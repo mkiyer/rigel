@@ -7,7 +7,7 @@ An aggregate of the converged deconvolution into the library-average gDNA densit
 ⭐ **Two axes, and every object on them exists.** The predecessor summed a region's contained mass plus
 its two boundary SIDES, and had to mask each side with ``same_ref_left_right`` because a reference
 terminal's outer boundary has nothing on the far side — "a side that doesn't exist contributes no
-length". A contiguous boundary is the line BETWEEN two adjacent regions, so there is no such object to
+length". A contiguous boundary is the boundary BETWEEN two adjacent regions, so there is no such object to
 exclude: ``E = N − n_refs`` and every entry is real. The mask goes with the terminal slots.
 
 ⚠ **It is a ratio of SUMS, never a mean of ratios** (``ρ_bg = Σg/ΣE``) — a rate

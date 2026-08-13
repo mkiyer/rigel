@@ -3,7 +3,7 @@
 ⛔ **This file was rewritten, not ported (S5.f).** Its predecessor asserted that the region→boundary
 map "attributes exactly the non-terminal boundary mass, no double count, no loss" — a property of the
 ``k + 1`` boundary axis, whose two data-free terminal slots were the only thing that could lose mass.
-That axis does not exist: a reference with ``k`` regions owns ``k − 1`` lines and **every one of them has
+That axis does not exist: a reference with ``k`` regions owns ``k − 1`` boundaries and **every one of them has
 a region on both sides**, so there is no terminal to drop and no face to double. A test of a model that
 no longer exists can only be rewritten from scratch (the call S5.c made on ``test_message_frames.py``
 and S5.e made on three ``test_sweep`` tests).
@@ -59,7 +59,7 @@ def test_one_region_start_per_ACCEPTED_fragment(scanned):
     """⭐ THE invariant. ``region_start_count`` is incremented once, at the region holding the fragment's
     first base, for every fragment the accumulator accepts — so its total IS the accepted count.
 
-    ⚠ Checked against the payload's own QC tally, which is written on the SAME line of the deposit but
+    ⚠ Checked against the payload's own QC tally, which is written on the SAME boundary of the deposit but
     is a separate counter: they can only agree if every accepted fragment reached both.
     """
     payload, ra, _buffer, _index = scanned
@@ -84,7 +84,7 @@ def test_every_buffered_fragment_is_ACCEPTED_or_DROPPED_FOR_A_NAMED_REASON(scann
 
 def test_the_boundary_axis_is_N_minus_the_NONEMPTY_references(scanned):
     """``E = N − (references that own at least one region)``, re-derived from the INDEX rather than from
-    the payload's own offsets. A reference with one region owns no line; a reference with none owns
+    the payload's own offsets. A reference with one region owns no boundary; a reference with none owns
     nothing at all — neither is a special case in the formula, and both were terminal slots before."""
     payload, ra, _buffer, index = scanned
     regions_per_ref = np.diff(np.asarray(ra.ref_offsets, dtype=np.int64))
@@ -95,7 +95,7 @@ def test_the_boundary_axis_is_N_minus_the_NONEMPTY_references(scanned):
 
 def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
     """A fragment lies wholly inside at most one region, so the contained bank cannot out-count the
-    fragments. ⚠ It is an inequality, not an identity: a fragment that crosses any line is contained
+    fragments. ⚠ It is an inequality, not an identity: a fragment that crosses any boundary is contained
     in nothing and contributes only to the boundary banks."""
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
@@ -103,7 +103,7 @@ def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
     assert 0 < contained <= int(np.asarray(sub.region_start_count).sum())
 
 
-def test_no_line_STRADDLES_a_reference(scanned):
+def test_no_boundary_STRADDLES_a_reference(scanned):
     """Every contiguous boundary joins two regions of the same reference — the invariant the ``k + 1`` axis
     could not state, because its terminal slots had a region on one side only."""
     _payload, ra, _buffer, _index = scanned
@@ -114,7 +114,7 @@ def test_no_line_STRADDLES_a_reference(scanned):
 
 
 def test_the_two_boundary_banks_are_DISJOINT_populations(scanned):
-    """``boundary_unspliced`` and ``boundary_spliced`` are different molecules at the same line — crossed
+    """``boundary_unspliced`` and ``boundary_spliced`` are different molecules at the same boundary — crossed
     contiguously having spliced NOWHERE, versus having spliced ELSEWHERE — so a fragment lands in
     exactly one of them and neither is a subset of the other. Pinned here on real data as a
     non-degeneracy check: if the scan produced both, the two banks cannot be the same array."""

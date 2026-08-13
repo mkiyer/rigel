@@ -168,13 +168,13 @@ class _HeadRelay:
             logvar_tot = np.zeros_like(logvar_tot)
         self._logvar_tot = logvar_tot
 
-        # ── the per-TRANSCRIPT-STRAND junction DENSITY at each line ────────────────────────────────────
+        # ── the per-TRANSCRIPT-STRAND junction DENSITY at each boundary ────────────────────────────────────
         def _mature_rho(strand: int) -> np.ndarray:
             c, e = SPL[:, strand], ESP[:, strand]
             live = (c > _EPS) & (e > _EPS)
             return np.where(live, c / np.where(live, e, 1.0), 0.0)
 
-        spl_p = _mature_rho(0)  # + transcript junction density at this line (0 on REGION slots)
+        spl_p = _mature_rho(0)  # + transcript junction density at this boundary (0 on REGION slots)
         spl_n = _mature_rho(1)
         self._spl_p, self._spl_n = spl_p, spl_n
 
@@ -229,7 +229,7 @@ class _HeadRelay:
 
         # ── v_mu uses the spliced COUNT, never a mass ──────────────────────────────────────────────────
         # The accumulator deposits fragments fractionally, so at a junction face the median count is 33
-        # against a median mass of 11 and the mass would over-state v_mu ~3x. With one count per line the
+        # against a median mass of 11 and the mass would over-state v_mu ~3x. With one count per boundary the
         # rule is structural rather than a discipline: ``junction_count`` IS the junction fragment count.
         self._mu_s = (spl_p, spl_n)
         self._v_mu_s = tuple(

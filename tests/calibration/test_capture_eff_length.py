@@ -34,9 +34,9 @@ from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 from conftest import build_test_index
 
-#: The gDNA crossing effective length every line carries. In production this is
+#: The gDNA crossing effective length every boundary carries. In production this is
 #: ``crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) = mu_g − 1``, the SAME number at every
-# line, because gDNA's template is the chromosome and takes no reach taper.
+# boundary, because gDNA's template is the chromosome and takes no reach taper.
 _CROSSING_EFF = 180.0
 
 
@@ -49,10 +49,10 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
      the halved per-side density length ``E[min(ℓ,L)]/2`` or the un-halved ``E[min(ℓ,L)]``. Two of them
      stored the un-halved length AND deposited half the mass, which cancelled a spurious ½ in
      ``_pooled_boundary_arrays`` and hid an exact factor of 2 from every assertion in this file for months
-    A contiguous boundary is a 0-bp line with ONE mass and ONE support, so
+    A contiguous boundary is a 0-bp boundary with ONE mass and ONE support, so
      there is no face, no half, and nothing for three fixtures to disagree about.
 
-     ⚠ A line's density is its **left flank's**. With a varying field the two flanks disagree, so the
+     ⚠ A boundary's density is its **left flank's**. With a varying field the two flanks disagree, so the
      fixture must SAY which it means rather than average them into a number that is neither.
     """
     d = np.asarray(density, dtype=np.float64)
@@ -69,7 +69,7 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
         mass_rna_boundary=ez.copy(),
         mass_rna_spliced_boundary=ez.copy(),
         # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
-        # identity — a line whose flanks both exceed every fragment length, where an incidence IS
+        # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones_like(ez),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
@@ -394,16 +394,16 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 # ``E[min(ℓ,L)]/2``, the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face, so a pooled boundary
 # holds ``ρ·(gbl_r + gbl_{r+1})`` — and dividing that by the AVERAGE read **2ρ**. Every quantity in
 # that sentence is gone with the faces. There is no per-side length to halve, no pair of faces to sum,
-# and no choice between a sum and an average: a contiguous boundary is a 0-bp line with one mass and one
+# and no choice between a sum and an average: a contiguous boundary is a 0-bp boundary with one mass and one
 # support ().
 #
 # ⚠ **The PROPERTY they protected is still real**, and is kept below: a crossing object under a uniform
-# field must read ρ, and a line genuinely below the reference density must contract rather than clip.
+# field must read ρ, and a boundary genuinely below the reference density must contract rather than clip.
 # What is retired is the specific arithmetic that could break it.
 
 
 def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
-    """⭐ The surviving half of TRAPS: prefer-shares-to-differences. A line's mass over its own support is the true density — exactly,
+    """⭐ The surviving half of TRAPS: prefer-shares-to-differences. A boundary's mass over its own support is the true density — exactly,
     with no factor to get wrong. Verified end-to-end at 1.994 / 2.002 / 1.981 × truth when the old
     average-vs-sum defect was live, so this is where that regression would reappear."""
     ra = RegionArrays.from_index(multiexon_index)
@@ -411,30 +411,30 @@ def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
     cal = _field_cal(ra, np.full(ra.n_regions, rho))
     # ⭐ Read straight off the BOUNDARY axis. It used to go through `_left_keyed_boundary_arrays`, a region-shaped
     # copy that existed only because the incidence helper emitted a left-region index; that helper now
-    # emits an boundary index and the copy is deleted, so a line's density is read where it lives.
+    # emits an boundary index and the copy is deleted, so a boundary's density is read where it lives.
     boundary_mass = np.asarray(cal.mass_gdna_boundary, dtype=np.float64)
     boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
     live = boundary_support > 0.0
-    assert live.any(), "the fixture produced no lines"
+    assert live.any(), "the fixture produced no boundaries"
     np.testing.assert_allclose(boundary_mass[live] / boundary_support[live], rho, rtol=1e-12)
 
 
-def test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
+def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
     """⭐ TRAPS: prefer-shares-to-differences' other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is still there and still hides
     anything that reads a density too HIGH.
 
-    Put the true line density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the
+    Put the true boundary density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the
     reference and must contract; read at any inflated multiple it lands above, clips to 1, and
-    contributes no contraction at all — silent on exactly the lines the shrinkage exists to act on.
+    contributes no contraction at all — silent on exactly the boundaries the shrinkage exists to act on.
 
-    ⚠ The ρ_ref anchor sits on the LAST region, not the first. A line takes its LEFT flank's density
-    (:func:`_cal`), so anchoring on region 0 would put line 0 itself at ρ_ref and the assertion would
+    ⚠ The ρ_ref anchor sits on the LAST region, not the first. A boundary takes its LEFT flank's density
+    (:func:`_cal`), so anchoring on region 0 would put boundary 0 itself at ρ_ref and the assertion would
     fail on the fixture rather than on the code.
     """
     ra = RegionArrays.from_index(multiexon_index)
-    rho_ref, rho_line = 1.0, 0.7  # 0.7 ∈ (0.5, 1.0)
-    dens = np.full(ra.n_regions, rho_line)
-    dens[-1] = rho_ref  # the last region anchors ρ_ref and is no line's LEFT flank
+    rho_ref, rho_boundary = 1.0, 0.7  # 0.7 ∈ (0.5, 1.0)
+    dens = np.full(ra.n_regions, rho_boundary)
+    dens[-1] = rho_ref  # the last region anchors ρ_ref and is no boundary's LEFT flank
     cal = _field_cal(ra, dens)
 
     boundary_mass = np.asarray(cal.mass_gdna_boundary, dtype=np.float64)
@@ -443,7 +443,7 @@ def test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping(multi
     assert band.any()
     ratio = (boundary_mass[band] / boundary_support[band]) / rho_ref
     assert np.all(ratio < 1.0 - 1e-9), (
-        f"line density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
+        f"boundary density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
         "contributes no contraction, which is precisely how the factor-2 stayed invisible"
     )
 
@@ -479,7 +479,7 @@ def test_the_boundary_incidence_is_an_BOUNDARY_index_not_a_left_region_index(two
     (``TRAPS: perturb-every-gate``).
 
     ⛔ On a second reference the two axes diverge by one per preceding reference boundary, and indexing
-    a per-boundary array with a region index then reads **the wrong line's mass** — silently, since both are
+    a per-boundary array with a region index then reads **the wrong boundary's mass** — silently, since both are
     in range. This pins the axis: every emitted boundary index must be a valid boundary whose flanking
     regions are the ones the transcript actually crosses.
     """
@@ -497,7 +497,7 @@ def test_the_boundary_incidence_is_an_BOUNDARY_index_not_a_left_region_index(two
     for t, e in zip(bt.tolist(), br.tolist()):
         owned = set(reg_r[reg_t == t].tolist())
         assert lo[e] in owned and hi[e] in owned, (
-            f"transcript {t} was given line {e} between regions {lo[e]},{hi[e]} — which it does not span"
+            f"transcript {t} was given boundary {e} between regions {lo[e]},{hi[e]} — which it does not span"
         )
 
     # ...and the two axes genuinely differ here, so the assertions above are not vacuous

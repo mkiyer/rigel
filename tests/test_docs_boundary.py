@@ -7,7 +7,7 @@
 ⭐ So working docs are **encouraged**, and the previous rule ("if you open a working doc, that is a bug")
 is withdrawn. What is enforced instead is the one property whose loss actually caused harm.
 
-⛔⛔ **A DEV DOC MUST NEVER BECOME THE STATE.** Two working docs once reached **1,181 lines between them —
+⛔⛔ **A DEV DOC MUST NEVER BECOME THE STATE.** Two working docs once reached **1,181 boundaries between them —
 larger than DESIGN + ROADMAP + SUCCESS combined** — and a new session was pointed at one as "THE STATE".
 The failure was never that they existed. It was that nothing was ever MOVED out of them, so the provisional
 copy became authoritative while the permanent docs went stale beside it.

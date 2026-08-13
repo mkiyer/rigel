@@ -97,8 +97,8 @@ def main() -> None:
     print()
     if failures:
         print("⛔ NOT THE EXPECTED REBUILD")
-        for line in failures:
-            print(f"  {line}")
+        for boundary in failures:
+            print(f"  {boundary}")
         sys.exit(1)
     print("✅ regions unchanged; boundaries changed only in contiguous reach — exactly what S1 did")
 

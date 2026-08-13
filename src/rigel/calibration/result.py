@@ -14,7 +14,7 @@ per-region mass arrays — ``mass_{gdna,rna}_{contained,left,right}`` — becaus
 sitting in differently-sized flanks. ``priors.assemble_priors`` then pooled two of them straight back
 as ``mass_gdna_right[r] + mass_gdna_left[r+1]``, and ``capture_eff_length._pooled_boundary_arrays`` did the
 identical thing. That split-then-re-pool was a no-op with a history: the same sum-then-halve pattern hid
-an exact factor of 2 for months. A contiguous boundary is a 0-bp line with
+an exact factor of 2 for months. A contiguous boundary is a 0-bp boundary with
 ONE set of numbers, so the pair collapses to ``mass_{gdna,rna}_boundary`` and the pooling **disappears
 rather than being re-derived** (owner ruling).
 
@@ -87,7 +87,7 @@ class CalibrationResult:
     mass_rna_region: np.ndarray
 
     # --- the deconvolved MIXTURE, per contiguous boundary (float64[n_boundaries]) ---
-    #: ``chain_boundary_deconv``: the line's unspliced crossing count split by the converged belief.
+    #: ``chain_boundary_deconv``: the boundary's unspliced crossing count split by the converged belief.
     #: ``mass_rna_boundary`` is spliced-INCLUSIVE — an boundary's certified-RNA crossings are RNA whatever the
     #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-boundary conservation
     #: ``mass_gdna_boundary + mass_rna_boundary == unspliced + spliced`` holds.
@@ -95,15 +95,15 @@ class CalibrationResult:
     mass_rna_boundary: np.ndarray
 
     #: float64[n_boundaries] — the ``boundary_spliced`` part of ``mass_rna_boundary``: molecules that crossed this
-    #: line CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
+    #: boundary CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
     #: it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM (gDNA does not
     #: splice), so it is guaranteed-RNA and assigned directly — counting it in the prior would double
     #: it and inflate the RNA side of the gDNA-vs-RNA *unspliced* split, which is the only thing the
     #: prior arbitrates. ``mass_rna_boundary`` itself stays spliced-inclusive so conservation is preserved.
     mass_rna_spliced_boundary: np.ndarray
 
-    #: float64[n_boundaries] — ⭐⭐ **THE INCIDENCE→FRAGMENT CONVERSION, per line.** ``mass / count`` off the
-    #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this line carries.
+    #: float64[n_boundaries] — ⭐⭐ **THE INCIDENCE→FRAGMENT CONVERSION, per boundary.** ``mass / count`` off the
+    #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this boundary carries.
     #:
     #: ⛔ **It is GEOMETRY, not a deconvolved mass, and the distinction is load-bearing.** Every array
     #: above is a gDNA/RNA split that a perfect deconvolution would change; this one is a property of
@@ -111,8 +111,8 @@ class CalibrationResult:
     #: is why it is NOT in ``prior_vs_oracle.OVERRIDE_FIELDS``: an oracle that overrode it would be
     #: answering a different question.
     #:
-    #: ⭐ ``assemble_priors`` multiplies each component's per-line mass by it, because the accumulator
-    #: deposits ``+1`` on EVERY line a fragment crosses — ``max(K, 1)`` of them — so a sum over lines is
+    #: ⭐ ``assemble_priors`` multiplies each component's per-boundary mass by it, because the accumulator
+    #: deposits ``+1`` on EVERY boundary a fragment crosses — ``max(K, 1)`` of them — so a sum over boundaries is
     #: an object-incidence count and the EM adds a FRAGMENT count. It is 1.0 where both flanking regions
     #: exceed every fragment length, and falls toward the region spacing where they do not.
     boundary_mass_per_crossing: np.ndarray
@@ -129,7 +129,7 @@ class CalibrationResult:
     #: alongside the two ``mass_*_boundary`` incidences; that rename is its own commit.
     #:
     #: ⭐ **Never deconvolved: a junction boundary is pure mature RNA by construction**, so there is nothing
-    #: to split. It is the third population at a line, and it is routinely two orders of magnitude
+    #: to split. It is the third population at a boundary, and it is routinely two orders of magnitude
     #: larger than ``mass_rna_spliced_boundary`` at the same place: at a donor boundary the junction flux is the
     #: gene's whole mature output while the spliced crossing is the handful of molecules that read
     #: through without splicing.
@@ -147,7 +147,7 @@ class CalibrationResult:
     #:
     #: ⛔ **The junction one did not exist until ``sj_mass`` did, and that is why a conserved LIBRARY
     #: fragment count was not computable.** A spliced fragment whose every block lies inside one region
-    #: crosses no line and is not contained, so it deposited on no conserved bank — **1,222,375 of
+    #: crosses no boundary and is not contained, so it deposited on no conserved bank — **1,222,375 of
     #: 4,830,713 RNA fragments (25.3 %)** on ladder g50 capture_off, against 0 of 4,997,761 gDNA
     #: fragments, since gDNA cannot splice.
     boundary_spliced_mass_per_crossing: np.ndarray
@@ -163,7 +163,7 @@ class CalibrationResult:
     gdna_region_eff_len: np.ndarray
     #: float64[n_boundaries] — ``effective_length.crossing_eff_length`` on the gDNA pmf. ⚠ **Uniform across
     #: boundaries today, and that is physics rather than a placeholder**: gDNA's template is the chromosome,
-    #: so it takes ``UNBOUNDED_REACH`` on both sides at every line and the divisor collapses to
+    #: so it takes ``UNBOUNDED_REACH`` on both sides at every boundary and the divisor collapses to
     #: ``mu_g − 1``. It stays a per-boundary array because that is the axis its consumers index it on.
     gdna_boundary_eff_len: np.ndarray
 
@@ -327,7 +327,7 @@ class CalibrationResult:
 
         ⭐ **At a junction nothing crossed it is 0, and that needs the multiplication rather than a
         branch.** ``mass_per_crossing`` deliberately keeps the ``1.0`` identity where the count is zero
-        — there is no mass at an unobserved line to rescale — and multiplying by the zero incidence is
+        — there is no mass at an unobserved boundary to rescale — and multiplying by the zero incidence is
         what turns it back into the 0 that is correct here. **4,636 of those 13,482 junctions are
         zero-count**, so a ``where(count > 0, …)`` fallback to the factor would publish phantom mass on
         a third of the axis, on the one axis that is certified RNA by construction.
@@ -372,7 +372,7 @@ class CalibrationResult:
         ⛔⛔ **THE TREE ONCE HELD THREE DISAGREEING ANSWERS TO THIS**, and every one summed INCIDENCES:
         ``pipeline.py`` added region + boundary + junction raw, ``calibration_truth_ab.py`` added region + boundary
         and dropped the junction, and only ``assemble_priors`` converted anything. One fragment books
-        ``max(K,1)`` line crossings AND one incidence per junction it uses, so the sum over-counts and
+        ``max(K,1)`` boundary crossings AND one incidence per junction it uses, so the sum over-counts and
         the ratio is biased wherever the two components' inflations differ — which they do. Measured on
         the origin-split oracle, ladder g50 capture_off: the incidence ratio reads ``f_gdna`` **0.3851**
         against a truth of **0.5085**, while these conserved counts reproduce **0.5085** exactly, each
@@ -380,7 +380,7 @@ class CalibrationResult:
 
         ⭐ The spliced crossings and the junction flux are the SAME fragments split across two banks by
         the deposit rule — ``boundary_spliced_mass`` holds the share of a spliced fragment's bases in blocks
-        that crossed a line and ``sj_mass`` the share in blocks that crossed none — and the two sum to
+        that crossed a boundary and ``sj_mass`` the share in blocks that crossed none — and the two sum to
         exactly one per fragment. Adding both is conservation, not double counting.
 
         ⚠ **A PROPERTY, never a stored field.** ``prior_vs_oracle`` swaps the mass arrays for truth with

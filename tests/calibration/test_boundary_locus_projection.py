@@ -1,21 +1,21 @@
-"""A locus collects REGIONS **and** BOUNDARIES — no line is ever folded into a region's total.
+"""A locus collects REGIONS **and** BOUNDARIES — no boundary is ever folded into a region's total.
 
 ⭐⭐ **THE RULE** (owner, 2026-08-08): *an boundary owns the fragments that cross it; a region owns only the
 fragments contained in it; nothing is re-attributed.* A locus's boundaries are therefore the boundaries that
-**touch its regions** — every region contributes both of its lines, so a locus of ``k`` contiguous regions
-carries ``k + 1`` lines, its two outer ones included.
+**touch its regions** — every region contributes both of its boundaries, so a locus of ``k`` contiguous regions
+carries ``k + 1`` boundaries, its two outer ones included.
 
-⛔ **What this replaces.** ``boundary_owner_regions`` folded each line's mass into ONE flank region's total so
-the region-overlap projection could reach it — a 0-bp line has no extent, and
+⛔ **What this replaces.** ``boundary_owner_regions`` folded each boundary's mass into ONE flank region's total so
+the region-overlap projection could reach it — a 0-bp boundary has no extent, and
 ``_project_regions_to_loci`` divides by ``region_size_bp``. That fold then needed a second heuristic (the
-intergenic re-key) to stop a locus's far-LEFT line vanishing into the dropped intergenic flank. Both are
+intergenic re-key) to stop a locus's far-LEFT boundary vanishing into the dropped intergenic flank. Both are
 gone: an boundary is projected as an boundary.
 
-⭐ **The outer lines are unambiguous, and that is structural, not lucky.** A locus is bounded by
+⭐ **The outer boundaries are unambiguous, and that is structural, not lucky.** A locus is bounded by
 intergenic sequence and intergenic regions carry no transcripts, so no two loci can contend for a
-boundary line. Where two loci *could* contend — adjacent regions in different multi-loci — any fragment
-crossing the shared line overlaps transcripts in both and would have MERGED them into one multi-locus.
-The configuration is therefore unreachable for any line that carries mass, which is what
+boundary boundary. Where two loci *could* contend — adjacent regions in different multi-loci — any fragment
+crossing the shared boundary overlaps transcripts in both and would have MERGED them into one multi-locus.
+The configuration is therefore unreachable for any boundary that carries mass, which is what
 :func:`test_a_contended_boundary_carries_no_mass` states as a measurable claim rather than an assumption.
 """
 
@@ -78,14 +78,14 @@ def _dense(idx, lid, share, n_boundaries, n_loci) -> np.ndarray:
 def test_a_locus_of_k_regions_carries_k_plus_1_boundaries():
     """⭐ THE RULE, stated as a count. 5 regions; the locus is the middle 3, flanked by intergenic.
 
-    Its boundaries are the 4 lines touching those 3 regions: the two interior ones AND the two OUTER ones.
-    ⛔ A form that kept only interior lines would give 2, and a form that kept only one outer line —
+    Its boundaries are the 4 boundaries touching those 3 regions: the two interior ones AND the two OUTER ones.
+    ⛔ A form that kept only interior boundaries would give 2, and a form that kept only one outer boundary —
     which is what left-keying without the re-key did — would give 3.
     """
     ra = _regions([0, 100, 200, 300, 400, 500])
     ml = [_ml(0, [(0, 100, 400)])]  # regions 1,2,3
     e, lid, w = _boundary_locus_shares(ra, ml, 1)
-    assert sorted(e.tolist()) == [0, 1, 2, 3], "expected the 4 lines touching regions 1-3"
+    assert sorted(e.tolist()) == [0, 1, 2, 3], "expected the 4 boundaries touching regions 1-3"
     np.testing.assert_allclose(w, 1.0)
     assert set(lid.tolist()) == {0}
 
@@ -93,13 +93,13 @@ def test_a_locus_of_k_regions_carries_k_plus_1_boundaries():
 def test_an_boundary_between_two_intergenic_regions_belongs_to_no_locus():
     """⛔ The complement, and it is what makes the rule a rule rather than 'keep everything'.
 
-    A fragment crossing a line with no locus region on either side overlaps no transcript, so it is a
+    A fragment crossing a boundary with no locus region on either side overlaps no transcript, so it is a
     candidate nowhere and must load no prior.
     """
     ra = _regions([0, 100, 200, 300, 400])
     ml = [_ml(0, [(0, 300, 400)])]  # region 3 only
     e, lid, _w = _boundary_locus_shares(ra, ml, 1)
-    assert sorted(e.tolist()) == [2], "only the line touching region 3 may be kept"
+    assert sorted(e.tolist()) == [2], "only the boundary touching region 3 may be kept"
     assert set(lid.tolist()) == {0}
 
 
@@ -120,13 +120,13 @@ def test_a_region_touching_ONE_locus_gives_it_everything():
 
 
 def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
-    """A region genuinely split BETWEEN two loci has fractional shares; its lines take the larger.
+    """A region genuinely split BETWEEN two loci has fractional shares; its boundaries take the larger.
 
-    ⚠ ``max``, not a sum and not a mean: the rule is *"if a region is part of a locus, its two lines are
-    part of that locus"*, so a line inherits the stronger of its two flanks' memberships.
+    ⚠ ``max``, not a sum and not a mean: the rule is *"if a region is part of a locus, its two boundaries are
+    part of that locus"*, so a boundary inherits the stronger of its two flanks' memberships.
 
     region 0 = [0,100) lies wholly in locus 0; region 1 = [100,200) is split 50/50 between loci 0 and 1.
-    The single line between them is therefore ``max(1.0, 0.5) = 1.0`` in locus 0 and
+    The single boundary between them is therefore ``max(1.0, 0.5) = 1.0`` in locus 0 and
     ``max(0.0, 0.5) = 0.5`` in locus 1.
     """
     ra = _regions([0, 100, 200])
@@ -143,8 +143,8 @@ def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
 def test_a_contended_boundary_carries_no_mass():
     """⛔⛔ THE CLAIM THE RULE RESTS ON, AS A MEASUREMENT RATHER THAN AN ASSUMPTION.
 
-    Two adjacent regions in DIFFERENT multi-loci would give their shared line to both, so its shares sum
-    to 2. The owner's argument is that this is unreachable *for a line that carries mass*: any fragment
+    Two adjacent regions in DIFFERENT multi-loci would give their shared boundary to both, so its shares sum
+    to 2. The owner's argument is that this is unreachable *for a boundary that carries mass*: any fragment
     crossing it overlaps transcripts in both loci, is a candidate in both, and the union-find would
     already have merged them into ONE multi-locus.
 
@@ -154,16 +154,16 @@ def test_a_contended_boundary_carries_no_mass():
     ra = _regions([0, 100, 200])
     ml = [_ml(0, [(0, 0, 100)]), _ml(1, [(0, 100, 200)])]  # adjacent, no intergenic between
     e, lid, w = _boundary_locus_shares(ra, ml, 2)
-    assert e.tolist() == [0, 0], "the contended line reaches both loci"
+    assert e.tolist() == [0, 0], "the contended boundary reaches both loci"
     assert sorted(lid.tolist()) == [0, 1]
     assert float(w.sum()) == pytest.approx(2.0), "shares sum above 1 — the reportable configuration"
 
 
 def test_two_references_do_not_share_an_boundary():
-    """A line exists only between two regions of the SAME reference; the axis must not straddle refs."""
+    """A boundary exists only between two regions of the SAME reference; the axis must not straddle refs."""
     ra = _regions([0, 100, 200, 0, 100, 200][:4], ref_id=[0, 0, 1])
     lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
-    assert lo.tolist() == [0], "one line, inside reference 0 only"
+    assert lo.tolist() == [0], "one boundary, inside reference 0 only"
     assert hi.tolist() == [1]
 
 

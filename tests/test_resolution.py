@@ -190,7 +190,7 @@ def _exon(ref, start, end, strand=Strand.POS):
 
 
 def _ambiguous_multiexon_gtf(n_transcripts=8):
-    lines = []
+    boundaries = []
     for t_idx in range(n_transcripts):
         exon_coords = [
             (100, 150),
@@ -200,12 +200,12 @@ def _ambiguous_multiexon_gtf(n_transcripts=8):
             (600 + t_idx, 650 + t_idx),
         ]
         for start, end in exon_coords:
-            lines.append(
+            boundaries.append(
                 f"chr1\ttest\texon\t{start}\t{end}\t.\t+\t.\t"
                 f'gene_id "g1"; transcript_id "t{t_idx}"; '
                 f'gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";'
             )
-    return "\n".join(lines) + "\n"
+    return "\n".join(boundaries) + "\n"
 
 
 # GTF for overlap tests: 3 transcripts in one gene

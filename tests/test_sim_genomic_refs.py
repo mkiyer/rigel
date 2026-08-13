@@ -40,7 +40,7 @@ from rigel.types import Interval, Strand
 
 
 #: The RNA-only reference's name. Deliberately not "ERCC-*": nothing about the defect is
-#: ERCC-specific — any spike-in, decoy or synthetic-transcript reference hits the same line.
+#: ERCC-specific — any spike-in, decoy or synthetic-transcript reference hits the same boundary.
 SPIKE_REF = "SPIKE-1"
 
 GENOMIC_REFS = ["chrA", "chrB"]

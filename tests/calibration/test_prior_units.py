@@ -3,7 +3,7 @@
 ⭐ **THE DEFECT THESE TESTS PIN.** ``gdna_prior_count`` / ``rna_prior_count`` are handed to the EM as
 **additive pseudocounts in fragment units** — ``G = n_gdna + a_g`` in ``apply_grouped_prior_update`` —
 where ``n_gdna`` is a count of fragments. But a fragment deposits on ``max(K, 1)`` objects, ``K`` being
-the number of contiguous lines it crosses, so summing per-object masses does NOT give a fragment count::
+the number of contiguous boundaries it crosses, so summing per-object masses does NOT give a fragment count::
 
     incidences(w) = max( 1 , (w-1)/s )        for a partition of spacing s
 
@@ -15,7 +15,7 @@ so the prior's g:r ratio under-calls gDNA by 13–19 %.
 
 ⭐⭐ **THE FIX, AND IT IS A READ-OUT RATHER THAN A DERIVATION.** The region term is already a fragment
 count — a contained fragment deposits on exactly one region. Only the crossing term is converted, by the
-accumulator's own conserved ``mass / count`` at that line::
+accumulator's own conserved ``mass / count`` at that boundary::
 
     prior_c = SUM_locus share · [ mass_c_region[r] + SUM_{e owned by r} mass_c_boundary[e] · q[e] ]
 
@@ -264,7 +264,7 @@ def _truth_and_prediction(tiling, rho_g, rho_r, pmf_g, pmf_r):
       stated as arithmetic, and its only content beyond ``truth`` is that ``q_c`` has been replaced by
       ``q_pooled``.
 
-    ``q_c = mass_c / count_c`` per line is each component's own share, and ``pred == truth`` exactly
+    ``q_c = mass_c / count_c`` per boundary is each component's own share, and ``pred == truth`` exactly
     where the two agree.
     """
     cont_g, cross_g, mass_g = _enumerate(tiling, int(np.argmax(pmf_g)))[1:]
@@ -297,7 +297,7 @@ _TILINGS = {
     "ragged (mixed)": [37, 400, 63, 300, 1, 199, 200],
 }
 # ⭐ The tilings where every region exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
-# line and ``q_g == q_r == 1``: the pooled share is then each component's own and the split is exact.
+# boundary and ``q_g == q_r == 1``: the pooled share is then each component's own and the split is exact.
 _SHARES_AGREE = ["coarse (1 x 1200)", "medium (3 x 400)"]
 # ⚠ Not 1e-9: the conserved-mass bank is fixed-point at 2^-32 per fragment, so a 1,001-fragment total
 # carries ~2e-11 of relative rounding. Anything above 1e-10 here would be a real error.
@@ -309,7 +309,7 @@ def test_the_total_prior_is_the_true_fragment_count_on_every_tiling(name):
     """⭐⭐ THE CONSERVATION GATE. The same physical library, re-tiled, deposits the same TOTAL — and it
     is the right total: the number of fragments that FIT, ``rho_g·(S−mu_g+1) + rho_r·(S−mu_r+1)``.
 
-    The raw incidence sum grows as the tiling is refined (every new line adds a crossing to every
+    The raw incidence sum grows as the tiling is refined (every new boundary adds a crossing to every
     fragment that spans it), so it fails here by construction. The retired ``rho_c·span_bp`` form fails
     too, by the ``w−1`` start positions no fragment can occupy — 4.1 % on this fixture.
 
@@ -429,7 +429,7 @@ def test_the_prior_ratio_moves_with_the_length_ratio_by_exactly_the_pooled_share
 def test_the_ratio_IS_exact_where_the_two_components_share_a_length():
     """⛔⛔ **AND AT EQUAL LENGTHS THE BIAS IS EXACTLY ZERO — which is why a panel built that way cannot
     measure it** (`TRAPS: an-equal-length-panel-defeats-the-lift`). The ladder's realised gDNA/RNA gap is
-    +1.5–2.1 %; the flgap PAIR exists because of this line.
+    +1.5–2.1 %; the flgap PAIR exists because of this boundary.
 
     ⭐ Asserted at two very different mixtures, because "exact" here must not depend on the mixing ratio:
     when ``q_g == q_r`` the pooled share equals both regardless of ``phi``.
@@ -482,7 +482,7 @@ def test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_d
     prior is exactly the deposited 4 × 2.5, which is neither 0 nor any multiple of 1e9.
 
     ⛔ **The guard is still LIVE where a divisor still lives — the eff-length** — and that half is
-    `test_priors.test_stray_mass_on_a_zero_opportunity_line_is_dropped_from_the_eff_len`, which
+    `test_priors.test_stray_mass_on_a_zero_opportunity_boundary_is_dropped_from_the_eff_len`, which
     perturbs it and measures the +19.97 / +44.93 bp it holds back. ⚠ Do not delete one without the
     other: alone, either one reads as a rule about the whole file.
     """

@@ -421,9 +421,9 @@ def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
 
 
 def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
-    """**S** — the O arm, plus each component rescaled by its OWN true per-line share.
+    """**S** — the O arm, plus each component rescaled by its OWN true per-boundary share.
 
-    ⭐⭐ **WHY THIS ARM EXISTS.** ``assemble_priors`` rescales BOTH components at a line by ONE pooled
+    ⭐⭐ **WHY THIS ARM EXISTS.** ``assemble_priors`` rescales BOTH components at a boundary by ONE pooled
     share, ``mass / count`` off the mixture. That is exact when the two components share a length
     distribution and biased when they do not — by exactly ``share_r / share_g``, independent of the true
     mixing ratio. ⛔ The bias is **purely compositional**: the locus total is conserved to the last
@@ -449,7 +449,7 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     """⭐ Is ``gdna_eff_len`` clamped by an INCIDENCE-support sum rather than the genomic span?
 
     ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + S_boundary)``. ``S_boundary`` is
-    ``E_g[w − 1] ≈ mu_g − 1`` PER LINE, so every interior line adds most of a fragment length to a
+    ``E_g[w − 1] ≈ mu_g − 1`` PER BOUNDARY, so every interior boundary adds most of a fragment length to a
     locus whose regions may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
     divides the gDNA component's abundance by this array, so an inflation here is a direct scale error
     on one of the three numbers calibration ships.
@@ -458,7 +458,7 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     what the consumer feels rather than what an unweighted locus average would say
     (``TRAPS: weight-it-like-the-consumer``).
     """
-    # ⭐ Regions and boundaries are projected on their OWN axes, exactly as `assemble_priors` does — no line is
+    # ⭐ Regions and boundaries are projected on their OWN axes, exactly as `assemble_priors` does — no boundary is
     # folded onto a flank region. Re-deriving the fold here would measure a span the assembler no longer
     # builds (`TRAPS: a-test-that-redefines`).
     n_loci = len(multi_loci)
@@ -917,7 +917,7 @@ _SELECTIONS = (
     ("ALL (g00 excluded)", lambda c: not is_zero_gdna(c)),
     *((" x ".join(st), (lambda c, st=st: stratum(c) == st and not is_zero_gdna(c)))
       for st in _STRATA),
-    (None, None),  # a rule line
+    (None, None),  # a rule boundary
     ("⛔ g00 ZERO-gDNA control", is_zero_gdna),
 )
 
@@ -1113,7 +1113,7 @@ def report(rows: list[dict]) -> None:
               f"{float(np.median([x['median_region_over_genomic'] for x in sub_rows])):>12.2f} "
               f"{sum(x['total_support'] for x in sub_rows):>16,.0f} "
               f"{sum(x['total_genomic'] for x in sub_rows):>16,.0f}")
-    print("    ⚠ `support/genomic` well above 1 means every interior line is adding ~mu_g − 1 to the "
+    print("    ⚠ `support/genomic` well above 1 means every interior boundary is adding ~mu_g − 1 to the "
           "locus's clamp.")
     print("    The EM divides the gDNA component's abundance by gdna_eff_len, so this is a direct "
           "scale error on a shipped number.")

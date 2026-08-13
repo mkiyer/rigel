@@ -114,7 +114,7 @@ def test_own_composition_logvar_three_states():
 def test_own_precision_monotone_and_zeros():
     """``p = 1/(v + trigamma(n+½))``: monotone in the count; 0 only at ``v=∞`` or a dead component.
 
-    ⭐⭐ **RE-POINTED 2026-08-05 — the line this used to carry, ``assert p[2] == 0.0  # no count``, WAS
+    ⭐⭐ **RE-POINTED 2026-08-05 — the boundary this used to carry, ``assert p[2] == 0.0  # no count``, WAS
     THE DEFECT** (TRAPS: a-zero-count-is-a-measurement). It asserted that an object with zero counts must emit nothing, which
     is true of ``1/n`` and false of the world: a zero count over a known opportunity is a measurement,
     and at a structurally pure-gDNA object it is the strongest one in the library. Measured cost of the

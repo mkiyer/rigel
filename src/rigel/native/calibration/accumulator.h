@@ -6,12 +6,12 @@
  *
  * THE MODEL
  *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
- *   A reference contributing `c` cuts owns `c - 1` REGIONS and `c - 2` interior LINES, and a line is a
+ *   A reference contributing `c` cuts owns `c - 1` REGIONS and `c - 2` interior BOUNDARIES, and a boundary is a
  *   0-bp CONTIGUOUS BOUNDARY between two adjacent regions:
  *
  *       cuts    0        100       200       600        c = 4
  *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
- *       lines            line 1    line 2               c - 2 = 2
+ *       boundaries            boundary 1    boundary 2               c - 2 = 2
  *
  *   A JUNCTION BOUNDARY is a directed donor->acceptor link taken from the annotation. A fragment is a
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
@@ -21,7 +21,7 @@
  *   inv_length_sum (fixed point), length_sum, and -- on the contiguous boundaries -- the conserved mass.
  *
  * WHY MORE THAN ONE SUM
- *   With `placements` the number of admissible start positions -- L at a region, L-1 at a 0-bp line:
+ *   With `placements` the number of admissible start positions -- L at a region, L-1 at a 0-bp boundary:
  *
  *       E[count]   = rho * E[placements]
  *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an BOUNDARY, exactly
@@ -111,7 +111,7 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 /// ⚠ A `spanning` population (one segment covering the region whole) was removed on evidence: it reached
 /// no evidence-starved region the region's own bounding BOUNDARIES did not already reach off capture, and 141
 /// regions / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
-/// the region's lines and is deposited there.
+/// the region's boundaries and is deposited there.
 /// ⛔ Consequence, and it is structural: no spliced fragment touches the region axis at all, because a
 /// spliced fragment can never be `contained` (both endpoints of an annotated intron are cuts).
 struct Region {
@@ -124,8 +124,8 @@ struct Region {
 };
 static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
 
-/// A contiguous boundary: the 0-bp line between two adjacent regions. `spliced` means the FRAGMENT used an
-/// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
+/// A contiguous boundary: the 0-bp boundary between two adjacent regions. `spliced` means the FRAGMENT used an
+/// annotated junction somewhere -- not that this boundary is one. gDNA cannot be spliced, so a spliced
 /// crossing is a certified RNA crossing.
 struct Boundary {
     std::uint32_t unspliced_count[kNStrandColumns];
@@ -133,21 +133,21 @@ struct Boundary {
     /// ⭐ ONE value -- strand-agnostic, see `Region`.
     double unspliced_inv_length_sum;
     /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
-    /// number cannot be both: `unspliced_count` is `+1` on every line a fragment crosses, so a fragment
-    /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the lines it crosses.
+    /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
+    /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the boundaries it crosses.
     ///
     /// ⛔ ONE VALUE, NOT TWO, AND THE RULING STANDS **HERE** WHILE IT WAS REVERSED ON THE JUNCTION AXIS
     /// (2026-08-13) — the premise that changed is specific to junctions and does not reach this bank.
-    /// `strand_deconv` reads the counts per column; nothing reads a LINE's mass per strand, because at a
-    /// line the mass exists to turn an object-incidence total into a fragment count and that question
+    /// `strand_deconv` reads the counts per column; nothing reads a BOUNDARY's mass per strand, because at a
+    /// boundary the mass exists to turn an object-incidence total into a fragment count and that question
     /// has no strand in it. ⚠ `one-thing-varied`: widening this too would have been a second change with
     /// no named consumer. See `JunctionEdge::mass`.
     double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
     /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
-    /// interior line deposit nothing (their accounting is on the junction axis), so this sums to
-    /// `crossed_block_len / L`. It is a per-LINE certified-RNA term, commensurate with the unspliced
-    /// mass at the same line, and is NOT "the number of spliced fragments here".
+    /// interior boundary deposit nothing (their accounting is on the junction axis), so this sums to
+    /// `crossed_block_len / L`. It is a per-BOUNDARY certified-RNA term, commensurate with the unspliced
+    /// mass at the same boundary, and is NOT "the number of spliced fragments here".
     double spliced_mass;
 };
 static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding");
@@ -161,14 +161,14 @@ struct JunctionEdge {
     /// population's length distribution.
     double inv_length_sum;
     /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
-    /// line deposits on neither boundary bank, and is not `contained` either -- its path spans a junction,
+    /// boundary deposits on neither boundary bank, and is not `contained` either -- its path spans a junction,
     /// so it lies in no single region. Such a fragment existed on the incidence axis and on no conserved
     /// one, which is why a library fragment count was not computable. Measured on the origin-split
     /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
     /// population, against 0 of 4,997,761 gDNA fragments, because gDNA cannot splice.
     ///
     /// ⛔ The rule ADDS a boundary class; it does not re-apportion an existing one. A block that
-    /// crossed a line is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
+    /// crossed a boundary is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
     /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
     ///
     /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `Boundary::unspliced_mass`'s ONE-VALUE RULING ON
@@ -199,13 +199,13 @@ static_assert(sizeof(JunctionEdge) == 32, "JunctionEdge must be 32 bytes with no
 //: Five pools, each PURE BY CONSTRUCTION. Purity removes the circularity: a length model is fitted from
 //: a population known to be one component, so nothing is estimated from the fragments it will explain.
 //:
-//: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing -- those are
+//: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing -- those are
 //: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
 enum class FragmentPool : std::uint8_t {
     kDnaIntergenic     = 0,  // contained in an intergenic region
     kDnaIntronic       = 1,  // contained in an intronic region
-    kDnaIntronExon     = 2,  // crossing exactly one line, flanks {intron, exon} -- a "splash" read
-    kDnaIntergenicExon = 3,  // crossing exactly one line, flanks {intergenic, exon}
+    kDnaIntronExon     = 2,  // crossing exactly one boundary, flanks {intron, exon} -- a "splash" read
+    kDnaIntergenicExon = 3,  // crossing exactly one boundary, flanks {intergenic, exon}
     kRnaSpliced        = 4,  // using an annotated junction, splice OBSERVED
 };
 inline constexpr std::size_t kNFragmentPools = 5;
@@ -445,7 +445,7 @@ public:
                          std::int32_t ref_id);
 
     /// Install this reference's junction boundaries as a CSR keyed by DONOR CUT INDEX -- the index the
-    /// deposit already computes while locating the lines its path crosses.
+    /// deposit already computes while locating the boundaries its path crosses.
     ///
     /// ⚠ The junction-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
     /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
@@ -540,7 +540,7 @@ private:
     /// The one length pool this fragment belongs to, or -1 for none.
     ///
     /// ⭐ DETERMINACY, NOT PROVENANCE. There used to be an `sj_implicit` argument barring a fragment
-    /// whose splice was inferred rather than sequenced. It is gone: a fragment reaches this line only
+    /// whose splice was inferred rather than sequenced. It is gone: a fragment reaches this boundary only
     /// when exactly ONE hypothesis survived, so its L is not in doubt however it was arrived at.
     /// Measured before deleting it -- the pool reads +0.67 % mean / +2.40 % sd against truth under
     /// determinacy and -9.58 % / -22.46 % under provenance, because barring inferred lengths
@@ -548,7 +548,7 @@ private:
     /// length filter.
     std::int64_t fragment_pool(bool spliced,
                                std::int64_t contained_region,
-                               std::int64_t sole_line) const noexcept;
+                               std::int64_t sole_boundary) const noexcept;
 
     /// L for one hypothesis: its implied introns UNIONED with the observed ones, normalised and clipped
     /// into [start, end). Leaves the normalised list in `scratch.introns`. ⭐ ONE definition of L and one
@@ -575,7 +575,7 @@ private:
 
     std::vector<std::int64_t>  cuts_;              // n_cuts, strictly increasing
     std::vector<Region>          regions_;             // n_cuts - 1
-    std::vector<Boundary> boundaries_;            // n_cuts - 2, the interior lines
+    std::vector<Boundary> boundaries_;            // n_cuts - 2, the interior boundaries
     std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
     std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
 

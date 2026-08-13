@@ -719,7 +719,7 @@ def _run_locus_em_partitioned(
         gdna_prior,
         index,
         rna_prior_count=rna_prior,
-        # ⛔ FLAT and per-TRANSCRIPT — deliberately not `[ids]`. ⚠ This line was dropped once while
+        # ⛔ FLAT and per-TRANSCRIPT — deliberately not `[ids]`. ⚠ This boundary was dropped once while
         # deleting an unrelated caller, leaving the parameter accepted and silently ignored: every
         # allocation, however extreme, produced byte-identical output. A FIRE COUNTER CANNOT SEE THAT —
         # it counts nonzero weights, not weights the solver read. What caught it was an arm that
@@ -909,7 +909,7 @@ def run_pipeline(
         )
 
     # -- Calibration (acyclic) --
-    # Build the region geometry, verify it lines up 1:1 with the accumulator
+    # Build the region geometry, verify it boundaries up 1:1 with the accumulator
     # payload, then hand both (plus the trained strand model and the gDNA FL pmf)
     # to the calibrator. Single feed-forward pass: deconvolve each region into
     # gDNA/RNA and derive ρ_0 + per-region exposure. See
@@ -993,9 +993,9 @@ def run_pipeline(
     calibration_diagnostics = _calib_diag.get("calibration")
 
     # ⭐ FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained in
-    # a region or crosses a line, RNA also jumps, and at a donor boundary the junction flux IS the gene's whole
+    # a region or crosses a boundary, RNA also jumps, and at a donor boundary the junction flux IS the gene's whole
     # mature output — but each axis is converted by its own population's mass-per-crossing first. Adding
-    # the raw banks counted one fragment once per line it crossed AND once per junction it used, which
+    # the raw banks counted one fragment once per boundary it crossed AND once per junction it used, which
     # read `f_gdna` 0.3851 against a truth of 0.5085 on ladder g50 capture_off.
     logger.info(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "

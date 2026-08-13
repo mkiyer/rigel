@@ -146,7 +146,7 @@ def _lse(a, axis, keepdims=False):
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# ⭐ THE THREE-COMPONENT STRAND LIKELIHOOD — folded in from `simplex.py`, which was 55 lines with ZERO
+# ⭐ THE THREE-COMPONENT STRAND LIKELIHOOD — folded in from `simplex.py`, which was 55 boundaries with ZERO
 # public names and exactly ONE importer: this file. A module whose whole surface is one private function
 # used in one place is a file a reader has to open to learn nothing, and the flat pile was made of those.
 # ⚠ Its TWO-component special case lives in `strand_likelihood.strand_loglik` and is an executable

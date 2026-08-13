@@ -257,7 +257,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
         }
     }
 
-    // A reference contributing c cuts owns c-1 regions and c-2 interior lines; one contributing fewer than
+    // A reference contributing c cuts owns c-1 regions and c-2 interior boundaries; one contributing fewer than
     // two cuts owns neither, which is legal and deposits nothing.
     const std::size_t n_regions = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
     const std::size_t n_boundaries = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
@@ -611,19 +611,19 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     ++counters_.deposited;
 
     // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
-    // A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
+    // A boundary is crossed iff it lies strictly inside a segment, so per segment the crossed boundaries are a
     // contiguous index range and no container is needed. A region is SPANNED iff ONE segment crosses both of
-    // its lines -- not merely "both lines crossed", which would count a region the fragment JUMPS OVER,
-    // whose two lines are touched by the two flanking segments from opposite sides.
+    // its boundaries -- not merely "both boundaries crossed", which would count a region the fragment JUMPS OVER,
+    // whose two boundaries are touched by the two flanking segments from opposite sides.
     //
-    // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero. Its
+    // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would divide by zero. Its
     // residue is the schema's only count/density co-support violation -- an L == 1 path on an annotated
     // junction books a count against density 0, which is correct.
     const double inv_boundary = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
     const std::size_t   col          = static_cast<std::size_t>(column);
 
     std::int64_t n_crossed = 0;
-    std::int64_t sole_line = -1;
+    std::int64_t sole_boundary = -1;
     for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
         const auto& [seg_start, seg_end] = scratch.segments[block];
         const std::int64_t first =
@@ -631,11 +631,11 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         const std::int64_t last =
             std::lower_bound(cuts_.begin(), cuts_.end(), seg_end) - cuts_.begin();
 
-        for (std::int64_t line = first; line < last; ++line) {
+        for (std::int64_t boundary_idx = first; boundary_idx < last; ++boundary_idx) {
             // ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is
             // the design: a spliced crossing is certified RNA, nothing deconvolves it, so its length
             // moments have no consumer and are not stored.
-            Boundary& boundary = boundaries_[static_cast<std::size_t>(line - 1)];
+            Boundary& boundary = boundaries_[static_cast<std::size_t>(boundary_idx - 1)];
             if (spliced) {
                 boundary.spliced_count[col] += 1u;
             } else {
@@ -648,20 +648,20 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
         // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
         //
-        // ⭐⭐ A JUNCTION IS A BOUNDARY EXACTLY LIKE A LINE, and that is the whole rule. A block's
-        // interior boundaries are the lines it crosses; its two ENDS are boundaries too whenever the
+        // ⭐⭐ A JUNCTION IS A BOUNDARY EXACTLY LIKE A BOUNDARY, and that is the whole rule. A block's
+        // interior boundaries are the boundaries it crosses; its two ENDS are boundaries too whenever the
         // intron there resolved to an annotated junction. So a fragment's 1.0 is shared across every
-        // object it crosses -- lines and junctions together -- rather than lines first and junctions
+        // object it crosses -- boundaries and junctions together -- rather than boundaries first and junctions
         // only with whatever is left over.
         //
-        // ⛔ The predecessor gave a line-crossing block's bases entirely to lines, so a junction whose
-        // two flanking blocks both crossed a line received NOTHING while `sj_count` credited it. That
+        // ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a junction whose
+        // two flanking blocks both crossed a boundary received NOTHING while `sj_count` credited it. That
         // still conserved -- the total was 1.0 -- but it is not a sharing.
         //
         // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
         // only this one is expressible per base -- which is how the two are told apart at all.
         // ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule exactly
-        // and `unspliced_mass` is byte-identical. A single block with no line and no annotated junction
+        // and `unspliced_mass` is byte-identical. A single block with no boundary and no annotated junction
         // is bounded by nothing and deposits nothing: for a one-block path that is the CONTAINED case,
         // already whole in `contained_count`; for a multi-block one it is an unannotated intron's block.
         {
@@ -673,22 +673,22 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             for (std::int64_t i = 0; i < n_slices; ++i) {
                 const std::int64_t lo = (i == 0) ? seg_start : cuts_[static_cast<std::size_t>(first + i - 1)];
                 const std::int64_t hi = (i == n_slices - 1) ? seg_end : cuts_[static_cast<std::size_t>(first + i)];
-                const std::int64_t left_line  = (i > 0) ? first + i - 1 : -1;
-                const std::int64_t right_line = (i < n_slices - 1) ? first + i : -1;
-                // The block's own ends are junction boundaries; its interior ends are lines. A slice
+                const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
+                const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
+                // The block's own ends are junction boundaries; its interior ends are boundaries. A slice
                 // therefore has at most one boundary of each kind on each side, never both.
-                const std::int32_t left_jid  = (left_line  < 0) ? left_junction  : -1;
-                const std::int32_t right_jid = (right_line < 0) ? right_junction : -1;
-                const std::int64_t n_bounds = (left_line >= 0 ? 1 : 0) + (right_line >= 0 ? 1 : 0)
+                const std::int32_t left_jid  = (left_boundary  < 0) ? left_junction  : -1;
+                const std::int32_t right_jid = (right_boundary < 0) ? right_junction : -1;
+                const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
                                             + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
                 if (n_bounds == 0) continue;
                 // ⭐ float64, deposited directly: the share is a coverage fraction in (0, 1] and needs
                 // no fixed point. Conservation is 2.1e6x tighter than the 2^-32 grid it replaced.
                 const double share = static_cast<double>(hi - lo)
                                    / (static_cast<double>(length) * static_cast<double>(n_bounds));
-                for (const std::int64_t line : {left_line, right_line}) {
-                    if (line < 0) continue;
-                    Boundary& boundary = boundaries_[static_cast<std::size_t>(line - 1)];
+                for (const std::int64_t boundary_idx : {left_boundary, right_boundary}) {
+                    if (boundary_idx < 0) continue;
+                    Boundary& boundary = boundaries_[static_cast<std::size_t>(boundary_idx - 1)];
                     if (spliced) boundary.spliced_mass += share;
                     else         boundary.unspliced_mass += share;
                 }
@@ -700,7 +700,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             }
         }
         if (last > first) {
-            sole_line = (n_crossed == 0 && last - first == 1) ? first : -1;
+            sole_boundary = (n_crossed == 0 && last - first == 1) ? first : -1;
             n_crossed += last - first;
         }
     }
@@ -712,7 +712,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
 
     // ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────────
-    // ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two blocks,
+    // ⚠ Not merely "crossed no boundary". An unannotated intron can swallow every boundary between two blocks,
     // leaving a fragment that crosses nothing yet straddles two regions. Such a fragment deposits on NO
     // object but still increments region_start_count, so the loss is visible rather than silent.
     std::int64_t contained_region = -1;
@@ -734,7 +734,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
 
     if (!pool_lengths_.empty()) {
-        const std::int64_t pool = fragment_pool(spliced, contained_region, sole_line);
+        const std::int64_t pool = fragment_pool(spliced, contained_region, sole_boundary);
         if (pool >= 0) {
             pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
                           static_cast<std::size_t>(length)] += 1;
@@ -772,11 +772,11 @@ void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
 
 std::int64_t Accumulator::fragment_pool(bool spliced,
                                         std::int64_t contained_region,
-                                        std::int64_t sole_line) const noexcept
+                                        std::int64_t sole_boundary) const noexcept
 {
     // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
-    // fragment is typed by its region; a single-line crossing is a "splash" read typed by its two flanks.
-    // Anything else -- an exonic contained fragment, a multi-line crossing -- is a mixture and enters
+    // fragment is typed by its region; a single-boundary crossing is a "splash" read typed by its two flanks.
+    // Anything else -- an exonic contained fragment, a multi-boundary crossing -- is a mixture and enters
     // nothing.
     //
     // ⭐ DETERMINACY, NOT PROVENANCE: a fragment reaches here only when exactly ONE hypothesis survived,
@@ -790,9 +790,9 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
             default:              return -1;  // exonic is a gDNA/RNA mixture, absent by design
         }
     }
-    if (sole_line >= 1) {
-        const std::uint8_t left  = region_types_[static_cast<std::size_t>(sole_line) - 1];
-        const std::uint8_t right = region_types_[static_cast<std::size_t>(sole_line)];
+    if (sole_boundary >= 1) {
+        const std::uint8_t left  = region_types_[static_cast<std::size_t>(sole_boundary) - 1];
+        const std::uint8_t right = region_types_[static_cast<std::size_t>(sole_boundary)];
         const std::uint8_t lo    = std::min(left, right);
         const std::uint8_t hi    = std::max(left, right);
         if (lo == kTypeIntron && hi == kTypeExon) {

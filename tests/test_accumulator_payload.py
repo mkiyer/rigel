@@ -26,7 +26,7 @@ from native._accumulator_reference import (
 )
 
 
-#: Two references: chr1 with 4 cuts (3 regions, 2 lines) and chr2 with 3 (2 regions, 1 line). A third
+#: Two references: chr1 with 4 cuts (3 regions, 2 boundaries) and chr2 with 3 (2 regions, 1 boundary). A third
 #: reference has NO cuts, which is legal and contributes nothing — the case where per-reference offset
 #: arithmetic goes wrong if it is written as a plain subtraction.
 CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
@@ -424,7 +424,7 @@ def test_an_array_that_does_not_divide_by_its_axis_is_rejected():
 
 
 def test_the_offsets_must_agree_with_the_cut_axis_they_describe():
-    """A reference contributing ``c`` cuts owns ``c-1`` regions and ``c-2`` lines. Re-derived here rather
+    """A reference contributing ``c`` cuts owns ``c-1`` regions and ``c-2`` boundaries. Re-derived here rather
     than trusted, because an offset array that merely has the right LENGTH can still be inconsistent."""
     bad = np.asarray(
         [0, 3, 5, 5], np.int64

@@ -321,7 +321,7 @@ static std::vector<EmEquivClass> build_equiv_classes(
     // addition is non-associative, so an unstable order produces ULP differences that SQUAREM amplifies
     // across iterations into large cascading output differences.  Sorting by comp_idx pins it.
     //
-    // ⚠ THE ROWS WITHIN A CLASS NEED NO SORT, and there used to be one (~45 lines, keyed on a
+    // ⚠ THE ROWS WITHIN A CLASS NEED NO SORT, and there used to be one (~45 boundaries, keyed on a
     // log-likelihood fingerprint).  It existed because the multi-threaded BAM scan filled the fragment
     // buffer in worker-COMPLETION order, so a locus's units arrived permuted.  That is fixed at the
     // source now: `build_multi_loci` orders each locus's units by `frag_id`, the reader's BAM-order
@@ -787,7 +787,7 @@ static void apply_grouped_prior_update(
     // state. Gate: `tests/native/test_grouped_prior_update.py`, specifically
     // `test_a_locus_with_NO_annotated_carried_alpha_drops_the_prior_from_BOTH_sides`.
     //
-    // ⚠ This line used to cite `test_the_gDNA_RNA_split_is_UNTOUCHED_by_the_rna_prior_split`, which
+    // ⚠ This boundary used to cite `test_the_gDNA_RNA_split_is_UNTOUCHED_by_the_rna_prior_split`, which
     // existed NOWHERE in the repository (grepped 2026-08-12, one hit: this comment). A source→test
     // citation is meant to be the one kind that cannot rot silently, and this one did — it named the
     // gate the paragraph above says was missing. The gate exists now.

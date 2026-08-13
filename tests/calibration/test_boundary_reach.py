@@ -3,22 +3,22 @@
     Ruling: · Equation:
 
 ⭐ **What reach is for.** A crossing molecule must fit in what remains of **its own template** either
-side of the line. gDNA's template is the chromosome, so its reach is unbounded — that is physics, not a
+side of the boundary. gDNA's template is the chromosome, so its reach is unbounded — that is physics, not a
 choice. RNA's template ends where its transcript ends, so near a terminus the admissible placements
 collapse and the crossing divisor with them. Ignoring that over-calls gDNA by a measured **11.0 %**
 genome-wide and by **+0.36** in the last region before a polyA site.
 
 ⚠ **PER STRAND, and per SIDE**: reach is "maximised over transcripts
 independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
-different places give a line two different RNA reaches, and averaging them would describe neither.
+different places give a boundary two different RNA reaches, and averaging them would describe neither.
 
 ⚠ **A contiguous boundary's reach is GENOMIC, unlike a junction's, which is EXONIC.** A junction is used
-only by a spliced molecule, so what remains either side of it is exonic. A contiguous line is crossed by
+only by a spliced molecule, so what remains either side of it is exonic. A contiguous boundary is crossed by
 *nascent* RNA too, which is genomic — taking the exonic reach there would declare an intronic nascent
 fragment impossible (`splice_graph.JunctionGeometry`).
 
 ⚠ **A reach of 0 is MEANINGFUL, not a sentinel**. It says there is no template
-of that strand at that line at all, so RNA of that strand has zero opportunity — which is what makes
+of that strand at that boundary at all, so RNA of that strand has zero opportunity — which is what makes
 `crossing_eff_length` return 0 and the consuming `_rate` emit nothing rather than a floored value
 (trap 23). Measured on the chr22 pilot index: **40.6 %** POS and **42.9 %** NEG.
 """
@@ -37,7 +37,7 @@ from rigel.calibration.splice_graph import (
 from conftest import build_test_index
 
 #: chr1: t0 is a two-exon POS transcript [200,400)+[700,900); t1 is a NEG transcript [1000,1200) whose
-#: reach therefore differs from t0's at every line between them. chr2 keeps the per-reference offsets
+#: reach therefore differs from t0's at every boundary between them. chr2 keeps the per-reference offsets
 #: honest — a single-reference fixture cannot see an axis that is laid out per reference.
 GTF = """\
 chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
@@ -58,7 +58,7 @@ def index(tmp_path_factory):
 def _boundary_positions(index) -> np.ndarray:
     """Genomic position of every contiguous boundary, in boundary order — the independent coordinate.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines, and line
+    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior boundaries, and boundary
     ``e`` sits at cut ``e + 1``. Derived from the PARTITION, not from the reach builder, so the two
     cannot agree by sharing a helper.
     """
@@ -76,7 +76,7 @@ def _boundary_positions(index) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def test_one_entry_per_line_on_the_SAME_axis_as_the_flags(index):
+def test_one_entry_per_boundary_on_the_SAME_axis_as_the_flags(index):
     """⭐ The reach array and the flags array must be the same axis, element for element — both are
     per contiguous boundary, and a consumer indexes them with one index."""
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
@@ -91,19 +91,19 @@ def test_the_strand_axis_is_POS_then_NEG(index):
     accumulator's two columns and ``JunctionGeometry``'s strand join use.
 
     ⚠ On this fixture chr1 carries a POS transcript at [200,900) and a NEG one at [1000,1200), which
-    are disjoint — so there are lines where exactly one column is non-zero, and a transposed strand
-    axis moves the non-zero to the wrong line rather than merely permuting a pair.
+    are disjoint — so there are boundaries where exactly one column is non-zero, and a transposed strand
+    axis moves the non-zero to the wrong boundary rather than merely permuting a pair.
     """
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     pos_live = (reach_lo[:, 0] > 0) | (reach_hi[:, 0] > 0)
     neg_live = (reach_lo[:, 1] > 0) | (reach_hi[:, 1] > 0)
     assert pos_live.any() and neg_live.any(), "the fixture must exercise both strands"
-    # the two transcripts are disjoint, so no line can be live on both strands
+    # the two transcripts are disjoint, so no boundary can be live on both strands
     assert not (pos_live & neg_live).any()
 
 
 def test_reach_is_ZERO_where_the_strand_carries_no_transcript(index):
-    """⚠ Zero is the ANSWER, not a missing value. A line with no POS-strand template gives POS-RNA no
+    """⚠ Zero is the ANSWER, not a missing value. A boundary with no POS-strand template gives POS-RNA no
     opportunity, and the consuming divisor must return 0 so the rate emits nothing (trap 23)."""
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     assert int((reach_lo[:, 0] == 0).sum()) > 0
@@ -111,7 +111,7 @@ def test_reach_is_ZERO_where_the_strand_carries_no_transcript(index):
 
 
 def test_reach_matches_the_INDEX_keyed_by_src_region(index):
-    """The values are the edges_df reach columns of the boundary whose ``src`` is the line's left region —
+    """The values are the edges_df reach columns of the boundary whose ``src`` is the boundary's left region —
     read back from the frame directly rather than re-derived."""
     boundaries = index.edges_df
     contiguous = boundaries[boundaries["kind"] == 0]
@@ -134,7 +134,7 @@ def test_reach_matches_the_INDEX_keyed_by_src_region(index):
 
 
 def test_a_single_region_reference_contributes_no_entry(tmp_path_factory):
-    """A reference with one region owns no line, so it contributes nothing — the invariant the ``k + 1``
+    """A reference with one region owns no boundary, so it contributes nothing — the invariant the ``k + 1``
     boundary axis could not state."""
     one = build_test_index(
         tmp_path_factory,

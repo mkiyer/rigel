@@ -30,7 +30,7 @@ clue, the background pool, the intron factory, the result's two supports — rea
 
 
 ⛔ **The per-face boundary machinery is gone.** ``boundary_substrate``, the ``left``/``right`` views and
-``boundary_side_eff_length``'s ``E[min(ℓ,L)]/2`` had no successor: a contiguous boundary is a 0-bp line with
+``boundary_side_eff_length``'s ``E[min(ℓ,L)]/2`` had no successor: a contiguous boundary is a 0-bp boundary with
 one count and one divisor, ``crossing_eff_length``. A zero-gDNA library
 (``gdna_density_global == 0``, per-object gDNA mass ``0``) remains a valid, graceful output.
 
@@ -170,7 +170,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     single-strand and AMBIG per-region solves.
 
     ⚠ **BOUNDARY slots are zero, structurally.** The factor scores a CONTAINED count against a CONTAINED
-    support; a line's count is a crossing and its divisor a different formula, so applying the same
+    support; a boundary's count is a crossing and its divisor a different formula, so applying the same
     NegBinom there would be scoring one frame's evidence against another frame's support.
 
     ``bg`` (an injected population :class:`GdnaBackground`) overrides the internal fit — a tiny toy's own
@@ -301,7 +301,7 @@ def calibrate(
             f"{int(substrate.n_junctions)}. Build it with "
             "splice_graph.build_junction_geometry_arrays(index) against the SAME index the payload "
             "was scanned on — a junction axis addressing a different graph would place every splice "
-            "on the wrong line."
+            "on the wrong boundary."
         )
 
     # ⭐ THE CHAIN AND ITS GEOMETRY COME FIRST, and the geometry owns every divisor from here down:
@@ -610,18 +610,18 @@ def calibrate(
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(regions, boundaries, region_eff_gdna, boundary_eff_gdna)
 
-    # The certified-RNA crossings per LINE: molecules that crossed contiguously having spliced
+    # The certified-RNA crossings per BOUNDARY: molecules that crossed contiguously having spliced
     # elsewhere. ``chain_boundary_deconv`` adds the whole of this to ``rna_mass`` (rna = (1−g)·unspliced +
     # spliced), so it is exactly the spliced component of ``mass_rna_boundary``. ``assemble_priors``
     # withholds it from ``rna_prior_count`` — a spliced fragment is guaranteed-RNA in the EM (no gDNA
     # candidate), so it must not load the RNA side of the gDNA-vs-RNA *unspliced* split. ``mass_rna_boundary``
-    # stays spliced-inclusive so per-line conservation gdna + rna = unspliced + spliced holds.
+    # stays spliced-inclusive so per-boundary conservation gdna + rna = unspliced + spliced holds.
     #
     # ⚠ There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
     # fragment used no junction, so a region's contained population cannot hold a spliced molecule.
     mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
-    # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this line carries.
-    # ``assemble_priors`` needs it to turn a per-line object-incidence total into a fragment count.
+    # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this boundary carries.
+    # ``assemble_priors`` needs it to turn a per-boundary object-incidence total into a fragment count.
     boundary_mass_per_crossing = substrate.boundary_unspliced.mass_per_crossing
 
     # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A junction boundary is pure
@@ -672,7 +672,7 @@ def calibrate(
     )
     # Diagnostic: the JUNCTION sense fraction should agree with the StrandModel κ. A large gap flags a
     # strand-model / accumulator mismatch (κ stays the StrandModel posterior — this is QC only).
-    # ⭐ It is also "sense derived, never stored" in one line: the accumulator's columns are GENOME
+    # ⭐ It is also "sense derived, never stored" in one boundary: the accumulator's columns are GENOME
     # strand, and which of them is *sense* is read off each junction's own annotated transcript strand.
     _flux = np.asarray(substrate.junction.count, dtype=np.float64)
     _is_pos = np.asarray(junctions.strand) == np.int8(Strand.POS)

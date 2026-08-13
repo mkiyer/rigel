@@ -395,14 +395,14 @@ def fit_gdna_strand_from_substrate(
     Pools two kinds of count-observable seed (the same seeds the density estimator trusts):
 
     * **contained regions** — intergenic + intron-only (:func:`_region_seeds`);
-    * **contiguous boundaries** — exon–intron / exon–intergenic lines
+    * **contiguous boundaries** — exon–intron / exon–intergenic boundaries
       (:func:`strand_deconv.boundary_seeds`), needed under hybrid capture, which depletes off-target
       intergenic/intronic gDNA.
 
     Both contribute ``(sense, total, gdna_weight)`` on the same footing, and the pooled estimator fits
     one global overdispersion, shrunk toward ``prior_overdispersion`` (strength ``prior_weight``).
 
-    ⚠ **The boundary arm contributes one seed per line, not two per boundary** (S5.f). The predecessor
+    ⚠ **The boundary arm contributes one seed per boundary, not two per boundary** (S5.f). The predecessor
     counted each physical crossing twice — once from each face — which inflated the pooled sample size
     2× and paired every observation with a perfectly correlated twin. A dispersion estimator reading
     its own duplication is the failure mode this removes; see :mod:`strand_deconv`.

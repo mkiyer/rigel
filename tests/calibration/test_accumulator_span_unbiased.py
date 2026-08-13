@@ -34,9 +34,9 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     ``ρ_bg = Σg/ΣE``). The predecessor took the MEAN of the per-boundary fluxes and divided by
     ``fl_mean``, which is a mean of ratios — a different number whenever the supports differ.
 
-    ⭐ **And a line is ONE number.** The predecessor averaged a boundary's two faces,
+    ⭐ **And a boundary is ONE number.** The predecessor averaged a boundary's two faces,
     ``(right[r] + left[r+1]) / 2``, because the old accumulator split one crossing across them. A
-    contiguous boundary is a 0-bp line with one count, so the ½ and the loop over flanks both go.
+    contiguous boundary is a 0-bp boundary with one count, so the ½ and the loop over flanks both go.
     """
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
@@ -45,8 +45,8 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     flm = build_fl_models(pl)
     gpmf = flm.gdna_pmf
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)
-    # gDNA's template is the chromosome, so a line's divisor is the unbounded-reach limit mu_g − 1 —
-    # the SAME number at every line, which is why the crossing pool needs only a count of lines.
+    # gDNA's template is the chromosome, so a boundary's divisor is the unbounded-reach limit mu_g − 1 —
+    # the SAME number at every boundary, which is why the crossing pool needs only a count of boundaries.
     boundary_eff = float(crossing_eff_length(gpmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
     sub = CalibrationSubstrate.from_payload(pl, ra)
     region_obs, boundary_obs = count_observable_masks(np.asarray(ra.signature), np.asarray(ra.ref_id))
@@ -125,13 +125,13 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     gene = rid == res.index.ref_name_to_id["implicit_chan"]
 
     # (1) Implicit splices route to the JUNCTION axis — the molecule JUMPED, it did not cross. ⭐ In
-    #     the new model a splice deposits on its junction boundary ONLY, never on the contiguous lines it
+    #     the new model a splice deposits on its junction boundary ONLY, never on the contiguous boundaries it
     #     splices over, so the evidence is `sj_count` rather than a spliced channel on a boundary.
     junction_flux = int(np.asarray(sub.junction.count, np.int64).sum())
     assert junction_flux > 1000, f"expected substantial junction flux, got {junction_flux}"
 
     # (2) The intron is CUT, not filled: the intron REGION carries no contained mass, and neither of the
-    #     lines bounding it carries an unspliced crossing — the implicit molecules skip both.
+    #     boundaries bounding it carries an unspliced crossing — the implicit molecules skip both.
     from rigel.calibration.region_arrays import region_right_boundary
 
     intron = gene & (ctype == 1)

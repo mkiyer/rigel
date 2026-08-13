@@ -70,7 +70,7 @@ def toy(tmp_path_factory):
 
     ⭐ Two structures here are load-bearing, and without them two gates below are vacuous:
 
-    * **staggered isoform boundaries.** ``boundary_spliced`` — a molecule that crossed a contiguous line
+    * **staggered isoform boundaries.** ``boundary_spliced`` — a molecule that crossed a contiguous boundary
       having spliced *elsewhere* — can only be deposited where a cut falls INSIDE another
       transcript's exon. A single-isoform gene has no such cut, so its spliced-boundary bank is
       identically zero and GATE 2's perturbation removes nothing.
@@ -85,7 +85,7 @@ def toy(tmp_path_factory):
         "+",
         [
             {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
-            # ⚠ the stagger must sit CLOSE to the junction: the fragment has to reach the line
+            # ⚠ the stagger must sit CLOSE to the junction: the fragment has to reach the boundary
             # contiguously AND reach the junction, so a cut 700 bp away is one no fragment spans.
             {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
         ],
@@ -421,7 +421,7 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
     np.testing.assert_allclose(score.mwae, 2.0 / 11.0)
 
     # ...and on the real toy: exactly the objects with mass are scored, and there is at least one
-    # without, or the line above proves nothing about the path the instrument actually runs.
+    # without, or the boundary above proves nothing about the path the instrument actually runs.
     region = measured.scores["pass0"]["region"]["ALL"]
     live = (
         np.asarray(measured.truth.mass_gdna_region) + np.asarray(measured.truth.mass_rna_region)
@@ -459,7 +459,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     # whose answer came from its neighbours, when nothing was ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
     # ⭐ the census asks the SOLVER's question by calling the solver's own predicate — imported, not
-    #   restated. This line IS the census's line (`composition_evidence_census.census_one`).
+    #   restated. This boundary IS the census's boundary (`composition_evidence_census.census_one`).
     census_no_ev = ~census.has_own_composition_evidence(tau) & (~census_lock)
 
     slot = P0.solver_slot_classes(cap, chain)

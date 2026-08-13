@@ -1163,7 +1163,7 @@ public:
     //
     // Inputs:
     //   cut_positions:   flat int64[n_cuts_total], the concatenated sorted cut positions of every
-    //                    reference. A reference contributing c cuts owns c-1 regions and c-2 lines.
+    //                    reference. A reference contributing c cuts owns c-1 regions and c-2 boundaries.
     //   ref_cut_offsets: int64[n_refs + 1] offsets into cut_positions. A reference with
     //                    offsets[f+1] == offsets[f] has no partition and accepts no deposits.
     //   n_refs:          number of references (must match ctx_->ref_to_id_).
@@ -3151,7 +3151,7 @@ NB_MODULE(_bam_impl, m) {
                  "Install the accumulator's region partition. Call set_junctions next.\n\n"
                  "cut_positions : int64[n_cuts_total]\n"
                  "    Flat sorted cut positions for all references. A reference\n"
-                 "    contributing c cuts owns c-1 regions and c-2 interior lines.\n"
+                 "    contributing c cuts owns c-1 regions and c-2 interior boundaries.\n"
                  "ref_cut_offsets : int64[n_refs + 1]\n"
                  "    Per-ref offsets into cut_positions; ref f spans\n"
                  "    cut_positions[ref_cut_offsets[f]:ref_cut_offsets[f+1]].\n"

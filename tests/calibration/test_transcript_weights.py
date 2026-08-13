@@ -119,7 +119,7 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
 
     e_t = float(contained_eff_length(np.array([1_000.0]), PMF)[0])  # 801
     ceff_region = float(contained_eff_length(np.array([500.0]), PMF)[0])  # 301
-    crossing_opp = 199.0  # a 200 bp fragment crossing a line: w − 1 admissible offsets
+    crossing_opp = 199.0  # a 200 bp fragment crossing a boundary: w − 1 admissible offsets
     abundance = 8_010.0
     rate = abundance / e_t  # 10.0 fragments per admissible start
 

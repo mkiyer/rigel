@@ -267,7 +267,7 @@ class TestGeneBuilder:
         from rigel.gtf import GTFRecord
 
         features = list(GTFRecord.parse_file(gtf_path))
-        assert len(features) == 2  # 2 exon lines
+        assert len(features) == 2  # 2 exon boundaries
         assert all(f.feature == "exon" for f in features)
         assert all(f.attrs["gene_id"] == "g1" for f in features)
         assert all(f.attrs["transcript_id"] == "t1" for f in features)
@@ -352,11 +352,11 @@ class TestGeneBuilder:
         result_path = gtf_to_bed12(gtf_path, bed_path)
         assert result_path.exists()
 
-        lines = bed_path.read_text().strip().split("\n")
-        assert len(lines) == 2
+        boundaries = bed_path.read_text().strip().split("\n")
+        assert len(boundaries) == 2
 
         # Parse first transcript (2-exon, + strand)
-        fields = lines[0].split("\t")
+        fields = boundaries[0].split("\t")
         assert len(fields) == 12
         assert fields[0] == "chr1"  # ref
         assert fields[1] == "100"  # refStart
@@ -368,7 +368,7 @@ class TestGeneBuilder:
         assert fields[11] == "0,400"  # blockStarts (100-100, 500-100)
 
         # Parse second transcript (3-exon, - strand)
-        fields = lines[1].split("\t")
+        fields = boundaries[1].split("\t")
         assert fields[0] == "chr1"
         assert fields[1] == "1000"
         assert fields[2] == "1800"

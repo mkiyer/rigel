@@ -7,12 +7,12 @@ deconvolution lives in the chain sweep. What is left here is boundary strand geo
   gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-region
   seeds (needed under hybrid capture, which depletes off-target intergenic / intronic gDNA).
 
-⭐ **ONE SEED PER LINE, NOT TWO PER BOUNDARY (S5.f).** ``boundary_side_seeds`` emitted a seed for each
+⭐ **ONE SEED PER BOUNDARY, NOT TWO PER BOUNDARY (S5.f).** ``boundary_side_seeds`` emitted a seed for each
 of a boundary's two faces — region ``r``'s right side and region ``r+1``'s left side — because the old
 accumulator split one crossing fragment's mass across the two flanks. They are the same physical
 crossing: pooling both into one method-of-moments estimator doubles its apparent sample size and pairs
 every observation with a perfectly correlated twin, which is a dispersion estimate reading its own
-duplication. A contiguous boundary is a 0-bp line with one count, so there is one seed and the whole
+duplication. A contiguous boundary is a 0-bp boundary with one count, so there is one seed and the whole
 ``_SideQuantities`` / ``_compute_side`` / ``_left_right_neighbors`` layer dissolves with the faces.
 
 ⭐ **And the seed WEIGHT is now exactly 1, provably.** It was
@@ -20,7 +20,7 @@ duplication. A contiguous boundary is a 0-bp line with one count, so there is on
 ``density = mass / eff`` — algebraically 1 whenever the seed mask admits it, and the borrowed-density
 branch could never reach a seed. With ``count`` and ``mass`` the same number that identity is exact
 rather than approximate, so the ratio, the effective length it divided by, and the
-``boundary_side_eff_len`` argument that carried it all go. A seed's weight is "this line is gDNA by
+``boundary_side_eff_len`` argument that carried it all go. A seed's weight is "this boundary is gDNA by
 signature", and that is a 1.
 """
 
@@ -40,19 +40,19 @@ from .signature import TS_NEG, TS_NONE, TS_POS
 def boundary_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(orient_neg, strand_observable)`` per contiguous boundary, from its two flanks' strand classes.
 
-    A line is **strand-observable** iff its two flanks define a single consistent transcript sense:
+    A boundary is **strand-observable** iff its two flanks define a single consistent transcript sense:
     ``{POS,POS}`` / ``{NEG,NEG}``, or a gene-boundary ``{POS,NONE}`` / ``{NEG,NONE}``. An **intergenic
     (``TS_NONE``) flank is a strand WILDCARD** — it carries no transcript, so it is compatible with
-    either strand and the line is oriented by its gene flank. Only a genuine conflict — opposite
+    either strand and the boundary is oriented by its gene flank. Only a genuine conflict — opposite
     strands ``{POS,NEG}``, or a ``TS_AMBIG`` flank (overlapping ± transcripts) — leaves the sense
-    undefined, and such a line cannot seed the fit at all.
+    undefined, and such a boundary cannot seed the fit at all.
 
     ⭐ **The rule is SYMMETRIC in the two flanks**, which is precisely why the two faces of the old
     boundary always agreed about orientation and differed only in which face's count they read — the
     duplication `boundary_seeds` removes.
 
     ``orient_neg`` selects the NEG genome-strand column as "sense"; where it is ``False`` (and the
-    line is observable) the POS column is sense.
+    boundary is observable) the POS column is sense.
 
     ⚠ **There is no explicit AMBIG guard, and there must not be one.** The predecessor carried an
     ``~either_ambig`` term on both clauses. ``TS_AMBIG`` is a fourth distinct value, so
@@ -73,7 +73,7 @@ def boundary_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[n
 def boundary_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous boundary.
 
-    The exon–intron / exon–intergenic line seeds for the gDNA strand-overdispersion fit
+    The exon–intron / exon–intergenic boundary seeds for the gDNA strand-overdispersion fit
     (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture, which
     depletes off-target intergenic / intronic gDNA).
 

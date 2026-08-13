@@ -16,7 +16,7 @@ rather than inferred from an aggregate.
    which total each end presented, the reframe ``r``, what ``r`` would have been under the shipped
    single-total, what TRUTH says the same ratio is, whether the composition licence fired, and the gDNA
    level arriving and leaving. ⭐ A hop where ``r_new`` tracks truth and ``r_old`` does not is the
-   derivation working, in one line.
+   derivation working, in one boundary.
 5. **THE ANSWER** per slot against per-object truth.
 
 ⚠ **The geometry is REBUILT here, not read out of the solver** — ``build_region_geometry`` is a pure

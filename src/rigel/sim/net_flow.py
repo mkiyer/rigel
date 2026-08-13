@@ -9,7 +9,7 @@ destination. "6 M gDNA fragments left the gDNA pool at ``g98 ss0.50 capture_on``
 number; "and here is the transcript they landed on" is this one.
 
 ⛔ **THIS MODULE IS WHAT SURVIVED ``sim/analysis.py``** (retired 2026-08-11, owner). That file was a
-1,589-line SECOND SCORER: it ran the tool and rendered its own accuracy tables beside
+1,589-boundary SECOND SCORER: it ran the tool and rendered its own accuracy tables beside
 ``quant_accuracy.py``'s, against its own definition of truth. Two scorers is how a baseline and a ceiling
 drift apart (`TRAPS: score-the-consumers-own-count`), so the scoring and report-rendering halves went and
 the flow decomposition — the part with no duplicate — moved here with its tests.
@@ -491,20 +491,20 @@ def analyze_net_flow(
                 ldf[k] = v
             locus_frames.append(ldf)
 
-    lines: list[str] = []
+    boundaries: list[str] = []
     hr = "═" * 100
-    lines.append(f"\n{hr}")
-    lines.append("  NET FRAGMENT-FLOW DECONVOLUTION  (primary gDNA↔RNA accuracy)")
-    lines.append(hr)
-    lines.append(
+    boundaries.append(f"\n{hr}")
+    boundaries.append("  NET FRAGMENT-FLOW DECONVOLUTION  (primary gDNA↔RNA accuracy)")
+    boundaries.append(hr)
+    boundaries.append(
         "  Net flow cancels symmetric (sequence-identical, unrecoverable) misassignment;\n"
         "  only systematic bias remains. + net_gdna_to_rna ⇒ gDNA leaked into RNA;\n"
         "  - ⇒ RNA siphoned into gDNA. Per transcript, Δ = net(gDNA→T) + net(RNA isoforms→T).\n"
     )
 
     if not tx_frames:
-        lines.append("  [no annotated BAMs / loci available — run quant with --annotated-bam]")
-        return "\n".join(lines)
+        boundaries.append("  [no annotated BAMs / loci available — run quant with --annotated-bam]")
+        return "\n".join(boundaries)
 
     tx_all = pd.concat(tx_frames, ignore_index=True)
     locus_all = pd.concat(locus_frames, ignore_index=True) if locus_frames else pd.DataFrame()
@@ -516,12 +516,12 @@ def analyze_net_flow(
         locus_all.to_csv(locus_path, sep="\t", index=False)
 
     # ── Pool net-leak & direction, per condition ──
-    lines.append("  POOL NET LEAK (signed; fraction of true gDNA), by condition:")
-    lines.append(
+    boundaries.append("  POOL NET LEAK (signed; fraction of true gDNA), by condition:")
+    boundaries.append(
         f"  {'gdna':9}{'cap':5}{'ss':6} | {'true_gDNA':>10} {'net→RNA':>9} "
         f"{'leak%':>7} | {'in_locus':>9} {'intergenic':>11}"
     )
-    lines.append("  " + "-" * 74)
+    boundaries.append("  " + "-" * 74)
     pool_rows = []
     for cond in conditions:
         fd = flows.get(cond)
@@ -553,7 +553,7 @@ def analyze_net_flow(
         )
     pool_rows.sort(key=lambda r: (r["gdna_rate"], r["capture"], -r["ss"]))
     for r in pool_rows:
-        lines.append(
+        boundaries.append(
             f"  {r['gdna_label']:9}{r['capture']:5}{r['ss']:<6.2f} | {r['true_gdna']:>10,} "
             f"{r['net_to_rna']:>+9,} {r['leak_frac'] * 100:>6.2f}% | "
             f"{r['in_locus']:>+9,} {r['intergenic']:>+11,}"
@@ -562,17 +562,17 @@ def analyze_net_flow(
     pd.DataFrame(pool_rows).to_csv(cond_path, sep="\t", index=False)
 
     # ── 3-pool net flow: gDNA ↔ nRNA ↔ mRNA (the resurrected nRNA pool needs 3 pools) ──
-    lines.append(
+    boundaries.append(
         "\n  3-POOL NET FLOW (gDNA/nRNA/mRNA): per-pool net surplus (assigned−true) + net pair fluxes."
     )
-    lines.append(
+    boundaries.append(
         "  + surplus ⇒ pool net-inflated (false gain); − ⇒ net-deficit. Watch mRNA surplus (mature FP)."
     )
-    lines.append(
+    boundaries.append(
         f"  {'gdna':9}{'cap':4}{'ss':5}{'nrna':5} | {'gDNA_surp':>10}{'nRNA_surp':>10}{'mRNA_surp':>10}"
         f" | {'g→n':>8}{'g→m':>8}{'n→m':>8}"
     )
-    lines.append("  " + "-" * 86)
+    boundaries.append("  " + "-" * 86)
     pool3_rows = []
     for cond in conditions:
         fd = flows.get(cond)
@@ -592,7 +592,7 @@ def analyze_net_flow(
         pool3_rows.append(row)
     pool3_rows.sort(key=lambda r: (r["gdna_rate"], r["capture"], -r["ss"], r["nrna"]))
     for r in pool3_rows:
-        lines.append(
+        boundaries.append(
             f"  {r['gdna_label']:9}{r['capture']:4}{r['ss']:<5.2f}{r['nrna']:5} | "
             f"{r['gdna_net_surplus']:>+10,}{r['nrna_net_surplus']:>+10,}{r['mrna_net_surplus']:>+10,}"
             f" | {r['net_gdna_to_nrna']:>+8,}{r['net_gdna_to_mrna']:>+8,}{r['net_nrna_to_mrna']:>+8,}"
@@ -603,14 +603,14 @@ def analyze_net_flow(
         )
 
     # ── Per-transcript Δ distribution + source decomposition ──
-    lines.append("\n  PER-TRANSCRIPT Δ (observed − expected) and its decomposition:")
-    lines.append(
+    boundaries.append("\n  PER-TRANSCRIPT Δ (observed − expected) and its decomposition:")
+    boundaries.append(
         f"  {'gdna':9}{'cap':5}{'ss':6} | {'n_tx':>5} {'meanΔ':>7} {'sdΔ':>7} "
         f"{'mean|Δ|':>8} | {'fromGDNA':>9} {'fromISO':>8} | {'|Δ|>10':>6}"
     )
-    lines.append("  " + "-" * 78)
+    boundaries.append("  " + "-" * 78)
     for (gl, cap, ss), grp in tx_all.groupby(["gdna_label", "capture", "ss"], dropna=False):
-        lines.append(
+        boundaries.append(
             f"  {str(gl):9}{str(cap):5}{float(ss):<6.2f} | {len(grp):>5} "
             f"{grp['delta'].mean():>7.2f} {grp['delta'].std():>7.2f} "
             f"{grp['delta'].abs().mean():>8.2f} | "
@@ -619,7 +619,7 @@ def analyze_net_flow(
         )
 
     # ── Root cause: covariate ranking against gDNA contamination inflow ──
-    lines.append(
+    boundaries.append(
         "\n  ROOT CAUSE — Spearman(net_from_gdna, covariate) over transcripts in gDNA>0 conditions:"
     )
     contam = tx_all[tx_all["gdna_label"] != "none"].copy()
@@ -641,14 +641,14 @@ def analyze_net_flow(
         ranked = [r for r in ranked if not np.isnan(r[1])]
         ranked.sort(key=lambda r: abs(r[1]), reverse=True)
         for name, r in ranked:
-            lines.append(f"    {name:<28} ρ = {r:+.3f}")
+            boundaries.append(f"    {name:<28} ρ = {r:+.3f}")
         if not ranked:
-            lines.append("    (insufficient variation to rank covariates)")
+            boundaries.append("    (insufficient variation to rank covariates)")
 
     # ── Identifiability diagnostic: gross confusion vs net (expected-unrecoverable vs bias) ──
-    lines.append("\n  IDENTIFIABILITY — single-exon (gDNA-identical) vs multi-exon transcripts:")
+    boundaries.append("\n  IDENTIFIABILITY — single-exon (gDNA-identical) vs multi-exon transcripts:")
     if "single_exon" in contam.columns and not contam.empty:
-        lines.append(
+        boundaries.append(
             f"    {'class':<12} {'n_tx':>6} {'mean|Δ|':>8} {'meanΔ':>8} {'mean net_from_gdna':>18}"
         )
         for label, mask in (
@@ -658,19 +658,19 @@ def analyze_net_flow(
             grp = contam[mask]
             if grp.empty:
                 continue
-            lines.append(
+            boundaries.append(
                 f"    {label:<12} {len(grp):>6} {grp['delta'].abs().mean():>8.2f} "
                 f"{grp['delta'].mean():>8.2f} {grp['net_from_gdna'].mean():>18.2f}"
             )
-        lines.append(
+        boundaries.append(
             "    (single-exon transcripts are sequence-identical to gDNA and have no isoforms, so\n"
             "     their Δ ≈ net_from_gdna; compare gDNA inflow across classes to localize where\n"
             "     contamination concentrates. meanΔ near 0 with large spread ⇒ unbiased-but-noisy;\n"
             "     meanΔ ≈ mean net_from_gdna ⇒ systematic gDNA→RNA leak on that class.)"
         )
 
-    lines.append(f"\n  Wrote {cond_path}")
-    lines.append(f"  Wrote {tx_path}")
+    boundaries.append(f"\n  Wrote {cond_path}")
+    boundaries.append(f"  Wrote {tx_path}")
     if not locus_all.empty:
-        lines.append(f"  Wrote {locus_path}")
-    return "\n".join(lines)
+        boundaries.append(f"  Wrote {locus_path}")
+    return "\n".join(boundaries)

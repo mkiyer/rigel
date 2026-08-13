@@ -12,8 +12,8 @@ Two pieces of pure geometry the calibrator builds on:
 
 ⭐ **The ``k + 1`` boundary axis is retired (S5.f).** A reference with ``k`` regions used to own
 ``k + 1`` boundary slots — the ``k − 1`` interior boundaries plus two data-free terminals that existed
-only so every region had an object on each side. A contiguous boundary is the line BETWEEN two adjacent
-regions: there is no such line before the first or after the last, so a reference owns exactly
+only so every region had an object on each side. A contiguous boundary is the boundary BETWEEN two adjacent
+regions: there is no such boundary before the first or after the last, so a reference owns exactly
 ``k − 1`` of them and **an boundary always has a region on both sides**. That kills the ``-1``-terminal
 branch, the two-spaces-off-by-one-per-reference arithmetic, and the pair of offset arrays the old
 mapping needed — the boundary axis is derivable from ``ref_id`` alone.
@@ -151,7 +151,7 @@ class RegionArrays:
 def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
     """``int64[N]`` — the contiguous boundary to the right of each region, ``-1`` at a reference's last region.
 
-    Regions ``r`` and ``r + 1`` share a line exactly when they are in the same reference, so the boundary
+    Regions ``r`` and ``r + 1`` share a boundary exactly when they are in the same reference, so the boundary
     axis is the run of adjacent same-reference pairs, numbered in region order. A reference with one
     region owns no boundary; an empty reference contributes nothing.
 

@@ -139,7 +139,7 @@ def _view(pos, neg):
 def _mock_substrate(pos, neg, ts, count_evidence, observable):
     """Mock with only contained-REGION signal: the boundary axis carries ZERO counts ⇒ no boundary seeds.
 
-    ⚠ One reference with ``n`` regions owns exactly ``n − 1`` lines, so the boundary arrays are sized from
+    ⚠ One reference with ``n`` regions owns exactly ``n − 1`` boundaries, so the boundary arrays are sized from
     the region axis rather than left empty — an boundary axis inconsistent with its own ``ref_id`` is not a
     "no boundaries" fixture, it is a mis-shaped one.
     """
@@ -209,7 +209,7 @@ def test_wrapper_excludes_ambig_and_non_observable():
     ).fallback_used
 
 
-# --- boundary seeds: ONE per line, not two per boundary -------------------------------------------
+# --- boundary seeds: ONE per boundary, not two per boundary -------------------------------------------
 
 
 def _boundary_parts(signatures, boundary_pos, boundary_neg, ref_id=None):
@@ -237,18 +237,18 @@ def _boundary_parts(signatures, boundary_pos, boundary_neg, ref_id=None):
     return substrate, region_arrays, region_density
 
 
-def test_boundary_seeds_emits_ONE_seed_per_line_not_two_per_boundary():
+def test_boundary_seeds_emits_ONE_seed_per_boundary_not_two_per_boundary():
     """⭐ The S5.f collapse, and the whole point of the change.
 
     The predecessor emitted TWO seeds for one boundary — region ``r``'s right side and region ``r+1``'s
     left side — because the old accumulator split one crossing fragment's mass across the two flanks.
     They were the same physical crossing, counted twice into one pooled moment estimator, which
     inflates its apparent sample size by 2× and correlates every pair perfectly. A contiguous boundary is
-    a 0-bp line with ONE count, so there is ONE seed.
+    a 0-bp boundary with ONE count, so there is ONE seed.
     """
     from rigel.calibration.strand_deconv import boundary_seeds
 
-    # intron+ | intron+ : one line, count-observable (no shared EXON bit), sense-POS on both flanks.
+    # intron+ | intron+ : one boundary, count-observable (no shared EXON bit), sense-POS on both flanks.
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
     )
@@ -260,7 +260,7 @@ def test_boundary_seeds_emits_ONE_seed_per_line_not_two_per_boundary():
 
 
 def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
-    """A NEG-strand line orients to the NEG genome column; the sense count is not always ``pos``."""
+    """A NEG-strand boundary orients to the NEG genome column; the sense count is not always ``pos``."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
@@ -272,7 +272,7 @@ def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
 
 
 def test_an_intergenic_flank_is_a_strand_WILDCARD():
-    """Intergenic carries no transcript, so a gene-boundary line is oriented by its gene flank."""
+    """Intergenic carries no transcript, so a gene-boundary boundary is oriented by its gene flank."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
@@ -282,8 +282,8 @@ def test_an_intergenic_flank_is_a_strand_WILDCARD():
     np.testing.assert_allclose(sense, [30.0])  # oriented NEG by the gene side
 
 
-def test_an_opposite_strand_line_is_not_strand_observable():
-    """``{POS, NEG}`` leaves 'sense' undefined, so the line cannot seed the fit at all."""
+def test_an_opposite_strand_boundary_is_not_strand_observable():
+    """``{POS, NEG}`` leaves 'sense' undefined, so the boundary cannot seed the fit at all."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
@@ -297,7 +297,7 @@ def test_an_AMBIG_flank_cannot_seed():
     """⛔ Found by PERTURBATION, not by review: nothing pinned this rule.
 
     A flank carrying overlapping ± transcripts has no defined transcript sense, so neither genome
-    column is "sense" and the line cannot seed a strand fit. ``boundary_strand_orientation`` used to carry
+    column is "sense" and the boundary cannot seed a strand fit. ``boundary_strand_orientation`` used to carry
     an explicit ``~either_ambig`` guard — deleting it broke NOTHING, because ``TS_AMBIG`` is a fourth
     distinct value that the ``POS-or-NONE`` / ``NEG-or-NONE`` tests already exclude. The guard was
     dead code claiming to be the rule; this test is the rule.
@@ -315,8 +315,8 @@ def test_an_AMBIG_flank_cannot_seed():
     assert sense.shape == (0,)
 
 
-def test_a_line_inside_one_exon_is_not_count_observable():
-    """A shared exon bit means an exon-strand continues across the line, so unspliced MATURE RNA
+def test_a_boundary_inside_one_exon_is_not_count_observable():
+    """A shared exon bit means an exon-strand continues across the boundary, so unspliced MATURE RNA
     crosses it and its count is not gDNA."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
@@ -328,7 +328,7 @@ def test_a_line_inside_one_exon_is_not_count_observable():
 
 
 def test_boundary_seeds_never_straddle_a_reference():
-    """Two single-region references own ZERO lines between them — nothing can leak across."""
+    """Two single-region references own ZERO boundaries between them — nothing can leak across."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(

@@ -5,7 +5,7 @@
 ⛔ **What this replaces.** The old chain was `B R B R ... R B` — a reference with `k` regions had `k + 1`
 boundary slots, the two outermost of which were reference terminals carrying no data and existing only
 so every region had something on both sides. The new partition has no such object: a reference with `k`
-regions owns exactly `k - 1` interior lines, so the chain **starts and ends with a REGION**.
+regions owns exactly `k - 1` interior boundaries, so the chain **starts and ends with a REGION**.
 
 That is not a renaming. It is one fewer object per reference in one direction and two fewer in the other,
 and every off-by-one in this file is a real defect the old shape could not express.
@@ -43,7 +43,7 @@ def test_the_chain_length_is_2k_minus_1_not_2k_plus_1():
 
 def test_a_SINGLE_REGION_reference_has_no_boundaries_and_is_still_a_slot():
     """1 bp and single-region references are legal — 15,687 regions of length 1 exist at human scale — and a
-    reference with one region has zero interior lines, not one."""
+    reference with one region has zero interior boundaries, not one."""
     chain = _chain([1])
     assert chain.n_slots == 1
     assert list(chain.kind) == [REGION]
@@ -77,7 +77,7 @@ def test_adjacency_is_symmetric_and_alternates_TYPE():
 
 
 def test_an_BOUNDARY_always_has_a_region_on_BOTH_sides():
-    """An boundary is the line BETWEEN two regions, so it can never be a terminal. This is the invariant the
+    """An boundary is the boundary BETWEEN two regions, so it can never be a terminal. This is the invariant the
     old shape could not state: its terminal boundaries had exactly one flank."""
     chain = _chain([5, 2, 1])
     for slot in np.flatnonzero(np.asarray(chain.kind) == BOUNDARY):

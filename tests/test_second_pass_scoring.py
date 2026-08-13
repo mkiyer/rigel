@@ -25,7 +25,7 @@ arm 3   locus 3, the gap is deeply crossed          ∅ must win. ⛔ **This arm
 arm 4   locus 4, the gap's **donor** end is deeply  ∅ must LOSE — a molecule crossing the gap is
 6       crossed and its acceptor never; locus 6 is  present at both ends, and nothing was seen at
         the mirror                                  one. ⛔ Added because half-fixes to D-6 that
-                                                    kept ONE line passed arms 1–3
+                                                    kept ONE boundary passed arms 1–3
 arm 5   locus 5, two junctions at **equal** depth   the length term decides, so the hypothesis the
         and different implied lengths               anchor supports must win. ⛔ Added because
                                                     dropping ``f`` entirely passed arms 1–4
@@ -97,7 +97,7 @@ def _gtf() -> str:
             f'chr1\tt\texon\t{base + 901}\t{base + 1200}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
         ]
     # ⭐ Loci 3 and 4 have ONE isoform on purpose, so the intron's endpoints are ADJACENT cuts and the
-    # intron spans exactly one region. That is D-6's case: the lines strictly between them are an empty set.
+    # intron spans exactly one region. That is D-6's case: the boundaries strictly between them are an empty set.
     for base, gene in ((L3, "C"), (L4, "D"), (L6, "G")):
         rows += [
             f'chr1\tt\texon\t{base + 1}\t{base + 600}\t.\t+\t.\tgene_id "g{gene}"; transcript_id "t{gene}";\n',
@@ -157,7 +157,7 @@ def _spliced(qname, donor, acceptor, k):
 
 
 def _contiguous(qname, start, half):
-    """A fully-sequenced UNSPLICED fragment: it crosses every line strictly inside its span."""
+    """A fully-sequenced UNSPLICED fragment: it crosses every boundary strictly inside its span."""
     return [
         _read(qname, start, [(M, half)], start + half, True),
         _read(qname, start + half, [(M, half)], start, False),
@@ -224,7 +224,7 @@ def scored(tmp_path_factory):
     reads += _ambiguous(f"ambig_{L3}", L3)
 
     # arm 4: the DONOR end of the gap is deeply crossed and the ACCEPTOR end never is. These fragments
-    # span [L4+400, L4+800) — over the line at L4+600, and stopping well short of the one at L4+1000.
+    # span [L4+400, L4+800) — over the boundary at L4+600, and stopping well short of the one at L4+1000.
     for k in range(DEEP):
         reads += _contiguous(f"contig_{L4}_{k}", L4 + 400, 200)
     for k in range(SHALLOW):
@@ -232,7 +232,7 @@ def scored(tmp_path_factory):
     reads += _ambiguous(f"ambig_{L4}", L4)
 
     # arm 6: the MIRROR of arm 4 — the ACCEPTOR end is deeply crossed and the DONOR end never is.
-    # These span [L6+800, L6+1200), over the line at L6+1000 and starting well past the one at L6+600.
+    # These span [L6+800, L6+1200), over the boundary at L6+1000 and starting well past the one at L6+600.
     for k in range(DEEP):
         reads += _contiguous(f"contig_{L6}_{k}", L6 + 800, 200)
     for k in range(SHALLOW):
@@ -342,7 +342,7 @@ def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
 
     # ⛔ AND ∅'s OWN TERM MUST BE SYMMETRIC HERE. This locus offers candidates on BOTH strands, so there is
     # no locus orientation for an unspliced molecule to be sense or antisense TO — and a rule that picked
-    # one anyway would make the answer depend on which annotation line was read first, which is D-5's defect
+    # one anyway would make the answer depend on which annotation boundary was read first, which is D-5's defect
     # wearing a different hat.
     d = payload.deferred
     i = next(j for j in range(d.n_fragments) if int(d.start[j]) == L7 + 500)
@@ -418,11 +418,11 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
     Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
     ``SHALLOW``, so the evidence says the molecule is genomic. ⭐ Its intron spans **exactly one region** —
     the locus has one isoform, so the intron's endpoints are adjacent cuts — which is precisely the
-    configuration where the shipped ``_lines_inside`` returned an EMPTY evidence set and handed ∅ a
+    configuration where the shipped ``_boundaries_inside`` returned an EMPTY evidence set and handed ∅ a
     structural ``rho = 0``.
 
-    ⚠ The deposit rule is what settles the right set, not taste: a line is crossed iff it is strictly
-    inside a *segment*, so the lines distinguishing ∅ from a path splicing ``[a, b)`` are those at cuts
+    ⚠ The deposit rule is what settles the right set, not taste: a boundary is crossed iff it is strictly
+    inside a *segment*, so the boundaries distinguishing ∅ from a path splicing ``[a, b)`` are those at cuts
     ``a <= c <= b`` — **endpoints included**, and both endpoints are always cuts.
     """
     shares = _shares(scored[0], scored[1], L3)
@@ -438,14 +438,14 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
 def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, base, crossed_end):
     """⛔ **Arm 4 — the half of D-6 that arms 1–3 could not see.**
 
-    A perturbation keeping only the **donor** line of the distinguishing set passed every other gate in
+    A perturbation keeping only the **donor** boundary of the distinguishing set passed every other gate in
     this module, because at locus 3 both ends carry the same deep coverage and either one alone answers.
-    Loci 4 and 6 separate them, and they are a **mirror pair**: locus 4 crosses only the donor line and
+    Loci 4 and 6 separate them, and they are a **mirror pair**: locus 4 crosses only the donor boundary and
     locus 6 only the acceptor, so a rule that consults either end alone fails one of the two.
 
     ⭐ A molecule that crosses the gap contiguously is present at *both* of its ends, so the scarcest
     object on the path bounds it — which is what ``min`` aggregation means (D-1's bottleneck reading).
-    With no fragment ever seen crossing the acceptor line, there is no evidence for a contiguous crossing
+    With no fragment ever seen crossing the acceptor boundary, there is no evidence for a contiguous crossing
     however deep the donor side is, and ∅ must lose to the junction that does have flux.
 
     ⚠ ∅'s zero here is a **correct** zero, and the owner's D-3 ruling is what makes it stand: the score
@@ -456,7 +456,7 @@ def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, b
     empty_end = base + 1000 if crossed_end == "donor" else base + 600
     assert shares[spliced] > shares[genomic], (
         f"nothing was ever observed crossing the {'acceptor' if crossed_end == 'donor' else 'donor'} "
-        f"line at {empty_end}, so ∅ has no evidence for a contiguous crossing; got "
+        f"boundary at {empty_end}, so ∅ has no evidence for a contiguous crossing; got "
         f"genomic={shares[genomic]:.4f} spliced={shares[spliced]:.4f}. A winning ∅ means only ONE end "
         f"of the gap was consulted."
     )

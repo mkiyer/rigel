@@ -244,6 +244,28 @@ renamed to `request.region` and two scenario tests failed. Nothing else in the t
 `node` API, but the class of error is real — a token can belong to a LIBRARY, not just to two of our own
 senses.
 
+## 3h. ⛔⛔ STAGE 4 — WHAT A "PER-SITE" STAGE ACTUALLY COSTS
+
+**⑤ A PLACEHOLDER MUST BE ALPHANUMERIC.** The first attempt protected text variables as `\x00line\x00`.
+A NUL is not alphanumeric, so `(?<![A-Za-z0-9])line(?![A-Za-z0-9])` matched straight THROUGH the
+placeholder, the restore then found nothing, and **146 files kept their NUL bytes**. ⭐ Recovery was one
+`git checkout` — which is the entire argument for one stage, one commit. The replacement placeholder is
+alphanumeric and contains no target token, so every lookaround refuses it by construction.
+
+**⑥ CLASSIFYING A FILE BY ITS IDIOMS IS NOT ENOUGH — CLASSIFY BY WHETHER IT READS TEXT.** `for line in
+range(first, last)` and `lines = [i for i in (region, region + 1)]` are BOUNDARY loops that look exactly
+like text iteration. The first regex mis-classified **11 of 31 files**, protecting 277 boundary-sense
+tokens that should have been renamed — including the executable specification and the conserved-mass
+gates. ⭐ The tighter test asks for real I/O (`splitlines`, `readlines`, `open(`, `.strip()`), and it
+splits 20 genuinely-text from 11 boundary.
+
+**⑦ AND THE TEXT SENSE LEAKS THROUGH COMPOUNDS AND PROSE, not just bare tokens.** `line_number` in the
+GTF parser is a TEXT line and is a COMPOUND, so variable-level protection missed it; the test asserting
+`match="line 2"` was in a file that never BINDS a `line` variable, so the AST scan missed it too. Plus
+five English idioms — **`command line`, `log line`, `one-line-per-condition`** — all renamed to
+"boundary". ⚠ `multi-boundary crossing` is genuine and was correctly left; the two are only separable by
+reading.
+
 ## 4. THE METHOD, and the two rules it follows
 
 1. **Identifier-by-identifier, word-boundary-anchored, longest-first** — `sj_acceptor_cut_` must not be

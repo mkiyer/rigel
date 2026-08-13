@@ -8,7 +8,7 @@ drifts, an index space that wraps, a junction lookup that silently misses. The n
 about to be gated on byte-identity to this file, so the file has to be correct on real data first.
 
 WHAT IS CHECKED. Every number the reference reports is re-derived here **by a different method** and
-compared. The reference locates crossed lines with two ``searchsorted`` calls per segment and takes the
+compared. The reference locates crossed boundaries with two ``searchsorted`` calls per segment and takes the
 resulting index range; this script walks each segment's cuts with ``bisect`` and counts them one at a
 time. Agreement between the two is not automatic — that is the point.
 
@@ -71,7 +71,7 @@ def build_partition(index) -> Partition:
 def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
     """Region (``per_ref=1``) or contiguous-boundary (``per_ref=2``) CSR offsets from the cut offsets.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` lines; one contributing none
+    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` boundaries; one contributing none
     owns neither, which is why the subtraction is clamped at zero rather than applied blindly.
     """
     counts = np.diff(cut_offsets.astype(np.int64))
@@ -312,7 +312,7 @@ def main() -> None:
     if density_total:
         print(
             f"pooled count/density + 1 = {count_total / density_total + 1:.1f}  "
-            f"(the crossing population's own mean L, weighted by lines crossed)"
+            f"(the crossing population's own mean L, weighted by boundaries crossed)"
         )
 
     raise SystemExit(0 if ok else 1)

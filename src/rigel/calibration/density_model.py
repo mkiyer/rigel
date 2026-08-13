@@ -81,7 +81,7 @@ def count_observable_masks(
     sig = np.asarray(signature).astype(np.int64)
     region_count_observable = (sig & _EXON_BITS) == 0
     lo, hi = boundary_region_indices(ref_id)
-    # observable ⇔ no exon bit is SHARED across the line ⇒ no single exon-strand continues across it
+    # observable ⇔ no exon bit is SHARED across the boundary ⇒ no single exon-strand continues across it
     # ⇒ no unspliced mature RNA crosses, so the crossing count is gDNA (+ nascent).
     boundary_count_observable = (sig[lo] & sig[hi] & _EXON_BITS) == 0
     return region_count_observable, boundary_count_observable

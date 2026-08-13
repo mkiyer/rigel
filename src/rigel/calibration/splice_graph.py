@@ -961,7 +961,7 @@ class JunctionEdgeArrays:
     endpoints as partition cuts** (100.00 % of 404,168 on the human annotation — forced, since a cut is
     placed at every exon endpoint). So "is this intron annotated?" reduces to *"are both endpoints cuts,
     and is the pair registered?"* — and finding the cut index is the binary search the deposit already
-    performs to locate the crossed lines. If an intron's start is not a cut it is unannotated and the
+    performs to locate the crossed boundaries. If an intron's start is not a cut it is unannotated and the
     table is never consulted.
 
     Keyed by the **donor** cut index, i.e. the flat index into
@@ -1044,7 +1044,7 @@ def build_boundary_flags_array(index) -> np.ndarray:
     ⭐ **There is no padding, because there are no terminal slots.** The predecessor
     (``build_boundary_flags_array``) emitted ``k + 1`` entries per reference — the ``k − 1`` interior
     interfaces plus two data-free terminals — purely so every region had an object on each side. A
-    contiguous boundary is the line BETWEEN two adjacent regions and there is no such line before the first or
+    contiguous boundary is the boundary BETWEEN two adjacent regions and there is no such boundary before the first or
     after the last, so a reference with ``k`` regions contributes exactly ``k − 1`` entries and the
     off-by-one commentary that used to live here goes with the slots.
 
@@ -1070,7 +1070,7 @@ def build_boundary_flags_array(index) -> np.ndarray:
         if grp is None or len(grp) == 0:
             continue
         ids = grp.index.to_numpy(np.int64)  # == region_id (I2), and contiguous within a reference
-        out.append(by_region[ids[:-1]])  # the k-1 interior lines; a 1-region reference contributes none
+        out.append(by_region[ids[:-1]])  # the k-1 interior boundaries; a 1-region reference contributes none
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
 
 
@@ -1078,7 +1078,7 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
     """The RNA **reach** on the accumulator's contiguous-boundary axis — ``(reach_lo, reach_hi)``,
      ``float64[E, 2]``, column 0 the POS-strand transcript's and column 1 the NEG's.
 
-     A crossing molecule must fit in what remains of **its own template** either side of the line. gDNA's
+     A crossing molecule must fit in what remains of **its own template** either side of the boundary. gDNA's
      template is the chromosome, so its reach is unbounded — physics, not a choice. RNA's ends where its
      transcript ends, and ignoring that over-calls gDNA by a measured **11.0 %** genome-wide
     This is the array that lets :func:`effective_length.crossing_eff_length`
@@ -1086,14 +1086,14 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
 
      ⚠ **PER STRAND and per SIDE**: reach is "maximised over transcripts
      independently per side AND per strand". A POS transcript and a NEG one ending in different places
-     give one line two different RNA reaches, and a single averaged number describes neither.
+     give one boundary two different RNA reaches, and a single averaged number describes neither.
 
      ⚠ **GENOMIC, unlike a junction's EXONIC reach.** A junction is used only by a spliced molecule, so
-     what remains either side of it is exonic; a contiguous line is also crossed by *nascent* RNA, which
+     what remains either side of it is exonic; a contiguous boundary is also crossed by *nascent* RNA, which
      is genomic. Taking the exonic reach here would declare an intronic nascent fragment impossible
      (:class:`JunctionGeometry`).
 
-     ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that line, so
+     ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that boundary, so
      that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
      as "emit nothing" rather than flooring it. Measured on the chr22
      pilot index: **40.6 %** of contiguous boundaries have no POS template and **42.9 %** no NEG template.
@@ -1109,7 +1109,7 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
 
     # (n_regions, 2) scratch keyed by the region whose RIGHT interface the boundary is, then sliced per
     # reference. Regions with no outgoing contiguous boundary keep 0, which is also the correct reach for a
-    # line that does not exist — they are dropped by the ``[:-1]`` slice below either way.
+    # boundary that does not exist — they are dropped by the ``[:-1]`` slice below either way.
     def by_region(column_pos: str, column_neg: str) -> np.ndarray:
         out = np.zeros((len(regions_df), 2), dtype=np.float64)
         out[src, 0] = edges_df[column_pos].to_numpy(np.float64)[contiguous]
@@ -1129,7 +1129,7 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
         if grp is None or len(grp) == 0:
             continue
         ids = grp.index.to_numpy(np.int64)  # == region_id (I2), contiguous within a reference
-        lo_out.append(lo_by_region[ids[:-1]])  # the k-1 interior lines
+        lo_out.append(lo_by_region[ids[:-1]])  # the k-1 interior boundaries
         hi_out.append(hi_by_region[ids[:-1]])
     empty = np.zeros((0, 2), dtype=np.float64)
     return (

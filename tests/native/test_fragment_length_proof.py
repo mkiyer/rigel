@@ -25,7 +25,7 @@ From that one set, all four deposit populations follow with no further machinery
 
 ===================  =============================================================================
 ``L``                ``len(covered)``
-line ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
+boundary ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
                      molecule — 's definition, verbatim)
 region contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one region
 ===================  =============================================================================
@@ -98,7 +98,7 @@ def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
 def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: bool):
     """Every population the deposit rule credits, derived from the covered set alone.
 
-    Returns ``(L, crossed_lines, contained_region)`` with local indices, or ``None`` for a fragment that
+    Returns ``(L, crossed_boundaries, contained_region)`` with local indices, or ``None`` for a fragment that
     deposits nothing. ``cuts`` are this reference's cut positions.
 
     ⚠ A ``spanned_regions`` set used to be derived and compared here. The bank it checked was removed on
@@ -109,9 +109,9 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
     if not covered:
         return None
     length = len(covered)
-    # A line at cut position p is crossed iff the molecule holds the bases on BOTH sides of it.
+    # A boundary at cut position p is crossed iff the molecule holds the bases on BOTH sides of it.
     # ⚠ Reported as BOUNDARY indices: a reference's cut ``i`` is its boundary ``i − 1`` (the deposit writes
-    # ``boundary_base + line - 1``), because cut 0 is the reference start and owns no interior line. The
+    # ``boundary_base + boundary - 1``), because cut 0 is the reference start and owns no interior boundary. The
     # oracle re-derives that offset rather than importing it — and it caught me getting it wrong first.
     crossed = {i - 1 for i, p in enumerate(cuts) if (p - 1) in covered and p in covered}
 
@@ -191,7 +191,7 @@ def _check_one(start: int, end: int, introns) -> None:
             float(t.region_contained_inv_opportunity_sum.sum()), 1.0 / (region_len - length + 1), 1
         ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {region_len} bp region"
 
-    assert got_crossed == crossed, f"{ctx}: crossed lines {got_crossed} != oracle {crossed}"
+    assert got_crossed == crossed, f"{ctx}: crossed boundaries {got_crossed} != oracle {crossed}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
     # the start-count invariant: exactly one, at the region holding the first COVERED base
     assert int(t.region_start_count.sum()) == 1, ctx
@@ -290,7 +290,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     crossing, or the density estimator is biased."*
 
     Nothing tested the two against each other before. A mate gap must count toward ``L`` **and** cross
-    lines; an intron must do neither. Both are asserted here from ONE set.
+    boundaries; an intron must do neither. Both are asserted here from ONE set.
     """
     # a paired-end molecule with an unsequenced mate gap: the gap IS part of the molecule
     acc = _acc()
@@ -298,14 +298,14 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     assert int(acc.tally.region_contained_count.sum()) == 0
     got_crossed, _ = _observed(acc)
     assert got_crossed == {0, 1, 2}, (
-        "the mate gap must carry the molecule across every interior line"
+        "the mate gap must carry the molecule across every interior boundary"
     )
 
-    # the same span with the middle excised as an intron: L shrinks AND the lines under it go uncrossed
+    # the same span with the middle excised as an intron: L shrinks AND the boundaries under it go uncrossed
     acc2 = _acc()
     acc2.deposit(0, 1, 11, observed_introns=[(3, 9)])
     got2, _ = _observed(acc2)
-    assert got2 == set(), "an intron must not carry the molecule across the lines it splices over"
+    assert got2 == set(), "an intron must not carry the molecule across the boundaries it splices over"
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
 
 
@@ -315,7 +315,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
 def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
     """⭐ **THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT (TRAPS: one-thing-varied).** ``Σ deposited_lengths == Σ region_start_count == qc.deposited``.
 
-    Three counters, one population, incremented on the same line of `deposit` so they cannot drift by
+    Three counters, one population, incremented on the same boundary of `deposit` so they cannot drift by
     construction. It is the same externally-checkable form as 's start-count
     invariant and a **different statement**: that one says every fragment was located in space, this one
     that every fragment was binned by length. A histogram that is about to become the anchor for every FL
@@ -376,7 +376,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
     """⭐ The property that makes it usable as the EB anchor: every pooled fragment is also binned here,
     at the SAME length. The pools are conditioned subsets of this population, not a different one.
 
-    ⚠ It is a strict superset in general — an exonic contained fragment and a multi-line crossing enter
+    ⚠ It is a strict superset in general — an exonic contained fragment and a multi-boundary crossing enter
     no pool at all (an impure pool is worse than a missing one) — which is
     precisely why the pools could never serve as their own anchor.
     """
@@ -398,7 +398,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
 
 
 def _one_region_acc(region_len: int, max_fragment_length: int = 10_000) -> Accumulator:
-    """An accumulator over a SINGLE region ``[0, region_len)`` — no lines, so nothing but containment."""
+    """An accumulator over a SINGLE region ``[0, region_len)`` — no boundaries, so nothing but containment."""
     part = Partition.from_cuts([[0, region_len]])
     return Accumulator(part, max_fragment_length=max_fragment_length)
 

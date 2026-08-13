@@ -112,7 +112,7 @@ def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
     _, a = _aggregate([[500]], [1.0], 600)
     assert not a.any()
 
-    # P2 — a 1 bp fragment crosses no 0-bp line
+    # P2 — a 1 bp fragment crosses no 0-bp boundary
     _, a = _aggregate([[10, 10, 10]], [1.0], 40)
     assert a[1] == 0
 

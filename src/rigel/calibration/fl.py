@@ -65,7 +65,7 @@ __all__ = [
 #: gDNA contained in exactly one intergenic or intronic region. Dominant OFF capture.
 _GDNA_CONTAINED_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
 
-#: gDNA crossing exactly one line whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
+#: gDNA crossing exactly one boundary whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
 #: UNDER capture: a fragment beside a probe reaches the exon boundary, so it leaves the contained pools
 #: and arrives here. Mature RNA never crosses an exon<->intron boundary, so these are gDNA by construction.
 _GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
@@ -267,7 +267,7 @@ def build_fl_models(
        selected on *"used an annotated junction"*, which longer fragments do more often.
      * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
        (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one region*, whose
-       opportunity **falls** with length; two are *crossing exactly one line*, whose opportunity
+       opportunity **falls** with length; two are *crossing exactly one boundary*, whose opportunity
        **rises**. ⛔ Folding one divisor into the other, or one divisor over the pooled sum, is a
        category error — it is the defect that read a gDNA mean of 146.05 where the contained pool said
        88.0.

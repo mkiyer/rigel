@@ -246,7 +246,7 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     component a message did NOT supply from the destination's OWN density, which at an evidence-free
     object is ψ's uninformative ``fg_loc ~ 1/2``. It therefore reserved about half the budget for RNA no
     message claimed — the running level inflated 1.96x at the RNA-rich exon and deflated again at the next
-    evidence-free line, a multiplicative random walk landing at 0.80 against a field of 1.0. The pin is
+    evidence-free boundary, a multiplicative random walk landing at 0.80 against a field of 1.0. The pin is
     now gated by the same licence (`test_relay_mass_pin`), so nothing rescales the level on this chain and
     it arrives as the field, exactly.
 

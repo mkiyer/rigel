@@ -30,10 +30,10 @@ what one neighbour tells another           6 · the solve  (⭐ and `messages/` 
 turning the solve into a result            7 · assemble
 =========================================  ==========================================================
 
-⚠ **A layer is not a promise that its modules are the right SIZE.** Layer 4 is five modules and 939 lines
+⚠ **A layer is not a promise that its modules are the right SIZE.** Layer 4 is five modules and 939 boundaries
 for one concept; layer 5 is six and 1,858. Whether those should be fewer files is a separate question with
 its own risk, and this file deliberately does not answer it — it answers *where*, which is what was blocking
-a reader. The census prints the line counts so the question stays visible.
+a reader. The census prints the boundary counts so the question stays visible.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         3,
         "geometry and the per-slot solve",
         # One slot's own numbers, and ψ — the log-density log-odds posterior over (f_pos, f_neg, f_g).
-        # ⚠ `simplex_logodds` is ψ and is 784 lines; it is the single densest thing in the package.
+        # ⚠ `simplex_logodds` is ψ and is 784 boundaries; it is the single densest thing in the package.
         ("region_geometry", "simplex_logodds"),
     ),
     (
@@ -94,7 +94,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         5,
         "density and prior",
-        # How dense a component is, and every fitted population prior. ⚠ SIX modules, 1,858 lines.
+        # How dense a component is, and every fitted population prior. ⚠ SIX modules, 1,858 boundaries.
         (
             "run_fill",
             "density_model",

@@ -1,6 +1,6 @@
 """⭐⭐ THE INSTRUMENT SHELF HAS AN INDEX, AND THE INDEX IS CHECKED — because a hand-written one drifts.
 
-`scripts/design/` is **49 instruments, 15,904 lines**, and it is the project's debug loop rather than
+`scripts/design/` is **49 instruments, 15,904 boundaries**, and it is the project's debug loop rather than
 sprawl: measured 2026-08-07, **every one of them imports cleanly** and 35 of 49 lead with the question they
 answer. The problem was never the count. It was that the only index — a table in `CLAUDE.md` — is
 hand-maintained, and by the time it was measured it had **drifted by eight entries**, which `CLAUDE.md`
@@ -89,7 +89,7 @@ def test_every_instrument_still_imports(path):
     `_component_region_arrays`. Two commits, five dead instruments, 3,235 passing tests.
 
     ⭐ The other tests here check that a script is INDEXED and has a DOCSTRING — both true of a script
-    that raises on line 1. Importing is the cheapest possible check that it is still connected to the
+    that raises on boundary 1. Importing is the cheapest possible check that it is still connected to the
     code it measures, and it is the one that rots.
 
     ⚠ Import only, never execution: an instrument's numbers need its substrate, and this is a

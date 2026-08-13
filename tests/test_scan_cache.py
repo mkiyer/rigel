@@ -538,7 +538,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         """⭐ The signature check above cannot see a MIS-SIZED argument, only a missing name.
 
         `junctions` must address the same graph the payload was scanned on; an axis of the wrong length
-        places every splice on the wrong line. Calling `calibrate` for real is the only check that
+        places every splice on the wrong boundary. Calling `calibrate` for real is the only check that
         covers it, and it is cheap on this fixture.
         """
         from rigel.calibration.calibrate import calibrate

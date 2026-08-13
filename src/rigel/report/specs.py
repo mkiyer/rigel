@@ -60,7 +60,7 @@ def fl_overlay_spec(fl_df: pd.DataFrame) -> dict | None:
         "data": {"values": rows},
         "mark": {
             "type": "area",
-            "line": {"strokeWidth": 2},
+            "boundary": {"strokeWidth": 2},
             "opacity": 0.22,
             "interpolate": "monotone",
         },
@@ -218,7 +218,7 @@ def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | Non
             "width": "container",
             "height": 58,
             "mark": {
-                "type": "line",
+                "type": "boundary",
                 "strokeWidth": 1.5,
                 "interpolate": "monotone",
                 "point": {"size": 6, "filled": True},
@@ -268,7 +268,7 @@ def capture_kde_spec(capture: dict | None) -> dict | None:
             "data": {"values": values},
             "mark": {
                 "type": "area",
-                "line": {"strokeWidth": 2},
+                "boundary": {"strokeWidth": 2},
                 "opacity": 0.16,
                 "interpolate": "monotone",
             },

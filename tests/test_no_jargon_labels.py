@@ -40,7 +40,7 @@ LABEL = re.compile(r"(?<![\w./-])([A-G]\d{1,2}[a-z]?)(?![\w-])")
 
 #: ⛔ A CHAIN DIAGRAM, where ``E1`` is a SLOT ID and not a rule. The first pass of the rename rewrote 20 of
 #: these into citations — ``N0 E0 N1 E1 … E(k-2) N(k-1)`` became prose — which is the same collision the
-#: rename exists to end, met in the other direction. A line carrying other slot ids is a diagram.
+#: rename exists to end, met in the other direction. A boundary carrying other slot ids is a diagram.
 DIAGRAM = re.compile(r"\bN0\b|\bE0\b|\bB0\b|\bR0\b|\bN1\b|\bE\(k|\bR\d\b|\(N\d\|")
 
 #: ⭐ Where a bare letter+digit token is NOT a rule citation. Each entry is a MEASURED collision, and the
@@ -133,8 +133,8 @@ def test_no_numbered_rule_labels(path: pathlib.Path):
     for m in LABEL.finditer(txt):
         if _permitted(m.group(1), rel):
             continue
-        line = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
-        if DIAGRAM.search(line):
+        boundary = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
+        if DIAGRAM.search(boundary):
             continue  # a slot id in a chain diagram, not a rule citation
         bad.add(m.group(1))
     bad = sorted(bad)

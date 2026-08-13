@@ -298,7 +298,7 @@ def solve_chain(
 
     ``policy`` is the message-composition policy (:mod:`~.messages`). ⭐ **It defaults to
     :class:`~.messages.silent.SilentPolicy`, which sends nothing** — so a reader of this file plus five
-    lines holds the whole working system. The shipped answer is
+    boundaries holds the whole working system. The shipped answer is
     :class:`~.messages.head.HeadPolicy`, which ``calibrate`` passes explicitly.
 
     ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the derived reference alone on

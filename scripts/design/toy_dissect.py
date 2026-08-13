@@ -160,7 +160,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
               f"M/E_r = {M / max(Er, 1e-9):>10.5g}")
         print(f"         ⇒ implied f_g = 1 − rho_R·E_r/M = "
               f"{1.0 - rho_r * Er / max(M, 1e-9):>10.5g}   (final {cap['f_g'][s]:.4f})")
-        print(f"      junction flux at the flanking lines: "
+        print(f"      junction flux at the flanking boundaries: "
               f"{float(np.asarray(cap['mature'], float)[s - 1]):,.0f} / "
               f"{float(np.asarray(cap['mature'], float)[s + 1]):,.0f}"
               f"   E_J-frame density = J/E_J")

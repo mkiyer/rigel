@@ -3,14 +3,14 @@
        Gate: ``tests/calibration/test_region_chain.py``
 
 The calibration graph is a **linear bipartite chain of REGION and BOUNDARY slots, interleaved in genomic
-order**. A reference with ``k`` regions owns exactly ``k − 1`` interior lines, so its slot sequence is::
+order**. A reference with ``k`` regions owns exactly ``k − 1`` interior boundaries, so its slot sequence is::
 
     N0  E0  N1  E1  ...  E(k-2)  N(k-1)          2k − 1 slots
 
 ⭐ **It starts and ends with a REGION, and there are no terminal slots.** That is the whole shape change
 from the predecessor, which ran ``B R B R … R B`` with ``k + 1`` boundary slots per reference — the two
 outermost carrying no data and existing only so every region had an object on each side. A contiguous
-boundary is the line BETWEEN two adjacent regions; there is no such line before the first or after the last, so
+boundary is the boundary BETWEEN two adjacent regions; there is no such boundary before the first or after the last, so
 the object does not exist rather than existing empty. **An boundary therefore always has a region on both
 sides**, an invariant the old shape could not state.
 
@@ -137,8 +137,8 @@ def build_region_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.
         raise ValueError(
             f"reference {bad}: the payload reports {int(boundaries_per_ref[bad])} contiguous boundaries for "
             f"{int(regions_per_ref[bad])} regions, but a reference with k regions has exactly k-1 interior "
-            f"lines (expected {int(expected[bad])}). There are no terminal boundary slots: an boundary is the "
-            f"line BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
+            f"boundaries (expected {int(expected[bad])}). There are no terminal boundary slots: an boundary is the "
+            f"boundary BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
             f"this is an accumulator/payload inconsistency, not a stale index — rebuilding will not fix it."
         )
 

@@ -82,8 +82,8 @@ def test_init_zero_gdna_introns_via_strand():
 
 
 def test_init_boundary_continuity_gate():
-    # 1 ref, 2 regions (exon+ | intron+) → ONE line between them. ⭐ The two terminal boundary slots the
-    # predecessor asserted on do not exist: a reference with k regions owns k-1 lines, so there is nothing
+    # 1 ref, 2 regions (exon+ | intron+) → ONE boundary between them. ⭐ The two terminal boundary slots the
+    # predecessor asserted on do not exist: a reference with k regions owns k-1 boundaries, so there is nothing
     # before the first region or after the last to be a sink.
     parts = make_chain_parts(
         [BIT_EXON_POS, BIT_INTRON_POS],
@@ -114,7 +114,7 @@ def test_init_tss_boundary_is_black_hole():
         boundary_neg=[5.0],
     )
     b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
-    # slot 1 is the TSS line: a locked gDNA sink despite the sense tilt (all precision locked at 0).
+    # slot 1 is the TSS boundary: a locked gDNA sink despite the sense tilt (all precision locked at 0).
     assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
 
 
@@ -180,7 +180,7 @@ def _factor1_uniform_rho():
     the sweep.
 
     ⭐ **One density per slot, not a (left, right) pair.** The predecessor returned two arrays because a
-    boundary's two sides had different divisors; a 0-bp line has one. The invariant being tested is
+    boundary's two sides had different divisors; a 0-bp boundary has one. The invariant being tested is
     unchanged: lay down a uniform field and the solver must read it back.
     """
     rho = 0.5
@@ -320,8 +320,8 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,
     # monotonically.
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two lines carry
-    # the same tilt as the regions they separate. ⭐ Two lines, not four: there are no terminal slots, so
+    # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two boundaries carry
+    # the same tilt as the regions they separate. ⭐ Two boundaries, not four: there are no terminal slots, so
     # the "directly-adjacent terminal G1 lock" the retired xfail blamed no longer exists at all.
     parts = make_chain_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG],
@@ -369,7 +369,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # than ~0.22 because the chain's two TERMINAL boundary slots were G1-locked and emitted their
     # structural all-gDNA into the flanking introns — an artefact of an artificial chain, since an intron
     # running to the chain boundary with no intergenic flank cannot occur in a real annotation. **Those slots
-    # no longer exist**: a reference with k regions owns k−1 lines, so there is nothing beyond the outer
+    # no longer exist**: a reference with k regions owns k−1 boundaries, so there is nothing beyond the outer
     # regions to emit anything. The invariant the test protects is unchanged; the artefact is gone.
     assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
 
@@ -447,12 +447,12 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     flux on the two intron↔exon *boundaries* by hand, because the old accumulator attributed a splice to
     the region's boundary. A junction now states its own ``(src, dst)``, so it has to HAVE endpoints: the
     junction over intron ``n1`` runs ``n0 → n2`` and the one over ``n3`` runs ``n2 → n4``, and
-    `build_region_geometry` places their flux on the lines they leave and enter. The exon under test
-    (``n2``) ends up with mature flux on both its flanking lines — which is what the old fixture asserted
+    `build_region_geometry` places their flux on the boundaries they leave and enter. The exon under test
+    (``n2``) ends up with mature flux on both its flanking boundaries — which is what the old fixture asserted
     by construction, now derived from the graph instead.
 
     Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
-    introns and every line carry balanced gDNA only. ⭐ **`boundary_spliced` is 0 everywhere, and that is a
+    introns and every boundary carry balanced gDNA only. ⭐ **`boundary_spliced` is 0 everywhere, and that is a
     measured fact rather than a convenience** — mature RNA never crosses an exon↔intron boundary (0 of 1,146
     boundaries over 7 conditions). It skips the intron as a junction, never as
     a contiguous crossing.
@@ -519,7 +519,7 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
 
 
 def test_mature_no_nascent_hallucination_in_introns():
-    """The owner's red line: a pure-mature expressed exon (nascent = 0) must NOT manufacture wholesale nascent
+    """The owner's red boundary: a pure-mature expressed exon (nascent = 0) must NOT manufacture wholesale nascent
     in its flanking pure-gDNA introns; the introns stay gDNA (truth ``f_g = 1``).
 
     Was ``xfail`` at ``f_g ≈ 0.82`` — the exon's ~95 %-mature unspliced payload leaking in as nascent, because

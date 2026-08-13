@@ -63,7 +63,7 @@ def test_mass_conserved_per_region():
 
 
 def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
-    """A line's gDNA + RNA equals unspliced + spliced. ``mass_rna_boundary`` is spliced-INCLUSIVE — a
+    """A boundary's gDNA + RNA equals unspliced + spliced. ``mass_rna_boundary`` is spliced-INCLUSIVE — a
     certified-RNA crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice
     — so dropping it here would lose 6 of boundary 1's 11 fragments."""
     result = _run()
@@ -77,7 +77,7 @@ def test_junction_flux_is_exported_VERBATIM_and_never_deconvolved():
     construction, so there is nothing to split: the result carries ``sj_count`` summed over the
     genome-strand columns, exactly.
 
-    ⚠ It is two orders of magnitude away from ``mass_rna_spliced_boundary`` on real data at the same line
+    ⚠ It is two orders of magnitude away from ``mass_rna_spliced_boundary`` on real data at the same boundary
     — 13 vs 0/6 even in this toy — which is why folding the two into one "mature" number names
     nothing.
     """
@@ -91,7 +91,7 @@ def test_the_conserved_junction_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK(
 
     ⛔ **This is the gate that says the published quantity is the CONSERVED one.** The fixture's
     junction carries 13 incidences and ``sj_mass`` 1.3, a **10×** gap, so the two cannot be confused by
-    coincidence — which they could on real data at a line where every fragment used one junction. On
+    coincidence — which they could on real data at a boundary where every fragment used one junction. On
     ``g00 ss0.99 capture_off`` the same round trip agrees with the bank to 9.1e-13.
     """
     payload, _ = make_synthetic_payload()
@@ -135,7 +135,7 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
     """⭐ Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50:
 
         contained  E_f[(100 − 50 + 1)+]                    = 51   — starts that FIT inside
-        crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   — offsets that SPAN the line
+        crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   — offsets that SPAN the boundary
 
     The two differ by 2 and neither is the region length, which is the whole point: ``region_size_bp``
     ignores the fit-inside constraint and ``mean_FL`` ignores the ``−1``.
@@ -146,7 +146,7 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
 
 
 def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
-    """Σ gDNA mass / Σ gDNA support, pooled across regions AND lines — never a mean of per-object
+    """Σ gDNA mass / Σ gDNA support, pooled across regions AND boundaries — never a mean of per-object
     ratios, which is a different number whenever the supports differ."""
     result = _run()
     expected = (result.mass_gdna_region.sum() + result.mass_gdna_boundary.sum()) / (
@@ -187,7 +187,7 @@ def test_density_and_supports_sane():
 
 
 def test_a_mismatched_junction_axis_is_REFUSED():
-    """⛔ A junction axis built against a different graph would place every splice on the wrong line,
+    """⛔ A junction axis built against a different graph would place every splice on the wrong boundary,
     and nothing downstream would fault on it — the shape is plausible either way. Refuse at the door
     (476,719 of 476,732 real fragments once vanished inside a deposit
     while every golden test passed)."""

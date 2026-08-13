@@ -67,7 +67,7 @@ _BANKS = (
 
 #: The banks a gDNA fragment can NEVER touch — it does not splice. ⭐ ``sj_mass`` joins them, and it is
 #: a STRONGER statement than the two counts: the mass is where a spliced fragment's whole share goes
-#: when its blocks cross no line, so a gDNA record leaking onto the junction axis shows up here as
+#: when its blocks cross no boundary, so a gDNA record leaking onto the junction axis shows up here as
 #: fragment-scale mass rather than as a single incidence.
 _RNA_ONLY_BANKS = ("boundary_spliced_count", "sj_count", "sj_mass")
 
@@ -381,15 +381,15 @@ class OracleTruth:
         )
 
     def boundary_pools(self) -> dict:
-        """Per-LINE TRUE crossing counts by ORIGIN × GENOME strand, plus the certified-RNA bank.
+        """Per-BOUNDARY TRUE crossing counts by ORIGIN × GENOME strand, plus the certified-RNA bank.
 
         ⭐ The exact mirror of :meth:`region_pools`, on the basis the solver's BOUNDARY slots use — and it is
-        ONE set of numbers per line, not a left/right pair. The predecessor summed ``left + right``
+        ONE set of numbers per boundary, not a left/right pair. The predecessor summed ``left + right``
         because the old accumulator split one crossing across two faces; there is nothing to sum.
 
-        ``*_spl`` is ``boundary_spliced``: molecules that crossed this line CONTIGUOUSLY having spliced
+        ``*_spl`` is ``boundary_spliced``: molecules that crossed this boundary CONTIGUOUSLY having spliced
         elsewhere. It is a different population from ``sj_count`` (:meth:`junction_flux`), which never
-        crossed the line at all — it jumped.
+        crossed the boundary at all — it jumped.
         """
         eu = lambda k: np.asarray(self.parts[k].boundary_unspliced_count, np.float64)  # noqa: E731
         es = lambda k: np.asarray(self.parts[k].boundary_spliced_count, np.float64)  # noqa: E731
@@ -413,7 +413,7 @@ class OracleTruth:
         return {k: sj(k) for k in ORIGINS}
 
     def component_shares(self) -> dict:
-        """⭐⭐ **THE TRUE PER-COMPONENT SHARE AT EVERY LINE, MEASURED — not modelled.**
+        """⭐⭐ **THE TRUE PER-COMPONENT SHARE AT EVERY BOUNDARY, MEASURED — not modelled.**
 
         ``mass / count`` inside one origin partition IS that component's mean conserved fragment-mass
         per crossing, on the real partition, under the real placement. It needs **no fragment-length
@@ -425,7 +425,7 @@ class OracleTruth:
         on truth inputs, and it would defeat the purpose: the arm could then be wrong in the same
         direction as the thing it is supposed to price.
 
-        ⚠ **1.0 where a component never crossed a line** — the identity, matching
+        ⚠ **1.0 where a component never crossed a boundary** — the identity, matching
         ``PopulationView.mass_per_crossing``. A zero there would delete mass rather than leave it
         unscaled, and the shipped accessor makes the same choice for the same reason.
 

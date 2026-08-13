@@ -120,7 +120,7 @@ def assigned_lengths(deferred, choices: np.ndarray) -> np.ndarray:
 
 
 def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, fl) -> None:
-    """⭐⭐ **DOES THE JUNCTION/LINE OPPORTUNITY MISMATCH ACTUALLY FLIP A CHOICE?**
+    """⭐⭐ **DOES THE JUNCTION/BOUNDARY OPPORTUNITY MISMATCH ACTUALLY FLIP A CHOICE?**
 
     Per held record: which hypotheses reproduce the TRUE length, whether those are genomic or spliced,
     which one was drawn, and the BOTTLENECK exonic reach of the junctions involved. ⭐ The bottleneck is

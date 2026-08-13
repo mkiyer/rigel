@@ -28,7 +28,7 @@ from pathlib import Path
 import pysam
 
 #: FASTA line width. A formatting choice with no effect on any downstream sequence.
-_FASTA_LINE_WIDTH = 60
+_FASTA_BOUNDARY_WIDTH = 60
 
 
 def selected_references(fai_path: Path, refs: list[str], ercc: bool) -> list[str]:
@@ -54,8 +54,8 @@ def write_fasta(source: Path, names: list[str], out_path: Path, append: Path | N
         for name in names:
             sequence = fasta.fetch(name)
             fh.write(f">{name}\n")
-            for i in range(0, len(sequence), _FASTA_LINE_WIDTH):
-                fh.write(sequence[i : i + _FASTA_LINE_WIDTH] + "\n")
+            for i in range(0, len(sequence), _FASTA_BOUNDARY_WIDTH):
+                fh.write(sequence[i : i + _FASTA_BOUNDARY_WIDTH] + "\n")
         if append is not None:
             fh.write(append.read_text())
     pysam.faidx(str(out_path))

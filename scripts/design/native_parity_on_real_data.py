@@ -222,8 +222,8 @@ def main() -> None:
         failures.append(f"{disagreements:,} per-fragment outcome disagreements")
     if failures:
         print("⛔ NOT BYTE-IDENTICAL")
-        for line in failures[:20]:
-            print(f"  {line}")
+        for boundary in failures[:20]:
+            print(f"  {boundary}")
         raise SystemExit(1)
     print(f"✅ BYTE-IDENTICAL on {n:,} real fragments across {len(natives)} references")
 

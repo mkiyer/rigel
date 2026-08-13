@@ -5,8 +5,8 @@ observation in the tool that needs no deconvolution. The standing proposal is to
 composition evidence by adding a coefficient ``S`` to ψ's RNA arm — ``(½ + S)·log(1 − f_g)`` in place of
 the bare Jeffreys reference ``½·log(1 − f_g)``.
 
-**Half of that derivation is right and half of it is not**, and these gates pin exactly where the line is.
-The model is one population of contiguous crossings at one line, split by whether a splice was VISIBLE::
+**Half of that derivation is right and half of it is not**, and these gates pin exactly where the boundary is.
+The model is one population of contiguous crossings at one boundary, split by whether a splice was VISIBLE::
 
     E[S | f_g, q]  =  (q / (1 − q)) · (1 − f_g) · M
 

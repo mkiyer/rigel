@@ -11,8 +11,8 @@ assuming: that calibration really does see the drained tally, and that the drain
 gDNA length pools move by **exactly zero**, and there is a derivation:
 
 * a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are cuts;
-* if the drain picks ∅ the molecule crosses **both** those lines, making it a multi-line crossing — and
-   gives a multi-line crossing **no pool**, because it is a gDNA/RNA mixture;
+* if the drain picks ∅ the molecule crosses **both** those boundaries, making it a multi-boundary crossing — and
+   gives a multi-boundary crossing **no pool**, because it is a gDNA/RNA mixture;
 * if the drain picks a spliced path the fragment used an annotated junction, so it is ``RNA_SPLICED``.
 
 So the drain can only ever touch ``RNA_SPLICED``, and measured on all 8 pilot conditions it does: 100 % of
@@ -124,7 +124,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
     """⭐ **THE P4 CONTROL, and it is EXACT.** The four pure-gDNA pools are byte-identical after the drain.
 
     ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are cuts, so a
-    chosen ∅ crosses two lines — a multi-line crossing, which deliberately gives
+    chosen ∅ crosses two boundaries — a multi-boundary crossing, which deliberately gives
     **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated junction, so
     it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pool that is supposed to be pure.
 
@@ -141,7 +141,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
         assert np.array_equal(after[pool], before[pool]), (
             f"pool {pool} is pure gDNA by construction and the drain moved it by "
             f"{int(after[pool].sum() - before[pool].sum())} fragments. A drained fragment can only be a "
-            f"multi-line crossing (no pool) or an annotated splice (RNA_SPLICED)."
+            f"multi-boundary crossing (no pool) or an annotated splice (RNA_SPLICED)."
         )
     # ⭐ And the delta is not zero everywhere — otherwise the gate above passes because nothing happened.
     assert after[POOL_RNA_SPLICED].sum() > before[POOL_RNA_SPLICED].sum(), (

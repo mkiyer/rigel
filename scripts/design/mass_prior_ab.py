@@ -2,7 +2,7 @@
 """⭐⭐⭐ **THE PRIOR AS A CONSERVED FRAGMENT COUNT** — plan 5.5 against the oracle, on real conditions.
 
 **The question.** ``assemble_priors`` hands the EM a per-locus FRAGMENT COUNT, but ``boundary_unspliced_count``
-is ``+1`` on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them. The shipped
+is ``+1`` on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them. The shipped
 assembler repairs that with ``rho = Sum m / Sum S`` integrated over the locus span, and under capture the
 repair over-calls by **+15.1 %** with a PERFECT deconvolution fed in (``prior_vs_oracle.py``, arm ``O``
 against arm ``F``). The accumulator now carries the count directly — ``boundary_unspliced_mass``, which sums
@@ -99,15 +99,15 @@ def subsample_bam(source: str, out: Path, target: int, total_fragments: int) -> 
 
 
 def boundary_share(payload) -> np.ndarray:
-    """``boundary_unspliced_mass / boundary_unspliced_count`` per line — the mean conserved share of a crossing.
+    """``boundary_unspliced_mass / boundary_unspliced_count`` per boundary — the mean conserved share of a crossing.
 
-    ⭐ This is the whole of plan 5.5's new input: one dimensionless scalar per line that converts an
-    object-incidence total into a fragment count. It is 1.0 at a line whose flanking regions both exceed
-    every fragment length (a crossing fragment can only cross that one line) and falls toward the region
-    spacing where they do not — which is the K-inflation, per line.
+    ⭐ This is the whole of plan 5.5's new input: one dimensionless scalar per boundary that converts an
+    object-incidence total into a fragment count. It is 1.0 at a boundary whose flanking regions both exceed
+    every fragment length (a crossing fragment can only cross that one boundary) and falls toward the region
+    spacing where they do not — which is the K-inflation, per boundary.
 
-    ⛔ Lines with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
-    delete whatever mass the calibration put on a line the accumulator never saw.
+    ⛔ Boundaries with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
+    delete whatever mass the calibration put on a boundary the accumulator never saw.
     """
     mass = np.asarray(payload.boundary_unspliced_mass, np.float64)
     count = np.asarray(payload.boundary_unspliced_count, np.float64).sum(axis=1)
@@ -138,7 +138,7 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
 
     ⭐ **Regions and boundaries are projected on their own axes**, matching the shipped assembler: a region owns
     the fragments contained in it, an boundary owns the fragments that cross it, and a locus collects the
-    boundaries that touch its regions. No line is folded onto a flank region.
+    boundaries that touch its regions. No boundary is folded onto a flank region.
     """
     from rigel.calibration.priors import (
         LocusPriors,
@@ -323,15 +323,15 @@ def _pooled_share(payloads) -> np.ndarray:
 
 
 def _report_q4(rows) -> None:
-    """⭐ **PLAN 8 Q4** — is ONE share per line unbiased for the gDNA component?
+    """⭐ **PLAN 8 Q4** — is ONE share per boundary unbiased for the gDNA component?
 
-    Plan 5.5 rescales both components at a line by the same ``mass/count``, which assumes the gDNA
+    Plan 5.5 rescales both components at a boundary by the same ``mass/count``, which assumes the gDNA
     crossings and the RNA crossings there have the same mean conserved share. The origin-split oracle
     carries both separately, so the assumption is a measurement: the bias is
     ``Sum_l count_g[l]*share_pooled[l] - Sum_l mass_g[l]``, in fragments.
     """
     print()
-    print("  ⭐ PLAN 8 Q4 — is ONE share per line unbiased for the gDNA arm? (from the origin split)")
+    print("  ⭐ PLAN 8 Q4 — is ONE share per boundary unbiased for the gDNA arm? (from the origin split)")
     print(f"    {'condition':<44} {'Σ mass_g':>12} {'Σ count_g·share':>16} {'bias':>12} "
           f"{'as % of mass_g':>15} {'mwae |Δf_g|':>12}")
     print("    " + "-" * 116)
@@ -359,9 +359,9 @@ def _report_q4(rows) -> None:
         print(f"    {row['condition']:<44} {actual:>12,.0f} {predicted:>16,.0f} "
               f"{predicted - actual:>+12,.0f} {(predicted - actual) / max(actual, 1e-9):>+15.2%} "
               f"{mwae:>12.4f}")
-    print("    ⭐ `mwae |Δf_g|` compares the gDNA fraction of a line's INCIDENCES with the gDNA fraction "
+    print("    ⭐ `mwae |Δf_g|` compares the gDNA fraction of a boundary's INCIDENCES with the gDNA fraction "
           "of its conserved MASS,")
-    print("       weighted by that line's mass. Small means one pooled share is unbiased for both.")
+    print("       weighted by that boundary's mass. Small means one pooled share is unbiased for both.")
 
 
 def main() -> int:

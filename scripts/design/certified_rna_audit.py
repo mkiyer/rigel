@@ -17,8 +17,8 @@ The rung is ``tes_readthrough``::
 
 ⭐ **BOUNDARY @9,100 is TA's TES and no junction touches it**, but TB's exon 2 runs to 11,000 — so a TB
 fragment that used TB's junction and reaches past 9,100 crosses it CONTIGUOUSLY HAVING SPLICED ELSEWHERE.
-⭐ **BOUNDARY @9,050 is TB's junction acceptor AND a plain contiguity line for TA**, whose exon 2 spans
-9,000-9,100 unbroken. One line, junction flux for one transcript and an unspliced RNA crossing for another.
+⭐ **BOUNDARY @9,050 is TB's junction acceptor AND a plain contiguity boundary for TA**, whose exon 2 spans
+9,000-9,100 unbroken. One boundary, junction flux for one transcript and an unspliced RNA crossing for another.
 
 ⛔⛔ **SCORE THE MASS, NOT ``f_g`` — AND THIS INSTRUMENT LEARNED THAT THE HARD WAY.** The solver's
 ``f_g`` is the gDNA fraction of the **unspliced** population; the oracle's per-object fraction is
@@ -47,7 +47,7 @@ and it is added back as RNA: ``PRED rna`` tracks ``TRUE rna`` to <2 % (11,205 vs
 2,747 vs 2,784). Certified RNA is not being fed to the gDNA solver.
 
 ⛔ **(c) FAILS at every populated bank — ``cm_p = cm_n = 0`` in 24/24 cells.** The channel therefore
-informs nothing about the UNSPLICED split at the very same line, and there the gDNA is over-called:
+informs nothing about the UNSPLICED split at the very same boundary, and there the gDNA is over-called:
 
 =================  =========  ==========  ==========  ==========  ===========
 cell               object     unspl n     spliced     TRUE gDNA   PRED gDNA
@@ -74,7 +74,7 @@ neighbour, not the object.
 ⭐ **The grid is the experiment, not a sweep for its own sake.** At @9,100 the certified channel is TB's
 alone while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves the two independently and a
 single abundance pair tests one corner. TA also carries the *other* junction into @9,050, so the two
-transcripts stress different lines.
+transcripts stress different boundaries.
 
 ⚠ **A known, CORRECT loss to keep in view.** TA's and TB's junctions share the donor at 2,000 and differ
 only in acceptor (9,000 vs 9,050), so a fragment whose UNSEQUENCED mate gap could hold either implies two

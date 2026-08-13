@@ -18,7 +18,7 @@ of that number.
 hundred objects hold most of the error, there is a mechanism to find and a handful of objects that
 demonstrate it. If the error is spread evenly over tens of thousands, there is a systematic bias and
 chasing individual objects is wasted effort. Those two findings call for completely different work,
-and the curve distinguishes them in one line.
+and the curve distinguishes them in one boundary.
 
 ⚠ **EVERY COLUMN IS AN INPUT THE SOLVER ACTUALLY SAW, OR AN OUTPUT IT ACTUALLY PRODUCED.** Nothing
 here is re-derived: the counts come from the substrate, the divisors from the geometry the solver
@@ -167,8 +167,8 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
             kind_txt = TYPE_NAME.get(int(rtype[obj]), "?")
             sc = STRAND_NAME.get(int(strand_class[obj]), "?")
             span = int(end[obj] - start[obj])
-        else:  # a contiguous boundary is a 0-bp line; name it by the slot's neighbours
-            where, kind_txt, sc, span = f"line#{obj}", "line", "-", 0
+        else:  # a contiguous boundary is a 0-bp boundary; name it by the slot's neighbours
+            where, kind_txt, sc, span = f"boundary#{obj}", "boundary", "-", 0
         rows.append(
             {
                 "obj": int(obj), "where": where, "type": kind_txt, "strand": sc, "bp": span,

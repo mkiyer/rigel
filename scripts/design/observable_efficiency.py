@@ -137,7 +137,7 @@ def weight(kind: str, population: str, region_len: float = 0.0) -> np.ndarray:
     """The per-fragment quantity summed into a channel.
 
     ``invL`` is the accumulator's own rule today, and its two cases are NOT one quantity: ``1/L`` at a
-    region, ``1/(L-1)`` at a 0-bp line.
+    region, ``1/(L-1)`` at a 0-bp boundary.
 
     ``invA`` is the RECIPROCAL OPPORTUNITY -- the derivation in
     ``scripts/design/region_density_derivation.py``. It is the unique weight for which E[sum h] is

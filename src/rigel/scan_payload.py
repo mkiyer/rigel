@@ -15,9 +15,9 @@ THE AXES — three of them, off by one from each other per reference::
 
     cuts    0        100       200       600        c = 4 cuts on this reference
     regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3 regions
-    lines            line 1    line 2               c - 2 = 2 contiguous boundaries
+    boundaries            boundary 1    boundary 2               c - 2 = 2 contiguous boundaries
 
-A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines; one contributing
+A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior boundaries; one contributing
 none owns neither, which is legal. Junction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 junction-boundary id simply BE its slot.
@@ -26,7 +26,7 @@ WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a
 There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
-    inv_length_sum  Sum 1/placements         float64   placements = L at a region, L−1 at a 0-bp line
+    inv_length_sum  Sum 1/placements         float64   placements = L at a region, L−1 at a 0-bp boundary
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
 ⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
@@ -96,12 +96,12 @@ N_FRAGMENT_POOLS = 5
 #: *_EXON "splash" pools are the only ON-TARGET gDNA population, so they are named rather than folded
 #: into the gDNA model: on-target gDNA runs ~42 bp shorter than off-target (§8.2), and the shipped model
 #: read a gDNA mean of 146.05 against the pure intergenic pool's 88.0 precisely by pooling them in.
-#: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing — those are
+#: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing — those are
 #: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
 POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — pure gDNA
 POOL_DNA_INTRONIC = 1  # contained in an intronic region — pure gDNA
-POOL_DNA_INTRON_EXON = 2  # crossing one line, flanks {intron, exon} — on-target gDNA
-POOL_DNA_INTERGENIC_EXON = 3  # crossing one line, {intergenic, exon} — on-target gDNA
+POOL_DNA_INTRON_EXON = 2  # crossing one boundary, flanks {intron, exon} — on-target gDNA
+POOL_DNA_INTERGENIC_EXON = 3  # crossing one boundary, {intergenic, exon} — on-target gDNA
 POOL_RNA_SPLICED = 4  # used an annotated junction, splice OBSERVED — pure RNA
 
 
@@ -508,12 +508,12 @@ class AccumulatorPayload:
     region_contained_inv_opportunity_sum: np.ndarray
     region_start_count: np.ndarray  # uint32[n_regions] — THE invariant; sums to qc.deposited
 
-    # -- contiguous boundaries: the 0-bp line between two adjacent regions --
+    # -- contiguous boundaries: the 0-bp boundary between two adjacent regions --
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
     boundary_unspliced_inv_length_sum: np.ndarray  # uint64[n_boundaries] — ONE column, strand-agnostic
     #: ⭐⭐ uint64[n_boundaries] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
     #: MASS are two different deposits and one number cannot be both: ``boundary_unspliced_count`` is ``+1``
-    #: on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
+    #: on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
     #: fragment. That is what lets a consumer turn an object-incidence total into a FRAGMENT COUNT
     #: without manufacturing one from a density. ⛔ ONE column, not two — nothing reads a mass per
     #: strand, and the question it answers has no strand in it.
@@ -523,8 +523,8 @@ class AccumulatorPayload:
     boundary_spliced_count: np.ndarray
     #: ⭐ uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
     #: one channel that ignores the split. ⛔ A PARTIAL, never a conservation ledger: it sums to
-    #: ``crossed_block_len / L`` per fragment. A per-LINE certified-RNA term, commensurate with the
-    #: unspliced mass at the same line — NOT "the number of spliced fragments here".
+    #: ``crossed_block_len / L`` per fragment. A per-BOUNDARY certified-RNA term, commensurate with the
+    #: unspliced mass at the same boundary — NOT "the number of spliced fragments here".
     boundary_spliced_mass: np.ndarray
 
     # -- junction boundaries: one exact donor->acceptor jump. Pure RNA by construction --
@@ -548,7 +548,7 @@ class AccumulatorPayload:
     #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
-    #: COMPUTABLE.** A spliced fragment's block containing no interior line deposits on neither boundary
+    #: COMPUTABLE.** A spliced fragment's block containing no interior boundary deposits on neither boundary
     #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single region.
     #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
     #:
@@ -556,7 +556,7 @@ class AccumulatorPayload:
     #: fragments (25.3 %)** are in that population, against **0 of 4,997,761** gDNA fragments — gDNA
     #: cannot splice, so its conserved count was already exact while RNA's read 0.747x deposited.
     #:
-    #: ⛔ **It ADDS a boundary class rather than re-apportioning one**: a block that crossed a line is
+    #: ⛔ **It ADDS a boundary class rather than re-apportioning one**: a block that crossed a boundary is
     #: untouched, so ``boundary_unspliced_mass`` and ``boundary_spliced_mass`` are byte-identical to what they
     #: were. Gates: ``tests/native/test_conserved_mass.py`` claim 5.
     sj_mass: np.ndarray
@@ -741,7 +741,7 @@ class AccumulatorPayload:
                 raise ValueError(
                     f"{name}[{bad}] is {int(offsets[name][bad])} but the cut axis implies "
                     f"{int(expected[bad])}. A reference contributing c cuts owns c-1 regions and c-2 "
-                    f"interior lines, and none at all below two cuts."
+                    f"interior boundaries, and none at all below two cuts."
                 )
 
         n_regions = int(offsets["ref_region_offsets"][-1])

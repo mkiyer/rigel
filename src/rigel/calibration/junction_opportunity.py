@@ -15,7 +15,7 @@ length-``w`` window crosses **at least one** junction is::
 ⭐ Work with the **complement** and it decomposes with no inclusion-exclusion: a window crosses no
 junction iff it lies wholly inside a single exon, and the exons are disjoint, so those placements
 partition by which exon contains the window. Attempting the union of "crosses junction ``j``" events
-directly is messy and gets worse with every exon; the complement is exact in one line.
+directly is messy and gets worse with every exon; the complement is exact in one boundary.
 
 The library-level quantities are abundance-weighted sums of that, over transcripts::
 

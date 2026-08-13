@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .result import CalibrationResult
 
 # A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
-# the per-locus projection, so a line whose left flank is such a region must be re-attributed to its
+# the per-locus projection, so a boundary whose left flank is such a region must be re-attributed to its
 # (locus) right flank or its gDNA is lost (see boundary_owner_regions).
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
@@ -127,25 +127,25 @@ def _boundary_locus_shares(
 
     ⭐⭐ **THE RULE** (owner, 2026-08-08): an BOUNDARY owns the fragments that cross it, a REGION owns only the
     fragments contained in it, and nothing is re-attributed between them. Every region contributes both of
-    its lines, so a locus of ``k`` contiguous regions carries ``k + 1`` lines — its two OUTER ones
+    its boundaries, so a locus of ``k`` contiguous regions carries ``k + 1`` boundaries — its two OUTER ones
     included, which is correct because a fragment crossing a locus's outer boundary overlaps the locus
     and is therefore one of its EM candidates.
 
         share(e, L) = max( share(lo(e), L), share(hi(e), L) )
 
-    ``max`` and not a sum: the rule is *"if a region is part of a locus, its two lines are part of that
-    locus"*, so a line inherits the stronger of its two flanks' memberships rather than accumulating
+    ``max`` and not a sum: the rule is *"if a region is part of a locus, its two boundaries are part of that
+    locus"*, so a boundary inherits the stronger of its two flanks' memberships rather than accumulating
     them.
 
-    ⛔ **This replaces ``boundary_owner_regions``**, which folded a line's mass into ONE flank region's total so
-    the region projection could reach it — a 0-bp line has no extent and ``_region_locus_shares`` divides
-    by the region length. The fold then needed the intergenic re-key to stop a locus's far-LEFT line
+    ⛔ **This replaces ``boundary_owner_regions``**, which folded a boundary's mass into ONE flank region's total so
+    the region projection could reach it — a 0-bp boundary has no extent and ``_region_locus_shares`` divides
+    by the region length. The fold then needed the intergenic re-key to stop a locus's far-LEFT boundary
     vanishing into its dropped intergenic flank. Projecting an boundary AS an boundary removes both.
 
-    ⚠ **Shares can sum above 1 only for a CONTENDED line** — adjacent regions in different multi-loci —
-    and that line carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
+    ⚠ **Shares can sum above 1 only for a CONTENDED boundary** — adjacent regions in different multi-loci —
+    and that boundary carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
     a candidate in both and the union-find has already merged them into one multi-locus. The
-    configuration is therefore unreachable for a line with mass, and it is *reported* by
+    configuration is therefore unreachable for a boundary with mass, and it is *reported* by
     :func:`contended_boundaries` rather than silently renormalised.
     """
     r_idx, l_idx, w = _region_locus_shares(region_arrays, multi_loci, n_loci)
@@ -195,7 +195,7 @@ def contended_boundaries(
 ) -> np.ndarray:
     """``int64[]`` — boundaries whose locus shares sum above 1, i.e. reached by two multi-loci at once.
 
-    ⛔ **Reported, never renormalised.** The rule in :func:`_boundary_locus_shares` says such a line cannot
+    ⛔ **Reported, never renormalised.** The rule in :func:`_boundary_locus_shares` says such a boundary cannot
     carry mass; a caller that wants to *prove* that on real data needs the list, and silently rescaling
     the shares would destroy the evidence. Expected to be empty or mass-free.
     """
@@ -216,7 +216,7 @@ def _project_regions_to_loci(
 ) -> dict[str, np.ndarray]:
     """Overlap-weighted projection of per-REGION arrays to per-locus sums.
 
-    ⚠ Regions only. The crossing axis is projected by :func:`_boundary_locus_shares`, because a line is a
+    ⚠ Regions only. The crossing axis is projected by :func:`_boundary_locus_shares`, because a boundary is a
     first-class object and is not carried by a region.
     """
     out = {name: np.zeros(n_loci, dtype=np.float64) for name in arrays}
@@ -264,17 +264,17 @@ def assemble_priors(
     connected component of transcripts linked by shared fragments. The region term is already such a count
     (a contained fragment deposits on exactly one region). Only the CROSSING term is converted, by one
     multiply against ``q = boundary_mass_per_crossing`` — the accumulator's own ``mass / count`` at that
-    line, which undoes the ``+1``-per-crossed-line inflation. ``q`` is a geometry,
+    boundary, which undoes the ``+1``-per-crossed-boundary inflation. ``q`` is a geometry,
     ``[min(w−1,a) + min(w−1,b)] / 2(w−1)`` under a uniform field.
 
-    ⛔ **A locus's OUTER lines are included, and that is the point.** A fragment crossing a locus's
+    ⛔ **A locus's OUTER boundaries are included, and that is the point.** A fragment crossing a locus's
     boundary overlaps the locus, so it is one of its EM candidates and must load its prior. ⚠ It follows
     that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
     straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
 
-    ⛔ **What this replaced, so it does not come back.** ``boundary_owner_regions`` folded each line's mass
+    ⛔ **What this replaced, so it does not come back.** ``boundary_owner_regions`` folded each boundary's mass
     into ONE flank region's total, because ``_region_locus_shares`` divides by the region length and so
-    cannot see a 0-bp object. The fold then needed the intergenic RE-KEY to stop a locus's far-left line
+    cannot see a 0-bp object. The fold then needed the intergenic RE-KEY to stop a locus's far-left boundary
     vanishing into its dropped intergenic flank. Projecting an boundary AS an boundary removes both, and makes
     this the same operation ``transcript_capture_eff_lengths`` performs over a transcript's own objects.
 
@@ -282,12 +282,12 @@ def assemble_priors(
     object with ``S = 0`` contributes exactly 0 to ``elen`` and 0 to ``span`` with no test and no floor.
     The predecessor summed supports first and therefore needed an explicit
     ``mass_where_there_is_opportunity`` and a ``1e-9`` cap; folding two objects into one ``min()`` also
-    UNDER-contracted a captured exon whose line ran into a depleted intron. Both are gone.
+    UNDER-contracted a captured exon whose boundary ran into a depleted intron. Both are gone.
 
     **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each object's mass by its EFFECTIVE
     sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched) library,
     because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a region and ``ρ·E_f[w−1]``
-    of crossing mass on a line. Every object's ``min(m/ρ_ref, S)`` then returns ``S``, so
+    of crossing mass on a boundary. Every object's ``min(m/ρ_ref, S)`` then returns ``S``, so
     ``gdna_eff_len == span`` exactly: an unenriched library contracts NOTHING. Using the genomic
     ``region_size_bp`` instead would understate short-region density and fabricate a contraction with no
     capture bias present (verified factor 0.878 vs the correct 1.000). Under capture the contraction
@@ -321,7 +321,7 @@ def assemble_priors(
         return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
     # ⭐ THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
-    # converted, by the accumulator's own conserved mass-per-crossing at that line.
+    # converted, by the accumulator's own conserved mass-per-crossing at that boundary.
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
     gdna_boundary = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64) * q
     rna_boundary = (

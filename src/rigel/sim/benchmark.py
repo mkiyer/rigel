@@ -169,7 +169,7 @@ class BenchmarkResult:
 
     def summary(self) -> str:
         """Human-readable summary string."""
-        lines = [
+        boundaries = [
             f"Benchmark: {self.scenario_name}",
             f"  Simulated: {self.n_simulated} fragments",
             f"  Pipeline fragments: {self.n_fragments} (alignment rate: {self.alignment_rate:.1%})",
@@ -177,18 +177,18 @@ class BenchmarkResult:
             f"  Total expected: {self.total_expected}, Total observed: {self.total_observed:.0f}",
         ]
         if self.n_gdna_expected > 0 or self.n_gdna_pipeline > 0:
-            lines.append(
+            boundaries.append(
                 f"  gDNA: expected={self.n_gdna_expected}, "
                 f"pipeline={self.n_gdna_pipeline:.0f}, "
                 f"diff={self.gdna_abs_diff:.0f}"
             )
         if self.n_nrna_expected > 0 or self.n_nrna_pipeline > 0:
-            lines.append(
+            boundaries.append(
                 f"  nRNA: expected={self.n_nrna_expected}, "
                 f"pipeline={self.n_nrna_pipeline:.0f}, "
                 f"diff={self.nrna_abs_diff:.0f}"
             )
-        lines.extend(
+        boundaries.extend(
             [
                 f"  All exact: {self.all_exact}, "
                 f"Total abs error: {self.total_abs_error:.0f}, "
@@ -197,8 +197,8 @@ class BenchmarkResult:
             ]
         )
         for t in self.transcripts:
-            lines.append(f"    {t}")
-        return "\n".join(lines)
+            boundaries.append(f"    {t}")
+        return "\n".join(boundaries)
 
 
 def run_benchmark(

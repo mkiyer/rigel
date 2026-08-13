@@ -4,7 +4,7 @@
 
 ⛔ **What this replaces.** ``CalibrationSubstrate`` held three per-REGION views (contained / left / right)
 and ``BoundarySubstrate`` held the same numbers re-keyed by boundary. Two classes, one set of numbers,
-two keyings — and they existed solely because a boundary had two sides. A contiguous boundary is a 0-bp line
+two keyings — and they existed solely because a boundary had two sides. A contiguous boundary is a 0-bp boundary
 with ONE set of numbers, so both the second class and the whole left/right axis dissolve.
 """
 
@@ -146,7 +146,7 @@ def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
     of 100 % gDNA was once actively seeding false gDNA into neighbouring exons.
 
     ⭐ For a MASS the null answer is 1.0 rather than NaN, and the direction matters: this factor rescales
-    whatever mass the deconvolution placed at the line, so 0 would DELETE it while 1.0 leaves it alone.
+    whatever mass the deconvolution placed at the boundary, so 0 would DELETE it while 1.0 leaves it alone.
     """
     view = PopulationView(
         name="junction",

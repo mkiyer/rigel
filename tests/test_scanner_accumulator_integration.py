@@ -216,7 +216,7 @@ class TestScannerAccumulatorIntegration:
         """The payload's three axes must be exactly what the index's partition implies.
 
         ⭐ ``cuts`` are the CUT POSITIONS; a reference with ``k`` cuts owns ``k − 1`` regions and
-        ``k − 2`` interior lines. The predecessor counted ``k`` boundary objects per reference — the
+        ``k − 2`` interior boundaries. The predecessor counted ``k`` boundary objects per reference — the
         ``k − 1`` interiors plus two data-free terminals — which is the axis S5.f retired.
         """
         index = oracle.index

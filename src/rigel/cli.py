@@ -1,5 +1,5 @@
 """
-rigel.cli — Unified command-line interface.
+rigel.cli — Unified command-boundary interface.
 
 Entry point: ``rigel`` (registered in pyproject.toml).
 
@@ -201,7 +201,7 @@ def _build_pipeline_config(
 
 #: summary.json schema version. Bumped to 2 when the fragment-length histograms
 #: were externalized to ``fragment_lengths.feather`` (they previously bloated the
-#: JSON by thousands of lines) and the splice / strand-contamination diagnostics
+#: JSON by thousands of boundaries) and the splice / strand-contamination diagnostics
 #: were added. Consumers should read this before parsing.
 SUMMARY_SCHEMA_VERSION = 2
 
@@ -372,7 +372,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
     # Fragment length: lean per-category summary statistics go into summary.json;
     # the raw 1-bp histograms are written separately to fragment_lengths.feather
-    # (they used to inflate summary.json by thousands of lines).
+    # (they used to inflate summary.json by thousands of boundaries).
     #
     # ⭐ ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
     # payload alone — the anchor, the two modelled pools and the five pure pools, all binned at the
@@ -1113,8 +1113,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="strict",
         choices=["strict", "warn-skip"],
         help=(
-            "GTF parse mode: 'strict' (default) fails on malformed lines; "
-            "'warn-skip' logs warnings and skips malformed lines"
+            "GTF parse mode: 'strict' (default) fails on malformed boundaries; "
+            "'warn-skip' logs warnings and skips malformed boundaries"
         ),
     )
     idx.add_argument(

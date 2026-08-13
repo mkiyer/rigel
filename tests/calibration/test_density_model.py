@@ -7,7 +7,7 @@ anywhere takes the global count-weighted-mean observable density.
 
 ⭐ **What S5.e changed here.** A region used to carry its own ``left``/``right`` per-side views of the
 flanking boundary flux, and the crossing divisor arrived separately as a scalar ``fl_mean``. An boundary is
-a 0-bp line with ONE count, shared by the two regions it separates, and its divisor is the same
+a 0-bp boundary with ONE count, shared by the two regions it separates, and its divisor is the same
 ``eff_gdna`` array the solver uses — so both the side views and the second length model are gone, and a
 caller can no longer hand this a divisor that disagrees with the geometry's.
 
@@ -117,7 +117,7 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
 
 
 def test_exon_between_introns_recovers_uniform_density():
-    # intron+ | exon+ | intron+ ; both of the exon's flanking lines are observable.
+    # intron+ | exon+ | intron+ ; both of the exon's flanking boundaries are observable.
     nd = _parts(
         [INTRON, EXON, INTRON],
         region_count=[200, 0, 200],
@@ -125,7 +125,7 @@ def test_exon_between_introns_recovers_uniform_density():
         boundary_count=[100, 100],
         boundary_eff=[50.0, 50.0],
     )
-    # rho = 200/100 = 2 (introns) and 100/50 = 2 (exon from each line) -> uniform 2.
+    # rho = 200/100 = 2 (introns) and 100/50 = 2 (exon from each boundary) -> uniform 2.
     assert np.allclose(nd.density, [2.0, 2.0, 2.0])
 
 
@@ -144,7 +144,7 @@ def test_tiny_observable_region_anchors_from_boundaries():
 
 
 def test_run_interior_filled_from_anchored_boundaries():
-    # intron+ | exon+ | exon+ | exon+ | intron+ : the middle exon has BOTH lines non-observable
+    # intron+ | exon+ | exon+ | exon+ | intron+ : the middle exon has BOTH boundaries non-observable
     # (shared exon bit) and is reachable only by the inward carry.
     nd = _parts(
         [INTRON, EXON, EXON, EXON, INTRON],
@@ -153,8 +153,8 @@ def test_run_interior_filled_from_anchored_boundaries():
         boundary_count=[100, 0, 0, 200],
         boundary_eff=np.full(4, 50.0),
     )
-    assert nd.density[1] == pytest.approx(2.0)  # 100/50, from its observable LEFT line
-    assert nd.density[3] == pytest.approx(4.0)  # 200/50, from its observable RIGHT line
+    assert nd.density[1] == pytest.approx(2.0)  # 100/50, from its observable LEFT boundary
+    assert nd.density[3] == pytest.approx(4.0)  # 200/50, from its observable RIGHT boundary
     assert nd.density[2] == pytest.approx(3.0)  # carry mean of the two flanks
 
 
@@ -175,7 +175,7 @@ def test_count_gdna_frac_is_density_ratio():
 
 
 def test_no_observable_region_takes_zero_baseline():
-    # A single exon-only reference: no observable region, and with one region there is no line at all.
+    # A single exon-only reference: no observable region, and with one region there is no boundary at all.
     # Density takes the global baseline, which is 0 (there is no observable region anywhere).
     nd = _parts([EXON], region_count=[0], region_eff=[100.0], boundary_count=[], boundary_eff=[])
     assert nd.density[0] == 0.0
@@ -186,7 +186,7 @@ def test_density_does_not_cross_references():
     # chr1 carries a high-density observable intron (density 4.0); chr2 is a lone no-anchor exon.
     # The chr2 exon must NOT inherit chr1's 4.0 via the run-fill carry (the carry is per-reference)
     # — it takes the GLOBAL baseline (the count-weighted-mean observable density, 4.0 here).
-    # ⭐ Each reference owns ONE region and therefore ZERO lines, so nothing can leak across even in
+    # ⭐ Each reference owns ONE region and therefore ZERO boundaries, so nothing can leak across even in
     # principle: `chain.left`/`chain.right` are -1 at every reference terminal.
     nd = _parts(
         [INTRON, EXON],

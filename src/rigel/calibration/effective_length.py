@@ -10,10 +10,10 @@ because gDNA and RNA have different length distributions *and* different templat
 TWO FRAMES, ONE FAMILY. With ``w`` the molecule length and ``f`` its pmf::
 
     contained   E_f[ (region_len − w + 1)+ ]                                   fits wholly inside a region
-    crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]     spans a 0-bp line
+    crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]     spans a 0-bp boundary
 
 ⭐ **The crossing formula covers BOTH boundary kinds and BOTH components**, with ``R_lo``/``R_hi`` the
-molecule's own remaining template either side of the line. Mean fragment length is its large-reach limit,
+molecule's own remaining template either side of the boundary. Mean fragment length is its large-reach limit,
 not a separate case: gDNA's template is the chromosome, so ``taper_g = 1``, its reaches are
 :data:`UNBOUNDED_REACH` and the divisor collapses to ``mu − 1``. RNA's template ends where its transcript
 ends, so its reaches come from the annotation.
@@ -36,7 +36,7 @@ and a floored division turns "no data" into a confident wrong answer.
 
 ⛔ **The three mass-era divisors are DELETED** — ``boundary_side_eff_length`` (``E[min(l,R)]/2``),
 ``spliced_side_eff_length`` (``E[min²/2l]``) and ``boundary_side_crossing_count_eff_length``. They divided
-a per-FACE mass, and a contiguous boundary no longer has faces: it is a 0-bp line carrying one set of numbers.
+a per-FACE mass, and a contiguous boundary no longer has faces: it is a 0-bp boundary carrying one set of numbers.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def crossing_eff_length(
 ) -> np.ndarray:
     """``E_f[max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1))]`` per object — one formula, both boundary kinds.
 
-    A molecule of length ``w`` crossing the line lies ``a`` bases to its left and ``w − a`` to its right,
+    A molecule of length ``w`` crossing the boundary lies ``a`` bases to its left and ``w − a`` to its right,
     with ``1 ≤ a ≤ w − 1``; it must fit in what remains of its own template on each side, so
     ``a ≤ R_lo`` and ``w − a ≤ R_hi``. Counting the admissible ``a`` gives the four-way ``min`` — each
     term is one of the four binding constraints, and none is droppable:
@@ -232,7 +232,7 @@ def contained_moments(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMo
 def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
     """Moments for the CROSSING population at UNBOUNDED reach: ``A(w) = (w−1)+``, ``u(w) = 1/(w−1)``.
 
-    Every entry is a scalar — under unbounded reach a line's opportunity does not depend on where it is,
+    Every entry is a scalar — under unbounded reach a boundary's opportunity does not depend on where it is,
     which is the "every boundary has the same expectation" property stated in moments.
 
         E[A]     = mu − 1                    <- IS crossing_eff_length at UNBOUNDED_REACH
@@ -251,7 +251,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
     total = float(p.sum())
     p = p / total if total > 0.0 else p
     w = np.arange(p.shape[0], dtype=np.float64)
-    ok = w >= 2.0  # a length-0 or length-1 fragment cannot cross a 0-bp line
+    ok = w >= 2.0  # a length-0 or length-1 fragment cannot cross a 0-bp boundary
     inv = np.zeros_like(w)
     np.divide(1.0, w - 1.0, out=inv, where=ok)
 

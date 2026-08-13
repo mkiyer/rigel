@@ -2,7 +2,7 @@
 
 The gDNA fragment-length model is fitted from pools that are pure gDNA **by construction**, and every
 one of them is a length-dependent *selection*. Two are "contained in one region", which longer fragments
-achieve less often; two are "crosses exactly one line", which longer fragments achieve more often. So
+achieve less often; two are "crosses exactly one boundary", which longer fragments achieve more often. So
 the four raw histograms tilt in **opposite directions**, and each has to be divided by its own
 opportunity before any of them can be combined.
 
@@ -12,8 +12,8 @@ opportunity before any of them can be combined.
 |---|---|---|
 | ``DNA_INTERGENIC`` | contained in exactly one intergenic region | capture OFF |
 | ``DNA_INTRONIC`` | contained in exactly one intronic region | capture OFF |
-| ``DNA_INTRON_EXON`` | crosses exactly one line, flanks {intron, exon} | capture ON |
-| ``DNA_INTERGENIC_EXON`` | crosses exactly one line, flanks {intergenic, exon} | capture ON |
+| ``DNA_INTRON_EXON`` | crosses exactly one boundary, flanks {intron, exon} | capture ON |
+| ``DNA_INTERGENIC_EXON`` | crosses exactly one boundary, flanks {intergenic, exon} | capture ON |
 
 Off capture the library is spread over the genome and nearly all gDNA lies wholly inside a large
 intergenic or intronic region. Under hybrid capture the surviving gDNA sits beside a probe, and a fragment
@@ -27,14 +27,14 @@ under capture; the crossing pair holds the long half.
 
     A(w) = SUM_n (ell_n - w + 1)+
 
-*Crossing exactly one line*, for a line whose flanking region lengths are ``a`` (left) and ``b`` (right)::
+*Crossing exactly one boundary*, for a boundary whose flanking region lengths are ``a`` (left) and ``b`` (right)::
 
     A(w) = (w - 1)+  -  (w - 1 - a)+  -  (w - 1 - b)+  +  (w - 1 - a - b)+
 
-A fragment ``[s, s+w)`` crosses the line for ``w - 1`` starts; of those it also crosses the previous
-line for ``(w-1-a)+`` and the next for ``(w-1-b)+``, and both for ``(w-1-a-b)+``. ⭐ **The two nearest
-lines are the only ones that need excluding** — a fragment is an interval containing the line, so if it
-reaches any line beyond ``p-a`` it must also cross ``p-a``. The inclusion-exclusion over the two
+A fragment ``[s, s+w)`` crosses the boundary for ``w - 1`` starts; of those it also crosses the previous
+boundary for ``(w-1-a)+`` and the next for ``(w-1-b)+``, and both for ``(w-1-a-b)+``. ⭐ **The two nearest
+boundaries are the only ones that need excluding** — a fragment is an interval containing the boundary, so if it
+reaches any boundary beyond ``p-a`` it must also cross ``p-a``. The inclusion-exclusion over the two
 neighbours is therefore exact rather than a truncation. ⚠ And the reference ends need no special case:
 the partition cuts at ``0`` and at ``L_ref``, so the outermost region's length *is* the distance to the
 wall and the same subtraction removes the impossible starts.
@@ -140,9 +140,9 @@ def contained_opportunity(region_lengths: np.ndarray, max_width: int) -> np.ndar
 
 
 def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_width: int) -> np.ndarray:
-    """``SUM_lines`` starts at which a length-``w`` fragment crosses THAT line and no other.
+    """``SUM_boundaries`` starts at which a length-``w`` fragment crosses THAT boundary and no other.
 
-    ``left`` and ``right`` are the flanking region lengths, one entry per line. See the module docstring
+    ``left`` and ``right`` are the flanking region lengths, one entry per boundary. See the module docstring
     for the inclusion-exclusion and why two neighbours suffice.
     """
     left = np.asarray(left, dtype=np.int64)
@@ -188,7 +188,7 @@ class GdnaOpportunity:
     def combined_probability(self) -> np.ndarray:
         """``pi(w) = [SUM_p A_p(w)] / T(w)`` — the divisor for the four pools' summed counts.
 
-        ⭐ This is the whole model in one line, and the weighting inside it is inverse-variance rather
+        ⭐ This is the whole model in one boundary, and the weighting inside it is inverse-variance rather
         than chosen; see the module docstring.
         """
         summed = np.sum(self.pools, axis=0)
@@ -210,9 +210,9 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
     types = np.asarray(region_types, dtype=np.int64)
 
     region_lengths: list[np.ndarray] = []
-    line_left: list[np.ndarray] = []
-    line_right: list[np.ndarray] = []
-    line_pairs: list[np.ndarray] = []
+    boundary_left: list[np.ndarray] = []
+    boundary_right: list[np.ndarray] = []
+    boundary_pairs: list[np.ndarray] = []
     reference_lengths: list[int] = []
     region_base = 0
     for r in range(len(offsets) - 1):
@@ -226,9 +226,9 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
         reference_lengths.append(int(reference_cuts[-1]))
         region_lengths.append(lengths)
         if n_regions >= 2:
-            # Interior lines only: line i sits between region i-1 and region i.
-            line_left.append(lengths[:-1])
-            line_right.append(lengths[1:])
+            # Interior boundaries only: boundary i sits between region i-1 and region i.
+            boundary_left.append(lengths[:-1])
+            boundary_right.append(lengths[1:])
             flanks = np.stack(
                 [
                     types[region_base : region_base + n_regions - 1],
@@ -237,7 +237,7 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
             )
             # Sorted, so the flank pair is order-insensitive exactly as the accumulator's own
             # `_SPLASH_POOL` key is.
-            line_pairs.append(np.sort(flanks, axis=0))
+            boundary_pairs.append(np.sort(flanks, axis=0))
         region_base += n_regions
 
     if not region_lengths:
@@ -246,9 +246,9 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
 
     lengths = np.concatenate(region_lengths)
     types_by_region = types[: len(lengths)]
-    left = np.concatenate(line_left) if line_left else np.zeros(0, np.int64)
-    right = np.concatenate(line_right) if line_right else np.zeros(0, np.int64)
-    pairs = np.concatenate(line_pairs, axis=1) if line_pairs else np.zeros((2, 0), np.int64)
+    left = np.concatenate(boundary_left) if boundary_left else np.zeros(0, np.int64)
+    right = np.concatenate(boundary_right) if boundary_right else np.zeros(0, np.int64)
+    pairs = np.concatenate(boundary_pairs, axis=1) if boundary_pairs else np.zeros((2, 0), np.int64)
 
     intron_exon = (pairs[0] == _TYPE_INTRON) & (pairs[1] == _TYPE_EXON)
     intergenic_exon = (pairs[0] == _TYPE_INTERGENIC) & (pairs[1] == _TYPE_EXON)

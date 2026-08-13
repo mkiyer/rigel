@@ -66,7 +66,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ⚠ ONE value per boundary — the two strand columns are SUMMED, because the mass has no strand axis.
         ⭐ And it is a plausible state rather than an arbitrary array: a crossing's share is at most one
         fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment that
-        crosses two lines, which is what the multi-line geometry this fixture describes produces.
+        crosses two boundaries, which is what the multi-boundary geometry this fixture describes produces.
         """
         return np.asarray(counts, np.float64).sum(axis=1) / per_crossing
 
@@ -127,11 +127,11 @@ def make_synthetic_junctions():
 
     ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a junction
     axis of a different length, because an axis addressing a different graph would place every splice
-    on the wrong line and nothing downstream would fault on it.
+    on the wrong boundary and nothing downstream would fault on it.
 
     The junction runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
-    reference admits, and the one that makes the donor and acceptor two DIFFERENT lines (boundary 0 and
-    boundary 1). A ``0 → 1`` junction would put both endpoints on the same line and hide an
+    reference admits, and the one that makes the donor and acceptor two DIFFERENT boundaries (boundary 0 and
+    boundary 1). A ``0 → 1`` junction would put both endpoints on the same boundary and hide an
     endpoint mix-up.
     """
     from rigel.calibration.splice_graph import JunctionGeometry
@@ -218,7 +218,7 @@ def make_chain_parts(
     per-object argument is broadcast, so a test states only the numbers it cares about.
 
     ``junctions`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
-    row on the junction axis and is placed on the lines it leaves and enters.
+    row on the junction axis and is placed on the boundaries it leaves and enters.
 
     Returns ``SimpleNamespace(chain, substrate, region_arrays, geometry, statics)``.
     """

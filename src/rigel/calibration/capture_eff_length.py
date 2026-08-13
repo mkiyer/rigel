@@ -46,7 +46,7 @@ def _transcript_region_incidence(
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
     incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS BOUNDARY INDEX —
-    a line is a first-class object on its own axis, so a consumer indexes the per-boundary arrays directly; and
+    a boundary is a first-class object on its own axis, so a consumer indexes the per-boundary arrays directly; and
     SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
     where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
     between them carries no gDNA (no genomic-adjacent boundary), so the junction's crossing mass is IMPUTED by
@@ -133,10 +133,10 @@ def _transcript_region_incidence(
             _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
 
     e = np.empty(0, dtype=np.int64)
-    # ⭐ The boundary axis is emitted as an BOUNDARY index, not a left-region index. A line is a first-class
+    # ⭐ The boundary axis is emitted as an BOUNDARY index, not a left-region index. A boundary is a first-class
     # object with its own axis, so a consumer indexes the per-boundary arrays directly — the predecessor
     # returned ``r`` and forced every caller through a region-shaped copy (`_left_keyed_boundary_arrays`),
-    # which read as an attribution of the line's mass to a region and was not one.
+    # which read as an attribution of the boundary's mass to a region and was not one.
     right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
     b_boundaries = right_boundary[np.concatenate(b_r)] if b_r else e
     return (
@@ -209,8 +209,8 @@ def transcript_capture_eff_lengths(
     set:
 
     * a per-region CONTAINED region at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
-    * a per-interior-LINE crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w − 1]``
-      (mass ``m_e = mass_gdna_boundary[e]``) — for lines the transcript crosses without a splice (interior
+    * a per-interior-BOUNDARY crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w − 1]``
+      (mass ``m_e = mass_gdna_boundary[e]``) — for boundaries the transcript crosses without a splice (interior
       to an exon);
     * a per-SPLICE-JUNCTION crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its mass
       IMPUTED from the two flanking exon densities ``m_j = ½·(ρ_left + ρ_right)·S_j`` — the intron between
@@ -246,17 +246,17 @@ def transcript_capture_eff_lengths(
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     n_t = fl.shape[0]
 
-    # per-region CONTAINED object (mass, effective support) and per-interior-LINE crossing object. The
-    # line between region r and r+1 is keyed to r — the SAME objects the gDNA component uses
+    # per-region CONTAINED object (mass, effective support) and per-interior-BOUNDARY crossing object. The
+    # boundary between region r and r+1 is keyed to r — the SAME objects the gDNA component uses
     # (priors._gdna_region_arrays).
     contained_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
     contained_ev = contained_m + np.asarray(calibration.mass_rna_region, dtype=np.float64)
-    # ⭐ The per-LINE crossing objects, on their own axis. `inc_bnd` is an BOUNDARY index, so these are
+    # ⭐ The per-BOUNDARY crossing objects, on their own axis. `inc_bnd` is an BOUNDARY index, so these are
     # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
     boundary_m = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64)
     boundary_S = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
-    # A SPLICE junction is not a contiguous line, so it has no entry on the boundary axis — but it is still
+    # A SPLICE junction is not a contiguous boundary, so it has no entry on the boundary axis — but it is still
     # a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both sides ⇒
     # mu_g − 1). Take it from the boundary supports rather than recomputing a length model here: one
     # definition, and it cannot drift from the one the calibrator divided by.
@@ -299,7 +299,7 @@ def transcript_capture_eff_lengths(
         rho_l = contained_m[jl] / contained_S[jl]
         rho_r = contained_m[jr] / contained_S[jr]
         # ⭐ The junction boundary's SUPPORT is the gDNA crossing effective length — ONE number, the same
-        # every contiguous line uses, taken from the boundary supports rather than re-derived. The
+        # every contiguous boundary uses, taken from the boundary supports rather than re-derived. The
         # predecessor summed two halved per-side lengths here and had to keep that sum in step with
         # `_pooled_boundary_arrays`'s by hand; there is one quantity now, so there is nothing to keep in step.
         # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the junction's imputed

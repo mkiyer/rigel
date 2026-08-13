@@ -18,13 +18,13 @@ from __future__ import annotations
 import numpy as np
 
 #: Same geometry as ``rigel.scan_cache.deposit_digest``: two annotated junctions, a short region whose far
-#: line a fragment may or may not reach, and regions wide enough that containment is reachable.
+#: boundary a fragment may or may not reach, and regions wide enough that containment is reachable.
 CUTS = [0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400]
 REGION_TYPES = [0, 2, 2, 1, 2, 2, 1, 2]
 JUNCTIONS = [(0, 260, 1000, 1), (0, 1120, 2000, 1)]
 
-#: Contained / one line / three lines / spliced-both-cross / spliced-neither-crosses / two junctions and
-#: lines / one junction and one line. ⭐ Every branch of the deposit rule appears at least once, so a
+#: Contained / one boundary / three boundaries / spliced-both-cross / spliced-neither-crosses / two junctions and
+#: boundaries / one junction and one boundary. ⭐ Every branch of the deposit rule appears at least once, so a
 #: change confined to any single branch still moves the digest.
 FRAGMENTS = (
     (10, 50, ()),

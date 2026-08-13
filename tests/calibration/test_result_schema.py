@@ -30,7 +30,7 @@ def _valid_kwargs() -> dict:
         mass_rna_boundary=boundary.copy(),
         mass_rna_spliced_boundary=np.zeros(N_BOUNDARIES),
         # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
-        # identity — a line whose flanks both exceed every fragment length, where an incidence IS
+        # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones(N_BOUNDARIES),
         # ⛔ These two must NOT be equal, and a `ones`/`ones` pair is what they were. `mass_rna_junction`
@@ -222,7 +222,7 @@ def test_the_per_face_fields_are_gone():
 
     ``gdna_boundary_len`` was ``E[min(ℓ,L)]/2`` — a per-FACE divisor, halved because a boundary had two
     sides that were then summed back together. S5.c deleted the quantity and S5.e deleted the faces;
-    its replacement is the per-boundary ``gdna_boundary_eff_len``, ONE number at a 0-bp line with no ½ in it.
+    its replacement is the per-boundary ``gdna_boundary_eff_len``, ONE number at a 0-bp boundary with no ½ in it.
     Anything still naming the old fields is reading a convention that no longer exists
 
     """
@@ -325,7 +325,7 @@ def test_the_junction_INCIDENCE_is_NOT_the_junction_MASS():
 
 def test_a_junction_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
     """⛔ ``mass_per_crossing`` is deliberately **1.0** where nothing crossed — the identity, so a
-    deconvolution's mass at an unobserved line is rescaled by 1 rather than deleted. Multiplying it by
+    deconvolution's mass at an unobserved boundary is rescaled by 1 rather than deleted. Multiplying it by
     the zero incidence is what turns that identity back into the ``0`` that is correct here.
 
     ⚠ This is the gate that fires if the property ever grows a ``where(count > 0, …)`` branch that

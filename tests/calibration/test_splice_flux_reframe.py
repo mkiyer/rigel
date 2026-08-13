@@ -208,7 +208,7 @@ def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_ano
     """⭐⭐ The case that makes the split necessary rather than merely tidy — and the case a
     per-BOUNDARY rule cannot represent at all.
 
-    Two junctions MEETING at one line — ``A = region0 → region2`` and ``B = region1 → region3``, i.e. A's intron
+    Two junctions MEETING at one boundary — ``A = region0 → region2`` and ``B = region1 → region3``, i.e. A's intron
     spans region 1 and B's spans region 2, so A ENDS exactly where B BEGINS. On a 5-region chain
     (``N0 E1 N2 E3 N4 E5 N6 E7 N8``, region ``k`` at slot ``2k``) A's high end is ``left(region2) = slot 3``
     and B's low end is ``right(region1) = slot 3``: **one BOUNDARY, both roles.** Both flank totals are then
@@ -233,16 +233,16 @@ def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_ano
     jc_lo, jc_hi = np.asarray(g.junction_count_lo)[:, 0], np.asarray(g.junction_count_hi)[:, 0]
     assert jc_lo[1] == pytest.approx(500.0) and jc_hi[1] == 0.0  # A's low end
     assert jc_lo[5] == pytest.approx(0.0) and jc_hi[5] == pytest.approx(90.0)  # B's high end
-    # ⭐⭐ THE SHARED LINE: A's high end and B's low end at once, each on its own bank
+    # ⭐⭐ THE SHARED BOUNDARY: A's high end and B's low end at once, each on its own bank
     assert jc_hi[3] == pytest.approx(500.0), "A's flux belongs to the HIGH flank here"
     assert jc_lo[3] == pytest.approx(90.0), "B's flux belongs to the LOW flank here"
     # ⭐ and the divisors go with them — the two junctions have different reaches, so a bank that pooled
-    # them would show the same number on both sides of the shared line.
+    # them would show the same number on both sides of the shared boundary.
     ej_lo, ej_hi = np.asarray(g.eff_junction_lo)[:, 0], np.asarray(g.eff_junction_hi)[:, 0]
     assert ej_hi[3] == pytest.approx(ej_lo[1])
     assert ej_lo[3] == pytest.approx(ej_hi[5])
     assert ej_lo[3] != pytest.approx(ej_hi[3]), "the two junctions must have distinct divisors"
-    # ⛔ and the two flank TOTALS at that line differ by more than rounding, which is the consequence
+    # ⛔ and the two flank TOTALS at that boundary differ by more than rounding, which is the consequence
     rho_lo, rho_hi = region_total_density(g, np.full(int(parts.chain.n_slots), 0.4))
     assert not np.isclose(rho_lo[3], rho_hi[3])
 
@@ -283,9 +283,9 @@ def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
 
 def test_the_flank_split_is_NOT_A_FACE():
     """⚠ `test_region_geometry.test_NO_FIELD_NAMES_A_FACE` bans a ``_left``/``_right`` pair, and the reason
-    is that a 0-bp line's own measurement is one set of numbers seen identically from both sides. ⭐ These
+    is that a 0-bp boundary's own measurement is one set of numbers seen identically from both sides. ⭐ These
     fields do not reintroduce that: they are ONE measurement — the junction axis's flux — partitioned by
-    which junction attaches where, and the partition is a property of the JUNCTIONS, not of the line's own
+    which junction attaches where, and the partition is a property of the JUNCTIONS, not of the boundary's own
     counting. The unspliced banks stay single, which is what this asserts."""
     fields = set(RegionGeometry.__dataclass_fields__)
     for dead in ("unspliced_count_lo", "unspliced_count_hi", "eff_gdna_lo", "eff_rna_hi"):

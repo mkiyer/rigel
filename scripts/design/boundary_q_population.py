@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 """⭐⭐⭐ **IS THE PRIOR'S CROSSING→FRAGMENT CONVERSION POPULATION-BLIND? — DRAINED, no solver runs.**
 
-**The defect under test.** ``assemble_priors`` turns each line's crossing INCIDENCE into a FRAGMENT count
-with one scalar per line (``priors.py``)::
+**The defect under test.** ``assemble_priors`` turns each boundary's crossing INCIDENCE into a FRAGMENT count
+with one scalar per boundary (``priors.py``)::
 
     q = calibration.boundary_mass_per_crossing = mass / count      # measured, not modelled
     gdna_boundary = mass_gdna_boundary * q ;   rna_boundary = (mass_rna_boundary - spliced) * q
 
-⭐ The logic is right: a fragment crossing ``K`` lines is ``+1`` on each, so an incidence total must be
-divided by the mean number of lines crossed, and ``mass/count`` is exactly that.
+⭐ The logic is right: a fragment crossing ``K`` boundaries is ``+1`` on each, so an incidence total must be
+divided by the mean number of boundaries crossed, and ``mass/count`` is exactly that.
 
 ⛔ **But ``q`` is measured on the POOLED population and applied to the gDNA and RNA parts SEPARATELY.**
 Under a uniform field ``q = [min(w-1,a) + min(w-1,b)] / 2(w-1)`` — an explicit function of the fragment
-length ``w``. A longer fragment crosses more lines, so it carries LESS mass per crossing. **So gDNA and
+length ``w``. A longer fragment crosses more boundaries, so it carries LESS mass per crossing. **So gDNA and
 RNA have different true ``q`` whenever their length distributions differ, and the assembler gives them
 the same one.** It vanishes exactly when the two distributions coincide, which is why the equal-length
 ladder cannot see it and why nothing has measured it.
@@ -99,7 +99,7 @@ def _boundary_banks(payload):
 
 def _q(count, mass):
     """``mass / count``, and 1.0 where nothing crossed — the SHIPPED contract
-    (`substrate.PopulationView.mass_per_crossing`): there is no mass at such a line to rescale."""
+    (`substrate.PopulationView.mass_per_crossing`): there is no mass at such a boundary to rescale."""
     out = np.ones(count.shape, np.float64)
     np.divide(mass, count, out=out, where=count > 0.0)
     return out

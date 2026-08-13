@@ -581,7 +581,7 @@ def write_bed12(
 ) -> Path:
     """Write transcripts as BED12 for minimap2 ``-j`` annotation.
 
-    Each transcript becomes one BED12 line with exon blocks.
+    Each transcript becomes one BED12 boundary with exon blocks.
     Coordinates are already 0-based half-open (BED convention).
 
     Parameters
@@ -999,7 +999,7 @@ class TranscriptIndex:
             If True, write human-readable TSV mirrors alongside Feather files.
         gtf_parse_mode : {"strict", "warn-skip"}
             GTF parsing behavior. ``"strict"`` (default) fails fast on
-            malformed lines; ``"warn-skip"`` logs warnings and skips.
+            malformed boundaries; ``"warn-skip"`` logs warnings and skips.
         nrna_tolerance : int
             Max distance (bp) for clustering transcript start/end sites
             when building synthetic nascent RNA transcripts.

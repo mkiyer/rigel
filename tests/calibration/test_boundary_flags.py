@@ -2,16 +2,16 @@
 
     Graph: · (S5.e)
 
-The solver needs to ask, at a line, *"is this a transcript terminus?"* and *"is this a splice site, on
+The solver needs to ask, at a boundary, *"is this a transcript terminus?"* and *"is this a splice site, on
 which flank?"* — questions the 4-bit signature is structurally blind to. The graph answers them, and
 until S5.e it answered them in a **different index space**: a reference with ``k`` regions has ``k − 1``
 contiguous boundaries but the old accumulator had ``k + 1`` boundary slots, so the two ran off by one per
 reference *in opposite directions*.
 
-⭐ **That mismatch is gone.** There are no terminal slots — a contiguous boundary is the line BETWEEN two
-adjacent regions, and there is no such line before the first or after the last — so the flags array and
+⭐ **That mismatch is gone.** There are no terminal slots — a contiguous boundary is the boundary BETWEEN two
+adjacent regions, and there is no such boundary before the first or after the last — so the flags array and
 the payload's boundary axis are the same axis, with no padding to align. What is left to test is that the
-flags land on the right LINE, and it is tested by **genomic coordinate** against a really scanned
+flags land on the right BOUNDARY, and it is tested by **genomic coordinate** against a really scanned
 payload, never by re-deriving the same index arithmetic.
 """
 
@@ -56,7 +56,7 @@ def index(tmp_path_factory):
 def _boundary_positions(index) -> np.ndarray:
     """Genomic position of every contiguous boundary, in boundary order.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines, and line
+    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior boundaries, and boundary
     ``e`` sits at cut ``e + 1`` — so the interior cuts, per reference, ARE the boundary coordinates.
     """
     positions, cut_offsets, _types = build_region_partition_arrays(index)
@@ -68,7 +68,7 @@ def _boundary_positions(index) -> np.ndarray:
     return np.concatenate(out) if out else np.zeros(0, np.int64)
 
 
-def test_there_is_EXACTLY_ONE_ENTRY_PER_LINE_and_no_padding(index):
+def test_there_is_EXACTLY_ONE_ENTRY_PER_BOUNDARY_and_no_padding(index):
     """⭐ The shape change S5.d/S5.e make. A reference with ``k`` regions contributes ``k − 1`` entries,
     never ``k + 1``: the two data-free terminals existed only so every region had an object on each
     side, and an boundary is defined by having a region on BOTH sides."""
@@ -165,7 +165,7 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
 
 
 def test_a_wrong_length_is_refused(index):
-    """A silently mis-sized array would shift every flag by one line — invisible in aggregate, and
+    """A silently mis-sized array would shift every flag by one boundary — invisible in aggregate, and
     exactly what the solver must not inherit. ⚠ The old ``k+1`` shape is the specific wrong length
     most likely to be handed in during the transition, so that is the one used here."""
     from rigel.calibration.region_chain import build_region_chain

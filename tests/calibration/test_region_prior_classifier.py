@@ -36,7 +36,7 @@ def _build_statics(region_sigs):
     """Build a single-reference chain over ``region_sigs`` (genomic order) and return
     ``(chain, statics)``.
 
-    ⭐ ``k`` regions own ``k − 1`` interior lines and there are **no terminal slots** — so the old
+    ⭐ ``k`` regions own ``k − 1`` interior boundaries and there are **no terminal slots** — so the old
     "boundary 0 is the reference-start sink" case does not exist to be classified any more. An boundary
     always has a region on both sides, which is what lets `build_region_statics` read its flanks straight
     off the chain's adjacency instead of a ``left_region``/``right_region`` array with ``-1`` holes.
@@ -98,7 +98,7 @@ def test_classifier_covers_region_and_boundary_types():
     assert state(reg[4]) == (True, True, True, True)  # ambig-exon: mature-capable both strands
 
     # --- boundaries: the four types. ⚠ Indices shift by one against the predecessor because the
-    # reference-start terminal slot no longer exists; E0 is now the first REAL line, N0|N1.
+    # reference-start terminal slot no longer exists; E0 is now the first REAL boundary, N0|N1.
     assert state(bnd[0]) == (True, False, True, False)  # exon↔exon+   : MATURE-CAPABLE
     assert state(bnd[1]) == (True, False, False, False)  # exon↔intron+ : NASCENT-ONLY
     assert state(bnd[2]) == (False, False, False, False)  # intron↔intergenic: SINK (no + crossing)

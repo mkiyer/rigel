@@ -996,7 +996,7 @@ private:
             //
             // ⚠ Unreachable on human data -- 0 of 404,168 junction coordinates are annotated on both
             // strands, and the index warns that it is biologically impossible. Fixed because the
-            // alternative is a silent answer that flips when two GTF lines are swapped.
+            // alternative is a silent answer that flips when two GTF boundaries are swapped.
             if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
             // ⚠ Inserted in place so the supporting lists stay contiguous per hypothesis.
             cr.gap_supporting.insert(cr.gap_supporting.begin() + cr.gap_supporting_offsets[h + 1], t);

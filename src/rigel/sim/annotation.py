@@ -262,6 +262,6 @@ class GeneBuilder:
 
         logger.info(
             f"Wrote {len(transcripts)} transcripts "
-            f"({sum(len(t.exons) for t in transcripts)} exon lines) → {gtf_path}"
+            f"({sum(len(t.exons) for t in transcripts)} exon boundaries) → {gtf_path}"
         )
         return gtf_path

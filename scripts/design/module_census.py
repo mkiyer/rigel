@@ -21,7 +21,7 @@ What it reports
 1. **THE LAYERING**, from ``rigel.calibration._layers``, with every module's assigned layer and any import
    that points UPWARD (which is what a layering violation is). ``test_layering.py`` gates this; here it is
    printed so a reader can see the shape rather than only be told it holds.
-2. **THE GRAPH** — per module: layer, lines, public surface, and every importer inside the package and
+2. **THE GRAPH** — per module: layer, boundaries, public surface, and every importer inside the package and
    outside it. ⭐ A module with no importer inside the package is an ENTRY POINT or it is DEAD, and the two
    are distinguished by whether anything outside the package calls it.
 3. ⭐⭐ **STALE DOCSTRING CROSS-REFERENCES** — every sibling module a docstring names for which **no import
@@ -162,7 +162,7 @@ def main() -> int:
 
     total = sum(m["loc"] for m in mods.values())
     print()
-    print(f"   {args.package}: {len(mods)} modules, {total:,} lines")
+    print(f"   {args.package}: {len(mods)} modules, {total:,} boundaries")
 
     # ── 1. THE LAYERING ────────────────────────────────────────────────────────────────────────────────
     if LAYERS is not None and not args.stale_only:
@@ -173,7 +173,7 @@ def main() -> int:
             present = [m for m in members if m in mods]
             missing = [m for m in members if m not in mods]
             loc = sum(mods[m]["loc"] for m in present)
-            print(f"\n   {num}. {title:<34} {loc:>6,} lines")
+            print(f"\n   {num}. {title:<34} {loc:>6,} boundaries")
             for m in present:
                 up = sorted(t for t in uses[m] if (layer_of(t) or 0) > (layer_of(m) or 0))
                 ann = sorted(

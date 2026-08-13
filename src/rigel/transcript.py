@@ -147,7 +147,7 @@ class Transcript:
         """Read GTF and construct list of Transcript objects."""
         transcripts: dict[str, Transcript] = {}
         logging.debug("[Transcript] Reading GTF file: %s", gtf_file)
-        num_lines = 0
+        num_boundaries = 0
         for f in GTFRecord.parse_file(gtf_file, parse_mode=parse_mode):
             if f.feature != "exon":
                 continue
@@ -158,10 +158,10 @@ class Transcript:
             else:
                 t = transcripts[t_id]
             t.exons.append(Interval(f.start, f.end))
-            num_lines += 1
-            if num_lines % _GTF_LOG_INTERVAL == 0:
-                logging.debug("[Transcript] Read %d GTF features", num_lines)
-        logging.debug("[Transcript] Done reading GTF: %d features", num_lines)
+            num_boundaries += 1
+            if num_boundaries % _GTF_LOG_INTERVAL == 0:
+                logging.debug("[Transcript] Read %d GTF features", num_boundaries)
+        logging.debug("[Transcript] Done reading GTF: %d features", num_boundaries)
 
         logging.debug("[Transcript] Processing transcripts")
         for t in transcripts.values():

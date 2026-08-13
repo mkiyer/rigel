@@ -8,7 +8,7 @@ intron that fails to match deposits nothing at all (an unannotated intron credit
 a mis-keyed table silently deletes the entire spliced-RNA signal.
 
 The table is keyed by the **donor cut index**, which is the index the deposit has already computed while
-locating the lines its path crosses. ``_lookup`` below is written to mirror that inner loop exactly, so
+locating the boundaries its path crosses. ``_lookup`` below is written to mirror that inner loop exactly, so
 these tests double as the API's worked example.
 """
 

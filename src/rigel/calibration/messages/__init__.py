@@ -8,7 +8,7 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — tw
 
 Three policies ship:
 
-* :class:`~.silent.SilentPolicy` — sends nothing. ⭐ **THE DEFAULT**, and five lines long. A reader who
+* :class:`~.silent.SilentPolicy` — sends nothing. ⭐ **THE DEFAULT**, and five boundaries long. A reader who
   holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
 * :class:`~.head.HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch, so
   ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.

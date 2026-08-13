@@ -4,15 +4,15 @@
 
 ⭐ **The oracle enumerates; the code computes.** Every closed form here is checked against a loop that
 walks every start position on a small partition and asks the *deposit rule's own question* — "is this
-fragment contained in exactly one region?", "does it cross exactly one line?" — so the divisor is verified
+fragment contained in exactly one region?", "does it cross exactly one boundary?" — so the divisor is verified
 against the selection it is meant to invert, not against a re-derivation of itself.
 `docs/TRAPS.md` trap 1: a validator that calls the builder's own helper validates nothing.
 
 ⚠ **The rule the oracle implements is `_accumulator_reference.FragmentPool`'s, verbatim:**
 
 * contained in exactly one region -> typed by that region's coarse type (intergenic / intronic only)
-* crossing exactly one line -> typed by the sorted pair of flanking region types
-* anything else — an exonic contained fragment, a multi-line crossing — enters **no** pool
+* crossing exactly one boundary -> typed by the sorted pair of flanking region types
+* anything else — an exonic contained fragment, a multi-boundary crossing — enters **no** pool
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
     type per region, so ``len(types) == len(cuts) - 1``.
     """
     reference_length = cuts[-1]
-    lines = cuts[1:-1]  # interior lines only
+    boundaries = cuts[1:-1]  # interior boundaries only
     counts = {
         "contained": {TYPE_INTERGENIC: 0, TYPE_INTRON: 0, TYPE_EXON: 0},
         "crossing": {},
@@ -49,14 +49,14 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
     for start in range(0, reference_length - width + 1):
         end = start + width
         counts["total"] += 1
-        crossed = [i for i, p in enumerate(lines) if start < p < end]
+        crossed = [i for i, p in enumerate(boundaries) if start < p < end]
         if not crossed:
             # Contained: find the single region holding [start, end).
             region = max(i for i, c in enumerate(cuts[:-1]) if c <= start)
             counts["contained"][types[region]] += 1
         elif len(crossed) == 1:
-            line = crossed[0]
-            pair = tuple(sorted((types[line], types[line + 1])))
+            boundary = crossed[0]
+            pair = tuple(sorted((types[boundary], types[boundary + 1])))
             counts["crossing"][pair] = counts["crossing"].get(pair, 0) + 1
     return counts
 
@@ -131,8 +131,8 @@ class TestAgainstTheEnumeratingOracle:
         oracle = enumerate_pools(cuts, types, width)
         pooled = sum(oracle["contained"].values()) + sum(oracle["crossing"].values())
         assert pooled <= oracle["total"]
-        multi_line = oracle["total"] - pooled
-        assert multi_line >= 0
+        multi_boundary = oracle["total"] - pooled
+        assert multi_boundary >= 0
         # And the closed forms sum to the same pooled figure.
         lengths = region_lengths_of(cuts)
         max_width = max(WIDTHS)
@@ -161,7 +161,7 @@ class TestTheTiltsAreOpposite:
         left = np.array([500, 700, 900], dtype=np.int64)
         right = np.array([600, 800, 1000], dtype=np.int64)
         crossing = crossing_opportunity(left, right, 400)
-        # Strictly increasing: a longer fragment covers more of the line's neighbourhood.
+        # Strictly increasing: a longer fragment covers more of the boundary's neighbourhood.
         assert np.all(np.diff(crossing[2:301]) > 0)
 
     def test_a_short_region_caps_the_crossing_opportunity(self):

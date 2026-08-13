@@ -2,7 +2,7 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
-⭐⭐⭐ **This file is five lines of behaviour, and that is the entire point.** A new session reads
+⭐⭐⭐ **This file is five boundaries of behaviour, and that is the entire point.** A new session reads
 ``sweep.py`` plus this and holds the whole working system in their head. :mod:`~.head` is opt-in and is
 clearly labelled as the legacy arm being dismantled.
 

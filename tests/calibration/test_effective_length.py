@@ -191,7 +191,7 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
 
     ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``) and
     ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous boundary no
-    longer has faces — it is a 0-bp line with one set of numbers. Keeping them would leave two answers
+    longer has faces — it is a 0-bp boundary with one set of numbers. Keeping them would leave two answers
     for one question, which is how an exact factor of 2 survived 29 tests.
     trap 2).
     """

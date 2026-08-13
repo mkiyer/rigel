@@ -299,7 +299,7 @@ def resolving_power_rows(a: dict, mask: np.ndarray) -> list[tuple]:
     ⭐ **This is the shape the measurement actually has.** ``sd(λ) ≫ L`` says the object's own evidence
     is flat across every λ the solver can represent, so whatever it reports came from its neighbours
     and the reference — the *substance* of "undetermined", stated as a magnitude instead of a class.
-    ⛔ Nothing branches on the boundaries; they are decades, and a reader draws their own line.
+    ⛔ Nothing branches on the boundaries; they are decades, and a reader draws their own boundary.
 
     ⚠ **Pass a mask that EXCLUDES the structurally-locked slots.** Their ``sd(λ)`` is 0 because they
     are certain, not because their evidence is strong, and putting them in the first band would read
@@ -472,8 +472,8 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
     """Label each object by what it IS, structurally — a region's region type, or for a contiguous boundary
     the PAIR of region types it separates.
 
-    ⭐ The boundary pair is the axis the debug chain turns on. An ``intron|exon`` line and an
-    ``intergenic|exon`` line are the same kind of object to the solver and completely different
+    ⭐ The boundary pair is the axis the debug chain turns on. An ``intron|exon`` boundary and an
+    ``intergenic|exon`` boundary are the same kind of object to the solver and completely different
     problems: the first must inherit its answer from an intron region the density peel resolved, the
     second from a structurally-locked intergenic region. Lumping them as "boundaries" hides which
     propagation path is broken.

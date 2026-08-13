@@ -12,7 +12,7 @@ likelihood. Zero spliced reads ⇒ ``Beta(1,1)`` ⇒ 0.5, and ``calibrate`` rais
 deconv's genuine RNA strand Beta-Binomial overdispersion — a different quantity on a different axis (the
 spread of junctions ABOUT the mean, fitted in :func:`gdna_strand.fit_rna_strand_from_sj_table` and applied
 in ψ's ``simplex_logodds._mixture_strand_loglik``, versus the width of the mean itself). **Deleted 2026-07-28**, which removes the
-collision without needing a second name. Restoring it is one line if a consumer ever appears; the strand
+collision without needing a second name. Restoring it is one boundary if a consumer ever appears; the strand
 model's own :meth:`StrandModel.posterior_variance` already reports the same power question.
 """
 

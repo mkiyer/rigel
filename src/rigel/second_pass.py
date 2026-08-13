@@ -128,21 +128,21 @@ def _junction_id(junctions, cuts, lo, hi, start, end, sj_strand) -> int:
     return -1
 
 
-def _distinguishing_lines(
+def _distinguishing_boundaries(
     cuts: np.ndarray, lo: int, hi: int, start: int, end: int
 ) -> tuple[int, int]:
-    """The LOCAL line range that separates ∅ from a path splicing ``[start, end)``. Endpoints INCLUDED.
+    """The LOCAL boundary range that separates ∅ from a path splicing ``[start, end)``. Endpoints INCLUDED.
 
     ⭐ **Read off the deposit rule, not chosen** (`_accumulator_reference.py`, the per-segment crossing
-    loop): a line is crossed iff it lies **strictly inside a contiguous segment**. So over a fragment
+    loop): a boundary is crossed iff it lies **strictly inside a contiguous segment**. So over a fragment
     ``[s, e)``:
 
-    * ∅ is one segment and crosses every line in ``(s, e)``;
+    * ∅ is one segment and crosses every boundary in ``(s, e)``;
     * the spliced path is ``[s, start)`` and ``[end, e)`` and crosses those in ``(s, start)`` and
       ``(end, e)``.
 
-    The difference is the lines at cuts ``start <= c <= end`` — and since both endpoints of an annotated
-    intron are cuts by construction, those two lines always exist and always discriminate.
+    The difference is the boundaries at cuts ``start <= c <= end`` — and since both endpoints of an annotated
+    intron are cuts by construction, those two boundaries always exist and always discriminate.
 
     ⛔ **This asked for ``start < c < end`` until 2026-08-02 (D-6).** That drops exactly the two
     guaranteed discriminators, and returns an EMPTY range whenever the intron spans one region — handing ∅
@@ -454,10 +454,10 @@ def score_held_fragments(
                 # The genomic path's evidence is the unspliced crossing density where the others jump.
                 boundary_densities = []
                 for a, b in contested:
-                    first, last = _distinguishing_lines(cuts, cut_lo, cut_hi, a, b)
-                    for line in range(first, last):
+                    first, last = _distinguishing_boundaries(cuts, cut_lo, cut_hi, a, b)
+                    for boundary in range(first, last):
                         boundary_densities.append(
-                            float(payload.boundary_unspliced_inv_length_sum[boundary_base + line - 1])
+                            float(payload.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1])
                         )
                 density[slot] = _bottleneck(boundary_densities)
 

@@ -32,7 +32,7 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
     """A 1-reference payload of ``n_regions`` intergenic regions; contained gDNA ~ BetaBinom(½, od).
 
     ⚠ **The boundary axis is empty of COUNTS but not of ROWS.** One reference with ``k`` regions owns
-    ``k − 1`` lines, and the payload must carry them or the chain builder refuses it. Leaving the
+    ``k − 1`` boundaries, and the payload must carry them or the chain builder refuses it. Leaving the
     counts at zero is what makes this test isolate the CONTAINED-region seed arm: with no crossing
     fragments there are no boundary seeds, so a recovered overdispersion can only have come from the regions.
     """

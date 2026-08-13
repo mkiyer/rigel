@@ -242,7 +242,7 @@ def deposit_digest() -> str:
     associative.
 
     ⚠ The fixture is deliberately awkward rather than minimal — two annotated junctions, a short region
-    whose far line a fragment may or may not reach, contained / crossing / spliced / junction-only
+    whose far boundary a fragment may or may not reach, contained / crossing / spliced / junction-only
     fragments — so that a rule change confined to ONE of those cases still moves it.
 
     ⛔ **It runs the NATIVE accumulator, not the specification.** The cache holds what the production
@@ -269,12 +269,12 @@ def deposit_digest() -> str:
     )
     for start, end, introns in (
         (10, 50, ()),  # contained in one region, crosses nothing
-        (30, 150, ()),  # crosses one line
-        (30, 280, ()),  # crosses three lines
-        (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a line
-        (210, 1040, ((260, 1000),)),  # spliced; NEITHER block crosses a line
-        (150, 2100, ((260, 1000), (1120, 2000))),  # two junctions AND lines
-        (1030, 2050, ((1120, 2000),)),  # one junction, one line
+        (30, 150, ()),  # crosses one boundary
+        (30, 280, ()),  # crosses three boundaries
+        (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a boundary
+        (210, 1040, ((260, 1000),)),  # spliced; NEITHER block crosses a boundary
+        (150, 2100, ((260, 1000), (1120, 2000))),  # two junctions AND boundaries
+        (1030, 2050, ((1120, 2000),)),  # one junction, one boundary
     ):
         # ⚠ ``hypotheses=()`` is REQUIRED — the native binding has no default, unlike the specification,
         # whose default IS ``UNSPLICED_ONLY``. An empty set means "nothing to arbitrate", and it is safe
@@ -575,7 +575,7 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
         "boundary_flags": build_boundary_flags_array(index),
         # ⚠ The JUNCTION axis is index-derived too, and it is not optional: `calibrate` refuses an axis
         # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
-        # would place every splice on the wrong line. Omitting it here was an S5.f miss that only the
+        # would place every splice on the wrong boundary. Omitting it here was an S5.f miss that only the
         # guard caught.
         "junctions": build_junction_geometry_arrays(index),
     }

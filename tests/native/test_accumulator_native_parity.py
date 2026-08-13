@@ -52,11 +52,11 @@ from ._accumulator_reference import (
 #
 # cuts    0     100    200   201    400        900       1000
 # regions   [ n0 ][ n1  ][n2*][  n3  ][    n4   ][   n5   ]        (* n2 is 1 bp)
-# lines         1      2    3      4          5
+# boundaries         1      2    3      4          5
 # types   intergenic, exon, exon, intron, exon, intergenic
 #
-# So: line 1 has {intergenic, exon} flanks (a splash pool), line 3 has {intron, exon} (the other), n2 is
-# a 1 bp region that a fragment can span, and the annotated junction [201, 900) SWALLOWS line 4 — which is
+# So: boundary 1 has {intergenic, exon} flanks (a splash pool), boundary 3 has {intron, exon} (the other), n2 is
+# a 1 bp region that a fragment can span, and the annotated junction [201, 900) SWALLOWS boundary 4 — which is
 # the case the whole redesign exists for.
 #
 # ⛔ THREE junctions, not one, and the count is load-bearing. With a single annotated junction no fragment
@@ -215,12 +215,12 @@ CASES: list[tuple[str, dict]] = [
     ("contained in an exonic region", dict(start=150, end=190)),
     ("contained, intergenic region (a pure gDNA pool)", dict(start=10, end=90)),
     ("contained, intronic region (the other pure gDNA pool)", dict(start=210, end=390)),
-    ("one line crossed, {intergenic, exon} splash", dict(start=50, end=150)),
-    ("one line crossed, {intron, exon} splash", dict(start=200, end=210)),
-    ("four lines crossed -> no pool, it is a mixture", dict(start=50, end=500)),
+    ("one boundary crossed, {intergenic, exon} splash", dict(start=50, end=150)),
+    ("one boundary crossed, {intron, exon} splash", dict(start=200, end=210)),
+    ("four boundaries crossed -> no pool, it is a mixture", dict(start=50, end=500)),
     ("spanning the 1 bp region", dict(start=150, end=250)),
-    ("ends exactly ON a line: contained, does NOT cross", dict(start=50, end=100)),
-    ("starts exactly ON a line", dict(start=100, end=150)),
+    ("ends exactly ON a boundary: contained, does NOT cross", dict(start=50, end=100)),
+    ("starts exactly ON a boundary", dict(start=100, end=150)),
     ("minus column", dict(start=150, end=190, align_strand=Strand.NEG)),
     (
         "annotated junction, definite motif strand",

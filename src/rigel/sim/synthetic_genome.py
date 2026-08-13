@@ -531,7 +531,7 @@ def write_gtf(genes: list[GeneDef], ref_name: str, outdir: Path) -> Path:
     with open(gtf_path, "w") as f:
         for gene in genes:
             for tx in gene.transcripts:
-                # Transcript line
+                # Transcript boundary
                 tx_start = tx.start + 1  # GTF is 1-based
                 tx_end = tx.end
                 f.write(
@@ -540,7 +540,7 @@ def write_gtf(genes: list[GeneDef], ref_name: str, outdir: Path) -> Path:
                     f'gene_id "{tx.gene_id}"; transcript_id "{tx.t_id}"; '
                     f'gene_name "{tx.gene_name}";\n'
                 )
-                # Exon lines
+                # Exon boundaries
                 for i, exon in enumerate(tx.exons, 1):
                     e_start = exon.start + 1  # GTF is 1-based
                     e_end = exon.end

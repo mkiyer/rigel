@@ -17,13 +17,13 @@ carry the same channels, because a channel is stored where a named consumer read
 ⭐ **ONE type, and that is the change.** The predecessor had ``CalibrationSubstrate`` holding three
 per-region views (contained / left / right) and ``BoundarySubstrate`` holding the same numbers re-keyed
 by boundary. Two classes, one set of numbers, two keyings — and they existed **solely because a boundary
-had two sides**. A contiguous boundary is a 0-bp line with one set of numbers, so the second class, the
+had two sides**. A contiguous boundary is a 0-bp boundary with one set of numbers, so the second class, the
 left/right axis, the re-keying identity and ``_make_view`` all dissolve together.
 
 ⭐ **THE COLUMNS ARE GENOME STRAND, WITHOUT EXCEPTION.** Sense/antisense is transcript-relative,
 derived by a consumer from a junction's own strand, and never stored. The predecessor stored some banks
 by genome strand and others by sense, which is how 40–44 % of the SPLICED deposits landed in the
-opposite column from the unspliced fragments beside them at the same line.
+opposite column from the unspliced fragments beside them at the same boundary.
 
 ⭐ **THE COUNTS CARRY BOTH COLUMNS; THE LENGTH MOMENTS CARRY ONE.** Which strand a read aligned to says
 nothing about whether the molecule was gDNA or RNA, so the moments are strand-agnostic and every
@@ -99,7 +99,7 @@ class PopulationView:
         ⚠ **A missing channel is None, never an array of zeros.** Zeros would be a lie in the type: a
         consumer cannot tell "this population does not measure that" from "it measured it and got
         nothing", and the second is an ordinary, meaningful state. The same contract
-        :meth:`mass_per_crossing` keeps for a line nothing crossed.
+        :meth:`mass_per_crossing` keeps for a boundary nothing crossed.
         """
         value = getattr(self, channel)
         if value is None:
@@ -120,13 +120,13 @@ class PopulationView:
     def mass_per_crossing(self) -> np.ndarray:
         """float64[n] — ``mass / count``: the mean conserved fragment-mass ONE crossing here carries.
 
-        ⭐ **This is what converts an object-INCIDENCE total into a FRAGMENT count.** It is 1.0 at a line
+        ⭐ **This is what converts an object-INCIDENCE total into a FRAGMENT count.** It is 1.0 at a boundary
         whose flanking regions both exceed every fragment length — a crossing fragment can only cross that
-        one line, so its whole 1.0 lands there — and falls toward the region spacing where they do not.
-        That gap is the K-inflation, per line.
+        one boundary, so its whole 1.0 lands there — and falls toward the region spacing where they do not.
+        That gap is the K-inflation, per boundary.
 
-        ⛔ **1.0 where nothing crossed**, the identity, not 0. There is no mass at such a line to
-        rescale, and a 0 would delete whatever mass the deconvolution placed on a line the accumulator
+        ⛔ **1.0 where nothing crossed**, the identity, not 0. There is no mass at such a boundary to
+        rescale, and a 0 would delete whatever mass the deconvolution placed on a boundary the accumulator
         never saw — the identity is the only value that cannot invent or destroy mass.
         """
         mass = self._require("mass")

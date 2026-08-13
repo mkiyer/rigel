@@ -5,7 +5,7 @@
 THE CLAIM UNDER TEST
     At an boundary the accumulator deposits ``1/(L-1)`` and the result is an exactly model-free estimate of
     the start density. The reason usually given is "the reciprocal of the fragment length cancels the
-    opportunity". That is a coincidence of the boundary frame: the opportunity to cross a 0-bp line happens
+    opportunity". That is a coincidence of the boundary frame: the opportunity to cross a 0-bp boundary happens
     to BE ``L-1``. The general statement is
 
         deposit  h(w) = 1 / A(w)     where A(w) is that population's OPPORTUNITY
@@ -78,7 +78,7 @@ def deposit_weight(kind: str, population: str, region_len: float) -> np.ndarray:
     """The per-fragment quantity added to the density channel.
 
     ``invA`` is the derivation's proposal (reciprocal opportunity); ``invL`` is what ships (1/L at a
-    region, 1/(L-1) at a line); ``count`` deposits 1.
+    region, 1/(L-1) at a boundary); ``count`` deposits 1.
     """
     out = np.zeros_like(W)
     if kind == "count":
@@ -172,7 +172,7 @@ def check_T3_complementary(rho: float = 0.05) -> tuple[int, float]:
 
 def check_T4_limits(rho: float = 0.05) -> None:
     """T4: the two limits -- l = 0 is the boundary rule exactly; l >> E[L] tends to count / region_length."""
-    print("\n  T4a  l = 0 reduces to the boundary rule (region spanning weight vs the 0-bp line weight)")
+    print("\n  T4a  l = 0 reduces to the boundary rule (region spanning weight vs the 0-bp boundary weight)")
     for spec in GRID[:6]:
         pmf = fl_pmf(*spec)
         region0 = expected_deposit(pmf, "spanning", 0.0, "invA", rho)

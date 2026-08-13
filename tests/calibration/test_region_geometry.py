@@ -3,10 +3,10 @@
      (S5.e)
     Divisors: ``rigel.calibration.effective_length`` (S5.c) — the one placements formula
 
-⛔ **What this replaces.** ``build_region_geometry`` was 213 lines producing **18 per-face arrays** — a
+⛔ **What this replaces.** ``build_region_geometry`` was 213 boundaries producing **18 per-face arrays** — a
 ``_left``/``_right`` pair for the unspliced mass, its integer flux, three effective lengths and four
 spliced channels. The pairs existed because a boundary's two sides lay in differently-sized flanks and
-therefore had **different divisors**. A contiguous boundary is a 0-bp line: one set of numbers, seen
+therefore had **different divisors**. A contiguous boundary is a 0-bp boundary: one set of numbers, seen
 identically from both sides. So the pairs go, and with them the junction-strand routing, the exon-bit
 flank gating and the ``_continues``/``_eff_spl_face`` far-boundary machinery — all of which existed to
 *guess* which flank a spliced deposit belonged to, because the old accumulator attributed a splice to
@@ -61,7 +61,7 @@ def brute_contained(region_len: int, pmf: np.ndarray) -> float:
 def brute_crossing(pmf: np.ndarray, reach_lo: float, reach_hi: float) -> float:
     """``E_f[#{a : 1 <= a <= w-1, a <= R_lo, w-a <= R_hi}]`` by enumeration.
 
-    ``a`` is how many of the molecule's bases lie to the LEFT of the 0-bp line. The molecule must have
+    ``a`` is how many of the molecule's bases lie to the LEFT of the 0-bp boundary. The molecule must have
     at least one base on each side and must fit in what remains of its own template either way.
     """
     total = 0.0
@@ -100,7 +100,7 @@ def parts():
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     # the fixture's one junction: regions are [0,100) [100,200) [200,300), so an intron running from the
-    # end of region 0 to the start of region 2 has its DONOR at line 0 and its ACCEPTOR at line 1.
+    # end of region 0 to the start of region 2 has its DONOR at boundary 0 and its ACCEPTOR at boundary 1.
     junctions = JunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
@@ -195,7 +195,7 @@ def test_a_REGION_slot_carries_region_contained_and_an_BOUNDARY_slot_carries_bou
 def test_the_count_columns_are_GENOME_STRAND_unpermuted(geometry, parts):
     """⭐ POS is column 0. The predecessor stored some banks by genome strand and others by sense, which
     is how 40–44 % of the SPLICED deposits landed in the opposite column from their unspliced
-    neighbours at the same line."""
+    neighbours at the same boundary."""
     payload, _, _, chain, _ = parts
     first_region = int(np.flatnonzero(np.asarray(chain.kind) == REGION)[0])
     assert geometry.unspliced_count[first_region, 0] == float(payload.region_contained_count[0, 0])
@@ -344,10 +344,10 @@ def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
 # ---------------------------------------------------------------------------
 
 
-def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_line(geometry, parts):
-    """A junction ``(src, dst)`` has its DONOR at the line to the right of ``src`` and its ACCEPTOR at
-    the line to the left of ``dst``. Molecules leave the template at the first and arrive at the
-    second, so both lines genuinely saw the flux — and the index states both explicitly, which is what
+def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometry, parts):
+    """A junction ``(src, dst)`` has its DONOR at the boundary to the right of ``src`` and its ACCEPTOR at
+    the boundary to the left of ``dst``. Molecules leave the template at the first and arrive at the
+    second, so both boundaries genuinely saw the flux — and the index states both explicitly, which is what
     replaces the old exon-bit guess.
 
     The fixture's junction runs region 0 -> region 2, so it lands on boundary 0 (donor) and boundary 1 (acceptor)
@@ -387,8 +387,8 @@ def test_the_mature_flux_is_keyed_by_the_JUNCTIONS_OWN_STRAND_not_the_align_colu
         assert g.junction_count[slot, 0] == 0.0
 
 
-def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(parts):
-    """Two junctions sharing a donor line are two estimates of one rate, so the pooled statement is
+def test_several_junctions_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
+    """Two junctions sharing a donor boundary are two estimates of one rate, so the pooled statement is
     ``sum(count) / sum(E)`` — the ratio of sums, never the mean of ratios.
     ``rho_bg = sum(g)/sum(E)``). Averaging the divisors instead would mis-weight the deeper junction.
     """
@@ -488,7 +488,7 @@ def _boundary_slot_of(chain, boundary_obj_id: int) -> int:
 
 
 def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
-    """Getting the incidence wrong shifts a junction onto a neighbouring reference's lines — invisible
+    """Getting the incidence wrong shifts a junction onto a neighbouring reference's boundaries — invisible
     in aggregate, and exactly the class of defect the substrate's per-reference offset check exists
     for."""
     payload, _, _, _, _ = parts
@@ -504,7 +504,7 @@ def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
     assert g.junction_count[_boundary_slot_of(chain2, 2)].sum() == 0.0, "a chr1 junction reached chr2"
 
 
-def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line(parts):
+def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
     """⛔ **The layout-assumption killer.** Region ``i`` sits at slot ``2i`` only within the FIRST
     reference; chr2's region 3 sits at slot 5. A geometry that computes the slot arithmetically instead
     of reading ``chain.left``/``chain.right`` passes every single-reference test and then puts chr2's
@@ -525,10 +525,10 @@ def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line(parts
     g = build_region_geometry(chain2, sub2, ra2, j, GDNA_PMF, RNA_PMF)
     flux = float(p2.sj_count[0].sum())
     chr2_boundary = _boundary_slot_of(chain2, 2)
-    # donor (right of region 3) and acceptor (left of region 4) are the SAME line, so it takes the flux twice
+    # donor (right of region 3) and acceptor (left of region 4) are the SAME boundary, so it takes the flux twice
     assert g.junction_count[chr2_boundary, 0] == pytest.approx(2.0 * flux)
     assert np.all(g.junction_count[np.asarray(chain2.kind) == REGION] == 0.0)
-    for e in (0, 1):  # chr1's two lines saw nothing
+    for e in (0, 1):  # chr1's two boundaries saw nothing
         assert g.junction_count[_boundary_slot_of(chain2, e)].sum() == 0.0
 
 
@@ -594,7 +594,7 @@ def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
     """rho_mature = sum over transcript strands of count/E, each strand in its own frame — and a strand
     with no flux contributes nothing rather than a 0/0.
 
-    ⭐ Per FLANK: the LOW-flank total carries the flux of junctions whose genomic-low end is this line and
+    ⭐ Per FLANK: the LOW-flank total carries the flux of junctions whose genomic-low end is this boundary and
     the HIGH-flank total the rest, so the pooling over strands is checked inside each side separately."""
     _, _, _, chain, _ = parts
     rho_lo, rho_hi = region_total_density(geometry, np.zeros(chain.n_slots))
@@ -625,10 +625,10 @@ def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, pa
     could be called "mature", so one word would cover both and distinguish neither. They are different
     molecules:
 
-    * ``spliced_count`` — crossed this line CONTIGUOUSLY, having spliced somewhere else;
+    * ``spliced_count`` — crossed this boundary CONTIGUOUSLY, having spliced somewhere else;
     * ``junction_count`` — never crossed it, it JUMPED from here.
 
-    The fixture makes them differ on both axes at once. At boundary 0 the junction's donor sits on the line
+    The fixture makes them differ on both axes at once. At boundary 0 the junction's donor sits on the boundary
     but nothing crossed it contiguously (13 vs 0); at boundary 1 both are live and unequal (13 vs 6). A
     consumer that read one for the other would be off by the whole gene's mature output at a donor boundary
     — which is the 2-versus-251 case in the design log.

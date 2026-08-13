@@ -42,7 +42,7 @@ def oracle(tmp_path):
     ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the junction
     boundaries and leave **both contiguous-boundary banks identically zero**: every cut is an exon boundary, so a
     mature fragment either fits inside an exon (contained) or splices across the gap (junction boundary), and
-    it never has bases on both sides of a line. A bit-identity gate over an all-zero array passes for the
+    it never has bases on both sides of a boundary. A bit-identity gate over an all-zero array passes for the
     wrong reason — this project has already had one report "32/32 IDENTICAL" on an arm with zero rows. So:
 
     * ``t2`` starts at 500, **inside** ``t1``'s first exon. That makes 500 a cut, and a ``t1`` fragment

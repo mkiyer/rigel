@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """⭐⭐ PROTOTYPE A SOLVER MECHANISM AS A PER-OBJECT OVERRIDE AND SCORE IT ON THE REAL LADDER — before
-writing a line of it into ``src/``.
+writing a boundary of it into ``src/``.
 
 ⛔ **THE WORKFLOW THIS EXISTS FOR.** A toy isolates a mechanism; it cannot rank one (`TESTING.md` §0b).
 `toy_ceiling.py` re-solves the owner's two-exon toy under a set of arms and says what each is worth

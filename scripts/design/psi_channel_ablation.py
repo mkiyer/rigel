@@ -10,7 +10,7 @@ rather than a second implementation of it.
 the WRITE-BACK too.** `region_sweep` keeps the incoming belief wherever ``solvable`` is False, so comparing
 raw ψ output against the stored belief differs by up to 1.0 at every unsolvable slot. The first version of
 this script reported ``max |Δ| = 1.0`` and its numbers were on a different basis than the panel's; the
-`wb()` helper is that fix and the identity line is the gate.
+`wb()` helper is that fix and the identity boundary is the gate.
 ⛔ **TRAPS: could-the-arm-have-fired — every ablation prints how many LIVE slots it COULD have moved**, so "no effect" is separable
 from "never fired".
 

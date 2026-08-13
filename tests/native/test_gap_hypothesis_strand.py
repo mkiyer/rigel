@@ -219,15 +219,15 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
 
     Grouping by path is right — it **is** one path, and one hypothesis is the correct count. ⛔ But the
     hypothesis carries ONE ``sj_strand``, and taking the first supporter's silently asserts a strand the
-    evidence does not support: swap the two GTF lines and the answer flips.
+    evidence does not support: swap the two GTF boundaries and the answer flips.
 
     ⭐ ``AMBIGUOUS`` is what that state is called everywhere else in this codebase — the fragment-level
     ``sj_strand`` uses it for exactly this, "contradictory evidence rather than missing evidence", and
     ``deposit`` already refuses to credit a junction on it. Reusing the value keeps one vocabulary.
 
     ⚠ Unreachable on human data — **0 of 404,168** junction coordinates are annotated on both strands,
-    and the index warns that it is biologically impossible. Fixed anyway because it is three lines and
-    the alternative is an answer that depends on GTF line order.
+    and the index warns that it is biologically impossible. Fixed anyway because it is three boundaries and
+    the alternative is an answer that depends on GTF boundary order.
     """
     hypotheses = _hypotheses(scanned, _record(scanned, 3050))
     spliced = [(path, strand) for path, strand in hypotheses if path]
@@ -239,7 +239,7 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
     assert path == [(3200, 3600)]
     assert strand == int(Strand.AMBIGUOUS), (
         f"the merged hypothesis reports strand {strand}, but its two supporters disagree. Taking the "
-        f"first supporter's strand makes the answer depend on GTF line order."
+        f"first supporter's strand makes the answer depend on GTF boundary order."
     )
     assert (
         len(

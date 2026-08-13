@@ -220,7 +220,7 @@ def main() -> int:
     for arm_name, title in (("gdna", "gDNA arm"), ("rna", "RNA arm (target = UNSPLICED RNA units)")):
         print()
         print(f"  ② THE ASSEMBLER'S OWN ERROR · {title}")
-        print("     ⭐ O = perfect masses in. S = O plus each component's OWN true per-line share.")
+        print("     ⭐ O = perfect masses in. S = O plus each component's OWN true per-boundary share.")
         print(f"    {'panel/condition':<26} {'arm':<11} {'O−Fo':>9} {'S−Fo':>9} {'O−S':>9} "
               f"{'O−F':>9} {'S−F':>9} {'P−Fo':>9}")
         print("    " + "-" * 106)

@@ -54,7 +54,7 @@ GENOME = 70_000
 #:
 #: g6/t_mixed — three exons, so a fragment can carry an observed splice AND a gap intron.
 #: g7/t_two_{a,b} — two isoforms whose gap introns DISAGREE, which is the deferral case.
-#: (GTF is 1-based inclusive; the 0-based half-open geometry each line produces is in the comment.)
+#: (GTF is 1-based inclusive; the 0-based half-open geometry each boundary produces is in the comment.)
 GTF = (
     # t_mixed exons (62000,62200) (62400,62600) (62800,63000); introns (62200,62400) (62600,62800)
     'chr1\ttest\texon\t62001\t62200\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed";\n'

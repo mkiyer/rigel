@@ -5,8 +5,8 @@
 ``_accumulator_reference.py`` is the executable specification; the native accumulator is required to
 reproduce it byte for byte. This module is what "correct" means for both.
 
-THE RULE UNDER TEST, in five lines. The genome is a graph: REGIONS are half-open intervals tiling each
-reference, and the 0-bp LINES between adjacent regions are CONTIGUOUS boundaries. A JUNCTION boundary is a directed
+THE RULE UNDER TEST, in five boundaries. The genome is a graph: REGIONS are half-open intervals tiling each
+reference, and the 0-bp BOUNDARIES between adjacent regions are CONTIGUOUS boundaries. A JUNCTION boundary is a directed
 donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
 gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; boundaries
 count fragments CROSSING. Each population stores only the channels something READS — an integer count, a
@@ -14,7 +14,7 @@ fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a region and
 ``Σ L``, and on the contiguous boundaries the CONSERVED MASS, which sums to one per fragment.
 
 ⚠ **No partitioning.** Every crossed boundary receives the FULL weight. The chance that a length-``L``
-fragment crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
+fragment crosses a given boundary is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
 every fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys
 that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**.
 """
@@ -52,7 +52,7 @@ def close(got: float, want: float, deposits: int) -> bool:
 
 #: chr1 cuts   0    100   200   201   400   900   1000
 #: regions        n0    n1    n2*   n3    n4    n5      (* n2 is 1 bp: [200,201))
-#: lines           1     2     3     4     5          (local cut index)
+#: boundaries           1     2     3     4     5          (local cut index)
 CHR1_CUTS = [0, 100, 200, 201, 400, 900, 1000]
 CHR2_CUTS = [0, 500, 1000]
 
@@ -60,7 +60,7 @@ CHR2_CUTS = [0, 500, 1000]
 CHR1_TYPES = [0, 2, 2, 1, 2, 0]
 CHR2_TYPES = [0, 2]
 
-#: an annotated intron whose endpoints are cuts 3 and 5, so it SWALLOWS the line at cut 4
+#: an annotated intron whose endpoints are cuts 3 and 5, so it SWALLOWS the boundary at cut 4
 JUNCTION = (0, 201, 900, Strand.POS)
 
 
@@ -74,9 +74,9 @@ def _acc(junctions=(), **kw):
     return Accumulator(_partition(junctions), **kw)
 
 
-def _boundary(ref, line):
-    """Global contiguous-boundary id of the line at local cut index ``line``."""
-    return (0 if ref == 0 else len(CHR1_CUTS) - 2) + line - 1
+def _boundary(ref, boundary):
+    """Global contiguous-boundary id of the boundary at local cut index ``boundary``."""
+    return (0 if ref == 0 else len(CHR1_CUTS) - 2) + boundary - 1
 
 
 
@@ -130,15 +130,15 @@ def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
     assert t.boundary_unspliced_count.sum() == 0
 
 
-def test_a_fragment_ENDING_AT_a_line_does_not_cross_it():
-    """A line is 0 bp wide: crossing needs a base on each side."""
+def test_a_fragment_ENDING_AT_a_boundary_does_not_cross_it():
+    """A boundary is 0 bp wide: crossing needs a base on each side."""
     acc = _acc()
     acc.deposit(0, 120, 200)
     assert acc.tally.boundary_unspliced_count.sum() == 0
     assert int(acc.tally.region_contained_count[_region(0, 1), 0]) == 1
 
 
-def test_a_fragment_STARTING_AT_a_line_does_not_cross_it():
+def test_a_fragment_STARTING_AT_a_boundary_does_not_cross_it():
     acc = _acc()
     acc.deposit(0, 201, 390)
     assert acc.tally.boundary_unspliced_count.sum() == 0
@@ -147,7 +147,7 @@ def test_a_fragment_STARTING_AT_a_line_does_not_cross_it():
 
 def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FULL_weight():
     acc = _acc()
-    acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
+    acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> boundaries at 200, 201, 400
     t = acc.tally
     assert [int(t.boundary_unspliced_count[_boundary(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
     quantum = 1.0 / (350 - 1)
@@ -155,11 +155,11 @@ def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FU
     assert t.region_contained_count.sum() == 0
 
 
-def test_a_fragment_covering_a_1bp_region_credits_BOTH_lines_and_conserves_its_mass():
+def test_a_fragment_covering_a_1bp_region_credits_BOTH_boundaries_and_conserves_its_mass():
     """1 bp regions are legal — 15,687 of them at human scale — and nothing may assume length > 1.
 
     ⭐ The 1 bp region is the sharpest case for the CONSERVED MASS: its slice is a single base shared
-    between two bounding lines, so the fragment's three slices are 50 / 1 / 99 bases of a 150 bp
+    between two bounding boundaries, so the fragment's three slices are 50 / 1 / 99 bases of a 150 bp
     molecule and must still sum to exactly one fragment.
     ⚠ This test used to assert a ``region_spanning`` deposit here. That bank was removed on evidence, and
     the mass is what now makes the case observable — a strictly stronger statement, since a count of 1
@@ -176,7 +176,7 @@ def test_a_fragment_covering_a_1bp_region_credits_BOTH_lines_and_conserves_its_m
     )
 
 
-def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_one_line():
+def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_one_boundary():
     """``contained`` needs ``L <= region``. One base longer and the fragment is a CROSSING instead, and it
     touches the region axis nowhere at all — that axis has exactly one population now."""
     acc = _acc()
@@ -191,8 +191,8 @@ def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_on
 # ---------------------------------------------------------------------------
 
 
-def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
-    """⭐ The defect this design removes. The intron [201,900) swallows the line at 400; the old rule,
+def test_a_spliced_jump_deposits_NOTHING_on_the_boundaries_it_splices_over():
+    """⭐ The defect this design removes. The intron [201,900) swallows the boundary at 400; the old rule,
     which asked only "does another slice follow?", could not tell that from a contiguous crossing."""
     acc = _acc(junctions=[JUNCTION])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
@@ -200,33 +200,33 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     length = (950 - 150) - (900 - 201)
     assert int(t.sj_count[0, 0]) == 1
     assert close(float(t.sj_inv_length_sum[0]), 1.0 / (length - 1), 1)
-    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 0, "the swallowed line at 400"
+    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 0, "the swallowed boundary at 400"
     assert int(t.boundary_spliced_count[_boundary(0, 4), 0]) == 0
 
 
 def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
-    """A spliced fragment is certified RNA — gDNA cannot be spliced — so a line its block genuinely
+    """A spliced fragment is certified RNA — gDNA cannot be spliced — so a boundary its block genuinely
     crosses is the cleanest RNA marker available at a boundary."""
     acc = _acc(junctions=[JUNCTION])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
-    assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
+    assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, "block [150,201) crosses the boundary at 200"
     assert t.boundary_unspliced_count.sum() == 0
 
 
 def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segments():
-    """An unannotated intron sits strictly inside n4 = [400,900), so segment 1 crosses the line at 400
-    and segment 2 crosses the line at 900 — two segments, each touching a line.
+    """An unannotated intron sits strictly inside n4 = [400,900), so segment 1 crosses the boundary at 400
+    and segment 2 crosses the boundary at 900 — two segments, each touching a boundary.
 
-    ⭐ Every segment touches a line, so the conservation law applies unchanged and the mass sums to
+    ⭐ Every segment touches a boundary, so the conservation law applies unchanged and the mass sums to
     exactly one fragment. ⚠ This is the case the law's "deposited, unspliced, annotated" wording exists
-    for: had either segment touched NO line, its bases would have had nowhere conserved to go and the
+    for: had either segment touched NO boundary, its bases would have had nowhere conserved to go and the
     total would be a PARTIAL."""
     acc = _acc()
     acc.deposit(0, 380, 950, observed_introns=[(500, 600)])
     t = acc.tally
-    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 1, "line 400, from segment 1"
-    assert int(t.boundary_unspliced_count[_boundary(0, 5), 0]) == 1, "line 900, from segment 2"
+    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 1, "boundary 400, from segment 1"
+    assert int(t.boundary_unspliced_count[_boundary(0, 5), 0]) == 1, "boundary 900, from segment 2"
     mass = int(t.boundary_unspliced_mass.sum())
     assert abs(mass - 1.0) <= 8 * EPS, (
         f"a two-segment fragment deposited {mass} fragments, not 1"
@@ -237,27 +237,27 @@ def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
     """Owner ruling: unannotated junctions are disproportionately artifactual, so they deposit on the
     UNSPLICED channel and compete with gDNA rather than being certified RNA."""
     acc = _acc(junctions=[JUNCTION])
-    # [200,400) is NOT annotated; it swallows the line at 201
+    # [200,400) is NOT annotated; it swallows the boundary at 201
     acc.deposit(0, 50, 500, observed_introns=[(200, 400)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.sj_count.sum() == 0
     assert t.boundary_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
     assert int(t.boundary_unspliced_count[_boundary(0, 1), 0]) == 1, (
-        "block [50,200) crosses the line at 100"
+        "block [50,200) crosses the boundary at 100"
     )
-    assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 0, "the swallowed line at 201"
+    assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 0, "the swallowed boundary at 201"
     assert t.qc["unannotated_introns"] == 1
 
 
-def test_a_fragment_straddling_two_regions_without_crossing_a_line_is_NOT_contained():
-    """⚠ An unannotated intron can swallow every line between two blocks. The fragment then crosses
+def test_a_fragment_straddling_two_regions_without_crossing_a_boundary_is_NOT_contained():
+    """⚠ An unannotated intron can swallow every boundary between two blocks. The fragment then crosses
     nothing, yet it straddles two regions — crediting it as *contained* would put its whole length in a
     region it only partly overlaps. It deposits on no object, and the start count is what keeps that
     visible rather than silent."""
     acc = _acc()
     acc.deposit(
         0, 120, 500, observed_introns=[(200, 400)]
-    )  # blocks land in n1 and n4, crossing no line
+    )  # blocks land in n1 and n4, crossing no boundary
     t = acc.tally
     assert t.boundary_unspliced_count.sum() == 0
     assert t.region_contained_count.sum() == 0
@@ -490,11 +490,11 @@ def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragmen
 
 
 def test_the_per_reference_offsets_do_not_bleed():
-    """chr1's fragment crosses its lines 2 and 3; chr2's crosses chr2's line 1. Nothing lands on a
+    """chr1's fragment crosses its boundaries 2 and 3; chr2's crosses chr2's boundary 1. Nothing lands on a
     reference it did not come from — the failure mode that once dropped 476,719 of 476,732 fragments."""
     acc = _acc()
-    acc.deposit(0, 150, 300)  # crosses the lines at 200 AND 201
-    acc.deposit(1, 400, 700)  # crosses chr2's line at 500
+    acc.deposit(0, 150, 300)  # crosses the boundaries at 200 AND 201
+    acc.deposit(1, 400, 700)  # crosses chr2's boundary at 500
     t = acc.tally
     assert [int(t.boundary_unspliced_count[e, 0]) for e in range(acc.n_boundaries)] == [0, 1, 1, 0, 0, 1]
     assert int(t.boundary_unspliced_count.sum()) == 3
@@ -530,7 +530,7 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
     acc = _acc(junctions=[JUNCTION])
     acc.deposit(0, 10, 90)  # contained in n0 — intergenic
     acc.deposit(0, 210, 390)  # contained in n3 — intronic
-    acc.deposit(0, 380, 420)  # crosses the line at 400 only — flanks intron|exon
+    acc.deposit(0, 380, 420)  # crosses the boundary at 400 only — flanks intron|exon
     acc.deposit(0, 950, 990)  # contained in n5 — intergenic
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS
@@ -566,8 +566,8 @@ def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
 # `test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequenced`.
 
 
-def test_a_multi_line_crossing_enters_NO_pool():
-    """A splash read straddles ONE probe boundary. A fragment crossing several lines has no single
+def test_a_multi_boundary_crossing_enters_NO_pool():
+    """A splash read straddles ONE probe boundary. A fragment crossing several boundaries has no single
     structural class, and an impure pool is worse than a missing one."""
     acc = _acc()
     acc.deposit(0, 150, 500)
@@ -615,7 +615,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(reg
 
 
 def test_the_crossing_COUNT_recovers_density_times_mean_length():
-    """The companion identity ``E[count] = ρ·(E[L] − 1)``. Together with the line above, this is the 2×2
+    """The companion identity ``E[count] = ρ·(E[L] − 1)``. Together with the boundary above, this is the 2×2
     that separates gDNA from RNA by fragment length alone."""
     ref_len, rho = 200_000, 0.05
     acc = _uniform_accumulator(200, ref_len)
@@ -773,7 +773,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     and removing it took away the only REGION-axis population a spliced fragment can reach, since a
     spliced fragment can never be *contained* (both endpoints of an annotated intron are cuts). The
     claim is about the CONVENTION, not about that bank, so it now rides on the two banks a spliced
-    fragment does reach: ``boundary_spliced_count`` beside ``boundary_unspliced_count`` at the SAME line, and
+    fragment does reach: ``boundary_spliced_count`` beside ``boundary_unspliced_count`` at the SAME boundary, and
     ``sj_count``. ⛔ Deleting it with its old vehicle would have retired the only gate on a rule this
     codebase has already broken once.
     """
@@ -783,8 +783,8 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
         0, 150, 950, observed_introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
     )
     t = acc.tally
-    # ⭐ ONE line, TWO banks, one column: the unspliced fragment and the spliced one both cross the
-    # line at 200, and both are genome-minus. A sense-relative convention would split them.
+    # ⭐ ONE boundary, TWO banks, one column: the unspliced fragment and the spliced one both cross the
+    # boundary at 200, and both are genome-minus. A sense-relative convention would split them.
     assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, "genome minus"
     assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
         "the spliced one is ANTISENSE to its + junction, and still books genome minus"
@@ -842,7 +842,7 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 # Owner ruling, 2026-07-29 (design §9.1). A `SPLICE_IMPLICIT` fragment overlaps an annotated intron and
 # matches in every other way, so it DOES deposit — the only thing missing is the sequenced motif, and
 # `sj_implicit` records that. But when several candidate transcripts imply DIFFERENT INTRON SETS, the
-# implied set fixes `L`, both quanta, the pool bin, the segment list and therefore which lines are
+# implied set fixes `L`, both quanta, the pool bin, the segment list and therefore which boundaries are
 # crossed. There is no partial answer: it cannot deposit spliced (which junction is the unknown), and it
 # cannot deposit unspliced either, because `L` involves an intron and does not fit the length
 # distribution unless one candidate intron is cut out — the very choice in doubt. Forcing a choice is
@@ -853,7 +853,7 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     """⛔ The whole point: an undetermined path is not a partial deposit, and not a loss either.
 
-    The fragment used here would otherwise deposit richly — it crosses lines, uses an annotated junction
+    The fragment used here would otherwise deposit richly — it crosses boundaries, uses an annotated junction
     and lands in a length pool — so a leak into any one bank is visible. And it must be RETAINED: this is
     the population the second pass drains, so a silent drop would understate what that pass owes.
     """
@@ -1086,9 +1086,9 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     boundary_acc.deposit(0, 120, 320, align_strand=Strand.POS)
     boundary_acc.deposit(0, 120, 320, align_strand=Strand.NEG)
     e = boundary_acc.tally
-    line = _boundary(0, 2)
-    assert int(e.boundary_unspliced_count[line].sum()) == 2
-    assert close(float(e.boundary_unspliced_inv_length_sum[line]), 2.0 / (200 - 1), 2)
+    boundary = _boundary(0, 2)
+    assert int(e.boundary_unspliced_count[boundary].sum()) == 2
+    assert close(float(e.boundary_unspliced_inv_length_sum[boundary]), 2.0 / (200 - 1), 2)
 
 
 def test_the_density_FIELD_NAME_is_gone_everywhere():

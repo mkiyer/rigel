@@ -157,7 +157,7 @@ def _bar(frac: float, width: int = 36) -> str:
 
 def format_report(agg: dict, label: str) -> str:
     total = agg["total_seconds"]["mean"]
-    lines = [
+    boundaries = [
         "",
         "=" * 74,
         f"  RIGEL PROFILE — {label}   ({agg['n_runs']} run(s))",
@@ -173,14 +173,14 @@ def format_report(agg: dict, label: str) -> str:
         st = agg["stages"][lbl]
         sec, sd = st["seconds"]["mean"], st["seconds"]["stdev"]
         pct = (sec / total) if total > 0 else 0.0
-        lines.append(f"  {lbl:<12} {sec:>10.3f} {sd:>9.3f} {100*pct:>7.1f}%  {_bar(pct)}")
+        boundaries.append(f"  {lbl:<12} {sec:>10.3f} {sd:>9.3f} {100*pct:>7.1f}%  {_bar(pct)}")
     other = agg["other_seconds"]["mean"]
     opct = (other / total) if total > 0 else 0.0
-    lines.append(f"  {'other':<12} {other:>10.3f} {'':>9} {100*opct:>7.1f}%  {_bar(opct)}")
-    lines.append("  " + "-" * 70)
-    lines.append(f"  {'TOTAL':<12} {total:>10.3f} {agg['total_seconds']['stdev']:>9.3f} {100.0:>7.1f}%")
-    lines.append("=" * 74)
-    return "\n".join(lines)
+    boundaries.append(f"  {'other':<12} {other:>10.3f} {'':>9} {100*opct:>7.1f}%  {_bar(opct)}")
+    boundaries.append("  " + "-" * 70)
+    boundaries.append(f"  {'TOTAL':<12} {total:>10.3f} {agg['total_seconds']['stdev']:>9.3f} {100.0:>7.1f}%")
+    boundaries.append("=" * 74)
+    return "\n".join(boundaries)
 
 
 def _build_config(args: argparse.Namespace) -> PipelineConfig:

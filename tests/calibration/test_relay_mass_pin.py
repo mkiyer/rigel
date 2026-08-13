@@ -472,7 +472,7 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
 
     The fixture disagrees on purpose: the field on the FIRST region alone is scaled 10x, so the level
     arriving at the BOUNDARY is 10x the BOUNDARY's own measurement, and the BOUNDARY's answer must be its own."""
-    BOUNDARY = 1  # chain N E N E N E N E N → the intergenic|exon line, structurally pure gDNA
+    BOUNDARY = 1  # chain N E N E N E N E N → the intergenic|exon boundary, structurally pure gDNA
     levels = []
     for rho_first in (1.0, 10.0):
         walk, _, _ = _relay_walk(_uniform_field_chain(rna=_RNA, rho=1.0, rho_first=rho_first))

@@ -73,7 +73,7 @@ def mini_fasta_file(tmp_path: Path) -> Path:
     chr1: 2000 bp, chr2: 500 bp (chr2 has no genes — tests intergenic).
     """
     fasta_path = tmp_path / "genome.fa"
-    # Write a simple FASTA with 80-char line width
+    # Write a simple FASTA with 80-char boundary width
     with open(fasta_path, "w") as f:
         f.write(">chr1\n")
         seq1 = "N" * 2000

@@ -74,7 +74,7 @@ def test_from_region_df_requires_signature():
 #
 # ⭐ Topology deliberately MULTI-REFERENCE with three different shapes, because the whole class of
 # defect here is "the first reference happens to work". ref0 = 3 regions / 2 boundaries, ref1 = 2 regions /
-# 1 boundary, ref2 = 1 region / 0 boundaries (a legal reference that owns no line at all). E == N − n_refs
+# 1 boundary, ref2 = 1 region / 0 boundaries (a legal reference that owns no boundary at all). E == N − n_refs
 # only counts non-empty refs: 6 regions, 3 refs, 3 boundaries.
 REF_ID = np.array([0, 0, 0, 1, 1, 2], dtype=np.int32)
 REF_REGION_OFFSETS = np.array([0, 3, 5, 6], dtype=np.int64)
@@ -82,7 +82,7 @@ REF_BOUNDARY_OFFSETS = np.array([0, 2, 3, 3], dtype=np.int64)
 
 
 def test_region_right_boundary_is_minus_one_at_every_reference_end():
-    # region 2 is chr0's last, region 4 chr1's last, region 5 chr2's only — none owns a line to its right.
+    # region 2 is chr0's last, region 4 chr1's last, region 5 chr2's only — none owns a boundary to its right.
     np.testing.assert_array_equal(region_right_boundary(REF_ID), [0, 1, -1, 2, -1, -1])
 
 

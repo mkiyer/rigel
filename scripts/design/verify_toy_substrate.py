@@ -31,9 +31,9 @@ holds*, which no existing gate does:
 * the path is the fragment's contiguous genomic SEGMENTS; a junction splits it in two;
 * ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
   fragment, so its sum is the deposited count;
-* a cut line strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
+* a cut boundary strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
   junction, else ``boundary_unspliced``;
-* a region between two consecutively-crossed lines OF ONE SEGMENT is SPANNED;
+* a region between two consecutively-crossed boundaries OF ONE SEGMENT is SPANNED;
 * every annotated junction used gets ``sj_count`` +1;
 * CONTAINED — ``region_contained`` — iff the path used no junction AND its first and last bases are in
   the same region. ⛔ A spliced fragment is never contained.
@@ -41,10 +41,10 @@ holds*, which no existing gate does:
 ⭐⭐ **What that predicts for a ONE-transcript toy, and it is worth stating before measuring it:** on a
 pure-mRNA two-exon transcript whose exons ARE the regions, every fragment deposits either one
 ``region_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``boundary_unspliced`` at the two
-``intron|exon`` lines is **exactly zero**, because mature RNA cannot cross an exon↔intron boundary
+``intron|exon`` boundaries is **exactly zero**, because mature RNA cannot cross an exon↔intron boundary
 contiguously. ⛔ **That last clause is NOT "zero everywhere"**, and the difference is the whole reason the
 structural gate is now a SET: as soon as another transcript's exon spans the intron, mature RNA crosses
-that line legitimately. On `splice_both_strands` TB+ and TC− both do, at all six interior BOUNDARIES.
+that boundary legitimately. On `splice_both_strands` TB+ and TC− both do, at all six interior BOUNDARIES.
 
 ⭐⭐⭐ **ANY NUMBER OF TRANSCRIPTS, ON EITHER STRAND (2026-08-05).** The predecessor refused a ``−``
 transcript and refused more than one, which made the rung the splice-flux reframe must be derived against
@@ -320,11 +320,11 @@ class TruthTally:
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(self.cuts, seg_start, side="right"))
             last = int(np.searchsorted(self.cuts, seg_end, side="left"))
-            for line in range(first, last):
-                boundary[line - 1] += 1
-            for line in range(first, last - 1):
-                self.region_spanning[line] += 1
-        # ⚠ ``line`` indexes ``cuts``; boundary ``line-1`` and region ``line`` follow the reference exactly.
+            for boundary in range(first, last):
+                boundary[boundary - 1] += 1
+            for boundary in range(first, last - 1):
+                self.region_spanning[boundary] += 1
+        # ⚠ ``boundary`` indexes ``cuts``; boundary ``boundary-1`` and region ``boundary`` follow the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
         if not sj_ids and self._region_of(first_base) == self._region_of(last_base):

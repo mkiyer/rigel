@@ -5,7 +5,7 @@
 be gDNA, so ``boundary_spliced`` is certified RNA — and the obvious next step is to make that certified count
 speak about the slot's own gDNA-vs-RNA split. It cannot, and this measures why.
 
-**The derivation being tested.** At one line the unspliced bank holds ``M`` crossings split ``f_g``
+**The derivation being tested.** At one boundary the unspliced bank holds ``M`` crossings split ``f_g``
 gDNA / ``1−f_g`` RNA, and the certified bank holds ``S`` crossings that spliced elsewhere. The two are ONE
 population of contiguous crossings split by whether a splice was VISIBLE, so with ``q`` that visibility
 probability::
@@ -60,11 +60,11 @@ the evidence has not added information; it has added a prior** (TRAPS: honesty-m
 
 **4. And ``q`` is a property of the RNA GEOMETRY, not of the composition.** Per-BOUNDARY ``q`` at ``g00`` vs
 ``g50`` agrees to a Spearman **ρ = 0.9257** on 5,241 shared BOUNDARIES — a 50-point swing in the gDNA fraction
-barely moves it, because ``q`` asks only "of the RNA crossing this line, what fraction shows a splice?".
+barely moves it, because ``q`` asks only "of the RNA crossing this boundary, what fraction shows a splice?".
 ⭐ So the missing quantity is
 computable in principle: ``1−q`` is the share of the crossing opportunity that fits inside the unbroken
-EXONIC reach either side of the line. ⛔ But that array does not exist —
-``splice_graph.build_contiguous_boundary_reach_arrays`` is deliberately GENOMIC (a contiguous line is also
+EXONIC reach either side of the boundary. ⛔ But that array does not exist —
+``splice_graph.build_contiguous_boundary_reach_arrays`` is deliberately GENOMIC (a contiguous boundary is also
 crossed by nascent RNA, which does not splice), and the exonic version is per-TRANSCRIPT and
 abundance-weighted, which calibration does not know at pass-0. That is the build this channel is blocked
 on, and it needs its own brute-force enumeration gate.
@@ -129,7 +129,7 @@ def measure(parts) -> dict:
         C_g=Cg,
         C_R=Cr,
         M=M,
-        # the splice VISIBILITY: of the RNA that crossed this line, the share that showed a splice.
+        # the splice VISIBILITY: of the RNA that crossed this boundary, the share that showed a splice.
         q=S / np.maximum(S + Cr, 1e-12),
         true_fg=Cg / M,
         # ⭐ what the RAW-COUNT term alone would answer: psi's reference (Beta(½,½)) updated by S
@@ -214,7 +214,7 @@ def main() -> int:
             r = float(spearmanr(xa, xb).statistic)
             print(f"\n⭐ q is GEOMETRY, not composition: q(g00) vs q(g50) on {xa.size:,} shared BOUNDARIES "
                   f"— Spearman ρ = {r:.4f}")
-            print("   ⇒ the missing quantity is the unbroken EXONIC reach either side of the line, which "
+            print("   ⇒ the missing quantity is the unbroken EXONIC reach either side of the boundary, which "
                   "is\n     annotation-derivable in principle and does NOT exist as an array today.")
     return 0
 
