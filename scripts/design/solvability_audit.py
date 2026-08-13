@@ -4,7 +4,7 @@
 ⛔ **THE MISTAKE THIS REPLACES.** ``pass0_vs_oracle.py`` scores every object that carries mass and
 mass-weights the result. In pass-0 that is the wrong question. Pass-0 is the **prior-free** solve, and
 its job is not to be accurate everywhere — it is to produce a substrate the gDNA hyperprior can be
-fitted against. A node with no own evidence that reports ``f_g ≈ ½`` at **zero precision** is not
+fitted against. A region with no own evidence that reports ``f_g ≈ ½`` at **zero precision** is not
 making an error; it is correctly saying *I cannot be solved without a prior*, which is exactly true.
 Counting that as error buries the thing that actually matters underneath it.
 
@@ -80,8 +80,8 @@ def _sibling(name: str):
 P0 = _sibling("pass0_vs_oracle.py")
 
 from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
-from rigel.calibration.node_chain import EDGE, NODE  # noqa: E402
-from rigel.calibration.node_geometry import g1_locked  # noqa: E402
+from rigel.calibration.region_chain import EDGE, REGION  # noqa: E402
+from rigel.calibration.region_geometry import g1_locked  # noqa: E402
 from rigel.calibration.simplex_logodds import _logodds_grid  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -93,11 +93,11 @@ _EPS = 1.0e-9
 Z_BANDS = ((0.0, 1.0), (1.0, 2.0), (2.0, 5.0), (5.0, np.inf))
 
 #: The own-evidence channels a slot can have in pass-0. ⚠ ``length`` is absent deliberately: the
-#: per-node length likelihood is gated OFF, so it cannot contribute to what the SOLVER could get
+#: per-region length likelihood is gated OFF, so it cannot contribute to what the SOLVER could get
 #: right. C_info's identification test is a statement about the payload, not about the solver.
 #:
 #: ⛔ **THESE OVERLAP AND ARE NOT A PARTITION**, which a first draft of this instrument got wrong.
-#: ``tau_lam = i_strand + tau_fac``, so a single-stranded INTRON node has BOTH — and that is the
+#: ``tau_lam = i_strand + tau_fac``, so a single-stranded INTRON region has BOTH — and that is the
 #: best-evidenced kind of object there is, not a bookkeeping error. Only ``none`` is exclusive of the
 #: rest. Mass summed over these rows therefore DOUBLE-COUNTS, and the report says so; the partition
 #: that does add up is determined / undetermined.
@@ -126,19 +126,19 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     """Which own-evidence channel(s) can speak at each slot — the solvability question, per channel.
 
     ⚠ **Overlapping capability flags, NOT a partition.** ``strand`` and ``factory`` are both live on a
-    single-stranded intron node, because ``tau_lam`` is their SUM. Only ``none`` excludes the others.
+    single-stranded intron region, because ``tau_lam`` is their SUM. Only ``none`` excludes the others.
 
     ⭐ Decomposed from ``tau_lam`` rather than re-derived: the factory arm is recoverable exactly by
     re-reading the captured ``intron_prior`` through the same ``density_factor_precision`` the solver
     used, and with the length channel off, whatever remains of ``tau_lam`` is the strand arm. So these
     are the solver's own numbers, split, not a second opinion about them.
 
-    ⛔ **``locked`` IS THE TRAPS: no-magic-numbers CLASS ON BOTH AXES** (:func:`~rigel.calibration.node_geometry.g1_locked`).
-    It used to be ``~solvable & (kind == NODE)``, which dropped every structurally-locked **edge** — an
+    ⛔ **``locked`` IS THE TRAPS: no-magic-numbers CLASS ON BOTH AXES** (:func:`~rigel.calibration.region_geometry.g1_locked`).
+    It used to be ``~solvable & (kind == REGION)``, which dropped every structurally-locked **edge** — an
     intergenic↔exon seam, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
     at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
     ignorance. Those objects are the opposite of ignorant: they are structurally certain, and right.
-    ⚠⚠ **This is NOT ``node_init.strand_evidence``'s ``struct_lock``, which is node-only ON PURPOSE** —
+    ⚠⚠ **This is NOT ``region_init.strand_evidence``'s ``struct_lock``, which is region-only ON PURPOSE** —
     that one governs whether a slot may EMIT certainty into its messages, and excludes G1 edges because
     a seam's crossing mass is RNA-contaminated. Two questions, one word; see ``g1_locked``.
 
@@ -154,8 +154,8 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
             f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
-    # TRAPS: no-magic-numbers, from the ONE definition (`node_geometry.g1_locked`) — see there for why this is both axes
-    # and why `node_init.struct_lock` is deliberately NOT.
+    # TRAPS: no-magic-numbers, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes
+    # and why `region_init.struct_lock` is deliberately NOT.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
     lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
     fac = density_factor_precision(capture.get("intron_prior"), lam_grid)
@@ -188,15 +188,15 @@ def standardised_discrepancy(f_pred, f_true, var_log, fg_grid):
     return np.where((sd <= _EPS) & (np.abs(gap) <= _EPS), 0.0, z), gap, sd
 
 
-def audit(m, *, axis: str = "node", config=None) -> dict:
+def audit(m, *, axis: str = "region", config=None) -> dict:
     """Partition one axis into undetermined / solvable-right / solvable-wrong and standardise."""
     config = config or CalibrationConfig()
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
-    n_nodes, n_edges = int(m.payload.n_nodes), int(m.payload.n_edges)
+    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
 
     slots = channel_masks(cap, chain, config)
     per_axis = {
-        name: P0._project(mask, chain, n_nodes, n_edges)[axis] for name, mask in slots.items()
+        name: P0._project(mask, chain, n_regions, n_edges)[axis] for name, mask in slots.items()
     }
 
     g_p = np.asarray(getattr(m.arms["pass0"], f"mass_gdna_{axis}"), np.float64)
@@ -209,10 +209,10 @@ def audit(m, *, axis: str = "node", config=None) -> dict:
 
     # the solver's per-slot state, projected onto this axis
     def onto(values):
-        out = np.zeros(n_nodes if axis == "node" else n_edges, np.float64)
+        out = np.zeros(n_regions if axis == "region" else n_edges, np.float64)
         kind = np.asarray(chain.kind)
         obj = np.asarray(chain.obj_idx, np.int64)
-        sel = (kind == NODE) if axis == "node" else (kind != NODE)
+        sel = (kind == REGION) if axis == "region" else (kind != REGION)
         out[obj[sel]] = np.asarray(values, np.float64)[sel]
         return out
 
@@ -263,7 +263,7 @@ def undetermined_overreach_rows(a: dict) -> list[tuple]:
     An undetermined object at ``f_g = 0.83`` is **not** honest ignorance. It is the relay and the
     population reference asserting an answer where the object had none, and because the class is
     excluded from every error total, the assertion is invisible. Measured cost of that blindness on the
-    gDNA ladder: on ``gdna_g25_ss_0.50_nrna_none_capture_off``, **87 exon nodes are driven to
+    gDNA ladder: on ``gdna_g25_ss_0.50_nrna_none_capture_off``, **87 exon regions are driven to
     ``f_g = 0.829`` against a truth of 0.009 — 395,251 fragments of error, 0.0 % of it scored**, and
     that is 3× the error on the row where the defect was first found.
 
@@ -361,7 +361,7 @@ def report(m, a: dict, config=None) -> None:
               f"{err[mask].sum() / max(err_all, 1):>6.1%}")
     print()
     print("   by own-evidence CHANNEL (which can speak here at all). ⚠ THESE OVERLAP — a")
-    print("   single-stranded intron node has both strand and factory — so mass DOUBLE-COUNTS here.")
+    print("   single-stranded intron region has both strand and factory — so mass DOUBLE-COUNTS here.")
     print("   The partition that adds up is the determined/undetermined split above.")
     for name in CHANNELS:
         c = a["channels"][name] & live
@@ -450,15 +450,15 @@ def report(m, a: dict, config=None) -> None:
 #: next, so they are reported in this order and read top-down: the first one that is wrong explains
 #: everything below it, and fixing anything lower before it is wasted work.
 #:
-#: 1. ``node/intergenic`` — structurally pure gDNA. If these are wrong, nothing else can be right.
-#: 2. ``node/intron``     — the DENSITY PEEL: intron density against the intergenic background. On an
+#: 1. ``region/intergenic`` — structurally pure gDNA. If these are wrong, nothing else can be right.
+#: 2. ``region/intron``     — the DENSITY PEEL: intron density against the intergenic background. On an
 #:                          unstranded library this is the ONLY own-evidence channel there is.
-#: 3. ``edge/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron node.
-#: 4. ``edge/intergenic|exon``  — must impute from the resolved intergenic node.
+#: 3. ``edge/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron region.
+#: 4. ``edge/intergenic|exon``  — must impute from the resolved intergenic region.
 CHAIN = (
-    "node/intergenic",
-    "node/intron",
-    "node/exon",
+    "region/intergenic",
+    "region/intron",
+    "region/exon",
     "edge/intergenic|intron",
     "edge/intron|exon",
     "edge/intergenic|exon",
@@ -469,13 +469,13 @@ CHAIN = (
 
 
 def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
-    """Label each object by what it IS, structurally — a node's region type, or for a contiguous edge
-    the PAIR of node types it separates.
+    """Label each object by what it IS, structurally — a region's region type, or for a contiguous edge
+    the PAIR of region types it separates.
 
     ⭐ The edge pair is the axis the debug chain turns on. An ``intron|exon`` line and an
     ``intergenic|exon`` line are the same kind of object to the solver and completely different
-    problems: the first must inherit its answer from an intron node the density peel resolved, the
-    second from a structurally-locked intergenic node. Lumping them as "edges" hides which
+    problems: the first must inherit its answer from an intron region the density peel resolved, the
+    second from a structurally-locked intergenic region. Lumping them as "edges" hides which
     propagation path is broken.
 
     ⚠ The pair is unordered (``intron|exon`` and ``exon|intron`` are one class) — the chain is
@@ -489,20 +489,20 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
-    n = int(m.payload.n_nodes) if axis == "node" else int(m.payload.n_edges)
+    n = int(m.payload.n_regions) if axis == "region" else int(m.payload.n_edges)
     out = {c: np.zeros(n, bool) for c in CHAIN}
 
-    if axis == "node":
+    if axis == "region":
         for t, nm in names.items():
-            key = f"node/{nm}"
+            key = f"region/{nm}"
             if key in out:
                 out[key][rtype == t] = True
         return out
 
-    # a contiguous edge sits at chain slot s between node slots s-1 and s+1
+    # a contiguous edge sits at chain slot s between region slots s-1 and s+1
     for s in np.flatnonzero(kind == EDGE):
         lo, hi = s - 1, s + 1
-        if lo < 0 or hi >= kind.shape[0] or kind[lo] != NODE or kind[hi] != NODE:
+        if lo < 0 or hi >= kind.shape[0] or kind[lo] != REGION or kind[hi] != REGION:
             continue
         a, b = sorted((int(rtype[obj[lo]]), int(rtype[obj[hi]])))
         key = f"edge/{names[a]}|{names[b]}"
@@ -651,7 +651,7 @@ def main() -> int:
     ap.add_argument("--condition", default=None, help="one condition; omit for the whole panel")
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
-    ap.add_argument("--axis", default="node", choices=("node", "edge", "both"))
+    ap.add_argument("--axis", default="region", choices=("region", "edge", "both"))
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")))
     ap.add_argument("--oracle-cache", type=Path, default=None)
     args = ap.parse_args()
@@ -680,12 +680,12 @@ def main() -> int:
             ),
             oracle_cache=args.oracle_cache,
         )
-        for axis in (("node", "edge") if args.axis == "both" else (args.axis,)):
+        for axis in (("region", "edge") if args.axis == "both" else (args.axis,)):
             a = audit(m, axis=axis, config=config)
             if len(names) == 1:
                 report(m, a, config)
                 chain_report(m, a, config)
-            if axis == ("node" if args.axis != "edge" else "edge"):
+            if axis == ("region" if args.axis != "edge" else "edge"):
                 panel.append((name, truth, summarise(a)))
     if len(panel) > 1:
         panel_report(panel)

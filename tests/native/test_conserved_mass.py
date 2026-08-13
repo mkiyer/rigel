@@ -23,7 +23,7 @@ one numeric convention). The banks are float64 fractions; there is no quantum an
 
 ⚠ Claim 3 states the rule a second time, deliberately and in one place only. The specification reaches
 the answer through slices and two ``searchsorted`` calls; this reaches it by asking of every base "which
-node holds you, and which of that node's bounding cuts lie strictly inside this fragment?". Agreement is
+region holds you, and which of that region's bounding cuts lie strictly inside this fragment?". Agreement is
 not automatic — the same shape ``reference_on_real_data.py``'s ``bisect`` walk has against the
 specification's index ranges (``TRAPS: a-test-that-redefines``).
 """
@@ -52,7 +52,7 @@ def budget(deposits: int) -> float:
 
 #: ⭐ The fixture, and every part of it is load-bearing. Lines 1 and 5 have BOTH flanks wider than every
 #: fragment below — the control, where a crossing fragment can only cross that one line. Lines 2, 3 and 4
-#: bound a cluster of 50 bp nodes, so one 300 bp fragment crosses three at once. Under capture that
+#: bound a cluster of 50 bp regions, so one 300 bp fragment crosses three at once. Under capture that
 #: cluster IS the geometry: 40.2 % of gDNA fragments are crossings there against 4.8 % off it.
 CUTS = [0, 400, 1000, 1050, 1100, 1500, 1900]
 LENGTHS = (60, 150, 300)
@@ -60,13 +60,13 @@ MAX_LENGTH = 1000
 
 
 def _partition(cuts=CUTS) -> Partition:
-    return Partition.from_cuts([cuts], node_types=[[0] * (len(cuts) - 1)])
+    return Partition.from_cuts([cuts], region_types=[[0] * (len(cuts) - 1)])
 
 
 def _mass_by_base(cuts, start: int, end: int) -> dict[int, Fraction]:
     """The per-line mass of ONE unspliced fragment, attributed BASE BY BASE.
 
-    Every base is asked which node holds it; the node's two bounding cuts are lines iff they lie
+    Every base is asked which region holds it; the region's two bounding cuts are lines iff they lie
     strictly inside the fragment; the base is split equally between the lines that do bound it. Divided
     by the fragment's length, that is the mass — reached without ever forming a slice.
 
@@ -76,8 +76,8 @@ def _mass_by_base(cuts, start: int, end: int) -> dict[int, Fraction]:
     length = end - start
     out: dict[int, Fraction] = {}
     for position in range(start, end):
-        node = bisect.bisect_right(cuts, position) - 1
-        lines = [i for i in (node, node + 1) if start < cuts[i] < end]
+        region = bisect.bisect_right(cuts, position) - 1
+        lines = [i for i in (region, region + 1) if start < cuts[i] < end]
         for line in lines:
             out[line] = out.get(line, Fraction(0)) + Fraction(1, length * len(lines))
     return out
@@ -111,14 +111,14 @@ def _exact_fragment_mass(partition, cuts, start, end) -> tuple[Fraction, int]:
     outcome = accumulator.deposit(0, start, end)
     assert outcome is DepositOutcome.DEPOSITED
     total = float(np.asarray(accumulator.tally.edge_unspliced_mass, np.float64).sum())
-    contained = int(np.asarray(accumulator.tally.node_contained_count, np.int64).sum())
+    contained = int(np.asarray(accumulator.tally.region_contained_count, np.int64).sum())
     return total, contained
 
 
 def test_the_RULE_conserves_exactly_before_any_quantisation():
     """⭐⭐⭐ **THE LAW ITSELF, in exact rational arithmetic.** ``Σ share == 1`` per crossing fragment.
 
-    Every unspliced path is ONE segment. If it stays inside a node it is ``contained``. Otherwise it has
+    Every unspliced path is ONE segment. If it stays inside a region it is ``contained``. Otherwise it has
     ``n >= 2`` slices: the first crosses right only, the last crosses left only, every interior one
     crosses both. **Every slice has at least one bounding line**, so ``Σ slice_len / L = 1`` exactly and
     nothing is dropped by the "no line here" guard.
@@ -132,7 +132,7 @@ def test_the_RULE_conserves_exactly_before_any_quantisation():
         for start in range(CUTS[0], CUTS[-1] - length + 1):
             by_base = _mass_by_base(CUTS, start, start + length)
             if not by_base:
-                continue  # contained: the node bank holds the whole fragment
+                continue  # contained: the region bank holds the whole fragment
             assert sum(by_base.values()) == 1, (
                 f"fragment [{start},{start + length}) shares sum to {sum(by_base.values())}"
             )
@@ -171,16 +171,16 @@ def test_the_BANK_conserves_to_within_the_REPRESENTATION_and_no_more():
 
 
 def test_a_CONTAINED_fragment_deposits_NO_mass_at_all():
-    """⛔ Its whole fragment is already ``node_contained_count``; mass at a line as well would be it
+    """⛔ Its whole fragment is already ``region_contained_count``; mass at a line as well would be it
     counted twice. This is the branch the law's ``contained`` term exists for."""
     partition = _partition()
-    total, contained = _exact_fragment_mass(partition, CUTS, 100, 160)  # well inside node 0
+    total, contained = _exact_fragment_mass(partition, CUTS, 100, 160)  # well inside region 0
     assert contained == 1
     assert total == 0
 
 
 def test_the_two_populations_together_are_EXHAUSTIVE_for_an_unspliced_fragment():
-    """⭐ A contiguous interval either stays inside one node or crosses at least one line — so over the
+    """⭐ A contiguous interval either stays inside one region or crosses at least one line — so over the
     enumeration, ``Σ contained + Σ mass`` is the fragment COUNT, with no third case to account for.
 
     ⚠ At the bank's precision: the budget is the total number of crossings, one quantum each, by the
@@ -188,7 +188,7 @@ def test_the_two_populations_together_are_EXHAUSTIVE_for_an_unspliced_fragment()
     """
     accumulator, n = _enumerate(_partition())
     mass = float(np.asarray(accumulator.tally.edge_unspliced_mass, np.float64).sum())
-    contained = int(np.asarray(accumulator.tally.node_contained_count, np.int64).sum())
+    contained = int(np.asarray(accumulator.tally.region_contained_count, np.int64).sum())
     crossings = int(np.asarray(accumulator.tally.edge_unspliced_count, np.int64).sum())
     assert abs(mass + contained - n) <= budget(crossings), (
         f"{n} fragments deposited {float(mass)} of mass plus {contained} contained"
@@ -206,7 +206,7 @@ def test_the_mass_is_the_PER_BASE_attribution():
     """⭐⭐⭐ **THE CLAIM THAT PINS THE RULE.** Coverage-weighted, not ``1/K``.
 
     Both rules conserve, so no conservation gate can tell them apart. This one can: the per-base walk
-    splits each base between the lines bounding its own node, and no per-base rule can produce ``1/K``
+    splits each base between the lines bounding its own region, and no per-base rule can produce ``1/K``
     because a base carries no knowledge of how many lines the whole fragment crossed.
 
     ⭐ **Measured, not argued** (2026-08-08). Injecting an exact ``1/K`` deposit into the specification
@@ -243,8 +243,8 @@ def test_the_mass_is_the_PER_BASE_attribution():
 def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
     """⭐⭐ The closed form, and the reason the shipped assembler is right OFF capture and wrong ON it.
 
-    Where both flanking nodes are longer than every fragment, a crossing fragment can cross only that
-    one line, so its whole 1.0 lands there and ``mass == count`` exactly. Where the nodes are shorter,
+    Where both flanking regions are longer than every fragment, a crossing fragment can cross only that
+    one line, so its whole 1.0 lands there and ``mass == count`` exactly. Where the regions are shorter,
     one fragment is spread over several lines and ``mass`` falls far below ``count`` — that gap is the
     K-inflation, and it is why a per-object sum is not a fragment count.
     """
@@ -286,7 +286,7 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
     cuts = [0, 1000, 2000, 9000, 9050, 10000]
     partition = Partition.from_cuts(
         [cuts],
-        node_types=[[0, 2, 1, 2, 2]],
+        region_types=[[0, 2, 1, 2, 2]],
         junctions=[(0, 2000, 9000, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
@@ -328,7 +328,7 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
     reading a consumer can make, so it is pinned rather than left to the docstring."""
     cuts = [0, 1000, 2000, 9000, 9050, 10000]
     partition = Partition.from_cuts(
-        [cuts], node_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+        [cuts], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
     )
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     n = 0
@@ -346,7 +346,7 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
 # claim 5 — the law over ALL THREE axes, which is what makes a LIBRARY count computable
 # ---------------------------------------------------------------------------
 
-#: The staggered geometry claim 4 uses: one annotated junction, and a short node (9000–9050) whose far
+#: The staggered geometry claim 4 uses: one annotated junction, and a short region (9000–9050) whose far
 #: line a fragment may or may not reach. That choice is what lets the SAME partition carry both a
 #: spliced fragment that crosses a line and one that crosses none.
 SPLICED_CUTS = [0, 1000, 2000, 9000, 9050, 10000]
@@ -354,7 +354,7 @@ SPLICED_CUTS = [0, 1000, 2000, 9000, 9050, 10000]
 
 def _spliced_partition() -> Partition:
     return Partition.from_cuts(
-        [SPLICED_CUTS], node_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+        [SPLICED_CUTS], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
     )
 
 
@@ -374,9 +374,9 @@ def _total_deposited_mass(tally) -> Fraction:
 
 
 def test_a_spliced_fragment_crossing_NO_LINE_still_deposits_a_WHOLE_FRAGMENT_of_mass():
-    """⛔⛔ **THE POPULATION A CONSERVED COUNT CANNOT SEE.** Both blocks lie inside one node each.
+    """⛔⛔ **THE POPULATION A CONSERVED COUNT CANNOT SEE.** Both blocks lie inside one region each.
 
-    The fragment is not ``contained`` — its path spans a junction, so it is not inside ONE node — and it
+    The fragment is not ``contained`` — its path spans a junction, so it is not inside ONE region — and it
     crosses no line, so the slice loop never runs. Under the rule as it stands it deposits **nothing
     anywhere** while ``sj_count`` credits it, which is a fragment that exists on the incidence axis and
     on no conserved one.
@@ -394,8 +394,8 @@ def test_a_spliced_fragment_crossing_NO_LINE_still_deposits_a_WHOLE_FRAGMENT_of_
 
     tally = accumulator.tally
     assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the junction must be credited"
-    assert int(np.asarray(tally.node_contained_count, np.int64).sum()) == 0, (
-        "a path spanning a junction is not contained in ONE node"
+    assert int(np.asarray(tally.region_contained_count, np.int64).sum()) == 0, (
+        "a path spanning a junction is not contained in ONE region"
     )
     assert _total_deposited_mass(tally) == 1, (
         "a deposited fragment must place exactly one fragment of mass somewhere; this one placed "
@@ -403,7 +403,7 @@ def test_a_spliced_fragment_crossing_NO_LINE_still_deposits_a_WHOLE_FRAGMENT_of_
     )
 
 
-#: ⛔⛔ **TWO junctions, and the middle exon is a WHOLE node.** A one-junction fixture cannot exercise
+#: ⛔⛔ **TWO junctions, and the middle exon is a WHOLE region.** A one-junction fixture cannot exercise
 #: the equal-share rule at all — every block it produces is bounded on one side only, so ``len(bounds)``
 #: is always 1 and a rule that forgot to share would pass every gate. Measured: deleting the share made
 #: 18/18 gates pass until this fixture existed (`TRAPS: could-the-arm-have-fired`).
@@ -413,7 +413,7 @@ TWO_JUNCTION_CUTS = [0, 1000, 2000, 5000, 5100, 8000, 9000, 10000]
 def _two_junction_partition() -> Partition:
     return Partition.from_cuts(
         [TWO_JUNCTION_CUTS],
-        node_types=[[0, 2, 1, 2, 1, 2, 0]],
+        region_types=[[0, 2, 1, 2, 1, 2, 0]],
         junctions=[(0, 2000, 5000, Strand.POS), (0, 5100, 8000, Strand.POS)],
     )
 
@@ -483,7 +483,7 @@ def test_a_fragment_crossing_BOTH_junctions_AND_lines_gives_EVERY_crossed_object
     cuts = [0, 1000, 2000, 2500, 5000, 5100, 5200, 8000, 9000, 10000]
     partition = Partition.from_cuts(
         [cuts],
-        node_types=[[0, 2, 2, 1, 2, 2, 1, 2, 0]],
+        region_types=[[0, 2, 2, 1, 2, 2, 1, 2, 0]],
         junctions=[(0, 2500, 5000, Strand.POS), (0, 5200, 8000, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=2000)
@@ -550,7 +550,7 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
     cuts = [0, 1000, 2000, 5000, 5050, 10000, 12000]
     partition = Partition.from_cuts(
         [cuts],
-        node_types=[[0, 2, 1, 2, 2, 0]],
+        region_types=[[0, 2, 1, 2, 2, 0]],
         junctions=[(0, 2000, 5000, Strand.POS), (0, 2000, 5050, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=2000)
@@ -589,7 +589,7 @@ def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or
     oversight — the rule genuinely did not hold across a junction. This is the same law once the
     junction axis carries its share, and it is the identity a library fragment count rests on.
 
-    The enumeration sweeps the second block's end across the short node's far line, so it contains
+    The enumeration sweeps the second block's end across the short region's far line, so it contains
     spliced fragments that cross a line and spliced fragments that cross none, plus the unspliced
     population for the control.
 
@@ -607,12 +607,12 @@ def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or
             )
             assert outcome is DepositOutcome.DEPOSITED
             n += 1
-    for start in range(100, 190):  # the unspliced control, contained in node 0
+    for start in range(100, 190):  # the unspliced control, contained in region 0
         assert accumulator.deposit(0, start, start + 60) is DepositOutcome.DEPOSITED
         n += 1
 
     tally = accumulator.tally
-    contained = int(np.asarray(tally.node_contained_count, np.int64).sum())
+    contained = int(np.asarray(tally.region_contained_count, np.int64).sum())
     deposits = int(
         np.asarray(tally.edge_unspliced_count, np.int64).sum()
         + np.asarray(tally.edge_spliced_count, np.int64).sum()
@@ -643,5 +643,5 @@ def test_the_mass_has_ONE_column_while_every_other_edge_bank_has_TWO():
             f"{name} must be float64. ⭐ ONE CONVENTION: a COUNT is an integer, a FRACTION is float64. "
             f"A fixed point here would be a second convention in the same schema, and it was measured "
             f"LESS accurate than float64 on the reciprocal-opportunity theorem (7.0e-10 against "
-            f"5.8e-15 at node_len 151)."
+            f"5.8e-15 at region_len 151)."
         )

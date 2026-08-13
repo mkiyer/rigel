@@ -7,7 +7,7 @@ one at a time to say which one is responsible.
 
 **The five sections, in the order the solver computes them:**
 
-1. **EVERY NODE AND EVERY EDGE**, with truth in FRAGMENTS beside the answer, ranked by error MASS — not
+1. **EVERY REGION AND EVERY EDGE**, with truth in FRAGMENTS beside the answer, ranked by error MASS — not
    by error rate, because a small rate on a big object is what the deliverable actually pays for.
 2. **THE FOUR INIT SOURCES**, per object: is there any own evidence at all (structural certainty, the
    intron factory, the strand tilt, the length channel), and what did the message-free self-solve make of
@@ -18,7 +18,7 @@ one at a time to say which one is responsible.
 4. **THE COMBINE AND psi** at the worst object: every channel's mode and precision as psi receives them.
 5. ⭐⭐ **THE ABLATION**: re-run psi with one channel removed at a time. ⛔ It first replays with EVERY
    channel and requires the shipped ``f_g`` back to ~1e-6 — a replay that cannot reproduce the answer is
-   not measuring the answer. `node_sweep` captures ``global_lp`` / ``solve_grid`` / ``fg_init`` precisely
+   not measuring the answer. `region_sweep` captures ``global_lp`` / ``solve_grid`` / ``fg_init`` precisely
    so this replay is possible without re-solving the chain.
 
 ⚠ **It ablates, it does not fix.** Removing a channel tells you what that channel contributed; it is not
@@ -47,9 +47,9 @@ _s.loader.exec_module(TC)
 TH = TC.TH
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
-from rigel.calibration.simplex_logodds import _solve_nodes_logodds_all  # noqa: E402
+from rigel.calibration.simplex_logodds import _solve_regions_logodds_all  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import index_derived_inputs  # noqa: E402
@@ -66,12 +66,12 @@ def _labels(chain, ra):
     out = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        if kind[s] == NODE:
+        if kind[s] == REGION:
             out.append(f"{TYPES[int(rtype[i])]}[{starts[i]:,},{starts[i] + sizes[i]:,})")
         else:
             hi, lo = s + 1, s - 1
-            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == NODE else -1
-            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == NODE else -1
+            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
+            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
             pair = "|".join(TYPES.get(x, "?") for x in sorted((a, b)) if x >= 0)
             out.append(f"{pair}@{starts[obj[hi]]:,}" if b >= 0 else f"edge#{i}")
     return out
@@ -114,10 +114,10 @@ def main() -> int:
     n_slots = int(chain.n_slots)
 
     ov = sub.truth.override_masses(ra)
-    T = {"node": (np.asarray(ov["mass_gdna_node"], float), np.asarray(ov["mass_rna_node"], float)),
+    T = {"region": (np.asarray(ov["mass_gdna_region"], float), np.asarray(ov["mass_rna_region"], float)),
          "edge": (np.asarray(ov["mass_gdna_edge"], float), np.asarray(ov["mass_rna_edge"], float))}
     # the shipped per-object answer, in the same currency as the truth
-    res_g = {"node": np.asarray(cap["f_g"], float), "edge": np.asarray(cap["f_g"], float)}
+    res_g = {"region": np.asarray(cap["f_g"], float), "edge": np.asarray(cap["f_g"], float)}
 
     print("=" * 132)
     print(f"⭐⭐⭐ ERROR TRACE — {args.condition}")
@@ -129,13 +129,13 @@ def main() -> int:
     print("=" * 132)
 
     # ── 1. every object ──────────────────────────────────────────────────────────────────────────
-    print("\n── 1. EVERY NODE AND EVERY EDGE, ranked by error MASS (fragments of gDNA mis-assigned) ──")
+    print("\n── 1. EVERY REGION AND EVERY EDGE, ranked by error MASS (fragments of gDNA mis-assigned) ──")
     print(f"\n   {'slot':<28} {'n':>6} {'gDNA':>6} {'RNA':>6} {'true f_g':>9} {'f_g':>8} "
           f"{'Δf_g':>8} {'err frags':>10} {'share':>7}")
     print("   " + "-" * 118)
     recs = []
     for s in range(n_slots):
-        ax = "node" if kind[s] == NODE else "edge"
+        ax = "region" if kind[s] == REGION else "edge"
         i = int(obj[s])
         g, r = T[ax][0][i], T[ax][1][i]
         tot = g + r
@@ -240,13 +240,13 @@ def main() -> int:
         kw = dict(base_kw)
         kw.update(ch)
         kw.update(over)
-        return np.asarray(_solve_nodes_logodds_all(**kw).gdna_frac, float)
+        return np.asarray(_solve_regions_logodds_all(**kw).gdna_frac, float)
 
     solvable = np.asarray(cap["solvable"], bool)
     init = np.asarray(cap["fg_init"], float)
 
     def as_shipped(f):
-        """⛔ `node_sweep` writes back ONLY solvable slots; a G1 object keeps its pinned init of 1.0.
+        """⛔ `region_sweep` writes back ONLY solvable slots; a G1 object keeps its pinned init of 1.0.
         Scoring psi's raw output at those slots reads a structurally-certain object as 0 % gDNA and
         swamps the table — the first run of this file did exactly that and reported 218 error
         fragments where the gene carries 55."""

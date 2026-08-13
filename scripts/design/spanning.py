@@ -1,4 +1,4 @@
-"""Verify a node's THREE populations (contained, spanning, neither) against brute-force simulation."""
+"""Verify a region's THREE populations (contained, spanning, neither) against brute-force simulation."""
 
 import numpy as np
 
@@ -14,7 +14,7 @@ starts = rng.integers(0, T - lens)
 ends = starts + lens
 
 print(
-    f"{'node len':>9} {'contained obs':>14} {'pred':>9} | {'encompass obs':>14} {'pred':>9} | {'neither':>8}"
+    f"{'region len':>9} {'contained obs':>14} {'pred':>9} | {'encompass obs':>14} {'pred':>9} | {'neither':>8}"
 )
 for ell in (25, 50, 100, 150, 200, 300, 600, 1200):
     a = rng.integers(1000, T - ell - 1000, 3000)

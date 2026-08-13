@@ -4,14 +4,14 @@
 
 ⭐ **The oracle enumerates; the code computes.** Every closed form here is checked against a loop that
 walks every start position on a small partition and asks the *deposit rule's own question* — "is this
-fragment contained in exactly one node?", "does it cross exactly one line?" — so the divisor is verified
+fragment contained in exactly one region?", "does it cross exactly one line?" — so the divisor is verified
 against the selection it is meant to invert, not against a re-derivation of itself.
 `docs/TRAPS.md` trap 1: a validator that calls the builder's own helper validates nothing.
 
 ⚠ **The rule the oracle implements is `_accumulator_reference.FragmentPool`'s, verbatim:**
 
-* contained in exactly one node -> typed by that node's coarse type (intergenic / intronic only)
-* crossing exactly one line -> typed by the sorted pair of flanking node types
+* contained in exactly one region -> typed by that region's coarse type (intergenic / intronic only)
+* crossing exactly one line -> typed by the sorted pair of flanking region types
 * anything else — an exonic contained fragment, a multi-line crossing — enters **no** pool
 """
 
@@ -37,7 +37,7 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
     """Walk every start position on one reference and classify it exactly as the deposit rule does.
 
     ``cuts`` is the reference's cut axis, ascending, first 0 and last ``L_ref``. ``types`` is one coarse
-    type per node, so ``len(types) == len(cuts) - 1``.
+    type per region, so ``len(types) == len(cuts) - 1``.
     """
     reference_length = cuts[-1]
     lines = cuts[1:-1]  # interior lines only
@@ -51,9 +51,9 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
         counts["total"] += 1
         crossed = [i for i, p in enumerate(lines) if start < p < end]
         if not crossed:
-            # Contained: find the single node holding [start, end).
-            node = max(i for i, c in enumerate(cuts[:-1]) if c <= start)
-            counts["contained"][types[node]] += 1
+            # Contained: find the single region holding [start, end).
+            region = max(i for i, c in enumerate(cuts[:-1]) if c <= start)
+            counts["contained"][types[region]] += 1
         elif len(crossed) == 1:
             line = crossed[0]
             pair = tuple(sorted((types[line], types[line + 1])))
@@ -61,14 +61,14 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
     return counts
 
 
-def node_lengths_of(cuts: list[int]) -> np.ndarray:
+def region_lengths_of(cuts: list[int]) -> np.ndarray:
     return np.diff(np.asarray(cuts, dtype=np.int64))
 
 
 # ── the partitions the oracle is run over ───────────────────────────────────────────────────────
 
-#: Deliberately awkward: a 1 bp node (legal, and 15,687 exist in the human index), a node shorter than
-#: the widest fragment, adjacent same-type nodes, and both flank pairs present.
+#: Deliberately awkward: a 1 bp region (legal, and 15,687 exist in the human index), a region shorter than
+#: the widest fragment, adjacent same-type regions, and both flank pairs present.
 PARTITIONS = [
     ([0, 40, 41, 90, 200], [TYPE_INTERGENIC, TYPE_EXON, TYPE_INTRON, TYPE_EXON]),
     ([0, 10, 60, 61, 62, 130], [TYPE_INTRON, TYPE_EXON, TYPE_INTRON, TYPE_EXON, TYPE_INTERGENIC]),
@@ -87,20 +87,20 @@ class TestAgainstTheEnumeratingOracle:
     @pytest.mark.parametrize("width", WIDTHS)
     def test_contained_opportunity_matches_enumeration(self, cuts, types, width):
         oracle = enumerate_pools(cuts, types, width)
-        lengths = node_lengths_of(cuts)
+        lengths = region_lengths_of(cuts)
         max_width = max(WIDTHS)
-        for node_type in (TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON):
-            selected = lengths[np.asarray(types) == node_type]
+        for region_type in (TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON):
+            selected = lengths[np.asarray(types) == region_type]
             computed = contained_opportunity(selected, max_width)[width]
-            assert computed == pytest.approx(oracle["contained"][node_type]), (
-                f"type {node_type}, width {width}, cuts {cuts}"
+            assert computed == pytest.approx(oracle["contained"][region_type]), (
+                f"type {region_type}, width {width}, cuts {cuts}"
             )
 
     @pytest.mark.parametrize("cuts,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
     def test_crossing_opportunity_matches_enumeration(self, cuts, types, width):
         oracle = enumerate_pools(cuts, types, width)
-        lengths = node_lengths_of(cuts)
+        lengths = region_lengths_of(cuts)
         max_width = max(WIDTHS)
         if len(lengths) < 2:
             return
@@ -134,7 +134,7 @@ class TestAgainstTheEnumeratingOracle:
         multi_line = oracle["total"] - pooled
         assert multi_line >= 0
         # And the closed forms sum to the same pooled figure.
-        lengths = node_lengths_of(cuts)
+        lengths = region_lengths_of(cuts)
         max_width = max(WIDTHS)
         computed = sum(
             contained_opportunity(lengths[np.asarray(types) == t], max_width)[width]
@@ -164,7 +164,7 @@ class TestTheTiltsAreOpposite:
         # Strictly increasing: a longer fragment covers more of the line's neighbourhood.
         assert np.all(np.diff(crossing[2:301]) > 0)
 
-    def test_a_short_node_caps_the_crossing_opportunity(self):
+    def test_a_short_region_caps_the_crossing_opportunity(self):
         """⭐ Where a flank is shorter than the fragment, the crossing count STOPS growing — that is the
         `(w-1-a)+` term, and it is why `(w-1)` alone is not the opportunity."""
         crossing = crossing_opportunity(
@@ -286,11 +286,11 @@ class TestWiredIntoTheModel:
         for module in (pipeline, scan_cache):
             tree = ast.parse(inspect.getsource(module))
             calls = [
-                node
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "build_fl_models"
+                region
+                for region in ast.walk(tree)
+                if isinstance(region, ast.Call)
+                and isinstance(region.func, ast.Name)
+                and region.func.id == "build_fl_models"
             ]
             assert calls, f"{module.__name__} no longer calls build_fl_models — retarget this test"
             for call in calls:

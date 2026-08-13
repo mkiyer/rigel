@@ -1,19 +1,19 @@
-"""rigel.calibration.splice_graph — the v8 SPLICE GRAPH: nodes + edges.
+"""rigel.calibration.splice_graph — the v8 SPLICE GRAPH: regions + edges.
 
 The calibration partition: what the accumulator deposits into, and the structure the solver reads.
 
 
-**A node** is a genomic interval; nodes tile each reference and are numbered in genomic order.
+**A region** is a genomic interval; regions tile each reference and are numbered in genomic order.
 **An edge** is a transition, always ``src < dst`` so genomic order is a topological order:
 
 * ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``. Carries the 8 structural
   :ref:`flag bits <flags>`.
 * ``JUNCTION(donor, acceptor, strand)`` — one per distinct annotated intron.
 
-**Every distinct exon endpoint is a cut, and adjacent equal-signature nodes are NOT merged.** The merge is
+**Every distinct exon endpoint is a cut, and adjacent equal-signature regions are NOT merged.** The merge is
 what the predecessor partition did and what made it blind to transcript termini: ⭐ **53.4 %** of real human
 transcript termini (232,451 of 435,291) fall strictly *inside* a merged region and vanish from the partition
-entirely. Measured consequence: 752,654 merged regions → **1,043,881** nodes (+38.7 %), median 151 bp,
+entirely. Measured consequence: 752,654 merged regions → **1,043,881** regions (+38.7 %), median 151 bp,
 15,687 of length 1, plus **404,168** junction edges.
 
 ⚠ The often-quoted **59.5 %** is that same statistic computed under the ``~is_synthetic & ~is_nrna``
@@ -100,8 +100,8 @@ from .signature import (
 )
 
 __all__ = [
-    "NODE_COLUMNS",
-    "NODE_COLUMN_DTYPES",
+    "REGION_COLUMNS",
+    "REGION_COLUMN_DTYPES",
     "EDGE_COLUMNS",
     "EDGE_COLUMN_DTYPES",
     "EDGE_KIND_CONTIGUOUS",
@@ -115,7 +115,7 @@ __all__ = [
     "FLAG_ACCEPTOR_POS",
     "FLAG_ACCEPTOR_NEG",
     "build_splice_graph",
-    "build_node_partition_arrays",
+    "build_region_partition_arrays",
     "build_edge_flags_array",
     "build_junction_edge_arrays",
     "build_contiguous_edge_reach_arrays",
@@ -130,12 +130,12 @@ __all__ = [
     "is_terminus",
     "is_splice_site",
     "validate_graph",
-    "load_nodes",
+    "load_regions",
     "load_edges",
 ]
 
-NODE_COLUMNS = ["node_id", "ref_name", "start", "end", "length", "signature"]
-NODE_COLUMN_DTYPES: dict[str, type | np.dtype] = {
+REGION_COLUMNS = ["node_id", "ref_name", "start", "end", "length", "signature"]
+REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "node_id": np.int64,
     "start": np.int64,
     "end": np.int64,
@@ -265,9 +265,9 @@ def build_splice_graph(
     transcripts: list[Transcript],
     ref_lengths: Mapping[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build ``(nodes_df, edges_df)`` — the v8 splice graph. Fully vectorised; no per-node Python object.
+    """Build ``(regions_df, edges_df)`` — the v8 splice graph. Fully vectorised; no per-region Python object.
 
-    Deterministic by construction: ``np.unique`` sorts, node ids are assigned by position, edges by
+    Deterministic by construction: ``np.unique`` sorts, region ids are assigned by position, edges by
     ``(src, kind, dst)``. No dict iteration order, no hashing, no parallel reduction ⇒ byte-identical
     across runs and platforms.
     """
@@ -288,7 +288,7 @@ def build_splice_graph(
     intr_by_ref = _ref_slices(intr[0])
 
     n_rows, e_rows = [], []
-    node_base = 0
+    region_base = 0
     for name, length in reflen.items():
         if length == 0:
             continue
@@ -301,7 +301,7 @@ def build_splice_graph(
         starts, ends = cuts[:-1], cuts[1:]
         n = starts.shape[0]
 
-        # ── 2. the 4-bit signature, by difference arrays over the node index ──────────────────────
+        # ── 2. the 4-bit signature, by difference arrays over the region index ──────────────────────
         sig = np.zeros(n, np.uint8)
         for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
             if iv_s.size == 0:
@@ -314,7 +314,7 @@ def build_splice_graph(
         n_rows.append(
             pd.DataFrame(
                 {
-                    "node_id": np.arange(node_base, node_base + n, dtype=np.int64),
+                    "node_id": np.arange(region_base, region_base + n, dtype=np.int64),
                     "ref_name": name,
                     "start": starts,
                     "end": ends,
@@ -338,8 +338,8 @@ def build_splice_graph(
         # ── 4. junction edges: one per distinct (intron_start, intron_end, strand) ────────────────
         j_src, j_dst, j_strand, j_reach = _junction_edges(cuts, intr, i_rows, name)
 
-        src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + node_base
-        dst = np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + node_base
+        src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base
+        dst = np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + region_base
         kind = np.concatenate(
             [
                 np.full(max(n - 1, 0), EDGE_KIND_CONTIGUOUS, np.uint8),
@@ -361,10 +361,10 @@ def build_splice_graph(
                 }
             )
         )
-        node_base += n
+        region_base += n
 
-    nodes_df = (
-        pd.concat(n_rows, ignore_index=True) if n_rows else pd.DataFrame(columns=NODE_COLUMNS)
+    regions_df = (
+        pd.concat(n_rows, ignore_index=True) if n_rows else pd.DataFrame(columns=REGION_COLUMNS)
     )
     edges_df = (
         pd.concat(e_rows, ignore_index=True) if e_rows else pd.DataFrame(columns=EDGE_COLUMNS[1:])
@@ -374,21 +374,21 @@ def build_splice_graph(
         # TOTAL order: two strand-coincident junctions (§3.3, G18) share all three and differ only in
         # strand, so the order would be ambiguous and determinism would depend on the input order.
         # GENCODE contains zero such junctions — which is exactly why only a synthetic case can catch it.
-        # Adding strand REFINES the documented order, so the "out-edges of a node are contiguous" CSR
+        # Adding strand REFINES the documented order, so the "out-edges of a region are contiguous" CSR
         # contract is unchanged.
         edges_df = edges_df.sort_values(
             ["src", "kind", "dst", "strand"], kind="stable"
         ).reset_index(drop=True)
     edges_df.insert(0, "edge_id", np.arange(len(edges_df), dtype=np.int64))
-    return _coerce(nodes_df, NODE_COLUMNS, NODE_COLUMN_DTYPES), _coerce(
+    return _coerce(regions_df, REGION_COLUMNS, REGION_COLUMN_DTYPES), _coerce(
         edges_df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES
     )
 
 
 def _signature_intervals(ev: _Exons, ei, ev_i, ii):
-    """The four ``(bit, starts, ends)`` interval sets that define a node's 4-bit signature.
+    """The four ``(bit, starts, ends)`` interval sets that define a region's 4-bit signature.
 
-    ONE definition, consumed by the builder (cumulative difference arrays over the node index) and
+    ONE definition, consumed by the builder (cumulative difference arrays over the region index) and
     by validator **I3b** (midpoint containment). Sharing the interval sets and differing in the
     evaluation is the point: the two can then only agree by both being right.
     """
@@ -586,7 +586,7 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
 
 
 def _junction_edges(cuts, ma_i, mi_, ref_name):
-    """Distinct junction edges for one reference: ``(src, dst, strand, reach dict)``, node-local ids."""
+    """Distinct junction edges for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
     empty = np.zeros(0, np.int64)
     keys = {
         k: empty.copy() for k in ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
@@ -599,10 +599,10 @@ def _junction_edges(cuts, ma_i, mi_, ref_name):
     uniq, inv = np.unique(key, axis=0, return_inverse=True)
     inv = np.asarray(inv).ravel()
     ua, ub, ust = uniq[:, 0], uniq[:, 1], uniq[:, 2].astype(np.int8)
-    src = np.searchsorted(cuts, ua) - 1  # the node ENDING at intron_start
-    dst = np.searchsorted(cuts, ub)  # the node STARTING at intron_end
+    src = np.searchsorted(cuts, ua) - 1  # the region ENDING at intron_start
+    dst = np.searchsorted(cuts, ub)  # the region STARTING at intron_end
     if not (np.all(cuts[src + 1] == ua) and np.all(cuts[dst] == ub)):
-        raise ValueError(f"ref {ref_name!r}: a junction endpoint is not a node interface (I5)")
+        raise ValueError(f"ref {ref_name!r}: a junction endpoint is not a region interface (I5)")
     out = {k: np.zeros(uniq.shape[0], np.int64) for k in keys}
     for s, kl, kh in (
         (Strand.POS, "reach_lo_pos", "reach_hi_pos"),
@@ -635,7 +635,7 @@ def _coerce(df, columns, dtypes):
 # ---------------------------------------------------------------------------
 
 
-def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcripts=None) -> None:
+def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcripts=None) -> None:
     """Assert invariants I1–I13. Raises :class:`ValueError` on the first violation.
 
     ⚠ **``transcripts`` gates four invariants, not one**: I3b (the signature, recomputed), I4 (the
@@ -645,25 +645,25 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
     transcripts; the load path does not, because reconstructing them costs ~3 s at human scale.
     """
     reflen = {str(k): int(v) for k, v in ref_lengths.items()}
-    nid = nodes_df["node_id"].to_numpy(np.int64)
-    start = nodes_df["start"].to_numpy(np.int64)
-    end = nodes_df["end"].to_numpy(np.int64)
-    length = nodes_df["length"].to_numpy(np.int64)
-    sig = nodes_df["signature"].to_numpy(np.uint8)
-    ref = nodes_df["ref_name"].astype(str).to_numpy()
+    nid = regions_df["node_id"].to_numpy(np.int64)
+    start = regions_df["start"].to_numpy(np.int64)
+    end = regions_df["end"].to_numpy(np.int64)
+    length = regions_df["length"].to_numpy(np.int64)
+    sig = regions_df["signature"].to_numpy(np.uint8)
+    ref = regions_df["ref_name"].astype(str).to_numpy()
 
     # I2 — ids are 0..n-1 in row order
     if not np.array_equal(nid, np.arange(nid.size, dtype=np.int64)):
-        raise ValueError("I2: node_id is not 0..n-1 in row order. Rebuild the index.")
+        raise ValueError("I2: region_id is not 0..n-1 in row order. Rebuild the index.")
     # I3a — signature range (I3b, the independent recomputation, needs the transcripts)
     if nid.size and int(sig.max()) >= N_SIGNATURES:
         raise ValueError(f"I3: signature {int(sig.max())} out of range. Rebuild the index.")
     if not np.array_equal(length, end - start):
-        raise ValueError("I1: stored node length != end - start. Rebuild the index.")
+        raise ValueError("I1: stored region length != end - start. Rebuild the index.")
     if nid.size and int(length.min()) <= 0:
-        raise ValueError("I1: a node has non-positive length. Rebuild the index.")
+        raise ValueError("I1: a region has non-positive length. Rebuild the index.")
 
-    # I1 — nodes tile each reference exactly. ⚠ Reference slices are computed ONCE from the run
+    # I1 — regions tile each reference exactly. ⚠ Reference slices are computed ONCE from the run
     # boundaries; `np.flatnonzero(ref == name)` inside the loop is 286 full-array string comparisons
     # over 1.04 M rows and cost 3.5 s on its own.
     slices = _ref_slices(ref)
@@ -671,7 +671,7 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
         sl = slices.get(name)
         if sl is None:
             if L > 0:
-                raise ValueError(f"I1: reference {name!r} (length {L}) has no nodes.")
+                raise ValueError(f"I1: reference {name!r} (length {L}) has no regions.")
             continue
         lo, hi = int(sl[0]), int(sl[-1]) + 1
         if start[lo] != 0 or end[hi - 1] != L:
@@ -679,9 +679,9 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
                 f"I1: reference {name!r} spans [{start[lo]}, {end[hi - 1]}), expected [0, {L})."
             )
         if hi - lo > 1 and not np.array_equal(end[lo : hi - 1], start[lo + 1 : hi]):
-            raise ValueError(f"I1: reference {name!r} has a gap or overlap between nodes.")
+            raise ValueError(f"I1: reference {name!r} has a gap or overlap between regions.")
     if len(slices) != sum(1 for _n, L in reflen.items() if L > 0):
-        raise ValueError("I1: node rows are not grouped contiguously by reference.")
+        raise ValueError("I1: region rows are not grouped contiguously by reference.")
 
     src = edges_df["src"].to_numpy(np.int64)
     dst = edges_df["dst"].to_numpy(np.int64)
@@ -700,8 +700,8 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
         # (src, kind, dst, strand) packed into one strictly-increasing int64 key. STRAND is part of the
         # key because it is part of the order (see the sort in build_splice_graph): without it two
         # strand-coincident junctions collide and read as a duplicate.
-        n_nodes_ = max(nid.size, 1)
-        key = ((src * 2 + kind.astype(np.int64)) * n_nodes_ + dst) * 4 + estrand.astype(np.int64)
+        n_regions_ = max(nid.size, 1)
+        key = ((src * 2 + kind.astype(np.int64)) * n_regions_ + dst) * 4 + estrand.astype(np.int64)
         if not np.all(np.diff(key) > 0):
             raise ValueError(
                 "I12: edges are not sorted by (src, kind, dst, strand), or a duplicate exists."
@@ -710,7 +710,7 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
     # I7 — contiguous edges are exactly {(i, i+1)} within each reference
     c = kind == EDGE_KIND_CONTIGUOUS
     if not np.all(dst[c] == src[c] + 1):
-        raise ValueError("I7: a CONTIGUOUS edge is not between adjacent nodes.")
+        raise ValueError("I7: a CONTIGUOUS edge is not between adjacent regions.")
     # ⚠ `sum(... (ref == name).any())` here was 286 full-array object-dtype comparisons over 1.04 M
     # rows — 1.68 s of a 1.91 s load-time validate_graph, i.e. 88 % of it — and it recomputed a
     # number `slices` already holds. This is the same trap the I1 block above documents.
@@ -758,10 +758,10 @@ def validate_graph(nodes_df, edges_df, ref_lengths: Mapping[str, int], transcrip
     # I3b — signature recomputed; I4 — interfaces ARE the events; I11 — every transcript walks;
     # I13 — the flags ARE the events
     if transcripts is not None:
-        _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df)
+        _validate_against_transcripts(transcripts, reflen, regions_df, edges_df)
 
 
-def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> None:
+def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> None:
     """I3b (the signature, recomputed) + I4 (interfaces ARE the events) + I11 (every transcript
     walks) + I13 (the flags ARE the events), vectorised.
 
@@ -769,10 +769,10 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
     annotation against §8's 5 s budget, and it is the check most likely to be skipped when it is slow —
     which would be exactly backwards, since I11 is the one that catches real bugs.
     """
-    ref = nodes_df["ref_name"].astype(str).to_numpy()
-    start = nodes_df["start"].to_numpy(np.int64)
-    end = nodes_df["end"].to_numpy(np.int64)
-    sig = nodes_df["signature"].to_numpy(np.uint8)
+    ref = regions_df["ref_name"].astype(str).to_numpy()
+    start = regions_df["start"].to_numpy(np.int64)
+    end = regions_df["end"].to_numpy(np.int64)
+    sig = regions_df["signature"].to_numpy(np.uint8)
     src = edges_df["src"].to_numpy(np.int64)
     dst = edges_df["dst"].to_numpy(np.int64)
     kind = edges_df["kind"].to_numpy(np.uint8)
@@ -787,9 +787,9 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
     csrc = src[cm]  # already ascending: edges sort by (src, kind, dst, strand)
     cflags = edges_df["flags"].to_numpy(np.uint16)[cm]
 
-    n_nodes = ref.size
+    n_regions = ref.size
     jm = kind == EDGE_KIND_JUNCTION
-    jkey = np.sort((src[jm] * n_nodes + dst[jm]) * 4 + estrand[jm].astype(np.int64))
+    jkey = np.sort((src[jm] * n_regions + dst[jm]) * 4 + estrand[jm].astype(np.int64))
 
     slices = _ref_slices(ref)
     for name, L in reflen.items():
@@ -814,9 +814,9 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
                 f"({extra} extra, {missing} missing)."
             )
 
-        # ⭐ I3b — recompute the signature from each node's MIDPOINT, by direct interval
+        # ⭐ I3b — recompute the signature from each region's MIDPOINT, by direct interval
         # containment. Deliberately a DIFFERENT algorithm from the builder's cumulative-difference
-        # sweep, so the two can only agree by both being right. A node is homogeneous by
+        # sweep, so the two can only agree by both being right. A region is homogeneous by
         # construction (every interval endpoint is a cut), so its midpoint decides it.
         mid = (start[m] + end[m]) // 2
         want = np.zeros(mid.size, np.uint8)
@@ -829,7 +829,7 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
         if not np.array_equal(want, sig[m]):
             k = int(np.flatnonzero(want != sig[m])[0])
             raise ValueError(
-                f"I3: reference {name!r} node {int(m[k])} [{int(start[m][k])}, "
+                f"I3: reference {name!r} region {int(m[k])} [{int(start[m][k])}, "
                 f"{int(end[m][k])}) has signature {int(sig[m][k])}, recomputed {int(want[k])}."
             )
 
@@ -854,11 +854,11 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
         if m.size > 1:
             interior = end[m[:-1]]
             at = np.zeros(interior.size, np.uint16)
-            e_of_node = np.searchsorted(csrc, m[:-1])
-            hit = (e_of_node < csrc.size) & (
-                csrc[np.clip(e_of_node, 0, max(csrc.size - 1, 0))] == m[:-1]
+            e_of_region = np.searchsorted(csrc, m[:-1])
+            hit = (e_of_region < csrc.size) & (
+                csrc[np.clip(e_of_region, 0, max(csrc.size - 1, 0))] == m[:-1]
             )
-            at[hit] = cflags[e_of_node[hit]]
+            at[hit] = cflags[e_of_region[hit]]
             for arr, bit in _events_independently(ex, rows, intr, i_rows):
                 want = np.isin(interior, arr)
                 got = (at & bit) != 0
@@ -869,14 +869,14 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
                         f"{'is missing' if want[k] else 'wrongly carries'} flag bit {int(bit):#06x}."
                     )
 
-        # I11a — every mature exon edge lands exactly on a node interface
+        # I11a — every mature exon edge lands exactly on a region interface
         if rows.size:
             for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
                 hit = np.searchsorted(cuts, arr)
                 bad = (hit >= cuts.size) | (cuts[np.clip(hit, 0, cuts.size - 1)] != arr)
                 if bad.any():
                     raise ValueError(
-                        f"I11: reference {name!r} has {int(bad.sum())} exon {what}s that are not node "
+                        f"I11: reference {name!r} has {int(bad.sum())} exon {what}s that are not region "
                         f"interfaces (first at {int(arr[bad][0])})."
                     )
 
@@ -885,7 +885,7 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
             a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
             js = base + np.searchsorted(cuts, a) - 1
             jd = base + np.searchsorted(cuts, b)
-            want = (js * n_nodes + jd) * 4 + st
+            want = (js * n_regions + jd) * 4 + st
             if jkey.size == 0:
                 miss = np.ones(want.shape, bool)
             else:
@@ -904,26 +904,26 @@ def _validate_against_transcripts(transcripts, reflen, nodes_df, edges_df) -> No
 # ---------------------------------------------------------------------------
 
 
-def build_node_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Flatten the graph into the ``BamScanner.set_regions`` ABI — THE partition the accumulator
     deposits into.
 
     For each reference in ``index.ref_names`` the cut positions are ``[n0.start, n0.end, n1.end, …]``
-    over that reference's nodes (which tile it contiguously), so ``k`` nodes give ``k + 1`` positions.
-    References with zero nodes contribute none.
+    over that reference's regions (which tile it contiguously), so ``k`` regions give ``k + 1`` positions.
+    References with zero regions contribute none.
 
     :meth:`RegionArrays.from_index <rigel.calibration.region_arrays.RegionArrays.from_index>` reads
     the same frame; that is what keeps the calibration geometry and the scanner from addressing
     different partitions.
 
-    Returns ``(cut_positions int64[P], ref_pos_offsets int64[n_refs+1], node_types uint8[N])``, where
-    ``node_types`` is the coarse type (0=intergenic, 1=intron, 2=exon) aligned 1:1 with the nodes —
+    Returns ``(cut_positions int64[P], ref_pos_offsets int64[n_refs+1], region_types uint8[N])``, where
+    ``region_types`` is the coarse type (0=intergenic, 1=intron, 2=exon) aligned 1:1 with the regions —
     the gDNA FL-pool axis.
     """
-    nodes_df = index.nodes_df
+    regions_df = index.regions_df
     ref_names = index.ref_names
     by_ref: dict[str, pd.DataFrame] = {
-        ref: grp for ref, grp in nodes_df.groupby("ref_name", sort=False)
+        ref: grp for ref, grp in regions_df.groupby("ref_name", sort=False)
     }
     positions: list[np.ndarray] = []
     types: list[np.ndarray] = []
@@ -965,7 +965,7 @@ class JunctionEdgeArrays:
     table is never consulted.
 
     Keyed by the **donor** cut index, i.e. the flat index into
-    ``build_node_partition_arrays(index)[0]`` of the intron's LOW endpoint::
+    ``build_region_partition_arrays(index)[0]`` of the intron's LOW endpoint::
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
             if boundary_right[k] == observed_right_boundary:   # 1-3 iterations at human scale
@@ -997,22 +997,22 @@ class JunctionEdgeArrays:
 def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     """Build the :class:`JunctionEdgeArrays` CSR for ``index``.
 
-    A junction edge stores node ids; the accumulator works in cut indices. For a reference whose first
-    node is ``node_base`` and whose first cut is ``cut_base``, node ``i`` spans
-    ``[cuts[cut_base + i - node_base], cuts[cut_base + i - node_base + 1])``, so::
+    A junction edge stores region ids; the accumulator works in cut indices. For a reference whose first
+    region is ``region_base`` and whose first cut is ``cut_base``, region ``i`` spans
+    ``[cuts[cut_base + i - region_base], cuts[cut_base + i - region_base + 1])``, so::
 
-        donor cut    = cut_base + (src - node_base) + 1      # the intron starts where src ENDS
-        acceptor cut = cut_base + (dst - node_base)          # and ends where dst BEGINS
+        donor cut    = cut_base + (src - region_base) + 1      # the intron starts where src ENDS
+        acceptor cut = cut_base + (dst - region_base)          # and ends where dst BEGINS
     """
-    nodes_df, edges_df = index.nodes_df, index.edges_df
-    _, cut_offsets, _ = build_node_partition_arrays(index)
+    regions_df, edges_df = index.regions_df, index.edges_df
+    _, cut_offsets, _ = build_region_partition_arrays(index)
     n_cuts = int(cut_offsets[-1])
 
-    # per-reference node_base, in the same reference order the cut axis uses
-    counts = nodes_df.groupby("ref_name", sort=False).size()
-    node_base = np.zeros(len(index.ref_names) + 1, dtype=np.int64)
+    # per-reference region_base, in the same reference order the cut axis uses
+    counts = regions_df.groupby("ref_name", sort=False).size()
+    region_base = np.zeros(len(index.ref_names) + 1, dtype=np.int64)
     for i, ref in enumerate(index.ref_names):
-        node_base[i + 1] = node_base[i] + int(counts.get(ref, 0))
+        region_base[i + 1] = region_base[i] + int(counts.get(ref, 0))
 
     is_junction = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
     src = edges_df["src"].to_numpy(np.int64)[is_junction]
@@ -1020,9 +1020,9 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     strand = edges_df["strand"].to_numpy(np.int8)[is_junction]
     edge_row = np.flatnonzero(is_junction).astype(np.int64)
 
-    # which reference each junction belongs to: node ids are contiguous per reference (I2)
-    ref_of = np.searchsorted(node_base, src, side="right") - 1
-    shift = cut_offsets[ref_of] - node_base[ref_of]
+    # which reference each junction belongs to: region ids are contiguous per reference (I2)
+    ref_of = np.searchsorted(region_base, src, side="right") - 1
+    shift = cut_offsets[ref_of] - region_base[ref_of]
     boundary_left = src + shift + 1
     boundary_right = dst + shift
 
@@ -1043,34 +1043,34 @@ def build_edge_flags_array(index) -> np.ndarray:
 
     ⭐ **There is no padding, because there are no terminal slots.** The predecessor
     (``build_boundary_flags_array``) emitted ``k + 1`` entries per reference — the ``k − 1`` interior
-    interfaces plus two data-free terminals — purely so every node had an object on each side. A
-    contiguous edge is the line BETWEEN two adjacent nodes and there is no such line before the first or
-    after the last, so a reference with ``k`` nodes contributes exactly ``k − 1`` entries and the
+    interfaces plus two data-free terminals — purely so every region had an object on each side. A
+    contiguous edge is the line BETWEEN two adjacent regions and there is no such line before the first or
+    after the last, so a reference with ``k`` regions contributes exactly ``k − 1`` entries and the
     off-by-one commentary that used to live here goes with the slots.
 
-    A contiguous edge IS the interface to the right of its ``src`` node, so the flags are keyed by
+    A contiguous edge IS the interface to the right of its ``src`` region, so the flags are keyed by
     ``src``. Junction edges carry no flags — they are not a genomic position — and are excluded.
 
     Returns ``uint16[E]`` with ``E == ref_edge_offsets[-1]``, aligned element for element with the
     payload's contiguous-edge axis.
     """
-    nodes_df, edges_df = index.nodes_df, index.edges_df
+    regions_df, edges_df = index.regions_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
-    by_node = np.zeros(len(nodes_df), dtype=np.uint16)
-    by_node[edges_df["src"].to_numpy(np.int64)[contiguous]] = edges_df["flags"].to_numpy(np.uint16)[
+    by_region = np.zeros(len(regions_df), dtype=np.uint16)
+    by_region[edges_df["src"].to_numpy(np.int64)[contiguous]] = edges_df["flags"].to_numpy(np.uint16)[
         contiguous
     ]
 
     by_ref: dict[str, pd.DataFrame] = {
-        ref: grp for ref, grp in nodes_df.groupby("ref_name", sort=False)
+        ref: grp for ref, grp in regions_df.groupby("ref_name", sort=False)
     }
     out: list[np.ndarray] = []
     for ref in index.ref_names:
         grp = by_ref.get(ref)
         if grp is None or len(grp) == 0:
             continue
-        ids = grp.index.to_numpy(np.int64)  # == node_id (I2), and contiguous within a reference
-        out.append(by_node[ids[:-1]])  # the k-1 interior lines; a 1-node reference contributes none
+        ids = grp.index.to_numpy(np.int64)  # == region_id (I2), and contiguous within a reference
+        out.append(by_region[ids[:-1]])  # the k-1 interior lines; a 1-region reference contributes none
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
 
 
@@ -1100,27 +1100,27 @@ def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
 
      ⭐ **Keyed by ``src``, exactly as :func:`build_edge_flags_array` is**, and laid out per reference in
      ``index.ref_names`` order, so the two arrays are the SAME axis element for element and a consumer
-     indexes both with one index. A reference with ``k`` nodes contributes ``k − 1`` entries; one with a
-     single node contributes none.
+     indexes both with one index. A reference with ``k`` regions contributes ``k − 1`` entries; one with a
+     single region contributes none.
     """
-    nodes_df, edges_df = index.nodes_df, index.edges_df
+    regions_df, edges_df = index.regions_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
     src = edges_df["src"].to_numpy(np.int64)[contiguous]
 
-    # (n_nodes, 2) scratch keyed by the node whose RIGHT interface the edge is, then sliced per
-    # reference. Nodes with no outgoing contiguous edge keep 0, which is also the correct reach for a
+    # (n_regions, 2) scratch keyed by the region whose RIGHT interface the edge is, then sliced per
+    # reference. Regions with no outgoing contiguous edge keep 0, which is also the correct reach for a
     # line that does not exist — they are dropped by the ``[:-1]`` slice below either way.
-    def by_node(column_pos: str, column_neg: str) -> np.ndarray:
-        out = np.zeros((len(nodes_df), 2), dtype=np.float64)
+    def by_region(column_pos: str, column_neg: str) -> np.ndarray:
+        out = np.zeros((len(regions_df), 2), dtype=np.float64)
         out[src, 0] = edges_df[column_pos].to_numpy(np.float64)[contiguous]
         out[src, 1] = edges_df[column_neg].to_numpy(np.float64)[contiguous]
         return out
 
-    lo_by_node = by_node("reach_lo_pos", "reach_lo_neg")
-    hi_by_node = by_node("reach_hi_pos", "reach_hi_neg")
+    lo_by_region = by_region("reach_lo_pos", "reach_lo_neg")
+    hi_by_region = by_region("reach_hi_pos", "reach_hi_neg")
 
     by_ref: dict[str, pd.DataFrame] = {
-        ref: grp for ref, grp in nodes_df.groupby("ref_name", sort=False)
+        ref: grp for ref, grp in regions_df.groupby("ref_name", sort=False)
     }
     lo_out: list[np.ndarray] = []
     hi_out: list[np.ndarray] = []
@@ -1128,9 +1128,9 @@ def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
         grp = by_ref.get(ref)
         if grp is None or len(grp) == 0:
             continue
-        ids = grp.index.to_numpy(np.int64)  # == node_id (I2), contiguous within a reference
-        lo_out.append(lo_by_node[ids[:-1]])  # the k-1 interior lines
-        hi_out.append(hi_by_node[ids[:-1]])
+        ids = grp.index.to_numpy(np.int64)  # == region_id (I2), contiguous within a reference
+        lo_out.append(lo_by_region[ids[:-1]])  # the k-1 interior lines
+        hi_out.append(hi_by_region[ids[:-1]])
     empty = np.zeros((0, 2), dtype=np.float64)
     return (
         np.concatenate(lo_out) if lo_out else empty,
@@ -1143,7 +1143,7 @@ class JunctionGeometry:
     """The junction edges on **the accumulator's junction axis**, in its own slot order.
 
     A junction edge is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
-    **factor on its endpoint nodes** and never a message channel. This
+    **factor on its endpoint regions** and never a message channel. This
     is what a consumer needs to place that factor: where the junction attaches, whose transcript it
     belongs to, and how much of its own template remains either side.
 
@@ -1161,15 +1161,15 @@ class JunctionGeometry:
     a NEG-strand junction the biological donor is on the right.
     """
 
-    src_node: np.ndarray  # int64[J] — global node id; the intron STARTS where this node ends
-    dst_node: np.ndarray  # int64[J] — global node id; the intron ENDS where this node begins
+    src_region: np.ndarray  # int64[J] — global region id; the intron STARTS where this region ends
+    dst_region: np.ndarray  # int64[J] — global region id; the intron ENDS where this region begins
     strand: np.ndarray  # int8[J]  — the junction's own genomic strand == the TRANSCRIPT strand
     reach_lo: np.ndarray  # float64[J] — exonic reach on the junction's OWN strand
     reach_hi: np.ndarray  # float64[J]
 
     @property
     def n_junctions(self) -> int:
-        return int(self.src_node.shape[0])
+        return int(self.src_region.shape[0])
 
 
 def build_junction_geometry_arrays(index) -> JunctionGeometry:
@@ -1197,8 +1197,8 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
         ).astype(np.float64)
 
     return JunctionGeometry(
-        src_node=edges["src"].to_numpy(np.int64)[rows],
-        dst_node=edges["dst"].to_numpy(np.int64)[rows],
+        src_region=edges["src"].to_numpy(np.int64)[rows],
+        dst_region=edges["dst"].to_numpy(np.int64)[rows],
         strand=strand,
         reach_lo=reach("reach_lo_pos", "reach_lo_neg"),
         reach_hi=reach("reach_hi_pos", "reach_hi_neg"),
@@ -1228,14 +1228,14 @@ def is_splice_site(flags: np.ndarray, strand: int) -> np.ndarray:
     return (np.asarray(flags, dtype=np.uint16) & bits) != 0
 
 
-def load_nodes(path) -> pd.DataFrame:
+def load_regions(path) -> pd.DataFrame:
     df = pd.read_feather(str(path))
-    missing = set(NODE_COLUMNS) - set(df.columns)
+    missing = set(REGION_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(
-            f"nodes.feather at {path} is missing {sorted(missing)}. Rebuild the index."
+            f"regions.feather at {path} is missing {sorted(missing)}. Rebuild the index."
         )
-    return _coerce(df, NODE_COLUMNS, NODE_COLUMN_DTYPES)
+    return _coerce(df, REGION_COLUMNS, REGION_COLUMN_DTYPES)
 
 
 def load_edges(path) -> pd.DataFrame:
@@ -1253,7 +1253,7 @@ def load_edges(path) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
 
 #: The three kinds of step a transcript's path takes. ⭐ Deliberately the same ``(kind, obj_id)`` idiom
-#: ``NodeChain`` already uses for the solve's slots — one addressing convention for one graph — with a
+#: ``RegionChain`` already uses for the solve's slots — one addressing convention for one graph — with a
 #: third kind, because a splice junction is neither a position nor an interval.
 STEP_REGION = 0
 STEP_BOUNDARY = 1
@@ -1273,7 +1273,7 @@ class TranscriptPath:
     silently wrong: it is invisible to a consumer that treats a path as a SET or averages symmetrically
     over it, and wrong for every consumer that reads it as a sequence.
 
-    ⭐ Verified on the shipped suite index against the independently-checked ``_transcript_node_incidence``
+    ⭐ Verified on the shipped suite index against the independently-checked ``_transcript_region_incidence``
     (2026-08-12): **0 of 15,669 transcripts differ** on the region axis or the boundary axis, the splice
     steps number **45,609** — exactly the annotated (transcript, intron) count — and the ordering holds
     on **7,312/7,312** minus-strand and **8,357/8,357** plus-strand transcripts.
@@ -1311,10 +1311,10 @@ def _splice_junction_by_intron(index) -> dict[tuple, int]:
     src = rows["src"].to_numpy(np.int64)
     dst = rows["dst"].to_numpy(np.int64)
     strand = rows["strand"].to_numpy(np.int64)
-    nodes = index.nodes_df
-    n_end = nodes["end"].to_numpy(np.int64)
-    n_start = nodes["start"].to_numpy(np.int64)
-    n_ref = nodes["ref_name"].to_numpy()
+    regions = index.regions_df
+    n_end = regions["end"].to_numpy(np.int64)
+    n_start = regions["start"].to_numpy(np.int64)
+    n_ref = regions["ref_name"].to_numpy()
     # ⭐ `src` is the genomically LOWER region on BOTH strands, so the intron is [end[src], start[dst]).
     # Never `donor`/`acceptor`: those are 5'/3' and therefore strand-dependent, and on this index they
     # would name the wrong end of 6,527 of 13,482 junctions.
@@ -1354,12 +1354,12 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
     import os
 
     from ..types import IntervalType
-    from .region_arrays import node_right_edge
+    from .region_arrays import region_right_edge
 
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    right_boundary = node_right_edge(np.asarray(region_arrays.ref_id))
+    right_boundary = region_right_edge(np.asarray(region_arrays.ref_id))
     name_to_id = index.ref_name_to_id
     sj_of_intron = _splice_junction_by_intron(index)
 

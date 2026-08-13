@@ -26,7 +26,7 @@ from native._accumulator_reference import (
 )
 
 
-#: Two references: chr1 with 4 cuts (3 nodes, 2 lines) and chr2 with 3 (2 nodes, 1 line). A third
+#: Two references: chr1 with 4 cuts (3 regions, 2 lines) and chr2 with 3 (2 regions, 1 line). A third
 #: reference has NO cuts, which is legal and contributes nothing — the case where per-reference offset
 #: arithmetic goes wrong if it is written as a plain subtraction.
 CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
@@ -44,7 +44,7 @@ _DEFERRED_CUTS = [0, 100, 200, 300, 400, 500, 600]
 
 def _deferred_bank(n_fragments: int = 4) -> dict[str, np.ndarray]:
     """``n_fragments`` deferred records, flattened exactly as ``Tally.deferred_arrays()`` specifies."""
-    partition = Partition.from_cuts([_DEFERRED_CUTS], node_types=[[0, 2, 1, 2, 1, 0]])
+    partition = Partition.from_cuts([_DEFERRED_CUTS], region_types=[[0, 2, 1, 2, 1, 0]])
     acc = Accumulator(partition, max_fragment_length=1000)
     for i in range(n_fragments):
         outcome = acc.deposit(
@@ -80,15 +80,15 @@ def _deposited_lengths(total: int) -> np.ndarray:
 def _calibration_dict(**overrides) -> dict:
     """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
     ref_cut_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
-    ref_node_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
+    ref_region_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
     ref_edge_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
     for f, cuts in enumerate(CUTS_PER_REF):
         ref_cut_offsets[f + 1] = ref_cut_offsets[f] + len(cuts)
-        ref_node_offsets[f + 1] = ref_node_offsets[f] + max(len(cuts) - 1, 0)
+        ref_region_offsets[f + 1] = ref_region_offsets[f] + max(len(cuts) - 1, 0)
         ref_edge_offsets[f + 1] = ref_edge_offsets[f] + max(len(cuts) - 2, 0)
 
-    n_nodes, n_edges, n_sj = (
-        int(ref_node_offsets[-1]),
+    n_regions, n_edges, n_sj = (
+        int(ref_region_offsets[-1]),
         int(ref_edge_offsets[-1]),
         3,
     )
@@ -97,12 +97,12 @@ def _calibration_dict(**overrides) -> dict:
     cal = {
         "cut_positions": np.asarray([c for cuts in CUTS_PER_REF for c in cuts], np.int64),
         "ref_cut_offsets": ref_cut_offsets,
-        "ref_node_offsets": ref_node_offsets,
+        "ref_region_offsets": ref_region_offsets,
         "ref_edge_offsets": ref_edge_offsets,
         "ref_sj_offsets": ref_sj_offsets,
-        "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
-        "node_contained_inv_opportunity_sum": np.arange(n_nodes, dtype=np.float64) * 7,
-        "node_start_count": np.arange(n_nodes, dtype=np.uint32),
+        "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
+        "region_contained_inv_opportunity_sum": np.arange(n_regions, dtype=np.float64) * 7,
+        "region_start_count": np.arange(n_regions, dtype=np.uint32),
         "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
         "edge_unspliced_inv_length_sum": np.arange(n_edges, dtype=np.float64),
         "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
@@ -164,11 +164,11 @@ def test_the_payload_carries_every_field_of_the_specifications_Tally():
 
 def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     payload = _payload()
-    n_nodes, n_edges, n_sj = payload.n_nodes, payload.n_edges, payload.n_sj
-    assert (n_nodes, n_edges, n_sj) == (5, 3, 3)
+    n_regions, n_edges, n_sj = payload.n_regions, payload.n_edges, payload.n_sj
+    assert (n_regions, n_edges, n_sj) == (5, 3, 3)
     # ⭐ The COUNTS keep both genome-strand columns — the strand model is a Beta-Binomial over them.
     for name, rows in (
-        ("node_contained_count", n_nodes),
+        ("region_contained_count", n_regions),
         ("edge_unspliced_count", n_edges),
         ("edge_spliced_count", n_edges),
         ("sj_count", n_sj),
@@ -178,14 +178,14 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     # ⛔ The length moments and the conserved masses carry ONE column: which strand a read aligned to
     # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
     for name, rows in (
-        ("node_contained_inv_opportunity_sum", n_nodes),
+        ("region_contained_inv_opportunity_sum", n_regions),
         ("edge_unspliced_inv_length_sum", n_edges),
         ("edge_unspliced_mass", n_edges),
         ("edge_spliced_mass", n_edges),
         ("sj_inv_length_sum", n_sj),
     ):
         assert getattr(payload, name).shape == (rows,), name
-    assert payload.node_start_count.shape == (n_nodes,)
+    assert payload.region_start_count.shape == (n_regions,)
     assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
 
 
@@ -201,7 +201,7 @@ def test_the_dtypes_are_the_specifications_dtypes():
     stopped being an array drop silently out of this gate.
     """
     payload = _payload()
-    reference = Tally.zeros(n_nodes=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    reference = Tally.zeros(n_regions=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
     checked = 0
     for field in dataclasses.fields(Tally):
         expected = getattr(reference, field.name)
@@ -210,9 +210,9 @@ def test_the_dtypes_are_the_specifications_dtypes():
         assert getattr(payload, field.name).dtype == expected.dtype, field.name
         checked += 1
     # ⚠ The floor moves only when the SCHEMA moves, and then deliberately. 18 arrays → 20 when the two
-    # conserved masses landed → 14 when the six dead banks were removed (three ``node_spanning_*``, the
+    # conserved masses landed → 14 when the six dead banks were removed (three ``region_spanning_*``, the
     # two spliced-edge length moments, ``sj_length_sum``) → **12** on 2026-08-13 with
-    # ``node_contained_length_sum`` and ``edge_unspliced_length_sum``, whose stated justification did not
+    # ``region_contained_length_sum`` and ``edge_unspliced_length_sum``, whose stated justification did not
     # survive measurement (`scan_payload`'s docstring has the retraction). A floor that drifted down on
     # its own would be this gate quietly narrowing, which is the one thing it exists to catch.
     # ⚠ ``sj_mass`` going per-strand in that same change did NOT move this floor: it is one array either
@@ -228,7 +228,7 @@ def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_ar
     the ABI would compare equal by value and hide the change.
     """
     payload = _payload()
-    reference = Tally.zeros(n_nodes=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    reference = Tally.zeros(n_regions=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
     expected = set(reference.deferred_arrays())
     actual = {f.name for f in dataclasses.fields(payload.deferred)}
     assert actual == expected, (
@@ -250,8 +250,8 @@ def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
     has stopped agreeing with the schema — the dtype is part of byte-identity, and a widened count compares
     equal by value all the way down. So the wrong dtype has to arrive and be refused.
     """
-    with pytest.raises(ValueError, match="node_contained_count.*dtype"):
-        _payload(node_contained_count=np.arange(10, dtype=np.int64))
+    with pytest.raises(ValueError, match="region_contained_count.*dtype"):
+        _payload(region_contained_count=np.arange(10, dtype=np.int64))
     with pytest.raises(ValueError, match="sj_inv_length_sum.*dtype"):
         _payload(sj_inv_length_sum=np.arange(6, dtype=np.uint32))
 
@@ -272,7 +272,7 @@ def test_a_MISSING_qc_denominator_is_REJECTED():
 def test_a_reference_with_no_cuts_contributes_nothing_to_any_axis():
     """The third reference is empty. Per-reference offsets written as a plain subtraction go negative."""
     payload = _payload()
-    assert payload.ref_node_offsets[-1] == payload.ref_node_offsets[-2]
+    assert payload.ref_region_offsets[-1] == payload.ref_region_offsets[-2]
     assert payload.ref_edge_offsets[-1] == payload.ref_edge_offsets[-2]
     assert payload.n_refs == 3
 
@@ -342,7 +342,7 @@ def test_a_TRUNCATED_deferred_CSR_is_REJECTED_rather_than_indexed_off_the_end():
 
     A bank whose offsets outrun its values does not fail loudly when it is read — it scores one fragment
     against another fragment's hypotheses, or reads zeros, and returns a plausible answer. So the CSR is
-    re-derived at the door, exactly as ``ref_node_offsets`` is.
+    re-derived at the door, exactly as ``ref_region_offsets`` is.
     """
     bank = _deferred_bank()
     truncated = dict(bank) | {"hypothesis_introns": bank["hypothesis_introns"][:-2]}
@@ -384,7 +384,7 @@ def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
 
 
 def test_the_start_count_invariant_is_checkable_from_the_payload_alone():
-    """``Σ node_start_count == deposited`` — the accumulator's one non-tautological invariant.
+    """``Σ region_start_count == deposited`` — the accumulator's one non-tautological invariant.
 
     It replaced three "conservation identities" whose right-hand sides could only be evaluated by
     re-running the deposit, so a deliberately broken replay satisfied all three while 91 % of the
@@ -393,8 +393,8 @@ def test_the_start_count_invariant_is_checkable_from_the_payload_alone():
     """
     counts = np.zeros(5, np.uint32)
     counts[:3] = [10, 20, 11]
-    payload = _payload(node_start_count=counts, qc=dict(_calibration_dict()["calibration"]["qc"]))
-    assert int(payload.node_start_count.sum()) == payload.qc.deposited
+    payload = _payload(region_start_count=counts, qc=dict(_calibration_dict()["calibration"]["qc"]))
+    assert int(payload.region_start_count.sum()) == payload.qc.deposited
 
 
 # ---------------------------------------------------------------------------
@@ -413,25 +413,25 @@ def test_a_wrong_column_count_is_rejected():
 
 
 def test_an_offset_array_of_the_wrong_length_is_rejected():
-    with pytest.raises(ValueError, match="ref_node_offsets"):
-        _payload(ref_node_offsets=np.zeros(2, np.int64))
+    with pytest.raises(ValueError, match="ref_region_offsets"):
+        _payload(ref_region_offsets=np.zeros(2, np.int64))
 
 
 def test_an_array_that_does_not_divide_by_its_axis_is_rejected():
     """⛔ The failure mode this catches is a payload silently reshaped to the wrong number of rows."""
-    with pytest.raises(ValueError, match="node_contained_count"):
-        _payload(node_contained_count=np.arange(7, dtype=np.uint32))
+    with pytest.raises(ValueError, match="region_contained_count"):
+        _payload(region_contained_count=np.arange(7, dtype=np.uint32))
 
 
 def test_the_offsets_must_agree_with_the_cut_axis_they_describe():
-    """A reference contributing ``c`` cuts owns ``c-1`` nodes and ``c-2`` lines. Re-derived here rather
+    """A reference contributing ``c`` cuts owns ``c-1`` regions and ``c-2`` lines. Re-derived here rather
     than trusted, because an offset array that merely has the right LENGTH can still be inconsistent."""
     bad = np.asarray(
         [0, 3, 5, 5], np.int64
-    )  # chr1 claims 3 nodes; 4 cuts means 3 — chr2 claims 2, ok
+    )  # chr1 claims 3 regions; 4 cuts means 3 — chr2 claims 2, ok
     bad[1] = 99
-    with pytest.raises(ValueError, match="ref_node_offsets"):
-        _payload(ref_node_offsets=bad)
+    with pytest.raises(ValueError, match="ref_region_offsets"):
+        _payload(ref_region_offsets=bad)
 
 
 # ---------------------------------------------------------------------------
@@ -444,12 +444,12 @@ def test_the_payload_holds_VIEWS_and_does_not_copy():
 
     ``np.ascontiguousarray(x, dtype=D)`` is a **no-op** when the array already has dtype ``D``, so the
     payload holds views over the capsule-owned C++ heap and the payload object is the keep-alive. Adding
-    a defensive cast would silently double peak memory on a 1.04 M-node partition.
+    a defensive cast would silently double peak memory on a 1.04 M-region partition.
     """
     cal = _calibration_dict()
     payload = AccumulatorPayload.from_scan_result(cal)
-    source = cal["calibration"]["node_start_count"]
-    assert payload.node_start_count.base is source or payload.node_start_count is source, (
+    source = cal["calibration"]["region_start_count"]
+    assert payload.region_start_count.base is source or payload.region_start_count is source, (
         "the payload copied an array whose dtype already matched — that doubles peak memory"
     )
 

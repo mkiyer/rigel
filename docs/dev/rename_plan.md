@@ -183,8 +183,9 @@ them must read ✅ on `--check` with no exception and no re-freeze.
 | 4 | **`line` → `boundary`**, per site | 120 of 180; leave the 60 text lines | — |
 | 5 | **`cut` → `region_bound`** (§2a — it is the region ENDPOINT grid, not a boundary) | ~690 code + 214 docstrings | — |
 | 6 | **`junction` → `sj`**, incl. §2.5's `mass`→`count` | ~900 code + 646 docstrings | — |
-| 7 | **module filenames** | 16 files + every import | — |
-| 8 | **docs, `CLAUDE.md`, `DESIGN.md` §0, memory** | 1,080 | `test_docs_boundary`, `test_no_jargon_labels`; ⭐ `--check` is a NO-OP here and that is the point: prose cannot move a number |
+| 7 | **module filenames** | remaining `edge_*`/`junction_*` files + imports | ⚠ ONLY the ones whose stage did not already move them — see below |
+| **8a** | ⭐ **ON-DISK ARTIFACT names** — `nodes.feather`, the `node_id` column, `gdna_density_nodes.feather` | 24 strings | ⛔ needs an INDEX REBUILD, so it lands with stage 9 |
+| 8b | **docs, `CLAUDE.md`, `DESIGN.md` §0, memory** | 1,080 | `test_docs_boundary`, `test_no_jargon_labels`; ⭐ `--check` is a NO-OP here and that is the point: prose cannot move a number |
 | 9 | **the caches** — one regeneration | 4 panels | `rescan_panels.py` |
 
 ### The per-stage protocol, in order — no step is optional
@@ -202,6 +203,34 @@ them must read ✅ on `--check` with no exception and no re-freeze.
 
 ⛔ **If step 6 fails, STOP and revert the stage.** A rename that moves a number is not a rename, and the
 next stage would build on it.
+
+## 3g. ⛔⛔ THREE THINGS STAGE 2 TAUGHT, ALL OF WHICH CHANGE THE REMAINING STAGES
+
+**① A MODULE NAME IS AN IDENTIFIER, so stage 7 cannot be deferred per-module.** Renaming
+`node_geometry` → `region_geometry` rewrites `import` statements, and the suite then fails to COLLECT
+until the file moves. ⇒ **a module's file moves in the same stage as its contents**; stage 7 keeps only
+whatever a stage did not already move.
+
+**② PERSISTED ARTIFACT NAMES ARE NOT IDENTIFIERS AND MUST NOT MOVE WITH THEM.** `nodes.feather`, the
+`node_id` COLUMN inside it, `gdna_density_nodes.feather`. Renaming those invalidated the shipped index
+mid-stage and made the bit-identity gate unrunnable — so they were reverted and given stage 8a, which
+needs an index rebuild and therefore belongs with the caches. ⭐ The right shape is
+`REGIONS_FEATHER = "nodes.feather"`: the CONSTANT renamed, the on-disk VALUE not.
+
+**③ ⭐⭐ THE NEW VOCABULARY IS THE PREDECESSOR'S VOCABULARY, and two anti-regression gates were keyed on
+that.** `test_the_old_BOUNDARY_vocabulary_is_GONE` banned the attributes `REGION` and `BOUNDARY`;
+`test_the_per_face_fields_are_gone` banned the fields `gdna_region_eff_len` and `n_regions`. All four are
+names the ruling RE-ADOPTS, so the gates began banning live code.
+⛔ **The words were never the defect — the `B R B R` SHAPE was.** Both gates are re-pointed at the shape:
+`k` regions give `2k − 1` slots, the chain starts and ends with a REGION, and every BOUNDARY has a region
+on both sides — the invariant the predecessor could not state. That is strictly stronger than the name
+check it replaces (`TRAPS: a-gate-that-reconstructs` — prefer an invariance).
+⚠ **Expect the same collision in stages 3–6**, since `boundary` is the other re-adopted word.
+
+**⚠ And one false positive the census did not predict:** `request.node` is **pytest's API**. It was
+renamed to `request.region` and two scenario tests failed. Nothing else in the tree hit a third-party
+`node` API, but the class of error is real — a token can belong to a LIBRARY, not just to two of our own
+senses.
 
 ## 4. THE METHOD, and the two rules it follows
 

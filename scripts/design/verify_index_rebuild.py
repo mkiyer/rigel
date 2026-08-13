@@ -1,19 +1,19 @@
-"""Verify a rebuilt index against the one it replaces: nodes UNCHANGED, edges changed only in `reach`.
+"""Verify a rebuilt index against the one it replaces: regions UNCHANGED, edges changed only in `reach`.
 
     TODO item 1   ·   Ledger: S1 (what changed and why)
 
 ⭐ WHY THIS CHECK IS THE WHOLE POINT. S1 changed `_contiguous_reaches` — the reach a contiguous edge
 reports — and **nothing else**. So a correct rebuild has an exactly predictable shape:
 
-* `nodes.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
-  used the RIGHT SOURCE: a different FASTA or GTF moves the cuts, and nodes would differ immediately.
+* `regions.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
+  used the RIGHT SOURCE: a different FASTA or GTF moves the cuts, and regions would differ immediately.
 * `edges.feather` differing in the four `reach_*` columns of the **contiguous** rows and nowhere else.
   ⚠ Junction reach is deliberately unchanged — a junction edge is only used by a molecule that spliced
   across it, so what remains either side is exonic, and `_junction_edges` stays on the exonic reach.
 
-Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the node
+Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the region
 ids would be a different change wearing this one's clothes — and `partition_hash` would not notice, because
-it covers `nodes.feather` only.
+it covers `regions.feather` only.
 
     python scripts/design/verify_index_rebuild.py OLD_INDEX NEW_INDEX
 """
@@ -43,20 +43,20 @@ def main() -> None:
     failures: list[str] = []
     print(f"old  {old}\nnew  {new}\n")
 
-    # ── nodes: byte-identical, which also proves the source was right ─────────────────────────────────
+    # ── regions: byte-identical, which also proves the source was right ─────────────────────────────────
     if filecmp.cmp(old / "nodes.feather", new / "nodes.feather", shallow=False):
-        print("  OK    nodes.feather byte-identical  (the partition did not move)")
+        print("  OK    regions.feather byte-identical  (the partition did not move)")
     else:
-        old_nodes = pd.read_feather(old / "nodes.feather")
-        new_nodes = pd.read_feather(new / "nodes.feather")
-        if old_nodes.equals(new_nodes):
-            print("  OK    nodes.feather differs on disk but is EQUAL as a table (compression only)")
+        old_regions = pd.read_feather(old / "nodes.feather")
+        new_regions = pd.read_feather(new / "nodes.feather")
+        if old_regions.equals(new_regions):
+            print("  OK    regions.feather differs on disk but is EQUAL as a table (compression only)")
         else:
             failures.append(
-                f"nodes.feather CHANGED: {len(old_nodes):,} -> {len(new_nodes):,} rows. The partition "
+                f"regions.feather CHANGED: {len(old_regions):,} -> {len(new_regions):,} rows. The partition "
                 f"moved, which S1 did not do — so this rebuild used a different FASTA or GTF."
             )
-            print(f"  FAIL  nodes.feather changed: {len(old_nodes):,} -> {len(new_nodes):,} rows")
+            print(f"  FAIL  regions.feather changed: {len(old_regions):,} -> {len(new_regions):,} rows")
 
     # ── edges: only the reach columns, only on contiguous rows ────────────────────────────────────────
     old_edges = pd.read_feather(old / "edges.feather")
@@ -100,7 +100,7 @@ def main() -> None:
         for line in failures:
             print(f"  {line}")
         sys.exit(1)
-    print("✅ nodes unchanged; edges changed only in contiguous reach — exactly what S1 did")
+    print("✅ regions unchanged; edges changed only in contiguous reach — exactly what S1 did")
 
 
 if __name__ == "__main__":

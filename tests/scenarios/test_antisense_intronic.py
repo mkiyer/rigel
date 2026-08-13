@@ -133,7 +133,7 @@ class TestAntisenseIntronicOverlap:
         RNA and only 14 % to gDNA, and `g00` phantom gDNA moves +1.7 % while nascent falls 99 %.
         """
         if ss < 1.0:
-            request.node.add_marker(
+            request.node.add_marker(  # ⛔ pytest API — NOT a genomic region
                 pytest.mark.xfail(
                     strict=True,
                     reason=(

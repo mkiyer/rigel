@@ -27,7 +27,7 @@ From that one set, all four deposit populations follow with no further machinery
 ``L``                ``len(covered)``
 line ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
                      molecule — 's definition, verbatim)
-node contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one node
+region contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one region
 ===================  =============================================================================
 
 ⭐ That crossing rule is the design's own words turned into a predicate, and it is what makes this file a
@@ -47,7 +47,7 @@ L1'    ``L`` from ``span − Σ(RAW intron lengths)`` — the formula           
 L2'    introns not clipped to the fragment                                          ✅ caught
 L4     fragment not clipped to the reference                                        ✅ caught
 L5     crossing boundary ``searchsorted`` side flipped right→left                   ✅ caught
-L6     spanning loop credits one node too many                                      ✅ caught
+L6     spanning loop credits one region too many                                      ✅ caught
 L7     containment keyed on the fragment EXTENT, not its first/last COVERED base    ✅ caught
 L3     ABUTTING introns no longer merge                                         ⚠ NOT caught
 =====  ==========================================================================  ==========
@@ -98,10 +98,10 @@ def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
 def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: bool):
     """Every population the deposit rule credits, derived from the covered set alone.
 
-    Returns ``(L, crossed_lines, contained_node)`` with local indices, or ``None`` for a fragment that
+    Returns ``(L, crossed_lines, contained_region)`` with local indices, or ``None`` for a fragment that
     deposits nothing. ``cuts`` are this reference's cut positions.
 
-    ⚠ A ``spanned_nodes`` set used to be derived and compared here. The bank it checked was removed on
+    ⚠ A ``spanned_regions`` set used to be derived and compared here. The bank it checked was removed on
     evidence, and the oracle no longer computes it — an oracle deriving a quantity nothing asserts is
     dead weight that reads as coverage.
     """
@@ -115,10 +115,10 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
     # oracle re-derives that offset rather than importing it — and it caught me getting it wrong first.
     crossed = {i - 1 for i, p in enumerate(cuts) if (p - 1) in covered and p in covered}
 
-    def node_of(pos):
+    def region_of(pos):
         return min(max(int(np.searchsorted(cuts, pos, side="right")) - 1, 0), len(cuts) - 2)
 
-    lo, hi = node_of(min(covered)), node_of(max(covered))
+    lo, hi = region_of(min(covered)), region_of(max(covered))
     contained = lo if (not spliced and lo == hi) else None
     return length, crossed, contained
 
@@ -127,21 +127,21 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
 
 _CUTS = np.array(
     [0, 3, 4, 9, 12], dtype=np.int64
-)  # 4 nodes: widths 3, 1, 5, 3 — includes a 1 bp node
+)  # 4 regions: widths 3, 1, 5, 3 — includes a 1 bp region
 _REF_LEN = 12
 
 
 def _acc(max_fragment_length: int = 10_000) -> Accumulator:
-    n_nodes = _CUTS.size - 1
+    n_regions = _CUTS.size - 1
     part = Partition(
         cut_positions=_CUTS.copy(),
         ref_cut_offsets=np.array([0, _CUTS.size], dtype=np.int64),
-        ref_node_offsets=np.array([0, n_nodes], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_nodes - 1], dtype=np.int64),
+        ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
+        ref_edge_offsets=np.array([0, n_regions - 1], dtype=np.int64),
         sj_offsets=np.zeros(_CUTS.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
-        node_types=np.zeros(n_nodes, dtype=np.int8),
+        region_types=np.zeros(n_regions, dtype=np.int8),
     )
     return Accumulator(part, max_fragment_length=max_fragment_length)
 
@@ -151,7 +151,7 @@ def _observed(acc: Accumulator):
     return (
         {i for i in range(t.edge_unspliced_count.shape[0]) if t.edge_unspliced_count[i].sum()},
         next(
-            (i for i in range(t.node_contained_count.shape[0]) if t.node_contained_count[i].sum()),
+            (i for i in range(t.region_contained_count.shape[0]) if t.region_contained_count[i].sum()),
             None,
         ),
     )
@@ -185,16 +185,16 @@ def _check_one(start: int, end: int, introns) -> None:
         ), f"{ctx}: the deposited L disagrees with the oracle's {length}"
     if contained is not None:
         # ⭐ The contained deposit is `1/OPPORTUNITY` — `ell − L + 1` admissible starts inside the
-        # containing node — so this asserts BOTH the length the oracle derived and the node it landed in.
-        node_len = int(_CUTS[contained + 1]) - int(_CUTS[contained])
+        # containing region — so this asserts BOTH the length the oracle derived and the region it landed in.
+        region_len = int(_CUTS[contained + 1]) - int(_CUTS[contained])
         assert _close(
-            float(t.node_contained_inv_opportunity_sum.sum()), 1.0 / (node_len - length + 1), 1
-        ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {node_len} bp node"
+            float(t.region_contained_inv_opportunity_sum.sum()), 1.0 / (region_len - length + 1), 1
+        ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {region_len} bp region"
 
     assert got_crossed == crossed, f"{ctx}: crossed lines {got_crossed} != oracle {crossed}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
-    # the start-count invariant: exactly one, at the node holding the first COVERED base
-    assert int(t.node_start_count.sum()) == 1, ctx
+    # the start-count invariant: exactly one, at the region holding the first COVERED base
+    assert int(t.region_start_count.sum()) == 1, ctx
 
 
 # --- EXHAUSTIVE: every configuration with up to two introns ------------------------------------------
@@ -239,16 +239,16 @@ def test_randomised_at_realistic_scale():
     rng = np.random.default_rng(20260731)
     cuts = np.array([0, 137, 138, 400, 401, 1200, 5000, 5001, 9000], dtype=np.int64)
     ref_len = 9000
-    n_nodes = cuts.size - 1
+    n_regions = cuts.size - 1
     part = Partition(
         cut_positions=cuts.copy(),
         ref_cut_offsets=np.array([0, cuts.size], dtype=np.int64),
-        ref_node_offsets=np.array([0, n_nodes], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_nodes - 1], dtype=np.int64),
+        ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
+        ref_edge_offsets=np.array([0, n_regions - 1], dtype=np.int64),
         sj_offsets=np.zeros(cuts.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
-        node_types=np.zeros(n_nodes, dtype=np.int8),
+        region_types=np.zeros(n_regions, dtype=np.int8),
     )
     n_checked = 0
     for _ in range(4000):
@@ -295,7 +295,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     # a paired-end molecule with an unsequenced mate gap: the gap IS part of the molecule
     acc = _acc()
     acc.deposit(0, 1, 11, observed_introns=[])
-    assert int(acc.tally.node_contained_count.sum()) == 0
+    assert int(acc.tally.region_contained_count.sum()) == 0
     got_crossed, _ = _observed(acc)
     assert got_crossed == {0, 1, 2}, (
         "the mate gap must carry the molecule across every interior line"
@@ -313,7 +313,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
 
 
 def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
-    """⭐ **THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT (TRAPS: one-thing-varied).** ``Σ deposited_lengths == Σ node_start_count == qc.deposited``.
+    """⭐ **THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT (TRAPS: one-thing-varied).** ``Σ deposited_lengths == Σ region_start_count == qc.deposited``.
 
     Three counters, one population, incremented on the same line of `deposit` so they cannot drift by
     construction. It is the same externally-checkable form as 's start-count
@@ -335,7 +335,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
         lengths.append(len(covered_bases(_REF_LEN, start, end, introns)))
     t = acc.tally
     assert int(t.deposited_lengths.sum()) == len(lengths)
-    assert int(t.deposited_lengths.sum()) == int(t.node_start_count.sum())
+    assert int(t.deposited_lengths.sum()) == int(t.region_start_count.sum())
     assert int(t.deposited_lengths.sum()) == t.qc[DepositOutcome.DEPOSITED.value]
     # ⭐ and it is binned at L — the ORACLE's L, not the accumulator's own
     expected = np.zeros_like(t.deposited_lengths)
@@ -393,21 +393,21 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
-#  THE RECIPROCAL-OPPORTUNITY DEPOSIT AT A NODE — `1/A`, not `1/L`
+#  THE RECIPROCAL-OPPORTUNITY DEPOSIT AT A REGION — `1/A`, not `1/L`
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def _one_node_acc(node_len: int, max_fragment_length: int = 10_000) -> Accumulator:
-    """An accumulator over a SINGLE node ``[0, node_len)`` — no lines, so nothing but containment."""
-    part = Partition.from_cuts([[0, node_len]])
+def _one_region_acc(region_len: int, max_fragment_length: int = 10_000) -> Accumulator:
+    """An accumulator over a SINGLE region ``[0, region_len)`` — no lines, so nothing but containment."""
+    part = Partition.from_cuts([[0, region_len]])
     return Accumulator(part, max_fragment_length=max_fragment_length)
 
 
-@pytest.mark.parametrize("node_len", [151, 400, 1000])
-def test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_FREE(node_len):
-    """⭐⭐⭐ **A NODE'S DENSITY CHANNEL MUST NOT DEPEND ON THE FRAGMENT-LENGTH DISTRIBUTION.**
+@pytest.mark.parametrize("region_len", [151, 400, 1000])
+def test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_FREE(region_len):
+    """⭐⭐⭐ **A REGION'S DENSITY CHANNEL MUST NOT DEPEND ON THE FRAGMENT-LENGTH DISTRIBUTION.**
 
-    The opportunity for a length-``w`` fragment inside a node of length ``ell`` is ``ell − w + 1`` start
+    The opportunity for a length-``w`` fragment inside a region of length ``ell`` is ``ell − w + 1`` start
     positions. Deposit ``1/A`` and the two cancel identically::
 
         E[SUM 1/A]  =  SUM_w rho * A(w) * f(w) * (1/A(w))  =  rho      for ANY f
@@ -421,17 +421,17 @@ def test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_F
     contributes ``(ell − w + 1)/w``, so the total is a function of the lengths and the channel is not a
     density (`EQUATIONS.md` §2.2). Verified failing before the fix was written.
     """
-    lengths = [w for w in (20, 51, 97, 150, 233, 400, 999) if w <= node_len]
+    lengths = [w for w in (20, 51, 97, 150, 233, 400, 999) if w <= region_len]
     assert len(lengths) >= 3, "the parametrisation must leave a non-degenerate length SET"
 
-    acc = _one_node_acc(node_len)
+    acc = _one_region_acc(region_len)
     placements = 0
     for w in lengths:
-        for start in range(0, node_len - w + 1):  # every admissible placement, exactly once
+        for start in range(0, region_len - w + 1):  # every admissible placement, exactly once
             assert acc.deposit(0, start, start + w) is DepositOutcome.DEPOSITED
             placements += 1
 
-    got = float(acc.tally.node_contained_inv_opportunity_sum[0])
+    got = float(acc.tally.region_contained_inv_opportunity_sum[0])
 
     # ⭐⭐⭐ THE THEOREM, stated against the REAL-ARITHMETIC answer: `A` placements each depositing
     # `1/A` is exactly one density unit per length, whatever the lengths are. The total is therefore
@@ -441,32 +441,32 @@ def test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_F
     # closed form, so it re-derived the implementation and could not fail (`TRAPS: a-gate-that-reconstructs`).
     # ⭐ Measured against the exact rational answer, float64 is far closer than the grid it replaced::
     #
-    #     node_len 151    fixed 7.0e-10    float64 5.8e-15
-    #     node_len 400    fixed 1.7e-08    float64 1.0e-13
-    #     node_len 1000   fixed 2.0e-07    float64 2.8e-13
+    #     region_len 151    fixed 7.0e-10    float64 5.8e-15
+    #     region_len 400    fixed 1.7e-08    float64 1.0e-13
+    #     region_len 1000   fixed 2.0e-07    float64 2.8e-13
     #
     # ⛔ The budget is the representation's, derived from the number of additions — not fitted.
     assert _close(got, float(len(lengths)), placements), (
-        f"node_len={node_len}: {got:.12f} density units for {len(lengths)} lengths — "
+        f"region_len={region_len}: {got:.12f} density units for {len(lengths)} lengths — "
         "the opportunity did not cancel, so this channel is a function of the pmf"
     )
 
 
-def test_the_node_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
+def test_the_region_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
     """⛔ The falsification with the pmf VARIED — the property `1/L` cannot have.
 
-    Two disjoint length sets over the same node, each placed at every admissible start. A model-free
+    Two disjoint length sets over the same region, each placed at every admissible start. A model-free
     density reads the same ``rho`` per length in both; a length-dependent one does not.
     """
     unit = float(1 << 32)
-    node_len = 1000
+    region_len = 1000
     per_length = []
     for lengths in ((20, 51, 97), (233, 400, 999)):
-        acc = _one_node_acc(node_len)
+        acc = _one_region_acc(region_len)
         for w in lengths:
-            for start in range(0, node_len - w + 1):
+            for start in range(0, region_len - w + 1):
                 acc.deposit(0, start, start + w)
-        per_length.append(int(acc.tally.node_contained_inv_opportunity_sum[0]) / unit / len(lengths))
+        per_length.append(int(acc.tally.region_contained_inv_opportunity_sum[0]) / unit / len(lengths))
     short, long_ = per_length
     assert abs(short - long_) < 1e-6, (
         f"density per length: short lengths {short:.9f}, long lengths {long_:.9f} — a model-free "

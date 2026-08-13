@@ -38,7 +38,7 @@ cached — freezing its output would mean a change to the FL model silently does
 
 THE KEY NEEDS THREE PARTS, AND THE MIDDLE ONE IS A GAP THAT WAS ALREADY LOGGED
 -----------------------------------------------------------------------------
-* ``graph_hash`` — the node partition plus the junction CSR. The payload already carries it.
+* ``graph_hash`` — the region partition plus the junction CSR. The payload already carries it.
 * ⭐ **a PAYLOAD-SCHEMA digest.** The accumulator's own field list. None of the other keys moves when
   the accumulator changes, so without it a cache written before an accumulator change is accepted and
   then fails deep inside the loader with a bare ``KeyError``. S5.a made that concrete by adding
@@ -232,7 +232,7 @@ def deposit_digest() -> str:
     **A deposit-RULE change moves neither**, so a cache written under the old rule was accepted by the key
     and silently served OLD VALUES to NEW CODE. That is ``TRAPS: a-hash-that-misses-its-artifact`` in the
     key written to prevent it, and it has now happened FOUR times: the reach digest; the ``[n,2] → [n]``
-    shape collapse; the node deposit ``1/L → 1/A``; and the junction-boundary rule. ⚠ The third was caught
+    shape collapse; the region deposit ``1/L → 1/A``; and the junction-boundary rule. ⚠ The third was caught
     only because the bank had to be renamed anyway and the rename moved the key — luck, not the key doing
     its job. The fourth changed no name at all and this function is what catches it.
 
@@ -241,7 +241,7 @@ def deposit_digest() -> str:
     across runs, processes and worker counts, because every channel is an integer and integer addition is
     associative.
 
-    ⚠ The fixture is deliberately awkward rather than minimal — two annotated junctions, a short node
+    ⚠ The fixture is deliberately awkward rather than minimal — two annotated junctions, a short region
     whose far line a fragment may or may not reach, contained / crossing / spliced / junction-only
     fragments — so that a rule change confined to ONE of those cases still moves it.
 
@@ -258,7 +258,7 @@ def deposit_digest() -> str:
     cuts = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
     accumulator = Accumulator(
         cuts=cuts,
-        node_types=np.array([0, 2, 2, 1, 2, 2, 1, 2], dtype=np.uint8),
+        region_types=np.array([0, 2, 2, 1, 2, 2, 1, 2], dtype=np.uint8),
         max_length=1000,
         ref=0,
     )
@@ -268,7 +268,7 @@ def deposit_digest() -> str:
         np.array([1, 1], dtype=np.int8),  # STRAND_POS
     )
     for start, end, introns in (
-        (10, 50, ()),  # contained in one node, crosses nothing
+        (10, 50, ()),  # contained in one region, crosses nothing
         (30, 150, ()),  # crosses one line
         (30, 280, ()),  # crosses three lines
         (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a line
@@ -499,7 +499,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     expected_graph = index.graph_hash
     if payload.graph_hash != expected_graph:
         raise ScanCacheKeyError(
-            f"cache graph_hash {payload.graph_hash} != index graph_hash {expected_graph}. The node "
+            f"cache graph_hash {payload.graph_hash} != index graph_hash {expected_graph}. The region "
             f"partition or the junction CSR moved; this tally does not describe this index."
         )
 

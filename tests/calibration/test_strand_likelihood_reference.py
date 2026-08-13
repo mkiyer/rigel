@@ -5,7 +5,7 @@
 Measured 2026-08-07 by `scripts/design/module_census.py`:
 
 * `strand_likelihood.strand_loglik` had **no production consumer at all**. Its own docstring said "Used by
-  the per-node strand module (`strand_deconv`)", and `strand_deconv` does not import it.
+  the per-region strand module (`strand_deconv`)", and `strand_deconv` does not import it.
 * the only importers were two test files, and both exercised it against **its own properties** — never
   against the three-component form it is supposedly the special case of.
 
@@ -36,7 +36,7 @@ GRID = np.linspace(0.02, 0.98, 25)
 def _three(u_pos, n, f_g, kappa, od_g, od_r, *, tilt=1.0):
     """ψ's three-component form with ALL the RNA on the ``+`` strand — the single-strand special case.
 
-    ⭐ ``tilt = 1`` means ``f_neg = 0``, which is the structural state of a single-strand node: one strand is
+    ⭐ ``tilt = 1`` means ``f_neg = 0``, which is the structural state of a single-strand region: one strand is
     not admissible, so the tilt is not a free nuisance and the mixture reduces to two components.
     ⚠ The variance REFERENCE is passed equal to the live composition, because `strand_loglik` has no
     count-zero-information freeze — it evaluates the variance at the same composition as the mean. Passing a

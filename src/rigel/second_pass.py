@@ -145,7 +145,7 @@ def _distinguishing_lines(
     intron are cuts by construction, those two lines always exist and always discriminate.
 
     ⛔ **This asked for ``start < c < end`` until 2026-08-02 (D-6).** That drops exactly the two
-    guaranteed discriminators, and returns an EMPTY range whenever the intron spans one node — handing ∅
+    guaranteed discriminators, and returns an EMPTY range whenever the intron spans one region — handing ∅
     a structural ``rho`` of 0. Measured over the pilot: on a gdna100 library the shipped rule read
     **43.4 %** of ∅ hypotheses as zero-density where the derived rule reads ⭐ **0.0000**.
     """
@@ -298,16 +298,16 @@ class _Accumulators:
     only needs ``length_under`` and would survive without it; the drain would silently credit no junction
     edge at all.
 
-    ⚠ ``node_types`` comes from the INDEX. The payload echoes the cut axis but not the typing, and the
+    ⚠ ``region_types`` comes from the INDEX. The payload echoes the cut axis but not the typing, and the
     typing is what assigns a deposit to a length pool.
 
     ⚠ Lazy, and :attr:`built` is the set that actually exists — which is exactly the delta's support, so
     :func:`_gather_delta` iterates it instead of every reference in the genome.
     """
 
-    def __init__(self, payload: AccumulatorPayload, node_types: np.ndarray, junctions) -> None:
+    def __init__(self, payload: AccumulatorPayload, region_types: np.ndarray, junctions) -> None:
         self._payload = payload
-        self._node_types = node_types
+        self._region_types = region_types
         self._junctions = junctions
         self.built: dict[int, NativeAccumulator] = {}
 
@@ -317,12 +317,12 @@ class _Accumulators:
         payload, junctions = self._payload, self._junctions
         cut_lo = int(payload.ref_cut_offsets[ref])
         cut_hi = int(payload.ref_cut_offsets[ref + 1])
-        node_lo = int(payload.ref_node_offsets[ref])
-        n_nodes = max(cut_hi - cut_lo - 1, 0)
+        region_lo = int(payload.ref_region_offsets[ref])
+        n_regions = max(cut_hi - cut_lo - 1, 0)
         accumulator = NativeAccumulator(
             cuts=np.ascontiguousarray(payload.cut_positions[cut_lo:cut_hi], dtype=np.int64),
-            node_types=np.ascontiguousarray(
-                self._node_types[node_lo : node_lo + n_nodes], dtype=np.uint8
+            region_types=np.ascontiguousarray(
+                self._region_types[region_lo : region_lo + n_regions], dtype=np.uint8
             ),
             max_length=payload.max_length,
             ref=ref,
@@ -359,7 +359,7 @@ def score_held_fragments(
     *,
     fl_models,
     rna_sense_frac: float,
-    node_types: np.ndarray,
+    region_types: np.ndarray,
     junctions,
 ) -> HeldScores:
     """Score every held fragment's hypotheses. Pure: reads pass-1 state, writes nothing.
@@ -377,8 +377,8 @@ def score_held_fragments(
         certified RNA because an annotated splice proves it. ⚠ On an R1-antisense (dUTP) library this is
         ≈ 0.01, so **disagreement is the likely case**. It is used as the probability
         of agreement it is, never inverted.
-    node_types, junctions
-        From the index: ``build_node_partition_arrays`` and ``build_junction_edge_arrays``. ⚠ The junction
+    region_types, junctions
+        From the index: ``build_region_partition_arrays`` and ``build_junction_edge_arrays``. ⚠ The junction
         CSR is genuinely not on the payload, so this dependency is real rather than an oversight.
     """
     deferred = payload.deferred
@@ -393,7 +393,7 @@ def score_held_fragments(
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
-    accumulators = _Accumulators(payload, node_types, junctions)
+    accumulators = _Accumulators(payload, region_types, junctions)
 
     n_undecided = 0
     for i in range(deferred.n_fragments):
@@ -633,7 +633,7 @@ def drain(
     payload: AccumulatorPayload,
     choices: np.ndarray,
     *,
-    node_types: np.ndarray,
+    region_types: np.ndarray,
     junctions,
 ) -> AccumulatorPayload:
     """⭐ **THE DRAIN.** Replay every held fragment with its chosen hypothesis; return the drained payload.
@@ -660,7 +660,7 @@ def drain(
             f"in the bank's canonical order — a mismatch means the scores and the draw walked different "
             f"queues."
         )
-    accumulators = _Accumulators(payload, node_types, junctions)
+    accumulators = _Accumulators(payload, region_types, junctions)
     counts = {
         "deposited": 0,
         "dropped_too_long": 0,
@@ -712,7 +712,7 @@ def _gather_delta(
     correct delta and also the cheap path when a library's held fragments sit on a few contigs.
     """
     axis_offsets = {
-        "node": payload.ref_node_offsets,
+        "region": payload.ref_region_offsets,
         "edge": payload.ref_edge_offsets,
         "sj": payload.ref_sj_offsets,
     }

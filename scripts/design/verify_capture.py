@@ -7,9 +7,9 @@ without re-implementing the sampler — simulate the identical chromosome, ident
 rate and identical RNA budget twice, once with probes and once without, and read the three consequences
 off the ground truth:
 
-1. ⭐ **gDNA per base, per node.** gDNA is uniform along the genome before capture, so its post-capture
-   density profile IS the capture landscape, measured directly. Exon nodes must go UP, intergenic and
-   intronic nodes must go DOWN — relative to the same library's own mean.
+1. ⭐ **gDNA per base, per region.** gDNA is uniform along the genome before capture, so its post-capture
+   density profile IS the capture landscape, measured directly. Exon regions must go UP, intergenic and
+   intronic regions must go DOWN — relative to the same library's own mean.
 2. ⭐ **the mRNA length marginal.** A longer fragment presents more sequence to a probe, so capture
    selects for length until the overlap saturates at the probe length. The realised mean must RISE.
 3. ⭐ **the junction-crossing share.** ``_toy_probes`` tiles probes WITHIN each exon so none spans the
@@ -22,9 +22,9 @@ because they are the useful part; the gates are on sign.
 
 ⭐⭐ **MEASURED 2026-08-05** on `spliced_exons`, 120 kb, gDNA rate raised to 0.05/bp for power (both arms):
 
-* probed exon nodes **65-66x enriched**; the off-probe INTERIOR (116 kb) **0.046x**, i.e. 22x depleted;
-* ⛔ but a whole 7 kb intron NODE reads **0.80x**, NOT depleted — because the +-500 bp COLLAR abutting a
-  probed exon is itself **5.4x ENRICHED**. A node beside a probe is not off-probe, and an intron's
+* probed exon regions **65-66x enriched**; the off-probe INTERIOR (116 kb) **0.046x**, i.e. 22x depleted;
+* ⛔ but a whole 7 kb intron REGION reads **0.80x**, NOT depleted — because the +-500 bp COLLAR abutting a
+  probed exon is itself **5.4x ENRICHED**. A region beside a probe is not off-probe, and an intron's
   measured gDNA density under capture is a MIXTURE of a depleted interior and two enriched ends;
 * the mRNA length mean rises **+6.6 bp** (z = 14.8) — capture selects for length, as the engine says;
 * the junction depletion has the hard onset the weight law predicts: crossing/uniform is **0.62x below
@@ -115,7 +115,7 @@ def main() -> int:
     sizes = np.asarray(ra.region_size_bp, np.int64)
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
 
-    def gdna_per_node(frags):
+    def gdna_per_region(frags):
         c = Counter()
         for f in frags:
             if f["kind"] != "gdna":
@@ -126,12 +126,12 @@ def main() -> int:
                 c[i] += 1
         return c
 
-    g_on, g_off = gdna_per_node(fr_on), gdna_per_node(fr_off)
+    g_on, g_off = gdna_per_region(fr_on), gdna_per_region(fr_off)
     n_on = sum(g_on.values()) or 1
     n_off = sum(g_off.values()) or 1
-    print("\n── 1. gDNA DENSITY PER NODE (fragments per kb, normalised to each library's own total) ──")
+    print("\n── 1. gDNA DENSITY PER REGION (fragments per kb, normalised to each library's own total) ──")
     print(f"   total gDNA fragments: probes ON {n_on:,}   OFF {n_off:,}")
-    print(f"\n   {'node':<34} {'bp':>9} {'n OFF':>7} {'n ON':>7} {'OFF /kb':>9} {'ON /kb':>9} "
+    print(f"\n   {'region':<34} {'bp':>9} {'n OFF':>7} {'n ON':>7} {'OFF /kb':>9} {'ON /kb':>9} "
           f"{'ratio':>8} {'±':>7}")
     fails = []
     for i in range(starts.size):
@@ -153,13 +153,13 @@ def main() -> int:
             continue
         if TYPE_NAMES[int(rtype[i])] == "exon" and not (math.log(ratio) > 2 * rel):
             fails.append(f"exon {label} not ENRICHED (ratio {ratio:.2f} ± {100 * rel:.0f}%)")
-        # ⛔ NOT "every non-exon node is depleted". A node ABUTTING a probed exon is not off-probe: a
+        # ⛔ NOT "every non-exon region is depleted". A region ABUTTING a probed exon is not off-probe: a
         # fragment lying in its first or last ~fragment-length can still overlap the neighbour's probe
         # and be captured. Only the INTERIOR is off-probe, and it is split out below.
-    V.check(not fails, "⭐ every probed exon node is ENRICHED", "; ".join(fails))
+    V.check(not fails, "⭐ every probed exon region is ENRICHED", "; ".join(fails))
 
     # ── the interior/edge split, which is where "off-probe is depleted" is actually testable ──
-    print("\n   ⭐ A node beside a probed exon is NOT off-probe. Split each long node into the")
+    print("\n   ⭐ A region beside a probed exon is NOT off-probe. Split each long region into the")
     print("      collar within one max-fragment-length of a probed exon, and the interior beyond it:")
     collar = int(donor_on.frag_max)
     exon_bounds = [(s, e) for s, e in geom.exons]
@@ -202,7 +202,7 @@ def main() -> int:
                     f"ratio {r:.3f} ± {100 * rel:.0f}%")
         else:
             V.check(math.log(r) > 2 * rel,
-                    "⭐ and the COLLAR beside a probe is ENRICHED — which is why a whole intron NODE "
+                    "⭐ and the COLLAR beside a probe is ENRICHED — which is why a whole intron REGION "
                     "reads ~1.0",
                     f"ratio {r:.2f} ± {100 * rel:.0f}%")
 

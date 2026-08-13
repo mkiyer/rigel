@@ -222,7 +222,7 @@ def test_genome_track_spec_bins_per_ref():
         fragment_lengths=None,
         calibration_track=track,
         gdna_density_kde=None,
-        gdna_density_nodes=None,
+        gdna_density_regions=None,
         summary={},
     )
     assert set(build_charts(stub)) == {"genome"}
@@ -230,7 +230,7 @@ def test_genome_track_spec_bins_per_ref():
         fragment_lengths=None,
         calibration_track=None,
         gdna_density_kde=None,
-        gdna_density_nodes=None,
+        gdna_density_regions=None,
         summary={},
     )
     assert build_charts(empty) == {}

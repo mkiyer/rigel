@@ -50,7 +50,7 @@ _s.loader.exec_module(TC)
 TH = TC.TH
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -83,9 +83,9 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
     kind, obj = np.asarray(chain.kind), np.asarray(chain.obj_idx, np.int64)
 
     ov = sub.truth.override_masses(ra)
-    tg = {"node": np.asarray(ov["mass_gdna_node"], float),
+    tg = {"region": np.asarray(ov["mass_gdna_region"], float),
           "edge": np.asarray(ov["mass_gdna_edge"], float)}
-    tr = {"node": np.asarray(ov["mass_rna_node"], float),
+    tr = {"region": np.asarray(ov["mass_rna_region"], float),
           "edge": np.asarray(ov["mass_rna_edge"], float)}
 
     print("=" * 132)
@@ -102,13 +102,13 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
     rows = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        ax = "node" if kind[s] == NODE else "edge"
-        if ax == "node":
+        ax = "region" if kind[s] == REGION else "edge"
+        if ax == "region":
             label = f"{TYPES[int(rtype[i])]} [{starts[i]:,},{starts[i] + sizes[i]:,})"
         else:
             hi = s + 1
-            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == NODE else -1
-            a = int(rtype[obj[s - 1]]) if s > 0 and kind[s - 1] == NODE else -1
+            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
+            a = int(rtype[obj[s - 1]]) if s > 0 and kind[s - 1] == REGION else -1
             label = "|".join(TYPES.get(x, "?") for x in sorted((a, b)) if x >= 0) + \
                     (f" @{starts[obj[hi]]:,}" if b >= 0 else "")
         tot = tg[ax][i] + tr[ax][i]

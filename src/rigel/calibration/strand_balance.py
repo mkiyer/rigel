@@ -3,7 +3,7 @@
 Fit from the **posterior-predictive** of the library sense rate over annotated spliced unique mappers (the
 2×2 contingency in the live ``StrandModel``, itself the marginal of the per-junction SJ strand table). The
 sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` is its **mean**,
-``(n_same + 1) / (n_obs + 2)``: it strand-cleans the count density and parameterises the per-node strand
+``(n_same + 1) / (n_obs + 2)``: it strand-cleans the count density and parameterises the per-region strand
 likelihood. Zero spliced reads ⇒ ``Beta(1,1)`` ⇒ 0.5, and ``calibrate`` raises ``CalibrationStrandError``
 (a real RNA-seq library always has spliced reads).
 

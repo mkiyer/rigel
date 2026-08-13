@@ -254,14 +254,14 @@ def main() -> int:
     from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
-        build_node_partition_arrays,
+        build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
     from rigel.scan_cache import read_scan_cache
     from rigel.second_pass import choose_hypotheses, score_held_fragments
 
     index = TranscriptIndex.load(str(args.index))
-    _cuts, _offsets, node_types = build_node_partition_arrays(index)
+    _cuts, _offsets, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)
@@ -282,7 +282,7 @@ def main() -> int:
             payload,
             fl_models=fl,
             rna_sense_frac=cache.strand_model.p_r1_sense,
-            node_types=node_types,
+            region_types=region_types,
             junctions=junctions,
         )
         choices = choose_hypotheses(scores, payload, seed=args.seed)

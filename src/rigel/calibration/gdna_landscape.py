@@ -5,13 +5,13 @@ it to ψ's composition arm on the re-solve. It replaces the δ-pin `DensityNPMLE
 retired, not deleted — see :mod:`.npmle`).
 
 **The shape of the truth it has to represent.** gDNA is uniform, so the depleted level is a near point mass;
-hybrid capture lifts the covered nodes into one enriched mode ~2.7 decades above it. Two components, one
+hybrid capture lifts the covered regions into one enriched mode ~2.7 decades above it. Two components, one
 sharp and one broad, several decades apart — so the estimator must resolve a spike *and* a wide bump on the
 same axis, which is what fixes the design below.
 
 **Three decisions, each measured**:
 
-1. **SUBSTRATE** — REGION nodes only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
+1. **SUBSTRATE** — REGION regions only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
    excluded (owner, 2026-07-27): they are ~as numerous as regions but only 5.1 % of them are truly enriched
    against the regions' 12.1 %, so including them nearly halves the enriched component's census and their
    two-flank mixture fills the valley between the two true modes (74 % of all valley mass). The zero-count
@@ -40,8 +40,8 @@ _LN10 = np.log(10.0)
 #: faithful and strictly slower. 260 is what every measurement in the production plan was taken at.
 _N_GRID = 260
 #: Kernels are grouped into this many equal-count width bins and each bin convolved once, instead of one
-#: convolution per node. Pure speed: the cost goes from O(n·K²) to O(bins·K²), which is what makes this
-#: affordable at genome scale (1.5 M nodes).
+#: convolution per region. Pure speed: the cost goes from O(n·K²) to O(bins·K²), which is what makes this
+#: affordable at genome scale (1.5 M regions).
 _WIDTH_BINS = 12
 
 # ── Modelling constants (both tracked in the production plan's constants ledger) ─────────────────────────
@@ -54,7 +54,7 @@ _KNN_SCALE = 0.5
 #: Reference variance scale in the reliability weight, as a log-rate variance (0.15 decades).
 #: ⚠ It is a tuning constant in disguise: it is presented as "the kernel resolution floor", but the actual
 #: rendering resolution is the grid step (~0.025 dec), and substituting that makes the weight *more*
-#: aggressive and the census *worse*. What it really does is cap how far a confident node can be
+#: aggressive and the census *worse*. What it really does is cap how far a confident region can be
 #: down-weighted. Changing it is its own measured experiment; it must not ride along with anything else.
 #:
 #: ⛔ **IT IS NO LONGER THE BINDING CONSTRAINT ON THE ENRICHED CENSUS, AND THIS NOTE USED TO SAY IT WAS.**
@@ -84,7 +84,7 @@ class GdnaLandscape:
     strength: float = 1.0
 
     def logprior(self, fg_grid, mass, eff) -> np.ndarray:
-        """Project onto the ψ solve grid → ``(n_nodes, K)`` additive term ``= log P(log ρ_g)`` evaluated at
+        """Project onto the ψ solve grid → ``(n_regions, K)`` additive term ``= log P(log ρ_g)`` evaluated at
         ``ρ_g = f_g·M/E``. **Bare** — no reference prior, no measure term, no Jacobian; ψ's `_gdna_arm` adds
         the reference itself.
 
@@ -112,20 +112,20 @@ def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
 
     ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``, so:
 
-    * **the top is a hard bound**, ``max_i log10(M_i/E_i)``. No node can ever be placed above its own total
+    * **the top is a hard bound**, ``max_i log10(M_i/E_i)``. No region can ever be placed above its own total
       density, so there is nothing above it to represent.
-    * **the bottom is the resolution wall**, ``min_i log10(1/E_i)``. A node of effective length ``E`` that
+    * **the bottom is the resolution wall**, ``min_i log10(1/E_i)``. A region of effective length ``E`` that
       sequenced no gDNA says only "ρ ≲ 1/E"; below the deepest such wall nothing is distinguishable from
-      anything else. This end matters more than it looks — a zero-count node's kernel ``e^{−ρE}`` is
+      anything else. This end matters more than it looks — a zero-count region's kernel ``e^{−ρE}`` is
       monotone decreasing, so where the floor sits is where the depleted anchor deposits its mass.
 
     Both bounds also dominate every kernel centre ``log10(max(count,1)/E)``, since ``count ≤ M``, so no
     centre is ever truncated.
 
     ⚠ **Do not pad this by a kernel width.** That was tried: the pad is set by the single widest kernel, one
-    isolated node then stretches the span by 2–3 decades, and since the point count is fixed the grid step
+    isolated region then stretches the span by 2–3 decades, and since the point count is fixed the grid step
     coarsens and the whole landscape over-smooths (measured +0.007 / +0.056 EMD, enriched width 0.42 → 0.54).
-    A lone node's broad kernel is 1/n of the mass spread over decades; spending resolution to render its
+    A lone region's broad kernel is 1/n of the mass spread over decades; spending resolution to render its
     tails costs resolution everywhere that matters.
     """
     lo = float(np.min(-np.log10(np.maximum(eff, _EPS))))
@@ -136,7 +136,7 @@ def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
 
 
 def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np.ndarray:
-    """Per-node ``P(count | ρ·E)`` on the grid, row-normalised to unit mass → ``(n, K)``.
+    """Per-region ``P(count | ρ·E)`` on the grid, row-normalised to unit mass → ``(n, K)``.
 
     **Zero-native, and that is the point**: at ``count = 0`` this is ``e^{−ρE}``, a monotone decay that says
     "ρ is anything below the resolution wall" — the honest statement, and the one a point-estimate KDE
@@ -152,10 +152,10 @@ def _poisson_kernels(count: np.ndarray, eff: np.ndarray, grid: np.ndarray) -> np
 def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE) -> np.ndarray:
     """THE population resolution: ``h_i = scale · dist(a_i, k-th nearest neighbour)``, ``k = √n``.
 
-    ⚠⚠ **READ THIS BEFORE CHANGING THE KERNEL.** The per-node Poisson likelihood is a *measurement* width,
+    ⚠⚠ **READ THIS BEFORE CHANGING THE KERNEL.** The per-region Poisson likelihood is a *measurement* width,
     and on the log axis it is ``1/(√g·ln10)`` decades — so it **shrinks as ρ^(−1/2)**. Across the benchmark
     that is a **41× collapse** (0.317 → 0.0078 dec) which drops **below one grid step** exactly where the
-    enriched mode lives: above +1 decade, 88 % of nodes carrying 100 % of that band's mass become deltas in
+    enriched mode lives: above +1 decade, 88 % of regions carrying 100 % of that band's mass become deltas in
     a single cell. A landscape built from measurement widths alone is therefore smooth through the depleted
     bulk and a **comb** over the enriched one (roughness 46.9 vs the 2–4 of a smooth bump), and it reports
     that one broad mode as dozens.
@@ -163,7 +163,7 @@ def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE)
     A population's resolution is set by how finely the *sample* can resolve it, never by how precisely one
     member happens to be measured. Nearest-neighbour spacing is exactly that quantity — it is what decides
     whether two kernels merge into one mode or stand apart as two spurious ones — and it self-corrects with
-    no tuning: fewer nodes ⇒ farther neighbours ⇒ wider kernels (mode-count-vs-sample-size slope +5.6 → −1.0).
+    no tuning: fewer regions ⇒ farther neighbours ⇒ wider kernels (mode-count-vs-sample-size slope +5.6 → −1.0).
 
     The `grid_step` floor is **forced by the axis, not chosen**: nothing narrower than one cell is
     representable, so a kernel below it is not a narrow density but a delta at the wrong height.
@@ -176,11 +176,11 @@ def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE)
 
     ⚠⚠ **This must be the true k-th-nearest-neighbour distance, and getting it wrong is not cosmetic.** The
     first implementation used ``max(a_i − a_{i−k}, a_{i+k} − a_i)`` — the FAR edge of a 2k window, which is
-    systematically larger and, for a node with no near neighbours on one side, reaches all the way back into
-    the bulk. That hands **the widest kernel in the fit to the most isolated node**, which is precisely
+    systematically larger and, for a region with no near neighbours on one side, reaches all the way back into
+    the bulk. That hands **the widest kernel in the fit to the most isolated region**, which is precisely
     backwards: an isolated observation is one observation, and smearing it across decades asserts population
-    mass everywhere it touches. Measured on zero-gDNA libraries, where every such node is a false positive:
-    p99 width **1.04 decades → 0.21–0.46**, and the handful of over-called nodes (6–126 of ~1100, carrying
+    mass everywhere it touches. Measured on zero-gDNA libraries, where every such region is a false positive:
+    p99 width **1.04 decades → 0.21–0.46**, and the handful of over-called regions (6–126 of ~1100, carrying
     0.03–1.5 % of the weight) were being rendered as a permissive plateau across the whole enriched range.
     """
     n = centres.size
@@ -212,11 +212,11 @@ def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE)
 
 
 def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.ndarray:
-    """Per-node mass ``w = ref/(v + ref)`` — the irreducible share of the log-rate variance against the
+    """Per-region mass ``w = ref/(v + ref)`` — the irreducible share of the log-rate variance against the
     deconvolution AMBIGUITY ``v = Var(log f_g)``.
 
-    ``ref`` sums the node's own Poisson counting floor ``1/max(count,1)`` and the reference scale
-    :data:`_S0`. A confident node keeps mass so a real enriched mode survives; a give-up node (``v ≫ ref``)
+    ``ref`` sums the region's own Poisson counting floor ``1/max(count,1)`` and the reference scale
+    :data:`_S0`. A confident region keeps mass so a real enriched mode survives; a give-up region (``v ≫ ref``)
     collapses toward zero. The zero-count structural anchor is the trusted "no gDNA here" statement and
     carries ``w = 1``: its density is ``0`` for *every* ``f_g``, so its composition ambiguity is irrelevant.
 
@@ -226,9 +226,9 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     identically, so it is a global bandwidth under another name, and it inflates false enrichment on
     zero-gDNA libraries from 6.2× to 35×.
 
-    ⚠ On unstranded data this weight does not separate enriched from depleted *within* a node class (exon
+    ⚠ On unstranded data this weight does not separate enriched from depleted *within* a region class (exon
     0.466 vs 0.459) — it separates *classes* (exon 0.46 / intron 0.95 / intergenic 1.00), and every enriched
-    node is an exon. So it is an *informative* weight, and the standing deficit in :data:`_S0` is its size.
+    region is an exon. So it is an *informative* weight, and the standing deficit in :data:`_S0` is its size.
     """
     v = np.maximum(np.nan_to_num(var, nan=np.inf, posinf=np.inf), 0.0)
     ref = 1.0 / np.maximum(count, 1.0) + _S0
@@ -263,15 +263,15 @@ def _render(
 def fit_gdna_landscape(
     count, mass, eff, var, *, anchor, strength: float = 1.0, knn_scale: float = _KNN_SCALE
 ) -> "GdnaLandscape | None":
-    """Fit the landscape from pass-0's per-node deconvolved gDNA. Returns ``None`` if it cannot be fit.
+    """Fit the landscape from pass-0's per-region deconvolved gDNA. Returns ``None`` if it cannot be fit.
 
-    Parameters mirror one training node each: ``count`` the deconvolved gDNA mass ``f_g·M``, ``mass`` the
-    node's total unspliced mass ``M`` (which bounds the achievable density and so fixes the grid top),
+    Parameters mirror one training region each: ``count`` the deconvolved gDNA mass ``f_g·M``, ``mass`` the
+    region's total unspliced mass ``M`` (which bounds the achievable density and so fixes the grid top),
     ``eff`` the effective length, ``var`` the belief's ``Var(log f_g)``, and ``anchor`` the zero-mass
-    structural nodes (see :func:`_reliability`). Substrate selection is the caller's job — it needs the chain.
+    structural regions (see :func:`_reliability`). Substrate selection is the caller's job — it needs the chain.
 
-    The estimator is a weighted sum of zero-native per-node kernels at the population resolution; there is
-    no EM, no competition between components and no iteration, so it is deterministic and every node's
+    The estimator is a weighted sum of zero-native per-region kernels at the population resolution; there is
+    no EM, no competition between components and no iteration, so it is deterministic and every region's
     contribution is traceable. A capture-enriched minority therefore cannot be competed away, which is the
     failure the δ-pin predecessor had.
     """
@@ -294,10 +294,10 @@ def fit_gdna_landscape(
     if not (total > 0.0 and np.isfinite(total)):
         return None
 
-    # ONE PSEUDO-NODE OF COMPLETE IGNORANCE, spread uniformly. Ordinary Laplace smoothing, and the "one" is
-    # one node — no constant. It is what bounds how hard this prior can push: without it the empty cells
+    # ONE PSEUDO-REGION OF COMPLETE IGNORANCE, spread uniformly. Ordinary Laplace smoothing, and the "one" is
+    # one region — no constant. It is what bounds how hard this prior can push: without it the empty cells
     # take whatever floor the arithmetic happens to underflow to, which is an assertion the sample cannot
-    # support. A population of `W` weighted nodes cannot resolve a cell rarer than ~1/W, so the log-range is
+    # support. A population of `W` weighted regions cannot resolve a cell rarer than ~1/W, so the log-range is
     # bounded by log W and the prior stays WEAK AND CORRECTABLE — the governing principle for pass-0 output,
     # which is exactly what this is fitted from.
     density = (density + total / (grid.size * max(float(weights.sum()), 1.0))) / total

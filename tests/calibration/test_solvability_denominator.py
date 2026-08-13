@@ -3,14 +3,14 @@
 `solvability_audit`'s headline scores the SOLVABLE population, and "solvable" is a BOOLEAN on a
 CONTINUOUS quantity: `own_composition_logvar` treats any `tau_lam > 1e-9` as own evidence. On an
 unstranded library the strand arm carries a genuinely nonzero but physically nil precision —
-measured `I ≈ Var(κ̂)·N_eff/(p(1−p))`, i.e. roughly the node's depth over the library's spliced
+measured `I ≈ Var(κ̂)·N_eff/(p(1−p))`, i.e. roughly the region's depth over the library's spliced
 depth — so that boolean flips on fitting noise at some conditions and not others.
 
 ⭐ **That is not fixable in the solver and three designs prove it** (TRAPS: deadband-from-the-wrong-sample):
 a resolving-power floor at `1/(2L)²` was derived, implemented and REFUTED (τ is continuous across
 the region — no empty interval, so any floor is a tuned constant); subtracting exactly `Var(κ̂)`
 instead of `σ²_d` OPENS the zero-gDNA control; and propagating `Var(κ̂)` into the Schur denominator
-is inert because the node's own binomial noise dominates it by 87×–5,179×.
+is inert because the region's own binomial noise dominates it by 87×–5,179×.
 
 ⛔ **So the headline needs a FIXED-DENOMINATOR companion, which is exactly what TRAPS: honesty-metrics-reward-ignorance already
 prescribes and what the table did not carry:** ``mwae`` over ALL live objects, and the raw
@@ -31,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.node_init import has_own_composition_evidence, own_composition_logvar
+from rigel.calibration.region_init import has_own_composition_evidence, own_composition_logvar
 
 
 def _fixture(n=400, seed=3):

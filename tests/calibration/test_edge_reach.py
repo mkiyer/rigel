@@ -6,7 +6,7 @@
 side of the line. gDNA's template is the chromosome, so its reach is unbounded — that is physics, not a
 choice. RNA's template ends where its transcript ends, so near a terminus the admissible placements
 collapse and the crossing divisor with them. Ignoring that over-calls gDNA by a measured **11.0 %**
-genome-wide and by **+0.36** in the last node before a polyA site.
+genome-wide and by **+0.36** in the last region before a polyA site.
 
 ⚠ **PER STRAND, and per SIDE**: reach is "maximised over transcripts
 independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
@@ -31,7 +31,7 @@ import pytest
 from rigel.calibration.splice_graph import (
     build_contiguous_edge_reach_arrays,
     build_edge_flags_array,
-    build_node_partition_arrays,
+    build_region_partition_arrays,
 )
 
 from conftest import build_test_index
@@ -58,11 +58,11 @@ def index(tmp_path_factory):
 def _edge_positions(index) -> np.ndarray:
     """Genomic position of every contiguous edge, in edge order — the independent coordinate.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` nodes and ``c − 2`` interior lines, and line
+    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines, and line
     ``e`` sits at cut ``e + 1``. Derived from the PARTITION, not from the reach builder, so the two
     cannot agree by sharing a helper.
     """
-    positions, cut_offsets, _types = build_node_partition_arrays(index)
+    positions, cut_offsets, _types = build_region_partition_arrays(index)
     out = []
     for f in range(len(cut_offsets) - 1):
         lo, hi = int(cut_offsets[f]), int(cut_offsets[f + 1])
@@ -110,8 +110,8 @@ def test_reach_is_ZERO_where_the_strand_carries_no_transcript(index):
     assert np.all(reach_lo >= 0) and np.all(reach_hi >= 0)
 
 
-def test_reach_matches_the_INDEX_keyed_by_src_node(index):
-    """The values are the edges_df reach columns of the edge whose ``src`` is the line's left node —
+def test_reach_matches_the_INDEX_keyed_by_src_region(index):
+    """The values are the edges_df reach columns of the edge whose ``src`` is the line's left region —
     read back from the frame directly rather than re-derived."""
     edges = index.edges_df
     contiguous = edges[edges["kind"] == 0]
@@ -120,12 +120,12 @@ def test_reach_matches_the_INDEX_keyed_by_src_node(index):
     }
 
     reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
-    from rigel.calibration.region_arrays import RegionArrays, edge_node_indices
+    from rigel.calibration.region_arrays import RegionArrays, edge_region_indices
 
     ra = RegionArrays.from_index(index)
-    lo_node, _hi_node = edge_node_indices(np.asarray(ra.ref_id))
-    assert lo_node.shape[0] == reach_lo.shape[0]
-    for e, src in enumerate(lo_node):
+    lo_region, _hi_region = edge_region_indices(np.asarray(ra.ref_id))
+    assert lo_region.shape[0] == reach_lo.shape[0]
+    for e, src in enumerate(lo_region):
         row = by_src[int(src)]
         assert reach_lo[e, 0] == row.reach_lo_pos
         assert reach_hi[e, 0] == row.reach_hi_pos
@@ -133,8 +133,8 @@ def test_reach_matches_the_INDEX_keyed_by_src_node(index):
         assert reach_hi[e, 1] == row.reach_hi_neg
 
 
-def test_a_single_node_reference_contributes_no_entry(tmp_path_factory):
-    """A reference with one node owns no line, so it contributes nothing — the invariant the ``k + 1``
+def test_a_single_region_reference_contributes_no_entry(tmp_path_factory):
+    """A reference with one region owns no line, so it contributes nothing — the invariant the ``k + 1``
     boundary axis could not state."""
     one = build_test_index(
         tmp_path_factory,

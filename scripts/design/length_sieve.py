@@ -1,6 +1,6 @@
 """Point 2: does the CONTAINED count carry gDNA-vs-RNA composition information?
 
-A molecule of length L fits inside a node of length ell in (ell - L + 1) positions, or not at all if
+A molecule of length L fits inside a region of length ell in (ell - L + 1) positions, or not at all if
 L > ell. So the expected contained count for component c is  rho_c * A_c(ell),  with
 
     A_c(ell) = E_c[ max(0, ell - L + 1) ]      <- the component's own effective length
@@ -25,7 +25,7 @@ def eff(mu, sd, ell):
 
 def show(name, mug, sdg, mur, sdr):
     print(f"\n{name}:  gDNA L ~ {mug}+-{sdg}   RNA L ~ {mur}+-{sdr}")
-    print(f"  {'node ell':>9} {'A_gdna':>10} {'A_rna':>10} {'A_g/A_r':>9}   discriminability")
+    print(f"  {'region ell':>9} {'A_gdna':>10} {'A_rna':>10} {'A_g/A_r':>9}   discriminability")
     for ell in (25, 50, 100, 150, 167, 200, 250, 300, 500, 1000, 5000):
         ag, ar = eff(mug, sdg, ell), eff(mur, sdr, ell)
         ratio = ag / ar if ar > 1e-12 else float("nan")
@@ -49,6 +49,6 @@ show("cfRNA-like, well separated", 167, 15, 90, 35)
 show("cfRNA-like, modest separation", 167, 30, 200, 60)
 show("worst case: identical FL", 180, 50, 180, 50)
 
-print("\n--- how much of the human v8 node partition sits in the informative zone? ---")
-print("  measured earlier this project: 8.2 % of nodes < 10 bp, 56.7 % < 200 bp,")
-print("  median node length 151 bp  -> the MAJORITY of nodes are shorter than a fragment.")
+print("\n--- how much of the human v8 region partition sits in the informative zone? ---")
+print("  measured earlier this project: 8.2 % of regions < 10 bp, 56.7 % < 200 bp,")
+print("  median region length 151 bp  -> the MAJORITY of regions are shorter than a fragment.")

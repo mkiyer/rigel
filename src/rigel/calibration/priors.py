@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .region_arrays import edge_node_indices
+from .region_arrays import edge_region_indices
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 
 if TYPE_CHECKING:
@@ -24,9 +24,9 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
 
-# A node with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
-# the per-locus projection, so a line whose left flank is such a node must be re-attributed to its
-# (locus) right flank or its gDNA is lost (see edge_owner_nodes).
+# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
+# the per-locus projection, so a line whose left flank is such a region must be re-attributed to its
+# (locus) right flank or its gDNA is lost (see edge_owner_regions).
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 # Numerical floor for the gDNA-component effective length: matches the EM's own
@@ -123,52 +123,52 @@ def _edge_locus_shares(
     multi_loci: "list[MultiLocus]",
     n_loci: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(edge_idx, locus_idx, share)`` — **a locus's edges are the edges that touch its nodes.**
+    """``(edge_idx, locus_idx, share)`` — **a locus's edges are the edges that touch its regions.**
 
-    ⭐⭐ **THE RULE** (owner, 2026-08-08): an EDGE owns the fragments that cross it, a NODE owns only the
-    fragments contained in it, and nothing is re-attributed between them. Every node contributes both of
-    its lines, so a locus of ``k`` contiguous nodes carries ``k + 1`` lines — its two OUTER ones
+    ⭐⭐ **THE RULE** (owner, 2026-08-08): an EDGE owns the fragments that cross it, a REGION owns only the
+    fragments contained in it, and nothing is re-attributed between them. Every region contributes both of
+    its lines, so a locus of ``k`` contiguous regions carries ``k + 1`` lines — its two OUTER ones
     included, which is correct because a fragment crossing a locus's outer boundary overlaps the locus
     and is therefore one of its EM candidates.
 
         share(e, L) = max( share(lo(e), L), share(hi(e), L) )
 
-    ``max`` and not a sum: the rule is *"if a node is part of a locus, its two lines are part of that
+    ``max`` and not a sum: the rule is *"if a region is part of a locus, its two lines are part of that
     locus"*, so a line inherits the stronger of its two flanks' memberships rather than accumulating
     them.
 
-    ⛔ **This replaces ``edge_owner_nodes``**, which folded a line's mass into ONE flank node's total so
-    the node projection could reach it — a 0-bp line has no extent and ``_region_locus_shares`` divides
+    ⛔ **This replaces ``edge_owner_regions``**, which folded a line's mass into ONE flank region's total so
+    the region projection could reach it — a 0-bp line has no extent and ``_region_locus_shares`` divides
     by the region length. The fold then needed the intergenic re-key to stop a locus's far-LEFT line
     vanishing into its dropped intergenic flank. Projecting an edge AS an edge removes both.
 
-    ⚠ **Shares can sum above 1 only for a CONTENDED line** — adjacent nodes in different multi-loci —
+    ⚠ **Shares can sum above 1 only for a CONTENDED line** — adjacent regions in different multi-loci —
     and that line carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
     a candidate in both and the union-find has already merged them into one multi-locus. The
     configuration is therefore unreachable for a line with mass, and it is *reported* by
     :func:`contended_edges` rather than silently renormalised.
     """
     r_idx, l_idx, w = _region_locus_shares(region_arrays, multi_loci, n_loci)
-    lo, hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+    lo, hi = edge_region_indices(np.asarray(region_arrays.ref_id))
     if r_idx.size == 0 or lo.size == 0:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
 
-    # per-node CSR over the (locus, share) pairs, so each edge can gather both of its flanks' pairs
+    # per-region CSR over the (locus, share) pairs, so each edge can gather both of its flanks' pairs
     n_regions = int(region_arrays.n_regions)
     order = np.argsort(r_idx, kind="stable")
     r_sorted, l_sorted, w_sorted = r_idx[order], l_idx[order], w[order]
-    node_off = np.searchsorted(r_sorted, np.arange(n_regions + 1)).astype(np.int64)
+    region_off = np.searchsorted(r_sorted, np.arange(n_regions + 1)).astype(np.int64)
 
     parts_e: list[np.ndarray] = []
     parts_p: list[np.ndarray] = []
     for flank in (lo, hi):
-        counts = node_off[flank + 1] - node_off[flank]
+        counts = region_off[flank + 1] - region_off[flank]
         if not counts.sum():
             continue
         live = counts > 0
         # expand each edge once per (locus, share) pair its flank carries
         parts_e.append(np.repeat(np.flatnonzero(live).astype(np.int64), counts[live]))
-        starts = node_off[flank][live]
+        starts = region_off[flank][live]
         c = counts[live]
         ramp = np.arange(int(c.sum()), dtype=np.int64) - np.repeat(
             np.cumsum(c) - c, c
@@ -214,10 +214,10 @@ def _project_regions_to_loci(
     n_loci: int,
     arrays: dict[str, np.ndarray],
 ) -> dict[str, np.ndarray]:
-    """Overlap-weighted projection of per-NODE arrays to per-locus sums.
+    """Overlap-weighted projection of per-REGION arrays to per-locus sums.
 
-    ⚠ Nodes only. The crossing axis is projected by :func:`_edge_locus_shares`, because a line is a
-    first-class object and is not carried by a node.
+    ⚠ Regions only. The crossing axis is projected by :func:`_edge_locus_shares`, because a line is a
+    first-class object and is not carried by a region.
     """
     out = {name: np.zeros(n_loci, dtype=np.float64) for name in arrays}
     r_idx, l_idx, w = _region_locus_shares(region_arrays, multi_loci, n_loci)
@@ -246,23 +246,23 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the calibration result.
 
-    ⭐⭐⭐ **A NODE OWNS THE FRAGMENTS CONTAINED IN IT; AN EDGE OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
-    IS RE-ATTRIBUTED** (owner, 2026-08-08). A locus collects both kinds of object — its nodes by genomic
-    overlap (:func:`_region_locus_shares`) and its edges by touching those nodes
+    ⭐⭐⭐ **A REGION OWNS THE FRAGMENTS CONTAINED IN IT; AN EDGE OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
+    IS RE-ATTRIBUTED** (owner, 2026-08-08). A locus collects both kinds of object — its regions by genomic
+    overlap (:func:`_region_locus_shares`) and its edges by touching those regions
     (:func:`_edge_locus_shares`)::
 
-        {gdna,rna}_prior_count = Σ_nodes share(r,L)·mass_c_node[r]
+        {gdna,rna}_prior_count = Σ_regions share(r,L)·mass_c_region[r]
                                + Σ_edges share(e,L)·mass_c_edge[e]·q[e]
 
         gdna_eff_len = clamp( w·elen + (1−w)·span ),          w = C/(C+1)
-            elen = Σ_nodes share·min(m_r/ρ_ref, S_r) + Σ_edges share·min(m_e/ρ_ref, S_e)
-            span = Σ_nodes share·S_r                 + Σ_edges share·S_e
+            elen = Σ_regions share·min(m_r/ρ_ref, S_r) + Σ_edges share·min(m_e/ρ_ref, S_e)
+            span = Σ_regions share·S_r                 + Σ_edges share·S_e
 
     ⭐ **THE PRIOR IS A CONSERVED FRAGMENT COUNT.** The EM adds these scalars straight to its own soft
     counts (``G = n_gdna + a_g``, ``em_solver.cpp:apply_grouped_prior_update``), where ``n_gdna`` counts
     the gDNA fragments that are candidates in this multi-locus — each ONCE, since a multi-locus is a
-    connected component of transcripts linked by shared fragments. The node term is already such a count
-    (a contained fragment deposits on exactly one node). Only the CROSSING term is converted, by one
+    connected component of transcripts linked by shared fragments. The region term is already such a count
+    (a contained fragment deposits on exactly one region). Only the CROSSING term is converted, by one
     multiply against ``q = edge_mass_per_crossing`` — the accumulator's own ``mass / count`` at that
     line, which undoes the ``+1``-per-crossed-line inflation. ``q`` is a geometry,
     ``[min(w−1,a) + min(w−1,b)] / 2(w−1)`` under a uniform field.
@@ -272,8 +272,8 @@ def assemble_priors(
     that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
     straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
 
-    ⛔ **What this replaced, so it does not come back.** ``edge_owner_nodes`` folded each line's mass
-    into ONE flank node's total, because ``_region_locus_shares`` divides by the region length and so
+    ⛔ **What this replaced, so it does not come back.** ``edge_owner_regions`` folded each line's mass
+    into ONE flank region's total, because ``_region_locus_shares`` divides by the region length and so
     cannot see a 0-bp object. The fold then needed the intergenic RE-KEY to stop a locus's far-left line
     vanishing into its dropped intergenic flank. Projecting an edge AS an edge removes both, and makes
     this the same operation ``transcript_capture_eff_lengths`` performs over a transcript's own objects.
@@ -286,10 +286,10 @@ def assemble_priors(
 
     **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each object's mass by its EFFECTIVE
     sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched) library,
-    because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a node and ``ρ·E_f[w−1]``
+    because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a region and ``ρ·E_f[w−1]``
     of crossing mass on a line. Every object's ``min(m/ρ_ref, S)`` then returns ``S``, so
     ``gdna_eff_len == span`` exactly: an unenriched library contracts NOTHING. Using the genomic
-    ``region_size_bp`` instead would understate short-node density and fabricate a contraction with no
+    ``region_size_bp`` instead would understate short-region density and fabricate a contraction with no
     capture bias present (verified factor 0.878 vs the correct 1.000). Under capture the contraction
     falls below ``span`` toward the probed footprint.
 
@@ -305,22 +305,22 @@ def assemble_priors(
     mappers only, so a multimapper-dominated locus has little contained mass and an unreliable reference
     read; ``C = 0`` ⇒ ``span`` exactly.
     """
-    if calibration.n_nodes != region_arrays.n_regions:
+    if calibration.n_regions != region_arrays.n_regions:
         raise ValueError(
-            f"calibration has {calibration.n_nodes} nodes but region_arrays has "
+            f"calibration has {calibration.n_regions} regions but region_arrays has "
             f"{region_arrays.n_regions}; they must address the same partition."
         )
     n_loci = len(multi_loci)
     r_idx, r_lid, r_w = _region_locus_shares(region_arrays, multi_loci, n_loci)
     e_idx, e_lid, e_w = _edge_locus_shares(region_arrays, multi_loci, n_loci)
 
-    def by_node(values):
+    def by_region(values):
         return _sum_by_locus(r_idx, r_lid, r_w, values, n_loci)
 
     def by_edge(values):
         return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
-    # ⭐ THE TWO PSEUDOCOUNTS. The node term is already a fragment count; only the crossing term is
+    # ⭐ THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
     # converted, by the accumulator's own conserved mass-per-crossing at that line.
     q = np.asarray(calibration.edge_mass_per_crossing, dtype=np.float64)
     gdna_edge = np.asarray(calibration.mass_gdna_edge, dtype=np.float64) * q
@@ -332,32 +332,32 @@ def assemble_priors(
         )
         * q
     )
-    gdna_locus = np.maximum(by_node(calibration.mass_gdna_node) + by_edge(gdna_edge), 0.0)
-    rna_locus = np.maximum(by_node(calibration.mass_rna_node) + by_edge(rna_edge), 0.0)
+    gdna_locus = np.maximum(by_region(calibration.mass_gdna_region) + by_edge(gdna_edge), 0.0)
+    rna_locus = np.maximum(by_region(calibration.mass_rna_region) + by_edge(rna_edge), 0.0)
 
     # gDNA effective length: every object contracted against the SHARED global ρ_ref, PER OBJECT, so the
     # gDNA-vs-transcript density comparison sits on one scale. ρ_ref None (no detectable gDNA) ⇒ no
     # contraction. This is `transcript_capture_eff_lengths`' operation over the locus's object set.
     from .capture_eff_length import _global_reference_density
 
-    node_m = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
-    node_s = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 0.0)
+    region_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+    region_s = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 0.0)
     edge_m = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
     edge_s = np.maximum(np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64), 0.0)
-    rho_ref = _global_reference_density(node_m, calibration.gdna_node_eff_len)
+    rho_ref = _global_reference_density(region_m, calibration.gdna_region_eff_len)
     if rho_ref is None or rho_ref <= 0.0:
-        node_e, edge_e = node_s, edge_s
+        region_e, edge_e = region_s, edge_s
     else:
         inv = 1.0 / rho_ref
-        node_e = np.minimum(node_m * inv, node_s)
+        region_e = np.minimum(region_m * inv, region_s)
         edge_e = np.minimum(edge_m * inv, edge_s)
 
-    span = by_node(node_s) + by_edge(edge_s)
-    elen = by_node(node_e) + by_edge(edge_e)
+    span = by_region(region_s) + by_edge(edge_s)
+    elen = by_region(region_e) + by_edge(edge_e)
     contained_ev = np.maximum(
-        by_node(
-            np.asarray(calibration.mass_gdna_node, dtype=np.float64)
-            + np.asarray(calibration.mass_rna_node, dtype=np.float64)
+        by_region(
+            np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+            + np.asarray(calibration.mass_rna_region, dtype=np.float64)
         ),
         0.0,
     )

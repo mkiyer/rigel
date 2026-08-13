@@ -1,18 +1,18 @@
 """Unit tests for the count module (density_model): raw-count local imputation.
 
 The count module estimates gDNA density from RAW unspliced counts — no strand cleaning. Observable
-nodes use their own contained density; non-observable (exon/AMBIG) nodes are anchored from their
-observable flanking EDGES; run interiors are carried inward; a node with no observable neighbour
+regions use their own contained density; non-observable (exon/AMBIG) regions are anchored from their
+observable flanking EDGES; run interiors are carried inward; a region with no observable neighbour
 anywhere takes the global count-weighted-mean observable density.
 
-⭐ **What S5.e changed here.** A node used to carry its own ``left``/``right`` per-side views of the
+⭐ **What S5.e changed here.** A region used to carry its own ``left``/``right`` per-side views of the
 flanking boundary flux, and the crossing divisor arrived separately as a scalar ``fl_mean``. An edge is
-a 0-bp line with ONE count, shared by the two nodes it separates, and its divisor is the same
+a 0-bp line with ONE count, shared by the two regions it separates, and its divisor is the same
 ``eff_gdna`` array the solver uses — so both the side views and the second length model are gone, and a
 caller can no longer hand this a divisor that disagrees with the geometry's.
 
-⚠ The geometry here is built BY HAND rather than through ``build_node_geometry``: these tests are about
-the imputation logic, and the divisors have their own gate in ``test_node_geometry.py``. Stating the
+⚠ The geometry here is built BY HAND rather than through ``build_region_geometry``: these tests are about
+the imputation logic, and the divisors have their own gate in ``test_region_geometry.py``. Stating the
 numbers directly is what keeps the expected densities arithmetic rather than a second derivation.
 """
 
@@ -22,9 +22,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.density_model import node_gdna_density
-from rigel.calibration.node_chain import NODE, build_node_chain
-from rigel.calibration.node_geometry import NodeGeometry
+from rigel.calibration.density_model import region_gdna_density
+from rigel.calibration.region_chain import REGION, build_region_chain
+from rigel.calibration.region_geometry import RegionGeometry
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -56,7 +56,7 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
         pos += 100
     df = pd.DataFrame(
         {
-            "region_id": np.arange(n, dtype=np.int64),
+            "node_id": np.arange(n, dtype=np.int64),
             "ref_name": pd.array(ref_names, dtype="string"),
             "start": np.asarray(starts, dtype=np.int64),
             "end": np.asarray(ends, dtype=np.int64),
@@ -68,33 +68,33 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
     return RegionArrays.from_frame(df, refmap)
 
 
-def _parts(signatures, node_count, node_eff, edge_count, edge_eff, ref_names=None):
-    """A chain + a hand-built :class:`NodeGeometry` over ``signatures``.
+def _parts(signatures, region_count, region_eff, edge_count, edge_eff, ref_names=None):
+    """A chain + a hand-built :class:`RegionGeometry` over ``signatures``.
 
-    ``node_count``/``node_eff`` are per NODE, ``edge_count``/``edge_eff`` per contiguous EDGE — and a
-    reference with ``k`` nodes owns exactly ``k - 1`` edges, with no terminal slots.
+    ``region_count``/``region_eff`` are per REGION, ``edge_count``/``edge_eff`` per contiguous EDGE — and a
+    reference with ``k`` regions owns exactly ``k - 1`` edges, with no terminal slots.
     """
     ra = _region_arrays(signatures, ref_names)
     rno = np.asarray(ra.ref_offsets, dtype=np.int64)
     reo = np.zeros_like(rno)
     np.cumsum(np.maximum(np.diff(rno) - 1, 0), out=reo[1:])
-    chain = build_node_chain(rno, reo)
+    chain = build_region_chain(rno, reo)
 
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_node = kind == NODE
+    is_region = kind == REGION
     n_slots = chain.n_slots
     count = np.zeros((n_slots, 2))
     eff = np.zeros(n_slots)
-    count[is_node, 0] = np.asarray(node_count, float)[obj[is_node]]
-    eff[is_node] = np.asarray(node_eff, float)[obj[is_node]]
-    if np.any(~is_node):
-        count[~is_node, 0] = np.asarray(edge_count, float)[obj[~is_node]]
-        eff[~is_node] = np.asarray(edge_eff, float)[obj[~is_node]]
-    geometry = NodeGeometry(
+    count[is_region, 0] = np.asarray(region_count, float)[obj[is_region]]
+    eff[is_region] = np.asarray(region_eff, float)[obj[is_region]]
+    if np.any(~is_region):
+        count[~is_region, 0] = np.asarray(edge_count, float)[obj[~is_region]]
+        eff[~is_region] = np.asarray(edge_eff, float)[obj[~is_region]]
+    geometry = RegionGeometry(
         n_slots=n_slots,
         unspliced_count=count,
-        # the length channels are irrelevant to node_gdna_density (it reads count and eff only);
+        # the length channels are irrelevant to region_gdna_density (it reads count and eff only);
         # shape-correct zeros say "this fixture makes no statement about fragment lengths".
         spliced_count=np.zeros((n_slots, 2)),
         eff_gdna=eff,
@@ -102,17 +102,17 @@ def _parts(signatures, node_count, node_eff, edge_count, edge_eff, ref_names=Non
         junction_count=np.zeros((n_slots, 2)),
         eff_junction=np.zeros((n_slots, 2)),
         # the per-FLANK split of the same flux; this fixture has no junction at all, so all four are 0
-        # and the two flank totals coincide (`node_total_density`).
+        # and the two flank totals coincide (`region_total_density`).
         junction_count_lo=np.zeros((n_slots, 2)),
         junction_count_hi=np.zeros((n_slots, 2)),
         eff_junction_lo=np.zeros((n_slots, 2)),
         eff_junction_hi=np.zeros((n_slots, 2)),
     )
-    return node_gdna_density(chain, geometry, ra)
+    return region_gdna_density(chain, geometry, ra)
 
 
 # --------------------------------------------------------------------------- #
-# node_gdna_density — geometry cases
+# region_gdna_density — geometry cases
 # --------------------------------------------------------------------------- #
 
 
@@ -120,8 +120,8 @@ def test_exon_between_introns_recovers_uniform_density():
     # intron+ | exon+ | intron+ ; both of the exon's flanking lines are observable.
     nd = _parts(
         [INTRON, EXON, INTRON],
-        node_count=[200, 0, 200],
-        node_eff=[100.0, 100.0, 100.0],
+        region_count=[200, 0, 200],
+        region_eff=[100.0, 100.0, 100.0],
         edge_count=[100, 100],
         edge_eff=[50.0, 50.0],
     )
@@ -130,12 +130,12 @@ def test_exon_between_introns_recovers_uniform_density():
 
 
 def test_tiny_observable_region_anchors_from_boundaries():
-    # intergenic | tiny intron (eff_len 0) | intergenic — the tiny node cannot use contained.
-    # ⚠ eff 0 must make the node fall through to its flanks, NOT divide and floor (trap 23).
+    # intergenic | tiny intron (eff_len 0) | intergenic — the tiny region cannot use contained.
+    # ⚠ eff 0 must make the region fall through to its flanks, NOT divide and floor (trap 23).
     nd = _parts(
         [INTERGENIC, INTRON, INTERGENIC],
-        node_count=[200, 0, 200],
-        node_eff=[100.0, 0.0, 100.0],
+        region_count=[200, 0, 200],
+        region_eff=[100.0, 0.0, 100.0],
         edge_count=[60, 80],
         edge_eff=[50.0, 50.0],
     )
@@ -148,8 +148,8 @@ def test_run_interior_filled_from_anchored_edges():
     # (shared exon bit) and is reachable only by the inward carry.
     nd = _parts(
         [INTRON, EXON, EXON, EXON, INTRON],
-        node_count=[200, 0, 0, 0, 200],
-        node_eff=np.full(5, 100.0),
+        region_count=[200, 0, 0, 0, 200],
+        region_eff=np.full(5, 100.0),
         edge_count=[100, 0, 0, 200],
         edge_eff=np.full(4, 50.0),
     )
@@ -163,8 +163,8 @@ def test_count_gdna_frac_is_density_ratio():
     # uniform density the contained count equals density·eff, so the fraction is 1 (all gDNA).
     nd = _parts(
         [INTRON, EXON, INTRON],
-        node_count=[200, 0, 200],
-        node_eff=np.full(3, 100.0),
+        region_count=[200, 0, 200],
+        region_eff=np.full(3, 100.0),
         edge_count=[100, 100],
         edge_eff=[50.0, 50.0],
     )
@@ -174,10 +174,10 @@ def test_count_gdna_frac_is_density_ratio():
     assert nd.count_gdna_frac[1] == pytest.approx(0.0)
 
 
-def test_no_observable_node_takes_zero_baseline():
-    # A single exon-only reference: no observable node, and with one node there is no line at all.
-    # Density takes the global baseline, which is 0 (there is no observable node anywhere).
-    nd = _parts([EXON], node_count=[0], node_eff=[100.0], edge_count=[], edge_eff=[])
+def test_no_observable_region_takes_zero_baseline():
+    # A single exon-only reference: no observable region, and with one region there is no line at all.
+    # Density takes the global baseline, which is 0 (there is no observable region anywhere).
+    nd = _parts([EXON], region_count=[0], region_eff=[100.0], edge_count=[], edge_eff=[])
     assert nd.density[0] == 0.0
     assert nd.count_gdna_frac[0] == 0.0
 
@@ -186,12 +186,12 @@ def test_density_does_not_cross_references():
     # chr1 carries a high-density observable intron (density 4.0); chr2 is a lone no-anchor exon.
     # The chr2 exon must NOT inherit chr1's 4.0 via the run-fill carry (the carry is per-reference)
     # — it takes the GLOBAL baseline (the count-weighted-mean observable density, 4.0 here).
-    # ⭐ Each reference owns ONE node and therefore ZERO lines, so nothing can leak across even in
+    # ⭐ Each reference owns ONE region and therefore ZERO lines, so nothing can leak across even in
     # principle: `chain.left`/`chain.right` are -1 at every reference terminal.
     nd = _parts(
         [INTRON, EXON],
-        node_count=[400, 0],
-        node_eff=[100.0, 100.0],
+        region_count=[400, 0],
+        region_eff=[100.0, 100.0],
         edge_count=[],
         edge_eff=[],
         ref_names=["chr1", "chr2"],

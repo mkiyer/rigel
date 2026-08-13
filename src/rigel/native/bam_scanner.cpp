@@ -1126,7 +1126,7 @@ public:
     BamScanStats stats_;
     StrandObservations strand_obs_;
 
-    // The accumulator's node partition, installed by set_regions() and the junction CSR by
+    // The accumulator's region partition, installed by set_regions() and the junction CSR by
     // set_junctions(). One Accumulator per BAM reference; deposits go into a per-worker copy during
     // scan() and are merged back here.
     //
@@ -1134,7 +1134,7 @@ public:
     // installed after that point is invisible to the workers, which is a silent half-empty tally.
     std::vector<int64_t> cut_positions_;
     std::vector<int64_t> ref_cut_offsets_;
-    std::vector<uint8_t> node_types_;      // coarse node type, ref-major, one per node
+    std::vector<uint8_t> region_types_;      // coarse region type, ref-major, one per region
     int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
     std::vector<int64_t> sj_offsets_;       // n_cuts + 1, CSR over the flat cut axis
     std::vector<int64_t> sj_boundary_right_;  // flat cut index of each junction's high end
@@ -1157,23 +1157,23 @@ public:
     // The accumulator's partition
     // ----------------------------------------------------------------
     //
-    // Install the node partition the accumulator deposits onto. Must be called BEFORE scan(); without it
+    // Install the region partition the accumulator deposits onto. Must be called BEFORE scan(); without it
     // the calibration payload comes back empty. `set_junctions` is a SECOND call, because this one
     // refuses to run twice.
     //
     // Inputs:
     //   cut_positions:   flat int64[n_cuts_total], the concatenated sorted cut positions of every
-    //                    reference. A reference contributing c cuts owns c-1 nodes and c-2 lines.
+    //                    reference. A reference contributing c cuts owns c-1 regions and c-2 lines.
     //   ref_cut_offsets: int64[n_refs + 1] offsets into cut_positions. A reference with
     //                    offsets[f+1] == offsets[f] has no partition and accepts no deposits.
     //   n_refs:          number of references (must match ctx_->ref_to_id_).
-    //   node_types:      uint8[n_nodes_total], the coarse node type, ref-major; it types the length pools.
+    //   region_types:      uint8[n_regions_total], the coarse region type, ref-major; it types the length pools.
     //   max_length:      the fragment-length limit applied to L, and the pool-histogram width.
     void set_regions(
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
         int32_t n_refs,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
         int max_length)
     {
         if (n_refs < 0) {
@@ -1205,9 +1205,9 @@ public:
         ref_cut_offsets_.assign(
             ref_cut_offsets.data(),
             ref_cut_offsets.data() + n_off);
-        node_types_.assign(
-            node_types.data(),
-            node_types.data() + node_types.shape(0));
+        region_types_.assign(
+            region_types.data(),
+            region_types.data() + region_types.shape(0));
         max_length_ = max_length;
         acc_set_ = make_accumulator_set();
     }
@@ -1253,8 +1253,8 @@ public:
             cut_positions_.size(),
             ref_cut_offsets_.data(),
             ref_cut_offsets_.empty() ? 0 : ref_cut_offsets_.size() - 1,
-            node_types_.empty() ? nullptr : node_types_.data(),
-            node_types_.size(),
+            region_types_.empty() ? nullptr : region_types_.data(),
+            region_types_.size(),
             max_length_);
         install_junctions(*set);
         return set;
@@ -2085,7 +2085,7 @@ private:
         // contiguous buffer and does not depend on the AccumulatorSet's internal layout. Arrays are emitted
         // FLAT; the two-column ones are reshaped Python-side.
         //
-        // ⚠ And this copy cannot be a memcpy: the accumulator stores AoS (a 48 B `Node` interleaving four
+        // ⚠ And this copy cannot be a memcpy: the accumulator stores AoS (a 48 B `Region` interleaving four
         // channel pairs) while the payload is SoA, so the transpose is a strided read by construction. That
         // is the price of the hot struct being 48 B with no padding, which is the right trade — this loop is
         // O(partition) once per scan, the deposit is O(fragments).
@@ -2093,31 +2093,31 @@ private:
             using rigel::accumulator::Accumulator;
             using rigel::accumulator::ContiguousEdge;
             using rigel::accumulator::JunctionEdge;
-            using rigel::accumulator::Node;
+            using rigel::accumulator::Region;
             using rigel::accumulator::kNFragmentPools;
             using rigel::accumulator::kNStrandColumns;
 
             const std::size_t n_refs = acc_set_->n_refs();
 
-            std::vector<int64_t> ref_node_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
             std::vector<int64_t> ref_edge_offsets(n_refs + 1, 0);
             std::vector<int64_t> ref_sj_offsets(n_refs + 1, 0);
             for (std::size_t f = 0; f < n_refs; ++f) {
                 const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                ref_node_offsets[f + 1] =
-                    ref_node_offsets[f] + static_cast<int64_t>(a.n_nodes());
+                ref_region_offsets[f + 1] =
+                    ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
                 ref_edge_offsets[f + 1] =
                     ref_edge_offsets[f] + static_cast<int64_t>(a.n_edges());
                 ref_sj_offsets[f + 1] =
                     ref_sj_offsets[f] + static_cast<int64_t>(a.n_junctions());
             }
-            const auto n_nodes = static_cast<std::size_t>(ref_node_offsets.back());
+            const auto n_regions = static_cast<std::size_t>(ref_region_offsets.back());
             const auto n_edges = static_cast<std::size_t>(ref_edge_offsets.back());
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
-            std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
-            std::vector<double> node_contained_inv_opportunity_sum(n_nodes, 0.0);
-            std::vector<uint32_t> node_start_count(n_nodes, 0u);
+            std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
+            std::vector<double> region_contained_inv_opportunity_sum(n_regions, 0.0);
+            std::vector<uint32_t> region_start_count(n_regions, 0u);
             std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
             std::vector<double> edge_unspliced_inv_length_sum(n_edges, 0.0);
             std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
@@ -2147,22 +2147,22 @@ private:
                 Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
                 deferred.merge_from(a.deferred_canonical());
                 gap_census.merge_from(a.gap_census());
-                const Node* nodes = a.nodes_data();
+                const Region* regions = a.regions_data();
                 const ContiguousEdge* edges = a.edges_data();
                 const JunctionEdge* junctions = a.junctions_data();
-                const uint32_t* starts = a.node_start_count_data();
-                const auto node_base = static_cast<std::size_t>(ref_node_offsets[f]);
+                const uint32_t* starts = a.region_start_count_data();
+                const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
                 const auto edge_base = static_cast<std::size_t>(ref_edge_offsets[f]);
                 const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
 
-                for (std::size_t i = 0; i < a.n_nodes(); ++i) {
-                    node_start_count[node_base + i] = starts[i];
+                for (std::size_t i = 0; i < a.n_regions(); ++i) {
+                    region_start_count[region_base + i] = starts[i];
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        const std::size_t o = (node_base + i) * kNStrandColumns + c;
-                        node_contained_count[o]   = nodes[i].contained_count[c];
+                        const std::size_t o = (region_base + i) * kNStrandColumns + c;
+                        region_contained_count[o]   = regions[i].contained_count[c];
                     }
-                    // ⚠ Outside the column loop: ONE value per node, keyed without kNStrandColumns.
-                    node_contained_inv_opportunity_sum[node_base + i] = nodes[i].contained_inv_opportunity_sum;
+                    // ⚠ Outside the column loop: ONE value per region, keyed without kNStrandColumns.
+                    region_contained_inv_opportunity_sum[region_base + i] = regions[i].contained_inv_opportunity_sum;
                 }
                 for (std::size_t i = 0; i < a.n_edges(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
@@ -2215,13 +2215,13 @@ private:
             // Echo the partition back, so a consumer can locate every object without reloading the index.
             cal["cut_positions"]   = vec_to_ndarray(std::vector<int64_t>(cut_positions_));
             cal["ref_cut_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_cut_offsets_));
-            cal["ref_node_offsets"] = vec_to_ndarray(std::move(ref_node_offsets));
+            cal["ref_region_offsets"] = vec_to_ndarray(std::move(ref_region_offsets));
             cal["ref_edge_offsets"] = vec_to_ndarray(std::move(ref_edge_offsets));
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
-            cal["node_contained_count"]   = vec_to_ndarray(std::move(node_contained_count));
-            cal["node_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(node_contained_inv_opportunity_sum));
-            cal["node_start_count"]       = vec_to_ndarray(std::move(node_start_count));
+            cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
+            cal["region_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(region_contained_inv_opportunity_sum));
+            cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
             cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
             cal["edge_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_inv_length_sum));
             cal["edge_spliced_count"]     = vec_to_ndarray(std::move(edge_spliced_count));
@@ -2831,7 +2831,7 @@ NB_MODULE(_bam_impl, m) {
     // character. The gate reads them off `dataclasses.fields(Tally)`, so a name that drifts fails loudly
     // instead of quietly dropping out of the comparison.
     //
-    // ⚠ Every two-column view needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 48 B `Node`
+    // ⚠ Every two-column view needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 48 B `Region`
     // holds two uint32 pairs then two uint64 pairs — so the row stride is `sizeof(struct)/sizeof(element)`,
     // not the column count. The binding this replaced passed no strides at all and worked only because the
     // old `Region` was exactly four contiguous uint32.
@@ -2842,7 +2842,7 @@ NB_MODULE(_bam_impl, m) {
         using rigel::accumulator::GapHypothesis;
         using rigel::accumulator::OfferedFragment;
         using rigel::accumulator::JunctionEdge;
-        using rigel::accumulator::Node;
+        using rigel::accumulator::Region;
         using rigel::accumulator::kNFragmentPools;
         using rigel::accumulator::kNStrandColumns;
 
@@ -2854,19 +2854,19 @@ NB_MODULE(_bam_impl, m) {
             .def("__init__",
                  [](Accumulator* self,
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cuts,
-                    nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+                    nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
                     int max_length,
                     int32_t ref) {
                      std::vector<int64_t> c(cuts.data(), cuts.data() + cuts.shape(0));
-                     std::vector<uint8_t> t(node_types.data(),
-                                            node_types.data() + node_types.shape(0));
+                     std::vector<uint8_t> t(region_types.data(),
+                                            region_types.data() + region_types.shape(0));
                      new (self) Accumulator(std::move(c), std::move(t), max_length, ref);
                  },
                  nb::arg("cuts"),
-                 nb::arg("node_types"),
+                 nb::arg("region_types"),
                  nb::arg("max_length"),
                  nb::arg("ref"),
-                 "One reference's sorted cut positions, one coarse type per node, the\n"
+                 "One reference's sorted cut positions, one coarse type per region, the\n"
                  "fragment-length limit (which is also the pool-histogram width), and WHICH\n"
                  "reference this is — stamped into every deferred record, because the second\n"
                  "pass replays those onto that reference's cut axis.")
@@ -2887,30 +2887,30 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("sj_strand"),
                  "The junction CSR for THIS reference, keyed by the ref-local donor cut\n"
                  "index. The junction-edge id is the slot; slot order is a contract.")
-            .def_prop_ro("n_nodes",     [](const Accumulator& a) { return a.n_nodes(); })
+            .def_prop_ro("n_regions",     [](const Accumulator& a) { return a.n_regions(); })
             .def_prop_ro("n_edges",     [](const Accumulator& a) { return a.n_edges(); })
             .def_prop_ro("n_junctions", [](const Accumulator& a) { return a.n_junctions(); })
             .def_prop_ro("n_cuts",      [](const Accumulator& a) { return a.n_cuts(); })
             .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
 
-            // ── nodes ────────────────────────────────────────────────────────────────────────────────
-            .def_prop_ro("node_contained_count", [](nb::handle h) {
+            // ── regions ────────────────────────────────────────────────────────────────────────────────
+            .def_prop_ro("region_contained_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(Node) / sizeof(uint32_t);
+                constexpr int64_t row = sizeof(Region) / sizeof(uint32_t);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    &a.nodes_data()[0].contained_count[0], {a.n_nodes(), kNStrandColumns}, h,
+                    &a.regions_data()[0].contained_count[0], {a.n_regions(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("node_contained_inv_opportunity_sum", [](nb::handle h) {
+            .def_prop_ro("region_contained_inv_opportunity_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(Node) / sizeof(double);
+                constexpr int64_t row = sizeof(Region) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.nodes_data()[0].contained_inv_opportunity_sum, {a.n_nodes()}, h, {row}).cast();
+                    &a.regions_data()[0].contained_inv_opportunity_sum, {a.n_regions()}, h, {row}).cast();
             })
-            .def_prop_ro("node_start_count", [](nb::handle h) {
+            .def_prop_ro("region_start_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<1>>(
-                    a.node_start_count_data(), {a.n_nodes()}, h).cast();
+                    a.region_start_count_data(), {a.n_regions()}, h).cast();
             })
 
             // ── contiguous edges ─────────────────────────────────────────────────────────────────────
@@ -3016,8 +3016,8 @@ NB_MODULE(_bam_impl, m) {
                 return deferred_dict(a.deferred_canonical());
             })
 
-            .def("node_of_pos",
-                 [](const Accumulator& a, int64_t pos) { return a.node_of_pos(pos); },
+            .def("region_of_pos",
+                 [](const Accumulator& a, int64_t pos) { return a.region_of_pos(pos); },
                  nb::arg("pos"))
 
             // Returns the QC KEY the deposit incremented, which is the specification's
@@ -3138,27 +3138,27 @@ NB_MODULE(_bam_impl, m) {
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
                      int32_t n_refs,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
                      int max_length) {
                       self.set_regions(cut_positions, ref_cut_offsets, n_refs,
-                                       node_types, max_length);
+                                       region_types, max_length);
                  },
                  nb::arg("cut_positions"),
                  nb::arg("ref_cut_offsets"),
                  nb::arg("n_refs"),
-                 nb::arg("node_types"),
+                 nb::arg("region_types"),
                  nb::arg("max_length"),
-                 "Install the accumulator's node partition. Call set_junctions next.\n\n"
+                 "Install the accumulator's region partition. Call set_junctions next.\n\n"
                  "cut_positions : int64[n_cuts_total]\n"
                  "    Flat sorted cut positions for all references. A reference\n"
-                 "    contributing c cuts owns c-1 nodes and c-2 interior lines.\n"
+                 "    contributing c cuts owns c-1 regions and c-2 interior lines.\n"
                  "ref_cut_offsets : int64[n_refs + 1]\n"
                  "    Per-ref offsets into cut_positions; ref f spans\n"
                  "    cut_positions[ref_cut_offsets[f]:ref_cut_offsets[f+1]].\n"
                  "n_refs : int\n"
                  "    Number of references (matches FragmentResolver).\n"
-                 "node_types : uint8[n_nodes_total]\n"
-                 "    Coarse node type (0=intergenic, 1=intron, 2=exon), ref-major.\n"
+                 "region_types : uint8[n_regions_total]\n"
+                 "    Coarse region type (0=intergenic, 1=intron, 2=exon), ref-major.\n"
                  "    It types the fragment-length pools.\n"
                  "max_length : int\n"
                  "    The fragment-length limit applied to L, and the width of the\n"

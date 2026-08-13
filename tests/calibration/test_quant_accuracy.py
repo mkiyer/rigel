@@ -270,8 +270,8 @@ def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_two_shipped(toy
 class _FakeCal:
     """Enough of a ``CalibrationResult`` for ``dataclasses.replace`` inside the wrapper."""
 
-    mass_gdna_node: object = None
-    mass_rna_node: object = None
+    mass_gdna_region: object = None
+    mass_rna_region: object = None
     mass_gdna_edge: object = None
     mass_rna_edge: object = None
     mass_rna_spliced_edge: object = None

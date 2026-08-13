@@ -62,12 +62,12 @@ SIM_DIR = ROOT / "scripts" / "sim"
 #: should only ever SHRINK. ⚠ A name here is still gated — the test asserts it fails for the RECORDED
 #: reason, so a script that starts working, or breaks a NEW way, both fail loudly.
 BROKEN_ON_IMPORT: dict[str, str] = {
-    # `_component_node_arrays` was deleted from `calibration/priors.py` and has no successor: the module
+    # `_component_region_arrays` was deleted from `calibration/priors.py` and has no successor: the module
     # now exposes `_region_locus_shares` / `_edge_locus_shares` / `_project_regions_to_loci`. ⭐ The
     # DECISION is not a repair — this instrument compares the EM prior "in fragment units vs the OLD
     # incidence sum", and `ROADMAP.md` §0 records that migration as DONE, so its question is closed.
     # Delete it or re-point it at the surviving API; do not leave it here.
-    "prior_units_check.py": "_component_node_arrays",
+    "prior_units_check.py": "_component_region_arrays",
 }
 
 #: every script the import gate covers, both trees.
@@ -86,7 +86,7 @@ def test_every_instrument_still_imports(path):
     measurement taken once, by hand, and never gated. By 2026-08-11 it was false for **five** scripts and
     the suite was green the whole time: three died when the fixed-point layer (`INV_LENGTH_SCALE`,
     `inv_length_quantum`) went at `94d283c0`, one when `enrichment_frame` went at `0d9d422b`, one on
-    `_component_node_arrays`. Two commits, five dead instruments, 3,235 passing tests.
+    `_component_region_arrays`. Two commits, five dead instruments, 3,235 passing tests.
 
     ⭐ The other tests here check that a script is INDEXED and has a DOCSTRING — both true of a script
     that raises on line 1. Importing is the cheapest possible check that it is still connected to the

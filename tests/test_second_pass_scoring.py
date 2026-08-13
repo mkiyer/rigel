@@ -97,7 +97,7 @@ def _gtf() -> str:
             f'chr1\tt\texon\t{base + 901}\t{base + 1200}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
         ]
     # ⭐ Loci 3 and 4 have ONE isoform on purpose, so the intron's endpoints are ADJACENT cuts and the
-    # intron spans exactly one node. That is D-6's case: the lines strictly between them are an empty set.
+    # intron spans exactly one region. That is D-6's case: the lines strictly between them are an empty set.
     for base, gene in ((L3, "C"), (L4, "D"), (L6, "G")):
         rows += [
             f'chr1\tt\texon\t{base + 1}\t{base + 600}\t.\t+\t.\tgene_id "g{gene}"; transcript_id "t{gene}";\n',
@@ -180,7 +180,7 @@ def scored(tmp_path_factory):
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
-        build_node_partition_arrays,
+        build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
     from rigel.second_pass import score_held_fragments
@@ -262,7 +262,7 @@ def scored(tmp_path_factory):
     _stats, strand_model, _buffer, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
-    _, _, node_types = build_node_partition_arrays(index)
+    _, _, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     fl_models = build_fl_models(payload)
 
@@ -273,7 +273,7 @@ def scored(tmp_path_factory):
             payload,
             fl_models=fl_models,
             rna_sense_frac=rna_sense_frac,
-            node_types=node_types,
+            region_types=region_types,
             junctions=junctions,
         )
 
@@ -416,7 +416,7 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
     """⛔ **Arm 3 — this is D-6, and it FAILED when it was written**.
 
     Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
-    ``SHALLOW``, so the evidence says the molecule is genomic. ⭐ Its intron spans **exactly one node** —
+    ``SHALLOW``, so the evidence says the molecule is genomic. ⭐ Its intron spans **exactly one region** —
     the locus has one isoform, so the intron's endpoints are adjacent cuts — which is precisely the
     configuration where the shipped ``_lines_inside`` returned an EMPTY evidence set and handed ∅ a
     structural ``rho = 0``.

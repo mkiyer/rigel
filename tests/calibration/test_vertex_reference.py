@@ -45,7 +45,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import simplex_logodds as SL
-from rigel.calibration.simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
+from rigel.calibration.simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 
 #: κ = ½ EXACTLY, no overdispersion, no fitted priors. On that substrate the strand term is bit-flat, so
 #: the only things speaking about λ are the message under test and ψ's reference — which isolates the
@@ -59,8 +59,8 @@ _BASE = dict(kappa=0.5, od_g=0.0, od_r=0.0, n_grid=128, L=10.0, n_tilt=64, n_gri
 _NATS_PER_DECADE = 0.5 * float(np.log(10.0))
 
 
-def _nodes(n: int = 2):
-    """``n`` single-strand (+) nodes carrying data. Single-strand keeps this on the exact 1-D λ solve."""
+def _regions(n: int = 2):
+    """``n`` single-strand (+) regions carrying data. Single-strand keeps this on the exact 1-D λ solve."""
     u_pos = np.full(n, 200.0)
     u_neg = np.zeros(n)
     return u_pos, u_neg, np.ones(n, bool), np.zeros(n, bool), u_pos + u_neg, np.zeros(n)
@@ -68,12 +68,12 @@ def _nodes(n: int = 2):
 
 def _solve(**over):
     n = int(over.pop("n", 2))
-    u_pos, u_neg, ap, an, mu, ms = _nodes(n)
+    u_pos, u_neg, ap, an, mu, ms = _regions(n)
     ms = np.asarray(over.pop("mass_spliced", ms), np.float64)
     kw = dict(_BASE)
     kw.update(over)
     return np.asarray(
-        _solve_nodes_logodds_all(u_pos, u_neg, ap, an, mu, ms, **kw).gdna_frac, np.float64
+        _solve_regions_logodds_all(u_pos, u_neg, ap, an, mu, ms, **kw).gdna_frac, np.float64
     )
 
 
@@ -136,7 +136,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
     ⛔ ``_local_loglik_logodds`` is CALLED, not reimplemented, so this cannot drift from what the solver
     computes (TRAPS: self-checking-validator)."""
     lam, fg = _logodds_grid(1024, 10.0)
-    u_pos, u_neg, ap, an, _mu, _ms = _nodes(1)
+    u_pos, u_neg, ap, an, _mu, _ms = _regions(1)
     psi, _fp, _fn = SL._local_loglik_logodds(
         u_pos,
         u_neg,
@@ -274,7 +274,7 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
     ⇒ certified RNA, unspliced ⇒ must be deconvolved), never a second species of RNA.
 
     ⚠ ``edge_spliced`` is EDGE-only and is structurally ZERO on every toy geometry (a toy's exons ARE its
-    nodes, so no spliced molecule crosses an interior line contiguously). On the real panel it carries
+    regions, so no spliced molecule crosses an interior line contiguously). On the real panel it carries
     85.3 %% of EDGE unspliced mass off capture. So this gate uses ``mass_spliced`` as a pure SWEEP HANDLE
     to prove ψ ignores the channel — it is not a claim about the channel's size.
 

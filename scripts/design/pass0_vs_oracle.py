@@ -46,7 +46,7 @@ SCORING RULES, NON-NEGOTIABLE
 -----------------------------
 * **Per object AND per class, never pooled.** One run once reported a −47.6 k error next to a +75.4 k
   error as a "nearly perfect" −1.9 k.
-* **Mass-weighted**, because that is how the consumer weights it — a 1 bp node with 2 fragments must
+* **Mass-weighted**, because that is how the consumer weights it — a 1 bp region with 2 fragments must
   not count like an exon with 40,000.
 * **The directional split alongside the absolute**, because here they nearly cancel.
 * **The contaminated conditions only.** A zero-gDNA row is saturated at truth = 0 exactly, so
@@ -100,8 +100,8 @@ from _oracle import ORIGINS, OracleTruth, _split_bam  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.effective_length import build_slot_moments  # noqa: E402
-from rigel.calibration.node_chain import EDGE, NODE  # noqa: E402
-from rigel.calibration.node_geometry import g1_locked  # noqa: E402
+from rigel.calibration.region_chain import EDGE, REGION  # noqa: E402
+from rigel.calibration.region_geometry import g1_locked  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -113,7 +113,7 @@ DEFAULT_SUITE = _RUNS / "suite" / "pilot"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 #: ⭐ NOT DEFINED HERE ANY MORE. "Has own composition evidence" has ONE home in production —
-#: :func:`~rigel.calibration.node_init.has_own_composition_evidence` — and every instrument imports
+#: :func:`~rigel.calibration.region_init.has_own_composition_evidence` — and every instrument imports
 #: it. It used to be restated here and in ``composition_evidence_census.py``, each beside a comment
 #: saying it must match the solver, which is precisely the arrangement TRAPS: a-test-that-redefines names: a change
 #: to the solver would have moved neither. Kept as a name only because ``solver_slot_classes`` takes
@@ -122,10 +122,10 @@ _EPS = 1.0e-9
 
 #: The two axes ``CalibrationResult`` deconvolves. The junction axis is pure RNA by construction —
 #: nothing is deconvolved there, so there is nothing to score.
-AXES = ("node", "edge")
+AXES = ("region", "edge")
 
 #: ⭐ WHERE DID THE ANSWER COME FROM? The solver's own three-way partition of a slot, reproducing
-#: ``node_init``'s definitions. Mutually exclusive and exhaustive — a gate asserts the mass and the
+#: ``region_init``'s definitions. Mutually exclusive and exhaustive — a gate asserts the mass and the
 #: error both decompose over them exactly.
 SOLVER_CLASSES = ("own_evidence", "relay_only", "struct_lock")
 
@@ -187,14 +187,14 @@ def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore
     if arm_total.shape != true_total.shape:
         raise ValueError(
             f"arm has {arm_total.shape[0]} objects, truth has {true_total.shape[0]} — these are "
-            "different axes. A node mass scored against edge truth is not a small error."
+            "different axes. A region mass scored against edge truth is not a small error."
         )
     if not np.allclose(arm_total, true_total, rtol=1e-9, atol=1e-6):
         worst = int(np.argmax(np.abs(arm_total - true_total)))
         raise ValueError(
             f"arm and truth are on DIFFERENT BASES: per-object totals differ, worst at object "
             f"{worst} ({arm_total[worst]:.6g} vs {true_total[worst]:.6g}). Both must be "
-            "contained count on the node axis and unspliced+spliced on the edge axis."
+            "contained count on the region axis and unspliced+spliced on the edge axis."
         )
 
     live = np.isfinite(arm_f) & np.isfinite(true_f)
@@ -217,19 +217,19 @@ def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore
 def check_same_basis(name: str, arm, full_substrate) -> None:
     """Assert one ``CalibrationResult``-shaped arm's per-object totals are the payload's own totals.
 
-    ⚠ **Per axis, never pooled.** ``n_nodes`` and ``n_edges`` differ by only ``n_refs``, so an error
+    ⚠ **Per axis, never pooled.** ``n_regions`` and ``n_edges`` differ by only ``n_refs``, so an error
     on one axis cancelling an equal and opposite one on the other is not far-fetched — that is a real
     class of mistake a three-axis schema makes possible, and pooling the check invites it.
 
-    The node axis holds no spliced molecule (``node_contained`` is credited only when the fragment
+    The region axis holds no spliced molecule (``region_contained`` is credited only when the fragment
     used no junction); the edge axis is unspliced + spliced, because ``chain_edge_deconv`` builds
     ``rna = (1−f_g)·unspliced + spliced`` and T must match that or the two are different quantities.
     """
-    node_total = np.asarray(full_substrate.node_contained.count, np.float64).sum(axis=1)
+    region_total = np.asarray(full_substrate.region_contained.count, np.float64).sum(axis=1)
     edge_total = np.asarray(full_substrate.edge_unspliced.count, np.float64).sum(
         axis=1
     ) + np.asarray(full_substrate.edge_spliced.count, np.float64).sum(axis=1)
-    for axis, expect in (("node", node_total), ("edge", edge_total)):
+    for axis, expect in (("region", region_total), ("edge", edge_total)):
         got = np.asarray(getattr(arm, f"mass_gdna_{axis}"), np.float64) + np.asarray(
             getattr(arm, f"mass_rna_{axis}"), np.float64
         )
@@ -246,19 +246,19 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
 
 
 def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarray]:
-    """Partition the chain's SLOTS three ways, using ``node_init``'s own definitions.
+    """Partition the chain's SLOTS three ways, using ``region_init``'s own definitions.
 
     * ``struct_lock`` — composition CERTAIN. A slot the solver could not move because there is
       nothing to decide: neither RNA strand admissible, so ``_type_belief`` pins ``{0,0,1}`` at
       ``Var(log f_g) = 0``. ⚠ Locked is not the same as uninformed, and lumping the two reports a
-      pure-gDNA intergenic node as a solver failure.
-      ⛔ **BOTH AXES** — :func:`~rigel.calibration.node_geometry.g1_locked`. This was
-      ``(~solvable) & (kind == NODE)``, so every structurally-locked EDGE — an intergenic↔exon seam,
+      pure-gDNA intergenic region as a solver failure.
+      ⛔ **BOTH AXES** — :func:`~rigel.calibration.region_geometry.g1_locked`. This was
+      ``(~solvable) & (kind == REGION)``, so every structurally-locked EDGE — an intergenic↔exon seam,
       where RNA cannot cross a gene boundary — was filed as ``relay_only``, i.e. as an object whose
       answer came from its neighbours, when nothing was ever asked of it and its ``f_g = 1`` is the
       pinned init.
-      ⚠⚠ **AND IT IS NOT THE SAME MASK AS ``node_init.strand_evidence``'s ``struct_lock``**, which is
-      node-only ON PURPOSE. That one answers "may this slot EMIT composition certainty into its
+      ⚠⚠ **AND IT IS NOT THE SAME MASK AS ``region_init.strand_evidence``'s ``struct_lock``**, which is
+      region-only ON PURPOSE. That one answers "may this slot EMIT composition certainty into its
       messages?" and excludes G1 edges because a seam is structurally gDNA yet sits between
       RNA-carrying exons, so certainty there compounds into a phantom-gDNA emitter. Two questions, one
       word; ``g1_locked``'s docstring holds the distinction.
@@ -277,7 +277,7 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
     answers on the ladder's unstranded strata, and each is right for its own consumer.
 
     ``eps`` exists so a gate can move it and watch the partition move; production callers must not
-    pass it. The three sources of ``tau_lam`` and their gating are ``node_init.build_node_init``.
+    pass it. The three sources of ``tau_lam`` and their gating are ``region_init.build_region_init``.
     """
     tau = np.asarray(capture["_tau0_lam"], np.float64)
     struct_lock = g1_locked(capture["free_pos"], capture["free_neg"])
@@ -289,24 +289,24 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
     }
 
 
-def _project(slot_mask, chain, n_nodes: int, n_edges: int) -> dict[str, np.ndarray]:
-    """Scatter a per-slot boolean onto the node and edge axes. The chain is ``N E N E … N`` per
-    reference, so every node and every contiguous edge is exactly one slot and the map is a
+def _project(slot_mask, chain, n_regions: int, n_edges: int) -> dict[str, np.ndarray]:
+    """Scatter a per-slot boolean onto the region and edge axes. The chain is ``N E N E … N`` per
+    reference, so every region and every contiguous edge is exactly one slot and the map is a
     bijection — there is nothing to pool and nothing to drop."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     mask = np.asarray(slot_mask, bool)
-    out = {"node": np.zeros(n_nodes, bool), "edge": np.zeros(n_edges, bool)}
-    out["node"][obj[kind == NODE]] = mask[kind == NODE]
+    out = {"region": np.zeros(n_regions, bool), "edge": np.zeros(n_edges, bool)}
+    out["region"][obj[kind == REGION]] = mask[kind == REGION]
     out["edge"][obj[kind == EDGE]] = mask[kind == EDGE]
     return out
 
 
-def solver_class_masks(capture, chain, n_nodes: int, n_edges: int) -> dict[str, dict]:
+def solver_class_masks(capture, chain, n_regions: int, n_edges: int) -> dict[str, dict]:
     """:func:`solver_slot_classes`, projected onto the two scored axes."""
     slots = solver_slot_classes(capture, chain)
     return {
-        axis: {name: _project(m, chain, n_nodes, n_edges)[axis] for name, m in slots.items()}
+        axis: {name: _project(m, chain, n_regions, n_edges)[axis] for name, m in slots.items()}
         for axis in AXES
     }
 
@@ -320,8 +320,8 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
     The 2×2 at one object is ``N = ρ_g·E_g + ρ_r·E_r`` and ``Σ1/L = ρ_g·D_g + ρ_r·D_r``, and it is
     identified iff ``E_g/D_g ≠ E_r/D_r`` — the two components' **opportunity-weighted** mean lengths.
     ⚠ At a contiguous edge the opportunity is ``(w−1)+`` and that reduces to the bare ``μ_g ≠ μ_r``;
-    at a NODE it does **not**, because the opportunity is ``(ell − w + 1)+`` and ``1/w`` does not
-    cancel it. Applying the edge form at a node would be scoring one frame's evidence against another
+    at a REGION it does **not**, because the opportunity is ``(ell − w + 1)+`` and ``1/w`` does not
+    cancel it. Applying the edge form at a region would be scoring one frame's evidence against another
     frame's support, so this reads the moments in each slot's own frame.
 
     ⭐ **And it reads them from ``length_likelihood.build_slot_moments``, which already computes
@@ -329,14 +329,14 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
     implementations of one quantity in the tree; the same argument is why ``LandedMoments`` carries
     ``eff`` at all. Conditional on the object's count ``N``, the deposited weight has mean
     ``pi·m1_g + (1−pi)·m1_r`` where ``pi`` is the gDNA share of the LANDED fragments — which is the
-    quantity ``chain_node_deconv`` turns into mass — so::
+    quantity ``chain_region_deconv`` turns into mass — so::
 
         pi_hat = (Σ(1/L)/N − m1_r) / (m1_g − m1_r)
 
     Four classes, and the middle two are the answer this function exists to give:
 
     * ``absent`` — no count. There is no answer here to get right or wrong.
-    * ``identified`` — either only ONE component has any opportunity here (a node too short for any
+    * ``identified`` — either only ONE component has any opportunity here (a region too short for any
       RNA fragment to fit inside can only contain gDNA — determined, with no arithmetic at all), or
       both do, the moments separate, and ``pi_hat`` lands in ``[0, 1]``.
     * ``undet_no_separation`` — ``m1_g == m1_r`` **exactly**. At equal opportunity-weighted means the
@@ -362,7 +362,7 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     count = np.zeros(n_slots, np.float64)
     inv = np.zeros(n_slots, np.float64)
-    for k, view in ((NODE, substrate.node_contained), (EDGE, substrate.edge_unspliced)):
+    for k, view in ((REGION, substrate.region_contained), (EDGE, substrate.edge_unspliced)):
         sel = kind == k
         count[sel] = np.asarray(view.count, np.float64).sum(axis=1)[obj[sel]]
         inv[sel] = np.asarray(view.inv_length_sum, np.float64)[obj[sel]]
@@ -386,9 +386,9 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
         "undet_out_of_range": live & ~in_range,
         "absent": absent,
     }
-    n_nodes, n_edges = int(substrate.n_nodes), int(substrate.n_edges)
+    n_regions, n_edges = int(substrate.n_regions), int(substrate.n_edges)
     return {
-        axis: {name: _project(m, chain, n_nodes, n_edges)[axis] for name, m in slots.items()}
+        axis: {name: _project(m, chain, n_regions, n_edges)[axis] for name, m in slots.items()}
         for axis in AXES
     }
 
@@ -493,11 +493,11 @@ def library_f_gdna(result) -> float:
     different quantity (it counts fragments once; this counts each fragment on every object it
     touched), and subtracting one from the other would mix a basis change into the error.
 
-    ⚠ Both axes, always: gDNA lives contained in a node AND crossing a line, and summing one axis
+    ⚠ Both axes, always: gDNA lives contained in a region AND crossing a line, and summing one axis
     reports a library's gDNA as a fraction of part of itself.
     """
-    g = float(np.asarray(result.mass_gdna_node).sum() + np.asarray(result.mass_gdna_edge).sum())
-    r = float(np.asarray(result.mass_rna_node).sum() + np.asarray(result.mass_rna_edge).sum())
+    g = float(np.asarray(result.mass_gdna_region).sum() + np.asarray(result.mass_gdna_edge).sum())
+    r = float(np.asarray(result.mass_rna_region).sum() + np.asarray(result.mass_rna_edge).sum())
     return g / (g + r) if (g + r) > 0 else 0.0
 
 
@@ -555,7 +555,7 @@ def measure_condition(
         bam, index, pipeline_config, work_dir, tag, payload, oracle_cache
     )
 
-    ra = RegionArrays.from_frame(index.nodes_df, index.ref_name_to_id)
+    ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     substrate = CalibrationSubstrate.from_payload(payload, ra)
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
@@ -605,8 +605,8 @@ def measure_condition(
     # question Stage B asks is about the prior-free solve, and a class that moves between arms cannot
     # be used to compare them.
     chain = debug_pass0["chain"]
-    n_nodes, n_edges = int(payload.n_nodes), int(payload.n_edges)
-    solver_masks = solver_class_masks(debug_pass0["capture"], chain, n_nodes, n_edges)
+    n_regions, n_edges = int(payload.n_regions), int(payload.n_edges)
+    solver_masks = solver_class_masks(debug_pass0["capture"], chain, n_regions, n_edges)
     has_truth = truth_gdna_pmf is not None and truth_rna_pmf is not None
     info_pmf_source = "the simulator's own post-capture pmfs" if has_truth else "the FITTED pmfs"
     info_masks = info_class_masks(
@@ -760,14 +760,14 @@ def report(measurements: list[ConditionMeasurement]) -> None:
         "   ⛔ undrained on every arm, T included: three partitions cannot be drained independently."
     )
     for m in measurements:
-        true_contained = m.scores["pass0"]["node"]["ALL"].mass
+        true_contained = m.scores["pass0"]["region"]["ALL"].mass
         true_crossing = m.scores["pass0"]["edge"]["ALL"].mass
         print()
         print(f"── {m.condition}    ({m.seconds:.0f} s)")
         print(
-            f"   TRUE mass: node contained {_fmt(true_contained)}   "
+            f"   TRUE mass: region contained {_fmt(true_contained)}   "
             f"edge crossing {_fmt(true_crossing)}   "
-            f"true gDNA node {_fmt(float(np.asarray(m.truth.mass_gdna_node).sum()))}"
+            f"true gDNA region {_fmt(float(np.asarray(m.truth.mass_gdna_region).sum()))}"
         )
         for axis in AXES:
             print(f"   {axis.upper():<5} {'arm':<26} {'net err':>13} {'Σ|err|':>13} "

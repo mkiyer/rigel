@@ -95,9 +95,9 @@ def test_no_import_points_UP_a_layer(path):
     """⛔⛔ **THE RULE.** An import may point DOWN a layer or SIDEWAYS within one. Never UP.
 
     ⭐ It found two real violations on the tree as it stood, and both were the SAME defect wearing two
-    costumes: a TYPE defined too high. ``NodeDeconv`` — one slot's deconvolution result, the pie
+    costumes: a TYPE defined too high. ``RegionDeconv`` — one slot's deconvolution result, the pie
     ``(f_pos, f_neg, f_g)`` that is the tool's central datum — was defined in the STRAND family at layer 4
-    and imported by `node_geometry` and `simplex_logodds` at layer 3 and by `sweep` at layer 6. Three layers
+    and imported by `region_geometry` and `simplex_logodds` at layer 3 and by `sweep` at layer 6. Three layers
     reached upward for it. The repair is the one a layering violation always asks for: **the type belongs at
     the bottom, not with the code that happened to define it first.** It is now layer 0.
     """

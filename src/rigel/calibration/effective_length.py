@@ -9,7 +9,7 @@ because gDNA and RNA have different length distributions *and* different templat
 
 TWO FRAMES, ONE FAMILY. With ``w`` the molecule length and ``f`` its pmf::
 
-    contained   E_f[ (node_len − w + 1)+ ]                                   fits wholly inside a node
+    contained   E_f[ (region_len − w + 1)+ ]                                   fits wholly inside a region
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]     spans a 0-bp line
 
 ⭐ **The crossing formula covers BOTH edge kinds and BOTH components**, with ``R_lo``/``R_hi`` the
@@ -27,11 +27,11 @@ to keep ignoring it is an open decision, and this module is written so that
 
 ⚠ **The `+1` in the contained formula is the discrete count of start positions, not a fudge.** A fragment
 ``[s, s+w)`` sits inside ``[a, a+L)`` iff ``s ∈ [a, a+L−w]``, which is ``L − w + 1`` positions. Dropping it
-makes the divisor exactly 0 when a node is one fragment long — a division by zero that was floored to an
-epsilon and produced densities of ~1e9 on 12.4 % of fine-partition nodes.
+makes the divisor exactly 0 when a region is one fragment long — a division by zero that was floored to an
+epsilon and produced densities of ~1e9 on 12.4 % of fine-partition regions.
 
 ⚠ **An object with no opportunity must return 0, and the caller must treat 0 as "no evidence" rather than
-flooring it.** A short node genuinely cannot measure a long component; that is physics
+flooring it.** A short region genuinely cannot measure a long component; that is physics
 and a floored division turns "no data" into a confident wrong answer.
 
 ⛔ **The three mass-era divisors are DELETED** — ``boundary_side_eff_length`` (``E[min(l,R)]/2``),
@@ -45,7 +45,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .node_chain import EDGE, NODE, NodeChain
+from .region_chain import EDGE, REGION, RegionChain
 
 __all__ = [
     "UNBOUNDED_REACH",
@@ -79,14 +79,14 @@ def fl_mean(fl_pmf: np.ndarray) -> float:
     return float(np.dot(np.arange(p.shape[0], dtype=np.float64), p))
 
 
-def contained_eff_length(node_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarray:
-    """``E_f[(node_len − w + 1)+]`` per node — the count of starts placing the whole molecule inside.
+def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarray:
+    """``E_f[(region_len − w + 1)+]`` per region — the count of starts placing the whole molecule inside.
 
     Computed as ``(L+1)·F(L) − S(L)`` with ``F`` the pmf's CDF and ``S(L) = Σ_{w≤L} w f(w)``; beyond the
     support the full sums apply, giving ``L + 1 − mean``.
 
     ⚠ This is the frame that still NEEDS a length model. Containment probability differs 6.6× between
-    gDNA and RNA at a 150 bp node, so a 10 % error in the fitted pmf costs 0.010–0.026 of composition
+    gDNA and RNA at a 150 bp region, so a 10 % error in the fitted pmf costs 0.010–0.026 of composition
     the length models are load-bearing here, not hygiene.
     """
     p = _as_pmf(fl_pmf)
@@ -95,9 +95,9 @@ def contained_eff_length(node_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndar
     cdf = np.cumsum(p)  # F(w)
     cum_len = np.cumsum(lengths * p)  # S(w)
 
-    node = np.asarray(node_len_bp, dtype=np.float64)
-    idx = np.clip(np.floor(node).astype(np.int64), 0, n - 1)
-    return np.maximum((node + 1.0) * cdf[idx] - cum_len[idx], 0.0)
+    region = np.asarray(region_len_bp, dtype=np.float64)
+    idx = np.clip(np.floor(region).astype(np.int64), 0, n - 1)
+    return np.maximum((region + 1.0) * cdf[idx] - cum_len[idx], 0.0)
 
 
 def crossing_eff_length(
@@ -174,7 +174,7 @@ class LandedMoments:
     eff: np.ndarray
 
 def _pmf_cumulants(fl_pmf: np.ndarray):
-    """Cumulative sums of ``f(w)·w^k`` for ``k ∈ {−2,−1,0,1,2,3}`` — the whole of the node frame.
+    """Cumulative sums of ``f(w)·w^k`` for ``k ∈ {−2,−1,0,1,2,3}`` — the whole of the region frame.
 
     ⚠ ``w = 0`` contributes 0 to every reciprocal sum: a zero-length fragment does not exist, and the
     pmf is 0 there in every real model. Guarding it here rather than trusting the input is what keeps a
@@ -195,29 +195,29 @@ def _pmf_cumulants(fl_pmf: np.ndarray):
         np.cumsum(p * w * w * w),  # S3  = Σ w³ f
     )
 
-def contained_moments(node_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMoments:
+def contained_moments(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMoments:
     """Moments of the tilted pmf for the CONTAINED population: ``A(w) = (ell − w + 1)+``, ``u(w) = 1/w``.
 
-    ⭐ **Closed form, O(n_nodes).** Each raw moment is ``(ell+1)·<cumsum> − <next cumsum>``, exactly the
+    ⭐ **Closed form, O(n_regions).** Each raw moment is ``(ell+1)·<cumsum> − <next cumsum>``, exactly the
     shape `effective_length.contained_eff_length` uses for the denominator — so no
-    ``n_nodes × max_len`` array is ever materialised (that would be 8 GB at human scale).
+    ``n_regions × max_len`` array is ever materialised (that would be 8 GB at human scale).
 
         E[A]     = (ell+1)·F  − S1        <- IS contained_eff_length
         E[A·u]   = (ell+1)·C1 − F
         E[A·w]   = (ell+1)·S1 − S2
         E[A·u²]  = (ell+1)·C2 − C1
         E[A·w²]  = (ell+1)·S2 − S3
-        E[A·u·w] = (ell+1)·F  − S1        <- ⭐ identical to E[A], because u(w)·w = 1 at a node
+        E[A·u·w] = (ell+1)·F  − S1        <- ⭐ identical to E[A], because u(w)·w = 1 at a region
 
-    ⭐ That last identity means ``q12 ≡ 1`` at every node, for both components. It is not a shortcut: it
+    ⭐ That last identity means ``q12 ≡ 1`` at every region, for both components. It is not a shortcut: it
     says the two channels' cross-moment carries no composition information in the contained frame, and
     it falls out of the deposit rule rather than being imposed.
     """
     F, C1, C2, S1, S2, S3 = _pmf_cumulants(fl_pmf)
     n = F.shape[0]
-    node = np.asarray(node_len_bp, dtype=np.float64)
-    i = np.clip(np.floor(node).astype(np.int64), 0, n - 1)
-    a = node + 1.0
+    region = np.asarray(region_len_bp, dtype=np.float64)
+    i = np.clip(np.floor(region).astype(np.int64), 0, n - 1)
+    a = region + 1.0
 
     eff = np.maximum(a * F[i] - S1[i], 0.0)
     return _normalise(
@@ -242,7 +242,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
         E[A·w²]  = E[w³] − E[w²]
         E[A·u·w] = mu                        (u(w)·w = w/(w−1), so Σ f(w)(w−1)·w/(w−1) = mu)
 
-    ⚠ **Unbounded reach only, matching `build_node_geometry`'s default.** With the TRAPS: prove-the-substrate taper switched on
+    ⚠ **Unbounded reach only, matching `build_region_geometry`'s default.** With the TRAPS: prove-the-substrate taper switched on
     (``edge_rna_reach``) the opportunity becomes per-edge and these moments would have to as well. The
     taper was measured as a null (≤ 0.0002), so the default path is the one wired;
     a consumer that turns the taper on must extend this function rather than silently mismatch.
@@ -281,27 +281,27 @@ def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
 
     return LandedMoments(m1=d(e_u), m2=d(e_w), q1=d(e_uu), q2=d(e_ww), q12=d(e_uw), eff=eff)
 
-def build_slot_moments(chain: NodeChain, region_arrays, fl_pmf: np.ndarray) -> LandedMoments:
-    """Scatter the two frames' moments onto the chain: contained at NODE slots, crossing at EDGE slots.
+def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) -> LandedMoments:
+    """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at EDGE slots.
 
-    The same slot layout `build_node_geometry` uses for ``eff_gdna``/``eff_rna``, so ``moments.eff`` is
+    The same slot layout `build_region_geometry` uses for ``eff_gdna``/``eff_rna``, so ``moments.eff`` is
     that array — asserted by ``test_eff_matches_the_solver_divisor``, because two implementations of one
     quantity is how a ½ went unnoticed for months.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_node, is_edge = kind == NODE, kind == EDGE
+    is_region, is_edge = kind == REGION, kind == EDGE
     n = int(chain.n_slots)
 
-    node_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    node_m = contained_moments(node_len, fl_pmf) if node_len.shape[0] else None
+    region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    region_m = contained_moments(region_len, fl_pmf) if region_len.shape[0] else None
     edge_m = crossing_moments(fl_pmf)
 
     fields = {}
     for name in ("m1", "m2", "q1", "q2", "q12", "eff"):
         out = np.zeros(n, dtype=np.float64)
-        if node_m is not None:
-            out[is_node] = getattr(node_m, name)[obj[is_node]]
+        if region_m is not None:
+            out[is_region] = getattr(region_m, name)[obj[is_region]]
         out[is_edge] = float(getattr(edge_m, name))
         fields[name] = out
     return LandedMoments(**fields)

@@ -59,11 +59,11 @@ PV = _load_sibling("prior_vs_oracle.py")
 
 
 def _scenario(name: str, seed: int, work_dir) -> Scenario:
-    """Three genes, staggered isoforms, and one node shorter than the shortest fragment.
+    """Three genes, staggered isoforms, and one region shorter than the shortest fragment.
 
     ⭐ The stagger is load-bearing for the ``edge_spliced`` bank (a contiguous crossing by a molecule
     that spliced elsewhere can only land where a cut falls inside another transcript's exon), and the
-    short node is what gives the toy genuinely EMPTY objects — the population the NaN-not-zero gate is
+    short region is what gives the toy genuinely EMPTY objects — the population the NaN-not-zero gate is
     about. Both are the same structures ``test_pass0_vs_oracle`` relies on, for the same reasons.
     """
     sc = Scenario(name, genome_length=9000, seed=seed, work_dir=work_dir)
@@ -170,12 +170,12 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     not deconvolution error, and that bug would BE the headline number.
 
     ⭐ **The perturbation site had to be found by perturbation, and finding it is the gate's real
-    content.** The first version nudged ``argmax(mass_gdna_node)`` and read "no effect" — because on
-    any genome the largest gDNA node is INTERGENIC, and ``_project_regions_to_loci`` drops every
+    content.** The first version nudged ``argmax(mass_gdna_region)`` and read "no effect" — because on
+    any genome the largest gDNA region is INTERGENIC, and ``_project_regions_to_loci`` drops every
     region overlapping no locus. Correct behaviour, and it would have retired the gate as broken
     (TRAPS: could-the-arm-have-fired). So this asserts BOTH directions: in-locus moves, intergenic does not.
 
-    ⚠ **Measured resolution: 1e-12 fragments at an in-locus node moves the prior by 1.0e-12; one ULP
+    ⚠ **Measured resolution: 1e-12 fragments at an in-locus region moves the prior by 1.0e-12; one ULP
     (≈3e-14 on a mass of 207) does not.** The projection is a plain summation, so a perturbation below
     the summand's own rounding is absorbed. 1e-12 fragments is twelve orders of magnitude below the
     unit the prior is denominated in, so the lever is not the limiting factor anywhere.
@@ -186,20 +186,20 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
 
     sig = np.asarray(measured.region_arrays.signature).astype(np.int64)
     in_locus = (sig & _RNA_SIGNATURE_BITS) != 0
-    mass = np.asarray(measured.calibration.mass_gdna_node, np.float64)
+    mass = np.asarray(measured.calibration.mass_gdna_region, np.float64)
     inside = int(np.argmax(np.where(in_locus, mass, -1.0)))
     outside = int(np.argmax(np.where(~in_locus, mass, -1.0)))
     assert mass[inside] > 0.0 and mass[outside] > 0.0, (
-        "the toy has no gDNA at an in-locus node or no gDNA at an intergenic one — one half of this "
+        "the toy has no gDNA at an in-locus region or no gDNA at an intergenic one — one half of this "
         "gate would be vacuous"
     )
 
     base = measured.priors["P"]
-    assert _moved(_nudged_prior(measured, "mass_gdna_node", inside, 1e-12), base), (
-        "1e-12 fragments at an in-locus node changed no prior — the lever cannot resolve an override"
+    assert _moved(_nudged_prior(measured, "mass_gdna_region", inside, 1e-12), base), (
+        "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
-    assert not _moved(_nudged_prior(measured, "mass_gdna_node", outside, 1.0), base), (
-        "a whole fragment at an INTERGENIC node changed the prior — the locus projection is no "
+    assert not _moved(_nudged_prior(measured, "mass_gdna_region", outside, 1.0), base), (
+        "a whole fragment at an INTERGENIC region changed the prior — the locus projection is no "
         "longer dropping regions that overlap no locus"
     )
 
@@ -372,7 +372,7 @@ def test_eff_len_error_ignores_loci_with_no_gDNA_and_notices_loci_with_some():
 def test_the_fragment_truth_projection_LOSES_NOTHING_it_does_not_report(measured):
     """⛔ ``_project_regions_to_loci`` DROPS every region overlapping no locus — that is correct (an
     intergenic fragment belongs to no prior) and it is also the one place F could quietly lose mass
-    and read as a smaller assembler error. So the identity ``Σ F + dropped == Σ node_start_count``
+    and read as a smaller assembler error. So the identity ``Σ F + dropped == Σ region_start_count``
     must hold EXACTLY, per origin, and ``dropped`` must be reported rather than absorbed.
 
     ⭐ The perturbation removes one locus from the projection and watches the residue absorb exactly
@@ -383,11 +383,11 @@ def test_the_fragment_truth_projection_LOSES_NOTHING_it_does_not_report(measured
         ("rna", measured.f_rna_upper, measured.f_dropped["rna"]),
     ):
         if origin == "gdna":
-            total = float(np.asarray(measured.oracle.parts["gdna"].node_start_count).sum())
+            total = float(np.asarray(measured.oracle.parts["gdna"].region_start_count).sum())
         else:
             total = float(
-                np.asarray(measured.oracle.parts["mrna"].node_start_count).sum()
-                + np.asarray(measured.oracle.parts["nrna"].node_start_count).sum()
+                np.asarray(measured.oracle.parts["mrna"].region_start_count).sum()
+                + np.asarray(measured.oracle.parts["nrna"].region_start_count).sum()
             )
         assert arm.sum() + drop == pytest.approx(total, rel=1e-9), origin
         assert drop >= 0.0, f"{origin}: a NEGATIVE residue means the projection invented fragments"
@@ -404,7 +404,7 @@ def test_the_fragment_truth_projection_LOSES_NOTHING_it_does_not_report(measured
 def test_the_gdna_partition_carries_NO_spliced_deposit_so_F_gdna_needs_no_subtraction(measured):
     """⭐ This is why F is EXACT on the gDNA arm and only a bound on the RNA arm, and it is physics
     rather than a convention: gDNA does not splice, so there is no spliced sub-population inside
-    ``node_start_count`` for the gdna partition to withhold.
+    ``region_start_count`` for the gdna partition to withhold.
 
     ⛔ The perturbation writes a single spliced deposit into the gdna partition and asserts
     ``OracleTruth`` refuses the whole oracle — because if it did not, F_gdna would silently become a
@@ -448,13 +448,13 @@ def test_at_zero_gDNA_the_ORACLE_prior_is_identically_zero_and_the_shipped_one_i
 
     cal = _rebuild_calibration(measured_zero)
     truth = measured_zero.oracle.override_masses(measured_zero.region_arrays)
-    seeded = np.array(truth["mass_gdna_node"], copy=True)
-    # the largest RNA node — one with real opportunity, so the mass is not dropped by
+    seeded = np.array(truth["mass_gdna_region"], copy=True)
+    # the largest RNA region — one with real opportunity, so the mass is not dropped by
     # ``_mass_where_there_is_opportunity``
-    i = int(np.argmax(np.asarray(truth["mass_rna_node"])))
+    i = int(np.argmax(np.asarray(truth["mass_rna_region"])))
     seeded[i] = 1.0
     with_one = PV.PRIORS.assemble_priors(
-        dataclasses.replace(cal, **{**truth, "mass_gdna_node": seeded}),
+        dataclasses.replace(cal, **{**truth, "mass_gdna_region": seeded}),
         measured_zero.region_arrays,
         measured_zero.multi_loci,
     )
@@ -867,8 +867,8 @@ def test_assemble_priors_is_BLIND_to_unit_indices_so_Fo_is_not_circular(measured
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 
 
-def _in_locus_nodes(measured) -> np.ndarray:
-    """``bool[N]`` — nodes the locus projection keeps. An intergenic node carries no exon/intron bit
+def _in_locus_regions(measured) -> np.ndarray:
+    """``bool[N]`` — regions the locus projection keeps. An intergenic region carries no exon/intron bit
     and is DROPPED, so a perturbation there is inert by design (see the noop gate)."""
     from rigel.calibration.priors import _RNA_SIGNATURE_BITS
 
@@ -880,13 +880,13 @@ def _biggest_in_locus_site(measured, field):
     """The largest element of ``field`` that the locus projection actually reaches.
 
     ⛔ Edge-indexed arrays are selected through the SHIPPED ``_edge_locus_shares`` rather than a local
-    rule: a locus's edges are the edges that TOUCH its nodes, which is exactly the decision that
+    rule: a locus's edges are the edges that TOUCH its regions, which is exactly the decision that
     function exists to make. Restating it here would drift from the code under test.
     """
     from rigel.calibration.priors import _edge_locus_shares
 
     arr = np.asarray(getattr(measured.calibration, field), np.float64)
-    keep = _in_locus_nodes(measured)
+    keep = _in_locus_regions(measured)
     if "edge" in field:
         e_idx, _lid, _w = _edge_locus_shares(
             measured.region_arrays, measured.multi_loci, len(measured.multi_loci)

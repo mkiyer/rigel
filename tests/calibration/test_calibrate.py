@@ -7,7 +7,7 @@ data and is covered by the scenario suite.
 ⭐ **Every expected number here is arithmetic on ``_synthetic.make_synthetic_payload``'s banks**, not a
 recorded output — so a change in the solver moves the composition but never the totals, and a change in
 the AXES fails immediately. The fixture's three axes are deliberately three different lengths
-(3 nodes / 2 edges / 1 junction).
+(3 regions / 2 edges / 1 junction).
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from rigel.calibration import calibrate
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 
-# node_contained_count summed over the two genome-strand columns: [10+2, 1+20, 7+8]
-NODE_TOTAL = np.array([12.0, 21.0, 15.0])
+# region_contained_count summed over the two genome-strand columns: [10+2, 1+20, 7+8]
+REGION_TOTAL = np.array([12.0, 21.0, 15.0])
 # edge_unspliced + edge_spliced: [4+1, 2+3] + [0+0, 6+0]
 EDGE_TOTAL = np.array([5.0, 11.0])
 EDGE_SPLICED = np.array([0.0, 6.0])
@@ -52,14 +52,14 @@ def _run(config=None, junctions=_UNSET):
 def test_returns_valid_result_on_all_three_axes():
     result = _run()
     assert isinstance(result, CalibrationResult)
-    assert (result.n_nodes, result.n_edges, result.n_junctions) == (3, 2, 1)
+    assert (result.n_regions, result.n_edges, result.n_junctions) == (3, 2, 1)
 
 
-def test_mass_conserved_per_node():
-    """A node's gDNA + RNA equals its contained count. There is no spliced term to add: the
-    accumulator credits ``node_contained`` only when the fragment used no junction."""
+def test_mass_conserved_per_region():
+    """A region's gDNA + RNA equals its contained count. There is no spliced term to add: the
+    accumulator credits ``region_contained`` only when the fragment used no junction."""
     result = _run()
-    np.testing.assert_allclose(result.mass_gdna_node + result.mass_rna_node, NODE_TOTAL)
+    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
 
 
 def test_mass_conserved_per_edge_INCLUDING_the_spliced_crossings():
@@ -112,45 +112,45 @@ def test_the_conserved_junction_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK(
 def test_masses_bounded_by_their_own_totals():
     result = _run()
     for g, tot in (
-        (result.mass_gdna_node, NODE_TOTAL),
+        (result.mass_gdna_region, REGION_TOTAL),
         (result.mass_gdna_edge, EDGE_TOTAL),
     ):
         assert np.all(g >= -1e-9)
         assert np.all(g <= tot + 1e-9)
 
 
-def test_an_intergenic_node_is_ALL_gDNA():
-    """Node 2 carries no exon or intron bit, so no RNA can be contained in it — a structural lock,
-    not an inference. ⚠ ``mass_rna_node[2] == 0`` exactly; a floored or smoothed answer here would be
+def test_an_intergenic_region_is_ALL_gDNA():
+    """Region 2 carries no exon or intron bit, so no RNA can be contained in it — a structural lock,
+    not an inference. ⚠ ``mass_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
     manufacturing RNA where the annotation says none exists."""
     result = _run()
-    assert result.mass_rna_node[2] == 0.0
-    assert result.mass_gdna_node[2] == NODE_TOTAL[2]
+    assert result.mass_rna_region[2] == 0.0
+    assert result.mass_gdna_region[2] == REGION_TOTAL[2]
 
 
 # --- the two geometric supports ---------------------------------------------------------------
 
 
 def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
-    """⭐ Arithmetic, not a recorded number. Every node is 100 bp and the gDNA pmf is a delta at 50:
+    """⭐ Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50:
 
         contained  E_f[(100 − 50 + 1)+]                    = 51   — starts that FIT inside
         crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   — offsets that SPAN the line
 
-    The two differ by 2 and neither is the node length, which is the whole point: ``region_size_bp``
+    The two differ by 2 and neither is the region length, which is the whole point: ``region_size_bp``
     ignores the fit-inside constraint and ``mean_FL`` ignores the ``−1``.
     """
     result = _run()
-    np.testing.assert_allclose(result.gdna_node_eff_len, [51.0, 51.0, 51.0])
+    np.testing.assert_allclose(result.gdna_region_eff_len, [51.0, 51.0, 51.0])
     np.testing.assert_allclose(result.gdna_edge_eff_len, [49.0, 49.0])
 
 
 def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
-    """Σ gDNA mass / Σ gDNA support, pooled across nodes AND lines — never a mean of per-object
+    """Σ gDNA mass / Σ gDNA support, pooled across regions AND lines — never a mean of per-object
     ratios, which is a different number whenever the supports differ."""
     result = _run()
-    expected = (result.mass_gdna_node.sum() + result.mass_gdna_edge.sum()) / (
-        result.gdna_node_eff_len.sum() + result.gdna_edge_eff_len.sum()
+    expected = (result.mass_gdna_region.sum() + result.mass_gdna_edge.sum()) / (
+        result.gdna_region_eff_len.sum() + result.gdna_edge_eff_len.sum()
     )
     assert result.gdna_density_global == pytest.approx(expected)
 
@@ -178,7 +178,7 @@ def test_kappa_matches_strand_balance():
 def test_density_and_supports_sane():
     result = _run()
     assert np.isfinite(result.gdna_density_global) and result.gdna_density_global >= 0.0
-    for arr in (result.gdna_node_eff_len, result.gdna_edge_eff_len):
+    for arr in (result.gdna_region_eff_len, result.gdna_edge_eff_len):
         assert np.all(np.isfinite(arr)) and np.all(arr >= 0.0)
     assert 0.0 <= result.rna_sense_frac <= 1.0
 
@@ -200,8 +200,8 @@ def test_the_junction_axis_length_is_what_is_checked_not_its_content():
     from rigel.types import Strand
 
     two = JunctionGeometry(
-        src_node=np.array([0, 0], dtype=np.int64),
-        dst_node=np.array([2, 2], dtype=np.int64),
+        src_region=np.array([0, 0], dtype=np.int64),
+        dst_region=np.array([2, 2], dtype=np.int64),
         strand=np.full(2, int(Strand.POS), dtype=np.int8),
         reach_lo=np.full(2, 100.0),
         reach_hi=np.full(2, 100.0),
@@ -218,15 +218,15 @@ def test_intron_factory_flag_runs_and_conserves_mass():
 
     result = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
     assert isinstance(result, CalibrationResult)
-    np.testing.assert_allclose(result.mass_gdna_node + result.mass_rna_node, NODE_TOTAL)
+    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
 
 
 def test_intron_factory_noop_without_introns():
-    # Correct scoping: with no INTRON nodes (the synthetic is +exon/−exon/intergenic) the factory is a
+    # Correct scoping: with no INTRON regions (the synthetic is +exon/−exon/intergenic) the factory is a
     # graceful no-op — byte-identical to the flag-off calibration.
     import dataclasses
 
     off = _run(CalibrationConfig())
     on = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
-    np.testing.assert_array_equal(off.mass_gdna_node, on.mass_gdna_node)
-    np.testing.assert_array_equal(off.mass_rna_node, on.mass_rna_node)
+    np.testing.assert_array_equal(off.mass_gdna_region, on.mass_gdna_region)
+    np.testing.assert_array_equal(off.mass_rna_region, on.mass_rna_region)

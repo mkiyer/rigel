@@ -256,18 +256,18 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "gdna_density",
         "gdna_frac",
     ]
-    assert len(track) == pr.calibration.n_nodes
+    assert len(track) == pr.calibration.n_regions
     assert (track["gdna_frac"] >= 0).all() and (track["gdna_frac"] <= 1).all()
     bg = (out / "calibration_track.bedgraph").read_text().splitlines()
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
 
     # Mass-weighted capture-enrichment summary — present when the track has
-    # enough informative nodes (capture_summary returns non-None).
+    # enough informative regions (capture_summary returns non-None).
     if "capture" in summary["calibration"]:
         cap = summary["calibration"]["capture"]
         assert {
-            "n_nodes",
+            "n_regions",
             "enriched",
             "count_median_log_rho",
             "background_mode_log_rho",

@@ -16,7 +16,7 @@ buffering) is common to both runs and cancels.
 ⚠ TWO COSTS WITH DIFFERENT SCALING, AND THEY MUST NOT BE AVERAGED TOGETHER. Wiring the accumulator adds
 work that is **O(fragments)** — the deposit itself — and work that is **O(partition)**: allocating and
 zeroing a per-worker accumulator, merging the workers, and copying the per-reference structs into the
-flat payload. On a shallow BAM against the 1.04 M-node human partition the second term dominates, so a
+flat payload. On a shallow BAM against the 1.04 M-region human partition the second term dominates, so a
 single-BAM ``delta / n_fragments`` is not a per-fragment cost.
 
 So pass **two or more BAMs of different depth against the same index** and the harness regresses::
@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 
 from rigel import pipeline
-from rigel.calibration.splice_graph import build_node_partition_arrays
+from rigel.calibration.splice_graph import build_region_partition_arrays
 from rigel.config import BamScanConfig
 from rigel.index import TranscriptIndex
 
@@ -86,10 +86,10 @@ def main() -> None:
 
     index = TranscriptIndex.load(args.index)
     scan = BamScanConfig(total_threads=args.threads)
-    cuts, _offsets, _types = build_node_partition_arrays(index)
+    cuts, _offsets, _types = build_region_partition_arrays(index)
 
     print(f"index      {args.index}")
-    print(f"partition  {len(index.nodes_df):,} nodes, {cuts.size:,} cut positions")
+    print(f"partition  {len(index.regions_df):,} regions, {cuts.size:,} cut positions")
     print(f"threads    {args.threads}   repeats {args.repeats} (minimum used)\n")
     print(f"{'BAM':<26} {'fragments':>12} {'scan':>9} {'accumulator':>12} {'delta/frag':>12}")
     print("-" * 76)

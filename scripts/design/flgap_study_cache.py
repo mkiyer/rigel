@@ -124,7 +124,7 @@ def _key(panel: str, cond: str) -> dict:
 
 def _start_counts(oracle, origins) -> dict:
     """``{"gdna", "rna"}`` per-region first-base counts — the RAW input to ``F``'s projection."""
-    starts = {k: np.asarray(oracle.parts[k].node_start_count, np.float64) for k in origins}
+    starts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64) for k in origins}
     return {"gdna": starts["gdna"], "rna": starts["mrna"] + starts["nrna"]}
 
 
@@ -211,7 +211,7 @@ def build(panel: str, cond: str) -> dict:
             )
             parts_d = {
                 k: sp_drain(
-                    parts[k], ch, node_types=lift["node_types"], junctions=lift["junctions"]
+                    parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"]
                 )
                 for k, ch in zip(ORIGINS, lifted)
             }

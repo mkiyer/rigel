@@ -1,6 +1,6 @@
 """CalibrationResult.__post_init__ intrinsic invariants — the THREE-AXIS schema (S5.f).
 
-⭐ **Three axes, and they are different lengths on purpose.** ``n_nodes``, ``n_edges`` and
+⭐ **Three axes, and they are different lengths on purpose.** ``n_regions``, ``n_edges`` and
 ``n_junctions`` are independent (``E = N − n_refs``, ``J`` unrelated to either), so every fixture here
 uses three DIFFERENT lengths. A fixture that used one length for all three could not tell an
 axis mix-up from a correct result, which is exactly how the predecessor's per-region ``left``/``right``
@@ -17,15 +17,15 @@ import pytest
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 
-N_NODES, N_EDGES, N_JUNCTIONS = 4, 3, 2
+N_REGIONS, N_EDGES, N_JUNCTIONS = 4, 3, 2
 
 
 def _valid_kwargs() -> dict:
-    node = np.ones(N_NODES, dtype=np.float64)
+    region = np.ones(N_REGIONS, dtype=np.float64)
     edge = np.ones(N_EDGES, dtype=np.float64)
     return dict(
-        mass_gdna_node=np.zeros(N_NODES),
-        mass_rna_node=node.copy(),
+        mass_gdna_region=np.zeros(N_REGIONS),
+        mass_rna_region=region.copy(),
         mass_gdna_edge=np.zeros(N_EDGES),
         mass_rna_edge=edge.copy(),
         mass_rna_spliced_edge=np.zeros(N_EDGES),
@@ -41,16 +41,16 @@ def _valid_kwargs() -> dict:
         mass_rna_junction=np.array([4.0, 6.0]),
         edge_spliced_mass_per_crossing=edge.copy(),
         junction_mass_per_crossing=np.array([0.5, 0.25]),
-        gdna_node_eff_len=node.copy(),
+        gdna_region_eff_len=region.copy(),
         gdna_edge_eff_len=edge.copy(),
-        rna_node_eff_len=node.copy(),
+        rna_region_eff_len=region.copy(),
         rna_edge_eff_len=edge.copy(),
         # ⭐ The three-way composition ψ solves, per object. ⛔ NOT renormalised — see the field
         # docstring: it fails to close on ~25 % of both axes on real data, so a fixture that pretends
         # otherwise would be asserting something the shipped solver does not produce.
-        gdna_frac_node=np.zeros(N_NODES),
-        rna_pos_frac_node=node.copy(),
-        rna_neg_frac_node=np.zeros(N_NODES),
+        gdna_frac_region=np.zeros(N_REGIONS),
+        rna_pos_frac_region=region.copy(),
+        rna_neg_frac_region=np.zeros(N_REGIONS),
         gdna_frac_edge=np.zeros(N_EDGES),
         rna_pos_frac_edge=edge.copy(),
         rna_neg_frac_edge=np.zeros(N_EDGES),
@@ -58,7 +58,7 @@ def _valid_kwargs() -> dict:
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
-        n_nodes=N_NODES,
+        n_regions=N_REGIONS,
         n_edges=N_EDGES,
         n_junctions=N_JUNCTIONS,
         config=CalibrationConfig(),
@@ -73,7 +73,7 @@ def test_zero_gdna_library_constructs():
     # Graceful zero-gDNA: gdna_density_global = 0 and all gDNA mass = 0 must be valid, not a failure.
     kw = _valid_kwargs()
     kw["gdna_density_global"] = 0.0
-    kw["mass_gdna_node"] = np.zeros(N_NODES)
+    kw["mass_gdna_region"] = np.zeros(N_REGIONS)
     kw["mass_gdna_edge"] = np.zeros(N_EDGES)
     CalibrationResult(**kw)
 
@@ -96,10 +96,10 @@ def test_a_library_with_no_junctions_constructs():
 @pytest.mark.parametrize(
     "field,n_expected",
     [
-        ("mass_gdna_node", N_NODES),
-        ("mass_rna_node", N_NODES),
-        ("gdna_node_eff_len", N_NODES),
-        ("rna_node_eff_len", N_NODES),
+        ("mass_gdna_region", N_REGIONS),
+        ("mass_rna_region", N_REGIONS),
+        ("gdna_region_eff_len", N_REGIONS),
+        ("rna_region_eff_len", N_REGIONS),
         ("mass_gdna_edge", N_EDGES),
         ("mass_rna_edge", N_EDGES),
         ("mass_rna_spliced_edge", N_EDGES),
@@ -112,7 +112,7 @@ def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
     """⛔ The one defect this gate exists for: an array keyed to the WRONG axis. With E = N − n_refs
     the two lengths differ by only a handful genome-wide, so a mis-keyed array is a plausible shape
     and a shape check is the only thing that catches it before the numbers go silently wrong."""
-    for wrong in (N_NODES, N_EDGES, N_JUNCTIONS):
+    for wrong in (N_REGIONS, N_EDGES, N_JUNCTIONS):
         if wrong == n_expected:
             continue
         kw = _valid_kwargs()
@@ -123,7 +123,7 @@ def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
 
 def test_the_error_names_the_axis_it_expected():
     kw = _valid_kwargs()
-    kw["mass_gdna_edge"] = np.ones(N_NODES)
+    kw["mass_gdna_edge"] = np.ones(N_REGIONS)
     with pytest.raises(ValueError, match="mass_gdna_edge"):
         CalibrationResult(**kw)
 
@@ -136,11 +136,11 @@ def test_the_error_names_the_axis_it_expected():
 @pytest.mark.parametrize(
     "field",
     [
-        "mass_gdna_node",
-        "gdna_node_eff_len",
+        "mass_gdna_region",
+        "gdna_region_eff_len",
         "mass_gdna_edge",
         "gdna_edge_eff_len",
-        "rna_node_eff_len",
+        "rna_region_eff_len",
         "rna_edge_eff_len",
     ],
 )
@@ -155,7 +155,7 @@ def test_rejects_negative(field):
 
 def test_rejects_non_finite_array():
     kw = _valid_kwargs()
-    kw["gdna_node_eff_len"] = np.array([np.inf, 1.0, 1.0, 1.0])
+    kw["gdna_region_eff_len"] = np.array([np.inf, 1.0, 1.0, 1.0])
     with pytest.raises(ValueError, match="non-finite"):
         CalibrationResult(**kw)
 
@@ -174,14 +174,14 @@ def test_still_rejects_a_narrower_float():
     """Integers are exact; float32 is not. Admitting it would silently mix precisions through
     arithmetic that is float64 everywhere else, which is what the dtype gate is actually for."""
     kw = _valid_kwargs()
-    kw["mass_rna_node"] = np.ones(N_NODES, dtype=np.float32)
+    kw["mass_rna_region"] = np.ones(N_REGIONS, dtype=np.float32)
     with pytest.raises(ValueError, match="float64 or an integer count"):
         CalibrationResult(**kw)
 
 
 def test_still_rejects_a_negative_integer_count():
     kw = _valid_kwargs()
-    kw["mass_rna_node"] = np.array([1, -1, 1, 1], dtype=np.int64)
+    kw["mass_rna_region"] = np.array([1, -1, 1, 1], dtype=np.int64)
     with pytest.raises(ValueError, match="non-negative"):
         CalibrationResult(**kw)
 
@@ -204,7 +204,7 @@ def test_rejects_bad_scalars(field, value):
         CalibrationResult(**kw)
 
 
-@pytest.mark.parametrize("field", ["n_nodes", "n_edges", "n_junctions"])
+@pytest.mark.parametrize("field", ["n_regions", "n_edges", "n_junctions"])
 def test_rejects_negative_axis_length(field):
     kw = _valid_kwargs()
     kw[field] = -1
@@ -226,10 +226,13 @@ def test_the_per_face_fields_are_gone():
     Anything still naming the old fields is reading a convention that no longer exists
 
     """
+    # ⛔⛔ TWO NAMES LEFT THIS LIST ON 2026-08-13, and the reason matters: `gdna_region_eff_len` and
+    # `n_regions` were banned as the PREDECESSOR's names, and the vocabulary ruling RE-ADOPTS exactly
+    # those words — they are live fields now. The words were never the defect; the per-FACE convention
+    # was, and everything still listed below names that convention rather than a vocabulary.
     fields = set(CalibrationResult.__dataclass_fields__)
     assert not fields & {
         "gdna_boundary_len",
-        "gdna_region_eff_len",
         "mass_gdna_left",
         "mass_gdna_right",
         "mass_rna_left",
@@ -237,16 +240,15 @@ def test_the_per_face_fields_are_gone():
         "mass_gdna_contained",
         "mass_rna_contained",
         "mass_rna_spliced",
-        "n_regions",
     }
 
 
-def test_mass_rna_spliced_has_no_node_twin():
-    """⚠ Structural, not an omission: the accumulator credits ``node_contained`` only when the fragment
-    used NO junction, so a node's contained population cannot hold a spliced molecule. A
-    ``mass_rna_spliced_node`` field would be a channel that cannot exist."""
+def test_mass_rna_spliced_has_no_region_twin():
+    """⚠ Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
+    used NO junction, so a region's contained population cannot hold a spliced molecule. A
+    ``mass_rna_spliced_region`` field would be a channel that cannot exist."""
     assert "mass_rna_spliced_edge" in CalibrationResult.__dataclass_fields__
-    assert "mass_rna_spliced_node" not in CalibrationResult.__dataclass_fields__
+    assert "mass_rna_spliced_region" not in CalibrationResult.__dataclass_fields__
 
 
 # ── the three-way composition ─────────────────────────────────────────────────────────────────────
@@ -255,9 +257,9 @@ def test_mass_rna_spliced_has_no_node_twin():
 @pytest.mark.parametrize(
     "name",
     [
-        "gdna_frac_node",
-        "rna_pos_frac_node",
-        "rna_neg_frac_node",
+        "gdna_frac_region",
+        "rna_pos_frac_region",
+        "rna_neg_frac_region",
         "gdna_frac_edge",
         "rna_pos_frac_edge",
         "rna_neg_frac_edge",
@@ -286,11 +288,11 @@ def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
     publication — which would make a 15 %-short object indistinguishable from a solved one.
     """
     kw = _valid_kwargs()
-    kw["gdna_frac_node"] = np.full(N_NODES, 0.25)
-    kw["rna_pos_frac_node"] = np.full(N_NODES, 0.25)
-    kw["rna_neg_frac_node"] = np.full(N_NODES, 0.25)  # sums to 0.75, not 1
+    kw["gdna_frac_region"] = np.full(N_REGIONS, 0.25)
+    kw["rna_pos_frac_region"] = np.full(N_REGIONS, 0.25)
+    kw["rna_neg_frac_region"] = np.full(N_REGIONS, 0.25)  # sums to 0.75, not 1
     res = CalibrationResult(**kw)
-    total = res.gdna_frac_node + res.rna_pos_frac_node + res.rna_neg_frac_node
+    total = res.gdna_frac_region + res.rna_pos_frac_region + res.rna_neg_frac_region
     assert np.allclose(total, 0.75), "the composition was silently renormalised at publication"
 
 

@@ -27,8 +27,8 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 
-from ..node_geometry import g1_locked, node_total_density, terminus_flank_gain
-from ..node_init import own_composition_logvar
+from ..region_geometry import g1_locked, region_total_density, terminus_flank_gain
+from ..region_init import own_composition_logvar
 from . import NeighbourState, PsiMessage, StepContext
 from .variance import (
     _fmax,
@@ -134,17 +134,17 @@ class _HeadRelay:
 
         # ── the arrays this policy works in, named as the shipped solver named them ───────────────────
         is_bnd_a = np.asarray(ctx.is_edge, bool)
-        ex_a = np.asarray(ctx.is_exon_node, bool)
+        ex_a = np.asarray(ctx.is_exon_region, bool)
         fp_a, fn_a = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
         M = np.asarray(ctx.mass, np.float64)
         E_g = np.asarray(ctx.eff_gdna_global, np.float64)
         E_r = np.asarray(ctx.eff_rna, np.float64)
         SPL = np.asarray(ctx.junction_count, np.float64)
         ESP = np.asarray(ctx.eff_junction, np.float64)
-        _n_node = np.asarray(ctx.n_slot, np.float64)
+        _n_region = np.asarray(ctx.n_slot, np.float64)
         ni = ctx.own
         self._is_bnd_a, self._ex_a, self._fp_a, self._fn_a = is_bnd_a, ex_a, fp_a, fn_a
-        self._M, self._E_g, self._E_r, self._SPL, self._n_node = M, E_g, E_r, SPL, _n_node
+        self._M, self._E_g, self._E_r, self._SPL, self._n_region = M, E_g, E_r, SPL, _n_region
         self._is_amb = fp_a & fn_a  # AMBIG: both strands live ⇒ the tilt is a free DOF
 
         # ── the-reframe-scale-variance sigma^2_transfer = Var(log r): the per-slot total-density log-variance ──────────────────
@@ -163,7 +163,7 @@ class _HeadRelay:
             0.0,
             np.where(_tau > _EPS, np.minimum(_fgfr * _fgfr / np.maximum(_tau, _EPS), _fgfr), _fgfr),
         )
-        logvar_tot = np.asarray(composition_logvar(_fg0, E_g, E_r, _var_fg, _n_node), np.float64)
+        logvar_tot = np.asarray(composition_logvar(_fg0, E_g, E_r, _var_fg, _n_region), np.float64)
         if not sw.transfer_var:
             logvar_tot = np.zeros_like(logvar_tot)
         self._logvar_tot = logvar_tot
@@ -174,7 +174,7 @@ class _HeadRelay:
             live = (c > _EPS) & (e > _EPS)
             return np.where(live, c / np.where(live, e, 1.0), 0.0)
 
-        spl_p = _mature_rho(0)  # + transcript junction density at this line (0 on NODE slots)
+        spl_p = _mature_rho(0)  # + transcript junction density at this line (0 on REGION slots)
         spl_n = _mature_rho(1)
         self._spl_p, self._spl_n = spl_p, spl_n
 
@@ -249,7 +249,7 @@ class _HeadRelay:
         # ⚠ TRAPS: a-message-from-the-destinations-belief DEBT, NAMED: this reads the belief at BOTH ends, so the frame at a hop is a function of the
         # destination's belief. The ledger prices it — a *solved* belief sets the frame at slots carrying
         # 57-77 % of library mass.
-        rho_lo, rho_hi = node_total_density(ctx.geometry, np.asarray(ctx.belief_fg, np.float64))
+        rho_lo, rho_hi = region_total_density(ctx.geometry, np.asarray(ctx.belief_fg, np.float64))
         if not sw.flank_pair:
             _one = np.maximum(rho_lo, rho_hi)
             rho_lo, rho_hi = _one, _one
@@ -281,7 +281,7 @@ class _HeadRelay:
             self._M_l,
             self._E_g_l,
             self._E_r_l,
-            self._n_node_l,
+            self._n_region_l,
             self._logvar_l,
         ) = (
             np.asarray(a, np.float64).tolist()
@@ -299,7 +299,7 @@ class _HeadRelay:
                 M,
                 E_g,
                 E_r,
-                _n_node,
+                _n_region,
                 logvar_tot,
             )
         )
@@ -307,8 +307,8 @@ class _HeadRelay:
             a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a)
         )
         # the destination's own composition CERTAINTY — case (ii) of the mass pin's licence. Both axes: an
-        # ``intergenic|exon`` EDGE is as structurally pure-gDNA as an intergenic NODE, and it is gated on
-        # ``g1_locked`` rather than on ``node_init``'s node-only ``struct_lock`` because the object in
+        # ``intergenic|exon`` EDGE is as structurally pure-gDNA as an intergenic REGION, and it is gated on
+        # ``g1_locked`` rather than on ``region_init``'s region-only ``struct_lock`` because the object in
         # question is an EDGE.
         self._g1_l = g1_locked(fp_a, fn_a).tolist()
         self._spl_p_l, self._spl_n_l = spl_p.tolist(), spl_n.tolist()
@@ -438,9 +438,9 @@ class _HeadRelay:
 
         ⚠ TWIN of :meth:`_peel_share_scalar` — mirror any change into both."""
         cap = self.ctx.capture
-        M, _n_node, E_g, E_r = self._M, self._n_node, self._E_g, self._E_r
+        M, _n_region, E_g, E_r = self._M, self._n_region, self._E_g, self._E_r
         _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
-        _nu_m, _vlog_m, _vl_m = residual_level(M, _n_node, tg, E_g, E_r, _vg)
+        _nu_m, _vlog_m, _vl_m = residual_level(M, _n_region, tg, E_g, E_r, _vg)
         _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
         _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
         out = []
@@ -509,7 +509,7 @@ class _HeadRelay:
         discarded. Measured 25x on this path, which is the bulk of a genome-scale calibration."""
         _vg = 1.0 / _fmax(tpg, _EPS) if tpg > 0.0 else math.inf
         _nu_m, _vlog_m, _vl_m = residual_level_scalar(
-            self._M_l[i], self._n_node_l[i], tg, self._E_g_l[i], self._E_r_l[i], _vg
+            self._M_l[i], self._n_region_l[i], tg, self._E_g_l[i], self._E_r_l[i], _vg
         )
         _fin = math.isfinite(_vl_m)
         _A = tp + tn
@@ -715,7 +715,7 @@ class _HeadRelay:
         is_bnd_a, ex_a, fp_a, fn_a = self._is_bnd_a, self._ex_a, self._fp_a, self._fn_a
         M, E_g, E_r, SPL = self._M, self._E_g, self._E_r, self._SPL
         og, op, on = self._og, self._op, self._on
-        _n_node, logvar_tot = self._n_node, self._logvar_tot
+        _n_region, logvar_tot = self._n_region, self._logvar_tot
         spl_p, spl_n = self._spl_p, self._spl_n
 
         # A slot with no frame (no mass ⇒ no rho_tot) cannot reframe: the message passes through at r = 1.
@@ -809,7 +809,7 @@ class _HeadRelay:
                     "tpp": tpp.copy(),
                     "tpn": tpn.copy(),
                     "s2t": np.where(np.isfinite(s2t), s2t, 0.0),
-                    "n_src": np.asarray(_n_node)[src].copy(),
+                    "n_src": np.asarray(_n_region)[src].copy(),
                     "spl_p": _sp.copy(),
                     "spl_n": _sn.copy(),
                     "spl_prec": (_spc + _snc).copy(),
@@ -831,13 +831,13 @@ class _HeadRelay:
         _okc = valid & (_S > _EPS) & (M > _EPS)
         _al = _mc / np.maximum(_S, _EPS)[..., None]
         _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
-        _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS))[
+        _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_region[src], _EPS))[
             ..., None
         ]
         _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
         _aSa = np.sum(_al * _sv, axis=-1)
         _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
-        _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
+        _den = _aSa + 1.0 / np.maximum(_n_region, _EPS)
         _b2 = np.maximum(_dlt * _dlt - _den, 0.0)
         # ── ⭐ THE SCOPE: only the OVER-claim direction is evidence against the MESSAGE ────────────────
         # ``S`` is a COMPLETE budget: the partial-claim semantics fill every component the message does not

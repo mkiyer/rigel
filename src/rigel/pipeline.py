@@ -270,17 +270,17 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Calibration region wiring: install the per-genome v8 node partition into the scanner so
-    # per-node evidence is collected during the scan.
+    # Calibration region wiring: install the per-genome v8 region partition into the scanner so
+    # per-region evidence is collected during the scan.
     #
     # ⚠ This used to be `getattr(index, "region_df", None)` — a SILENT skip. An index that could not
     # supply a partition disabled calibration with no error anywhere, and the whole pipeline then ran
     # as though the library had no gDNA. The two cases are now separated: a MISSING graph is a broken
     # index and raises; an EMPTY one (every reference of length 0) is a degenerate genome with
     # genuinely nothing to deposit, and is skipped exactly as before.
-    # A genome whose references are all zero-length has no nodes and nothing to deposit; the loader
+    # A genome whose references are all zero-length has no regions and nothing to deposit; the loader
     # guarantees the graph itself is present.
-    if len(index.nodes_df) > 0:
+    if len(index.regions_df) > 0:
         _wire_calibration_regions(
             scanner,
             index,
@@ -348,9 +348,9 @@ def scan_and_buffer(
     from .scan_payload import AccumulatorPayload
 
     if result.get("calibration") is not None:
-        # ⚠ The provenance covers nodes AND edges. The payload is edge-keyed by construction — its
+        # ⚠ The provenance covers regions AND edges. The payload is edge-keyed by construction — its
         # junction axis is meaningless against a different junction CSR — and `partition_hash` covers
-        # `nodes.feather` only, deliberately.
+        # `regions.feather` only, deliberately.
         calibration_payload = AccumulatorPayload.from_scan_result(
             result, graph_hash=index.graph_hash
         )
@@ -387,14 +387,14 @@ def _drain_side_buffer(
     the whole's already-drawn choices inside each partition — which needs the choices, the undrained
     whole they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside
     this function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and
-    drift (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` / ``node_sweep(_capture=)``, and
+    drift (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` / ``region_sweep(_capture=)``, and
     inert in production, where nobody passes it. ⚠ An empty side buffer leaves ``_lift`` UNTOUCHED — the
     early return below is the "nothing was drained" signal on this path too.
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
     from .calibration.junction_opportunity import crossing_probability_from_index
-    from .calibration.splice_graph import build_junction_edge_arrays, build_node_partition_arrays
+    from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
     held = payload.deferred.n_fragments
@@ -405,7 +405,7 @@ def _drain_side_buffer(
         return payload
 
     start = time.perf_counter()
-    _cuts, _offsets, node_types = build_node_partition_arrays(index)
+    _cuts, _offsets, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     scores = score_held_fragments(
         payload,
@@ -421,15 +421,15 @@ def _drain_side_buffer(
         # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
         # this is ≈ 0.01, so DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
-        node_types=node_types,
+        region_types=region_types,
         junctions=junctions,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
-    drained = drain(payload, choices, node_types=node_types, junctions=junctions)
+    drained = drain(payload, choices, region_types=region_types, junctions=junctions)
     if _lift is not None:
         # ⛔ ``undrained`` is the payload as it entered here, NOT ``drained``: the drained bank is empty by
         # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
-        _lift.update(undrained=payload, choices=choices, node_types=node_types, junctions=junctions)
+        _lift.update(undrained=payload, choices=choices, region_types=region_types, junctions=junctions)
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
@@ -450,12 +450,12 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     max_frag_length: int,
 ) -> None:
-    """Install the index's v8 splice graph into a native BamScanner: the node partition, then the junctions.
+    """Install the index's v8 splice graph into a native BamScanner: the region partition, then the junctions.
 
-    :func:`~rigel.calibration.splice_graph.build_node_partition_arrays` flattens the per-reference
-    partition into the ``(cut_positions, ref_cut_offsets, n_refs, node_types, max_length)`` ABI, and
+    :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` flattens the per-reference
+    partition into the ``(cut_positions, ref_cut_offsets, n_refs, region_types, max_length)`` ABI, and
     :func:`~rigel.calibration.splice_graph.build_junction_edge_arrays` builds the junction CSR keyed by the
-    flat cut index. Both are derived from ``index.nodes_df``/``index.edges_df`` and ordered to match
+    flat cut index. Both are derived from ``index.regions_df``/``index.edges_df`` and ordered to match
     ``index.ref_names``, which is the resolver's reference-id space.
 
     ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the junctions
@@ -463,15 +463,15 @@ def _wire_calibration_regions(
     is invisible — every observed intron would simply read as unannotated, so all 404,168 junction edges and
     both spliced banks would come back empty from a scan that looked perfectly well-formed.
     """
-    from .calibration.splice_graph import build_junction_edge_arrays, build_node_partition_arrays
+    from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
 
-    cut_positions, ref_cut_offsets, node_types = build_node_partition_arrays(index)
+    cut_positions, ref_cut_offsets, region_types = build_region_partition_arrays(index)
     n_refs = len(index.ref_names)
     scanner.set_regions(
         np.ascontiguousarray(cut_positions, dtype=np.int64),
         np.ascontiguousarray(ref_cut_offsets, dtype=np.int64),
         n_refs,
-        np.ascontiguousarray(node_types, dtype=np.uint8),
+        np.ascontiguousarray(region_types, dtype=np.uint8),
         int(max_frag_length),
     )
     # ⚠ ``edge_row`` is deliberately NOT passed. It is a join key back to ``index.edges_df``, not the
@@ -911,8 +911,8 @@ def run_pipeline(
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator
     # payload, then hand both (plus the trained strand model and the gDNA FL pmf)
-    # to the calibrator. Single feed-forward pass: deconvolve each node into
-    # gDNA/RNA and derive ρ_0 + per-node exposure. See
+    # to the calibrator. Single feed-forward pass: deconvolve each region into
+    # gDNA/RNA and derive ρ_0 + per-region exposure. See
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
@@ -935,13 +935,13 @@ def run_pipeline(
     edge_flags = build_edge_flags_array(index)
     # The junction axis, in the accumulator's own junction slot order: where each junction attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
-    # its two endpoint nodes — never as a message channel, since every junction closes an undirected
+    # its two endpoint regions — never as a message channel, since every junction closes an undirected
     # loop and the graph is not a polytree.
     junctions = build_junction_geometry_arrays(index)
 
     # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
     # from a pool that is PURE BY CONSTRUCTION: gDNA from fragments
-    # contained in an intergenic or intronic node, RNA from fragments that used an annotated junction
+    # contained in an intergenic or intronic region, RNA from fragments that used an annotated junction
     # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
     #
     # ⭐ ALL THREE come from the PAYLOAD — one object, one frame, one definition of length. The
@@ -993,14 +993,14 @@ def run_pipeline(
     calibration_diagnostics = _calib_diag.get("calibration")
 
     # ⭐ FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained in
-    # a node or crosses a line, RNA also jumps, and at a donor seam the junction flux IS the gene's whole
+    # a region or crosses a line, RNA also jumps, and at a donor seam the junction flux IS the gene's whole
     # mature output — but each axis is converted by its own population's mass-per-crossing first. Adding
     # the raw banks counted one fragment once per line it crossed AND once per junction it used, which
     # read `f_gdna` 0.3851 against a truth of 0.5085 on ladder g50 capture_off.
     logger.info(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gDNA_fragments=%.0f RNA_fragments=%.0f (junction incidences %.0f)",
-        calibration.n_nodes,
+        calibration.n_regions,
         calibration.n_edges,
         calibration.n_junctions,
         calibration.gdna_density_global,

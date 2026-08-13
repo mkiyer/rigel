@@ -2,7 +2,7 @@
 
     TODO item 1   ·   Ledger: "Benchmarks and indexes DELETED" (2026-07-30)
 
-⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 nodes · 404,168 junction edges · median 151 bp* were quoted
+⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 junction edges · median 151 bp* were quoted
 across the documentation as though they were constants of the tool. They are properties of **one
 annotation**. A rebuild from a different GTF moves every one of them, and the deletion entry says so
 explicitly. This script re-derives them so a claim can be checked instead of inherited.
@@ -11,7 +11,7 @@ explicitly. This script re-derives them so a claim can be checked instead of inh
 validator that calls the builder's own helper validates nothing):
 
 * the **merged partition** is rebuilt here by run-length-encoding equal signatures, so "how many termini
-  did the old merge hide?" is computed from the node table rather than taken from a stored column;
+  did the old merge hide?" is computed from the region table rather than taken from a stored column;
 * **every annotated intron's endpoints are looked up in the cut array** — the deposit's junction lookup
   depends on that being 100 %, because an intron whose start is not a cut can never be found.
 
@@ -50,15 +50,15 @@ def row(label: str, value: object, note: str = "") -> None:
     print(f"  {label:<52} {rendered:>14}  {note}")
 
 
-def census_nodes(nodes: pd.DataFrame) -> None:
-    length = nodes["length"].to_numpy(np.int64)
+def census_regions(regions: pd.DataFrame) -> None:
+    length = regions["length"].to_numpy(np.int64)
     print("\nNODES")
-    row("nodes", len(nodes))
-    row("references", nodes["ref_name"].nunique())
-    row("median node length (bp)", int(np.median(length)))
-    row("mean node length (bp)", int(round(length.mean())))
-    row("nodes of length 1", int((length == 1).sum()), "nothing may assume length > 1")
-    row("nodes of length < 200 bp", int((length < 200).sum()), "shorter than one RNA fragment")
+    row("regions", len(regions))
+    row("references", regions["ref_name"].nunique())
+    row("median region length (bp)", int(np.median(length)))
+    row("mean region length (bp)", int(round(length.mean())))
+    row("regions of length 1", int((length == 1).sum()), "nothing may assume length > 1")
+    row("regions of length < 200 bp", int((length < 200).sum()), "shorter than one RNA fragment")
 
 
 def census_edges(edges: pd.DataFrame) -> None:
@@ -85,22 +85,22 @@ def census_edges(edges: pd.DataFrame) -> None:
         row(label, int(mask.sum()), f"{100 * mask.sum() / total:6.2f} %")
 
 
-def census_merge_visibility(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
+def census_merge_visibility(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
     """⭐ RE-DERIVED, not read back: rebuild the old merged partition and ask what it could not see.
 
-    The v7 partition merged genomically adjacent nodes carrying the same signature. A cut that
+    The v7 partition merged genomically adjacent regions carrying the same signature. A cut that
     disappears into the interior of a merged region is a position that partition could not represent —
     and a terminus cut is exactly the kind that vanished. This is the whole reason for v8.
     """
-    signature = nodes["signature"].to_numpy(np.uint8)
-    ref = nodes["ref_name"].astype(str).to_numpy()
+    signature = regions["signature"].to_numpy(np.uint8)
+    ref = regions["ref_name"].astype(str).to_numpy()
     # A merged region ends wherever the reference changes or the signature changes.
-    boundary = np.ones(len(nodes), dtype=bool)
+    boundary = np.ones(len(regions), dtype=bool)
     boundary[1:] = (signature[1:] != signature[:-1]) | (ref[1:] != ref[:-1])
     n_merged = int(boundary.sum())
 
-    # Cut `i` is the seam between node i-1 and node i, i.e. contiguous edge with dst == i. It is
-    # INTERIOR to a merged region exactly when node i does not start one.
+    # Cut `i` is the seam between region i-1 and region i, i.e. contiguous edge with dst == i. It is
+    # INTERIOR to a merged region exactly when region i does not start one.
     contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
     dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
     flags = edges.loc[contiguous, "flags"].to_numpy(np.uint16)
@@ -109,14 +109,14 @@ def census_merge_visibility(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
 
     print("\nWHAT THE OLD MERGE COULD NOT SEE  (re-derived by run-length encoding the signatures)")
     row("merged regions (the v7 partition)", n_merged)
-    row("nodes / merged regions", f"{len(nodes) / max(n_merged, 1):.3f} x")
+    row("regions / merged regions", f"{len(regions) / max(n_merged, 1):.3f} x")
     row("contiguous seams interior to a merged region", int(interior.sum()))
     hidden = int((is_terminus & interior).sum())
     total_terminus = max(int(is_terminus.sum()), 1)
     row("TERMINUS seams the merge hid", hidden, f"{100 * hidden / total_terminus:6.2f} % of termini")
 
 
-def census_junction_cuts(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
+def census_junction_cuts(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
     """⭐ RE-DERIVED: the deposit's junction lookup IS a search in the cut array, so this must be 100 %.
 
      rests on it — if an annotated intron's start is not a cut, the CSR
@@ -129,9 +129,9 @@ def census_junction_cuts(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
         print("\nJUNCTION ENDPOINTS: no junction edges")
         return
 
-    start = nodes["start"].to_numpy(np.int64)
-    end = nodes["end"].to_numpy(np.int64)
-    # A junction runs from the END of node `src` to the START of node `dst`; both are cut positions by
+    start = regions["start"].to_numpy(np.int64)
+    end = regions["end"].to_numpy(np.int64)
+    # A junction runs from the END of region `src` to the START of region `dst`; both are cut positions by
     # construction, so this checks the graph is self-consistent and reports the intron-length spread.
     intron_length = start[dst] - end[src]
     print("\nJUNCTION EDGES")
@@ -161,14 +161,14 @@ def main() -> None:
     ap.add_argument("--collapse-duplicate-transcripts", action="store_true")
     args = ap.parse_args()
 
-    nodes = pd.read_feather(args.index_dir / "nodes.feather")
+    regions = pd.read_feather(args.index_dir / "nodes.feather")
     edges = pd.read_feather(args.index_dir / "edges.feather")
     print(f"index  {args.index_dir}")
 
-    census_nodes(nodes)
+    census_regions(regions)
     census_edges(edges)
-    census_merge_visibility(nodes, edges)
-    census_junction_cuts(nodes, edges)
+    census_merge_visibility(regions, edges)
+    census_junction_cuts(regions, edges)
     if args.gtf is None:
         print("\nANNOTATION: skipped (pass --gtf to include it)")
     else:

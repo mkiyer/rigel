@@ -64,7 +64,7 @@ EG_BND, ER_BND = 300.0, 200.0  # a boundary crossing (E_g = fl_mean_gdna, E_r = 
 
 
 def test_composition_logvar_is_pure_counting_at_the_structural_corner():
-    """At ``f_g = 1`` with ``Var(f_g) = 0`` (a structural gDNA node) the composition term vanishes and
+    """At ``f_g = 1`` with ``Var(f_g) = 0`` (a structural gDNA region) the composition term vanishes and
     ``Var(log ρ_tot) = count_logvar(n)`` — the honest counting precision, no composition penalty.
 
     ⭐⭐ **RE-POINTED 2026-08-06.** The claim is unchanged; the counting term is now the EXACT Poisson
@@ -209,7 +209,7 @@ def test_graft_frame_logvar_is_the_squared_log_step_and_direction_free():
 
 
 def test_graft_frame_logvar_guards_a_degenerate_ratio():
-    """A node with no frame (r ≤ 0 — no mass, no ρ_tot) must give 0, not a nan: the relay passes such a
+    """A region with no frame (r ≤ 0 — no mass, no ρ_tot) must give 0, not a nan: the relay passes such a
     message through at r = 1, so there is no mislift to charge."""
     out = graft_frame_logvar(np.array([0.0, -1.0, 2.0]))
     assert np.all(np.isfinite(out))
@@ -224,7 +224,7 @@ def test_graft_frame_logvar_guards_a_degenerate_ratio():
 
 def test_mismatch_gap_is_the_log_ratio_and_flags_only_one_sided_absence():
     """the-mismatch-deflation: G = log(ρ^msg/ρ^own). ``contradicted`` marks exactly one side absent (an assertion of ``f_c = 0``
-    against a node that has the component, or vice versa); BOTH absent is not a contradiction, it is silence."""
+    against a region that has the component, or vice versa); BOTH absent is not a contradiction, it is silence."""
     g, c = mismatch_gap(np.array([2.0, 0.0, 5.0, 0.0]), np.array([0.5, 3.0, 0.0, 0.0]))
     assert g[0] == pytest.approx(np.log(4.0), rel=1e-14)
     assert list(c) == [False, True, True, False]
@@ -244,7 +244,7 @@ def test_mismatch_deflate_is_the_closed_form_and_never_strengthens():
 
 def test_mismatch_deflate_is_inert_without_own_evidence():
     """the-mismatch-deflation's safety property: τ_own = 0 ⇒ v_own = ∞ ⇒ b̂² = 0 ⇒ the message passes BIT-IDENTICALLY. This is the
-    AMBIG / unstranded regime — where cross-node messages are the only information — so the term must not
+    AMBIG / unstranded regime — where cross-region messages are the only information — so the term must not
     touch it, and a CONTRADICTED claim is not damped there either (there is no evidence to contradict it)."""
     p = np.array([25.0, 3.0, 0.0])
     out = mismatch_deflate(
@@ -254,7 +254,7 @@ def test_mismatch_deflate_is_inert_without_own_evidence():
 
 
 def test_mismatch_deflate_kills_a_contradicted_claim_where_there_is_evidence():
-    """A message asserting a component is ABSENT at a node whose own evidence says otherwise is the b̂² → ∞
+    """A message asserting a component is ABSENT at a region whose own evidence says otherwise is the b̂² → ∞
     limit ⇒ precision 0 — expressed as a mask so the numerical zero-test ``_EPS`` never sets the answer."""
     out = mismatch_deflate(
         np.array([50.0, 50.0]), np.zeros(2), np.array([True, False]), np.array([0.1, 0.1])
@@ -262,7 +262,7 @@ def test_mismatch_deflate_kills_a_contradicted_claim_where_there_is_evidence():
     assert out[0] == 0.0 and out[1] == pytest.approx(50.0, rel=1e-12)
 
 
-def test_mismatch_deflate_charges_the_full_gap_when_the_node_is_composition_certain():
+def test_mismatch_deflate_charges_the_full_gap_when_the_region_is_composition_certain():
     """v_own = 0 (a structural pure-gDNA anchor: composition CERTAIN) ⇒ the whole G² is charged, so no message
     can talk it off its composition."""
     out = mismatch_deflate(np.array([100.0]), np.array([1.5]), np.zeros(1, bool), np.array([0.0]))
@@ -350,12 +350,12 @@ def test_peel_share_logvar_vanishes_with_no_spliced():
     assert float(peel_share_logvar(0.0, 0.5, 0.25)) == 0.0
 
 
-# ── the-residual-level: the LEVEL from the node's own mass + an imputed gDNA density ────────────────────────────────────
+# ── the-residual-level: the LEVEL from the region's own mass + an imputed gDNA density ────────────────────────────────────
 
 
 def test_residual_level_pure_rna_limit_is_the_count():
     """the-residual-level limit 1 — a gDNA claim of ZERO accounts for none of the crossing, so the whole mass is RNA and the
-    only uncertainty left is the node's own Poisson count. This is the limit that makes the level a
+    only uncertainty left is the region's own Poisson count. This is the limit that makes the level a
     MEASUREMENT in a low-gDNA library, which is exactly where the old no-evidence default silenced the RNA
     channel outright. It is exact only because the arithmetic is done on the FRACTION: the count cancels out
     of ``φ = ρ_g E_g/M``, so ``σ_f → 0`` with ``φ`` and the upper truncation never bites."""

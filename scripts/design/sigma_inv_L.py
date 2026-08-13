@@ -6,7 +6,7 @@ Ground truth: molecules of length L ~ f(L) are deposited on a template with STAR
   (a) COUNT of molecules COVERING a point p
   (b) SUM 1/L over molecules COVERING p
   (c) SUM 1/L over molecules SPANNING a seam (>=1 base on each side)
-  (d) COUNT of molecules CONTAINED in a node of length ell
+  (d) COUNT of molecules CONTAINED in a region of length ell
 """
 
 import numpy as np
@@ -79,7 +79,7 @@ for i, p in enumerate(probes):
 print(f"    sum 1/(L-1) mean {span_dens_fix.mean():.6f}  ratio {span_dens_fix.mean() / RHO:.5f}")
 
 print()
-print("(d) CONTAINED in a node of length ell -- does 1/L rescue it?")
+print("(d) CONTAINED in a region of length ell -- does 1/L rescue it?")
 for ell in (100, 300, 1000, 5000):
     lo = rng.integers(1000, T - ell - 1000, 3000)
     cnt = np.empty(lo.size)

@@ -2,12 +2,12 @@
 
 An aggregate of the converged deconvolution into the library-average gDNA density scalar:
 
-    gdna_density_global = (Σ_nodes gdna_mass + Σ_edges gdna_mass) / (Σ_nodes E_g + Σ_edges E_g)
+    gdna_density_global = (Σ_regions gdna_mass + Σ_edges gdna_mass) / (Σ_regions E_g + Σ_edges E_g)
 
 ⭐ **Two axes, and every object on them exists.** The predecessor summed a region's contained mass plus
 its two boundary SIDES, and had to mask each side with ``same_ref_left_right`` because a reference
 terminal's outer boundary has nothing on the far side — "a side that doesn't exist contributes no
-length". A contiguous edge is the line BETWEEN two adjacent nodes, so there is no such object to
+length". A contiguous edge is the line BETWEEN two adjacent regions, so there is no such object to
 exclude: ``E = N − n_refs`` and every entry is real. The mask goes with the terminal slots.
 
 ⚠ **It is a ratio of SUMS, never a mean of ratios** (``ρ_bg = Σg/ΣE``) — a rate
@@ -24,9 +24,9 @@ import numpy as np
 
 
 def gdna_density_global(
-    node_deconv,
+    region_deconv,
     edge_deconv,
-    gdna_node_eff_len: np.ndarray,
+    gdna_region_eff_len: np.ndarray,
     gdna_edge_eff_len: np.ndarray,
 ) -> float:
     """Library-average gDNA density (QC scalar) = Σ gDNA mass / Σ gDNA effective length, over both axes.
@@ -35,11 +35,11 @@ def gdna_density_global(
     division would report one.
     """
     total_g = float(
-        np.asarray(node_deconv.gdna_mass, dtype=np.float64).sum()
+        np.asarray(region_deconv.gdna_mass, dtype=np.float64).sum()
         + np.asarray(edge_deconv.gdna_mass, dtype=np.float64).sum()
     )
     total_l = float(
-        np.asarray(gdna_node_eff_len, dtype=np.float64).sum()
+        np.asarray(gdna_region_eff_len, dtype=np.float64).sum()
         + np.asarray(gdna_edge_eff_len, dtype=np.float64).sum()
     )
     return total_g / total_l if total_l > 0.0 else 0.0

@@ -411,11 +411,11 @@ def test_EVERY_production_caller_of_build_fl_models_passes_the_divisor():
     for module in (pipeline, scan_cache):
         tree = ast.parse(inspect.getsource(module))
         calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "build_fl_models"
+            region
+            for region in ast.walk(tree)
+            if isinstance(region, ast.Call)
+            and isinstance(region.func, ast.Name)
+            and region.func.id == "build_fl_models"
         ]
         assert calls, f"{module.__name__} no longer calls build_fl_models — retarget this test"
         for call in calls:

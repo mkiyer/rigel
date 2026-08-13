@@ -5,7 +5,7 @@
 An effective length is the expected number of admissible fragment START POSITIONS — the divisor that
 turns an observed count into a start density. There is one formula per frame and nothing else:
 
-    contained   E_f[ (node_len − w + 1)+ ]
+    contained   E_f[ (region_len − w + 1)+ ]
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]
 
 ⭐ **The crossing formula covers BOTH edge kinds and both components.** Mean fragment length is its
@@ -50,10 +50,10 @@ def _normal_pmf(mean: float, sd: float, n: int = 1301) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def _enumerate_contained(node_len: int, w: int) -> int:
-    """Integer starts placing a length-``w`` fragment wholly inside ``[0, node_len)``."""
-    starts = np.arange(-w - 2, node_len + w + 2)
-    return int(np.sum((starts >= 0) & (starts + w <= node_len)))
+def _enumerate_contained(region_len: int, w: int) -> int:
+    """Integer starts placing a length-``w`` fragment wholly inside ``[0, region_len)``."""
+    starts = np.arange(-w - 2, region_len + w + 2)
+    return int(np.sum((starts >= 0) & (starts + w <= region_len)))
 
 
 def _enumerate_crossing(w: int, reach_lo: int, reach_hi: int) -> int:
@@ -70,23 +70,23 @@ def _enumerate_crossing(w: int, reach_lo: int, reach_hi: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("node_len", [1, 10, 60, 100, 150, 500, 2000])
+@pytest.mark.parametrize("region_len", [1, 10, 60, 100, 150, 500, 2000])
 @pytest.mark.parametrize("w", [1, 2, 59, 100, 101, 200, 501])
-def test_contained_is_the_enumerated_start_count(node_len, w):
-    got = contained_eff_length(np.array([float(node_len)]), _spike(w))[0]
-    assert got == pytest.approx(float(_enumerate_contained(node_len, w)))
+def test_contained_is_the_enumerated_start_count(region_len, w):
+    got = contained_eff_length(np.array([float(region_len)]), _spike(w))[0]
+    assert got == pytest.approx(float(_enumerate_contained(region_len, w)))
 
 
-def test_contained_at_a_node_exactly_one_fragment_long_is_ONE_not_zero():
+def test_contained_at_a_region_exactly_one_fragment_long_is_ONE_not_zero():
     """⚠ The ``+1`` is the discrete count of start positions, not a correction factor.
 
-    Dropping it makes the divisor exactly 0 when a node is one fragment long — a division by zero that
-    was floored to an epsilon and produced densities of ~1e9 on 12.4 % of fine-partition nodes.
+    Dropping it makes the divisor exactly 0 when a region is one fragment long — a division by zero that
+    was floored to an epsilon and produced densities of ~1e9 on 12.4 % of fine-partition regions.
     """
     assert contained_eff_length(np.array([100.0]), _spike(100))[0] == pytest.approx(1.0)
 
 
-def test_contained_beyond_the_pmf_support_is_node_plus_one_minus_mean():
+def test_contained_beyond_the_pmf_support_is_region_plus_one_minus_mean():
     pmf = _normal_pmf(200.0, 50.0)
     got = contained_eff_length(np.array([5000.0]), pmf)[0]
     assert got == pytest.approx(5000.0 + 1.0 - fl_mean(pmf), rel=1e-9)

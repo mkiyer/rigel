@@ -1,15 +1,15 @@
-"""Generic DENSITY DECONVOLUTION — deconvolve a node's counts into gDNA + RNA against a gDNA prior.
+"""Generic DENSITY DECONVOLUTION — deconvolve a region's counts into gDNA + RNA against a gDNA prior.
 
-A node's unspliced count ``C`` (over its gDNA effective length ``E_g``) is ``gDNA + RNA``. If we know the
-**gDNA density prior** — how dense gDNA is at this node, as a distribution ``π_bg`` — we can peel the gDNA
+A region's unspliced count ``C`` (over its gDNA effective length ``E_g``) is ``gDNA + RNA``. If we know the
+**gDNA density prior** — how dense gDNA is at this region, as a distribution ``π_bg`` — we can peel the gDNA
 (``g ≈ ρ_bg·E_g``) and read the residual as RNA, with honest, count-derived precision. This is the generic
 count-deconvolution primitive; the **intron factory** is its special case (`fit_intron_background`), where the
-gDNA prior is the intergenic node distribution (introns are off-target, at the same capture depletion as
+gDNA prior is the intergenic region distribution (introns are off-target, at the same capture depletion as
 intergenic —).
 
 Model (owner-ratified 2026-07-20): the gDNA count ``g ~ NegBinom(mean = ρ_bg·E_g, size = α_eff)``, a
 Gamma-Poisson — the per-region background rate ``ρ ~ Gamma`` (over-dispersion ``α`` = per-region CNV /
-mappability spread, fitted from the pool) mixed by the per-node Poisson sampling. The observed ``C = g + r``
+mappability spread, fitted from the pool) mixed by the per-region Poisson sampling. The observed ``C = g + r``
 with a **flat one-sided RNA prior** ``r ≥ 0`` (RNA carries no informative density prior, and this dodges any
 cutoff), so the posterior on the gDNA fraction is ``P(g | C) ∝ NegBinom(g; ρ_bg·E_g, α_eff)·1[g ≤ C]``. On the
 ``f_g`` solve grid this is the factor ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` (the truncation is automatic
@@ -17,7 +17,7 @@ since ``f_g ≤ 1 ⇒ g ≤ C``). It peels **gDNA only** (gDNA is strand-symmetr
 residual RNA's strand is the tilt ``θ``, left to the strand solver — the SYNERGY of the two deconvolutions).
 
 Precision is honest and count-over-length, with NO tuned constant: three variance sources add as
-``Var(g) = μ + μ²/α_eff`` with ``1/α_eff = 1/α + 1/(Σg + n0)`` — the per-node Poisson (``μ``), the per-region
+``Var(g) = μ + μ²/α_eff`` with ``1/α_eff = 1/α + 1/(Σg + n0)`` — the per-region Poisson (``μ``), the per-region
 over-dispersion (``α``, fitted), and the pooled-mean/resolution uncertainty (``Σg + n0``, the floor-blend
 Fisher info from ``gdna_background_floor_derivation``). Graceful ``Σg → 0``: ``μ`` falls back to the resolution
 wall and ``α_eff`` widens, so the peel becomes imprecise (never confidently wrong) as capture depletes the pool.
@@ -46,7 +46,7 @@ _EPS = 1.0e-12
 
 @dataclass(frozen=True, slots=True)
 class GdnaBackground:
-    """The fitted gDNA density prior the density deconvolution scores each node against.
+    """The fitted gDNA density prior the density deconvolution scores each region against.
 
     ``log_mu_bg`` is the natural-log background gDNA DENSITY location: ``log(Σg/ΣE)`` (the pooled rate) when the
     pool has counts, else the resolution wall ``log ρ_res`` (``Σg = 0``). ``alpha`` is the NegBinom size = the
@@ -64,14 +64,14 @@ class GdnaBackground:
 
 
 def fit_gdna_background(g_counts, eff_g, *, log_rho_floor: float) -> GdnaBackground:
-    """The GENERIC fit: a gDNA NegBinom background from a pool of **pure-gDNA** nodes.
+    """The GENERIC fit: a gDNA NegBinom background from a pool of **pure-gDNA** regions.
 
-    ``g_counts``/``eff_g`` are the pooled nodes' gDNA counts and gDNA effective lengths; ``log_rho_floor`` is
+    ``g_counts``/``eff_g`` are the pooled regions' gDNA counts and gDNA effective lengths; ``log_rho_floor`` is
     the resolution-wall location for the ``Σg = 0`` case (from :func:`background_reference.measure_background`).
     ``α`` by method-of-moments on the pool given the pooled mean ``ρ_bg = Σg/ΣE`` (so ``μ_i = ρ_bg·E_i`` and
     the residuals sum to zero at the MLE): from ``E[Σ(g_i − μ_i)²] = Σμ_i + (1/α)·Σμ_i²``,
     ``α = Σμ_i² / max(Σ(g_i − μ_i)² − Σμ_i, 0⁺)`` — ``+inf`` (Poisson) when the pool is not over-dispersed. No
-    tuned constant. Callers select the pool (introns → intergenic; post-pass-0 exons → clean-gDNA nodes)."""
+    tuned constant. Callers select the pool (introns → intergenic; post-pass-0 exons → clean-gDNA regions)."""
     g = np.asarray(g_counts, dtype=np.float64)
     E = np.asarray(eff_g, dtype=np.float64)
     sg = float(g.sum())
@@ -107,9 +107,9 @@ def fit_gdna_background(g_counts, eff_g, *, log_rho_floor: float) -> GdnaBackgro
 
 
 def fit_intron_background(
-    substrate, region_arrays, node_eff_g, *, include_introns: bool = False
+    substrate, region_arrays, region_eff_g, *, include_introns: bool = False
 ) -> GdnaBackground:
-    """The INTRON special case of :func:`fit_gdna_background`: the gDNA prior IS the intergenic node
+    """The INTRON special case of :func:`fit_gdna_background`: the gDNA prior IS the intergenic region
     distribution (introns are off-target at the same capture depletion as intergenic —
 
 
@@ -119,17 +119,17 @@ def fit_intron_background(
     :func:`fit_gdna_background`; the intergenic pool + resolution floor come from
     :func:`background_reference.measure_background`.
 
-    ``node_eff_g`` is the gDNA CONTAINED effective length per node
+    ``region_eff_g`` is the gDNA CONTAINED effective length per region
     (:func:`effective_length.contained_eff_length`) — the same array ``measure_background`` pools over,
     passed through so the fit and the floor sit on one support."""
-    bg = measure_background(substrate, region_arrays, node_eff_g, include_introns=include_introns)
+    bg = measure_background(substrate, region_arrays, region_eff_g, include_introns=include_introns)
     sig = np.asarray(region_arrays.signature)
-    eff = np.asarray(node_eff_g, dtype=np.float64)
+    eff = np.asarray(region_eff_g, dtype=np.float64)
     ctype = coarse_type_array(sig)  # 0 intergenic / 1 intron / 2 exon
     # the pure-gDNA pool: intergenic only (or non-exonic when include_introns), matching measure_background.
     pool = ((ctype != 2) if include_introns else (ctype == 0)) & (eff > _EPS)
     # ⚠ GENOME-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
-    counts = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)
+    counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
     return fit_gdna_background(counts[pool], eff[pool], log_rho_floor=bg.log_rho_floor)
 
 
@@ -157,9 +157,9 @@ def _log_negbinom(g: np.ndarray, mu: np.ndarray, size: float) -> np.ndarray:
 def density_lambda_factor(
     background: GdnaBackground, count: np.ndarray, eff_g: np.ndarray, fg_grid: np.ndarray
 ) -> np.ndarray:
-    """The per-node factor on ``λ`` over the ``f_g = σ(λ)`` solve grid: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``.
+    """The per-region factor on ``λ`` over the ``f_g = σ(λ)`` solve grid: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``.
 
-    ``count`` (``C``), ``eff_g`` (``E_g``) are per-node arrays ``(n,)``; ``fg_grid`` is the ``(K,)`` grid.
+    ``count`` (``C``), ``eff_g`` (``E_g``) are per-region arrays ``(n,)``; ``fg_grid`` is the ``(K,)`` grid.
     Returns ``(n, K)``, peaked at ``f_g = ρ_bg/ρ_obs`` (the confident gDNA peel), with the honest
     ``μ + μ²/α_eff`` curvature. Each row is offset so its max is 0 (an ``f_g``-independent constant is
     irrelevant to ψ; this only keeps the numbers well-scaled). A non-informative background returns all-zero."""
@@ -179,7 +179,7 @@ def density_lambda_factor(
     mu = np.exp(background.log_mu_bg) * Eg  # (n,) background gDNA count location
     g = fg[None, :] * C[:, None]  # (n, K) gDNA count at each grid point
     logf = _log_negbinom(g, mu[:, None], alpha_eff)  # (n, K)
-    logf = logf - np.max(logf, axis=1, keepdims=True)  # per-node offset (ψ-irrelevant constant)
+    logf = logf - np.max(logf, axis=1, keepdims=True)  # per-region offset (ψ-irrelevant constant)
     return logf
 
 
@@ -188,10 +188,10 @@ def density_factor_precision(lam_logprior, lam_grid):
     CURVATURE.
 
     The factor :func:`density_lambda_factor` is a genuine, reference-FREE likelihood on ``λ`` (external
-    ``ρ_bg`` information about this node's composition), so its precision belongs on the composition ``λ``-axis
+    ``ρ_bg`` information about this region's composition), so its precision belongs on the composition ``λ``-axis
     alongside the strand evidence. ``τ_λ = 1/Var_λ`` under the normalized factor; the NegBinom
-    ``Var(g) = μ + μ²/α_eff`` makes a low-count / high-overdispersion node peel IMPRECISELY and a dense one
-    confidently, so it self-limits on thin data. A FLAT row (a non-deconvolved node, or an uninformative
+    ``Var(g) = μ + μ²/α_eff`` makes a low-count / high-overdispersion region peel IMPRECISELY and a dense one
+    confidently, so it self-limits on thin data. A FLAT row (a non-deconvolved region, or an uninformative
     background) carries NO information ⇒ ``τ = 0``. Returns ``(m,)`` (all-zero when ``lam_logprior`` is None)."""
     if lam_logprior is None:
         return None

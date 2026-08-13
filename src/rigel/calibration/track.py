@@ -1,6 +1,6 @@
 """Genome-wide gDNA track from the calibration result.
 
-Calibration solves each region node for a gDNA/RNA split; joined to the region
+Calibration solves each region region for a gDNA/RNA split; joined to the region
 coordinates this yields a per-region gDNA level across the genome — a QC track
 that traces contamination and, on capture libraries, on-target enrichment.
 
@@ -21,18 +21,18 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     """Per-region gDNA track: ``(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)``.
 
     Rows are in genomic order (``RegionArrays`` is sorted by ``(ref_id, start)``),
-    which is the same order the ``CalibrationResult`` per-NODE arrays are aligned
+    which is the same order the ``CalibrationResult`` per-REGION arrays are aligned
     to. ``gdna_density`` is the density-correct contained gDNA mass per bp
-    (mass / ``gdna_node_eff_len``); ``gdna_frac`` is gDNA's share of the node's
+    (mass / ``gdna_region_eff_len``); ``gdna_frac`` is gDNA's share of the region's
     contained mass.
 
     ⚠ **Contained only, deliberately.** A contiguous edge is a 0-bp line: it has no genomic extent to
-    occupy a row of a track, and attributing its crossing mass to a flank node would report a density
+    occupy a row of a track, and attributing its crossing mass to a flank region would report a density
     at a position where that mass was never contained.
     """
-    gdna = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
-    rna = np.asarray(calibration.mass_rna_node, dtype=np.float64)
-    efflen = np.asarray(calibration.gdna_node_eff_len, dtype=np.float64)
+    gdna = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+    rna = np.asarray(calibration.mass_rna_region, dtype=np.float64)
+    efflen = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
 
     density = np.where(efflen > _EPS, gdna / np.maximum(efflen, _EPS), 0.0)
     total = gdna + rna
@@ -63,7 +63,7 @@ _KDE_N_GRID = 320
 def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> dict | None:
     """Mass-weighted capture-enrichment summary from the per-region gDNA track.
 
-    On hybrid-capture RNA-seq the on-target regions are a small minority of nodes
+    On hybrid-capture RNA-seq the on-target regions are a small minority of regions
     but carry the captured gDNA *mass* at high density; the many off-target
     (expressed) genes dominate by count. So an equal-weight density KDE is
     unimodal, while a gDNA-mass-weighted KDE develops a high-density on-target
@@ -135,7 +135,7 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
     mass_frac_ontarget = float(w[log_rho >= midpoint].sum() / w.sum()) if enriched else 0.0
 
     out = {
-        "n_nodes": int(keep.sum()),
+        "n_regions": int(keep.sum()),
         "enriched": enriched,
         "count_median_log_rho": round(count_median, 4),
         "background_mode_log_rho": round(background_mode, 4),

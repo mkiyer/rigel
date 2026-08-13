@@ -51,7 +51,7 @@ def runfill_bidirectional(values: np.ndarray, ref_id: np.ndarray) -> np.ndarray:
     ``nan`` — the caller supplies its own global fallback. Originally-set regions are returned
     unchanged. A carry never crosses a reference boundary.
 
-    This is the exact bidirectional run-fill `density_model.node_gdna_density` uses (extracted verbatim);
+    This is the exact bidirectional run-fill `density_model.region_gdna_density` uses (extracted verbatim);
     the BP chain sweep reuses it in fraction/state space. Cost is two ``O(R)`` passes.
     """
     v = np.asarray(values, dtype=np.float64)

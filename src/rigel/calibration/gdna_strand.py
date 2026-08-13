@@ -9,9 +9,9 @@ machinery is shared: a per-region/per-boundary sense split is more spread out th
 
 **Symmetric by design.** Earlier the RNA side was forced Binomial while gDNA was Beta-Binomial;
 that asymmetry made the strand likelihood *spuriously informative on unstranded data* (the
-``−½·log var`` term prefers the lower-variance component, pulling balanced nodes toward RNA). Both
+``−½·log var`` term prefers the lower-variance component, pulling balanced regions toward RNA). Both
 components now carry a fitted overdispersion with the **same default prior**, so under sparse data
-the two collapse to the same distribution and an unstranded node is uninformative — as it must be.
+the two collapse to the same distribution and an unstranded region is uninformative — as it must be.
 The gDNA mean ½ and RNA mean κ are unchanged; only RNA gains the overdispersion term.
 
 ⭐ **The RNA overdispersion is fit from the PER-JUNCTION SJ strand table — the same population κ is the
@@ -24,13 +24,13 @@ to the ceiling on 4/4 real libraries. Two halves of one Beta-Binomial, two diffe
 
 **Breaking the circularity** (gDNA only). Fitting the overdispersion needs to know which fragments are gDNA,
 which is what the deconvolution determines — circular. We break it with the count⊥strand
-conditional independence the engine already relies on: the **count module** supplies a per-node
+conditional independence the engine already relies on: the **count module** supplies a per-region
 gDNA fraction ``gdna_weight`` (``count_gdna_frac``, a raw count/density ratio) that is *independent*
 of the strand overdispersion (it uses no strand information at all). Given those weights and the RNA
 sense rate, the overdispersion is identified from the **excess variance of the sense split beyond
 Binomial**, attributable to the gDNA fragments.
 
-**Estimator — pooled method of moments.** For each seed node ``s`` (a count-observable region or
+**Estimator — pooled method of moments.** For each seed region ``s`` (a count-observable region or
 boundary side — intergenic, intronic, exon–intron / exon–intergenic seam) with ``sense_s`` of
 ``n_s`` gDNA-eligible unspliced fragments and count-derived gDNA weight ``w_s``:
 
@@ -45,8 +45,8 @@ The point estimate is then **shrunk toward a prior overdispersion** ``od₀`` = 
 ``Beta(2,2)`` ceiling, od = 0.2, the most overdispersion allowed).
 
 ⭐ **The shrinkage currency is INFORMATION, not seed count, and that is a units fix, not a tuning choice.**
-Overdispersion is a correlation *between* fragments in a node, so a seed with ONE fragment carries none of
-it — it has nothing to be correlated with. Weighting by ``n_seed_nodes`` let 160 k singleton seeds outvote
+Overdispersion is a correlation *between* fragments in a region, so a seed with ONE fragment carries none of
+it — it has nothing to be correlated with. Weighting by ``n_seed_regions`` let 160 k singleton seeds outvote
 the prior by four orders of magnitude on a library that has almost no pairs. With ``I = 1/Var(od_mom)|₀``
 the expression becomes an exact Normal–Normal posterior mean and the prior's weight ``W`` is **DERIVED**
 from the two asserted constants rather than asserted itself (:func:`_prior_information`).
@@ -56,7 +56,7 @@ from the two asserted constants rather than asserted itself (:func:`_prior_infor
 fixtures — which is exactly where it should. The saturation seen on real cfRNA is **bias from a
 contaminated seed channel**, not a shrinkage problem.
 
-The MoM is closed-form, ``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv
+The MoM is closed-form, ``O(n_seed_regions)``, and uses the **same variance decomposition the deconv
 applies** (ψ's ``simplex_logodds._mixture_strand_loglik``; its two-component reference is
 :mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
 module, next to the estimator they parameterise.
@@ -105,7 +105,7 @@ _MAX_OVERDISPERSION: float = overdispersion_for_beta(_CEIL_ALPHA_BETA)
 #: top of every honest measurement, i.e. at the conservative end of measured reality, which is what a
 #: fallback should be. It remains ASSERTED — the measurements bracket it, they do not derive it.
 #: **Shared by the gDNA and RNA fits, and that is required, not a convenience**: at κ = ½ with no data the
-#: two components must coincide, or ψ's ``−½·log var`` term hands an unstranded node a spurious gDNA/RNA
+#: two components must coincide, or ψ's ``−½·log var`` term hands an unstranded region a spurious gDNA/RNA
 # preference (see:mod:`.strand_likelihood`). Full record:.
 _PRIOR_ALPHA_BETA: float = 14.0
 _PRIOR_OVERDISPERSION: float = overdispersion_for_beta(_PRIOR_ALPHA_BETA)
@@ -165,8 +165,8 @@ class GdnaStrandModel:
     """Fitted gDNA strand model: the global Beta-Binomial overdispersion + fit provenance."""
 
     gdna_strand_overdispersion: float  # intra-class correlation in [0, _MAX_OVERDISPERSION]
-    n_seed_nodes: int  # seed nodes that carried gDNA-eligible fragments
-    n_seed_fragments: int  # total gDNA-eligible fragments across seed nodes
+    n_seed_regions: int  # seed regions that carried gDNA-eligible fragments
+    n_seed_fragments: int  # total gDNA-eligible fragments across seed regions
     fallback_used: bool  # True ⇒ no gDNA strand signal ⇒ returned the prior overdispersion
 
     def beta_concentration(self) -> float:
@@ -186,7 +186,7 @@ class RnaStrandModel:
     :class:`strand_balance.StrandBalance`; this carries only the between-JUNCTION overdispersion."""
 
     rna_strand_overdispersion: float  # intra-class correlation in [0, _MAX_OVERDISPERSION]
-    n_seed_nodes: int  # splice junctions that carried strand-qualified fragments
+    n_seed_regions: int  # splice junctions that carried strand-qualified fragments
     n_seed_fragments: (
         int  # total strand-qualified fragments (exactly one per fragment, no double-count)
     )
@@ -226,7 +226,7 @@ def _null_information(comp_frags: np.ndarray, comp_var: np.ndarray | float) -> f
 def _fit_overdispersion(
     sense: np.ndarray,
     total: np.ndarray,
-    node_mean: np.ndarray,
+    region_mean: np.ndarray,
     component_frac: np.ndarray,
     component_mean: np.ndarray,
     *,
@@ -235,28 +235,28 @@ def _fit_overdispersion(
 ) -> tuple[float, int, int, bool]:
     """Shared pooled-MoM + prior-shrinkage core for one component's strand overdispersion.
 
-    Component-agnostic, with three per-node inputs:
+    Component-agnostic, with three per-region inputs:
 
-    * ``node_mean`` — the node's mixture sense rate, used to subtract the Binomial variance:
+    * ``region_mean`` — the region's mixture sense rate, used to subtract the Binomial variance:
       ½·w + κ·(1−w) for a gDNA seed (a gDNA/RNA mix), κ for a pure-RNA spliced seed.
-    * ``component_frac`` — the fraction of the node's fragments in the component being fit (the
+    * ``component_frac`` — the fraction of the region's fragments in the component being fit (the
       gDNA weight ``w`` for gDNA, ``1`` for pure-RNA spliced); sets ``n_c = component_frac·N``.
     * ``component_mean`` — the component's *own* sense mean ``μ_c`` (½ for gDNA, κ for RNA); the
       BetaBinom excess variance of ``n_c`` correlated fragments scales as
       ``n_c·(n_c − 1)·μ_c·(1 − μ_c)`` — **not** ¼ unless ``μ_c = ½``.
 
-    Returns ``(overdispersion, n_seed_nodes, n_seed_fragments, fallback_used)``; clamped to
+    Returns ``(overdispersion, n_seed_regions, n_seed_fragments, fallback_used)``; clamped to
     ``[0, _MAX_OVERDISPERSION]``; fallback (pooled denominator ≤ 0) ⇒ ``prior_overdispersion``.
     """
     sense = np.asarray(sense, dtype=np.float64)
     total = np.asarray(total, dtype=np.float64)
-    node_mean = np.asarray(node_mean, dtype=np.float64)
+    region_mean = np.asarray(region_mean, dtype=np.float64)
     component_frac = np.asarray(component_frac, dtype=np.float64)
     component_mean = np.asarray(component_mean, dtype=np.float64)
 
     valid = total > 0.0
-    binom_var = total * node_mean * (1.0 - node_mean)
-    excess_var = (sense - total * node_mean) ** 2 - binom_var
+    binom_var = total * region_mean * (1.0 - region_mean)
+    excess_var = (sense - total * region_mean) ** 2 - binom_var
     # ⚠ INTEGER component counts. ``component_frac`` is a float that is 1.0 only to within rounding
     # (measured min − 1 = −2.2e−16), so ``w·N`` on a 2-fragment seed is 1.9999999999999996 and every
     # ``n_c ≥ 2`` test silently under-counts. Round: a fragment count is an integer.
@@ -267,7 +267,7 @@ def _fit_overdispersion(
 
     num = float(np.sum(excess_var[valid]))
     denom = float(np.sum(var_scale[valid]))
-    n_seed_nodes = int(np.sum(valid & (comp_frags > 0.0)))
+    n_seed_regions = int(np.sum(valid & (comp_frags > 0.0)))
     n_seed_fragments = int(np.sum(total[valid & (comp_frags > 0.0)]))
     prior_overdispersion = float(prior_overdispersion)
     prior_weight = max(float(prior_weight), 0.0)
@@ -279,7 +279,7 @@ def _fit_overdispersion(
     else:
         od_mom = num / denom
         # ── SHRINKAGE IN THE DATA'S OWN CURRENCY (the units fix) ────────────────────────────────────
-        # This used to weight the data by ``n_seed_nodes``, which is the wrong measure of evidence
+        # This used to weight the data by ``n_seed_regions``, which is the wrong measure of evidence
         # about a SECOND moment: overdispersion is a correlation BETWEEN fragments, so a seed with one
         # fragment carries none of it — it has nothing to be correlated with. Counting seeds let
         # 160k singleton seeds outvote the prior by four orders of magnitude on a library that has
@@ -293,7 +293,7 @@ def _fit_overdispersion(
             else od_mom
         )
     od = float(np.clip(od, _OVERDISPERSION_FLOOR, _MAX_OVERDISPERSION))
-    return od, n_seed_nodes, n_seed_fragments, fallback
+    return od, n_seed_regions, n_seed_fragments, fallback
 
 
 def fit_gdna_strand_overdispersion(
@@ -308,18 +308,18 @@ def fit_gdna_strand_overdispersion(
     """Pooled method-of-moments fit of the global gDNA strand overdispersion, with prior shrinkage.
 
     The pooled MoM point estimate is shrunk toward ``prior_overdispersion`` weighted by
-    INFORMATION (:func:`_null_information`), not by seed-node count:
+    INFORMATION (:func:`_null_information`), not by seed-region count:
     ``od = (I·od_mom + prior_weight·prior_overdispersion) / (I + prior_weight)``.
     Seed sets carrying little information lean on the prior; abundant ones on the fit. This
-    replaces the earlier hard min-node / significance gates (no thresholds — graceful with data).
+    replaces the earlier hard min-region / significance gates (no thresholds — graceful with data).
     The result is clamped to ``[0, _MAX_OVERDISPERSION]`` (the ``Beta(2, 2)`` ceiling).
 
     Parameters
     ----------
     sense, total : np.ndarray
-        Per-seed-node sense count ``K⁺`` and total gDNA-eligible unspliced count ``N``.
+        Per-seed-region sense count ``K⁺`` and total gDNA-eligible unspliced count ``N``.
     gdna_weight : np.ndarray
-        Per-seed-node count-clue gDNA fraction ``∈ [0, 1]`` (independent of the overdispersion).
+        Per-seed-region count-clue gDNA fraction ``∈ [0, 1]`` (independent of the overdispersion).
     rna_sense_frac : float
         Library RNA sense fraction ``κ`` (the spliced-channel ``StrandModel`` mean).
     prior_overdispersion : float
@@ -336,14 +336,14 @@ def fit_gdna_strand_overdispersion(
         seeds carry no gDNA strand signal (pooled denominator ≤ 0) ⇒ the prior is returned.
     """
     weight = np.clip(np.asarray(gdna_weight, dtype=np.float64), 0.0, 1.0)
-    # gDNA component: the node's sense mean is the mixture ½·w + κ·(1−w); the component whose
+    # gDNA component: the region's sense mean is the mixture ½·w + κ·(1−w); the component whose
     # shared rate inflates the variance is the gDNA fraction w, with its own mean ½ (⇒ scale ¼).
-    node_mean = 0.5 * weight + float(rna_sense_frac) * (1.0 - weight)
-    component_mean = np.full(node_mean.shape, 0.5, dtype=np.float64)
-    od, n_seed_nodes, n_seed_fragments, fallback = _fit_overdispersion(
+    region_mean = 0.5 * weight + float(rna_sense_frac) * (1.0 - weight)
+    component_mean = np.full(region_mean.shape, 0.5, dtype=np.float64)
+    od, n_seed_regions, n_seed_fragments, fallback = _fit_overdispersion(
         sense,
         total,
-        node_mean,
+        region_mean,
         weight,
         component_mean,
         prior_overdispersion=prior_overdispersion,
@@ -351,40 +351,40 @@ def fit_gdna_strand_overdispersion(
     )
     return GdnaStrandModel(
         gdna_strand_overdispersion=od,
-        n_seed_nodes=n_seed_nodes,
+        n_seed_regions=n_seed_regions,
         n_seed_fragments=n_seed_fragments,
         fallback_used=fallback,
     )
 
 
-def _node_seeds(substrate, region_arrays, node_density):
-    """``(sense, total, gdna_weight)`` from the count-observable CONTAINED nodes.
+def _region_seeds(substrate, region_arrays, region_density):
+    """``(sense, total, gdna_weight)`` from the count-observable CONTAINED regions.
 
-    Intergenic (``TS_NONE``) and intron-only (``TS_POS``/``TS_NEG``) nodes — i.e.
-    ``node_density.node_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
-    sense). The weight is the count-clue gDNA fraction ``node_density.count_gdna_frac`` (=
+    Intergenic (``TS_NONE``) and intron-only (``TS_POS``/``TS_NEG``) regions — i.e.
+    ``region_density.region_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
+    sense). The weight is the count-clue gDNA fraction ``region_density.count_gdna_frac`` (=
     ``clip(density·eff_gdna / count)``, density cleaned by the strand *mean* ½, not the dispersion).
     It reads the explicit count-prior MEAN (``count_gdna_frac``) directly — decoupled from the
     count-prior concentration, which carries the overdispersion-honest precision.
 
     ⚠ The columns are GENOME strand, so orienting to transcript sense is this function's job
-    (arbitrary but consistent for ``TS_NONE`` — an intergenic node has no transcript to be sense to,
+    (arbitrary but consistent for ``TS_NONE`` — an intergenic region has no transcript to be sense to,
     and gDNA's strand mean is ½ either way).
     """
     ts = np.asarray(region_arrays.strand_class)
-    count = np.asarray(substrate.node_contained.count, dtype=np.float64)
+    count = np.asarray(substrate.region_contained.count, dtype=np.float64)
     pos, neg = count[:, 0], count[:, 1]
     total = pos + neg
     sense = np.where(ts == TS_NEG, neg, pos)
-    weight = np.clip(np.asarray(node_density.count_gdna_frac, dtype=np.float64), 0.0, 1.0)
-    seed = np.asarray(node_density.node_count_observable) & (ts != TS_AMBIG)
+    weight = np.clip(np.asarray(region_density.count_gdna_frac, dtype=np.float64), 0.0, 1.0)
+    seed = np.asarray(region_density.region_count_observable) & (ts != TS_AMBIG)
     return sense[seed], total[seed], weight[seed]
 
 
 def fit_gdna_strand_from_substrate(
     substrate,
     region_arrays,
-    node_density,
+    region_density,
     *,
     rna_sense_frac: float,
     prior_overdispersion: float = _PRIOR_OVERDISPERSION,
@@ -394,7 +394,7 @@ def fit_gdna_strand_from_substrate(
 
     Pools two kinds of count-observable seed (the same seeds the density estimator trusts):
 
-    * **contained nodes** — intergenic + intron-only (:func:`_node_seeds`);
+    * **contained regions** — intergenic + intron-only (:func:`_region_seeds`);
     * **contiguous edges** — exon–intron / exon–intergenic lines
       (:func:`strand_deconv.edge_seeds`), needed under hybrid capture, which depletes off-target
       intergenic/intronic gDNA.
@@ -407,8 +407,8 @@ def fit_gdna_strand_from_substrate(
     2× and paired every observation with a perfectly correlated twin. A dispersion estimator reading
     its own duplication is the failure mode this removes; see :mod:`strand_deconv`.
     """
-    n_sense, n_total, n_weight = _node_seeds(substrate, region_arrays, node_density)
-    e_sense, e_total, e_weight = edge_seeds(substrate, region_arrays, node_density)
+    n_sense, n_total, n_weight = _region_seeds(substrate, region_arrays, region_density)
+    e_sense, e_total, e_weight = edge_seeds(substrate, region_arrays, region_density)
     sense = np.concatenate([n_sense, e_sense])
     total = np.concatenate([n_total, e_total])
     weight = np.concatenate([n_weight, e_weight])
@@ -433,7 +433,7 @@ def fit_rna_strand_overdispersion(
     """Pooled method-of-moments fit of the global RNA strand overdispersion, with prior shrinkage.
 
     The twin of :func:`fit_gdna_strand_overdispersion`, on **pure-RNA spliced** seeds: an annotated
-    splice junction proves RNA origin, so each seed is all-RNA — ``node_mean = rna_sense_frac`` (κ)
+    splice junction proves RNA origin, so each seed is all-RNA — ``region_mean = rna_sense_frac`` (κ)
     and the component fraction is ``1`` (the whole seed is the RNA component). The excess variance of
     the sense split beyond ``Binomial(N, κ)`` identifies the overdispersion. Shrinks toward
     ``prior_overdispersion`` by INFORMATION and clamps to ``[0, _MAX_OVERDISPERSION]`` exactly
@@ -449,24 +449,24 @@ def fit_rna_strand_overdispersion(
         Per-seed motif-relative sense count and total qualified count ``N``. The production caller
         is :func:`fit_rna_strand_from_sj_table`, one seed per splice junction.
     rna_sense_frac : float
-        Library RNA sense fraction ``κ`` (the spliced-channel ``StrandModel`` mean) — the node mean.
+        Library RNA sense fraction ``κ`` (the spliced-channel ``StrandModel`` mean) — the region mean.
     """
     total = np.asarray(total, dtype=np.float64)
-    # Pure-RNA spliced node: mixture mean AND component mean are both κ; component fraction is 1.
-    node_mean = np.full(total.shape, float(rna_sense_frac), dtype=np.float64)
+    # Pure-RNA spliced region: mixture mean AND component mean are both κ; component fraction is 1.
+    region_mean = np.full(total.shape, float(rna_sense_frac), dtype=np.float64)
     component_frac = np.ones(total.shape, dtype=np.float64)  # pure RNA
-    od, n_seed_nodes, n_seed_fragments, fallback = _fit_overdispersion(
+    od, n_seed_regions, n_seed_fragments, fallback = _fit_overdispersion(
         sense,
         total,
-        node_mean,
+        region_mean,
         component_frac,
-        node_mean,  # component_mean = κ ⇒ scale κ(1−κ)
+        region_mean,  # component_mean = κ ⇒ scale κ(1−κ)
         prior_overdispersion=prior_overdispersion,
         prior_weight=prior_weight,
     )
     return RnaStrandModel(
         rna_strand_overdispersion=od,
-        n_seed_nodes=n_seed_nodes,
+        n_seed_regions=n_seed_regions,
         n_seed_fragments=n_seed_fragments,
         fallback_used=fallback,
     )

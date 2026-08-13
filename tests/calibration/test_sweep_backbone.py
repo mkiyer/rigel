@@ -44,7 +44,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         left=np.arange(-1, N - 1),
         right=np.append(np.arange(1, N), -1),
         is_edge=np.arange(N) % 2 == 1,
-        is_exon_node=np.zeros(N, bool),
+        is_exon_region=np.zeros(N, bool),
         free_pos=fp,
         free_neg=fn,
         g1_locked=np.zeros(N, bool),
@@ -341,9 +341,9 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
 
     tree = ast.parse(inspect.getsource(SW))
     ident: set[str] = set()
-    for node in ast.walk(tree):
+    for region in ast.walk(tree):
         for attr in ("id", "name", "arg", "attr"):
-            v = getattr(node, attr, None)
+            v = getattr(region, attr, None)
             if isinstance(v, str):
                 ident.add(v.lower())
     banned = ("graft", "reframe", "pin", "enrichment", "peel", "flank", "damp", "mismatch")

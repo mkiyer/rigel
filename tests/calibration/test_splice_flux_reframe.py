@@ -18,7 +18,7 @@ its high neighbour the flux of junctions that END there, and one number per slot
 
 1. ⭐ The decision is **per junction**, not per edge — an EDGE can be the low end of one junction and the
    high end of another, and then both flank totals are nonzero with *different* fluxes. So the split has
-   to happen where the flux is gathered (`build_node_geometry`), not where it is consumed.
+   to happen where the flux is gathered (`build_region_geometry`), not where it is consumed.
 2. ⭐⭐ It is keyed on the **SIDE only — DIRECTION DOES NOT ENTER.** A hop joins two adjacent slots
    ``(k, k+1)``; whichever is the source, the pair is the same pair, so ``r = rho_lo[k+1]/rho_hi[k]``
    always. Travelling low→high (mature departing — a **splice-out**) versus high→low (mature arriving — a
@@ -31,9 +31,9 @@ its high neighbour the flux of junctions that END there, and one number per slot
    transcript terms flips sign with the strand; ``test_a_NEG_junction_splits_IDENTICALLY_to_a_POS_one`` is
    the gate that catches it, and it is why the fields are named ``_lo``/``_hi``.
 
-⛔ **A rule keyed on the coarse node type provably cannot do this**, which is why none is attempted:
-on `toy_harness --spec splice_both_strands` three nodes are simultaneously intron and exon and
-``coarse_type_array`` reports **every** gene-body node as ``exon``, so the string ``intron|exon`` never
+⛔ **A rule keyed on the coarse region type provably cannot do this**, which is why none is attempted:
+on `toy_harness --spec splice_both_strands` three regions are simultaneously intron and exon and
+``coarse_type_array`` reports **every** gene-body region as ``exon``, so the string ``intron|exon`` never
 appears on the rung where the question is hardest.
 
 ⚠⚠ **PERTURBATIONS — TRAPS: self-checking-validator's second half, all EIGHT applied and each one's gate named. Two of
@@ -72,12 +72,12 @@ import pytest
 from rigel.calibration.messages.head import HeadPolicy
 from rigel.calibration.sweep import solve_chain
 
-from rigel.calibration.node_chain import EDGE, NODE
-from rigel.calibration.node_geometry import (
-    NodeGeometry,
+from rigel.calibration.region_chain import EDGE, REGION
+from rigel.calibration.region_geometry import (
+    RegionGeometry,
     init_beliefs,
-    node_gdna_geometry,
-    node_total_density,
+    region_gdna_geometry,
+    region_total_density,
 )
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 from rigel.types import Strand
@@ -88,7 +88,7 @@ from _synthetic import make_chain_parts
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 _N_GRID = 41
 
@@ -99,8 +99,8 @@ def _delta_pmf(length):
     return pmf
 
 
-#: A two-exon gene: exon / intron / exon, flanked by intergenic. ⭐ The junction runs node 1 → node 3, so
-#: the EDGE between nodes 1 and 2 is its genomic-LOW end and the one between 2 and 3 its genomic-HIGH end
+#: A two-exon gene: exon / intron / exon, flanked by intergenic. ⭐ The junction runs region 1 → region 3, so
+#: the EDGE between regions 1 and 2 is its genomic-LOW end and the one between 2 and 3 its genomic-HIGH end
 #: — and the exon of that junction's transcript is on the LOW side of the first and the HIGH side of the
 #: second, which is the whole asymmetry under test.
 _EXON = np.uint8(BIT_EXON_POS)
@@ -112,8 +112,8 @@ def _gene_parts(*, strand=Strand.POS, flux=400.0, junctions=None):
     """The exon/intron/exon chain, with one junction spanning the intron unless told otherwise."""
     return make_chain_parts(
         _GENE,
-        node_size_bp=1000.0,
-        node_pos=300.0,
+        region_size_bp=1000.0,
+        region_pos=300.0,
         edge_pos=120.0,
         junctions=[(1, 3, strand, 1e9, 1e9, flux)] if junctions is None else junctions,
         gdna_fl=_delta_pmf(50),
@@ -128,14 +128,14 @@ def _edge_slots(chain):
 def _low_high_edges(chain):
     """``(low_end_slot, high_end_slot)`` for the fixture's junction — the two EDGEs beside the intron."""
     kind = np.asarray(chain.kind)
-    # chain is N E N E N E N E N; the intron is node index 2, i.e. slot 4
+    # chain is N E N E N E N E N; the intron is region index 2, i.e. slot 4
     intron_slot = 4
-    assert kind[intron_slot] == NODE
+    assert kind[intron_slot] == REGION
     return intron_slot - 1, intron_slot + 1
 
 
 # ---------------------------------------------------------------------------
-# 1. the split at the SOURCE — build_node_geometry
+# 1. the split at the SOURCE — build_region_geometry
 # ---------------------------------------------------------------------------
 
 
@@ -166,10 +166,10 @@ def test_a_junctions_flux_lands_in_LO_at_its_low_end_and_HI_at_its_high_end():
     assert jc_hi[lo_edge] == 0.0
     assert jc_lo[hi_edge] == 0.0
     assert jc_hi[hi_edge] == pytest.approx(400.0)
-    # and nowhere else — in particular not at any NODE, which stores only CONTAINED fragments
-    node_slots = np.asarray(chain.kind) == NODE
-    assert float(jc_lo[node_slots].sum()) == 0.0
-    assert float(jc_hi[node_slots].sum()) == 0.0
+    # and nowhere else — in particular not at any REGION, which stores only CONTAINED fragments
+    region_slots = np.asarray(chain.kind) == REGION
+    assert float(jc_lo[region_slots].sum()) == 0.0
+    assert float(jc_hi[region_slots].sum()) == 0.0
     others = [s for s in _edge_slots(chain) if s not in (lo_edge, hi_edge)]
     assert float(jc_lo[others].sum() + jc_hi[others].sum()) == 0.0
 
@@ -208,10 +208,10 @@ def test_ONE_EDGE_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_another
     """⭐⭐ The case that makes the split necessary rather than merely tidy — and the case a
     per-EDGE rule cannot represent at all.
 
-    Two junctions MEETING at one line — ``A = node0 → node2`` and ``B = node1 → node3``, i.e. A's intron
-    spans node 1 and B's spans node 2, so A ENDS exactly where B BEGINS. On a 5-node chain
-    (``N0 E1 N2 E3 N4 E5 N6 E7 N8``, node ``k`` at slot ``2k``) A's high end is ``left(node2) = slot 3``
-    and B's low end is ``right(node1) = slot 3``: **one EDGE, both roles.** Both flank totals are then
+    Two junctions MEETING at one line — ``A = region0 → region2`` and ``B = region1 → region3``, i.e. A's intron
+    spans region 1 and B's spans region 2, so A ENDS exactly where B BEGINS. On a 5-region chain
+    (``N0 E1 N2 E3 N4 E5 N6 E7 N8``, region ``k`` at slot ``2k``) A's high end is ``left(region2) = slot 3``
+    and B's low end is ``right(region1) = slot 3``: **one EDGE, both roles.** Both flank totals are then
     nonzero and they carry DIFFERENT fluxes with DIFFERENT divisors, which no per-EDGE number can hold.
 
     ⚠ On `spliced_exons` and `splice_both_strands` every junction-bearing EDGE has exactly one
@@ -219,8 +219,8 @@ def test_ONE_EDGE_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_another
     """
     parts = make_chain_parts(
         [_EXON, _EXON, _EXON, _EXON, _EXON],
-        node_size_bp=1000.0,
-        node_pos=300.0,
+        region_size_bp=1000.0,
+        region_pos=300.0,
         edge_pos=120.0,
         junctions=[
             (0, 2, Strand.POS, 1e9, 1e9, 500.0),
@@ -243,19 +243,19 @@ def test_ONE_EDGE_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_another
     assert ej_lo[3] == pytest.approx(ej_hi[5])
     assert ej_lo[3] != pytest.approx(ej_hi[3]), "the two junctions must have distinct divisors"
     # ⛔ and the two flank TOTALS at that line differ by more than rounding, which is the consequence
-    rho_lo, rho_hi = node_total_density(g, np.full(int(parts.chain.n_slots), 0.4))
+    rho_lo, rho_hi = region_total_density(g, np.full(int(parts.chain.n_slots), 0.4))
     assert not np.isclose(rho_lo[3], rho_hi[3])
 
 
 def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
-    """`node_total_density` returns ``(rho_lo, rho_hi)``: the unspliced total plus, on each side, only
-    that side's flux. ⭐ At a NODE both banks are 0, so the pair collapses to one number and every
+    """`region_total_density` returns ``(rho_lo, rho_hi)``: the unspliced total plus, on each side, only
+    that side's flux. ⭐ At a REGION both banks are 0, so the pair collapses to one number and every
     junction-free chain is byte-identical to the predecessor."""
     parts = _gene_parts(flux=400.0)
     g, chain = parts.geometry, parts.chain
     f_g = np.full(int(chain.n_slots), 0.4)
-    rho_lo, rho_hi = node_total_density(g, f_g)
-    mass, eff_g = node_gdna_geometry(g)
+    rho_lo, rho_hi = region_total_density(g, f_g)
+    mass, eff_g = region_gdna_geometry(g)
     eff_r = np.asarray(g.eff_rna, float)
     unspliced = np.asarray(mass, float) * (
         0.4 / np.where(np.asarray(eff_g, float) > 0, eff_g, np.inf)
@@ -268,8 +268,8 @@ def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
     assert rho_hi[lo_edge] == pytest.approx(unspliced[lo_edge])
     assert rho_lo[hi_edge] == pytest.approx(unspliced[hi_edge])
     assert rho_hi[hi_edge] - unspliced[hi_edge] == pytest.approx(400.0 / ej)
-    node_slots = np.asarray(chain.kind) == NODE
-    np.testing.assert_allclose(rho_lo[node_slots], rho_hi[node_slots])
+    region_slots = np.asarray(chain.kind) == REGION
+    np.testing.assert_allclose(rho_lo[region_slots], rho_hi[region_slots])
 
 
 def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
@@ -277,17 +277,17 @@ def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
     identically equal, so the pair cannot be measuring the split — it is measuring the rebuild. If this
     fails, every other gate in the file is reading an artefact."""
     parts = _gene_parts(junctions=[])
-    rho_lo, rho_hi = node_total_density(parts.geometry, np.full(int(parts.chain.n_slots), 0.4))
+    rho_lo, rho_hi = region_total_density(parts.geometry, np.full(int(parts.chain.n_slots), 0.4))
     np.testing.assert_array_equal(rho_lo, rho_hi)
 
 
 def test_the_flank_split_is_NOT_A_FACE():
-    """⚠ `test_node_geometry.test_NO_FIELD_NAMES_A_FACE` bans a ``_left``/``_right`` pair, and the reason
+    """⚠ `test_region_geometry.test_NO_FIELD_NAMES_A_FACE` bans a ``_left``/``_right`` pair, and the reason
     is that a 0-bp line's own measurement is one set of numbers seen identically from both sides. ⭐ These
     fields do not reintroduce that: they are ONE measurement — the junction axis's flux — partitioned by
     which junction attaches where, and the partition is a property of the JUNCTIONS, not of the line's own
     counting. The unspliced banks stay single, which is what this asserts."""
-    fields = set(NodeGeometry.__dataclass_fields__)
+    fields = set(RegionGeometry.__dataclass_fields__)
     for dead in ("unspliced_count_lo", "unspliced_count_hi", "eff_gdna_lo", "eff_rna_hi"):
         assert dead not in fields
     for name in fields:
@@ -301,7 +301,7 @@ def test_the_flank_split_is_NOT_A_FACE():
 
 def _sweep(parts, *, kappa=0.5, n_obs=200_000):
     cap: dict = {}
-    node_sweep(
+    region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,
@@ -338,7 +338,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
     relay-only deletion pass the entire calibration suite — and it is exact rather than approximate.
 
     **The construction.** The fixture is a PALINDROME: signatures ``[·, exon, intron, exon, ·]``, uniform
-    node sizes and counts, and one junction ``node1 → node3`` with equal reaches. So reflecting the chain
+    region sizes and counts, and one junction ``region1 → region3`` with equal reaches. So reflecting the chain
     left-to-right maps it onto itself, slot ``k`` ↔ slot ``n−1−k``, and the junction's genomic-LOW end maps
     onto its genomic-HIGH end.
 
@@ -390,7 +390,7 @@ def test_THE_SEAM_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_CHAIN
     exon's frame, and the lift is the same reframe ``r`` — so it takes the same flank pair with the same
     role pairing. ⛔ Swapping ITS pairing fires none of the gates above: on the palindromic fixture the
     swap just exchanges the two flanks of every pair, and the pooled fit is symmetric in them, so it is
-    genuinely inert there. The chain here is deliberately ASYMMETRIC (unequal node sizes and counts) so
+    genuinely inert there. The chain here is deliberately ASYMMETRIC (unequal region sizes and counts) so
     the two lifts differ, and the gate reads the published per-pair log gap ``d`` directly.
 
     ⚠ What this protects is a library-level VARIANCE, not a location, so its accuracy weight is
@@ -398,8 +398,8 @@ def test_THE_SEAM_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_CHAIN
     """
     parts = make_chain_parts(
         [np.uint8(0), _EXON, _INTRON, _EXON, np.uint8(0)],
-        node_size_bp=[900.0, 400.0, 5000.0, 1100.0, 2500.0],
-        node_pos=[40.0, 260.0, 90.0, 610.0, 55.0],
+        region_size_bp=[900.0, 400.0, 5000.0, 1100.0, 2500.0],
+        region_pos=[40.0, 260.0, 90.0, 610.0, 55.0],
         edge_pos=[30.0, 140.0, 75.0, 210.0],
         junctions=[(1, 3, Strand.POS, 1e9, 1e9, 400.0)],
         gdna_fl=_delta_pmf(50),

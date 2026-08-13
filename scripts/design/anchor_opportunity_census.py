@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """⭐⭐⭐ IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.
 
-⛔ **THE QUESTION.** A structurally pure-gDNA NODE (intergenic, ``struct_lock``) with **zero** counts now
+⛔ **THE QUESTION.** A structurally pure-gDNA REGION (intergenic, ``struct_lock``) with **zero** counts now
 forms and transmits the claim ``rho_g = 0`` at precision ``1/trigamma(1/2) = 0.2026`` (TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero).
 Off capture that is the strongest true statement in a gDNA-free library. **Under capture an empty
-intergenic node may mean "no probe here" rather than "no gDNA here"** — and the relay's currency is a
+intergenic region may mean "no probe here" rather than "no gDNA here"** — and the relay's currency is a
 density RATIO, so a source claiming zero multiplies every destination it reaches to zero.
 
 This measures, from the origin-split oracle alone, whether that claim is true of the neighbourhood the
@@ -14,29 +14,29 @@ message reaches. Everything below is an identity on truth; nothing is fitted and
 
     rho_g_true[slot] = gdna_count[slot] / eff_gdna[slot]
 
-⭐ ``eff_gdna`` is built by the SHIPPED `build_node_geometry` from the gDNA partition's OWN fitted length
+⭐ ``eff_gdna`` is built by the SHIPPED `build_region_geometry` from the gDNA partition's OWN fitted length
 model — i.e. the TRUE post-capture gDNA pmf — so the divisor is the solver's own function evaluated at the
 exact pmf `SUCCESS.md` calls the ceiling. A census that wrote its own opportunity would be measuring a
 different program.
 
-⛔⛔ **THE POPULATION IS `g1_locked` ∧ NODE, AND IT IS *NOT* ``strand_evidence``'s ``struct_lock``.** This
+⛔⛔ **THE POPULATION IS `g1_locked` ∧ REGION, AND IT IS *NOT* ``strand_evidence``'s ``struct_lock``.** This
 docstring and the comment at the mask both said "exactly ``struct_lock``" until 2026-08-11 and the two
 masks differ by **15–23×**:
 
 ============================================  ==========  =======================================
 mask                                          size        what it is
 ============================================  ==========  =======================================
-``anchor`` — what this instrument measures         1,312   ``g1_locked ∧ NODE``: RNA is inadmissible
+``anchor`` — what this instrument measures         1,312   ``g1_locked ∧ REGION``: RNA is inadmissible
                                                            on both strands, so the composition is
                                                            structurally certain
-``struct_lock`` — what the solver actually    14,875 to    ``~((free_pos|free_neg) ∧ n_node>0) ∧
-locks (`node_init.py`)                            30,423   NODE`` — which is ``g1_locked`` **∪ every
-                                                           zero-count NODE**, empty exons and
+``struct_lock`` — what the solver actually    14,875 to    ``~((free_pos|free_neg) ∧ n_region>0) ∧
+locks (`region_init.py`)                            30,423   REGION`` — which is ``g1_locked`` **∪ every
+                                                           zero-count REGION**, empty exons and
                                                            introns included
 ============================================  ==========  =======================================
 
-⭐ ``anchor`` is the mask the docstring of ``struct_lock`` *describes* ("scoped to true intergenic NODE
-nodes") and the one the standing xfail wants it rescoped to. The shipped code grants certainty to
+⭐ ``anchor`` is the mask the docstring of ``struct_lock`` *describes* ("scoped to true intergenic REGION
+regions") and the one the standing xfail wants it rescoped to. The shipped code grants certainty to
 **13,563–29,111 further slots** whose ``f_g`` is a default belief and whose evidence is nothing at all.
 
 ⛔ **So this instrument's 346× verdict is a statement about 1,312 anchors, not about the population the
@@ -44,7 +44,7 @@ solver locks.** It is not thereby wrong — the anchors are what the question is
 overstated wherever it was quoted, and every run now prints both sizes so the reading cannot drift again.
 
 ⚠ Measured on four ladder conditions 2026-08-11: the ``∧ intergenic`` term is **redundant** —
-``g1_locked ∧ NODE`` and ``g1_locked ∧ intergenic ∧ NODE`` are the same 1,312 slots on all four. It is
+``g1_locked ∧ REGION`` and ``g1_locked ∧ intergenic ∧ REGION`` are the same 1,312 slots on all four. It is
 kept and ASSERTED rather than deleted, so an index that ever separates them says so instead of silently
 widening this instrument's population.
 
@@ -59,7 +59,7 @@ widening this instrument's population.
                    the probe-retention factor and nowhere else.
 
 ⚠ **The neighbour set is the chain's own adjacency** (`chain.left`/`chain.right`), not a re-derived
-traversal: genomic order IS slot order and the chain strictly alternates NODE/EDGE, so an anchor's
+traversal: genomic order IS slot order and the chain strictly alternates REGION/EDGE, so an anchor's
 neighbours are ``i-1`` and ``i+1`` and a reference terminal links to ``-1``.
 
 ⛔ **This instrument cannot say the anchor caused the regression** — it says only whether the anchor's
@@ -82,10 +82,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-from rigel.calibration.node_chain import EDGE, NODE, build_node_chain  # noqa: E402
-from rigel.calibration.node_geometry import (  # noqa: E402
-    build_node_geometry,
-    build_node_statics,
+from rigel.calibration.region_chain import EDGE, REGION, build_region_chain  # noqa: E402
+from rigel.calibration.region_geometry import (  # noqa: E402
+    build_region_geometry,
+    build_region_statics,
     g1_locked,
 )
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
@@ -119,8 +119,8 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
     from rigel.calibration.junction_opportunity import crossing_probability_from_index
 
     gp = parts["gdna"]
-    chain = build_node_chain(gp.ref_node_offsets, gp.ref_edge_offsets)
-    statics = build_node_statics(chain, ra, edge_flags)
+    chain = build_region_chain(gp.ref_region_offsets, gp.ref_edge_offsets)
+    statics = build_region_statics(chain, ra, edge_flags)
 
     # ⭐ the divisor comes from the gDNA partition's OWN length model — the true post-capture gDNA pmf.
     size = int(gp.max_length)
@@ -129,7 +129,7 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
         junction_opportunity=crossing_probability_from_index(index, size),
         gdna_opportunity=gdna_opportunity_from_index(index, size),
     )
-    geom = build_node_geometry(
+    geom = build_region_geometry(
         chain,
         CalibrationSubstrate.from_payload(gp, ra),
         ra,
@@ -147,8 +147,8 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
         """One origin's unspliced count on every slot — the same populations ``eff_gdna`` divides."""
         sub = CalibrationSubstrate.from_payload(payload, ra)
         out = np.zeros(chain.n_slots, np.float64)
-        out[kind == NODE] = np.asarray(sub.node_contained.count, np.float64).sum(1)[
-            obj[kind == NODE]
+        out[kind == REGION] = np.asarray(sub.region_contained.count, np.float64).sum(1)[
+            obj[kind == REGION]
         ]
         out[kind == EDGE] = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)[
             obj[kind == EDGE]
@@ -160,32 +160,32 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
     live = eff_g > 0.0
     rho_g = np.where(live, n_g / np.where(live, eff_g, 1.0), 0.0)
 
-    # ⛔ THE ANCHOR POPULATION IS ``g1_locked ∧ NODE`` — NOT ``strand_evidence``'s ``struct_lock``, which
+    # ⛔ THE ANCHOR POPULATION IS ``g1_locked ∧ REGION`` — NOT ``strand_evidence``'s ``struct_lock``, which
     # is 15-23x larger. See the module docstring's table; both claimed "exactly struct_lock" until
     # 2026-08-11 and neither mask matched it.
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
-    is_node = kind == NODE
-    ntype = np.where(is_node, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
+    is_region = kind == REGION
+    ntype = np.where(is_region, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
     locked = g1_locked(fp, fn)
-    anchor = is_node & (ntype == INTERGENIC) & locked
+    anchor = is_region & (ntype == INTERGENIC) & locked
 
     # ⭐ the ``∧ intergenic`` term is measured REDUNDANT (2026-08-11, four conditions). Asserted rather
-    # than deleted: if an index ever admits a G1 NODE that is not intergenic, this instrument's
+    # than deleted: if an index ever admits a G1 REGION that is not intergenic, this instrument's
     # population would silently narrow and its verdict would change meaning with no tell.
-    if not np.array_equal(anchor, is_node & locked):
+    if not np.array_equal(anchor, is_region & locked):
         raise AssertionError(
-            f"`g1_locked & NODE` ({int((is_node & locked).sum()):,}) and `g1_locked & intergenic & "
-            f"NODE` ({int(anchor.sum()):,}) have SEPARATED on this index. They were the same 1,312 "
+            f"`g1_locked & REGION` ({int((is_region & locked).sum()):,}) and `g1_locked & intergenic & "
+            f"REGION` ({int(anchor.sum()):,}) have SEPARATED on this index. They were the same 1,312 "
             f"slots when this instrument's population was defined; re-read the docstring's table "
             f"before trusting any number below."
         )
 
     # the mask the SOLVER actually locks, so the scope of every verdict below is printed beside it
-    # rather than asserted in prose (`node_init.py`: `locked = ~solvable`, `solvable = (fp|fn) & n>0`).
+    # rather than asserted in prose (`region_init.py`: `locked = ~solvable`, `solvable = (fp|fn) & n>0`).
     mass = n_g + n_r
-    struct_lock = (~((fp | fn) & (mass > 0.0))) & is_node
+    struct_lock = (~((fp | fn) & (mass > 0.0))) & is_region
 
     left, right = np.asarray(chain.left, np.int64), np.asarray(chain.right, np.int64)
     empty = anchor & (n_g <= 0.0)
@@ -230,7 +230,7 @@ def main() -> int:
     cache = Path(args.cache) if args.cache else suite / "oracle_cache"
     index = TranscriptIndex.load(args.index)
     cfg = PipelineConfig()
-    ra = RegionArrays.from_frame(index.nodes_df, index.ref_name_to_id)
+    ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     from rigel.calibration.splice_graph import (
         build_edge_flags_array,
         build_junction_geometry_arrays,
@@ -270,8 +270,8 @@ def main() -> int:
 
     print("\n" + "=" * 136)
     print(
-        "⛔ SCOPE: `anchor` is `g1_locked & NODE`; `lock` is the solver's own `struct_lock`, which also\n"
-        "   contains every ZERO-COUNT node (empty exons and introns). Every verdict on a row is a\n"
+        "⛔ SCOPE: `anchor` is `g1_locked & REGION`; `lock` is the solver's own `struct_lock`, which also\n"
+        "   contains every ZERO-COUNT region (empty exons and introns). Every verdict on a row is a\n"
         "   statement about the `anchor` column only — `lock/anch` is the factor by which the solver\n"
         "   locks more than this instrument measured.\n"
         "⭐ rho_full = mass-weighted TRUE gDNA density at anchors that DO hold counts;\n"

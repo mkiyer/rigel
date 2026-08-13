@@ -76,7 +76,7 @@ DEPOSIT_SENSITIVE_SCALARS = ("qc", "gap_resolution")
 #: depositing once and each interior one twice — `test_conserved_mass.py` derives this), and a junction
 #: can be claimed at BOTH its positions.
 FLOAT_BANK_DEPOSITS = {
-    "node_contained_inv_opportunity_sum": ("node_contained_count", 1),
+    "region_contained_inv_opportunity_sum": ("region_contained_count", 1),
     "edge_unspliced_inv_length_sum": ("edge_unspliced_count", 1),
     "edge_unspliced_mass": ("edge_unspliced_count", 2),
     "edge_spliced_mass": ("edge_spliced_count", 2),

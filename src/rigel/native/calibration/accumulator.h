@@ -6,34 +6,34 @@
  *
  * THE MODEL
  *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
- *   A reference contributing `c` cuts owns `c - 1` NODES and `c - 2` interior LINES, and a line is a
- *   0-bp CONTIGUOUS EDGE between two adjacent nodes:
+ *   A reference contributing `c` cuts owns `c - 1` REGIONS and `c - 2` interior LINES, and a line is a
+ *   0-bp CONTIGUOUS EDGE between two adjacent regions:
  *
  *       cuts    0        100       200       600        c = 4
- *       nodes   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
+ *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
  *       lines            line 1    line 2               c - 2 = 2
  *
  *   A JUNCTION EDGE is a directed donor->acceptor link taken from the annotation. A fragment is a
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
- *   Nodes count fragments CONTAINED (the whole path fits inside one node); edges count fragments
+ *   Regions count fragments CONTAINED (the whole path fits inside one region); edges count fragments
  *   CROSSING. Each population stores only the channels something READS, and they differ: count,
  *   inv_length_sum (fixed point), length_sum, and -- on the contiguous edges -- the conserved mass.
  *
  * WHY MORE THAN ONE SUM
- *   With `placements` the number of admissible start positions -- L at a node, L-1 at a 0-bp line:
+ *   With `placements` the number of admissible start positions -- L at a region, L-1 at a 0-bp line:
  *
  *       E[count]   = rho * E[placements]
  *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an EDGE, exactly
  *       E[length_sum]     = rho * E[placements * L]
  *
  * `inv_length_sum` is deliberately NOT called `density`: it is one at an edge, exactly, and is NOT one
- * at a node, where the opportunity (node - L + 1)+ does not cancel. `length_sum` is the second tilt, and
+ * at a region, where the opportunity (region - L + 1)+ does not cancel. `length_sum` is the second tilt, and
  * without it the (count, inv_length_sum) pair has determinant mu_g - mu_r and so carries NO information
  * about the gDNA/RNA split whenever the two components share a mean length. See
  *
  *   The opportunity factor cancels identically at an edge for ANY length distribution, which is why no
- *   divisor and no length model appear there. It does not cancel at a node.
+ *   divisor and no length model appear there. It does not cancel at a region.
  *
  * TWO STRANDS, AND THEY ARE INDEPENDENT
  *   align_strand   the genomic strand the read ALIGNED to. Every read has one. Selects the column.
@@ -91,9 +91,9 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 //: ⭐⭐ And the fixed point was LESS ACCURATE, measured against exact rational arithmetic on the
 //: reciprocal-opportunity theorem (each length contributes exactly one density unit):
 //:
-//:      node_len 151    fixed 7.0e-10    double 5.8e-15      120,000x better
-//:      node_len 400    fixed 1.7e-08    double 1.0e-13      170,000x better
-//:      node_len 1000   fixed 2.0e-07    double 2.8e-13      714,000x better
+//:      region_len 151    fixed 7.0e-10    double 5.8e-15      120,000x better
+//:      region_len 400    fixed 1.7e-08    double 1.0e-13      170,000x better
+//:      region_len 1000   fixed 2.0e-07    double 2.8e-13      714,000x better
 //:
 //: ⚠ The exactness the old gates asserted was a property of their FIXTURES: 1/2 + 1/3 + 1/6 lands back
 //: on 2^32 because two rounding errors cancel, while 1/3 + 1/3 + 1/3 is one quantum short -- and double
@@ -106,15 +106,15 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 // what each object stores
 // ============================================================================
 
-/// A node: an interval. ONE population — the fragments contained inside it — in two strand columns.
+/// A region: an interval. ONE population — the fragments contained inside it — in two strand columns.
 ///
-/// ⚠ A `spanning` population (one segment covering the node whole) was removed on evidence: it reached
-/// no evidence-starved node the node's own bounding EDGES did not already reach off capture, and 141
-/// nodes / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
-/// the node's lines and is deposited there.
-/// ⛔ Consequence, and it is structural: no spliced fragment touches the node axis at all, because a
+/// ⚠ A `spanning` population (one segment covering the region whole) was removed on evidence: it reached
+/// no evidence-starved region the region's own bounding EDGES did not already reach off capture, and 141
+/// regions / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
+/// the region's lines and is deposited there.
+/// ⛔ Consequence, and it is structural: no spliced fragment touches the region axis at all, because a
 /// spliced fragment can never be `contained` (both endpoints of an annotated intron are cuts).
-struct Node {
+struct Region {
     std::uint32_t contained_count[kNStrandColumns];
     /// ⭐ ONE value, while `contained_count` keeps two. The length moments are strand-AGNOSTIC -- which
     /// strand a read aligned to says nothing about whether the molecule was gDNA or RNA -- and every
@@ -122,15 +122,15 @@ struct Node {
     /// is a Beta-Binomial over them, per strand.
     double contained_inv_opportunity_sum;
 };
-static_assert(sizeof(Node) == 16, "Node must be 16 bytes with no padding");
+static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
 
-/// A contiguous edge: the 0-bp line between two adjacent nodes. `spliced` means the FRAGMENT used an
+/// A contiguous edge: the 0-bp line between two adjacent regions. `spliced` means the FRAGMENT used an
 /// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
 /// crossing is a certified RNA crossing.
 struct ContiguousEdge {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
-    /// ⭐ ONE value -- strand-agnostic, see `Node`.
+    /// ⭐ ONE value -- strand-agnostic, see `Region`.
     double unspliced_inv_length_sum;
     /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
     /// number cannot be both: `unspliced_count` is `+1` on every line a fragment crosses, so a fragment
@@ -162,7 +162,7 @@ struct JunctionEdge {
     double inv_length_sum;
     /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
     /// line deposits on neither edge bank, and is not `contained` either -- its path spans a junction,
-    /// so it lies in no single node. Such a fragment existed on the incidence axis and on no conserved
+    /// so it lies in no single region. Such a fragment existed on the incidence axis and on no conserved
     /// one, which is why a library fragment count was not computable. Measured on the origin-split
     /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
     /// population, against 0 of 4,997,761 gDNA fragments, because gDNA cannot splice.
@@ -202,15 +202,15 @@ static_assert(sizeof(JunctionEdge) == 32, "JunctionEdge must be 32 bytes with no
 //: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing -- those are
 //: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
 enum class FragmentPool : std::uint8_t {
-    kDnaIntergenic     = 0,  // contained in an intergenic node
-    kDnaIntronic       = 1,  // contained in an intronic node
+    kDnaIntergenic     = 0,  // contained in an intergenic region
+    kDnaIntronic       = 1,  // contained in an intronic region
     kDnaIntronExon     = 2,  // crossing exactly one line, flanks {intron, exon} -- a "splash" read
     kDnaIntergenicExon = 3,  // crossing exactly one line, flanks {intergenic, exon}
     kRnaSpliced        = 4,  // using an annotated junction, splice OBSERVED
 };
 inline constexpr std::size_t kNFragmentPools = 5;
 
-//: Coarse node types, as `signature.coarse_type_array` emits them.
+//: Coarse region types, as `signature.coarse_type_array` emits them.
 inline constexpr std::uint8_t kTypeIntergenic = 0;
 inline constexpr std::uint8_t kTypeIntron     = 1;
 inline constexpr std::uint8_t kTypeExon       = 2;
@@ -428,9 +428,9 @@ struct DepositCounters {
 class Accumulator {
 public:
     /// `cuts` is this reference's sorted, strictly increasing cut positions and is moved in. Length may
-    /// be 0 or 1, which is a reference with no nodes: legal, and it deposits nothing.
+    /// be 0 or 1, which is a reference with no regions: legal, and it deposits nothing.
     ///
-    /// `node_types` is either empty or one coarse type per node; it types the length pools. `max_length`
+    /// `region_types` is either empty or one coarse type per region; it types the length pools. `max_length`
     /// is the fragment-length limit applied to L and the width of the pool histograms, and must be >= 1
     /// -- at 0 every real fragment would be dropped as too long and the whole tally would be silently
     /// empty.
@@ -440,7 +440,7 @@ public:
     /// into every DEFERRED record, and the second pass replays those through `deposit` -- onto the wrong
     /// cut axis if the stamp is wrong, which is the failure mode `merge_from`'s cut comparison exists for.
     explicit Accumulator(std::vector<std::int64_t> cuts,
-                         std::vector<std::uint8_t> node_types,
+                         std::vector<std::uint8_t> region_types,
                          int max_length,
                          std::int32_t ref_id);
 
@@ -457,29 +457,29 @@ public:
                        std::vector<std::int32_t> boundary_right,  // acceptor CUT INDEX, not a coordinate
                        std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
 
-    std::size_t n_nodes()    const noexcept { return nodes_.size(); }
+    std::size_t n_regions()    const noexcept { return regions_.size(); }
     std::size_t n_edges()    const noexcept { return edges_.size(); }
     std::size_t n_junctions() const noexcept { return junctions_.size(); }
     std::size_t n_cuts()     const noexcept { return cuts_.size(); }
 
     const std::int64_t* cuts_data() const noexcept { return cuts_.data(); }
-    Node*               nodes_data()      noexcept { return nodes_.data(); }
-    const Node*         nodes_data() const noexcept { return nodes_.data(); }
+    Region*               regions_data()      noexcept { return regions_.data(); }
+    const Region*         regions_data() const noexcept { return regions_.data(); }
     ContiguousEdge*     edges_data()      noexcept { return edges_.data(); }
     const ContiguousEdge* edges_data() const noexcept { return edges_.data(); }
     JunctionEdge*       junctions_data()      noexcept { return junctions_.data(); }
     const JunctionEdge* junctions_data() const noexcept { return junctions_.data(); }
 
-    /// One uint32 per node counting fragments whose FIRST COVERED BASE lies in it.
+    /// One uint32 per region counting fragments whose FIRST COVERED BASE lies in it.
     ///
-    /// ⭐ This is the accumulator's one real invariant: `sum(node_start_count) == deposited`, checkable
+    /// ⭐ This is the accumulator's one real invariant: `sum(region_start_count) == deposited`, checkable
     /// against a number the scanner knows independently. The three "conservation identities" it replaced
     /// were tautologies -- each right-hand side could only be evaluated by re-running the deposit, so a
     /// deliberately broken replay satisfied all three while 91 % of the crossings were junk.
-    const std::uint32_t* node_start_count_data() const noexcept { return node_start_count_.data(); }
+    const std::uint32_t* region_start_count_data() const noexcept { return region_start_count_.data(); }
 
     /// Length histograms, pool-major: pool p occupies [p*(max_length+1), (p+1)*(max_length+1)), binned
-    /// at L. Empty when this reference has no node types.
+    /// at L. Empty when this reference has no region types.
     const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
     std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
 
@@ -495,8 +495,8 @@ public:
     /// rejects (too long / ambiguous path / strand-undefined / empty), each of which is counted in
     /// `DepositCounters`. That is exactly the population the pools are drawn from.
     ///
-    /// Invariant, the same externally-checkable form as node_start_count's and a DIFFERENT statement:
-    /// `sum(deposited_lengths) == sum(node_start_count) == deposited`.
+    /// Invariant, the same externally-checkable form as region_start_count's and a DIFFERENT statement:
+    /// `sum(deposited_lengths) == sum(region_start_count) == deposited`.
     const std::uint32_t* deposited_lengths_data() const noexcept { return deposited_lengths_.data(); }
     std::size_t          deposited_lengths_size() const noexcept { return deposited_lengths_.size(); }
     int                 max_length()        const noexcept { return max_length_; }
@@ -511,12 +511,12 @@ public:
     /// that means nothing.
     const DeferredFragments& deferred_canonical();
 
-    /// Index of the node containing `position`, clamped into [0, n_nodes - 1].
+    /// Index of the region containing `position`, clamped into [0, n_regions - 1].
     ///
     /// ⚠ Clamped, not -1 on miss: `deposit` has already clipped the path into this reference, so a
     /// position outside cannot arrive, and clamping keeps this byte-compatible with the spec's
     /// `min(max(searchsorted(cuts, p, 'right') - 1, 0), n_cuts - 2)`.
-    std::int64_t node_of_pos(std::int64_t position) const noexcept;
+    std::int64_t region_of_pos(std::int64_t position) const noexcept;
 
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
     DepositOutcome deposit(const OfferedFragment& fragment, DepositScratch& scratch);
@@ -547,7 +547,7 @@ private:
     /// preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is a
     /// length filter.
     std::int64_t fragment_pool(bool spliced,
-                               std::int64_t contained_node,
+                               std::int64_t contained_region,
                                std::int64_t sole_line) const noexcept;
 
     /// L for one hypothesis: its implied introns UNIONED with the observed ones, normalised and clipped
@@ -574,16 +574,16 @@ private:
     std::int64_t exact_cut(std::int64_t position) const noexcept;
 
     std::vector<std::int64_t>  cuts_;              // n_cuts, strictly increasing
-    std::vector<Node>          nodes_;             // n_cuts - 1
+    std::vector<Region>          regions_;             // n_cuts - 1
     std::vector<ContiguousEdge> edges_;            // n_cuts - 2, the interior lines
     std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
-    std::vector<std::uint32_t> node_start_count_;  // n_nodes -- its own array, so Node stays 48 B
+    std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
 
     std::vector<std::int32_t>  sj_offsets_;        // n_cuts + 1, CSR over the donor cut index
     std::vector<std::int32_t>  sj_boundary_right_;   // n_junctions
     std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
 
-    std::vector<std::uint8_t>  node_types_;        // n_nodes, or empty (no pools)
+    std::vector<std::uint8_t>  region_types_;        // n_regions, or empty (no pools)
     std::int32_t               ref_id_ = 0;        // stamped into every deferred record
     int                        max_length_ = 0;
     std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
@@ -599,7 +599,7 @@ private:
 //
 // `cut_positions` is the concatenated, reference-major cut array; reference f owns
 // cut_positions[ref_cut_offsets[f] .. ref_cut_offsets[f+1]). A reference with fewer than 2 cuts owns no
-// nodes and no edges, which is legal.
+// regions and no edges, which is legal.
 //
 class AccumulatorSet {
 public:
@@ -607,8 +607,8 @@ public:
                    std::size_t n_positions,
                    const std::int64_t* ref_cut_offsets,
                    std::size_t n_refs,
-                   const std::uint8_t* node_types,
-                   std::size_t n_node_types,
+                   const std::uint8_t* region_types,
+                   std::size_t n_region_types,
                    int max_length);
 
     std::size_t n_refs() const noexcept { return accs_.size(); }

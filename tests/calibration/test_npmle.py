@@ -60,7 +60,7 @@ def test_projection_is_bare_no_reference_prior():
     log_rho = np.log(fg)[None, :] + (np.log(mass) - np.log(e))[:, None]
     expect = np.interp(log_rho.ravel(), pr.log_rho, pr.logP, left=pr.logP[0], right=pr.logP[-1])
     assert np.allclose(term, expect.reshape(term.shape), atol=1e-12)
-    # A node whose density is far ABOVE the fitted support must be penalised at f_g→1, not rewarded.
+    # A region whose density is far ABOVE the fitted support must be penalised at f_g→1, not rewarded.
     # (Under the ramp this was inverted: the +0.5·λ pull beat the kde's own tail.)
     dense = pr.logprior(fg, np.array([mass.max() * 50.0]), np.array([e[0]]))[0]
     assert dense[-1] <= dense[len(fg) // 2] + 1e-9
@@ -73,7 +73,7 @@ def test_prior_is_weak():
     The bound is **2** pseudo-observations, not 1. The old <1 threshold was measured against a prior that
     silently carried the ``+0.5·λ`` ramp, and **a ramp has zero curvature by construction** — it widened
     Var(λ) and dragged the mass to the vertex, so the prior *scored* weak while in fact overwhelming every
-    unstranded node (it alone returned f_g = 0.9994). Stripping it reveals the kde's true curvature:
+    unstranded region (it alone returned f_g = 0.9994). Stripping it reveals the kde's true curvature:
     n_eff ≈ 1.2. That is still weak — the strand at κ=0.99, n=100 is worth ~5.3 — but it is honest.
     See
     """
@@ -89,13 +89,13 @@ def test_prior_is_weak():
     var = (w * (lam[None, :] - m[:, None]) ** 2).sum(1)
     n_eff = (1.0 / np.maximum(var, 1e-9)) / 0.25  # pseudo-observations
     assert np.median(n_eff) < 2.0
-    assert (n_eff > 4.0).mean() < 0.05  # no node may rival a well-stranded count
+    assert (n_eff > 4.0).mean() < 0.05  # no region may rival a well-stranded count
 
 
 def test_lognormal_belief_width_path():
     """The refit path (nonzero belief width τ²=var_g, via Gauss-Hermite) fits a valid, deterministic P(ρ).
     Note: unlike a non-deconvolving average, the fixed-kernel EM DECONVOLVES the belief width out — a wide τ
-    is attributed to observation noise, not true rate spread — so uncertain nodes are down-weighted rather
+    is attributed to observation noise, not true rate spread — so uncertain regions are down-weighted rather
     than broadening P(ρ). Here we only assert the path is valid + reproducible; the deconvolution behaviour is
     exercised end-to-end by the calibration/oracle benchmarks."""
     count, eff = _bimodal_counts()
@@ -131,7 +131,7 @@ def test_projection_floor_is_h_squared():
         _mu, var = pr.project(count + 1.0, eff)
         assert np.isfinite(var).all()
         assert (var >= h2 - 1e-9).all()  # the within-mode floor is the hard lower bound
-        # a node deep in the enriched mode (rate 1e-2) sits at ~the floor (unambiguous membership)
+        # a region deep in the enriched mode (rate 1e-2) sits at ~the floor (unambiguous membership)
         assert pr.project(np.array([1e-2 * 150.0]), np.array([150.0]))[1][0] < 3.0 * h2
 
 
@@ -170,8 +170,8 @@ def test_aggregate_cell_concentrates_mass_at_background():
     at ``log ρ_bg = log(Σg/ΣE)`` — the smooth low-density anchor, sharp by construction (the huge ΣE)."""
     rng = np.random.default_rng(1)
     eff = rng.uniform(1000.0, 3000.0, 5000)
-    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual nodes at ρ ≈ 1e-2
-    target = float(np.log(1e-3))  # the background sits a decade BELOW the individual nodes
+    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual regions at ρ ≈ 1e-2
+    target = float(np.log(1e-3))  # the background sits a decade BELOW the individual regions
     bg = BackgroundReference(
         log_rho_bg=target,
         sigma_bg=0.001,
@@ -205,7 +205,7 @@ def test_aggregate_cell_zero_counts_anchors_the_derived_floor():
     (.)"""
     rng = np.random.default_rng(2)
     eff = rng.uniform(1000.0, 3000.0, 3000)
-    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual nodes
+    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual regions
     rho_res = float(np.mean(1.0 / eff))  # mean(1/E_i) = 1/harmmean(E) — the resolution wall
     lrf = float(np.log(rho_res))
     bg0 = BackgroundReference(
@@ -245,7 +245,7 @@ def test_projection_is_continuous_across_the_valley():
     functions of the observed density — there are no regime strata, no thresholds. The discriminating property,
     with no magic threshold: for a Lipschitz function the max adjacent jump ``∝ grid step``, so HALVING the step
     roughly halves the max jump; a step-function's jump (≈ the mode gap, several nats) is resolution-INVARIANT.
-    We sweep a node's density straight through the depleted↔enriched valley — the one place a stratified design
+    We sweep a region's density straight through the depleted↔enriched valley — the one place a stratified design
     would step — at two resolutions and assert the max jump shrinks like the step. Reintroducing discrete regime
     bins would make the ratio ≈ 1, failing this."""
     count, eff = _bimodal_counts()
@@ -330,7 +330,7 @@ def test_additive_weak_floor_cannot_dominate_the_flood():
 
 
 def test_additive_pure_rna_concentrates_low_no_phantom_mode():
-    """FP safety: pure-RNA nodes (ĝ≈0) read as gDNA ≤ 1/E ⇒ the density concentrates at the low resolution
+    """FP safety: pure-RNA regions (ĝ≈0) read as gDNA ≤ 1/E ⇒ the density concentrates at the low resolution
     wall, with no manufactured high-gDNA mode."""
     eff = np.full(300, 1000.0)
     g_hat = np.zeros(300)  # pure RNA: no deconvolved gDNA

@@ -3,7 +3,7 @@
 
 ⛔ **THE PROBLEM THIS SOLVES.** Every calibration defect we have found so far was found by sifting a
 36-condition, 10-million-fragment panel for objects that behave badly, and then trying to reason
-backwards from a node id to a mechanism. That is slow, the examples are never quite the ones you
+backwards from a region id to a mechanism. That is slow, the examples are never quite the ones you
 wanted, and a fix cannot be *demonstrated* — only measured in aggregate, where two errors can cancel.
 
 ⭐ **WHAT IT DOES.** A **mini chromosome** you define — a handful of genes with exactly the structure
@@ -15,7 +15,7 @@ trick. A tiny toy cannot fit the library-level quantities calibration needs — 
 no population to estimate a strand balance, an enrichment landscape or an intergenic background from.
 So one of the 36 ladder conditions acts as **donor**: it is calibrated once, and its fitted
 library-level bundle is injected into the toy (:class:`~rigel.calibration.calibrate.InjectedCalibrationPriors`,
-whose docstring specifies exactly this use). The toy then supplies only the controlled per-node
+whose docstring specifies exactly this use). The toy then supplies only the controlled per-region
 GEOMETRY, which is the thing under study.
 
 The donor supplies, and the toy therefore does NOT have to invent:
@@ -34,7 +34,7 @@ gDNA density per base        ⭐ see `_rate_from_capture` -- the toy is simulate
 
 ⭐⭐ **DEPTH MATCHING IS NOT OPTIONAL.** ``calibrate``'s own note on the injected enrichment prior says
 it: the NPMLE is an *absolute* log-density landscape, so "the toy's densities must be generated at the
-reference library's depth so its nodes project onto the right cells". A toy at the wrong depth is not
+reference library's depth so its regions project onto the right cells". A toy at the wrong depth is not
 a small version of the library, it is a different library. So the harness measures the donor's gDNA
 density per base from the donor's OWN pure-gDNA population and simulates the toy to match it, rather
 than taking a fragment count from the user.
@@ -49,7 +49,7 @@ than taking a fragment count from the user.
                    ``abundance=`` field, which is a per-transcript weight, not a density
 =================  ==============================================================================
 
-⚠ A node's stored *counts* are CONTAINED counts, so ``counts != density x bp`` -- it is
+⚠ A region's stored *counts* are CONTAINED counts, so ``counts != density x bp`` -- it is
 ``density x effective_length``. The sweep therefore reports the density it ASKED the simulator for
 and the counts each object actually RECEIVED, side by side, and never converts one into the other.
 
@@ -83,7 +83,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibrat
 from _oracle import OracleTruth  # noqa: E402
 
 from rigel.calibration.calibrate import InjectedCalibrationPriors, calibrate  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -101,7 +101,7 @@ _EPS = 1.0e-12
 DEFAULT_SUITE = Path.home() / "Downloads/rigel_runs/suite/ladder"
 DEFAULT_INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
 
-#: Coarse node type names, shared with every other instrument (`signature.coarse_type_array`).
+#: Coarse region type names, shared with every other instrument (`signature.coarse_type_array`).
 TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 
@@ -224,22 +224,22 @@ def harvest(
 
 
 def _rate_from_capture(capture, chain, region_arrays) -> float:
-    """``sum(count) / sum(eff_gdna)`` over the donor's INTERGENIC node slots.
+    """``sum(count) / sum(eff_gdna)`` over the donor's INTERGENIC region slots.
 
     ⭐ Both arrays are the solver's own (``capture['count']`` and ``capture['eff_gdna']``), so the rate
-    is in exactly the frame the toy's own nodes will be measured in — no second implementation of an
+    is in exactly the frame the toy's own regions will be measured in — no second implementation of an
     effective length, which is how two definitions of one quantity start to drift (TRAPS: two-docstrings-one-quantity).
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-    is_node = kind == NODE
-    pure = is_node.copy()
-    pure[is_node] = rtype[obj[is_node]] == 0
+    is_region = kind == REGION
+    pure = is_region.copy()
+    pure[is_region] = rtype[obj[is_region]] == 0
     count = np.asarray(capture["count"], np.float64).sum(axis=1)
     eff = np.asarray(capture["eff_gdna"], np.float64)
     if not pure.any() or eff[pure].sum() <= 0.0:
-        raise ValueError("no intergenic node slots with gDNA opportunity in the donor")
+        raise ValueError("no intergenic region slots with gDNA opportunity in the donor")
     return float(count[pure].sum() / eff[pure].sum())
 
 
@@ -473,7 +473,7 @@ def run_toy(
         # UNDRAINED whole inside `drain_with` (the drained bank holds nothing, so it has no key pool).
         full_payload=payload,
         drain_with=(
-            (lift["undrained"], lift["choices"], lift["node_types"], lift["junctions"])
+            (lift["undrained"], lift["choices"], lift["region_types"], lift["junctions"])
             if lift
             else None
         ),
@@ -511,7 +511,7 @@ def run_toy(
 
 
 def object_rows(r: ToyResult) -> list[dict]:
-    """One row per node and per contiguous edge, in genomic order along the chain."""
+    """One row per region and per contiguous edge, in genomic order along the chain."""
     chain, ra = r.chain, r.region_arrays
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -529,27 +529,27 @@ def object_rows(r: ToyResult) -> list[dict]:
     spliced = np.asarray(cap["spliced"], np.float64)
 
     ov = r.truth.override_masses(ra)
-    tg = {"node": np.asarray(ov["mass_gdna_node"], np.float64),
+    tg = {"region": np.asarray(ov["mass_gdna_region"], np.float64),
           "edge": np.asarray(ov["mass_gdna_edge"], np.float64)}
-    tr = {"node": np.asarray(ov["mass_rna_node"], np.float64),
+    tr = {"region": np.asarray(ov["mass_rna_region"], np.float64),
           "edge": np.asarray(ov["mass_rna_edge"], np.float64)}
-    pg = {"node": np.asarray(r.result.mass_gdna_node, np.float64),
+    pg = {"region": np.asarray(r.result.mass_gdna_region, np.float64),
           "edge": np.asarray(r.result.mass_gdna_edge, np.float64)}
-    pr = {"node": np.asarray(r.result.mass_rna_node, np.float64),
+    pr = {"region": np.asarray(r.result.mass_rna_region, np.float64),
           "edge": np.asarray(r.result.mass_rna_edge, np.float64)}
 
     rows = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        axis = "node" if kind[s] == NODE else "edge"
-        if axis == "node":
+        axis = "region" if kind[s] == REGION else "edge"
+        if axis == "region":
             label = TYPE_NAMES[int(rtype[i])]
             where = f"{int(start[i]):,}–{int(start[i] + size[i]):,}"
             bp = int(size[i])
         else:
             lo, hi = s - 1, s + 1
-            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == NODE else -1
-            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == NODE else -1
+            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
+            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
             pair = "|".join(TYPE_NAMES.get(x, "?") for x in sorted((a, b)) if x >= 0)
             label = pair or "edge"
             where = f"@{int(start[obj[hi]]):,}" if b >= 0 else f"#{i}"
@@ -661,7 +661,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "one_exon": ToySpec(
         name="one_exon",
-        what_it_probes="a single-exon gene: one exon node, two intergenic|exon edges, no junction",
+        what_it_probes="a single-exon gene: one exon region, two intergenic|exon edges, no junction",
         genome_length=60_000,
         genes=[_gene("g1", "+", [(20_000, 23_000)], 400.0)],
     ),
@@ -675,13 +675,13 @@ SPECS: dict[str, ToySpec] = {
         name="spliced_exons",
         what_it_probes="⭐⭐ OWNER'S SPEC. ONE two-exon transcript TA+ (1,000, 2,000) (9,000, 10,000) "
         "— so this is `nested_exons`'s TWIN at the same gene boundaries on the same 12 kb "
-        "chromosome, with an INTRON and a JUNCTION where the nesting was. FIVE NODES, FOUR "
+        "chromosome, with an INTRON and a JUNCTION where the nesting was. FIVE REGIONS, FOUR "
         "contiguous EDGES and ⭐ the ladder's first JUNCTION EDGE:\n"
-        "          NODE intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA (TSS+)\n"
-        "          NODE exon  [1000, 2000)   TA e1  EDGE @2,000   intron|exon, the DONOR+ side\n"
-        "          NODE intron [2000, 9000)  TA i1  EDGE @9,000   intron|exon, the ACCEPTOR+ side\n"
-        "          NODE exon  [9000, 10000)  TA e2  EDGE @10,000  intergenic|exon, pure gDNA (TES+)\n"
-        "          NODE intergenic [10000, 12000)\n"
+        "          REGION intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA (TSS+)\n"
+        "          REGION exon  [1000, 2000)   TA e1  EDGE @2,000   intron|exon, the DONOR+ side\n"
+        "          REGION intron [2000, 9000)  TA i1  EDGE @9,000   intron|exon, the ACCEPTOR+ side\n"
+        "          REGION exon  [9000, 10000)  TA e2  EDGE @10,000  intergenic|exon, pure gDNA (TES+)\n"
+        "          REGION intergenic [10000, 12000)\n"
         "          JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, NOT a chain slot\n"
         "        ⭐⭐ What it adds over every rung before it, and why it is the hard one: the two "
         "exon↔intron EDGES. Mature RNA cannot cross an exon↔intron seam contiguously, so their truth "
@@ -694,9 +694,9 @@ SPECS: dict[str, ToySpec] = {
         "empty chromosome. At 120 kb they carry 20 and 36 at the EXON's own capture stratum (density "
         "0.079–0.142 against the exon interior's 0.158–0.162 and the intron interior's 0.00015), which is "
         "the regime the object actually matters in. ⭐ That is capture working as intended: the gDNA "
-        "signal LEAVES the intergenic and intronic NODES and arrives at the EDGES abutting the exon.\n"
+        "signal LEAVES the intergenic and intronic REGIONS and arrives at the EDGES abutting the exon.\n"
         "        ⭐ And unlike `nested_exons` there IS own evidence inside the gene: the 7,000 bp intron "
-        "NODE is where the intron factory lives, so the gDNA level does not have to travel from the "
+        "REGION is where the intron factory lives, so the gDNA level does not have to travel from the "
         "gene ends. The two exons each sit between a G1 gene-boundary EDGE and an exon|intron EDGE, and "
         "the junction's flux is the only measurement of their mature RNA.",
         genome_length=12_000,
@@ -718,7 +718,7 @@ SPECS: dict[str, ToySpec] = {
         "`Sum(count)/Sum(E)` — the ratio of sums, never the mean of ratios. ⛔ A single junction-inclusive "
         "total per EDGE cannot express this at all, and neither can a per-junction rule that forgets the "
         "two share a line.\n"
-        "        ⭐ It also adds a node that is exon AND intron on the SAME strand: [5,000, 6,000) is TA's "
+        "        ⭐ It also adds a region that is exon AND intron on the SAME strand: [5,000, 6,000) is TA's "
         "middle exon and lies inside TB's intron. `splice_both_strands` had that contrast only ACROSS "
         "strands; here it is within one, so no strand bit can separate them and `coarse_type_array` calls "
         "it `exon`.\n"
@@ -756,7 +756,7 @@ SPECS: dict[str, ToySpec] = {
         "is exactly the population the new TSS/TES edges create, and if it is not binned as spliced it "
         "falls into the UNSPLICED pool and gets deconvolved — certified RNA fed to the gDNA solver.\n"
         "        ⛔ **No previous toy can make this fragment.** On every earlier rung the exons ARE the "
-        "nodes, so a spliced molecule never crosses an interior line contiguously and `edge_spliced` is "
+        "regions, so a spliced molecule never crosses an interior line contiguously and `edge_spliced` is "
         "structurally zero everywhere (measured 0 on `alt_splice`, including at exons holding 68,000 RNA "
         "fragments).\n"
         "        ⭐ The other three structures, each a separate stress:\n"
@@ -764,7 +764,7 @@ SPECS: dict[str, ToySpec] = {
         "exon 2 spans 9,000-9,100 unbroken. So one line carries junction flux for one transcript and an "
         "unspliced RNA crossing for another.\n"
         "          EDGE @1,050 — TA's TSS, with TB already transcribing through it.\n"
-        "          NODE [9,000, 9,050) — TA exon AND TB intron on the SAME strand, 50 bp wide, so it is "
+        "          REGION [9,000, 9,050) — TA exon AND TB intron on the SAME strand, 50 bp wide, so it is "
         "also below one fragment length and has no resolvable density of its own (TRAPS: density-below-one-fragment-length).\n"
         "        ⚠ Both `abundance` values are meant to be SWEPT: the certified channel's strength at "
         "@9,100 is TB's alone, while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves "
@@ -792,9 +792,9 @@ SPECS: dict[str, ToySpec] = {
         "          TC− (1,000, 11,000)                     1 exon,  − strand, spans everything\n"
         "          TD− (1,000, 2,500) (8,500, 11,000)      2 exons, − strand, intron 2,500-8,500\n"
         "        ⭐⭐ WHY THIS ONE. Every previous rung let an EDGE answer 'is my neighbour an exon?' "
-        "with a yes or a no. Here it cannot: THREE nodes are simultaneously an INTRON on one strand and "
+        "with a yes or a no. Here it cannot: THREE regions are simultaneously an INTRON on one strand and "
         "an EXON on the other — [2,500, 3,000), [3,000, 8,500) and [8,500, 9,000) — so 'exon' is not a "
-        "property of a node at all, it is a property of (node, strand). And the two junctions are on "
+        "property of a region at all, it is a property of (region, strand). And the two junctions are on "
         "OPPOSITE strands, so an edge can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
         "        ⛔ The question it exists to answer is per (EDGE, side, strand, donor-or-acceptor, "
         "message direction): when this edge reframes against that neighbour, does its splice flux belong "
@@ -827,16 +827,16 @@ SPECS: dict[str, ToySpec] = {
         name="nested_exons",
         what_it_probes="⭐⭐ NESTED EXONS (owner's spec). THREE nested single-exon transcripts on one gene:\n"
         "                     TA+ (1,000, 10,000)   TB+ (2,000, 9,000)   TC+ (3,000, 8,000)\n"
-        "        The partition is therefore SEVEN NODES and SIX EDGES, and there is NO INTRON "
+        "        The partition is therefore SEVEN REGIONS and SIX EDGES, and there is NO INTRON "
         "anywhere:\n"
-        "          NODE intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA\n"
-        "          NODE exon [1000, 2000)   TA      EDGE @2,000   exon|exon\n"
-        "          NODE exon [2000, 3000)   TA+TB   EDGE @3,000   exon|exon\n"
-        "          NODE exon [3000, 8000)   TA+B+C  EDGE @8,000   exon|exon\n"
-        "          NODE exon [8000, 9000)   TA+TB   EDGE @9,000   exon|exon\n"
-        "          NODE exon [9000, 10000)  TA      EDGE @10,000  intergenic|exon, pure gDNA\n"
-        "          NODE intergenic [10000, 12000)\n"
-        "        ⭐ Every one of the five exon NODES carries RNA and the library is unstranded, so NONE "
+        "          REGION intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA\n"
+        "          REGION exon [1000, 2000)   TA      EDGE @2,000   exon|exon\n"
+        "          REGION exon [2000, 3000)   TA+TB   EDGE @3,000   exon|exon\n"
+        "          REGION exon [3000, 8000)   TA+B+C  EDGE @8,000   exon|exon\n"
+        "          REGION exon [8000, 9000)   TA+TB   EDGE @9,000   exon|exon\n"
+        "          REGION exon [9000, 10000)  TA      EDGE @10,000  intergenic|exon, pure gDNA\n"
+        "          REGION intergenic [10000, 12000)\n"
+        "        ⭐ Every one of the five exon REGIONS carries RNA and the library is unstranded, so NONE "
         "of them has composition evidence of its own; and with no intron there is no object in the "
         "middle of the gene that can re-derive the gDNA level for itself. So the gDNA level has to "
         "travel from the two pure-gDNA EDGES at the gene ends through five evidence-free objects. "
@@ -992,7 +992,7 @@ def sweep_density(
         print(f"      The donor's gDNA density is {g_rate:.5g} counts/bp and the chromosome is only")
         print(f"      {spec.genome_length:,} bp. ⛔ The density is PINNED to the donor and must NOT be")
         print("      changed. Which lever helps depends on WHICH object is starved:")
-        print("      • an intergenic NODE  — lengthen the chromosome (--genome-length): counts scale")
+        print("      • an intergenic REGION  — lengthen the chromosome (--genome-length): counts scale")
         print("        with bp at fixed density;")
         print("      • an EDGE, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
         print("        `density x mean_FL`, independent of the chromosome, so the only lever is depth.")
@@ -1004,7 +1004,7 @@ def sweep_density(
         print("        the edge count grows with L until that ratio saturates. ⭐ Measured on")
         print("        `spliced_exons` x `g75 ss0.50 capture_on`, 12 kb -> 120 kb: the two intron|exon")
         print("        EDGEs go 2 -> 20 and 5 -> 36 counts and the gene-boundary EDGEs 1 -> 41 and")
-        print("        2 -> 35, while the intron NODE stays at 1 and the intergenic NODE at ~0 density")
+        print("        2 -> 35, while the intron REGION stays at 1 and the intergenic REGION at ~0 density")
         print("        — i.e. the signal moves to the EDGES abutting the exon, which is what capture")
         print("        does. ⚠ Raising `binding_per_base` also works but un-matches the toy from the")
         print("        donor's chemistry; lengthening keeps every harvested global intact.")

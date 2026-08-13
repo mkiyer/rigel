@@ -10,7 +10,7 @@ read what the headroom actually is.
 
 ⭐ **A RE-SOLVE, NOT A SUBSTITUTION** (TRAPS: substitution-understates-a-source). A vertex object is mostly a message SOURCE — its
 value is what it CARRIES — and substituting its answer after the fact does not propagate. So the pin goes
-in at ``node_init.build_node_init``, the per-object message-free self-solve, and the relay then runs on
+in at ``region_init.build_region_init``, the per-object message-free self-solve, and the relay then runs on
 top of it. That is also the one place a mechanism can be expressed without touching either relay twin,
 so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-observable-per-site).
 
@@ -71,28 +71,28 @@ arm, so none of this is a denominator move):
 =========  ======  ============  ==============  ==============
 axis       base    vertex_free   Σ\\|err\\| frags   better/worse
 =========  ======  ============  ==============  ==============
-node       0.1247  **0.0975**    −149,267        27 / 9
+region       0.1247  **0.0975**    −149,267        27 / 9
 edge       0.1434  **0.1127**    −161,302        29 / 3
 =========  ======  ============  ==============  ==============
 
 ⭐⭐⭐ **AND IT SPLITS ON EXACTLY ONE AXIS — STRAND — which is what the mechanism predicts.** Pass-0
-``mwae`` delta, node axis: unstranded **−0.0188** (capture off, 9/0) and **−0.0963** (capture ON, 9/0);
+``mwae`` delta, region axis: unstranded **−0.0188** (capture off, 9/0) and **−0.0963** (capture ON, 9/0);
 stranded **−0.0003** and **+0.0064** (2/7). Every one of the 9 rows that got worse is ``ss_0.99``.
 The strand channel's Fisher information is ``∝ (2κ−1)²`` and is EXACTLY zero at κ = ½, so on an
 unstranded library ψ's reference is the only term left with a gradient at the vertex, while on a stranded
 one the strand term supplies the λ information and the vertex is already reached. ⭐ The ceiling is
 therefore entirely on unstranded data — which is also the panel's worst stratum
-(``capture_ON × ss0.50``: base 0.3235 node / 0.2922 edge). Largest single row:
+(``capture_ON × ss0.50``: base 0.3235 region / 0.2922 edge). Largest single row:
 ``gdna_g01_ss_0.50_capture_on``, **−0.2188**.
 
 ⛔⛔ **TWO WARNINGS THAT MUST TRAVEL WITH THE NUMBER.**
 
-* **``vertex_all`` is WORSE than ``vertex_free``** — node pass-0 0.1076 vs 0.0975, and on the shipped
+* **``vertex_all`` is WORSE than ``vertex_free``** — region pass-0 0.1076 vs 0.0975, and on the shipped
   solve it is worse than *base* (+0.0080). Pinning MORE truth hurts: the extra objects have their own
   evidence, and declaring them certain overrides it and propagates. That is TRAPS: admitting-an-object-costs's shape
   reached with the TRUTH, so the harm is in the relay's dynamics and not in the values. ⭐ Quote
   ``vertex_free``, and note that a fix which hands out certainty broadly can lose even when it is right.
-* **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (node) / +893 (edge),
+* **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (region) / +893 (edge),
   28 and 16 rows worse — while accuracy improves 22 %. TRAPS: honesty-metrics-reward-ignorance exactly: certainty handed to an
   object moves it into the confident population. Read ``mwae_all`` and ``abs_err_all``, never these.
 
@@ -139,10 +139,10 @@ def _sibling(name: str):
 SA = _sibling("solvability_audit.py")
 P0 = _sibling("pass0_vs_oracle.py")
 
-from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
+from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import node_gdna_geometry  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
+from rigel.calibration.region_geometry import region_gdna_geometry  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
@@ -154,13 +154,13 @@ _EPS = 1.0e-9
 #: assumed.
 _TAU_FREE = 1.0e-4
 
-#: filled by the wrappers, one call before `build_node_init` needs them.
+#: filled by the wrappers, one call before `build_region_init` needs them.
 _CTX: dict = {}
 #: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
 _FIRED: dict = {"init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "conditions": 0}
 
 
-# ── the plumbing: get the oracle's per-object truth and the geometry to `build_node_init` ────────────
+# ── the plumbing: get the oracle's per-object truth and the geometry to `build_region_init` ────────────
 
 
 def _wrap_oracle():
@@ -176,21 +176,21 @@ def _wrap_oracle():
     P0.load_or_build_oracle = wrapper
 
 
-def _wrap_node_sweep():
-    """Stash `region_arrays` — `node_sweep` receives it and calls `build_node_init` after."""
-    orig = CAL.node_sweep
+def _wrap_region_sweep():
+    """Stash `region_arrays` — `region_sweep` receives it and calls `build_region_init` after."""
+    orig = CAL.region_sweep
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
         _CTX["region_arrays"] = region_arrays
         return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
 
-    CAL.node_sweep = wrapper
+    CAL.region_sweep = wrapper
 
 
 def _truth_fg_per_slot(chain):
     """The ORACLE's true ``f_g`` per SLOT, and the mass behind it.
 
-    ⚠ ``NodeInit``'s arrays are indexed by SLOT (the chain's alternating NODE/EDGE sequence), while the
+    ⚠ ``RegionInit``'s arrays are indexed by SLOT (the chain's alternating REGION/EDGE sequence), while the
     oracle's masses are per OBJECT on two separate axes — so the mapping goes through
     ``chain.kind``/``chain.obj_idx`` rather than being assumed."""
     oracle = _CTX.get("oracle")
@@ -199,20 +199,20 @@ def _truth_fg_per_slot(chain):
         return None, None
     ov = oracle.override_masses(ra)
     g = {
-        "node": np.asarray(ov["mass_gdna_node"], np.float64),
+        "region": np.asarray(ov["mass_gdna_region"], np.float64),
         "edge": np.asarray(ov["mass_gdna_edge"], np.float64),
     }
     r = {
-        "node": np.asarray(ov["mass_rna_node"], np.float64),
+        "region": np.asarray(ov["mass_rna_region"], np.float64),
         "edge": np.asarray(ov["mass_rna_edge"], np.float64),
     }
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
-    is_node = kind == NODE
+    is_region = kind == REGION
     n = int(chain.n_slots)
     tg = np.zeros(n)
     tr = np.zeros(n)
-    for axis, msk in (("node", is_node), ("edge", ~is_node)):
+    for axis, msk in (("region", is_region), ("edge", ~is_region)):
         idx = np.flatnonzero(msk)
         if idx.size == 0:
             continue
@@ -236,7 +236,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
     ⚠ ``evidence_free_only`` restricts the pin to objects with no own composition evidence
     (``tau_lam <= _TAU_FREE``). That is the population a vertex fix can actually reach; the unrestricted
     arm is the looser bound."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
@@ -289,15 +289,15 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
         lock[tgt] = True
 
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
-        M, E_g = node_gdna_geometry(geometry)
+        M, E_g = region_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)
-        n_node = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
+        n_region = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
         rho_g = np.maximum(
             np.where((M > _EPS) & (E_g > _EPS), f_g * M / np.maximum(E_g, _EPS), 0.0), 0.0
         )
-        prec_g = NI.own_precision(n_node, v_fg, rho_g > _EPS)
+        prec_g = NI.own_precision(n_region, v_fg, rho_g > _EPS)
         touched = np.zeros(f_g.shape[0], bool)
         touched[tgt] = True
 
@@ -307,20 +307,20 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
                 frac * M / np.maximum(E_r, _EPS),
                 0.0,
             )
-            live = (n_node > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
+            live = (n_region > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
             rho = np.where(live, raw, 0.0)
-            return rho, NI.own_precision(n_node, v_fr, rho > _EPS)
+            return rho, NI.own_precision(n_region, v_fr, rho > _EPS)
 
         rho_pos, prec_pos = _rna(f_pos, statics.free_pos, np.asarray(ni.rho_pos, np.float64))
         rho_neg, prec_neg = _rna(f_neg, statics.free_neg, np.asarray(ni.rho_neg, np.float64))
-        return NI.NodeInit(
+        return NI.RegionInit(
             f_g=f_g, f_pos=f_pos, f_neg=f_neg,
             rho_g=rho_g, rho_pos=rho_pos, rho_neg=rho_neg,
             prec_g=prec_g, prec_pos=prec_pos, prec_neg=prec_neg,
             struct_lock=lock, tau_lam=tau,
         )
 
-    SW.build_node_init = wrapper
+    SW.build_region_init = wrapper
 
 
 def _install_ref_exponent(c_value: float):
@@ -379,7 +379,7 @@ def _compare(paths: list[Path]) -> int:
         ("conf_wrong_objects", "conf-wrong objects", "lower"),
         ("library_f_gdna_pass0", "library f_g pass0", "context"),
     ]
-    for axis in ("node", "edge"):
+    for axis in ("region", "edge"):
         print(f"\n{'=' * 118}\n⭐ AXIS = {axis}\n{'=' * 118}")
         print(f"   {'metric':<22}{'arm':<16}{'mean':>12}{'vs base':>12}{'better':>9}"
               f"{'worse':>7}{'flat':>6}   rows")
@@ -448,7 +448,7 @@ def main() -> int:
         ap.error("--arm and --out are required unless --compare is given")
 
     _wrap_oracle()
-    _wrap_node_sweep()
+    _wrap_region_sweep()
     arm = args.arm
     expect_fire: list[str] = []
     if arm == "vertex_free":
@@ -495,7 +495,7 @@ def main() -> int:
                         f"⛔ TRAPS: an-ablation-that-never-ran: arm {arm!r} did not fire on {name} (counter {k} = 0). "
                         "An override that never ran reads as 'no effect'."
                     )
-            for axis in ("node", "edge"):
+            for axis in ("region", "edge"):
                 s = SA.summarise(SA.audit(m, axis=axis, config=config))
                 sc = m.scores["pass0"][axis]["ALL"]
                 s["mwae_all"] = float(sc.mwae)

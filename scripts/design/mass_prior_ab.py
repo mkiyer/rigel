@@ -102,8 +102,8 @@ def edge_share(payload) -> np.ndarray:
     """``edge_unspliced_mass / edge_unspliced_count`` per line — the mean conserved share of a crossing.
 
     ⭐ This is the whole of plan 5.5's new input: one dimensionless scalar per line that converts an
-    object-incidence total into a fragment count. It is 1.0 at a line whose flanking nodes both exceed
-    every fragment length (a crossing fragment can only cross that one line) and falls toward the node
+    object-incidence total into a fragment count. It is 1.0 at a line whose flanking regions both exceed
+    every fragment length (a crossing fragment can only cross that one line) and falls toward the region
     spacing where they do not — which is the K-inflation, per line.
 
     ⛔ Lines with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
@@ -119,13 +119,13 @@ def edge_share(payload) -> np.ndarray:
 def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_source):
     """⭐⭐⭐ **PLAN 5.5** — the prior as a CONSERVED FRAGMENT COUNT, with no density conversion::
 
-        a_g(locus) = Sum_r share(r) * mass_gdna_node[r]
+        a_g(locus) = Sum_r share(r) * mass_gdna_region[r]
                    + Sum_l share(l) * mass_gdna_edge[l] * (edge_unspliced_mass[l] / edge_count[l])
 
     and the same on the RNA masses, spliced withheld exactly as the shipped assembler withholds it.
 
-    ⭐ ``mass_gdna_node[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
-    fragment — so the node term needs no arithmetic at all. Only the edge term is rescaled, from the
+    ⭐ ``mass_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
+    fragment — so the region term needs no arithmetic at all. Only the edge term is rescaled, from the
     K-inflated incidence count onto the conserved mass. ``rho = Sum m / Sum S``, ``span_bp`` and the
     support-weighted pooling are all GONE: the count is in the bank, so nothing manufactures one.
 
@@ -136,9 +136,9 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
     ⚠ **Nothing is dropped for zero opportunity.** There is no denominator here — the mass IS the count
     — so dropping such mass would simply lose fragments the accumulator really deposited.
 
-    ⭐ **Nodes and edges are projected on their own axes**, matching the shipped assembler: a node owns
+    ⭐ **Regions and edges are projected on their own axes**, matching the shipped assembler: a region owns
     the fragments contained in it, an edge owns the fragments that cross it, and a locus collects the
-    edges that touch its nodes. No line is folded onto a flank node.
+    edges that touch its regions. No line is folded onto a flank region.
     """
     from rigel.calibration.priors import (
         LocusPriors,
@@ -151,14 +151,14 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
     n_loci = len(multi_loci)
     e_idx, e_lid, e_w = _edge_locus_shares(region_arrays, multi_loci, n_loci)
 
-    def component(mass_node, mass_edge):
-        node_part = _project_regions_to_loci(
-            region_arrays, multi_loci, n_loci, {"m": np.asarray(mass_node, np.float64)}
+    def component(mass_region, mass_edge):
+        region_part = _project_regions_to_loci(
+            region_arrays, multi_loci, n_loci, {"m": np.asarray(mass_region, np.float64)}
         )["m"]
         edge_part = _sum_by_locus(
             e_idx, e_lid, e_w, np.asarray(mass_edge, np.float64) * share, n_loci
         )
-        return np.maximum(node_part + edge_part, 0.0)
+        return np.maximum(region_part + edge_part, 0.0)
 
     # the same spliced withholding the shipped assembler does: mass_rna_edge is spliced-INCLUSIVE by an
     # existing per-edge conservation convention, so the certified fraction is subtracted before the
@@ -169,8 +169,8 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
         0.0,
     )
     return LocusPriors(
-        gdna_prior_count=component(calibration.mass_gdna_node, calibration.mass_gdna_edge),
-        rna_prior_count=component(calibration.mass_rna_node, rna_edge_unspliced),
+        gdna_prior_count=component(calibration.mass_gdna_region, calibration.mass_gdna_edge),
+        rna_prior_count=component(calibration.mass_rna_region, rna_edge_unspliced),
         gdna_eff_len=np.asarray(eff_len_source.gdna_eff_len, np.float64).copy(),
     )
 

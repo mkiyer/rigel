@@ -1,9 +1,9 @@
 """calibrate() — the calibrator: deconvolve each object's UNSPLICED count into ``(RNA₊, RNA₋, gDNA)``.
 
 Calibration models **RNA vs gDNA only** (the per-locus EM separates nascent from mature downstream). Per the
-count-zero-information architecture a node's composition is set by three sources — the **strand likelihood**
+count-zero-information architecture a region's composition is set by three sources — the **strand likelihood**
 (the Beta-Binomial tilt of the per-strand counts, the only INTRINSIC signal; the count enters ONLY as its
-overdispersed Fisher information), the **cross-node imputation** (the neighbour density messages, at the
+overdispersed Fisher information), the **cross-region imputation** (the neighbour density messages, at the
 source's own honest belief precision (strand + count) ``pr = n_src/(n_src·vb_src + 1)``), and the
 **population gDNA prior** (the conservative intergenic+intron floor + the Phase-2 density KDE). The solver
 is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.calibration.sweep`)::
@@ -11,20 +11,20 @@ is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.ca
     substrate  (five populations on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
       -> strand balance: rna_sense_frac (κ)
-      -> node_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
+      -> region_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
       -> signature-binary init (G1/G2/G3)
-      -> PASS 1 node_sweep (no KDE prior): ONE forward + ONE backward pass — each object integrates its
+      -> PASS 1 region_sweep (no KDE prior): ONE forward + ONE backward pass — each object integrates its
            strand likelihood + the conservative gDNA floor + the belief-free density messages
       -> train the Phase-2 gDNA-density KDE on the pass-1 belief
-      -> PASS 2 node_sweep (the KDE prior added per object) -> the converged per-object pie
-      -> chain_node_deconv  -> per-NODE gDNA / RNA contained mass
+      -> PASS 2 region_sweep (the KDE prior added per object) -> the converged per-object pie
+      -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_edge_deconv  -> per-EDGE gDNA / RNA crossing mass, for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
 
 ⭐ **THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR.** The predecessor computed three effective
 lengths up front (``region_eff_length``, ``boundary_side_eff_length``, ``boundary_eff_length``) and
 handed them around; the density model took a fourth, a scalar ``fl_mean``. That is four chances for a
-consumer to divide by a length model the solver never used. ``build_node_geometry`` now produces the
+consumer to divide by a length model the solver never used. ``build_region_geometry`` now produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the density
 clue, the background pool, the intron factory, the result's two supports — reads THAT array
 
@@ -37,7 +37,7 @@ one count and one divisor, ``crossing_eff_length``. A zero-gDNA library
 ⚠ **TRAPS: prove-the-substrate IS OFF AT CONTIGUOUS EDGES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
 unspliced crossing takes ``UNBOUNDED_REACH`` rather than its transcript's real remaining length
 (owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
-over-call and **+0.36** in the last node before a polyA site. It is
+over-call and **+0.36** in the last region before a polyA site. It is
 sequenced after this step so that turning it on can be A/B'd against the baseline this step produces.
 Junction edges DO take their real exonic reach — they are a new population with no predecessor divisor.
 """
@@ -53,15 +53,15 @@ import numpy as np
 from .background_reference import BackgroundReference, measure_background
 from .messages.head import HeadPolicy
 from .messages.silent import SilentPolicy
-from .node_chain import EDGE, NODE
-from .node_geometry import (
-    build_node_geometry,
-    build_node_statics,
+from .region_chain import EDGE, REGION
+from .region_geometry import (
+    build_region_geometry,
+    build_region_statics,
     init_beliefs,
-    node_gdna_geometry,
+    region_gdna_geometry,
 )
-from .sweep import chain_edge_deconv, chain_node_deconv, solve_chain
-from .density_model import node_gdna_density
+from .sweep import chain_edge_deconv, chain_region_deconv, solve_chain
+from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .npmle import DensityNPMLE
@@ -70,7 +70,7 @@ from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_sj_table,
 )
-from .node_chain import build_node_chain
+from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .gdna_landscape import GdnaLandscape, fit_gdna_landscape
 from .signature import RegionType, coarse_type_array
@@ -97,7 +97,7 @@ class InjectedCalibrationPriors:
     σ²_transfer landscape), the intergenic intron-factory background, and the aggregate ρ_bg background.
 
     A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
-    population scenario and injects them, letting the toy provide only the controlled per-node GEOMETRY. Every
+    population scenario and injects them, letting the toy provide only the controlled per-region GEOMETRY. Every
     field is optional; ``None`` ⇒ fit that prior internally (the default, byte-identical). ``calibrate`` also
     stashes the fitted-or-injected bundle in ``_debug["calibration_priors"]`` so a population scenario's fitted
     priors can be extracted and re-injected into a toy (`scripts/debug/toy_inject.py`)."""
@@ -123,8 +123,8 @@ def _empty_junction_geometry() -> "JunctionGeometry":
 
     e_i = np.zeros(0, dtype=np.int64)
     return JunctionGeometry(
-        src_node=e_i,
-        dst_node=e_i.copy(),
+        src_region=e_i,
+        dst_region=e_i.copy(),
         strand=np.zeros(0, dtype=np.int8),
         reach_lo=np.zeros(0, dtype=np.float64),
         reach_hi=np.zeros(0, dtype=np.float64),
@@ -132,10 +132,10 @@ def _empty_junction_geometry() -> "JunctionGeometry":
 
 
 def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
-    """Split a per-SLOT divisor back onto the node and contiguous-edge axes.
+    """Split a per-SLOT divisor back onto the region and contiguous-edge axes.
 
-    ⭐ **A projection, not a recomputation.** ``build_node_geometry`` already applied
-    ``contained_eff_length`` at NODE slots and ``crossing_eff_length`` at EDGE slots; calling those
+    ⭐ **A projection, not a recomputation.** ``build_region_geometry`` already applied
+    ``contained_eff_length`` at REGION slots and ``crossing_eff_length`` at EDGE slots; calling those
     again here would put two implementations of one quantity in the tree, which is precisely how the
     prose and the code came to disagree about a ½ for months ( and 27).
     Whatever the solver divided by is what the result reports.
@@ -148,26 +148,26 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     eff = np.asarray(eff_slots, dtype=np.float64)
-    is_node, is_edge = kind == NODE, kind == EDGE
-    node_eff = np.zeros(int(payload.n_nodes), dtype=np.float64)
+    is_region, is_edge = kind == REGION, kind == EDGE
+    region_eff = np.zeros(int(payload.n_regions), dtype=np.float64)
     edge_eff = np.zeros(int(payload.n_edges), dtype=np.float64)
-    node_eff[obj[is_node]] = eff[is_node]
+    region_eff[obj[is_region]] = eff[is_region]
     edge_eff[obj[is_edge]] = eff[is_edge]
-    return node_eff, edge_eff
+    return region_eff, edge_eff
 
 
 
 
-def _build_intron_prior(chain, substrate, region_arrays, node_eff_len, config, bg=None):
+def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
     """The gDNA intron factory λ-factor per chain slot.
 
-    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON NODE
+    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION
     slot, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → an ``(n_slots, K)`` array,
     ZERO on every other slot (a no-op there). Returns ``None`` when the factory is disabled, the
-    background pool is uninformative, or there are no intron nodes — in which case the sweep is
+    background pool is uninformative, or there are no intron regions — in which case the sweep is
     byte-identical to the pre-factory path. gDNA is strand-symmetric, so this factor lives purely on
     ``λ`` (peels gDNA; the residual RNA's tilt is left to the solver), and is consumed identically by the
-    single-strand and AMBIG per-node solves.
+    single-strand and AMBIG per-region solves.
 
     ⚠ **EDGE slots are zero, structurally.** The factor scores a CONTAINED count against a CONTAINED
     support; a line's count is a crossing and its divisor a different formula, so applying the same
@@ -176,29 +176,29 @@ def _build_intron_prior(chain, substrate, region_arrays, node_eff_len, config, b
     ``bg`` (an injected population :class:`GdnaBackground`) overrides the internal fit — a tiny toy's own
     intergenic pool is too sparse to fit the background the introns are peeled against."""
     if bg is None:
-        bg = fit_intron_background(substrate, region_arrays, node_eff_len, include_introns=False)
+        bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
     if not bg.informative:
         return None
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(
         np.int64
-    )  # 0/1/2 per NODE
+    )  # 0/1/2 per REGION
     R = rtype.shape[0]
-    is_intron = (kind == NODE) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
+    is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
     if not bool(is_intron.any()):
         return None
     _, fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
     prior = np.zeros((kind.shape[0], fg.shape[0]), dtype=np.float64)
     ridx = idx[is_intron]
     # ⚠ GENOME-strand columns summed: gDNA is strand-symmetric, so the peel is against a total rate.
-    count = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)[ridx]
-    eff_g = np.asarray(node_eff_len, dtype=np.float64)[ridx]
+    count = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)[ridx]
+    eff_g = np.asarray(region_eff_len, dtype=np.float64)[ridx]
     prior[is_intron] = density_lambda_factor(bg, count, eff_g, fg)
     return prior
 
 
-#: Minimum training nodes for a hyperprior fit — below this the population is not a population.
+#: Minimum training regions for a hyperprior fit — below this the population is not a population.
 _MIN_TRAIN = 5
 
 
@@ -209,13 +209,13 @@ def _fit_gdna_hyperprior(
     peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
     **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions
-    in ``node_sweep`` are a separate mechanism and are untouched).
+    in ``region_sweep`` are a separate mechanism and are untouched).
 
     The substrate is the whole of this function's job; the estimator itself is in
     :mod:`.gdna_landscape`. Four axes decide membership, and conflating them is the mistake this replaces
     (production plan §2.2):
 
-    * **circularity → structural exclusion.** AMBIG nodes are out. They are the two-root ambiguity the prior
+    * **circularity → structural exclusion.** AMBIG regions are out. They are the two-root ambiguity the prior
       exists to resolve, so training on them would have it predict itself. ⚠ Note the *empirical* case
       alongside this is stratum-dependent — it holds over all conditions but reverses on the ones where an
       enriched mode exists — so the argument carrying the decision is the circularity, not the EMD.
@@ -237,7 +237,7 @@ def _fit_gdna_hyperprior(
     baseline**; at equal depth its own table already showed fabrication regressing 4.7× → 6.7×.
 
     """
-    isr = np.asarray(chain.kind) == NODE
+    isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
     rtype = coarse_type_array(np.asarray(region_arrays.signature))
@@ -290,7 +290,7 @@ def calibrate(
 
     ``edge_flags`` is the splice graph's per-contiguous-edge structural bits
     (:func:`~rigel.calibration.splice_graph.build_edge_flags_array`), carried onto the chain as
-    ``NodeStatics.edge_flags``. ``None`` (the default) leaves them zero.
+    ``RegionStatics.edge_flags``. ``None`` (the default) leaves them zero.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
@@ -305,24 +305,24 @@ def calibrate(
         )
 
     # ⭐ THE CHAIN AND ITS GEOMETRY COME FIRST, and the geometry owns every divisor from here down:
-    # `eff_gdna`/`eff_rna` are the CONTAINED placements at a NODE slot and the CROSSING placements at an
+    # `eff_gdna`/`eff_rna` are the CONTAINED placements at a REGION slot and the CROSSING placements at an
     # EDGE slot, one rule, one array. Nothing below computes a second length model.
-    chain = build_node_chain(payload.ref_node_offsets, payload.ref_edge_offsets)
-    geometry = build_node_geometry(
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_edge_offsets)
+    geometry = build_region_geometry(
         chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf, edge_rna_reach
     )
-    statics = build_node_statics(chain, region_arrays, edge_flags)
+    statics = build_region_statics(chain, region_arrays, edge_flags)
 
     # The result's two gDNA supports, PROJECTED off the geometry rather than recomputed — so the number
     # `priors` divides by is byte-identically the one the solver divided by. Two implementations
     # of one quantity is how they come to disagree.
-    node_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
+    region_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
     # ⭐ And the RNA twin, on the same two axes — the RNA population's own opportunity per object.
     # ⛔ It USED to be what turned ``mass_rna_*`` into a density in ``assemble_priors``. That consumer
     # is gone: the prior became a conserved FRAGMENT COUNT and divides by nothing on the mass path
     # (`d045d820`, `5591cc01`). Kept because it is the RNA divisor any density-based prior needs and
     # because it is byte-identically the opportunity the solver used — see `result.py`.
-    node_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
+    region_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -344,11 +344,11 @@ def calibrate(
         rna_sense_frac = float(balance.rna_sense_frac)
         n_rna_obs = float(balance.n_observations)
 
-    # Count clue on RAW counts (the count module, pre-cleaning): per-node gDNA density by LOCAL
+    # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
     # edge-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
     # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
-    # pass must come first. This is NOT the node answer (the sweep below is).
-    node_density_raw = node_gdna_density(chain, geometry, region_arrays)
+    # pass must come first. This is NOT the region answer (the sweep below is).
+    region_density_raw = region_gdna_density(chain, geometry, region_arrays)
 
     # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
@@ -356,24 +356,24 @@ def calibrate(
     # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
     # the RNA Beta-Binomial come from one source. Both shrunk
     # toward the SAME default prior, so under sparse data they collapse to one distribution and an
-    # unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
+    # unstranded region (κ=½) is uninformative. See docs/em_strand/03+05.
     _gd_seed = _rna_seed = (
         -1,
         -1,
         False,
-    )  # (n_seed_nodes, n_seed_frags, fallback) — QC log only; -1 = injected
+    )  # (n_seed_regions, n_seed_frags, fallback) — QC log only; -1 = injected
     if inj is not None and inj.gdna_strand_overdispersion is not None:
         gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
     else:
         gdna_strand = fit_gdna_strand_from_substrate(
             substrate,
             region_arrays,
-            node_density_raw,
+            region_density_raw,
             rna_sense_frac=rna_sense_frac,
         )
         gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
         _gd_seed = (
-            gdna_strand.n_seed_nodes,
+            gdna_strand.n_seed_regions,
             gdna_strand.n_seed_fragments,
             gdna_strand.fallback_used,
         )
@@ -385,10 +385,10 @@ def calibrate(
             rna_sense_frac=rna_sense_frac,
         )
         rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
-        _rna_seed = (rna_strand.n_seed_nodes, rna_strand.n_seed_fragments, rna_strand.fallback_used)
+        _rna_seed = (rna_strand.n_seed_regions, rna_strand.n_seed_fragments, rna_strand.fallback_used)
 
     # Strand-Fisher noise-floor SAMPLE SIZES (the sweep's τ seed): N_gdna (gDNA-eligible unspliced fragments in
-    # the structurally pure-gDNA intergenic nodes, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was
+    # the structurally pure-gDNA intergenic regions, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was
     # fit from). gDNA's sense mean is ½ by biology (dsDNA symmetry — not fitted); the seed only needs the sample
     # sizes to size the sampling part of the floor ¼·(1/N + ω). N_gdna=0 (a gDNA-free library) ⇒ 1/N_gdna → ∞ ⇒
     # the strand seed is gated off (nothing to distinguish RNA from).
@@ -399,7 +399,7 @@ def calibrate(
     else:
         _inter = coarse_type_array(np.asarray(region_arrays.signature)) == 0
         n_gdna_obs = float(
-            np.asarray(substrate.node_contained.count, dtype=np.float64)[_inter].sum()
+            np.asarray(substrate.region_contained.count, dtype=np.float64)[_inter].sum()
         )
     # n_rna_obs is set above (injected or from the strand-balance fit).
 
@@ -418,7 +418,7 @@ def calibrate(
 
     belief = _init_belief()
     # The gDNA INTRON FACTORY λ-factor: peel confident gDNA
-    # from intron nodes against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
+    # from intron regions against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
     # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
     # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
     # INJECTED intergenic intron-factory background overrides the internal (toy-sparse) fit.
@@ -426,24 +426,24 @@ def calibrate(
         inj.intron_background
         if (inj is not None and inj.intron_background is not None)
         else (
-            fit_intron_background(substrate, region_arrays, node_eff_gdna, include_introns=False)
+            fit_intron_background(substrate, region_arrays, region_eff_gdna, include_introns=False)
             if config.intron_factory
             else None
         )
     )
     intron_prior = (
         _build_intron_prior(
-            chain, substrate, region_arrays, node_eff_gdna, config, bg=intron_background
+            chain, substrate, region_arrays, region_eff_gdna, config, bg=intron_background
         )
         if (config.intron_factory and intron_background is not None)
         else None
     )
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
-    # (strand + count, from `node_init.build_node_init`), degraded by the reframe's scale variance
+    # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
     # effective lengths inside the pass. There is nothing to fit here.
 
-    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
+    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
     def _sweep(prior):
@@ -493,18 +493,18 @@ def calibrate(
             _debug["capture"] = capture
         return out
 
-    # THE ENRICHMENT NPMLE — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models the
+    # THE ENRICHMENT NPMLE — fit ONCE on ALL regions' TOTAL unspliced density (belief-free). It models the
     # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
     # composition-vacuous (count-zero-information — /§5), so it is NEVER fed to the
     # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
     # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
     # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
     # substrate, so it is fit here and consumed below, never inside the sweep.
-    mass_global, eff_global = node_gdna_geometry(geometry)
+    mass_global, eff_global = region_gdna_geometry(geometry)
     if inj is not None and inj.enrichment_prior is not None:
-        # INJECTED population enrichment landscape — a toy has too few nodes to resolve enriched vs depleted
+        # INJECTED population enrichment landscape — a toy has too few regions to resolve enriched vs depleted
         # modes. (Scale note: the toy's densities must be generated at the reference library's depth so its
-        # nodes project onto the right cells of this absolute log-density landscape.)
+        # regions project onto the right cells of this absolute log-density landscape.)
         enrichment_prior = inj.enrichment_prior
     else:
         enrichment_prior = DensityNPMLE.fit(
@@ -512,8 +512,8 @@ def calibrate(
         )
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
-    # Single-strand nodes self-solve from strand; unstranded
-    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity,
+    # Single-strand regions self-solve from strand; unstranded
+    # AMBIG regions are grounded only by the messages here (the two-root DNA ambiguity,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
     belief = _sweep(None)
     belief_pass0 = (
@@ -526,7 +526,7 @@ def calibrate(
 
     # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit the gDNA-rate NPMLE on
     # the initial solve's peeled gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
-    # ambiguity the prior-free pass leaves at unstranded AMBIG nodes. Repeated ``calib_refit_iters`` times.
+    # ambiguity the prior-free pass leaves at unstranded AMBIG regions. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —
     # belief-free) is the refit floor; ``None`` when disabled.
     if inj is not None and inj.background is not None:
@@ -537,7 +537,7 @@ def calibrate(
         background = measure_background(
             substrate,
             region_arrays,
-            node_eff_gdna,
+            region_eff_gdna,
             include_introns=config.background_include_introns,
             robust_trim_mad=config.background_robust_trim_mad,
         )
@@ -557,17 +557,17 @@ def calibrate(
         if gdna_hyperprior is None:
             break
         # FULL reset, then re-solve WITH the prior: nothing from pass-0 survives into the re-solve except
-        # the fitted landscape itself, so an over-confident node cannot refuse to budge when the prior lands.
+        # the fitted landscape itself, so an over-confident region cannot refuse to budge when the prior lands.
         belief = _init_belief()
         belief = _sweep(gdna_hyperprior)
         logger.debug(
-            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training nodes)",
+            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
             it + 1,
             config.calib_refit_iters,
             gdna_hyperprior.n_train,
         )
 
-    nodes = chain_node_deconv(chain, belief, substrate)
+    regions = chain_region_deconv(chain, belief, substrate)
     edges = chain_edge_deconv(chain, belief, substrate)
 
     if (
@@ -585,7 +585,7 @@ def calibrate(
             gdna_prior=enrichment_prior,  # the ENRICHMENT NPMLE (QC landscape / injection substrate)
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
             rna_sense_frac=rna_sense_frac,
-            node_eff_gdna=node_eff_gdna,
+            region_eff_gdna=region_eff_gdna,
             edge_eff_gdna=edge_eff_gdna,
             # the fitted-or-injected population priors — extract from a population scenario, inject into a toy
             calibration_priors=InjectedCalibrationPriors(
@@ -608,7 +608,7 @@ def calibrate(
         diagnostics_out["calibration"] = CalibrationDiagnostics.from_prior(enrichment_prior)
 
     # Derive gdna_density_global (the library-average density QC scalar).
-    density_global = gdna_density_global(nodes, edges, node_eff_gdna, edge_eff_gdna)
+    density_global = gdna_density_global(regions, edges, region_eff_gdna, edge_eff_gdna)
 
     # The certified-RNA crossings per LINE: molecules that crossed contiguously having spliced
     # elsewhere. ``chain_edge_deconv`` adds the whole of this to ``rna_mass`` (rna = (1−g)·unspliced +
@@ -617,8 +617,8 @@ def calibrate(
     # candidate), so it must not load the RNA side of the gDNA-vs-RNA *unspliced* split. ``mass_rna_edge``
     # stays spliced-inclusive so per-line conservation gdna + rna = unspliced + spliced holds.
     #
-    # ⚠ There is no NODE twin, and that is structural: ``node_contained`` is credited only when the
-    # fragment used no junction, so a node's contained population cannot hold a spliced molecule.
+    # ⚠ There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
+    # fragment used no junction, so a region's contained population cannot hold a spliced molecule.
     mass_rna_spliced_edge = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
     # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this line carries.
     # ``assemble_priors`` needs it to turn a per-line object-incidence total into a fragment count.
@@ -640,8 +640,8 @@ def calibrate(
     junction_mass_per_crossing = substrate.junction.mass_per_crossing
 
     result = CalibrationResult(
-        mass_gdna_node=nodes.gdna_mass,
-        mass_rna_node=nodes.rna_mass,
+        mass_gdna_region=regions.gdna_mass,
+        mass_rna_region=regions.rna_mass,
         mass_gdna_edge=edges.gdna_mass,
         mass_rna_edge=edges.rna_mass,
         mass_rna_spliced_edge=mass_rna_spliced_edge,
@@ -649,15 +649,15 @@ def calibrate(
         mass_rna_junction=mass_rna_junction,
         edge_spliced_mass_per_crossing=edge_spliced_mass_per_crossing,
         junction_mass_per_crossing=junction_mass_per_crossing,
-        gdna_node_eff_len=node_eff_gdna,
+        gdna_region_eff_len=region_eff_gdna,
         gdna_edge_eff_len=edge_eff_gdna,
-        rna_node_eff_len=node_eff_rna,
+        rna_region_eff_len=region_eff_rna,
         rna_edge_eff_len=edge_eff_rna,
         # ⭐ The simplex ψ solved, published per object rather than summed away. `mass_*` above is this
         # same answer with the two RNA strands added together.
-        gdna_frac_node=nodes.gdna_frac,
-        rna_pos_frac_node=nodes.rna_pos_frac,
-        rna_neg_frac_node=nodes.rna_neg_frac,
+        gdna_frac_region=regions.gdna_frac,
+        rna_pos_frac_region=regions.rna_pos_frac,
+        rna_neg_frac_region=regions.rna_neg_frac,
         gdna_frac_edge=edges.gdna_frac,
         rna_pos_frac_edge=edges.rna_pos_frac,
         rna_neg_frac_edge=edges.rna_neg_frac,
@@ -665,7 +665,7 @@ def calibrate(
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        n_nodes=int(substrate.n_nodes),
+        n_regions=int(substrate.n_regions),
         n_edges=int(substrate.n_edges),
         n_junctions=int(substrate.n_junctions),
         config=config,
@@ -681,10 +681,10 @@ def calibrate(
     junction_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gdna_strand_overdispersion=%.4g (%d seed nodes, %d frags%s) "
+        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags%s) "
         "rna_strand_overdispersion=%.4g (%d junctions, %d frags%s) "
         "[junction sense_frac=%.3f vs κ=%.3f]",
-        result.n_nodes,
+        result.n_regions,
         result.n_edges,
         result.n_junctions,
         result.gdna_density_global,

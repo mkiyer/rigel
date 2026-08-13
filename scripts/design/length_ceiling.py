@@ -108,13 +108,13 @@ def main() -> int:
             # aggregate anyway. Record the absence rather than crashing on it.
             row["has_ceiling"] = "c_input_pass0" in m.scores
             arms = ("pass0", "c_input_pass0") if row["has_ceiling"] else ("pass0",)
-            for axis in ("node", "edge"):
+            for axis in ("region", "edge"):
                 for arm in arms:
                     row[f"mwae_all_{arm}_{axis}"] = float(m.scores[arm][axis]["ALL"].mwae)
                     row[f"mwae_solvable_{arm}_{axis}"] = solvable_mwae(m, arm, axis, config)
-            row["mwae_all_final"] = float(m.scores["final"]["node"]["ALL"].mwae)
+            row["mwae_all_final"] = float(m.scores["final"]["region"]["ALL"].mwae)
             if row["has_ceiling"]:
-                row["mwae_all_c_input_final"] = float(m.scores["c_input_final"]["node"]["ALL"].mwae)
+                row["mwae_all_c_input_final"] = float(m.scores["c_input_final"]["region"]["ALL"].mwae)
                 # ⭐ SPLIT THE BOTH-EXACT ARM. `measure_condition` only builds both-at-once, and
                 # "which of the two models earns it" is the whole question here: the gDNA model is
                 # already exact off capture and +6 % under it, while the RNA model is 8.4 bp low
@@ -135,15 +135,15 @@ def main() -> int:
                         m.payload, m.calibrate_kwargs, cfg_, gdna_pmf=gp, rna_pmf=rp
                     )
                     s = P0.score_axis(
-                        arm.mass_gdna_node, arm.mass_rna_node,
-                        m.truth.mass_gdna_node, m.truth.mass_rna_node,
+                        arm.mass_gdna_region, arm.mass_rna_region,
+                        m.truth.mass_gdna_region, m.truth.mass_rna_region,
                     )
                     row[f"mwae_all_{tag_}"] = float(s.mwae)
                     if tag_.endswith("pass0"):
                         mm = copy.copy(m)
                         mm.arms = dict(m.arms)
                         mm.arms["pass0"] = arm
-                        a = SA.audit(mm, axis="node", config=config)
+                        a = SA.audit(mm, axis="region", config=config)
                         det = a["determined"]
                         row[f"mwae_solvable_{tag_}"] = float(
                             np.abs(a["err"])[det].sum() / max(a["total"][det].sum(), 1.0)

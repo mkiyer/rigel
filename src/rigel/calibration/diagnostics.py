@@ -9,7 +9,7 @@ dominant modes, and the separation — but deliberately assign **no** categorica
 "capture worked" verdict (that threshold is left to the analyst).
 
 The calibrator builds one only when it actually fits the Phase-2 KDE (enough
-training nodes); otherwise it is ``None`` and the report omits the panel.
+training regions); otherwise it is ``None`` and the report omits the panel.
 """
 
 from __future__ import annotations
@@ -32,13 +32,13 @@ class CalibrationDiagnostics:
     enriched_mode: float | None  # log ρ_g of the higher-density dominant mode
     separation_nats: float | None  # enriched − depleted (0 if unimodal)
     enrichment_factor: float | None  # exp(separation_nats)
-    rug_log_rho: np.ndarray  # downsampled per-node training log-densities
-    rug_kind: np.ndarray  # int node-kind codes (0=intergenic,1=intron,2=exon,3=boundary)
+    rug_log_rho: np.ndarray  # downsampled per-region training log-densities
+    rug_kind: np.ndarray  # int region-kind codes (0=intergenic,1=intron,2=exon,3=boundary)
 
     @classmethod
     def from_prior(cls, prior) -> "CalibrationDiagnostics":
         """Build from a fitted :class:`~rigel.calibration.npmle.DensityNPMLE` enrichment landscape (Role A).
-        Modes are the local maxima of the fitted log-density curve (it carries no per-node training points,
+        Modes are the local maxima of the fitted log-density curve (it carries no per-region training points,
         so the rug is empty).
 
         ⛔ **It does NOT accept a**

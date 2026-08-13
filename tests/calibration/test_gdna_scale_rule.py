@@ -42,7 +42,7 @@ from rigel.calibration.effective_length import (
     contained_eff_length,
     crossing_eff_length,
 )
-from rigel.calibration.node_geometry import init_beliefs
+from rigel.calibration.region_geometry import init_beliefs
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
 from _synthetic import make_chain_parts
@@ -51,7 +51,7 @@ from _synthetic import make_chain_parts
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 #: the chain is ``N E N E N``: intergenic(0) EDGE(1) EXON(2) EDGE(3) intergenic(4)
 IG_LEFT, SEAM_LEFT, EXON, SEAM_RIGHT, IG_RIGHT = 0, 1, 2, 3, 4
@@ -64,11 +64,11 @@ def _delta_pmf(length):
     return p
 
 
-def _single_exon_chain(*, rho_node, rho_edge, rna_counts, node_bp=1000.0):
+def _single_exon_chain(*, rho_region, rho_edge, rna_counts, region_bp=1000.0):
     """``intergenic | exon+ | intergenic`` with a gDNA field laid down as ``rho x own opportunity``, plus
     ``rna_counts`` extra UNSTRANDED RNA counts on the exon only.
 
-    ``rho_node`` / ``rho_edge`` are the gDNA densities of the off-probe NODE class and the exon-adjacent
+    ``rho_region`` / ``rho_edge`` are the gDNA densities of the off-probe REGION class and the exon-adjacent
     EDGE class. Equal ⇒ a flat landscape (capture OFF). Unequal ⇒ a capture step, with the exon's own
     gDNA laid at the on-probe level ``rho_edge`` — the geometry hybrid capture produces.
 
@@ -77,18 +77,18 @@ def _single_exon_chain(*, rho_node, rho_edge, rna_counts, node_bp=1000.0):
     and the exon has no own answer — the state TRAPS: a-purity-filter-is-a-length-filter was measured in.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    node_eff = contained_eff_length(np.full(3, node_bp), gdna_fl)
+    region_eff = contained_eff_length(np.full(3, region_bp), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
     edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     # gDNA: the flanks at the off-probe rate, the exon at the on-probe rate (== off-probe when flat).
-    g_node = np.array([rho_node, rho_edge, rho_node]) * node_eff
+    g_region = np.array([rho_region, rho_edge, rho_region]) * region_eff
     g_edge = rho_edge * edge_eff
-    node_count = g_node + np.array([0.0, float(rna_counts), 0.0])
+    region_count = g_region + np.array([0.0, float(rna_counts), 0.0])
     return make_chain_parts(
         [0, BIT_EXON_POS, 0],
-        node_size_bp=node_bp,
-        node_pos=node_count / 2,
-        node_neg=node_count / 2,
+        region_size_bp=region_bp,
+        region_pos=region_count / 2,
+        region_neg=region_count / 2,
         edge_pos=g_edge / 2,
         edge_neg=g_edge / 2,
         gdna_fl=gdna_fl,
@@ -105,7 +105,7 @@ _N_GRID = 200
 
 def _solve(parts, *, kappa=0.5):
     cap = {}
-    final = node_sweep(
+    final = region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,
@@ -122,11 +122,11 @@ def _solve(parts, *, kappa=0.5):
     return final, cap, final.f_g * count / eff_g
 
 
-def _sweep(rho_node, rho_edge, rna_ladder):
+def _sweep(rho_region, rho_edge, rna_ladder):
     """The delivered gDNA level at the exon, and its own f_g, as the exon's RNA content moves."""
     out = []
     for rna in rna_ladder:
-        parts = _single_exon_chain(rho_node=rho_node, rho_edge=rho_edge, rna_counts=rna)
+        parts = _single_exon_chain(rho_region=rho_region, rho_edge=rho_edge, rna_counts=rna)
         final, cap, rho_g = _solve(parts)
         count = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
         eff_g = np.asarray(parts.geometry.eff_gdna, float)
@@ -178,7 +178,7 @@ def test_exon_fg_tracks_its_truth_across_the_density_sweep():
 
     ⚠ **The zero-RNA rung is excluded from the accuracy bound, and that is not a tolerance dodge.** There
     the exon is structurally pure gDNA with no evidence of its own, and ψ's uninformative Jeffreys
-    reference deliberately holds such a node off the ``f_g = 1`` vertex until the data earn it — the same
+    reference deliberately holds such a region off the ``f_g = 1`` vertex until the data earn it — the same
     residual `test_sweep.test_gdna_sweep_factor1_ambig_recovery` measures from the other side, with the
     same instruction not to attack it with damping. The delivered LEVEL is exact there too (gate 1); what
     is short is ψ's readout at the vertex, which is a different mechanism and a different fix."""
@@ -196,7 +196,7 @@ def test_exon_fg_tracks_its_truth_across_the_density_sweep():
 
 def test_every_structurally_pure_gdna_object_stays_exact():
     """⭐ **GATE 3 — a fix that breaks the anchors has traded one error for another.** Both intergenic
-    nodes and both gene-boundary EDGEs are structurally pure gDNA; all four must read exactly 1.0 on
+    regions and both gene-boundary EDGEs are structurally pure gDNA; all four must read exactly 1.0 on
     every rung of the ladder."""
     for row in _sweep(1.0, 1.0, _RNA_LADDER):
         assert np.all(row["pure_fg"] == 1.0), f"rna={row['rna']}: pure objects {row['pure_fg']}"
@@ -251,7 +251,7 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     it arrives as the field, exactly.
 
     ⚠ ``f_g`` at the interior exon is 0.914 and not 1.000, and that residual is NOT this rule or the pin:
-    it is ψ's uninformative reference holding an evidence-free node off the vertex by ~0.08, pinned as a
+    it is ψ's uninformative reference holding an evidence-free region off the vertex by ~0.08, pinned as a
     strict xfail against the TRUTH in `test_relay_mass_pin`. The bound here is short of it deliberately.
 
     ⭐ **Every variant that re-imputes a total fails this gate**, and did so even at the old loose bound:
@@ -270,16 +270,16 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     exon before the pin drags it back — the TRAPS: a-message-from-the-destinations-belief re-imputation, visible in flight."""
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     rho, bp_ = 1.0, 1_000.0
-    node_eff = contained_eff_length(np.full(5, bp_), gdna_fl)
+    region_eff = contained_eff_length(np.full(5, bp_), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
     edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     # a UNIFORM gDNA field on every object, plus heavy RNA on the two OUTER exons only
-    node_count = rho * node_eff + np.array([0.0, 60_000.0, 0.0, 60_000.0, 0.0])
+    region_count = rho * region_eff + np.array([0.0, 60_000.0, 0.0, 60_000.0, 0.0])
     parts = make_chain_parts(
         [0, BIT_EXON_POS, BIT_EXON_POS, BIT_EXON_POS, 0],
-        node_size_bp=bp_,
-        node_pos=node_count / 2,
-        node_neg=node_count / 2,
+        region_size_bp=bp_,
+        region_pos=region_count / 2,
+        region_neg=region_count / 2,
         edge_pos=rho * edge_eff / 2,
         edge_neg=rho * edge_eff / 2,
         gdna_fl=gdna_fl,
@@ -301,7 +301,7 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
     gDNA arm must use it, unchanged and bit-identical. Where the source supplies one, it must not.
 
     The fixture is a STRANDED chain (κ = 0.95, library sample sizes large enough to open the strand
-    deadband), so the exon and intron nodes earn real composition evidence and can lend a composition,
+    deadband), so the exon and intron regions earn real composition evidence and can lend a composition,
     while the two gene-boundary EDGEs and the intergenic flanks still cannot.
 
     ⚠ **Both populations must be non-empty**, and that is what makes the gate two-sided: forcing the
@@ -309,14 +309,14 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
     cannot tell those two lies apart, because it has no composition-shared step at all."""
     parts = make_chain_parts(  # intergenic | exon+ | intron+ | exon+ | intergenic
         [0, BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS, 0],
-        node_size_bp=1000.0,
-        node_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic nodes
-        node_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
+        region_size_bp=1000.0,
+        region_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic regions
+        region_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
         edge_pos=[20.0, 60.0, 60.0, 20.0],
         edge_neg=[20.0, 10.0, 10.0, 20.0],
     )
     cap = {}
-    node_sweep(
+    region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,

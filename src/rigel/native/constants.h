@@ -224,7 +224,7 @@ struct RawResolveResult {
     //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
     //   (b) the K >= 2 stratum is a materially cleaner population (minor rate
     //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
-    //       kappa by 21-34% — and the fit feeds kappa in as the MoM node mean.
+    //       kappa by 21-34% — and the fit feeds kappa in as the MoM region mean.
     // ⛔ NOT because credit-all "inflates" the dispersion: measured null bias is
     // -7.3e-5 +/- 3.0e-4 on LBX0190, i.e. none. That reasoning was refuted.
     // ⛔ A 1/K split is provably BIASED (4-12 sigma): Var(sum w_i X_i) = pq*sum w^2

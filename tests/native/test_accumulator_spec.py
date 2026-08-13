@@ -5,18 +5,18 @@
 ``_accumulator_reference.py`` is the executable specification; the native accumulator is required to
 reproduce it byte for byte. This module is what "correct" means for both.
 
-THE RULE UNDER TEST, in five lines. The genome is a graph: NODES are half-open intervals tiling each
-reference, and the 0-bp LINES between adjacent nodes are CONTIGUOUS edges. A JUNCTION edge is a directed
+THE RULE UNDER TEST, in five lines. The genome is a graph: REGIONS are half-open intervals tiling each
+reference, and the 0-bp LINES between adjacent regions are CONTIGUOUS edges. A JUNCTION edge is a directed
 donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
-gaps and broken by introns — of length ``L = span − Σ intron``. Nodes count fragments CONTAINED; edges
+gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; edges
 count fragments CROSSING. Each population stores only the channels something READS — an integer count, a
-fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a node and ``L − 1`` at an edge, a
+fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a region and ``L − 1`` at an edge, a
 ``Σ L``, and on the contiguous edges the CONSERVED MASS, which sums to one per fragment.
 
 ⚠ **No partitioning.** Every crossed edge receives the FULL weight. The chance that a length-``L``
 fragment crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
 every fragment length contributes equally to each edge. Dividing by the number of edges crossed destroys
-that cancellation and makes the answer depend on node spacing — measured up to **3.6× low**.
+that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**.
 """
 
 from __future__ import annotations
@@ -51,12 +51,12 @@ def close(got: float, want: float, deposits: int) -> bool:
 # ---------------------------------------------------------------------------
 
 #: chr1 cuts   0    100   200   201   400   900   1000
-#: nodes        n0    n1    n2*   n3    n4    n5      (* n2 is 1 bp: [200,201))
+#: regions        n0    n1    n2*   n3    n4    n5      (* n2 is 1 bp: [200,201))
 #: lines           1     2     3     4     5          (local cut index)
 CHR1_CUTS = [0, 100, 200, 201, 400, 900, 1000]
 CHR2_CUTS = [0, 500, 1000]
 
-#: coarse node type: 0 intergenic, 1 intron, 2 exon
+#: coarse region type: 0 intergenic, 1 intron, 2 exon
 CHR1_TYPES = [0, 2, 2, 1, 2, 0]
 CHR2_TYPES = [0, 2]
 
@@ -66,7 +66,7 @@ JUNCTION = (0, 201, 900, Strand.POS)
 
 def _partition(junctions=()):
     return Partition.from_cuts(
-        [CHR1_CUTS, CHR2_CUTS], node_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
+        [CHR1_CUTS, CHR2_CUTS], region_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
     )
 
 
@@ -81,19 +81,19 @@ def _edge(ref, line):
 
 
 def _contained_quantum(ref, local, length):
-    """The deposit a CONTAINED length-``length`` fragment makes on node ``(ref, local)``.
+    """The deposit a CONTAINED length-``length`` fragment makes on region ``(ref, local)``.
 
-    ⭐⭐ **The deposit is ``1/OPPORTUNITY``, not ``1/length``** — a length-`w` fragment inside a node of
+    ⭐⭐ **The deposit is ``1/OPPORTUNITY``, not ``1/length``** — a length-`w` fragment inside a region of
     length `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels the
     opportunity identically and the channel is a DENSITY for any length distribution
-    (`test_fragment_length_proof.test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_...`). ⚠ Derived from
+    (`test_fragment_length_proof.test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_...`). ⚠ Derived from
     the fixture's own cuts rather than written as a number, so an assertion states the RULE.
     """
     cuts = CHR1_CUTS if ref == 0 else CHR2_CUTS
     return 1.0 / (cuts[local + 1] - cuts[local] - length + 1)
 
 
-def _node(ref, local):
+def _region(ref, local):
     return (0 if ref == 0 else len(CHR1_CUTS) - 1) + local
 
 
@@ -120,13 +120,13 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
 # ---------------------------------------------------------------------------
 
 
-def test_a_contained_fragment_touches_ONE_node_and_no_edge():
+def test_a_contained_fragment_touches_ONE_region_and_no_edge():
     acc = _acc()
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
-    assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 3)]), _contained_quantum(0, 3, 160), 1)
-    assert t.node_contained_count.sum() == 1
+    assert int(t.region_contained_count[_region(0, 3), 0]) == 1
+    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 3)]), _contained_quantum(0, 3, 160), 1)
+    assert t.region_contained_count.sum() == 1
     assert t.edge_unspliced_count.sum() == 0
 
 
@@ -135,33 +135,33 @@ def test_a_fragment_ENDING_AT_a_line_does_not_cross_it():
     acc = _acc()
     acc.deposit(0, 120, 200)
     assert acc.tally.edge_unspliced_count.sum() == 0
-    assert int(acc.tally.node_contained_count[_node(0, 1), 0]) == 1
+    assert int(acc.tally.region_contained_count[_region(0, 1), 0]) == 1
 
 
 def test_a_fragment_STARTING_AT_a_line_does_not_cross_it():
     acc = _acc()
     acc.deposit(0, 201, 390)
     assert acc.tally.edge_unspliced_count.sum() == 0
-    assert int(acc.tally.node_contained_count[_node(0, 3), 0]) == 1
+    assert int(acc.tally.region_contained_count[_region(0, 3), 0]) == 1
 
 
-def test_a_fragment_crossing_four_nodes_credits_exactly_THREE_edges_at_FULL_weight():
+def test_a_fragment_crossing_four_regions_credits_exactly_THREE_edges_at_FULL_weight():
     acc = _acc()
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
     t = acc.tally
     assert [int(t.edge_unspliced_count[_edge(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
     quantum = 1.0 / (350 - 1)
     assert all(close(float(t.edge_unspliced_inv_length_sum[_edge(0, j)]), quantum, 1) for j in (2, 3, 4))
-    assert t.node_contained_count.sum() == 0
+    assert t.region_contained_count.sum() == 0
 
 
-def test_a_fragment_covering_a_1bp_node_credits_BOTH_lines_and_conserves_its_mass():
-    """1 bp nodes are legal — 15,687 of them at human scale — and nothing may assume length > 1.
+def test_a_fragment_covering_a_1bp_region_credits_BOTH_lines_and_conserves_its_mass():
+    """1 bp regions are legal — 15,687 of them at human scale — and nothing may assume length > 1.
 
-    ⭐ The 1 bp node is the sharpest case for the CONSERVED MASS: its slice is a single base shared
+    ⭐ The 1 bp region is the sharpest case for the CONSERVED MASS: its slice is a single base shared
     between two bounding lines, so the fragment's three slices are 50 / 1 / 99 bases of a 150 bp
     molecule and must still sum to exactly one fragment.
-    ⚠ This test used to assert a ``node_spanning`` deposit here. That bank was removed on evidence, and
+    ⚠ This test used to assert a ``region_spanning`` deposit here. That bank was removed on evidence, and
     the mass is what now makes the case observable — a strictly stronger statement, since a count of 1
     survives any error in *how much* of the fragment was attributed."""
     acc = _acc()
@@ -169,20 +169,20 @@ def test_a_fragment_covering_a_1bp_node_credits_BOTH_lines_and_conserves_its_mas
     t = acc.tally
     assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
     assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
-    assert int(t.node_contained_count[_node(0, 2), 0]) == 0
+    assert int(t.region_contained_count[_region(0, 2), 0]) == 0
     mass = int(t.edge_unspliced_mass.sum())
     assert abs(mass - 1.0) <= 8 * EPS, (
         f"the fragment deposited {mass} fragments, not 1"
     )
 
 
-def test_a_fragment_LONGER_than_a_node_is_not_contained_and_crosses_exactly_one_line():
-    """``contained`` needs ``L <= node``. One base longer and the fragment is a CROSSING instead, and it
-    touches the node axis nowhere at all — that axis has exactly one population now."""
+def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_one_line():
+    """``contained`` needs ``L <= region``. One base longer and the fragment is a CROSSING instead, and it
+    touches the region axis nowhere at all — that axis has exactly one population now."""
     acc = _acc()
     acc.deposit(0, 200, 202)  # n2 is 1 bp, L = 2
     t = acc.tally
-    assert t.node_contained_count.sum() == 0
+    assert t.region_contained_count.sum() == 0
     assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
 
 
@@ -249,10 +249,10 @@ def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
     assert t.qc["unannotated_introns"] == 1
 
 
-def test_a_fragment_straddling_two_nodes_without_crossing_a_line_is_NOT_contained():
+def test_a_fragment_straddling_two_regions_without_crossing_a_line_is_NOT_contained():
     """⚠ An unannotated intron can swallow every line between two blocks. The fragment then crosses
-    nothing, yet it straddles two nodes — crediting it as *contained* would put its whole length in a
-    node it only partly overlaps. It deposits on no object, and the start count is what keeps that
+    nothing, yet it straddles two regions — crediting it as *contained* would put its whole length in a
+    region it only partly overlaps. It deposits on no object, and the start count is what keeps that
     visible rather than silent."""
     acc = _acc()
     acc.deposit(
@@ -260,16 +260,16 @@ def test_a_fragment_straddling_two_nodes_without_crossing_a_line_is_NOT_containe
     )  # blocks land in n1 and n4, crossing no line
     t = acc.tally
     assert t.edge_unspliced_count.sum() == 0
-    assert t.node_contained_count.sum() == 0
-    assert int(t.node_start_count.sum()) == 1, "still counted"
+    assert t.region_contained_count.sum() == 0
+    assert int(t.region_start_count.sum()) == 1, "still counted"
 
 
-def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment():
+def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragment():
     acc = _acc()
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
-    assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 3)]), _contained_quantum(0, 3, 180 - 40), 1)
+    assert int(t.region_contained_count[_region(0, 3), 0]) == 1
+    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 3)]), _contained_quantum(0, 3, 180 - 40), 1)
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -298,7 +298,7 @@ def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(orde
     """
     _, direction = order
     junctions = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
-    part = Partition.from_cuts([CHR1_CUTS], node_types=[CHR1_TYPES], junctions=junctions)
+    part = Partition.from_cuts([CHR1_CUTS], region_types=[CHR1_TYPES], junctions=junctions)
     assert [int(s) for s in part.sj_strand] == [int(Strand.POS), int(Strand.NEG)], (
         "POS must sort to slot 0 whichever order it was passed in"
     )
@@ -313,7 +313,7 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
     with room for an exon between them."""
     part = Partition.from_cuts(
         [[0, 100, 200, 300, 400, 500, 600]],
-        node_types=[[0, 2, 1, 2, 1, 2]],
+        region_types=[[0, 2, 1, 2, 1, 2]],
         junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
     )
     acc = Accumulator(part, max_fragment_length=10_000)
@@ -461,7 +461,7 @@ def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
     assert acc.deposit(0, 100, 500) is DepositOutcome.TOO_LONG
     t = acc.tally
     assert t.edge_unspliced_count.sum() == 0
-    assert t.node_start_count.sum() == 0
+    assert t.region_start_count.sum() == 0
     assert t.qc["dropped_too_long"] == 1
 
 
@@ -478,15 +478,15 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc = _acc()
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
-    assert int(t.node_contained_count[_node(0, 5), 0]) == 1
-    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 5)]), _contained_quantum(0, 5, 50), 1)
+    assert int(t.region_contained_count[_region(0, 5), 0]) == 1
+    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 5)]), _contained_quantum(0, 5, 50), 1)
 
 
-def test_a_single_node_reference_has_no_edges_and_still_accepts_a_fragment():
-    acc = Accumulator(Partition.from_cuts([[0, 1000]], node_types=[[0]]))
+def test_a_single_region_reference_has_no_edges_and_still_accepts_a_fragment():
+    acc = Accumulator(Partition.from_cuts([[0, 1000]], region_types=[[0]]))
     assert acc.n_edges == 0
     acc.deposit(0, 100, 300)
-    assert int(acc.tally.node_contained_count[0, 0]) == 1
+    assert int(acc.tally.region_contained_count[0, 0]) == 1
 
 
 def test_the_per_reference_offsets_do_not_bleed():
@@ -498,8 +498,8 @@ def test_the_per_reference_offsets_do_not_bleed():
     t = acc.tally
     assert [int(t.edge_unspliced_count[e, 0]) for e in range(acc.n_edges)] == [0, 1, 1, 0, 0, 1]
     assert int(t.edge_unspliced_count.sum()) == 3
-    assert int(t.node_start_count[_node(0, 1)]) == 1
-    assert int(t.node_start_count[_node(1, 0)]) == 1
+    assert int(t.region_start_count[_region(0, 1)]) == 1
+    assert int(t.region_start_count[_region(1, 0)]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +517,7 @@ def test_every_accepted_fragment_increments_exactly_ONE_start_count():
         for s, e, i in fragments
     )
     assert accepted == 4
-    assert int(acc.tally.node_start_count.sum()) == 4
+    assert int(acc.tally.region_start_count.sum()) == 4
     assert acc.tally.qc["deposited"] == 4
 
 
@@ -585,24 +585,24 @@ def _corpus(rng, n, ref_len):
     return starts, starts + lengths, lengths
 
 
-def _uniform_accumulator(node_bp, ref_len):
-    cuts = list(range(0, ref_len + 1, node_bp))
+def _uniform_accumulator(region_bp, ref_len):
+    cuts = list(range(0, ref_len + 1, region_bp))
     return Accumulator(
-        Partition.from_cuts([cuts], node_types=[[0] * (len(cuts) - 1)]), max_fragment_length=10_000
+        Partition.from_cuts([cuts], region_types=[[0] * (len(cuts) - 1)]), max_fragment_length=10_000
     )
 
 
-@pytest.mark.parametrize("node_bp", [50, 200, 1000])
-def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(node_bp):
+@pytest.mark.parametrize("region_bp", [50, 200, 1000])
+def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(region_bp):
     """⭐ ``E[Σ 1/(L−1)] = ρ`` exactly, for ANY fragment-length distribution. This is the identity the
     whole design rests on and the reason no divisor and no length model appear at an edge.
 
-    It must hold at every node spacing. Partitioning the weight by the number of edges crossed breaks
-    it — measured 0.28× at 50 bp nodes, 0.54× at 100 bp, 0.91× at 200 bp — so this test is also what
+    It must hold at every region spacing. Partitioning the weight by the number of edges crossed breaks
+    it — measured 0.28× at 50 bp regions, 0.54× at 100 bp, 0.91× at 200 bp — so this test is also what
     forbids partitioning.
     """
     ref_len, rho = 200_000, 0.05
-    acc = _uniform_accumulator(node_bp, ref_len)
+    acc = _uniform_accumulator(region_bp, ref_len)
     rng = np.random.default_rng(7)
     starts, ends, _ = _corpus(rng, int(rho * ref_len), ref_len)
     for s, e in zip(starts, ends):
@@ -611,7 +611,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(nod
     estimate = (
         acc.tally.edge_unspliced_inv_length_sum[interior].sum() / (acc.n_edges - 10)
     )
-    assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {node_bp} bp nodes"
+    assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {region_bp} bp regions"
 
 
 def test_the_crossing_COUNT_recovers_density_times_mean_length():
@@ -644,9 +644,9 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
 
     a, b = run(range(len(starts))), run(order)
     for field in (
-        "node_contained_count",
-        "node_contained_inv_opportunity_sum",
-        "node_start_count",
+        "region_contained_count",
+        "region_contained_inv_opportunity_sum",
+        "region_start_count",
         "edge_unspliced_count",
         "edge_unspliced_inv_length_sum",
         "pool_lengths",
@@ -704,16 +704,16 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
 
 
 def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_begins():
-    """A leading intron means the molecule does not begin at ``lo``. Attributing it to the node
+    """A leading intron means the molecule does not begin at ``lo``. Attributing it to the region
     containing ``lo`` would credit the start-count invariant — and possibly the contained deposit — to a
-    node the fragment never touches."""
+    region the fragment never touches."""
     acc = _acc(max_fragment_length=10_000)
     acc.deposit(0, 150, 500, observed_introns=[(150, 480)])  # the path is only [480,500), inside n4
     t = acc.tally
-    assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
-    assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
-    assert int(t.node_contained_count[_node(0, 4), 0]) == 1
-    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 4)]), _contained_quantum(0, 4, 20), 1)
+    assert int(t.region_start_count[_region(0, 4)]) == 1, "n4, where the path actually starts"
+    assert int(t.region_start_count[_region(0, 1)]) == 0, "not n1, where the extent begins"
+    assert int(t.region_contained_count[_region(0, 4), 0]) == 1
+    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 4)]), _contained_quantum(0, 4, 20), 1)
 
 
 def test_a_duplicated_intron_credits_its_junction_ONCE():
@@ -747,14 +747,14 @@ def test_a_wide_overlap_no_longer_discards_a_good_fragment():
         is DepositOutcome.DEPOSITED
     )
     assert acc.tally.qc["dropped_empty"] == 0
-    assert int(acc.tally.node_start_count.sum()) == 1
+    assert int(acc.tally.region_start_count.sum()) == 1
 
 
 # ---------------------------------------------------------------------------
-# the node banks carry ONE strand convention
+# the region banks carry ONE strand convention
 # ---------------------------------------------------------------------------
 
-#: a junction far enough right that the first block still spans node n2 = [200,201)
+#: a junction far enough right that the first block still spans region n2 = [200,201)
 SPAN_JUNCTION_POS = (0, 400, 900, Strand.POS)
 SPAN_JUNCTION_NEG = (0, 400, 900, Strand.NEG)
 
@@ -763,14 +763,14 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     """⚠ One array, one convention.
 
     A spliced fragment cannot be *contained* — both endpoints of an annotated intron are cuts, so it
-    always crosses its junction edge — but its blocks routinely SPAN a node whole. Measured on real
-    cfRNA, **65–69 % of all node_spanning deposits came from spliced fragments**. Indexing those by
+    always crosses its junction edge — but its blocks routinely SPAN a region whole. Measured on real
+    cfRNA, **65–69 % of all region_spanning deposits came from spliced fragments**. Indexing those by
     sense-relative-to-motif while the unspliced ones beside them use genome strand would put one array
     into two conventions, and 40–44 % of the spliced deposits would land in the opposite column from
     their unspliced neighbours.
 
-    ⭐⭐ **RE-HOMED, NOT DELETED.** This test used to ride on ``node_spanning``, which was removed —
-    and removing it took away the only NODE-axis population a spliced fragment can reach, since a
+    ⭐⭐ **RE-HOMED, NOT DELETED.** This test used to ride on ``region_spanning``, which was removed —
+    and removing it took away the only REGION-axis population a spliced fragment can reach, since a
     spliced fragment can never be *contained* (both endpoints of an annotated intron are cuts). The
     claim is about the CONVENTION, not about that bank, so it now rides on the two banks a spliced
     fragment does reach: ``edge_spliced_count`` beside ``edge_unspliced_count`` at the SAME line, and
@@ -833,8 +833,8 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
     assert acc.deposit(0, 150, 300, align_strand=undefined) is DepositOutcome.STRAND_UNDEFINED
     t = acc.tally
     assert t.qc["dropped_strand_undefined"] == 1
-    assert int(t.node_contained_count.sum()) == 0, "must not be booked into either column"
-    assert int(t.node_start_count.sum()) == 0, "a rejected fragment never reaches the invariant"
+    assert int(t.region_contained_count.sum()) == 0, "must not be booked into either column"
+    assert int(t.region_start_count.sum()) == 0, "a rejected fragment never reaches the invariant"
 
 
 # ── an AMBIGUOUS PATH deposits nothing, and that is not the same thing as an IMPLICIT splice ────────
@@ -870,8 +870,8 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     assert t.qc["deferred_undetermined_gap"] == 1
     assert t.qc["deposited"] == 0
     for name in (
-        "node_contained_count",
-        "node_start_count",
+        "region_contained_count",
+        "region_start_count",
         "edge_unspliced_count",
         "edge_spliced_count",
         "sj_count",
@@ -905,7 +905,7 @@ def test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequ
     assert outcome is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.sj_count[0, 0]) == 1
-    assert int(t.node_start_count.sum()) == 1
+    assert int(t.region_start_count.sum()) == 1
     assert t.qc["deferred_undetermined_gap"] == 0
     assert not t.deferred
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1
@@ -1075,12 +1075,12 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     acc.deposit(0, 220, 380, align_strand=Strand.POS)
     acc.deposit(0, 220, 380, align_strand=Strand.NEG)
     t = acc.tally
-    node = _node(0, 3)
+    region = _region(0, 3)
     # the count still separates them, one per column
-    assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.POS]]) == 1
-    assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.NEG]]) == 1
+    assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.POS]]) == 1
+    assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.NEG]]) == 1
     # ...and the moments pool them into the single slot
-    assert close(float(t.node_contained_inv_opportunity_sum[node]), 2 * _contained_quantum(0, 3, 160), 2)
+    assert close(float(t.region_contained_inv_opportunity_sum[region]), 2 * _contained_quantum(0, 3, 160), 2)
 
     edge_acc = _acc()
     edge_acc.deposit(0, 120, 320, align_strand=Strand.POS)
@@ -1094,10 +1094,10 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
 def test_the_density_FIELD_NAME_is_gone_everywhere():
     """The rename is complete, so no consumer can reach a half-migrated schema.
 
-    ``inv_length_sum`` is an exact density at an edge and is NOT one at a node; keeping the old name
+    ``inv_length_sum`` is an exact density at an edge and is NOT one at a region; keeping the old name
     would put one word on two concepts, which is.
     """
     t = _acc().tally
     stale = [name for name in t.__slots__ if name.endswith("_density")]
     assert stale == []
-    assert {"node_contained_inv_opportunity_sum"} <= set(t.__slots__)
+    assert {"region_contained_inv_opportunity_sum"} <= set(t.__slots__)

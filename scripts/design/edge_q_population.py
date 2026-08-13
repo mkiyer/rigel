@@ -125,7 +125,7 @@ def load_drained(panel, cond, cfg, index):
     payload = _drain_side_buffer(payload, index, sm, seed=cfg.second_pass_seed, _lift=lift)
     lifted, n_amb = lift_choices(lift["undrained"], [parts[k] for k in ORIGINS], lift["choices"])
     parts = {
-        k: sp_drain(parts[k], ch, node_types=lift["node_types"], junctions=lift["junctions"])
+        k: sp_drain(parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"])
         for k, ch in zip(ORIGINS, lifted)
     }
     return payload, parts, int(n_amb)
@@ -190,16 +190,16 @@ def main() -> int:  # noqa: C901
               f"mass max|Δ| {float(np.abs((m_g + m_r) - m_all).max()):.3e}")
 
         # ── the defect, with a PERFECT f_g ────────────────────────────────────────────────────────
-        # ⭐ The NODE term needs no conversion (a contained fragment deposits on exactly one node), so it
+        # ⭐ The REGION term needs no conversion (a contained fragment deposits on exactly one region), so it
         # enters both arms identically and DILUTES the edge error. The EM sees the total, so the total is
         # what must be reported beside the edge-only figure — an edge-only number overstates the defect
-        # by exactly the node share.
-        def _node_count(p):
-            v = np.asarray(p.node_contained_count, np.float64)
+        # by exactly the region share.
+        def _region_count(p):
+            v = np.asarray(p.region_contained_count, np.float64)
             return float(v.sum(axis=1).sum() if v.ndim == 2 else v.sum())
 
-        n_g = _node_count(parts["gdna"])
-        n_r = sum(_node_count(parts[k]) for k in ("mrna", "nrna"))
+        n_g = _region_count(parts["gdna"])
+        n_r = sum(_region_count(parts[k]) for k in ("mrna", "nrna"))
 
         a_g, t_g = float((c_g * q_pool).sum()), float(m_g.sum())
         a_r, t_r = float((c_r * q_pool).sum()), float(m_r.sum())

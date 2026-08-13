@@ -61,7 +61,7 @@ def main() -> None:
     args = ap.parse_args()
 
     index = TranscriptIndex.load(args.index)
-    print(f"index  {args.index}   {len(index.nodes_df):,} nodes\n")
+    print(f"index  {args.index}   {len(index.regions_df):,} regions\n")
 
     header = f"{'library':<22}" + "".join(f"{key:>26}" for key in _KEYS + _CENSUS_KEYS)
     print(header)

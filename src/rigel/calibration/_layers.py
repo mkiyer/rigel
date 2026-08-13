@@ -47,9 +47,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         0,
         "vocabulary — no calibration deps",
-        # The words everything else is written in. ⭐ `signature` is the region bitmask, `node_chain` is the
+        # The words everything else is written in. ⭐ `signature` is the region bitmask, `region_chain` is the
         # N E N E … N sequence, `errors` is the one exception type. Nothing here knows what a solve is.
-        ("errors", "signature", "node_chain", "_layers"),
+        ("errors", "signature", "region_chain", "_layers"),
     ),
     (
         1,
@@ -76,7 +76,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "geometry and the per-slot solve",
         # One slot's own numbers, and ψ — the log-density log-odds posterior over (f_pos, f_neg, f_g).
         # ⚠ `simplex_logodds` is ψ and is 784 lines; it is the single densest thing in the package.
-        ("node_geometry", "simplex_logodds"),
+        ("region_geometry", "simplex_logodds"),
     ),
     (
         4,
@@ -110,7 +110,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # ⭐ The backbone and the message policy. `sweep` owns the shape of the solve and five assertions;
         # `messages/` owns every argument about what a message should say. `DESIGN.md` §6.1.
         (
-            "node_init",
+            "region_init",
             "sweep",
             "messages",
             "messages/variance",

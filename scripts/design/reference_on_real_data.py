@@ -2,8 +2,8 @@
 
     Reference: ``tests/native/_accumulator_reference.py`` · (S2)
 
-⚠ WHY. The spec matrix exercises the reference on hand-built fixtures of two to six nodes. That cannot
-catch a defect that only appears at 1.04 M nodes and 404,168 junctions — a per-reference offset that
+⚠ WHY. The spec matrix exercises the reference on hand-built fixtures of two to six regions. That cannot
+catch a defect that only appears at 1.04 M regions and 404,168 junctions — a per-reference offset that
 drifts, an index space that wraps, a junction lookup that silently misses. The native accumulator is
 about to be gated on byte-identity to this file, so the file has to be correct on real data first.
 
@@ -41,7 +41,7 @@ from native._accumulator_reference import (  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     EDGE_KIND_JUNCTION,
     build_junction_edge_arrays,
-    build_node_partition_arrays,
+    build_region_partition_arrays,
 )
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.types import Strand  # noqa: E402
@@ -49,7 +49,7 @@ from rigel.types import Strand  # noqa: E402
 
 def build_partition(index) -> Partition:
     """The real index, in the reference's own terms."""
-    cuts, cut_offsets, node_types = build_node_partition_arrays(index)
+    cuts, cut_offsets, region_types = build_region_partition_arrays(index)
     arrays = build_junction_edge_arrays(index)
     edges = index.edges_df
     is_junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
@@ -59,8 +59,8 @@ def build_partition(index) -> Partition:
     return Partition(
         cut_positions=cuts,
         ref_cut_offsets=cut_offsets,
-        node_types=node_types,
-        ref_node_offsets=_offsets(cut_offsets, per_ref=1),
+        region_types=region_types,
+        ref_region_offsets=_offsets(cut_offsets, per_ref=1),
         ref_edge_offsets=_offsets(cut_offsets, per_ref=2),
         sj_offsets=arrays.offsets,
         sj_boundary_right=arrays.boundary_right,
@@ -69,9 +69,9 @@ def build_partition(index) -> Partition:
 
 
 def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
-    """Node (``per_ref=1``) or contiguous-edge (``per_ref=2``) CSR offsets from the cut offsets.
+    """Region (``per_ref=1``) or contiguous-edge (``per_ref=2``) CSR offsets from the cut offsets.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` nodes and ``c − 2`` lines; one contributing none
+    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` lines; one contributing none
     owns neither, which is why the subtraction is clamped at zero rather than applied blindly.
     """
     counts = np.diff(cut_offsets.astype(np.int64))
@@ -165,7 +165,7 @@ def self_check() -> int:
     prefix a ``--limit`` run sees is very likely clean.
     """
     types = [[0] * (len(_SELF_CHECK_CUTS) - 1)]
-    partition = Partition.from_cuts([_SELF_CHECK_CUTS], node_types=types)
+    partition = Partition.from_cuts([_SELF_CHECK_CUTS], region_types=types)
     print("SELF-CHECK — this harness's re-derivation vs the reference, on intron pathologies\n")
     print(f"  {'case':44s} {'reference':>10s} {'harness':>8s} {'absorbed':>9s}")
     failures = 0
@@ -215,7 +215,7 @@ def main() -> None:
     partition = build_partition(index)
     print(f"index      {args.index}")
     print(
-        f"partition  {partition.n_nodes:,} nodes  {partition.n_edges:,} contiguous edges  "
+        f"partition  {partition.n_regions:,} regions  {partition.n_edges:,} contiguous edges  "
         f"{partition.n_sj:,} junction edges  {partition.cut_positions.size:,} cuts"
     )
     print(f"bam        {args.bam}\n")
@@ -260,7 +260,7 @@ def main() -> None:
 
     print("\nCROSS-CHECKS — the reference vs an independent re-derivation")
     checks = [
-        ("start_count total == accepted", int(t.node_start_count.sum()), accepted),
+        ("start_count total == accepted", int(t.region_start_count.sum()), accepted),
         (
             "edge crossings",
             int(t.edge_unspliced_count.sum()) + int(t.edge_spliced_count.sum()),
@@ -280,13 +280,13 @@ def main() -> None:
         print(f"  {'OK ' if good else 'FAIL'}  {label:<34} {got:>16,}  vs {want:>16,}")
 
     print("\nWHAT LANDED")
-    contained = int(t.node_contained_count.sum())
-    spanning = int(t.node_spanning_count.sum())
+    contained = int(t.region_contained_count.sum())
+    spanning = int(t.region_spanning_count.sum())
     print(
         f"  contained            {contained:>12,}  ({100 * contained / max(accepted, 1):5.1f} % of accepted)"
     )
     print(f"  spanning             {spanning:>12,}")
-    print(f"  nodes with any count {int((t.node_contained_count.sum(1) > 0).sum()):>12,}")
+    print(f"  regions with any count {int((t.region_contained_count.sum(1) > 0).sum()):>12,}")
     print(f"  edges with any count {int((t.edge_unspliced_count.sum(1) > 0).sum()):>12,}")
     print(f"  junctions used       {int((t.sj_count.sum(1) > 0).sum()):>12,}")
 

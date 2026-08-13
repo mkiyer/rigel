@@ -7,7 +7,7 @@ re-solves with one imputed channel nulled at a time — so an attribution is a r
 rather than a second implementation of it.
 
 ⛔ **TRAPS: byte-identity-gate — the ``as-is`` arm must reproduce the run BIT-IDENTICALLY, and reproducing it means reproducing
-the WRITE-BACK too.** `node_sweep` keeps the incoming belief wherever ``solvable`` is False, so comparing
+the WRITE-BACK too.** `region_sweep` keeps the incoming belief wherever ``solvable`` is False, so comparing
 raw ψ output against the stored belief differs by up to 1.0 at every unsolvable slot. The first version of
 this script reported ``max |Δ| = 1.0`` and its numbers were on a different basis than the panel's; the
 `wb()` helper is that fix and the identity line is the gate.
@@ -53,9 +53,9 @@ def _sibling(name: str):
 
 P0 = _sibling("pass0_vs_oracle.py")
 
-import rigel.calibration.node_init as NI  # noqa: E402
+import rigel.calibration.region_init as NI  # noqa: E402
 import rigel.calibration.simplex_logodds as SL  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -66,7 +66,7 @@ CACHE = SUITE / "oracle_cache"
 TYPE_NAME = {0: "intergenic", 1: "intron", 2: "exon"}
 
 CALLS: list[dict] = []
-_orig = SL._solve_nodes_logodds_all
+_orig = SL._solve_regions_logodds_all
 
 
 def _rec(*a, **kw):
@@ -86,8 +86,8 @@ def main() -> int:
     import rigel.calibration.sweep as BP
     patched = []
     for mod in (SL, NI, BP):
-        if hasattr(mod, "_solve_nodes_logodds_all"):
-            setattr(mod, "_solve_nodes_logodds_all", _rec)
+        if hasattr(mod, "_solve_regions_logodds_all"):
+            setattr(mod, "_solve_regions_logodds_all", _rec)
             patched.append(mod.__name__)
     print(f"   [TRAPS: an-ablation-that-never-ran] recording ψ in {patched}")
 
@@ -107,15 +107,15 @@ def main() -> int:
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     n_slots = kind.shape[0]
-    n_nodes, n_edges = int(m.payload.n_nodes), int(m.payload.n_edges)
-    node_slot = np.full(n_nodes, -1, np.int64)
+    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
+    region_slot = np.full(n_regions, -1, np.int64)
     edge_slot = np.full(n_edges, -1, np.int64)
-    node_slot[obj[kind == NODE]] = np.flatnonzero(kind == NODE)
-    edge_slot[obj[kind != NODE]] = np.flatnonzero(kind != NODE)
+    region_slot[obj[kind == REGION]] = np.flatnonzero(kind == REGION)
+    edge_slot[obj[kind != REGION]] = np.flatnonzero(kind != REGION)
 
     def field(res, which):
         out = np.zeros(n_slots)
-        for ax, sl in (("node", node_slot), ("edge", edge_slot)):
+        for ax, sl in (("region", region_slot), ("edge", edge_slot)):
             ok = sl >= 0
             out[sl[ok]] = np.asarray(getattr(res, f"mass_{which}_{ax}"), np.float64)[ok]
         return out
@@ -138,7 +138,7 @@ def main() -> int:
 
     print("   capture keys:", sorted(k for k in cap if isinstance(cap[k], np.ndarray)))
     fg = np.asarray(cap["f_g"], np.float64)
-    # ⛔ the WRITE-BACK, reproduced: `node_sweep` keeps the incoming belief wherever `solvable` is False,
+    # ⛔ the WRITE-BACK, reproduced: `region_sweep` keeps the incoming belief wherever `solvable` is False,
     # so comparing raw psi output against the stored belief differs by up to 1.0 at every unsolvable slot.
     cnt = np.asarray(cap["count"], np.float64)
     solvable = (np.asarray(cap["free_pos"], bool) | np.asarray(cap["free_neg"], bool)) & (
@@ -175,7 +175,7 @@ def main() -> int:
 
     # per-channel reach, by slot type
     rt = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
-    st = np.where(kind == NODE, rt[np.clip(obj, 0, rt.shape[0] - 1)], -1)
+    st = np.where(kind == REGION, rt[np.clip(obj, 0, rt.shape[0] - 1)], -1)
     print("\n   ⭐ WHO RECEIVES EACH CHANNEL IN HEAD (nonzero precision), by slot type")
     print(f"      {'channel':<26} {'EDGE':>9} {'intergenic':>11} {'intron':>9} {'exon':>9}")
     chans = {

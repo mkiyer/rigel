@@ -3,7 +3,7 @@
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
-antisense-RNA / gDNA — over the ``N E N E … N`` chain (`node_chain`), by ONE forward pass and ONE backward
+antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), by ONE forward pass and ONE backward
 pass. The chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
 
 ⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, GRAFTS, REFRAMES, PINS OR ENRICHMENT — those words do not
@@ -41,24 +41,24 @@ import numpy as np
 
 from .messages import NeighbourState, PsiMessage, StepContext
 from .messages.silent import SilentPolicy
-from .node_geometry import (
-    NodeBelief,
-    NodeGeometry,
-    NodeStatics,
+from .region_geometry import (
+    RegionBelief,
+    RegionGeometry,
+    RegionStatics,
     g1_locked,
-    node_gdna_geometry,
+    region_gdna_geometry,
 )
-from .node_init import build_node_init
+from .region_init import build_region_init
 from .signature import coarse_type_array
 from .simplex_logodds import (
     _log_fg,
     _logodds_grid,
-    _solve_nodes_logodds_all,
+    _solve_regions_logodds_all,
     _tilt_grid,
 )
-from .node_chain import EDGE, NODE, NodeChain, NodeDeconv
+from .region_chain import EDGE, REGION, RegionChain, RegionDeconv
 
-__all__ = ["AssertionCounts", "chain_edge_deconv", "chain_node_deconv", "solve_chain"]
+__all__ = ["AssertionCounts", "chain_edge_deconv", "chain_region_deconv", "solve_chain"]
 
 
 # ⛔⛔ ASSERTIONS THE SHIPPED POLICY IS KNOWN TO VIOLATE, with the measurement beside each. They are
@@ -97,7 +97,7 @@ _KNOWN_VIOLATIONS: dict[str, str] = {
         "than the slot observed. This is the identity Sigma_c rho_c E_c = M that the mass pin exists to "
         "restore, and the pin is licensed in only two states, so everywhere else the residual is delivered "
         "rather than fixed. ⭐ It is consistent with a number already in the tree — messages/variance.py "
-        "records the over-claim on 52-71 % of nodes — but nothing had surfaced it as a checkable invariant, "
+        "records the over-claim on 52-71 % of regions — but nothing had surfaced it as a checkable invariant, "
         "so nothing could rank it. ⚠ It is a SUPERSET of share_in_unit_interval by construction and the two "
         "are not independent evidence; report both, and never add them."
     ),
@@ -274,10 +274,10 @@ def _at_source(state: tuple[np.ndarray, ...], src: np.ndarray) -> tuple[np.ndarr
 
 
 def solve_chain(
-    chain: NodeChain,
-    statics: NodeStatics,
-    geometry: NodeGeometry,
-    belief: NodeBelief,
+    chain: RegionChain,
+    statics: RegionStatics,
+    geometry: RegionGeometry,
+    belief: RegionBelief,
     region_arrays,
     *,
     rna_sense_frac: float,
@@ -293,8 +293,8 @@ def solve_chain(
     intron_prior=None,
     policy=None,
     _capture: dict | None = None,
-) -> NodeBelief:
-    """One forward-backward sweep over the chain. Returns the resolved :class:`NodeBelief`.
+) -> RegionBelief:
+    """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
 
     ``policy`` is the message-composition policy (:mod:`~.messages`). ⭐ **It defaults to
     :class:`~.messages.silent.SilentPolicy`, which sends nothing** — so a reader of this file plus five
@@ -330,7 +330,7 @@ def solve_chain(
     u_pos, u_neg = CNT[:, 0], CNT[:, 1]
     spliced_slot = np.asarray(geometry.spliced_count, np.float64).sum(axis=1)
     # per-slot "global" gDNA support — the basis the rate prior is fit and projected on.
-    mass_global, eff_global = node_gdna_geometry(geometry)
+    mass_global, eff_global = region_gdna_geometry(geometry)
 
     _, solve_grid = _logodds_grid(int(n_grid), float(logodds_window))
     kappa = float(rna_sense_frac)
@@ -345,7 +345,7 @@ def solve_chain(
         It is passed EXPLICITLY rather than closed over, because the write-back rebinds the belief and one
         diagnostic solve below deliberately runs after that.
         """
-        return _solve_nodes_logodds_all(
+        return _solve_regions_logodds_all(
             u_pos,
             u_neg,
             fp,
@@ -396,10 +396,10 @@ def solve_chain(
     # per-slot EXON-region flag — the graft's destination class, and a policy input rather than a gate.
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
-    is_exon_node = (np.asarray(chain.kind) == NODE) & (_rtype[_ri] == 2)
+    is_exon_region = (np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)
 
     # ── (A) the per-slot message-free SELF-SOLVE — the four init sources ──────────────────────────────
-    own = build_node_init(
+    own = build_region_init(
         chain,
         statics,
         geometry,
@@ -431,8 +431,8 @@ def solve_chain(
         # geometry / structure
         left=left,
         right=right,
-        is_edge=np.asarray(chain.kind) != NODE,
-        is_exon_node=is_exon_node,
+        is_edge=np.asarray(chain.kind) != REGION,
+        is_exon_region=is_exon_region,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
         g1_locked=g1_locked(np.asarray(fp, bool), np.asarray(fn, bool)),
@@ -509,7 +509,7 @@ def solve_chain(
     if _capture is not None:  # inert diagnostic hook
         # strand-ONLY local belief (no global prior, no messages) — to split the local error into the
         # strand likelihood vs the global gDNA prior contribution. Same solver, global=None.
-        fg_strand = _solve_nodes_logodds_all(
+        fg_strand = _solve_regions_logodds_all(
             u_pos,
             u_neg,
             fp,
@@ -580,7 +580,7 @@ def solve_chain(
             solvable_mask=solvable,
         )
 
-    return NodeBelief(
+    return RegionBelief(
         f_pos=f_pos,
         f_neg=f_neg,
         f_g=f_g,
@@ -616,19 +616,19 @@ def _scan(seq, nbr, relay, *, backward: bool):  # noqa: D401 — see solve_chain
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def chain_node_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
-    """Project the chain belief's NODE slots back onto the NODE axis as a :class:`NodeDeconv` — what
+def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
+    """Project the chain belief's REGION slots back onto the REGION axis as a :class:`RegionDeconv` — what
     ``CalibrationResult`` / ``priors`` / ``derive`` consume.
 
-    ⚠ **A node's contained population carries no spliced term any more, and that is structural**: the
-    accumulator credits ``node_contained`` only when the fragment used no junction, so a contained
+    ⚠ **A region's contained population carries no spliced term any more, and that is structural**: the
+    accumulator credits ``region_contained`` only when the fragment used no junction, so a contained
     fragment is unspliced by construction. The predecessor added ``+ mass_spliced`` here; that quantity
-    is identically zero on the node axis now, and adding it would be adding a channel that cannot exist.
+    is identically zero on the region axis now, and adding it would be adding a channel that cannot exist.
     """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
-    reg = kind == NODE
-    count = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)
+    reg = kind == REGION
+    count = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
     n = count.shape[0]
     f_g = np.zeros(n)
     f_pos = np.zeros(n)
@@ -637,7 +637,7 @@ def chain_node_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDe
     f_g[ri] = belief.f_g[reg]
     f_pos[ri] = belief.f_pos[reg]
     f_neg[ri] = belief.f_neg[reg]
-    return NodeDeconv(
+    return RegionDeconv(
         gdna_mass=f_g * count,
         rna_mass=(1.0 - f_g) * count,
         gdna_frac=f_g,
@@ -646,7 +646,7 @@ def chain_node_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDe
     )
 
 
-def chain_edge_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
+def chain_edge_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
     """Project the chain belief's EDGE slots onto the CONTIGUOUS-EDGE axis — the crossing flux that
     ``priors`` and ``derive`` consume.
 
@@ -673,12 +673,12 @@ def chain_edge_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDe
     # ⭐ THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
     # ``(f_g, f_pos, f_neg)`` at EVERY slot — AXIOM 0's `T(slot)`, which is a function of the two
     # `free_*` bits and never of the slot's kind — so an EDGE slot has the same three-way composition a
-    # NODE slot does. ⛔ This projection used to emit ``np.zeros(n)`` for both RNA strands, so the
+    # REGION slot does. ⛔ This projection used to emit ``np.zeros(n)`` for both RNA strands, so the
     # crossing axis published a composition that summed to ``f_g`` alone. Nothing consumed it, which is
     # why it survived; a per-transcript prior reading composition per object does.
     f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[edge]
     f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[edge]
-    return NodeDeconv(
+    return RegionDeconv(
         gdna_mass=f_g * unspliced,
         rna_mass=(1.0 - f_g) * unspliced + spliced,
         gdna_frac=f_g,

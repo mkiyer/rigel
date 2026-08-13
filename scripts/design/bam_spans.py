@@ -13,7 +13,7 @@ so merely IMPORTING it raised ``IndexError``. That made it invisible to the impo
 test now applies to every instrument — a script that cannot be imported cannot be checked, and this one
 had been broken-on-import for long enough that nobody noticed.
 
-    OMP_NUM_THREADS=1 python scripts/design/bam_spans.py <name-collated.bam> [median_node_bp]
+    OMP_NUM_THREADS=1 python scripts/design/bam_spans.py <name-collated.bam> [median_region_bp]
 """
 
 import sys
@@ -23,7 +23,7 @@ import numpy as np
 import pysam
 
 
-def census(bam_path: str, node_bp: float) -> int:
+def census(bam_path: str, region_bp: float) -> int:
     rows: list[tuple[int, int, bool, bool]] = []
 
     def flush(recs):
@@ -80,7 +80,7 @@ def census(bam_path: str, node_bp: float) -> int:
             f"{lim:>12,} {(L > lim).sum():>10,} {100 * (L > lim).mean():>8.3f}%   "
             f"span: {100 * (span > lim).mean():.3f}%"
         )
-    cross = np.maximum(L / node_bp, 0)
+    cross = np.maximum(L / region_bp, 0)
     o = np.argsort(-cross)
     print(
         f"\nunbounded: top 1,000 groups carry "

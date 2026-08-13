@@ -24,10 +24,10 @@ arm              the EDGE's own ``f_g``      ``struct_lock``     what the delta 
 ===============  ==========================  ==================  =====================================
 
 ⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.head``'s ``mg_own``), and
-`node_init.strand_evidence` scopes it to NODE slots — so an EDGE can only ever RELAY a gDNA level, never
+`region_init.strand_evidence` scopes it to REGION slots — so an EDGE can only ever RELAY a gDNA level, never
 ORIGINATE one. That is `ROADMAP.md` §1 **reframe-and-level-together**= stated as code, and ``lock_only`` is its ceiling.
 
-The override reuses `node_init`'s own `own_precision` / `own_composition_logvar`, so there is no second
+The override reuses `region_init`'s own `own_precision` / `own_composition_logvar`, so there is no second
 implementation of the precision arithmetic to drift (TRAPS: two-docstrings-one-quantity).
 
 ⭐ **`--arms base noop` IS THE FALSIFICATION.** ``noop`` runs the whole wrapper with an empty target set
@@ -87,10 +87,10 @@ def _sibling(name: str, path: Path):
 DESIGN = Path(__file__).resolve().parent
 TH = _sibling("toy_harness.py", DESIGN)
 
-from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
+from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import node_gdna_geometry  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
+from rigel.calibration.region_geometry import region_gdna_geometry  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -197,26 +197,26 @@ def simulate(spec, donor, work_dir: Path, pipeline_config=None) -> Substrate:
 
 
 def _slot_types(chain, region_arrays):
-    """Per slot: its coarse type if it is a NODE, and for an EDGE the pair of its two flanking NODEs."""
+    """Per slot: its coarse type if it is a REGION, and for an EDGE the pair of its two flanking NODEs."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     n = int(chain.n_slots)
-    is_node = kind == NODE
-    node_type = np.where(is_node, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
+    is_region = kind == REGION
+    region_type = np.where(is_region, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
     left_t = np.full(n, -1, np.int64)
     right_t = np.full(n, -1, np.int64)
-    left_t[1:] = np.where(is_node[:-1], node_type[:-1], -1)
-    right_t[:-1] = np.where(is_node[1:], node_type[1:], -1)
-    return is_node, node_type, left_t, right_t
+    left_t[1:] = np.where(is_region[:-1], region_type[:-1], -1)
+    right_t[:-1] = np.where(is_region[1:], region_type[1:], -1)
+    return is_region, region_type, left_t, right_t
 
 
 def _target_slots(chain, region_arrays):
-    """The `intron|exon` EDGE slots, each paired with the slot of its flanking INTRON NODE."""
-    is_node, node_type, left_t, right_t = _slot_types(chain, region_arrays)
+    """The `intron|exon` EDGE slots, each paired with the slot of its flanking INTRON REGION."""
+    is_region, region_type, left_t, right_t = _slot_types(chain, region_arrays)
     out = []
     for i in range(int(chain.n_slots)):
-        if is_node[i]:
+        if is_region[i]:
             continue
         pair = {int(left_t[i]), int(right_t[i])}
         if pair == {INTRON, EXON}:
@@ -230,13 +230,13 @@ def _true_fg_per_slot(chain, region_arrays, truth):
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     ov = truth.override_masses(region_arrays)
-    g = {"node": np.asarray(ov["mass_gdna_node"], np.float64),
+    g = {"region": np.asarray(ov["mass_gdna_region"], np.float64),
          "edge": np.asarray(ov["mass_gdna_edge"], np.float64)}
-    r = {"node": np.asarray(ov["mass_rna_node"], np.float64),
+    r = {"region": np.asarray(ov["mass_rna_region"], np.float64),
          "edge": np.asarray(ov["mass_rna_edge"], np.float64)}
     out = np.full(int(chain.n_slots), np.nan)
     for s in range(int(chain.n_slots)):
-        ax = "node" if kind[s] == NODE else "edge"
+        ax = "region" if kind[s] == REGION else "edge"
         i = int(obj[s])
         tot = g[ax][i] + r[ax][i]
         if tot > 0:
@@ -245,28 +245,28 @@ def _true_fg_per_slot(chain, region_arrays, truth):
 
 
 def make_override(arm: str, region_arrays, truth):
-    """A `build_node_init` wrapper that rewrites the two `intron|exon` EDGEs' OWN belief, then lets the
+    """A `build_region_init` wrapper that rewrites the two `intron|exon` EDGEs' OWN belief, then lets the
     whole chain re-solve. Returns ``None`` for the untouched baseline.
 
     ⭐ ``noop`` runs the ENTIRE wrapper with an empty target set — the falsification arm. It must be
     byte-identical to ``base``; if it is not, the rebuild of the densities and precisions below is not
-    faithful to `node_init` and every other arm is measuring the rebuild rather than the override."""
+    faithful to `region_init` and every other arm is measuring the rebuild rather than the override."""
     if arm == "base":
         return None
 
     def wrapper(chain, statics, geometry, **kw):
-        ni = NI.build_node_init(chain, statics, geometry, **kw)
+        ni = NI.build_region_init(chain, statics, geometry, **kw)
         targets = [] if arm == "noop" else _target_slots(chain, region_arrays)
         f_g = np.array(ni.f_g, np.float64)
         f_pos = np.array(ni.f_pos, np.float64)
         f_neg = np.array(ni.f_neg, np.float64)
         tau = np.array(ni.tau_lam, np.float64)
         lock = np.array(ni.struct_lock, bool)
-        M, E_g = node_gdna_geometry(geometry)
+        M, E_g = region_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)
-        n_node = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
+        n_region = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
         true_fg = _true_fg_per_slot(chain, region_arrays, truth)
 
         for edge, src in targets:
@@ -301,14 +301,14 @@ def make_override(arm: str, region_arrays, truth):
                 f_neg[edge] = rna * (float(fn_ok) / k) if k else 0.0
             f_g[edge] = new_fg
 
-        # ── the densities + precisions, through `node_init`'s OWN arithmetic ──
+        # ── the densities + precisions, through `region_init`'s OWN arithmetic ──
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
         rho_g = np.where((M > _EPS) & (E_g > _EPS), f_g * M / np.maximum(E_g, _EPS), 0.0)
         rho_g = np.maximum(rho_g, 0.0)
-        prec_g = NI.own_precision(n_node, v_fg, rho_g > _EPS)
+        prec_g = NI.own_precision(n_region, v_fg, rho_g > _EPS)
 
-        # ⚠ `node_init._rna` also gates on the local solve's posterior variance being finite, which is
-        # not reconstructible from `NodeInit`. Its OUTCOME is: ``rho_old > 0`` exactly where that gate
+        # ⚠ `region_init._rna` also gates on the local solve's posterior variance being finite, which is
+        # not reconstructible from `RegionInit`. Its OUTCOME is: ``rho_old > 0`` exactly where that gate
         # passed — so carry the original liveness forward off the target slots and force it ON at the
         # slots being overridden, which is the whole point of the arm.
         touched = np.zeros(int(chain.n_slots), bool)
@@ -321,13 +321,13 @@ def make_override(arm: str, region_arrays, truth):
                 frac * M / np.maximum(E_r, _EPS),
                 0.0,
             )
-            live = (n_node > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
+            live = (n_region > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
             rho = np.where(live, raw, 0.0)
-            return rho, NI.own_precision(n_node, v_fr, rho > _EPS)
+            return rho, NI.own_precision(n_region, v_fr, rho > _EPS)
 
         rho_pos, prec_pos = _rna(f_pos, statics.free_pos, np.asarray(ni.rho_pos, np.float64))
         rho_neg, prec_neg = _rna(f_neg, statics.free_neg, np.asarray(ni.rho_neg, np.float64))
-        return NI.NodeInit(
+        return NI.RegionInit(
             f_g=f_g,
             f_pos=f_pos,
             f_neg=f_neg,
@@ -348,9 +348,9 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
     """Calibrate the shared substrate under one arm and return the per-slot rows."""
     override = make_override(arm, sub.region_arrays, sub.truth)
     debug: dict = {}
-    orig = SW.build_node_init
+    orig = SW.build_region_init
     if override is not None:
-        SW.build_node_init = override
+        SW.build_region_init = override
     try:
         out = calibrate(
             payload=sub.payload,
@@ -363,7 +363,7 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
             **index_derived_inputs(sub.index),
         )
     finally:
-        SW.build_node_init = orig
+        SW.build_region_init = orig
     r = TH.ToyResult(
         spec=sub.spec,
         donor=sub.donor,

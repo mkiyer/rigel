@@ -20,7 +20,7 @@ import pytest
 from rigel.calibration.splice_graph import (
     EDGE_KIND_JUNCTION,
     build_junction_edge_arrays,
-    build_node_partition_arrays,
+    build_region_partition_arrays,
 )
 from rigel.types import Strand
 
@@ -106,7 +106,7 @@ def _lookup(arrays, boundary_left, boundary_right):
 def test_the_csr_addresses_the_flat_cut_axis(index):
     """One slot per cut, and the totals close against the edge table."""
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     n_junction = int((index.edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION).sum())
     assert arrays.offsets.shape == (cuts.shape[0] + 1,)
     assert int(arrays.offsets[0]) == 0
@@ -119,7 +119,7 @@ def test_the_csr_addresses_the_flat_cut_axis(index):
 def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
     """The four annotated introns, looked up the way the deposit will look them up."""
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     expected = [
         (0, 400, 700, Strand.POS),  # t0 intron 1
         (0, 900, 1200, Strand.POS),  # t0 intron 2
@@ -147,7 +147,7 @@ def test_a_shared_donor_keeps_BOTH_junctions(index):
     invisible — the dropped intron would simply be treated as unannotated.
     """
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     donor = _cut_index(cuts, offsets, 0, 400)
     lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
     assert hi - lo == 2
@@ -159,7 +159,7 @@ def test_a_cut_that_is_not_a_LEFT_BOUNDARY_has_an_empty_slice(index):
     """Most cuts are not left_boundaries — measured 70.4 % on both the toy and the human annotation. The slice
     must be empty rather than absent, so the deposit needs no special case."""
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     for ref_id, position in ((0, 200), (0, 1400), (1, 300)):  # TSS / TES, never a donor
         cut = _cut_index(cuts, offsets, ref_id, position)
         assert cut >= 0, f"{position} should be a cut on ref {ref_id}"
@@ -170,7 +170,7 @@ def test_an_unannotated_intron_does_not_match(index):
     """A coordinate pair that is not an annotated junction must miss, even when both of its endpoints
     happen to be cuts — that is what routes it to the unspliced channel (design §4.1)."""
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     # 700 and 900 are both cuts on chr1, but [700,900) is an EXON, not an intron
     assert (
         _lookup(arrays, _cut_index(cuts, offsets, 0, 700), _cut_index(cuts, offsets, 0, 900))
@@ -182,10 +182,10 @@ def test_an_unannotated_intron_does_not_match(index):
 
 def test_the_csr_round_trips_to_the_edge_table(index):
     """Re-derive the junction set from the CSR and compare with ``edges_df`` — the two agree only if the
-    node-id → cut-index shift is right on every reference, which is the one thing that can silently
-    break when a reference has no nodes."""
+    region-id → cut-index shift is right on every reference, which is the one thing that can silently
+    break when a reference has no regions."""
     arrays = build_junction_edge_arrays(index)
-    cuts, offsets, _ = build_node_partition_arrays(index)
+    cuts, offsets, _ = build_region_partition_arrays(index)
     donor = np.repeat(np.arange(cuts.shape[0]), np.diff(arrays.offsets))
     from_csr = np.stack(
         [cuts[donor], cuts[arrays.boundary_right], arrays.strand.astype(np.int64)], axis=1
@@ -193,12 +193,12 @@ def test_the_csr_round_trips_to_the_edge_table(index):
 
     edges = index.edges_df
     junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
-    nodes = index.nodes_df
+    regions = index.regions_df
     src, dst = edges["src"].to_numpy(np.int64)[junction], edges["dst"].to_numpy(np.int64)[junction]
     from_edges = np.stack(
         [
-            nodes["end"].to_numpy(np.int64)[src],  # the intron starts where src ENDS
-            nodes["start"].to_numpy(np.int64)[dst],  # and ends where dst BEGINS
+            regions["end"].to_numpy(np.int64)[src],  # the intron starts where src ENDS
+            regions["start"].to_numpy(np.int64)[dst],  # and ends where dst BEGINS
             edges["strand"].to_numpy(np.int8)[junction].astype(np.int64),
         ],
         axis=1,
@@ -212,30 +212,30 @@ def _reference_partition(index):
 
     Deliberately independent of :func:`build_junction_edge_arrays`: this route names each junction by its
     genomic ``(ref, intron_start, intron_end, strand)`` and lets ``Partition.from_cuts`` resolve both
-    endpoints with its own ``searchsorted``, where the builder walks node ids and applies a per-reference
-    ``cut_base − node_base`` shift. Only the *definition* of a junction is shared.
+    endpoints with its own ``searchsorted``, where the builder walks region ids and applies a per-reference
+    ``cut_base − region_base`` shift. Only the *definition* of a junction is shared.
     """
-    cuts, cut_offsets, node_types = build_node_partition_arrays(index)
-    edges, nodes = index.edges_df, index.nodes_df
+    cuts, cut_offsets, region_types = build_region_partition_arrays(index)
+    edges, regions = index.edges_df, index.regions_df
     junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
     src = edges["src"].to_numpy(np.int64)[junction]
     dst = edges["dst"].to_numpy(np.int64)[junction]
     strand = edges["strand"].to_numpy(np.int8)[junction]
-    node_end, node_start = nodes["end"].to_numpy(np.int64), nodes["start"].to_numpy(np.int64)
-    ref_of_node = nodes["ref_name"].to_numpy()
+    region_end, region_start = regions["end"].to_numpy(np.int64), regions["start"].to_numpy(np.int64)
+    ref_of_region = regions["ref_name"].to_numpy()
     ref_id = {name: i for i, name in enumerate(index.ref_names)}
 
     junctions = [
         # the intron starts where src ENDS and ends where dst BEGINS
-        (ref_id[ref_of_node[s]], int(node_end[s]), int(node_start[d]), int(st))
+        (ref_id[ref_of_region[s]], int(region_end[s]), int(region_start[d]), int(st))
         for s, d, st in zip(src, dst, strand)
     ]
     n_refs = len(index.ref_names)
     return Partition.from_cuts(
         [cuts[cut_offsets[r] : cut_offsets[r + 1]] for r in range(n_refs)],
-        # a reference contributing c cuts owns c-1 nodes, so r earlier references own cut_offsets[r]-r
-        node_types=[
-            node_types[cut_offsets[r] - r : cut_offsets[r + 1] - r - 1] for r in range(n_refs)
+        # a reference contributing c cuts owns c-1 regions, so r earlier references own cut_offsets[r]-r
+        region_types=[
+            region_types[cut_offsets[r] - r : cut_offsets[r + 1] - r - 1] for r in range(n_refs)
         ],
         junctions=junctions,
     )
@@ -282,7 +282,7 @@ def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):
     junction is already separated by its donor or its acceptor.
     """
     arrays = build_junction_edge_arrays(coincident_index)
-    cuts, offsets, _ = build_node_partition_arrays(coincident_index)
+    cuts, offsets, _ = build_region_partition_arrays(coincident_index)
     donor = _cut_index(cuts, offsets, 0, 400)
     lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
     assert hi - lo == 2, "the strand-coincident pair collapsed to one junction edge"

@@ -112,7 +112,7 @@ def spec():
 def test_the_DONORS_GLOBALS_ARE_INJECTED_and_not_silently_refitted(donor, spec, tmp_path):
     """⛔ The whole premise. A toy cannot fit a strand balance, an enrichment landscape or an
     intergenic background, so if the injection is not wired the toy quietly fits its own — from a
-    handful of nodes — and every conclusion is about a library that does not exist.
+    handful of regions — and every conclusion is about a library that does not exist.
 
     PERTURBATION: move κ in the injected bundle to the opposite extreme and require the toy's answer
     to CHANGE. If it does not, the bundle is not reaching the solve.
@@ -123,8 +123,8 @@ def test_the_DONORS_GLOBALS_ARE_INJECTED_and_not_silently_refitted(donor, spec, 
     flipped = replace(donor, priors=dataclasses.replace(donor.priors, rna_sense_frac=0.02))
     moved = TH.run_toy(spec, flipped, tmp_path / "b").result
 
-    a = np.asarray(got.mass_gdna_node, np.float64)
-    b = np.asarray(moved.mass_gdna_node, np.float64)
+    a = np.asarray(got.mass_gdna_region, np.float64)
+    b = np.asarray(moved.mass_gdna_region, np.float64)
     assert not np.allclose(a, b), (
         "flipping the injected kappa from unstranded to strongly stranded changed nothing, so the "
         "injected priors are not reaching calibrate"
@@ -148,8 +148,8 @@ def test_the_LENGTH_MODELS_come_from_the_DONOR_not_from_the_toy(donor, spec, tmp
     spike[min(90, size - 1)] = 1.0
     apart = replace(donor, gdna_fl_pmf=spike)
 
-    base = np.asarray(TH.run_toy(spec, donor, tmp_path / "c").result.mass_gdna_node, np.float64)
-    moved = np.asarray(TH.run_toy(spec, apart, tmp_path / "d").result.mass_gdna_node, np.float64)
+    base = np.asarray(TH.run_toy(spec, donor, tmp_path / "c").result.mass_gdna_region, np.float64)
+    moved = np.asarray(TH.run_toy(spec, apart, tmp_path / "d").result.mass_gdna_region, np.float64)
     assert not np.allclose(base, moved), (
         "replacing the donor's gDNA length model by a spike changed nothing; the pmfs are not "
         "reaching calibrate"
@@ -206,19 +206,19 @@ def test_TRUTH_is_the_ORIGIN_SPLIT_and_sums_to_the_full_payload(donor, spec, tmp
     """
     r = TH.run_toy(spec, donor, tmp_path / "g")
     assert hasattr(r.truth, "parts") and set(r.truth.parts) == {"gdna", "mrna", "nrna"}
-    node = np.asarray(r.payload.node_contained_count, np.int64)
+    region = np.asarray(r.payload.region_contained_count, np.int64)
     parts = sum(
-        np.asarray(r.truth.parts[k].node_contained_count, np.int64)
+        np.asarray(r.truth.parts[k].region_contained_count, np.int64)
         for k in ("gdna", "mrna", "nrna")
     )
-    np.testing.assert_array_equal(node, parts)
+    np.testing.assert_array_equal(region, parts)
 
     # PERTURBATION: break one partition and the identity must break with it.
-    bad = np.asarray(r.truth.parts["gdna"].node_contained_count, np.int64).copy()
+    bad = np.asarray(r.truth.parts["gdna"].region_contained_count, np.int64).copy()
     if bad.size:
         bad[0] += 1
         assert not np.array_equal(
-            node, parts - np.asarray(r.truth.parts["gdna"].node_contained_count, np.int64) + bad
+            region, parts - np.asarray(r.truth.parts["gdna"].region_contained_count, np.int64) + bad
         )
 
 
@@ -226,14 +226,14 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     """⭐ The point of a toy is that you can read every row. A report that dropped objects would hide
     exactly the one being interrogated.
 
-    PERTURBATION: the row set must cover every chain slot, and the node/edge split must be non-trivial
+    PERTURBATION: the row set must cover every chain slot, and the region/edge split must be non-trivial
     — a toy with no edges could not exercise the edge classes at all.
     """
     r = TH.run_toy(spec, donor, tmp_path / "h")
     rows = TH.object_rows(r)
     assert len(rows) == int(r.chain.n_slots), "object_rows does not cover every chain slot"
     kinds = {row["axis"] for row in rows}
-    assert kinds == {"node", "edge"}, f"the toy has only {kinds}; it cannot exercise both axes"
+    assert kinds == {"region", "edge"}, f"the toy has only {kinds}; it cannot exercise both axes"
     types = {row["type"] for row in rows}
     for expected in ("intergenic", "exon", "intron", "intron|exon", "intergenic|exon"):
         assert expected in types, f"the two-exon toy produced no {expected!r} object"

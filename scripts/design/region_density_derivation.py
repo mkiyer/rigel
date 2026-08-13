@@ -1,4 +1,4 @@
-"""The reciprocal-opportunity deposit: one density rule for every object, node or edge.
+"""The reciprocal-opportunity deposit: one density rule for every object, region or edge.
 
     Write-up: · /§10.1
 
@@ -10,7 +10,7 @@ THE CLAIM UNDER TEST
 
         deposit  h(w) = 1 / A(w)     where A(w) is that population's OPPORTUNITY
 
-    and the edge rule is its ``A(w) = w - 1`` special case. Applied to a node, where the contained
+    and the edge rule is its ``A(w) = w - 1`` special case. Applied to a region, where the contained
     opportunity is ``(l - w + 1)_+`` and the spanning opportunity is ``(w - l - 1)_+``, this predicts a
     deposit that has never been tried: ``1/(l - L + 1)`` and ``1/(L - l - 1)``.
 
@@ -21,9 +21,9 @@ WHAT THIS SCRIPT VERIFIES
     T3  contained + spanning together estimate rho * (1 - f(l+1)) -- the two truncations are
         complementary and close to exactly, the single missing length being w = l + 1.
     T4  The two limits the owner predicted:
-          l = 0        -> the node rule degenerates to the edge rule EXACTLY
-          l >> E[L]    -> the deposit tends to 1/l, i.e. count / node_length
-    T5  The shipped node weight ``1/L`` does NOT have property T2, and the size of its bias.
+          l = 0        -> the region rule degenerates to the edge rule EXACTLY
+          l >> E[L]    -> the deposit tends to 1/l, i.e. count / region_length
+    T5  The shipped region weight ``1/L`` does NOT have property T2, and the size of its bias.
     T6  ``count / l`` (the naive density) is biased by (l - mu + 1)/l; the reciprocal deposit removes
         that bias with NO fragment-length model.
 
@@ -63,28 +63,28 @@ def fl_pmf(mean: float, cv: float, family: str = "gamma") -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def opportunity(population: str, node_len: float) -> np.ndarray:
+def opportunity(population: str, region_len: float) -> np.ndarray:
     """Admissible start positions per fragment length. Verified by enumeration in `check_enumeration`."""
     if population == "contained":
-        return np.maximum(node_len - W + 1.0, 0.0)
+        return np.maximum(region_len - W + 1.0, 0.0)
     if population == "spanning":
-        return np.maximum(W - node_len - 1.0, 0.0)
+        return np.maximum(W - region_len - 1.0, 0.0)
     if population == "crossing":
         return np.maximum(W - 1.0, 0.0)
     raise ValueError(population)
 
 
-def deposit_weight(kind: str, population: str, node_len: float) -> np.ndarray:
+def deposit_weight(kind: str, population: str, region_len: float) -> np.ndarray:
     """The per-fragment quantity added to the density channel.
 
     ``invA`` is the derivation's proposal (reciprocal opportunity); ``invL`` is what ships (1/L at a
-    node, 1/(L-1) at a line); ``count`` deposits 1.
+    region, 1/(L-1) at a line); ``count`` deposits 1.
     """
     out = np.zeros_like(W)
     if kind == "count":
         return np.ones_like(W)
     if kind == "invA":
-        A = opportunity(population, node_len)
+        A = opportunity(population, region_len)
         np.divide(1.0, A, out=out, where=A > 0)
         return out
     if kind == "invL":
@@ -94,10 +94,10 @@ def deposit_weight(kind: str, population: str, node_len: float) -> np.ndarray:
     raise ValueError(kind)
 
 
-def expected_deposit(pmf, population, node_len, kind, rho) -> float:
+def expected_deposit(pmf, population, region_len, kind, rho) -> float:
     """Closed form ``E[sum h] = rho * sum_w f(w) A(w) h(w)`` -- exact, given the pmf."""
-    A = opportunity(population, node_len)
-    h = deposit_weight(kind, population, node_len)
+    A = opportunity(population, region_len)
+    h = deposit_weight(kind, population, region_len)
     return float(rho * np.sum(pmf * A * h))
 
 
@@ -106,7 +106,7 @@ def expected_deposit(pmf, population, node_len, kind, rho) -> float:
 # ---------------------------------------------------------------------------
 
 GRID = [(m, c) for m in (50.0, 100.0, 200.0, 300.0) for c in (0.15, 0.35, 0.60, 1.00)]
-NODE_LENGTHS = (0, 1, 25, 50, 100, 151, 250, 400, 1000, 3000, 20000)
+REGION_LENGTHS = (0, 1, 25, 50, 100, 151, 250, 400, 1000, 3000, 20000)
 
 
 def check_enumeration() -> int:
@@ -135,7 +135,7 @@ def check_T2_model_free(kind: str, rho: float = 0.05) -> tuple[int, float]:
     """
     bad, worst = 0, 0.0
     for population in ("contained", "spanning", "crossing"):
-        for ell in NODE_LENGTHS:
+        for ell in REGION_LENGTHS:
             if population == "crossing" and ell != 0:
                 continue
             for spec in GRID:
@@ -155,7 +155,7 @@ def check_T2_model_free(kind: str, rho: float = 0.05) -> tuple[int, float]:
 def check_T3_complementary(rho: float = 0.05) -> tuple[int, float]:
     """T3: contained + spanning, both at reciprocal opportunity, estimate ``rho * (1 - f(l+1))``."""
     bad, worst = 0, 0.0
-    for ell in NODE_LENGTHS:
+    for ell in REGION_LENGTHS:
         for spec in GRID:
             pmf = fl_pmf(*spec)
             total = expected_deposit(pmf, "contained", float(ell), "invA", rho) + expected_deposit(
@@ -171,20 +171,20 @@ def check_T3_complementary(rho: float = 0.05) -> tuple[int, float]:
 
 
 def check_T4_limits(rho: float = 0.05) -> None:
-    """T4: the two limits -- l = 0 is the edge rule exactly; l >> E[L] tends to count / node_length."""
-    print("\n  T4a  l = 0 reduces to the edge rule (node spanning weight vs the 0-bp line weight)")
+    """T4: the two limits -- l = 0 is the edge rule exactly; l >> E[L] tends to count / region_length."""
+    print("\n  T4a  l = 0 reduces to the edge rule (region spanning weight vs the 0-bp line weight)")
     for spec in GRID[:6]:
         pmf = fl_pmf(*spec)
-        node0 = expected_deposit(pmf, "spanning", 0.0, "invA", rho)
+        region0 = expected_deposit(pmf, "spanning", 0.0, "invA", rho)
         edge = expected_deposit(pmf, "crossing", 0.0, "invA", rho)
         contained0 = expected_deposit(pmf, "contained", 0.0, "invA", rho)
-        tag = PASS if abs(node0 - edge) < 1e-12 and contained0 == 0.0 else FAIL
-        print(f"   {tag} FL {spec[0]:5.0f}/{spec[1]:4.2f}:  node l=0 spanning {node0:.10f}  "
+        tag = PASS if abs(region0 - edge) < 1e-12 and contained0 == 0.0 else FAIL
+        print(f"   {tag} FL {spec[0]:5.0f}/{spec[1]:4.2f}:  region l=0 spanning {region0:.10f}  "
               f"edge {edge:.10f}   (contained at l=0 is {contained0:.1f}, as it must be)")
 
-    print("\n  T4b  l >> E[L]: the reciprocal deposit -> 1/l, so the sum -> count / node_length")
+    print("\n  T4b  l >> E[L]: the reciprocal deposit -> 1/l, so the sum -> count / region_length")
     pmf = fl_pmf(200.0, 0.35)
-    print(f"       {'node l':>10}{'E[sum 1/A]/rho':>18}{'E[count]/(rho*l)':>20}{'ratio':>10}")
+    print(f"       {'region l':>10}{'E[sum 1/A]/rho':>18}{'E[count]/(rho*l)':>20}{'ratio':>10}")
     for ell in (400, 1000, 3000, 20000):
         dens = expected_deposit(pmf, "contained", float(ell), "invA", rho) / rho
         naive = expected_deposit(pmf, "contained", float(ell), "count", rho) / (rho * ell)
@@ -193,8 +193,8 @@ def check_T4_limits(rho: float = 0.05) -> None:
 
 def check_T6_naive_bias(rho: float = 0.05) -> None:
     """T6: `count / l` is biased by (l - mu + 1)/l. The reciprocal deposit removes it, model-free."""
-    print("\n  T6   `count / node_length` against the reciprocal deposit -- the effective-length bias")
-    print(f"       {'node l':>9}{'FL mean':>10}{'count/l  (x truth)':>22}{'sum 1/A  (x truth)':>22}")
+    print("\n  T6   `count / region_length` against the reciprocal deposit -- the effective-length bias")
+    print(f"       {'region l':>9}{'FL mean':>10}{'count/l  (x truth)':>22}{'sum 1/A  (x truth)':>22}")
     for ell in (151, 250, 400, 1000, 3000):
         for mean in (50.0, 200.0, 300.0):
             pmf = fl_pmf(mean, 0.35)
@@ -207,11 +207,11 @@ def check_end_to_end(rho: float, n_reps: int, seed: int) -> None:
     """The whole chain through a simulated Poisson fragment process, not just the algebra.
 
     Places fragments uniformly at density `rho` over a window wide enough to cover every start that
-    could touch the node, applies the deposit rule as CODE, and compares to the closed form.
+    could touch the region, applies the deposit rule as CODE, and compares to the closed form.
     """
     print("\n  END-TO-END simulation of the fragment process (the algebra above is not the code path)")
     rng = np.random.default_rng(seed)
-    print(f"       {'node l':>9}{'FL':>12}{'predicted':>13}{'simulated':>13}{'z':>8}")
+    print(f"       {'region l':>9}{'FL':>12}{'predicted':>13}{'simulated':>13}{'z':>8}")
     for ell in (0, 25, 151, 1000):
         for spec in ((100.0, 0.60), (250.0, 0.35)):
             pmf = fl_pmf(*spec)

@@ -170,7 +170,7 @@ def test_boundary_taxonomy_from_flank_helpers():
     assert cross_mature(exon_p, exon_p) == (True, True)
     # 4) ambig ↔ ambig: both strands cross; on + it is mature-capable.
     assert cross_mature(ambig, ambig) == (True, True)
-    # ambig ↔ ambig also crosses on the − strand (the AMBIG 2-D node).
+    # ambig ↔ ambig also crosses on the − strand (the AMBIG 2-D region).
     _, nln = nrna_active_strands(np.array([ambig]))
     _, nrn = nrna_active_strands(np.array([ambig]))
     assert bool((nln & nrn)[0])

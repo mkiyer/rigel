@@ -2,7 +2,7 @@
 
 ⭐⭐ **THE ONE DERIVATION EVERYTHING RESTS ON**, and the first gate below is it:
 
-    density(r) = mass_rna_node[r] / ceff(r) = Σ_{t ∋ r} A_t / E_t
+    density(r) = mass_rna_region[r] / ceff(r) = Σ_{t ∋ r} A_t / E_t
 
 A transcript ``t`` with ``A_t`` fragments over effective length ``E_t`` puts ``A_t·ceff(r)/E_t`` contained
 fragments in region ``r``, so the REGION's own opportunity cancels and what is left is a sum of
@@ -57,13 +57,13 @@ def _patched_junctions(monkeypatch):
 
 
 def _calibration(
-    n_nodes, n_edges, n_junctions, *, node_mass, node_opp, edge_mass=None, edge_opp=None
+    n_regions, n_edges, n_junctions, *, region_mass, region_opp, edge_mass=None, edge_opp=None
 ) -> CalibrationResult:
     """A real ``CalibrationResult`` — not a stand-in, so a schema change reaches these gates."""
-    z_n, z_e, z_j = (np.zeros(n) for n in (n_nodes, n_edges, n_junctions))
+    z_n, z_e, z_j = (np.zeros(n) for n in (n_regions, n_edges, n_junctions))
     return CalibrationResult(
-        mass_gdna_node=z_n.copy(),
-        mass_rna_node=np.asarray(node_mass, dtype=np.float64),
+        mass_gdna_region=z_n.copy(),
+        mass_rna_region=np.asarray(region_mass, dtype=np.float64),
         mass_gdna_edge=z_e.copy(),
         mass_rna_edge=z_e.copy() if edge_mass is None else np.asarray(edge_mass, dtype=np.float64),
         mass_rna_spliced_edge=z_e.copy(),
@@ -71,15 +71,15 @@ def _calibration(
         mass_rna_junction=z_j.copy(),
         edge_spliced_mass_per_crossing=np.ones(n_edges),
         junction_mass_per_crossing=np.ones(n_junctions),
-        gdna_node_eff_len=np.ones(n_nodes),
+        gdna_region_eff_len=np.ones(n_regions),
         gdna_edge_eff_len=np.ones(n_edges),
-        rna_node_eff_len=np.asarray(node_opp, dtype=np.float64),
+        rna_region_eff_len=np.asarray(region_opp, dtype=np.float64),
         rna_edge_eff_len=np.ones(n_edges)
         if edge_opp is None
         else np.asarray(edge_opp, dtype=np.float64),
-        gdna_frac_node=z_n.copy(),
-        rna_pos_frac_node=np.ones(n_nodes),
-        rna_neg_frac_node=z_n.copy(),
+        gdna_frac_region=z_n.copy(),
+        rna_pos_frac_region=np.ones(n_regions),
+        rna_neg_frac_region=z_n.copy(),
         gdna_frac_edge=z_e.copy(),
         rna_pos_frac_edge=np.ones(n_edges),
         rna_neg_frac_edge=z_e.copy(),
@@ -87,7 +87,7 @@ def _calibration(
         rna_sense_frac=1.0,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
-        n_nodes=n_nodes,
+        n_regions=n_regions,
         n_edges=n_edges,
         n_junctions=n_junctions,
         config=CalibrationConfig(),
@@ -123,9 +123,9 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
     abundance = 8_010.0
     rate = abundance / e_t  # 10.0 fragments per admissible start
 
-    node_mass = np.zeros(regions.n_regions)
-    node_mass[1] = node_mass[2] = rate * ceff_region
-    node_opp = np.full(regions.n_regions, ceff_region)
+    region_mass = np.zeros(regions.n_regions)
+    region_mass[1] = region_mass[2] = rate * ceff_region
+    region_opp = np.full(regions.n_regions, ceff_region)
     n_edges = regions.n_regions - 1
     edge_mass = np.zeros(n_edges)
     edge_mass[1] = rate * crossing_opp
@@ -133,8 +133,8 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
         regions.n_regions,
         n_edges,
         1,
-        node_mass=node_mass,
-        node_opp=node_opp,
+        region_mass=region_mass,
+        region_opp=region_opp,
         edge_mass=edge_mass,
         edge_opp=np.full(n_edges, crossing_opp),
     )
@@ -161,13 +161,13 @@ def test_build_weights_ITSELF_weights_by_opportunity_not_by_object_count(
     o_big = float(contained_eff_length(np.array([990.0]), PMF)[0])  # 791
     o_small = float(contained_eff_length(np.array([300.0]), PMF)[0])  # 101
 
-    node_mass = np.zeros(regions.n_regions)
-    node_mass[1], node_mass[2] = 3.0 * o_big, 0.3 * o_small
-    node_opp = np.ones(regions.n_regions)
-    node_opp[1], node_opp[2] = o_big, o_small
+    region_mass = np.zeros(regions.n_regions)
+    region_mass[1], region_mass[2] = 3.0 * o_big, 0.3 * o_small
+    region_opp = np.ones(regions.n_regions)
+    region_opp[1], region_opp[2] = o_big, o_small
     n_e = regions.n_regions - 1
     # ⚠ the boundary between them carries no mass, so it drops out and the two regions are the path
-    cal = _calibration(regions.n_regions, n_e, 1, node_mass=node_mass, node_opp=node_opp)
+    cal = _calibration(regions.n_regions, n_e, 1, region_mass=region_mass, region_opp=region_opp)
 
     total_opp = float(contained_eff_length(np.array([1_290.0]), PMF)[0])
     weighted = (o_big + o_small) / (o_big / 3.0 + o_small / 0.3)
@@ -190,14 +190,14 @@ def test_build_weights_SERVES_the_opportunity_it_was_ASKED_for(tmp_path, _patche
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000), (9_000, 10_000)]}, strands=[Strand.POS])
     regions = _Regions(bounds)
-    node_mass = np.zeros(regions.n_regions)
-    node_mass[1], node_mass[3] = 500.0, 300.0
+    region_mass = np.zeros(regions.n_regions)
+    region_mass[1], region_mass[3] = 500.0, 300.0
     cal = _calibration(
         regions.n_regions,
         regions.n_regions - 1,
         1,
-        node_mass=node_mass,
-        node_opp=np.full(regions.n_regions, 801.0),
+        region_mass=region_mass,
+        region_opp=np.full(regions.n_regions, 801.0),
     )
 
     kw = dict(mode="harmonic")
@@ -254,8 +254,8 @@ def test_a_path_that_is_ENTIRELY_ZERO_gets_weight_EXACTLY_ZERO(
         regions.n_regions,
         regions.n_regions - 1,
         1,
-        node_mass=np.zeros(regions.n_regions),
-        node_opp=np.full(regions.n_regions, 301.0),
+        region_mass=np.zeros(regions.n_regions),
+        region_opp=np.full(regions.n_regions, 301.0),
     )
     w = TW.build_weights(cal, regions, idx, PMF, mode=mode, opportunity=opportunity)
     assert w[0] == 0.0
@@ -275,9 +275,9 @@ def test_a_SPLICE_JUNCTION_step_carries_NO_weight(tmp_path, _patched_junctions, 
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000), (9_000, 10_000)]}, strands=[Strand.POS])
     regions = _Regions(bounds)
     n_e = regions.n_regions - 1
-    node_mass = np.zeros(regions.n_regions)
-    node_mass[1], node_mass[3] = 100.0, 60.0
-    kw = dict(node_mass=node_mass, node_opp=np.full(regions.n_regions, 801.0))
+    region_mass = np.zeros(regions.n_regions)
+    region_mass[1], region_mass[3] = 100.0, 60.0
+    kw = dict(region_mass=region_mass, region_opp=np.full(regions.n_regions, 801.0))
 
     quiet = _calibration(regions.n_regions, n_e, 1, **kw)
     loud = _calibration(regions.n_regions, n_e, 1, **kw)

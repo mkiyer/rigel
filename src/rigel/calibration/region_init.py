@@ -1,29 +1,29 @@
-"""rigel.calibration.node_init — the pass-0 per-node INITIALIZATION (the message-free self-solve).
+"""rigel.calibration.region_init — the pass-0 per-region INITIALIZATION (the message-free self-solve).
 
-Calibration's prior-free first pass ("pass-0") deconvolves each node's unspliced fragment mass into
-``(f_pos, f_neg, f_g)``. Before any message passing, every node is given its OWN belief — a per-component
+Calibration's prior-free first pass ("pass-0") deconvolves each region's unspliced fragment mass into
+``(f_pos, f_neg, f_g)``. Before any message passing, every region is given its OWN belief — a per-component
 density ``ρ_c`` (the message currency) and a per-component precision ``p_c`` — from the four information
 sources below:
 
-1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon nodes are structurally pure
+1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon regions are structurally pure
    gDNA (``f_g = 1``, composition CERTAIN); their gDNA density carries only the count precision ``1/n`` (so
    the own precision is the raw count ``n``). This is the anchor the whole prior-free pass leans on.
-2. **DENSITY DECONVOLUTION** — a node's gDNA is peeled against a gDNA density prior via NegBinom
-   (`density_deconv`); the curvature of that per-node ``λ``-factor is honest, count-derived composition
+2. **DENSITY DECONVOLUTION** — a region's gDNA is peeled against a gDNA density prior via NegBinom
+   (`density_deconv`); the curvature of that per-region ``λ``-factor is honest, count-derived composition
    evidence, registered here as ``τ_λ`` (`density_factor_precision`). The **intron factory** is its special
-   case (the gDNA prior = the intergenic node distribution).
+   case (the gDNA prior = the intergenic region distribution).
 3. **STRAND DECONVOLUTION** — the strand Beta-Binomial is RANK-1 (it informs only ``p``), so its
    gDNA-level (``λ``) precision is the Schur-marginal (approach E): a 1-DOF
-   (single-strand) node has its tilt structurally locked, so the strand PINS ``f_g`` (``τ_λ`` gets the strand
-   λ-term ``c·a²``); a 2-DOF (AMBIG) node's tilt is free, so the strand CANCELS out of ``f_g`` and contributes
-   ZERO (it constrains only the tilt). `strand_evidence` returns the single-strand λ-term; `build_node_init`
-   gates it to single-strand nodes. Identically zero on unstranded data (κ=½) by a derived noise-floor deadband.
-4. **UNSOLVED** nodes default to **100 % gDNA at ZERO precision** — the honest "no information" state
+   (single-strand) region has its tilt structurally locked, so the strand PINS ``f_g`` (``τ_λ`` gets the strand
+   λ-term ``c·a²``); a 2-DOF (AMBIG) region's tilt is free, so the strand CANCELS out of ``f_g`` and contributes
+   ZERO (it constrains only the tilt). `strand_evidence` returns the single-strand λ-term; `build_region_init`
+   gates it to single-strand regions. Identically zero on unstranded data (κ=½) by a derived noise-floor deadband.
+4. **UNSOLVED** regions default to **100 % gDNA at ZERO precision** — the honest "no information" state
    (``τ_λ = 0 ⇒ Var(log f) = ∞ ⇒ p = 0``), left for the sweep + population prior to resolve.
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
-Layer: imports only lower layers (`node_geometry`, `simplex_logodds`, `density_deconv`), never
-`sweep`, so it sits cleanly beneath the backbone that consumes :func:`build_node_init`.
+Layer: imports only lower layers (`region_geometry`, `simplex_logodds`, `density_deconv`), never
+`sweep`, so it sits cleanly beneath the backbone that consumes :func:`build_region_init`.
 """
 
 from __future__ import annotations
@@ -34,18 +34,18 @@ import numpy as np
 
 from .density_deconv import density_factor_precision
 from .messages.variance import count_logvar
-from .node_chain import NODE, NodeChain
-from .node_geometry import NodeGeometry, NodeStatics, node_gdna_geometry
-from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
+from .region_chain import REGION, RegionChain
+from .region_geometry import RegionGeometry, RegionStatics, region_gdna_geometry
+from .simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 
 __all__ = [
-    "NodeInit",
+    "RegionInit",
     "count_logvar",
     "has_own_composition_evidence",
     "own_composition_logvar",
     "own_precision",
     "strand_evidence",
-    "build_node_init",
+    "build_region_init",
 ]
 
 _EPS = 1.0e-9
@@ -56,14 +56,14 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
     every consumer imports it instead of restating the number.**
 
     ``tau_lam`` is the λ-axis Fisher precision summed over the sources
-    (:func:`build_node_init`); anything above the divide-by-zero guard is a live channel, and
+    (:func:`build_region_init`); anything above the divide-by-zero guard is a live channel, and
     :func:`own_composition_logvar` returns a finite variance there and ``∞`` below it. That is the
     whole content — the predicate is read off the solver's behaviour, not chosen.
 
     ⛔ **IT IS NOT A RESOLVING-POWER TEST, AND MUST NOT BECOME ONE.** ``τ`` is continuous across the
     interesting region, so a floor on it is a tuned constant: one at ``1/(2L)²`` was derived,
     implemented and refuted by its own insensitivity gate. On an unstranded library the strand arm
-    carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the node's depth over the library's spliced
+    carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the region's depth over the library's spliced
     depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
     ⭐ **The consumer's defence is a FIXED-DENOMINATOR score, not a better cut**
     (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
@@ -77,14 +77,14 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
 
 
 @dataclass(frozen=True, slots=True)
-class NodeInit:
-    """The per-node message-free self-solve (length ``n_nodes``) — the pass-0 relay's starting beliefs.
+class RegionInit:
+    """The per-region message-free self-solve (length ``n_regions``) — the pass-0 relay's starting beliefs.
 
     ``f_*`` are the composition MODE (strand / intron / structural-default fractions). ``rho_*`` are the own
-    per-component DENSITIES ``ρ_c = f_c·M_node/E_c`` (the message currency; a killed / count-free component is
+    per-component DENSITIES ``ρ_c = f_c·M_region/E_c`` (the message currency; a killed / count-free component is
     0). ``prec_*`` are the own per-component PRECISIONS from the four sources — the strand + intron-factory
-    composition evidence combined with the Poisson count power (0 where a node is genuinely uninformed).
-    ``struct_lock`` marks the structurally composition-certain (pure-gDNA) nodes; ``tau_lam`` is the combined
+    composition evidence combined with the Poisson count power (0 where a region is genuinely uninformed).
+    ``struct_lock`` marks the structurally composition-certain (pure-gDNA) regions; ``tau_lam`` is the combined
     ``λ``-axis evidence (I_strand + I_factory), retained for tests/diagnostics."""
 
     f_g: np.ndarray
@@ -104,12 +104,12 @@ class NodeInit:
 
 
 def own_composition_logvar(f_g, tau_lam, struct_lock):
-    """The message-free composition variance of a node's own belief, on the two log-fraction arms — the
-    honest "how well does this node know its gDNA/RNA split?".
+    """The message-free composition variance of a region's own belief, on the two log-fraction arms — the
+    honest "how well does this region know its gDNA/RNA split?".
 
     Three states, nothing between:
 
-    * **structural lock** → composition CERTAIN → variance ``0`` (an intergenic pure-gDNA node);
+    * **structural lock** → composition CERTAIN → variance ``0`` (an intergenic pure-gDNA region);
     * **real evidence ``τ_λ > 0``** → ``Var(log f_g) = (1−f_g)²/τ_λ`` and ``Var(log f_r) = f_g²/τ_λ`` (the
       Jacobians of ``log f_g`` / ``log f_r`` w.r.t. ``λ = logit f_g``);
     * **no evidence ``τ_λ = 0``** → composition UNSEEN → variance ``∞`` (⇒ own precision 0 — the unsolved
@@ -159,7 +159,7 @@ def strand_evidence(
     u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rna_obs, is_region, locked
 ):
     """The reference-free strand composition evidence ``τ₀_λ`` (**I_strand**) + the structural-certainty mask,
-    evaluated at the message-free local ``fg_loc``. Pure; no cross-node coupling.
+    evaluated at the message-free local ``fg_loc``. Pure; no cross-region coupling.
 
     ``I_strand(λ) = N_eff·disc·[f_g(1−f_g)]² / (4 p(1−p))``, ``p = κ + f_g(½−κ)`` — the strand Fisher
     information, IDENTICALLY 0 at κ=½ (unstranded). The count enters as the OVERDISPERSED effective count
@@ -169,7 +169,7 @@ def strand_evidence(
     deadband that kills the unstranded phantom). ``1/N_gdna`` gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒
     disc=0).
 
-    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic NODE nodes, never a
+    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic REGION regions, never a
     G1 EDGE seam (TSS/TES): a seam is structurally gDNA but sits between RNA-carrying exons, so its
     crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA emitter; a true
     intergenic region carries ~0 mass in a zero-gDNA library, so it is safe."""
@@ -193,10 +193,10 @@ def strand_evidence(
 # ── the assembly ───────────────────────────────────────────────────────────────────────────────────────────
 
 
-def build_node_init(
-    chain: NodeChain,
-    statics: NodeStatics,
-    geometry: NodeGeometry,
+def build_region_init(
+    chain: RegionChain,
+    statics: RegionStatics,
+    geometry: RegionGeometry,
     *,
     kappa: float,
     od_g: float,
@@ -210,32 +210,32 @@ def build_node_init(
     belief,
     global_logprior=None,
     intron_prior=None,
-) -> NodeInit:
-    """The pass-0 per-node self-solve → :class:`NodeInit`. Runs the message-free strand deconvolution
-    (`simplex_logodds`), compiles the strand + intron-factory composition evidence, and assembles each node's
+) -> RegionInit:
+    """The pass-0 per-region self-solve → :class:`RegionInit`. Runs the message-free strand deconvolution
+    (`simplex_logodds`), compiles the strand + intron-factory composition evidence, and assembles each region's
     own per-component density + precision from the four sources (see the module docstring).
 
     The strand deconvolution reference (`fg_ref`/`fpos_ref`/`fneg_ref`) is the incoming ``belief`` — the
     count-zero-information variance freeze evaluates the composition variance near the truth, not at a flat ½.
     ``global_logprior`` (the anchored population gDNA prior, ``(m, K)``) and ``intron_prior`` (the intron
     factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
-    is_reg = np.asarray(chain.kind) == NODE
+    is_reg = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
     # ⭐ The counts come from the GEOMETRY, which is their single source since S5.e: the unspliced
     # ``count`` is both the density numerator and the Poisson n, so there is no second copy to drift.
     count = np.asarray(geometry.unspliced_count, np.float64)
     u_pos, u_neg = count[:, 0], count[:, 1]
-    n_node = count.sum(axis=1)
+    n_region = count.sum(axis=1)
     spliced = np.asarray(geometry.spliced_count, np.float64).sum(axis=1)
 
     # ── source 3: the message-free strand deconvolution (1-DOF solves; AMBIG partial) ──
-    dc = _solve_nodes_logodds_all(
+    dc = _solve_regions_logodds_all(
         u_pos,
         u_neg,
         fp,
         fn,
-        n_node,
+        n_region,
         spliced,
         kappa=kappa,
         od_g=od_g,
@@ -254,8 +254,8 @@ def build_node_init(
     fp_loc = np.asarray(dc.rna_pos_frac, np.float64)
     fn_loc = np.asarray(dc.rna_neg_frac, np.float64)
 
-    # a node that does not deconvolve its own split (G1 sink / empty) keeps the signature-binary init.
-    solvable = (fp | fn) & (n_node > 0.0)
+    # a region that does not deconvolve its own split (G1 sink / empty) keeps the signature-binary init.
+    solvable = (fp | fn) & (n_region > 0.0)
     locked = ~solvable
     fg_loc = np.where(locked, np.asarray(belief.f_g, np.float64), fg_loc)
     fp_loc = np.where(locked, np.asarray(belief.f_pos, np.float64), fp_loc)
@@ -280,8 +280,8 @@ def build_node_init(
     # precision (the Schur complement of the 2×2 composition Fisher) is:
     #   * SINGLE-STRAND (1-DOF): θ is STRUCTURALLY locked ⇒ τ_λ gets the full strand λ-term c·a² (strand pins f_g);
     #   * AMBIG (2-DOF): θ is a FREE nuisance ⇒ the strand CANCELS out of f_g (Schur ⇒ 0) — it constrains only
-    #     the tilt, never the gDNA level. Crediting c·a² to an AMBIG node is a (bounded) phantom precision on
-    #     exactly the nodes calibration exists to resolve. Gate the strand λ-term to single-strand nodes.
+    #     the tilt, never the gDNA level. Crediting c·a² to an AMBIG region is a (bounded) phantom precision on
+    #     exactly the regions calibration exists to resolve. Gate the strand λ-term to single-strand regions.
     single_strand = np.asarray(fp, bool) ^ np.asarray(fn, bool)
     tau_lam = np.where(single_strand, i_strand, 0.0)
     lam_grid, _ = _logodds_grid(int(n_grid), float(logodds_window))
@@ -292,7 +292,7 @@ def build_node_init(
         tau_lam = tau_lam + tau_fac
 
     # ── the own per-component densities + precisions — ONE set of numbers per slot, no faces to pool ──
-    mass_global, eff_global = node_gdna_geometry(geometry)
+    mass_global, eff_global = region_gdna_geometry(geometry)
     eff_r = np.asarray(geometry.eff_rna, np.float64)
     v_log_fg, v_log_fr = own_composition_logvar(fg_loc, tau_lam, struct_lock)
 
@@ -325,7 +325,7 @@ def build_node_init(
     # RNA per strand — admissible iff the annotation allows that strand here AND there is opportunity.
     # ⚠ ``np.isfinite(var_loc)`` used to gate this too and is GONE as redundant, not as a change of
     # meaning: ``own_precision`` already returns exactly 0 on a non-finite composition variance, so the
-    # unresolvable node emitted nothing before and emits nothing now.
+    # unresolvable region emitted nothing before and emits nothing now.
     def _rna(frac_loc, free_s):
         admissible = np.asarray(free_s, bool)
         count = np.asarray(frac_loc, np.float64) * mass_global
@@ -338,7 +338,7 @@ def build_node_init(
     rho_pos, prec_pos = _rna(fp_loc, fp)
     rho_neg, prec_neg = _rna(fn_loc, fn)
 
-    return NodeInit(
+    return RegionInit(
         f_g=fg_loc,
         f_pos=fp_loc,
         f_neg=fn_loc,

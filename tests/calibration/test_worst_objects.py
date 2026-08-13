@@ -83,7 +83,7 @@ def measured(tmp_path_factory):
     return m, res.index
 
 
-def _dissect(measured, axis="node", top=25):
+def _dissect(measured, axis="region", top=25):
     m, index = measured
     return m, WO.dissect(m, axis=axis, arm="pass0", top=top, index=index)
 
@@ -92,7 +92,7 @@ def _dissect(measured, axis="node", top=25):
 
 
 def test_the_ranking_is_by_error_MASS_and_a_RATE_ranking_would_differ(measured):
-    """⭐ The whole instrument turns on this. A 1 bp node with two fragments can carry ``|Δf_g| = 1``
+    """⭐ The whole instrument turns on this. A 1 bp region with two fragments can carry ``|Δf_g| = 1``
     and be worth two fragments of error; ranking by rate puts it above an exon carrying thousands.
 
     PERTURBATION: rank the same objects by ``|Δf_g|`` instead and require a DIFFERENT leader. If the
@@ -138,8 +138,8 @@ def test_an_object_with_NO_MASS_never_appears_in_the_table(measured):
 
 def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(measured):
     """⭐ On an object with no own evidence the neighbour columns are the whole explanation, so they
-    must be the objects that actually message it. The chain is ``N E N E … N``, so a NODE's
-    neighbours are two EDGES — **not** the nodes at ``obj ± 1``, which are two slots away and do not
+    must be the objects that actually message it. The chain is ``N E N E … N``, so a REGION's
+    neighbours are two EDGES — **not** the regions at ``obj ± 1``, which are two slots away and do not
     message it directly.
 
     PERTURBATION: compute the same-axis ``obj ± 1`` errors and require them to DIFFER, so the gate
@@ -147,30 +147,30 @@ def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(meas
     """
     m, d = _dissect(measured)
     chain = m.debug_pass0["chain"]
-    n_nodes, n_edges = int(m.payload.n_nodes), int(m.payload.n_edges)
-    node_slot, edge_slot = WO._slot_lookup(chain, n_nodes, n_edges)
+    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
+    region_slot, edge_slot = WO._slot_lookup(chain, n_regions, n_edges)
     kind = np.asarray(chain.kind)
     obj_idx = np.asarray(chain.obj_idx, dtype=np.int64)
 
     edge_err = np.asarray(m.arms["pass0"].mass_gdna_edge, np.float64) - np.asarray(
         m.truth.mass_gdna_edge, np.float64
     )
-    node_err = np.asarray(m.arms["pass0"].mass_gdna_node, np.float64) - np.asarray(
-        m.truth.mass_gdna_node, np.float64
+    region_err = np.asarray(m.arms["pass0"].mass_gdna_region, np.float64) - np.asarray(
+        m.truth.mass_gdna_region, np.float64
     )
 
     checked = differed = 0
     for r in d["rows"]:
-        s = int(node_slot[r["obj"]])
+        s = int(region_slot[r["obj"]])
         for side, nb in zip((s - 1, s + 1), r["nb_err"]):
             if np.isnan(nb) or not 0 <= side < kind.shape[0]:
                 continue  # a reference boundary has no neighbour on that side
-            assert kind[side] == WO.EDGE, "a NODE's chain neighbour must be an EDGE slot"
+            assert kind[side] == WO.EDGE, "a REGION's chain neighbour must be an EDGE slot"
             np.testing.assert_allclose(nb, edge_err[obj_idx[side]], rtol=1e-9, atol=1e-6)
             checked += 1
         # the same-axis alternative must not coincide, or the gate cannot see the difference
         for other in (r["obj"] - 1, r["obj"] + 1):
-            if 0 <= other < n_nodes and not np.isclose(node_err[other], r["nb_err"][0]):
+            if 0 <= other < n_regions and not np.isclose(region_err[other], r["nb_err"][0]):
                 differed += 1
     assert checked > 0, "no neighbours were checked; the gate would be vacuous"
     assert differed > 0, "same-axis indexing gives the same answer here; the gate cannot detect it"
@@ -234,9 +234,9 @@ def test_the_classes_are_the_SCORED_ones_not_a_second_computation(measured):
     fresh = P0.solver_class_masks(
         m.debug_pass0["capture"],
         m.debug_pass0["chain"],
-        int(m.payload.n_nodes),
+        int(m.payload.n_regions),
         int(m.payload.n_edges),
-    )["node"]
+    )["region"]
     for name in P0.SOLVER_CLASSES:
         np.testing.assert_array_equal(d["solver"][name], fresh[name])
-        np.testing.assert_array_equal(d["solver"][name], m.solver_masks["node"][name])
+        np.testing.assert_array_equal(d["solver"][name], m.solver_masks["region"][name])

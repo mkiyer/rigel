@@ -8,10 +8,10 @@ THERE. This applies the SAME override to the 36-condition gDNA ladder and scores
 own acceptance instrument (`solvability_audit.py`), so the two arms differ by exactly the mechanism and
 the answer is in the currency the project actually ships.
 
-⭐ **The override goes in at `node_init.build_node_init`** — the per-object message-free self-solve —
+⭐ **The override goes in at `region_init.build_region_init`** — the per-object message-free self-solve —
 which is the one place a mechanism can be expressed without touching either relay twin, so a prototype
 cannot accidentally be gated in one twin and not the other (TRAPS: name-the-observable-per-site). `region_arrays` reaches the
-wrapper by way of a `node_sweep` wrapper, because `build_node_init` is not handed it.
+wrapper by way of a `region_sweep` wrapper, because `build_region_init` is not handed it.
 
 ⚠ **A prototype here is an UPPER bound on the built form, not a model of it**: it overwrites the
 object's own belief unconditionally, with no licence and no inverse-variance fuse. If the upper bound
@@ -20,7 +20,7 @@ loses, the built form cannot win; if it wins, the built form still has to earn i
 ⛔⛔ **THE ARM IT CARRIES, AND ITS VERDICT (2026-08-04).** ``intron_phi`` is `EQUATIONS.md` §3.6 face (I):
 an `intron|exon` EDGE takes the flanking INTRON's COMPOSITION — never its level — and closes the level
 with its own observed mass. On the toy it was worth −0.009 panel-wide and −0.027 on capture-ON ×
-unstranded. On the ladder, 32 contaminated conditions, node axis:
+unstranded. On the ladder, 32 contaminated conditions, region axis:
 
 ======================  ==========  =============  ===================
 metric                  base        intron_phi     better/worse/flat
@@ -53,7 +53,7 @@ arm                  what it reverts                                 what it tes
 ``zc_own_count``     ``own_precision``'s count TERM back to the       CAN a zero-count object
                      ``n/(n·V+1)`` form, ``0`` at ``n = 0``           FORM a claim?
 ``zc_total_n``       the count ARGUMENT back to the slot TOTAL        does a component's
-                     ``n_node``, from HEAD's COMPONENT count          precision come from its
+                     ``n_region``, from HEAD's COMPONENT count          precision come from its
                      ``f_c·M``                                       OWN count or the total?
 ``zc_live_count``    the ``live`` predicate back to COUNT-keyed —     CAN a zero-DENSITY
                      ``rho_g > 0`` on gDNA, ``n > 0 ∧ rho > 0``       component form one?
@@ -65,7 +65,7 @@ arm                  what it reverts                                 what it tes
 
 ⚠ ``zc_total_n`` is the change that was NOT in the handoff's list and is the largest of the four by
 construction: on a stranded, gDNA-rich exon the RNA arms' component count ``f_c·M`` is a few hundredths of
-``n_node``, so their precision falls by orders of magnitude, while an unstranded object splits its RNA
+``n_region``, so their precision falls by orders of magnitude, while an unstranded object splits its RNA
 evenly and barely moves.
 
 ⛔ Each arm asserts it FIRED (TRAPS: an-ablation-that-never-ran — an ablation that never ran reads as "no effect", and
@@ -109,10 +109,10 @@ SA = _sibling("solvability_audit.py")
 P0 = _sibling("pass0_vs_oracle.py")
 
 import rigel.calibration.strand_balance  # noqa: E402,F401  (registers the module for patching)
-from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
+from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration.messages import head as HD, variance as VAR  # noqa: E402
-from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import g1_locked, node_gdna_geometry  # noqa: E402
+from rigel.calibration.region_chain import REGION  # noqa: E402
+from rigel.calibration.region_geometry import g1_locked, region_gdna_geometry  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -121,7 +121,7 @@ CAL = sys.modules["rigel.calibration.calibrate"]
 
 _EPS = 1.0e-9
 INTRON, EXON = 1, 2
-#: set by the `node_sweep` wrapper one call before `build_node_init` needs it.
+#: set by the `region_sweep` wrapper one call before `build_region_init` needs it.
 _RA: dict = {}
 
 
@@ -169,7 +169,7 @@ _FIRED: dict = {}
 #:
 #: ⭐ **The two shapes, and they fail differently, which is why the counter alone is not enough:**
 #:
-#: * ``composition_logvar`` / ``_solve_nodes_logodds_all``'s imputation arguments are reached ONLY from
+#: * ``composition_logvar`` / ``_solve_regions_logodds_all``'s imputation arguments are reached ONLY from
 #:   ``HeadPolicy.prepare``. Those arms never fire and the counter DOES catch them — after a full run.
 #: * ⛔ every arm that moves a PRECISION (``own_precision``, ``struct_lock``, ``own_composition_logvar``,
 #:   or a ``rho`` at a zero-mass slot) fires on tens of thousands of slots and changes NO scored field:
@@ -219,8 +219,8 @@ def _install_zc_own_count():
     Here: ``p = n/(n·Var(log f) + 1)`` gated on ``n > 0`` — algebraically ``1/(Var + 1/n)``, the
     large-count LIMIT of the same expression, which diverges at ``n = 0`` and so returns 0 there.
 
-    ⚠ ``own_precision`` is called as a MODULE GLOBAL from inside ``build_node_init``, so rebinding
-    ``NI.own_precision`` is sufficient and `sweep`'s re-export of ``build_node_init`` shares the same
+    ⚠ ``own_precision`` is called as a MODULE GLOBAL from inside ``build_region_init``, so rebinding
+    ``NI.own_precision`` is sufficient and `sweep`'s re-export of ``build_region_init`` shares the same
     function object. The counter proves it rather than the reader assuming it."""
     orig = NI.own_precision
 
@@ -241,15 +241,15 @@ def _install_zc_own_count():
 
 
 def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
-    """Rebuild the three own-belief precisions from the arrays ``build_node_init`` itself was handed,
+    """Rebuild the three own-belief precisions from the arrays ``build_region_init`` itself was handed,
     varying ONE of its two count/gate decisions.
 
-    ⚠ Done OUTSIDE ``build_node_init`` because both quantities are locals there. Every input comes from
+    ⚠ Done OUTSIDE ``build_region_init`` because both quantities are locals there. Every input comes from
     the geometry/statics the solver was given and the composition variance is HEAD's own
     ``own_composition_logvar``, so an arm differs from HEAD in its named decision and in nothing else.
     ⭐ The LOCATIONS (``rho_g``/``rho_pos``/``rho_neg``) are HEAD's untouched unless ``count_live``
     zeroes a component, which is exactly what the pre-fix predicate did."""
-    M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)  # ≡ node_gdna_geometry mass
+    M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)  # ≡ region_gdna_geometry mass
     E_r = np.asarray(geometry.eff_rna, np.float64)
     f_g = np.asarray(ni.f_g, np.float64)
     v_fg, v_fr = NI.own_composition_logvar(f_g, ni.tau_lam, np.asarray(ni.struct_lock, bool))
@@ -257,7 +257,7 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
     rho_p = np.asarray(ni.rho_pos, np.float64)
     rho_n = np.asarray(ni.rho_neg, np.float64)
 
-    E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
+    E_g = np.asarray(region_gdna_geometry(geometry)[1], np.float64)
     live_g = (rho_g > _EPS) if count_live else (E_g > 0.0)
     n_g = M if total_n else f_g * M
     prec_g = NI.own_precision(n_g, v_fg, live_g)
@@ -273,7 +273,7 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
 
     rho_pos, prec_pos = _rna(rho_p, statics.free_pos)
     rho_neg, prec_neg = _rna(rho_n, statics.free_neg)
-    return NI.NodeInit(
+    return NI.RegionInit(
         f_g=ni.f_g, f_pos=ni.f_pos, f_neg=ni.f_neg,
         rho_g=rho_g, rho_pos=rho_pos, rho_neg=rho_neg,
         prec_g=prec_g, prec_pos=prec_pos, prec_neg=prec_neg,
@@ -282,17 +282,17 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
 
 
 def _install_rebuild(name: str, **flags):
-    """Wrap ``build_node_init`` with one :func:`_rebuild_own` variant. ⚠ Both bindings are rebound —
+    """Wrap ``build_region_init`` with one :func:`_rebuild_own` variant. ⚠ Both bindings are rebound —
     ``sweep`` re-exports the name (TRAPS: an-ablation-that-never-ran)."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         _fire(name)
         return _rebuild_own(ni, statics, geometry, **flags)
 
-    NI.build_node_init = wrapper
-    SW.build_node_init = wrapper
+    NI.build_region_init = wrapper
+    SW.build_region_init = wrapper
     return orig
 
 
@@ -334,7 +334,7 @@ def _zero_mass_locked(ni, geometry):
     ``rho_g = f_g·M/E_g`` is 0 iff ``M = 0`` (``f_g`` is a ψ grid point and never exactly 0), and a
     zero-mass slot has ``tau_lam = 0``, so ``own_composition_logvar`` returns ``∞`` and the precision is 0
     — **unless** ``struct_lock`` short-circuits the variance to 0. So "zero density with a live claim"
-    is exactly ``struct_lock ∧ M = 0``: an empty intergenic NODE.
+    is exactly ``struct_lock ∧ M = 0``: an empty intergenic REGION.
     ⚠ Printed as a count by both callers, because an arm acting on an empty set is not a control (TRAPS: could-the-arm-have-fired)."""
     M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
     return np.asarray(ni.struct_lock, bool) & (M <= 0.0), M
@@ -349,7 +349,7 @@ def _install_zc_anchor_mute():
     anchor is the site. This changes ``prec_g`` at ~122 slots at ``g75 capture_on`` and at 1,312 at ``g00``
     — so if the stranded × capture-ON regression goes and the ``g00`` win goes with it, the two are the SAME
     mechanism and a fix has to separate them by something other than muting."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
@@ -360,8 +360,8 @@ def _install_zc_anchor_mute():
         prec_g[sel] = 0.0
         return dataclasses.replace(ni, prec_g=prec_g)
 
-    NI.build_node_init = wrapper
-    SW.build_node_init = wrapper
+    NI.build_region_init = wrapper
+    SW.build_region_init = wrapper
     return orig
 
 
@@ -384,21 +384,21 @@ def _install_zc_jeffreys_mean():
 
     ⚠ It does NOT fix a level: an off-probe anchor's ``½/E_g`` is still far below an on-probe exon's true
     density. It fixes the CLAIM, and the arm exists to price that separately from the level."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         sel, _M = _zero_mass_locked(ni, geometry)
         _FIRED["zc_jeffreys_mean_slots"] = int(sel.sum())
         _fire("zc_jeffreys_mean")
-        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(region_gdna_geometry(geometry)[1], np.float64)
         rho_g = np.array(ni.rho_g, np.float64)
         ok = sel & (E_g > 0.0)
         rho_g[ok] = 0.5 / E_g[ok]
         return dataclasses.replace(ni, rho_g=rho_g)
 
-    NI.build_node_init = wrapper
-    SW.build_node_init = wrapper
+    NI.build_region_init = wrapper
+    SW.build_region_init = wrapper
     return orig
 
 
@@ -407,7 +407,7 @@ def _install_zc_reference_var():
     of ψ's OWN reference prior, ``Beta(½, ½)`` ⇒ exactly **1/8**, instead of ``f_g(1−f_g)`` evaluated at a
     default point estimate that sits on the corner.
 
-    ⛔ **THE DEFECT.** ``node_sweep`` builds
+    ⛔ **THE DEFECT.** ``region_sweep`` builds
     ``_var_fg = where(struct_lock, 0, where(τ > 0, min(fgfr²/τ, fgfr), fgfr))`` and hands it to
     `composition_logvar`, whose output IS ``σ²_transfer``. An evidence-free slot's default belief is
     ``f_g = 1`` **exactly** (measured on the ladder fixture: every zero-count slot), so ``fgfr = 0`` and the
@@ -431,12 +431,12 @@ def _install_zc_reference_var():
     this different from every arm above, all of which cost the ``g00`` control.
 
     ⚠ Both bindings of ``composition_logvar`` are patched (TRAPS: an-ablation-that-never-ran), and ``tau_lam``/``struct_lock``
-    are captured from the ``build_node_init`` call that ``node_sweep`` makes immediately before.
+    are captured from the ``build_region_init`` call that ``region_sweep`` makes immediately before.
 
     ⛔ **MESSAGE-LAYER ARM** — the patched ``composition_logvar`` is called only by ``HeadPolicy.prepare``,
     so under ``SilentPolicy`` the ``bni`` half still runs and changes nothing. :func:`_require` refuses it
     up front rather than letting it read as inert."""
-    orig_bni = NI.build_node_init
+    orig_bni = NI.build_region_init
     orig_cl = VAR.composition_logvar
     state: dict = {}
 
@@ -456,8 +456,8 @@ def _install_zc_reference_var():
             v = np.where(free, 0.125, v)  # Var of Beta(½,½) — ψ's own reference
         return orig_cl(f_g, E_g, E_r, v, n)
 
-    NI.build_node_init = bni
-    SW.build_node_init = bni
+    NI.build_region_init = bni
+    SW.build_region_init = bni
     VAR.composition_logvar = cl
     HD.composition_logvar = cl
     return orig_cl
@@ -586,7 +586,7 @@ def _install_zc_discrepancy():
 
     ⛔ **THE PATCH POINT IS CHOSEN SO THAT NOTHING IN `src/` MOVES** (TRAPS: panel-before-src). The operator belongs
     in ``messages.head``'s combine, inside a closure and therefore unreachable — but everything it needs
-    is reconstructible one call later, at `simplex_logodds._solve_nodes_logodds_all`, which is module-level:
+    is reconstructible one call later, at `simplex_logodds._solve_regions_logodds_all`, which is module-level:
 
         gdna_imp_mode = log(cg·E_g/M) = log φ_g^msg      ⭐ ALREADY the delivered gDNA SHARE
         rna_imp_mode  = (log φ_p, log φ_n)
@@ -595,7 +595,7 @@ def _install_zc_discrepancy():
     access to any belief. **TRAPS: a-message-from-the-destinations-belief holds**: the shift is built from the message and the destination's own count.
 
     ⚠ Patched on ``sweep``'s binding, which is a SEPARATE module global from the leaf module's
-    (TRAPS: an-ablation-that-never-ran). ``node_init`` and ``node_geometry`` also import the name, but their calls pass no
+    (TRAPS: an-ablation-that-never-ran). ``region_init`` and ``region_geometry`` also import the name, but their calls pass no
     imputation modes, so the operator cannot fire there — and the counter proves it rather than the reader
     assuming it.
 
@@ -609,7 +609,7 @@ def _install_discrepancy(*, shift: bool):
     """The shared installer. ``shift`` selects the mode treatment; the variance is always applied, so the
     two arms differ in exactly one term and nothing else."""
     SL = sys.modules["rigel.calibration.simplex_logodds"]
-    orig = SL._solve_nodes_logodds_all
+    orig = SL._solve_regions_logodds_all
     tag = "zc_discrepancy" if shift else "zc_disc_var"
 
     def wrapper(*a, gdna_imp_mode=None, gdna_imp_prec=None, rna_imp_mode=None, **kw):
@@ -635,35 +635,35 @@ def _install_discrepancy(*, shift: bool):
             **kw,
         )
 
-    SL._solve_nodes_logodds_all = wrapper
-    SW._solve_nodes_logodds_all = wrapper
+    SL._solve_regions_logodds_all = wrapper
+    SW._solve_regions_logodds_all = wrapper
     return orig
 
 
 def _install_zc_struct_lock_g1():
     """⭐⭐⭐ ``struct_lock`` MEANS "STRUCTURALLY PURE gDNA" IN ITS OWN DOCSTRING AND MEANS "UNSOLVABLE"
-    IN ITS CODE. This arm makes the mask match the prose: ``g1_locked(free_pos, free_neg) ∧ NODE``.
+    IN ITS CODE. This arm makes the mask match the prose: ``g1_locked(free_pos, free_neg) ∧ REGION``.
 
     ``strand_evidence`` is handed ``locked = ~solvable`` with
-    ``solvable = (free_pos | free_neg) & (n_node > 0)``, so ``struct_lock = locked & is_region`` is true at
-    **every NODE with zero counts** — an empty EXON and an empty INTRON included, not only at the "true
-    intergenic NODE nodes" the docstring scopes it to. ``own_composition_logvar`` then returns
+    ``solvable = (free_pos | free_neg) & (n_region > 0)``, so ``struct_lock = locked & is_region`` is true at
+    **every REGION with zero counts** — an empty EXON and an empty INTRON included, not only at the "true
+    intergenic REGION regions" the docstring scopes it to. ``own_composition_logvar`` then returns
     ``Var(log f_g) = 0`` there: **composition CERTAIN**, on a slot whose ``f_g`` is a default belief and
     whose evidence is nothing at all.
 
     ⚠ It was INERT until 2026-08-06: ``own_precision``'s ``n > 0`` gate silenced every zero-count slot, so
-    a certainty granted to 18,511 empty nodes could not leave them. Removing that gate un-masked it.
+    a certainty granted to 18,511 empty regions could not leave them. Removing that gate un-masked it.
     ⭐ ``g1_locked`` is the ONE HOME for the predicate (TRAPS: a-test-that-redefines) and already exists; this arm simply
     calls it. At ``g00`` every intergenic anchor is G1, so the arm must KEEP the zero-gDNA win — that is
     what makes it different from muting the anchors."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         _fire("zc_struct_lock_g1")
         fp = np.asarray(statics.free_pos, bool)
         fn = np.asarray(statics.free_neg, bool)
-        is_reg = np.asarray(chain.kind) == NODE
+        is_reg = np.asarray(chain.kind) == REGION
         want = g1_locked(fp, fn) & is_reg
         have = np.asarray(ni.struct_lock, bool)
         _FIRED["struct_lock_slots_HEAD"] = int(have.sum())
@@ -671,7 +671,7 @@ def _install_zc_struct_lock_g1():
         _FIRED["struct_lock_slots_REVOKED"] = int((have & ~want).sum())
         _FIRED["struct_lock_slots_ADDED"] = int((want & ~have).sum())
         M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
-        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(region_gdna_geometry(geometry)[1], np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)
         f_g = np.asarray(ni.f_g, np.float64)
         v_fg, v_fr = NI.own_composition_logvar(f_g, ni.tau_lam, want)
@@ -686,8 +686,8 @@ def _install_zc_struct_lock_g1():
             ni, struct_lock=want, prec_g=prec_g, prec_pos=prec_pos, prec_neg=prec_neg
         )
 
-    NI.build_node_init = wrapper
-    SW.build_node_init = wrapper
+    NI.build_region_init = wrapper
+    SW.build_region_init = wrapper
     return orig
 
 
@@ -709,38 +709,38 @@ def _install_zc_logmean():
     ``Σ_c ρ_c·E_c = M`` places no constraint."""
     from scipy.special import digamma
 
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         sel, _M = _zero_mass_locked(ni, geometry)
         _FIRED["zc_logmean_slots"] = int(sel.sum())
         _fire("zc_logmean")
-        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(region_gdna_geometry(geometry)[1], np.float64)
         rho_g = np.array(ni.rho_g, np.float64)
         ok = sel & (E_g > 0.0)
         rho_g[ok] = float(np.exp(digamma(0.5))) / E_g[ok]
         return dataclasses.replace(ni, rho_g=rho_g)
 
-    NI.build_node_init = wrapper
-    SW.build_node_init = wrapper
+    NI.build_region_init = wrapper
+    SW.build_region_init = wrapper
     return orig
 
 
 def _targets(chain, region_arrays):
-    """Vectorised: every `intron|exon` EDGE slot and the slot of its flanking INTRON NODE.
+    """Vectorised: every `intron|exon` EDGE slot and the slot of its flanking INTRON REGION.
 
-    ⭐ Genomic order IS slot order and the chain strictly alternates NODE/EDGE, so an EDGE's flanks are
+    ⭐ Genomic order IS slot order and the chain strictly alternates REGION/EDGE, so an EDGE's flanks are
     ``i-1`` and ``i+1`` and no traversal is needed. Breaks at a reference terminal are handled by
     `chain.left`/`chain.right` being −1 there."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-    is_node = kind == NODE
-    ntype = np.where(is_node, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
+    is_region = kind == REGION
+    ntype = np.where(is_region, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
     left = np.asarray(chain.left, np.int64)
     right = np.asarray(chain.right, np.int64)
-    ok = (~is_node) & (left >= 0) & (right >= 0)
+    ok = (~is_region) & (left >= 0) & (right >= 0)
     lt = np.where(ok, ntype[np.clip(left, 0, ntype.size - 1)], -1)
     rt = np.where(ok, ntype[np.clip(right, 0, ntype.size - 1)], -1)
     hit = ok & (((lt == INTRON) & (rt == EXON)) | ((lt == EXON) & (rt == INTRON)))
@@ -802,10 +802,10 @@ def _install_backbone(silent: bool):
     CAL.solve_chain = wrapper
 
 
-def _wrap_node_sweep():
-    """Stash `region_arrays` — the sweep receives it and calls `build_node_init` after.
+def _wrap_region_sweep():
+    """Stash `region_arrays` — the sweep receives it and calls `build_region_init` after.
 
-    ⚠ The name it patches is ``calibrate.solve_chain`` (the BACKBONE). It used to be ``node_sweep``, and
+    ⚠ The name it patches is ``calibrate.solve_chain`` (the BACKBONE). It used to be ``region_sweep``, and
     that rename is exactly the TRAPS: an-ablation-that-never-ran hazard: patching a name the caller no longer calls raises nothing, sets
     no ``region_arrays``, and every override arm downstream silently overrides nothing. So it is asserted
     rather than assumed."""
@@ -869,7 +869,7 @@ def _install_msgscale(scale: float):
 
     The owner's account, from having shipped the production tool: *"messages do not need to be confident.
     When messages become confident they overwrite the strand-specific data, and so they harm scenarios
-    with strand specificity. When we have unstranded data none of the nodes has a solution — all have a
+    with strand specificity. When we have unstranded data none of the regions has a solution — all have a
     precision of zero — so the weakest of weak messages is still going to work, because it is more
     precision than zero."*
 
@@ -891,11 +891,11 @@ def _install_msgscale(scale: float):
     ⚠ All four channels are scaled together — ``gdna_imp``, ``rna_imp``, ``lam_imp``, ``theta_imp`` — which
     is ONE thing varied and is exactly the claim as stated. Scaling them separately is a different, later
     experiment. The MODES are untouched, so nothing about what a message SAYS changes; only how loudly.
-    ⛔ TRAPS: an-ablation-that-never-ran — all three ``_solve_nodes_logodds_all`` bindings are patched and the arm raises if unfired.
+    ⛔ TRAPS: an-ablation-that-never-ran — all three ``_solve_regions_logodds_all`` bindings are patched and the arm raises if unfired.
     """
     import rigel.calibration.simplex_logodds as SL
 
-    orig_solve = SL._solve_nodes_logodds_all
+    orig_solve = SL._solve_regions_logodds_all
     k = float(scale)
 
     def _s(p):
@@ -913,8 +913,8 @@ def _install_msgscale(scale: float):
         return orig_solve(*a, **kw)
 
     for mod in (SL, NI, SW):
-        if hasattr(mod, "_solve_nodes_logodds_all"):
-            mod._solve_nodes_logodds_all = solve
+        if hasattr(mod, "_solve_regions_logodds_all"):
+            mod._solve_regions_logodds_all = solve
 
 
 def _install_msgfree(where: str):
@@ -941,15 +941,15 @@ def _install_msgfree(where: str):
     is attributable to the message layer and to nothing else. ⭐ The whole relay still RUNS; only its
     delivery into psi is withheld. That keeps one thing varied and leaves the geometry identical.
 
-    ⛔ TRAPS: an-ablation-that-never-ran — ``_solve_nodes_logodds_all`` is bound as a module global in THREE places
-    (``simplex_logodds``, ``node_init``, ``sweep``); all three are patched and the arm raises if it
+    ⛔ TRAPS: an-ablation-that-never-ran — ``_solve_regions_logodds_all`` is bound as a module global in THREE places
+    (``simplex_logodds``, ``region_init``, ``sweep``); all three are patched and the arm raises if it
     never fired. And the pass-0-vs-refit switch is read off ``gdna_prior is None``, which is exactly how
     ``calibrate`` itself distinguishes the two phases (``calibrate.py:528`` vs ``:572``).
     """
     import rigel.calibration.simplex_logodds as SL
 
     state = {"muted": where == "all"}
-    orig_solve = SL._solve_nodes_logodds_all
+    orig_solve = SL._solve_regions_logodds_all
 
     def solve(*a, **kw):
         if state["muted"]:
@@ -960,8 +960,8 @@ def _install_msgfree(where: str):
         return orig_solve(*a, **kw)
 
     for mod in (SL, NI, SW):
-        if hasattr(mod, "_solve_nodes_logodds_all"):
-            mod._solve_nodes_logodds_all = solve
+        if hasattr(mod, "_solve_regions_logodds_all"):
+            mod._solve_regions_logodds_all = solve
 
     if where == "p0":
         orig_sweep = SW.solve_chain
@@ -991,7 +991,7 @@ def _install_face_one():
     the share may cross. ⛔ The LEVEL may not: measured on the toy, transferring the intron's gDNA
     DENSITY instead is **+0.017 panel-wide and +0.207 on capture-ON × unstranded**, because capture
     depletes the intron ~1000× while enriching the EDGE."""
-    orig = NI.build_node_init
+    orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
@@ -1014,11 +1014,11 @@ def _install_face_one():
         f_neg = np.array(ni.f_neg, np.float64)
         tau = np.array(ni.tau_lam, np.float64)
         lock = np.asarray(ni.struct_lock, bool)
-        M, E_g = node_gdna_geometry(geometry)
+        M, E_g = region_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)
-        n_node = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
+        n_region = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
 
         new_fg = f_g[srcs]
         rna = np.maximum(0.0, 1.0 - new_fg)
@@ -1039,7 +1039,7 @@ def _install_face_one():
         rho_g = np.maximum(
             np.where((M > _EPS) & (E_g > _EPS), f_g * M / np.maximum(E_g, _EPS), 0.0), 0.0
         )
-        prec_g = NI.own_precision(n_node, v_fg, rho_g > _EPS)
+        prec_g = NI.own_precision(n_region, v_fg, rho_g > _EPS)
         touched = np.zeros(f_g.shape[0], bool)
         touched[edges] = True
 
@@ -1048,20 +1048,20 @@ def _install_face_one():
                 (M > _EPS) & (E_r > _EPS) & np.asarray(free_s, bool),
                 frac * M / np.maximum(E_r, _EPS), 0.0,
             )
-            live = (n_node > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
+            live = (n_region > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
             rho = np.where(live, raw, 0.0)
-            return rho, NI.own_precision(n_node, v_fr, rho > _EPS)
+            return rho, NI.own_precision(n_region, v_fr, rho > _EPS)
 
         rho_pos, prec_pos = _rna(f_pos, statics.free_pos, np.asarray(ni.rho_pos, np.float64))
         rho_neg, prec_neg = _rna(f_neg, statics.free_neg, np.asarray(ni.rho_neg, np.float64))
-        return NI.NodeInit(
+        return NI.RegionInit(
             f_g=f_g, f_pos=f_pos, f_neg=f_neg,
             rho_g=rho_g, rho_pos=rho_pos, rho_neg=rho_neg,
             prec_g=prec_g, prec_pos=prec_pos, prec_neg=prec_neg,
             struct_lock=lock, tau_lam=tau,
         )
 
-    SW.build_node_init = wrapper
+    SW.build_region_init = wrapper
 
 
 #: every arm this harness carries. ⭐ ONE home: `--arm`'s choices and `--self-test`'s worklist are the
@@ -1315,7 +1315,7 @@ def main() -> int:
     elif args.arm == "onesided_rna":
         _install_onesided_rna()
     else:
-        _wrap_node_sweep()
+        _wrap_region_sweep()
     if args.arm == "intron_phi":
         _install_face_one()
     elif args.arm == "kappa_half":
@@ -1372,13 +1372,13 @@ def main() -> int:
                 calibration_config=config, work_dir=args.work_dir / "rigel_pass0_oracle", tag=name,
                 # ⛔ NO truth pmfs. They exist only to build the two ``c_input_*`` arms, and this
                 # harness reads ``pass0`` and ``final`` ONLY — so those two calibrate runs were pure
-                # waste. Measured: 35.2 s -> 24.5 s per condition (**-30 %**), 10 node_sweep calls -> 5,
+                # waste. Measured: 35.2 s -> 24.5 s per condition (**-30 %**), 10 region_sweep calls -> 5,
                 # and all four scored fields BYTE-IDENTICAL on both axes. ⭐ Verified, not assumed
                 # (TRAPS: byte-identity-gate): dropping work that changes a number is a different change entirely.
                 truth_pmfs=None,
                 oracle_cache=args.oracle_cache,
             )
-            for axis in ("node", "edge"):
+            for axis in ("region", "edge"):
                 s = SA.summarise(SA.audit(m, axis=axis, config=config))
                 # ⛔⛔ FIXED-DENOMINATOR COMPANIONS. `solvable_mwae`'s denominator is the SOLVABLE set,
                 # and an arm that changes what counts as solvable changes its own denominator — so a

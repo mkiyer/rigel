@@ -25,7 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rigel.calibration.node_init import has_own_composition_evidence
+from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import CalibrationConfig, PipelineConfig
@@ -74,8 +74,8 @@ def toy(tmp_path_factory):
       having spliced *elsewhere* — can only be deposited where a cut falls INSIDE another
       transcript's exon. A single-isoform gene has no such cut, so its spliced-edge bank is
       identically zero and GATE 2's perturbation removes nothing.
-    * **a node shorter than the minimum fragment length.** ``node_contained`` requires the fragment
-      to fit, so a 40 bp node can never hold one. That is what gives the toy genuinely EMPTY objects
+    * **a region shorter than the minimum fragment length.** ``region_contained`` requires the fragment
+      to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY objects
       — everything else here is covered ~100x deep — and GATE 6 is about exactly those.
     """
     wd = tmp_path_factory.mktemp("p0_orc")
@@ -177,15 +177,15 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
     warm = mod.load_or_build_oracle(bam, index, cfg, tmp_path / "w2", "t", full, cache)
     for origin in _oracle.ORIGINS:
         np.testing.assert_array_equal(
-            np.asarray(warm.parts[origin].node_contained_count),
-            np.asarray(cold.parts[origin].node_contained_count),
+            np.asarray(warm.parts[origin].region_contained_count),
+            np.asarray(cold.parts[origin].region_contained_count),
         )
 
     # ⛔ the cached path is NOT exempt from sum-to-full
     npz = cache / "t" / "gdna" / "payload.npz"
     data = {k: v for k, v in np.load(npz).items()}
-    data["node_contained_count"] = data["node_contained_count"].copy()
-    data["node_contained_count"][0, 0] += 1
+    data["region_contained_count"] = data["region_contained_count"].copy()
+    data["region_contained_count"][0, 0] += 1
     np.savez_compressed(npz, **data)
     with pytest.raises(AssertionError, match="oracle INVALID"):
         mod.load_or_build_oracle(bam, index, cfg, tmp_path / "w3", "t", full, cache)
@@ -255,7 +255,7 @@ def test_a_corrupted_partition_ABORTS_the_measurement(toy, tmp_path, monkeypatch
         payload = real(bam, index, cfg)
         calls["n"] += 1
         if calls["n"] == 1:  # the first partition scanned
-            payload.node_contained_count[0, 0] += 1
+            payload.region_contained_count[0, 0] += 1
         return payload
 
     monkeypatch.setattr(_oracle, "_scan_payload", corrupting)
@@ -276,14 +276,14 @@ def test_a_corrupted_partition_ABORTS_the_measurement(toy, tmp_path, monkeypatch
 def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     """``check_same_basis`` must hold between T and the payload it claims to partition, **per axis**.
 
-    ⚠ Per axis, never pooled: ``n_nodes`` and ``n_edges`` differ by only ``n_refs``, so an error on
+    ⚠ Per axis, never pooled: ``n_regions`` and ``n_edges`` differ by only ``n_refs``, so an error on
     one axis cancelling an equal and opposite one on the other is not far-fetched.
 
     PERTURBATION: drop the spliced term from ``mass_rna_edge``. That is the exact schema mistake
     ``override_masses`` exists to avoid — ``chain_edge_deconv`` builds ``rna = (1−f_g)·unspliced +
     spliced``, so a T without the spliced term is on a different basis from every P.
     """
-    ra = RegionArrays.from_frame(toy.index.nodes_df, toy.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
     full = CalibrationSubstrate.from_payload(measured.oracle.full, ra)
     P0.check_same_basis("T", measured.truth, full)  # holds
 
@@ -304,10 +304,10 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
     ``f_g`` comparable at all: two arrays of fractions over different denominators subtract to a
     number that means nothing.
 
-    PERTURBATION (a): score the node axis against the edge axis' truth.
+    PERTURBATION (a): score the region axis against the edge axis' truth.
     PERTURBATION (b): scale one arm's masses, i.e. put P on a different denominator.
     """
-    ra = RegionArrays.from_frame(toy.index.nodes_df, toy.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
     full = CalibrationSubstrate.from_payload(measured.oracle.full, ra)
     for name, arm in measured.arms.items():
         P0.check_same_basis(name, arm, full)  # holds for every arm
@@ -315,17 +315,17 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
     p = measured.arms["pass0"]
     with pytest.raises(ValueError):
         P0.score_axis(
-            p.mass_gdna_node,
-            p.mass_rna_node,
+            p.mass_gdna_region,
+            p.mass_rna_region,
             measured.truth.mass_gdna_edge,
             measured.truth.mass_rna_edge,
         )
     with pytest.raises(ValueError):
         P0.score_axis(
-            p.mass_gdna_node * 2.0,
-            p.mass_rna_node * 2.0,
-            measured.truth.mass_gdna_node,
-            measured.truth.mass_rna_node,
+            p.mass_gdna_region * 2.0,
+            p.mass_rna_region * 2.0,
+            measured.truth.mass_gdna_region,
+            measured.truth.mass_rna_region,
         )
 
 
@@ -340,21 +340,21 @@ def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
     PERTURBATION: ask for ONE refit iteration. The refit is the whole point of Phase 2, so a single
     iteration must move the answer; if it does not, the lever is inert and this test is vacuous.
     """
-    from rigel.calibration.sweep import chain_node_deconv
+    from rigel.calibration.sweep import chain_region_deconv
 
-    ra = RegionArrays.from_frame(toy.index.nodes_df, toy.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
     substrate = CalibrationSubstrate.from_payload(measured.payload, ra)
     debug = measured.debug_final
-    from_debug = chain_node_deconv(debug["chain"], debug["belief_pass0"], substrate).gdna_mass
+    from_debug = chain_region_deconv(debug["chain"], debug["belief_pass0"], substrate).gdna_mass
 
-    np.testing.assert_array_equal(measured.arms["pass0"].mass_gdna_node, from_debug)
+    np.testing.assert_array_equal(measured.arms["pass0"].mass_gdna_region, from_debug)
 
     one = P0.calibrate_arm(
         measured.payload,
         measured.calibrate_kwargs,
         dataclasses.replace(CalibrationConfig(), calib_refit_iters=1),
     )
-    assert not np.array_equal(one.mass_gdna_node, from_debug), (
+    assert not np.array_equal(one.mass_gdna_region, from_debug), (
         "one refit iteration left the answer byte-identical: the lever this instrument depends on "
         "does nothing, so the pass-0/final distinction it reports is fictional."
     )
@@ -371,7 +371,7 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
       * two IDENTICAL length pmfs ⇒ the 2×2 has no separation anywhere ⇒ nothing is identified;
       * two widely separated pmfs ⇒ something is.
     """
-    ra = RegionArrays.from_frame(toy.index.nodes_df, toy.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
     substrate = CalibrationSubstrate.from_payload(measured.payload, ra)
     chain = measured.debug_final["chain"]
 
@@ -380,7 +380,7 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
     flat = P0.info_class_masks(chain, ra, substrate, same, same.copy())
     apart = P0.info_class_masks(chain, ra, substrate, _spike_pmf(150, size), _spike_pmf(330, size))
 
-    for axis in ("node", "edge"):
+    for axis in ("region", "edge"):
         live = ~flat[axis]["absent"]
         assert live.sum() > 0, f"the toy has no live {axis} objects; the gate would be vacuous"
         # equal means ⇒ the length channel carries EXACTLY zero information, at any depth.
@@ -391,7 +391,7 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
 
     # and the share is REPORTED, mass-weighted, for every class — an unreported class is an averaged
     # -away class.
-    shares = measured.info_shares["node"]
+    shares = measured.info_shares["region"]
     assert set(shares) == set(P0.INFO_CLASSES)
     assert abs(sum(shares.values()) - 1.0) < 1e-9
 
@@ -401,7 +401,7 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
 
 def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
     """⭐ "No data" must be inert, never "100 % gDNA" — and its mirror, never "0 % gDNA", is just as
-    wrong. Most nodes in any real index carry no fragments at all, so a scorer that turns 0/0 into a
+    wrong. Most regions in any real index carry no fragments at all, so a scorer that turns 0/0 into a
     number reports a beautiful answer for the majority of the genome.
 
     PERTURBATION: the mass-weighted mean is *blind* to this by construction (a zero-mass object gets
@@ -422,12 +422,12 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
 
     # ...and on the real toy: exactly the objects with mass are scored, and there is at least one
     # without, or the line above proves nothing about the path the instrument actually runs.
-    node = measured.scores["pass0"]["node"]["ALL"]
+    region = measured.scores["pass0"]["region"]["ALL"]
     live = (
-        np.asarray(measured.truth.mass_gdna_node) + np.asarray(measured.truth.mass_rna_node)
+        np.asarray(measured.truth.mass_gdna_region) + np.asarray(measured.truth.mass_rna_region)
     ) > 0
-    assert node.n_scored == int(live.sum())
-    assert (~live).sum() > 0, "the toy has no empty node; the gate would be vacuous"
+    assert region.n_scored == int(live.sum())
+    assert (~live).sum() > 0, "the toy has no empty region; the gate would be vacuous"
 
 
 # ── GATE 7: the solver classes are the SOLVER's, not a second opinion ─────────────────────────────
@@ -435,27 +435,27 @@ def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
 
 def test_the_solver_classes_match_the_composition_evidence_census(measured, toy):
     """⭐ ``composition_evidence_census.py`` already partitions slots into own-evidence / no-evidence /
-    structurally-locked, reproducing ``node_init``'s own definitions. This instrument must ask the
+    structurally-locked, reproducing ``region_init``'s own definitions. This instrument must ask the
     SAME question, or the project acquires two definitions of one class and they drift — which has
     already happened here once, between a docstring and the code it sat beside, for months.
 
     ⭐⭐ **RE-POINTED 2026-08-05, AND THE RE-POINTING IS THE FIX THIS GATE WAS ASKING FOR.** It used to
     compare two hand-written copies of ``1e-9`` (``P0._EPS == census._EPS``) — a drift DETECTOR for a
-    definition that had three homes. ``node_init.has_own_composition_evidence`` is now the single home
+    definition that had three homes. ``region_init.has_own_composition_evidence`` is now the single home
     and every instrument imports it, so there is no longer anything to drift; the honest gate is that
     the census's partition IS the solver's predicate, evaluated by calling it. TRAPS: a-test-that-redefines' own
     prescription: one home, every consumer importing, rather than a gate policing copies.
 
-    PERTURBATION: shift the evidence threshold off ``node_init``'s and watch the partition move.
+    PERTURBATION: shift the evidence threshold off ``region_init``'s and watch the partition move.
     """
     census = _load_sibling("composition_evidence_census.py")
     cap = measured.debug_pass0["capture"]
     chain = measured.debug_pass0["chain"]
 
     tau = np.asarray(cap["_tau0_lam"], np.float64)
-    is_node = np.asarray(chain.kind) == P0.NODE
+    is_region = np.asarray(chain.kind) == P0.REGION
     # ⛔ TRAPS: no-magic-numbers, on BOTH axes — `_type_belief` locks the class without consulting the axis. The earlier
-    # `(~solvable) & is_node` filed every structurally-locked EDGE as `relay_only`, i.e. as an object
+    # `(~solvable) & is_region` filed every structurally-locked EDGE as `relay_only`, i.e. as an object
     # whose answer came from its neighbours, when nothing was ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
     # ⭐ the census asks the SOLVER's question by calling the solver's own predicate — imported, not
@@ -475,11 +475,11 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     assert moved["own_evidence"].sum() == 0
     assert slot["own_evidence"].sum() > 0, "no slot has own evidence; the gate would be vacuous"
 
-    # PERTURBATION 2: the node-only lock must be a DIFFERENT partition on this fixture, or the
+    # PERTURBATION 2: the region-only lock must be a DIFFERENT partition on this fixture, or the
     # correction above is untested and could silently revert.
-    node_only_lock = (~np.asarray(cap["solvable"], bool)) & is_node
-    assert not np.array_equal(node_only_lock, census_lock), (
-        "the node-only and both-axes locks agree on this fixture, so it cannot demonstrate the "
+    region_only_lock = (~np.asarray(cap["solvable"], bool)) & is_region
+    assert not np.array_equal(region_only_lock, census_lock), (
+        "the region-only and both-axes locks agree on this fixture, so it cannot demonstrate the "
         "defect — the scenario needs a G1 EDGE carrying mass (an intergenic<->exon seam)"
     )
 
@@ -512,7 +512,7 @@ def test_the_classes_PARTITION_the_mass_and_the_error(measured):
     for kind, table in (("solver", measured.scores), ("info", measured.info_scores)):
         names = P0.SOLVER_CLASSES if kind == "solver" else P0.INFO_CLASSES
         for arm in table:
-            for axis in ("node", "edge"):
+            for axis in ("region", "edge"):
                 per_class = table[arm][axis]
                 whole = per_class["ALL"]
                 classes = [per_class[c] for c in names]
@@ -541,7 +541,7 @@ def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE(measu
     both are always populated the split is measuring noise, not direction.
     """
     for arm in measured.scores:
-        for axis in ("node", "edge"):
+        for axis in ("region", "edge"):
             s = measured.scores[arm][axis]["ALL"]
             np.testing.assert_allclose(s.over_call - s.under_call, s.net_err, atol=1e-6)
             np.testing.assert_allclose(s.over_call + s.under_call, s.abs_err, rtol=1e-9)

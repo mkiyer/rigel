@@ -25,26 +25,26 @@ from rigel.scan_payload import (
 
 
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
-    """A 1-reference, 3-node payload + aligned :class:`RegionArrays`, with every bank distinct.
+    """A 1-reference, 3-region payload + aligned :class:`RegionArrays`, with every bank distinct.
 
-    chr1 is cut at 0/100/200/300, so it owns **3 nodes and 2 contiguous edges** — the axes are off by one
+    chr1 is cut at 0/100/200/300, so it owns **3 regions and 2 contiguous edges** — the axes are off by one
     per reference, and a fixture that used the same length for both would hide an axis mix-up. One
     junction edge exists so the third axis is non-trivial.
 
-    Nodes: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
+    Regions: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
     share a value, so a consumer reading the wrong one cannot pass by coincidence::
 
-        node_contained_count   n0 [10, 2]   n1 [1, 20]   n2 [7, 8]
+        region_contained_count   n0 [10, 2]   n1 [1, 20]   n2 [7, 8]
         edge_unspliced_count   e0 [4, 1]    e1 [2, 3]
         edge_spliced_count     e0 [0, 0]    e1 [6, 0]
         sj_count               j0 [9, 4]
     """
-    n_nodes, n_edges, n_sj = 3, 2, 1
+    n_regions, n_edges, n_sj = 3, 2, 1
 
     def bank(rows, values, dtype):
         return np.asarray(values, dtype=dtype).reshape(rows, 2)
 
-    contained = bank(n_nodes, [[10, 2], [1, 20], [7, 8]], np.uint32)
+    contained = bank(n_regions, [[10, 2], [1, 20], [7, 8]], np.uint32)
     unspliced = bank(n_edges, [[4, 1], [2, 3]], np.uint32)
     spliced = bank(n_edges, [[0, 0], [6, 0]], np.uint32)
     sj = bank(n_sj, [[9, 4]], np.uint32)
@@ -73,12 +73,12 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     payload = AccumulatorPayload(
         cut_positions=np.array([0, 100, 200, 300], dtype=np.int64),
         ref_cut_offsets=np.array([0, 4], dtype=np.int64),
-        ref_node_offsets=np.array([0, n_nodes], dtype=np.int64),
+        ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
         ref_edge_offsets=np.array([0, n_edges], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
-        node_contained_count=contained,
-        node_contained_inv_opportunity_sum=inv(contained, 50),
-        node_start_count=np.array([11, 12, 13], dtype=np.uint32),
+        region_contained_count=contained,
+        region_contained_inv_opportunity_sum=inv(contained, 50),
+        region_start_count=np.array([11, 12, 13], dtype=np.uint32),
         edge_unspliced_count=unspliced,
         edge_unspliced_inv_length_sum=inv(unspliced, 25),
         edge_unspliced_mass=mass(unspliced),
@@ -111,7 +111,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     )
     region_df = pd.DataFrame(
         {
-            "region_id": np.arange(3, dtype=np.int64),
+            "node_id": np.arange(3, dtype=np.int64),
             "ref_name": pd.array(["chr1"] * 3, dtype="string"),
             "start": np.array([0, 100, 200], dtype=np.int64),
             "end": np.array([100, 200, 300], dtype=np.int64),
@@ -129,7 +129,7 @@ def make_synthetic_junctions():
     axis of a different length, because an axis addressing a different graph would place every splice
     on the wrong line and nothing downstream would fault on it.
 
-    The junction runs ``node 0 → node 2``, i.e. it splices OVER node 1 — the only shape a 3-node
+    The junction runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
     reference admits, and the one that makes the donor and acceptor two DIFFERENT lines (edge 0 and
     edge 1). A ``0 → 1`` junction would put both endpoints on the same line and hide an
     endpoint mix-up.
@@ -138,8 +138,8 @@ def make_synthetic_junctions():
     from rigel.types import Strand
 
     return JunctionGeometry(
-        src_node=np.array([0], dtype=np.int64),
-        dst_node=np.array([2], dtype=np.int64),
+        src_region=np.array([0], dtype=np.int64),
+        dst_region=np.array([2], dtype=np.int64),
         strand=np.array([int(Strand.POS)], dtype=np.int8),
         reach_lo=np.array([100.0]),
         reach_hi=np.array([100.0]),
@@ -186,7 +186,7 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int 
 
 
 # ---------------------------------------------------------------------------
-# The S5.e chain fixture — hand-built numbers on the node / edge / junction axes.
+# The S5.e chain fixture — hand-built numbers on the region / edge / junction axes.
 # ---------------------------------------------------------------------------
 
 
@@ -200,9 +200,9 @@ def delta_pmf(length: int, size: int | None = None) -> np.ndarray:
 def make_chain_parts(
     signatures,
     *,
-    node_size_bp=1000.0,
-    node_pos=0.0,
-    node_neg=0.0,
+    region_size_bp=1000.0,
+    region_pos=0.0,
+    region_neg=0.0,
     edge_pos=0.0,
     edge_neg=0.0,
     edge_spliced=0.0,
@@ -214,24 +214,24 @@ def make_chain_parts(
     """A chain + substrate + geometry + statics over ``signatures``, on the S5.e axes.
 
     ⭐ **The axes are off by one per reference and that is the point of the helper**: a reference with
-    ``k`` nodes owns ``k`` node rows and ``k − 1`` contiguous-edge rows, with **no terminal slots**. Every
+    ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-edge rows, with **no terminal slots**. Every
     per-object argument is broadcast, so a test states only the numbers it cares about.
 
-    ``junctions`` is a list of ``(src_node, dst_node, strand, reach_lo, reach_hi, count)``; each becomes a
+    ``junctions`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
     row on the junction axis and is placed on the lines it leaves and enters.
 
     Returns ``SimpleNamespace(chain, substrate, region_arrays, geometry, statics)``.
     """
     from types import SimpleNamespace
 
-    from rigel.calibration.node_chain import build_node_chain
-    from rigel.calibration.node_geometry import build_node_geometry, build_node_statics
+    from rigel.calibration.region_chain import build_region_chain
+    from rigel.calibration.region_geometry import build_region_geometry, build_region_statics
     from rigel.calibration.signature import transcript_strand_class
     from rigel.calibration.splice_graph import JunctionGeometry
 
     sig = np.asarray(signatures, dtype=np.uint8)
-    n_nodes = sig.shape[0]
-    ref_names = list(ref_names or ["chr1"] * n_nodes)
+    n_regions = sig.shape[0]
+    ref_names = list(ref_names or ["chr1"] * n_regions)
     ref_id = np.array(
         [{n: i for i, n in enumerate(dict.fromkeys(ref_names))}[r] for r in ref_names]
     )
@@ -252,20 +252,20 @@ def make_chain_parts(
 
     j = list(junctions or [])
     junction_geometry = JunctionGeometry(
-        src_node=np.array([x[0] for x in j], dtype=np.int64),
-        dst_node=np.array([x[1] for x in j], dtype=np.int64),
+        src_region=np.array([x[0] for x in j], dtype=np.int64),
+        dst_region=np.array([x[1] for x in j], dtype=np.int64),
         strand=np.array([x[2] for x in j], dtype=np.int8),
         reach_lo=np.array([float(x[3]) for x in j]),
         reach_hi=np.array([float(x[4]) for x in j]),
     )
     gdna_pmf = delta_pmf(200, 400) if gdna_fl is None else gdna_fl
     rna_pmf = delta_pmf(100, 400) if rna_fl is None else rna_fl
-    node_sz = np.broadcast_to(np.asarray(node_size_bp, float), (n_nodes,)).copy()
+    region_sz = np.broadcast_to(np.asarray(region_size_bp, float), (n_regions,)).copy()
 
-    node_counts = pair(node_pos, node_neg, n_nodes)
+    region_counts = pair(region_pos, region_neg, n_regions)
     edge_counts = pair(edge_pos, edge_neg, n_edges)
     substrate = SimpleNamespace(
-        node_contained=SimpleNamespace(count=node_counts),
+        region_contained=SimpleNamespace(count=region_counts),
         edge_unspliced=SimpleNamespace(count=edge_counts),
         edge_spliced=SimpleNamespace(count=pair(edge_spliced, 0.0, n_edges)),
         junction=SimpleNamespace(
@@ -275,13 +275,13 @@ def make_chain_parts(
     region_arrays = SimpleNamespace(
         signature=sig,
         strand_class=transcript_strand_class(sig.astype(np.int64)),
-        region_size_bp=node_sz,
+        region_size_bp=region_sz,
         ref_id=ref_id,
         ref_offsets=rno,
-        n_regions=n_nodes,
+        n_regions=n_regions,
     )
-    chain = build_node_chain(rno, reo)
-    geometry = build_node_geometry(
+    chain = build_region_chain(rno, reo)
+    geometry = build_region_geometry(
         chain,
         substrate,
         region_arrays,
@@ -294,5 +294,5 @@ def make_chain_parts(
         substrate=substrate,
         region_arrays=region_arrays,
         geometry=geometry,
-        statics=build_node_statics(chain, region_arrays),
+        statics=build_region_statics(chain, region_arrays),
     )

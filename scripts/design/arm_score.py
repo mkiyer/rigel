@@ -72,7 +72,7 @@ def main():
             return _in(k, s)
         line(" x ".join(s), pred, sum(1 for k in keys if pred(k)))
     print("   " + "-" * 112)
-    for ax in ("node", "edge"):
+    for ax in ("region", "edge"):
         def pred(k, ax=ax):
             return k[1] == ax and not is_g00(k)
         line(f"axis: {ax}", pred, sum(1 for k in keys if pred(k)))
@@ -85,7 +85,7 @@ def main():
     print(f"      {'condition':<44} {'truth':>8} {'base':>8} {'arm':>8}")
     for cond in sorted({k[0] for k in keys}):
         if "_g00_" in cond or "_g98_" in cond:
-            k = (cond, "node")
+            k = (cond, "region")
             print(f"      {cond:<44} {A[k]['library_f_gdna_truth']:>8.4f} "
                   f"{A[k]['library_f_gdna_final']:>8.4f} {B[k]['library_f_gdna_final']:>8.4f}")
 

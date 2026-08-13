@@ -31,7 +31,7 @@ def substrate():
 
 
 def test_every_population_is_present_on_the_RIGHT_axis(substrate):
-    """Nodes, contiguous edges and junctions are three axes off by one per reference.
+    """Regions, contiguous edges and junctions are three axes off by one per reference.
 
     A population read against the wrong axis is the defect class that once dropped 476,719 of 476,732
     fragments while every golden test passed, so the shapes are asserted rather than assumed.
@@ -41,7 +41,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     # consumer reads it. ``None`` means "this population does not measure that", which is a different
     # statement from "it measured it and got zero", and the view keeps them distinguishable.
     for view, n, channels in (
-        (sub.node_contained, payload.n_nodes, ("inv_length_sum",)),
+        (sub.region_contained, payload.n_regions, ("inv_length_sum",)),
         (sub.edge_unspliced, payload.n_edges, ("inv_length_sum", "mass")),
         (sub.edge_spliced, payload.n_edges, ("mass",)),
         (sub.junction, payload.n_sj, ("inv_length_sum", "mass")),
@@ -60,14 +60,14 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
                     f"{view.name}.{channel} must be None, not zeros — a zero array cannot be told "
                     f"apart from a real measurement of nothing"
                 )
-    assert payload.n_nodes != payload.n_edges, "the fixture must not let an axis mix-up pass"
+    assert payload.n_regions != payload.n_edges, "the fixture must not let an axis mix-up pass"
 
 
 def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
     """⭐ ONE convention. Sense/antisense is transcript-relative, derived by the consumer from a
     junction's own strand, and never stored — so no field here may be named for it."""
     sub, payload, _ = substrate
-    np.testing.assert_array_equal(sub.node_contained.count, payload.node_contained_count)
+    np.testing.assert_array_equal(sub.region_contained.count, payload.region_contained_count)
     for name in dir(sub):
         assert "sense" not in name, (
             f"{name} names a transcript-relative concept the schema does not store"
@@ -77,7 +77,7 @@ def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
 def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
     """The old substrate's `left`/`right` were the same numbers twice. Nothing here may alias."""
     sub, _, _ = substrate
-    banks = [sub.node_contained, sub.edge_unspliced, sub.edge_spliced]
+    banks = [sub.region_contained, sub.edge_unspliced, sub.edge_spliced]
     totals = [int(b.count.sum()) for b in banks]
     assert len(set(totals)) == len(totals), "the fixture gives every bank a distinct total"
 
@@ -100,22 +100,22 @@ def test_a_FRACTION_arrives_as_float64_with_NO_decode(substrate):
     """
     sub, payload, _ = substrate
     np.testing.assert_allclose(
-        sub.node_contained.inv_length_sum,
-        payload.node_contained_inv_opportunity_sum,
+        sub.region_contained.inv_length_sum,
+        payload.region_contained_inv_opportunity_sum,
         rtol=0,
         atol=0,
     )
-    assert sub.node_contained.inv_length_sum.dtype == np.float64
+    assert sub.region_contained.inv_length_sum.dtype == np.float64
 
 
 def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(substrate):
     """The fixture deposited ``n`` fragments at 50 placements into the contained bank, so the decoded
     sum must read ``n / 50`` — the round trip, not just a division."""
     sub, payload, _ = substrate
-    counts = payload.node_contained_count.astype(np.float64).sum(axis=1)
+    counts = payload.region_contained_count.astype(np.float64).sum(axis=1)
     # ⚠ rtol above the fixed point's own quantisation, which the spec bounds at 6.9e-8 relative over
     # L in [40, 1000] — asserting tighter would be asserting the rounding, not the decode.
-    np.testing.assert_allclose(sub.node_contained.inv_length_sum, counts / 50.0, rtol=1e-7)
+    np.testing.assert_allclose(sub.region_contained.inv_length_sum, counts / 50.0, rtol=1e-7)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
 def test_total_count_sums_the_two_strands(substrate):
     sub, payload, _ = substrate
     np.testing.assert_array_equal(
-        sub.node_contained.total_count, payload.node_contained_count.sum(axis=1)
+        sub.region_contained.total_count, payload.region_contained_count.sum(axis=1)
     )
 
 

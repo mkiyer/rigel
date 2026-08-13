@@ -231,7 +231,7 @@ void DeferredFragments::canonicalise() {
 // ============================================================================
 
 Accumulator::Accumulator(std::vector<std::int64_t> cuts,
-                         std::vector<std::uint8_t> node_types,
+                         std::vector<std::uint8_t> region_types,
                          int max_length,
                          std::int32_t ref_id)
     : cuts_(std::move(cuts)), ref_id_(ref_id), max_length_(max_length)
@@ -257,37 +257,37 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
         }
     }
 
-    // A reference contributing c cuts owns c-1 nodes and c-2 interior lines; one contributing fewer than
+    // A reference contributing c cuts owns c-1 regions and c-2 interior lines; one contributing fewer than
     // two cuts owns neither, which is legal and deposits nothing.
-    const std::size_t n_nodes = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
+    const std::size_t n_regions = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
     const std::size_t n_edges = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
-    nodes_.assign(n_nodes, Node{});
+    regions_.assign(n_regions, Region{});
     edges_.assign(n_edges, ContiguousEdge{});
-    node_start_count_.assign(n_nodes, 0u);
+    region_start_count_.assign(n_regions, 0u);
 
-    // ⚠ REQUIRED whenever this reference owns a node, and it throws rather than quietly skipping the
+    // ⚠ REQUIRED whenever this reference owns a region, and it throws rather than quietly skipping the
     // length pools. The shipped accumulator disabled pooling silently on an empty type array, which is a
     // whole output going missing with nothing to notice it by; and the specification has no such state at
-    // all -- `Partition.from_cuts` always materialises a type per node -- so a C++ mode the spec cannot
+    // all -- `Partition.from_cuts` always materialises a type per region -- so a C++ mode the spec cannot
     // express could only ever be a way to disagree with it.
-    if (n_nodes > 0 && node_types.empty()) {
+    if (n_regions > 0 && region_types.empty()) {
         throw std::invalid_argument(
-            "accumulator: node_types is empty but this reference has " + std::to_string(n_nodes) +
-            " nodes. It types the fragment-length pools, so an empty array would silently emit no pools "
+            "accumulator: region_types is empty but this reference has " + std::to_string(n_regions) +
+            " regions. It types the fragment-length pools, so an empty array would silently emit no pools "
             "at all rather than fail.");
     }
-    if (!node_types.empty()) {
-        if (node_types.size() != n_nodes) {
+    if (!region_types.empty()) {
+        if (region_types.size() != n_regions) {
             throw std::invalid_argument(
-                "accumulator: node_types has " + std::to_string(node_types.size()) +
-                " entries but this reference has " + std::to_string(n_nodes) + " nodes");
+                "accumulator: region_types has " + std::to_string(region_types.size()) +
+                " entries but this reference has " + std::to_string(n_regions) + " regions");
         }
-        node_types_ = std::move(node_types);
+        region_types_ = std::move(region_types);
     }
     pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
-    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no node types.
-    // The unconditional histogram does not depend on node typing -- a fragment has a length whether or
-    // not its node can be classified -- and an anchor that silently vanished on an untyped reference
+    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no region types.
+    // The unconditional histogram does not depend on region typing -- a fragment has a length whether or
+    // not its region can be classified -- and an anchor that silently vanished on an untyped reference
     // would be exactly the kind of conditioning this row exists to remove.
     deposited_lengths_.assign(static_cast<std::size_t>(max_length_) + 1, 0u);
 }
@@ -321,12 +321,12 @@ void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
 // locating things on the cut axis
 // ============================================================================
 
-std::int64_t Accumulator::node_of_pos(std::int64_t position) const noexcept {
-    if (nodes_.empty()) return -1;
+std::int64_t Accumulator::region_of_pos(std::int64_t position) const noexcept {
+    if (regions_.empty()) return -1;
     const auto it = std::upper_bound(cuts_.begin(), cuts_.end(), position);
-    const std::int64_t node = (it - cuts_.begin()) - 1;
-    return std::min<std::int64_t>(std::max<std::int64_t>(node, 0),
-                                  static_cast<std::int64_t>(nodes_.size()) - 1);
+    const std::int64_t region = (it - cuts_.begin()) - 1;
+    return std::min<std::int64_t>(std::max<std::int64_t>(region, 0),
+                                  static_cast<std::int64_t>(regions_.size()) - 1);
 }
 
 std::int64_t Accumulator::exact_cut(std::int64_t position) const noexcept {
@@ -598,12 +598,12 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
 
     // ⚠ The path's own first and last COVERED base, not the fragment's extent. With a leading intron the
     // molecule does not begin at `start`: introns [(150,480)] over [150,500) has its whole path in
-    // [480,500), a different node, and using the extent would credit a node it never touches.
+    // [480,500), a different region, and using the extent would credit a region it never touches.
     const std::int64_t first_base = scratch.segments.front().first;
     const std::int64_t last_base  = scratch.segments.back().second - 1;
 
-    const std::int64_t first_node = node_of_pos(first_base);
-    node_start_count_[static_cast<std::size_t>(first_node)] += 1u;
+    const std::int64_t first_region = region_of_pos(first_base);
+    region_start_count_[static_cast<std::size_t>(first_region)] += 1u;
     // ⭐ TRAPS: a-purity-filter-is-a-length-filter — incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
     // describe one population by construction rather than by agreement. `length` is already clipped to
     // the reference and gated by the length limit above.
@@ -612,8 +612,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
 
     // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
     // A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
-    // contiguous index range and no container is needed. A node is SPANNED iff ONE segment crosses both of
-    // its lines -- not merely "both lines crossed", which would count a node the fragment JUMPS OVER,
+    // contiguous index range and no container is needed. A region is SPANNED iff ONE segment crosses both of
+    // its lines -- not merely "both lines crossed", which would count a region the fragment JUMPS OVER,
     // whose two lines are touched by the two flanking segments from opposite sides.
     //
     // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero. Its
@@ -711,30 +711,30 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         junction.inv_length_sum += inv_edge;
     }
 
-    // ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────────
+    // ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────────
     // ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two blocks,
-    // leaving a fragment that crosses nothing yet straddles two nodes. Such a fragment deposits on NO
-    // object but still increments node_start_count, so the loss is visible rather than silent.
-    std::int64_t contained_node = -1;
-    if (sj_ids.empty() && first_node == node_of_pos(last_base)) {
-        contained_node = first_node;
-        Node& node = nodes_[static_cast<std::size_t>(contained_node)];
+    // leaving a fragment that crosses nothing yet straddles two regions. Such a fragment deposits on NO
+    // object but still increments region_start_count, so the loss is visible rather than silent.
+    std::int64_t contained_region = -1;
+    if (sj_ids.empty() && first_region == region_of_pos(last_base)) {
+        contained_region = first_region;
+        Region& region = regions_[static_cast<std::size_t>(contained_region)];
         // ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT -- what makes this channel a DENSITY. A length-`w`
-        // fragment contained in a node of length `ell` had `ell - w + 1` admissible start positions, so
+        // fragment contained in a region of length `ell` had `ell - w + 1` admissible start positions, so
         // `1/(ell - w + 1)` cancels the opportunity identically and E[SUM] = rho for ANY length
         // distribution. `1/L` does NOT cancel it: measured, that channel read 25.67 density units for
         // short fragments and 1.60 for long ones at the same true density. An EDGE is the `ell -> 0`
         // limit, which is why `1/(L-1)` is right there and was wrong here.
         // ⚠ `A >= 1` is structural: the fragment IS contained, so `w <= ell`.
-        const std::int64_t node_len =
-            cuts_[static_cast<std::size_t>(contained_node) + 1] -
-            cuts_[static_cast<std::size_t>(contained_node)];
-        node.contained_count[col] += 1u;
-        node.contained_inv_opportunity_sum += 1.0 / static_cast<double>(node_len - length + 1);
+        const std::int64_t region_len =
+            cuts_[static_cast<std::size_t>(contained_region) + 1] -
+            cuts_[static_cast<std::size_t>(contained_region)];
+        region.contained_count[col] += 1u;
+        region.contained_inv_opportunity_sum += 1.0 / static_cast<double>(region_len - length + 1);
     }
 
     if (!pool_lengths_.empty()) {
-        const std::int64_t pool = fragment_pool(spliced, contained_node, sole_line);
+        const std::int64_t pool = fragment_pool(spliced, contained_region, sole_line);
         if (pool >= 0) {
             pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
                           static_cast<std::size_t>(length)] += 1;
@@ -771,11 +771,11 @@ void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
 }
 
 std::int64_t Accumulator::fragment_pool(bool spliced,
-                                        std::int64_t contained_node,
+                                        std::int64_t contained_region,
                                         std::int64_t sole_line) const noexcept
 {
     // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
-    // fragment is typed by its node; a single-line crossing is a "splash" read typed by its two flanks.
+    // fragment is typed by its region; a single-line crossing is a "splash" read typed by its two flanks.
     // Anything else -- an exonic contained fragment, a multi-line crossing -- is a mixture and enters
     // nothing.
     //
@@ -783,16 +783,16 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
     // so its L is not in doubt however it was arrived at. See the declaration for the measurement that
     // deleted the old `sj_implicit` bar.
     if (spliced) return static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
-    if (contained_node >= 0) {
-        switch (node_types_[static_cast<std::size_t>(contained_node)]) {
+    if (contained_region >= 0) {
+        switch (region_types_[static_cast<std::size_t>(contained_region)]) {
             case kTypeIntergenic: return static_cast<std::int64_t>(FragmentPool::kDnaIntergenic);
             case kTypeIntron:     return static_cast<std::int64_t>(FragmentPool::kDnaIntronic);
             default:              return -1;  // exonic is a gDNA/RNA mixture, absent by design
         }
     }
     if (sole_line >= 1) {
-        const std::uint8_t left  = node_types_[static_cast<std::size_t>(sole_line) - 1];
-        const std::uint8_t right = node_types_[static_cast<std::size_t>(sole_line)];
+        const std::uint8_t left  = region_types_[static_cast<std::size_t>(sole_line) - 1];
+        const std::uint8_t right = region_types_[static_cast<std::size_t>(sole_line)];
         const std::uint8_t lo    = std::min(left, right);
         const std::uint8_t hi    = std::max(left, right);
         if (lo == kTypeIntron && hi == kTypeExon) {
@@ -856,13 +856,13 @@ void Accumulator::merge_from(const Accumulator& other) {
     deferred_.merge_from(other.deferred_);
 
     // Integer addition is associative, so the result is identical at any worker count, on any machine.
-    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+    for (std::size_t i = 0; i < regions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            nodes_[i].contained_count[c]   += other.nodes_[i].contained_count[c];
+            regions_[i].contained_count[c]   += other.regions_[i].contained_count[c];
         }
-        // ⚠ Outside the column loop — these have ONE value per node, not one per strand.
-        nodes_[i].contained_inv_opportunity_sum += other.nodes_[i].contained_inv_opportunity_sum;
-        node_start_count_[i] += other.node_start_count_[i];
+        // ⚠ Outside the column loop — these have ONE value per region, not one per strand.
+        regions_[i].contained_inv_opportunity_sum += other.regions_[i].contained_inv_opportunity_sum;
+        region_start_count_[i] += other.region_start_count_[i];
     }
     for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
         deposited_lengths_[i] += other.deposited_lengths_[i];
@@ -909,8 +909,8 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
                                std::size_t n_positions,
                                const std::int64_t* ref_cut_offsets,
                                std::size_t n_refs,
-                               const std::uint8_t* node_types,
-                               std::size_t n_node_types,
+                               const std::uint8_t* region_types,
+                               std::size_t n_region_types,
                                int max_length)
 {
     if (ref_cut_offsets == nullptr || static_cast<std::size_t>(ref_cut_offsets[n_refs]) != n_positions) {
@@ -919,28 +919,28 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
     }
     accs_.reserve(n_refs);
 
-    // A reference contributing c cuts owns c-1 nodes, so the node offset for reference f is
-    // ref_cut_offsets[f] - (number of earlier references that own any node).
-    std::size_t node_base = 0;
+    // A reference contributing c cuts owns c-1 regions, so the region offset for reference f is
+    // ref_cut_offsets[f] - (number of earlier references that own any region).
+    std::size_t region_base = 0;
     for (std::size_t f = 0; f < n_refs; ++f) {
         const std::size_t lo = static_cast<std::size_t>(ref_cut_offsets[f]);
         const std::size_t hi = static_cast<std::size_t>(ref_cut_offsets[f + 1]);
         std::vector<std::int64_t> cuts(cut_positions + lo, cut_positions + hi);
-        const std::size_t n_nodes = hi - lo >= 2 ? hi - lo - 1 : 0;
+        const std::size_t n_regions = hi - lo >= 2 ? hi - lo - 1 : 0;
 
         std::vector<std::uint8_t> types;
-        if (node_types != nullptr && n_node_types > 0 && n_nodes > 0) {
-            if (node_base + n_nodes > n_node_types) {
+        if (region_types != nullptr && n_region_types > 0 && n_regions > 0) {
+            if (region_base + n_regions > n_region_types) {
                 throw std::invalid_argument(
-                    "accumulator set: node_types has " + std::to_string(n_node_types) +
+                    "accumulator set: region_types has " + std::to_string(n_region_types) +
                     " entries but reference " + std::to_string(f) + " needs " +
-                    std::to_string(node_base + n_nodes));
+                    std::to_string(region_base + n_regions));
             }
-            types.assign(node_types + node_base, node_types + node_base + n_nodes);
+            types.assign(region_types + region_base, region_types + region_base + n_regions);
         }
         accs_.emplace_back(std::move(cuts), std::move(types), max_length,
                            static_cast<std::int32_t>(f));
-        node_base += n_nodes;
+        region_base += n_regions;
     }
 }
 
@@ -972,7 +972,7 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
     for (std::size_t f = 0; f < accs_.size(); ++f) {
         const std::int64_t c0 = ref_cut_offsets[f];
         const std::int64_t c1 = ref_cut_offsets[f + 1];
-        if (c1 <= c0) continue;  // a reference with no cuts owns no nodes and no junctions
+        if (c1 <= c0) continue;  // a reference with no cuts owns no regions and no junctions
         const std::int64_t j0 = offsets[c0];
         const std::int64_t j1 = offsets[c1];
 

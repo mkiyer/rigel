@@ -7,15 +7,15 @@ prices a step a MESSAGE takes, so it belongs to the policy rather than to the ba
 the loop, the combine, the write-back and the five assertions, and none of them needs a variance.
 
 ⚠ **ONE function crosses the layer and it is deliberate**: :func:`count_logvar` is also imported by
-``node_init``, which builds the per-slot self-solve the backbone hands the policy as its seed. That is the
+``region_init``, which builds the per-slot self-solve the backbone hands the policy as its seed. That is the
 Poisson log-count variance and it has exactly ONE home (TRAPS: a-test-that-redefines) — the same ``1/n`` had been written
 out twice, and unifying it is what the panel-wide **39 %** belongs to. It stays here, imported.
 
 
-Hybrid capture multiplies *every* component of a node's density by the same efficiency ``e(x)``, so it is
+Hybrid capture multiplies *every* component of a region's density by the same efficiency ``e(x)``, so it is
 visible in the **total density and only in the total** (a composition *ratio* ``k = ρ_g/ρ_R`` cancels ``e``).
 A message carries a per-base density, so it is transportable across an enrichment cliff only after being
-scaled into the destination node's frame by the *measured* ratio of total densities. This module owns that
+scaled into the destination region's frame by the *measured* ratio of total densities. This module owns that
 arithmetic and nothing else: it is a pure function of masses, compositions, and effective lengths — no chain,
 no substrate, no solver state — so its facts are pinned by closed-form unit tests
 (``tests/calibration/test_enrichment_frame.py``) that cannot drift with solver behaviour.
@@ -23,14 +23,14 @@ no substrate, no solver state — so its facts are pinned by closed-form unit te
  (the framework, §1 the total-density
 pivot, §2 the bounding lemma, §4 the step-wise junction solve) and (the
 junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase TRAPS: annotated-is-not-genomic (behind a
-flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-node-level
+flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-region-level
 frame question TRAPS: annotated-is-not-genomic must settle cannot invalidate anything here.
 
 The design principle behind the API shape: **transport ``k``, never ``f_g``.** ``k`` is enrichment-free and
-component-set-shared; ``f_g`` depends on the node's own crossing-vs-contained effective lengths, so copying it
+component-set-shared; ``f_g`` depends on the region's own crossing-vs-contained effective lengths, so copying it
 across a frame change is a known past defect (§2 of the junction doc). And the composition assumption is
 carried as a **variance**, not a bool gate: the bounding lemma (§2) says a totally wrong composition still
-pins ``ρ_tot`` to within the effective-length ratio (1.04–1.5× for normal nodes, 4×+ for short regions), which
+pins ``ρ_tot`` to within the effective-length ratio (1.04–1.5× for normal regions, 4×+ for short regions), which
 is a continuous quantity — :func:`composition_logvar` derives it with no tuned threshold, so a short region
 down-weights itself automatically, with no ``L ≲ fl_mean`` cut anywhere in the module.
 """
@@ -286,7 +286,7 @@ def peel_share_logvar(w_mu, v_nu, v_mu):
 
 
 def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
-    """the-residual-level — a node's own RNA density read off its **observed mass** against an imputed gDNA **density**.
+    """the-residual-level — a region's own RNA density read off its **observed mass** against an imputed gDNA **density**.
 
     This is the generic DENSITY DECONVOLUTION (`density_deconv`, of which the intron factory is the intron
     special case) with the gDNA density prior supplied by a NEIGHBOUR instead of by the intergenic pool. It is
@@ -312,7 +312,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     ``f_R ~ N(1−φ, σ_f²)``; ``ρ_ν = E[f_R]·M/E_r``. Each bound earns its keep and neither is optional:
 
     * **the LOWER bound** is what lets the estimator say something at an RNA-free seam. A naive ``max(·, 0)``
-      would report density 0 at infinite variance — "no opinion" — exactly where the node in fact holds a
+      would report density 0 at infinite variance — "no opinion" — exactly where the region in fact holds a
       strong one: that its RNA is below its own noise floor.
     * **the UPPER bound** is what stops it inventing one. The imputed gDNA claim routinely arrives at
       ``√v_g ≈ 1.0–1.2 nats`` (measured at exon→boundary edges under capture), which makes ``σ_f`` of order 1;
@@ -324,7 +324,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     **The log-variance is the TRIGAMMA of the level's effective fragment count**, not the delta method::
 
         k = E[f_R]² / Var[f_R]                    the RNA share's effective COUNT — how many fragments of RNA
-        Var(log ρ_ν) = ψ'(k) + 1/(n·E[f_R]²)      the node has evidence for, in exactly the ``Var(log) = 1/n``
+        Var(log ρ_ν) = ψ'(k) + 1/(n·E[f_R]²)      the region has evidence for, in exactly the ``Var(log) = 1/n``
                                                   sense used everywhere else in the model, ⊕ the LEVEL's own
                                                   Poisson count
 
@@ -370,7 +370,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     phi = np.where(ok, np.maximum(rg_, 0.0) * eg_ / np.maximum(m_, _EPS), 0.0)
     # The claim's log-variance is linearized at the ADMISSIBLE point ``min(φ, 1)``, not at ``φ`` itself. ``φ``
     # is a share and cannot exceed 1; an estimate that does (routine — a relayed claim asserts more reads of a
-    # component than the node sequenced on 52–71 % of nodes) is "at least all of it", and its relative
+    # component than the region sequenced on 52–71 % of regions) is "at least all of it", and its relative
     # uncertainty applies to the largest admissible value. Linearizing at ``φ`` instead makes ``σ_f`` grow
     # WITH the over-claim, so the [0,1] window widens faster than the mean leaves it and the estimator INVERTS
     # — more imputed gDNA returning more RNA, reaching ``f_R = 1`` at ``φ ≈ 100``. This is the projection onto
@@ -444,9 +444,9 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
 
     Same arithmetic in the same association order, with every ``np.where`` turned back into the branch it
     encodes. That is where the speed is: the array form must evaluate BOTH arms of all 21 selectors, so a
-    node with no level still pays for ``log_ndtr`` ×4 and ``ζ(2,·)``, and every one of those ops costs
+    region with no level still pays for ``log_ndtr`` ×4 and ``ζ(2,·)``, and every one of those ops costs
     0.5–0.7 µs on a 0-d array against ~0.02 µs for the float expression. 25× on the main branch, 223× on
-    the no-level early-out — and the relay calls this once per node per direction, sequentially, which is
+    the no-level early-out — and the relay calls this once per region per direction, sequentially, which is
     the bulk of a genome-scale calibration.
 
     ⚠ TWIN of :func:`residual_level`: mirror any change into both. The equality is pinned bit-for-bit,
@@ -536,15 +536,15 @@ def mismatch_deflate(precision, gap, contradicted, var_own):
 
     The three regimes fall out of ``var_own`` alone, with no gate and no threshold:
 
-    * ``var_own = +inf`` — the destination has NO composition evidence (τ_λ = 0: every AMBIG node, and every
-      node on unstranded data) ⇒ ``b̂² = 0`` ⇒ the message passes at full precision. This is deliberate and it
+    * ``var_own = +inf`` — the destination has NO composition evidence (τ_λ = 0: every AMBIG region, and every
+      region on unstranded data) ⇒ ``b̂² = 0`` ⇒ the message passes at full precision. This is deliberate and it
       is what makes the term safe: where messages are the only information, there is no own opinion to
       contradict them, and inventing one would be the count-votes-composition regression.
     * ``var_own`` finite — a message that AGREES is barely touched; one that CONFLICTS is killed.
     * ``var_own = 0`` — composition CERTAIN (a structural pure-gDNA anchor) ⇒ the full ``G²`` is charged.
 
     The closed form ``p_eff = 1/max(v_msg, G²−v_own)`` states the safety property exactly: **a message can only
-    out-weigh the destination's own belief when it agrees with it to within ``√2·σ_own``**, at every node and
+    out-weigh the destination's own belief when it agrees with it to within ``√2·σ_own``**, at every region and
     every composition — "pass-0 must be weak and correctable" as an inequality rather than a tuning knob.
 
     ``precision = 0`` (no message) stays 0; a CONTRADICTED claim goes to 0 wherever the destination has any
@@ -609,14 +609,14 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
       per-edge+pooled 870,245 confidently-wrong reads at ``z2`` 11.12; pooled alone **762,000 at 8.98**, with
       exon-single ``z2`` 5.68 → **2.46**. A derived PARTIAL-POOLING variant (James–Stein, with the shrinkage
       weight ``B = τ²_b/(τ²_b + Var(ω̂_i))`` and ``Var(ω̂_i) = (2ω+v_i)²/2`` exact from the χ²₁) was also
-      implemented and **deleted**: its own weight comes out **B = 0.82–0.89** — the between-node heterogeneity
+      implemented and **deleted**: its own weight comes out **B = 0.82–0.89** — the between-region heterogeneity
       is real and dominant — and it STILL loses (765,281 / 9.23), because ``ω_i`` is right-skewed (the top
-      decile of pairs carries 78–92 % of ``Σd²``) so any per-node point estimate charges the median node ≈0,
-      and the loss is asymmetric: over-charging only widens a message, under-charging leaves a node
+      decile of pairs carries 78–92 % of ``Σd²``) so any per-region point estimate charges the median region ≈0,
+      and the loss is asymmetric: over-charging only widens a message, under-charging leaves a region
       confidently wrong. **The population mean is right precisely because the loss is asymmetric.**
-      Do not rebuild the per-node form.
+      Do not rebuild the per-region form.
     * **Structurally** (owner, 2026-07-26), a per-edge form makes the message from the LEFT seam carry a
-      variance computed from the RIGHT seam's counts, so a non-adjacent node's data reaches the destination
+      variance computed from the RIGHT seam's counts, so a non-adjacent region's data reaches the destination
       twice — a real BP violation. With the pooled form no message's precision depends on anything but its
       own edge and one library constant, which is exactly the standing ``κ`` and both strand overdispersions
       already have.

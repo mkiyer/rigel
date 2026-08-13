@@ -248,8 +248,8 @@ class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
     The calibrator is the **belief-propagation sweep** over the region↔boundary chain — a single
-    forward-backward pass per node_sweep call, with the belief-free Poisson disagreement-variance message
-    precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-node log-odds solve grid. See
+    forward-backward pass per region_sweep call, with the belief-free Poisson disagreement-variance message
+    precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-region log-odds solve grid. See
     :func:`rigel.calibration.calibrate.calibrate`.
     """
 
@@ -260,13 +260,13 @@ class CalibrationConfig:
     #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
     #: structural zero.
 
-    #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
-    #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand nodes are exact 1-D, AMBIG
-    #: nodes marginalize the RNA tilt ``τ``). ``K=60`` matches per-node accuracy at a tractable cost
+    #: **Sweep grid resolution** ``K`` for the per-region log-density log-odds solve over ``λ = logit(f_g)``
+    #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand regions are exact 1-D, AMBIG
+    #: regions marginalize the RNA tilt ``τ``). ``K=60`` matches per-region accuracy at a tractable cost
     #: (``K=20`` over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
-    #: **Single-strand λ-grid resolution** ``K_ss`` (Fix 3). Single-strand nodes solve a cheap 1-D λ grid
+    #: **Single-strand λ-grid resolution** ``K_ss`` (Fix 3). Single-strand regions solve a cheap 1-D λ grid
     #: (``O(m·K)``), so a fine grid is affordable there and de-quantizes the ``f_g`` readout (the coarse
     #: ``K=60`` snapped f_g to Δf_g≈0.085 steps — the dominant post-Fix-1 error on high-mass exons). Decoupled
     #: from ``sweep_n_grid`` because the AMBIG 2-D ``(λ,τ)`` cube is ``O(m·K·K_t)`` and a fine grid there is a
@@ -278,7 +278,7 @@ class CalibrationConfig:
     #: ``[4.5e-5, 1−4.5e-5]``, bracketing the vertex mass Phase 0 measured).
     sweep_logodds_window: float = 10.0
 
-    #: **Inner tilt-grid resolution** ``K_t`` for AMBIG nodes' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
+    #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
@@ -308,7 +308,7 @@ class CalibrationConfig:
     background_robust_trim_mad: float | None = None
 
     # **gDNA intron factory**. ``True`` ⇒ peel confident gDNA
-    #: from INTRON nodes against the intergenic background BEFORE the pass-0 solve: a per-intron
+    #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
     #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
     #: prior-free pass-0 currently leaves at ~½ (fixes both the zero-gDNA false-positive and the gDNA under-call),
@@ -373,7 +373,7 @@ class CalibrationConfig:
     #: zero-gDNA false-positive guard** (0.0667 → 0.0109), so extra iterations never trade specificity for
     #: accuracy. Iteration 3 captures **96 %** of the total available gain; past it the increments are below
     #: anything worth acting on. Cost is linear — one landscape fit plus one full sweep each, measured
-    #: 46.8 s (1 iter) → 96.0 s (3 iters) on a 118 k-node real cfRNA sample. Lower it if calibration
+    #: 46.8 s (1 iter) → 96.0 s (3 iters) on a 118 k-region real cfRNA sample. Lower it if calibration
     #: wall-clock matters more than the last ~10 % of its accuracy.
     calib_refit_iters: int = 3
 

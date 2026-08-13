@@ -9,7 +9,7 @@ peers, and nothing in the tree names the layers that already exist in the edges.
 ⭐⭐ **The second finding is the one that actually blocks a reader, and this instrument is the only thing
 that can see it: the module docstrings MISDESCRIBE THE GRAPH.** ``run_fill`` said it was "shared by
 `density_model`, `strand_deconv`, `priors`, and the `sweep` chain geometry" and had **one** importer.
-``strand_likelihood`` said it was "Used by the per-node strand module (`strand_deconv`)" and
+``strand_likelihood`` said it was "Used by the per-region strand module (`strand_deconv`)" and
 ``strand_deconv`` does not import it at all. A developer who trusts either sentence goes looking for code
 that is not there — and neither sentence can rot *loudly*, because nothing checks prose against edges.
 ⛔ That is the same failure as a stale doc citation, one layer down: **a claim about the code, inside the

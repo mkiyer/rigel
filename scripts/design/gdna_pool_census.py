@@ -7,13 +7,13 @@ that is **pure by construction** (`tests/native/_accumulator_reference.py`, `Fra
 
 | pool | rule | dominant when |
 |---|---|---|
-| `DNA_INTERGENIC` | contained in exactly one **intergenic** node | capture OFF |
-| `DNA_INTRONIC` | contained in exactly one **intronic** node | capture OFF |
+| `DNA_INTERGENIC` | contained in exactly one **intergenic** region | capture OFF |
+| `DNA_INTRONIC` | contained in exactly one **intronic** region | capture OFF |
 | `DNA_INTRON_EXON` | crosses exactly one line, flanks {intron, exon} | capture ON |
 | `DNA_INTERGENIC_EXON` | crosses exactly one line, flanks {intergenic, exon} | capture ON |
 
 Off capture the library is spread over the genome and most gDNA sits wholly inside a large intergenic or
-intronic node. Under capture the surviving gDNA sits beside a probe, and a fragment beside a probe
+intronic region. Under capture the surviving gDNA sits beside a probe, and a fragment beside a probe
 *reaches* the exon boundary — so it stops being contained and becomes crossing. **Both regimes need
 covering, which is why the model is fitted from all four.**
 
@@ -52,7 +52,7 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: Coarse node types, as `signature.coarse_type_array` emits them.
+#: Coarse region types, as `signature.coarse_type_array` emits them.
 TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON = 0, 1, 2
 
 POOL_NAMES = ("DNA_INTERGENIC", "DNA_INTRONIC", "DNA_INTRON_EXON", "DNA_INTERGENIC_EXON", "RNA_SPLICED")
@@ -80,14 +80,14 @@ def _ramp(values: np.ndarray, max_w: int) -> np.ndarray:
     return out
 
 
-def contained_opportunity(node_lengths: np.ndarray, max_w: int) -> np.ndarray:
-    """``sum_n (ell_n - w + 1)+`` — the admissible starts for a fragment contained in one of these nodes.
+def contained_opportunity(region_lengths: np.ndarray, max_w: int) -> np.ndarray:
+    """``sum_n (ell_n - w + 1)+`` — the admissible starts for a fragment contained in one of these regions.
 
-    ⭐ Exact, and O(max_w + n) rather than O(max_w * n): nodes longer than ``max_w`` always contribute,
+    ⭐ Exact, and O(max_w + n) rather than O(max_w * n): regions longer than ``max_w`` always contribute,
     so they reduce to ``sum(ell) - (w - 1) * count``; the rest come from a length histogram's reverse
     cumulative sums.
     """
-    lengths = np.asarray(node_lengths, dtype=np.int64)
+    lengths = np.asarray(region_lengths, dtype=np.int64)
     w = np.arange(max_w + 1, dtype=np.float64)
 
     big = lengths > max_w
@@ -108,7 +108,7 @@ def contained_opportunity(node_lengths: np.ndarray, max_w: int) -> np.ndarray:
 def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_w: int) -> np.ndarray:
     """``sum_lines`` admissible starts that cross THIS line and no other.
 
-    For a line at ``p`` with flanking node lengths ``a`` (left) and ``b`` (right), a fragment
+    For a line at ``p`` with flanking region lengths ``a`` (left) and ``b`` (right), a fragment
     ``[s, s+w)`` crosses ``p`` for ``w - 1`` starts; of those it also crosses the previous line for
     ``(w-1-a)+`` and the next for ``(w-1-b)+``, and both for ``(w-1-a-b)+``. So
 
@@ -119,7 +119,7 @@ def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_w: int) -> np.
     over the two neighbours is therefore **exact**, not an approximation.
 
     ⚠ The reference ends need no special case. The partition cuts at 0 and at ``L_ref``, so the outermost
-    node's length *is* the distance to the wall and the same subtraction removes the impossible starts.
+    region's length *is* the distance to the wall and the same subtraction removes the impossible starts.
     """
     w = np.arange(max_w + 1, dtype=np.float64)
     base = float(len(left)) * np.maximum(w - 1.0, 0.0)
@@ -133,41 +133,41 @@ def total_opportunity(ref_lengths: np.ndarray, max_w: int) -> np.ndarray:
 
 
 def pool_opportunities(index, max_w: int) -> dict[str, np.ndarray]:
-    """The four gDNA pools' opportunities plus ``T``, all derived from the node partition alone."""
-    from rigel.calibration.splice_graph import build_node_partition_arrays
+    """The four gDNA pools' opportunities plus ``T``, all derived from the region partition alone."""
+    from rigel.calibration.splice_graph import build_region_partition_arrays
 
-    cuts, ref_cut_offsets, node_types = build_node_partition_arrays(index)
+    cuts, ref_cut_offsets, region_types = build_region_partition_arrays(index)
     cuts = np.asarray(cuts, dtype=np.int64)
     offsets = np.asarray(ref_cut_offsets, dtype=np.int64)
-    types = np.asarray(node_types, dtype=np.int64)
+    types = np.asarray(region_types, dtype=np.int64)
 
-    node_lengths: list[np.ndarray] = []
+    region_lengths: list[np.ndarray] = []
     line_left: list[np.ndarray] = []
     line_right: list[np.ndarray] = []
     line_types: list[np.ndarray] = []
     ref_lengths: list[int] = []
-    node_base = 0
+    region_base = 0
     for r in range(len(offsets) - 1):
         lo, hi = int(offsets[r]), int(offsets[r + 1])
         if hi - lo < 2:
             continue
         ref_cuts = cuts[lo:hi]
         lengths = np.diff(ref_cuts)
-        n_nodes = len(lengths)
+        n_regions = len(lengths)
         ref_lengths.append(int(ref_cuts[-1]))
-        node_lengths.append(lengths)
-        # Interior lines only: line i sits between node i-1 and node i, for i in [1, n_nodes).
-        if n_nodes >= 2:
+        region_lengths.append(lengths)
+        # Interior lines only: line i sits between region i-1 and region i, for i in [1, n_regions).
+        if n_regions >= 2:
             line_left.append(lengths[:-1])
             line_right.append(lengths[1:])
             pair = np.sort(
-                np.stack([types[node_base : node_base + n_nodes - 1], types[node_base + 1 : node_base + n_nodes]]),
+                np.stack([types[region_base : region_base + n_regions - 1], types[region_base + 1 : region_base + n_regions]]),
                 axis=0,
             )
             line_types.append(pair)
-        node_base += n_nodes
+        region_base += n_regions
 
-    all_lengths = np.concatenate(node_lengths)
+    all_lengths = np.concatenate(region_lengths)
     all_types = types[: len(all_lengths)]
     left = np.concatenate(line_left) if line_left else np.zeros(0, np.int64)
     right = np.concatenate(line_right) if line_right else np.zeros(0, np.int64)
@@ -185,9 +185,9 @@ def pool_opportunities(index, max_w: int) -> dict[str, np.ndarray]:
         ),
         "T": total_opportunity(np.asarray(ref_lengths, dtype=np.int64), max_w),
         "_census": {
-            "nodes": int(len(all_lengths)),
-            "intergenic_nodes": int((all_types == TYPE_INTERGENIC).sum()),
-            "intronic_nodes": int((all_types == TYPE_INTRON).sum()),
+            "regions": int(len(all_lengths)),
+            "intergenic_regions": int((all_types == TYPE_INTERGENIC).sum()),
+            "intronic_regions": int((all_types == TYPE_INTRON).sum()),
             "intron_exon_lines": int(intron_exon.sum()),
             "intergenic_exon_lines": int(intergenic_exon.sum()),
         },

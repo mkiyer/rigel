@@ -3,7 +3,7 @@
     TODO item 2, requirement (a)
 
 ⭐ **The panel is not scaffolding — it is one of the seven requirements.** asks for *a
-density step, not just a uniform background*, because over a run of flat nodes a relayed message decays
+density step, not just a uniform background*, because over a run of flat regions a relayed message decays
 geometrically per hop, so a uniform scenario cannot distinguish "the relay works" from "the global prior
 reached it". A capture panel that covers some gene groups and not others IS that step, and a sharp one:
  measures hybrid capture at **~1000x** on exons and 1.0 off target, so the

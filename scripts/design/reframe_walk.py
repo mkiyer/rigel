@@ -7,7 +7,7 @@ rather than inferred from an aggregate.
 
 **Five sections:**
 
-1. **THE COUNTS** — every NODE and every EDGE: the unspliced crossing per genome strand, the spliced
+1. **THE COUNTS** — every REGION and every EDGE: the unspliced crossing per genome strand, the spliced
    crossing, the junction flux per transcript strand, and the three divisors. Plus the junction axis.
 2. ⭐⭐ **THE FLANK PAIR** — per slot, ``rho_unspliced``, ``rho_lo``, ``rho_hi``, and which side the
    junction flux landed on. ⛔ This is the whole change: a slot where the two differ is a slot the
@@ -19,7 +19,7 @@ rather than inferred from an aggregate.
    derivation working, in one line.
 5. **THE ANSWER** per slot against per-object truth.
 
-⚠ **The geometry is REBUILT here, not read out of the solver** — ``build_node_geometry`` is a pure
+⚠ **The geometry is REBUILT here, not read out of the solver** — ``build_region_geometry`` is a pure
 function of (chain, substrate, region_arrays, junctions, two pmfs, reach) and this calls it with the same
 arguments `calibrate` did. ⛔ That re-derivation is then GATED against the frames the solver published
 (``_uni_static['rho_lo'/'rho_hi']``) to 1e-12, so it cannot silently drift (TRAPS: self-checking-validator).
@@ -55,10 +55,10 @@ TH = importlib.util.module_from_spec(_s)
 sys.modules["toy_harness"] = TH
 _s.loader.exec_module(TH)
 
-from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import (  # noqa: E402
-    build_node_geometry,
-    node_total_density,
+from rigel.calibration.region_chain import REGION  # noqa: E402
+from rigel.calibration.region_geometry import (  # noqa: E402
+    build_region_geometry,
+    region_total_density,
 )
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.calibration.splice_graph import build_junction_geometry_arrays  # noqa: E402
@@ -83,29 +83,29 @@ ARMS = {
 
 
 def labels(chain, ra):
-    """A readable name per slot: the coarse type at a NODE, the flanking pair at an EDGE."""
+    """A readable name per slot: the coarse type at a REGION, the flanking pair at an EDGE."""
     kind, obj = np.asarray(chain.kind), np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     starts, sizes = np.asarray(ra.start, np.int64), np.asarray(ra.region_size_bp, np.int64)
     out = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        if kind[s] == NODE:
+        if kind[s] == REGION:
             out.append(f"{TYPES[int(rtype[i])]} [{starts[i]:,}–{starts[i] + sizes[i]:,})")
         else:
             hi, lo = s + 1, s - 1
-            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == NODE else -1
-            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == NODE else -1
+            b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
+            a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
             pair = "|".join(TYPES.get(x, "?") for x in sorted((a, b)) if x >= 0)
             out.append(f"{pair} @{starts[obj[hi]]:,}" if b >= 0 else f"edge #{i}")
     return out
 
 
 def rebuild_geometry(r):
-    """`build_node_geometry` with the arguments `calibrate` used — see the module docstring's gate."""
+    """`build_region_geometry` with the arguments `calibrate` used — see the module docstring's gate."""
     ra = r.region_arrays
     sub = CalibrationSubstrate.from_payload(r.payload, ra)
-    return build_node_geometry(
+    return build_region_geometry(
         r.chain,
         sub,
         ra,
@@ -119,7 +119,7 @@ def truth_slot_arrays(r):
     """Per SLOT, from the oracle's origin split: gDNA / RNA unspliced counts, and the junction flux.
 
     ⚠ Built from ``truth.parts`` directly rather than from ``override_masses``, because that helper folds
-    the SPLICED crossing into the RNA edge mass and `node_total_density` deliberately excludes it from
+    the SPLICED crossing into the RNA edge mass and `region_total_density` deliberately excludes it from
     both flank totals — so using it here would compare two different populations."""
     ra = r.region_arrays
     subs = {k: CalibrationSubstrate.from_payload(r.truth.parts[k], ra) for k in ("gdna", "mrna", "nrna")}
@@ -127,18 +127,18 @@ def truth_slot_arrays(r):
     kind, obj = np.asarray(r.chain.kind), np.asarray(r.chain.obj_idx, np.int64)
     n = int(r.chain.n_slots)
 
-    def per_slot(sub, node_pop, edge_pop):
-        nd = np.asarray(getattr(sub, node_pop).count, np.float64).sum(1)
+    def per_slot(sub, region_pop, edge_pop):
+        nd = np.asarray(getattr(sub, region_pop).count, np.float64).sum(1)
         eg = np.asarray(getattr(sub, edge_pop).count, np.float64).sum(1)
         out = np.zeros(n)
         for s in range(n):
             i = int(obj[s])
-            out[s] = nd[i] if kind[s] == NODE else eg[i]
+            out[s] = nd[i] if kind[s] == REGION else eg[i]
         return out
 
-    g = per_slot(subs["gdna"], "node_contained", "edge_unspliced")
-    rna = per_slot(subs["mrna"], "node_contained", "edge_unspliced") + per_slot(
-        subs["nrna"], "node_contained", "edge_unspliced"
+    g = per_slot(subs["gdna"], "region_contained", "edge_unspliced")
+    rna = per_slot(subs["mrna"], "region_contained", "edge_unspliced") + per_slot(
+        subs["nrna"], "region_contained", "edge_unspliced"
     )
     return g, rna, full
 
@@ -171,7 +171,7 @@ def truth_flank_pair(r, geom, g_cnt, rna_cnt):
 
 
 def section_counts(r, geom, lab, g_cnt, rna_cnt):
-    print("\n── 1. THE COUNTS, every NODE and every EDGE ─────────────────────────────────────────────")
+    print("\n── 1. THE COUNTS, every REGION and every EDGE ─────────────────────────────────────────────")
     ra = r.region_arrays
     kind, obj = np.asarray(r.chain.kind), np.asarray(r.chain.obj_idx, np.int64)
     sizes = np.asarray(ra.region_size_bp, np.int64)
@@ -187,8 +187,8 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
     print("   " + "-" * 118)
     for s in range(int(r.chain.n_slots)):
         i = int(obj[s])
-        bp = int(sizes[i]) if kind[s] == NODE else 0
-        print(f"   {s:>4} {'node' if kind[s] == NODE else 'edge':<5} {lab[s]:<26} {bp:>6,} "
+        bp = int(sizes[i]) if kind[s] == REGION else 0
+        print(f"   {s:>4} {'region' if kind[s] == REGION else 'edge':<5} {lab[s]:<26} {bp:>6,} "
               f"{U[s, 0]:>8,.0f} {U[s, 1]:>8,.0f} {SP[s].sum():>8,.0f} "
               f"{JL[s].sum():>7,.0f} {JH[s].sum():>7,.0f} "
               f"{E_g[s]:>8,.1f} {E_r[s]:>8,.1f} {EJ[s].sum():>8,.1f}")
@@ -196,7 +196,7 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
     starts = np.asarray(ra.start, np.int64)
     print()
     for k in range(int(getattr(jg, "n_junctions", 0))):
-        src, dst = int(np.asarray(jg.src_node)[k]), int(np.asarray(jg.dst_node)[k])
+        src, dst = int(np.asarray(jg.src_region)[k]), int(np.asarray(jg.dst_region)[k])
         st = "+" if int(np.asarray(jg.strand)[k]) == int(Strand.POS) else "-"
         flux = float(np.asarray(r.payload.sj_count, np.float64)[k].sum())
         lo = int(starts[src] + sizes[src])
@@ -219,7 +219,7 @@ def section_flank_pair(r, geom, lab, st_cap, t_unspl, t_lo, t_hi):
     print("   ⛔ `rho_lo` is what this slot presents to its genomic-LOW neighbour, `rho_hi` to its")
     print("      genomic-HIGH one. They differ ONLY where junction flux attaches, and the predecessor")
     print("      used ONE number — the junction-INCLUSIVE total — on both sides of every such slot.")
-    rho_lo, rho_hi = node_total_density(geom, st_cap["_fg_in"])
+    rho_lo, rho_hi = region_total_density(geom, st_cap["_fg_in"])
     # ⛔ the re-derivation gate: the rebuilt geometry must reproduce the solver's published frames
     np.testing.assert_allclose(rho_lo, np.asarray(st_cap["rho_lo"], float), rtol=1e-12, atol=0.0)
     np.testing.assert_allclose(rho_hi, np.asarray(st_cap["rho_hi"], float), rtol=1e-12, atol=0.0)
@@ -331,7 +331,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     — the ratio of TOTALS is the share-weighted average of the two components' OWN density ratios,
     weighted by each component's share of the SOURCE's mass. So:
 
-    * at a source that is 100 % gDNA (an intron, an intergenic NODE) ``phi_g = 1`` and ``r_tot`` IS
+    * at a source that is 100 % gDNA (an intron, an intergenic REGION) ``phi_g = 1`` and ``r_tot`` IS
       ``r_g`` exactly — the scaling is legitimate and carries no foreign component;
     * at a source that is 99.94 % RNA (an expressed exon) ``r_tot`` is 0.9994 . r_R + 0.0006 . r_g, so it
       is a measurement of the RNA ratio and says ⭐ **almost nothing** about the gDNA ratio. Scaling the
@@ -343,7 +343,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     while mature RNA is uniform along its transcript. Then:
 
     * the **gDNA** arm at an EDGE is NOISE-limited — an EDGE is 0 bp, so its opportunity is ~one mean
-      fragment length whatever the chromosome does, and it holds tens of counts against a NODE's hundreds.
+      fragment length whatever the chromosome does, and it holds tens of counts against a REGION's hundreds.
       Its ratio sits ~1-2 se from 1.0. ⭐ More depth DOES shrink this.
     * the **RNA** arm across a junction is BIAS-limited — it sits >13 se from 1.0 and more depth makes it
       MORE significant, not smaller. That is the junction-vs-exon frame gap: the junction's divisor

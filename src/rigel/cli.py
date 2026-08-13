@@ -420,14 +420,14 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "rna_sense_frac": round(float(cal.rna_sense_frac), 6),
             "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
             "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
-            "n_nodes": int(cal.n_nodes),
+            "n_regions": int(cal.n_regions),
             "n_edges": int(cal.n_edges),
             "n_junctions": int(cal.n_junctions),
         }
     )
     # Capture-enrichment diagnostics — mass-weighted (count-median vs gDNA-mass-
     # median density → fold-change). On capture RNA-seq the on-target regions are
-    # a small minority of nodes but carry the gDNA mass, so an equal-weight view is
+    # a small minority of regions but carry the gDNA mass, so an equal-weight view is
     # blind to them; the mass shift is the signal. Descriptive only — no verdict.
     # (The prior's own equal-weight KDE is kept for provenance in the companion
     # gdna_density_kde.feather below.)
@@ -592,7 +592,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             f"({len(track)} regions)"
         )
 
-    # gDNA-density KDE (capture diagnostic): the curve + the training-node rug.
+    # gDNA-density KDE (capture diagnostic): the curve + the training-region rug.
     if diag is not None:
         import numpy as _np
         import pandas as _pd
@@ -612,7 +612,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         ).to_feather(str(output_dir / "gdna_density_nodes.feather"), **feather_kw)
         logging.info(
             f"[DONE] Wrote gdna_density_kde.feather ({len(diag.kde_x)} pts) + "
-            f"gdna_density_nodes.feather ({diag.rug_log_rho.size} nodes)"
+            f"gdna_density_regions.feather ({diag.rug_log_rho.size} regions)"
         )
 
     # Write config.yaml — reproducible run configuration
@@ -1395,7 +1395,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="sweep_n_grid_single_strand",
         type=int,
         default=None,
-        help="Calibration single-strand log-odds grid resolution (default 256). Single-strand nodes solve a "
+        help="Calibration single-strand log-odds grid resolution (default 256). Single-strand regions solve a "
         "cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout (the coarse shared grid "
         "snapped it to ~0.085 steps, the dominant residual on high-mass exons). Decoupled from the AMBIG "
         "2-D grid (--sweep... n_grid) which stays coarse for genome-scale memory. Advanced calibration knob.",

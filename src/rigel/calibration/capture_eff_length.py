@@ -16,7 +16,7 @@ Contracted in **FL-marginal units** (scale the existing ``effective_lengths`` by
 its regions), so a uniform enrichment reduces *exactly* to the input length ⇒ capture-off is bit-identical;
 only the captured case contracts. No new readout — it reuses the calibration's per-region gDNA mass and the
 same IPR shape as the gDNA component (the standard 1-pseudocount convention + ``1e-9`` numerical floors used
-throughout calibration; not tuned constants). The density-correct node model (effective-support
+throughout calibration; not tuned constants). The density-correct region model (effective-support
 divisors, summed-side-density pooled seams, transport-free) is the shape this module implements.
 """
 
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .region_arrays import node_right_edge
+from .region_arrays import region_right_edge
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -39,10 +39,10 @@ if TYPE_CHECKING:
 __all__ = ["transcript_capture_eff_lengths"]
 
 
-def _transcript_node_incidence(
+def _transcript_region_incidence(
     index: "TranscriptIndex", region_arrays: "RegionArrays"
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-transcript **node** membership — the regions, boundaries, AND splice junctions a component crosses.
+    """Per-transcript **region** membership — the regions, boundaries, AND splice junctions a component crosses.
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
     incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS EDGE INDEX —
@@ -55,7 +55,7 @@ def _transcript_node_incidence(
     junction-dropped ``span_full`` under-states the mature footprint and the ``fl/span_full`` inflation
     lifts a spliced mRNA's EM eff-length ABOVE its nascent parent's — the physically impossible inversion).
 
-    A component's effective length is the IPR over exactly the nodes it occupies contiguously (the
+    A component's effective length is the IPR over exactly the regions it occupies contiguously (the
     transcript-structure gate, from first principles):
 
     * A **region** is in the set if an exon (mRNA) / the full span (nRNA) overlaps it.
@@ -67,7 +67,7 @@ def _transcript_node_incidence(
       ``≥ hi-1`` ⇒ excluded automatically. Introns lie in no exon's range ⇒ their regions and boundaries are
       excluded. So a MULTI-exon mRNA drops its introns + splice-junction boundaries but KEEPS an
       exon-interior boundary that merely marks a signature change (an antisense feature overlapping on the
-      other strand — crossed contiguously); a SINGLE-exon mRNA / nRNA keeps every interior node (introns
+      other strand — crossed contiguously); a SINGLE-exon mRNA / nRNA keeps every interior region (introns
       included, for nRNA); the outer boundaries are never interior ⇒ excluded (they belong to gDNA, which
       spans the chromosome). Annotation-only (sample-independent) — could be precomputed at index build.
     """
@@ -133,11 +133,11 @@ def _transcript_node_incidence(
             _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
 
     e = np.empty(0, dtype=np.int64)
-    # ⭐ The boundary axis is emitted as an EDGE index, not a left-node index. A line is a first-class
+    # ⭐ The boundary axis is emitted as an EDGE index, not a left-region index. A line is a first-class
     # object with its own axis, so a consumer indexes the per-edge arrays directly — the predecessor
-    # returned ``r`` and forced every caller through a node-shaped copy (`_left_keyed_edge_arrays`),
-    # which read as an attribution of the line's mass to a node and was not one.
-    right_edge = node_right_edge(np.asarray(region_arrays.ref_id))
+    # returned ``r`` and forced every caller through a region-shaped copy (`_left_keyed_edge_arrays`),
+    # which read as an attribution of the line's mass to a region and was not one.
+    right_edge = region_right_edge(np.asarray(region_arrays.ref_id))
     b_edges = right_edge[np.concatenate(b_r)] if b_r else e
     return (
         np.concatenate(r_t) if r_t else e,
@@ -163,9 +163,9 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
     The rightmost significant peak of the **mass-weighted** log-density KDE over the per-region gDNA
     densities ``ρ = mass/support`` — the fully-captured gDNA level, detected from the data with no assumption
     about probe locations. Mass-weighting is the
-    key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched nodes carry ~100×
+    key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched regions carry ~100×
     the mass), so its enriched mode is detectable. Unimodal (capture-off / no enrichment) ⇒ the single mode
-    ⇒ every node lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real node density so a
+    ⇒ every region lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real region density so a
     uniform field returns its density EXACTLY (factor 1, capture-off bit-identical). Returns ``None`` if
     there is too little gDNA to detect a reference (⇒ no contraction)."""
     m = np.asarray(mass, dtype=np.float64)
@@ -189,7 +189,7 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
         h = km[pk]
         sig = pk[h >= _KDE_PROM * float(h.max())]
         mode = grid[int((sig if sig.size else pk)[-1])]
-    # snap to the nearest ACTUAL node density: exact ρ under a uniform field (⇒ factor 1), a real density
+    # snap to the nearest ACTUAL region density: exact ρ under a uniform field (⇒ factor 1), a real density
     # under capture — no grid-quantization contraction is fabricated.
     return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
 
@@ -200,15 +200,15 @@ def transcript_capture_eff_lengths(
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
 ) -> np.ndarray:
-    """Capture-contract each transcript's EM effective length by the per-node gDNA-enrichment density,
+    """Capture-contract each transcript's EM effective length by the per-region gDNA-enrichment density,
     against a single GLOBAL reference density ``ρ_ref`` (the fully-captured level; ``_global_reference_density``).
 
     ``eff_em_t = fl_t · factor_t``, ``factor_t = [Σ_{n∈t} S_n·min(ρ_n/ρ_ref, 1)] / [Σ_{n∈t} S_n]`` — the
     enrichment-weighted fraction of the transcript's footprint that survives at the reference density, over
-    exactly the nodes it occupies CONTIGUOUSLY (``_transcript_node_incidence``), differing ONLY in the node
+    exactly the regions it occupies CONTIGUOUSLY (``_transcript_region_incidence``), differing ONLY in the region
     set:
 
-    * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
+    * a per-region CONTAINED region at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
     * a per-interior-LINE crossing object at support ``S_e = gdna_edge_eff_len[e] = E_f[w − 1]``
       (mass ``m_e = mass_gdna_edge[e]``) — for lines the transcript crosses without a splice (interior
       to an exon);
@@ -217,16 +217,16 @@ def transcript_capture_eff_lengths(
       the exons holds no gDNA, so the junction's enrichment is that of the exonic sequence a spliced
       fragment covers, not zero (dropping it) nor full length (the FL-marginal's implicit weight).
 
-    gDNA (contiguous genomic interval) takes ALL nodes; nRNA (single unspliced exon) keeps every interior
-    node (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction seams
+    gDNA (contiguous genomic interval) takes ALL regions; nRNA (single unspliced exon) keeps every interior
+    region (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction seams
     (dropping only the introns). Keeping the junction seams makes a spliced mRNA's ``span_full`` equal its
     FL-marginal length — WITHOUT them the ``fl/span_full`` ratio exceeds 1 (growing with exon count) and
     inflates a spliced mRNA's eff-length ABOVE its nascent parent's, the physically impossible inversion
-    (a nascent's genomic node set strictly contains its mature child's).
+    (a nascent's genomic region set strictly contains its mature child's).
 
     A single O(incidence) pass (``np.add.at``) does every transcript at once. Properties:
 
-    * **uniform gDNA** (capture off, unimodal density) ⇒ ρ_ref = ρ ⇒ every node ``min(ρ/ρ_ref, 1) = 1``
+    * **uniform gDNA** (capture off, unimodal density) ⇒ ρ_ref = ρ ⇒ every region ``min(ρ/ρ_ref, 1) = 1``
       ⇒ factor 1 ⇒ ``eff_em = fl`` — bit-identical to the FL-marginal length. NOTE this holds for a
       *noise-free* uniform field; on Poisson-noisy capture-off data the mass-weighted mode can sit slightly
       above the median and manufacture a small spurious contraction. The deferred unimodal / gDNA-abundance
@@ -234,7 +234,7 @@ def transcript_capture_eff_lengths(
       outlier resistance) would neutralise both this and a single high-mass region dominating ρ_ref
       genome-wide;
     * **no detectable gDNA** ⇒ ``ρ_ref = None`` ⇒ factor 1 (no contraction);
-    * **concentrated gDNA** (capture) ⇒ depleted nodes have ρ_n ≪ ρ_ref ⇒ ``min(m_n/ρ_ref, S_n) ≪ S_n``
+    * **concentrated gDNA** (capture) ⇒ depleted regions have ρ_n ≪ ρ_ref ⇒ ``min(m_n/ρ_ref, S_n) ≪ S_n``
       ⇒ the eff-len contracts to the enriched footprint.
 
     A single GLOBAL ``ρ_ref`` (shared by every transcript) makes ``eff(nascent) ≥ eff(mature)`` hold by
@@ -246,14 +246,14 @@ def transcript_capture_eff_lengths(
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     n_t = fl.shape[0]
 
-    # per-node CONTAINED object (mass, effective support) and per-interior-LINE crossing object. The
-    # line between node r and r+1 is keyed to r — the SAME objects the gDNA component uses
-    # (priors._gdna_node_arrays).
-    contained_m = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
-    contained_S = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
-    contained_ev = contained_m + np.asarray(calibration.mass_rna_node, dtype=np.float64)
+    # per-region CONTAINED object (mass, effective support) and per-interior-LINE crossing object. The
+    # line between region r and r+1 is keyed to r — the SAME objects the gDNA component uses
+    # (priors._gdna_region_arrays).
+    contained_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
+    contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
+    contained_ev = contained_m + np.asarray(calibration.mass_rna_region, dtype=np.float64)
     # ⭐ The per-LINE crossing objects, on their own axis. `inc_bnd` is an EDGE index, so these are
-    # indexed directly — no node-shaped copy, and nothing that reads as an attribution to a node.
+    # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
     seam_m = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
     seam_S = np.maximum(np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64), 0.0)
     # A SPLICE junction is not a contiguous line, so it has no entry on the edge axis — but it is still
@@ -262,11 +262,11 @@ def transcript_capture_eff_lengths(
     # definition, and it cannot drift from the one the calibrator divided by.
     crossing_S = float(seam_S[seam_S > 0.0][0]) if np.any(seam_S > 0.0) else 0.0
 
-    rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
-    # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED node-density KDE — the
+    rt, rr, bt, br, jt, jl, jr = _transcript_region_incidence(index, region_arrays)
+    # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED region-density KDE — the
     # fully-captured gDNA level detected from the data (no probe assumptions), SHARED across all transcripts
     # so eff(nascent) ≥ eff(mature) by construction. Unimodal (capture-off / no enrichment) ⇒ single mode ⇒
-    # every node w=1 ⇒ no contraction. Replaces the per-transcript ρ*=G_c/E_c, which contracted on
+    # every region w=1 ⇒ no contraction. Replaces the per-transcript ρ*=G_c/E_c, which contracted on
     # within-transcript density variation incl. noise — it fired even with NO gDNA, driving the nascent
     # siphon.
     rho_ref = _global_reference_density(contained_m, contained_S)
@@ -275,7 +275,7 @@ def transcript_capture_eff_lengths(
     inv = 1.0 / rho_ref
     # Per-transcript enrichment-weighted length num = Σ_n min(m_n/ρ_ref, S_n) = Σ_n S_n·min(ρ_n/ρ_ref, 1),
     # the uniform-case length span_full = Σ_n S_n, and the contained evidence (multimapper shrinkage), over
-    # the node set (regions + interior seams + splice-junction seams). factor = num/span_full ∈ (0, 1].
+    # the region set (regions + interior seams + splice-junction seams). factor = num/span_full ∈ (0, 1].
     num = np.zeros(n_t)
     span_full = np.zeros(n_t)
     c_ev = np.zeros(n_t)
@@ -293,7 +293,7 @@ def transcript_capture_eff_lengths(
         # SAME pooled crossing support S_j = ½·(gdna_boundary_len[left] + gdna_boundary_len[right]) the
         # genomic seams use. Stitching these in makes span_full == fl for a spliced mRNA, so the
         # junction-dropped fl/span_full inflation (which lifted eff_em(mature) ABOVE eff_em(nascent) — the
-        # physically impossible inversion) vanishes. Under uniform gDNA m_j = ρ·S_j like every other node,
+        # physically impossible inversion) vanishes. Under uniform gDNA m_j = ρ·S_j like every other region,
         # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the junction contributes at
         # its flanking-exon enrichment, not the fabricated full-length weight.
         rho_l = contained_m[jl] / contained_S[jl]
@@ -311,8 +311,8 @@ def transcript_capture_eff_lengths(
 
     with np.errstate(divide="ignore", invalid="ignore"):
         # factor = Σ min(m_n/ρ_ref, S_n) / Σ S_n ∈ (0, 1] (num ≤ span_full since min(·, S_n) ≤ S_n). Under
-        # uniform gDNA every node sits at ρ_ref ⇒ num = span_full ⇒ factor 1 (capture-off bit-identical);
-        # under capture depleted nodes contribute min(m_n/ρ_ref, S_n) ≪ S_n ⇒ contracts to the enriched
+        # uniform gDNA every region sits at ρ_ref ⇒ num = span_full ⇒ factor 1 (capture-off bit-identical);
+        # under capture depleted regions contribute min(m_n/ρ_ref, S_n) ≪ S_n ⇒ contracts to the enriched
         # footprint. ONE global ρ_ref for every transcript ⇒ eff(nascent) ≥ eff(mature) (no inversion).
         factor = np.where(span_full > 1e-9, num / np.maximum(span_full, 1e-9), 1.0)
         # multimapper-blindness shrinkage: shrink the contraction toward 1 (no contraction) on sparse

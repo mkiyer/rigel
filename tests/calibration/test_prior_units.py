@@ -7,17 +7,17 @@ the number of contiguous lines it crosses, so summing per-object masses does NOT
 
     incidences(w) = max( 1 , (w-1)/s )        for a partition of spacing s
 
-Counts are conserved exactly where every node is longer than every fragment, and become a
-**length-weighted** count where they are not — and 56.7 % of human nodes are shorter than one 200 bp
+Counts are conserved exactly where every region is longer than every fragment, and become a
+**length-weighted** count where they are not — and 56.7 % of human regions are shorter than one 200 bp
 fragment. Because the weighting is by length, it does not cancel between two components with different
 mean lengths: measured on the chr22 pilot, gDNA deposits 1.031 incidences per fragment and RNA ≈1.17,
 so the prior's g:r ratio under-calls gDNA by 13–19 %.
 
-⭐⭐ **THE FIX, AND IT IS A READ-OUT RATHER THAN A DERIVATION.** The node term is already a fragment
-count — a contained fragment deposits on exactly one node. Only the crossing term is converted, by the
+⭐⭐ **THE FIX, AND IT IS A READ-OUT RATHER THAN A DERIVATION.** The region term is already a fragment
+count — a contained fragment deposits on exactly one region. Only the crossing term is converted, by the
 accumulator's own conserved ``mass / count`` at that line::
 
-    prior_c = SUM_locus share · [ mass_c_node[r] + SUM_{e owned by r} mass_c_edge[e] · q[e] ]
+    prior_c = SUM_locus share · [ mass_c_region[r] + SUM_{e owned by r} mass_c_edge[e] · q[e] ]
 
     q[e] = edge_mass_per_crossing = [ min(w−1,a) + min(w−1,b) ] / 2(w−1)    under a uniform field
 
@@ -42,7 +42,7 @@ and it is not built; until it is, the biased value is the specified value and is
 evaluated exactly through the SPECIFICATION, so a failure is a defect and never noise. That is a
 deliberate departure from the plan's original end-to-end phrasing of T1/T2: rebuilding an index with
 extra cuts also moves the transcript set, the reach and every effective length, so it would not isolate
-the partition. The end-to-end conservation check against ``node_start_count`` is T3, and it lives in
+the partition. The end-to-end conservation check against ``region_start_count`` is T3, and it lives in
 `scripts/design/prior_units_check.py`.
 """
 
@@ -74,7 +74,7 @@ def _point_pmf(mean_len: int, max_len: int = 512) -> np.ndarray:
     return p
 
 
-def _enumerate(node_len, w):
+def _enumerate(region_len, w):
     """Deposit EVERY length-``w`` fragment at EVERY start position, through the SPECIFICATION itself.
 
     Returns ``(n_fragments, contained_count, crossing_count, conserved_mass)`` — the exact banks the
@@ -86,8 +86,8 @@ def _enumerate(node_len, w):
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
     from native._accumulator_reference import Accumulator, Partition
 
-    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(node_len, dtype=np.float64))]).astype(int)
-    partition = Partition.from_cuts([cuts.tolist()], node_types=[[0] * (len(cuts) - 1)])
+    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
+    partition = Partition.from_cuts([cuts.tolist()], region_types=[[0] * (len(cuts) - 1)])
     acc = Accumulator(partition, max_fragment_length=10**6)
     n = 0
     for start in range(0, int(cuts[-1]) - int(w) + 1):
@@ -96,13 +96,13 @@ def _enumerate(node_len, w):
     t = acc.tally
     return (
         n,
-        np.asarray(t.node_contained_count, np.int64).sum(axis=1).astype(np.float64),
+        np.asarray(t.region_contained_count, np.int64).sum(axis=1).astype(np.float64),
         np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64),
         np.asarray(t.edge_unspliced_mass, np.float64),
     )
 
 
-def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
+def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
     """The share the ACCUMULATOR itself would deposit on this tiling, by brute-force enumeration.
 
     ⛔ **Not derived from the answer these tests check.** Every fragment of each component's length is
@@ -126,14 +126,14 @@ def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
         Partition,
     )
 
-    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(node_len, dtype=np.float64))]).astype(int)
+    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
     n_edges = max(len(cuts) - 2, 0)
     mass = np.zeros(n_edges, dtype=np.float64)
     count = np.zeros(n_edges, dtype=np.float64)
     for rho, pmf in ((rho_g, pmf_g), (rho_r, pmf_r)):
         w = int(np.argmax(pmf))
         partition = Partition.from_cuts(
-            [cuts.tolist()], node_types=[[0] * (len(cuts) - 1)]
+            [cuts.tolist()], region_types=[[0] * (len(cuts) - 1)]
         )
         acc = Accumulator(partition, max_fragment_length=max(1000, w + 1))
         for start in range(0, int(cuts[-1]) - w + 1):
@@ -146,8 +146,8 @@ def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
     return out
 
 
-def _uniform_library(node_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
-    """A CalibrationResult for ONE reference tiled by ``node_len``, under a UNIFORM field.
+def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
+    """A CalibrationResult for ONE reference tiled by ``region_len``, under a UNIFORM field.
 
     ⭐⭐ **EVERY BANK IS ENUMERATED THROUGH THE SPECIFICATION, not evaluated analytically.** The masses
     and the conserved share must describe ONE population or the fixture is internally inconsistent —
@@ -164,37 +164,37 @@ def _uniform_library(node_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
     — the number of fragments that fit. ``rho·span`` counted ``w−1`` start positions no fragment can
     occupy, and was the approximation the density conversion happened to produce.
     """
-    node_len = np.asarray(node_len, dtype=np.float64)
-    n = node_len.shape[0]
+    region_len = np.asarray(region_len, dtype=np.float64)
+    n = region_len.shape[0]
     ne = max(n - 1, 0)
     # the OPPORTUNITY arrays stay analytic — they are the divisors `gdna_eff_len` contracts against,
     # and they are not a population statement
-    a_g_node = contained_eff_length(node_len, pmf_g)
-    a_r_node = contained_eff_length(node_len, pmf_r)
+    a_g_region = contained_eff_length(region_len, pmf_g)
+    a_r_region = contained_eff_length(region_len, pmf_r)
     a_g_edge = np.full(ne, float(crossing_eff_length(pmf_g, _UNB, _UNB)[0]))
     a_r_edge = np.full(ne, float(crossing_eff_length(pmf_r, _UNB, _UNB)[0]))
     # ...and every MASS is what the specification actually deposits on this tiling
-    _n_g, cont_g, cross_g, _m_g = _enumerate(node_len, int(np.argmax(pmf_g)))
-    _n_r, cont_r, cross_r, _m_r = _enumerate(node_len, int(np.argmax(pmf_r)))
+    _n_g, cont_g, cross_g, _m_g = _enumerate(region_len, int(np.argmax(pmf_g)))
+    _n_r, cont_r, cross_r, _m_r = _enumerate(region_len, int(np.argmax(pmf_r)))
     return CalibrationResult(
-        mass_gdna_node=rho_g * cont_g,
-        mass_rna_node=rho_r * cont_r,
+        mass_gdna_region=rho_g * cont_g,
+        mass_rna_region=rho_r * cont_r,
         mass_gdna_edge=rho_g * cross_g,
         mass_rna_edge=rho_r * cross_r,
         mass_rna_spliced_edge=np.zeros(ne, dtype=np.float64),
-        edge_mass_per_crossing=_mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r),
+        edge_mass_per_crossing=_mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
         edge_spliced_mass_per_crossing=np.ones_like(
-            _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r)
+            _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r)
         ),
         junction_mass_per_crossing=np.ones(0, dtype=np.float64),
-        gdna_node_eff_len=a_g_node,
+        gdna_region_eff_len=a_g_region,
         gdna_edge_eff_len=a_g_edge,
-        rna_node_eff_len=a_r_node,
+        rna_region_eff_len=a_r_region,
         rna_edge_eff_len=a_r_edge,
-        gdna_frac_node=np.zeros_like(cont_g),
-        rna_pos_frac_node=np.zeros_like(cont_g),
-        rna_neg_frac_node=np.zeros_like(cont_g),
+        gdna_frac_region=np.zeros_like(cont_g),
+        rna_pos_frac_region=np.zeros_like(cont_g),
+        rna_neg_frac_region=np.zeros_like(cont_g),
         gdna_frac_edge=np.zeros_like(cross_g),
         rna_pos_frac_edge=np.zeros_like(cross_g),
         rna_neg_frac_edge=np.zeros_like(cross_g),
@@ -202,27 +202,27 @@ def _uniform_library(node_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
-        n_nodes=n,
+        n_regions=n,
         n_edges=ne,
         n_junctions=0,
         config=CalibrationConfig(),
     )
 
 
-def _regions_tiling(node_len) -> RegionArrays:
-    """One reference tiled contiguously from 0 by ``node_len``."""
-    node_len = np.asarray(node_len, dtype=np.int64)
-    ends = np.cumsum(node_len)
-    starts = ends - node_len
-    n = node_len.shape[0]
+def _regions_tiling(region_len) -> RegionArrays:
+    """One reference tiled contiguously from 0 by ``region_len``."""
+    region_len = np.asarray(region_len, dtype=np.int64)
+    ends = np.cumsum(region_len)
+    starts = ends - region_len
+    n = region_len.shape[0]
     return RegionArrays(
         ref_id=np.zeros(n, dtype=np.int32),
         start=starts,
         end=ends,
-        # exon on both strands: the node must survive the locus projection's intergenic drop
+        # exon on both strands: the region must survive the locus projection's intergenic drop
         signature=np.full(n, 0b0000_0011, dtype=np.uint8),
         strand_class=np.zeros(n, dtype=np.int8),
-        region_size_bp=node_len.astype(np.float64),
+        region_size_bp=region_len.astype(np.float64),
         ref_offsets=np.array([0, n], dtype=np.int32),
         n_refs=1,
     )
@@ -287,7 +287,7 @@ def _truth_and_prediction(tiling, rho_g, rho_r, pmf_g, pmf_r):
 
 # 1200 bp of reference, tiled four ways. The library is IDENTICAL in all four; only the bookkeeping
 # grid moves. ⭐ The 100 bp tiling is finer than the 200 bp RNA fragment, which is the regime where
-# 56.7 % of human nodes live and where the raw incidence sum diverges hardest.
+# 56.7 % of human regions live and where the raw incidence sum diverges hardest.
 _SPAN = 1200
 _MU_G, _MU_R = 50, 200
 _TILINGS = {
@@ -296,7 +296,7 @@ _TILINGS = {
     "fine   (12 x 100)": [100] * 12,
     "ragged (mixed)": [37, 400, 63, 300, 1, 199, 200],
 }
-# ⭐ The tilings where every node exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
+# ⭐ The tilings where every region exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
 # line and ``q_g == q_r == 1``: the pooled share is then each component's own and the split is exact.
 _SHARES_AGREE = ["coarse (1 x 1200)", "medium (3 x 400)"]
 # ⚠ Not 1e-9: the conserved-mass bank is fixed-point at 2^-32 per fragment, so a 1,001-fragment total
@@ -448,11 +448,11 @@ def test_the_ratio_IS_exact_where_the_two_components_share_a_length():
 
 def test_zero_rna_opportunity_gives_zero_rna_prior():
     """⛔: an object with no opportunity for a component must emit NOTHING
-    at zero precision — never a floored division. Every node here is shorter than one RNA fragment and
+    at zero precision — never a floored division. Every region here is shorter than one RNA fragment and
     the RNA crossing opportunity is zeroed, so the RNA support is identically 0.
     """
     pmf_g, pmf_r = _point_pmf(20), _point_pmf(400)
-    tiling = [50] * 4  # every node < 400 bp ⇒ contained_eff_length(RNA) == 0
+    tiling = [50] * 4  # every region < 400 bp ⇒ contained_eff_length(RNA) == 0
     cal = _uniform_library(tiling, 0.03, 0.0, pmf_g, pmf_r)
     cal = _zero_rna_opportunity(cal)
     p = assemble_priors(cal, _regions_tiling(tiling), _one_locus(int(np.sum(tiling))))
@@ -469,14 +469,14 @@ def test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_d
     the drop existed for is gone from this path.
 
     ``mass > 0`` with ``support == 0`` is an ordinary configuration, not a corner: ``contained_eff_length``
-    is exactly 0 wherever a node is shorter than that component's shortest fragment, which on the chr22
-    pilot against its own measured pure pools is **21.7 % of nodes for RNA** and 18.7 % for gDNA. The
+    is exactly 0 wherever a region is shorter than that component's shortest fragment, which on the chr22
+    pilot against its own measured pure pools is **21.7 % of regions for RNA** and 18.7 % for gDNA. The
     solver can still put mass there — ``f_g`` is an inference, not a fact.
 
     ⭐ **What changed.** The drop existed because ``rho = SUM m / SUM S`` is a rate, and mass in the
     numerator with no exposure in the denominator inflates it — with ``mass / max(support, 1e-9)`` the
-    inflation reaching ~1e9. **The prior no longer divides by anything.** ``mass_c_node[r]`` is
-    ``f_c(r)·contained_count[r]`` and a contained fragment deposits on exactly one node, so the mass IS
+    inflation reaching ~1e9. **The prior no longer divides by anything.** ``mass_c_region[r]`` is
+    ``f_c(r)·contained_count[r]`` and a contained fragment deposits on exactly one region, so the mass IS
     the count; dropping it would silently lose fragments the accumulator really deposited. The
     catastrophe is now structurally unreachable here rather than guarded, and the assertion says so: the
     prior is exactly the deposited 4 × 2.5, which is neither 0 nor any multiple of 1e9.
@@ -490,7 +490,7 @@ def test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_d
     tiling = [50] * 4
     cal = _zero_rna_opportunity(_uniform_library(tiling, 0.03, 0.0, pmf_g, pmf_r))
     # ⭐ the change from the test above: put REAL mass on the zero-opportunity RNA objects
-    stray = dataclasses.replace(cal, mass_rna_node=np.full(4, 2.5))
+    stray = dataclasses.replace(cal, mass_rna_region=np.full(4, 2.5))
     regions, loci = _regions_tiling(tiling), _one_locus(int(np.sum(tiling)))
     p = assemble_priors(stray, regions, loci)
     assert np.all(np.isfinite(p.rna_prior_count)), "a floored divisor produced a non-finite prior"

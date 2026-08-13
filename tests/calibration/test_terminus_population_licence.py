@@ -9,7 +9,7 @@ difference in the measured population are indistinguishable, and the imputation 
 ⭐ **The structural fact.** An EDGE is a single genomic position and it counts the fragments spanning it
 CONTIGUOUSLY, so the transcripts it can see are exactly those continuous across it::
 
-    T(EDGE)  =  T(NODE_left)  ∩  T(NODE_right)
+    T(EDGE)  =  T(REGION_left)  ∩  T(REGION_right)
 
 A transcript whose body begins at the EDGE is in the right flank and not in the EDGE; one that ends there
 is in the left flank and not in the EDGE. So a transcript TERMINUS at the EDGE is precisely what makes one
@@ -63,8 +63,8 @@ import functools
 import numpy as np
 import pytest
 
-from rigel.calibration.node_geometry import (
-    build_node_statics,
+from rigel.calibration.region_geometry import (
+    build_region_statics,
     init_beliefs,
     terminus_flank_gain,
 )
@@ -74,7 +74,7 @@ from rigel.calibration.splice_graph import (
     FLAG_TSS_NEG,
     FLAG_TSS_POS,
     build_edge_flags_array,
-    build_node_partition_arrays,
+    build_region_partition_arrays,
 )
 
 from conftest import build_test_index
@@ -113,7 +113,7 @@ def neg_index(tmp_path_factory):
 
 def _edge_positions(index) -> np.ndarray:
     """Genomic position of every contiguous edge, in edge order (the interior cuts, per reference)."""
-    positions, cut_offsets, _types = build_node_partition_arrays(index)
+    positions, cut_offsets, _types = build_region_partition_arrays(index)
     out = []
     for f in range(len(cut_offsets) - 1):
         lo, hi = int(cut_offsets[f]), int(cut_offsets[f + 1])
@@ -267,13 +267,13 @@ def _flagged_chain(flags_by_edge):
 
     parts = make_chain_parts(
         [0] + [BIT_EXON_POS] * 5 + [0],
-        node_size_bp=1000.0,
-        node_pos=[100.0, 900.0, 900.0, 900.0, 900.0, 900.0, 100.0],
-        node_neg=[100.0, 50.0, 50.0, 50.0, 50.0, 50.0, 100.0],
+        region_size_bp=1000.0,
+        region_pos=[100.0, 900.0, 900.0, 900.0, 900.0, 900.0, 100.0],
+        region_neg=[100.0, 50.0, 50.0, 50.0, 50.0, 50.0, 100.0],
         edge_pos=[20.0, 60.0, 60.0, 60.0, 60.0, 20.0],
         edge_neg=[20.0, 10.0, 10.0, 10.0, 10.0, 20.0],
     )
-    parts.statics = build_node_statics(
+    parts.statics = build_region_statics(
         parts.chain, parts.region_arrays, np.asarray(flags_by_edge, np.uint16)
     )
     return parts
@@ -292,10 +292,10 @@ def _hop_licence(parts):
     from rigel.calibration.messages.head import HeadPolicy
     from rigel.calibration.sweep import solve_chain
 
-    node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+    region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
     cap = {}
-    node_sweep(
+    region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,
@@ -325,7 +325,7 @@ def _hop_licence(parts):
     return out
 
 
-#: chain N E N E N E N E N E N E N — slot 2k is node k, slot 2k+1 is edge k.
+#: chain N E N E N E N E N E N E N — slot 2k is region k, slot 2k+1 is edge k.
 #: The six EDGEs are slots 1,3,5,7,9,11; the `nested_exons` flag pattern puts a genomic LOW end on the
 #: first three and a genomic HIGH end on the last three.
 _NESTED_FLAGS = (
@@ -350,7 +350,7 @@ def test_a_terminus_UNLICENSES_the_step_into_the_flank_that_gains_rna():
     conjunct being a blanket. On this chain each EDGE breaks exactly one of its two sides, so every EDGE
     contributes one broken pair and one intact pair."""
     licence = {(h["dst"], h["src"]): h for h in _hop_licence(_flagged_chain(_NESTED_FLAGS))}
-    # slot 2k = node k, slot 2k+1 = edge k
+    # slot 2k = region k, slot 2k+1 = edge k
     broken, intact = [], []
     for e, bits in enumerate(_NESTED_FLAGS):
         edge = 2 * e + 1
@@ -392,13 +392,13 @@ def _ambig_chain(flags_by_edge):
 
     parts = make_chain_parts(
         [0, BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG, BIT_EXON_POS, 0],
-        node_size_bp=1000.0,
-        node_pos=[100.0, 900.0, 500.0, 900.0, 100.0],
-        node_neg=[100.0, 50.0, 500.0, 50.0, 100.0],
+        region_size_bp=1000.0,
+        region_pos=[100.0, 900.0, 500.0, 900.0, 100.0],
+        region_neg=[100.0, 50.0, 500.0, 50.0, 100.0],
         edge_pos=[20.0, 60.0, 60.0, 20.0],
         edge_neg=[20.0, 10.0, 10.0, 20.0],
     )
-    parts.statics = build_node_statics(
+    parts.statics = build_region_statics(
         parts.chain, parts.region_arrays, np.asarray(flags_by_edge, np.uint16)
     )
     return parts
@@ -412,10 +412,10 @@ def _relay_levels(parts):
     from rigel.calibration.messages.head import HeadPolicy
     from rigel.calibration.sweep import solve_chain
 
-    node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+    region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
     cap = {}
-    node_sweep(
+    region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,
@@ -439,7 +439,7 @@ def test_the_RELAY_honours_the_population_test_TOO():
     COMBINE's. This one reads ``fwd_g``, the relay's running level, which the combine has not yet touched.
 
     The chain is ``intergenic | exon+ | exon AMBIG | exon+ | intergenic`` with a genomic LOW end on the
-    EDGE at slot 3, so the step from that EDGE into the AMBIG node at slot 4 crosses a population
+    EDGE at slot 3, so the step from that EDGE into the AMBIG region at slot 4 crosses a population
     difference. The AMBIG destination has no own gDNA precision, so the relayed claim survives the fuse
     unchanged and the statement is exact: the level must cross UNSCALED.
 

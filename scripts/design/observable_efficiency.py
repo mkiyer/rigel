@@ -66,8 +66,8 @@ MEANS = (50.0, 75.0, 100.0, 150.0, 200.0, 250.0, 300.0)
 #: Coefficient of variation: a narrow peak through to a very broad one. 1.0 is exponential-tailed.
 CVS = (0.15, 0.35, 0.60, 1.00)
 
-#: Node lengths spanning the real partition: 1 bp nodes exist, the median is 151 bp, the mean 2,970.
-NODE_LENGTHS = (25, 50, 100, 151, 250, 400, 1000, 3000)
+#: Region lengths spanning the real partition: 1 bp regions exist, the median is 151 bp, the mean 2,970.
+REGION_LENGTHS = (25, 50, 100, 151, 250, 400, 1000, 3000)
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +108,12 @@ def fl_pmf(mean: float, cv: float, family: str = "gamma") -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
-def opportunity(population: str, node_len: float) -> np.ndarray:
+def opportunity(population: str, region_len: float) -> np.ndarray:
     """Admissible start-position count per fragment length -- the deposit rule, per population."""
     if population == "contained":
-        return np.maximum(node_len - W + 1.0, 0.0)
+        return np.maximum(region_len - W + 1.0, 0.0)
     if population == "spanning":
-        return np.maximum(W - node_len - 1.0, 0.0)
+        return np.maximum(W - region_len - 1.0, 0.0)
     if population == "crossing":
         return np.maximum(W - 1.0, 0.0)
     raise ValueError(population)
@@ -133,16 +133,16 @@ def hist_edges(n_bins: int, scheme: str = "geometric", top: float = 1000.0) -> n
     return np.concatenate(([0.0], inner, [float(MAX_W + 1)]))[: n_bins + 1]
 
 
-def weight(kind: str, population: str, node_len: float = 0.0) -> np.ndarray:
+def weight(kind: str, population: str, region_len: float = 0.0) -> np.ndarray:
     """The per-fragment quantity summed into a channel.
 
     ``invL`` is the accumulator's own rule today, and its two cases are NOT one quantity: ``1/L`` at a
-    node, ``1/(L-1)`` at a 0-bp line.
+    region, ``1/(L-1)`` at a 0-bp line.
 
     ``invA`` is the RECIPROCAL OPPORTUNITY -- the derivation in
-    ``scripts/design/node_density_derivation.py``. It is the unique weight for which E[sum h] is
+    ``scripts/design/region_density_derivation.py``. It is the unique weight for which E[sum h] is
     proportional to the start density with a length-distribution-independent constant, and the shipped
-    edge rule is its ``A(w) = w - 1`` special case. At a node it is ``1/(l - L + 1)`` when contained and
+    edge rule is its ``A(w) = w - 1`` special case. At a region it is ``1/(l - L + 1)`` when contained and
     ``1/(L - l - 1)`` when spanning, neither of which has ever been tried.
     """
     if kind == "count":
@@ -160,7 +160,7 @@ def weight(kind: str, population: str, node_len: float = 0.0) -> np.ndarray:
         return ((W >= lo) & (W < hi)).astype(np.float64)
     out = np.zeros_like(W)
     if kind == "invA":
-        A = opportunity(population, node_len)
+        A = opportunity(population, region_len)
         np.divide(1.0, A, out=out, where=A > 0)
         return out
     if kind == "invL":
@@ -177,19 +177,19 @@ def verify_opportunity_counts() -> int:
     count so a caller can fail on it.
     """
     bad = 0
-    for node_len in (1, 2, 7, 25, 151, 400):
+    for region_len in (1, 2, 7, 25, 151, 400):
         for w in (1, 2, 3, 26, 150, 151, 152, 401, 900):
-            starts = np.arange(-w - 2, node_len + w + 2)
+            starts = np.arange(-w - 2, region_len + w + 2)
             ends = starts + w
             checks = (
-                ("contained", int(np.sum((starts >= 0) & (ends <= node_len))), max(node_len - w + 1, 0)),
-                ("spanning", int(np.sum((starts < 0) & (ends > node_len))), max(w - node_len - 1, 0)),
+                ("contained", int(np.sum((starts >= 0) & (ends <= region_len))), max(region_len - w + 1, 0)),
+                ("spanning", int(np.sum((starts < 0) & (ends > region_len))), max(w - region_len - 1, 0)),
                 ("crossing", int(np.sum((starts < 0) & (ends > 0))), max(w - 1, 0)),
             )
             for name, got, want in checks:
                 if got != want:
                     bad += 1
-                    print(f"    MISMATCH {name} node={node_len} w={w}: enum {got} != formula {want}")
+                    print(f"    MISMATCH {name} region={region_len} w={w}: enum {got} != formula {want}")
     return bad
 
 
@@ -198,7 +198,7 @@ def verify_opportunity_counts() -> int:
 # ---------------------------------------------------------------------------
 
 #: A "frame" is the set of populations that co-occur at ONE object, with its geometry.
-FRAMES = {**{f"node {ell} bp": ("contained", "spanning", float(ell)) for ell in NODE_LENGTHS},
+FRAMES = {**{f"region {ell} bp": ("contained", "spanning", float(ell)) for ell in REGION_LENGTHS},
           "contiguous edge": ("crossing", None, 0.0)}
 
 
@@ -208,7 +208,7 @@ def _populations(frame):
 
 
 #: Candidate storage choices, as (population, channel) lists. `_expand` fills in the frame's
-#: populations so one definition covers both node populations and the single edge population.
+#: populations so one definition covers both region populations and the single edge population.
 CANDIDATE_SETS = {
     "SHIPS: count + Sum1/L": [("*", "count"), ("*", "invL")],
     "count + Sum1/L + SumL": [("*", "count"), ("*", "invL"), ("*", "sumL")],
@@ -389,9 +389,9 @@ def validate(family: str, phi_g: float, rho_tot: float, n_trials: int, seed: int
     rng = np.random.default_rng(seed)
     rho_g, rho_r = phi_g * rho_tot, (1.0 - phi_g) * rho_tot
     cells = [
-        ((100.0, 0.35), (200.0, 0.35), "node 400 bp"),
-        ((200.0, 0.35), (100.0, 0.35), "node 400 bp"),   # the inverted case: gDNA longer
-        ((100.0, 1.00), (200.0, 0.15), "node 400 bp"),   # broad vs narrow
+        ((100.0, 0.35), (200.0, 0.35), "region 400 bp"),
+        ((200.0, 0.35), (100.0, 0.35), "region 400 bp"),   # the inverted case: gDNA longer
+        ((100.0, 1.00), (200.0, 0.15), "region 400 bp"),   # broad vs narrow
         ((100.0, 0.35), (200.0, 0.35), "contiguous edge"),
         ((200.0, 1.00), (100.0, 0.15), "contiguous edge"),
     ]
@@ -552,7 +552,7 @@ def main() -> None:
             f"{family.upper()} fragment lengths   (true phi_g={args.phi}, rho_tot={args.rho}/bp)",
         )
 
-    for frame in ("node 151 bp", "contiguous edge"):
+    for frame in ("region 151 bp", "contiguous edge"):
         hardest_cells("gamma", args.phi, args.rho, frame, "SHIPS: count + Sum1/L")
         hardest_cells("gamma", args.phi, args.rho, frame, "DERIVED: count + Sum1/A")
         hardest_cells("gamma", args.phi, args.rho, frame, "count + Sum1/A + SumL")

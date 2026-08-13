@@ -14,10 +14,10 @@ than against a written-out list, for the same reason.
 THE AXES — three of them, off by one from each other per reference::
 
     cuts    0        100       200       600        c = 4 cuts on this reference
-    nodes   [  n0  ][   n1   ][   n2   ]            c - 1 = 3 nodes
+    regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3 regions
     lines            line 1    line 2               c - 2 = 2 contiguous edges
 
-A reference contributing ``c`` cuts owns ``c − 1`` nodes and ``c − 2`` interior lines; one contributing
+A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines; one contributing
 none owns neither, which is legal. Junction edges are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 junction-edge id simply BE its slot.
@@ -26,7 +26,7 @@ WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a
 There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
-    inv_length_sum  Sum 1/placements         float64   placements = L at a node, L−1 at a 0-bp line
+    inv_length_sum  Sum 1/placements         float64   placements = L at a region, L−1 at a 0-bp line
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
 ⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
@@ -38,7 +38,7 @@ validate the float banks within a DERIVED tolerance. `TRAPS: integer-channels-re
 
 ⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
 edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
-at a node, where the opportunity is ``(node − L + 1)₊`` and nothing cancels. One word for two concepts is
+at a region, where the opportunity is ``(region − L + 1)₊`` and nothing cancels. One word for two concepts is
 the defect this naming avoids.
 
 ⛔⛔ **RETRACTED, AND DELETED WITH ITS BANKS (2026-08-13).** This paragraph read: *"``length_sum`` exists
@@ -64,7 +64,7 @@ strand, and never stored. ⭐ ``sj_mass`` joined them on 2026-08-13 and is the o
 ⚠ **OWNERSHIP: this object holds VIEWS, and it is the keep-alive.** ``np.ascontiguousarray(x, dtype=D)`` is
 a **no-op** when the array already has dtype ``D``, so nothing here copies — the buffers belong to
 capsules owned by the C++ side. Someone "adding a cast for safety" would silently double peak memory
-against a 1.04 M-node partition. Do not.
+against a 1.04 M-region partition. Do not.
 """
 
 from __future__ import annotations
@@ -98,8 +98,8 @@ N_FRAGMENT_POOLS = 5
 #: read a gDNA mean of 146.05 against the pure intergenic pool's 88.0 precisely by pooling them in.
 #: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing — those are
 #: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
-POOL_DNA_INTERGENIC = 0  # contained in an intergenic node — pure gDNA
-POOL_DNA_INTRONIC = 1  # contained in an intronic node — pure gDNA
+POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — pure gDNA
+POOL_DNA_INTRONIC = 1  # contained in an intronic region — pure gDNA
 POOL_DNA_INTRON_EXON = 2  # crossing one line, flanks {intron, exon} — on-target gDNA
 POOL_DNA_INTERGENIC_EXON = 3  # crossing one line, {intergenic, exon} — on-target gDNA
 POOL_RNA_SPLICED = 4  # used an annotated junction, splice OBSERVED — pure RNA
@@ -116,7 +116,7 @@ class ScanQC:
     The field names are the specification's own ``Tally.qc`` keys.
     """
 
-    deposited: int  # fragments that reached an object; == sum(node_start_count)
+    deposited: int  # fragments that reached an object; == sum(region_start_count)
     dropped_too_long: int  # L above --max-fragment-length
     dropped_empty: int  # no path left after clipping to the reference
     dropped_strand_undefined: int  # align_strand named no column, so there was none to credit
@@ -269,7 +269,7 @@ class DrainQC:
 #: validates against it and the drain adds a per-reference delta into it, so a new channel cannot reach one
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
-    ("node_contained_count", "node", np.uint32),
+    ("region_contained_count", "region", np.uint32),
     ("edge_unspliced_count", "edge", np.uint32),
     ("edge_spliced_count", "edge", np.uint32),
     ("sj_count", "sj", np.uint32),
@@ -292,7 +292,7 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
     # fraction, so every row is float64; there is no fixed point and no scale constant to decode.
     # ⚠ The two `*_length_sum` banks were the integer exception and are GONE (2026-08-13) — see the
     # module docstring for why their stated justification did not survive measurement.
-    ("node_contained_inv_opportunity_sum", "node", np.float64),
+    ("region_contained_inv_opportunity_sum", "region", np.float64),
     ("edge_unspliced_inv_length_sum", "edge", np.float64),
     ("sj_inv_length_sum", "sj", np.float64),
     ("edge_unspliced_mass", "edge", np.float64),
@@ -303,13 +303,13 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
 #: three that are not banks. ``"library"`` means the axis is library-wide rather than per reference.
 #:
 #: ⚠ Derived from `BANK_AXES` rather than restated, because the drain must add every additive channel and
-#: miss none. `node_start_count` and `deposited_lengths` are the two externally-checkable invariants (each
+#: miss none. `region_start_count` and `deposited_lengths` are the two externally-checkable invariants (each
 #: sums to `qc.deposited`), so a drain that skipped either would be caught — but `pool_lengths` would just
 #: go quietly short, and nothing downstream would look wrong.
 ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
     *((name, axis) for name, axis, _dtype in BANK_AXES),
     *((name, axis) for name, axis, _dtype in SINGLE_COLUMN_AXES),
-    ("node_start_count", "node"),
+    ("region_start_count", "region"),
     ("pool_lengths", "library"),
     ("deposited_lengths", "library"),
 )
@@ -392,7 +392,7 @@ class DeferredFragments:
     def from_dict(cls, deferred: dict[str, Any]) -> "DeferredFragments":
         """Validate and adopt the flat arrays the C++ emits.
 
-        ⚠ The two nested CSRs are re-derived rather than trusted, exactly as ``ref_node_offsets`` is. An
+        ⚠ The two nested CSRs are re-derived rather than trusted, exactly as ``ref_region_offsets`` is. An
         offset array of the right LENGTH can still be inconsistent, and the second pass indexes every one
         of these — a truncated bank would score a fragment against another fragment's hypotheses, which is
         a wrong answer that looks entirely plausible.
@@ -496,19 +496,19 @@ class AccumulatorPayload:
     # -- the partition, echoed back so a consumer can locate every object without reloading the index --
     cut_positions: np.ndarray  # int64[n_cuts] — flat, reference-major, ascending within a reference
     ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
-    ref_node_offsets: np.ndarray  # int64[n_refs + 1]
+    ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_edge_offsets: np.ndarray  # int64[n_refs + 1] — contiguous edges
     ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — junction edges
 
-    # -- nodes: two disjoint populations, each two genome-strand columns --
-    node_contained_count: np.ndarray  # uint32[n_nodes, 2] — the whole path lies inside the node
-    #: ⭐ uint64[n_nodes] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
+    # -- regions: two disjoint populations, each two genome-strand columns --
+    region_contained_count: np.ndarray  # uint32[n_regions, 2] — the whole path lies inside the region
+    #: ⭐ uint64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
-    node_contained_inv_opportunity_sum: np.ndarray
-    node_start_count: np.ndarray  # uint32[n_nodes] — THE invariant; sums to qc.deposited
+    region_contained_inv_opportunity_sum: np.ndarray
+    region_start_count: np.ndarray  # uint32[n_regions] — THE invariant; sums to qc.deposited
 
-    # -- contiguous edges: the 0-bp line between two adjacent nodes --
+    # -- contiguous edges: the 0-bp line between two adjacent regions --
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2] — the mixture being deconvolved
     edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column, strand-agnostic
     #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
@@ -549,7 +549,7 @@ class AccumulatorPayload:
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
     #: COMPUTABLE.** A spliced fragment's block containing no interior line deposits on neither edge
-    #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single node.
+    #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single region.
     #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
     #:
     #: ⭐ Measured on the origin-split oracle at ladder g50 capture_off: **1,222,375 of 4,830,713 RNA
@@ -586,10 +586,10 @@ class AccumulatorPayload:
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
     n_refs: int
 
-    #: ⭐ Provenance, and it must cover **nodes AND edges**. The payload is edge-keyed by construction —
+    #: ⭐ Provenance, and it must cover **regions AND edges**. The payload is edge-keyed by construction —
     #: its junction axis is meaningless against a different junction CSR — and `index.partition_hash`
-    #: deliberately covers `nodes.feather` only. A 2026-07-29 flag fix rewrote every `edges.feather` while
-    #: leaving every `nodes.feather` byte-identical, so a nodes-only key would have verified CLEAN against
+    #: deliberately covers `regions.feather` only. A 2026-07-29 flag fix rewrote every `edges.feather` while
+    #: leaving every `regions.feather` byte-identical, so a regions-only key would have verified CLEAN against
     #: a stale cache. `None` when the scanner was driven without an index to hash.
     graph_hash: str | None = None
 
@@ -607,8 +607,8 @@ class AccumulatorPayload:
         return N_STRAND_COLUMNS
 
     @property
-    def n_nodes(self) -> int:
-        return int(self.node_start_count.shape[0])
+    def n_regions(self) -> int:
+        return int(self.region_start_count.shape[0])
 
     @property
     def n_edges(self) -> int:
@@ -714,7 +714,7 @@ class AccumulatorPayload:
             name: _offsets(cal, name, n_refs)
             for name in (
                 "ref_cut_offsets",
-                "ref_node_offsets",
+                "ref_region_offsets",
                 "ref_edge_offsets",
                 "ref_sj_offsets",
             )
@@ -731,7 +731,7 @@ class AccumulatorPayload:
         # is the defect class that once dropped 476,719 of 476,732 fragments while every golden passed.
         per_ref_cuts = np.diff(offsets["ref_cut_offsets"])
         for name, per_ref in (
-            ("ref_node_offsets", np.maximum(per_ref_cuts - 1, 0)),
+            ("ref_region_offsets", np.maximum(per_ref_cuts - 1, 0)),
             ("ref_edge_offsets", np.maximum(per_ref_cuts - 2, 0)),
         ):
             expected = np.zeros(n_refs + 1, np.int64)
@@ -740,25 +740,25 @@ class AccumulatorPayload:
                 bad = int(np.argmax(offsets[name] != expected))
                 raise ValueError(
                     f"{name}[{bad}] is {int(offsets[name][bad])} but the cut axis implies "
-                    f"{int(expected[bad])}. A reference contributing c cuts owns c-1 nodes and c-2 "
+                    f"{int(expected[bad])}. A reference contributing c cuts owns c-1 regions and c-2 "
                     f"interior lines, and none at all below two cuts."
                 )
 
-        n_nodes = int(offsets["ref_node_offsets"][-1])
+        n_regions = int(offsets["ref_region_offsets"][-1])
         n_edges = int(offsets["ref_edge_offsets"][-1])
         n_sj = int(offsets["ref_sj_offsets"][-1])
 
-        rows_on = {"node": n_nodes, "edge": n_edges, "sj": n_sj}
+        rows_on = {"region": n_regions, "edge": n_edges, "sj": n_sj}
         banks: dict[str, np.ndarray] = {}
         for name, axis, dtype in BANK_AXES:
             banks[name] = _bank(cal, name, rows_on[axis], dtype)
         for name, axis, dtype in SINGLE_COLUMN_AXES:
             banks[name] = _single_column_bank(cal, name, rows_on[axis], dtype)
 
-        node_start_count = np.ascontiguousarray(cal["node_start_count"], dtype=np.uint32)
-        if node_start_count.shape != (n_nodes,):
+        region_start_count = np.ascontiguousarray(cal["region_start_count"], dtype=np.uint32)
+        if region_start_count.shape != (n_regions,):
             raise ValueError(
-                f"node_start_count has shape {node_start_count.shape}, expected ({n_nodes},)"
+                f"region_start_count has shape {region_start_count.shape}, expected ({n_regions},)"
             )
         pool_lengths = np.ascontiguousarray(cal["pool_lengths"], dtype=np.int64)
         if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):
@@ -773,7 +773,7 @@ class AccumulatorPayload:
                 f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
             )
         # ⭐ THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT, checked at the door. Same externally-checkable form as
-        # ``sum(node_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
+        # ``sum(region_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
         # was located in space, this one that every fragment was binned by length. A histogram that is
         # the anchor for every FL model in the tool must not be allowed in one fragment short.
         n_binned = int(deposited_lengths.sum())
@@ -808,7 +808,7 @@ class AccumulatorPayload:
             cut_positions=cut_positions,
             **offsets,
             **banks,
-            node_start_count=node_start_count,
+            region_start_count=region_start_count,
             pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
             deposited_lengths=deposited_lengths,
             deferred=deferred,

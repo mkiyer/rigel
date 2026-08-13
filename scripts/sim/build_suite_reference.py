@@ -4,7 +4,7 @@
 
 ⭐ **WHY A REAL BACKBONE.** The suite this replaces was a generated mini-genome, and it could not judge
 what it was used to judge: zero fragment-length variance, Poisson by
-construction, and a fine node set row-for-row identical to its merged one. Real human genes give
+construction, and a fine region set row-for-row identical to its merged one. Real human genes give
 calibration a real fragment-length distribution, a real strand model, and — the point of the v8 partition
 — alternative TSS/TES that fall strictly inside exons. The owner's plan is one chromosome as the training
 substrate, with a synthetic stress chromosome piggybacked on top.

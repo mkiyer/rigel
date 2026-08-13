@@ -108,7 +108,7 @@ def main() -> int:
     #
     # ⛔⛔ **PER ROW KEY, NEVER OVER THE WHOLE FILE.** This used to union the field names across every
     # row of an arm and then demand every row carry every name. That holds only while all rows share one
-    # schema — true for `ladder_arm_ab`, whose two axes are `node` and `edge` — and it reports a
+    # schema — true for `ladder_arm_ab`, whose two axes are `region` and `edge` — and it reports a
     # spurious failure the moment an arm emits rows of DIFFERENT shapes on different axes:
     # `quant_accuracy.py` writes a `transcript` row and a `library` row per condition, and the global
     # union made each one look like it was missing the other's fields. **1,296 false "field missing"

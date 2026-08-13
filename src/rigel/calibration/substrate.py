@@ -9,7 +9,7 @@ reads the payload.
 THE FOUR POPULATIONS, on three axes off by one from each other per reference — and ⭐ they do NOT all
 carry the same channels, because a channel is stored where a named consumer reads it::
 
-    nodes             contained   count  inv_length_sum  length_sum
+    regions             contained   count  inv_length_sum  length_sum
     contiguous edges  unspliced   count  inv_length_sum  length_sum   the mixture being deconvolved
                       spliced     count                               certified RNA -- gDNA cannot splice
     junction edges    (one)       count  inv_length_sum               pure RNA by construction
@@ -63,7 +63,7 @@ class PopulationView:
 
     They answer different questions and are never interchangeable: ``count`` carries the statistical
     power (a Beta-Binomial needs an integer, per strand) and ``inv_length_sum`` carries the level — an
-    exact model-free density at an edge, and *not* a density at a node.
+    exact model-free density at an edge, and *not* a density at a region.
 
     ⛔ **A population carries only the channels a named consumer reads**, and that rule has teeth: the
     ``length_sum`` channel was deleted in 2026-08-13's schema change precisely because it had none. The
@@ -80,8 +80,8 @@ class PopulationView:
     inv_length_sum: np.ndarray | None = None
     #: float64[n] — ⭐ **THE CONSERVED MASS**, strand-agnostic. Sums to ONE per fragment
     #: across the objects it touched, where ``count`` is ``+1`` on each of them. ⛔ ``None`` on the two
-    #: node populations, which need no such channel: ``node_contained_count`` is already 1 per contained
-    #: fragment, i.e. already the conserved node mass.
+    #: region populations, which need no such channel: ``region_contained_count`` is already 1 per contained
+    #: fragment, i.e. already the conserved region mass.
     mass: np.ndarray | None = None
 
     @property
@@ -121,8 +121,8 @@ class PopulationView:
         """float64[n] — ``mass / count``: the mean conserved fragment-mass ONE crossing here carries.
 
         ⭐ **This is what converts an object-INCIDENCE total into a FRAGMENT count.** It is 1.0 at a line
-        whose flanking nodes both exceed every fragment length — a crossing fragment can only cross that
-        one line, so its whole 1.0 lands there — and falls toward the node spacing where they do not.
+        whose flanking regions both exceed every fragment length — a crossing fragment can only cross that
+        one line, so its whole 1.0 lands there — and falls toward the region spacing where they do not.
         That gap is the K-inflation, per line.
 
         ⛔ **1.0 where nothing crossed**, the identity, not 0. There is no mass at such a line to
@@ -141,25 +141,25 @@ class PopulationView:
 class CalibrationSubstrate:
     """Every per-object statistic the calibrator reads, on the payload's own axes."""
 
-    n_nodes: int
+    n_regions: int
     n_edges: int
     n_junctions: int
 
-    strand_class: np.ndarray  # int8[n_nodes] — the node's transcript-strand class
-    node_start_count: np.ndarray  # int64[n_nodes] — one per accepted fragment; THE invariant
+    strand_class: np.ndarray  # int8[n_regions] — the region's transcript-strand class
+    region_start_count: np.ndarray  # int64[n_regions] — one per accepted fragment; THE invariant
 
     #: ⭐⭐ FOUR populations, and they do NOT carry the same channels. A channel is stored where a named
     #: consumer reads it and nowhere else::
     #:
-    #:     node_contained   count  inv_length_sum  length_sum
+    #:     region_contained   count  inv_length_sum  length_sum
     #:     edge_unspliced   count  inv_length_sum  length_sum  mass
     #:     edge_spliced     count                              mass   certified RNA — not deconvolved
     #:     junction         count  inv_length_sum                     LIVE in second_pass
     #:
-    #: ⚠ A fifth, ``node_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
-    #: touches the node axis at all** — a spliced fragment can never be *contained*, because both
+    #: ⚠ A fifth, ``region_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
+    #: touches the region axis at all** — a spliced fragment can never be *contained*, because both
     #: endpoints of an annotated intron are cuts.
-    node_contained: PopulationView
+    region_contained: PopulationView
     edge_unspliced: PopulationView
     edge_spliced: PopulationView
     junction: PopulationView
@@ -193,15 +193,15 @@ class CalibrationSubstrate:
             )
 
         return cls(
-            n_nodes=payload.n_nodes,
+            n_regions=payload.n_regions,
             n_edges=payload.n_edges,
             n_junctions=payload.n_sj,
             strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
-            node_start_count=np.asarray(payload.node_start_count, dtype=np.int64),
-            node_contained=view(
-                "node_contained",
-                payload.node_contained_count,
-                payload.node_contained_inv_opportunity_sum,
+            region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
+            region_contained=view(
+                "region_contained",
+                payload.region_contained_count,
+                payload.region_contained_inv_opportunity_sum,
             ),
             edge_unspliced=view(
                 "edge_unspliced",
@@ -230,17 +230,17 @@ class CalibrationSubstrate:
             raise CalibrationSubstrateError(
                 "calibration payload is None; BamScanner.set_regions was not called."
             )
-        if region_arrays.n_regions != payload.n_nodes:
+        if region_arrays.n_regions != payload.n_regions:
             raise CalibrationSubstrateError(
-                f"node geometry has {region_arrays.n_regions} objects but the payload has "
-                f"{payload.n_nodes}. {PARTITION_MISMATCH_HINT}"
+                f"region geometry has {region_arrays.n_regions} objects but the payload has "
+                f"{payload.n_regions}. {PARTITION_MISMATCH_HINT}"
             )
         expected = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-        actual = np.asarray(payload.ref_node_offsets, dtype=np.int64)
+        actual = np.asarray(payload.ref_region_offsets, dtype=np.int64)
         if not np.array_equal(expected, actual):
             bad = int(np.argmax(expected != actual)) if expected.shape == actual.shape else -1
             raise CalibrationSubstrateError(
-                "node geometry per-reference offsets do not match the payload's ref_node_offsets"
+                "region geometry per-reference offsets do not match the payload's ref_region_offsets"
                 + (f" (first difference at reference {bad})" if bad >= 0 else "")
                 + f". {PARTITION_MISMATCH_HINT}"
             )

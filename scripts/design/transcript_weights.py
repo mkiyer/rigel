@@ -27,9 +27,9 @@ objects, so the shipped form is a SOFT min.
 
 ⛔⛔ **AND THE SOFT MIN IS NOT AN UNWEIGHTED MEAN, WHICH IS WHERE THIS DEVIATES FROM THE SPEC AS
 WRITTEN.** `TRAPS: a-mean-of-ratios-inherits-the-partition` was measured *while designing this prior*:
-a node boundary appears wherever a signature changes — an antisense feature on the other strand splits a
+a region boundary appears wherever a signature changes — an antisense feature on the other strand splits a
 uniform stretch in two — so **how many objects a transcript's path contains is an artefact of the
-annotation, not biology.** Subdividing one 20 kb intron from 1 node to 4 to 10, mass and opportunity held
+annotation, not biology.** Subdividing one 20 kb intron from 1 region to 4 to 10, mass and opportunity held
 constant, moved a shadow span's share of its locus's prior from **9.4 % → 18.6 % → 32.4 %**. An
 unweighted harmonic, geometric or arithmetic mean over path objects inherits that artefact exactly.
 
@@ -77,7 +77,7 @@ floor here and there must not be one — `g00`'s lesson transposed is that doubt
 fragments it can support*. An unspliced fragment cannot cross an intron, so a transcript's unspliced
 opportunity is `Σ_exons contained_eff_length(exon_len)` on the RNA pmf: many tiny exons ⇒ nearly all its
 fragments are spliced ⇒ it can claim little of an UNSPLICED budget however abundant it is. ⛔ It is NOT
-`Σ_regions rna_node_eff_len`, which would forbid crossing an interior region boundary that a real
+`Σ_regions rna_region_eff_len`, which would forbid crossing an interior region boundary that a real
 fragment crosses freely.
 
 ⛔ **SPLICE-JUNCTION STEPS CARRY NO WEIGHT, BY THE OWNER'S OWN KEY REALIZATION.** The prior is UNSPLICED
@@ -121,7 +121,7 @@ MODES = ("arithmetic", "geometric", "harmonic", "min")
 #: and the derivation is short enough to state here.** Transcript ``t`` with ``A_t`` fragments over an
 #: effective length ``E_t`` puts ``A_t·ceff(r)/E_t`` contained fragments in region ``r``, so::
 #:
-#:     density(r) = mass_rna_node[r] / ceff(r) = Σ_{t ∋ r} A_t / E_t
+#:     density(r) = mass_rna_region[r] / ceff(r) = Σ_{t ∋ r} A_t / E_t
 #:
 #: ⭐ **The region's own opportunity CANCELS EXACTLY** — which is what makes densities at objects of
 #: wildly different sizes commensurate, and what the theorem's ``min`` is a min OF. So the soft min
@@ -157,12 +157,12 @@ GRANULARITIES = ("transcript", "gene")
 def region_unspliced_density(calibration) -> np.ndarray:
     """float64[n_regions] — deconvolved RNA fragments per admissible start position.
 
-    ⭐ ``mass_rna_node`` is already a FRAGMENT count: containment is exclusive, so a contained fragment
+    ⭐ ``mass_rna_region`` is already a FRAGMENT count: containment is exclusive, so a contained fragment
     deposits on exactly one region and needs no incidence→fragment conversion. It is also unspliced by
-    construction — ``node_contained`` is credited only when the fragment used no junction.
+    construction — ``region_contained`` is credited only when the fragment used no junction.
     """
-    mass = np.asarray(calibration.mass_rna_node, dtype=np.float64)
-    opp = np.asarray(calibration.rna_node_eff_len, dtype=np.float64)
+    mass = np.asarray(calibration.mass_rna_region, dtype=np.float64)
+    opp = np.asarray(calibration.rna_region_eff_len, dtype=np.float64)
     out = np.zeros_like(mass)
     np.divide(mass, opp, out=out, where=opp > 0.0)
     return out
@@ -196,7 +196,7 @@ def transcript_opportunities(index, rna_fl_pmf: np.ndarray) -> tuple[np.ndarray,
     fragment cannot do; summing before is the ordinary transcript effective length, over the spliced
     molecule a fragment actually samples.
 
-    ⛔ Neither is ``Σ_regions rna_node_eff_len``, and that would be the easy mistake — it would also
+    ⛔ Neither is ``Σ_regions rna_region_eff_len``, and that would be the easy mistake — it would also
     forbid crossing an INTERIOR region boundary, which a real fragment crosses freely, so it understates
     every transcript whose exons the partition happened to cut.
     """
@@ -267,7 +267,7 @@ def build_weights(
 
     d_region = region_unspliced_density(calibration)
     d_boundary = boundary_unspliced_density(calibration)
-    o_region = np.asarray(calibration.rna_node_eff_len, dtype=np.float64)
+    o_region = np.asarray(calibration.rna_region_eff_len, dtype=np.float64)
     o_boundary = np.asarray(calibration.rna_edge_eff_len, dtype=np.float64)
 
     kind = np.asarray(path.kind)

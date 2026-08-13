@@ -37,7 +37,7 @@ Anywhere else, the identity is not implied and there is nothing for the pin to r
 gDNA density at its own capture stratum and the exon behind it has no other way to hear it, so dropping
 that branch delivers the off-probe floor to every exon under capture (measured: it fires
 `test_gdna_scale_rule`'s capture gate at 20x and 200x). It is also why a per-capture-class landscape ratio
-built to do the same job measured inert (`node_geometry`'s deleted-landscape note). ⛔ And deleting the pin
+built to do the same job measured inert (`region_geometry`'s deleted-landscape note). ⛔ And deleting the pin
 outright is a third, worse thing: unanchored, the relay's residual compounded to ``Sum_c rho_c E_c / M``
 p99 = 31–288x and max 519x, and rescaling all three components blindly regressed capture-OFF 3.6x.
 `test_the_pin_fires_ONLY_where_no_belief_can_reach_its_budget` is what keeps this a licence.
@@ -68,7 +68,7 @@ measured consequence and neither is decoration:
                                                                    20x and 200x, + the own-measurement gate here
     ``if True``                   (the pre-fix behaviour)        7: every effect gate in this file
     ``if False``                  (delete the pin)               5: the union of the two above
-    ``_struct`` for ``g1_locked`` (node-only, so not the EDGE)   3: as ``if _lend``
+    ``_struct`` for ``g1_locked`` (region-only, so not the EDGE)   3: as ``if _lend``
     ``and`` for ``or``                                           5: the union
 """
 
@@ -87,7 +87,7 @@ from rigel.calibration.effective_length import (
     contained_eff_length,
     crossing_eff_length,
 )
-from rigel.calibration.node_geometry import g1_locked, init_beliefs
+from rigel.calibration.region_geometry import g1_locked, init_beliefs
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
 from _synthetic import make_chain_parts
@@ -96,7 +96,7 @@ from _synthetic import make_chain_parts
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 _N_GRID = 200
 
@@ -109,11 +109,11 @@ def _delta_pmf(length):
 
 def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
     """``intergenic | exon+ x k | intergenic`` with gDNA laid down at ``rho`` x each object's own
-    opportunity, plus ``rna[i]`` extra unstranded RNA counts on node ``i``.
+    opportunity, plus ``rna[i]`` extra unstranded RNA counts on region ``i``.
 
     ⭐ The gDNA field is UNIFORM by construction, so the truth is ``rho`` at every object and any
     departure of the relayed level from ``rho`` is the relay's own doing. ``rho_first`` overrides the
-    field on the FIRST node only — the handle for the TRAPS: a-message-from-the-destinations-belief invariance test.
+    field on the FIRST region only — the handle for the TRAPS: a-message-from-the-destinations-belief invariance test.
 
     ⚠ **No step on this chain is licensed**, and that is the point of it: the library is unstranded and
     there is no junction anywhere, so no slot ever earns RNA precision of its own and no source can lend
@@ -122,18 +122,18 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     n = len(rna)
-    node_eff = contained_eff_length(np.full(n, bp), gdna_fl)
+    region_eff = contained_eff_length(np.full(n, bp), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
     edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     field = np.full(n, float(rho))
     if rho_first is not None:
         field[0] = float(rho_first)
-    node_count = field * node_eff + np.asarray(rna, float)
+    region_count = field * region_eff + np.asarray(rna, float)
     return make_chain_parts(
         [0] + [BIT_EXON_POS] * (n - 2) + [0],
-        node_size_bp=bp,
-        node_pos=node_count / 2,
-        node_neg=node_count / 2,
+        region_size_bp=bp,
+        region_pos=region_count / 2,
+        region_neg=region_count / 2,
         edge_pos=rho * edge_eff / 2,
         edge_neg=rho * edge_eff / 2,
         gdna_fl=gdna_fl,
@@ -144,16 +144,16 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
 def _stranded_chain():
     """``intergenic | exon+ | intron+ | exon+ | intergenic`` on a STRANDED library.
 
-    ⭐ **The two-sided fixture**: the genic nodes earn real composition evidence from the strand tilt and
+    ⭐ **The two-sided fixture**: the genic regions earn real composition evidence from the strand tilt and
     can therefore lend one, while the intergenic flanks and the gene-boundary EDGEs cannot. So the same
     chain carries licensed and unlicensed steps, which is what makes "the pin fires iff licensed"
     falsifiable in both directions. Same geometry as `test_gdna_scale_rule`'s licence gate.
     """
     return make_chain_parts(
         [0, BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS, 0],
-        node_size_bp=1000.0,
-        node_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic nodes
-        node_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
+        region_size_bp=1000.0,
+        region_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic regions
+        region_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
         edge_pos=[20.0, 60.0, 60.0, 20.0],
         edge_neg=[20.0, 10.0, 10.0, 20.0],
     )
@@ -177,7 +177,7 @@ def _relay_walk(parts, *, kappa=0.5, n_obs=0.0):
     * ``S_over_M`` — the destination's mass identity as the relay left it. 1 means the pin fired.
     """
     cap = {}
-    final = node_sweep(
+    final = region_sweep(
         parts.chain,
         parts.statics,
         parts.geometry,
@@ -196,7 +196,7 @@ def _relay_walk(parts, *, kappa=0.5, n_obs=0.0):
     op, on, pg_own = st["op"], st["on"], st["pg_own"]
     # ⭐ the reframe frame is a PAIR, one total per FLANK, and a hop pairs them by ROLE: this walk follows
     # the FORWARD relay, whose source is the genomic-LOW neighbour, so the destination presents its
-    # LOW-flank total and the source its HIGH-flank one (`node_total_density`).
+    # LOW-flank total and the source its HIGH-flank one (`region_total_density`).
     rho_lo, rho_hi = st["rho_lo"], st["rho_hi"]
     left = np.asarray(parts.chain.left, np.int64)
     g1 = g1_locked(parts.statics.free_pos, parts.statics.free_neg)
@@ -214,7 +214,7 @@ def _relay_walk(parts, *, kappa=0.5, n_obs=0.0):
         out.append(
             {
                 "slot": s,
-                "is_node": bool(np.asarray(parts.chain.kind)[s] == 0),
+                "is_region": bool(np.asarray(parts.chain.kind)[s] == 0),
                 "M_over_Eg": float(M[s] / EG[s]),
                 "R_own": float((op[s] + on[s]) * ER[s] / M[s]),
                 "own_prec": float(pg_own[s]),
@@ -331,7 +331,7 @@ def test_the_lend_branch_of_the_licence_is_live():
     deleted. This asserts the composition branch fires on steps whose destination is NOT structurally
     pure gDNA — i.e. that it decides something the structural branch does not.
 
-    The fixture is STRANDED, so the genic nodes earn composition evidence of their own and can lend one,
+    The fixture is STRANDED, so the genic regions earn composition evidence of their own and can lend one,
     while the intergenic flanks and the gene-boundary EDGEs cannot. ⚠ The effect on the delivered level
     is not readable here (see the note in the gate above); what is asserted is the predicate."""
     walk, _, _ = _relay_walk(_stranded_chain(), kappa=0.95, n_obs=10_000.0)
@@ -468,9 +468,9 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
     case (ii) and the off-probe intergenic floor leaks straight through to the exon: measured, and it
     fires `test_gdna_scale_rule.test_capture_step_is_carried_and_the_off_probe_floor_is_not` at 20x and
     200x. A per-capture-class landscape ratio built to do this job explicitly measured inert
-    (`node_geometry`'s deleted-landscape note) because this pin already did it.
+    (`region_geometry`'s deleted-landscape note) because this pin already did it.
 
-    The fixture disagrees on purpose: the field on the FIRST node alone is scaled 10x, so the level
+    The fixture disagrees on purpose: the field on the FIRST region alone is scaled 10x, so the level
     arriving at the EDGE is 10x the EDGE's own measurement, and the EDGE's answer must be its own."""
     EDGE = 1  # chain N E N E N E N E N → the intergenic|exon line, structurally pure gDNA
     levels = []
@@ -497,7 +497,7 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
     reason=(
         "NOT the nested-exons probe, and not the mass pin: the level reaching the RNA-free interior exon is now the field "
         "EXACTLY (see the gate above it), and the exon still reads 0.914 rather than 1.000. What is "
-        "left is psi's uninformative reference holding an evidence-free node off the f_g = 1 vertex by "
+        "left is psi's uninformative reference holding an evidence-free region off the f_g = 1 vertex by "
         "~0.08 on its own — test_sweep.test_gdna_sweep_factor1_ambig_recovery measures the same "
         "residual from the other side. Strict: the bound is the TRUTH and must not be widened to the "
         "number the solver currently reaches."

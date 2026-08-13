@@ -29,18 +29,18 @@ than from the BAM — so this compares *the molecule the simulator made* with *t
 holds*, which no existing gate does:
 
 * the path is the fragment's contiguous genomic SEGMENTS; a junction splits it in two;
-* ``node_start_count`` gets +1 at the node containing the path's FIRST covered base — one per accepted
+* ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
   fragment, so its sum is the deposited count;
 * a cut line strictly inside a segment is CROSSED: ``edge_spliced`` if the path used any annotated
   junction, else ``edge_unspliced``;
-* a node between two consecutively-crossed lines OF ONE SEGMENT is SPANNED;
+* a region between two consecutively-crossed lines OF ONE SEGMENT is SPANNED;
 * every annotated junction used gets ``sj_count`` +1;
-* CONTAINED — ``node_contained`` — iff the path used no junction AND its first and last bases are in
-  the same node. ⛔ A spliced fragment is never contained.
+* CONTAINED — ``region_contained`` — iff the path used no junction AND its first and last bases are in
+  the same region. ⛔ A spliced fragment is never contained.
 
 ⭐⭐ **What that predicts for a ONE-transcript toy, and it is worth stating before measuring it:** on a
-pure-mRNA two-exon transcript whose exons ARE the nodes, every fragment deposits either one
-``node_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``edge_unspliced`` at the two
+pure-mRNA two-exon transcript whose exons ARE the regions, every fragment deposits either one
+``region_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``edge_unspliced`` at the two
 ``intron|exon`` lines is **exactly zero**, because mature RNA cannot cross an exon↔intron seam
 contiguously. ⛔ **That last clause is NOT "zero everywhere"**, and the difference is the whole reason the
 structural gate is now a SET: as soon as another transcript's exon spans the intron, mature RNA crosses
@@ -243,7 +243,7 @@ class Geom:
         ⚠ The same reflection, against the transcript's genomic SPAN rather than its spliced length —
         ``rigel.sim.bam.premrna_to_genomic_interval``. Getting this wrong on ``−`` puts every nascent
         fragment at the mirror-image position inside the gene, which is invisible in a total and
-        visible per node."""
+        visible per region."""
         g0, g1 = self.span
         n = g1 - g0
         if self.strand == "-" and PERTURB != "pos_premrna":
@@ -290,21 +290,21 @@ class TruthTally:
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
     the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
-    def __init__(self, cuts: np.ndarray, n_nodes: int, n_edges: int, junctions: dict):
+    def __init__(self, cuts: np.ndarray, n_regions: int, n_edges: int, junctions: dict):
         self.cuts = np.asarray(cuts, np.int64)
-        self.node_contained = np.zeros(n_nodes, np.int64)
-        self.node_spanning = np.zeros(n_nodes, np.int64)
-        self.node_start = np.zeros(n_nodes, np.int64)
+        self.region_contained = np.zeros(n_regions, np.int64)
+        self.region_spanning = np.zeros(n_regions, np.int64)
+        self.region_start = np.zeros(n_regions, np.int64)
         self.edge_unspliced = np.zeros(n_edges, np.int64)
         self.edge_spliced = np.zeros(n_edges, np.int64)
         self.sj = Counter()
         self.junctions = junctions  #: (intron_start, intron_end) -> jid
         self.n_deposited = 0
 
-    def _node_of(self, pos: int) -> int:
-        """⚠ ``cut_positions`` carries BOTH reference boundaries — ``n_nodes = n_cuts − 1`` — so the
-        node index is one less than the insertion point. Transcribed from the reference's own
-        ``_local_node``; getting it wrong shifts every deposit by one node, which is exactly what a
+    def _region_of(self, pos: int) -> int:
+        """⚠ ``cut_positions`` carries BOTH reference boundaries — ``n_regions = n_cuts − 1`` — so the
+        region index is one less than the insertion point. Transcribed from the reference's own
+        ``_local_region``; getting it wrong shifts every deposit by one region, which is exactly what a
         first run of this file did."""
         return min(max(int(np.searchsorted(self.cuts, pos, side="right")) - 1, 0), self.cuts.size - 2)
 
@@ -314,7 +314,7 @@ class TruthTally:
         sj_ids = [self.junctions[i] for i in introns if i in self.junctions]
         spliced = bool(sj_ids)
         first_base, last_base = segments[0][0], segments[-1][1] - 1
-        self.node_start[self._node_of(first_base)] += 1
+        self.region_start[self._region_of(first_base)] += 1
         self.n_deposited += 1
         edge = self.edge_spliced if spliced else self.edge_unspliced
         for seg_start, seg_end in segments:
@@ -323,12 +323,12 @@ class TruthTally:
             for line in range(first, last):
                 edge[line - 1] += 1
             for line in range(first, last - 1):
-                self.node_spanning[line] += 1
-        # ⚠ ``line`` indexes ``cuts``; edge ``line-1`` and node ``line`` follow the reference exactly.
+                self.region_spanning[line] += 1
+        # ⚠ ``line`` indexes ``cuts``; edge ``line-1`` and region ``line`` follow the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
-        if not sj_ids and self._node_of(first_base) == self._node_of(last_base):
-            self.node_contained[self._node_of(first_base)] += 1
+        if not sj_ids and self._region_of(first_base) == self._region_of(last_base):
+            self.region_contained[self._region_of(first_base)] += 1
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -662,7 +662,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print("\n── GATE TRAPS: self-checking-validator: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
     cuts = np.asarray(payload.cut_positions, np.int64)
-    n_nodes, n_edges = int(payload.n_nodes), int(payload.n_edges)
+    n_regions, n_edges = int(payload.n_regions), int(payload.n_edges)
     # the junction map: (intron_start, intron_end) -> jid, from the index's own junction axis
     from rigel.calibration.splice_graph import build_junction_geometry_arrays
 
@@ -671,8 +671,8 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     sizes = np.asarray(ra.region_size_bp, np.int64)
     junctions = {}
     for k in range(int(getattr(jg, "n_junctions", 0))):
-        src = int(np.asarray(jg.src_node)[k])
-        dst = int(np.asarray(jg.dst_node)[k])
+        src = int(np.asarray(jg.src_region)[k])
+        dst = int(np.asarray(jg.dst_region)[k])
         junctions[(int(starts[src] + sizes[src]), int(starts[dst]))] = k
     # ⛔ EVERY spec-declared intron must appear on the index's junction axis, and nothing else may. A
     # junction the map misses would make its crossings read as contiguous and silently deposit on the
@@ -684,7 +684,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
           "⭐ the index's junction axis is EXACTLY the set of introns the spec declares",
           f"spec {sorted(declared)} vs index {sorted(junctions)}")
 
-    tt = TruthTally(cuts, n_nodes, n_edges, junctions)
+    tt = TruthTally(cuts, n_regions, n_edges, junctions)
 
     first_tid = sorted(geoms)[0]
     for f in frags:
@@ -708,22 +708,22 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print("   " + "-" * 80)
     ok_all = True
     pay = {
-        "node_contained": (col(payload.node_contained_count), tt.node_contained, "node"),
-        "node_spanning": (col(payload.node_spanning_count), tt.node_spanning, "node"),
-        "node_start": (np.asarray(payload.node_start_count, np.int64), tt.node_start, "node"),
+        "region_contained": (col(payload.region_contained_count), tt.region_contained, "region"),
+        "region_spanning": (col(payload.region_spanning_count), tt.region_spanning, "region"),
+        "region_start": (np.asarray(payload.region_start_count, np.int64), tt.region_start, "region"),
         "edge_unspliced": (col(payload.edge_unspliced_count), tt.edge_unspliced, "edge"),
         "edge_spliced": (col(payload.edge_spliced_count), tt.edge_spliced, "edge"),
     }
-    for i in range(n_nodes):
-        label = f"NODE {TYPE_NAMES[int(rtype[i])]} [{starts[i]:,},{starts[i] + sizes[i]:,})"
+    for i in range(n_regions):
+        label = f"REGION {TYPE_NAMES[int(rtype[i])]} [{starts[i]:,},{starts[i] + sizes[i]:,})"
         for bank, (got, exp, axis) in pay.items():
-            if axis != "node" or (got[i] == 0 and exp[i] == 0):
+            if axis != "region" or (got[i] == 0 and exp[i] == 0):
                 continue
             d = int(got[i]) - int(exp[i])
             ok_all &= d == 0
             print(f"   {label:<30} {bank:<16} {int(exp[i]):>9,} {int(got[i]):>12,} {d:>+8,}")
     for i in range(n_edges):
-        label = f"EDGE @{starts[i + 1]:,}" if i + 1 < n_nodes else f"EDGE #{i}"
+        label = f"EDGE @{starts[i + 1]:,}" if i + 1 < n_regions else f"EDGE #{i}"
         for bank, (got, exp, axis) in pay.items():
             if axis != "edge" or (got[i] == 0 and exp[i] == 0):
                 continue
@@ -753,13 +753,13 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
         exonic = {
             int(starts[i + 1])
             for i in range(n_edges)
-            if i + 1 < n_nodes
+            if i + 1 < n_regions
             and any(s < int(starts[i + 1]) < e for g in geoms.values() for s, e in g.exons)
         }
         if PERTURB == "unspliced_zero_everywhere":
             exonic = set()
         got = {int(starts[i + 1]) for i in range(n_edges)
-               if i + 1 < n_nodes and int(e_un[i]) > 0}
+               if i + 1 < n_regions and int(e_un[i]) > 0}
         print(f"   EDGEs an exon spans contiguously: {sorted(exonic)}")
         print(f"   EDGEs with nonzero edge_unspliced: {sorted(got)}")
         check(got == exonic,
@@ -772,14 +772,14 @@ def gate_invariants(payload, tt, frags):
     """TRAPS: perturb-every-gate — the accumulator's own externally-checkable identities."""
     print("\n── GATE TRAPS: perturb-every-gate: THE ACCUMULATOR'S OWN INVARIANTS ─────────────────────────────────────────")
     qc = {f.name: getattr(payload.qc, f.name) for f in dataclasses.fields(payload.qc)}
-    start_sum = int(np.asarray(payload.node_start_count, np.int64).sum())
+    start_sum = int(np.asarray(payload.region_start_count, np.int64).sum())
     dep_len_sum = int(np.asarray(payload.deposited_lengths, np.int64).sum())
-    print(f"   Σ node_start_count      {start_sum:,}")
+    print(f"   Σ region_start_count      {start_sum:,}")
     print(f"   Σ deposited_lengths     {dep_len_sum:,}")
     print(f"   fragments in the BAM    {len(frags):,}")
     print(f"   TRUTH-derived deposits  {tt.n_deposited:,}")
     check(start_sum == dep_len_sum,
-          "Σ node_start_count == Σ deposited_lengths (one per accepted fragment)")
+          "Σ region_start_count == Σ deposited_lengths (one per accepted fragment)")
     held = len(frags) - start_sum
     print(f"   ⭐ fragments NOT deposited: {held:,}  ({held / max(len(frags), 1):.2%})")
     for k, v in sorted(qc.items()):

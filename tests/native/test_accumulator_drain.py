@@ -143,7 +143,7 @@ def test_draining_a_choice_equals_depositing_it_directly(choice):
         f"a drained deposit must be byte-identical to a direct one on every tally channel; differs on "
         f"{sorted(differing)}"
     )
-    assert "node_start_count" not in differing and "deposited_lengths" not in differing
+    assert "region_start_count" not in differing and "deposited_lengths" not in differing
 
 
 def test_the_drain_consumes_the_bank_and_conserves():
@@ -165,7 +165,7 @@ def test_the_drain_consumes_the_bank_and_conserves():
     # ⭐ The held counter goes to 0 WITH the bank. The two must describe one population — the payload
     # refuses a bank that disagrees with its counter at the door, and a drained payload gets no exception.
     assert accumulator.tally.qc["deferred_undetermined_gap"] == 0
-    assert int(accumulator.tally.node_start_count.sum()) == accumulator.tally.qc["deposited"]
+    assert int(accumulator.tally.region_start_count.sum()) == accumulator.tally.qc["deposited"]
     assert int(accumulator.tally.deposited_lengths.sum()) == accumulator.tally.qc["deposited"]
 
 
@@ -353,7 +353,7 @@ def scanned_two_contigs(tmp_path_factory):
 
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
-        build_node_partition_arrays,
+        build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
     from rigel.index import TranscriptIndex
@@ -435,24 +435,24 @@ def scanned_two_contigs(tmp_path_factory):
     _s, strand_model, _b, payload = scan_and_buffer(
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
-    _, _, node_types = build_node_partition_arrays(index)
-    return payload, node_types, build_junction_edge_arrays(index), strand_model
+    _, _, region_types = build_region_partition_arrays(index)
+    return payload, region_types, build_junction_edge_arrays(index), strand_model
 
 
 def _drained(scanned_two_contigs, seed=11):
     from rigel.calibration.fl import build_fl_models
     from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
-    payload, node_types, junctions, strand_model = scanned_two_contigs
+    payload, region_types, junctions, strand_model = scanned_two_contigs
     scores = score_held_fragments(
         payload,
         fl_models=build_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
-        node_types=node_types,
+        region_types=region_types,
         junctions=junctions,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
-    return payload, drain(payload, choices, node_types=node_types, junctions=junctions), choices
+    return payload, drain(payload, choices, region_types=region_types, junctions=junctions), choices
 
 
 def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
@@ -474,7 +474,7 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     assert after.qc.deferred_undetermined_gap == 0
     assert after.qc.deposited == before.qc.deposited + after.drain.deposited
     # ⭐ The two invariants that survive the per-reference placement arithmetic in `_gather_delta`.
-    assert int(after.node_start_count.sum()) == after.qc.deposited
+    assert int(after.region_start_count.sum()) == after.qc.deposited
     assert int(after.deposited_lengths.sum()) == after.qc.deposited
     # ⛔ Pass one's payload must be untouched — the delta is a separate object, which is what makes the
     # drain's contribution to every channel a subtraction rather than a rerun (§6.3).
@@ -541,9 +541,9 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
     from rigel.second_pass import drain
 
     _before, after, choices = _drained(scanned_two_contigs)
-    payload, node_types, junctions, _strand = scanned_two_contigs
+    payload, region_types, junctions, _strand = scanned_two_contigs
     with pytest.raises(ValueError, match="already been drained"):
-        drain(after, np.zeros(0, np.int64), node_types=node_types, junctions=junctions)
+        drain(after, np.zeros(0, np.int64), region_types=region_types, junctions=junctions)
     assert len(choices) == 6
 
 
@@ -568,7 +568,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
-        build_node_partition_arrays,
+        build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
     from rigel.index import TranscriptIndex
@@ -642,7 +642,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
             out.write(r)
     pysam.sort("-n", "-o", bam, bam)
 
-    _, _, node_types = build_node_partition_arrays(index)
+    _, _, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
 
     results = {}
@@ -658,13 +658,13 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
             payload,
             fl_models=build_fl_models(payload),
             rna_sense_frac=strand_model.p_r1_sense,
-            node_types=node_types,
+            region_types=region_types,
             junctions=junctions,
         )
         choices = choose_hypotheses(scores, payload, seed=5)
         results[threads] = (
             choices,
-            drain(payload, choices, node_types=node_types, junctions=junctions),
+            drain(payload, choices, region_types=region_types, junctions=junctions),
         )
 
     assert results[1][1].drain.offered == 80, (

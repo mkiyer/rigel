@@ -28,7 +28,7 @@ The four causes, and why the split matters
 ``no_evidence_set``     ⛔ ∅ only, and it is an ARTEFACT: the scorer's contiguous-edge set is empty.
                         See :func:`_lines_inside_inclusive` — the deposit rule says which lines
                         distinguish ∅ from a spliced path, and the shipped scorer asks for a strict
-                        subset of them, empty whenever the intron spans exactly one node
+                        subset of them, empty whenever the intron spans exactly one region
 ``zero_edge``           ∅'s evidence set is non-empty but some edge in it carries no unspliced mass
 ======================  ============================================================================
 
@@ -65,7 +65,7 @@ def _lines_strictly_inside(cuts: np.ndarray, lo: int, hi: int, start: int, end: 
 
     ``rigel.second_pass`` asked for the lines ``start < c < end`` until 2026-08-02. That drops the donor
     and acceptor lines — the two that are guaranteed to exist and guaranteed to discriminate — and
-    returns an EMPTY range when the intron spans one node. The shipped rule is now
+    returns an EMPTY range when the intron spans one region. The shipped rule is now
     :func:`rigel.second_pass._distinguishing_lines`, derived from the deposit; this function exists so
     the ``artefact`` column below can still be computed. ⛔ Do not import it into ``src/``.
     """
@@ -276,7 +276,7 @@ def main() -> int:
     from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
-        build_node_partition_arrays,
+        build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
     from rigel.scan_cache import read_scan_cache
@@ -287,7 +287,7 @@ def main() -> int:
     # the held fragments against a different length model than the one that actually decides them.
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)
-    _, _, node_types = build_node_partition_arrays(index)
+    _, _, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     t_ids = index.t_df["t_id"].to_numpy()
 
@@ -304,7 +304,7 @@ def main() -> int:
             # ⭐ Pass 1's own strand model, not calibration's — the second pass runs BEFORE calibration
             # and `rna_sense_frac` is the Beta posterior mean of exactly this.
             rna_sense_frac=cache.strand_model.p_r1_sense,
-            node_types=node_types,
+            region_types=region_types,
             junctions=junctions,
         )
         truth_path = suite / name / "truth_abundances.tsv"

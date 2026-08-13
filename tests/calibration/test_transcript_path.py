@@ -44,7 +44,7 @@ class _Regions:
 
 
 class _Index:
-    """The surface ``build_transcript_path`` reads: intervals.feather, t_df, nodes_df, edges_df."""
+    """The surface ``build_transcript_path`` reads: intervals.feather, t_df, regions_df, edges_df."""
 
     def __init__(self, tmp_path, bounds, exons_by_t, strands, synthetic=(), spans=None):
         self.index_dir = str(tmp_path)
@@ -79,7 +79,7 @@ class _Index:
         )
 
         n_r = len(bounds) - 1
-        self.nodes_df = pd.DataFrame(
+        self.regions_df = pd.DataFrame(
             {
                 "node_id": np.arange(n_r, dtype=np.int64),
                 "ref_name": ["chr1"] * n_r,
@@ -91,8 +91,8 @@ class _Index:
         jr = []
         for t, exons in exons_by_t.items():
             for (_, e0), (s1, _) in zip(exons[:-1], exons[1:], strict=True):
-                src = int(np.flatnonzero(self.nodes_df["end"].to_numpy() == e0)[0])
-                dst = int(np.flatnonzero(self.nodes_df["start"].to_numpy() == s1)[0])
+                src = int(np.flatnonzero(self.regions_df["end"].to_numpy() == e0)[0])
+                dst = int(np.flatnonzero(self.regions_df["start"].to_numpy() == s1)[0])
                 jr.append((src, dst, int(strands[t])))
         jr = sorted(set(jr))
         self.edges_df = pd.DataFrame(

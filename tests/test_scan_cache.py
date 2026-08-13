@@ -9,7 +9,7 @@ and a 5 M-fragment simulated condition costs far more than that to scan. Caching
 
 ⛔ **THE KEY IS THE WHOLE POINT, AND IT NEEDS THREE PARTS, NOT ONE.**
 
-* ``graph_hash`` — nodes plus the junction CSR. The payload already carries it, so the tally self-keys.
+* ``graph_hash`` — regions plus the junction CSR. The payload already carries it, so the tally self-keys.
 * ⭐ **a REACH digest.** logs that ``reach`` is consumed by calibration and is covered by
   **neither** ``partition_hash`` **nor** ``graph_hash`` — correctly, since neither the scan nor the
   accumulator reads it — and that the gap "becomes live the moment something caches a calibration
@@ -546,7 +546,7 @@ class TestNothingDerivableFromTheIndexIsStored:
 
         _cache_dir, cache = round_trip(scanned, tmp_path)
         result = calibrate(**calibration_inputs(cache, scanned[0]), config=CalibrationConfig())
-        assert result.n_nodes > 0
+        assert result.n_regions > 0
         assert result.n_junctions == cache.payload.n_sj
 
 

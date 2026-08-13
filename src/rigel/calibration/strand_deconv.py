@@ -1,10 +1,10 @@
 """The contiguous-edge seeds for the gDNA strand-overdispersion fit.  LAYER 4 — strand.
 
-After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.sweep`), the per-node gDNA/RNA
+After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.sweep`), the per-region gDNA/RNA
 deconvolution lives in the chain sweep. What is left here is edge strand geometry:
 
 * :func:`edge_seeds` — the exon–intron / exon–intergenic ``(sense, total, gDNA weight)`` seeds for the
-  gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-node
+  gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-region
   seeds (needed under hybrid capture, which depletes off-target intergenic / intronic gDNA).
 
 ⭐ **ONE SEED PER LINE, NOT TWO PER BOUNDARY (S5.f).** ``boundary_side_seeds`` emitted a seed for each
@@ -29,11 +29,11 @@ from __future__ import annotations
 
 import numpy as np
 
-# ⭐ :class:`NodeDeconv` MOVED TO `node_chain` (layer 0) on 2026-08-07: three layers were reaching UP for
+# ⭐ :class:`RegionDeconv` MOVED TO `region_chain` (layer 0) on 2026-08-07: three layers were reaching UP for
 # it, which `test_layering.py` now forbids. It is re-exported here only so existing importers keep
-# working; new code should take it from `node_chain`, where the tool's central datum belongs.
-from .node_chain import NodeDeconv  # noqa: F401
-from .region_arrays import edge_node_indices
+# working; new code should take it from `region_chain`, where the tool's central datum belongs.
+from .region_chain import RegionDeconv  # noqa: F401
+from .region_arrays import edge_region_indices
 from .signature import TS_NEG, TS_NONE, TS_POS
 
 
@@ -70,25 +70,25 @@ def edge_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.nd
     return cons_neg, cons_pos | cons_neg
 
 
-def edge_seeds(substrate, region_arrays, node_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def edge_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous edge.
 
     The exon–intron / exon–intergenic line seeds for the gDNA strand-overdispersion fit
-    (:mod:`gdna_strand`), complementing the contained-node seeds (needed under hybrid capture, which
+    (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture, which
     depletes off-target intergenic / intronic gDNA).
 
     ⚠ **``gdna_weight`` is identically 1 on every seed**, and that is a derivation rather than a
     simplification — see the module docstring. It is returned as an array because the pooled estimator
-    takes a per-seed weight and the contained-node seeds genuinely vary.
+    takes a per-seed weight and the contained-region seeds genuinely vary.
     """
     ts = np.asarray(region_arrays.strand_class)
-    lo, hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+    lo, hi = edge_region_indices(np.asarray(region_arrays.ref_id))
     count = np.asarray(substrate.edge_unspliced.count, dtype=np.float64)
     pos, neg = count[:, 0], count[:, 1]
     total = pos + neg
 
     orient_neg, strand_observable = edge_strand_orientation(ts[lo], ts[hi])
-    count_observable = np.asarray(node_density.edge_count_observable, dtype=bool)
+    count_observable = np.asarray(region_density.edge_count_observable, dtype=bool)
     seed = count_observable & strand_observable & (total > 0.0)
 
     sense = np.where(orient_neg, neg, pos)[seed]

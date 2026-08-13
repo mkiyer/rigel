@@ -28,17 +28,17 @@ from rigel.calibration.signature import (
 from rigel.calibration.strand_likelihood import strand_loglik
 
 
-def _beta_binom_nodes(rng, n_nodes, depth, overdispersion, mean=0.5):
-    """Draw per-node (sense, total) from BetaBinom(depth, mean, overdispersion).
+def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean=0.5):
+    """Draw per-region (sense, total) from BetaBinom(depth, mean, overdispersion).
 
-    Mirrors the simulator: each node has a shared latent sense rate p ~ Beta(a, b),
+    Mirrors the simulator: each region has a shared latent sense rate p ~ Beta(a, b),
     then sense ~ Binomial(depth, p). With a symmetric mean=½, a = b = ½(1−od)/od.
     """
     conc = (1.0 - overdispersion) / overdispersion  # a + b
     a = mean * conc
     b = (1.0 - mean) * conc
-    p = rng.beta(a, b, size=n_nodes)
-    total = np.full(n_nodes, depth, dtype=np.float64)
+    p = rng.beta(a, b, size=n_regions)
+    total = np.full(n_regions, depth, dtype=np.float64)
     sense = rng.binomial(depth, p).astype(np.float64)
     return sense, total
 
@@ -47,11 +47,11 @@ def _beta_binom_nodes(rng, n_nodes, depth, overdispersion, mean=0.5):
 def test_recovers_overdispersion_pure_gdna(true_od):
     """§4.1 — pure-gDNA seeds (weight=1): recovered overdispersion ≈ truth."""
     rng = np.random.default_rng(12345)
-    sense, total = _beta_binom_nodes(rng, n_nodes=4000, depth=120, overdispersion=true_od)
+    sense, total = _beta_binom_regions(rng, n_regions=4000, depth=120, overdispersion=true_od)
     weight = np.ones_like(total)  # pure gDNA → rna_sense_frac irrelevant
     model = fit_gdna_strand_overdispersion(sense, total, weight, rna_sense_frac=0.95)
     assert not model.fallback_used
-    # MoM on 4000 nodes: relative error should be small; absolute floor for tiny od.
+    # MoM on 4000 regions: relative error should be small; absolute floor for tiny od.
     assert model.gdna_strand_overdispersion == pytest.approx(true_od, rel=0.20, abs=0.005)
 
 
@@ -72,17 +72,17 @@ def test_mixture_identifiability(weight):
     true_od = 0.10
     kappa = 0.95
     depth = 200
-    n_nodes = 6000
+    n_regions = 6000
     conc = (1.0 - true_od) / true_od
     a = 0.5 * conc
-    sense = np.empty(n_nodes)
-    total = np.full(n_nodes, depth, dtype=np.float64)
-    for i in range(n_nodes):
+    sense = np.empty(n_regions)
+    total = np.full(n_regions, depth, dtype=np.float64)
+    for i in range(n_regions):
         n_g = rng.binomial(depth, weight)
-        p_g = rng.beta(a, a)  # shared gDNA rate for this node
+        p_g = rng.beta(a, a)  # shared gDNA rate for this region
         sense[i] = rng.binomial(n_g, p_g) + rng.binomial(depth - n_g, kappa)
     model = fit_gdna_strand_overdispersion(
-        sense, total, np.full(n_nodes, weight), rna_sense_frac=kappa
+        sense, total, np.full(n_regions, weight), rna_sense_frac=kappa
     )
     assert not model.fallback_used
     assert model.gdna_strand_overdispersion == pytest.approx(true_od, rel=0.30, abs=0.02)
@@ -114,7 +114,7 @@ def test_thin_seed_fallback():
 def test_beta_concentration_roundtrip():
     """Model exposes the Beta(a, a) concentration consistent with a = ½(1−od)/od."""
     m = GdnaStrandModel(
-        gdna_strand_overdispersion=0.1, n_seed_nodes=10, n_seed_fragments=1000, fallback_used=False
+        gdna_strand_overdispersion=0.1, n_seed_regions=10, n_seed_fragments=1000, fallback_used=False
     )
     assert m.beta_concentration() == pytest.approx(0.5 * (1.0 - 0.1) / 0.1)
 
@@ -137,10 +137,10 @@ def _view(pos, neg):
 
 
 def _mock_substrate(pos, neg, ts, count_evidence, observable):
-    """Mock with only contained-NODE signal: the edge axis carries ZERO counts ⇒ no edge seeds.
+    """Mock with only contained-REGION signal: the edge axis carries ZERO counts ⇒ no edge seeds.
 
-    ⚠ One reference with ``n`` nodes owns exactly ``n − 1`` lines, so the edge arrays are sized from
-    the node axis rather than left empty — an edge axis inconsistent with its own ``ref_id`` is not a
+    ⚠ One reference with ``n`` regions owns exactly ``n − 1`` lines, so the edge arrays are sized from
+    the region axis rather than left empty — an edge axis inconsistent with its own ``ref_id`` is not a
     "no edges" fixture, it is a mis-shaped one.
     """
     pos = np.asarray(pos, dtype=np.float64)
@@ -149,7 +149,7 @@ def _mock_substrate(pos, neg, ts, count_evidence, observable):
     n_edges = max(n - 1, 0)
     mass = pos + neg
     substrate = SimpleNamespace(
-        node_contained=_view(pos, neg),
+        region_contained=_view(pos, neg),
         edge_unspliced=_view(np.zeros(n_edges), np.zeros(n_edges)),
     )
     region_arrays = SimpleNamespace(strand_class=np.asarray(ts), ref_id=np.zeros(n, dtype=np.int64))
@@ -157,36 +157,36 @@ def _mock_substrate(pos, neg, ts, count_evidence, observable):
     ce = np.asarray(count_evidence, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         count_gdna_frac = np.clip(np.where(mass > 0.0, ce / mass, 0.0), 0.0, 1.0)
-    node_density = SimpleNamespace(
+    region_density = SimpleNamespace(
         count_evidence=ce,
         count_gdna_frac=count_gdna_frac,
-        node_count_observable=np.asarray(observable, dtype=bool),
+        region_count_observable=np.asarray(observable, dtype=bool),
         edge_count_observable=np.zeros(n_edges, dtype=bool),  # no edge seeds
         density=np.zeros(n, dtype=np.float64),
     )
-    return substrate, region_arrays, node_density
+    return substrate, region_arrays, region_density
 
 
 def test_wrapper_recovers_overdispersion_from_intergenic_seeds():
     """End-to-end of the Phase-2 wrapper: pure-gDNA (intergenic) seed regions → recovered od."""
     rng = np.random.default_rng(2024)
     true_od = 0.10
-    sense, total = _beta_binom_nodes(rng, n_nodes=3000, depth=100, overdispersion=true_od)
+    sense, total = _beta_binom_regions(rng, n_regions=3000, depth=100, overdispersion=true_od)
     pos, neg = sense, total - sense
     n = len(total)
-    substrate, region_arrays, node_density = _mock_substrate(
+    substrate, region_arrays, region_density = _mock_substrate(
         pos, neg, np.full(n, TS_NONE), count_evidence=total.copy(), observable=np.ones(n, bool)
     )  # count_evidence == mass ⇒ weight ≈ 1 (pure gDNA)
     model = fit_gdna_strand_from_substrate(
-        substrate, region_arrays, node_density, rna_sense_frac=0.95
+        substrate, region_arrays, region_density, rna_sense_frac=0.95
     )
     assert not model.fallback_used
-    assert model.n_seed_nodes == n
+    assert model.n_seed_regions == n
     assert model.gdna_strand_overdispersion == pytest.approx(true_od, rel=0.25, abs=0.01)
 
 
 def test_wrapper_excludes_ambig_and_non_observable():
-    """AMBIG nodes (no defined sense) and non-count-observable (exonic) nodes are dropped."""
+    """AMBIG regions (no defined sense) and non-count-observable (exonic) regions are dropped."""
     n = 100
     pos = np.full(n, 50.0)
     neg = np.full(n, 50.0)
@@ -197,7 +197,7 @@ def test_wrapper_excludes_ambig_and_non_observable():
     assert (
         fit_gdna_strand_from_substrate(
             s_ambig, ra_ambig, nd_ambig, rna_sense_frac=0.95
-        ).n_seed_nodes
+        ).n_seed_regions
         == 0
     )
     # intergenic but non-observable (exonic) → excluded
@@ -213,28 +213,28 @@ def test_wrapper_excludes_ambig_and_non_observable():
 
 
 def _edge_parts(signatures, edge_pos, edge_neg, ref_id=None):
-    """A substrate + geometry-free ``NodeDensity`` over ``signatures``, on the node/edge axes."""
+    """A substrate + geometry-free ``RegionDensity`` over ``signatures``, on the region/edge axes."""
     from rigel.calibration.density_model import count_observable_masks
     from rigel.calibration.signature import transcript_strand_class
 
     sig = np.asarray(signatures, dtype=np.uint8)
     n = sig.shape[0]
     ref = np.zeros(n, dtype=np.int64) if ref_id is None else np.asarray(ref_id, dtype=np.int64)
-    node_obs, edge_obs = count_observable_masks(sig, ref)
+    region_obs, edge_obs = count_observable_masks(sig, ref)
     substrate = SimpleNamespace(
-        node_contained=_view(np.zeros(n), np.zeros(n)),
+        region_contained=_view(np.zeros(n), np.zeros(n)),
         edge_unspliced=_view(edge_pos, edge_neg),
     )
     region_arrays = SimpleNamespace(
         signature=sig, strand_class=transcript_strand_class(sig.astype(np.int64)), ref_id=ref
     )
-    node_density = SimpleNamespace(
+    region_density = SimpleNamespace(
         count_gdna_frac=np.zeros(n),
-        node_count_observable=node_obs,
+        region_count_observable=region_obs,
         edge_count_observable=edge_obs,
         density=np.zeros(n),
     )
-    return substrate, region_arrays, node_density
+    return substrate, region_arrays, region_density
 
 
 def test_edge_seeds_emits_ONE_seed_per_line_not_two_per_boundary():
@@ -249,10 +249,10 @@ def test_edge_seeds_emits_ONE_seed_per_line_not_two_per_boundary():
     from rigel.calibration.strand_deconv import edge_seeds
 
     # intron+ | intron+ : one line, count-observable (no shared EXON bit), sense-POS on both flanks.
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS], edge_pos=[70.0], edge_neg=[30.0]
     )
-    sense, total, weight = edge_seeds(substrate, region_arrays, node_density)
+    sense, total, weight = edge_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (1,)  # ⛔ was (2,) — the same crossing, twice
     np.testing.assert_allclose(sense, [70.0])
     np.testing.assert_allclose(total, [100.0])
@@ -263,10 +263,10 @@ def test_edge_seed_sense_follows_the_flanking_transcript_strand():
     """A NEG-strand line orients to the NEG genome column; the sense count is not always ``pos``."""
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_INTRON_NEG, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
     )
-    sense, total, _ = edge_seeds(substrate, region_arrays, node_density)
+    sense, total, _ = edge_seeds(substrate, region_arrays, region_density)
     np.testing.assert_allclose(sense, [30.0])
     np.testing.assert_allclose(total, [100.0])
 
@@ -275,10 +275,10 @@ def test_an_intergenic_flank_is_a_strand_WILDCARD():
     """Intergenic carries no transcript, so a gene-edge line is oriented by its gene flank."""
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [0, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
     )
-    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    sense, _, _ = edge_seeds(substrate, region_arrays, region_density)
     np.testing.assert_allclose(sense, [30.0])  # oriented NEG by the gene side
 
 
@@ -286,10 +286,10 @@ def test_an_opposite_strand_line_is_not_strand_observable():
     """``{POS, NEG}`` leaves 'sense' undefined, so the line cannot seed the fit at all."""
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_INTRON_POS, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
     )
-    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    sense, _, _ = edge_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (0,)
 
 
@@ -307,11 +307,11 @@ def test_an_AMBIG_flank_cannot_seed():
     """
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_POS], edge_pos=[70.0], edge_neg=[30.0]
     )
-    assert node_density.edge_count_observable[0]  # count-observable — it fails on STRAND alone
-    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    assert region_density.edge_count_observable[0]  # count-observable — it fails on STRAND alone
+    sense, _, _ = edge_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (0,)
 
 
@@ -320,21 +320,21 @@ def test_a_line_inside_one_exon_is_not_count_observable():
     crosses it and its count is not gDNA."""
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_EXON_POS, BIT_EXON_POS], edge_pos=[70.0], edge_neg=[30.0]
     )
-    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    sense, _, _ = edge_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (0,)
 
 
 def test_edge_seeds_never_straddle_a_reference():
-    """Two single-node references own ZERO lines between them — nothing can leak across."""
+    """Two single-region references own ZERO lines between them — nothing can leak across."""
     from rigel.calibration.strand_deconv import edge_seeds
 
-    substrate, region_arrays, node_density = _edge_parts(
+    substrate, region_arrays, region_density = _edge_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS], edge_pos=[], edge_neg=[], ref_id=[0, 1]
     )
-    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    sense, _, _ = edge_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (0,)
 
 
@@ -370,7 +370,7 @@ def test_overdispersion_rescues_strand_skewed_gdna():
     assert median_gdna_frac(0.2) > median_gdna_frac(0.05) > median_gdna_frac(0.0)
 
 
-# --- prior conversion + shrinkage (replaces the old min-node / significance gates) -----------
+# --- prior conversion + shrinkage (replaces the old min-region / significance gates) -----------
 
 
 def test_overdispersion_for_beta_conversion():
@@ -387,7 +387,7 @@ def test_shrinkage_sparse_leans_on_prior_abundant_on_fit():
 
     ⭐ 2026-07-28: "sparse" is now measured in the right currency. Overdispersion is a correlation
     BETWEEN fragments, so the evidence unit is a PAIR — a seed of one fragment carries none of it. This
-    test used to call 3 nodes of depth 100 "sparse" and expect the prior to win; that is 14,850 pairs and
+    test used to call 3 regions of depth 100 "sparse" and expect the prior to win; that is 14,850 pairs and
     the fit should win, which is exactly the confusion the information-weighted shrinkage fixes. Genuine
     sparsity is many SHALLOW seeds."""
     rng = np.random.default_rng(11)
@@ -395,21 +395,21 @@ def test_shrinkage_sparse_leans_on_prior_abundant_on_fit():
     weight = 909.0  # the derived prior weight, in information units
 
     # LOW information: 40 two-fragment seeds = 40 pairs, far below the prior's 909 ⇒ ≈ prior.
-    s, t = _beta_binom_nodes(rng, n_nodes=40, depth=2, overdispersion=0.01)
+    s, t = _beta_binom_regions(rng, n_regions=40, depth=2, overdispersion=0.01)
     sparse = fit_gdna_strand_overdispersion(
         s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
     )
     assert sparse.gdna_strand_overdispersion == pytest.approx(prior, abs=0.03)
 
-    # HIGH information: 5000 nodes at depth 120 = 35.7M pairs ⇒ the fit dominates.
-    s, t = _beta_binom_nodes(rng, n_nodes=5000, depth=120, overdispersion=0.05)
+    # HIGH information: 5000 regions at depth 120 = 35.7M pairs ⇒ the fit dominates.
+    s, t = _beta_binom_regions(rng, n_regions=5000, depth=120, overdispersion=0.05)
     abundant = fit_gdna_strand_overdispersion(
         s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
     )
     assert abundant.gdna_strand_overdispersion == pytest.approx(0.05, rel=0.20, abs=0.01)
 
-    # ⭐ And the point of the units fix: 3 DEEP nodes are NOT sparse — they must follow the fit.
-    s, t = _beta_binom_nodes(rng, n_nodes=3, depth=400, overdispersion=0.05)
+    # ⭐ And the point of the units fix: 3 DEEP regions are NOT sparse — they must follow the fit.
+    s, t = _beta_binom_regions(rng, n_regions=3, depth=400, overdispersion=0.05)
     deep_few = fit_gdna_strand_overdispersion(
         s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
     )
@@ -421,7 +421,7 @@ def test_shrinkage_sparse_leans_on_prior_abundant_on_fit():
 def test_overdispersion_clamped_to_ceiling():
     """A wildly overdispersed fit is capped at the Beta(2,2) ceiling (od=0.2)."""
     rng = np.random.default_rng(3)
-    s, t = _beta_binom_nodes(rng, n_nodes=2000, depth=120, overdispersion=0.45)
+    s, t = _beta_binom_regions(rng, n_regions=2000, depth=120, overdispersion=0.45)
     model = fit_gdna_strand_overdispersion(s, t, np.ones_like(t), rna_sense_frac=0.95)
     assert model.gdna_strand_overdispersion <= _MAX_OVERDISPERSION + 1e-12
     assert model.gdna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION, abs=1e-9)

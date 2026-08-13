@@ -1,19 +1,19 @@
 """``DensityNPMLE`` — a Fixed-Kernel Poisson(-lognormal) Mixture NPMLE in count/rate space.
 
-**ONE density-estimation engine, TWO distinct calibration uses.** A node's count is ``g ~ Poisson(ρ·E)`` for a
-latent rate ``ρ ~ P(ρ)``; :meth:`~DensityNPMLE.fit` estimates the population ``P(log ρ)`` from per-node
+**ONE density-estimation engine, TWO distinct calibration uses.** A region's count is ``g ~ Poisson(ρ·E)`` for a
+latent rate ``ρ ~ P(ρ)``; :meth:`~DensityNPMLE.fit` estimates the population ``P(log ρ)`` from per-region
 ``(count, eff-length)`` observations. Which density it is fit on, and which projection is read, defines the use:
 
-1. **Enrichment NPMLE → σ²_transfer** (:meth:`~DensityNPMLE.project`). Fit on every node's **TOTAL** unspliced
+1. **Enrichment NPMLE → σ²_transfer** (:meth:`~DensityNPMLE.project`). Fit on every region's **TOTAL** unspliced
    density BEFORE the pass. It models the hybrid-capture ENRICHMENT/DEPLETION landscape, **not** composition
-   (a total-density model is composition-vacuous — count-zero-information). Its projection gives each node's
+   (a total-density model is composition-vacuous — count-zero-information). Its projection gives each region's
    ``(mu_proj, var_proj)``, from which the sweep builds the belief-free message transfer variance σ²_transfer
   This is the only NPMLE running in the INITIAL solve; it never
    votes composition. (`calibrate.enrichment_prior`.)
 
 2. **gDNA hyperprior → ψ** (:meth:`~DensityNPMLE.logprior`). Fit AFTER the pass-0 solve on the **DECONVOLVED
-   gDNA** density (``g_hat = f_g·count`` at belief width ``τ = √Var(log f_g)``) at the solvable nodes, with the
-   aggregate background ``ρ_bg`` pinned as a smooth low-density component. Its projection onto each node's
+   gDNA** density (``g_hat = f_g·count`` at belief width ``τ = √Var(log f_g)``) at the solvable regions, with the
+   aggregate background ``ρ_bg`` pinned as a smooth low-density component. Its projection onto each region's
    ``f_g`` axis is the composition (gDNA) arm of ψ for the REFIT solve. ANCHORED, EXTREMELY WEAK
    (``n_eff ≈ 0.15`` pseudo-obs — the strand likelihood + messages dominate). (`calibrate.gdna_prior`.)
 
@@ -25,11 +25,11 @@ Design (the two roles):
   The fixed kernel forbids any peak sharper than ``h`` ⇒ smooth, never a bed-of-nails (the raw NPMLE's
   Kiefer-Wolfowitz atomicity). ``h`` is the familiar KDE bandwidth knob (`config.npmle_bandwidth`).
 * **Count/rate space** — the Poisson is zero-native (``count=0`` ⇒ ``e^{−ρE}`` ⇒ mass at ρ→0), so the sparse,
-  zero-inflated data needs no boundary correction; the per-node likelihood width is set by the physics
+  zero-inflated data needs no boundary correction; the per-region likelihood width is set by the physics
   (broad for low-count/short-E — the discreteness comb smooths itself away). The pass-0 enrichment fit uses
   ``var_g=None`` (τ=0, pure Poisson at ``f_g=1``); the refit hyperprior passes the solved belief width.
 
-Performance: the per-node likelihood depends only on the ``(count, log-E, τ)`` cell, so ~10⁶ nodes collapse to
+Performance: the per-region likelihood depends only on the ``(count, log-E, τ)`` cell, so ~10⁶ regions collapse to
 ~10³–10⁴ weighted cells → the fit is sub-second and needs no C++/numba.
 """
 
@@ -55,9 +55,9 @@ def _lse(a: np.ndarray, axis: int) -> np.ndarray:
 
 
 def _collapse(g_hat, eff, var_g, *, dlog, dt, g_eps=1.0e-6):
-    """Collapse nodes to weighted cells of (near-)identical likelihood, keyed on
+    """Collapse regions to weighted cells of (near-)identical likelihood, keyed on
     ``(log-ĝ bin | a shared ĝ≈0 bin, log-E bin, τ bin)``. Representative = the in-cell mean; weight = the
-    node count. ``dlog``/``dt`` trade memory/compute for binning error — a perf knob, not an accuracy constant.
+    region count. ``dlog``/``dt`` trade memory/compute for binning error — a perf knob, not an accuracy constant.
     Returns ``(gc, Ec, t2c, wc)``."""
     logE = np.log(np.maximum(eff, _EPS))
     tau = np.sqrt(np.maximum(var_g, 0.0))
@@ -79,7 +79,7 @@ def _collapse(g_hat, eff, var_g, *, dlog, dt, g_eps=1.0e-6):
 def _cell_loglik(g_hat, eff, var_g, log_rho, *, n_gh, chunk=4096):
     """Per-cell log-likelihood over the log-ρ grid — the **Poisson-lognormal**: ``g ~ Poisson(ρ·E)`` with the
     belief placing ``log g ~ N(log ĝ, τ²)``; marginalise g by Gauss-Hermite quadrature. ``ĝ=0`` ⇒ ``g_q=0`` ⇒
-    ``e^{−ρE}`` (the exact zero anchor). ``τ=0`` (pass-0) ⇒ all quadrature nodes coincide ⇒ the pure Poisson
+    ``e^{−ρE}`` (the exact zero anchor). ``τ=0`` (pass-0) ⇒ all quadrature regions coincide ⇒ the pure Poisson
     (we drop the quadrature entirely then). Returns ``(n_cell, G)``."""
     pure_poisson = float(np.max(var_g)) <= _EPS
     x, wq = (
@@ -132,10 +132,10 @@ def _kde_density(log_rho, a_cells, w_cells, h, *, a_floor=-np.inf, w_floor=0.0, 
     normalized density on ``log_rho`` (G,).
 
     Each training cell deposits its OWN fixed-width kernel at its (resolution-floored) deconvolved-gDNA point
-    estimate ``a_c``, weighted by OCCUPANCY ``w_c`` (node count) — there is NO EM competition, so a minority
+    estimate ``a_c``, weighted by OCCUPANCY ``w_c`` (region count) — there is NO EM competition, so a minority
     (e.g. capture-enriched) population can never be competed away, and with a COMMON bandwidth occupancy equals
-    height (no per-node τ discounting). The **weak floor** is one pseudo-observation (``w_floor``) at the derived
-    background level ``a_floor`` — the anchor a sub-resolution / zero-gDNA node lands on, never an ``n_regions``
+    height (no per-region τ discounting). The **weak floor** is one pseudo-observation (``w_floor``) at the derived
+    background level ``a_floor`` — the anchor a sub-resolution / zero-gDNA region lands on, never an ``n_regions``
     tower. ``h_floor`` defaults to ``h`` (used when ``σ_bg`` is infinite, i.e. Σg=0)."""
     inv = 1.0 / (h * np.sqrt(2.0 * np.pi))
     z = (log_rho[:, None] - a_cells[None, :]) / h  # (G, n_cell)
@@ -189,7 +189,7 @@ class DensityNPMLE:
         rho_floor: float | None = None,
         additive: bool = False,
     ) -> "DensityNPMLE":
-        """Fit the Fixed-Kernel Poisson-lognormal Mixture on the per-node gDNA ``(count ĝ, eff-length E,
+        """Fit the Fixed-Kernel Poisson-lognormal Mixture on the per-region gDNA ``(count ĝ, eff-length E,
         belief width τ²=var_g)``. ``var_g=None`` ⇒ ``τ=0`` (pass-0, pure Poisson at ``f_g=1``, ``ĝ=count``).
 
         The grid spans the observed density support: the top is the MAX density (so the projection never
@@ -198,14 +198,14 @@ class DensityNPMLE:
 
         ``additive=True`` builds the **Role-B representation** instead of the
         EM mixture: an **occupancy-weighted, fixed-bandwidth KDE** on the deconvolved-gDNA point estimates
-        (each cell one kernel, weighted by node count — no EM competition, occupancy=height) plus a **weak
+        (each cell one kernel, weighted by region count — no EM competition, occupancy=height) plus a **weak
         1-pseudo-observation floor** at ``background.log_rho_floor`` (NOT the ``n_regions`` aggregate cell).
         The output object (``log_rho``/``logP``/``weights``/``project``/``logprior``) is interface-identical;
         ``weights`` carries the per-grid density mass so ``project``'s fallback stays defined. ``additive=False``
         (default) is the EM NPMLE, **byte-identical** to before — Role A (σ²_transfer) uses it unchanged."""
         g_hat = np.asarray(g_hat, dtype=np.float64)
         eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
-        # A belief width of ∞ marks an UNSOLVED node (no information). Such nodes carry no gDNA count
+        # A belief width of ∞ marks an UNSOLVED region (no information). Such regions carry no gDNA count
         # (``ĝ=0``) so their likelihood is the exact zero anchor regardless of τ — but ``0·exp(√2·∞·x)`` is
         # NaN, so normalise the width to 0 here rather than propagating a NaN through the EM.
         var_g = np.zeros_like(g_hat) if var_g is None else np.asarray(var_g, dtype=np.float64)
@@ -241,7 +241,7 @@ class DensityNPMLE:
         if additive:
             # ── THE ROLE-B ADDITIVE KDE — occupancy kernels + a weak floor, NO EM. ──
             # Each cell's point estimate is its deconvolved-gDNA density, floored at the 1-count resolution wall
-            # (a zero-ĝ / pure-RNA node reads "gDNA ≤ 1/E", not −∞). Occupancy ``wc`` is the weight; the
+            # (a zero-ĝ / pure-RNA region reads "gDNA ≤ 1/E", not −∞). Occupancy ``wc`` is the weight; the
             # background is a SEPARATE 1-pseudo-observation floor at ρ_floor — never the ``n_regions`` cell.
             a_cells = np.log(np.maximum(gc, 1.0)) - np.log(ec)
             if use_bg and np.isfinite(background.log_rho_floor):
@@ -312,7 +312,7 @@ class DensityNPMLE:
         )
 
     def logprior(self, fg_grid, mass, eff):
-        """Project onto the ``f_g`` solve grid → ``(n_nodes, K)`` additive term = ``log P(log ρ_g)`` at
+        """Project onto the ``f_g`` solve grid → ``(n_regions, K)`` additive term = ``log P(log ρ_g)`` at
         ``ρ_g = f_g·M/E``. **Bare** — no reference prior, no measure term, no Jacobian.
 
         This is the ``ψ_λ = strand + logP_g + logP_r`` result. The
@@ -346,7 +346,7 @@ class DensityNPMLE:
         ).reshape(log_rho_g.shape)
 
     def project(self, mass, eff, *, chunk: int = 8192):
-        """Belief-free projection of each node's total log-density ``d = log(mass/eff)`` onto the mixture
+        """Belief-free projection of each region's total log-density ``d = log(mass/eff)`` onto the mixture
         ``Σ_j w_j·N(μ_j, h²)`` → the latent log-rate's posterior ``(mu_proj, var_proj)`` (design doc
          role 2). The observed density is soft-assigned to the mixture
         components by responsibilities ``r_j ∝ w_j·N(d; μ_j, h²)``; then::

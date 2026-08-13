@@ -3,7 +3,7 @@
 The message currency is a **log**-density, and ``own_precision``'s count term was ``1/n``: the
 LARGE-COUNT LIMIT of the Poisson log-rate variance. At ``n = 0`` that limit diverges, so an object with
 no counts emitted nothing — even when it is structurally pure gDNA and therefore composition-CERTAIN.
-Measured consequence at ``g00`` (zero gDNA by construction): all **1,298** intergenic nodes hold exactly
+Measured consequence at ``g00`` (zero gDNA by construction): all **1,298** intergenic regions hold exactly
 zero counts over **50.7 Mb** of opportunity and **all 1,298 are silent**, pass-0 invents 34–38 % gDNA,
 and 100 % of the error is ``relay_only`` with 0 % ``struct_lock``.
 
@@ -34,7 +34,7 @@ import numpy as np
 import pytest
 from scipy.special import polygamma
 
-from rigel.calibration.node_init import (
+from rigel.calibration.region_init import (
     count_logvar,
     own_composition_logvar,
     own_precision,
@@ -90,7 +90,7 @@ def test_Z3_a_zero_count_carries_FINITE_POSITIVE_precision():
 
 
 def test_Z4_a_structurally_CERTAIN_object_with_ZERO_counts_now_EMITS():
-    """⭐⭐⭐ THE OBJECT THE DISSECTION FOUND: an intergenic node, ``struct_lock`` ⇒ composition
+    """⭐⭐⭐ THE OBJECT THE DISSECTION FOUND: an intergenic region, ``struct_lock`` ⇒ composition
     certain (``Var(log f_g) = 0``), holding zero counts over a large opportunity. It was
     *certain and silent at the same time*."""
     v_fg, _ = own_composition_logvar(np.array([1.0]), np.array([0.0]), np.array([True]))
@@ -149,9 +149,9 @@ def test_Z6_precision_is_MONOTONE_in_the_count_across_zero():
 
 
 def _init_with(geometry, chain, statics, belief):
-    from rigel.calibration.node_init import build_node_init
+    from rigel.calibration.region_init import build_region_init
 
-    return build_node_init(
+    return build_region_init(
         chain,
         statics,
         geometry,
@@ -168,20 +168,20 @@ def _init_with(geometry, chain, statics, belief):
     )
 
 
-def test_Z7_build_node_init_lets_a_ZERO_COUNT_STRUCTURALLY_CERTAIN_slot_EMIT():
+def test_Z7_build_region_init_lets_a_ZERO_COUNT_STRUCTURALLY_CERTAIN_slot_EMIT():
     """⛔⛔ **THE GATE THE FIRST PERTURBATION PASS WAS MISSING.** Z1–Z6 all call ``own_precision``
-    directly with ``live=True`` handed in, so re-gating ``build_node_init``'s ``live`` back onto the
+    directly with ``live=True`` handed in, so re-gating ``build_region_init``'s ``live`` back onto the
     COUNT (``rho_g > _EPS``) fired **nothing** — and that is the half of the fix that actually reaches
     the intergenic anchor. TRAPS: perturb-every-gate/TRAPS: name-the-observable-per-site: name the observable for *each place* the change was made.
 
     ⭐ The fixture is the shipped one with ONE thing varied — an intergenic slot's counts zeroed — so it
-    is the ``g00`` intergenic node in miniature: ``struct_lock`` (composition certain), zero counts,
+    is the ``g00`` intergenic region in miniature: ``struct_lock`` (composition certain), zero counts,
     positive gDNA opportunity. Under the retired count-keyed predicate its ``rho_g`` is 0, so
     ``rho_g > _EPS`` is False and it is silent. That silence, times 1,298, is TRAPS: a-zero-count-is-a-measurement.
     """
     import dataclasses
 
-    import test_node_init as TNI  # the shipped fixture, never a second one
+    import test_region_init as TNI  # the shipped fixture, never a second one
 
     chain, statics, geometry, belief, _ = TNI._scenario(0.9)
     base = _init_with(geometry, chain, statics, belief)

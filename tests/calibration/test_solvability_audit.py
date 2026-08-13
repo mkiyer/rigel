@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from rigel.calibration.node_chain import NODE
+from rigel.calibration.region_chain import REGION
 from rigel.config import CalibrationConfig, PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
@@ -78,7 +78,7 @@ def audited(tmp_path_factory):
         work_dir=tmp_path_factory.mktemp("sa_split"),
         tag="sa",
     )
-    return m, SA.audit(m, axis="node", config=cfg), cfg
+    return m, SA.audit(m, axis="region", config=cfg), cfg
 
 
 @pytest.fixture(scope="module")
@@ -115,7 +115,7 @@ def audited_stranded(tmp_path_factory):
         work_dir=tmp_path_factory.mktemp("sa_split_ss"),
         tag="sass",
     )
-    return m, SA.audit(m, axis="node", config=cfg), cfg
+    return m, SA.audit(m, axis="region", config=cfg), cfg
 
 
 # ── GATE 1: the undetermined population is EXCLUDED, and it is not empty ─────────────────────────
@@ -153,8 +153,8 @@ def test_the_own_evidence_CHANNELS_partition_and_match_the_undetermined_set(
     undetermined set and the union of the rest exactly the determined set.
 
     ⚠ The channels themselves OVERLAP and must not be asserted to partition — ``tau_lam`` is the SUM
-    of the strand and factory arms, so a single-stranded intron node has both. A first draft of this
-    gate asserted a partition and failed on exactly those nodes; the instrument was corrected to
+    of the strand and factory arms, so a single-stranded intron region has both. A first draft of this
+    gate asserted a partition and failed on exactly those regions; the instrument was corrected to
     describe them as overlapping capabilities and to warn that per-channel mass double-counts.
 
     PERTURBATION: require the overlap to be NON-EMPTY, so the gate fails if the two definitions ever
@@ -248,8 +248,8 @@ def test_the_ladders_FINAL_rung_IS_the_arm_it_claims_to_be(audited):
     PERTURBATION: the rungs must not all be identical, or the ladder cannot attribute anything.
     """
     m, a, _ = audited
-    g = np.asarray(m.arms["pass0"].mass_gdna_node, np.float64)
-    r = np.asarray(m.arms["pass0"].mass_rna_node, np.float64)
+    g = np.asarray(m.arms["pass0"].mass_gdna_region, np.float64)
+    r = np.asarray(m.arms["pass0"].mass_rna_region, np.float64)
     frac, _ = P0.object_fractions(g, r)
     live = a["live"]
     np.testing.assert_allclose(a["ladder"]["f_g"][live], frac[live], rtol=0, atol=1e-12)
@@ -374,7 +374,7 @@ def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audit
     tau = np.asarray(cap["_tau0_lam"], np.float64)
     ch = SA.channel_masks(cap, chain, cfg)
     kind = np.asarray(chain.kind)
-    axis_sel = kind == NODE  # `audited` is the node axis
+    axis_sel = kind == REGION  # `audited` is the region axis
     obj = np.asarray(chain.obj_idx, np.int64)
 
     sd = a["sd_lam"]
@@ -396,8 +396,8 @@ def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audit
         assert np.all(np.diff(s) <= 1e-12), "sd(λ) is not monotone-decreasing in τ"
 
 
-def test_a_STRUCTURALLY_LOCKED_EDGE_is_as_DETERMINED_as_a_locked_node(audited):
-    """⛔ ``locked`` was ``~solvable & (kind == NODE)``, so a G1 **edge** — an intergenic↔exon seam,
+def test_a_STRUCTURALLY_LOCKED_EDGE_is_as_DETERMINED_as_a_locked_region(audited):
+    """⛔ ``locked`` was ``~solvable & (kind == REGION)``, so a G1 **edge** — an intergenic↔exon seam,
     where RNA cannot cross a gene boundary and the solver pins ``{0,0,1}`` at ``Var(log f_g) = 0`` —
     fell into ``none`` and was EXCLUDED from the scored population as "honest ignorance". It is the
     opposite: it is structurally certain, and correct. Structural certainty is a property of the
@@ -414,8 +414,8 @@ def test_a_STRUCTURALLY_LOCKED_EDGE_is_as_DETERMINED_as_a_locked_node(audited):
     g1 = ~fp & ~fn
 
     ch = SA.channel_masks(cap, chain, cfg)
-    locked_edges = ch["locked"] & (kind != NODE)
-    assert (g1 & (kind != NODE)).sum() > 0, "no G1 edges in the fixture; the gate is vacuous"
+    locked_edges = ch["locked"] & (kind != REGION)
+    assert (g1 & (kind != REGION)).sum() > 0, "no G1 edges in the fixture; the gate is vacuous"
     assert locked_edges.sum() > 0, "a G1 edge is not classed locked"
     np.testing.assert_array_equal(ch["locked"], g1)
     assert not (ch["locked"] & ch["none"]).any(), "a locked slot is also 'none'"
@@ -434,7 +434,7 @@ def test_the_UNDETERMINED_class_is_checked_for_the_ONE_thing_it_can_get_wrong(au
     ``f_g ≈ ½`` at zero precision is a true statement about itself. But `SUCCESS.md` names the failure
     mode that exclusion leaves open ("claiming a precision it has not earned") and **nothing was
     checking it**, so a 395,251-fragment systematic error on ``gdna_g25_ss_0.50_nrna_none_capture_off``
-    — 87 exon nodes driven to ``f_g = 0.829`` against a truth of 0.009 — was invisible, at 0.0 %
+    — 87 exon regions driven to ``f_g = 0.829`` against a truth of 0.009 — was invisible, at 0.0 %
     scored, on a condition whose reported mwae is 0.0170.
 
     ⭐ The check needs no threshold: the class's correct answer is ½, so bucket it by ``|f_pred − ½|``

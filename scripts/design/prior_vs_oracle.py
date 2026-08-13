@@ -21,7 +21,7 @@ an INTERMEDIATE: ``solvability_audit.py`` and ``pass0_vs_oracle.py`` score per-o
  O   the prior a PERFECT DECONVOLUTION would produce             truth masses, same assembler
  S   O, plus each component rescaled by its OWN true share        :func:`share_priors`
  Fo  ⭐ the EM's OWN candidate count, per origin                  :func:`overlap_truth`
- F   the per-locus START-BASE count                              ``node_start_count``, per origin
+ F   the per-locus START-BASE count                              ``region_start_count``, per origin
 ===  ==========================================================  ===================================
 
 ``P − O`` is calibration's own error — everything upstream of :func:`assemble_priors`.
@@ -31,8 +31,8 @@ everything else. They are different repairs in different files and pooling them 
 
 ⛔⛔ **``F`` IS NOT THE EM's TARGET, AND EVERY ``O − F`` / ``S − F`` NUMBER THIS FILE ONCE PRINTED WAS
 SCORED AGAINST A QUANTITY NOTHING CONSUMES** (found and corrected 2026-08-08; the paragraph this
-replaced claimed ``F`` was "EXACT on the gDNA arm ... with nothing to subtract"). ``node_start_count``
-deposits at the node holding a fragment's FIRST BASE, so ``F`` credits a locus only for the fragments
+replaced claimed ``F`` was "EXACT on the gDNA arm ... with nothing to subtract"). ``region_start_count``
+deposits at the region holding a fragment's FIRST BASE, so ``F`` credits a locus only for the fragments
 that *start* inside it. The EM counts differently: ``n_gdna`` in
 ``em_solver.cpp:apply_grouped_prior_update`` is the soft count over that multi-locus's own EM UNITS,
 and a fragment becomes one by being a scored CANDIDATE — which a fragment that starts in the
@@ -48,7 +48,7 @@ name (TRAPS: a-test-that-redefines). ⛔ It is not circular — ``assemble_prior
 count; grep it for ``unit_indices``.
 
 ⭐ **AND ``Fo`` GIVES THE RNA ARM AN EXACT TARGET FOR THE FIRST TIME.** ``rna_prior_count`` withholds
-spliced mass, and ``node_start_count`` carries no splice bit — which is why ``F_rna`` could only ever
+spliced mass, and ``region_start_count`` carries no splice bit — which is why ``F_rna`` could only ever
 be an upper BOUND, "separating it needs a five-way origin×splice BAM split". A scored unit carries
 ``is_spliced``, so the split is free: ``Fo`` reports the RNA arm's target (**unspliced** RNA units)
 and, separately, every RNA unit.
@@ -69,7 +69,7 @@ Writing a "best possible prior" here would be the magic-number failure with an e
 constant.
 
 ⚠ **WHAT ``F`` IS STILL GOOD FOR, stated so it is not read as the target again.** It is the only arm
-that needs no scoring stage — one deposit per accepted fragment at the node holding its first base,
+that needs no scoring stage — one deposit per accepted fragment at the region holding its first base,
 projected through the SHIPPED ``priors._project_regions_to_loci`` — so it is the arm that keeps working
 when the question is about the *projection* rather than about the EM. ``Fo − F`` is the straddling
 population, per locus, and table ⑪ is it.
@@ -156,8 +156,8 @@ PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
 #: re-inject exactly this set from the SHIPPED result and demand byte-identity — an override applied
 #: to a field nothing reads is an override that never ran (TRAPS: an-ablation-that-never-ran).
 OVERRIDE_FIELDS = (
-    "mass_gdna_node",
-    "mass_rna_node",
+    "mass_gdna_region",
+    "mass_rna_region",
     "mass_gdna_edge",
     "mass_rna_edge",
     "mass_rna_spliced_edge",
@@ -448,9 +448,9 @@ def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
 def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     """⭐ Is ``gdna_eff_len`` clamped by an INCIDENCE-support sum rather than the genomic span?
 
-    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_node + S_edge)``. ``S_edge`` is
+    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + S_edge)``. ``S_edge`` is
     ``E_g[w − 1] ≈ mu_g − 1`` PER LINE, so every interior line adds most of a fragment length to a
-    locus whose nodes may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
+    locus whose regions may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
     divides the gDNA component's abundance by this array, so an inflation here is a direct scale error
     on one of the three numbers calibration ships.
 
@@ -458,30 +458,30 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     what the consumer feels rather than what an unweighted locus average would say
     (``TRAPS: weight-it-like-the-consumer``).
     """
-    # ⭐ Nodes and edges are projected on their OWN axes, exactly as `assemble_priors` does — no line is
-    # folded onto a flank node. Re-deriving the fold here would measure a span the assembler no longer
+    # ⭐ Regions and edges are projected on their OWN axes, exactly as `assemble_priors` does — no line is
+    # folded onto a flank region. Re-deriving the fold here would measure a span the assembler no longer
     # builds (`TRAPS: a-test-that-redefines`).
     n_loci = len(multi_loci)
-    node_support = np.maximum(np.asarray(calibration.gdna_node_eff_len, np.float64), 0.0)
+    region_support = np.maximum(np.asarray(calibration.gdna_region_eff_len, np.float64), 0.0)
     edge_support = np.maximum(np.asarray(calibration.gdna_edge_eff_len, np.float64), 0.0)
     proj = PRIORS._project_regions_to_loci(
         region_arrays, multi_loci, n_loci,
         {
-            "node_only": node_support,
+            "region_only": region_support,
             "genomic": np.asarray(region_arrays.region_size_bp, np.float64),
         },
     )
     e_idx, e_lid, e_w = PRIORS._edge_locus_shares(region_arrays, multi_loci, n_loci)
-    proj["support"] = proj["node_only"] + PRIORS._sum_by_locus(
+    proj["support"] = proj["region_only"] + PRIORS._sum_by_locus(
         e_idx, e_lid, e_w, edge_support, n_loci
     )
     live = proj["genomic"] > 0
     ratio = np.divide(proj["support"], proj["genomic"], out=np.ones_like(proj["support"]), where=live)
-    node_ratio = np.divide(proj["node_only"], proj["genomic"],
+    region_ratio = np.divide(proj["region_only"], proj["genomic"],
                            out=np.ones_like(proj["support"]), where=live)
     return {
         "median_support_over_genomic": float(np.median(ratio[live])) if live.any() else float("nan"),
-        "median_node_over_genomic": float(np.median(node_ratio[live])) if live.any() else float("nan"),
+        "median_region_over_genomic": float(np.median(region_ratio[live])) if live.any() else float("nan"),
         "total_support": float(proj["support"].sum()),
         "total_genomic": float(proj["genomic"].sum()),
     }
@@ -593,15 +593,15 @@ def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarr
 def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     """**F** — the per-locus true count of fragments whose FIRST BASE lands in the locus.
 
-    ⛔⛔ **THIS IS NOT THE PRIOR'S TARGET — :func:`overlap_truth` IS.** ``node_start_count`` deposits at
-    the node holding a fragment's first base, so a fragment that starts in the intergenic flank and
+    ⛔⛔ **THIS IS NOT THE PRIOR'S TARGET — :func:`overlap_truth` IS.** ``region_start_count`` deposits at
+    the region holding a fragment's first base, so a fragment that starts in the intergenic flank and
     reaches into the locus is a candidate the EM counts and a fragment ``F`` does not. Until
     2026-08-08 this docstring asserted the opposite ("the same quantity ``assemble_priors`` targets, by
     construction"), on an argument about ``rho_c · span_bp`` — a rule the assembler no longer computes.
     ``Fo − F`` is the straddling population and is reported as such.
 
-    ⭐ **What it is still the right instrument for.** ``node_start_count`` is the accumulator's one real
-    invariant — ``Σ node_start_count == qc.deposited``, one increment per accepted fragment — so ``F``
+    ⭐ **What it is still the right instrument for.** ``region_start_count`` is the accumulator's one real
+    invariant — ``Σ region_start_count == qc.deposited``, one increment per accepted fragment — so ``F``
     is the only per-locus truth that needs no scoring stage, no candidate set and no EM. That makes it
     the arm to reach for when the question is about the *projection*, and it is why it survives here
     rather than being deleted.
@@ -611,13 +611,13 @@ def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     assembler error (TRAPS: a-test-that-redefines).
 
     ⚠ **The RNA arm is spliced-INCLUSIVE and is a BOUND.** ``rna_prior_count`` withholds spliced mass;
-    ``node_start_count`` has no splice bit. ⭐ ``overlap_truth`` does have one, so the bound is no
+    ``region_start_count`` has no splice bit. ⭐ ``overlap_truth`` does have one, so the bound is no
     longer the best available RNA target — this one is kept only as ``F``'s own RNA companion. Returns
     ``(f_gdna, f_rna_upper, dropped)`` where ``dropped`` is the per-origin fragment count whose start
-    node overlaps no locus — intergenic, correctly outside every prior, and reported so that
+    region overlaps no locus — intergenic, correctly outside every prior, and reported so that
     ``Σ F + dropped == the library total`` is checkable rather than assumed.
     """
-    parts = {k: np.asarray(oracle.parts[k].node_start_count, np.float64) for k in ORIGINS}
+    parts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64) for k in ORIGINS}
     return project_start_counts(
         {"gdna": parts["gdna"], "rna": parts["mrna"] + parts["nrna"]}, region_arrays, multi_loci
     )
@@ -802,7 +802,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
             lift["undrained"], [parts[k] for k in ORIGINS], lift["choices"]
         )
         parts_d = {
-            k: sp_drain(parts[k], ch, node_types=lift["node_types"], junctions=lift["junctions"])
+            k: sp_drain(parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"])
             for k, ch in zip(ORIGINS, lifted)
         }
         drain["n_ambiguous"] = int(n_amb)
@@ -833,10 +833,10 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
                 ),
             }
 
-    g = float(np.asarray(oracle.parts["gdna"].node_start_count, np.int64).sum())
+    g = float(np.asarray(oracle.parts["gdna"].region_start_count, np.int64).sum())
     r = float(
-        np.asarray(oracle.parts["mrna"].node_start_count, np.int64).sum()
-        + np.asarray(oracle.parts["nrna"].node_start_count, np.int64).sum()
+        np.asarray(oracle.parts["mrna"].region_start_count, np.int64).sum()
+        + np.asarray(oracle.parts["nrna"].region_start_count, np.int64).sum()
     )
     return ConditionResult(
         condition=tag,
@@ -1098,7 +1098,7 @@ def report(rows: list[dict]) -> None:
     # ── ⑩ is gdna_eff_len clamped by an incidence sum? ──
     print()
     print("  ⑩ ⭐ gdna_eff_len's CLAMP — is `span` a genomic extent or an INCIDENCE sum?")
-    print(f"    {'stratum':<26} {'support/genomic':>16} {'nodes only':>12} {'Σ support':>16} "
+    print(f"    {'stratum':<26} {'support/genomic':>16} {'regions only':>12} {'Σ support':>16} "
           f"{'Σ genomic':>16}")
     print("    " + "-" * 92)
     for label, sel in _SELECTIONS:
@@ -1110,7 +1110,7 @@ def report(rows: list[dict]) -> None:
             continue
         print(f"    {label:<26} "
               f"{float(np.median([x['median_support_over_genomic'] for x in sub_rows])):>16.2f} "
-              f"{float(np.median([x['median_node_over_genomic'] for x in sub_rows])):>12.2f} "
+              f"{float(np.median([x['median_region_over_genomic'] for x in sub_rows])):>12.2f} "
               f"{sum(x['total_support'] for x in sub_rows):>16,.0f} "
               f"{sum(x['total_genomic'] for x in sub_rows):>16,.0f}")
     print("    ⚠ `support/genomic` well above 1 means every interior line is adding ~mu_g − 1 to the "

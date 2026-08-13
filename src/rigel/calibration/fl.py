@@ -6,8 +6,8 @@ gDNA-dominated regions/boundaries) and the **RNA FL** (spliced fragments), each
 **smoothly empirical-Bayes-shrunk** toward the global FL.
 
 This is **not** a per-fragment FL likelihood — that channel is deliberately
-excluded from calibration. BOTH FLs drive per-node effective lengths in the sweep
-(``node_geometry.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
+excluded from calibration. BOTH FLs drive per-region effective lengths in the sweep
+(``region_geometry.build_region_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
 unspliced + spliced) eff-lengths use the RNA FL.
 
 ⭐ **Every pool is PURE BY CONSTRUCTION**, and that purity is what
@@ -62,7 +62,7 @@ __all__ = [
     "splash_fl_mass",
 ]
 
-#: gDNA contained in exactly one intergenic or intronic node. Dominant OFF capture.
+#: gDNA contained in exactly one intergenic or intronic region. Dominant OFF capture.
 _GDNA_CONTAINED_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
 
 #: gDNA crossing exactly one line whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
@@ -266,7 +266,7 @@ def build_fl_models(
        an annotated junction at all (:mod:`rigel.calibration.junction_opportunity`). The RNA pool is
        selected on *"used an annotated junction"*, which longer fragments do more often.
      * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
-       (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one node*, whose
+       (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one region*, whose
        opportunity **falls** with length; two are *crossing exactly one line*, whose opportunity
        **rises**. ⛔ Folding one divisor into the other, or one divisor over the pooled sum, is a
        category error — it is the defect that read a gDNA mean of 146.05 where the contained pool said

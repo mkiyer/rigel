@@ -8,8 +8,8 @@ required to reproduce it **byte for byte**. Where this file and a document disag
     Spec matrix: ``test_accumulator_spec.py``
 
 THE MODEL
-    The genome is a graph. **Nodes** are half-open intervals tiling each reference, numbered in genomic
-    order. The 0-bp **lines** between adjacent nodes are **contiguous edges**; a **junction edge** is a
+    The genome is a graph. **Regions** are half-open intervals tiling each reference, numbered in genomic
+    order. The 0-bp **lines** between adjacent regions are **contiguous edges**; a **junction edge** is a
     directed donor→acceptor link taken from the annotation. A **fragment is a path** — its aligned
     blocks, joined across mate gaps and broken by introns::
 
@@ -19,21 +19,21 @@ THE MODEL
         path        [====== block ======]                       crosses line 1
         path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
 
-    Nodes count fragments **contained** (they fit inside); edges count fragments **crossing**.
+    Regions count fragments **contained** (they fit inside); edges count fragments **crossing**.
     ⭐ **Each population stores only the channels something reads**, and they differ: the two banks the
     deconvolution consumes carry ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed
     point) and ``length_sum`` = Sum L; the certified-RNA banks carry fewer, because nothing
     deconvolves a fragment that is already known to be RNA.
 
-    ⚠ A ``spanning`` population — one segment covering a node whole — used to exist and was **deleted
-    on evidence**: measured on the panel it reached **0 starved nodes** the bounding edges did not
-    already reach off capture, and 141 nodes / 822 fragments (0.008 %) under it. Its mass is not lost,
-    since a spanning fragment crosses both of the node's lines and is deposited there.
-    ⛔ One consequence, and it is structural: **no spliced fragment now touches the node axis at all**
+    ⚠ A ``spanning`` population — one segment covering a region whole — used to exist and was **deleted
+    on evidence**: measured on the panel it reached **0 starved regions** the bounding edges did not
+    already reach off capture, and 141 regions / 822 fragments (0.008 %) under it. Its mass is not lost,
+    since a spanning fragment crosses both of the region's lines and is deposited there.
+    ⛔ One consequence, and it is structural: **no spliced fragment now touches the region axis at all**
     (a spliced fragment can never be *contained* — both endpoints of an annotated intron are cuts).
 
 WHAT EACH OBJECT'S NUMBERS MEAN
-    With ``placements`` the number of admissible start positions — ``L`` at a node, ``L − 1`` at a 0-bp
+    With ``placements`` the number of admissible start positions — ``L`` at a region, ``L − 1`` at a 0-bp
     line — and a component of start-density ``rho`` and length distribution ``f``::
 
         E[count]          =  rho * E_f[placements]
@@ -41,12 +41,12 @@ WHAT EACH OBJECT'S NUMBERS MEAN
         E[length_sum]      =  rho * E_f[placements * L]
 
     The opportunity factor cancels identically at an edge, for **any** length distribution, which is why
-    no divisor and no length model appear there. It does **not** cancel at a node, where the opportunity
-    is ``max(0, node − L + 1)``; there the term is a better-conditioned second moment and nothing more.
+    no divisor and no length model appear there. It does **not** cancel at a region, where the opportunity
+    is ``max(0, region − L + 1)``; there the term is a better-conditioned second moment and nothing more.
 
     ⚠ **This is why the channel is called ``inv_length_sum`` and NOT ``density``.** It IS a density at an
-    edge, exactly; at a node it is not one. Naming it ``density`` put one word on two concepts and would
-    mislead every consumer that reads a node. The three names are three sums and are honest everywhere.
+    edge, exactly; at a region it is not one. Naming it ``density`` put one word on two concepts and would
+    mislead every consumer that reads a region. The three names are three sums and are honest everywhere.
 
     ⭐ **``length_sum`` is what separates two components that share a mean length.** At an edge the count
     row is ``(mu_g - 1, mu_r - 1)`` and the inv-length row is ``(1, 1)``, so the pair's determinant is
@@ -57,7 +57,7 @@ WHAT EACH OBJECT'S NUMBERS MEAN
 ⚠ NO PARTITIONING. Every crossed edge receives the FULL weight. The chance that a length-``L`` fragment
 crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and every
 fragment length contributes equally to each edge. Dividing by the number of edges crossed destroys that
-cancellation and makes the answer depend on node spacing — measured up to **3.6× low**. An edge count is
+cancellation and makes the answer depend on region spacing — measured up to **3.6× low**. An edge count is
 not a share of a conserved total; there is no total. Density is intensive, not extensive.
 """
 
@@ -123,9 +123,9 @@ N_STRAND_COLUMNS = len(STRAND_COLUMNS)
 #: reciprocal-opportunity theorem (every admissible placement deposits ``1/A``, so each length
 #: contributes exactly one density unit) the two representations miss the integer answer by::
 #:
-#:      node_len 151    fixed 7.0e-10    float64 5.8e-15      120,000x better
-#:      node_len 400    fixed 1.7e-08    float64 1.0e-13      170,000x better
-#:      node_len 1000   fixed 2.0e-07    float64 2.8e-13      714,000x better
+#:      region_len 151    fixed 7.0e-10    float64 5.8e-15      120,000x better
+#:      region_len 400    fixed 1.7e-08    float64 1.0e-13      170,000x better
+#:      region_len 1000   fixed 2.0e-07    float64 2.8e-13      714,000x better
 #:
 #: ⚠ The exactness the old gates asserted was a property of their FIXTURES, not of the representation:
 #: ``1/2 + 1/3 + 1/6`` lands back on ``2^32`` because two rounding errors cancel, while ``1/3 + 1/3 +
@@ -271,14 +271,14 @@ class FragmentPool(enum.IntEnum):
     are gDNA/RNA mixtures, and an impure pool is worse than a missing one.
     """
 
-    DNA_INTERGENIC = 0  # contained in an intergenic node
-    DNA_INTRONIC = 1  # contained in an intronic node
+    DNA_INTERGENIC = 0  # contained in an intergenic region
+    DNA_INTRONIC = 1  # contained in an intronic region
     DNA_INTRON_EXON = 2  # crossing exactly one line, flanks {intron, exon}
     DNA_INTERGENIC_EXON = 3  # crossing exactly one line, flanks {intergenic, exon}
     RNA_SPLICED = 4  # using an annotated junction, splice OBSERVED
 
 
-#: Coarse node types, as ``signature.coarse_type_array`` emits them.
+#: Coarse region types, as ``signature.coarse_type_array`` emits them.
 _TYPE_INTERGENIC, _TYPE_INTRON, _TYPE_EXON = 0, 1, 2
 
 #: Flank-type pair -> splash pool. The key is sorted, so it is order-insensitive.
@@ -287,7 +287,7 @@ _SPLASH_POOL = {
     (_TYPE_INTERGENIC, _TYPE_EXON): FragmentPool.DNA_INTERGENIC_EXON,
 }
 
-#: Contained node type -> pure gDNA pool. An exonic node is a mixture and is absent by design.
+#: Contained region type -> pure gDNA pool. An exonic region is a mixture and is absent by design.
 _CONTAINED_POOL = {
     _TYPE_INTERGENIC: FragmentPool.DNA_INTERGENIC,
     _TYPE_INTRON: FragmentPool.DNA_INTRONIC,
@@ -295,7 +295,7 @@ _CONTAINED_POOL = {
 
 
 # ---------------------------------------------------------------------------
-# the partition: the cut axis, the node types, and the junction CSR
+# the partition: the cut axis, the region types, and the junction CSR
 # ---------------------------------------------------------------------------
 
 
@@ -303,11 +303,11 @@ _CONTAINED_POOL = {
 class Partition:
     """Everything the deposit addresses. Three axes, off by one from each other per reference.
 
-    A reference contributing ``c`` cut positions owns ``c − 1`` nodes and ``c − 2`` contiguous edges
-    (its interior lines). A reference with no nodes contributes no cuts at all::
+    A reference contributing ``c`` cut positions owns ``c − 1`` regions and ``c − 2`` contiguous edges
+    (its interior lines). A reference with no regions contributes no cuts at all::
 
         cuts    0        100       200       600        c = 4
-        nodes   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
+        regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
         lines            line 1    line 2               c - 2 = 2
 
     Junctions are a CSR keyed by the **donor cut index**, which is the index the deposit has already
@@ -318,8 +318,8 @@ class Partition:
 
     cut_positions: np.ndarray  # int64[n_cuts] — flat, reference-major, ascending within a reference
     ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
-    node_types: np.ndarray  # uint8[n_nodes] — 0 intergenic / 1 intron / 2 exon
-    ref_node_offsets: np.ndarray  # int64[n_refs + 1]
+    region_types: np.ndarray  # uint8[n_regions] — 0 intergenic / 1 intron / 2 exon
+    ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_edge_offsets: np.ndarray  # int64[n_refs + 1]
     sj_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
     sj_boundary_right: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
@@ -330,8 +330,8 @@ class Partition:
         return int(self.ref_cut_offsets.shape[0]) - 1
 
     @property
-    def n_nodes(self) -> int:
-        return int(self.ref_node_offsets[-1])
+    def n_regions(self) -> int:
+        return int(self.ref_region_offsets[-1])
 
     @property
     def n_edges(self) -> int:
@@ -342,7 +342,7 @@ class Partition:
         return int(self.sj_boundary_right.shape[0])
 
     @classmethod
-    def from_cuts(cls, cuts_per_ref, node_types=None, junctions=()) -> "Partition":
+    def from_cuts(cls, cuts_per_ref, region_types=None, junctions=()) -> "Partition":
         """Build from per-reference cut lists.
 
         ``junctions`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be cuts on
@@ -356,22 +356,22 @@ class Partition:
                 raise ValueError(f"reference {r}: cuts must strictly increase, got {c.tolist()}")
 
         cut_offsets = np.zeros(n_refs + 1, np.int64)
-        node_offsets = np.zeros(n_refs + 1, np.int64)
+        region_offsets = np.zeros(n_refs + 1, np.int64)
         edge_offsets = np.zeros(n_refs + 1, np.int64)
         for r, c in enumerate(cuts_per_ref):
             cut_offsets[r + 1] = cut_offsets[r] + c.size
-            node_offsets[r + 1] = node_offsets[r] + max(c.size - 1, 0)
+            region_offsets[r + 1] = region_offsets[r] + max(c.size - 1, 0)
             edge_offsets[r + 1] = edge_offsets[r] + max(c.size - 2, 0)
 
         cut_positions = np.concatenate(cuts_per_ref) if n_refs else np.zeros(0, np.int64)
-        if node_types is None:
-            types = np.zeros(int(node_offsets[-1]), np.uint8)
+        if region_types is None:
+            types = np.zeros(int(region_offsets[-1]), np.uint8)
         else:
-            types = np.concatenate([np.asarray(t, np.uint8) for t in node_types])
-        if types.shape[0] != int(node_offsets[-1]):
+            types = np.concatenate([np.asarray(t, np.uint8) for t in region_types])
+        if types.shape[0] != int(region_offsets[-1]):
             raise ValueError(
-                f"node_types has {types.shape[0]} entries; the partition has "
-                f"{int(node_offsets[-1])} nodes"
+                f"region_types has {types.shape[0]} entries; the partition has "
+                f"{int(region_offsets[-1])} regions"
             )
 
         left_boundaries, right_boundaries, sj_strands = [], [], []
@@ -399,8 +399,8 @@ class Partition:
         return cls(
             cut_positions=cut_positions,
             ref_cut_offsets=cut_offsets,
-            node_types=types,
-            ref_node_offsets=node_offsets,
+            region_types=types,
+            ref_region_offsets=region_offsets,
             ref_edge_offsets=edge_offsets,
             sj_offsets=sj_offsets,
             sj_boundary_right=boundary_right,
@@ -479,19 +479,19 @@ class Tally:
 
     ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer);
     ``inv_length_sum`` = ``Sum 1/placements`` carries the level, and is an exact model-free density at an
-    edge but NOT at a node; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
+    edge but NOT at a region; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
     components with the same mean fragment length be told apart at all; ``mass`` is the conserved
     fragment count, and sums to ONE per fragment.
 
     ⭐⭐ **THE POPULATIONS DO NOT ALL CARRY THE SAME CHANNELS, AND THAT IS THE DESIGN.** A channel is
     stored where something reads it and nowhere else::
 
-        node_contained    count  inv_length_sum  length_sum       the mixture, on the node axis
+        region_contained    count  inv_length_sum  length_sum       the mixture, on the region axis
         edge_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the line axis
         edge_spliced      count                              mass certified RNA — nothing deconvolves it
         junction          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
 
-    ⛔ Six banks were removed on that rule (three ``node_spanning_*``, the two spliced-edge moments and
+    ⛔ Six banks were removed on that rule (three ``region_spanning_*``, the two spliced-edge moments and
     ``sj_length_sum``). ⚠ A future channel is added the same way — because a named consumer needs it,
     not because the shape would be tidier.
 
@@ -499,11 +499,11 @@ class Tally:
     is bit-identical at any thread count.
     """
 
-    node_contained_count: np.ndarray  # uint32[n_nodes, 2]
-    #: ⭐ uint64[n_nodes] — ONE column. See :meth:`Tally.zeros`: the length moments are
+    region_contained_count: np.ndarray  # uint32[n_regions, 2]
+    #: ⭐ uint64[n_regions] — ONE column. See :meth:`Tally.zeros`: the length moments are
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
-    node_contained_inv_opportunity_sum: np.ndarray
-    node_start_count: np.ndarray  # uint32[n_nodes] — one per accepted fragment; THE invariant
+    region_contained_inv_opportunity_sum: np.ndarray
+    region_start_count: np.ndarray  # uint32[n_regions] — one per accepted fragment; THE invariant
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
     edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column
     #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
@@ -557,7 +557,7 @@ class Tally:
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, AND IT IS WHAT MAKES A LIBRARY FRAGMENT
     #: COUNT COMPUTABLE AT ALL.** A spliced fragment's block that contains no interior line deposits
     #: nothing on either edge bank, and it is not ``contained`` either — its path spans a junction, so
-    #: it lies in no single node. Before this bank such a fragment existed on the incidence axis
+    #: it lies in no single region. Before this bank such a fragment existed on the incidence axis
     #: (``sj_count``) and on no conserved one, so no sum over conserved banks could count it.
     #:
     #: ⭐ **Measured on the origin-split oracle, ladder g50 capture_off: 1,222,375 of 4,830,713 RNA
@@ -597,8 +597,8 @@ class Tally:
     #: counted in ``qc``. That is exactly the population the pools are drawn from, which is what makes it
     #: the right anchor and not merely a convenient one.
     #:
-    #: ⭐ Its invariant is the same externally-checkable form as ``node_start_count``'s, and it is a
-    #: DIFFERENT statement: ``Σ deposited_lengths == Σ node_start_count == qc.deposited``. The first says
+    #: ⭐ Its invariant is the same externally-checkable form as ``region_start_count``'s, and it is a
+    #: DIFFERENT statement: ``Σ deposited_lengths == Σ region_start_count == qc.deposited``. The first says
     #: every fragment was binned by length, the second that every fragment was located in space.
     deposited_lengths: np.ndarray
     qc: dict[str, int] = field(default_factory=dict)
@@ -610,7 +610,7 @@ class Tally:
     gap_resolution: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def zeros(cls, n_nodes: int, n_edges: int, n_sj: int, max_length: int) -> "Tally":
+    def zeros(cls, n_regions: int, n_edges: int, n_sj: int, max_length: int) -> "Tally":
         def counts(rows):
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
@@ -620,9 +620,9 @@ class Tally:
             return np.zeros(rows, np.float64)
 
         return cls(
-            node_contained_count=counts(n_nodes),
-            node_contained_inv_opportunity_sum=fraction(n_nodes),
-            node_start_count=np.zeros(n_nodes, np.uint32),
+            region_contained_count=counts(n_regions),
+            region_contained_inv_opportunity_sum=fraction(n_regions),
+            region_start_count=np.zeros(n_regions, np.uint32),
             edge_unspliced_count=counts(n_edges),
             edge_unspliced_inv_length_sum=fraction(n_edges),
             edge_unspliced_mass=fraction(n_edges),
@@ -734,7 +734,7 @@ class Accumulator:
         self.partition = partition
         self.max_fragment_length = int(max_fragment_length)
         self.tally = Tally.zeros(
-            partition.n_nodes, partition.n_edges, partition.n_sj, self.max_fragment_length
+            partition.n_regions, partition.n_edges, partition.n_sj, self.max_fragment_length
         )
 
     @property
@@ -891,13 +891,13 @@ class Accumulator:
 
         # ⚠ The path's own first and last COVERED base, not the fragment's extent. A leading or trailing
         # intron means the molecule does not begin at `start`: with introns [(150,480)] over [150,500) the
-        # path is [480,500) and lives in a different node entirely. Using the extent would attribute the
-        # fragment — and the start-count invariant — to a node it never touches.
+        # path is [480,500) and lives in a different region entirely. Using the extent would attribute the
+        # fragment — and the start-count invariant — to a region it never touches.
         first_base, last_base = segments[0][0], segments[-1][1] - 1
 
         t = self.tally
-        node_base, edge_base = int(p.ref_node_offsets[ref]), int(p.ref_edge_offsets[ref])
-        t.node_start_count[node_base + self._local_node(cuts, first_base)] += 1
+        region_base, edge_base = int(p.ref_region_offsets[ref]), int(p.ref_edge_offsets[ref])
+        t.region_start_count[region_base + self._local_region(cuts, first_base)] += 1
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
         # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
@@ -906,8 +906,8 @@ class Accumulator:
 
         # ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────
         # A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
-        # contiguous index range and no container is needed. A node is SPANNED iff ONE segment crosses
-        # both of its lines — not merely "both lines crossed", which would count a node the fragment
+        # contiguous index range and no container is needed. A region is SPANNED iff ONE segment crosses
+        # both of its lines — not merely "both lines crossed", which would count a region the fragment
         # JUMPS OVER, whose two lines are touched by the two flanking segments from opposite sides.
         # ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is the
         # design rather than an omission. A spliced crossing is certified RNA: nothing deconvolves it,
@@ -948,7 +948,7 @@ class Accumulator:
             # ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule
             # exactly and `edge_unspliced_mass` is byte-identical. A single block with no line and no
             # annotated junction is bounded by nothing and deposits nothing: for a one-block path that is
-            # the CONTAINED case, already whole in `node_contained_count`; for a multi-block one it is an
+            # the CONTAINED case, already whole in `region_contained_count`; for a multi-block one it is an
             # unannotated intron's block, whose bases have nowhere conserved to go.
             left_junction = sj_id_at_gap[block - 1] if block > 0 else -1
             right_junction = sj_id_at_gap[block] if block < len(sj_id_at_gap) else -1
@@ -989,18 +989,18 @@ class Accumulator:
             # already carries the spliced population's length distribution (RNA_SPLICED) unconditioned.
             t.sj_inv_length_sum[jid] += inv_edge
 
-        # ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────
+        # ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
-        # blocks, leaving a fragment that crosses nothing yet straddles two nodes — crediting that as
-        # contained would place its whole length in a node it only partly overlaps. Such a fragment is
+        # blocks, leaving a fragment that crosses nothing yet straddles two regions — crediting that as
+        # contained would place its whole length in a region it only partly overlaps. Such a fragment is
         # neither contained nor crossing: it deposits on no object but is still counted (start_count),
         # so the loss is visible rather than silent.
-        first_node = self._local_node(cuts, first_base)
-        contained_node = -1
-        if not sj_ids and first_node == self._local_node(cuts, last_base):
-            contained_node = node_base + first_node
+        first_region = self._local_region(cuts, first_base)
+        contained_region = -1
+        if not sj_ids and first_region == self._local_region(cuts, last_base):
+            contained_region = region_base + first_region
             # ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT, and it is what makes this channel a DENSITY.
-            # A length-`w` fragment contained in a node of length `ell` had `ell − w + 1` admissible
+            # A length-`w` fragment contained in a region of length `ell` had `ell − w + 1` admissible
             # start positions, so depositing `1/(ell − w + 1)` cancels the opportunity identically and
             # `E[SUM] = rho` for ANY length distribution. ⛔ The predecessor deposited `1/L`, which does
             # NOT cancel `(ell − w + 1)` — measured, that channel read 25.67 density units for short
@@ -1008,13 +1008,13 @@ class Accumulator:
             # but the length SET. An EDGE is the `ell -> 0` limit of this, which is why `1/(L−1)` is
             # right there and was wrong here.
             # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
-            node_len = int(cuts[first_node + 1]) - int(cuts[first_node])
-            t.node_contained_count[contained_node, column] += 1
-            t.node_contained_inv_opportunity_sum[contained_node] += 1.0 / (
-                node_len - length + 1
+            region_len = int(cuts[first_region + 1]) - int(cuts[first_region])
+            t.region_contained_count[contained_region, column] += 1
+            t.region_contained_inv_opportunity_sum[contained_region] += 1.0 / (
+                region_len - length + 1
             )
 
-        pool = self._pool(spliced, contained_node, sole_line, node_base)
+        pool = self._pool(spliced, contained_region, sole_line, region_base)
         if pool is not None:
             t.pool_lengths[pool, length] += 1
         return DepositOutcome.DEPOSITED
@@ -1161,8 +1161,8 @@ class Accumulator:
         self.tally.gap_resolution[resolution.value] += 1
 
     @staticmethod
-    def _local_node(cuts: np.ndarray, position: int) -> int:
-        """Index within this reference of the node containing ``position``."""
+    def _local_region(cuts: np.ndarray, position: int) -> int:
+        """Index within this reference of the region containing ``position``."""
         return min(max(int(np.searchsorted(cuts, position, side="right")) - 1, 0), cuts.size - 2)
 
     def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
@@ -1196,11 +1196,11 @@ class Accumulator:
             return k
         return -1
 
-    def _pool(self, spliced, contained_node, sole_line, node_base):
+    def _pool(self, spliced, contained_region, sole_line, region_base):
         """The one length pool this fragment belongs to, or ``None``.
 
         Priority, so that every pool stays pure: a splice is unambiguously RNA; a contained fragment is
-        typed by its node; a single-line crossing is a "splash" read typed by its two flank types.
+        typed by its region; a single-line crossing is a "splash" read typed by its two flank types.
         Anything else — an exonic contained fragment, a multi-line crossing — is a mixture and enters
         nothing.
 
@@ -1215,12 +1215,12 @@ class Accumulator:
         and **−9.58 % / −22.46 %** under provenance. Excluding inferred lengths preferentially excludes
         fragments whose mates sit far apart — **a purity filter on a length pool is a length filter**.
         """
-        types = self.partition.node_types
+        types = self.partition.region_types
         if spliced:
             return FragmentPool.RNA_SPLICED
-        if contained_node >= 0:
-            return _CONTAINED_POOL.get(int(types[contained_node]))
+        if contained_region >= 0:
+            return _CONTAINED_POOL.get(int(types[contained_region]))
         if sole_line >= 0:
-            flanks = (int(types[node_base + sole_line - 1]), int(types[node_base + sole_line]))
+            flanks = (int(types[region_base + sole_line - 1]), int(types[region_base + sole_line]))
             return _SPLASH_POOL.get(tuple(sorted(flanks)))
         return None

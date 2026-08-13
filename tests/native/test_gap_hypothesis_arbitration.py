@@ -27,13 +27,13 @@ from ._accumulator_reference import (
 )
 
 
-#: One reference, cut at every coordinate the owner's §1 example names, so both paths land on real nodes.
+#: One reference, cut at every coordinate the owner's §1 example names, so both paths land on real regions.
 CUTS = [0, 1000, 2000, 3000, 3050, 4000, 5000, 6000]
 TYPES = [0, 2, 1, 2, 1, 2, 0]
 
 
 def _acc(**kw):
-    return Accumulator(Partition.from_cuts([CUTS], node_types=[TYPES]), **kw)
+    return Accumulator(Partition.from_cuts([CUTS], region_types=[TYPES]), **kw)
 
 
 # ── the owner's §1 example, to the base pair ───────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def test_TWO_COMPATIBLE_PATHS_are_BUFFERED_and_neither_is_chosen():
     outcome = acc.deposit(0, 1800, 4200, hypotheses=(TA, TB))
     assert outcome is DepositOutcome.DEFERRED
     t = acc.tally
-    assert int(t.node_start_count.sum()) == 0, "an undetermined fragment locates nowhere"
+    assert int(t.region_start_count.sum()) == 0, "an undetermined fragment locates nowhere"
     assert int(t.deposited_lengths.sum()) == 0, "and has no length to bin"
     assert int(t.pool_lengths.sum()) == 0
     assert len(t.deferred) == 1
@@ -230,7 +230,7 @@ def test_EVERY_OFFERED_FRAGMENT_IS_ACCOUNTED_FOR_EXACTLY_ONCE():
     assert sum(qc[outcome.value] for outcome in DepositOutcome) == offered
     # ⭐ And the deferred queue is not merely counted — it holds the fragments the counter claims.
     assert len(acc.tally.deferred) == qc["deferred_undetermined_gap"] == 2
-    assert int(acc.tally.node_start_count.sum()) == qc["deposited"] == 2
+    assert int(acc.tally.region_start_count.sum()) == qc["deposited"] == 2
 
 
 def test_the_gap_resolution_SUBCLASSES_CLOSE_against_the_umbrella_and_the_deferred_queue():
@@ -300,7 +300,7 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
     ]  # fmt: skip
     assert arrays["hypothesis_t"].tolist() == [11, 22]
     assert arrays["hypothesis_t_offsets"].tolist() == [0, 0, 0, 1, 2]
-    assert Accumulator(Partition.from_cuts([CUTS], node_types=[TYPES])).tally.deferred_arrays()[
+    assert Accumulator(Partition.from_cuts([CUTS], region_types=[TYPES])).tally.deferred_arrays()[
         "hypothesis_offsets"
     ].tolist() == [0]
 

@@ -5,7 +5,7 @@
      step 6
 
 ⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-cut partition. It cannot see
-a defect that only appears at **1,043,881 nodes and 404,168 junctions**: a per-reference offset that drifts,
+a defect that only appears at **1,043,881 regions and 404,168 junctions**: a per-reference offset that drifts,
 a cut index that wraps at int32, a junction CSR slice that is off by one reference. Every such bug this
 project has had was invisible on a fixture — a ref-id mismatch once dropped **476,719 of 476,732 fragments
 inside deposit()** while every golden test passed.
@@ -49,12 +49,12 @@ from rigel.index import TranscriptIndex  # noqa: E402
 #: reference holds one flat array per quantity across every reference, the native class holds one
 #: accumulator per reference, and the three axes have different per-reference lengths.
 _AXIS = {
-    "node_contained_count": "node",
-    "node_contained_inv_opportunity_sum": "node",
-    "node_spanning_count": "node",
-    "node_spanning_inv_length_sum": "node",
-    "node_spanning_length_sum": "node",
-    "node_start_count": "node",
+    "region_contained_count": "region",
+    "region_contained_inv_opportunity_sum": "region",
+    "region_spanning_count": "region",
+    "region_spanning_inv_length_sum": "region",
+    "region_spanning_length_sum": "region",
+    "region_start_count": "region",
     "edge_unspliced_count": "edge",
     "edge_unspliced_inv_length_sum": "edge",
     "edge_spliced_count": "edge",
@@ -80,10 +80,10 @@ def ref_sj_offsets(partition) -> np.ndarray:
 def native_for_ref(partition, ref: int, max_length: int) -> NativeAccumulator:
     """One native accumulator for reference ``ref``, with the junction CSR sliced and rebased."""
     c0, c1 = int(partition.ref_cut_offsets[ref]), int(partition.ref_cut_offsets[ref + 1])
-    n0, n1 = int(partition.ref_node_offsets[ref]), int(partition.ref_node_offsets[ref + 1])
+    n0, n1 = int(partition.ref_region_offsets[ref]), int(partition.ref_region_offsets[ref + 1])
     accumulator = NativeAccumulator(
         cuts=np.ascontiguousarray(partition.cut_positions[c0:c1], dtype=np.int64),
-        node_types=np.ascontiguousarray(partition.node_types[n0:n1], dtype=np.uint8),
+        region_types=np.ascontiguousarray(partition.region_types[n0:n1], dtype=np.uint8),
         max_length=max_length,
     )
     j0, j1 = int(partition.sj_offsets[c0]), int(partition.sj_offsets[c1])
@@ -108,7 +108,7 @@ def main() -> None:
     sj_offsets = ref_sj_offsets(partition)
     print(f"index      {args.index}")
     print(
-        f"partition  {partition.n_nodes:,} nodes  {partition.n_edges:,} contiguous edges  "
+        f"partition  {partition.n_regions:,} regions  {partition.n_edges:,} contiguous edges  "
         f"{partition.n_sj:,} junction edges  {partition.cut_positions.size:,} cuts"
     )
     print(f"bam        {args.bam}\n")
@@ -175,8 +175,8 @@ def main() -> None:
         total = 0
         for ref_id, native in sorted(natives.items()):
             actual = getattr(native, field.name)
-            if axis == "node":
-                lo, hi = partition.ref_node_offsets[ref_id], partition.ref_node_offsets[ref_id + 1]
+            if axis == "region":
+                lo, hi = partition.ref_region_offsets[ref_id], partition.ref_region_offsets[ref_id + 1]
             elif axis == "edge":
                 lo, hi = partition.ref_edge_offsets[ref_id], partition.ref_edge_offsets[ref_id + 1]
             else:

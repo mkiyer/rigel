@@ -218,7 +218,7 @@ class TestNrnaDoubleCounting:
                 # known-brittle g20 sparse-artifact class (memory: "dissolves at scale"); the v6 Phase-B RNA
                 # prior trusts the FROZEN deconv_sides anchors there (the R5 frozen-side issue), nudging this
                 # one corner 0.60→0.65. Accepted Phase-B regression — recovered in Phase C (co-evolving
-                # boundary nodes + the I₀-free recalibration). See CALIBRATION_PLAN_v6 §11/§12.
+                # boundary regions + the I₀-free recalibration). See CALIBRATION_PLAN_v6 §11/§12.
                 assert rna_rel_err < 0.66, (
                     f"Total RNA error (g20): expected={total_rna_expected}, "
                     f"observed={total_rna_observed:.0f}, "
@@ -264,7 +264,7 @@ class TestNrnaDoubleCounting:
             # accepted near-random zero-gDNA corner.
             #
             # The mid-SS branch was widened (40 → 100) by the pass-0 gDNA-rate NPMLE prior
-            # We now start every node at f_g=1 (total density) with an
+            # We now start every region at f_g=1 (total density) with an
             # extremely-weak prior and peel RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
             # imperfect strand cannot peel the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
             # phantom, now surfaced by the total-density start. Perfect-SS (>= 0.99) is unaffected (tol 20).

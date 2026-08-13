@@ -4,8 +4,8 @@
 
 ⭐ **THE CHECK.** ``assemble_priors`` hands the EM two additive pseudocounts that are added directly to
 its own fragment counts (``G = n_gdna + a_g``). So ``Σ_loci (a_g + a_r)`` must be commensurate with the
-number of fragments those loci actually contain — and ``node_start_count``, the accumulator's one
-non-tautological invariant (one increment per accepted fragment, at the node holding its first covered
+number of fragments those loci actually contain — and ``region_start_count``, the accumulator's one
+non-tautological invariant (one increment per accepted fragment, at the region holding its first covered
 base), is exactly that number with no model in it.
 
 ⭐ **AND THE A/B IS EXACT AND IN-PROCESS.** Both arms are computed from ONE ``CalibrationResult``, so the
@@ -33,7 +33,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.priors import _component_node_arrays, _project_regions_to_loci  # noqa: E402
+from rigel.calibration.priors import _component_region_arrays, _project_regions_to_loci  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
@@ -41,12 +41,12 @@ from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 def _arms(calibration, region_arrays, multi_loci):
     """Both arms from ONE result: (arm_A_gdna, arm_A_rna, arm_B_gdna, arm_B_rna), per locus."""
-    g_mass, g_sup, _, _ = _component_node_arrays(
+    g_mass, g_sup, _, _ = _component_region_arrays(
         calibration,
         region_arrays,
-        calibration.mass_gdna_node,
+        calibration.mass_gdna_region,
         calibration.mass_gdna_edge,
-        calibration.gdna_node_eff_len,
+        calibration.gdna_region_eff_len,
         calibration.gdna_edge_eff_len,
     )
     rna_edge = np.maximum(
@@ -54,12 +54,12 @@ def _arms(calibration, region_arrays, multi_loci):
         - np.asarray(calibration.mass_rna_spliced_edge, np.float64),
         0.0,
     )
-    r_mass, r_sup, _, _ = _component_node_arrays(
+    r_mass, r_sup, _, _ = _component_region_arrays(
         calibration,
         region_arrays,
-        calibration.mass_rna_node,
+        calibration.mass_rna_region,
         rna_edge,
-        calibration.rna_node_eff_len,
+        calibration.rna_region_eff_len,
         calibration.rna_edge_eff_len,
     )
     proj = _project_regions_to_loci(
@@ -95,16 +95,16 @@ def check_one(index: TranscriptIndex, cache_dir: Path) -> dict:
     ra: RegionArrays = inputs["region_arrays"]
 
     # ⭐ The locus set, WITHOUT running the EM: `build_multi_loci` needs the scored-fragment EM data, so
-    # for a units check we use the index's own locus decomposition over the same node axis. What matters
+    # for a units check we use the index's own locus decomposition over the same region axis. What matters
     # is that both arms see the SAME loci — the comparison is internal.
     multi_loci = _index_multi_loci(index, ra)
     a_g, a_r, b_g, b_r = _arms(cal, ra, multi_loci)
 
-    frags = float(np.asarray(cache.payload.node_start_count, np.float64).sum())
+    frags = float(np.asarray(cache.payload.region_start_count, np.float64).sum())
     # the unspliced population the prior arbitrates: contained + unspliced crossings, deconvolved
     unspliced_mass = float(
-        np.asarray(cal.mass_gdna_node).sum()
-        + np.asarray(cal.mass_rna_node).sum()
+        np.asarray(cal.mass_gdna_region).sum()
+        + np.asarray(cal.mass_rna_region).sum()
         + np.asarray(cal.mass_gdna_edge).sum()
         + np.asarray(cal.mass_rna_edge).sum()
         - np.asarray(cal.mass_rna_spliced_edge).sum()
@@ -121,7 +121,7 @@ def check_one(index: TranscriptIndex, cache_dir: Path) -> dict:
 
 
 def _index_multi_loci(index: TranscriptIndex, region_arrays):
-    """One MultiLocus per contiguous run of non-intergenic nodes — a model-free locus decomposition.
+    """One MultiLocus per contiguous run of non-intergenic regions — a model-free locus decomposition.
 
     ⚠ Deliberately NOT `locus.build_multi_loci`: that needs the scored-fragment EM data, and this check
     is about UNITS, not about the EM's locus grouping. Both arms see the same loci, so the comparison is

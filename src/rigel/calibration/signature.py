@@ -189,7 +189,7 @@ def mrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ``mrna_active_s`` implies ``nrna_active_s`` (an exon carries both nascent and mature; an intron only
     nascent). A region's ``mrna_active`` is its own exon bits; a boundary's is the AND of its two flanks
     (mature crosses an unspliced fragment only across contiguous exon — else it would be spliced). This
-    selects the node's solver prior:
+    selects the region's solver prior:
     ``nrna_active ∧ ¬mrna_active`` ⇒ nascent-only ⇒ the nascent≈0 prior.
     """
     sig = np.asarray(signature)

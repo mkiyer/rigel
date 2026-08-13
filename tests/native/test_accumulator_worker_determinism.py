@@ -39,7 +39,7 @@ EPS = float(np.finfo(np.float64).eps)
 def oracle(tmp_path):
     """A scenario built so that **every** bank of the tally receives something.
 
-    ⚠ The obvious scenario does not. Two single-isoform genes deposit into the nodes and the junction
+    ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the junction
     edges and leave **both contiguous-edge banks identically zero**: every cut is an exon boundary, so a
     mature fragment either fits inside an exon (contained) or splices across the gap (junction edge), and
     it never has bases on both sides of a line. A bit-identity gate over an all-zero array passes for the
@@ -48,11 +48,11 @@ def oracle(tmp_path):
     * ``t2`` starts at 500, **inside** ``t1``'s first exon. That makes 500 a cut, and a ``t1`` fragment
       spanning it has bases on both sides — a contiguous crossing. If that fragment also uses the
       junction, it is a crossing in the SPLICED bank, which is the channel the old design merged away.
-    * ``t4`` ends at 650, which cuts a **50 bp** node out of ``[500, 700)``. Nothing else here can be
-      SPANNED: spanning needs one segment covering a node whole, so at 200 bp nodes and 220 bp fragments
-      it essentially never happens, and mature RNA can never span the node before a junction at all —
-      it has no base past the exon end, it splices there. A 50 bp node is spanned by ordinary gDNA.
-    * ``gdna_fraction`` puts genomic fragments in the intronic and intergenic nodes, which is the
+    * ``t4`` ends at 650, which cuts a **50 bp** region out of ``[500, 700)``. Nothing else here can be
+      SPANNED: spanning needs one segment covering a region whole, so at 200 bp regions and 220 bp fragments
+      it essentially never happens, and mature RNA can never span the region before a junction at all —
+      it has no base past the exon end, it splices there. A 50 bp region is spanned by ordinary gDNA.
+    * ``gdna_fraction`` puts genomic fragments in the intronic and intergenic regions, which is the
       unspliced bank and the two pure gDNA length pools.
 
     ⚠ Every one of those three was added because the assertion below found the array empty. That is the
@@ -121,8 +121,8 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
     # something first. ⚠ A bit-identity gate in this project has already lied in exactly this way: an arm
     # with ZERO rows scored "32/32 IDENTICAL" because the comparison looped over the empty arm's rows.
     for key, why in [
-        ("node_start_count", "nothing was deposited at all"),
-        ("node_contained_count", "no fragment fitted inside a node"),
+        ("region_start_count", "nothing was deposited at all"),
+        ("region_contained_count", "no fragment fitted inside a region"),
         (
             "edge_unspliced_count",
             "no unspliced contiguous crossing — the mixture being deconvolved",
@@ -154,7 +154,7 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
         "is bit-identical for free. The fixture must produce an undetermined gap."
     )
 
-    n_deposits = int(np.asarray(baseline.node_start_count).sum())
+    n_deposits = int(np.asarray(baseline.region_start_count).sum())
     assert n_deposits > 0, "nothing was deposited, so this comparison could not have differed"
 
     for n_workers in (2, 4, 8):
@@ -224,11 +224,11 @@ def test_the_deferred_bank_holds_the_fragments_ITS_COUNTER_CLAIMS(oracle):
 
 
 def test_the_start_count_invariant_holds_on_a_real_scan(oracle):
-    """``sum(node_start_count) == deposited`` — the accumulator's one non-tautological invariant.
+    """``sum(region_start_count) == deposited`` — the accumulator's one non-tautological invariant.
 
     The three "conservation identities" it replaced could only be evaluated by re-running the deposit, so a
     deliberately broken replay satisfied all three while 91 % of the crossings were junk. This one is
     checkable against a number the deposit counts independently.
     """
     tally = _tally(oracle, 1)
-    assert int(tally.node_start_count.sum()) == tally.qc.deposited
+    assert int(tally.region_start_count.sum()) == tally.qc.deposited

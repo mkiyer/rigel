@@ -60,7 +60,7 @@ TA 3000 / TB 30    @9,100     116            364      12          12   (exact)
 
 ⭐ **@9,050 is the diagnostic and @9,100 is its control.** Both carry certified RNA; @9,100's flanks
 include the 1,900 bp exon [9,100, 11,000) which the relay can speak from, and it is exact. @9,050's flanks
-are the two **50 bp** nodes [9,000, 9,050) and [9,050, 9,100) — both below one mean fragment length, so
+are the two **50 bp** regions [9,000, 9,050) and [9,050, 9,100) — both below one mean fragment length, so
 neither has a resolvable density (TRAPS: density-below-one-fragment-length) and the relay has nothing to offer. ⛔ **So the answer at
 @9,050 is set entirely by whether a neighbour happens to be informative, and never by the object's own
 11,026 certified-RNA fragments.** ``f_g`` sits at 0.4902-0.5098 — the uninformative reference — across the

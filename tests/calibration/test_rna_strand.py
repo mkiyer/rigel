@@ -6,9 +6,9 @@ Two properties:
   :func:`fit_rna_strand_overdispersion` (its component mean is κ, not ½, so the excess-variance
   scale must be κ(1−κ), not ¼).
 * **Deconv symmetry** — with the RNA strand modelled as Beta-Binomial too (same default prior as
-  gDNA), an *unstranded* node (κ = ½) is **uninformative**, and a balanced node grows more
+  gDNA), an *unstranded* region (κ = ½) is **uninformative**, and a balanced region grows more
   gDNA-like as the library becomes more stranded. The earlier gDNA-only overdispersion broke this
-  (it pulled balanced unstranded nodes toward RNA).
+  (it pulled balanced unstranded regions toward RNA).
 """
 
 from __future__ import annotations
@@ -28,19 +28,19 @@ from rigel.calibration.gdna_strand import (
 from rigel.calibration.strand_likelihood import strand_loglik
 
 
-def _beta_binom_nodes(rng, n_nodes, depth, overdispersion, mean):
-    """Per-node (sense, total) ~ BetaBinom(depth, mean, overdispersion); symmetric Beta on `mean`."""
+def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean):
+    """Per-region (sense, total) ~ BetaBinom(depth, mean, overdispersion); symmetric Beta on `mean`."""
     conc = (1.0 - overdispersion) / overdispersion  # a + b
-    p = rng.beta(mean * conc, (1.0 - mean) * conc, size=n_nodes)
-    total = np.full(n_nodes, depth, dtype=np.float64)
+    p = rng.beta(mean * conc, (1.0 - mean) * conc, size=n_regions)
+    total = np.full(n_regions, depth, dtype=np.float64)
     sense = rng.binomial(depth, p).astype(np.float64)
     return sense, total
 
 
 def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000):
-    """Posterior median gDNA fraction of one node under a FLAT count prior (strand-only deconv).
+    """Posterior median gDNA fraction of one region under a FLAT count prior (strand-only deconv).
 
-    Mirrors the strand module (``strand_deconv._deconv_per_node`` strand branch): a weak prior ×
+    Mirrors the strand module (``strand_deconv._deconv_per_region`` strand branch): a weak prior ×
     the strand likelihood, isolating the strand likelihood's effect on the deconvolution.
     """
     grid = np.linspace(1e-6, 1.0 - 1e-6, n_grid)
@@ -68,15 +68,15 @@ def test_recovers_rna_overdispersion(true_od, kappa):
     Guards the κ(1−κ) excess-variance scale: a ¼ scale would bias the estimate by 4κ(1−κ).
     """
     rng = np.random.default_rng(2024)
-    sense, total = _beta_binom_nodes(
-        rng, n_nodes=6000, depth=150, overdispersion=true_od, mean=kappa
+    sense, total = _beta_binom_regions(
+        rng, n_regions=6000, depth=150, overdispersion=true_od, mean=kappa
     )
     # Weak prior so the 6000 seed sides dominate (tests the estimator, not the shrinkage).
     model = fit_rna_strand_overdispersion(
         sense, total, kappa, prior_overdispersion=1 / 7, prior_weight=5.0
     )
     assert not model.fallback_used
-    assert model.n_seed_nodes == 6000
+    assert model.n_seed_regions == 6000
     assert model.rna_strand_overdispersion == pytest.approx(true_od, rel=0.20, abs=0.01)
 
 
@@ -95,7 +95,7 @@ def test_binomial_limit_recovers_near_zero():
 def test_fit_clamped_to_ceiling():
     """Extreme overdispersion is clamped to the Beta(2,2) ceiling (od ≤ 0.2)."""
     rng = np.random.default_rng(3)
-    sense, total = _beta_binom_nodes(rng, n_nodes=4000, depth=150, overdispersion=0.45, mean=0.85)
+    sense, total = _beta_binom_regions(rng, n_regions=4000, depth=150, overdispersion=0.45, mean=0.85)
     model = fit_rna_strand_overdispersion(
         sense, total, 0.85, prior_overdispersion=1 / 7, prior_weight=5.0
     )
@@ -112,7 +112,7 @@ def test_no_spliced_data_falls_back_to_prior():
     )
     assert model.fallback_used
     assert model.rna_strand_overdispersion == pytest.approx(prior)
-    assert model.n_seed_nodes == 0
+    assert model.n_seed_regions == 0
 
 
 def test_shrinks_to_prior_when_sparse():
@@ -144,14 +144,14 @@ def test_fit_from_sj_table_uses_every_junction():
     """The wrapper fits one seed per junction; junctions with no fragments drop out."""
     rng = np.random.default_rng(5)
     kappa = 0.9
-    sense, total = _beta_binom_nodes(rng, 6000, 120, 0.10, kappa)
+    sense, total = _beta_binom_regions(rng, 6000, 120, 0.10, kappa)
     model = fit_rna_strand_from_sj_table(
         _sj_table(sense, total - sense),
         rna_sense_frac=kappa,
         prior_overdispersion=1 / 7,
         prior_weight=5.0,
     )
-    assert model.n_seed_nodes == 6000
+    assert model.n_seed_regions == 6000
     assert model.rna_strand_overdispersion == pytest.approx(0.10, rel=0.25, abs=0.01)
 
 
@@ -177,7 +177,7 @@ def test_fit_from_sj_table_matches_the_real_table_type():
 
 
 def test_unstranded_is_uninformative_with_symmetric_overdispersion():
-    """κ = ½, equal gDNA/RNA overdispersion ⇒ a balanced node deconvolves to gdna_frac ≈ ½ (flat)."""
+    """κ = ½, equal gDNA/RNA overdispersion ⇒ a balanced region deconvolves to gdna_frac ≈ ½ (flat)."""
     od = overdispersion_for_beta(3.0)
     frac = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)
     assert frac == pytest.approx(0.5, abs=0.02)
@@ -185,7 +185,7 @@ def test_unstranded_is_uninformative_with_symmetric_overdispersion():
 
 def test_asymmetric_overdispersion_biases_unstranded_toward_rna():
     """The OLD asymmetry (gDNA Beta-Binomial, RNA Binomial) spuriously pulls a balanced unstranded
-    node toward RNA — the bug this change fixes. Symmetric overdispersion removes the pull."""
+    region toward RNA — the bug this change fixes. Symmetric overdispersion removes the pull."""
     od = overdispersion_for_beta(3.0)
     asym = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=0.0)
     symm = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)
@@ -193,8 +193,8 @@ def test_asymmetric_overdispersion_biases_unstranded_toward_rna():
     assert symm == pytest.approx(0.5, abs=0.02)  # pull removed
 
 
-def test_graded_information_balanced_node_more_gdna_as_library_stranded():
-    """A balanced (50/50) node reads more gDNA-like as κ rises from ½ (unstranded) toward 1.
+def test_graded_information_balanced_region_more_gdna_as_library_stranded():
+    """A balanced (50/50) region reads more gDNA-like as κ rises from ½ (unstranded) toward 1.
 
     At κ = ½ it is uninformative (½); as the library becomes more stranded, a *symmetric* split
     looks increasingly like the symmetric gDNA component, so gdna_frac rises monotonically — the
@@ -222,12 +222,12 @@ def test_rna_model_beta_concentration_roundtrip():
     """RnaStrandModel.beta_concentration inverts overdispersion_for_beta."""
     m = RnaStrandModel(
         rna_strand_overdispersion=overdispersion_for_beta(3.0),
-        n_seed_nodes=1,
+        n_seed_regions=1,
         n_seed_fragments=1,
         fallback_used=False,
     )
     assert m.beta_concentration() == pytest.approx(3.0)
     m0 = RnaStrandModel(
-        rna_strand_overdispersion=0.0, n_seed_nodes=0, n_seed_fragments=0, fallback_used=True
+        rna_strand_overdispersion=0.0, n_seed_regions=0, n_seed_fragments=0, fallback_used=True
     )
     assert m0.beta_concentration() == float("inf")

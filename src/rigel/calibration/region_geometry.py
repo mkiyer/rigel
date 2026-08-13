@@ -1,7 +1,7 @@
-"""rigel.calibration.node_geometry — per-slot chain geometry, beliefs, densities, statics, and init.
+"""rigel.calibration.region_geometry — per-slot chain geometry, beliefs, densities, statics, and init.
 
 The lower layer beneath the belief-propagation backbone (`sweep`): everything that describes *what a
-chain slot is* before any message passing. Pure functions of the accumulator substrate + the node
+chain slot is* before any message passing. Pure functions of the accumulator substrate + the region
 geometry + the junction axis + the FL pmfs — no sweep state, no global prior.
 
 ⭐ **EVERY FACE CONCEPT IS GONE (S5.e).** The predecessor built **18 per-face arrays** — a
@@ -11,7 +11,7 @@ spliced channels — because a boundary's two sides lay in differently-sized fla
 sides. Dissolved with the pairs:
 
 * the **junction-strand routing** and the **exon-bit flank gating**, which existed to *guess* which flank
-  a spliced deposit belonged to — the old accumulator attributed a splice to the node's edge rather than
+  a spliced deposit belonged to — the old accumulator attributed a splice to the region's edge rather than
   to the junction's own coordinate. The v8 index states ``(src, dst,
   strand)`` explicitly, so the guess is replaced by the chain's own adjacency;
 * the ``_continues`` / ``_eff_spl_face`` far-boundary machinery, which chose between two per-face spliced
@@ -23,20 +23,20 @@ sides. Dissolved with the pairs:
 
 Contents:
 
-* `NodeGeometry` / `build_node_geometry` — the per-slot static geometry: the unspliced count being
+* `RegionGeometry` / `build_region_geometry` — the per-slot static geometry: the unspliced count being
   deconvolved, its two per-component divisors, and the mature (junction) flux with its own.
-* `NodeBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
+* `RegionBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
   ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
-* `NodeStatics` / `build_node_statics` — the static per-slot solver inputs (per-strand counts, masks).
+* `RegionStatics` / `build_region_statics` — the static per-slot solver inputs (per-strand counts, masks).
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
-* `_node_region_type` — per-slot coarse node type (intergenic/intron/exon), shared with the prior
+* `_region_region_type` — per-slot coarse region type (intergenic/intron/exon), shared with the prior
   subsystem and `gdna_density_prior`.
 
-Layering: LAYER 3. Imports only `node_chain`, `signature`, `effective_length`, `simplex_logodds`
+Layering: LAYER 3. Imports only `region_chain`, `signature`, `effective_length`, `simplex_logodds`
 and `splice_graph` (all lower layers) — never `sweep` or `gdna_density_prior`, so it sits cleanly
 below both. ⚠ `splice_graph` is imported for the four TERMINUS FLAG BITS alone, which
 :func:`terminus_flank_gain` has to know the meaning of; the module already carried the flags array
-through `NodeStatics` without knowing what any bit meant.
+through `RegionStatics` without knowing what any bit meant.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ import numpy as np
 
 from ..types import Strand
 from .effective_length import UNBOUNDED_REACH, contained_eff_length, crossing_eff_length
-from .node_chain import EDGE, NODE, NodeChain
+from .region_chain import EDGE, REGION, RegionChain
 from .signature import (
     TS_AMBIG,
     TS_NEG,
@@ -56,17 +56,17 @@ from .signature import (
     mrna_active_strands,
     nrna_active_strands,
 )
-from .simplex_logodds import _solve_nodes_logodds_all
+from .simplex_logodds import _solve_regions_logodds_all
 from .splice_graph import FLAG_TES_NEG, FLAG_TES_POS, FLAG_TSS_NEG, FLAG_TSS_POS
 
 __all__ = [
-    "NodeGeometry",
-    "build_node_geometry",
-    "node_gdna_geometry",
-    "node_total_density",
-    "NodeBelief",
-    "NodeStatics",
-    "build_node_statics",
+    "RegionGeometry",
+    "build_region_geometry",
+    "region_gdna_geometry",
+    "region_total_density",
+    "RegionBelief",
+    "RegionStatics",
+    "build_region_statics",
     "init_beliefs",
     "g1_locked",
     "terminus_flank_gain",
@@ -80,7 +80,7 @@ def _rate(numerator: np.ndarray, divisor: np.ndarray) -> np.ndarray:
 
     ⛔ and `effective_length`'s own contract: an object with no opportunity
     for a component must emit nothing, at zero precision. The predecessor floored every divisor to
-    ``_EPS`` instead, which is what produced densities of ~1e9 on the **12.4 %** of fine-partition nodes
+    ``_EPS`` instead, which is what produced densities of ~1e9 on the **12.4 %** of fine-partition regions
     where the contained effective length collapses to exactly 0 — turning "no data" into a confident
     wrong answer, and seeding false gDNA into the neighbouring exons.
     """
@@ -90,7 +90,7 @@ def _rate(numerator: np.ndarray, divisor: np.ndarray) -> np.ndarray:
 
 
 @dataclass(frozen=True, slots=True)
-class NodeGeometry:
+class RegionGeometry:
     """Per-chain-slot static geometry (length ``n_slots``). **ONE set of numbers per slot.**
 
     ⭐ **THREE POPULATIONS, NAMED FOR THE ACCUMULATOR'S OWN THREE BANKS.** ``unspliced`` / ``spliced`` /
@@ -118,12 +118,12 @@ class NodeGeometry:
 
     n_slots: int
 
-    #: float64[n_slots, 2] — ``edge_unspliced`` at an EDGE, ``node_contained`` at a NODE. By GENOME
+    #: float64[n_slots, 2] — ``edge_unspliced`` at an EDGE, ``region_contained`` at a REGION. By GENOME
     #: strand. **The mixture being deconvolved**, and the only population that is one.
     #: ⭐ It is BOTH the density numerator and the Poisson ``n``: the accumulator deposits ``+1`` on
     #: every object the fragment touched, so there is no fractional mass to carry separately.
     unspliced_count: np.ndarray
-    #: float64[n_slots] — the gDNA divisor. Contained placements at a NODE, crossing placements at an EDGE.
+    #: float64[n_slots] — the gDNA divisor. Contained placements at a REGION, crossing placements at an EDGE.
     eff_gdna: np.ndarray
     #: float64[n_slots] — the RNA divisor, the same frames on the RNA length pmf.
     #: ⚠ Both are **0 where there is no opportunity**, never floored — see :func:`_rate`.
@@ -131,7 +131,7 @@ class NodeGeometry:
     #: float64[n_slots, 2] — ``edge_spliced``: molecules that crossed this line CONTIGUOUSLY having
     #: spliced somewhere else in the same molecule. By GENOME strand. **Certified RNA — gDNA cannot
     #: splice** — which is what makes it a floor on the RNA inside this line's own population.
-    #: 0 on every NODE slot, structurally: ``node_contained`` is credited only when the fragment used no
+    #: 0 on every REGION slot, structurally: ``region_contained`` is credited only when the fragment used no
     #: junction at all (`_accumulator_reference.deposit`).
     #: ⚠ Its divisor is :attr:`eff_rna` — a contiguous crossing is a contiguous crossing whatever the
     #: molecule did elsewhere — so it needs no effective length of its own.
@@ -151,7 +151,7 @@ class NodeGeometry:
     #: its body in the exon on ONE side of it — the low side if this is the junction's low end, the high
     #: side if this is its high end — and it never enters the other flank at all. So the total this EDGE
     #: presents to its low neighbour must count ``_lo`` and not ``_hi``, and vice versa
-    #: (:func:`node_total_density`). Summing them, as ``junction_count`` above does, is right for the
+    #: (:func:`region_total_density`). Summing them, as ``junction_count`` above does, is right for the
     #: GRAFT — which is about the whole flux leaving this line — and wrong for the reframe.
     #: ⚠ Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
@@ -164,21 +164,21 @@ class NodeGeometry:
     eff_junction_hi: np.ndarray
 
 
-def build_node_geometry(
-    chain: NodeChain,
+def build_region_geometry(
+    chain: RegionChain,
     substrate,
     region_arrays,
     junctions,
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
     edge_rna_reach=None,
-) -> NodeGeometry:
+) -> RegionGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
     **The divisors, and TRAPS: prove-the-substrate** (ruled 2026-07-30):
 
     ================  ==========================================================================
-    NODE, both        ``contained_eff_length(node_len, pmf)`` — no reach argument exists
+    REGION, both        ``contained_eff_length(region_len, pmf)`` — no reach argument exists
     EDGE, gDNA        ``UNBOUNDED_REACH`` both sides ⇒ ``mu_g − 1``. gDNA's template is the
                       chromosome, so ``taper_g = 1``: settled by physics, not by the ruling
     EDGE, RNA         ⭐ ``UNBOUNDED_REACH`` **by the ruling** ⇒ ``mu_r − 1``. An unspliced crossing
@@ -195,48 +195,48 @@ def build_node_geometry(
     contiguous edge (:func:`~rigel.calibration.splice_graph.build_contiguous_edge_reach_arrays`) turns
     the taper on. ⚠ It is ONE argument so that an A/B varies one thing and shares every line of code.
 
-    **Where a junction attaches.** Its donor is the line to the RIGHT of ``src_node`` and its acceptor
-    the line to the LEFT of ``dst_node``; molecules leave the template at the first and arrive at the
+    **Where a junction attaches.** Its donor is the line to the RIGHT of ``src_region`` and its acceptor
+    the line to the LEFT of ``dst_region``; molecules leave the template at the first and arrive at the
     second, so both lines genuinely saw the flux. ⭐ Both are read off the chain's own adjacency
     (``right``/``left``) rather than re-derived from per-reference offsets — which is also what makes
     cross-reference leakage impossible, since a reference terminal links to ``-1``.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_node = kind == NODE
+    is_region = kind == REGION
     is_edge = kind == EDGE
     n = chain.n_slots
 
     # ── the two CONTIGUOUS populations: the mixture, and the certified-RNA floor beside it ───────
     unspliced_count = np.zeros((n, 2), dtype=np.float64)
-    unspliced_count[is_node] = np.asarray(substrate.node_contained.count, np.float64)[obj[is_node]]
+    unspliced_count[is_region] = np.asarray(substrate.region_contained.count, np.float64)[obj[is_region]]
     unspliced_count[is_edge] = np.asarray(substrate.edge_unspliced.count, np.float64)[obj[is_edge]]
-    # ⚠ NODE slots stay 0, and that is structural rather than a shortcut: a contained fragment used no
-    # junction, so a node's contained population cannot hold a spliced molecule.
+    # ⚠ REGION slots stay 0, and that is structural rather than a shortcut: a contained fragment used no
+    # junction, so a region's contained population cannot hold a spliced molecule.
     spliced_count = np.zeros((n, 2), dtype=np.float64)
     spliced_count[is_edge] = np.asarray(substrate.edge_spliced.count, np.float64)[obj[is_edge]]
 
     # ── the two per-component divisors ───────────────────────────────────────────────────────────
-    node_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    n_nodes = node_len.shape[0]
+    region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    n_regions = region_len.shape[0]
     unbounded = np.full(1, UNBOUNDED_REACH)
 
     def divisor(pmf: np.ndarray, edge_reach=None) -> np.ndarray:
-        """Per-slot effective length: contained at a NODE, crossing at an EDGE.
+        """Per-slot effective length: contained at a REGION, crossing at an EDGE.
 
         ``edge_reach`` is ``(reach_lo, reach_hi)`` per contiguous edge, or ``None`` for
         :data:`UNBOUNDED_REACH` — the TRAPS: prove-the-substrate switch. ``None`` is byte-identical to the pre-S5.g path, so
         the two arms of the A/B differ in ONE argument and share every line of code.
         """
-        contained = contained_eff_length(node_len, pmf) if n_nodes else np.zeros(0)
+        contained = contained_eff_length(region_len, pmf) if n_regions else np.zeros(0)
         n_edges = max(int(chain.n_edges_total), 1)
         if edge_reach is None:
             crossing = np.full(n_edges, float(crossing_eff_length(pmf, unbounded, unbounded)[0]))
         else:
             crossing = crossing_eff_length(pmf, edge_reach[0], edge_reach[1])
         out = np.zeros(n, dtype=np.float64)
-        if n_nodes:
-            out[is_node] = contained[obj[is_node]]
+        if n_regions:
+            out[is_region] = contained[obj[is_region]]
         if is_edge.any():
             out[is_edge] = crossing[np.clip(obj[is_edge], 0, crossing.shape[0] - 1)]
         return out
@@ -255,10 +255,10 @@ def build_node_geometry(
     ej_lo = np.zeros((n, 2), dtype=np.float64)
     ej_hi = np.zeros((n, 2), dtype=np.float64)
     if junctions.n_junctions:
-        slot_of_node = np.zeros(int(chain.n_nodes_total), dtype=np.int64)
-        slot_of_node[obj[is_node]] = np.flatnonzero(is_node)
-        donor = np.asarray(chain.right)[slot_of_node[np.asarray(junctions.src_node, np.int64)]]
-        acceptor = np.asarray(chain.left)[slot_of_node[np.asarray(junctions.dst_node, np.int64)]]
+        slot_of_region = np.zeros(int(chain.n_regions_total), dtype=np.int64)
+        slot_of_region[obj[is_region]] = np.flatnonzero(is_region)
+        donor = np.asarray(chain.right)[slot_of_region[np.asarray(junctions.src_region, np.int64)]]
+        acceptor = np.asarray(chain.left)[slot_of_region[np.asarray(junctions.dst_region, np.int64)]]
         if np.any(donor < 0) or np.any(acceptor < 0):
             raise ValueError(
                 "a junction edge attaches to a reference terminal, which has no line beside it. "
@@ -280,7 +280,7 @@ def build_node_geometry(
             np.add.at(jc, (line, column), flux)
             np.add.at(ej, (line, column), eff)
 
-    return NodeGeometry(
+    return RegionGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
         eff_gdna=eff_gdna,
@@ -295,12 +295,12 @@ def build_node_geometry(
     )
 
 
-def node_gdna_geometry(geometry: NodeGeometry):
+def region_gdna_geometry(geometry: RegionGeometry):
     """Per-slot gDNA support ``(unspliced count, eff_gdna)`` — the basis the enrichment NPMLE
     (`DensityNPMLE`) is fit on and projected onto, shared by :func:`sweep.solve_chain` and ``calibrate``
     so the fit and the projection use one definition.
 
-    ⛔ **It was called ``node_global_geometry`` and bound as ``eff_global`` until 2026-08-10, and the
+    ⛔ **It was called ``region_global_geometry`` and bound as ``eff_global`` until 2026-08-10, and the
     name was a lie in the one place it could do most harm.** It returns ``eff_gdna`` and nothing else,
     so ``rho_g = f_g·M/E_g`` — which is exactly what makes ``sum_c rho_c·E_c = M`` hold and therefore
     what makes ``f_g`` a COUNT share rather than a density share. A reader auditing whether the EM prior
@@ -317,7 +317,7 @@ def node_gdna_geometry(geometry: NodeGeometry):
     )
 
 
-def node_total_density(geometry: NodeGeometry, f_g):
+def region_total_density(geometry: RegionGeometry, f_g):
     """⭐⭐⭐ The LAZY, composition-aware total density — **as a PAIR, one per FLANK**::
 
         ρ_unspliced = f_g · (M/E_g)  +  (1−f_g) · (M/E_r)        gDNA-FL for gDNA, RNA-FL for RNA
@@ -325,7 +325,7 @@ def node_total_density(geometry: NodeGeometry, f_g):
         ρ_hi        = ρ_unspliced + Σ_s junction_count_hi_s / eff_junction_hi_s
 
     Returns ``(rho_lo, rho_hi)``: the total to use when this slot is compared against its genomic-LOW
-    neighbour, and the one for its genomic-HIGH neighbour. ⚠ **Equal at every NODE** — a NODE stores
+    neighbour, and the one for its genomic-HIGH neighbour. ⚠ **Equal at every REGION** — a REGION stores
     only CONTAINED fragments and a contained fragment used no junction, so both banks are 0 there and the
     pair degenerates to ``ρ_unspliced``. The distinction exists only at an EDGE.
 
@@ -363,7 +363,7 @@ def node_total_density(geometry: NodeGeometry, f_g):
     belong in the level in principle — but the predecessor's ``mass_spliced`` entered only the strand
     solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename.
     """
-    mass, eff_g = node_gdna_geometry(geometry)
+    mass, eff_g = region_gdna_geometry(geometry)
     fg = np.clip(np.asarray(f_g, dtype=np.float64), 0.0, 1.0)
     rho_unspl = mass * (
         _rate(fg, eff_g) + _rate(1.0 - fg, np.asarray(geometry.eff_rna, np.float64))
@@ -380,22 +380,22 @@ def node_total_density(geometry: NodeGeometry, f_g):
 
 
 @dataclass(frozen=True, slots=True)
-class NodeBelief:
-    """Per-node solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED
+class RegionBelief:
+    """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED
     mass + its per-component posterior variance in LOG-FRACTION space, `(var_pos, var_neg, var_gdna)` =
-    **`Var(log f_c)`, NOT `Var(f_c)`**. All length ``n_nodes``.
+    **`Var(log f_c)`, NOT `Var(f_c)`**. All length ``n_regions``.
 
     ⚠ **The variances are log-space** — grid moments of `log f_c` over the λ lattice
-    (`simplex_logodds._solve_nodes_logodds`), matching the log-density message currency. They are therefore
+    (`simplex_logodds._solve_regions_logodds`), matching the log-density message currency. They are therefore
     **not bounded by ¼** and routinely exceed it; a consumer needing the LINEAR `Var(f_c)` must convert
     (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does for `composition_logvar`).
 
     The variance is the **precision state**: `Var(log f_c)=0` ⇒
     locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
     send — a source's outgoing precision is degraded from its own `Var_own` by the
-    communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
+    communication noise, so an unsure region speaks quietly (Phase 2). The composition is stored as a FRACTION
     (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
-    is the message currency (computed inline in `sweep.solve_chain`), mass `m=f·M_face` (`NodeDeconv`) the
+    is the message currency (computed inline in `sweep.solve_chain`), mass `m=f·M_face` (`RegionDeconv`) the
     output."""
 
     f_pos: np.ndarray
@@ -410,11 +410,11 @@ class NodeBelief:
 # Initialization — the signature-binary G1/G2/G3 belief on the chain.
 # ---------------------------------------------------------------------------
 #
-# A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-node ``allow_pos`` /
+# A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-region ``allow_pos`` /
 # ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
 # ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
 # no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
-# A solved single-strand (TRAPS: one-thing-varied) node takes the strand-solve posterior variance.
+# A solved single-strand (TRAPS: one-thing-varied) region takes the strand-solve posterior variance.
 
 
 def g1_locked(free_pos, free_neg) -> np.ndarray:
@@ -424,8 +424,8 @@ def g1_locked(free_pos, free_neg) -> np.ndarray:
     applies to **both axes** — an intergenic region and an intergenic↔exon seam are both TRAPS: no-magic-numbers, because
     RNA cannot cross a gene boundary any more than it can occupy intergenic space.
 
-    ⚠⚠ **DO NOT CONFUSE THIS WITH ``node_init.strand_evidence``'s ``struct_lock``, which is
-    deliberately NODE-ONLY.** They are two different quantities that happen to share a word:
+    ⚠⚠ **DO NOT CONFUSE THIS WITH ``region_init.strand_evidence``'s ``struct_lock``, which is
+    deliberately REGION-ONLY.** They are two different quantities that happen to share a word:
 
     * *this* one answers "is the belief pinned and certain?" — a question about the belief, so both axes;
     * ``struct_lock`` answers "may this slot EMIT composition certainty into its messages?" and
@@ -434,7 +434,7 @@ def g1_locked(free_pos, free_neg) -> np.ndarray:
       emitter. ``strand_evidence``'s own docstring carries that reasoning.
 
     It lives here, beside the code that applies it, so the instruments that classify objects by it read
-    ONE definition rather than each re-deriving it — two homes for one predicate is how a node-only
+    ONE definition rather than each re-deriving it — two homes for one predicate is how a region-only
     variant survived in two scripts and a test at the same time.
     """
     return ~np.asarray(free_pos, bool) & ~np.asarray(free_neg, bool)
@@ -453,7 +453,7 @@ def terminus_flank_gain(edge_flags) -> tuple[np.ndarray, np.ndarray]:
     An EDGE is a single genomic position and it counts the fragments spanning it CONTIGUOUSLY, so the
     transcripts it can see are exactly the ones continuous across it::
 
-        T(EDGE)  =  T(NODE_left)  ∩  T(NODE_right)
+        T(EDGE)  =  T(REGION_left)  ∩  T(REGION_right)
 
     A transcript whose body BEGINS at the EDGE is in the right flank and not in the EDGE, so
     ``T(EDGE) = T(right)`` fails; one that ENDS there breaks the left equality the same way. Those are
@@ -479,8 +479,8 @@ def terminus_flank_gain(edge_flags) -> tuple[np.ndarray, np.ndarray]:
     boundary between the two treatments.
 
     ``edge_flags`` may be on either axis — the per-contiguous-edge array from
-    :func:`~rigel.calibration.splice_graph.build_edge_flags_array`, or :class:`NodeStatics`'s per-slot
-    copy of it (``0`` at NODE slots, which reads as "no terminus" and is correct: a NODE is not a
+    :func:`~rigel.calibration.splice_graph.build_edge_flags_array`, or :class:`RegionStatics`'s per-slot
+    copy of it (``0`` at REGION slots, which reads as "no terminus" and is correct: a REGION is not a
     position and breaks no population).
     """
     flags = np.asarray(edge_flags, dtype=np.uint16)
@@ -488,22 +488,22 @@ def terminus_flank_gain(edge_flags) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _type_belief(free_pos, free_neg, deconv, mass_unspl):
-    """Build the per-node composition ``(f_pos, f_neg, f_g)`` for ONE node type (regions OR boundaries) from its
+    """Build the per-region composition ``(f_pos, f_neg, f_g)`` for ONE region type (regions OR boundaries) from its
     signature-binary classification + its strand-only solve.
 
-    ``free_pos``/``free_neg`` are the per-node booleans for whether each strand's RNA axis is admissible (a
+    ``free_pos``/``free_neg`` are the per-region booleans for whether each strand's RNA axis is admissible (a
     region's own ±transcript bits; a boundary's ±strand CONTINUITY across the seam). ``deconv`` is the
-    strand-only :class:`NodeDeconv` (no global, no imputation). The signature-binary default is all-gDNA
+    strand-only :class:`RegionDeconv` (no global, no imputation). The signature-binary default is all-gDNA
     ``{0,0,1}`` (`ARCHITECTURE §3`). The class overrides:
 
     * **TRAPS: no-magic-numbers** (neither strand free — intergenic region / no-RNA-crossing boundary): a LOCKED gDNA sink — keep
       ``{0,0,1}``.
     * **TRAPS: one-thing-varied** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie (a
-      single-strand node is 1-D: ``f_active = 1 − f_g``).
+      single-strand region is 1-D: ``f_active = 1 − f_g``).
     * **TRAPS: converge-and-delete** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default at MAX
       (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
 
-    Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
+    Returns the six per-region arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
     precision state: ``var=0`` locked, ``inf`` no-information, else the strand-solve
     posterior variance. The variances are ``Var(log f_c)`` (log-space, unbounded above), never ``Var(f_c)``.
     """
@@ -538,23 +538,23 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
 
 
 @dataclass(frozen=True, slots=True)
-class NodeStatics:
+class RegionStatics:
     """Per-slot STATIC structural masks (length ``n_slots``). The sweep mutates only the dynamic
-    :class:`NodeBelief`; these never change.
+    :class:`RegionBelief`; these never change.
 
     ⭐ **NO COUNT LIVES HERE — this class is structure only.** ``u_pos``/``u_neg``/``mass_unspliced``/
-    ``mass_spliced`` used to be carried alongside :class:`NodeGeometry`'s ``mass_*``/``n_unspl_*``
+    ``mass_spliced`` used to be carried alongside :class:`RegionGeometry`'s ``mass_*``/``n_unspl_*``
     because the old accumulator's mass was fractional while the strand likelihood needed an integer.
     They are the same number now, so **all three populations sit together on the geometry** — where
     their difference is visible — and a consumer slices them there. One quantity, one place
 
 
-    ``free_pos``/``free_neg`` are the nascent-RNA-active axes (a node's own ±transcript bits; an edge's
+    ``free_pos``/``free_neg`` are the nascent-RNA-active axes (a region's own ±transcript bits; an edge's
     ±continuity — the RNA-crossing gate); ``mrna_active_pos``/``mrna_active_neg`` are the mature-RNA-active
-    axes (a node's ±exon bits; an edge's ±contiguous exon) that select the per-node solver prior.
+    axes (a region's ±exon bits; an edge's ±contiguous exon) that select the per-region solver prior.
 
     ``edge_flags`` carries the splice graph's 8 structural bits (``TSS_s``/``TES_s``/``DONOR_s``/
-    ``ACCEPTOR_s``) at each EDGE slot, ``0`` on NODE slots.
+    ``ACCEPTOR_s``) at each EDGE slot, ``0`` on REGION slots.
     ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them, and
     P1G_SCOPE's own specified predicate was measured to be nearly the COMPLEMENT of what it was meant to
     replace (plan TRAPS: a-seam-with-rna-is-not-a-junction). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
@@ -566,19 +566,19 @@ class NodeStatics:
     free_neg: np.ndarray  # bool
     mrna_active_pos: (
         np.ndarray
-    )  # bool — mature-RNA-active (contiguous exon); selects the node prior
+    )  # bool — mature-RNA-active (contiguous exon); selects the region prior
     mrna_active_neg: np.ndarray  # bool
-    edge_flags: np.ndarray  # uint16 — graph structural bits; 0 on NODE slots
+    edge_flags: np.ndarray  # uint16 — graph structural bits; 0 on REGION slots
 
 
-def build_node_statics(
-    chain: NodeChain,
+def build_region_statics(
+    chain: RegionChain,
     region_arrays,
     edge_flags: np.ndarray | None = None,
-) -> NodeStatics:
+) -> RegionStatics:
     """Gather the structural masks onto the chain, in ONE slot-keyed pass.
 
-    ⚠ **It no longer takes a substrate**: with the counts moved onto :class:`NodeGeometry` this reads
+    ⚠ **It no longer takes a substrate**: with the counts moved onto :class:`RegionGeometry` this reads
     nothing but the signatures and the chain's own adjacency, so an unused parameter would only invite a
     caller to think the two are coupled.
 
@@ -590,7 +590,7 @@ def build_node_statics(
 
     ⭐ **And the flank lookup is now the chain's own adjacency.** ``BoundarySubstrate`` carried explicit
     ``left_region``/``right_region`` arrays with ``-1`` at a reference terminal. Edge endpoints are
-    implicit — edge ``i`` lies between node ``i`` and node ``i+1`` — and **an edge always has a node on
+    implicit — edge ``i`` lies between region ``i`` and region ``i+1`` — and **an edge always has a region on
     both sides**, so ``chain.left``/``chain.right`` answer it and the ``-1`` branch has no cases.
 
     The allow mask is the transcript-structure CONTINUITY gate: a strand-``s`` unspliced crossing is
@@ -604,42 +604,42 @@ def build_node_statics(
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_node = kind == NODE
+    is_region = kind == REGION
     is_edge = kind == EDGE
     n = int(chain.n_slots)
     flags = _check_edge_flags(edge_flags, int(chain.n_edges_total))
 
     sig = np.asarray(region_arrays.signature).astype(np.int64)
-    n_nodes = sig.shape[0]
-    node_idx = np.clip(obj, 0, max(n_nodes - 1, 0))
+    n_regions = sig.shape[0]
+    region_idx = np.clip(obj, 0, max(n_regions - 1, 0))
 
-    # the signature at each NODE slot, then read through the chain's adjacency at each EDGE slot
-    slot_sig = np.where(is_node, sig[node_idx] if n_nodes else 0, 0)
+    # the signature at each REGION slot, then read through the chain's adjacency at each EDGE slot
+    slot_sig = np.where(is_region, sig[region_idx] if n_regions else 0, 0)
     left = np.clip(np.asarray(chain.left), 0, max(n - 1, 0))
     right = np.clip(np.asarray(chain.right), 0, max(n - 1, 0))
     sig_l = np.where(is_edge, slot_sig[left], 0)
     sig_r = np.where(is_edge, slot_sig[right], 0)
 
-    ts = np.where(is_node, np.asarray(region_arrays.strand_class)[node_idx] if n_nodes else 0, -1)
+    ts = np.where(is_region, np.asarray(region_arrays.strand_class)[region_idx] if n_regions else 0, -1)
     nrp_l, nrn_l = nrna_active_strands(sig_l)
     nrp_r, nrn_r = nrna_active_strands(sig_r)
     mrp_l, mrn_l = mrna_active_strands(sig_l)
     mrp_r, mrn_r = mrna_active_strands(sig_r)
     mr_self_p, mr_self_n = mrna_active_strands(slot_sig)
 
-    free_pos = np.where(is_node, (ts == TS_POS) | (ts == TS_AMBIG), nrp_l & nrp_r)
-    free_neg = np.where(is_node, (ts == TS_NEG) | (ts == TS_AMBIG), nrn_l & nrn_r)
+    free_pos = np.where(is_region, (ts == TS_POS) | (ts == TS_AMBIG), nrp_l & nrp_r)
+    free_neg = np.where(is_region, (ts == TS_NEG) | (ts == TS_AMBIG), nrn_l & nrn_r)
 
-    return NodeStatics(
+    return RegionStatics(
         n_slots=n,
-        # No per-node spliced FLOOR: spliced (mature) handling is OWNED by the message system (the
-        # edge→exon MEASUREMENT source + the exon→edge absorption in `_scan`). A node-local floor would
+        # No per-region spliced FLOOR: spliced (mature) handling is OWNED by the message system (the
+        # edge→exon MEASUREMENT source + the exon→edge absorption in `_scan`). A region-local floor would
         # double-count it AND inflate an edge's UNSPLICED f_pos with mature → phantom nascent into
         # introns (matrix-confirmed: removing it is ≥ keeping it in every κ × capture × ±gDNA regime).
         free_pos=free_pos,
         free_neg=free_neg,
-        mrna_active_pos=np.where(is_node, mr_self_p, mrp_l & mrp_r),
-        mrna_active_neg=np.where(is_node, mr_self_n, mrn_l & mrn_r),
+        mrna_active_pos=np.where(is_region, mr_self_p, mrp_l & mrp_r),
+        mrna_active_neg=np.where(is_region, mr_self_n, mrn_l & mrn_r),
         edge_flags=np.where(is_edge, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0).astype(
             np.uint16
         ),
@@ -659,16 +659,16 @@ def _check_edge_flags(edge_flags, n_edges: int) -> np.ndarray:
         raise ValueError(
             f"edge_flags has shape {flags.shape}; expected ({n_edges},), one per contiguous edge. "
             f"Build it with splice_graph.build_edge_flags_array(index) against the SAME index the "
-            f"payload was scanned on. ⚠ There are no terminal slots: a reference with k nodes owns "
+            f"payload was scanned on. ⚠ There are no terminal slots: a reference with k regions owns "
             f"k-1 lines, not k+1."
         )
     return flags if flags.size else np.zeros(1, dtype=np.uint16)
 
 
 def init_beliefs(
-    chain: NodeChain,
-    geometry: NodeGeometry,
-    statics: NodeStatics,
+    chain: RegionChain,
+    geometry: RegionGeometry,
+    statics: RegionStatics,
     *,
     rna_sense_frac: float,
     gdna_strand_overdispersion: float = 0.0,
@@ -676,18 +676,18 @@ def init_beliefs(
     n_grid: int,
     n_grid_ss: int | None = None,
     logodds_window: float = 10.0,
-) -> NodeBelief:
-    """The signature-binary G1/G2/G3 initial :class:`NodeBelief` on the unified chain.
+) -> RegionBelief:
+    """The signature-binary G1/G2/G3 initial :class:`RegionBelief` on the unified chain.
 
     All slots are strand-solved by the log-density 1-D/2-D log-odds solver (:mod:`simplex_logodds`,
-    ``O(m·K)``; the bare strand likelihood + the Jeffreys reference at single-strand nodes; NO global prior,
+    ``O(m·K)``; the bare strand likelihood + the Jeffreys reference at single-strand regions; NO global prior,
     NO imputation — those enter the sweep, P2/P3). The signature-binary class overrides (:func:`_type_belief`)
     then set the G1/G2/G3 belief. Single-strand introns resolve to ``f_g≈0`` from the BB tilt alone (the
-    zero-gDNA gate); intergenic / TSS sinks lock at ``{0,0,1}``; AMBIG nodes hold ``{0,0,1}`` at MAX variance
+    zero-gDNA gate); intergenic / TSS sinks lock at ``{0,0,1}``; AMBIG regions hold ``{0,0,1}`` at MAX variance
     for the sweep."""
     st = statics
     count = np.asarray(geometry.unspliced_count, np.float64)
-    deconv = _solve_nodes_logodds_all(
+    deconv = _solve_regions_logodds_all(
         count[:, 0],
         count[:, 1],
         st.free_pos,
@@ -706,24 +706,24 @@ def init_beliefs(
     f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
         st.free_pos, st.free_neg, deconv, count.sum(axis=1)
     )
-    return NodeBelief(
+    return RegionBelief(
         f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_p, var_neg=var_n, var_gdna=var_g
     )
 
 
 # ---------------------------------------------------------------------------
-# Node-type helper (the sweep itself lives in sweep.solve_chain).
+# Region-type helper (the sweep itself lives in sweep.solve_chain).
 # ---------------------------------------------------------------------------
 
 
-def _node_region_type(chain, region_arrays):
-    """Per-slot coarse node type at NODE slots (0=intergenic, 1=intron, 2=exon; exon>intron), −1 at EDGE
-    slots; plus the per-node type array. Single source of truth: :func:`signature.coarse_type_array`."""
+def _region_region_type(chain, region_arrays):
+    """Per-slot coarse region type at REGION slots (0=intergenic, 1=intron, 2=exon; exon>intron), −1 at EDGE
+    slots; plus the per-region type array. Single source of truth: :func:`signature.coarse_type_array`."""
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # per node
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # per region
     ri_ = np.clip(idx, 0, max(rtype.shape[0] - 1, 0))
-    return np.where(kind == NODE, rtype[ri_], -1), rtype
+    return np.where(kind == REGION, rtype[ri_], -1), rtype
 
 
 # ---------------------------------------------------------------------------
@@ -735,7 +735,7 @@ def _node_region_type(chain, region_arrays):
 # nothing else; that efficiency is fixed by probe geometry, probes are designed from the annotation, so it
 # is a property of the object's structural class; and it is directly observable on any class with
 # structurally-pure-gDNA members (intergenic NODEs, ``intergenic|exon`` EDGEs). Five classes were
-# implemented — NODE/EDGE x off-probe / half-covered / fully-covered — with the pooled rate
+# implemented — REGION/EDGE x off-probe / half-covered / fully-covered — with the pooled rate
 # ``Σcount/ΣE`` per class supplying ``r_g = rate[class(dst)]/rate[class(src)]``.
 #
 # ⭐⭐ **MEASURED INERT, AND THE REASON IS AN OPERATOR THAT ALREADY EXISTS.** The relay's MASS PIN
@@ -743,7 +743,7 @@ def _node_region_type(chain, region_arrays):
 # and at a structurally pure-gDNA object that total IS its gDNA density — measured at its own capture
 # stratum. So the landscape is already carried, per object and locally, by the pure-gDNA population's own
 # measurements; a pooled class ratio only re-derives it, worse. A/B on the ladder: **byte-identical off
-# capture**, and 1.2 % of one class on one capture-ON condition (``node/exon`` mwae 0.2719 → 0.2686).
+# capture**, and 1.2 % of one class on one capture-ON condition (``region/exon`` mwae 0.2719 → 0.2686).
 # That does not pay for five constants, a helper and two gates.
 #
 # ⭐ The rule that remains is therefore one line and is in `messages.head`: a gDNA LEVEL crosses a

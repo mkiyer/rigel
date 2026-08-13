@@ -21,7 +21,7 @@ What it compares
 ----------------
 Two ``sweep.solve_chain`` arms on the SAME inputs:
 
-* the six :class:`NodeBelief` arrays — ``f_pos``, ``f_neg``, ``f_g``, ``var_pos``, ``var_neg``, ``var_gdna``
+* the six :class:`RegionBelief` arrays — ``f_pos``, ``f_neg``, ``f_g``, ``var_pos``, ``var_neg``, ``var_gdna``
 * the two chain PROJECTIONS both feed ``CalibrationResult``
 * every shared key of the diagnostics ``_capture``, because the dissect loop's instruments read it and a
   change that silently drops one of its keys breaks them with no error
@@ -106,7 +106,7 @@ def main() -> int:
     from rigel.config import CalibrationConfig, PipelineConfig  # noqa: PLC0415
     from rigel.index import TranscriptIndex  # noqa: PLC0415
 
-    # ── capture ONE real set of node_sweep inputs by intercepting the production call ──────────────────
+    # ── capture ONE real set of region_sweep inputs by intercepting the production call ──────────────────
     grabbed: list[dict] = []
     orig = SW.solve_chain
 
@@ -192,7 +192,7 @@ def main() -> int:
         tot_diff += nd
 
     sub = g["region_arrays"]
-    for nm, fn in (("chain_node_deconv", SW.chain_node_deconv), ("chain_edge_deconv", SW.chain_edge_deconv)):
+    for nm, fn in (("chain_region_deconv", SW.chain_region_deconv), ("chain_edge_deconv", SW.chain_edge_deconv)):
         try:
             a = fn(g["chain"], old, sub)
             b = fn(g["chain"], new, sub)

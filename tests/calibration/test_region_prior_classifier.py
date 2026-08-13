@@ -1,5 +1,5 @@
-"""Phase A of the node-prior redesign (§8): the
-`mrna_active_*` classification carried onto the chain by `build_node_statics`, alongside the existing
+"""Phase A of the region-prior redesign (§8): the
+`mrna_active_*` classification carried onto the chain by `build_region_statics`, alongside the existing
 `free_*` (nascent-active / RNA-crossing) masks. Behaviour-neutral — no solver change — so this only
 asserts the new masks are correct across every region type and all four boundary types.
 """
@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.node_chain import EDGE, NODE, build_node_chain
-from rigel.calibration.node_geometry import build_node_statics
+from rigel.calibration.region_chain import EDGE, REGION, build_region_chain
+from rigel.calibration.region_geometry import build_region_statics
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
@@ -20,7 +20,7 @@ from rigel.calibration.signature import (
 )
 
 
-def _substrate(n_nodes, n_edges):
+def _substrate(n_regions, n_edges):
     """A zero-count substrate of the right shape — the classifier under test is signature-only, so the
     counts are irrelevant and only ``edge_spliced`` is read (for ``spliced_count``)."""
 
@@ -28,7 +28,7 @@ def _substrate(n_nodes, n_edges):
         return SimpleNamespace(count=np.zeros((n, 2)))
 
     return SimpleNamespace(
-        node_contained=view(n_nodes), edge_unspliced=view(n_edges), edge_spliced=view(n_edges)
+        region_contained=view(n_regions), edge_unspliced=view(n_edges), edge_spliced=view(n_edges)
     )
 
 
@@ -36,9 +36,9 @@ def _build_statics(region_sigs):
     """Build a single-reference chain over ``region_sigs`` (genomic order) and return
     ``(chain, statics)``.
 
-    ⭐ ``k`` nodes own ``k − 1`` interior lines and there are **no terminal slots** — so the old
+    ⭐ ``k`` regions own ``k − 1`` interior lines and there are **no terminal slots** — so the old
     "boundary 0 is the reference-start sink" case does not exist to be classified any more. An edge
-    always has a node on both sides, which is what lets `build_node_statics` read its flanks straight
+    always has a region on both sides, which is what lets `build_region_statics` read its flanks straight
     off the chain's adjacency instead of a ``left_region``/``right_region`` array with ``-1`` holes.
     """
     sig = np.asarray(region_sigs, dtype=np.int64)
@@ -49,8 +49,8 @@ def _build_statics(region_sigs):
         region_size_bp=np.full(n_reg, 1000.0),
     )
     n_edge = max(n_reg - 1, 0)
-    chain = build_node_chain(np.array([0, n_reg]), np.array([0, n_edge]))
-    return chain, build_node_statics(chain, region_arrays)
+    chain = build_region_chain(np.array([0, n_reg]), np.array([0, n_edge]))
+    return chain, build_region_statics(chain, region_arrays)
 
 
 def test_classifier_covers_region_and_boundary_types():
@@ -73,7 +73,7 @@ def test_classifier_covers_region_and_boundary_types():
     assert np.all(~st.mrna_active_neg | st.free_neg)  # (−)
 
     kind, ref = np.asarray(chain.kind), np.asarray(chain.obj_idx)
-    reg = np.where(kind == NODE)[0]  # N0..N5 (genomic order)
+    reg = np.where(kind == REGION)[0]  # N0..N5 (genomic order)
     bnd = np.where(kind == EDGE)[0]  # E0..E4
     np.testing.assert_array_equal(ref[reg], np.arange(6))  # confirm genomic ordering
     np.testing.assert_array_equal(ref[bnd], np.arange(5))

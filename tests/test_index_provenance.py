@@ -4,7 +4,7 @@
 
 ⛔ WHY THIS EXISTS. `manifest.json` recorded `format_version` and `rigel_version` and nothing else — not
 the FASTA, not the GTF, not the flags. Rebuilding the human index meant *inferring* the source by matching
-node counts, and `--collapse-duplicate-transcripts` was discovered from a build failure. An artifact that
+region counts, and `--collapse-duplicate-transcripts` was discovered from a build failure. An artifact that
 cannot be reproduced from its own provenance is one nobody can safely re-derive later.
 
 ⚠ **This is not.** That trap forbids storing a hash of an artifact *beside*

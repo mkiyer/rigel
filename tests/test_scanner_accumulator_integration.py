@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.splice_graph import build_node_partition_arrays
+from rigel.calibration.splice_graph import build_region_partition_arrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import scan_and_buffer
 from rigel.scan_payload import AccumulatorPayload
@@ -215,27 +215,27 @@ class TestScannerAccumulatorIntegration:
     def test_payload_shape_matches_index_partition(self, oracle):
         """The payload's three axes must be exactly what the index's partition implies.
 
-        ⭐ ``cuts`` are the CUT POSITIONS; a reference with ``k`` cuts owns ``k − 1`` nodes and
+        ⭐ ``cuts`` are the CUT POSITIONS; a reference with ``k`` cuts owns ``k − 1`` regions and
         ``k − 2`` interior lines. The predecessor counted ``k`` boundary objects per reference — the
         ``k − 1`` interiors plus two data-free terminals — which is the axis S5.f retired.
         """
         index = oracle.index
-        cuts, ref_cut_offsets, node_types = build_node_partition_arrays(index)
+        cuts, ref_cut_offsets, region_types = build_region_partition_arrays(index)
         payload = _scan(oracle)
 
         np.testing.assert_array_equal(payload.cut_positions, cuts)
         np.testing.assert_array_equal(payload.ref_cut_offsets, ref_cut_offsets)
         assert payload.n_refs == len(index.ref_names)
-        assert node_types.shape == (payload.n_nodes,)  # one type per node
+        assert region_types.shape == (payload.n_regions,)  # one type per region
 
         diffs = np.diff(ref_cut_offsets)
-        expected_nodes = int(np.sum(np.maximum(diffs - 1, 0)))
+        expected_regions = int(np.sum(np.maximum(diffs - 1, 0)))
         expected_edges = int(np.sum(np.maximum(diffs - 2, 0)))
-        assert payload.n_nodes == expected_nodes
+        assert payload.n_regions == expected_regions
         assert payload.n_edges == expected_edges
         # ⚠ E = N − (non-empty refs), stated a second way: the two derivations must agree.
         n_live_refs = int(np.sum(diffs > 1))
-        assert payload.n_edges == payload.n_nodes - n_live_refs
+        assert payload.n_edges == payload.n_regions - n_live_refs
 
     def test_fl_pools_emitted(self, oracle):
         """The scan emits the FIVE PURE fragment-length pools, binned at the same L as every other
@@ -254,11 +254,11 @@ class TestScannerAccumulatorIntegration:
 
     def test_at_least_some_mass_deposited(self, oracle):
         payload = _scan(oracle)
-        # ⭐ ONE tally answers this now: node_start_count is incremented once per ACCEPTED fragment, so
+        # ⭐ ONE tally answers this now: region_start_count is incremented once per ACCEPTED fragment, so
         # its total IS the deposit count. The predecessor had to add five arrays across two dtypes
         # because mass was fractional and carried separately from the integer flux.
-        assert int(np.asarray(payload.node_start_count).sum()) > 0, "scanner deposited nothing"
-        assert int(payload.qc.deposited) == int(np.asarray(payload.node_start_count).sum())
+        assert int(np.asarray(payload.region_start_count).sum()) > 0, "scanner deposited nothing"
+        assert int(payload.qc.deposited) == int(np.asarray(payload.region_start_count).sum())
 
 
 class TestFragmentLengthAnchor:

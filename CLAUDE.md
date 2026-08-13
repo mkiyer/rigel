@@ -289,7 +289,7 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/gdna_pool_census.py` | ⭐ the four gDNA pools, each against its own opportunity and against truth |
 | `design/second_pass_accuracy.py` | the second pass scored PER FRAGMENT against the oracle BAM's read names |
 | `design/observable_efficiency.py` | what fraction of the length information a storage choice keeps |
-| `design/node_density_derivation.py` | the reciprocal-opportunity theorem, T0–T6, each perturbed |
+| `design/region_density_derivation.py` | the reciprocal-opportunity theorem, T0–T6, each perturbed |
 | **the scoping number** | |
 | `design/calibration_truth_ab.py` | ⭐⭐ the deliverable against truth, and `--ceiling` — what perfecting each length model is *worth* |
 | **Stage B — calibration** | |

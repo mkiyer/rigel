@@ -38,7 +38,7 @@ def test_fit_is_deterministic():
 
 
 def test_recovers_both_modes():
-    """The estimator exists to keep a capture-enriched MINORITY — 15 % of nodes here — so a fit that
+    """The estimator exists to keep a capture-enriched MINORITY — 15 % of regions here — so a fit that
     smooths them into the depleted bulk is the failure mode, not a nuance."""
     count, mass, eff, var = _two_mode()
     ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
@@ -59,7 +59,7 @@ def test_grid_is_the_domain_logprior_is_asked_about():
 
 
 def test_zero_count_anchor_is_native_and_low():
-    """A node with no gDNA must say 'ρ is anything below the wall' — a downward decay, NOT an invented
+    """A region with no gDNA must say 'ρ is anything below the wall' — a downward decay, NOT an invented
     location at 1/E. It is also the depleted anchor, and dropping it costs +0.26/+0.61 EMD."""
     eff = np.full(200, 500.0)
     ls = fit_gdna_landscape(
@@ -74,11 +74,11 @@ def test_zero_count_anchor_is_native_and_low():
 
 def test_reliability_weight_damps_but_never_deletes():
     """Precision belongs in a continuous weight; expressing it as an admission threshold is measurably
-    worse than ignoring precision altogether. So an imprecise node must be DAMPED — strictly smaller
-    contribution — and never DELETED, because the one node reporting a genuine enriched mode may be exactly
+    worse than ignoring precision altogether. So an imprecise region must be DAMPED — strictly smaller
+    contribution — and never DELETED, because the one region reporting a genuine enriched mode may be exactly
     the imprecise one."""
     count, mass, eff, var = _two_mode()
-    # move a single node far from every other, so its contribution is separable on the axis
+    # move a single region far from every other, so its contribution is separable on the axis
     count, var = count.copy(), var.copy()
     count[0], mass[0] = 5000.0, 6000.0
     at = np.log10(count[0] / eff[0]) * LN10
@@ -91,7 +91,7 @@ def test_reliability_weight_damps_but_never_deletes():
         return float(_density(ls)[near].sum())
 
     confident, vague = mass_near(0.01), mass_near(50.0)
-    assert vague < confident, "an imprecise node must be damped"
+    assert vague < confident, "an imprecise region must be damped"
     assert vague > 0.0, "and never deleted — a cutoff is what this design rejects"
 
 
@@ -116,12 +116,12 @@ def test_knn_width_never_below_the_grid_step():
     a = np.linspace(-3.0, 2.0, 500)
     step = 0.02
     assert (knn_widths(a, step) >= step).all()
-    assert (knn_widths(np.zeros(50), step) == step).all()  # degenerate: all nodes coincident
+    assert (knn_widths(np.zeros(50), step) == step).all()  # degenerate: all regions coincident
 
 
 def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
     """Not "the far edge of a 2k window" — that hands the WIDEST kernel in the fit to the most ISOLATED
-    node, which is backwards and was measured as the false-positive channel on zero-gDNA libraries. Checked
+    region, which is backwards and was measured as the false-positive channel on zero-gDNA libraries. Checked
     against brute force on samples deliberately built as a bulk plus outliers."""
     rng = np.random.default_rng(0)
     for _ in range(20):
@@ -136,7 +136,7 @@ def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
 
 
 def test_knn_width_widens_as_the_sample_thins():
-    """The self-correcting property: fewer nodes ⇒ farther neighbours ⇒ wider kernels, with no tuning."""
+    """The self-correcting property: fewer regions ⇒ farther neighbours ⇒ wider kernels, with no tuning."""
     full = knn_widths(np.linspace(-3, 2, 1000), 1e-6)
     thin = knn_widths(np.linspace(-3, 2, 100), 1e-6)
     assert np.median(thin) > np.median(full)
@@ -154,8 +154,8 @@ def test_logprior_shape_and_strength():
     assert np.all(zero.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0)) == 0.0)
 
 
-def test_logprior_tracks_the_node_mass():
-    """ρ_g = f_g·M/E, so at fixed f_g a heavier node sits higher on the landscape."""
+def test_logprior_tracks_the_region_mass():
+    """ρ_g = f_g·M/E, so at fixed f_g a heavier region sits higher on the landscape."""
     count, mass, eff, var = _two_mode()
     ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     fg = np.array([0.5])

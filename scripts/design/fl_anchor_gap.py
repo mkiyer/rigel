@@ -101,7 +101,7 @@ def _pct(actual: float, reference: float) -> float:
     return 100.0 * (actual - reference) / reference if reference else float("nan")
 
 
-def _drain(cache, index, node_types, junctions, *, seed: int):
+def _drain(cache, index, region_types, junctions, *, seed: int):
     """The drained payload for one cached scan — production's own route, via the pipeline's helper.
 
     ⭐ Calls `pipeline._drain_side_buffer` rather than repeating its three steps, so this measurement
@@ -263,14 +263,14 @@ def main() -> int:
         # ⚠ `--raw-pool` drops BOTH divisors, so it is the before arm for the gDNA model as well as the RNA
         # one — and with both dropped the gDNA pool falls back to the CONTAINED pair, not the raw four.
         gdna_opp = gdna_opportunity_from_index(index, 4096)
-    node_types = junctions = None
+    region_types = junctions = None
     if args.drain:
         from rigel.calibration.splice_graph import (
             build_junction_edge_arrays,
-            build_node_partition_arrays,
+            build_region_partition_arrays,
         )
 
-        _c, _o, node_types = build_node_partition_arrays(index)
+        _c, _o, region_types = build_region_partition_arrays(index)
         junctions = build_junction_edge_arrays(index)
 
     conditions = sorted(p for p in args.pilot.iterdir() if p.is_dir())
@@ -291,7 +291,7 @@ def main() -> int:
         if args.drain:
             row["drained"] = measure(
                 cond.name,
-                _drain(cache, index, node_types, junctions, seed=args.seed),
+                _drain(cache, index, region_types, junctions, seed=args.seed),
                 truth,
                 crossing,
                 gdna_opp,
@@ -399,7 +399,7 @@ def main() -> int:
                   f"{ga['mean_pct']:>+11.2f}% {ga['sd_pct']:>+9.2f}%")
         print("   ⛔ On a ZERO-gDNA condition every fragment is RNA, so ANY growth in the gDNA pool is")
         print("      RNA contaminating it — a drained fragment that chose ∅ and landed contained in an")
-        print("      intronic node. ⚠ On gdna100 growth is LEGITIMATE: a real gDNA fragment whose mate")
+        print("      intronic region. ⚠ On gdna100 growth is LEGITIMATE: a real gDNA fragment whose mate")
         print("      gap spans an annotated intron is genuinely ambiguous and was genuinely held.")
         print("   ⚠ So this is not TRAPS: pure-and-length-censored.6's control. There the fix could not reach a fragment with no")
         print("      introns, so any movement was a bug; here the drain reaches fragments it is supposed")

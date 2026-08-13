@@ -4,7 +4,7 @@ Three candidate rules, each evaluated at every edge against the KNOWN true densi
 
   R1  no partition      each crossed edge gets  1/L
   R2  equal partition   each crossed edge gets  (1/L) * (1/K)     <- the current tool's rule
-  R3  overlap-weighted  edge between node a,b gets (1/L) * (overlap_a + overlap_b)/(2L)
+  R3  overlap-weighted  edge between region a,b gets (1/L) * (overlap_a + overlap_b)/(2L)
 
 Ground truth: molecules of length L land with START density rho per template position, uniform.
 Everything is exact -- no approximation anywhere -- so any departure from rho is the rule's own bias.
@@ -20,7 +20,7 @@ N_REP = 40
 
 
 def run(spacing):
-    cuts = np.arange(0, T + 1, spacing)  # node boundaries; edges sit at cuts[1:-1]
+    cuts = np.arange(0, T + 1, spacing)  # region boundaries; edges sit at cuts[1:-1]
     n_edge = cuts.size - 2
     acc = {k: np.zeros(n_edge) for k in ("R1", "R2", "R3")}
     cnt = np.zeros(n_edge)
@@ -44,7 +44,7 @@ def run(spacing):
             cnt[idx] += 1.0
             acc["R1"][idx] += 1.0 / L
             acc["R2"][idx] += (1.0 / L) / k
-            # overlap-weighted: the two node-pieces flanking this edge, over 2L
+            # overlap-weighted: the two region-pieces flanking this edge, over 2L
             cj = cuts[a:b][ok]
             left_ov = cj - np.maximum(s, cj - spacing)
             right_ov = np.minimum(e, cj + spacing) - cj
@@ -59,7 +59,7 @@ def run(spacing):
 
 
 print(f"truth rho = {RHO};  fragment length ~ N({MU:.0f},{SD:.0f})")
-print(f"{'node spacing':>13} {'mean K':>8} | {'R1 no-part':>11} {'R2 1/K':>9} {'R3 overlap':>11}")
+print(f"{'region spacing':>13} {'mean K':>8} | {'R1 no-part':>11} {'R2 1/K':>9} {'R3 overlap':>11}")
 print("-" * 62)
 for s in (50, 100, 200, 400, 1000, 4000):
     r, c = run(s)
@@ -69,4 +69,4 @@ for s in (50, 100, 200, 400, 1000, 4000):
         f"{r['R1']:>11.4f} {r['R2']:>9.4f} {r['R3']:>11.4f}"
     )
 print("\n(values are estimate / truth; 1.0000 = unbiased)")
-print("R2 and R3 depend on the NODE SPACING -- a property of the annotation, not the sample.")
+print("R2 and R3 depend on the REGION SPACING -- a property of the annotation, not the sample.")

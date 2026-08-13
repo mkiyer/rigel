@@ -3,7 +3,7 @@
     TODO item 2 · and 16
 
 ⛔ **WHY THIS EXISTS, AND WHY IT IS WRITTEN BEFORE THE SUITE.** The 32-condition `ambig_dense_10mb` suite
-was used for months to judge a partition change it was **structurally incapable of seeing**: its fine node
+was used for months to judge a partition change it was **structurally incapable of seeing**: its fine region
 set was row-for-row identical to its merged region set (1,698 == 1,698). It also had `frag_std = 0`, so
 nothing fragment-length-dependent was exercised at all, and it was Poisson by construction. The standing
 rule that came out of that: *before running a benchmark, prove it can resolve the axis you are changing.*
@@ -14,10 +14,10 @@ the suite turned out to be.
 standing rule forbids one. Every requirement is scored against its **degenerate value**: the number a suite
 scores when it is structurally blind to that requirement. Those are boundaries, not choices —
 
-* a partition that cannot be resolved has `nodes / merged regions` **exactly 1.000` and **0** hidden termini;
+* a partition that cannot be resolved has `regions / merged regions` **exactly 1.000` and **0** hidden termini;
 * a suite with no fragment-length variation has variance **exactly 0**;
 * a Poisson simulator has overdispersion **exactly 0** (measured `< 5e-5`);
-* a reference with no single-stranded node to train the population prior on has **0** of them.
+* a reference with no single-stranded region to train the population prior on has **0** of them.
 
 A requirement passes iff its measurement is strictly on the non-degenerate side. The **human index** is
 printed beside it as the calibration reference — not as a threshold, but so a number that is technically
@@ -89,24 +89,24 @@ class Verdict:
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def merged_region_boundaries(nodes: pd.DataFrame) -> np.ndarray:
+def merged_region_boundaries(regions: pd.DataFrame) -> np.ndarray:
     """Rebuild the v7 merged partition: a region ends where the reference or the signature changes."""
-    signature = nodes["signature"].to_numpy(np.uint8)
-    ref = nodes["ref_name"].astype(str).to_numpy()
-    boundary = np.ones(len(nodes), dtype=bool)
+    signature = regions["signature"].to_numpy(np.uint8)
+    ref = regions["ref_name"].astype(str).to_numpy()
+    boundary = np.ones(len(regions), dtype=bool)
     boundary[1:] = (signature[1:] != signature[:-1]) | (ref[1:] != ref[:-1])
     return boundary
 
 
-def requirement_g_partition(nodes: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
+def requirement_g_partition(regions: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
     """(g) Can the suite see a partition change at all?
 
-    ⛔ The deleted suite scored **exactly** the degenerate value on both of these: 1,698 nodes against
+    ⛔ The deleted suite scored **exactly** the degenerate value on both of these: 1,698 regions against
     1,698 merged regions, and therefore zero termini hidden by the merge.
     """
-    boundary = merged_region_boundaries(nodes)
+    boundary = merged_region_boundaries(regions)
     n_merged = int(boundary.sum())
-    ratio = len(nodes) / max(n_merged, 1)
+    ratio = len(regions) / max(n_merged, 1)
 
     contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
     dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
@@ -117,11 +117,11 @@ def requirement_g_partition(nodes: pd.DataFrame, edges: pd.DataFrame) -> list[Ve
     return [
         Verdict(
             "g",
-            "partition resolution (nodes / merged regions)",
+            "partition resolution (regions / merged regions)",
             ratio,
             1.0,
             "x",
-            f"{len(nodes):,} nodes against {n_merged:,} merged regions. "
+            f"{len(regions):,} regions against {n_merged:,} merged regions. "
             f"At 1.000x the two partitions are the same object and no partition change is visible.",
         ),
         Verdict(
@@ -136,14 +136,14 @@ def requirement_g_partition(nodes: pd.DataFrame, edges: pd.DataFrame) -> list[Ve
     ]
 
 
-def requirement_d_interior_termini(nodes: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
+def requirement_d_interior_termini(regions: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
     """(d) Alternative TSS/TES that fall strictly INSIDE an exon.
 
-    A terminus seam whose flanking nodes are BOTH exonic on the terminus's own strand sits strictly
+    A terminus seam whose flanking regions are BOTH exonic on the terminus's own strand sits strictly
     inside an exon of some other isoform — which is the case a merged partition cannot represent and
     the case a real annotation is full of. A generated mini-genome with one isoform per gene has none.
     """
-    signature = nodes["signature"].to_numpy(np.uint8)
+    signature = regions["signature"].to_numpy(np.uint8)
     contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
     dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
     flags = edges.loc[contiguous, "flags"].to_numpy(np.uint16)
@@ -167,17 +167,17 @@ def requirement_d_interior_termini(nodes: pd.DataFrame, edges: pd.DataFrame) -> 
     ]
 
 
-def requirement_e_single_stranded(nodes: pd.DataFrame) -> list[Verdict]:
-    """(e) Ample single-stranded nodes — the population prior trains on them.
+def requirement_e_single_stranded(regions: pd.DataFrame) -> list[Verdict]:
+    """(e) Ample single-stranded regions — the population prior trains on them.
 
     ⚠ Scored PER REFERENCE and by DISTANCE, not pooled. The stated failure is not "the suite has no
-    single-stranded nodes anywhere", it is *an isolated both-strand node with no single-stranded
-    neighbours* — a starved toy. So the measurement is: from each both-stranded node, how many nodes
-    away is the nearest single-stranded one? A reference with both-stranded nodes and none at all
+    single-stranded regions anywhere", it is *an isolated both-strand region with no single-stranded
+    neighbours* — a starved toy. So the measurement is: from each both-stranded region, how many regions
+    away is the nearest single-stranded one? A reference with both-stranded regions and none at all
     scores an infinite distance, which is the degenerate case.
     """
-    signature = nodes["signature"].to_numpy(np.uint8)
-    ref = nodes["ref_name"].astype(str).to_numpy()
+    signature = regions["signature"].to_numpy(np.uint8)
+    ref = regions["ref_name"].astype(str).to_numpy()
     has_pos = (signature & POS_BITS) != 0
     has_neg = (signature & NEG_BITS) != 0
     single = has_pos ^ has_neg
@@ -193,7 +193,7 @@ def requirement_e_single_stranded(nodes: pd.DataFrame) -> list[Verdict]:
             starved_refs += 1
             worst_distance = float("inf")
             continue
-        # Distance in NODES to the nearest single-stranded node on the same reference.
+        # Distance in REGIONS to the nearest single-stranded region on the same reference.
         slot = np.searchsorted(single_idx, both_idx)
         sentinel = np.iinfo(np.int64).max
         left = np.where(slot > 0, both_idx - single_idx[np.maximum(slot - 1, 0)], sentinel)
@@ -204,33 +204,33 @@ def requirement_e_single_stranded(nodes: pd.DataFrame) -> list[Verdict]:
         )
         worst_distance = max(worst_distance, float(np.minimum(left, right).max()))
 
-    fraction = float(single.sum()) / max(len(nodes), 1)
+    fraction = float(single.sum()) / max(len(regions), 1)
     return [
         Verdict(
             "e",
-            "single-stranded nodes",
+            "single-stranded regions",
             int(single.sum()),
             0.0,
-            "nodes",
-            f"{100 * fraction:.1f} % of nodes; {int(both.sum()):,} both-stranded, "
+            "regions",
+            f"{100 * fraction:.1f} % of regions; {int(both.sum()):,} both-stranded, "
             f"{int((~has_pos & ~has_neg).sum()):,} intergenic.",
         ),
         Verdict(
             "e",
-            "both-stranded nodes (a both-strand test needs some)",
+            "both-stranded regions (a both-strand test needs some)",
             int(both.sum()),
             0.0,
-            "nodes",
-            "Without these there is no both-strand stress case for the single-stranded nodes to support.",
+            "regions",
+            "Without these there is no both-strand stress case for the single-stranded regions to support.",
         ),
         Verdict(
             "e",
-            "single-stranded nodes PER both-stranded node",
+            "single-stranded regions PER both-stranded region",
             float(single.sum()) / max(int(both.sum()), 1) if both.any() else 0.0,
             0.0,
             "ratio",
-            f"This is what 'ample' means: {starved_refs} reference(s) carry a both-strand node with NO "
-            f"single-stranded node at all, and the worst node-distance from a both-strand node to the "
+            f"This is what 'ample' means: {starved_refs} reference(s) carry a both-strand region with NO "
+            f"single-stranded region at all, and the worst region-distance from a both-strand region to the "
             f"nearest single-stranded one is {worst_distance:g}.",
         ),
     ]
@@ -286,7 +286,7 @@ def requirement_b_fragment_length_variance(suite: Path, conditions: list[dict]) 
 def requirement_a_density_step(suite: Path, conditions: list[dict]) -> list[Verdict]:
     """(a) A density STEP, not a uniform background.
 
-    Over a run of flat nodes a relayed message decays geometrically per hop, so a uniform scenario
+    Over a run of flat regions a relayed message decays geometrically per hop, so a uniform scenario
     cannot distinguish "the relay works" from "the global prior reached it". Capture supplies the step:
     on-panel transcripts are enriched, off-panel ones are not, and the ratio between them IS the step.
     Measured from the truth as post-capture fragments per unit pre-capture abundance.
@@ -463,12 +463,12 @@ def empirical_verdicts(suite: Path) -> list[Verdict]:
 
 
 def structural_verdicts(index_dir: Path) -> list[Verdict]:
-    nodes = pd.read_feather(index_dir / "nodes.feather")
+    regions = pd.read_feather(index_dir / "nodes.feather")
     edges = pd.read_feather(index_dir / "edges.feather")
     return [
-        *requirement_g_partition(nodes, edges),
-        *requirement_d_interior_termini(nodes, edges),
-        *requirement_e_single_stranded(nodes),
+        *requirement_g_partition(regions, edges),
+        *requirement_d_interior_termini(regions, edges),
+        *requirement_e_single_stranded(regions),
     ]
 
 

@@ -51,12 +51,12 @@ from ._accumulator_reference import (
 # ---------------------------------------------------------------------------
 #
 # cuts    0     100    200   201    400        900       1000
-# nodes   [ n0 ][ n1  ][n2*][  n3  ][    n4   ][   n5   ]        (* n2 is 1 bp)
+# regions   [ n0 ][ n1  ][n2*][  n3  ][    n4   ][   n5   ]        (* n2 is 1 bp)
 # lines         1      2    3      4          5
 # types   intergenic, exon, exon, intron, exon, intergenic
 #
 # So: line 1 has {intergenic, exon} flanks (a splash pool), line 3 has {intron, exon} (the other), n2 is
-# a 1 bp node that a fragment can span, and the annotated junction [201, 900) SWALLOWS line 4 — which is
+# a 1 bp region that a fragment can span, and the annotated junction [201, 900) SWALLOWS line 4 — which is
 # the case the whole redesign exists for.
 #
 # ⛔ THREE junctions, not one, and the count is load-bearing. With a single annotated junction no fragment
@@ -115,11 +115,11 @@ def _pair(max_length: int = MAX_LENGTH, junctions=JUNCTIONS):
     ``test_the_csr_slot_order_matches_the_reference_accumulator``. Feeding both sides one CSR isolates
     the thing this module is for — the deposit rule.
     """
-    partition = Partition.from_cuts(_CUTS_PER_REF, node_types=_TYPES_PER_REF, junctions=junctions)
+    partition = Partition.from_cuts(_CUTS_PER_REF, region_types=_TYPES_PER_REF, junctions=junctions)
     reference = ReferenceAccumulator(partition, max_fragment_length=max_length)
     native = NativeAccumulator(
         cuts=np.asarray(CUTS, dtype=np.int64),
-        node_types=np.asarray(TYPES, dtype=np.uint8),
+        region_types=np.asarray(TYPES, dtype=np.uint8),
         max_length=max_length,
         ref=REF,
     )
@@ -212,13 +212,13 @@ BOTH_JUNCTIONS = GapHypothesis(
 #: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the
 #: junction bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
 CASES: list[tuple[str, dict]] = [
-    ("contained in an exonic node", dict(start=150, end=190)),
-    ("contained, intergenic node (a pure gDNA pool)", dict(start=10, end=90)),
-    ("contained, intronic node (the other pure gDNA pool)", dict(start=210, end=390)),
+    ("contained in an exonic region", dict(start=150, end=190)),
+    ("contained, intergenic region (a pure gDNA pool)", dict(start=10, end=90)),
+    ("contained, intronic region (the other pure gDNA pool)", dict(start=210, end=390)),
     ("one line crossed, {intergenic, exon} splash", dict(start=50, end=150)),
     ("one line crossed, {intron, exon} splash", dict(start=200, end=210)),
     ("four lines crossed -> no pool, it is a mixture", dict(start=50, end=500)),
-    ("spanning the 1 bp node", dict(start=150, end=250)),
+    ("spanning the 1 bp region", dict(start=150, end=250)),
     ("ends exactly ON a line: contained, does NOT cross", dict(start=50, end=100)),
     ("starts exactly ON a line", dict(start=100, end=150)),
     ("minus column", dict(start=150, end=190, align_strand=Strand.NEG)),
@@ -474,30 +474,30 @@ def test_the_fragment_length_limit_agrees_including_the_pool_histogram_width():
         _deposit_both(reference, native, label, **kw)
 
 
-def test_node_of_pos_agrees_everywhere_including_outside_the_reference():
-    """``node_of_pos`` is public, so its clamp is reachable even though ``deposit`` cannot reach it.
+def test_region_of_pos_agrees_everywhere_including_outside_the_reference():
+    """``region_of_pos`` is public, so its clamp is reachable even though ``deposit`` cannot reach it.
 
     ⚠ Inside ``deposit`` the clamp is dead by construction — the path is clipped to
     ``[cuts.front(), cuts.back())`` first, so neither end can fall outside — and a perturbation removing the
     upper clamp passed the rest of this module for exactly that reason. But the method is bound, a caller
-    may pass anything, and out of range it would index one past the last node. So it is pinned here rather
+    may pass anything, and out of range it would index one past the last region. So it is pinned here rather
     than left to the branch that cannot exercise it.
     """
     reference, native = _pair()
     cuts = np.asarray(CUTS, dtype=np.int64)
     for position in [-1000, -1, *CUTS, *[c - 1 for c in CUTS], *[c + 1 for c in CUTS], 5000]:
-        want = ReferenceAccumulator._local_node(cuts, position)
-        assert native.node_of_pos(position) == want, f"node_of_pos({position})"
+        want = ReferenceAccumulator._local_region(cuts, position)
+        assert native.region_of_pos(position) == want, f"region_of_pos({position})"
     assert reference is not None  # the pair is built for its side effects on the partition
 
 
 def test_a_reference_with_no_junction_table_agrees():
     """``set_junctions`` is a separate call, so "never called" is a real state and must not differ."""
-    partition = Partition.from_cuts(_CUTS_PER_REF, node_types=_TYPES_PER_REF)
+    partition = Partition.from_cuts(_CUTS_PER_REF, region_types=_TYPES_PER_REF)
     reference = ReferenceAccumulator(partition, max_fragment_length=MAX_LENGTH)
     native = NativeAccumulator(
         cuts=np.asarray(CUTS, dtype=np.int64),
-        node_types=np.asarray(TYPES, dtype=np.uint8),
+        region_types=np.asarray(TYPES, dtype=np.uint8),
         max_length=MAX_LENGTH,
         ref=REF,
     )
@@ -576,7 +576,7 @@ def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
     for ref in (0, REF):
         native = NativeAccumulator(
             cuts=np.asarray(CUTS, dtype=np.int64),
-            node_types=np.asarray(TYPES, dtype=np.uint8),
+            region_types=np.asarray(TYPES, dtype=np.uint8),
             max_length=MAX_LENGTH,
             ref=ref,
         )
