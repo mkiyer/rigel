@@ -96,7 +96,7 @@ something from a higher layer is telling you the thing belongs lower — a TYPE 
 | if the change is about… | it goes in |
 |---|---|
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
-| how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `junction_opportunity` `gdna_opportunity` `fl` |
+| how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, and ψ | **3 · geometry + the per-slot solve** — `node_geometry` `simplex_logodds` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_deconv` `strand_balance` `strand_summary`, and `strand_likelihood` (an executable REFERENCE, gated) |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `npmle` `gdna_landscape` `background_reference` `run_fill` |

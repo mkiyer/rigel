@@ -12,13 +12,13 @@ Unless such a fragment is binned as ``boundary_spliced`` it lands in the unsplic
 
 The rung is ``tes_readthrough``::
 
-    TA+ (1,050, 2,000) (9,000,  9,100)      junction 2,000 -> 9,000
-    TB+ (1,000, 2,000) (9,050, 11,000)      junction 2,000 -> 9,050
+    TA+ (1,050, 2,000) (9,000,  9,100)      sj 2,000 -> 9,000
+    TB+ (1,000, 2,000) (9,050, 11,000)      sj 2,000 -> 9,050
 
-⭐ **BOUNDARY @9,100 is TA's TES and no junction touches it**, but TB's exon 2 runs to 11,000 — so a TB
-fragment that used TB's junction and reaches past 9,100 crosses it CONTIGUOUSLY HAVING SPLICED ELSEWHERE.
-⭐ **BOUNDARY @9,050 is TB's junction acceptor AND a plain contiguity boundary for TA**, whose exon 2 spans
-9,000-9,100 unbroken. One boundary, junction flux for one transcript and an unspliced RNA crossing for another.
+⭐ **BOUNDARY @9,100 is TA's TES and no sj touches it**, but TB's exon 2 runs to 11,000 — so a TB
+fragment that used TB's sj and reaches past 9,100 crosses it CONTIGUOUSLY HAVING SPLICED ELSEWHERE.
+⭐ **BOUNDARY @9,050 is TB's sj acceptor AND a plain contiguity boundary for TA**, whose exon 2 spans
+9,000-9,100 unbroken. One boundary, sj flux for one transcript and an unspliced RNA crossing for another.
 
 ⛔⛔ **SCORE THE MASS, NOT ``f_g`` — AND THIS INSTRUMENT LEARNED THAT THE HARD WAY.** The solver's
 ``f_g`` is the gDNA fraction of the **unspliced** population; the oracle's per-object fraction is
@@ -31,7 +31,7 @@ silently produces the same symptom:
 
 ===  ====================================================================================
 (a)  is the BANK populated?          ``spliced_count`` > 0 where the geometry says it must be
-(b)  does it have a DIVISOR?         ``eff_rna`` > 0, since there is no ``eff_junction`` at a
+(b)  does it have a DIVISOR?         ``eff_rna`` > 0, since there is no ``eff_sj`` at a
                                      terminus BOUNDARY to price it against
 (c)  is a PRECISION EMITTED?         the relay's own RNA measurement precision (``cm_p``/``cm_n``)
                                      — a bank with a divisor and no precision is inert
@@ -73,10 +73,10 @@ neighbour, not the object.
 
 ⭐ **The grid is the experiment, not a sweep for its own sake.** At @9,100 the certified channel is TB's
 alone while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves the two independently and a
-single abundance pair tests one corner. TA also carries the *other* junction into @9,050, so the two
+single abundance pair tests one corner. TA also carries the *other* sj into @9,050, so the two
 transcripts stress different boundaries.
 
-⚠ **A known, CORRECT loss to keep in view.** TA's and TB's junctions share the donor at 2,000 and differ
+⚠ **A known, CORRECT loss to keep in view.** TA's and TB's sj share the donor at 2,000 and differ
 only in acceptor (9,000 vs 9,050), so a fragment whose UNSEQUENCED mate gap could hold either implies two
 different ``L`` values and is DEFERRED to the second pass rather than deposited — the owner's ruling, in
 `tests/native/_accumulator_reference.py`. Measured on the pure-RNA arm: 1,298 of 200,000 fragments, which
@@ -175,7 +175,7 @@ def main() -> int:
             print(f"\n{'─' * 132}")
             print(f"⭐ TA = {ta:<8g} TB = {tb:<8g}"
                   f"   deferred (ambiguous mate gap, CORRECT): {deferred:,}")
-            print(f"   {'object':<28}{'n':>8}{'spliced':>9}{'junction':>10}{'E_r':>8}"
+            print(f"   {'object':<28}{'n':>8}{'spliced':>9}{'sj':>10}{'E_r':>8}"
                   f"{'cm_p':>10}{'cm_n':>8}{'true_fg':>9}{'fg_loc':>8}{'pred_fg':>9}{'Δ':>9}   audit")
             print("   " + "-" * 126)
             for row in rows:

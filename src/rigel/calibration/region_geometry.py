@@ -2,7 +2,7 @@
 
 The lower layer beneath the belief-propagation backbone (`sweep`): everything that describes *what a
 chain slot is* before any message passing. Pure functions of the accumulator substrate + the region
-geometry + the junction axis + the FL pmfs — no sweep state, no global prior.
+geometry + the sj axis + the FL pmfs — no sweep state, no global prior.
 
 ⭐ **EVERY FACE CONCEPT IS GONE (S5.e).** The predecessor built **18 per-face arrays** — a
 ``_left``/``_right`` pair for the unspliced mass, its integer flux, three effective lengths and four
@@ -10,9 +10,9 @@ spliced channels — because a boundary's two sides lay in differently-sized fla
 **different divisors**. A contiguous boundary is a 0-bp boundary: one set of numbers, seen identically from both
 sides. Dissolved with the pairs:
 
-* the **junction-strand routing** and the **exon-bit flank gating**, which existed to *guess* which flank
+* the **sj-strand routing** and the **exon-bit flank gating**, which existed to *guess* which flank
   a spliced deposit belonged to — the old accumulator attributed a splice to the region's boundary rather than
-  to the junction's own coordinate. The v8 index states ``(src, dst,
+  to the sj's own coordinate. The v8 index states ``(src, dst,
   strand)`` explicitly, so the guess is replaced by the chain's own adjacency;
 * the ``_continues`` / ``_eff_spl_face`` far-boundary machinery, which chose between two per-face spliced
   divisors. S5.c left ONE crossing formula, so there is nothing to choose;
@@ -24,7 +24,7 @@ sides. Dissolved with the pairs:
 Contents:
 
 * `RegionGeometry` / `build_region_geometry` — the per-slot static geometry: the unspliced count being
-  deconvolved, its two per-component divisors, and the mature (junction) flux with its own.
+  deconvolved, its two per-component divisors, and the mature (sj) flux with its own.
 * `RegionBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
   ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
 * `RegionStatics` / `build_region_statics` — the static per-slot solver inputs (per-strand counts, masks).
@@ -94,23 +94,23 @@ class RegionGeometry:
     """Per-chain-slot static geometry (length ``n_slots``). **ONE set of numbers per slot.**
 
     ⭐ **THREE POPULATIONS, NAMED FOR THE ACCUMULATOR'S OWN THREE BANKS.** ``unspliced`` / ``spliced`` /
-    ``junction`` is what ``boundary_unspliced``, ``boundary_spliced`` and ``sj_count`` are called in the
+    ``sj`` is what ``boundary_unspliced``, ``boundary_spliced`` and ``sj_count`` are called in the
     executable specification, and a consumer that renames a bank on the way in is how one quantity comes
     to have two names. At one boundary, of the molecules that touched it::
 
         unspliced_count   crossed it CONTIGUOUSLY, spliced nowhere       a gDNA/RNA MIXTURE
         spliced_count     crossed it CONTIGUOUSLY, spliced elsewhere     certified RNA
-        junction_count    never crossed it -- it JUMPED from here        certified RNA
+        sj_count    never crossed it -- it JUMPED from here        certified RNA
 
     ⚠ **The last two are different molecules and routinely differ by two orders of magnitude at the same
-    boundary.** At a donor boundary the junction flux is the gene's whole mature output while the spliced
+    boundary.** At a donor boundary the sj flux is the gene's whole mature output while the spliced
     crossing is the handful of molecules that read through without splicing; at a region_bound inside an exon
-    there is no junction at all, so ``junction_count`` is 0 while ``spliced_count`` carries everything.
+    there is no sj at all, so ``sj_count`` is 0 while ``spliced_count`` carries everything.
     ⛔ The word *mature* fits both and therefore distinguishes neither, which is why it is not used.
 
     ⭐ **TWO STRAND AXES, AND THEY ARE NOT THE SAME AXIS.** ``unspliced_count`` and ``spliced_count``
     are keyed by **genome** strand — where the read aligned, the accumulator's one storage convention.
-    ``junction_count``/``eff_junction`` are keyed by **transcript** strand, derived from each junction's
+    ``sj_count``/``eff_sj`` are keyed by **transcript** strand, derived from each sj's
     own annotated strand. That derivation is precisely why the accumulator stores no sense/antisense
     column; putting the two axes in one array under one name is the two-conventions-in-one-schema defect
     the redesign removes.
@@ -132,43 +132,43 @@ class RegionGeometry:
     #: spliced somewhere else in the same molecule. By GENOME strand. **Certified RNA — gDNA cannot
     #: splice** — which is what makes it a floor on the RNA inside this boundary's own population.
     #: 0 on every REGION slot, structurally: ``region_contained`` is credited only when the fragment used no
-    #: junction at all (`_accumulator_reference.deposit`).
+    #: sj at all (`_accumulator_reference.deposit`).
     #: ⚠ Its divisor is :attr:`eff_rna` — a contiguous crossing is a contiguous crossing whatever the
     #: molecule did elsewhere — so it needs no effective length of its own.
     spliced_count: np.ndarray
-    #: float64[n_slots, 2] — ``sj_count``, gathered onto the two boundaries each junction leaves and enters,
+    #: float64[n_slots, 2] — ``sj_count``, gathered onto the two boundaries each sj leaves and enters,
     #: by TRANSCRIPT strand. The flux that **changes template** here: what the graft hands an exon, and
     #: what the peel measures the continuing share against.
-    junction_count: np.ndarray
-    #: float64[n_slots, 2] — the SUMMED junction divisor, same keying. Several junctions on one boundary are
+    sj_count: np.ndarray
+    #: float64[n_slots, 2] — the SUMMED sj divisor, same keying. Several sj on one boundary are
     #: several estimates of one rate, so the pooled statement is ``Σcount / ΣE`` — the ratio of sums, never
     # the mean of ratios (``ρ_bg = Σg/ΣE``).
-    eff_junction: np.ndarray
-    #: ⭐⭐ float64[n_slots, 2] — the SAME flux, split by WHICH GENOMIC END of its junction this BOUNDARY is.
-    #: ``_lo`` is the flux of junctions whose genomic-LOW end is here; ``_hi`` the genomic-HIGH end's.
+    eff_sj: np.ndarray
+    #: ⭐⭐ float64[n_slots, 2] — the SAME flux, split by WHICH GENOMIC END of its sj this BOUNDARY is.
+    #: ``_lo`` is the flux of sj whose genomic-LOW end is here; ``_hi`` the genomic-HIGH end's.
     #: ⛔ **This split is what makes the reframe's total well defined**, and the reason is that the two
     #: halves belong to DIFFERENT FLANKS of the same BOUNDARY. A molecule that splices at this position has
-    #: its body in the exon on ONE side of it — the low side if this is the junction's low end, the high
+    #: its body in the exon on ONE side of it — the low side if this is the sj's low end, the high
     #: side if this is its high end — and it never enters the other flank at all. So the total this BOUNDARY
     #: presents to its low neighbour must count ``_lo`` and not ``_hi``, and vice versa
-    #: (:func:`region_total_density`). Summing them, as ``junction_count`` above does, is right for the
+    #: (:func:`region_total_density`). Summing them, as ``sj_count`` above does, is right for the
     #: GRAFT — which is about the whole flux leaving this boundary — and wrong for the reframe.
     #: ⚠ Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
     #: (`test_splice_flux_reframe`).
-    junction_count_lo: np.ndarray
-    junction_count_hi: np.ndarray
+    sj_count_lo: np.ndarray
+    sj_count_hi: np.ndarray
     #: float64[n_slots, 2] — the matching divisors, split the same way.
-    eff_junction_lo: np.ndarray
-    eff_junction_hi: np.ndarray
+    eff_sj_lo: np.ndarray
+    eff_sj_hi: np.ndarray
 
 
 def build_region_geometry(
     chain: RegionChain,
     substrate,
     region_arrays,
-    junctions,
+    sj,
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
     boundary_rna_reach=None,
@@ -185,7 +185,7 @@ def build_region_geometry(
                       is a MIXTURE whose RNA half alone is bounded, so reach there is per
                       COMPONENT; turning it on is S5.g, where it can be A/B'd against S5.f's
                       first baseline. ⚠ Carries a known 11.0 % genome-wide gDNA over-call
-    junction, RNA     ⭐ the **real exonic** per-strand reach. A junction is used only by a molecule
+    sj, RNA     ⭐ the **real exonic** per-strand reach. A sj is used only by a molecule
                       that spliced across it, and it is a brand-new population with no predecessor
                       divisor, so wiring it regresses nothing
     ================  ==========================================================================
@@ -195,7 +195,7 @@ def build_region_geometry(
     contiguous boundary (:func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`) turns
     the taper on. ⚠ It is ONE argument so that an A/B varies one thing and shares every boundary of code.
 
-    **Where a junction attaches.** Its donor is the boundary to the RIGHT of ``src_region`` and its acceptor
+    **Where a sj attaches.** Its donor is the boundary to the RIGHT of ``src_region`` and its acceptor
     the boundary to the LEFT of ``dst_region``; molecules leave the template at the first and arrive at the
     second, so both boundaries genuinely saw the flux. ⭐ Both are read off the chain's own adjacency
     (``right``/``left``) rather than re-derived from per-reference offsets — which is also what makes
@@ -212,7 +212,7 @@ def build_region_geometry(
     unspliced_count[is_region] = np.asarray(substrate.region_contained.count, np.float64)[obj[is_region]]
     unspliced_count[is_boundary] = np.asarray(substrate.boundary_unspliced.count, np.float64)[obj[is_boundary]]
     # ⚠ REGION slots stay 0, and that is structural rather than a shortcut: a contained fragment used no
-    # junction, so a region's contained population cannot hold a spliced molecule.
+    # sj, so a region's contained population cannot hold a spliced molecule.
     spliced_count = np.zeros((n, 2), dtype=np.float64)
     spliced_count[is_boundary] = np.asarray(substrate.boundary_spliced.count, np.float64)[obj[is_boundary]]
 
@@ -246,37 +246,37 @@ def build_region_geometry(
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf, boundary_rna_reach)
 
-    # ── the JUMPING population: a junction boundary is a FACTOR on the boundaries it leaves and enters ───
-    junction_count = np.zeros((n, 2), dtype=np.float64)
-    eff_junction = np.zeros((n, 2), dtype=np.float64)
-    #: the same flux kept apart by which genomic END of its junction the boundary is — see the dataclass.
+    # ── the JUMPING population: a sj boundary is a FACTOR on the boundaries it leaves and enters ───
+    sj_count = np.zeros((n, 2), dtype=np.float64)
+    eff_sj = np.zeros((n, 2), dtype=np.float64)
+    #: the same flux kept apart by which genomic END of its sj the boundary is — see the dataclass.
     jc_lo = np.zeros((n, 2), dtype=np.float64)
     jc_hi = np.zeros((n, 2), dtype=np.float64)
     ej_lo = np.zeros((n, 2), dtype=np.float64)
     ej_hi = np.zeros((n, 2), dtype=np.float64)
-    if junctions.n_junctions:
+    if sj.n_sj:
         slot_of_region = np.zeros(int(chain.n_regions_total), dtype=np.int64)
         slot_of_region[obj[is_region]] = np.flatnonzero(is_region)
-        donor = np.asarray(chain.right)[slot_of_region[np.asarray(junctions.src_region, np.int64)]]
-        acceptor = np.asarray(chain.left)[slot_of_region[np.asarray(junctions.dst_region, np.int64)]]
+        donor = np.asarray(chain.right)[slot_of_region[np.asarray(sj.src_region, np.int64)]]
+        acceptor = np.asarray(chain.left)[slot_of_region[np.asarray(sj.dst_region, np.int64)]]
         if np.any(donor < 0) or np.any(acceptor < 0):
             raise ValueError(
-                "a junction boundary attaches to a reference terminal, which has no boundary beside it. "
+                "a sj boundary attaches to a reference terminal, which has no boundary beside it. "
                 "Both of an intron's endpoints are interior interfaces of the same reference by "
-                "construction (splice_graph I5), so this is a junction axis addressing a different "
+                "construction (splice_graph I5), so this is a sj axis addressing a different "
                 "partition than the payload was scanned on."
             )
-        # ⭐ The flux is the junction's own count summed over the GENOME-strand columns, filed under the
-        # junction's TRANSCRIPT strand. That join is the whole of "sense is derived, never stored".
-        flux = np.asarray(substrate.junction.count, np.float64).sum(axis=1)
-        eff = crossing_eff_length(rna_fl_pmf, junctions.reach_lo, junctions.reach_hi)
-        column = np.where(np.asarray(junctions.strand) == np.int8(Strand.POS), 0, 1)
-        # ⚠ ``donor`` is the boundary at the junction's genomic-LOW end and ``acceptor`` the genomic-HIGH
+        # ⭐ The flux is the sj's own count summed over the GENOME-strand columns, filed under the
+        # sj's TRANSCRIPT strand. That join is the whole of "sense is derived, never stored".
+        flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
+        eff = crossing_eff_length(rna_fl_pmf, sj.reach_lo, sj.reach_hi)
+        column = np.where(np.asarray(sj.strand) == np.int8(Strand.POS), 0, 1)
+        # ⚠ ``donor`` is the boundary at the sj's genomic-LOW end and ``acceptor`` the genomic-HIGH
         # one — for BOTH strands, because ``chain.right``/``chain.left`` are genomic and boundaries run
         # ``src < dst`` (`splice_graph`, DESIGN §2). The names are the index's; the meaning is genomic.
         for boundary, jc, ej in ((donor, jc_lo, ej_lo), (acceptor, jc_hi, ej_hi)):
-            np.add.at(junction_count, (boundary, column), flux)
-            np.add.at(eff_junction, (boundary, column), eff)
+            np.add.at(sj_count, (boundary, column), flux)
+            np.add.at(eff_sj, (boundary, column), eff)
             np.add.at(jc, (boundary, column), flux)
             np.add.at(ej, (boundary, column), eff)
 
@@ -286,12 +286,12 @@ def build_region_geometry(
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,
-        junction_count=junction_count,
-        eff_junction=eff_junction,
-        junction_count_lo=jc_lo,
-        junction_count_hi=jc_hi,
-        eff_junction_lo=ej_lo,
-        eff_junction_hi=ej_hi,
+        sj_count=sj_count,
+        eff_sj=eff_sj,
+        sj_count_lo=jc_lo,
+        sj_count_hi=jc_hi,
+        eff_sj_lo=ej_lo,
+        eff_sj_hi=ej_hi,
     )
 
 
@@ -321,25 +321,25 @@ def region_total_density(geometry: RegionGeometry, f_g):
     """⭐⭐⭐ The LAZY, composition-aware total density — **as a PAIR, one per FLANK**::
 
         ρ_unspliced = f_g · (M/E_g)  +  (1−f_g) · (M/E_r)        gDNA-FL for gDNA, RNA-FL for RNA
-        ρ_lo        = ρ_unspliced + Σ_s junction_count_lo_s / eff_junction_lo_s
-        ρ_hi        = ρ_unspliced + Σ_s junction_count_hi_s / eff_junction_hi_s
+        ρ_lo        = ρ_unspliced + Σ_s sj_count_lo_s / eff_sj_lo_s
+        ρ_hi        = ρ_unspliced + Σ_s sj_count_hi_s / eff_sj_hi_s
 
     Returns ``(rho_lo, rho_hi)``: the total to use when this slot is compared against its genomic-LOW
     neighbour, and the one for its genomic-HIGH neighbour. ⚠ **Equal at every REGION** — a REGION stores
-    only CONTAINED fragments and a contained fragment used no junction, so both banks are 0 there and the
+    only CONTAINED fragments and a contained fragment used no sj, so both banks are 0 there and the
     pair degenerates to ``ρ_unspliced``. The distinction exists only at an BOUNDARY.
 
     ⛔⛔ **WHY IT IS A PAIR, AND WHY ONE NUMBER PER SLOT CANNOT BE RIGHT.** The reframe
     ``r = ρ_tot(dst)/ρ_tot(src)`` is a COMPOSITION imputation, so its numerator and denominator must be
     totals over the SAME component set — the intersection of what the two slots can carry. At an BOUNDARY the
-    junction flux is the density of molecules that SPLICE at this position, and such a molecule's body
-    lies in the exon on exactly ONE side of it: the low side if this BOUNDARY is the junction's genomic-LOW
+    sj flux is the density of molecules that SPLICE at this position, and such a molecule's body
+    lies in the exon on exactly ONE side of it: the low side if this BOUNDARY is the sj's genomic-LOW
     end, the high side if it is the genomic-HIGH end. It never enters the other flank. So:
 
-        against the LOW neighbour  → count the flux of junctions that START here    (ρ_lo)
-        against the HIGH neighbour → count the flux of junctions that END here      (ρ_hi)
+        against the LOW neighbour  → count the flux of sj that START here    (ρ_lo)
+        against the HIGH neighbour → count the flux of sj that END here      (ρ_hi)
 
-    Using one junction-inclusive total on both sides — which is what the predecessor's second return
+    Using one sj-inclusive total on both sides — which is what the predecessor's second return
     value did, on every hop, in both directions and both twins — inflates the side facing the INTRON by
     exactly ``ρ_J/ρ_unspliced``: measured **1.28×** and **1.43×** at the two ``intron|exon`` BOUNDARIES of a
     two-exon toy, against a TRUTH ratio the split reproduces to 3 %. ⚠ It inflates each hop of a
@@ -348,13 +348,13 @@ def region_total_density(geometry: RegionGeometry, f_g):
     mistake, and it was measured worse: at an BOUNDARY→EXON step the exon genuinely contains the spliced
     population and the term belongs.
 
-    ⭐ This is `EQUATIONS.md` §3.6's two faces, made per-step and per-junction rather than per-object: the
-    INTRON face is whichever flank is not the exonic side of the junction, and the EXON face is the other.
+    ⭐ This is `EQUATIONS.md` §3.6's two faces, made per-step and per-sj rather than per-object: the
+    INTRON face is whichever flank is not the exonic side of the sj, and the EXON face is the other.
 
     ⛔ Written in GENOMIC terms, never donor/acceptor or TSS/TES. The index's ``FLAG_DONOR_s`` marks the
     genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     biological ACCEPTOR — a predicate phrased biologically flips sign with the strand and a genomic one
-    does not. Gated on a ``−``-strand junction specifically (`test_splice_flux_reframe`).
+    does not. Gated on a ``−``-strand sj specifically (`test_splice_flux_reframe`).
 
     This is NEVER a pure-gDNA precompute — ``f_g`` is the best current composition; gDNA-FL alone
     (``f_g = 1``) is only the fallback where composition is genuinely unknown.
@@ -374,8 +374,8 @@ def region_total_density(geometry: RegionGeometry, f_g):
         return _rate(c[:, 0], e[:, 0]) + _rate(c[:, 1], e[:, 1])
 
     return (
-        rho_unspl + _flux(geometry.junction_count_lo, geometry.eff_junction_lo),
-        rho_unspl + _flux(geometry.junction_count_hi, geometry.eff_junction_hi),
+        rho_unspl + _flux(geometry.sj_count_lo, geometry.eff_sj_lo),
+        rho_unspl + _flux(geometry.sj_count_hi, geometry.eff_sj_hi),
     )
 
 
@@ -474,7 +474,7 @@ def terminus_flank_gain(boundary_flags) -> tuple[np.ndarray, np.ndarray]:
     then neither flank matches. ``0`` (no graph supplied) means no terminus and so both flanks match.
 
     ⛔ **TERMINI ONLY: DONOR/ACCEPTOR are excluded on purpose.** A splice site also changes the population
-    — RNA splices out or in — but there the flux is MEASURED (``junction_count``) and the graft and the
+    — RNA splices out or in — but there the flux is MEASURED (``sj_count``) and the graft and the
     peel exist to route it. A terminus has no flux to measure: a transcript simply begins. That is the
     boundary between the two treatments.
 
@@ -557,7 +557,7 @@ class RegionStatics:
     ``ACCEPTOR_s``) at each BOUNDARY slot, ``0`` on REGION slots.
     ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them, and
     P1G_SCOPE's own specified predicate was measured to be nearly the COMPLEMENT of what it was meant to
-    replace (plan TRAPS: a-boundary-with-rna-is-not-a-junction). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
+    replace (plan TRAPS: a-boundary-with-rna-is-not-a-sj). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
     :func:`~rigel.calibration.splice_graph.is_splice_site`. It is ``0`` when no graph was supplied.
     """
 

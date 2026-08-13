@@ -16,7 +16,7 @@ the accumulator payload. Nothing is compared against a previous run and nothing 
 So for a two-exon transcript with exons of ``e1`` and ``e2`` bases and spliced length ``L = e1 + e2``,
 a length-``w`` fragment has exactly ``L - w + 1`` legal starts, of which
 
-    w - 1                  cross the junction        (start in [e1-w+1, e1-1])
+    w - 1                  cross the sj        (start in [e1-w+1, e1-1])
     (e1 - w + 1)+          lie inside exon 1
     (e2 - w + 1)+          lie inside exon 2
 
@@ -28,14 +28,14 @@ specification, which the C++ is gated byte-identical to) and re-implemented here
 than from the BAM — so this compares *the molecule the simulator made* with *the tally the accumulator
 holds*, which no existing gate does:
 
-* the path is the fragment's contiguous genomic SEGMENTS; a junction splits it in two;
+* the path is the fragment's contiguous genomic SEGMENTS; a sj splits it in two;
 * ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
   fragment, so its sum is the deposited count;
 * a region_bound boundary strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
-  junction, else ``boundary_unspliced``;
+  sj, else ``boundary_unspliced``;
 * a region between two consecutively-crossed boundaries OF ONE SEGMENT is SPANNED;
-* every annotated junction used gets ``sj_count`` +1;
-* CONTAINED — ``region_contained`` — iff the path used no junction AND its first and last bases are in
+* every annotated sj used gets ``sj_count`` +1;
+* CONTAINED — ``region_contained`` — iff the path used no sj AND its first and last bases are in
   the same region. ⛔ A spliced fragment is never contained.
 
 ⭐⭐ **What that predicts for a ONE-transcript toy, and it is worth stating before measuring it:** on a
@@ -57,12 +57,12 @@ simulator's code.
 ⛔⛔ **WHAT IT MEASURED, 2026-08-05.** Every bank matched the truth-derived deposit **exactly** on
 `spliced_exons` × 4 arms (pure mRNA, + gDNA, + nascent, capture-ON at 120 kb) and on
 **`splice_both_strands` × 2 arms** — pure mRNA at 100 k, and + gDNA + nascent(60) — with **zero**
-fragments held on any of them. On `splice_both_strands`, 4 transcripts / 2 strands / 2 junctions: 22
-nonzero banks all Δ = 0, ``sj_count`` 174 and 190 against truth 174 and 190, and both junctions'
+fragments held on any of them. On `splice_both_strands`, 4 transcripts / 2 strands / 2 sj: 22
+nonzero banks all Δ = 0, ``sj_count`` 174 and 190 against truth 174 and 190, and both sj'
 crossing counts within 0.5 z of the exact placement prediction.
 
-⭐⭐ **The finding worth carrying:** ``sj_count`` equals the TRUE junction-crossing count exactly, and it
-still does with FOUR overlapping transcripts on both strands, where a fragment's junction set has to
+⭐⭐ **The finding worth carrying:** ``sj_count`` equals the TRUE sj-crossing count exactly, and it
+still does with FOUR overlapping transcripts on both strands, where a fragment's sj set has to
 resolve against its own transcript. The implicit-splice path is not lossy here — which is what makes this
 toy a clean substrate, and what says a pool shortfall on the real panel is about ANNOTATION AMBIGUITY,
 not read length.
@@ -78,7 +78,7 @@ edit so every claim here is reproducible.** All six fire:
 | `single_geom` | the deposit gate — the old one-transcript assumption loses HALF the deposits |
 | `unspliced_zero_everywhere` | ⭐⭐ the structural-set gate, naming all six BOUNDARIES. ⚠ Only on the
   pure-mRNA arm, because that is the only arm the claim is about — a scope statement, not a hole |
-| `drop_junction` | the junction-axis equality AND the deposit gate |
+| `drop_sj` | the sj-axis equality AND the deposit gate |
 
 ⚠ **Two gates are RESOLUTION-AWARE and say so out loud** rather than passing quietly. The
 drawn-vs-realised length discrimination needs the templates to be short enough to tilt the marginal: on
@@ -134,12 +134,12 @@ PERTURBATIONS = {
     "pos_blocks": "map a − transcript's mature interval as if it were + (drop the t → L−t reflection)",
     "pos_premrna": "map a − transcript's NASCENT interval as if it were + (drop the reflection)",
     "transcript_order": "take a − transcript's exons in TRANSCRIPT order, not genomic — so its "
-    "junction u-region_bound and its exon lengths swap",
+    "sj u-region_bound and its exon lengths swap",
     "single_geom": "route every RNA fragment through the FIRST transcript's geometry — the "
     "one-transcript assumption this file used to make",
     "unspliced_zero_everywhere": "assert the OLD structural claim (boundary_unspliced == 0 everywhere on "
     "a pure-mRNA library), which is true only of a one-transcript two-exon toy",
-    "drop_junction": "hide one of the spec's introns from the junction map, so its crossings read as "
+    "drop_sj": "hide one of the spec's introns from the sj map, so its crossings read as "
     "contiguous",
 }
 
@@ -168,9 +168,9 @@ class Geom:
         u = t                on ``+``          u_interval([a,b)) = [a, b)
         u = L − t            on ``−``          u_interval([a,b)) = [L−b, L−a)
 
-    and in ``u``-space the exons are the genomic ones in genomic order, the junction region_bounds are their
+    and in ``u``-space the exons are the genomic ones in genomic order, the sj region_bounds are their
     cumulative lengths, and a uniform draw over ``t`` is a uniform draw over ``u``. So placement
-    combinatorics, containment and per-junction crossing are all strand-FREE once expressed here.
+    combinatorics, containment and per-sj crossing are all strand-FREE once expressed here.
 
     ⛔ The reflection is transcribed from the simulator's own code, not assumed — TRAPS: two-divisors-opposite-sign's rule.
     """
@@ -201,12 +201,12 @@ class Geom:
 
     @property
     def region_bounds_u(self) -> tuple[int, ...]:
-        """The junctions' ``u``-space offsets, ascending — one per intron, genomic order."""
+        """The sj' ``u``-space offsets, ascending — one per intron, genomic order."""
         return self.offsets[1:]
 
     @property
     def introns(self) -> tuple[tuple[int, int], ...]:
-        """Genomic ``(intron_start, intron_end)`` per intron, ascending — the junction axis's own key."""
+        """Genomic ``(intron_start, intron_end)`` per intron, ascending — the sj axis's own key."""
         return tuple(
             (self.exons[i][1], self.exons[i + 1][0]) for i in range(len(self.exons) - 1)
         )
@@ -256,13 +256,13 @@ class Geom:
         inside = [max(e - w + 1, 0) for e in self.exon_lengths]
         return total, total - sum(inside), inside
 
-    def crossings_per_junction(self, w: int) -> list[int]:
-        """Legal starts that cross EACH junction, in ``u``-space — one entry per intron.
+    def crossings_per_sj(self, w: int) -> list[int]:
+        """Legal starts that cross EACH sj, in ``u``-space — one entry per intron.
 
         A length-``w`` fragment crosses the region_bound at ``c`` iff its ``u``-start lies in
-        ``[c − w + 1, c − 1]``, intersected with the ``[0, L − w]`` legal range. ⭐ Per junction, not
-        pooled: on a 3-exon transcript a long fragment can cross two, and only the per-junction form
-        can tell a mis-placed junction from a mis-counted one."""
+        ``[c − w + 1, c − 1]``, intersected with the ``[0, L − w]`` legal range. ⭐ Per sj, not
+        pooled: on a 3-exon transcript a long fragment can cross two, and only the per-sj form
+        can tell a mis-placed sj from a mis-counted one."""
         total = max(self.spliced_length - w + 1, 0)
         if total <= 0:
             return [0] * len(self.region_bounds_u)
@@ -271,7 +271,7 @@ class Geom:
         ]
 
     def exon_of_u(self, u0: int, u1: int) -> int | None:
-        """The exon index wholly containing ``[u0, u1)``, or ``None`` if it crosses a junction."""
+        """The exon index wholly containing ``[u0, u1)``, or ``None`` if it crosses a sj."""
         for k, off in enumerate(self.offsets):
             if u0 >= off and u1 <= off + self.exon_lengths[k]:
                 return k
@@ -290,7 +290,7 @@ class TruthTally:
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
     the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
-    def __init__(self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, junctions: dict):
+    def __init__(self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, sj: dict):
         self.region_bounds = np.asarray(region_bounds, np.int64)
         self.region_contained = np.zeros(n_regions, np.int64)
         self.region_spanning = np.zeros(n_regions, np.int64)
@@ -298,7 +298,7 @@ class TruthTally:
         self.boundary_unspliced = np.zeros(n_boundaries, np.int64)
         self.boundary_spliced = np.zeros(n_boundaries, np.int64)
         self.sj = Counter()
-        self.junctions = junctions  #: (intron_start, intron_end) -> jid
+        self.sj = sj  #: (intron_start, intron_end) -> jid
         self.n_deposited = 0
 
     def _region_of(self, pos: int) -> int:
@@ -311,7 +311,7 @@ class TruthTally:
     def deposit(self, segments: list[tuple[int, int]], introns: list[tuple[int, int]]):
         if not segments:
             return
-        sj_ids = [self.junctions[i] for i in introns if i in self.junctions]
+        sj_ids = [self.sj[i] for i in introns if i in self.sj]
         spliced = bool(sj_ids)
         first_base, last_base = segments[0][0], segments[-1][1] - 1
         self.region_start[self._region_of(first_base)] += 1
@@ -378,7 +378,7 @@ def _pool_length_gate(label, widths, templates, donor, tag):
         # `off_target_weight` a and `binding_per_base` b and probes tiling the exons, a fragment's best
         # single-probe overlap is ``min(w, probe_length)``, so
         #     total_eff(w) ≈ Σ_t a_t (L_t − w + 1)+ · (a + b·min(w, probe_length))
-        # ⚠ APPROXIMATE — it ignores the junction split and the per-probe tiling phase — so the gate
+        # ⚠ APPROXIMATE — it ignores the sj split and the per-probe tiling phase — so the gate
         # below only asserts the DIRECTION under capture, never the value.
         k = donor.capture_knobs
         a0, b0 = float(k["off_target_weight"]), float(k["binding_per_base"])
@@ -484,12 +484,12 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
 
 
 def gate_splice_combinatorics(mrna, geoms, capture_on):
-    """S2 — the junction-crossing counts, against the exact placement count, PER TRANSCRIPT and PER
-    JUNCTION.
+    """S2 — the sj-crossing counts, against the exact placement count, PER TRANSCRIPT and PER
+    SJ.
 
-    ⭐ Per junction rather than pooled: on a multi-exon transcript a long fragment can cross two, and
-    only the per-junction form separates "a junction is in the wrong place" from "the total is off".
-    Returns ``{(t_id, junction_index): observed crossings}``."""
+    ⭐ Per sj rather than pooled: on a multi-exon transcript a long fragment can cross two, and
+    only the per-sj form separates "a sj is in the wrong place" from "the total is off".
+    Returns ``{(t_id, sj_index): observed crossings}``."""
     print("\n── GATE S2: THE SPLICE, AGAINST FIRST-PRINCIPLES COMBINATORICS ───────────────────────")
     out: dict[tuple[str, int], int] = {}
     spliced = {t: g for t, g in geoms.items() if len(g.exons) > 1}
@@ -510,23 +510,23 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
                 total = max(geom.spliced_length - w + 1, 0)
                 if total <= 0:
                     continue
-                p = geom.crossings_per_junction(w)[j] / total
+                p = geom.crossings_per_sj(w)[j] / total
                 exp += n * p
                 var += n * p * (1 - p)
             sd = math.sqrt(var)
             gpos = geom.introns[j]
-            print(f"      junction {j} @ genomic {gpos[0]:,}→{gpos[1]:,}  (u-region_bound {region_bound:,}): "
+            print(f"      sj {j} @ genomic {gpos[0]:,}→{gpos[1]:,}  (u-region_bound {region_bound:,}): "
                   f"observed {obs:,} · uniform prediction {exp:,.1f} ± {sd:,.1f}")
             if capture_on:
                 continue
             check(abs(obs - exp) < 4 * sd,
-                  f"{tid}: junction {j}'s crossing count matches uniform placement",
+                  f"{tid}: sj {j}'s crossing count matches uniform placement",
                   f"z = {(obs - exp) / max(sd, 1e-9):+.2f}")
         if capture_on:
             print("      ⚠ capture is ON, so uniform placement is NOT the null — the probe landscape")
             print("        reweights the starts. Reported for scale only; GATE S3 tests the law.")
         # ⛔ THE PARTITION IDENTITY, per length, so a placement bug cannot hide in an aggregate: a
-        # fragment lies wholly inside exactly one exon, or it crosses at least one junction.
+        # fragment lies wholly inside exactly one exon, or it crosses at least one sj.
         worst = (0.0, None)
         for w, n in sorted(by_len.items()):
             if n < 200:
@@ -554,7 +554,7 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
         n_cross = sum(1 for u0, u1 in us if geom.exon_of_u(u0, u1) is None)
         n_in = len(own) - n_cross
         check(n_cross + n_in == len(own),
-              f"{tid}: every mRNA fragment is EITHER inside one exon OR crossing ≥1 junction",
+              f"{tid}: every mRNA fragment is EITHER inside one exon OR crossing ≥1 sj",
               f"{n_in:,} contained + {n_cross:,} crossing = {len(own):,}")
     return out
 
@@ -623,8 +623,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
     print("   ⭐ the ON-vs-OFF contrast, which is where the capture LAW is actually tested, lives in")
     print("      `verify_capture.py`. What follows is the shape this run alone can show.")
     # ⭐ The probes tile each exon, so on this spec EVERY transcript base is under some probe and the
-    # discriminating quantity is not "on probe vs off" but the SPLIT penalty at the junction: a probe
-    # never spans the junction (they tile per exon), so a junction-crossing fragment's best single
+    # discriminating quantity is not "on probe vs off" but the SPLIT penalty at the sj: a probe
+    # never spans the sj (they tile per exon), so a sj-crossing fragment's best single
     # probe group covers at most the longer of its two overhangs.
     for tid, geom in sorted(geoms.items()):
         if len(geom.exons) < 2:
@@ -652,8 +652,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
             rows += 1
             if rows >= 8:
                 break
-    print("   ⭐ ratio < 1 means capture DEPLETES junction-crossing fragments relative to uniform,")
-    print("      which is what per-exon probe tiling predicts: no probe spans the junction, so a")
+    print("   ⭐ ratio < 1 means capture DEPLETES sj-crossing fragments relative to uniform,")
+    print("      which is what per-exon probe tiling predicts: no probe spans the sj, so a")
     print("      crossing fragment has less overlap with its best single probe than a contained one.")
 
 
@@ -663,28 +663,28 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     index = res.index
     region_bounds = np.asarray(payload.region_bounds, np.int64)
     n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
-    # the junction map: (intron_start, intron_end) -> jid, from the index's own junction axis
-    from rigel.calibration.splice_graph import build_junction_geometry_arrays
+    # the sj map: (intron_start, intron_end) -> jid, from the index's own sj axis
+    from rigel.calibration.splice_graph import build_sj_geometry_arrays
 
-    jg = build_junction_geometry_arrays(index)
+    jg = build_sj_geometry_arrays(index)
     starts = np.asarray(ra.start, np.int64)
     sizes = np.asarray(ra.region_size_bp, np.int64)
-    junctions = {}
-    for k in range(int(getattr(jg, "n_junctions", 0))):
+    sj = {}
+    for k in range(int(getattr(jg, "n_sj", 0))):
         src = int(np.asarray(jg.src_region)[k])
         dst = int(np.asarray(jg.dst_region)[k])
-        junctions[(int(starts[src] + sizes[src]), int(starts[dst]))] = k
-    # ⛔ EVERY spec-declared intron must appear on the index's junction axis, and nothing else may. A
-    # junction the map misses would make its crossings read as contiguous and silently deposit on the
+        sj[(int(starts[src] + sizes[src]), int(starts[dst]))] = k
+    # ⛔ EVERY spec-declared intron must appear on the index's sj axis, and nothing else may. A
+    # sj the map misses would make its crossings read as contiguous and silently deposit on the
     # wrong bank; the equality catches both directions.
-    if PERTURB == "drop_junction" and junctions:
-        junctions.pop(sorted(junctions)[0])
+    if PERTURB == "drop_sj" and sj:
+        sj.pop(sorted(sj)[0])
     declared = {i for g in geoms.values() for i in g.introns}
-    check(declared == set(junctions),
-          "⭐ the index's junction axis is EXACTLY the set of introns the spec declares",
-          f"spec {sorted(declared)} vs index {sorted(junctions)}")
+    check(declared == set(sj),
+          "⭐ the index's sj axis is EXACTLY the set of introns the spec declares",
+          f"spec {sorted(declared)} vs index {sorted(sj)}")
 
-    tt = TruthTally(region_bounds, n_regions, n_boundaries, junctions)
+    tt = TruthTally(region_bounds, n_regions, n_boundaries, sj)
 
     first_tid = sorted(geoms)[0]
     for f in frags:
@@ -734,7 +734,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     for k in range(sj_got.shape[0]):
         d = int(sj_got[k]) - int(tt.sj.get(k, 0))
         ok_all &= d == 0
-        print(f"   {'JUNCTION boundary #' + str(k):<30} {'sj_count':<16} "
+        print(f"   {'SJ boundary #' + str(k):<30} {'sj_count':<16} "
               f"{tt.sj.get(k, 0):>9,} {int(sj_got[k]):>12,} {d:>+8,}")
     print()
     check(ok_all, "⭐⭐ EVERY BANK MATCHES THE TRUTH-DERIVED DEPOSIT EXACTLY")

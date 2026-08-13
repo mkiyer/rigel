@@ -32,7 +32,7 @@ Three facts that determine this file's shape:
    a residual ``−¼·log(1−τ²)``.)*
 
 There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rna_mass``, never by ψ. That is
-correct — at a junction mature RNA *splices*, so the unspliced crossing mass is gDNA + nascent, a channel
+correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA + nascent, a channel
 genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
 
 Single-strand regions (exactly one of ``allow_pos`` / ``allow_neg``) are an exact 1-D solve over ``λ``; AMBIG

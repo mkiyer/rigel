@@ -119,13 +119,13 @@ def assigned_lengths(deferred, choices: np.ndarray) -> np.ndarray:
     return span - observed - implied
 
 
-def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, fl) -> None:
-    """⭐⭐ **DOES THE JUNCTION/BOUNDARY OPPORTUNITY MISMATCH ACTUALLY FLIP A CHOICE?**
+def _defect_table(deferred, choices, truth, ref_map, payload, index, sj, fl) -> None:
+    """⭐⭐ **DOES THE SJ/BOUNDARY OPPORTUNITY MISMATCH ACTUALLY FLIP A CHOICE?**
 
     Per held record: which hypotheses reproduce the TRUE length, whether those are genomic or spliced,
-    which one was drawn, and the BOTTLENECK exonic reach of the junctions involved. ⭐ The bottleneck is
+    which one was drawn, and the BOTTLENECK exonic reach of the sj involved. ⭐ The bottleneck is
     the right summary because ``second_pass`` scores a spliced path with ``_bottleneck`` (a ``min``) over
-    its junctions, so the weakest junction is what the path is judged on.
+    its sj, so the weakest sj is what the path is judged on.
 
     ⛔ **The control is the other direction.** If truth-spliced records are lost to the genomic
     hypothesis at short reach AND truth-genomic records are lost to the spliced one at the same rate,
@@ -134,11 +134,11 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
     ⚠ The reach bins are multiples of the library's OWN mean fragment length, because the mechanism is
     ``A_j(w)/(w-1)`` — a function of reach RELATIVE to ``w`` — and not of any absolute number of bases.
     """
-    from rigel.calibration.splice_graph import build_junction_geometry_arrays
-    from rigel.second_pass import _junction_id
+    from rigel.calibration.splice_graph import build_sj_geometry_arrays
+    from rigel.second_pass import _sj_id
     from rigel.types import Strand
 
-    geom = build_junction_geometry_arrays(index)
+    geom = build_sj_geometry_arrays(index)
     bottleneck_reach = np.minimum(
         np.asarray(geom.reach_lo, np.float64), np.asarray(geom.reach_hi, np.float64)
     )
@@ -176,8 +176,8 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
             kinds.append(bool(introns))  # True == spliced
             lengths.append(base - int(implied_all[h]))
             for a, b in introns:
-                jid = _junction_id(
-                    junctions, region_bounds, region_bound_lo, region_bound_hi, a, b,
+                jid = _sj_id(
+                    sj, region_bounds, region_bound_lo, region_bound_hi, a, b,
                     motif if motif != int(Strand.NONE) else int(deferred.hypothesis_sj_strand[h]),
                 )
                 if jid >= 0:
@@ -204,7 +204,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
             tally[b, 2] += 1
             tally[b, 3] += int(kinds[chosen])
 
-    print("\n  ⭐⭐ SPLICED-vs-GENOMIC CONFUSION, by the junction's BOTTLENECK EXONIC REACH")
+    print("\n  ⭐⭐ SPLICED-vs-GENOMIC CONFUSION, by the sj's BOTTLENECK EXONIC REACH")
     print(f"     (bins are multiples of this library's own mean fragment length, mu = {mu:.1f} bp;")
     print("      only records with BOTH a genomic and a spliced candidate are counted)")
     print(f"     {'reach':<12}{'n true-SPLICED':>16}{'-> chose genomic':>18}"
@@ -220,7 +220,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
     print("     " + "-" * 80)
     print(f"     {'ALL':<12}{ts:>16,}{100 * int(tally[:, 1].sum()) / ts if ts else 0:>17.1f}%"
           f"{tg:>16,}{100 * int(tally[:, 3].sum()) / tg if tg else 0:>17.1f}%")
-    print(f"     records with no resolvable junction: {no_reach:,}")
+    print(f"     records with no resolvable sj: {no_reach:,}")
     print("     ⛔ THE DEFECT PREDICTS the 'chose genomic' column RISES as reach falls, while the")
     print("       'chose spliced' control does NOT. Both rising together is difficulty, not bias.")
     if ts == 0 and tg == 0:
@@ -238,7 +238,7 @@ def main() -> int:
     ap.add_argument(
         "--defect",
         action="store_true",
-        help="⭐⭐ the SPLICED-vs-GENOMIC confusion, stratified by the junction's EXONIC REACH. "
+        help="⭐⭐ the SPLICED-vs-GENOMIC confusion, stratified by the sj's EXONIC REACH. "
              "The genomic hypothesis reads `boundary_unspliced_inv_length_sum`, whose `1/(w-1)` deposit "
              "cancels its `w-1` opportunity EXACTLY, so E = rho. The spliced hypothesis reads "
              "`sj_inv_length_sum`, same quantum but a TAPERED opportunity, so "
@@ -251,9 +251,9 @@ def main() -> int:
     suite = args.suite or args.pilot.parent
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
-        build_junction_edge_arrays,
+        build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
@@ -262,7 +262,7 @@ def main() -> int:
 
     index = TranscriptIndex.load(str(args.index))
     _region_bounds, _offsets, region_types = build_region_partition_arrays(index)
-    junctions = build_junction_edge_arrays(index)
+    sj = build_sj_arrays(index)
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)
     bam_ref_id_of_payload_ref: dict[int, int] = {}
@@ -277,13 +277,13 @@ def main() -> int:
 
         # ⚠ Reproduce `pipeline._drain_side_buffer`'s call exactly — the same de-tilted RNA pool and the
         # same `rna_sense_frac`. A scorer fed anything else is not the scorer being measured.
-        fl = build_fl_models(payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp)
+        fl = build_fl_models(payload, sj_opportunity=crossing, gdna_opportunity=gdna_opp)
         scores = score_held_fragments(
             payload,
             fl_models=fl,
             rna_sense_frac=cache.strand_model.p_r1_sense,
             region_types=region_types,
-            junctions=junctions,
+            sj=sj,
         )
         choices = choose_hypotheses(scores, payload, seed=args.seed)
         assigned = assigned_lengths(deferred, choices)
@@ -355,7 +355,7 @@ def main() -> int:
 
         if args.defect:
             _defect_table(
-                deferred, choices, truth, bam_ref_id_of_payload_ref, payload, index, junctions, fl
+                deferred, choices, truth, bam_ref_id_of_payload_ref, payload, index, sj, fl
             )
 
     if args.json and rows:

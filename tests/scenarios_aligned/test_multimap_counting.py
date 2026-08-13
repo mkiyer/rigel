@@ -503,7 +503,7 @@ class TestPseudogene:
         """Only parent gene expressed — pseudogene silent.
         Budget must be conserved.  The EM may split counts between
         parent and pseudo since most reads don't span the splice
-        junction, but the total should match expected."""
+        sj, but the total should match expected."""
         sc = self._make_scenario(
             tmp_path, parent_abund=100, pseudo_abund=0, name_suffix="_parent_only"
         )

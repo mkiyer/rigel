@@ -20,7 +20,7 @@ ends, so its reaches come from the annotation.
 
 ⚠ **REACH IS PER COMPONENT, NOT PER BOUNDARY, AND THAT IS WHAT MAKES IT AWKWARD.** An *unspliced* crossing is
 a gDNA/RNA MIXTURE: the RNA part is bounded by its transcript, the gDNA part is not. So an boundary does not
-have "a" reach — each component has its own, and only the RNA one is finite. A junction boundary is the easy
+have "a" reach — each component has its own, and only the RNA one is finite. A sj boundary is the easy
 case, since only a spliced molecule uses it. ⛔ Production has ignored reach entirely up to now; whether
 to keep ignoring it is an open decision, and this module is written so that
 "ignore it" is expressible as ``UNBOUNDED_REACH`` rather than as a second code path.

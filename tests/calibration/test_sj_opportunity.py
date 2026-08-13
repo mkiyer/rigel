@@ -1,6 +1,6 @@
-"""The junction pool's opportunity function, and the de-tilt it feeds.
+"""The sj pool's opportunity function, and the de-tilt it feeds.
 
-``RNA_SPLICED`` is selected on *"the path used an annotated junction"*, and that population is
+``RNA_SPLICED`` is selected on *"the path used an annotated sj"*, and that population is
 genuinely longer than the library — seeing a splice is roughly length-independent while having an
 unsequenced mate gap is a pure length threshold. So the pool the RNA fragment-length model is FITTED
 FROM is tilted long, and dividing it by its own opportunity is what removes the tilt.
@@ -30,11 +30,11 @@ import itertools
 import numpy as np
 import pytest
 
-from rigel.calibration.junction_opportunity import (
+from rigel.calibration.sj_opportunity import (
     crossing_probability,
     crossing_probability_from_index,
     detilt_pool,
-    junction_opportunity,
+    sj_opportunity,
 )
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ from rigel.calibration.junction_opportunity import (
 
 
 def _oracle_a_j(exon_lengths, w: int) -> int:
-    """Count start positions whose ``[s, s+w)`` window strictly contains a junction coordinate."""
+    """Count start positions whose ``[s, s+w)`` window strictly contains a sj coordinate."""
     total = int(sum(exon_lengths))
     region_bounds = list(itertools.accumulate(exon_lengths))[:-1]
     return sum(1 for s in range(0, total - w + 1) if any(s < int(c) < s + w for c in region_bounds))
@@ -64,9 +64,9 @@ def _csr(transcripts):
 
 
 def _aggregate(transcripts, theta, max_length):
-    """``(T, A)`` from :mod:`junction_opportunity`, for a list-of-lists transcriptome."""
+    """``(T, A)`` from :mod:`sj_opportunity`, for a list-of-lists transcriptome."""
     lengths, offsets = _csr(transcripts)
-    return junction_opportunity(lengths, offsets, np.asarray(theta, dtype=np.float64), max_length)
+    return sj_opportunity(lengths, offsets, np.asarray(theta, dtype=np.float64), max_length)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def test_A_j_matches_an_ENUMERATING_oracle_over_every_small_configuration():
     """⭐ The derivation, re-proven in the suite rather than cited from a document.
 
     Exhaustive over 1-4 exons x exon lengths 1-7 x every ``w`` up to ``L + 2``. The oracle walks every
-    start position and tests it against every junction coordinate; the formula works with the
+    start position and tests it against every sj coordinate; the formula works with the
     complement (a window crossing nothing lies wholly inside ONE exon, and exons are disjoint). They
     share no code, so agreement is evidence.
     """
@@ -108,7 +108,7 @@ def test_A_j_matches_the_oracle_at_REALISTIC_scales_too(exons):
 
 def test_the_five_properties_the_derivation_CLAIMS_are_CHECKED_not_stated():
     """P1-P5 of the derivation, each one a thing the correction silently depends on."""
-    # P1 — a single-exon transcript can never populate the junction pool
+    # P1 — a single-exon transcript can never populate the sj pool
     _, a = _aggregate([[500]], [1.0], 600)
     assert not a.any()
 
@@ -172,7 +172,7 @@ def test_the_crossing_probability_is_a_PROBABILITY_and_saturates_at_one():
 
 
 def test_a_SINGLE_EXON_annotation_makes_the_correction_INERT_not_a_division_by_zero():
-    """⛔ No junction anywhere means no opportunity anywhere. The correction must have NOTHING to
+    """⛔ No sj anywhere means no opportunity anywhere. The correction must have NOTHING to
     say, and in particular must not divide by zero or delete the pool."""
     pi = crossing_probability(*_csr([[500], [900]]), np.array([1.0, 1.0]), 600)
     assert not pi.any()
@@ -191,7 +191,7 @@ def _enumerate_library(transcripts, theta, pmf):
 
     A fragment of length ``w`` is drawn with probability ``pmf[w]`` and placed uniformly over the
     start positions available to it on a transcript chosen with probability proportional to
-    ``theta``. ``library`` counts every placement; ``pool`` counts only those crossing a junction.
+    ``theta``. ``library`` counts every placement; ``pool`` counts only those crossing a sj.
     This is the generative model the opportunity function claims to invert, written out by hand.
     """
     n = len(pmf)
@@ -214,7 +214,7 @@ def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_poo
     """⭐⭐ The gate TRAPS: divide-by-a-probability exists to pass, with nothing tuned and no tolerance beyond float.
 
     Build a transcriptome and a fragment-length distribution, enumerate every placement to get both
-    the library histogram and the junction-crossing subset of it, then de-tilt the subset. It must
+    the library histogram and the sj-crossing subset of it, then de-tilt the subset. It must
     come back to the library histogram — shape-exactly, because the de-tilt preserves the total.
     """
     transcripts = [[30, 40], [12] * 6, [70], [25, 8, 61], [100, 3]]
@@ -272,7 +272,7 @@ def test_the_ratio_form_is_what_makes_a_WRONG_theta_SAFE():
     wrong = np.array([0.0, 1.0, 0.0, 0.0, 0.0])  # every copy is the many-short-exon transcript
     lengths, offsets = _csr(transcripts)
     pi_wrong = crossing_probability(lengths, offsets, wrong, len(pmf) - 1)
-    _, a_wrong = junction_opportunity(lengths, offsets, wrong, len(pmf) - 1)
+    _, a_wrong = sj_opportunity(lengths, offsets, wrong, len(pmf) - 1)
 
     ratio_err = abs(mean(detilt_pool(pool, pi_wrong)) - mean(library))
     a_only_err = abs(mean(detilt_pool(pool, a_wrong / max(a_wrong.max(), 1.0))) - mean(library))
@@ -380,17 +380,17 @@ def test_build_fl_models_WITHOUT_the_divisor_is_unchanged():
     payload = SimpleNamespace(pool_lengths=pools, deposited_lengths=anchor, max_length=50)
 
     plain = build_fl_models(payload)
-    explicit = build_fl_models(payload, junction_opportunity=None)
+    explicit = build_fl_models(payload, sj_opportunity=None)
     np.testing.assert_array_equal(plain.rna_pmf, explicit.rna_pmf)
     np.testing.assert_array_equal(plain.gdna_pmf, explicit.gdna_pmf)
 
     pi = np.zeros(51)
     pi[1:] = np.linspace(0.1, 0.9, 50)
-    tilted = build_fl_models(payload, junction_opportunity=pi)
+    tilted = build_fl_models(payload, sj_opportunity=pi)
     assert not np.allclose(tilted.rna_pmf, plain.rna_pmf), "the divisor reached nothing"
     (
         np.testing.assert_array_equal(tilted.gdna_pmf, plain.gdna_pmf),
-        "the junction divisor must not touch the gDNA pool",
+        "the sj divisor must not touch the gDNA pool",
     )
     assert tilted.n_rna == pytest.approx(plain.n_rna), "the EB evidence weight moved"
 
@@ -419,7 +419,7 @@ def test_EVERY_production_caller_of_build_fl_models_passes_the_divisor():
         ]
         assert calls, f"{module.__name__} no longer calls build_fl_models — retarget this test"
         for call in calls:
-            assert any(k.arg == "junction_opportunity" for k in call.keywords), (
-                f"{module.__name__}:{call.lineno} builds FL models without the junction divisor, "
+            assert any(k.arg == "sj_opportunity" for k in call.keywords), (
+                f"{module.__name__}:{call.lineno} builds FL models without the sj divisor, "
                 "so the RNA pool stays tilted long"
             )

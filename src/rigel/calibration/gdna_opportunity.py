@@ -47,8 +47,8 @@ weighted by how many placements each length has. So the divisor is ``pi(w) = A(w
 
 the total admissible gDNA starts in the reference. ⚠ On whole chromosomes ``T`` is flat to ~1 part in
 10^5 and the two forms coincide numerically; on a short reference they do not, and the probability form
-is the correct one either way. (This is the same rule the junction pool obeys —
-:mod:`rigel.calibration.junction_opportunity`.)
+is the correct one either way. (This is the same rule the sj pool obeys —
+:mod:`rigel.calibration.sj_opportunity`.)
 
 ⭐⭐ **AND THE COMBINATION IS DERIVED, NOT CHOSEN.** Sum the counts, sum the opportunities::
 

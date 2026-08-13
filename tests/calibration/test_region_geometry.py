@@ -7,16 +7,16 @@
 ``_left``/``_right`` pair for the unspliced mass, its integer flux, three effective lengths and four
 spliced channels. The pairs existed because a boundary's two sides lay in differently-sized flanks and
 therefore had **different divisors**. A contiguous boundary is a 0-bp boundary: one set of numbers, seen
-identically from both sides. So the pairs go, and with them the junction-strand routing, the exon-bit
+identically from both sides. So the pairs go, and with them the sj-strand routing, the exon-bit
 flank gating and the ``_continues``/``_eff_spl_face`` far-boundary machinery — all of which existed to
 *guess* which flank a spliced deposit belonged to, because the old accumulator attributed a splice to
-the region's boundary rather than to the junction's own coordinate. The v8
+the region's boundary rather than to the sj's own coordinate. The v8
 index states ``(src, dst, strand)`` explicitly, so the guess is replaced by index arithmetic.
 
 ⭐ **TWO STRAND AXES, AND THEY ARE NOT THE SAME AXIS.** ``count`` is keyed by **genome** strand — where
-the read aligned, the accumulator's one convention. ``junction_count`` is keyed by **transcript** strand,
-derived from each junction's own annotated strand exactly as the design prescribes ("sense derived from
-a junction's own strand"). Putting them in one array under one name is the two-conventions-in-one-schema
+the read aligned, the accumulator's one convention. ``sj_count`` is keyed by **transcript** strand,
+derived from each sj's own annotated strand exactly as the design prescribes ("sense derived from
+a sj's own strand"). Putting them in one array under one name is the two-conventions-in-one-schema
 defect the redesign exists to remove, so they are asserted apart here.
 
 ⚠ **The brute-force oracles below share no helper with the implementation**.
@@ -35,7 +35,7 @@ from rigel.calibration.region_geometry import (
     region_gdna_geometry,
     region_total_density,
 )
-from rigel.calibration.splice_graph import JunctionGeometry
+from rigel.calibration.splice_graph import SpliceJunctionGeometry
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.types import Strand
 
@@ -87,7 +87,7 @@ def two_point_pmf(a: int, b: int, wa: float = 0.5, max_size: int = 200) -> np.nd
 
 
 # ---------------------------------------------------------------------------
-# the fixture: the 3-region / 2-boundary / 1-junction synthetic payload
+# the fixture: the 3-region / 2-boundary / 1-sj synthetic payload
 # ---------------------------------------------------------------------------
 
 GDNA_PMF = spike_pmf(50)
@@ -99,22 +99,22 @@ def parts():
     payload, region_arrays = make_synthetic_payload()
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    # the fixture's one junction: regions are [0,100) [100,200) [200,300), so an intron running from the
+    # the fixture's one sj: regions are [0,100) [100,200) [200,300), so an intron running from the
     # end of region 0 to the start of region 2 has its DONOR at boundary 0 and its ACCEPTOR at boundary 1.
-    junctions = JunctionGeometry(
+    sj = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.POS], dtype=np.int8),
         reach_lo=np.array([1000.0]),
         reach_hi=np.array([1000.0]),
     )
-    return payload, region_arrays, substrate, chain, junctions
+    return payload, region_arrays, substrate, chain, sj
 
 
 @pytest.fixture
 def geometry(parts):
-    payload, region_arrays, substrate, chain, junctions = parts
-    return build_region_geometry(chain, substrate, region_arrays, junctions, GDNA_PMF, RNA_PMF)
+    payload, region_arrays, substrate, chain, sj = parts
+    return build_region_geometry(chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF)
 
 
 # ---------------------------------------------------------------------------
@@ -157,8 +157,8 @@ def test_ONE_SET_OF_NUMBERS_PER_SLOT(geometry, parts):
     assert geometry.unspliced_count.shape == (n, 2)
     assert geometry.eff_gdna.shape == (n,)
     assert geometry.eff_rna.shape == (n,)
-    assert geometry.junction_count.shape == (n, 2)
-    assert geometry.eff_junction.shape == (n, 2)
+    assert geometry.sj_count.shape == (n, 2)
+    assert geometry.eff_sj.shape == (n, 2)
 
 
 def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geometry):
@@ -219,7 +219,7 @@ def test_a_REGION_carries_NO_MATURE_FLUX_because_contained_is_unspliced_by_const
     fragment, and any mature flux appearing on a REGION slot is a routing bug."""
     _, _, _, chain, _ = parts
     region_slots = np.asarray(chain.kind) == REGION
-    assert np.all(geometry.junction_count[region_slots] == 0.0)
+    assert np.all(geometry.sj_count[region_slots] == 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -255,17 +255,17 @@ def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_R
         assert geometry.eff_gdna[slot] == pytest.approx(brute_crossing(GDNA_PMF, 1e12, 1e12))
 
 
-def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
-    """⭐ **TRAPS: prove-the-substrate, ruled**: a junction boundary is used only by a molecule that spliced across it, so what
-    remains either side is exonic and the reach is real. A junction is a BRAND-NEW population — the
-    predecessor had no junction divisor at all — so wiring it regresses nothing, while leaving it
+def test_the_SJ_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
+    """⭐ **TRAPS: prove-the-substrate, ruled**: a sj boundary is used only by a molecule that spliced across it, so what
+    remains either side is exonic and the reach is real. A sj is a BRAND-NEW population — the
+    predecessor had no sj divisor at all — so wiring it regresses nothing, while leaving it
     unbounded would ship a divisor wrong by up to 4x at a first exon (199.0 at
     R=550 against 50.0 at R=50).
 
     Here the reach BINDS: 30 bases of exon either side of an 80 bp molecule.
     """
     payload, region_arrays, substrate, chain, _ = parts
-    tight = JunctionGeometry(
+    tight = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.POS], dtype=np.int8),
@@ -279,17 +279,17 @@ def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(p
         "the fixture must make the reach BIND, or the test proves nothing"
     )
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
-    live = [s for s in boundary_slots if g.junction_count[s].sum() > 0]
-    assert live, "the junction must reach some boundary slot"
+    live = [s for s in boundary_slots if g.sj_count[s].sum() > 0]
+    assert live, "the sj must reach some boundary slot"
     for slot in live:
-        assert g.eff_junction[slot, 0] == pytest.approx(expected)
+        assert g.eff_sj[slot, 0] == pytest.approx(expected)
 
 
 def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
     """`splice_graph`: a reach of 0 is meaningful — no strand-s molecule can occupy that side, so the
     opportunity is genuinely zero. It must NOT be read as 'unset' and replaced by the mean."""
     _, region_arrays, substrate, chain, _ = parts
-    dead = JunctionGeometry(
+    dead = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.POS], dtype=np.int8),
@@ -298,7 +298,7 @@ def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
     )
     g = build_region_geometry(chain, substrate, region_arrays, dead, GDNA_PMF, RNA_PMF)
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
-    assert np.all(g.eff_junction[boundary_slots, 0] == 0.0)
+    assert np.all(g.eff_sj[boundary_slots, 0] == 0.0)
 
 
 def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
@@ -309,9 +309,9 @@ def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
 
     A 100 bp region cannot contain a 150 bp fragment: the opportunity is exactly zero.
     """
-    _, region_arrays, substrate, chain, junctions = parts
+    _, region_arrays, substrate, chain, sj = parts
     huge = spike_pmf(150)
-    g = build_region_geometry(chain, substrate, region_arrays, junctions, huge, huge)
+    g = build_region_geometry(chain, substrate, region_arrays, sj, huge, huge)
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
     assert np.all(g.eff_gdna[region_slots] == 0.0)
     assert np.all(g.eff_rna[region_slots] == 0.0)
@@ -329,9 +329,9 @@ def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
     """The divisor is ``E_f[placements]``, not ``placements(E_f[w])`` — the two differ whenever the
     opportunity is non-linear in ``w``, which is every contained frame. Enumerated on a two-point pmf.
     """
-    _, region_arrays, substrate, chain, junctions = parts
+    _, region_arrays, substrate, chain, sj = parts
     pmf = two_point_pmf(20, 150)  # mean 85; 150 does not fit in a 100 bp region, 20 does
-    g = build_region_geometry(chain, substrate, region_arrays, junctions, pmf, pmf)
+    g = build_region_geometry(chain, substrate, region_arrays, sj, pmf, pmf)
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
     slot = int(region_slots[0])
     length = int(region_arrays.region_size_bp[int(np.asarray(chain.obj_idx)[slot])])
@@ -340,17 +340,17 @@ def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
 
 
 # ---------------------------------------------------------------------------
-# 4. the junction -> boundary incidence, and the transcript-strand keying
+# 4. the sj -> boundary incidence, and the transcript-strand keying
 # ---------------------------------------------------------------------------
 
 
-def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometry, parts):
-    """A junction ``(src, dst)`` has its DONOR at the boundary to the right of ``src`` and its ACCEPTOR at
+def test_a_sj_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometry, parts):
+    """A sj ``(src, dst)`` has its DONOR at the boundary to the right of ``src`` and its ACCEPTOR at
     the boundary to the left of ``dst``. Molecules leave the template at the first and arrive at the
     second, so both boundaries genuinely saw the flux — and the index states both explicitly, which is what
     replaces the old exon-bit guess.
 
-    The fixture's junction runs region 0 -> region 2, so it lands on boundary 0 (donor) and boundary 1 (acceptor)
+    The fixture's sj runs region 0 -> region 2, so it lands on boundary 0 (donor) and boundary 1 (acceptor)
     — i.e. on BOTH boundary slots.
     """
     payload, _, _, chain, _ = parts
@@ -358,18 +358,18 @@ def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_boundary(geometr
     flux = float(payload.sj_count[0].sum())
     assert flux > 0
     for slot in boundary_slots:
-        assert geometry.junction_count[slot, 0] == pytest.approx(flux)
+        assert geometry.sj_count[slot, 0] == pytest.approx(flux)
 
 
-def test_the_mature_flux_is_keyed_by_the_JUNCTIONS_OWN_STRAND_not_the_align_column(parts):
+def test_the_mature_flux_is_keyed_by_the_SJ_OWN_STRAND_not_the_align_column(parts):
     """⭐ The 'sense is derived, never stored' rule, made executable. The accumulator's ``sj_count``
-    columns are the **genome** strand the read aligned to; the junction's strand is a property of the
-    ANNOTATION. A ``-`` junction's flux belongs to the ``-`` transcript column however its reads
-    aligned — and the fixture's junction has 9 POS-aligned and 4 NEG-aligned reads, so a column-wise
+    columns are the **genome** strand the read aligned to; the sj's strand is a property of the
+    ANNOTATION. A ``-`` sj's flux belongs to the ``-`` transcript column however its reads
+    aligned — and the fixture's sj has 9 POS-aligned and 4 NEG-aligned reads, so a column-wise
     copy would put 4 fragments in the wrong place.
     """
     payload, region_arrays, substrate, chain, _ = parts
-    neg = JunctionGeometry(
+    neg = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.NEG], dtype=np.int8),
@@ -383,24 +383,24 @@ def test_the_mature_flux_is_keyed_by_the_JUNCTIONS_OWN_STRAND_not_the_align_colu
         "the fixture must make the axes distinct"
     )
     for slot in boundary_slots:
-        assert g.junction_count[slot, 1] == pytest.approx(total)  # the - transcript column
-        assert g.junction_count[slot, 0] == 0.0
+        assert g.sj_count[slot, 1] == pytest.approx(total)  # the - transcript column
+        assert g.sj_count[slot, 0] == 0.0
 
 
-def test_several_junctions_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
-    """Two junctions sharing a donor boundary are two estimates of one rate, so the pooled statement is
+def test_several_sj_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
+    """Two sj sharing a donor boundary are two estimates of one rate, so the pooled statement is
     ``sum(count) / sum(E)`` — the ratio of sums, never the mean of ratios.
-    ``rho_bg = sum(g)/sum(E)``). Averaging the divisors instead would mis-weight the deeper junction.
+    ``rho_bg = sum(g)/sum(E)``). Averaging the divisors instead would mis-weight the deeper sj.
     """
     payload, region_arrays, substrate, chain, _ = parts
-    two = JunctionGeometry(
+    two = SpliceJunctionGeometry(
         src_region=np.array([0, 0], dtype=np.int64),
         dst_region=np.array([2, 2], dtype=np.int64),
         strand=np.array([Strand.POS, Strand.POS], dtype=np.int8),
         reach_lo=np.array([1000.0, 30.0]),
         reach_hi=np.array([1000.0, 30.0]),
     )
-    # the fixture payload has one junction row; give the second its own
+    # the fixture payload has one sj row; give the second its own
     import dataclasses
 
     payload2 = dataclasses.replace(
@@ -415,13 +415,13 @@ def test_several_junctions_on_one_boundary_POOL_their_counts_AND_their_divisors(
         chain,
         substrate=sub2,
         region_arrays=region_arrays,
-        junctions=two,
+        sj=two,
         gdna_fl_pmf=GDNA_PMF,
         rna_fl_pmf=RNA_PMF,
     )
     slot = int(np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)[0])
-    assert g.junction_count[slot, 0] == pytest.approx(9 + 4 + 5 + 1)
-    assert g.eff_junction[slot, 0] == pytest.approx(
+    assert g.sj_count[slot, 0] == pytest.approx(9 + 4 + 5 + 1)
+    assert g.eff_sj[slot, 0] == pytest.approx(
         brute_crossing(RNA_PMF, 1e12, 1e12) + brute_crossing(RNA_PMF, 30.0, 30.0)
     )
 
@@ -487,13 +487,13 @@ def _boundary_slot_of(chain, boundary_obj_id: int) -> int:
     return int(boundary_slots[obj == boundary_obj_id][0])
 
 
-def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
-    """Getting the incidence wrong shifts a junction onto a neighbouring reference's boundaries — invisible
+def test_a_sj_never_lands_on_ANOTHER_REFERENCE(parts):
+    """Getting the incidence wrong shifts a sj onto a neighbouring reference's boundaries — invisible
     in aggregate, and exactly the class of defect the substrate's per-reference offset check exists
     for."""
     payload, _, _, _, _ = parts
     p2, ra2, sub2, chain2 = two_reference_parts(payload)
-    j = JunctionGeometry(
+    j = SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),  # chr1's first region
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([Strand.POS], dtype=np.int8),
@@ -501,10 +501,10 @@ def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
         reach_hi=np.array([1000.0]),
     )
     g = build_region_geometry(chain2, sub2, ra2, j, GDNA_PMF, RNA_PMF)
-    assert g.junction_count[_boundary_slot_of(chain2, 2)].sum() == 0.0, "a chr1 junction reached chr2"
+    assert g.sj_count[_boundary_slot_of(chain2, 2)].sum() == 0.0, "a chr1 sj reached chr2"
 
 
-def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
+def test_a_sj_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(parts):
     """⛔ **The layout-assumption killer.** Region ``i`` sits at slot ``2i`` only within the FIRST
     reference; chr2's region 3 sits at slot 5. A geometry that computes the slot arithmetically instead
     of reading ``chain.left``/``chain.right`` passes every single-reference test and then puts chr2's
@@ -515,7 +515,7 @@ def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(p
     """
     payload, _, _, _, _ = parts
     p2, ra2, sub2, chain2 = two_reference_parts(payload)
-    j = JunctionGeometry(
+    j = SpliceJunctionGeometry(
         src_region=np.array([3], dtype=np.int64),  # chr2's FIRST region
         dst_region=np.array([4], dtype=np.int64),  # chr2's second region
         strand=np.array([Strand.POS], dtype=np.int8),
@@ -526,10 +526,10 @@ def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_boundary(p
     flux = float(p2.sj_count[0].sum())
     chr2_boundary = _boundary_slot_of(chain2, 2)
     # donor (right of region 3) and acceptor (left of region 4) are the SAME boundary, so it takes the flux twice
-    assert g.junction_count[chr2_boundary, 0] == pytest.approx(2.0 * flux)
-    assert np.all(g.junction_count[np.asarray(chain2.kind) == REGION] == 0.0)
+    assert g.sj_count[chr2_boundary, 0] == pytest.approx(2.0 * flux)
+    assert np.all(g.sj_count[np.asarray(chain2.kind) == REGION] == 0.0)
     for e in (0, 1):  # chr1's two boundaries saw nothing
-        assert g.junction_count[_boundary_slot_of(chain2, e)].sum() == 0.0
+        assert g.sj_count[_boundary_slot_of(chain2, e)].sum() == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +551,7 @@ def test_region_total_density_is_the_SUM_of_component_densities_each_in_its_own_
     geometry, parts
 ):
     """rho = f_g*(M/E_g) + (1-f_g)*(M/E_r), each component in its OWN length frame, plus the flank's own
-    junction flux. Never one shared divisor.
+    sj flux. Never one shared divisor.
 
     ⭐ `region_total_density` returns a PAIR — the total for the genomic-LOW flank and the one for the
     genomic-HIGH flank — so the unspliced part is what the two have in COMMON, and each side adds only
@@ -569,10 +569,10 @@ def test_region_total_density_is_the_SUM_of_component_densities_each_in_its_own_
     np.testing.assert_allclose(rho_lo[region_slots], unspliced[region_slots])
     np.testing.assert_allclose(rho_hi[region_slots], unspliced[region_slots])
     assert np.all(rho_lo >= unspliced) and np.all(rho_hi >= unspliced)
-    # ⛔ and the two halves must ACCOUNT FOR THE WHOLE flux — no junction may fall between them
+    # ⛔ and the two halves must ACCOUNT FOR THE WHOLE flux — no sj may fall between them
     whole = np.zeros(int(chain.n_slots))
     for s in (0, 1):
-        c, e = geometry.junction_count[:, s], geometry.eff_junction[:, s]
+        c, e = geometry.sj_count[:, s], geometry.eff_sj[:, s]
         whole += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
     np.testing.assert_allclose((rho_lo - unspliced) + (rho_hi - unspliced), whole)
 
@@ -580,9 +580,9 @@ def test_region_total_density_is_the_SUM_of_component_densities_each_in_its_own_
 def test_a_zero_opportunity_object_emits_ZERO_DENSITY_not_infinity(parts):
     """⛔ The other half of trap 23. With the divisor no longer floored, the consumer must divide by
     zero *safely* — a region that cannot hold the component has no density, not an infinite one."""
-    _, region_arrays, substrate, chain, junctions = parts
+    _, region_arrays, substrate, chain, sj = parts
     huge = spike_pmf(150)
-    g = build_region_geometry(chain, substrate, region_arrays, junctions, huge, huge)
+    g = build_region_geometry(chain, substrate, region_arrays, sj, huge, huge)
     rho_u, rho_w = region_total_density(g, np.full(chain.n_slots, 0.5))
     assert np.all(np.isfinite(rho_u))
     assert np.all(np.isfinite(rho_w))
@@ -594,14 +594,14 @@ def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
     """rho_mature = sum over transcript strands of count/E, each strand in its own frame — and a strand
     with no flux contributes nothing rather than a 0/0.
 
-    ⭐ Per FLANK: the LOW-flank total carries the flux of junctions whose genomic-low end is this boundary and
+    ⭐ Per FLANK: the LOW-flank total carries the flux of sj whose genomic-low end is this boundary and
     the HIGH-flank total the rest, so the pooling over strands is checked inside each side separately."""
     _, _, _, chain, _ = parts
     rho_lo, rho_hi = region_total_density(geometry, np.zeros(chain.n_slots))
     # with f_g = 0 and E_r > 0 the unspliced part is common to both, so the DIFFERENCE isolates the flux
     for side, other, count, eff in (
-        (rho_lo, rho_hi, geometry.junction_count_lo, geometry.eff_junction_lo),
-        (rho_hi, rho_lo, geometry.junction_count_hi, geometry.eff_junction_hi),
+        (rho_lo, rho_hi, geometry.sj_count_lo, geometry.eff_sj_lo),
+        (rho_hi, rho_lo, geometry.sj_count_hi, geometry.eff_sj_hi),
     ):
         expected = np.zeros(int(chain.n_slots))
         for s in (0, 1):
@@ -610,9 +610,9 @@ def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
         other_flux = np.zeros(int(chain.n_slots))
         for s in (0, 1):
             c, e = (
-                (geometry.junction_count_hi, geometry.eff_junction_hi)
+                (geometry.sj_count_hi, geometry.eff_sj_hi)
                 if side is rho_lo
-                else (geometry.junction_count_lo, geometry.eff_junction_lo)
+                else (geometry.sj_count_lo, geometry.eff_sj_lo)
             )
             other_flux += np.where(
                 (c[:, s] > 0) & (e[:, s] > 0), c[:, s] / np.where(e[:, s] > 0, e[:, s], 1.0), 0.0
@@ -620,15 +620,15 @@ def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
         np.testing.assert_allclose(side - (other - other_flux), expected)
 
 
-def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, parts):
+def test_spliced_count_and_sj_count_are_DIFFERENT_POPULATIONS(geometry, parts):
     """⛔ **The naming hazard this schema exists to remove.** Both populations are certified RNA and both
     could be called "mature", so one word would cover both and distinguish neither. They are different
     molecules:
 
     * ``spliced_count`` — crossed this boundary CONTIGUOUSLY, having spliced somewhere else;
-    * ``junction_count`` — never crossed it, it JUMPED from here.
+    * ``sj_count`` — never crossed it, it JUMPED from here.
 
-    The fixture makes them differ on both axes at once. At boundary 0 the junction's donor sits on the boundary
+    The fixture makes them differ on both axes at once. At boundary 0 the sj's donor sits on the boundary
     but nothing crossed it contiguously (13 vs 0); at boundary 1 both are live and unequal (13 vs 6). A
     consumer that read one for the other would be off by the whole gene's mature output at a donor boundary
     — which is the 2-versus-251 case in the design log.
@@ -636,13 +636,13 @@ def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, pa
     payload, _, _, chain, _ = parts
     boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     spliced = geometry.spliced_count[boundary_slots].sum(axis=1)
-    junction = geometry.junction_count[boundary_slots].sum(axis=1)
+    sj = geometry.sj_count[boundary_slots].sum(axis=1)
     np.testing.assert_array_equal(spliced, payload.boundary_spliced_count.sum(axis=1))
-    assert junction[0] == pytest.approx(float(payload.sj_count[0].sum()))
-    # boundary 0: junction flux with NO contiguous spliced crossing — they cannot be the same array
-    assert spliced[0] == 0.0 and junction[0] > 0.0
+    assert sj[0] == pytest.approx(float(payload.sj_count[0].sum()))
+    # boundary 0: sj flux with NO contiguous spliced crossing — they cannot be the same array
+    assert spliced[0] == 0.0 and sj[0] > 0.0
     # boundary 1: both live, and unequal
-    assert spliced[1] > 0.0 and junction[1] > 0.0 and spliced[1] != junction[1]
+    assert spliced[1] > 0.0 and sj[1] > 0.0 and spliced[1] != sj[1]
 
 
 def test_the_word_MATURE_names_no_field(geometry):
@@ -650,4 +650,4 @@ def test_the_word_MATURE_names_no_field(geometry):
     trap 27 — one word on two concepts). The fields carry the accumulator's own three bank names."""
     fields = set(RegionGeometry.__dataclass_fields__)
     assert not any("mature" in f for f in fields), fields
-    assert {"unspliced_count", "spliced_count", "junction_count"} <= fields
+    assert {"unspliced_count", "spliced_count", "sj_count"} <= fields

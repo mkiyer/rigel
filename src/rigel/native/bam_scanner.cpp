@@ -163,7 +163,7 @@ static void build_tid_mapping(
 
 /// CIGAR-derived splice junction with per-read anchor lengths.
 ///
-/// The anchor on each side of the junction is the number of
+/// The anchor on each side of the sj is the number of
 /// reference-advancing CIGAR bases between that side and the nearest
 /// clip (or the end of the alignment).  Both anchors are required to
 /// test against the artifact blacklist.
@@ -181,7 +181,7 @@ struct ParsedAlignment {
     int32_t mate_ref_id;    // mtid
     int32_t mate_ref_start; // mpos
     uint16_t flag;
-    // Per-record count of CIGAR junctions dropped by the splice-artifact
+    // Per-record count of CIGAR sj dropped by the splice-artifact
     // blacklist.  Populated by filter_blacklisted_sjs in Pass 1 (for
     // scanner stats parity) and Pass 2 (for the ZB:i annotated-BAM tag).
     // Fits into the padding after `flag` — zero effective memory growth.
@@ -226,10 +226,10 @@ struct QnameBatch {
 // Model training observation collectors
 // ================================================================
 
-/// Per-junction sense / antisense counts.  ⚠ These ARE counts, unlike the
+/// Per-sj sense / antisense counts.  ⚠ These ARE counts, unlike the
 /// int8 label vectors below (whose count is the vector's size()), so they are
 /// sized as counts: uint64 removes the overflow question permanently at a cost
-/// of ~2.4 MB over a human junction set.
+/// of ~2.4 MB over a human sj set.
 struct SJStrandCounts {
     uint64_t n_sense = 0;
     uint64_t n_antisense = 0;
@@ -240,17 +240,17 @@ struct StrandObservations {
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 
-    // ⭐ The per-junction SJ strand table.
-    // A junction is uniquely specified by (ref, start, end, motif strand); each
-    // strand-qualified fragment credits its leftmost ANNOTATED junction with one
+    // ⭐ The per-sj SJ strand table.
+    // A sj is uniquely specified by (ref, start, end, motif strand); each
+    // strand-qualified fragment credits its leftmost ANNOTATED sj with one
     // sense (align_strand == sj_strand) or antisense observation.
     //
     // ⭐ This is a strict REFINEMENT of the exonic_spliced 2×2 above, which is
-    // exactly its marginal: summing n_sense over motif-POS junctions gives
+    // exactly its marginal: summing n_sense over motif-POS sj gives
     // pos_pos, n_antisense over motif-POS gives neg_pos, and symmetrically for
     // motif-NEG.  Populated from the SAME `get_is_strand_qualified()` branch, one
     // observation per fragment, so the identity is unconditional.  It exists
-    // because a dispersion ACROSS junctions cannot be recovered from the 2×2.
+    // because a dispersion ACROSS sj cannot be recovered from the 2×2.
     std::unordered_map<SJKey, SJStrandCounts, SJKeyHash> sj_strand_table;
 };
 
@@ -408,7 +408,7 @@ struct WorkerState {
     // mark and is never released.
     //
     // Two buffers, because they belong to two different owners. `deposit_scratch` is the accumulator's
-    // (normalised introns, path segments, junction ids) and is opaque here. `deposit_introns` is the
+    // (normalised introns, path segments, sj ids) and is opaque here. `deposit_introns` is the
     // ADAPTER's: the fragment's introns restricted to the reference being deposited and de-duplicated,
     // which is what `FragmentPath::introns` points at.
     //
@@ -445,14 +445,14 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
 // ================================================================
 //
 // In addition to emitting exon blocks and splice junctions, we compute
-// per-junction anchor lengths (left, right).  An "anchor" is the count
+// per-sj anchor lengths (left, right).  An "anchor" is the count
 // of reference-advancing CIGAR bases on one side of the N op, bounded
 // by clips/ends.  Insertions never contribute; deletions do (they
 // occupy reference positions in the aligner's evidence for the anchor).
 //
 // Example: CIGAR 10M 500N 15M 1000N 125M
-//   junction 1 (500N):  anchor_left = 10,  anchor_right = 15 + 125 = 140
-//   junction 2 (1000N): anchor_left = 10 + 15 = 25, anchor_right = 125
+//   sj 1 (500N):  anchor_left = 10,  anchor_right = 15 + 125 = 140
+//   sj 2 (1000N): anchor_left = 10 + 15 = 25, anchor_right = 125
 
 static void parse_cigar(
     const bam1_t* b,
@@ -473,7 +473,7 @@ static void parse_cigar(
     int32_t start = pos;           // current exon start
     int32_t ref_advanced = 0;      // ref-advancing bases seen so far
 
-    // First pass: build exons, record each junction's left anchor and
+    // First pass: build exons, record each sj's left anchor and
     // its CIGAR intron length so the right anchor can be back-filled.
     const size_t sj_base = sjs.size();
     for (int32_t i = 0; i < n_cigar; i++) {
@@ -513,10 +513,10 @@ static void parse_cigar(
 //
 // Drop each CIGAR splice junction whose (left, right) anchors sit
 // inside the blacklist's observed artifact envelope.  Rejection rule:
-// either anchor <= max → junction is indistinguishable from known
+// either anchor <= max → sj is indistinguishable from known
 // gDNA-derived artifacts and is treated as unspliced.
 //
-// Returns the number of junctions dropped (for scanner statistics).
+// Returns the number of sj dropped (for scanner statistics).
 static inline int32_t filter_blacklisted_sjs(
     std::vector<SJCigarEntry>& sjs,
     const FragmentResolver& resolver,
@@ -641,7 +641,7 @@ static ParsedAlignment parse_bam_record(
 
     // Splice-junction artifact filtering.  Per-read, immediately after
     // CIGAR parsing.  Downstream fragment assembly unions across mates,
-    // so this is the permissive rule: a junction survives as long as at
+    // so this is the permissive rule: a sj survives as long as at
     // least one read supports it with anchors above the blacklist envelope.
     if (resolver && resolver->has_sj_blacklist() && !rec.sjs.empty()) {
         if (n_sj_observed) *n_sj_observed += static_cast<int64_t>(rec.sjs.size());
@@ -1126,8 +1126,8 @@ public:
     BamScanStats stats_;
     StrandObservations strand_obs_;
 
-    // The accumulator's region partition, installed by set_regions() and the junction CSR by
-    // set_junctions(). One Accumulator per BAM reference; deposits go into a per-worker copy during
+    // The accumulator's region partition, installed by set_regions() and the sj CSR by
+    // set_sj(). One Accumulator per BAM reference; deposits go into a per-worker copy during
     // scan() and are merged back here.
     //
     // ⚠ These are MEMBERS because the per-worker sets are built from them inside scan(). Anything
@@ -1137,9 +1137,9 @@ public:
     std::vector<uint8_t> region_types_;      // coarse region type, ref-major, one per region
     int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
     std::vector<int64_t> sj_offsets_;       // n_region_bounds + 1, CSR over the flat region_bound axis
-    std::vector<int64_t> sj_boundary_right_;  // flat region_bound index of each junction's high end
-    std::vector<int8_t>  sj_strand_;        // each junction's ANNOTATED strand
-    bool                 junctions_set_ = false;
+    std::vector<int64_t> sj_boundary_right_;  // flat region_bound index of each sj's high end
+    std::vector<int8_t>  sj_strand_;        // each sj's ANNOTATED strand
+    bool                 sj_set_ = false;
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
 
     BamScanner(FragmentResolver& ctx,
@@ -1158,7 +1158,7 @@ public:
     // ----------------------------------------------------------------
     //
     // Install the region partition the accumulator deposits onto. Must be called BEFORE scan(); without it
-    // the calibration payload comes back empty. `set_junctions` is a SECOND call, because this one
+    // the calibration payload comes back empty. `set_sj` is a SECOND call, because this one
     // refuses to run twice.
     //
     // Inputs:
@@ -1213,37 +1213,37 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // The accumulator's junction boundaries
+    // The accumulator's sj boundaries
     // ----------------------------------------------------------------
     //
     // A SECOND method rather than two more arguments to set_regions, because that one throws if called
-    // twice. Takes the flat CSR `build_junction_edge_arrays` emits, keyed by the flat region_bound index;
+    // twice. Takes the flat CSR `build_sj_arrays` emits, keyed by the flat region_bound index;
     // AccumulatorSet slices it per reference.
     //
-    // ⚠ Required even when there are none: pass empty arrays to say "this annotation has no junctions".
+    // ⚠ Required even when there are none: pass empty arrays to say "this annotation has no sj".
     // scan() refuses to run without it, because a missing table is not an error anywhere — every observed
-    // intron simply reads as unannotated, and 404,168 annotated junctions become zero silently.
-    void set_junctions(
+    // intron simply reads as unannotated, and 404,168 annotated sj become zero silently.
+    void set_sj(
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
         nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand)
     {
         if (!acc_set_) {
             throw std::runtime_error(
-                "set_junctions: call set_regions first — the junction CSR is keyed by region_bound index, so "
+                "set_sj: call set_regions first — the sj CSR is keyed by region_bound index, so "
                 "there is nothing to key it against until the partition is installed");
         }
         if (boundary_right.shape(0) != sj_strand.shape(0)) {
             throw std::invalid_argument(
-                "set_junctions: boundary_right has " + std::to_string(boundary_right.shape(0)) +
+                "set_sj: boundary_right has " + std::to_string(boundary_right.shape(0)) +
                 " entries but sj_strand has " + std::to_string(sj_strand.shape(0)));
         }
         sj_offsets_.assign(offsets.data(), offsets.data() + offsets.shape(0));
         sj_boundary_right_.assign(
             boundary_right.data(), boundary_right.data() + boundary_right.shape(0));
         sj_strand_.assign(sj_strand.data(), sj_strand.data() + sj_strand.shape(0));
-        junctions_set_ = true;
-        install_junctions(*acc_set_);
+        sj_set_ = true;
+        install_sj(*acc_set_);
     }
 
     // Build a per-worker set over the same partition, locally writable so workers never contend.
@@ -1256,13 +1256,13 @@ public:
             region_types_.empty() ? nullptr : region_types_.data(),
             region_types_.size(),
             max_length_);
-        install_junctions(*set);
+        install_sj(*set);
         return set;
     }
 
-    void install_junctions(rigel::accumulator::AccumulatorSet& set) const {
-        if (!junctions_set_) return;
-        set.set_junctions(sj_offsets_.data(),
+    void install_sj(rigel::accumulator::AccumulatorSet& set) const {
+        if (!sj_set_) return;
+        set.set_sj(sj_offsets_.data(),
                           sj_offsets_.size(),
                           sj_boundary_right_.data(),
                           sj_strand_.data(),
@@ -1294,15 +1294,15 @@ public:
         if (chunk_size < 1) chunk_size = 1;
         if (qname_batch_size < 1) qname_batch_size = 1;
 
-        // ⚠ Explicit rather than defaulted, because the failure is invisible: with no junction table every
-        // observed intron reads as unannotated, so the spliced banks and every junction boundary stay at zero
+        // ⚠ Explicit rather than defaulted, because the failure is invisible: with no sj table every
+        // observed intron reads as unannotated, so the spliced banks and every sj boundary stay at zero
         // and the tally still looks well-formed. Pass empty arrays to declare an annotation with none.
-        if (acc_set_ && !junctions_set_) {
+        if (acc_set_ && !sj_set_) {
             throw std::runtime_error(
-                "scan: set_regions was called but set_junctions was not. The junction table is not "
-                "optional — without it every observed intron reads as unannotated, so the junction boundaries "
-                "and the spliced banks are silently empty. Call set_junctions with empty arrays if this "
-                "annotation genuinely has no junctions.");
+                "scan: set_regions was called but set_sj was not. The sj table is not "
+                "optional — without it every observed intron reads as unannotated, so the sj boundaries "
+                "and the spliced banks are silently empty. Call set_sj with empty arrays if this "
+                "annotation genuinely has no sj.");
         }
 
         // Two queues: input (SPMC) and output (MPSC)
@@ -1319,7 +1319,7 @@ public:
             auto ws = std::make_unique<WorkerState>(n_transcripts, 0);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
-            // Per-worker accumulator: the same partition and the same junction CSR as the shared
+            // Per-worker accumulator: the same partition and the same sj CSR as the shared
             // template, locally writable so workers don't contend.
             if (acc_set_) {
                 ws->acc_set = make_accumulator_set();
@@ -1574,7 +1574,7 @@ private:
         // The shipped code compared them into a third concept, a bool named `primary`, and used it to pick
         // a channel labelled *sense* — which is how a dUTP first-strand library ended up with 0.6 % of its
         // spliced fragments in that column. `primary` is deleted, not renamed, and nothing replaces it:
-        // sense/antisense is DERIVED by a consumer from the fragment strand and the junction's own strand.
+        // sense/antisense is DERIVED by a consumer from the fragment strand and the sj's own strand.
         //
         // ⚠ No strand gate here either. The deposit rejects an undefined `align_strand` itself and COUNTS
         // it, which is the point — the old `align_ok`/`motif_ok` gate returned early, so the loss vanished.
@@ -1596,8 +1596,8 @@ private:
                     ws.stats.splice_census[st]++;
 
                 // Hold artifact splices (blacklisted CIGAR-N) out of the accumulator entirely — no
-                // deposit, no length pool. Their true span is unrecoverable: a blacklisted junction may be
-                // a real-but-rejected junction OR a wholly incorrect alignment, and the span would be
+                // deposit, no length pool. Their true span is unrecoverable: a blacklisted sj may be
+                // a real-but-rejected sj OR a wholly incorrect alignment, and the span would be
                 // derived from that suspect alignment, so any reconstruction injects a false assumption.
                 //
                 // ⚠ Counted by the census above and NOT by `n_deposit_not_offered`: this is a
@@ -1624,7 +1624,7 @@ private:
                 // coordinate alone — it never looks at `ref_id`.
                 //
                 // ⚠ The de-duplication is for the QC denominator, NOT to prevent double-crediting a
-                // junction: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
+                // sj: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
                 // `intron_set` on (ref, start, end, strand), so a pair where one mate carries the tag
                 // yields the same intron twice. Each duplicate would increment `introns_absorbed`, on
                 // every spliced pair from such an aligner, and that counter is reported. `intron_set` is
@@ -1888,8 +1888,8 @@ private:
             if (is_unique_mapper) {
                 if (result.get_is_strand_qualified()) {
                     // ⭐ ONE observation per strand-qualified fragment, keyed by
-                    // JUNCTION. `sj_strand` is qualified to POS/NEG here and is the
-                    // motif strand of every annotated junction the fragment crosses,
+                    // SJ. `sj_strand` is qualified to POS/NEG here and is the
+                    // motif strand of every annotated sj the fragment crosses,
                     // so `sense` is exactly the align==sj bit the 2×2 is built from
                     // and `sj_key_*` is necessarily set.
                     //
@@ -1899,7 +1899,7 @@ private:
                     // conditions and 4 real libraries), so they were pure duplication
                     // and were deleted 2026-07-28. `stats.n_strand_trained` below still
                     // counts the fragments, and Python asserts it against the table's
-                    // total depth — the invariant that one fragment credits one junction.
+                    // total depth — the invariant that one fragment credits one sj.
                     SJKey sj_key{result.sj_key_ref, result.sj_key_start,
                                  result.sj_key_end, result.sj_strand};
                     auto& counts = strand_obs.sj_strand_table[sj_key];
@@ -2037,7 +2037,7 @@ private:
         strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
         strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
 
-        // The per-junction SJ strand table, as six parallel arrays.  Sorted by
+        // The per-sj SJ strand table, as six parallel arrays.  Sorted by
         // (ref, start, end, motif strand) because the source is an unordered_map
         // merged across workers, and every downstream number must not depend on
         // thread scheduling or hash order.
@@ -2092,7 +2092,7 @@ private:
         if (acc_set_) {
             using rigel::accumulator::Accumulator;
             using rigel::accumulator::Boundary;
-            using rigel::accumulator::JunctionEdge;
+            using rigel::accumulator::SpliceJunction;
             using rigel::accumulator::Region;
             using rigel::accumulator::kNFragmentPools;
             using rigel::accumulator::kNStrandColumns;
@@ -2109,7 +2109,7 @@ private:
                 ref_boundary_offsets[f + 1] =
                     ref_boundary_offsets[f] + static_cast<int64_t>(a.n_boundaries());
                 ref_sj_offsets[f + 1] =
-                    ref_sj_offsets[f] + static_cast<int64_t>(a.n_junctions());
+                    ref_sj_offsets[f] + static_cast<int64_t>(a.n_sj());
             }
             const auto n_regions = static_cast<std::size_t>(ref_region_offsets.back());
             const auto n_boundaries = static_cast<std::size_t>(ref_boundary_offsets.back());
@@ -2126,8 +2126,8 @@ private:
             std::vector<double> boundary_spliced_mass(n_boundaries, 0.0);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
             std::vector<double> sj_inv_length_sum(n_sj, 0.0);
-            // ⭐ MULTIPLIED by kNStrandColumns, unlike every other mass here — the junction mass is
-            // the one that carries a strand (owner 2026-08-12; premise in `JunctionEdge::mass`).
+            // ⭐ MULTIPLIED by kNStrandColumns, unlike every other mass here — the sj mass is
+            // the one that carries a strand (owner 2026-08-12; premise in `SpliceJunction::mass`).
             std::vector<double> sj_mass(n_sj * kNStrandColumns, 0.0);
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
@@ -2149,7 +2149,7 @@ private:
                 gap_census.merge_from(a.gap_census());
                 const Region* regions = a.regions_data();
                 const Boundary* boundaries = a.boundaries_data();
-                const JunctionEdge* junctions = a.junctions_data();
+                const SpliceJunction* sj = a.sj_data();
                 const uint32_t* starts = a.region_start_count_data();
                 const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
                 const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
@@ -2175,13 +2175,13 @@ private:
                     boundary_unspliced_mass[boundary_base + i] = boundaries[i].unspliced_mass;
                     boundary_spliced_mass[boundary_base + i]   = boundaries[i].spliced_mass;
                 }
-                for (std::size_t i = 0; i < a.n_junctions(); ++i) {
+                for (std::size_t i = 0; i < a.n_sj(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (sj_base + i) * kNStrandColumns + c;
-                        sj_count[o]   = junctions[i].count[c];
-                        sj_mass[o]    = junctions[i].mass[c];
+                        sj_count[o]   = sj[i].count[c];
+                        sj_mass[o]    = sj[i].mass[c];
                     }
-                    sj_inv_length_sum[sj_base + i] = junctions[i].inv_length_sum;
+                    sj_inv_length_sum[sj_base + i] = sj[i].inv_length_sum;
                 }
                 // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
                 // ⚠ A size mismatch throws instead of being skipped: skipping would drop that reference's
@@ -2841,7 +2841,7 @@ NB_MODULE(_bam_impl, m) {
         using rigel::accumulator::DepositScratch;
         using rigel::accumulator::GapHypothesis;
         using rigel::accumulator::OfferedFragment;
-        using rigel::accumulator::JunctionEdge;
+        using rigel::accumulator::SpliceJunction;
         using rigel::accumulator::Region;
         using rigel::accumulator::kNFragmentPools;
         using rigel::accumulator::kNStrandColumns;
@@ -2870,12 +2870,12 @@ NB_MODULE(_bam_impl, m) {
                  "fragment-length limit (which is also the pool-histogram width), and WHICH\n"
                  "reference this is — stamped into every deferred record, because the second\n"
                  "pass replays those onto that reference's region_bound axis.")
-            .def("set_junctions",
+            .def("set_sj",
                  [](Accumulator& a,
                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> offsets,
                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> boundary_right,
                     nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
-                     a.set_junctions(
+                     a.set_sj(
                          std::vector<int32_t>(offsets.data(), offsets.data() + offsets.shape(0)),
                          std::vector<int32_t>(boundary_right.data(),
                                               boundary_right.data() + boundary_right.shape(0)),
@@ -2885,11 +2885,11 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("offsets"),
                  nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
-                 "The junction CSR for THIS reference, keyed by the ref-local donor region_bound\n"
-                 "index. The junction-boundary id is the slot; slot order is a contract.")
+                 "The sj CSR for THIS reference, keyed by the ref-local donor region_bound\n"
+                 "index. The sj-boundary id is the slot; slot order is a contract.")
             .def_prop_ro("n_regions",     [](const Accumulator& a) { return a.n_regions(); })
             .def_prop_ro("n_boundaries",     [](const Accumulator& a) { return a.n_boundaries(); })
-            .def_prop_ro("n_junctions", [](const Accumulator& a) { return a.n_junctions(); })
+            .def_prop_ro("n_sj", [](const Accumulator& a) { return a.n_sj(); })
             .def_prop_ro("n_region_bounds",      [](const Accumulator& a) { return a.n_region_bounds(); })
             .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
 
@@ -2949,27 +2949,27 @@ NB_MODULE(_bam_impl, m) {
                     &a.boundaries_data()[0].spliced_mass, {a.n_boundaries()}, h, {row}).cast();
             })
 
-            // ── junction boundaries ───────────────────────────────────────────────────────────────────────
+            // ── sj boundaries ───────────────────────────────────────────────────────────────────────
             .def_prop_ro("sj_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint32_t);
+                constexpr int64_t row = sizeof(SpliceJunction) / sizeof(uint32_t);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    &a.junctions_data()[0].count[0], {a.n_junctions(), kNStrandColumns}, h,
+                    &a.sj_data()[0].count[0], {a.n_sj(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
             .def_prop_ro("sj_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(double);
+                constexpr int64_t row = sizeof(SpliceJunction) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.junctions_data()[0].inv_length_sum, {a.n_junctions()}, h, {row}).cast();
+                    &a.sj_data()[0].inv_length_sum, {a.n_sj()}, h, {row}).cast();
             })
-            // ⭐ ndim<2>, unlike every other mass here — the junction mass carries a strand, and its
-            // columns are `sj_count`'s columns. See `JunctionEdge::mass` for the premise that changed.
+            // ⭐ ndim<2>, unlike every other mass here — the sj mass carries a strand, and its
+            // columns are `sj_count`'s columns. See `SpliceJunction::mass` for the premise that changed.
             .def_prop_ro("sj_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(double);
+                constexpr int64_t row = sizeof(SpliceJunction) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<2>>(
-                    &a.junctions_data()[0].mass[0], {a.n_junctions(), kNStrandColumns}, h,
+                    &a.sj_data()[0].mass[0], {a.n_sj(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
 
@@ -3148,7 +3148,7 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("n_refs"),
                  nb::arg("region_types"),
                  nb::arg("max_length"),
-                 "Install the accumulator's region partition. Call set_junctions next.\n\n"
+                 "Install the accumulator's region partition. Call set_sj next.\n\n"
                  "region_bounds : int64[n_region_bounds_total]\n"
                  "    Flat sorted region_bound positions for all references. A reference\n"
                  "    contributing c region_bounds owns c-1 regions and c-2 interior boundaries.\n"
@@ -3163,30 +3163,30 @@ NB_MODULE(_bam_impl, m) {
                  "max_length : int\n"
                  "    The fragment-length limit applied to L, and the width of the\n"
                  "    pool histograms. Must be >= 1.\n")
-          .def("set_junctions",
+          .def("set_sj",
                  [](BamScanner& self,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
                      nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
-                      self.set_junctions(offsets, boundary_right, sj_strand);
+                      self.set_sj(offsets, boundary_right, sj_strand);
                  },
                  nb::arg("offsets"),
                  nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
-                 "Install the annotated junction boundaries, as build_junction_edge_arrays\n"
+                 "Install the annotated sj boundaries, as build_sj_arrays\n"
                  "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
                  "offsets : int64[n_region_bounds_total + 1]\n"
                  "    CSR over the flat region_bound axis, keyed by the DONOR region_bound index.\n"
-                 "boundary_right : int64[n_junctions]\n"
-                 "    Flat region_bound index of each junction's high end. The junction-boundary id\n"
+                 "boundary_right : int64[n_sj]\n"
+                 "    Flat region_bound index of each sj's high end. The sj-boundary id\n"
                  "    IS the slot here; edges_df.edge_row is a join key and is not\n"
                  "    passed. Slot order is a contract: sort on\n"
                  "    (donor region_bound, acceptor region_bound, sj_strand).\n"
-                 "sj_strand : int8[n_junctions]\n"
-                 "    Each junction's ANNOTATED strand.\n\n"
+                 "sj_strand : int8[n_sj]\n"
+                 "    Each sj's ANNOTATED strand.\n\n"
                  "Not optional: scan() refuses to run without it, because a missing\n"
                  "table makes every observed intron read as unannotated and empties\n"
-                 "the junction boundaries silently. Pass empty arrays to declare none.\n")
+                 "the sj boundaries silently. Pass empty arrays to declare none.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

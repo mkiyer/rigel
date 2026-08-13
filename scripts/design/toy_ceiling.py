@@ -431,7 +431,7 @@ def measure(spec_name, conditions, *, suite, index_path, work_dir, refit_iters, 
                         "n_rna": n_rna,
                         "nrna": float(base.nrna_abundance),
                         **{k: row[k] for k in (
-                            "slot", "axis", "type", "where", "bp", "n", "spliced", "junction",
+                            "slot", "axis", "type", "where", "bp", "n", "spliced", "sj",
                             "true_fg", "fg_loc", "pred_fg", "sd_fg", "tau", "err", "mass",
                             "cm_g", "c_tau", "cg", "mo_g",
                         )},

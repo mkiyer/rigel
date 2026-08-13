@@ -126,11 +126,11 @@ def test_the_two_boundary_banks_are_DISJOINT_populations(scanned):
     assert not np.array_equal(unspliced, spliced)
 
 
-def test_the_junction_axis_matches_the_payloads_own(scanned):
-    """The substrate's junction population is exactly ``n_sj`` rows — the third axis, independent of
+def test_the_sj_axis_matches_the_payloads_own(scanned):
+    """The substrate's sj population is exactly ``n_sj`` rows — the third axis, independent of
     the other two, and the one a consumer must not size from ``n_regions`` or ``n_boundaries``."""
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
-    assert sub.n_junctions == int(payload.n_sj)
-    assert np.asarray(sub.junction.count).shape == (int(payload.n_sj), 2)
-    assert np.asarray(sub.junction.count).sum() > 0, "the fixture must exercise the junction axis"
+    assert sub.n_sj == int(payload.n_sj)
+    assert np.asarray(sub.sj.count).shape == (int(payload.n_sj), 2)
+    assert np.asarray(sub.sj.count).sum() > 0, "the fixture must exercise the sj axis"

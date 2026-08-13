@@ -47,12 +47,12 @@ from ._accumulator_reference import (
 
 GENOME_REGION_BOUNDS = [0, 1000, 1600, 1700, 1900, 2000, 2200, 4000]
 #: Two annotated introns inside the gap, so an unspliced fragment spanning it has three hypotheses.
-JUNCTIONS = ((0, 1600, 2000, int(Strand.POS)), (0, 1700, 1900, int(Strand.NEG)))
+SJ = ((0, 1600, 2000, int(Strand.POS)), (0, 1700, 1900, int(Strand.NEG)))
 MAX_LENGTH = 1000
 
 
 def _partition() -> Partition:
-    return Partition.from_region_bounds([GENOME_REGION_BOUNDS], junctions=JUNCTIONS)
+    return Partition.from_region_bounds([GENOME_REGION_BOUNDS], sj=SJ)
 
 
 def _hypotheses() -> tuple[GapHypothesis, ...]:
@@ -327,7 +327,7 @@ def test_every_additive_channel_is_named_in_ADDITIVE_AXES():
 #
 # ⛔ TWO CONTIGS ON PURPOSE. S1 found that a constant `ref` stamp and a constant `AccumulatorSet` id each
 # passed all 1860 tests, because every fixture was single-contig or deferred only on reference 0. The drain
-# rebuilds one accumulator per reference from the payload and slices the junction CSR per reference — so
+# rebuilds one accumulator per reference from the payload and slices the sj CSR per reference — so
 # reference 0's slot base is 0 and every arithmetic error there is invisible. chr2's is not.
 
 DRAIN_GENOME = 6_000
@@ -352,7 +352,7 @@ def scanned_two_contigs(tmp_path_factory):
     import pysam
 
     from rigel.calibration.splice_graph import (
-        build_junction_edge_arrays,
+        build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
@@ -394,7 +394,7 @@ def scanned_two_contigs(tmp_path_factory):
 
     reads = []
     for ref_id in (0, 1):
-        # depth on both junctions, so neither reads zero and the draw has something to weigh
+        # depth on both sj, so neither reads zero and the draw has something to weigh
         for k in range(12):
             for donor, acceptor in ((1600, 2000), (1700, 1900)):
                 reads += [
@@ -436,23 +436,23 @@ def scanned_two_contigs(tmp_path_factory):
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     _, _, region_types = build_region_partition_arrays(index)
-    return payload, region_types, build_junction_edge_arrays(index), strand_model
+    return payload, region_types, build_sj_arrays(index), strand_model
 
 
 def _drained(scanned_two_contigs, seed=11):
     from rigel.calibration.fl import build_fl_models
     from rigel.second_pass import choose_hypotheses, drain, score_held_fragments
 
-    payload, region_types, junctions, strand_model = scanned_two_contigs
+    payload, region_types, sj, strand_model = scanned_two_contigs
     scores = score_held_fragments(
         payload,
         fl_models=build_fl_models(payload),
         rna_sense_frac=strand_model.p_r1_sense,
         region_types=region_types,
-        junctions=junctions,
+        sj=sj,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
-    return payload, drain(payload, choices, region_types=region_types, junctions=junctions), choices
+    return payload, drain(payload, choices, region_types=region_types, sj=sj), choices
 
 
 def test_the_fixture_holds_fragments_on_BOTH_contigs(scanned_two_contigs):
@@ -482,21 +482,21 @@ def test_the_drained_payload_CONSERVES_and_the_bank_is_empty(scanned_two_contigs
     assert before.drain is None
 
 
-def test_the_drain_credits_the_junction_on_the_RIGHT_CONTIG(scanned_two_contigs):
-    """⛔ The gate for the per-reference junction slice. A drained spliced choice must credit a junction slot
+def test_the_drain_credits_the_sj_on_the_RIGHT_CONTIG(scanned_two_contigs):
+    """⛔ The gate for the per-reference sj slice. A drained spliced choice must credit a sj slot
     **on its own contig**, and chr2's slots are not zero-based — which is what makes the arithmetic visible.
 
-    ⚠ Two failures this catches, both silent: junctions never installed (every slot stays at pass one's
+    ⚠ Two failures this catches, both silent: sj never installed (every slot stays at pass one's
     value, because an observed intron with no table reads as unannotated), and a slot base taken as 0 for
-    every reference (chr2's traffic lands on chr1's junctions).
+    every reference (chr2's traffic lands on chr1's sj).
     """
     before, after, choices = _drained(scanned_two_contigs)
     delta = after.sj_count.astype(np.int64) - before.sj_count.astype(np.int64)
     n_spliced = after.drain.chose_spliced
     assert n_spliced > 0, "the fixture must have drawn at least one spliced hypothesis to gate this"
     assert int(delta.sum()) == n_spliced, (
-        f"every spliced choice credits exactly one junction slot; {n_spliced} were chosen but the junction "
-        f"banks moved by {int(delta.sum())}. Zero means the junction table was never installed."
+        f"every spliced choice credits exactly one sj slot; {n_spliced} were chosen but the sj "
+        f"banks moved by {int(delta.sum())}. Zero means the sj table was never installed."
     )
     # Which contig did the movement land on? Slots are reference-major, so compare against ref_sj_offsets.
     moved = np.flatnonzero(delta.sum(axis=1))
@@ -518,7 +518,7 @@ def test_the_drain_credits_the_junction_on_the_RIGHT_CONTIG(scanned_two_contigs)
     if spliced_on_chr2:
         assert np.any(moved >= chr2_slot_base), (
             f"{spliced_on_chr2} chr2 fragments chose a spliced path, but every credited slot is below "
-            f"chr2's base {chr2_slot_base} — chr2's junction traffic landed on chr1's slots."
+            f"chr2's base {chr2_slot_base} — chr2's sj traffic landed on chr1's slots."
         )
 
 
@@ -541,9 +541,9 @@ def test_a_payload_cannot_be_drained_TWICE(scanned_two_contigs):
     from rigel.second_pass import drain
 
     _before, after, choices = _drained(scanned_two_contigs)
-    payload, region_types, junctions, _strand = scanned_two_contigs
+    payload, region_types, sj, _strand = scanned_two_contigs
     with pytest.raises(ValueError, match="already been drained"):
-        drain(after, np.zeros(0, np.int64), region_types=region_types, junctions=junctions)
+        drain(after, np.zeros(0, np.int64), region_types=region_types, sj=sj)
     assert len(choices) == 6
 
 
@@ -567,7 +567,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
 
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
-        build_junction_edge_arrays,
+        build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.config import BamScanConfig
@@ -643,7 +643,7 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
     pysam.sort("-n", "-o", bam, bam)
 
     _, _, region_types = build_region_partition_arrays(index)
-    junctions = build_junction_edge_arrays(index)
+    sj = build_sj_arrays(index)
 
     results = {}
     for threads in (1, 2, 4, 8):
@@ -659,12 +659,12 @@ def test_the_DRAINED_payload_is_byte_identical_at_1_2_4_8_WORKERS(tmp_path_facto
             fl_models=build_fl_models(payload),
             rna_sense_frac=strand_model.p_r1_sense,
             region_types=region_types,
-            junctions=junctions,
+            sj=sj,
         )
         choices = choose_hypotheses(scores, payload, seed=5)
         results[threads] = (
             choices,
-            drain(payload, choices, region_types=region_types, junctions=junctions),
+            drain(payload, choices, region_types=region_types, sj=sj),
         )
 
     assert results[1][1].drain.offered == 80, (
@@ -850,7 +850,7 @@ def test_SURVIVORS_are_weighted_by_LIKELIHOOD_not_tossed_for():
 # ⭐ THE DERIVATION. Let `t` be the strand a candidate implies, `a` the strand the fragment aligned to, and
 # `p = P(a == t | RNA)` the library's directional sense fraction (≈ 0.01 on dUTP).
 #
-#     H_spliced   used a junction; gDNA cannot splice, so RNA on strand t:   p  or  1 - p
+#     H_spliced   used a sj; gDNA cannot splice, so RNA on strand t:   p  or  1 - p
 #     H_genomic   crossed contiguously; the discriminating component is gDNA, which is DOUBLE-STRANDED
 #                 and therefore has no sense direction at all:              0.5, either orientation
 #

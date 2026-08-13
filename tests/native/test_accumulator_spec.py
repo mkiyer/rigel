@@ -6,7 +6,7 @@
 reproduce it byte for byte. This module is what "correct" means for both.
 
 THE RULE UNDER TEST, in five boundaries. The genome is a graph: REGIONS are half-open intervals tiling each
-reference, and the 0-bp BOUNDARIES between adjacent regions are CONTIGUOUS boundaries. A JUNCTION boundary is a directed
+reference, and the 0-bp BOUNDARIES between adjacent regions are CONTIGUOUS boundaries. A SJ boundary is a directed
 donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
 gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; boundaries
 count fragments CROSSING. Each population stores only the channels something READS — an integer count, a
@@ -61,17 +61,17 @@ CHR1_TYPES = [0, 2, 2, 1, 2, 0]
 CHR2_TYPES = [0, 2]
 
 #: an annotated intron whose endpoints are region_bounds 3 and 5, so it SWALLOWS the boundary at region_bound 4
-JUNCTION = (0, 201, 900, Strand.POS)
+SJ = (0, 201, 900, Strand.POS)
 
 
-def _partition(junctions=()):
+def _partition(sj=()):
     return Partition.from_region_bounds(
-        [CHR1_REGION_BOUNDS, CHR2_REGION_BOUNDS], region_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
+        [CHR1_REGION_BOUNDS, CHR2_REGION_BOUNDS], region_types=[CHR1_TYPES, CHR2_TYPES], sj=sj
     )
 
 
-def _acc(junctions=(), **kw):
-    return Accumulator(_partition(junctions), **kw)
+def _acc(sj=(), **kw):
+    return Accumulator(_partition(sj), **kw)
 
 
 def _boundary(ref, boundary):
@@ -194,7 +194,7 @@ def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_on
 def test_a_spliced_jump_deposits_NOTHING_on_the_boundaries_it_splices_over():
     """⭐ The defect this design removes. The intron [201,900) swallows the boundary at 400; the old rule,
     which asked only "does another slice follow?", could not tell that from a contiguous crossing."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     length = (950 - 150) - (900 - 201)
@@ -207,7 +207,7 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_boundaries_it_splices_over():
 def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     """A spliced fragment is certified RNA — gDNA cannot be spliced — so a boundary its block genuinely
     crosses is the cleanest RNA marker available at a boundary."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, "block [150,201) crosses the boundary at 200"
@@ -233,10 +233,10 @@ def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segme
     )
 
 
-def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
-    """Owner ruling: unannotated junctions are disproportionately artifactual, so they deposit on the
+def test_an_UNANNOTATED_intron_credits_no_sj_and_nothing_across_the_gap():
+    """Owner ruling: unannotated sj are disproportionately artifactual, so they deposit on the
     UNSPLICED channel and compete with gDNA rather than being certified RNA."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     # [200,400) is NOT annotated; it swallows the boundary at 201
     acc.deposit(0, 50, 500, observed_introns=[(200, 400)], sj_strand=Strand.POS)
     t = acc.tally
@@ -273,10 +273,10 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     assert t.qc["unannotated_introns"] == 1
 
 
-def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_boundaries():
+def test_opposite_strand_sj_at_the_same_coordinates_are_DISTINCT_boundaries():
     """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
     reach it, which is exactly why one exists."""
-    acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
+    acc = _acc(sj=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
     )
@@ -286,9 +286,9 @@ def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_boundari
 
 
 @pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
-def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
-    """⛔ The junction-boundary id IS the rank in the sort, so the sort must be total — otherwise the id
-    depends on the order the caller happened to list the junctions in, and the same graph gets two
+def test_a_sj_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
+    """⛔ The sj-boundary id IS the rank in the sort, so the sort must be total — otherwise the id
+    depends on the order the caller happened to list the sj in, and the same graph gets two
     labellings.
 
     ⚠ This is the ONLY test that pins ``strand`` as part of the sort key. ``np.lexsort`` is stable, so a
@@ -297,16 +297,16 @@ def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(orde
     what makes the missing key observable, and a strand-coincident pair is the only tie there is.
     """
     _, direction = order
-    junctions = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
-    part = Partition.from_region_bounds([CHR1_REGION_BOUNDS], region_types=[CHR1_TYPES], junctions=junctions)
+    sj = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
+    part = Partition.from_region_bounds([CHR1_REGION_BOUNDS], region_types=[CHR1_TYPES], sj=sj)
     assert [int(s) for s in part.sj_strand] == [int(Strand.POS), int(Strand.NEG)], (
         "POS must sort to slot 0 whichever order it was passed in"
     )
 
 
-def test_a_fragment_using_TWO_junctions_credits_BOTH():
+def test_a_fragment_using_TWO_sj_credits_BOTH():
     """Owner ruling: each boundary owns its own expectation, and the strand model is fitted from a separate
-    scan output, so crediting every junction distorts nothing.
+    scan output, so crediting every sj distorts nothing.
 
     ⚠ The two introns must be separated by a real exon. Abutting introns imply a zero-length exon and are
     malformed (see ``test_ABUTTING_introns_are_MALFORMED_and_merge``), so this needs its own partition
@@ -314,7 +314,7 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
     part = Partition.from_region_bounds(
         [[0, 100, 200, 300, 400, 500, 600]],
         region_types=[[0, 2, 1, 2, 1, 2]],
-        junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
+        sj=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
     )
     acc = Accumulator(part, max_fragment_length=10_000)
     acc.deposit(0, 50, 550, observed_introns=[(100, 200), (300, 400)], sj_strand=Strand.POS)
@@ -337,50 +337,50 @@ def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
     assert int(t.boundary_unspliced_count[_boundary(0, 2), 0]) == 0
 
 
-def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
-    """⭐ One convention throughout. Sense/antisense is DERIVED, never stored: the junction boundary carries
-    its own genomic strand, so a consumer computes ``sense = (fragment strand == junction strand)``.
+def test_EVERY_bank_including_the_sj_is_indexed_by_GENOME_strand():
+    """⭐ One convention throughout. Sense/antisense is DERIVED, never stored: the sj boundary carries
+    its own genomic strand, so a consumer computes ``sense = (fragment strand == sj strand)``.
 
-    Here a genome-minus fragment splices across a ``+`` junction. Under a sense convention it would land
+    Here a genome-minus fragment splices across a ``+`` sj. Under a sense convention it would land
     in the antisense column; under the genome convention it lands in the minus column. Those happen to be
     the same index, so the discriminating case is the next test."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
     )
     assert int(acc.tally.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
-def test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
-    """⛔⛔ **DO NOT COLLAPSE ``sj_count`` TO ONE COLUMN.** A junction is stranded by its genomic splicing
+def test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
+    """⛔⛔ **DO NOT COLLAPSE ``sj_count`` TO ONE COLUMN.** A sj is stranded by its genomic splicing
     MOTIF, so the strand of the *fragments* on it looks redundant — and every consumer today sums the two
     columns. It is retained anyway, on an owner ruling (2026-08-08), and this test is why.
 
     ⭐ **THE MECHANISM.** Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA.
     ``rigel.splice_blacklist`` catches the ones the sister tool ``alignable`` has already enumerated by
     coordinate — an a-priori list, and far from complete. A second, EMPIRICAL detector exists in a
-    stranded library: real junctions inherit the library's global strand specificity, while alignment
+    stranded library: real sj inherit the library's global strand specificity, while alignment
     artifacts deposit onto BOTH strands and deviate from it. That test is only possible if the
-    per-junction split by ALIGNED strand survives into the payload.
+    per-sj split by ALIGNED strand survives into the payload.
 
     ⚠ Unstranded data cannot use it — with κ = ½ there is no expectation to deviate from. That is a
     property of the detector, not a reason to drop the column.
 
     ⭐⭐ **AND THE DISCRIMINATING INFORMATION LIVES ONLY IN THE SPLIT**, which is the whole ruling: the
-    clean junction and the artifactual one below carry the SAME total, so a collapsed bank cannot tell
+    clean sj and the artifactual one below carry the SAME total, so a collapsed bank cannot tell
     them apart at all. A tidying pass that removed the column — the same "store a channel where a named
     consumer reads it" principle that correctly removed six other banks — would delete this detector
     before it was built.
     """
-    # a CLEAN junction: every fragment on one aligned strand, as a stranded library produces
-    clean = _acc(junctions=[JUNCTION])
+    # a CLEAN sj: every fragment on one aligned strand, as a stranded library produces
+    clean = _acc(sj=[SJ])
     for _ in range(20):
         clean.deposit(
             0, 150, 950, observed_introns=[(201, 900)],
             align_strand=Strand.NEG, sj_strand=Strand.POS,
         )
-    # an ARTIFACTUAL junction: the aligner emitted it from both strands
-    artifact = _acc(junctions=[JUNCTION])
+    # an ARTIFACTUAL sj: the aligner emitted it from both strands
+    artifact = _acc(sj=[SJ])
     for i in range(20):
         artifact.deposit(
             0, 150, 950, observed_introns=[(201, 900)],
@@ -389,21 +389,21 @@ def test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
 
     clean_row = clean.tally.sj_count[0]
     artifact_row = artifact.tally.sj_count[0]
-    assert list(clean_row) == [0, 20], "a clean junction sits entirely in one aligned-strand column"
+    assert list(clean_row) == [0, 20], "a clean sj sits entirely in one aligned-strand column"
     assert list(artifact_row) == [10, 10], "an artifact splits across both"
 
     # ⛔ THE RULING, as an assertion: collapsing the columns destroys the difference.
     assert int(clean_row.sum()) == int(artifact_row.sum()) == 20, (
-        "the two junctions carry the same TOTAL, so a one-column sj_count cannot distinguish them — "
+        "the two sj carry the same TOTAL, so a one-column sj_count cannot distinguish them — "
         "which is exactly why the strand split is retained"
     )
 
 
-def test_the_junction_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
+def test_the_sj_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
     """⭐⭐⭐ **THE MASS TWIN OF THE TEST ABOVE, AND THE REVERSED RULING MADE FALSIFIABLE.**
     ``accumulator.h`` ruled a mass bank is ONE value because *"nothing reads a mass per strand"*. The
     premise changed and the ruling was reversed on this axis alone (owner, 2026-08-12): the empirical
-    artifact detector above needs the split, and a COUNT cannot separate a junction used by many short
+    artifact detector above needs the split, and a COUNT cannot separate a sj used by many short
     fragments from one used by few long ones — only a mass can. It is also what makes the filter
     single-pass instead of tally-filter-re-accumulate.
 
@@ -416,13 +416,13 @@ def test_the_junction_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_doe
     pos, neg = STRAND_COLUMNS[Strand.POS], STRAND_COLUMNS[Strand.NEG]
 
     def one(align):
-        acc = _acc(junctions=[JUNCTION])
+        acc = _acc(sj=[SJ])
         acc.deposit(0, 150, 950, observed_introns=[(201, 900)], align_strand=align,
                     sj_strand=Strand.POS)
         return acc.tally
 
     t_pos, t_neg = one(Strand.POS), one(Strand.NEG)
-    assert t_pos.sj_mass.ndim == 2, "the junction mass carries a strand"
+    assert t_pos.sj_mass.ndim == 2, "the sj mass carries a strand"
 
     # ⭐ each deposit reaches its OWN column and only its own — the split is real, not decorative
     assert t_pos.sj_mass[0, pos] > 0.0 and t_pos.sj_mass[0, neg] == 0.0
@@ -439,7 +439,7 @@ def test_the_junction_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_doe
 
 def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
-    acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
+    acc = _acc(sj=[(0, 201, 900, Strand.NEG)])
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
     )
@@ -468,7 +468,7 @@ def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
 def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
     """⚠ A 300 bp molecule across a 10 kb intron has a 10 kb span. Limiting the span discards every
     spliced fragment — 37.96 % of read groups measured, against 5.45 % when the limit is on ``L``."""
-    acc = _acc(junctions=[JUNCTION], max_fragment_length=200)
+    acc = _acc(sj=[SJ], max_fragment_length=200)
     out = acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     assert out is DepositOutcome.DEPOSITED, "span 800, L = 101"
     assert int(acc.tally.sj_count[0, 0]) == 1
@@ -510,7 +510,7 @@ def test_the_per_reference_offsets_do_not_bleed():
 def test_every_accepted_fragment_increments_exactly_ONE_start_count():
     """⚠ The crossing and contained totals are tautologies — they can only be evaluated by re-running
     the deposit. This one is checkable against a number the scanner knows independently."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     fragments = [(120, 320, ()), (220, 380, ()), (150, 950, [(201, 900)]), (950, 1200, ())]
     accepted = sum(
         acc.deposit(0, s, e, observed_introns=i, sj_strand=Strand.POS) is DepositOutcome.DEPOSITED
@@ -527,14 +527,14 @@ def test_every_accepted_fragment_increments_exactly_ONE_start_count():
 
 
 def test_each_pool_is_reached_only_by_its_own_structural_class():
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     acc.deposit(0, 10, 90)  # contained in n0 — intergenic
     acc.deposit(0, 210, 390)  # contained in n3 — intronic
     acc.deposit(0, 380, 420)  # crosses the boundary at 400 only — flanks intron|exon
     acc.deposit(0, 950, 990)  # contained in n5 — intergenic
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS
-    )  # annotated junction
+    )  # annotated sj
     p = acc.tally.pool_lengths
     assert int(p[FragmentPool.DNA_INTERGENIC].sum()) == 2
     assert int(p[FragmentPool.DNA_INTRONIC].sum()) == 1
@@ -716,9 +716,9 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 4)]), _contained_quantum(0, 4, 20), 1)
 
 
-def test_a_duplicated_intron_credits_its_junction_ONCE():
+def test_a_duplicated_intron_credits_its_sj_ONCE():
     """Two mates reporting the same intron is one splice event, not two."""
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
     assert int(acc.tally.sj_count[0, 0]) == 1
     assert acc.tally.qc["introns_absorbed"] == 1
@@ -731,11 +731,11 @@ def test_ABUTTING_introns_are_MALFORMED_and_merge():
 
     The index cannot produce it either: a zero-length exon is dropped when the exon arrays are built,
     which fuses its two flanking introns into one. Merged here, and counted."""
-    acc = _acc(junctions=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
+    acc = _acc(sj=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
     acc.deposit(0, 150, 950, observed_introns=[(201, 400), (400, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.qc["introns_absorbed"] == 1
-    assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated junction"
+    assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated sj"
 
 
 def test_a_wide_overlap_no_longer_discards_a_good_fragment():
@@ -754,16 +754,16 @@ def test_a_wide_overlap_no_longer_discards_a_good_fragment():
 # the region banks carry ONE strand convention
 # ---------------------------------------------------------------------------
 
-#: a junction far enough right that the first block still spans region n2 = [200,201)
-SPAN_JUNCTION_POS = (0, 400, 900, Strand.POS)
-SPAN_JUNCTION_NEG = (0, 400, 900, Strand.NEG)
+#: a sj far enough right that the first block still spans region n2 = [200,201)
+SPAN_SJ_POS = (0, 400, 900, Strand.POS)
+SPAN_SJ_NEG = (0, 400, 900, Strand.NEG)
 
 
 def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_column():
     """⚠ One array, one convention.
 
     A spliced fragment cannot be *contained* — both endpoints of an annotated intron are region_bounds, so it
-    always crosses its junction boundary — but its blocks routinely SPAN a region whole. Measured on real
+    always crosses its sj boundary — but its blocks routinely SPAN a region whole. Measured on real
     cfRNA, **65–69 % of all region_spanning deposits came from spliced fragments**. Indexing those by
     sense-relative-to-motif while the unspliced ones beside them use genome strand would put one array
     into two conventions, and 40–44 % of the spliced deposits would land in the opposite column from
@@ -777,9 +777,9 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     ``sj_count``. ⛔ Deleting it with its old vehicle would have retired the only gate on a rule this
     codebase has already broken once.
     """
-    acc = _acc(junctions=[SPAN_JUNCTION_POS])
+    acc = _acc(sj=[SPAN_SJ_POS])
     acc.deposit(0, 150, 300, align_strand=Strand.NEG)  # unspliced, genome minus
-    acc.deposit(  # spliced, genome minus, ANTISENSE to its + junction
+    acc.deposit(  # spliced, genome minus, ANTISENSE to its + sj
         0, 150, 950, observed_introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
     )
     t = acc.tally
@@ -787,16 +787,16 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     # boundary at 200, and both are genome-minus. A sense-relative convention would split them.
     assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, "genome minus"
     assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
-        "the spliced one is ANTISENSE to its + junction, and still books genome minus"
+        "the spliced one is ANTISENSE to its + sj, and still books genome minus"
     )
     assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
     assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
-    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1, "the junction bank too"
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1, "the sj bank too"
 
 
-def test_a_spliced_SENSE_fragment_books_BOUNDARY_AND_junction_by_GENOME_strand():
+def test_a_spliced_SENSE_fragment_books_BOUNDARY_AND_sj_by_GENOME_strand():
     """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
-    acc = _acc(junctions=[SPAN_JUNCTION_NEG])
+    acc = _acc(sj=[SPAN_SJ_NEG])
     acc.deposit(
         0, 150, 950, observed_introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
     )
@@ -843,7 +843,7 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 # matches in every other way, so it DOES deposit — the only thing missing is the sequenced motif, and
 # `sj_implicit` records that. But when several candidate transcripts imply DIFFERENT INTRON SETS, the
 # implied set fixes `L`, both quanta, the pool bin, the segment list and therefore which boundaries are
-# crossed. There is no partial answer: it cannot deposit spliced (which junction is the unknown), and it
+# crossed. There is no partial answer: it cannot deposit spliced (which sj is the unknown), and it
 # cannot deposit unspliced either, because `L` involves an intron and does not fit the length
 # distribution unless one candidate intron is region_bound out — the very choice in doubt. Forcing a choice is
 # choosing an `L` at random. So it deposits NOTHING and waits for the second pass, which has the
@@ -853,11 +853,11 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     """⛔ The whole point: an undetermined path is not a partial deposit, and not a loss either.
 
-    The fragment used here would otherwise deposit richly — it crosses boundaries, uses an annotated junction
+    The fragment used here would otherwise deposit richly — it crosses boundaries, uses an annotated sj
     and lands in a length pool — so a leak into any one bank is visible. And it must be RETAINED: this is
     the population the second pass drains, so a silent drop would understate what that pass owes.
     """
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     outcome = acc.deposit(
         0,
         150,
@@ -898,7 +898,7 @@ def test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequ
     deleted ``sj_implicit`` flag used to bar it from. Measured on the chr22 pilot, that bar cost the pool
     **−9.58 % mean / −22.46 % sd** against truth where determinacy reads **+0.67 % / +2.40 %**.
     """
-    acc = _acc(junctions=[JUNCTION])
+    acc = _acc(sj=[SJ])
     outcome = acc.deposit(
         0, 150, 950, sj_strand=Strand.POS, hypotheses=(GapHypothesis(((201, 900),)),)
     )
@@ -945,7 +945,7 @@ def test_a_hypothesis_LONGER_THAN_THE_LIMIT_is_ruled_out_and_the_rest_stands():
     **is** that span. Here the span is 800 over a limit of 500, so the genomic path dies and the single
     spliced path — ``L`` = 800 − 699 = 101 — stands alone and deposits.
     """
-    acc = _acc(max_fragment_length=500, junctions=[JUNCTION])
+    acc = _acc(max_fragment_length=500, sj=[SJ])
     outcome = acc.deposit(
         0,
         150,
@@ -982,7 +982,7 @@ def test_when_the_limit_would_rule_out_EVERY_hypothesis_the_survivors_stand():
 # AMBIGUOUS as though it were a definite strand:
 #
 #   NONE       no strand tag in the BAM at all  ->  no information; match on coordinates alone
-#   POS / NEG  one definite observed strand      ->  must agree with the junction boundary's own strand
+#   POS / NEG  one definite observed strand      ->  must agree with the sj boundary's own strand
 #   AMBIGUOUS  the two mates' tags DISAGREE      ->  contradictory evidence; trust no splice
 #
 # ⚠ NONE must stay permissive. Aligners differ — STAR writes ``XS``, minimap2 writes ``ts``, and some
@@ -994,10 +994,10 @@ def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
     """⛔ The case that makes untagged aligners work at all, so it is pinned before the two below.
 
     An aligner that writes neither ``XS`` nor ``ts`` gives every spliced fragment
-    ``sj_strand = NONE``. If the junction lookup demanded a strand, that BAM would lose 100 % of its
-    annotated junctions — and the loss would look like a stale annotation, not a convention bug.
+    ``sj_strand = NONE``. If the sj lookup demanded a strand, that BAM would lose 100 % of its
+    annotated sj — and the loss would look like a stale annotation, not a convention bug.
     """
-    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    acc = _acc(sj=[SJ])  # (0, 201, 900, POS)
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.NONE)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
@@ -1005,15 +1005,15 @@ def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "certified RNA"
 
 
-def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
+def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_sj():
     """⛔ AMBIGUOUS is contradictory evidence, not missing evidence — and it is neither of the two things
     the original rule could express.
 
     ``sj_strand`` is the OR of a per-RECORD tag, so AMBIGUOUS (``POS | NEG``) means **the two mates
     disagreed about the same molecule**. That is a data-quality signal of the same family as mates agreeing
-    in reference orientation, so the splice must not be trusted: no junction is credited and the fragment
+    in reference orientation, so the splice must not be trusted: no sj is credited and the fragment
     deposits on the unspliced channel, which is the safe direction the design already takes for
-    unannotated junctions.
+    unannotated sj.
 
     ⚠ It must NOT be counted as an unannotated intron. That counter's whole purpose is measuring annotation
     coverage, so feeding it alignment disagreements makes the metric report a stale annotation whenever the
@@ -1023,7 +1023,7 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
     intron with the first matching candidate transcript's strand and the caller ORs them, so a two-gap
     fragment matching opposite-strand transcripts arrives here as AMBIGUOUS.
     """
-    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    acc = _acc(sj=[SJ])  # (0, 201, 900, POS)
     outcome = acc.deposit(
         0,
         150,
@@ -1043,9 +1043,9 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
 
 def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     """The third arm, so the rule above cannot be over-applied: a definite strand that disagrees with the
-    junction boundary's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
+    sj boundary's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
     pair is not annotated on the strand it was observed on."""
-    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    acc = _acc(sj=[SJ])  # (0, 201, 900, POS)
     acc.deposit(
         0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
     )

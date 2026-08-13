@@ -2,7 +2,7 @@
 
 Exons (1000,2000) and (3000,4000) create a 1000 bp intron gap.
 Validates that per-candidate fragment lengths correctly penalise
-nRNA candidates for junction-spanning fragments, preventing false
+nRNA candidates for sj-spanning fragments, preventing false
 nRNA allocation from spliced mRNA reads.
 """
 

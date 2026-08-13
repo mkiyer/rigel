@@ -53,7 +53,7 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
         parts = sum(np.asarray(getattr(orc.parts[k], bank), np.int64) for k in ORIGINS)
         np.testing.assert_array_equal(parts, full, err_msg=f"{bank} does not sum to full")
 
-    # gDNA is never spliced — on the contiguous-boundary spliced bank AND on the junction axis.
+    # gDNA is never spliced — on the contiguous-boundary spliced bank AND on the sj axis.
     assert np.asarray(orc.parts["gdna"].boundary_spliced_count, np.int64).sum() == 0
     assert np.asarray(orc.parts["gdna"].sj_count, np.int64).sum() == 0
 
@@ -98,9 +98,9 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
         np.asarray(full.boundary_unspliced.count, np.float64).sum(1)
         + np.asarray(full.boundary_spliced.count, np.float64).sum(1),
     )
-    # JUNCTION axis: never deconvolved — the flux verbatim.
+    # SJ axis: never deconvolved — the flux verbatim.
     np.testing.assert_allclose(
-        ov["mass_rna_junction"], np.asarray(full.junction.count, np.float64).sum(1)
+        ov["count_rna_sj"], np.asarray(full.sj.count, np.float64).sum(1)
     )
 
 
@@ -132,9 +132,9 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones(e),
-        mass_rna_junction=np.zeros(j),
+        count_rna_sj=np.zeros(j),
         boundary_spliced_mass_per_crossing=np.ones(e),
-        junction_mass_per_crossing=np.ones(j),
+        sj_mass_per_crossing=np.ones(j),
         gdna_region_eff_len=np.ones(n),
         gdna_boundary_eff_len=np.ones(e),
         rna_region_eff_len=np.ones(n),
@@ -151,8 +151,8 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         rna_strand_overdispersion=0.0,
         n_regions=n,
         n_boundaries=e,
-        n_junctions=j,
+        n_sj=j,
         config=CalibrationConfig(),
     )
     truth = dataclasses.replace(blank, **ov)  # __post_init__ re-validates every axis
-    assert truth.mass_rna_junction.sum() > 0
+    assert truth.count_rna_sj.sum() > 0

@@ -31,7 +31,7 @@ def substrate():
 
 
 def test_every_population_is_present_on_the_RIGHT_axis(substrate):
-    """Regions, contiguous boundaries and junctions are three axes off by one per reference.
+    """Regions, contiguous boundaries and sj are three axes off by one per reference.
 
     A population read against the wrong axis is the defect class that once dropped 476,719 of 476,732
     fragments while every golden test passed, so the shapes are asserted rather than assumed.
@@ -44,7 +44,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
         (sub.region_contained, payload.n_regions, ("inv_length_sum",)),
         (sub.boundary_unspliced, payload.n_boundaries, ("inv_length_sum", "mass")),
         (sub.boundary_spliced, payload.n_boundaries, ("mass",)),
-        (sub.junction, payload.n_sj, ("inv_length_sum", "mass")),
+        (sub.sj, payload.n_sj, ("inv_length_sum", "mass")),
     ):
         assert view.count.shape == (n, 2)
         for channel in ("inv_length_sum", "mass"):
@@ -53,7 +53,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
                 # ⛔ ONE column, on BOTH channels: the length moments carry no strand axis and neither
                 # does a mass, while ``count`` keeps two. ⚠ ``sj_mass`` arrives from the payload with
                 # two columns since 2026-08-13 and is FOLDED at this boundary, so this shape assertion
-                # is what pins the fold for the junction row.
+                # is what pins the fold for the sj row.
                 assert value is not None and value.shape == (n,)
             else:
                 assert value is None, (
@@ -65,7 +65,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
 
 def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
     """⭐ ONE convention. Sense/antisense is transcript-relative, derived by the consumer from a
-    junction's own strand, and never stored — so no field here may be named for it."""
+    sj's own strand, and never stored — so no field here may be named for it."""
     sub, payload, _ = substrate
     np.testing.assert_array_equal(sub.region_contained.count, payload.region_contained_count)
     for name in dir(sub):
@@ -123,7 +123,7 @@ def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(subs
 # ---------------------------------------------------------------------------
 
 
-def test_the_JUNCTION_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
+def test_the_SJ_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
     """⭐⭐ ``sj_mass`` went per-strand on 2026-08-13 for artifact detection, and this boundary is where
     the strand axis stops. :attr:`PopulationView.mass` is strand-agnostic by contract — the mass turns an
     object-incidence total into a fragment count, a question with no strand in it — so folding here is
@@ -136,8 +136,8 @@ def test_the_JUNCTION_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
     assert payload.sj_mass.ndim == 2, "the payload bank is per strand"
     assert payload.sj_mass.shape[1] == 2
     assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], "the fixture cannot separate the fold rules"
-    assert sub.junction.mass.ndim == 1, "PopulationView.mass is strand-agnostic"
-    np.testing.assert_allclose(sub.junction.mass, payload.sj_mass.sum(axis=1))
+    assert sub.sj.mass.ndim == 1, "PopulationView.mass is strand-agnostic"
+    np.testing.assert_allclose(sub.sj.mass, payload.sj_mass.sum(axis=1))
 
 
 def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
@@ -149,7 +149,7 @@ def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
     whatever mass the deconvolution placed at the boundary, so 0 would DELETE it while 1.0 leaves it alone.
     """
     view = PopulationView(
-        name="junction",
+        name="sj",
         count=np.zeros((2, 2), np.int64),
         mass=np.zeros(2, np.float64),
     )

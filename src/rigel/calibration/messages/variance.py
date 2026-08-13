@@ -21,14 +21,14 @@ no substrate, no solver state — so its facts are pinned by closed-form unit te
 (``tests/calibration/test_enrichment_frame.py``) that cannot drift with solver behaviour.
 
  (the framework, §1 the total-density
-pivot, §2 the bounding lemma, §4 the step-wise junction solve) and (the
-junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase TRAPS: annotated-is-not-genomic (behind a
+pivot, §2 the bounding lemma, §4 the step-wise sj solve) and (the
+sj instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase TRAPS: annotated-is-not-genomic (behind a
 flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-region-level
 frame question TRAPS: annotated-is-not-genomic must settle cannot invalidate anything here.
 
 The design principle behind the API shape: **transport ``k``, never ``f_g``.** ``k`` is enrichment-free and
 component-set-shared; ``f_g`` depends on the region's own crossing-vs-contained effective lengths, so copying it
-across a frame change is a known past defect (§2 of the junction doc). And the composition assumption is
+across a frame change is a known past defect (§2 of the sj doc). And the composition assumption is
 carried as a **variance**, not a bool gate: the bounding lemma (§2) says a totally wrong composition still
 pins ``ρ_tot`` to within the effective-length ratio (1.04–1.5× for normal regions, 4×+ for short regions), which
 is a continuous quantity — :func:`composition_logvar` derives it with no tuned threshold, so a short region
@@ -225,8 +225,8 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
     ``σ²_transfer`` is LOAD-BEARING here (~85–92% of the variance).
 
     ⚠ The linearization is valid only for ``ε = √(fraction continuing) ≲ 0.15`` (``u ≲ 3``); beyond it (>p75 of
-    real junctions) it UNDER-states the variance (over-confident 27–40%). ``u`` MUST therefore gate the peel's
-    precision as a per-junction weight, and ``ρ_ν < 0`` is a PRIOR truncation, not an emission gate (handoff §6).
+    real sj) it UNDER-states the variance (over-confident 27–40%). ``u`` MUST therefore gate the peel's
+    precision as a per-sj weight, and ``ρ_ν < 0`` is a PRIOR truncation, not an emission gate (handoff §6).
     MC 1–3% in-regime."""
     uu = np.asarray(u, np.float64)
     vT = np.asarray(v_log_rho_R, np.float64) + np.asarray(s2_transfer, np.float64)
@@ -236,7 +236,7 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
 def peel_continue_share(rho_nu, rho_mu):
     """the-continuing-share — the fraction of a boundary's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
 
-    This is the object that retires the peel's SUBTRACTION. What continues past a junction is a *share* of the
+    This is the object that retires the peel's SUBTRACTION. What continues past a sj is a *share* of the
     RNA at the boundary, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
     channels alike (``ρ_ν = e·c_ν``, ``ρ_μ = e·c_μ``), so ``e`` cancels identically inside ``w``. Both inputs
     are taken in the BOUNDARY's own frame — its solved unspliced-RNA density and its measured spliced density.
@@ -249,7 +249,7 @@ def peel_continue_share(rho_nu, rho_mu):
     ``u`` and every ``δ``: a scaling commutes with a scaling. That matters because the exon-facing reframe
     error is irreducible — the boundary samples a ``fl_mean`` window around a point while the exon samples its
     interior, so with mid-exon probes the two sit at genuinely different capture (measured 0.4–1.3 nats), and
-    ``u``'s p75 on real junctions is ≈ 3. MC: `message_variance_mc.py` the-continuing-share, exact to 1e-12.
+    ``u``'s p75 on real sj is ≈ 3. MC: `message_variance_mc.py` the-continuing-share, exact to 1e-12.
 
     Degenerate limits, both structural: no spliced flux (``ρ_μ = 0``) ⇒ ``w = 1``, nothing splices away and
     nothing is peeled; no RNA at the boundary at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
@@ -591,7 +591,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     ⚠⚠ **`ω_graft` IS A DEBT, NOT A MODEL.** It partially compensates for a FAILURE IN THE STRUCTURAL
     REPRESENTATION: the region/boundary map has no TSS/TES, so the solver cannot tell a splice junction from
     a transcript terminus — and that distinction is the whole of the effect this term prices (`ω̂` 1.7–1.9 at
-    terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split, with 20.8 % of boundaries carrying
+    terminus boundaries vs 0.04–0.06 at sj-only ones, a ≥30× split, with 20.8 % of boundaries carrying
     71.7 % of the error). One library-wide average is standing in for a bimodal quantity. It works because
     over-charging a variance is cheap and under-charging is expensive, **not because it is right**, and it is
     expected to be FRAGILE ON REAL DATA (fitted on ~200 exons at 30–50 % SE, on a Poisson-by-construction
@@ -664,7 +664,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
 
     ⚠ The suite this was measured on is **Poisson by construction**, so the premise variance here is purely
     structural/annotation-driven. Real libraries add overdispersion on top of every term, which makes this
-    an under-estimate rather than an over-estimate — but the SHAPE (terminus vs junction-only) must be
+    an under-estimate rather than an over-estimate — but the SHAPE (terminus vs sj-only) must be
     re-measured on a real annotation before it is trusted quantitatively."""
     fa, fb = _f(flux_a), _f(flux_b)
     ok = (fa > _EPS) & (fb > _EPS)

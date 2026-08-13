@@ -12,7 +12,7 @@ carry the same channels, because a channel is stored where a named consumer read
     regions             contained   count  inv_length_sum  length_sum
     contiguous boundaries  unspliced   count  inv_length_sum  length_sum   the mixture being deconvolved
                       spliced     count                               certified RNA -- gDNA cannot splice
-    junction boundaries    (one)       count  inv_length_sum               pure RNA by construction
+    sj boundaries    (one)       count  inv_length_sum               pure RNA by construction
 
 ⭐ **ONE type, and that is the change.** The predecessor had ``CalibrationSubstrate`` holding three
 per-region views (contained / left / right) and ``BoundarySubstrate`` holding the same numbers re-keyed
@@ -21,7 +21,7 @@ had two sides**. A contiguous boundary is a 0-bp boundary with one set of number
 left/right axis, the re-keying identity and ``_make_view`` all dissolve together.
 
 ⭐ **THE COLUMNS ARE GENOME STRAND, WITHOUT EXCEPTION.** Sense/antisense is transcript-relative,
-derived by a consumer from a junction's own strand, and never stored. The predecessor stored some banks
+derived by a consumer from a sj's own strand, and never stored. The predecessor stored some banks
 by genome strand and others by sense, which is how 40–44 % of the SPLICED deposits landed in the
 opposite column from the unspliced fragments beside them at the same boundary.
 
@@ -30,8 +30,8 @@ nothing about whether the molecule was gDNA or RNA, so the moments are strand-ag
 consumer summed the two columns before using them. The counts keep both because the strand model is a
 Beta-Binomial over them, per strand.
 
-⭐ **AND THE JUNCTION MASS ARRIVES WITH TWO COLUMNS AND LEAVES WITH ONE.** ``sj_mass`` went per-strand
-on 2026-08-13 for artifact detection (`JunctionEdge::mass` carries the premise), and this boundary folds
+⭐ **AND THE SJ MASS ARRIVES WITH TWO COLUMNS AND LEAVES WITH ONE.** ``sj_mass`` went per-strand
+on 2026-08-13 for artifact detection (`SpliceJunction::mass` carries the premise), and this boundary folds
 it: :attr:`PopulationView.mass` is strand-agnostic by contract, so nothing downstream of here changed.
 
 ⚠ **``length_sum`` and ``mean_length`` are GONE (2026-08-13)** along with the two banks that fed them —
@@ -143,7 +143,7 @@ class CalibrationSubstrate:
 
     n_regions: int
     n_boundaries: int
-    n_junctions: int
+    n_sj: int
 
     strand_class: np.ndarray  # int8[n_regions] — the region's transcript-strand class
     region_start_count: np.ndarray  # int64[n_regions] — one per accepted fragment; THE invariant
@@ -154,7 +154,7 @@ class CalibrationSubstrate:
     #:     region_contained   count  inv_length_sum  length_sum
     #:     boundary_unspliced   count  inv_length_sum  length_sum  mass
     #:     boundary_spliced     count                              mass   certified RNA — not deconvolved
-    #:     junction         count  inv_length_sum                     LIVE in second_pass
+    #:     sj         count  inv_length_sum                     LIVE in second_pass
     #:
     #: ⚠ A fifth, ``region_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
     #: touches the region axis at all** — a spliced fragment can never be *contained*, because both
@@ -162,7 +162,7 @@ class CalibrationSubstrate:
     region_contained: PopulationView
     boundary_unspliced: PopulationView
     boundary_spliced: PopulationView
-    junction: PopulationView
+    sj: PopulationView
 
     @classmethod
     def from_payload(
@@ -171,7 +171,7 @@ class CalibrationSubstrate:
         cls._check_alignment(payload, region_arrays)
 
         def view(name, count, inv=None, mass=None) -> PopulationView:
-            # ⭐⭐ `mass` arrives one-column on two axes and TWO-column on the junction axis, and is
+            # ⭐⭐ `mass` arrives one-column on two axes and TWO-column on the sj axis, and is
             # folded to one here. `PopulationView.mass` is strand-agnostic by contract — the mass exists
             # to turn an object-incidence total into a fragment count, a question with no strand in it —
             # so folding at the boundary is what keeps every downstream consumer of `sj_mass` unchanged
@@ -195,7 +195,7 @@ class CalibrationSubstrate:
         return cls(
             n_regions=payload.n_regions,
             n_boundaries=payload.n_boundaries,
-            n_junctions=payload.n_sj,
+            n_sj=payload.n_sj,
             strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
             region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
             region_contained=view(
@@ -212,8 +212,8 @@ class CalibrationSubstrate:
             boundary_spliced=view(
                 "boundary_spliced", payload.boundary_spliced_count, mass=payload.boundary_spliced_mass
             ),
-            junction=view(
-                "junction", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass
+            sj=view(
+                "sj", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass
             ),
         )
 

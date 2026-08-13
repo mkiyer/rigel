@@ -5,14 +5,14 @@
      step 6
 
 ⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-region_bound partition. It cannot see
-a defect that only appears at **1,043,881 regions and 404,168 junctions**: a per-reference offset that drifts,
-a region_bound index that wraps at int32, a junction CSR slice that is off by one reference. Every such bug this
+a defect that only appears at **1,043,881 regions and 404,168 sj**: a per-reference offset that drifts,
+a region_bound index that wraps at int32, a sj CSR slice that is off by one reference. Every such bug this
 project has had was invisible on a fixture — a ref-id mismatch once dropped **476,719 of 476,732 fragments
 inside deposit()** while every golden test passed.
 
-⭐ AND THE SLICING IS RE-DERIVED HERE BY A DIFFERENT ROUTE, DELIBERATELY. ``AccumulatorSet::set_junctions``
-slices the flat junction CSR per reference in C++; this script does the same arithmetic in numpy and feeds
-the result to a per-reference ``Accumulator``. If the two disagree the junction banks disagree, which is
+⭐ AND THE SLICING IS RE-DERIVED HERE BY A DIFFERENT ROUTE, DELIBERATELY. ``AccumulatorSet::set_sj``
+slices the flat sj CSR per reference in C++; this script does the same arithmetic in numpy and feeds
+the result to a per-reference ``Accumulator``. If the two disagree the sj banks disagree, which is
 exactly the class of error a validator that called the builder's own helper would report as agreement.
 
     OMP_NUM_THREADS=1 python scripts/design/native_parity_on_real_data.py INDEX BAM [--limit N]
@@ -68,17 +68,17 @@ _AXIS = {
 
 
 def ref_sj_offsets(partition) -> np.ndarray:
-    """Per-reference offsets into the junction axis, from the CSR alone.
+    """Per-reference offsets into the sj axis, from the CSR alone.
 
-    The CSR is keyed by the flat donor region_bound index and references are region_bound-major, so a reference's junctions
-    are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the junction-boundary
+    The CSR is keyed by the flat donor region_bound index and references are region_bound-major, so a reference's sj
+    are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the sj-boundary
     id can BE the slot: the flat slot order is already the per-reference banks concatenated in order.
     """
     return partition.sj_offsets[partition.ref_region_bound_offsets]
 
 
 def native_for_ref(partition, ref: int, max_length: int) -> NativeAccumulator:
-    """One native accumulator for reference ``ref``, with the junction CSR sliced and rebased."""
+    """One native accumulator for reference ``ref``, with the sj CSR sliced and rebased."""
     c0, c1 = int(partition.ref_region_bound_offsets[ref]), int(partition.ref_region_bound_offsets[ref + 1])
     n0, n1 = int(partition.ref_region_offsets[ref]), int(partition.ref_region_offsets[ref + 1])
     accumulator = NativeAccumulator(
@@ -87,7 +87,7 @@ def native_for_ref(partition, ref: int, max_length: int) -> NativeAccumulator:
         max_length=max_length,
     )
     j0, j1 = int(partition.sj_offsets[c0]), int(partition.sj_offsets[c1])
-    accumulator.set_junctions(
+    accumulator.set_sj(
         np.ascontiguousarray(partition.sj_offsets[c0 : c1 + 1] - j0, dtype=np.int32),
         np.ascontiguousarray(partition.sj_boundary_right[j0:j1] - c0, dtype=np.int32),
         np.ascontiguousarray(partition.sj_strand[j0:j1], dtype=np.int8),
@@ -109,7 +109,7 @@ def main() -> None:
     print(f"index      {args.index}")
     print(
         f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
-        f"{partition.n_sj:,} junction boundaries  {partition.region_bounds.size:,} region_bounds"
+        f"{partition.n_sj:,} sj boundaries  {partition.region_bounds.size:,} region_bounds"
     )
     print(f"bam        {args.bam}\n")
 

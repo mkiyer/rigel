@@ -73,10 +73,10 @@ public:
     int32_t num_hits = 1;
     int32_t nm = 0;
 
-    // Leftmost ANNOTATED junction (ref, start, end); -1 when the fragment
-    // crosses none.  With `sj_strand` this is the per-junction SJ strand
+    // Leftmost ANNOTATED sj (ref, start, end); -1 when the fragment
+    // crosses none.  With `sj_strand` this is the per-sj SJ strand
     // table's key — see RawResolveResult in constants.h for why it is the
-    // first ANNOTATED junction and why only one junction is credited.
+    // first ANNOTATED sj and why only one sj is credited.
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;
@@ -562,7 +562,7 @@ public:
 
     // --- SJ artifact blacklist (from alignable) ---
     // Strand-agnostic: keyed on (ref_id, start, end).  A CIGAR splice
-    // junction is rejected at BAM-scan time when either its left or
+    // sj is rejected at BAM-scan time when either its left or
     // right anchor is <= the stored maximum.
     using SJBlacklistMap = std::unordered_map<
         SJBlacklistKey, SJBlacklistEntry, SJBlacklistKeyHash>;
@@ -696,7 +696,7 @@ public:
     ///
     /// Strand-agnostic: a single entry per (ref, start, end).  At BAM
     /// scan time ``sj_blacklist_lookup`` is used to test a CIGAR-derived
-    /// junction; rejection uses the OR rule (either anchor <= max).
+    /// sj; rejection uses the OR rule (either anchor <= max).
     void build_sj_blacklist_map(
         const std::vector<std::string>& refs,
         const std::vector<int32_t>& starts,
@@ -716,7 +716,7 @@ public:
 
     bool has_sj_blacklist() const { return !sj_blacklist_.empty(); }
 
-    /// Return blacklist entry for a junction, or nullptr if not present.
+    /// Return blacklist entry for a sj, or nullptr if not present.
     inline const SJBlacklistEntry* sj_blacklist_lookup(
         int32_t ref_id, int32_t start, int32_t end) const
     {
@@ -930,7 +930,7 @@ public:
         }
 
         // ⭐ The UNSPLICED hypothesis. Present when some compatible transcript implies nothing in the
-        // gaps (a retained-intron isoform), and ALWAYS when no annotated junction was sequenced -- then
+        // gaps (a retained-intron isoform), and ALWAYS when no annotated sj was sequenced -- then
         // the molecule may be gDNA or nascent, and the gap is real template.
         if (any_candidate_implies_nothing || !certified_rna || cr.n_gap_hypotheses() == 0)
             emit_unspliced_hypothesis(cr);
@@ -992,9 +992,9 @@ private:
             // depend on the order the transcripts happen to sit in the GTF. AMBIGUOUS is what this state
             // is called everywhere else (the fragment-level `sj_strand` uses it for exactly this:
             // contradictory evidence, not missing evidence), and `deposit` already refuses to credit a
-            // junction on it. ⚠ Idempotent: once AMBIGUOUS, any further disagreement keeps it there.
+            // sj on it. ⚠ Idempotent: once AMBIGUOUS, any further disagreement keeps it there.
             //
-            // ⚠ Unreachable on human data -- 0 of 404,168 junction coordinates are annotated on both
+            // ⚠ Unreachable on human data -- 0 of 404,168 sj coordinates are annotated on both
             // strands, and the index warns that it is biologically impossible. Fixed because the
             // alternative is a silent answer that flips when two GTF boundaries are swapped.
             if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
@@ -1367,7 +1367,7 @@ public:
         cr.sj_strand = STRAND_NONE;
         // Reset alongside sj_strand: `cr` is an out-param taken by reference, so a
         // caller that reuses one across fragments would otherwise carry the previous
-        // fragment's junction key forward. Every call site builds a fresh `cr` today.
+        // fragment's sj key forward. Every call site builds a fresh `cr` today.
         cr.sj_key_ref = cr.sj_key_start = cr.sj_key_end = -1;
 
         for (int ii = 0; ii < n_introns; ii++) {
@@ -1379,8 +1379,8 @@ public:
                 has_annotated_sj = true;
                 cr.sj_strand |= introns[ii].strand;
                 if (cr.sj_key_start < 0) {
-                    // First ANNOTATED junction (introns arrive sorted by
-                    // ref/start/end) — the per-junction strand table's key.
+                    // First ANNOTATED sj (introns arrive sorted by
+                    // ref/start/end) — the per-sj strand table's key.
                     cr.sj_key_ref   = introns[ii].ref_id;
                     cr.sj_key_start = introns[ii].start;
                     cr.sj_key_end   = introns[ii].end;

@@ -1,4 +1,4 @@
-"""Tests for rigel.strand_model — the strand model and its per-junction SJ strand table."""
+"""Tests for rigel.strand_model — the strand model and its per-sj SJ strand table."""
 
 import numpy as np
 import pytest
@@ -66,11 +66,11 @@ class TestStrandModelCounts:
 
 
 class TestSJStrandTable:
-    """The per-junction refinement and the marginal identity that licenses it."""
+    """The per-sj refinement and the marginal identity that licenses it."""
 
     def test_empty(self):
         t = SJStrandTable.empty()
-        assert t.n_junctions == 0
+        assert t.n_sj == 0
         assert t.n_observations == 0
         assert t.contingency() == (0, 0, 0, 0)
 
@@ -78,10 +78,10 @@ class TestSJStrandTable:
         """⭐ THE correctness argument: the 2×2 is exactly the table's marginal."""
         t = _table([(Strand.POS, 3, 7), (Strand.POS, 10, 2), (Strand.NEG, 5, 4)])
         pos_pos, pos_neg, neg_pos, neg_neg = t.contingency()
-        assert pos_pos == 3 + 10  # sense on motif-POS junctions
-        assert neg_pos == 7 + 2  # antisense on motif-POS junctions
-        assert neg_neg == 5  # sense on motif-NEG junctions
-        assert pos_neg == 4  # antisense on motif-NEG junctions
+        assert pos_pos == 3 + 10  # sense on motif-POS sj
+        assert neg_pos == 7 + 2  # antisense on motif-POS sj
+        assert neg_neg == 5  # sense on motif-NEG sj
+        assert pos_neg == 4  # antisense on motif-NEG sj
 
     def test_from_sj_table_agrees_with_from_labels(self):
         """Both constructors, one population: the same fragments give the same 2×2 and κ."""
@@ -108,16 +108,16 @@ class TestSJStrandTable:
         t = _table([(Strand.POS, 3, 7), (Strand.NEG, 100, 0)])
         np.testing.assert_array_equal(t.depth, [10, 100])
         assert t.n_observations == 110
-        assert t.n_junctions == 2
+        assert t.n_sj == 2
         assert StrandModel.from_sj_table(t).p_r1_sense == pytest.approx(103 / 110)
 
-    def test_to_dict_reports_deep_junctions(self):
+    def test_to_dict_reports_deep_sj(self):
         t = _table([(Strand.POS, 1, 1), (Strand.POS, 60, 60), (Strand.NEG, 900, 200)])
         d = t.to_dict()
-        assert d["n_junctions"] == 3
+        assert d["n_sj"] == 3
         assert d["n_observations"] == 2 + 120 + 1100
-        assert d["n_junctions_depth_ge_100"] == 2
-        assert d["n_junctions_depth_ge_1000"] == 1
+        assert d["n_sj_depth_ge_100"] == 2
+        assert d["n_sj_depth_ge_1000"] == 1
         assert d["depth_max"] == 1100
 
     def test_model_carries_table_through(self):
@@ -195,11 +195,11 @@ class TestStrandModelsContainer:
         assert models.p_r1_sense == pytest.approx(1.0)
 
     def test_spliced_2x2_is_the_table_marginal(self):
-        """The container's spliced model has ONE source of truth — the junction table."""
+        """The container's spliced model has ONE source of truth — the sj table."""
         rows = [(Strand.POS, 30, 3), (Strand.NEG, 12, 5)]
         models = StrandModels.from_scan(self._scan_dict(rows))
         assert models.exonic_spliced.contingency_matches_table()
-        assert models.sj_table.n_junctions == 2
+        assert models.sj_table.n_sj == 2
 
     def test_zero_observations_warns(self, caplog):
         with caplog.at_level("WARNING"):
@@ -220,4 +220,4 @@ class TestStrandModelsContainer:
         assert models.exonic.sj_table is None
 
     def test_default_container_has_an_empty_table(self):
-        assert StrandModels().sj_table.n_junctions == 0
+        assert StrandModels().sj_table.n_sj == 0

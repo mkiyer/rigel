@@ -67,8 +67,8 @@ def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIV
 
     ⛔ **This is why TRAPS: two-divisors-opposite-sign's trap is structurally absent here, not merely avoided.** TRAPS: two-divisors-opposite-sign is two
     divisors built from one pmf responding to it with OPPOSITE SIGN; here neither ``eff_rna`` nor
-    ``eff_junction`` appears in the retained term at all, so there is nothing for them to disagree about.
-    The junction half's missing "frame statement" is therefore answered: **it does not need one.**
+    ``eff_sj`` appears in the retained term at all, so there is nothing for them to disagree about.
+    The sj half's missing "frame statement" is therefore answered: **it does not need one.**
 
     The gate: strip ``S·log(1−f_g)`` off scipy's exact Poisson log-pmf, and what remains must be
     ``−c·M·(1−f_g)`` plus a λ-free constant — for every ``c``, every ``M``, and every ``S``. Adding the

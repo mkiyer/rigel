@@ -56,11 +56,11 @@ from ._accumulator_reference import (
 # types   intergenic, exon, exon, intron, exon, intergenic
 #
 # So: boundary 1 has {intergenic, exon} flanks (a splash pool), boundary 3 has {intron, exon} (the other), n2 is
-# a 1 bp region that a fragment can span, and the annotated junction [201, 900) SWALLOWS boundary 4 — which is
+# a 1 bp region that a fragment can span, and the annotated sj [201, 900) SWALLOWS boundary 4 — which is
 # the case the whole redesign exists for.
 #
-# ⛔ THREE junctions, not one, and the count is load-bearing. With a single annotated junction no fragment
-# can use two, so "credit only the leftmost junction" — the rule the design deliberately REVERSED, and
+# ⛔ THREE sj, not one, and the count is load-bearing. With a single annotated sj no fragment
+# can use two, so "credit only the leftmost sj" — the rule the design deliberately REVERSED, and
 # which still recommends — was invisible to this gate: a perturbation
 # implementing it passed 5/5. [100,200) and [201,900) are separated by the 1 bp exon n2, so one fragment
 # can legitimately use both; [400,900) shares an acceptor with [201,900) but sits on the other strand, so
@@ -87,7 +87,7 @@ REF = 3
 _REGION_BOUNDS_PER_REF = [[] for _ in range(REF)] + [REGION_BOUNDS]
 _TYPES_PER_REF = [[] for _ in range(REF)] + [TYPES]
 
-JUNCTIONS = [
+SJ = [
     (REF, 201, 900, Strand.POS),
     (REF, 100, 200, Strand.POS),
     (REF, 400, 900, Strand.NEG),
@@ -106,16 +106,16 @@ _NON_ARRAY_FIELDS = {
 }
 
 
-def _pair(max_length: int = MAX_LENGTH, junctions=JUNCTIONS):
+def _pair(max_length: int = MAX_LENGTH, sj=SJ):
     """A reference accumulator and a native one over the same single-reference partition.
 
-    ⚠ The native junction CSR is taken **from the reference's own ``Partition``** rather than rebuilt
+    ⚠ The native sj CSR is taken **from the reference's own ``Partition``** rather than rebuilt
     here. That is deliberate: the agreement between ``Partition.from_region_bounds`` and the index builder
-    ``build_junction_edge_arrays`` is a *different* contract, already pinned by
+    ``build_sj_arrays`` is a *different* contract, already pinned by
     ``test_the_csr_slot_order_matches_the_reference_accumulator``. Feeding both sides one CSR isolates
     the thing this module is for — the deposit rule.
     """
-    partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, junctions=junctions)
+    partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, sj=sj)
     reference = ReferenceAccumulator(partition, max_fragment_length=max_length)
     native = NativeAccumulator(
         region_bounds=np.asarray(REGION_BOUNDS, dtype=np.int64),
@@ -123,7 +123,7 @@ def _pair(max_length: int = MAX_LENGTH, junctions=JUNCTIONS):
         max_length=max_length,
         ref=REF,
     )
-    native.set_junctions(
+    native.set_sj(
         np.ascontiguousarray(partition.sj_offsets, dtype=np.int32),
         np.ascontiguousarray(partition.sj_boundary_right, dtype=np.int32),
         np.ascontiguousarray(partition.sj_strand, dtype=np.int8),
@@ -201,16 +201,16 @@ def _assert_parity(reference, native, label: str) -> None:
 #: ``supporting_t_inds`` are carried but never read by the first pass; they are what the second pass
 #: weights a path by, so the deferred queue has to preserve them and this gate has to compare them.
 GENOMIC = GapHypothesis()
-LONG_JUNCTION = GapHypothesis(((201, 900),), sj_strand=Strand.POS, supporting_t_inds=(7,))
-SHORT_JUNCTION = GapHypothesis(((100, 200),), sj_strand=Strand.POS, supporting_t_inds=(9, 11))
-NEG_JUNCTION = GapHypothesis(((400, 900),), sj_strand=Strand.NEG, supporting_t_inds=(13,))
+LONG_SJ = GapHypothesis(((201, 900),), sj_strand=Strand.POS, supporting_t_inds=(7,))
+SHORT_SJ = GapHypothesis(((100, 200),), sj_strand=Strand.POS, supporting_t_inds=(9, 11))
+NEG_SJ = GapHypothesis(((400, 900),), sj_strand=Strand.NEG, supporting_t_inds=(13,))
 INTRONIC_PATH = GapHypothesis(((201, 400),), sj_strand=Strand.POS)
-BOTH_JUNCTIONS = GapHypothesis(
+BOTH_SJ = GapHypothesis(
     ((100, 200), (201, 900)), sj_strand=Strand.POS, supporting_t_inds=(7, 9)
 )
 
 #: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the
-#: junction bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
+#: sj bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
 CASES: list[tuple[str, dict]] = [
     ("contained in an exonic region", dict(start=150, end=190)),
     ("contained, intergenic region (a pure gDNA pool)", dict(start=10, end=90)),
@@ -223,11 +223,11 @@ CASES: list[tuple[str, dict]] = [
     ("starts exactly ON a boundary", dict(start=100, end=150)),
     ("minus column", dict(start=150, end=190, align_strand=Strand.NEG)),
     (
-        "annotated junction, definite motif strand",
+        "annotated sj, definite motif strand",
         dict(start=150, end=950, observed_introns=[(201, 900)], sj_strand=Strand.POS),
     ),
     (
-        "annotated junction, MISSING motif strand -> coordinates alone",
+        "annotated sj, MISSING motif strand -> coordinates alone",
         dict(start=150, end=950, observed_introns=[(201, 900)], sj_strand=Strand.NONE),
     ),
     (
@@ -239,7 +239,7 @@ CASES: list[tuple[str, dict]] = [
         dict(start=150, end=950, observed_introns=[(201, 900)], sj_strand=Strand.AMBIGUOUS),
     ),
     (
-        "annotated junction on the minus column",
+        "annotated sj on the minus column",
         dict(
             start=150,
             end=950,
@@ -290,20 +290,20 @@ CASES: list[tuple[str, dict]] = [
     ("reversed extent -> empty, counted", dict(start=500, end=400)),
     ("L == 1", dict(start=500, end=501)),
     (
-        "L == 1 ON AN ANNOTATED JUNCTION -- a count against density 0",
+        "L == 1 ON AN ANNOTATED SJ -- a count against density 0",
         dict(start=201, end=901, observed_introns=[(201, 900)], sj_strand=Strand.POS),
     ),
     (
-        "two junctions credited, one annotated one not",
+        "two sj credited, one annotated one not",
         dict(start=150, end=950, observed_introns=[(201, 900), (110, 120)], sj_strand=Strand.POS),
     ),
-    # ── EVERY annotated junction a path uses is credited, not just the leftmost ───────────────────────
+    # ── EVERY annotated sj a path uses is credited, not just the leftmost ───────────────────────
     (
-        "TWO annotated junctions on one path -> BOTH credited",
+        "TWO annotated sj on one path -> BOTH credited",
         dict(start=50, end=950, observed_introns=[(100, 200), (201, 900)], sj_strand=Strand.POS),
     ),
     (
-        "two annotated junctions, minus column",
+        "two annotated sj, minus column",
         dict(
             start=50,
             end=950,
@@ -313,24 +313,24 @@ CASES: list[tuple[str, dict]] = [
         ),
     ),
     (
-        "two annotated junctions with a MISSING motif strand",
+        "two annotated sj with a MISSING motif strand",
         dict(start=50, end=950, observed_introns=[(100, 200), (201, 900)], sj_strand=Strand.NONE),
     ),
     (
-        "two annotated junctions, motif strand disagrees with BOTH",
+        "two annotated sj, motif strand disagrees with BOTH",
         dict(start=50, end=950, observed_introns=[(100, 200), (201, 900)], sj_strand=Strand.NEG),
     ),
     # ── a strand-coincident acceptor: only the annotation's own strand may match ──────────────────────
     (
-        "the NEG junction, matched on its own strand",
+        "the NEG sj, matched on its own strand",
         dict(start=350, end=950, observed_introns=[(400, 900)], sj_strand=Strand.NEG),
     ),
     (
-        "the NEG junction, POS motif -> no match, and NOT the POS junction beside it",
+        "the NEG sj, POS motif -> no match, and NOT the POS sj beside it",
         dict(start=350, end=950, observed_introns=[(400, 900)], sj_strand=Strand.POS),
     ),
     (
-        "the NEG junction on a coordinates-alone lookup",
+        "the NEG sj on a coordinates-alone lookup",
         dict(start=350, end=950, observed_introns=[(400, 900)], sj_strand=Strand.NONE),
     ),
     ("the whole reference", dict(start=0, end=1000)),
@@ -340,35 +340,35 @@ CASES: list[tuple[str, dict]] = [
     # every one of them is the degenerate case — which is the general case, not a branch.
     (
         "ONE implied path -> deposits, and its intron is region_bound from L",
-        dict(start=150, end=950, hypotheses=(LONG_JUNCTION,)),
+        dict(start=150, end=950, hypotheses=(LONG_SJ,)),
     ),
     (
         "an implied path's strand is used because NOTHING was sequenced",
-        dict(start=150, end=950, sj_strand=Strand.NONE, hypotheses=(LONG_JUNCTION,)),
+        dict(start=150, end=950, sj_strand=Strand.NONE, hypotheses=(LONG_SJ,)),
     ),
     (
         "an OBSERVED motif beats the implied strand, even when they disagree",
-        dict(start=350, end=950, sj_strand=Strand.NEG, hypotheses=(LONG_JUNCTION,)),
+        dict(start=350, end=950, sj_strand=Strand.NEG, hypotheses=(LONG_SJ,)),
     ),
     (
-        "observed AND implied introns are both region_bound, and both junctions credited",
-        dict(start=50, end=950, observed_introns=[(100, 200)], hypotheses=(LONG_JUNCTION,)),
+        "observed AND implied introns are both region_bound, and both sj credited",
+        dict(start=50, end=950, observed_introns=[(100, 200)], hypotheses=(LONG_SJ,)),
     ),
     (
         "an implied intron DUPLICATING an observed one is absorbed, not region_bound twice",
-        dict(start=50, end=950, observed_introns=[(201, 900)], hypotheses=(LONG_JUNCTION,)),
+        dict(start=50, end=950, observed_introns=[(201, 900)], hypotheses=(LONG_SJ,)),
     ),
     (
         "TWO implied paths -> DEFERRED, held whole, nothing tallied",
-        dict(start=50, end=950, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION)),
+        dict(start=50, end=950, hypotheses=(LONG_SJ, SHORT_SJ)),
     ),
     (
         "the SAME two paths again -> two records that tie on content but not on identity",
-        dict(start=50, end=950, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION)),
+        dict(start=50, end=950, hypotheses=(LONG_SJ, SHORT_SJ)),
     ),
     (
         "the two paths in the OTHER order -> a different record, and the sort must say so",
-        dict(start=50, end=950, hypotheses=(SHORT_JUNCTION, LONG_JUNCTION)),
+        dict(start=50, end=950, hypotheses=(SHORT_SJ, LONG_SJ)),
     ),
     (
         "a spliced path against the GENOMIC one -> deferred, RNA or gDNA",
@@ -376,7 +376,7 @@ CASES: list[tuple[str, dict]] = [
     ),
     (
         "THREE paths, one of them genomic -> deferred, both questions at once",
-        dict(start=50, end=950, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION, GENOMIC)),
+        dict(start=50, end=950, hypotheses=(LONG_SJ, SHORT_SJ, GENOMIC)),
     ),
     (
         "a deferred fragment on the minus column, with a motif strand of its own",
@@ -385,16 +385,16 @@ CASES: list[tuple[str, dict]] = [
             end=950,
             sj_strand=Strand.NEG,
             align_strand=Strand.NEG,
-            hypotheses=(LONG_JUNCTION, NEG_JUNCTION),
+            hypotheses=(LONG_SJ, NEG_SJ),
         ),
     ),
     (
         "a path of TWO implied introns, deposited",
-        dict(start=50, end=950, hypotheses=(BOTH_JUNCTIONS,)),
+        dict(start=50, end=950, hypotheses=(BOTH_SJ,)),
     ),
     (
         "a two-intron path against a one-intron path -> deferred; the PREFIX must not compare equal",
-        dict(start=50, end=950, hypotheses=(BOTH_JUNCTIONS, SHORT_JUNCTION)),
+        dict(start=50, end=950, hypotheses=(BOTH_SJ, SHORT_SJ)),
     ),
     # ⛔ The order contract: a fragment can fail several ways and must count exactly ONCE. A fragment with
     # no genome strand is not recoverable by the second pass — that pass resolves which PATH — so the
@@ -402,12 +402,12 @@ CASES: list[tuple[str, dict]] = [
     (
         "STRAND-UNDEFINED beats the deferral: not held, and not counted as held",
         dict(
-            start=50, end=950, align_strand=Strand.NONE, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION)
+            start=50, end=950, align_strand=Strand.NONE, hypotheses=(LONG_SJ, SHORT_SJ)
         ),
     ),
     (
         "EMPTY beats the deferral: clipped to nothing before there is anything to arbitrate",
-        dict(start=2000, end=3000, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION)),
+        dict(start=2000, end=3000, hypotheses=(LONG_SJ, SHORT_SJ)),
     ),
 ]
 
@@ -491,8 +491,8 @@ def test_region_of_pos_agrees_everywhere_including_outside_the_reference():
     assert reference is not None  # the pair is built for its side effects on the partition
 
 
-def test_a_reference_with_no_junction_table_agrees():
-    """``set_junctions`` is a separate call, so "never called" is a real state and must not differ."""
+def test_a_reference_with_no_sj_table_agrees():
+    """``set_sj`` is a separate call, so "never called" is a real state and must not differ."""
     partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF)
     reference = ReferenceAccumulator(partition, max_fragment_length=MAX_LENGTH)
     native = NativeAccumulator(
@@ -509,11 +509,11 @@ def test_a_reference_with_no_junction_table_agrees():
         ("no table: a plain crossing", dict(start=50, end=500)),
         (
             "no table: an implied path still region_bounds its intron",
-            dict(start=150, end=950, hypotheses=(LONG_JUNCTION,)),
+            dict(start=150, end=950, hypotheses=(LONG_SJ,)),
         ),
         (
             "no table: two paths still defer",
-            dict(start=50, end=950, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION)),
+            dict(start=50, end=950, hypotheses=(LONG_SJ, SHORT_SJ)),
         ),
     ]:
         _deposit_both(reference, native, label, **kw)
@@ -538,7 +538,7 @@ def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it(
         observed_introns=[(110, 120)],
         sj_strand=Strand.POS,
         align_strand=Strand.NEG,
-        hypotheses=(LONG_JUNCTION, SHORT_JUNCTION, GENOMIC),
+        hypotheses=(LONG_SJ, SHORT_SJ, GENOMIC),
     )
     got = dict(native.deferred)
     assert got["ref"].tolist() == [REF], (
@@ -580,7 +580,7 @@ def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
             max_length=MAX_LENGTH,
             ref=ref,
         )
-        outcome = native.deposit(start=50, end=950, hypotheses=(LONG_JUNCTION, SHORT_JUNCTION))
+        outcome = native.deposit(start=50, end=950, hypotheses=(LONG_SJ, SHORT_SJ))
         assert outcome == "deferred_undetermined_gap", outcome
         held[ref] = dict(native.deferred)["ref"].tolist()
     assert held == {0: [0], REF: [REF]}, (
@@ -650,8 +650,8 @@ def test_ten_thousand_random_fragments_are_byte_identical():
         for _ in range(int(rng.integers(0, 4))):
             a = int(rng.choice(interesting))
             # ⚠ Half the ends are drawn from the interesting set too, so that a random intron can actually
-            # LAND on an annotated junction. Drawing the end as `a + U(0, 400)` alone cannot reach the
-            # 699 bp junction at all, which left the whole annotated-lookup branch to the named cases.
+            # LAND on an annotated sj. Drawing the end as `a + U(0, 400)` alone cannot reach the
+            # 699 bp sj at all, which left the whole annotated-lookup branch to the named cases.
             # The pair is deliberately left unsorted, so reversed and zero-length introns occur.
             b = (
                 int(rng.choice(interesting))

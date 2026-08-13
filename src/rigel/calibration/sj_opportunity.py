@@ -1,20 +1,20 @@
-"""rigel.calibration.junction_opportunity — de-tilting the annotated-junction length pool.
+"""rigel.calibration.sj_opportunity — de-tilting the annotated-sj length pool.
 
 The RNA fragment-length model is fitted from ``RNA_SPLICED``, the pool of deposited fragments whose
-path used an **annotated junction**. That is a selection, and it is length-dependent: a longer
-fragment covers more of its transcript, so it crosses a junction more often. Measured against the
+path used an **annotated sj**. That is a selection, and it is length-dependent: a longer
+fragment covers more of its transcript, so it crosses a sj more often. Measured against the
 simulator's own realized mRNA lengths on the chr22 pilot, the pool runs **+6.2 % to +8.1 %** long
 while the unconditional anchor runs +0.00 %.
 
 ⭐ **The tilt is exactly computable from the annotation.** For a transcript with exon lengths
 ``e_1 .. e_K`` in transcript space and total ``L = SUM e_i``, the number of start positions at which a
-length-``w`` window crosses **at least one** junction is::
+length-``w`` window crosses **at least one** sj is::
 
     A_j(w)  =  (L - w + 1)+  -  SUM_i (e_i - w + 1)+
 
 ⭐ Work with the **complement** and it decomposes with no inclusion-exclusion: a window crosses no
-junction iff it lies wholly inside a single exon, and the exons are disjoint, so those placements
-partition by which exon contains the window. Attempting the union of "crosses junction ``j``" events
+sj iff it lies wholly inside a single exon, and the exons are disjoint, so those placements
+partition by which exon contains the window. Attempting the union of "crosses sj ``j``" events
 directly is messy and gets worse with every exon; the complement is exact in one boundary.
 
 The library-level quantities are abundance-weighted sums of that, over transcripts::
@@ -32,7 +32,7 @@ is ``T``. The ratio also makes the correction **safe under a wrong ``theta``**: 
 sums over the same transcripts, so a reweighting moves both. Measured over a theta sweep including
 deliberately pathological regimes (all the abundance on the single steepest-tilted transcript), the
 ratio form never does worse than not correcting and the ``A``-only form does.
-``tests/calibration/test_junction_opportunity.py`` pins both halves of that.
+``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
 
 ⚠ **``theta`` is a molar abundance — copies — not an observed fragment count.** ``A_j`` already counts
 start positions, so a count applies the length weighting twice.
@@ -56,7 +56,7 @@ __all__ = [
     "crossing_probability",
     "crossing_probability_from_index",
     "detilt_pool",
-    "junction_opportunity",
+    "sj_opportunity",
 ]
 
 
@@ -82,13 +82,13 @@ def _ramp_sum(lengths: np.ndarray, weights: np.ndarray, max_length: int) -> np.n
     return out.copy()
 
 
-def junction_opportunity(
+def sj_opportunity(
     exon_lengths: np.ndarray,
     transcript_offsets: np.ndarray,
     theta: np.ndarray,
     max_length: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """``(T, A)``: total and junction-crossing placements, abundance-weighted, over ``w``.
+    """``(T, A)``: total and sj-crossing placements, abundance-weighted, over ``w``.
 
     Parameters
     ----------
@@ -137,12 +137,12 @@ def crossing_probability(
     theta: np.ndarray,
     max_length: int,
 ) -> np.ndarray:
-    """``pi(w) = A(w) / T(w)`` — the chance a uniformly placed length-``w`` fragment crosses a junction.
+    """``pi(w) = A(w) / T(w)`` — the chance a uniformly placed length-``w`` fragment crosses a sj.
 
     Zero where there are no placements at all (``w`` beyond every expressed transcript), which is the
     honest answer: the pool cannot contain such a fragment, so there is nothing to de-tilt.
     """
-    total, crossing = junction_opportunity(exon_lengths, transcript_offsets, theta, max_length)
+    total, crossing = sj_opportunity(exon_lengths, transcript_offsets, theta, max_length)
     return np.divide(crossing, total, out=np.zeros_like(total), where=total > 0.0)
 
 
@@ -166,7 +166,7 @@ def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -
 
 
 def detilt_pool(counts: np.ndarray, crossing_probability: np.ndarray) -> np.ndarray:
-    """Divide a junction-pool histogram by its own opportunity, keeping its evidence weight.
+    """Divide a sj-pool histogram by its own opportunity, keeping its evidence weight.
 
     ⚠ **The total is preserved on purpose.** ``build_fl_models`` shrinks each pool toward the anchor
     with a Dirichlet pseudo-count whose strength is the pool total, and the pool total means "how many
@@ -174,7 +174,7 @@ def detilt_pool(counts: np.ndarray, crossing_probability: np.ndarray) -> np.ndar
     letting the total move would weaken the shrinkage as an accidental side effect.
 
     ⭐ A bin where the opportunity is zero cannot legitimately hold mass — a fragment is only in this
-    pool because it crossed an annotated junction, which is a placement the opportunity counts. Such a
+    pool because it crossed an annotated sj, which is a placement the opportunity counts. Such a
     bin contributes nothing and the surviving mass is renormalised over it, so no evidence is lost.
 
     Returns ``counts`` unchanged when the annotation offers no opportunity anywhere (every transcript

@@ -11,8 +11,8 @@ Each artifact is keyed by ``(ref, intron_start, intron_end)`` and
 characterised by the maximum *left* and *right* anchor (in
 reference-advancing CIGAR bases) observed across all false-positive
 alignments at each read length.  At BAM-scan time, a fragment's splice
-junction is rejected as artifactual when **either** anchor in its CIGAR
-is ≤ the blacklist maximum — the junction sits inside the
+sj is rejected as artifactual when **either** anchor in its CIGAR
+is ≤ the blacklist maximum — the sj sits inside the
 "plausible-from-gDNA" envelope.
 
 This module handles only blacklist *ingestion* from an alignable store
@@ -81,7 +81,7 @@ def load_splice_blacklist_from_records(
     Returns
     -------
     pandas.DataFrame
-        One row per unique ``(ref, start, end)`` junction with columns
+        One row per unique ``(ref, start, end)`` sj with columns
         :data:`BLACKLIST_COLUMNS`.  Anchors are aggregated across
         surviving read-length rows by ``max``.  Sorted by
         ``(ref, start, end)``.
@@ -110,7 +110,7 @@ def load_splice_blacklist_from_records(
 
     if not refs:
         logger.info(
-            f"Splice blacklist: 0 junctions retained "
+            f"Splice blacklist: 0 sj retained "
             f"({n_raw:,} raw, {n_below:,} below count={min_count})"
         )
         return _empty_blacklist_df()
@@ -142,7 +142,7 @@ def load_splice_blacklist_from_records(
     logger.info(
         f"Splice blacklist: {n_raw:,} raw rows → {len(df):,} kept "
         f"(count>={min_count}, dropped {n_below:,}) → "
-        f"{len(agg):,} unique junctions"
+        f"{len(agg):,} unique sj"
     )
     return agg
 
@@ -200,7 +200,7 @@ def load_splice_blacklist_from_zarr(
     df = df.loc[keep_mask]
     if df.empty:
         logger.info(
-            f"Splice blacklist: 0 junctions retained "
+            f"Splice blacklist: 0 sj retained "
             f"({n_raw:,} raw, {n_below:,} below count={min_count})"
         )
         return _empty_blacklist_df()
@@ -223,7 +223,7 @@ def load_splice_blacklist_from_zarr(
     logger.info(
         f"Splice blacklist: {n_raw:,} raw rows → {int(keep_mask.sum()):,} kept "
         f"(count>={min_count}, dropped {n_below:,}) → "
-        f"{len(agg):,} unique junctions"
+        f"{len(agg):,} unique sj"
     )
     return agg
 

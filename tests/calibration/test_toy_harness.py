@@ -83,7 +83,7 @@ def donor(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def spec():
-    """Two exons and one intron — the smallest structure with a junction and both boundary kinds."""
+    """Two exons and one intron — the smallest structure with a sj and both boundary kinds."""
     return TH.ToySpec(
         name="gate_two_exon",
         what_it_probes="gate fixture",
@@ -248,9 +248,9 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     "the default, ungated. This gate then fails at 2.19x against its 2.0 bound — and the assertion is "
     "KEPT AGAINST THE TRUTH rather than widened to the number reached, because it is measuring a real "
     "interaction and not a defect in the reframe.\n"
-    "⭐ What it is measuring: correcting the junction leak removes ONE error from a compensating PAIR "
+    "⭐ What it is measuring: correcting the sj leak removes ONE error from a compensating PAIR "
     "(TRAPS: a-cancelling-defect-pair). An evidence-free exon is fed through `intron -> BOUNDARY -> exon`; the two hops' errors "
-    "cancelled under the old junction-inclusive total, and the second hop still carries its own defect — a "
+    "cancelled under the old sj-inclusive total, and the second hop still carries its own defect — a "
     "correct composition ratio applied to a LEVEL (`EQUATIONS.md` §3.5/§3.5d). So this gate is now the "
     "project's detector for THAT defect, and it must go green again when the pair is fixed jointly.\n"
     "⛔ Widening the 2.0 bound would delete the only automatic detector of this mechanism. `ROADMAP.md` "

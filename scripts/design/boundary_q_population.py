@@ -125,7 +125,7 @@ def load_drained(panel, cond, cfg, index):
     payload = _drain_side_buffer(payload, index, sm, seed=cfg.second_pass_seed, _lift=lift)
     lifted, n_amb = lift_choices(lift["undrained"], [parts[k] for k in ORIGINS], lift["choices"])
     parts = {
-        k: sp_drain(parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"])
+        k: sp_drain(parts[k], ch, region_types=lift["region_types"], sj=lift["sj"])
         for k, ch in zip(ORIGINS, lifted)
     }
     return payload, parts, int(n_amb)
@@ -134,7 +134,7 @@ def load_drained(panel, cond, cfg, index):
 def main() -> int:  # noqa: C901
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.substrate import CalibrationSubstrate
     from rigel.config import PipelineConfig
@@ -222,7 +222,7 @@ def main() -> int:  # noqa: C901
         max_w = int(payload.max_length)
         fl = build_fl_models(
             payload,
-            junction_opportunity=crossing_probability_from_index(index, max_w),
+            sj_opportunity=crossing_probability_from_index(index, max_w),
             gdna_opportunity=gdna_opportunity_from_index(index, max_w),
         )
         w = np.arange(fl.gdna_pmf.shape[0], dtype=np.float64)

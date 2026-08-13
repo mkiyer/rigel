@@ -93,13 +93,13 @@ L_NEAR = 502
 #: ⭐ ``near`` and ``ambig`` are DEFERRED, not deposited — for two different reasons, and both are the
 #: arbitration rule working rather than a loss:
 #:
-#: * ``near``'s observed CIGAR-N junction is 2 bp off the annotation, so the fragment is
+#: * ``near``'s observed CIGAR-N sj is 2 bp off the annotation, so the fragment is
 #:   ``SPLICED_UNANNOT`` and **not certified RNA**. The unspliced (genomic) hypothesis therefore survives
 #:   alongside the spliced one — the molecule may be gDNA or nascent with the gap as real template — and
 # two survivors mean ``L`` is undetermined: ∅ is available whenever no
-#:   *annotated* junction was sequenced.
+#:   *annotated* sj was sequenced.
 #: * ``ambig``'s two isoforms imply DIFFERENT introns in the same gap. gDNA cannot be spliced and its
-#:   junction IS annotated, so the molecule is certified RNA and only the structure is open.
+#:   sj IS annotated, so the molecule is certified RNA and only the structure is open.
 _DEFERRED = 2
 
 
@@ -225,7 +225,7 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
     spliced out and sequenced as CIGAR-N, another 200 bp was spliced out and never sequenced at all.
     Before this work only the first region_bound was made and the fragment measured 700 bp.
 
-    ⚠ ``mixed``'s junction IS annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and
+    ⚠ ``mixed``'s sj IS annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and
     its single surviving hypothesis DEPOSITS. ``near`` and ``ambig`` are held instead — U3 and U5 below.
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
@@ -267,7 +267,7 @@ def test_U3_a_near_match_does_not_shorten_L(payload):
     the observed one into [62200,62400) and region_bounds 200 bp where the molecule lost 198 — ``L`` too SHORT.
 
     ⭐ Asserted on the ENUMERATED COORDINATES, which is stronger than asserting a deposited length. The
-    fragment is now held (its junction is unannotated, so the genomic hypothesis survives too), and what the
+    fragment is now held (its sj is unannotated, so the genomic hypothesis survives too), and what the
     bank must show is that the gap the CIGAR explained was left alone: the observed list is exactly the
     fragment's own 198 bp intron, and the one implied intron is the one in the MATE gap and nothing else.
     """
@@ -315,8 +315,8 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
     assert [length for _, length in hypotheses] == [500, 600], (
         "a 100 bp difference in L for one molecule"
     )
-    # ⛔ Its own junction IS annotated, so the molecule is certified RNA: the genomic hypothesis is dead and
-    # the open question is purely WHICH STRUCTURE. `near`, whose junction is 2 bp off the annotation, is the
+    # ⛔ Its own sj IS annotated, so the molecule is certified RNA: the genomic hypothesis is dead and
+    # the open question is purely WHICH STRUCTURE. `near`, whose sj is 2 bp off the annotation, is the
     # other subclass. The two arms are counted apart, and that is what the census is for.
     assert payload.gap_resolution.gap_deferred_which_introns == 1
     assert payload.gap_resolution.gap_deferred_rna_or_gdna == 1
@@ -397,7 +397,7 @@ def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
         "whose gap intron was inferred, because with one surviving hypothesis its L is not in doubt"
     )
     assert int(rna.sum()) == payload.qc.deposited, (
-        "every deposited fragment here used an annotated junction, so the pool and the deposit total "
+        "every deposited fragment here used an annotated sj, so the pool and the deposit total "
         "coincide; a smaller pool means a fragment was silently barred"
     )
 

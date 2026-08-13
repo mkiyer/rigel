@@ -29,7 +29,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
 
     chr1 is region_bound at 0/100/200/300, so it owns **3 regions and 2 contiguous boundaries** — the axes are off by one
     per reference, and a fixture that used the same length for both would hide an axis mix-up. One
-    junction boundary exists so the third axis is non-trivial.
+    sj boundary exists so the third axis is non-trivial.
 
     Regions: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
     share a value, so a consumer reading the wrong one cannot pass by coincidence::
@@ -122,22 +122,22 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     return payload, RegionArrays.from_frame(region_df, {"chr1": 0})
 
 
-def make_synthetic_junctions():
-    """The :class:`JunctionGeometry` matching :func:`make_synthetic_payload`'s one junction boundary.
+def make_synthetic_sj():
+    """The :class:`SpliceJunctionGeometry` matching :func:`make_synthetic_payload`'s one sj boundary.
 
-    ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a junction
+    ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a sj
     axis of a different length, because an axis addressing a different graph would place every splice
     on the wrong boundary and nothing downstream would fault on it.
 
-    The junction runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
+    The sj runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
     reference admits, and the one that makes the donor and acceptor two DIFFERENT boundaries (boundary 0 and
-    boundary 1). A ``0 → 1`` junction would put both endpoints on the same boundary and hide an
+    boundary 1). A ``0 → 1`` sj would put both endpoints on the same boundary and hide an
     endpoint mix-up.
     """
-    from rigel.calibration.splice_graph import JunctionGeometry
+    from rigel.calibration.splice_graph import SpliceJunctionGeometry
     from rigel.types import Strand
 
-    return JunctionGeometry(
+    return SpliceJunctionGeometry(
         src_region=np.array([0], dtype=np.int64),
         dst_region=np.array([2], dtype=np.int64),
         strand=np.array([int(Strand.POS)], dtype=np.int8),
@@ -153,32 +153,32 @@ def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
     return pmf
 
 
-def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int = 1):
+def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
     """A real :class:`StrandModels` with a chosen κ and observation count.
 
-    The calibrator now reads BOTH halves of the RNA strand Beta-Binomial from the per-junction SJ
+    The calibrator now reads BOTH halves of the RNA strand Beta-Binomial from the per-sj SJ
     strand table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
     supply a real table rather than duck-type two scalars. Observations are spread evenly over
-    ``n_junctions`` motif-POS junctions, sense/antisense split to give exactly ``p_r1_sense``.
+    ``n_sj`` motif-POS sj, sense/antisense split to give exactly ``p_r1_sense``.
     """
     from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
     from rigel.types import Strand
 
-    per = n_observations // n_junctions
-    rem = n_observations - per * n_junctions
-    depth = np.full(n_junctions, per, dtype=np.int64)
-    if n_junctions:
+    per = n_observations // n_sj
+    rem = n_observations - per * n_sj
+    depth = np.full(n_sj, per, dtype=np.int64)
+    if n_sj:
         depth[0] += rem
     n_sense = np.rint(depth * float(p_r1_sense)).astype(np.int64)
     # Repair rounding so the marginal is EXACTLY the requested rate where it can be.
     want = int(round(n_observations * float(p_r1_sense)))
-    if n_junctions and n_sense.sum() != want:
+    if n_sj and n_sense.sum() != want:
         n_sense[0] = np.clip(n_sense[0] + (want - n_sense.sum()), 0, depth[0])
     table = SJStrandTable(
-        ref_id=np.zeros(n_junctions, dtype=np.int32),
-        start=np.arange(n_junctions, dtype=np.int64) * 1000,
-        end=np.arange(n_junctions, dtype=np.int64) * 1000 + 100,
-        motif_strand=np.full(n_junctions, int(Strand.POS), dtype=np.int8),
+        ref_id=np.zeros(n_sj, dtype=np.int32),
+        start=np.arange(n_sj, dtype=np.int64) * 1000,
+        end=np.arange(n_sj, dtype=np.int64) * 1000 + 100,
+        motif_strand=np.full(n_sj, int(Strand.POS), dtype=np.int8),
         n_sense=n_sense,
         n_antisense=depth - n_sense,
     )
@@ -186,7 +186,7 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int 
 
 
 # ---------------------------------------------------------------------------
-# The S5.e chain fixture — hand-built numbers on the region / boundary / junction axes.
+# The S5.e chain fixture — hand-built numbers on the region / boundary / sj axes.
 # ---------------------------------------------------------------------------
 
 
@@ -206,7 +206,7 @@ def make_chain_parts(
     boundary_pos=0.0,
     boundary_neg=0.0,
     boundary_spliced=0.0,
-    junctions=None,
+    sj=None,
     gdna_fl=None,
     rna_fl=None,
     ref_names=None,
@@ -217,8 +217,8 @@ def make_chain_parts(
     ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with **no terminal slots**. Every
     per-object argument is broadcast, so a test states only the numbers it cares about.
 
-    ``junctions`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
-    row on the junction axis and is placed on the boundaries it leaves and enters.
+    ``sj`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
+    row on the sj axis and is placed on the boundaries it leaves and enters.
 
     Returns ``SimpleNamespace(chain, substrate, region_arrays, geometry, statics)``.
     """
@@ -227,7 +227,7 @@ def make_chain_parts(
     from rigel.calibration.region_chain import build_region_chain
     from rigel.calibration.region_geometry import build_region_geometry, build_region_statics
     from rigel.calibration.signature import transcript_strand_class
-    from rigel.calibration.splice_graph import JunctionGeometry
+    from rigel.calibration.splice_graph import SpliceJunctionGeometry
 
     sig = np.asarray(signatures, dtype=np.uint8)
     n_regions = sig.shape[0]
@@ -250,8 +250,8 @@ def make_chain_parts(
             axis=1,
         ).copy()
 
-    j = list(junctions or [])
-    junction_geometry = JunctionGeometry(
+    j = list(sj or [])
+    sj_geometry = SpliceJunctionGeometry(
         src_region=np.array([x[0] for x in j], dtype=np.int64),
         dst_region=np.array([x[1] for x in j], dtype=np.int64),
         strand=np.array([x[2] for x in j], dtype=np.int8),
@@ -268,7 +268,7 @@ def make_chain_parts(
         region_contained=SimpleNamespace(count=region_counts),
         boundary_unspliced=SimpleNamespace(count=boundary_counts),
         boundary_spliced=SimpleNamespace(count=pair(boundary_spliced, 0.0, n_boundaries)),
-        junction=SimpleNamespace(
+        sj=SimpleNamespace(
             count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)
         ),
     )
@@ -285,7 +285,7 @@ def make_chain_parts(
         chain,
         substrate,
         region_arrays,
-        junction_geometry,
+        sj_geometry,
         gdna_pmf,
         rna_pmf,
     )

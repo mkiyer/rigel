@@ -116,7 +116,7 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
     field on the FIRST region only — the handle for the TRAPS: a-message-from-the-destinations-belief invariance test.
 
     ⚠ **No step on this chain is licensed**, and that is the point of it: the library is unstranded and
-    there is no junction anywhere, so no slot ever earns RNA precision of its own and no source can lend
+    there is no sj anywhere, so no slot ever earns RNA precision of its own and no source can lend
     a composition. It is therefore the pure-unlicensed fixture. The licensed population lives on
     `_stranded_chain`.
     """
@@ -288,7 +288,7 @@ def test_the_pin_fires_ONLY_where_no_belief_can_reach_its_budget():
     * **(ii) the destination is structurally pure gDNA.** There is no unsupplied component to fill in:
       ``f_g = 1`` is STRUCTURE, so the budget is ``rho_g·E_g`` and the pin hands the object its own
       MEASURED density ``M/E_g``. Both ``intergenic|exon`` BOUNDARIES of this fixture are that object.
-    * **not licensed anywhere else on this chain** — unstranded, no junction, so no slot earns RNA
+    * **not licensed anywhere else on this chain** — unstranded, no sj, so no slot earns RNA
       precision and nothing can lend a composition. Every other step must leave the level alone.
 
     Two-sided on ONE fixture, because either lie empties one of the two populations: pinning everywhere

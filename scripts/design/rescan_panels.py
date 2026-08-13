@@ -73,7 +73,7 @@ DEPOSIT_SENSITIVE_SCALARS = ("qc", "gap_resolution")
 #:
 #: ⚠ The factor is 2 for the MASS banks and 1 for the others, and it comes from the deposit rule rather
 #: than from padding: a fragment crossing ``K`` boundaries makes ``2K`` deposits (``K+1`` slices, the two ends
-#: depositing once and each interior one twice — `test_conserved_mass.py` derives this), and a junction
+#: depositing once and each interior one twice — `test_conserved_mass.py` derives this), and a sj
 #: can be claimed at BOTH its positions.
 FLOAT_BANK_DEPOSITS = {
     "region_contained_inv_opportunity_sum": ("region_contained_count", 1),

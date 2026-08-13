@@ -1,7 +1,7 @@
 """CalibrationResult.__post_init__ intrinsic invariants — the THREE-AXIS schema (S5.f).
 
 ⭐ **Three axes, and they are different lengths on purpose.** ``n_regions``, ``n_boundaries`` and
-``n_junctions`` are independent (``E = N − n_refs``, ``J`` unrelated to either), so every fixture here
+``n_sj`` are independent (``E = N − n_refs``, ``J`` unrelated to either), so every fixture here
 uses three DIFFERENT lengths. A fixture that used one length for all three could not tell an
 axis mix-up from a correct result, which is exactly how the predecessor's per-region ``left``/``right``
 pair survived being pooled straight back together.
@@ -17,7 +17,7 @@ import pytest
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 
-N_REGIONS, N_BOUNDARIES, N_JUNCTIONS = 4, 3, 2
+N_REGIONS, N_BOUNDARIES, N_SJ = 4, 3, 2
 
 
 def _valid_kwargs() -> dict:
@@ -33,14 +33,14 @@ def _valid_kwargs() -> dict:
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones(N_BOUNDARIES),
-        # ⛔ These two must NOT be equal, and a `ones`/`ones` pair is what they were. `mass_rna_junction`
-        # is an INCIDENCE count and `junction_mass_per_crossing` converts it to the conserved mass; with
+        # ⛔ These two must NOT be equal, and a `ones`/`ones` pair is what they were. `count_rna_sj`
+        # is an INCIDENCE count and `sj_mass_per_crossing` converts it to the conserved mass; with
         # the conversion at the identity no gate in this file could tell the two quantities apart, so
         # the fixture could not fail the one confusion the pair exists to prevent
         # (`TRAPS: could-the-arm-have-fired` — a fixture is an arm). Conserved mass = [2.0, 1.5].
-        mass_rna_junction=np.array([4.0, 6.0]),
+        count_rna_sj=np.array([4.0, 6.0]),
         boundary_spliced_mass_per_crossing=boundary.copy(),
-        junction_mass_per_crossing=np.array([0.5, 0.25]),
+        sj_mass_per_crossing=np.array([0.5, 0.25]),
         gdna_region_eff_len=region.copy(),
         gdna_boundary_eff_len=boundary.copy(),
         rna_region_eff_len=region.copy(),
@@ -60,7 +60,7 @@ def _valid_kwargs() -> dict:
         rna_strand_overdispersion=0.05,
         n_regions=N_REGIONS,
         n_boundaries=N_BOUNDARIES,
-        n_junctions=N_JUNCTIONS,
+        n_sj=N_SJ,
         config=CalibrationConfig(),
     )
 
@@ -78,14 +78,14 @@ def test_zero_gdna_library_constructs():
     CalibrationResult(**kw)
 
 
-def test_a_library_with_no_junctions_constructs():
-    """``J = 0`` is legal — a single-exon-only reference has no junction boundary at all — and must not
-    be confused with "no junction flux"."""
+def test_a_library_with_no_sj_constructs():
+    """``J = 0`` is legal — a single-exon-only reference has no sj boundary at all — and must not
+    be confused with "no sj flux"."""
     kw = _valid_kwargs()
-    kw["mass_rna_junction"] = np.zeros(0)
-    kw["junction_mass_per_crossing"] = np.zeros(0)
-    kw["n_junctions"] = 0
-    assert CalibrationResult(**kw).mass_rna_junction.shape == (0,)
+    kw["count_rna_sj"] = np.zeros(0)
+    kw["sj_mass_per_crossing"] = np.zeros(0)
+    kw["n_sj"] = 0
+    assert CalibrationResult(**kw).count_rna_sj.shape == (0,)
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +105,14 @@ def test_a_library_with_no_junctions_constructs():
         ("mass_rna_spliced_boundary", N_BOUNDARIES),
         ("gdna_boundary_eff_len", N_BOUNDARIES),
         ("rna_boundary_eff_len", N_BOUNDARIES),
-        ("mass_rna_junction", N_JUNCTIONS),
+        ("count_rna_sj", N_SJ),
     ],
 )
 def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
     """⛔ The one defect this gate exists for: an array keyed to the WRONG axis. With E = N − n_refs
     the two lengths differ by only a handful genome-wide, so a mis-keyed array is a plausible shape
     and a shape check is the only thing that catches it before the numbers go silently wrong."""
-    for wrong in (N_REGIONS, N_BOUNDARIES, N_JUNCTIONS):
+    for wrong in (N_REGIONS, N_BOUNDARIES, N_SJ):
         if wrong == n_expected:
             continue
         kw = _valid_kwargs()
@@ -162,12 +162,12 @@ def test_rejects_non_finite_array():
 
 def test_accepts_an_integer_count_array():
     """⚠ The accumulator's primary per-object observable is an integer COUNT, so an exact integer
-    array is a BETTER input here than a float one. ``mass_rna_junction`` is the sharpest case: it is
-    the junction flux verbatim, never deconvolved, so it arrives integral."""
+    array is a BETTER input here than a float one. ``count_rna_sj`` is the sharpest case: it is
+    the sj flux verbatim, never deconvolved, so it arrives integral."""
     for dtype in (np.int64, np.int32, np.uint32, np.uint64):
         kw = _valid_kwargs()
-        kw["mass_rna_junction"] = np.array([1, 1], dtype=dtype)
-        assert CalibrationResult(**kw).mass_rna_junction.dtype == dtype
+        kw["count_rna_sj"] = np.array([1, 1], dtype=dtype)
+        assert CalibrationResult(**kw).count_rna_sj.dtype == dtype
 
 
 def test_still_rejects_a_narrower_float():
@@ -204,7 +204,7 @@ def test_rejects_bad_scalars(field, value):
         CalibrationResult(**kw)
 
 
-@pytest.mark.parametrize("field", ["n_regions", "n_boundaries", "n_junctions"])
+@pytest.mark.parametrize("field", ["n_regions", "n_boundaries", "n_sj"])
 def test_rejects_negative_axis_length(field):
     kw = _valid_kwargs()
     kw[field] = -1
@@ -245,7 +245,7 @@ def test_the_per_face_fields_are_gone():
 
 def test_mass_rna_spliced_has_no_region_twin():
     """⚠ Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
-    used NO junction, so a region's contained population cannot hold a spliced molecule. A
+    used NO sj, so a region's contained population cannot hold a spliced molecule. A
     ``mass_rna_spliced_region`` field would be a channel that cannot exist."""
     assert "mass_rna_spliced_boundary" in CalibrationResult.__dataclass_fields__
     assert "mass_rna_spliced_region" not in CalibrationResult.__dataclass_fields__
@@ -297,62 +297,62 @@ def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
 
 
 # ---------------------------------------------------------------------------
-# ⭐⭐ The CONSERVED junction mass — the third axis's incidence→fragment conversion.
+# ⭐⭐ The CONSERVED sj mass — the third axis's incidence→fragment conversion.
 # ---------------------------------------------------------------------------
 
 
-def test_the_conserved_junction_mass_is_the_incidence_TIMES_its_own_conversion():
+def test_the_conserved_sj_mass_is_the_incidence_TIMES_its_own_conversion():
     """⭐ The arithmetic, on a fixture where the two are 2–4× apart so the gate can fail."""
     res = CalibrationResult(**_valid_kwargs())
-    np.testing.assert_allclose(res.junction_conserved_mass, [2.0, 1.5])
+    np.testing.assert_allclose(res.sj_conserved_mass, [2.0, 1.5])
 
 
-def test_the_junction_INCIDENCE_is_NOT_the_junction_MASS():
-    """⛔⛔ **THE TRAP THIS PROPERTY EXISTS FOR.** ``mass_rna_junction`` is named like a mass and is an
-    incidence count — a fragment deposits ``+1`` on every junction it uses, measured **2.0719×** per
+def test_the_sj_INCIDENCE_is_NOT_the_sj_MASS():
+    """⛔⛔ **THE TRAP THIS PROPERTY EXISTS FOR.** ``count_rna_sj`` is named like a mass and is an
+    incidence count — a fragment deposits ``+1`` on every sj it uses, measured **2.0719×** per
     unit of conserved mass on ``g00 ss0.99 capture_off``. This fires the moment anyone "simplifies" the
     property to return the incidence array, which is the specific edit that looks correct.
     """
     res = CalibrationResult(**_valid_kwargs())
-    incidence = np.asarray(res.mass_rna_junction, dtype=np.float64)
-    assert not np.allclose(res.junction_conserved_mass, incidence), (
-        "junction_conserved_mass returned the INCIDENCE count — the conversion was dropped"
+    incidence = np.asarray(res.count_rna_sj, dtype=np.float64)
+    assert not np.allclose(res.sj_conserved_mass, incidence), (
+        "sj_conserved_mass returned the INCIDENCE count — the conversion was dropped"
     )
     # ⭐ And the direction is fixed, not merely different: an incidence over-counts, never under-counts,
-    # because a fragment using K junctions books K of them and one unit of mass.
-    assert np.all(incidence >= res.junction_conserved_mass - 1e-12)
+    # because a fragment using K sj books K of them and one unit of mass.
+    assert np.all(incidence >= res.sj_conserved_mass - 1e-12)
 
 
-def test_a_junction_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
+def test_a_sj_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
     """⛔ ``mass_per_crossing`` is deliberately **1.0** where nothing crossed — the identity, so a
     deconvolution's mass at an unobserved boundary is rescaled by 1 rather than deleted. Multiplying it by
     the zero incidence is what turns that identity back into the ``0`` that is correct here.
 
     ⚠ This is the gate that fires if the property ever grows a ``where(count > 0, …)`` branch that
-    falls back to the conversion factor, which would publish **1.0 units of RNA mass at a junction no
+    falls back to the conversion factor, which would publish **1.0 units of RNA mass at a sj no
     fragment ever used** — a false positive on the axis that is certified RNA by construction. ⛔ Not a
-    corner case: **4,636 of 13,482** junctions are zero-count on ``g00 ss0.99 capture_off``, so that
+    corner case: **4,636 of 13,482** sj are zero-count on ``g00 ss0.99 capture_off``, so that
     fallback would invent mass on a third of the axis.
     """
     kw = _valid_kwargs()
-    kw["mass_rna_junction"] = np.array([0.0, 6.0])
-    kw["junction_mass_per_crossing"] = np.array([1.0, 0.25])
+    kw["count_rna_sj"] = np.array([0.0, 6.0])
+    kw["sj_mass_per_crossing"] = np.array([1.0, 0.25])
     res = CalibrationResult(**kw)
-    assert res.junction_conserved_mass[0] == 0.0
-    np.testing.assert_allclose(res.junction_conserved_mass[1], 1.5)
+    assert res.sj_conserved_mass[0] == 0.0
+    np.testing.assert_allclose(res.sj_conserved_mass[1], 1.5)
 
 
 def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
-    """⛔ The junction term used to be spelled out a second time inside ``library_rna_fragments``. Two
+    """⛔ The sj term used to be spelled out a second time inside ``library_rna_fragments``. Two
     spellings of one conversion is how a caller reading the property and a caller reading the library
     count come to disagree, so this pins that moving one moves the other.
     """
     kw = _valid_kwargs()
     before = CalibrationResult(**kw)
-    kw["junction_mass_per_crossing"] = np.array([0.5, 0.25]) * 3.0
+    kw["sj_mass_per_crossing"] = np.array([0.5, 0.25]) * 3.0
     after = CalibrationResult(**kw)
     delta_property = float(
-        after.junction_conserved_mass.sum() - before.junction_conserved_mass.sum()
+        after.sj_conserved_mass.sum() - before.sj_conserved_mass.sum()
     )
     delta_library = after.library_rna_fragments - before.library_rna_fragments
     assert delta_property > 0.0, (
@@ -362,12 +362,12 @@ def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
 
 
 def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
-    """⭐⭐ **WHY IT IS A PROPERTY AND NOT A STORED FIELD.** ``mass_rna_junction`` is in
+    """⭐⭐ **WHY IT IS A PROPERTY AND NOT A STORED FIELD.** ``count_rna_sj`` is in
     ``prior_vs_oracle.OVERRIDE_FIELDS``: an arm swaps it with ``dataclasses.replace``. A stored array
     would survive that swap and go on describing the array it replaced —
     ``TRAPS: a-hash-that-misses-its-artifact`` in dataclass form.
     """
     res = CalibrationResult(**_valid_kwargs())
-    swapped = dataclasses.replace(res, mass_rna_junction=np.array([40.0, 60.0]))
-    np.testing.assert_allclose(swapped.junction_conserved_mass, [20.0, 15.0])
-    assert not np.allclose(swapped.junction_conserved_mass, res.junction_conserved_mass)
+    swapped = dataclasses.replace(res, count_rna_sj=np.array([40.0, 60.0]))
+    np.testing.assert_allclose(swapped.sj_conserved_mass, [20.0, 15.0])
+    assert not np.allclose(swapped.sj_conserved_mass, res.sj_conserved_mass)

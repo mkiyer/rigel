@@ -18,7 +18,7 @@ one numeric convention). The banks are float64 fractions; there is no quantum an
  3   the mass equals the PER-BASE attribution — which ``1/K`` cannot reproduce, because a base
      does not know how many boundaries its fragment crossed. **This is the claim that pins the rule.**
  4   a spliced fragment's mass reaches the SPLICED bank and nothing else
- 5   every crossed object SHARES the one fragment, junction boundaries included
+ 5   every crossed object SHARES the one fragment, sj boundaries included
 ===  ==========================================================================================
 
 ⚠ Claim 3 states the rule a second time, deliberately and in one place only. The specification reaches
@@ -287,7 +287,7 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
     partition = Partition.from_region_bounds(
         [region_bounds],
         region_types=[[0, 2, 1, 2, 2]],
-        junctions=[(0, 2000, 9000, Strand.POS)],
+        sj=[(0, 2000, 9000, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     outcome = accumulator.deposit(
@@ -296,31 +296,31 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
     assert outcome is DepositOutcome.DEPOSITED
 
     tally = accumulator.tally
-    assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the junction must be credited"
+    assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the sj must be credited"
     assert float(np.asarray(tally.boundary_unspliced_mass, np.float64).sum()) == 0.0, (
         "certified RNA leaked into the bank being deconvolved"
     )
     spliced = float(np.asarray(tally.boundary_spliced_mass, np.float64).sum())
-    junction = float(np.asarray(tally.sj_mass, np.float64).sum())
+    sj = float(np.asarray(tally.sj_mass, np.float64).sum())
     assert spliced > 0, "the contiguous crossing at 9050 deposited nothing"
     # ⭐ A PARTIAL, and the exact one the design specifies: the boundary takes only the bases adjacent to it,
-    # and the junction takes the rest. Derived from the rule, slice by slice, NOT read off the code::
+    # and the sj takes the rest. Derived from the rule, slice by slice, NOT read off the code::
     #
     #   L = (2000-1900) + (9200-9000) = 300
-    #   block 0 [1900,2000)  crosses nothing; its only boundary is the junction   -> 100/300 junction
+    #   block 0 [1900,2000)  crosses nothing; its only boundary is the sj   -> 100/300 sj
     #   block 1 [9000,9200)  crosses the boundary at 9050, giving two slices:
-    #       [9000,9050)  bounded by the JUNCTION (block start) and the BOUNDARY       ->  25/300 each
+    #       [9000,9050)  bounded by the SJ (block start) and the BOUNDARY       ->  25/300 each
     #       [9050,9200)  bounded by the BOUNDARY alone (block end is the frag end)    -> 150/300 boundary
     #
     # ⚠ The predecessor of this assertion wanted 200/300 for the boundary — it encoded the rule in which a
-    # boundary-crossing block gave its bases ENTIRELY to boundaries, so the junction bounding it got nothing.
+    # boundary-crossing block gave its bases ENTIRELY to boundaries, so the sj bounding it got nothing.
     assert spliced < 1
     want_boundary = Fraction(25, 300) + Fraction(150, 300)
-    want_junction = Fraction(100, 300) + Fraction(25, 300)
+    want_sj = Fraction(100, 300) + Fraction(25, 300)
     assert abs(spliced - want_boundary) <= budget(2)
-    assert abs(junction - want_junction) <= budget(2)
+    assert abs(sj - want_sj) <= budget(2)
     # ⭐ And together they are the whole fragment, which the predecessor could not state at all.
-    assert abs(spliced + junction - 1) <= budget(4)
+    assert abs(spliced + sj - 1) <= budget(4)
 
 
 def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
@@ -328,7 +328,7 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
     reading a consumer can make, so it is pinned rather than left to the docstring."""
     region_bounds = [0, 1000, 2000, 9000, 9050, 10000]
     partition = Partition.from_region_bounds(
-        [region_bounds], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+        [region_bounds], region_types=[[0, 2, 1, 2, 2]], sj=[(0, 2000, 9000, Strand.POS)]
     )
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     n = 0
@@ -346,7 +346,7 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
 # claim 5 — the law over ALL THREE axes, which is what makes a LIBRARY count computable
 # ---------------------------------------------------------------------------
 
-#: The staggered geometry claim 4 uses: one annotated junction, and a short region (9000–9050) whose far
+#: The staggered geometry claim 4 uses: one annotated sj, and a short region (9000–9050) whose far
 #: boundary a fragment may or may not reach. That choice is what lets the SAME partition carry both a
 #: spliced fragment that crosses a boundary and one that crosses none.
 SPLICED_REGION_BOUNDS = [0, 1000, 2000, 9000, 9050, 10000]
@@ -354,12 +354,12 @@ SPLICED_REGION_BOUNDS = [0, 1000, 2000, 9000, 9050, 10000]
 
 def _spliced_partition() -> Partition:
     return Partition.from_region_bounds(
-        [SPLICED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+        [SPLICED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 2]], sj=[(0, 2000, 9000, Strand.POS)]
     )
 
 
 def _total_deposited_mass(tally) -> Fraction:
-    """Every conserved-mass bank summed — unspliced boundaries, spliced boundaries, and junctions.
+    """Every conserved-mass bank summed — unspliced boundaries, spliced boundaries, and sj.
 
     ⚠ ``sj_mass`` is read with :func:`getattr` so that when the bank does not exist this reports the
     LAW failing by a whole fragment, rather than an ``AttributeError`` that says nothing about how much
@@ -376,7 +376,7 @@ def _total_deposited_mass(tally) -> Fraction:
 def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT_of_mass():
     """⛔⛔ **THE POPULATION A CONSERVED COUNT CANNOT SEE.** Both blocks lie inside one region each.
 
-    The fragment is not ``contained`` — its path spans a junction, so it is not inside ONE region — and it
+    The fragment is not ``contained`` — its path spans a sj, so it is not inside ONE region — and it
     crosses no boundary, so the slice loop never runs. Under the rule as it stands it deposits **nothing
     anywhere** while ``sj_count`` credits it, which is a fragment that exists on the incidence axis and
     on no conserved one.
@@ -393,9 +393,9 @@ def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT
     assert outcome is DepositOutcome.DEPOSITED
 
     tally = accumulator.tally
-    assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the junction must be credited"
+    assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the sj must be credited"
     assert int(np.asarray(tally.region_contained_count, np.int64).sum()) == 0, (
-        "a path spanning a junction is not contained in ONE region"
+        "a path spanning a sj is not contained in ONE region"
     )
     assert _total_deposited_mass(tally) == 1, (
         "a deposited fragment must place exactly one fragment of mass somewhere; this one placed "
@@ -403,42 +403,42 @@ def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT
     )
 
 
-#: ⛔⛔ **TWO junctions, and the middle exon is a WHOLE region.** A one-junction fixture cannot exercise
+#: ⛔⛔ **TWO sj, and the middle exon is a WHOLE region.** A one-sj fixture cannot exercise
 #: the equal-share rule at all — every block it produces is bounded on one side only, so ``len(bounds)``
 #: is always 1 and a rule that forgot to share would pass every gate. Measured: deleting the share made
 #: 18/18 gates pass until this fixture existed (`TRAPS: could-the-arm-have-fired`).
-TWO_JUNCTION_REGION_BOUNDS = [0, 1000, 2000, 5000, 5100, 8000, 9000, 10000]
+TWO_SJ_REGION_BOUNDS = [0, 1000, 2000, 5000, 5100, 8000, 9000, 10000]
 
 
-def _two_junction_partition() -> Partition:
+def _two_sj_partition() -> Partition:
     return Partition.from_region_bounds(
-        [TWO_JUNCTION_REGION_BOUNDS],
+        [TWO_SJ_REGION_BOUNDS],
         region_types=[[0, 2, 1, 2, 1, 2, 0]],
-        junctions=[(0, 2000, 5000, Strand.POS), (0, 5100, 8000, Strand.POS)],
+        sj=[(0, 2000, 5000, Strand.POS), (0, 5100, 8000, Strand.POS)],
     )
 
 
 #: The three blocks of ``[1950, 8050)`` spliced over both introns: 50 bp, the whole 100 bp middle exon,
-#: then 50 bp. None contains an interior boundary, so all three are junction-bounded and the middle one is
+#: then 50 bp. None contains an interior boundary, so all three are sj-bounded and the middle one is
 #: bounded TWICE.
-TWO_JUNCTION_FRAGMENT = (1950, 8050, [(2000, 5000), (5100, 8000)])
+TWO_SJ_FRAGMENT = (1950, 8050, [(2000, 5000), (5100, 8000)])
 
 
-def test_a_block_bounded_by_TWO_junctions_SPLITS_its_mass_between_them():
-    """⭐⭐⭐ **THE CLAIM THAT PINS THE JUNCTION RULE**, the way claim 3 pins the boundary rule.
+def test_a_block_bounded_by_TWO_sj_SPLITS_its_mass_between_them():
+    """⭐⭐⭐ **THE CLAIM THAT PINS THE SJ RULE**, the way claim 3 pins the boundary rule.
 
     Conservation alone cannot see the difference between sharing a doubly-bounded block and giving it
     whole to each bound — one of those sums to 1 only because the fixture never produced such a block.
-    This states WHERE the mass went, per junction, in exact rational arithmetic::
+    This states WHERE the mass went, per sj, in exact rational arithmetic::
 
         block 0  [1950,2000)   50/200 -> j0            (fragment start on the left: one bound)
-        block 1  [5000,5100)  100/200 -> j0 and j1     (a junction at BOTH ends: shared)
+        block 1  [5000,5100)  100/200 -> j0 and j1     (a sj at BOTH ends: shared)
         block 2  [8000,8050)   50/200 -> j1            (fragment end on the right: one bound)
 
     so ``j0 == j1 == 1/2`` and the two sum to exactly one fragment.
     """
-    start, end, introns = TWO_JUNCTION_FRAGMENT
-    accumulator = Accumulator(_two_junction_partition(), max_fragment_length=MAX_LENGTH)
+    start, end, introns = TWO_SJ_FRAGMENT
+    accumulator = Accumulator(_two_sj_partition(), max_fragment_length=MAX_LENGTH)
     assert (
         accumulator.deposit(0, start, end, observed_introns=introns, sj_strand=Strand.POS)
         is DepositOutcome.DEPOSITED
@@ -447,7 +447,7 @@ def test_a_block_bounded_by_TWO_junctions_SPLITS_its_mass_between_them():
     # detection, and CONSERVATION is a strand-agnostic property — a fragment's 1.0 is shared across the
     # objects it touched whatever strand it aligned to — so every gate in this file reads the total.
     bank = np.asarray(accumulator.tally.sj_mass, np.float64).sum(axis=1)
-    assert bank.size == 2, "the fixture must carry both junctions or this gate tests one of them"
+    assert bank.size == 2, "the fixture must carry both sj or this gate tests one of them"
     got = [float(v) for v in bank]
 
     length = (2000 - 1950) + (5100 - 5000) + (8050 - 8000)
@@ -457,34 +457,34 @@ def test_a_block_bounded_by_TWO_junctions_SPLITS_its_mass_between_them():
     ]
     for jid, (g, w) in enumerate(zip(got, want)):
         assert abs(g - w) <= budget(1), (
-            f"junction {jid} holds {float(g)} but its bases give it {float(w)}"
+            f"sj {jid} holds {float(g)} but its bases give it {float(w)}"
         )
     assert sum(got) == 1, f"the three blocks sum to {float(sum(got))}, not one fragment"
 
 
-def test_a_fragment_crossing_BOTH_junctions_AND_boundaries_gives_EVERY_crossed_object_a_share():
+def test_a_fragment_crossing_BOTH_sj_AND_boundaries_gives_EVERY_crossed_object_a_share():
     """⭐⭐⭐ **THE OWNER'S REQUIREMENT, STATED AS A GATE** (2026-08-10): a spliced fragment may cross
-    several junctions *and* several boundaries, and **all of them share the one fragment**.
+    several sj *and* several boundaries, and **all of them share the one fragment**.
 
     ⛔ **Conservation alone does NOT imply sharing, and the first implementation proved it.** That rule
-    gave a boundary-crossing block's bases entirely to boundaries, so a junction flanked by two boundary-crossing
+    gave a boundary-crossing block's bases entirely to boundaries, so a sj flanked by two boundary-crossing
     blocks received exactly **0.000000** while ``sj_count`` credited it — and the fragment still summed
-    to 1.0, so every conservation gate passed. Measured on real geometry: 35 of 8,436 crossed junctions
+    to 1.0, so every conservation gate passed. Measured on real geometry: 35 of 8,436 crossed sj
     held zero mass. This gate asserts the property conservation cannot see.
 
     The fixture is the awkward case on purpose::
 
-        block 0  [1900,2500)  crosses boundary @2000     — and is bounded on the right by junction 0
-        block 1  [5000,5200)  crosses boundary @5100     — bounded by junction 0 left, junction 1 right
-        block 2  [8000,8100)  crosses NOTHING        — bounded by junction 1 on the left
+        block 0  [1900,2500)  crosses boundary @2000     — and is bounded on the right by sj 0
+        block 1  [5000,5200)  crosses boundary @5100     — bounded by sj 0 left, sj 1 right
+        block 2  [8000,8100)  crosses NOTHING        — bounded by sj 1 on the left
 
-    so junction 0 is flanked by two boundary-crossing blocks: under the old rule it got nothing.
+    so sj 0 is flanked by two boundary-crossing blocks: under the old rule it got nothing.
     """
     region_bounds = [0, 1000, 2000, 2500, 5000, 5100, 5200, 8000, 9000, 10000]
     partition = Partition.from_region_bounds(
         [region_bounds],
         region_types=[[0, 2, 2, 1, 2, 2, 1, 2, 0]],
-        junctions=[(0, 2500, 5000, Strand.POS), (0, 5200, 8000, Strand.POS)],
+        sj=[(0, 2500, 5000, Strand.POS), (0, 5200, 8000, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=2000)
     assert (
@@ -496,28 +496,28 @@ def test_a_fragment_crossing_BOTH_junctions_AND_boundaries_gives_EVERY_crossed_o
     tally = accumulator.tally
 
     crossed_boundaries = np.flatnonzero(np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1))
-    crossed_junctions = np.flatnonzero(np.asarray(tally.sj_count, np.int64).sum(axis=1))
+    crossed_sj = np.flatnonzero(np.asarray(tally.sj_count, np.int64).sum(axis=1))
     assert crossed_boundaries.size == 2, "the fixture must cross two boundaries or it tests one case"
-    assert crossed_junctions.size == 2, "the fixture must use both junctions"
+    assert crossed_sj.size == 2, "the fixture must use both sj"
 
     boundary_mass = np.asarray(tally.boundary_spliced_mass, np.float64)
     sj_mass = np.asarray(tally.sj_mass, np.float64).sum(axis=1)  # strand-agnostic, see above
     for boundary in crossed_boundaries:
         assert boundary_mass[boundary] > 0, f"boundary {boundary} was crossed but holds no mass"
-    for jid in crossed_junctions:
+    for jid in crossed_sj:
         assert sj_mass[jid] > 0, (
-            f"junction {jid} was crossed but holds NO mass — the fragment's 1.0 is conserved yet this "
+            f"sj {jid} was crossed but holds NO mass — the fragment's 1.0 is conserved yet this "
             f"object got none of it, which is not a sharing"
         )
 
     total = _total_deposited_mass(tally)
-    deposits = int(len(crossed_boundaries) * 2 + len(crossed_junctions) * 2)
+    deposits = int(len(crossed_boundaries) * 2 + len(crossed_sj) * 2)
     assert abs(total - 1) <= budget(deposits), (
         f"the fragment deposited {float(total)}, not one"
     )
 
 
-def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_crossing():
+def test_a_sj_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_crossing():
     """⭐⭐⭐ **THE OWNER'S CASE (2026-08-10), and it discriminates where conservation cannot.**
 
     Two isoforms sharing a donor and differing by 50 bp at the acceptor::
@@ -527,31 +527,31 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
 
     A fragment with blocks ``(1800,2000)`` and ``(5000,5200)`` — ``L = 400`` — splices TA's
     ``(2000,5000)`` and then runs CONTIGUOUSLY across TB's acceptor boundary at 5050. It therefore touches
-    THREE boundary positions, of which the junction accounts for two:
+    THREE boundary positions, of which the sj accounts for two:
 
     ===============  ======  ==================================================  ==========
     bases            n       bounded by                                          share
     ===============  ======  ==================================================  ==========
-    ``[1800,2000)``  200     the junction's DONOR side (fragment start on left)   200 junction
-    ``[5000,5050)``   50     the junction's ACCEPTOR side, and the boundary @5050      25 / 25
+    ``[1800,2000)``  200     the sj's DONOR side (fragment start on left)   200 sj
+    ``[5000,5050)``   50     the sj's ACCEPTOR side, and the boundary @5050      25 / 25
     ``[5050,5200)``  150     the boundary @5050 (fragment end on right)               150 boundary
     ===============  ======  ==================================================  ==========
 
-    so the junction holds ``225/400`` and the boundary ``175/400``.
+    so the sj holds ``225/400`` and the boundary ``175/400``.
 
     ⛔ **The predecessor rule scored 200/200 here** — it gave a boundary-crossing block's bases entirely to
-    boundaries, so the junction never collected on its ACCEPTOR side. Both rules sum to 1.0, so no
+    boundaries, so the sj never collected on its ACCEPTOR side. Both rules sum to 1.0, so no
     conservation gate could tell them apart; this one can, which is why the case is pinned.
 
-    ⛔ **And a junction must not ALSO register as a contiguous crossing** — that would be the same
+    ⛔ **And a sj must not ALSO register as a contiguous crossing** — that would be the same
     traversal counted twice. It cannot, structurally: a boundary is crossed iff it lies STRICTLY inside a
-    block, and a junction's donor and acceptor are block endpoints. Asserted rather than assumed.
+    block, and a sj's donor and acceptor are block endpoints. Asserted rather than assumed.
     """
     region_bounds = [0, 1000, 2000, 5000, 5050, 10000, 12000]
     partition = Partition.from_region_bounds(
         [region_bounds],
         region_types=[[0, 2, 1, 2, 2, 0]],
-        junctions=[(0, 2000, 5000, Strand.POS), (0, 2000, 5050, Strand.POS)],
+        sj=[(0, 2000, 5000, Strand.POS), (0, 2000, 5050, Strand.POS)],
     )
     accumulator = Accumulator(partition, max_fragment_length=2000)
     assert (
@@ -563,31 +563,31 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
 
     spliced_by_boundary = np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1)
     assert spliced_by_boundary.tolist() == [0, 0, 0, 1, 0], (
-        "exactly one CONTIGUOUS crossing — at the boundary @5050 — and none at the junction's own two "
+        "exactly one CONTIGUOUS crossing — at the boundary @5050 — and none at the sj's own two "
         f"positions, which would be the splice counted twice; got {spliced_by_boundary.tolist()}"
     )
     assert np.asarray(tally.sj_count, np.int64).sum(axis=1).tolist() == [1, 0], (
-        "the fragment splices TA's junction, not TB's"
+        "the fragment splices TA's sj, not TB's"
     )
 
     boundary_at_5050 = float(np.asarray(tally.boundary_spliced_mass, np.float64)[3])
-    junction = float(np.asarray(tally.sj_mass, np.float64)[0].sum())
-    want_junction = Fraction(200 + 25, length)
+    sj = float(np.asarray(tally.sj_mass, np.float64)[0].sum())
+    want_sj = Fraction(200 + 25, length)
     want_boundary = Fraction(25 + 150, length)
-    assert abs(junction - want_junction) <= budget(2), (
-        f"junction holds {float(junction):.6f}, want {float(want_junction):.6f} — it must claim on "
+    assert abs(sj - want_sj) <= budget(2), (
+        f"sj holds {float(sj):.6f}, want {float(want_sj):.6f} — it must claim on "
         f"BOTH its donor and acceptor sides"
     )
     assert abs(boundary_at_5050 - want_boundary) <= budget(2)
-    assert abs(junction + boundary_at_5050 - 1) <= budget(4)
+    assert abs(sj + boundary_at_5050 - 1) <= budget(4)
 
 
 def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or_not():
     """⭐⭐⭐ **THE LAW, over a population that mixes both.** ``Σ mass + Σ contained == n``.
 
     Claim 2 states this for unspliced fragments only, and that scoping was correct rather than an
-    oversight — the rule genuinely did not hold across a junction. This is the same law once the
-    junction axis carries its share, and it is the identity a library fragment count rests on.
+    oversight — the rule genuinely did not hold across a sj. This is the same law once the
+    sj axis carries its share, and it is the identity a library fragment count rests on.
 
     The enumeration sweeps the second block's end across the short region's far boundary, so it contains
     spliced fragments that cross a boundary and spliced fragments that cross none, plus the unspliced

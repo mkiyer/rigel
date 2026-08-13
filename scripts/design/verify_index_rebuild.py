@@ -8,8 +8,8 @@ reports — and **nothing else**. So a correct rebuild has an exactly predictabl
 * `regions.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
   used the RIGHT SOURCE: a different FASTA or GTF moves the region_bounds, and regions would differ immediately.
 * `edges.feather` differing in the four `reach_*` columns of the **contiguous** rows and nowhere else.
-  ⚠ Junction reach is deliberately unchanged — a junction boundary is only used by a molecule that spliced
-  across it, so what remains either side is exonic, and `_junction_edges` stays on the exonic reach.
+  ⚠ SpliceJunction reach is deliberately unchanged — a sj boundary is only used by a molecule that spliced
+  across it, so what remains either side is exonic, and `_sj_edges` stays on the exonic reach.
 
 Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the region
 ids would be a different change wearing this one's clothes — and `partition_hash` would not notice, because
@@ -73,20 +73,20 @@ def main() -> None:
             same = old_boundaries[column].equals(new_boundaries[column])
             if column in REACH_COLUMNS:
                 moved = int((old_boundaries[column].to_numpy() != new_boundaries[column].to_numpy()).sum())
-                junction_moved = int(
+                sj_moved = int(
                     (
                         old_boundaries.loc[~contiguous, column].to_numpy()
                         != new_boundaries.loc[~contiguous, column].to_numpy()
                     ).sum()
                 )
-                mark = "OK  " if junction_moved == 0 else "FAIL"
+                mark = "OK  " if sj_moved == 0 else "FAIL"
                 print(
                     f"  {mark}  {column:<16} {moved:>10,} rows moved "
-                    f"({100 * moved / len(old_boundaries):5.1f} %), of which junction rows: {junction_moved:,}"
+                    f"({100 * moved / len(old_boundaries):5.1f} %), of which sj rows: {sj_moved:,}"
                 )
-                if junction_moved:
+                if sj_moved:
                     failures.append(
-                        f"{column}: {junction_moved:,} JUNCTION rows moved. Junction reach is exonic by "
+                        f"{column}: {sj_moved:,} SJ rows moved. SpliceJunction reach is exonic by "
                         f"design and S1 did not touch it."
                     )
             elif not same:

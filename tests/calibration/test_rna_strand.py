@@ -140,8 +140,8 @@ def _sj_table(sense, antisense):
     )
 
 
-def test_fit_from_sj_table_uses_every_junction():
-    """The wrapper fits one seed per junction; junctions with no fragments drop out."""
+def test_fit_from_sj_table_uses_every_sj():
+    """The wrapper fits one seed per sj; sj with no fragments drop out."""
     rng = np.random.default_rng(5)
     kappa = 0.9
     sense, total = _beta_binom_regions(rng, 6000, 120, 0.10, kappa)
@@ -156,7 +156,7 @@ def test_fit_from_sj_table_uses_every_junction():
 
 
 def test_fit_from_sj_table_empty_is_fallback():
-    """No junctions carrying fragments → fallback to prior (a library with no spliced reads)."""
+    """No sj carrying fragments → fallback to prior (a library with no spliced reads)."""
     model = fit_rna_strand_from_sj_table(
         _sj_table([0, 0], [0, 0]),
         rna_sense_frac=0.9,

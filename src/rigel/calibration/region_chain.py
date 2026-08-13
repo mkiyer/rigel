@@ -21,9 +21,9 @@ A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:
 indexes the region axis or the contiguous-boundary axis respectively. That keeps every per-object statistic in
 its own payload-shaped array — the chain only sequences and links them.
 
-⚠ **Junction boundaries are NOT chain slots.** The graph is a DAG but not a polytree: every junction boundary
-closes an undirected loop, so a junction must be a FACTOR on its endpoint regions and never a message
-channel (— never break a cycle by dropping a junction boundary,
+⚠ **SpliceJunction boundaries are NOT chain slots.** The graph is a DAG but not a polytree: every sj boundary
+closes an undirected loop, so a sj must be a FACTOR on its endpoint regions and never a message
+channel (— never break a cycle by dropping a sj boundary,
 that re-isolates the exon the boundary exists for).
 """
 

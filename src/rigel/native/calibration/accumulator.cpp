@@ -292,29 +292,29 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
     deposited_lengths_.assign(static_cast<std::size_t>(max_length_) + 1, 0u);
 }
 
-void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
+void Accumulator::set_sj(std::vector<std::int32_t> offsets,
                                 std::vector<std::int32_t> boundary_right,
                                 std::vector<std::int8_t>  sj_strand)
 {
     if (!offsets.empty() && offsets.size() != region_bounds_.size() + 1) {
         throw std::invalid_argument(
-            "accumulator: junction CSR offsets must have length n_region_bounds + 1 = " +
+            "accumulator: sj CSR offsets must have length n_region_bounds + 1 = " +
             std::to_string(region_bounds_.size() + 1) + ", got " + std::to_string(offsets.size()));
     }
     if (boundary_right.size() != sj_strand.size()) {
         throw std::invalid_argument(
-            "accumulator: junction boundary_right has " + std::to_string(boundary_right.size()) +
+            "accumulator: sj boundary_right has " + std::to_string(boundary_right.size()) +
             " entries but sj_strand has " + std::to_string(sj_strand.size()));
     }
     if (!offsets.empty() && static_cast<std::size_t>(offsets.back()) != boundary_right.size()) {
         throw std::invalid_argument(
-            "accumulator: junction CSR ends at " + std::to_string(offsets.back()) +
-            " but there are " + std::to_string(boundary_right.size()) + " junctions");
+            "accumulator: sj CSR ends at " + std::to_string(offsets.back()) +
+            " but there are " + std::to_string(boundary_right.size()) + " sj");
     }
     sj_offsets_      = std::move(offsets);
     sj_boundary_right_ = std::move(boundary_right);
     sj_strand_       = std::move(sj_strand);
-    junctions_.assign(sj_boundary_right_.size(), JunctionEdge{});
+    sj_.assign(sj_boundary_right_.size(), SpliceJunction{});
 }
 
 // ============================================================================
@@ -351,7 +351,7 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
     // ⚠ The strand filter applies only when the observed strand is DEFINITE. NONE means the aligner wrote
     // no motif tag at all (STAR writes XS, minimap2 ts, some write neither), so on such a BAM every
     // spliced fragment arrives with NONE -- demanding a strand there would delete 100 % of that aligner's
-    // annotated junctions. AMBIGUOUS never reaches here; `deposit` rejects the whole fragment's splices.
+    // annotated sj. AMBIGUOUS never reaches here; `deposit` rejects the whole fragment's splices.
     const bool definite = (sj_strand == STRAND_POS || sj_strand == STRAND_NEG);
     const std::int32_t lo = sj_offsets_[static_cast<std::size_t>(donor)];
     const std::int32_t hi = sj_offsets_[static_cast<std::size_t>(donor) + 1];
@@ -566,10 +566,10 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
     counters_.introns_absorbed += absorbed;
 
-    // ── which annotated junctions does this path use? this also picks the boundary bank ────────────────
+    // ── which annotated sj does this path use? this also picks the boundary bank ────────────────
     // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
     // ⭐ Resolved PER INTRON POSITION into `sj_id_at_gap`, with -1 where the annotation has no such
-    // junction, because the conserved mass needs to know WHICH of a block's two ends is a junction
+    // sj, because the conserved mass needs to know WHICH of a block's two ends is a sj
     // boundary. A filtered list cannot answer that -- dropping the unannotated entries destroys the
     // alignment between intron `i` and the gap between blocks `i` and `i+1`.
     auto& sj_ids      = scratch.sj_ids;
@@ -618,7 +618,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     //
     // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp boundary, and 1/(L-1) would divide by zero. Its
     // residue is the schema's only count/density co-support violation -- an L == 1 path on an annotated
-    // junction books a count against density 0, which is correct.
+    // sj books a count against density 0, which is correct.
     const double inv_boundary = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
     const std::size_t   col          = static_cast<std::size_t>(column);
 
@@ -648,26 +648,26 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
         // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
         //
-        // ⭐⭐ A JUNCTION IS A BOUNDARY EXACTLY LIKE A BOUNDARY, and that is the whole rule. A block's
+        // ⭐⭐ A SJ IS A BOUNDARY EXACTLY LIKE A BOUNDARY, and that is the whole rule. A block's
         // interior boundaries are the boundaries it crosses; its two ENDS are boundaries too whenever the
-        // intron there resolved to an annotated junction. So a fragment's 1.0 is shared across every
-        // object it crosses -- boundaries and junctions together -- rather than boundaries first and junctions
+        // intron there resolved to an annotated sj. So a fragment's 1.0 is shared across every
+        // object it crosses -- boundaries and sj together -- rather than boundaries first and sj
         // only with whatever is left over.
         //
-        // ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a junction whose
+        // ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a sj whose
         // two flanking blocks both crossed a boundary received NOTHING while `sj_count` credited it. That
         // still conserved -- the total was 1.0 -- but it is not a sharing.
         //
         // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
         // only this one is expressible per base -- which is how the two are told apart at all.
-        // ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule exactly
-        // and `unspliced_mass` is byte-identical. A single block with no boundary and no annotated junction
+        // ⚠ An UNSPLICED path has no sj boundaries, so this reduces to the previous rule exactly
+        // and `unspliced_mass` is byte-identical. A single block with no boundary and no annotated sj
         // is bounded by nothing and deposits nothing: for a one-block path that is the CONTAINED case,
         // already whole in `contained_count`; for a multi-block one it is an unannotated intron's block.
         {
-            const std::int32_t left_junction =
+            const std::int32_t left_sj =
                 block > 0 ? sj_id_at_gap[block - 1] : -1;
-            const std::int32_t right_junction =
+            const std::int32_t right_sj =
                 block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
             const std::int64_t n_slices = last - first + 1;
             for (std::int64_t i = 0; i < n_slices; ++i) {
@@ -675,10 +675,10 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                 const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
                 const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
                 const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
-                // The block's own ends are junction boundaries; its interior ends are boundaries. A slice
+                // The block's own ends are sj boundaries; its interior ends are boundaries. A slice
                 // therefore has at most one boundary of each kind on each side, never both.
-                const std::int32_t left_jid  = (left_boundary  < 0) ? left_junction  : -1;
-                const std::int32_t right_jid = (right_boundary < 0) ? right_junction : -1;
+                const std::int32_t left_jid  = (left_boundary  < 0) ? left_sj  : -1;
+                const std::int32_t right_jid = (right_boundary < 0) ? right_sj : -1;
                 const std::int64_t n_bounds = (left_boundary >= 0 ? 1 : 0) + (right_boundary >= 0 ? 1 : 0)
                                             + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
                 if (n_bounds == 0) continue;
@@ -695,7 +695,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                 for (const std::int32_t jid : {left_jid, right_jid}) {
                     // ⭐ `col` — the SAME genome-strand column `count` is deposited at below, so
                     // `mass[c] / count[c]` is a per-strand mean rather than a ratio across populations.
-                    if (jid >= 0) junctions_[static_cast<std::size_t>(jid)].mass[col] += share;
+                    if (jid >= 0) sj_[static_cast<std::size_t>(jid)].mass[col] += share;
                 }
             }
         }
@@ -706,9 +706,9 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
 
     for (const std::int32_t id : sj_ids) {
-        JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
-        junction.count[col] += 1u;
-        junction.inv_length_sum += inv_boundary;
+        SpliceJunction& sj = sj_[static_cast<std::size_t>(id)];
+        sj.count[col] += 1u;
+        sj.inv_length_sum += inv_boundary;
     }
 
     // ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────────
@@ -845,11 +845,11 @@ void Accumulator::merge_from(const Accumulator& other) {
             "accumulator: merge_from requires identical region_bound positions (this has " +
             std::to_string(region_bounds_.size()) + ", other has " + std::to_string(other.region_bounds_.size()) + ")");
     }
-    if (junctions_.size() != other.junctions_.size()) {
+    if (sj_.size() != other.sj_.size()) {
         throw std::invalid_argument(
-            "accumulator: merge_from requires the same junction bank (this has " +
-            std::to_string(junctions_.size()) + ", other has " +
-            std::to_string(other.junctions_.size()) + ")");
+            "accumulator: merge_from requires the same sj bank (this has " +
+            std::to_string(sj_.size()) + ", other has " +
+            std::to_string(other.sj_.size()) + ")");
     }
 
     gap_census_.merge_from(other.gap_census_);
@@ -877,14 +877,14 @@ void Accumulator::merge_from(const Accumulator& other) {
         boundaries_[i].unspliced_mass += other.boundaries_[i].unspliced_mass;
         boundaries_[i].spliced_mass   += other.boundaries_[i].spliced_mass;
     }
-    for (std::size_t i = 0; i < junctions_.size(); ++i) {
+    for (std::size_t i = 0; i < sj_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            junctions_[i].count[c]   += other.junctions_[i].count[c];
-            // ⭐ INSIDE the column loop, unlike every other mass in this file: the junction mass is the
-            // one that carries a strand. See `JunctionEdge::mass` for the premise that changed.
-            junctions_[i].mass[c]    += other.junctions_[i].mass[c];
+            sj_[i].count[c]   += other.sj_[i].count[c];
+            // ⭐ INSIDE the column loop, unlike every other mass in this file: the sj mass is the
+            // one that carries a strand. See `SpliceJunction::mass` for the premise that changed.
+            sj_[i].mass[c]    += other.sj_[i].mass[c];
         }
-        junctions_[i].inv_length_sum += other.junctions_[i].inv_length_sum;
+        sj_[i].inv_length_sum += other.sj_[i].inv_length_sum;
     }
     // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
     // and silently not merging would lose one side's pools entirely — the same class of defect as the
@@ -944,27 +944,27 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
     }
 }
 
-void AccumulatorSet::set_junctions(const std::int64_t* offsets,
+void AccumulatorSet::set_sj(const std::int64_t* offsets,
                                    std::size_t n_offsets,
                                    const std::int64_t* boundary_right,
                                    const std::int8_t* sj_strand,
-                                   std::size_t n_junctions,
+                                   std::size_t n_sj,
                                    const std::int64_t* ref_region_bound_offsets)
 {
     if (offsets == nullptr || ref_region_bound_offsets == nullptr) {
         throw std::invalid_argument(
-            "accumulator set: set_junctions needs both the CSR offsets and ref_region_bound_offsets");
+            "accumulator set: set_sj needs both the CSR offsets and ref_region_bound_offsets");
     }
     const std::size_t n_region_bounds = static_cast<std::size_t>(ref_region_bound_offsets[accs_.size()]);
     if (n_offsets != n_region_bounds + 1) {
         throw std::invalid_argument(
-            "accumulator set: junction CSR offsets must have length n_region_bounds + 1 = " +
+            "accumulator set: sj CSR offsets must have length n_region_bounds + 1 = " +
             std::to_string(n_region_bounds + 1) + ", got " + std::to_string(n_offsets));
     }
-    if (static_cast<std::size_t>(offsets[n_region_bounds]) != n_junctions) {
+    if (static_cast<std::size_t>(offsets[n_region_bounds]) != n_sj) {
         throw std::invalid_argument(
-            "accumulator set: the junction CSR ends at " + std::to_string(offsets[n_region_bounds]) +
-            " but " + std::to_string(n_junctions) + " junctions were given");
+            "accumulator set: the sj CSR ends at " + std::to_string(offsets[n_region_bounds]) +
+            " but " + std::to_string(n_sj) + " sj were given");
     }
 
     std::vector<std::int32_t> ref_offsets, ref_boundary_right;
@@ -972,7 +972,7 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
     for (std::size_t f = 0; f < accs_.size(); ++f) {
         const std::int64_t c0 = ref_region_bound_offsets[f];
         const std::int64_t c1 = ref_region_bound_offsets[f + 1];
-        if (c1 <= c0) continue;  // a reference with no region_bounds owns no regions and no junctions
+        if (c1 <= c0) continue;  // a reference with no region_bounds owns no regions and no sj
         const std::int64_t j0 = offsets[c0];
         const std::int64_t j1 = offsets[c1];
 
@@ -989,7 +989,7 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
             ref_boundary_right.push_back(static_cast<std::int32_t>(boundary_right[k] - c0));
             ref_strand.push_back(sj_strand[k]);
         }
-        accs_[f].set_junctions(ref_offsets, ref_boundary_right, ref_strand);
+        accs_[f].set_sj(ref_offsets, ref_boundary_right, ref_strand);
     }
 }
 

@@ -100,7 +100,7 @@ def measure(spec_name: str, conditions: list[str], *, suite: Path, index_path: P
                     "n_rna": n_rna,
                     "n_gdna": int(r.n_gdna_target),
                     **{k: row[k] for k in (
-                        "slot", "axis", "type", "where", "bp", "n", "spliced", "junction",
+                        "slot", "axis", "type", "where", "bp", "n", "spliced", "sj",
                         "true_fg", "fg_loc", "pred_fg", "sd_fg", "tau", "err", "mass",
                     )},
                 }
@@ -197,7 +197,7 @@ def report(rows: list[dict], spec_name: str, refit_iters: int) -> None:
     for k in order[:4]:
         print(f"\n   {k}")
         print(f"      {'rung':>7} {'true':>7} {'loc':>7} {'pred':>7} {'|Δ|':>7} {'sd':>6} "
-              f"{'n':>8} {'junction':>9}")
+              f"{'n':>8} {'sj':>9}")
         for m in mults:
             g = _live([r for r in by_obj[k] if r["mult"] == m])
             if not g:
@@ -208,7 +208,7 @@ def report(rows: list[dict], spec_name: str, refit_iters: int) -> None:
                   f"{np.mean([abs(r['pred_fg'] - r['true_fg']) for r in g]):>7.4f} "
                   f"{np.mean([r['sd_fg'] for r in g]):>6.3f} "
                   f"{np.mean([r['n'] for r in g]):>8.0f} "
-                  f"{np.mean([r['junction'] for r in g]):>9.0f}")
+                  f"{np.mean([r['sj'] for r in g]):>9.0f}")
 
     # ── 4. confidently wrong: the population that corrupts a prior ────────────────────────────────
     print()

@@ -32,7 +32,7 @@ class CaptureConfig:
         Overlapping probes do not stack; the best single scaled overlap is used.
     gdna_split_penalty : float
         Multiplier applied to projected genomic/pre-mRNA blocks when a probe
-        is split across exon-exon junctions.  Mature RNA sees the contiguous
+        is split across exon-exon sj.  Mature RNA sees the contiguous
         transcript probe; unspliced molecules and gDNA only see separated
         genomic blocks and therefore get less binding weight.
     min_overlap : int

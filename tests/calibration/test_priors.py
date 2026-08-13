@@ -84,9 +84,9 @@ def _result(
             np.ones_like(ez) if mass_per_crossing is None
             else np.asarray(mass_per_crossing, dtype=np.float64)
         ),
-        mass_rna_junction=np.zeros(0, dtype=np.float64),
+        count_rna_sj=np.zeros(0, dtype=np.float64),
         boundary_spliced_mass_per_crossing=np.ones_like(ez),
-        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
+        sj_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=region_eff_arr,
         gdna_boundary_eff_len=boundary_eff_arr,
         rna_region_eff_len=(
@@ -107,7 +107,7 @@ def _result(
         rna_strand_overdispersion=0.05,
         n_regions=n,
         n_boundaries=ne,
-        n_junctions=0,
+        n_sj=0,
         config=CalibrationConfig(),
     )
 
@@ -340,8 +340,8 @@ def test_spliced_mass_withheld_from_rna_prior():
     assert priors.rna_prior_count[0] < 20.0  # the spliced mass really is withheld
 
 
-def test_the_junction_flux_does_NOT_enter_the_rna_prior():
-    """⭐ The ruling, pinned. A junction fragment is certified RNA in exactly the sense a spliced
+def test_the_sj_flux_does_NOT_enter_the_rna_prior():
+    """⭐ The ruling, pinned. A sj fragment is certified RNA in exactly the sense a spliced
     crossing is withheld for — it has no gDNA candidate in the EM — so counting it would load the RNA
     side of a split that arbitrates only UNSPLICED fragments. A locus whose RNA is fully spliced SHOULD
     get a near-zero ``rna_prior_count``: its unspliced fragments really are gDNA or nascent.
@@ -354,9 +354,9 @@ def test_the_junction_flux_does_NOT_enter_the_rna_prior():
 
     loud = dataclasses.replace(
         base,
-        mass_rna_junction=np.array([10_000.0]),
-        junction_mass_per_crossing=np.ones(1),
-        n_junctions=1,
+        count_rna_sj=np.array([10_000.0]),
+        sj_mass_per_crossing=np.ones(1),
+        n_sj=1,
     )
     ra = _regions([0, 100], [100, 200])
     ml = [_ml(0, [(0, 0, 200)])]

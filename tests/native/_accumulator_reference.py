@@ -9,7 +9,7 @@ required to reproduce it **byte for byte**. Where this file and a document disag
 
 THE MODEL
     The genome is a graph. **Regions** are half-open intervals tiling each reference, numbered in genomic
-    order. The 0-bp **boundaries** between adjacent regions are **contiguous boundaries**; a **junction boundary** is a
+    order. The 0-bp **boundaries** between adjacent regions are **contiguous boundaries**; a **sj boundary** is a
     directed donor→acceptor link taken from the annotation. A **fragment is a path** — its aligned
     blocks, joined across mate gaps and broken by introns::
 
@@ -17,7 +17,7 @@ THE MODEL
         region_bounds  0               100      200                  600
         boundaries                  1        2
         path        [====== block ======]                       crosses boundary 1
-        path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
+        path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a sj
 
     Regions count fragments **contained** (they fit inside); boundaries count fragments **crossing**.
     ⭐ **Each population stores only the channels something reads**, and they differ: the two banks the
@@ -91,8 +91,8 @@ __all__ = [
 #: strands — ``Strand.POS`` and ``Strand.NEG`` — following the index's own ``_pos``/``_neg`` column naming
 #: (``reach_lo_pos``, ``reach_lo_neg``, …). Nothing is stored transcript-relative.
 #:
-#: **Sense / antisense is derived, never stored.** A junction boundary carries its own genomic strand, so a
-#: consumer that wants transcript-relative counts computes ``sense = (fragment strand == junction
+#: **Sense / antisense is derived, never stored.** A sj boundary carries its own genomic strand, so a
+#: consumer that wants transcript-relative counts computes ``sense = (fragment strand == sj
 #: strand)``. Storing it instead would put two conventions into one schema — which is exactly the defect
 #: this replaced.
 #:
@@ -275,7 +275,7 @@ class FragmentPool(enum.IntEnum):
     DNA_INTRONIC = 1  # contained in an intronic region
     DNA_INTRON_EXON = 2  # crossing exactly one boundary, flanks {intron, exon}
     DNA_INTERGENIC_EXON = 3  # crossing exactly one boundary, flanks {intergenic, exon}
-    RNA_SPLICED = 4  # using an annotated junction, splice OBSERVED
+    RNA_SPLICED = 4  # using an annotated sj, splice OBSERVED
 
 
 #: Coarse region types, as ``signature.coarse_type_array`` emits them.
@@ -295,7 +295,7 @@ _CONTAINED_POOL = {
 
 
 # ---------------------------------------------------------------------------
-# the partition: the region_bound axis, the region types, and the junction CSR
+# the partition: the region_bound axis, the region types, and the sj CSR
 # ---------------------------------------------------------------------------
 
 
@@ -310,7 +310,7 @@ class Partition:
         regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
         boundaries            boundary 1    boundary 2               c - 2 = 2
 
-    Junctions are a CSR keyed by the **donor region_bound index**, which is the index the deposit has already
+    SpliceJunctions are a CSR keyed by the **donor region_bound index**, which is the index the deposit has already
     computed while locating the boundaries its path crosses. It is cheap because every annotated intron has
     both endpoints as region_bounds, so "is this intron annotated?" reduces to "are both endpoints region_bounds, and is
     the pair registered?" — and if the start is not a region_bound, the table is never consulted.
@@ -342,11 +342,11 @@ class Partition:
         return int(self.sj_boundary_right.shape[0])
 
     @classmethod
-    def from_region_bounds(cls, region_bounds_per_ref, region_types=None, junctions=()) -> "Partition":
+    def from_region_bounds(cls, region_bounds_per_ref, region_types=None, sj=()) -> "Partition":
         """Build from per-reference region_bound lists.
 
-        ``junctions`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be region_bounds on
-        that reference. Junction ids are assigned by sorting on ``(donor region_bound, acceptor region_bound, sj_strand)``,
+        ``sj`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be region_bounds on
+        that reference. SpliceJunction ids are assigned by sorting on ``(donor region_bound, acceptor region_bound, sj_strand)``,
         so they are a deterministic function of the partition alone.
         """
         region_bounds_per_ref = [np.asarray(c, dtype=np.int64) for c in region_bounds_per_ref]
@@ -375,14 +375,14 @@ class Partition:
             )
 
         left_boundaries, right_boundaries, sj_strands = [], [], []
-        for ref, intron_start, intron_end, sj_strand in junctions:
+        for ref, intron_start, intron_end, sj_strand in sj:
             donor = _exact_region_bound(region_bounds, region_bound_offsets, ref, intron_start)
             acceptor = _exact_region_bound(region_bounds, region_bound_offsets, ref, intron_end)
             if donor < 0 or acceptor < 0:
                 raise ValueError(
-                    f"junction [{intron_start}, {intron_end}) on reference {ref} has an endpoint that "
+                    f"sj [{intron_start}, {intron_end}) on reference {ref} has an endpoint that "
                     f"is not a region_bound. Every annotated intron endpoint is a region_bound by construction, so this "
-                    f"is a partition/annotation mismatch, not an unannotated junction."
+                    f"is a partition/annotation mismatch, not an unannotated sj."
                 )
             left_boundaries.append(donor)
             right_boundaries.append(acceptor)
@@ -489,7 +489,7 @@ class Tally:
         region_contained    count  inv_length_sum  length_sum       the mixture, on the region axis
         boundary_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the boundary axis
         boundary_spliced      count                              mass certified RNA — nothing deconvolves it
-        junction          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
+        sj          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
 
     ⛔ Six banks were removed on that rule (three ``region_spanning_*``, the two spliced-boundary moments and
     ``sj_length_sum``). ⚠ A future channel is added the same way — because a named consumer needs it,
@@ -525,7 +525,7 @@ class Tally:
     #: ⭐ uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag.
     #:
     #: ⛔ **A PARTIAL BY CONSTRUCTION, AND NOT A CONSERVATION LEDGER.** A spliced fragment's blocks that
-    #: contain no interior boundary deposit nothing here — their accounting is on the junction axis — so
+    #: contain no interior boundary deposit nothing here — their accounting is on the sj axis — so
     #: this sums to ``crossed_block_len / L`` per fragment, never to 1. That is correct: it is a
     #: per-BOUNDARY certified-RNA term, exactly commensurate with the unspliced mass at the same boundary
     #: (both are "the share of this fragment's bases adjacent to this boundary"), which is what makes the
@@ -536,27 +536,27 @@ class Tally:
     #: in the unspliced bank would put certified RNA into the competition the prior arbitrates.
     boundary_spliced_mass: np.ndarray
     #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
-    #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
+    #: THEM YET** (owner ruling, 2026-08-08). A sj is stranded by its genomic splicing MOTIF, so
     #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
     #:
     #: ⭐ **The reason is aligner-artifact detection.** Aligners emit false-positive ``N`` CIGAR ops from
     #: plain genomic DNA. ``rigel.splice_blacklist`` catches those the sister tool ``alignable`` has
     #: enumerated by coordinate — an a-priori list, and far from complete. The EMPIRICAL detector is
-    #: this column: in a stranded library a real junction inherits the global strand specificity, while
+    #: this column: in a stranded library a real sj inherits the global strand specificity, while
     #: an artifact deposits on BOTH strands and deviates from it. ⚠ Unstranded data cannot use it
     #: (κ = ½ leaves nothing to deviate from), which is a property of the detector, not a reason to drop
     #: the column.
     #:
-    #: ⛔ The discriminating information lives ONLY in the split — a clean junction and an artifactual
+    #: ⛔ The discriminating information lives ONLY in the split — a clean sj and an artifactual
     #: one carry the same total. Gated by
-    #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
+    #: ``test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
-    #: uint64[n_sj] — ⭐ LIVE: ``second_pass.py`` scores a held fragment's junction evidence with it.
+    #: uint64[n_sj] — ⭐ LIVE: ``second_pass.py`` scores a held fragment's sj evidence with it.
     #: ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, AND IT IS WHAT MAKES A LIBRARY FRAGMENT
     #: COUNT COMPUTABLE AT ALL.** A spliced fragment's block that contains no interior boundary deposits
-    #: nothing on either boundary bank, and it is not ``contained`` either — its path spans a junction, so
+    #: nothing on either boundary bank, and it is not ``contained`` either — its path spans a sj, so
     #: it lies in no single region. Before this bank such a fragment existed on the incidence axis
     #: (``sj_count``) and on no conserved one, so no sum over conserved banks could count it.
     #:
@@ -571,15 +571,15 @@ class Tally:
     #: commensurability ``boundary_spliced_mass`` documents ("the share of this fragment's bases adjacent to
     #: this boundary", directly comparable with the unspliced mass at the same boundary) survives. Only the
     #: blocks that previously disposed of nothing are affected, and they now give their whole
-    #: ``block_len / L`` to the annotated junctions bounding them, shared equally.
+    #: ``block_len / L`` to the annotated sj bounding them, shared equally.
     #:
-    #: ⚠ A boundary counts only where the intron RESOLVED to an annotated junction. A block bounded
+    #: ⚠ A boundary counts only where the intron RESOLVED to an annotated sj. A block bounded
     #: solely by unannotated introns still has nowhere conserved to send its bases — the same residual
     #: the unspliced rule has always had — so the identity is exact over deposited, ANNOTATED fragments,
     #: which is one qualifier weaker than before rather than none.
     #:
     #: ⭐⭐⭐ **float64[n_sj, 2] — TWO COLUMNS, and the only mass that has any.** `accumulator.h`'s
-    #: one-value ruling was reversed here and only here (owner, 2026-08-12): an ARTIFACTUAL junction
+    #: one-value ruling was reversed here and only here (owner, 2026-08-12): an ARTIFACTUAL sj
     #: accumulates SYMMETRICALLY on both strands like gDNA, so the existing strand model can detect one
     #: given a per-strand observable, and a per-strand mass is also what makes artifact filtering
     #: single-pass rather than tally-filter-re-accumulate. ⛔ The columns are `sj_count`'s columns.
@@ -803,7 +803,7 @@ class Accumulator:
         the column labelled *sense*.
 
         ⚠ ``sj_strand`` here is **observed**, per fragment. ``Partition.sj_strand`` is **annotated**, per
-        junction boundary. One quantity, two sources; :meth:`_sj_edge_id` compares them.
+        sj boundary. One quantity, two sources; :meth:`_sj_edge_id` compares them.
         """
         # ⚠ Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
         # fragment with no single genome strand has no column in any bank. The scanner's gate at
@@ -867,14 +867,14 @@ class Accumulator:
         if sj_strand == Strand.NONE:
             sj_strand = hypothesis.sj_strand
 
-        # ── which annotated junctions does this path use? ─────────────────────────────────────────
+        # ── which annotated sj does this path use? ─────────────────────────────────────────
         # ⚠ A contradictory motif strand disqualifies the whole fragment's splices, so it is checked once
         # here rather than per intron: `sj_strand` is the OR of the per-record strand-tag values, so
         # AMBIGUOUS means the mates disagreed about the same molecule. That is contradictory EVIDENCE, not
         # missing evidence, and it is counted on its own denominator — folding it into
         # `unannotated_introns` would poison the one metric whose job is measuring annotation coverage.
-        # ⭐ Resolved PER INTRON POSITION, with -1 where the annotation has no such junction, because
-        # the conserved mass needs to know WHICH of a block's two ends is a junction boundary. A
+        # ⭐ Resolved PER INTRON POSITION, with -1 where the annotation has no such sj, because
+        # the conserved mass needs to know WHICH of a block's two ends is a sj boundary. A
         # filtered list cannot answer that — dropping the unannotated entries destroys the alignment
         # between intron `i` and the gap between blocks `i` and `i+1`.
         if sj_strand == Strand.AMBIGUOUS:
@@ -932,36 +932,36 @@ class Accumulator:
             #
             #     Sum over the fragment  =  Sum slice_len / length  =  1
             #
-            # ⭐⭐ **A JUNCTION IS A BOUNDARY EXACTLY LIKE A BOUNDARY**, and that is the whole rule. A block's
+            # ⭐⭐ **A SJ IS A BOUNDARY EXACTLY LIKE A BOUNDARY**, and that is the whole rule. A block's
             # interior boundaries are the boundaries it crosses; its two ENDS are boundaries too whenever the
-            # intron there resolved to an annotated junction. So a fragment's 1.0 is shared across every
-            # object it crosses — boundaries and junctions together — rather than boundaries first and junctions
+            # intron there resolved to an annotated sj. So a fragment's 1.0 is shared across every
+            # object it crosses — boundaries and sj together — rather than boundaries first and sj
             # only with what is left over.
             #
-            # ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a junction whose
+            # ⛔ The predecessor gave a boundary-crossing block's bases entirely to boundaries, so a sj whose
             # two flanking blocks both crossed a boundary received NOTHING while `sj_count` credited it. That
             # still conserved — the total was 1.0 — but it is not a sharing, and it left `q_sj = 0` on
-            # 35 of 8,436 crossed junctions on ladder g50 capture_off.
+            # 35 of 8,436 crossed sj on ladder g50 capture_off.
             #
             # ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat,
             # and only this one is expressible per base — which is how the two are told apart at all.
-            # ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule
+            # ⚠ An UNSPLICED path has no sj boundaries, so this reduces to the previous rule
             # exactly and `boundary_unspliced_mass` is byte-identical. A single block with no boundary and no
-            # annotated junction is bounded by nothing and deposits nothing: for a one-block path that is
+            # annotated sj is bounded by nothing and deposits nothing: for a one-block path that is
             # the CONTAINED case, already whole in `region_contained_count`; for a multi-block one it is an
             # unannotated intron's block, whose bases have nowhere conserved to go.
-            left_junction = sj_id_at_gap[block - 1] if block > 0 else -1
-            right_junction = sj_id_at_gap[block] if block < len(sj_id_at_gap) else -1
+            left_sj = sj_id_at_gap[block - 1] if block > 0 else -1
+            right_sj = sj_id_at_gap[block] if block < len(sj_id_at_gap) else -1
             n_slices = last - first + 1
             for i in range(n_slices):
                 lo = seg_start if i == 0 else int(region_bounds[first + i - 1])
                 hi = seg_end if i == n_slices - 1 else int(region_bounds[first + i])
                 left_boundary = first + i - 1 if i > 0 else -1
                 right_boundary = first + i if i < n_slices - 1 else -1
-                # The block's own ends are junction boundaries; its interior ends are boundaries. A slice
+                # The block's own ends are sj boundaries; its interior ends are boundaries. A slice
                 # therefore has at most one boundary of each kind on each side, never both.
-                left_jid = left_junction if left_boundary < 0 else -1
-                right_jid = right_junction if right_boundary < 0 else -1
+                left_jid = left_sj if left_boundary < 0 else -1
+                right_jid = right_sj if right_boundary < 0 else -1
                 n_bounds = (
                     int(left_boundary >= 0)
                     + int(right_boundary >= 0)
@@ -1166,7 +1166,7 @@ class Accumulator:
         return min(max(int(np.searchsorted(region_bounds, position, side="right")) - 1, 0), region_bounds.size - 2)
 
     def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
-        """The junction-boundary id for this intron, or -1 if it is not annotated.
+        """The sj-boundary id for this intron, or -1 if it is not annotated.
 
         One to three iterations at human scale: 70.4 % of region_bounds are not a donor at all, and over those
         that are, the mean fan-out is 1.31.
@@ -1187,8 +1187,8 @@ class Accumulator:
             # credited `unannotated_introns` (poisoning the one metric that measures annotation coverage),
             # and dropped it from the pure RNA pool the length model is fitted from.
             #
-            # The filter exists only to separate two junctions sharing a coordinate pair. ⭐ Measured: 0 of
-            # 404,168 human junction coordinates are annotated on both strands, so it can only ever lose a
+            # The filter exists only to separate two sj sharing a coordinate pair. ⭐ Measured: 0 of
+            # 404,168 human sj coordinates are annotated on both strands, so it can only ever lose a
             # match, never disambiguate one. The resolver already reads a non-definite strand as "either"
             # (`sj_lookup_into` falls back to the union of POS and NEG), so this agrees with it.
             if sj_strand in STRAND_COLUMNS and int(p.sj_strand[k]) != int(sj_strand):

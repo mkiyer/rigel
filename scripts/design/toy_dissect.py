@@ -20,11 +20,11 @@ exactly 0) — the chain, measured:
 
 * the exon has NO own evidence (``tau = 0``, ``fg_loc = fg_strand = 0.4902`` — psi's reference);
 * every gDNA channel into it is DEAD (``cg``, ``cm_g``, ``c_tau`` all 0);
-* so the only channel left is the certified-RNA measurement grafted from the junction, and taken at
+* so the only channel left is the certified-RNA measurement grafted from the sj, and taken at
   face value it is RIGHT: it implies ``f_g = -0.003``;
 * ⛔ but its precision is capped by ``spl_prec = J/(1 + J·(log r)²)`` with
   ``r = rho_tot(exon)/rho_tot(intron|exon BOUNDARY)``. Measured r = 0.914 where it should be 1, so 15,639
-  junction reads deliver **122** effective observations and the phantom gDNA is FLAT at ~2 % over a
+  sj reads deliver **122** effective observations and the phantom gDNA is FLAT at ~2 % over a
   64x depth range. Handing the solver the toy's own realised RNA length pmf moves r to 0.964,
   ``spl_prec`` to 714, and halves the error.
 """
@@ -148,7 +148,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
               f"{st['fwd_g'][s]:>12.5g} {st['bwd_g'][s]:>12.5g}")
         print(f"      psi inputs: mo_g {uni['mo_g'][s]:>8.4f} at cm_g {uni['cm_g'][s]:>8.4g}   "
               f"lam {uni['lam_msg'][s]:>8.4f} at c_tau {uni['c_tau'][s]:>8.4g}")
-        # ⭐⭐ THE RNA MEASUREMENT CHANNEL — the graft. A mature-RNA count at the flanking junction is
+        # ⭐⭐ THE RNA MEASUREMENT CHANNEL — the graft. A mature-RNA count at the flanking sj is
         # a CERTIFIED-RNA measurement of this exon's RNA density (gDNA cannot be spliced), and on a
         # slot with no gDNA evidence and no strand it is the ONLY thing that can move f_g off psi's
         # uninformative reference. It is what the gDNA channels being dead leaves behind.
@@ -160,7 +160,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
               f"M/E_r = {M / max(Er, 1e-9):>10.5g}")
         print(f"         ⇒ implied f_g = 1 − rho_R·E_r/M = "
               f"{1.0 - rho_r * Er / max(M, 1e-9):>10.5g}   (final {cap['f_g'][s]:.4f})")
-        print(f"      junction flux at the flanking boundaries: "
+        print(f"      sj flux at the flanking boundaries: "
               f"{float(np.asarray(cap['mature'], float)[s - 1]):,.0f} / "
               f"{float(np.asarray(cap['mature'], float)[s + 1]):,.0f}"
               f"   E_J-frame density = J/E_J")

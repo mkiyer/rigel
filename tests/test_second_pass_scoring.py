@@ -9,7 +9,7 @@ this was deliberately not written against the four-fragment smoke fixture: it ha
 came out uniform, and the gate would have been green over a scorer that decided nothing.
 
 ⭐ **HOW rho IS ISOLATED WITHOUT A THRESHOLD — the mirror.** Loci 1 and 2 are the *same geometry* with the
-deep junction swapped. Every hypothesis has the same implied ``L`` at both, so ``f`` and the strand term
+deep sj swapped. Every hypothesis has the same implied ``L`` at both, so ``f`` and the strand term
 are **identical between them** — measured, not assumed (:func:`test_the_two_arms_differ_ONLY_in_rho`). So
 if the winner flips between the two loci, only ``rho`` can have flipped it. That is a derivation; a
 "score(A) > 3 * score(B)" assertion would have been a tuned constant.
@@ -18,15 +18,15 @@ The five arms
 -------------
 
 ======  ==========================================  ==========================================
-arm 1   locus 1, the **wide** junction is deep      the wide hypothesis must take the larger share
-arm 2   locus 2, the **narrow** junction is deep    ⭐ the mirror — the answer must FLIP
+arm 1   locus 1, the **wide** sj is deep      the wide hypothesis must take the larger share
+arm 2   locus 2, the **narrow** sj is deep    ⭐ the mirror — the answer must FLIP
 arm 3   locus 3, the gap is deeply crossed          ∅ must win. ⛔ **This arm is D-6**, and it
         **contiguously** and nothing splices it     failed until ∅'s evidence set was corrected
 arm 4   locus 4, the gap's **donor** end is deeply  ∅ must LOSE — a molecule crossing the gap is
 6       crossed and its acceptor never; locus 6 is  present at both ends, and nothing was seen at
         the mirror                                  one. ⛔ Added because half-fixes to D-6 that
                                                     kept ONE boundary passed arms 1–3
-arm 5   locus 5, two junctions at **equal** depth   the length term decides, so the hypothesis the
+arm 5   locus 5, two sj at **equal** depth   the length term decides, so the hypothesis the
         and different implied lengths               anchor supports must win. ⛔ Added because
                                                     dropping ``f`` entirely passed arms 1–4
 arm 7   locus 7, two **opposite-strand** hypotheses  scored twice on one payload, at an R1-sense and
@@ -55,7 +55,7 @@ from rigel.pipeline import scan_and_buffer
 GENOME = 30_000
 M, N = 0, 3
 
-#: The six loci. Three MIRROR PAIRS: 1/2 swap which junction is deep, and 4/6 swap which END of the
+#: The six loci. Three MIRROR PAIRS: 1/2 swap which sj is deep, and 4/6 swap which END of the
 #: gap is crossed. Every non-firing perturbation this module found was closed by adding the mirror.
 L1, L2, L3, L4, L5, L6, L7 = 1000, 4000, 7000, 10_000, 13_000, 16_000, 19_000
 
@@ -104,7 +104,7 @@ def _gtf() -> str:
             f'chr1\tt\texon\t{base + 1001}\t{base + 1200}\t.\t+\t.\tgene_id "g{gene}"; transcript_id "t{gene}";\n',
         ]
     # Locus 5: two isoforms whose introns differ in WIDTH (300 vs 100), so their implied lengths are 300
-    # and 500 — bins only the ballast fills. Both junctions get the same depth, so only ``f`` can decide.
+    # and 500 — bins only the ballast fills. Both sj get the same depth, so only ``f`` can decide.
     rows += [
         f'chr1\tt\texon\t{L5 + 1}\t{L5 + 650}\t.\t+\t.\tgene_id "gE"; transcript_id "tE";\n',
         f'chr1\tt\texon\t{L5 + 951}\t{L5 + 1200}\t.\t+\t.\tgene_id "gE"; transcript_id "tE";\n',
@@ -179,7 +179,7 @@ def scored(tmp_path_factory):
 
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
-        build_junction_edge_arrays,
+        build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
@@ -199,7 +199,7 @@ def scored(tmp_path_factory):
         for k in range(count):
             reads += _contiguous(f"ballast_{i}_{k}", 23_000 + (k % 20) * 100, half)
 
-    # arms 1 and 2: the same locus twice, with the deep junction swapped
+    # arms 1 and 2: the same locus twice, with the deep sj swapped
     for locus, deep_offset, shallow_offset in (
         (L1, (600, 1000), (700, 900)),
         (L2, (700, 900), (600, 1000)),
@@ -239,7 +239,7 @@ def scored(tmp_path_factory):
         reads += _spliced(f"spliced_{L6}_{k}", L6 + 600, L6 + 1000, k)
     reads += _ambiguous(f"ambig_{L6}", L6)
 
-    # arm 5: both junctions at EQUAL depth — the same k range, so the deposited length multiset and
+    # arm 5: both sj at EQUAL depth — the same k range, so the deposited length multiset and
     # therefore the deposited density are identical. Only the implied length differs.
     for k in range(DEEP):
         reads += _spliced(f"wide_{L5}_{k}", L5 + 650, L5 + 950, k)
@@ -263,7 +263,7 @@ def scored(tmp_path_factory):
         bam, index, BamScanConfig(sj_strand_tag="XS", total_threads=1)
     )
     _, _, region_types = build_region_partition_arrays(index)
-    junctions = build_junction_edge_arrays(index)
+    sj = build_sj_arrays(index)
     fl_models = build_fl_models(payload)
 
     def rescore(rna_sense_frac: float):
@@ -274,7 +274,7 @@ def scored(tmp_path_factory):
             fl_models=fl_models,
             rna_sense_frac=rna_sense_frac,
             region_types=region_types,
-            junctions=junctions,
+            sj=sj,
         )
 
     return payload, rescore(strand_model.p_r1_sense), rescore
@@ -307,7 +307,7 @@ def _terms(payload, result, base: int) -> dict[tuple, tuple]:
     }
 
 
-# ── arms 1 and 2: the deep junction wins, and the answer FLIPS when the depth moves ────────────────
+# ── arms 1 and 2: the deep sj wins, and the answer FLIPS when the depth moves ────────────────
 
 
 def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
@@ -355,8 +355,8 @@ def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
             )
 
 
-def test_the_DEEP_junction_takes_the_larger_share(scored):
-    """⭐ Arm 1. Locus 1's wide intron carries ``DEEP`` observed junction fragments and its narrow rival
+def test_the_DEEP_sj_takes_the_larger_share(scored):
+    """⭐ Arm 1. Locus 1's wide intron carries ``DEEP`` observed sj fragments and its narrow rival
     ``SHALLOW``; the held fragment is compatible with both. The wide hypothesis must win.
 
     ⚠ Both rivals have **non-zero** flux by construction, so this is a test of discrimination and not of
@@ -366,19 +366,19 @@ def test_the_DEEP_junction_takes_the_larger_share(scored):
     shares = _shares(scored[0], scored[1], L1)
     wide, narrow = ((1600, 2000),), ((1700, 1900),)
     assert shares[wide] > shares[narrow], (
-        f"the DEEP junction must take the larger share; got wide={shares[wide]:.4f} "
+        f"the DEEP sj must take the larger share; got wide={shares[wide]:.4f} "
         f"narrow={shares[narrow]:.4f}. The two differ only in how many fragments were observed "
         f"crossing them."
     )
     assert shares[wide] == max(shares.values()), (
-        f"the deep junction must be the winner; got {shares}"
+        f"the deep sj must be the winner; got {shares}"
     )
 
 
 def test_MOVING_the_depth_FLIPS_the_answer(scored):
     """⭐ Arm 2, the mirror — and the reason no threshold is needed anywhere in this module.
 
-    Locus 2 is locus 1's geometry with the deep junction moved to the *narrow* intron. Every implied
+    Locus 2 is locus 1's geometry with the deep sj moved to the *narrow* intron. Every implied
     length is unchanged, so ``f`` and the strand term are unchanged
     (:func:`test_the_two_arms_differ_ONLY_in_rho` proves it). A flipped winner therefore isolates ``rho``
     **exactly**, where a "wins by more than X" assertion would have been a constant chosen after the fact.
@@ -446,7 +446,7 @@ def test_the_GENOMIC_hypothesis_needs_evidence_at_BOTH_ENDS_of_the_gap(scored, b
     ⭐ A molecule that crosses the gap contiguously is present at *both* of its ends, so the scarcest
     object on the path bounds it — which is what ``min`` aggregation means (D-1's bottleneck reading).
     With no fragment ever seen crossing the acceptor boundary, there is no evidence for a contiguous crossing
-    however deep the donor side is, and ∅ must lose to the junction that does have flux.
+    however deep the donor side is, and ∅ must lose to the sj that does have flux.
 
     ⚠ ∅'s zero here is a **correct** zero, and the owner's D-3 ruling is what makes it stand: the score
     keeps no fallback, so a hypothesis with no evidence is unselectable rather than floored.
@@ -466,7 +466,7 @@ def test_when_rho_TIES_the_LENGTH_term_decides(scored):
     """⛔ **Arm 5.** Dropping ``f`` from the score entirely passed arms 1–4, because rho is deliberately
     decisive there. This locus removes rho from the contest.
 
-    Both junctions are observed by the same number of fragments over the same block layouts, so their
+    Both sj are observed by the same number of fragments over the same block layouts, so their
     deposited densities are **identical** — checked below, not assumed. What differs is the implied
     length: 300 bp for the wide intron and 500 bp for the narrow one, and the ballast puts three times
     the mass at 500. ⭐ Neither bin is reachable by any locus's depth fragments, so that 3:1 is structural
@@ -482,7 +482,7 @@ def test_when_rho_TIES_the_LENGTH_term_decides(scored):
         for h in range(int(d.hypothesis_offsets[i]), int(d.hypothesis_offsets[i + 1]))
     }
     assert rho[wide] == rho[narrow], (
-        f"the two junctions were built with identical depth and identical block layouts, so their "
+        f"the two sj were built with identical depth and identical block layouts, so their "
         f"densities must be equal; got {rho[wide]!r} and {rho[narrow]!r}. Without that this gate is not "
         f"isolating the length term."
     )

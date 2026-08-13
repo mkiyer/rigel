@@ -30,7 +30,7 @@ must give the **same** flank answer, while the TSS bit alone points at the oppos
 spelled "is there a TSS here" passes on one index and fails on its mirror.
 
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population — RNA splices out or in — but
-there the flux is MEASURED (``junction_count``) and the graft and the peel exist to route it. A terminus
+there the flux is MEASURED (``sj_count``) and the graft and the peel exist to route it. A terminus
 has no flux to measure: a transcript simply begins. That is the derived boundary between the two
 treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1 **reframe-and-level-together**).
 
@@ -216,12 +216,12 @@ def test_a_flagless_boundary_breaks_no_population():
 
 def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     """⛔ **THE SCOPE, pinned so it cannot be widened by accident.** A DONOR/ACCEPTOR BOUNDARY does change the
-    RNA population — a transcript splices out or in — but there the flux is MEASURED (``junction_count``)
+    RNA population — a transcript splices out or in — but there the flux is MEASURED (``sj_count``)
     and the graft and the peel exist to route it, so routing it a second time as a withheld licence would
     double-count. This predicate must therefore read the four TERMINUS bits and nothing else.
 
     ⚠ Extending it to splice sites is a separate experiment with its own measurement: deleting the
-    junction channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1 **reframe-and-level-together**)."""
+    sj channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1 **reframe-and-level-together**)."""
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -258,7 +258,7 @@ def _flagged_chain(flags_by_boundary):
     """The `nested_exons` chain as a synthetic payload, with ``boundary_flags`` injected per BOUNDARY.
 
     ⭐ STRANDED (κ = 0.95 at the solve), because the population test only *decides* anything where the
-    source could otherwise lend a composition: on an unstranded chain with no junction nothing is
+    source could otherwise lend a composition: on an unstranded chain with no sj nothing is
     licensed to begin with and the new conjunct is inert by construction.
     """
     from rigel.calibration.signature import BIT_EXON_POS

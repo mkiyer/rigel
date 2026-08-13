@@ -47,12 +47,12 @@ def _transcript_region_incidence(
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
     incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS BOUNDARY INDEX —
     a boundary is a first-class object on its own axis, so a consumer indexes the per-boundary arrays directly; and
-    SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
+    SPLICE-SJ incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
     where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
-    between them carries no gDNA (no genomic-adjacent boundary), so the junction's crossing mass is IMPUTED by
+    between them carries no gDNA (no genomic-adjacent boundary), so the sj's crossing mass is IMPUTED by
     ``transcript_capture_eff_lengths`` from the two flanking exon densities — stitching the spliced
     transcript into one contiguous ruler so its ``span_full`` equals its FL-marginal length (else the
-    junction-dropped ``span_full`` under-states the mature footprint and the ``fl/span_full`` inflation
+    sj-dropped ``span_full`` under-states the mature footprint and the ``fl/span_full`` inflation
     lifts a spliced mRNA's EM eff-length ABOVE its nascent parent's — the physically impossible inversion).
 
     A component's effective length is the IPR over exactly the regions it occupies contiguously (the
@@ -116,7 +116,7 @@ def _transcript_region_incidence(
         seen.add(t)
         if res is not None:
             lo, hi = res
-            if t in prev_last:  # exon→exon junction to this transcript's previous exon
+            if t in prev_last:  # exon→exon sj to this transcript's previous exon
                 j_t.append(t)
                 j_l.append(prev_last[t])
                 j_r.append(lo)
@@ -212,14 +212,14 @@ def transcript_capture_eff_lengths(
     * a per-interior-BOUNDARY crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w − 1]``
       (mass ``m_e = mass_gdna_boundary[e]``) — for boundaries the transcript crosses without a splice (interior
       to an exon);
-    * a per-SPLICE-JUNCTION crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its mass
+    * a per-SPLICE-SJ crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its mass
       IMPUTED from the two flanking exon densities ``m_j = ½·(ρ_left + ρ_right)·S_j`` — the intron between
-      the exons holds no gDNA, so the junction's enrichment is that of the exonic sequence a spliced
+      the exons holds no gDNA, so the sj's enrichment is that of the exonic sequence a spliced
       fragment covers, not zero (dropping it) nor full length (the FL-marginal's implicit weight).
 
     gDNA (contiguous genomic interval) takes ALL regions; nRNA (single unspliced exon) keeps every interior
     region (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction boundaries
-    (dropping only the introns). Keeping the junction boundaries makes a spliced mRNA's ``span_full`` equal its
+    (dropping only the introns). Keeping the sj boundaries makes a spliced mRNA's ``span_full`` equal its
     FL-marginal length — WITHOUT them the ``fl/span_full`` ratio exceeds 1 (growing with exon count) and
     inflates a spliced mRNA's eff-length ABOVE its nascent parent's, the physically impossible inversion
     (a nascent's genomic region set strictly contains its mature child's).
@@ -256,7 +256,7 @@ def transcript_capture_eff_lengths(
     # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
     boundary_m = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64)
     boundary_S = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
-    # A SPLICE junction is not a contiguous boundary, so it has no entry on the boundary axis — but it is still
+    # A SPLICE sj is not a contiguous boundary, so it has no entry on the boundary axis — but it is still
     # a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both sides ⇒
     # mu_g − 1). Take it from the boundary supports rather than recomputing a length model here: one
     # definition, and it cannot drift from the one the calibrator divided by.
@@ -287,22 +287,22 @@ def transcript_capture_eff_lengths(
         np.add.at(num, bt, np.minimum(boundary_m[br] * inv, boundary_S[br]))
         np.add.at(span_full, bt, boundary_S[br])
     if jt.size:
-        # SPLICE-JUNCTION boundaries (multi-exon mRNA). The intron between the two exons carries no gDNA, so
-        # the junction crossing is NOT a genomic-adjacent boundary — its mass is IMPUTED from the two flanking
-        # EXON densities ρ = m/S (the exonic sequence a junction-spanning fragment actually covers), at the
+        # SPLICE-SJ boundaries (multi-exon mRNA). The intron between the two exons carries no gDNA, so
+        # the sj crossing is NOT a genomic-adjacent boundary — its mass is IMPUTED from the two flanking
+        # EXON densities ρ = m/S (the exonic sequence a sj-spanning fragment actually covers), at the
         # SAME pooled crossing support S_j = ½·(gdna_boundary_len[left] + gdna_boundary_len[right]) the
         # genomic boundaries use. Stitching these in makes span_full == fl for a spliced mRNA, so the
-        # junction-dropped fl/span_full inflation (which lifted eff_em(mature) ABOVE eff_em(nascent) — the
+        # sj-dropped fl/span_full inflation (which lifted eff_em(mature) ABOVE eff_em(nascent) — the
         # physically impossible inversion) vanishes. Under uniform gDNA m_j = ρ·S_j like every other region,
-        # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the junction contributes at
+        # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the sj contributes at
         # its flanking-exon enrichment, not the fabricated full-length weight.
         rho_l = contained_m[jl] / contained_S[jl]
         rho_r = contained_m[jr] / contained_S[jr]
-        # ⭐ The junction boundary's SUPPORT is the gDNA crossing effective length — ONE number, the same
+        # ⭐ The sj boundary's SUPPORT is the gDNA crossing effective length — ONE number, the same
         # every contiguous boundary uses, taken from the boundary supports rather than re-derived. The
         # predecessor summed two halved per-side lengths here and had to keep that sum in step with
         # `_pooled_boundary_arrays`'s by hand; there is one quantity now, so there is nothing to keep in step.
-        # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the junction's imputed
+        # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the sj's imputed
         # density is the mean of its two flanks — and is unrelated to the support. It stays.
         s_j = np.full(jt.shape[0], crossing_S, dtype=np.float64)
         m_j = 0.5 * (rho_l + rho_r) * s_j

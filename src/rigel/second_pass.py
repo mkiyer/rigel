@@ -104,12 +104,12 @@ def _exact_region_bound(region_bounds: np.ndarray, lo: int, hi: int, position: i
     return k if k < hi and int(region_bounds[k]) == position else -1
 
 
-def _junction_id(junctions, region_bounds, lo, hi, start, end, sj_strand) -> int:
-    """The annotated junction slot for one intron, or -1.
+def _sj_id(sj, region_bounds, lo, hi, start, end, sj_strand) -> int:
+    """The annotated sj slot for one intron, or -1.
 
     ⚠ Mirrors ``Accumulator::sj_edge_id`` — same CSR, same strand rule (the filter applies only when the
     motif strand is DEFINITE; a non-definite one matches on coordinates alone). ⭐ Not a duplicate of the
-    length definition: this is a lookup into the index's own table, and the slot IS the payload's junction
+    length definition: this is a lookup into the index's own table, and the slot IS the payload's sj
     axis index.
     """
     donor = _exact_region_bound(region_bounds, lo, hi, start)
@@ -119,10 +119,10 @@ def _junction_id(junctions, region_bounds, lo, hi, start, end, sj_strand) -> int
     if acceptor < 0:
         return -1
     definite = sj_strand in (int(Strand.POS), int(Strand.NEG))
-    for k in range(int(junctions.offsets[donor]), int(junctions.offsets[donor + 1])):
-        if int(junctions.boundary_right[k]) != acceptor:
+    for k in range(int(sj.offsets[donor]), int(sj.offsets[donor + 1])):
+        if int(sj.boundary_right[k]) != acceptor:
             continue
-        if definite and int(junctions.strand[k]) != sj_strand:
+        if definite and int(sj.strand[k]) != sj_strand:
             continue
         return k
     return -1
@@ -168,7 +168,7 @@ def strand_terms(*, align: int, implied_strand: int, rna_sense_frac: float) -> t
     ``p = P(a == t | RNA) = rna_sense_frac`` the library's directional sense fraction (≈ 0.01 on a dUTP
     library, ≈ 0.99 on an R1-sense one; the direction-agnostic specificity is ``max(p, 1 - p)``)::
 
-        H_spliced   used a junction, and gDNA cannot splice, so the molecule is RNA on strand t
+        H_spliced   used a sj, and gDNA cannot splice, so the molecule is RNA on strand t
                     L = p        if a == t
                       = 1 - p    otherwise
         H_genomic   crossed the gap contiguously; the component that DISCRIMINATES is gDNA
@@ -285,17 +285,17 @@ def _bottleneck(values: list[float]) -> float:
 
 
 class _Accumulators:
-    """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own region_bound axis, junctions installed.
+    """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own region_bound axis, sj installed.
 
     ⭐ **This is what lets the second pass run off a payload rather than off a live scanner.** The
     accumulator is described by its region_bound positions, and the payload carries them — so a cached scan can be
     scored and drained without re-reading the BAM, which is what keeps `build_scan_cache.py` useful for
     every re-measurement and P6 ask for.
 
-    ⛔ **`set_junctions` is not optional here and the failure is invisible.** With no junction table every
-    observed intron reads as unannotated, so the junction banks stay at zero and the tally still looks
+    ⛔ **`set_sj` is not optional here and the failure is invisible.** With no sj table every
+    observed intron reads as unannotated, so the sj banks stay at zero and the tally still looks
     well-formed — the C++ refuses the same omission on the scan path for exactly this reason. The scorer
-    only needs ``length_under`` and would survive without it; the drain would silently credit no junction
+    only needs ``length_under`` and would survive without it; the drain would silently credit no sj
     boundary at all.
 
     ⚠ ``region_types`` comes from the INDEX. The payload echoes the region_bound axis but not the typing, and the
@@ -305,16 +305,16 @@ class _Accumulators:
     :func:`_gather_delta` iterates it instead of every reference in the genome.
     """
 
-    def __init__(self, payload: AccumulatorPayload, region_types: np.ndarray, junctions) -> None:
+    def __init__(self, payload: AccumulatorPayload, region_types: np.ndarray, sj) -> None:
         self._payload = payload
         self._region_types = region_types
-        self._junctions = junctions
+        self._sj = sj
         self.built: dict[int, NativeAccumulator] = {}
 
     def __getitem__(self, ref: int) -> NativeAccumulator:
         if ref in self.built:
             return self.built[ref]
-        payload, junctions = self._payload, self._junctions
+        payload, sj = self._payload, self._sj
         region_bound_lo = int(payload.ref_region_bound_offsets[ref])
         region_bound_hi = int(payload.ref_region_bound_offsets[ref + 1])
         region_lo = int(payload.ref_region_offsets[ref])
@@ -327,28 +327,28 @@ class _Accumulators:
             max_length=payload.max_length,
             ref=ref,
         )
-        # ⭐ The junction CSR sliced to THIS reference. A junction id IS its rank, so the slot base must
+        # ⭐ The sj CSR sliced to THIS reference. A sj id IS its rank, so the slot base must
         # agree with the payload's own `ref_sj_offsets[ref]` — checked rather than assumed, because a
-        # silent disagreement would write one reference's junction traffic onto another's slots.
+        # silent disagreement would write one reference's sj traffic onto another's slots.
         empty = region_bound_hi <= region_bound_lo
-        slot_lo = 0 if empty else int(junctions.offsets[region_bound_lo])
-        slot_hi = 0 if empty else int(junctions.offsets[region_bound_hi])
+        slot_lo = 0 if empty else int(sj.offsets[region_bound_lo])
+        slot_hi = 0 if empty else int(sj.offsets[region_bound_hi])
         if slot_lo != int(payload.ref_sj_offsets[ref]):
             raise ValueError(
-                f"reference {ref}'s junctions start at slot {slot_lo} in the index but the payload's "
-                f"ref_sj_offsets says {int(payload.ref_sj_offsets[ref])}; a junction id IS its rank, so "
+                f"reference {ref}'s sj start at slot {slot_lo} in the index but the payload's "
+                f"ref_sj_offsets says {int(payload.ref_sj_offsets[ref])}; a sj id IS its rank, so "
                 f"the two axes must agree."
             )
-        accumulator.set_junctions(
+        accumulator.set_sj(
             offsets=np.zeros(1, np.int32)
             if empty
             else np.ascontiguousarray(
-                junctions.offsets[region_bound_lo : region_bound_hi + 1] - slot_lo, dtype=np.int32
+                sj.offsets[region_bound_lo : region_bound_hi + 1] - slot_lo, dtype=np.int32
             ),
             boundary_right=np.ascontiguousarray(
-                junctions.boundary_right[slot_lo:slot_hi] - region_bound_lo, dtype=np.int32
+                sj.boundary_right[slot_lo:slot_hi] - region_bound_lo, dtype=np.int32
             ),
-            sj_strand=np.ascontiguousarray(junctions.strand[slot_lo:slot_hi], dtype=np.int8),
+            sj_strand=np.ascontiguousarray(sj.strand[slot_lo:slot_hi], dtype=np.int8),
         )
         self.built[ref] = accumulator
         return accumulator
@@ -360,7 +360,7 @@ def score_held_fragments(
     fl_models,
     rna_sense_frac: float,
     region_types: np.ndarray,
-    junctions,
+    sj,
 ) -> HeldScores:
     """Score every held fragment's hypotheses. Pure: reads pass-1 state, writes nothing.
 
@@ -377,8 +377,8 @@ def score_held_fragments(
         certified RNA because an annotated splice proves it. ⚠ On an R1-antisense (dUTP) library this is
         ≈ 0.01, so **disagreement is the likely case**. It is used as the probability
         of agreement it is, never inverted.
-    region_types, junctions
-        From the index: ``build_region_partition_arrays`` and ``build_junction_edge_arrays``. ⚠ The junction
+    region_types, sj
+        From the index: ``build_region_partition_arrays`` and ``build_sj_arrays``. ⚠ The sj
         CSR is genuinely not on the payload, so this dependency is real rather than an oversight.
     """
     deferred = payload.deferred
@@ -393,7 +393,7 @@ def score_held_fragments(
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
-    accumulators = _Accumulators(payload, region_types, junctions)
+    accumulators = _Accumulators(payload, region_types, sj)
 
     n_undecided = 0
     for i in range(deferred.n_fragments):
@@ -439,13 +439,13 @@ def score_held_fragments(
 
             # -- rho ------------------------------------------------------------------------------
             if introns:
-                # A spliced path's evidence is the junctions it uses. ⚠ `sj_inv_length_sum` is deposited
+                # A spliced path's evidence is the sj it uses. ⚠ `sj_inv_length_sum` is deposited
                 # by the SAME rule as a contiguous boundary, so the two are the same quantity on the same
                 # scale — that is what makes this comparable to `∅`'s number at all.
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied_strand
                 observed_densities = []
                 for a, b in introns:
-                    jid = _junction_id(junctions, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
+                    jid = _sj_id(sj, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
                     observed_densities.append(
                         0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid])
                     )
@@ -634,7 +634,7 @@ def drain(
     choices: np.ndarray,
     *,
     region_types: np.ndarray,
-    junctions,
+    sj,
 ) -> AccumulatorPayload:
     """⭐ **THE DRAIN.** Replay every held fragment with its chosen hypothesis; return the drained payload.
 
@@ -660,7 +660,7 @@ def drain(
             f"in the bank's canonical order — a mismatch means the scores and the draw walked different "
             f"queues."
         )
-    accumulators = _Accumulators(payload, region_types, junctions)
+    accumulators = _Accumulators(payload, region_types, sj)
     counts = {
         "deposited": 0,
         "dropped_too_long": 0,

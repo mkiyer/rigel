@@ -13,7 +13,7 @@
  *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
  *       boundaries            boundary 1    boundary 2               c - 2 = 2
  *
- *   A JUNCTION BOUNDARY is a directed donor->acceptor link taken from the annotation. A fragment is a
+ *   A SJ BOUNDARY is a directed donor->acceptor link taken from the annotation. A fragment is a
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
  *   Regions count fragments CONTAINED (the whole path fits inside one region); boundaries count fragments
@@ -125,7 +125,7 @@ struct Region {
 static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
 
 /// A contiguous boundary: the 0-bp boundary between two adjacent regions. `spliced` means the FRAGMENT used an
-/// annotated junction somewhere -- not that this boundary is one. gDNA cannot be spliced, so a spliced
+/// annotated sj somewhere -- not that this boundary is one. gDNA cannot be spliced, so a spliced
 /// crossing is a certified RNA crossing.
 struct Boundary {
     std::uint32_t unspliced_count[kNStrandColumns];
@@ -136,32 +136,32 @@ struct Boundary {
     /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
     /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the boundaries it crosses.
     ///
-    /// ⛔ ONE VALUE, NOT TWO, AND THE RULING STANDS **HERE** WHILE IT WAS REVERSED ON THE JUNCTION AXIS
-    /// (2026-08-13) — the premise that changed is specific to junctions and does not reach this bank.
+    /// ⛔ ONE VALUE, NOT TWO, AND THE RULING STANDS **HERE** WHILE IT WAS REVERSED ON THE SJ AXIS
+    /// (2026-08-13) — the premise that changed is specific to sj and does not reach this bank.
     /// `strand_deconv` reads the counts per column; nothing reads a BOUNDARY's mass per strand, because at a
     /// boundary the mass exists to turn an object-incidence total into a fragment count and that question
     /// has no strand in it. ⚠ `one-thing-varied`: widening this too would have been a second change with
-    /// no named consumer. See `JunctionEdge::mass`.
+    /// no named consumer. See `SpliceJunction::mass`.
     double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
     /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
-    /// interior boundary deposit nothing (their accounting is on the junction axis), so this sums to
+    /// interior boundary deposit nothing (their accounting is on the sj axis), so this sums to
     /// `crossed_block_len / L`. It is a per-BOUNDARY certified-RNA term, commensurate with the unspliced
     /// mass at the same boundary, and is NOT "the number of spliced fragments here".
     double spliced_mass;
 };
 static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding");
 
-/// A junction boundary: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
+/// A sj boundary: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
 /// population; and it is not a genomic position, so it carries no structural flags.
-struct JunctionEdge {
+struct SpliceJunction {
     std::uint32_t count[kNStrandColumns];
-    /// ⭐ LIVE: `second_pass` scores a held fragment's junction evidence with it. `length_sum` was
+    /// ⭐ LIVE: `second_pass` scores a held fragment's sj evidence with it. `length_sum` was
     /// removed — nothing read it, and `pool_lengths`' RNA_SPLICED row already carries that
     /// population's length distribution.
     double inv_length_sum;
     /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
-    /// boundary deposits on neither boundary bank, and is not `contained` either -- its path spans a junction,
+    /// boundary deposits on neither boundary bank, and is not `contained` either -- its path spans a sj,
     /// so it lies in no single region. Such a fragment existed on the incidence axis and on no conserved
     /// one, which is why a library fragment count was not computable. Measured on the origin-split
     /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
@@ -174,10 +174,10 @@ struct JunctionEdge {
     /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `Boundary::unspliced_mass`'s ONE-VALUE RULING ON
     /// THIS AXIS ONLY (owner, 2026-08-12). THE REVERSAL IS ADMISSIBLE BECAUSE THE PREMISE CHANGED, AND
     /// THE PREMISE IS RECORDED HERE SO IT IS NOT RE-LITIGATED IN EITHER DIRECTION.**
-    /// The ruling was *"nothing reads a mass per strand"*. That is now false for junctions and only for
-    /// junctions: an ARTIFACTUAL splice junction accumulates SYMMETRICALLY on both strands, exactly as
+    /// The ruling was *"nothing reads a mass per strand"*. That is now false for sj and only for
+    /// sj: an ARTIFACTUAL splice junction accumulates SYMMETRICALLY on both strands, exactly as
     /// gDNA does, so the strand model the tool already has can detect one — but only if it is given a
-    /// per-strand observable, and the COUNT is not enough because a count cannot separate a junction
+    /// per-strand observable, and the COUNT is not enough because a count cannot separate a sj
     /// used by many short fragments from one used by few long ones.
     /// ⚠ The second reason is structural: without this bank, artifact filtering needs TWO passes over
     /// the BAM (tally, filter, re-accumulate the mass), which is the one thing the single-pass
@@ -190,7 +190,7 @@ struct JunctionEdge {
     /// Agreement is ~1e-15 relative, which is the convention this file already documents.
     double mass[kNStrandColumns];
 };
-static_assert(sizeof(JunctionEdge) == 32, "JunctionEdge must be 32 bytes with no padding");
+static_assert(sizeof(SpliceJunction) == 32, "SpliceJunction must be 32 bytes with no padding");
 
 // ============================================================================
 // the fragment-length pools
@@ -206,7 +206,7 @@ enum class FragmentPool : std::uint8_t {
     kDnaIntronic       = 1,  // contained in an intronic region
     kDnaIntronExon     = 2,  // crossing exactly one boundary, flanks {intron, exon} -- a "splash" read
     kDnaIntergenicExon = 3,  // crossing exactly one boundary, flanks {intergenic, exon}
-    kRnaSpliced        = 4,  // using an annotated junction, splice OBSERVED
+    kRnaSpliced        = 4,  // using an annotated sj, splice OBSERVED
 };
 inline constexpr std::size_t kNFragmentPools = 5;
 
@@ -394,9 +394,9 @@ struct ScoredHypothesis {
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns region_bound out
-    std::vector<std::int32_t>                         sj_ids;     // annotated junction boundaries used
+    std::vector<std::int32_t>                         sj_ids;     // annotated sj boundaries used
     /// ⭐ The same resolution kept PER INTRON POSITION, -1 where unannotated. `sj_ids` is filtered, so
-    /// it cannot say which of a block's two ends is a junction — and the conserved mass needs exactly
+    /// it cannot say which of a block's two ends is a sj — and the conserved mass needs exactly
     /// that. One entry per intron, so block `i` is bounded by `sj_id_at_gap[i-1]` and `sj_id_at_gap[i]`.
     std::vector<std::int32_t>                         sj_id_at_gap;
     std::vector<ScoredHypothesis>                     survivors;  // arbitration, per fragment
@@ -414,7 +414,7 @@ struct DepositCounters {
     //: A name saying `dropped` for a population that is kept is how a recoverable loss gets read as
     //: a permanent one.
     std::int64_t deferred_undetermined_gap = 0;
-    std::int64_t unannotated_introns    = 0;  // observed introns with no annotated junction
+    std::int64_t unannotated_introns    = 0;  // observed introns with no annotated sj
     std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
     std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
 
@@ -444,22 +444,22 @@ public:
                          int max_length,
                          std::int32_t ref_id);
 
-    /// Install this reference's junction boundaries as a CSR keyed by DONOR REGION_BOUND INDEX -- the index the
+    /// Install this reference's sj boundaries as a CSR keyed by DONOR REGION_BOUND INDEX -- the index the
     /// deposit already computes while locating the boundaries its path crosses.
     ///
-    /// ⚠ The junction-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
+    /// ⚠ The sj-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
     /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
     /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
     ///
     /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
     /// (donor region_bound, acceptor region_bound, sj_strand), matching `Partition.from_region_bounds` in the Python spec.
-    void set_junctions(std::vector<std::int32_t> offsets,       // size n_region_bounds + 1
+    void set_sj(std::vector<std::int32_t> offsets,       // size n_region_bounds + 1
                        std::vector<std::int32_t> boundary_right,  // acceptor REGION_BOUND INDEX, not a coordinate
-                       std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
+                       std::vector<std::int8_t>  sj_strand);    // the sj's ANNOTATED strand
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
     std::size_t n_boundaries()    const noexcept { return boundaries_.size(); }
-    std::size_t n_junctions() const noexcept { return junctions_.size(); }
+    std::size_t n_sj() const noexcept { return sj_.size(); }
     std::size_t n_region_bounds()     const noexcept { return region_bounds_.size(); }
 
     const std::int64_t* region_bounds_data() const noexcept { return region_bounds_.data(); }
@@ -467,8 +467,8 @@ public:
     const Region*         regions_data() const noexcept { return regions_.data(); }
     Boundary*     boundaries_data()      noexcept { return boundaries_.data(); }
     const Boundary* boundaries_data() const noexcept { return boundaries_.data(); }
-    JunctionEdge*       junctions_data()      noexcept { return junctions_.data(); }
-    const JunctionEdge* junctions_data() const noexcept { return junctions_.data(); }
+    SpliceJunction*       sj_data()      noexcept { return sj_.data(); }
+    const SpliceJunction* sj_data() const noexcept { return sj_.data(); }
 
     /// One uint32 per region counting fragments whose FIRST COVERED BASE lies in it.
     ///
@@ -565,7 +565,7 @@ private:
     void record_gap_resolution(const OfferedFragment& fragment,
                                const std::vector<ScoredHypothesis>& survivors) noexcept;
 
-    /// The annotated junction-boundary id for one intron, or -1 if it is not an annotated junction.
+    /// The annotated sj-boundary id for one intron, or -1 if it is not an annotated sj.
     std::int64_t sj_edge_id(std::int64_t intron_start,
                             std::int64_t intron_end,
                             std::int32_t sj_strand) const noexcept;
@@ -576,12 +576,12 @@ private:
     std::vector<std::int64_t>  region_bounds_;              // n_region_bounds, strictly increasing
     std::vector<Region>          regions_;             // n_region_bounds - 1
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
-    std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
+    std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
     std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
 
     std::vector<std::int32_t>  sj_offsets_;        // n_region_bounds + 1, CSR over the donor region_bound index
-    std::vector<std::int32_t>  sj_boundary_right_;   // n_junctions
-    std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
+    std::vector<std::int32_t>  sj_boundary_right_;   // n_sj
+    std::vector<std::int8_t>   sj_strand_;         // n_sj, the ANNOTATED strand
 
     std::vector<std::uint8_t>  region_types_;        // n_regions, or empty (no pools)
     std::int32_t               ref_id_ = 0;        // stamped into every deferred record
@@ -613,25 +613,25 @@ public:
 
     std::size_t n_refs() const noexcept { return accs_.size(); }
 
-    /// Install the junction CSR for every reference at once, from the FLAT arrays the index emits
-    /// (`build_junction_edge_arrays`), keyed by the flat region_bound index.
+    /// Install the sj CSR for every reference at once, from the FLAT arrays the index emits
+    /// (`build_sj_arrays`), keyed by the flat region_bound index.
     ///
     /// The slicing is pure arithmetic and lives here so it exists once. Reference `f` owns region_bounds
     /// `[c0, c1)`, and because the CSR is sorted by flat donor region_bound while references are region_bound-major, its
-    /// junctions are the contiguous SLOT range `[offsets[c0], offsets[c1])`. So per reference:
+    /// sj are the contiguous SLOT range `[offsets[c0], offsets[c1])`. So per reference:
     ///
     ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_region_bounds + 1)
     ///     boundary_right -> boundary_right[j0 .. j1] - c0               (a ref-local region_bound index)
     ///
-    /// ⚠ Two consequences, both load-bearing. A reference's junction-boundary ids are `slot - j0`, so the
-    /// payload's junction axis is exactly the flat slot order concatenated in reference order — which is
+    /// ⚠ Two consequences, both load-bearing. A reference's sj-boundary ids are `slot - j0`, so the
+    /// payload's sj axis is exactly the flat slot order concatenated in reference order — which is
     /// what lets `edges_df.edge_row` stay a join key that never crosses the ABI. And the narrowing to
-    /// int32 is safe by census: 1.04 M region_bounds and 404,168 junctions at human scale.
-    void set_junctions(const std::int64_t* offsets,       // n_region_bounds_total + 1, over the FLAT region_bound axis
+    /// int32 is safe by census: 1.04 M region_bounds and 404,168 sj at human scale.
+    void set_sj(const std::int64_t* offsets,       // n_region_bounds_total + 1, over the FLAT region_bound axis
                        std::size_t n_offsets,
-                       const std::int64_t* boundary_right,  // n_junctions_total, FLAT region_bound indices
+                       const std::int64_t* boundary_right,  // n_sj_total, FLAT region_bound indices
                        const std::int8_t* sj_strand,
-                       std::size_t n_junctions,
+                       std::size_t n_sj,
                        const std::int64_t* ref_region_bound_offsets);
 
     Accumulator&       at(std::int32_t ref_id);

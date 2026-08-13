@@ -14,14 +14,14 @@ Usage::
 ⛔⛔ **SPLICEDNESS IS DERIVED FROM THE READ NAME, NEVER FROM THE CIGAR.** The simulator writes
 ``{t_id}:{start}-{end}:{strand}:{index}`` with the interval in SPLICED TRANSCRIPT coordinates, so a
 fragment is spliced exactly when its interval crosses one of its transcript's interior cumulative-exon
-boundaries. Reading the CIGAR instead misses every junction that falls in the **unsequenced inner gap**
+boundaries. Reading the CIGAR instead misses every sj that falls in the **unsequenced inner gap**
 between the mates — measured **7.34 %** of truly-spliced mRNA fragments have no ``N`` in either mate, and
 **0** in the reverse direction. A CIGAR-based count is therefore biased in one direction only, which is
 the kind of error that looks like a result.
 
 ⚠ **"UNSPLICED" HAS THREE INEQUIVALENT DEFINITIONS HERE AND THIS SCRIPT EMITS THE TRUTH ONE.** The EM's
 consumer bit is ``stype != SPLICE_UNSPLICED``, which is strictly WIDER than "the molecule crossed a
-junction" because ``resolve_context`` promotes a clean-CIGAR fragment whose mate gap admits more than one
+sj" because ``resolve_context`` promotes a clean-CIGAR fragment whose mate gap admits more than one
 hypothesis to ``SPLICE_IMPLICIT``. Scoring calibration's own quantity against this one is
 ``TRAPS: score-the-consumers-own-count`` unless the gap is stated. It is stated: this is what the
 SIMULATOR emitted, not what the resolver concluded.
@@ -254,7 +254,7 @@ def gates(res: dict, suite: Path, condition: str, index: TranscriptIndex,
         1 for t_idx, k in per_t_sj.items()
         if bounds.get(str(tid.get(t_idx, "")), np.zeros(0)).size != int(k)
     )
-    out.append(("junction-count — boundaries == annotated junctions, per transcript", mism == 0,
+    out.append(("sj-count — boundaries == annotated sj, per transcript", mism == 0,
                 f"{len(per_t_sj):,} transcripts, {mism:,} mismatched"))
     return out
 

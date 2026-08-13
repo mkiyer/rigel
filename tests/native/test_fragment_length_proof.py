@@ -27,7 +27,7 @@ From that one set, all four deposit populations follow with no further machinery
 ``L``                ``len(covered)``
 boundary ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
                      molecule — 's definition, verbatim)
-region contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one region
+region contained       the path used no sj and ``min(covered)``/``max(covered)`` fall in one region
 ===================  =============================================================================
 
 ⭐ That crossing rule is the design's own words turned into a predicate, and it is what makes this file a
@@ -59,8 +59,8 @@ so ``L`` and all four populations are untouched. The counter is pinned separatel
 ``Σ segments`` with ``span − Σ introns`` **after** ``_normalise_introns`` — and that is itself the design's
 claim demonstrated: normalisation is exactly what makes the two formulas agree.
 
-⛔ **WHAT THIS FILE DOES NOT PROVE.** The fixture carries no annotated junctions, so every fragment is
-unspliced and the **spliced routing** (``boundary_spliced`` vs ``boundary_unspliced``, junction credit, and the
+⛔ **WHAT THIS FILE DOES NOT PROVE.** The fixture carries no annotated sj, so every fragment is
+unspliced and the **spliced routing** (``boundary_spliced`` vs ``boundary_unspliced``, sj credit, and the
 containment block) is not exercised here — it is covered by ``test_accumulator_spec``'s dedicated cases.
 That is the right scope for TRAPS: a-purity-filter-is-a-length-filter's purpose: the unconditional histogram bins by ``L``, and ``L`` does not
 depend on which population the fragment is routed to.

@@ -100,7 +100,7 @@ def f_gdna_of(result) -> float:
     molecules. The units did not match across the subtraction, and because the two components' K
     inflations differ they did not cancel: on ladder g50 capture_off the incidence ratio reads
     **0.3851** against a truth of **0.5085**, while the conserved counts reproduce **0.5085** exactly.
-    It also silently omitted the junction axis, so it disagreed with ``pipeline.py``'s version too.
+    It also silently omitted the sj axis, so it disagreed with ``pipeline.py``'s version too.
 
     ⭐ Reading the result's own field is the point: the count is assembled once, in ``calibrate``, where
     each axis is converted by its own population's ``mass / count``. A consumer recombining the banks
@@ -144,7 +144,7 @@ def main() -> int:
     from rigel.calibration.calibrate import calibrate
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.config import CalibrationConfig
     from rigel.index import TranscriptIndex
     from rigel.pipeline import _drain_side_buffer
@@ -160,7 +160,7 @@ def main() -> int:
 
     def run(payload, strand_model, *, gdna_pmf=None, rna_pmf=None):
         """Calibrate. ``gdna_pmf`` / ``rna_pmf`` override the fitted model — that is the ceiling arm."""
-        fl = build_fl_models(payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp)
+        fl = build_fl_models(payload, sj_opportunity=crossing, gdna_opportunity=gdna_opp)
         return calibrate(
             payload=payload,
             strand_model=strand_model,

@@ -5,12 +5,12 @@
     Scores through the shipped `rigel.second_pass.score_held_fragments` — the question is what the
     tool does, not what could be done.
 
-D-3 asks whether a junction with zero flux is *impossible* or *merely unobserved*::
+D-3 asks whether a sj with zero flux is *impossible* or *merely unobserved*::
 
     ⛔ A hard zero makes the hypothesis unselectable and can empty the score vector.
     ⛔ A pseudocount is a magic number and will not be invented.
     ⚠  Measure first: the held fragments are excluded from the tally they are scored against, so a
-       junction used ONLY by deferred fragments reads zero — how often that happens decides this.
+       sj used ONLY by deferred fragments reads zero — how often that happens decides this.
 
 ⭐ **A COUNT OF ZEROS IS NOT AN ANSWER.** A zero is *correct* when the transcript is not expressed and
 *wrong* when its only evidence is held. So every zero here is pushed into one of four causes, and the
@@ -22,7 +22,7 @@ The four causes, and why the split matters
 ------------------------------------------
 
 ======================  ============================================================================
-``unannotated``         the implied intron resolves to no junction slot (`jid < 0`). ⚠ Not a flux
+``unannotated``         the implied intron resolves to no sj slot (`jid < 0`). ⚠ Not a flux
                         question at all — a lookup miss, and a different decision from D-3's
 ``annotated_empty``     the slot exists and `sj_inv_length_sum == 0`. ⭐ **THIS IS D-3'S POPULATION**
 ``no_evidence_set``     ⛔ ∅ only, and it is an ARTEFACT: the scorer's contiguous-boundary set is empty.
@@ -88,14 +88,14 @@ def _read_truth_abundance(path: Path) -> dict[str, float]:
     return out
 
 
-def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) -> dict:
+def census(payload, scored, sj, t_ids, truth: dict[str, float] | None) -> dict:
     """Decompose every zero in ``scored.terms.density`` into its cause. Mirrors the scorer, then checks it.
 
     ⚠ The mirror is **verified, not asserted**: the reconstructed zero mask is compared against the
     shipped scorer's own density array and the run aborts on any disagreement. A census that has drifted
     from the code it describes is worse than no census.
     """
-    from rigel.second_pass import _distinguishing_lines, _junction_id
+    from rigel.second_pass import _distinguishing_lines, _sj_id
     from rigel.types import Strand
 
     deferred = payload.deferred
@@ -110,7 +110,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
     empty_old_zero = np.zeros(deferred.n_hypotheses, dtype=bool)
     reconstructed = np.zeros(deferred.n_hypotheses, dtype=bool)
 
-    #: annotated-but-empty junction slot -> how many held hypotheses claim it
+    #: annotated-but-empty sj slot -> how many held hypotheses claim it
     empty_slot_claims: Counter[int] = Counter()
     #: and the supporting transcripts of the hypotheses that claim one
     empty_slot_supporters: dict[int, set[int]] = {}
@@ -139,7 +139,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied
                 worst = 0
                 for a, b in introns:
-                    jid = _junction_id(junctions, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
+                    jid = _sj_id(sj, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
                     if jid < 0:
                         worst = max(worst, 1)
                     elif sj_flux[jid] <= 0.0:
@@ -227,7 +227,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
         },
     }
 
-    # ⭐ THE TRUTH ARM. An annotated junction with no flux is CORRECT when nothing expressed it and WRONG
+    # ⭐ THE TRUTH ARM. An annotated sj with no flux is CORRECT when nothing expressed it and WRONG
     # when its supporters did express — the second is D-3's self-exclusion, and it is the only version
     # of the zero that costs an answer.
     if truth is not None and empty_slot_claims:
@@ -273,9 +273,9 @@ def main() -> int:
 
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
-        build_junction_edge_arrays,
+        build_sj_arrays,
         build_region_partition_arrays,
     )
     from rigel.index import TranscriptIndex
@@ -288,7 +288,7 @@ def main() -> int:
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)
     _, _, region_types = build_region_partition_arrays(index)
-    junctions = build_junction_edge_arrays(index)
+    sj = build_sj_arrays(index)
     t_ids = index.t_df["t_id"].to_numpy()
 
     names = args.conditions or sorted(p.name for p in args.pilot.iterdir() if p.is_dir())
@@ -299,17 +299,17 @@ def main() -> int:
         scored = score_held_fragments(
             payload,
             fl_models=build_fl_models(
-                payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp
+                payload, sj_opportunity=crossing, gdna_opportunity=gdna_opp
             ),
             # ⭐ Pass 1's own strand model, not calibration's — the second pass runs BEFORE calibration
             # and `rna_sense_frac` is the Beta posterior mean of exactly this.
             rna_sense_frac=cache.strand_model.p_r1_sense,
             region_types=region_types,
-            junctions=junctions,
+            sj=sj,
         )
         truth_path = suite / name / "truth_abundances.tsv"
         truth = _read_truth_abundance(truth_path) if truth_path.is_file() else None
-        row = census(payload, scored, junctions, t_ids, truth)
+        row = census(payload, scored, sj, t_ids, truth)
         row["condition"] = name
         row["p_r1_sense"] = float(cache.strand_model.p_r1_sense)
         rows.append(row)

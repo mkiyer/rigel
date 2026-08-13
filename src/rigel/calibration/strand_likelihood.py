@@ -15,7 +15,7 @@ A region's unspliced fragments are a mix of **gDNA** and **RNA**, both **Beta-Bi
 * gDNA is unstranded (oriented-sense rate ½) with intra-class correlation
   ``gdna_strand_overdispersion`` (fitted in :mod:`gdna_strand`).
 * RNA is stranded at ``rna_sense_frac`` (κ) with intra-class correlation
-  ``rna_strand_overdispersion`` (fitted from the per-junction SJ strand table in :mod:`gdna_strand`).
+  ``rna_strand_overdispersion`` (fitted from the per-sj SJ strand table in :mod:`gdna_strand`).
 
 Both components carry a fitted overdispersion with the **same default prior**, so they collapse to
 the same distribution under sparse data and an unstranded region (κ = ½, equal overdispersions) is

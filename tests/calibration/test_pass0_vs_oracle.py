@@ -85,8 +85,8 @@ def toy(tmp_path_factory):
         "+",
         [
             {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
-            # ⚠ the stagger must sit CLOSE to the junction: the fragment has to reach the boundary
-            # contiguously AND reach the junction, so a region_bound 700 bp away is one no fragment spans.
+            # ⚠ the stagger must sit CLOSE to the sj: the fragment has to reach the boundary
+            # contiguously AND reach the sj, so a region_bound 700 bp away is one no fragment spans.
             {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
         ],
     )

@@ -35,7 +35,7 @@ GENOME = 8_000
 
 #: ⭐ Three pairs, each isolating one behaviour.
 #:
-#: **tP/tM** share the observed junction ``(1200,1400)`` on OPPOSITE strands and cover the same sequenced
+#: **tP/tM** share the observed sj ``(1200,1400)`` on OPPOSITE strands and cover the same sequenced
 #: blocks, so neither annotation nor overlap can separate them — only the sequenced **motif** can. Their
 #: gap introns differ in width (400 vs 200 bp), so the deposited ``L`` says which one was believed.
 #:
@@ -46,7 +46,7 @@ GTF = (
     'chr1\ttest\texon\t1001\t1200\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
     'chr1\ttest\texon\t1401\t1600\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
     'chr1\ttest\texon\t2001\t2200\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
-    # tM (-): same observed junction, but its gap intron is (1700,1900) -> region_bounds 200
+    # tM (-): same observed sj, but its gap intron is (1700,1900) -> region_bounds 200
     'chr1\ttest\texon\t1001\t1200\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
     'chr1\ttest\texon\t1401\t1700\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
     'chr1\ttest\texon\t1901\t2200\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
@@ -156,13 +156,13 @@ def _lengths(payload) -> dict[int, int]:
     return {int(i): int(payload.deposited_lengths[i]) for i in nz}
 
 
-# ── an OBSERVED junction pins the strand ───────────────────────────────────────────────────────────
+# ── an OBSERVED sj pins the strand ───────────────────────────────────────────────────────────
 
 
-def test_an_OBSERVED_junction_PINS_the_gap_hypotheses_to_its_own_strand(scanned):
+def test_an_OBSERVED_sj_PINS_the_gap_hypotheses_to_its_own_strand(scanned):
     """⭐ The owner's ruling, and the audit found it already true — now it is gated.
 
-    ``tP`` and ``tM`` cover the same sequenced blocks and share the observed junction's coordinates, so
+    ``tP`` and ``tM`` cover the same sequenced blocks and share the observed sj's coordinates, so
     nothing separates them but the **motif**. A ``+`` motif must leave only tP's 400 bp gap intron on the
     table and a ``-`` motif only tM's 200 bp one — and the deposited ``L`` says which was believed,
     without needing to read the hypothesis set at all.
@@ -206,7 +206,7 @@ def test_an_UNSPLICED_fragment_offers_BOTH_STRANDS(scanned):
         f"strand here means the enumeration narrowed on something that was never sequenced."
     )
     assert any(not path for path, _strand in hypotheses), (
-        "the genomic hypothesis must also be present — no annotated junction was observed, so the gap "
+        "the genomic hypothesis must also be present — no annotated sj was observed, so the gap "
         "may be real template"
     )
 
@@ -223,9 +223,9 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
 
     ⭐ ``AMBIGUOUS`` is what that state is called everywhere else in this codebase — the fragment-level
     ``sj_strand`` uses it for exactly this, "contradictory evidence rather than missing evidence", and
-    ``deposit`` already refuses to credit a junction on it. Reusing the value keeps one vocabulary.
+    ``deposit`` already refuses to credit a sj on it. Reusing the value keeps one vocabulary.
 
-    ⚠ Unreachable on human data — **0 of 404,168** junction coordinates are annotated on both strands,
+    ⚠ Unreachable on human data — **0 of 404,168** sj coordinates are annotated on both strands,
     and the index warns that it is biologically impossible. Fixed anyway because it is three boundaries and
     the alternative is an answer that depends on GTF boundary order.
     """
@@ -277,7 +277,7 @@ def test_the_fixture_reaches_every_branch_it_claims_to(scanned):
 #     cannot explain the read and drops out of `t_inds`. ∅ is then correctly absent — measured in
 #     `test_gap_introns_are_region_bound.py`, where the certified-RNA `mixed` fragment has exactly ONE hypothesis.
 #   * UNSPLICED fragment: the shadow survives, implies nothing, and supplies ∅ — which is what
-#     §2's table requires ("no annotated junction ⇒ ∅ always").
+#     §2's table requires ("no annotated sj ⇒ ∅ always").
 #
 # ⚠ So `!certified_rna` is REDUNDANT here, not wrong, and it is kept: it states the rule directly instead
 # of depending on the shadow mechanism continuing to exist. A single-exon gene has no separate shadow row

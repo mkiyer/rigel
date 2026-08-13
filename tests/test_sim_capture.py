@@ -82,8 +82,8 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
     assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
-def test_transcript_probe_crossing_junction_penalizes_gdna_and_nrna(tmp_path):
-    probes = tmp_path / "junction_probe.tsv"
+def test_transcript_probe_crossing_sj_penalizes_gdna_and_nrna(tmp_path):
+    probes = tmp_path / "sj_probe.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t80\t140\n")
     transcript = _transcript("T", [(100, 200), (400, 500)])
     sampler = CaptureSampler.from_config(
@@ -375,7 +375,7 @@ def test_random_mini_genome_probe_writer_targets_only_captured_transcripts(tmp_p
         assert all(left[1] <= right[0] for left, right in zip(intervals, intervals[1:]))
 
 
-def test_random_probe_writer_outputs_bed12_for_junction_spanning_probe(tmp_path):
+def test_random_probe_writer_outputs_bed12_for_sj_spanning_probe(tmp_path):
     transcripts = [_transcript("T", [(100, 200), (400, 500)])]
     probes = tmp_path / "capture_probes.tsv"
     bed = tmp_path / "capture_probes.bed"

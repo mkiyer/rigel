@@ -9,7 +9,7 @@ and a 5 M-fragment simulated condition costs far more than that to scan. Caching
 
 ⛔ **THE KEY IS THE WHOLE POINT, AND IT NEEDS THREE PARTS, NOT ONE.**
 
-* ``graph_hash`` — regions plus the junction CSR. The payload already carries it, so the tally self-keys.
+* ``graph_hash`` — regions plus the sj CSR. The payload already carries it, so the tally self-keys.
 * ⭐ **a REACH digest.** logs that ``reach`` is consumed by calibration and is covered by
   **neither** ``partition_hash`` **nor** ``graph_hash`` — correctly, since neither the scan nor the
   accumulator reads it — and that the gap "becomes live the moment something caches a calibration
@@ -53,7 +53,7 @@ def scanned(tmp_path_factory):
     """A REAL scan of a tiny oracle BAM: the payload, strand model and FL histograms it produced.
 
     ⚠ A real scan rather than a hand-built payload on purpose — the cache's whole job is to reproduce
-    what the scanner emitted, including the per-junction strand table and the five length pools, and a
+    what the scanner emitted, including the per-sj strand table and the five length pools, and a
     fixture that never ran the scanner could not catch a field the writer forgot.
     """
     from rigel.config import BamScanConfig
@@ -167,8 +167,8 @@ class TestTheCachedTallyIsTheSCANNEDTally:
             assert np.array_equal(after, before), f"deferred.{field.name} content moved"
         assert cache.payload.gap_resolution == original.gap_resolution
 
-    def test_the_strand_model_survives_including_its_per_junction_table(self, scanned, tmp_path):
-        """⚠ The 2x2 is the MARGINAL of the per-junction table; the dispersion fit needs the table
+    def test_the_strand_model_survives_including_its_per_sj_table(self, scanned, tmp_path):
+        """⚠ The 2x2 is the MARGINAL of the per-sj table; the dispersion fit needs the table
         itself, so a cache that kept only the 2x2 would silently disable the dispersion estimate."""
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original = scanned[4]
@@ -523,21 +523,21 @@ class TestNothingDerivableFromTheIndexIsStored:
         inputs = calibration_inputs(cache, scanned[0])
         accepted = set(inspect.signature(calibrate).parameters)
         assert set(inputs) <= accepted, f"not accepted by calibrate(): {set(inputs) - accepted}"
-        # ⚠ EVERY argument without a usable default, not a hand-kept list. `junctions` was added to
+        # ⚠ EVERY argument without a usable default, not a hand-kept list. `sj` was added to
         # `calibrate` at S5.f and this helper was not updated — a hand-kept `required` set cannot catch
         # that, because the omission is invisible until something calls it.
         required = {
             name
             for name, param in inspect.signature(calibrate).parameters.items()
             if param.default is inspect.Parameter.empty and name != "config"
-        } | {"junctions"}
+        } | {"sj"}
         assert required <= set(inputs), f"missing: {required - set(inputs)}"
         assert inputs["gdna_fl_pmf"].sum() == pytest.approx(1.0, abs=1e-9)
 
     def test_calibration_inputs_ACTUALLY_DRIVE_calibrate(self, scanned, tmp_path):
         """⭐ The signature check above cannot see a MIS-SIZED argument, only a missing name.
 
-        `junctions` must address the same graph the payload was scanned on; an axis of the wrong length
+        `sj` must address the same graph the payload was scanned on; an axis of the wrong length
         places every splice on the wrong boundary. Calling `calibrate` for real is the only check that
         covers it, and it is cheap on this fixture.
         """
@@ -547,7 +547,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         _cache_dir, cache = round_trip(scanned, tmp_path)
         result = calibrate(**calibration_inputs(cache, scanned[0]), config=CalibrationConfig())
         assert result.n_regions > 0
-        assert result.n_junctions == cache.payload.n_sj
+        assert result.n_sj == cache.payload.n_sj
 
 
 def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path):
@@ -556,7 +556,7 @@ def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path
     ⚠ It was a **strict** xfail naming S5 as the blocker. Strict is what made it honest: the moment it
     started working it would have failed loudly rather than sitting green and forgotten. ⛔ It was in
     fact still xfailing at S5.f for a DIFFERENT reason than the one recorded — `calibration_inputs` had
-    not been given `junctions` — which is exactly why a stale xfail reason is worth nothing.
+    not been given `sj` — which is exactly why a stale xfail reason is worth nothing.
     """
     from rigel.calibration.calibrate import calibrate
     from rigel.config import CalibrationConfig

@@ -12,8 +12,8 @@ off the ground truth:
    intronic regions must go DOWN — relative to the same library's own mean.
 2. ⭐ **the mRNA length marginal.** A longer fragment presents more sequence to a probe, so capture
    selects for length until the overlap saturates at the probe length. The realised mean must RISE.
-3. ⭐ **the junction-crossing share.** ``_toy_probes`` tiles probes WITHIN each exon so none spans the
-   junction, so a junction-crossing fragment's best single probe covers only its longer overhang. Below
+3. ⭐ **the sj-crossing share.** ``_toy_probes`` tiles probes WITHIN each exon so none spans the
+   sj, so a sj-crossing fragment's best single probe covers only its longer overhang. Below
    about ``2 x probe_length`` that is less overlap than a contained fragment gets, so crossing fragments
    must be relatively DEPLETED.
 
@@ -27,10 +27,10 @@ because they are the useful part; the gates are on sign.
   probed exon is itself **5.4x ENRICHED**. A region beside a probe is not off-probe, and an intron's
   measured gDNA density under capture is a MIXTURE of a depleted interior and two enriched ends;
 * the mRNA length mean rises **+6.6 bp** (z = 14.8) — capture selects for length, as the engine says;
-* the junction depletion has the hard onset the weight law predicts: crossing/uniform is **0.62x below
+* the sj depletion has the hard onset the weight law predicts: crossing/uniform is **0.62x below
   120 bp** (one probe length), 0.97 in 120-240, and 0.97 above 240 where both saturate. ⚠ The residual
   3 % above 240 bp is the probe TILING PHASE: 1,000 bp of exon at 120 bp per probe leaves a 40 bp runt
-  at the exon end, and that runt is what a junction-crossing fragment's overhang lands on.
+  at the exon end, and that runt is what a sj-crossing fragment's overhang lands on.
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def main() -> int:
             "⭐ capture SELECTS FOR LENGTH — the realised mean rises",
             f"z = {(w_on.mean() - w_off.mean()) / max(se, 1e-9):+.1f}")
 
-    print("\n── 3. THE JUNCTION-CROSSING SHARE — probes tile PER EXON, so none spans the junction ──")
+    print("\n── 3. THE SJ-CROSSING SHARE — probes tile PER EXON, so none spans the sj ──")
     e1 = geom.exon_lengths[0]
 
     def share(frags):

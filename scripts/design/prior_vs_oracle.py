@@ -161,7 +161,7 @@ OVERRIDE_FIELDS = (
     "mass_gdna_boundary",
     "mass_rna_boundary",
     "mass_rna_spliced_boundary",
-    "mass_rna_junction",
+    "count_rna_sj",
 )
 
 
@@ -707,16 +707,16 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
     """calibrate → score → ``(calibration, fl, multi_loci, LocusPriors)`` on ONE payload."""
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
     max_size = int(payload.max_length)
     fl = build_fl_models(
         payload,
-        junction_opportunity=crossing_probability_from_index(index, max_size),
+        sj_opportunity=crossing_probability_from_index(index, max_size),
         gdna_opportunity=gdna_opportunity_from_index(index, max_size),
     )
     cal = calibrate(
@@ -726,7 +726,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         gdna_fl_pmf=fl.gdna_pmf,
         rna_fl_pmf=fl.rna_pmf,
         config=pipeline_config.calibration,
-        junctions=build_junction_geometry_arrays(index),
+        sj=build_sj_geometry_arrays(index),
         boundary_flags=build_boundary_flags_array(index),
     )
     multi_loci, priors, units = capture_priors(
@@ -802,7 +802,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
             lift["undrained"], [parts[k] for k in ORIGINS], lift["choices"]
         )
         parts_d = {
-            k: sp_drain(parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"])
+            k: sp_drain(parts[k], ch, region_types=lift["region_types"], sj=lift["sj"])
             for k, ch in zip(ORIGINS, lifted)
         }
         drain["n_ambiguous"] = int(n_amb)

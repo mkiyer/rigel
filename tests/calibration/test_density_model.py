@@ -99,14 +99,14 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
         spliced_count=np.zeros((n_slots, 2)),
         eff_gdna=eff,
         eff_rna=eff,
-        junction_count=np.zeros((n_slots, 2)),
-        eff_junction=np.zeros((n_slots, 2)),
-        # the per-FLANK split of the same flux; this fixture has no junction at all, so all four are 0
+        sj_count=np.zeros((n_slots, 2)),
+        eff_sj=np.zeros((n_slots, 2)),
+        # the per-FLANK split of the same flux; this fixture has no sj at all, so all four are 0
         # and the two flank totals coincide (`region_total_density`).
-        junction_count_lo=np.zeros((n_slots, 2)),
-        junction_count_hi=np.zeros((n_slots, 2)),
-        eff_junction_lo=np.zeros((n_slots, 2)),
-        eff_junction_hi=np.zeros((n_slots, 2)),
+        sj_count_lo=np.zeros((n_slots, 2)),
+        sj_count_hi=np.zeros((n_slots, 2)),
+        eff_sj_lo=np.zeros((n_slots, 2)),
+        eff_sj_hi=np.zeros((n_slots, 2)),
     )
     return region_gdna_density(chain, geometry, ra)
 

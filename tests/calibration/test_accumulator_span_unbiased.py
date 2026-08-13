@@ -101,7 +101,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
 
     sc = Scenario("implicit_chan", genome_length=6000, seed=7, work_dir=str(tmp_path / "sim"))
     # Short intron (50 bp ≪ insert) → fragments spanning both exons place the
-    # junction in the unsequenced mate gap = implicit splice (no CIGAR-N).
+    # sj in the unsequenced mate gap = implicit splice (no CIGAR-N).
     sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(1000, 1150), (1200, 1500)], "abundance": 80}])
     res = sc.build_oracle(
         n_fragments=40000,
@@ -124,11 +124,11 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     rid = np.asarray(ra.ref_id)
     gene = rid == res.index.ref_name_to_id["implicit_chan"]
 
-    # (1) Implicit splices route to the JUNCTION axis — the molecule JUMPED, it did not cross. ⭐ In
-    #     the new model a splice deposits on its junction boundary ONLY, never on the contiguous boundaries it
+    # (1) Implicit splices route to the SJ axis — the molecule JUMPED, it did not cross. ⭐ In
+    #     the new model a splice deposits on its sj boundary ONLY, never on the contiguous boundaries it
     #     splices over, so the evidence is `sj_count` rather than a spliced channel on a boundary.
-    junction_flux = int(np.asarray(sub.junction.count, np.int64).sum())
-    assert junction_flux > 1000, f"expected substantial junction flux, got {junction_flux}"
+    sj_flux = int(np.asarray(sub.sj.count, np.int64).sum())
+    assert sj_flux > 1000, f"expected substantial sj flux, got {sj_flux}"
 
     # (2) The intron is REGION_BOUND, not filled: the intron REGION carries no contained mass, and neither of the
     #     boundaries bounding it carries an unspliced crossing — the implicit molecules skip both.
@@ -173,13 +173,13 @@ def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):
 
 
 def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
-    """``SPLICE_ARTIFACT`` fragments (a blacklisted CIGAR-N junction) are held out
+    """``SPLICE_ARTIFACT`` fragments (a blacklisted CIGAR-N sj) are held out
     of the accumulator entirely — no contained/boundary mass — while non-artifact
     fragments deposit normally, so total mass == n_deposited (artifacts excluded).
 
     Construction: 20 plain unspliced pairs (positive control) + 50 pairs spanning
-    an ANNOTATED junction. Without a blacklist all 70 deposit (the 50 as spliced);
-    blacklisting that junction turns the 50 into artifacts (junction removed →
+    an ANNOTATED sj. Without a blacklist all 70 deposit (the 50 as spliced);
+    blacklisting that sj turns the 50 into artifacts (sj removed →
     n_sj_blacklisted > 0 → SPLICE_ARTIFACT) which must then deposit nothing.
     """
     import numpy as np
@@ -192,7 +192,7 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     fasta.write_text(">chr1\n" + "ACGT" * 1000 + "\n")
     pysam.faidx(str(fasta))
     gtf = tmp_path / "a.gtf"
-    # 2-exon transcript → annotated junction at 0-based [200, 300).
+    # 2-exon transcript → annotated sj at 0-based [200, 300).
     gtf.write_text(
         'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
         'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
@@ -207,7 +207,7 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
             _write_pair(
                 out, f"u{i:03d}", r1_pos=20, r1_cigar="100M", r2_pos=120, r2_cigar="80M", xs=False
             )
-        for i in range(50):  # span the annotated junction [200, 300)
+        for i in range(50):  # span the annotated sj [200, 300)
             _write_pair(
                 out,
                 f"r{i:03d}",
@@ -232,7 +232,7 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     assert s0.n_with_annotated_sj == 50
     assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
 
-    # Blacklist the annotated junction → the 50 become SPLICE_ARTIFACT → held out.
+    # Blacklist the annotated sj → the 50 become SPLICE_ARTIFACT → held out.
     pd.DataFrame(
         {
             "ref": ["chr1"],
@@ -244,6 +244,6 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     ).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
     idx2 = TranscriptIndex.load(str(idx_dir))
     s1, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
-    assert s1.n_sj_blacklisted == 50, "blacklist did not flag the junction"
+    assert s1.n_sj_blacklisted == 50, "blacklist did not flag the sj"
     # Only the 20 non-artifact unspliced controls remain → mass == n_deposited.
     assert total_mass(pl1) == 20.0, f"artifacts not held out (mass={total_mass(pl1)})"

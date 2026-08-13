@@ -152,8 +152,8 @@ class StepContext:
     eff_gdna_global: np.ndarray  # the matching gDNA opportunity
     eff_rna: np.ndarray  # per-slot RNA effective length
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)
-    eff_junction: np.ndarray  # [n, 2] junction opportunity by TRANSCRIPT strand
-    junction_count: np.ndarray  # [n, 2] junction fragment count by TRANSCRIPT strand
+    eff_sj: np.ndarray  # [n, 2] sj opportunity by TRANSCRIPT strand
+    sj_count: np.ndarray  # [n, 2] sj fragment count by TRANSCRIPT strand
     unspliced_count: (
         np.ndarray
     )  # [n, 2] unspliced count by GENOME strand — the density numerator AND n

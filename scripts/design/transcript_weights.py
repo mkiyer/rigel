@@ -80,9 +80,9 @@ fragments are spliced ⇒ it can claim little of an UNSPLICED budget however abu
 `Σ_regions rna_region_eff_len`, which would forbid crossing an interior region boundary that a real
 fragment crosses freely.
 
-⛔ **SPLICE-JUNCTION STEPS CARRY NO WEIGHT, BY THE OWNER'S OWN KEY REALIZATION.** The prior is UNSPLICED
+⛔ **SPLICE-SJ STEPS CARRY NO WEIGHT, BY THE OWNER'S OWN KEY REALIZATION.** The prior is UNSPLICED
 fragments only — a spliced fragment has no gDNA candidate in the EM and is assigned directly — so a
-junction, which is spliced by construction, has zero unspliced mass and must not enter the mean. It stays
+sj, which is spliced by construction, has zero unspliced mass and must not enter the mean. It stays
 in the path because the path has other consumers.
 
 ⚠ **What this module is NOT.** It does not score end to end and must never learn to: `quant_accuracy.py`
@@ -159,7 +159,7 @@ def region_unspliced_density(calibration) -> np.ndarray:
 
     ⭐ ``mass_rna_region`` is already a FRAGMENT count: containment is exclusive, so a contained fragment
     deposits on exactly one region and needs no incidence→fragment conversion. It is also unspliced by
-    construction — ``region_contained`` is credited only when the fragment used no junction.
+    construction — ``region_contained`` is credited only when the fragment used no sj.
     """
     mass = np.asarray(calibration.mass_rna_region, dtype=np.float64)
     opp = np.asarray(calibration.rna_region_eff_len, dtype=np.float64)
@@ -281,8 +281,8 @@ def build_weights(
     is_b = kind == STEP_BOUNDARY
     dens[is_r], opp[is_r] = d_region[obj[is_r]], o_region[obj[is_r]]
     dens[is_b], opp[is_b] = d_boundary[obj[is_b]], o_boundary[obj[is_b]]
-    # ⛔ STEP_SPLICE_JUNCTION keeps dens = opp = 0 and is dropped by the mask below — the prior is
-    # UNSPLICED fragments, and a junction has none by construction.
+    # ⛔ STEP_SPLICE_SJ keeps dens = opp = 0 and is dropped by the mask below — the prior is
+    # UNSPLICED fragments, and a sj has none by construction.
 
     keep = (dens > 0.0) & (opp > 0.0)
     seg = seg_all

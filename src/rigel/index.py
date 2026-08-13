@@ -10,7 +10,7 @@ TSV mirrors) in an output directory:
     intervals.feather          — exon/intron/intergenic tiling of the genome
     regions.feather            — calibration region partition (INTERGENIC/INTRON/EXON)
     sj.feather                 — annotated splice junctions from transcript introns
-    splice_blacklist.feather   — (optional) splice-artifact junctions derived
+    splice_blacklist.feather   — (optional) splice-artifact sj derived
                                  from the alignable Zarr store
 
 The ``TranscriptIndex`` class provides both the ``build()`` method for creating
@@ -80,11 +80,11 @@ MANIFEST_JSON = "manifest.json"
 #:        the derived coarse class is recomputed on load from `signature`.
 #:   6 — three-channel calibration: regions.feather gained per-strand
 #:        `mature_eligible_{pos,neg}` and boundaries.feather carried
-#:        per-boundary annotation flags (is_tss/is_tes/is_splice_junction/
+#:        per-boundary annotation flags (is_tss/is_tes/is_splice_sj/
 #:        genomic_sj_strand).
 #:   7 — those v6 precompute columns removed (the message-precision collapse
 #:        retired the mature/nascent overlay that consumed them; the solver
-#:        reads junction strand from the accumulator motif instead).
+#:        reads sj strand from the accumulator motif instead).
 #:        regions.feather is again the minimal partition [region_id, ref_name,
 #:        start, end, length, signature]; boundaries.feather is [boundary_id,
 #:        ref_name, position].
@@ -560,7 +560,7 @@ def create_nrna_transcripts(
     return synthetics, t_to_span_key, span_to_syn_idx, covered_equiv
 
 
-def build_splice_junctions(transcripts: list[Transcript]) -> pd.DataFrame:
+def build_splice_sj(transcripts: list[Transcript]) -> pd.DataFrame:
     """Extract splice junctions (introns) from all transcripts.
 
     Each intron boundary within a transcript produces one SpliceJunction
@@ -860,7 +860,7 @@ class TranscriptIndex:
         # Splice-artifact blacklist size, set at load():
         #   None → index predates the field / never loaded
         #   0    → no blacklist present (artifact detection is OFF)
-        #   >0   → number of blacklisted junctions active (detection is ON)
+        #   >0   → number of blacklisted sj active (detection is ON)
         self.sj_blacklist_size: int | None = None
 
         # Per-transcript exon intervals for coverage-weight model.
@@ -935,27 +935,27 @@ class TranscriptIndex:
 
         ⚠ **`partition_hash` is not enough for a payload, and that is not an oversight in either of them.**
         That hash keys a cached *scan*, and a scan sees the region_bound array; this one keys a cached *tally*, whose
-        junction axis is meaningless against a different junction CSR. ⭐ The two genuinely differ: the
+        sj axis is meaningless against a different sj CSR. ⭐ The two genuinely differ: the
         2026-07-29 flag fix rewrote every ``edges.feather`` while leaving every ``regions.feather``
         byte-identical, so a regions-only key would have verified **clean** against a stale payload and fed
-        every downstream comparison the pre-fix junctions.
+        every downstream comparison the pre-fix sj.
 
-        So it is ``partition_hash``'s inputs plus the junction CSR — the donor offsets, the acceptor region_bound
-        indices and the annotated strands, i.e. exactly what crosses into ``set_junctions``.
+        So it is ``partition_hash``'s inputs plus the sj CSR — the donor offsets, the acceptor region_bound
+        indices and the annotated strands, i.e. exactly what crosses into ``set_sj``.
 
         ⚠ **Computed on demand, never stored.** A hash written beside the data it describes can go stale
         against it; this one cannot.
         """
         import hashlib
 
-        from .calibration.splice_graph import build_junction_edge_arrays
+        from .calibration.splice_graph import build_sj_arrays
 
         h = hashlib.blake2b(digest_size=8)
         h.update(self.partition_hash.encode())
-        junctions = build_junction_edge_arrays(self)
+        sj = build_sj_arrays(self)
         # ⚠ `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses the
         # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated boundary row moved.
-        for array in (junctions.offsets, junctions.boundary_right, junctions.strand):
+        for array in (sj.offsets, sj.boundary_right, sj.strand):
             contiguous = np.ascontiguousarray(array)
             h.update(str(contiguous.dtype).encode())
             h.update(contiguous.tobytes())
@@ -1087,7 +1087,7 @@ class TranscriptIndex:
 
         # -- Splice junctions -------------------------------------------------
         logger.info("[START] Building splice junctions")
-        sj_df = build_splice_junctions(annotated_transcripts)
+        sj_df = build_splice_sj(annotated_transcripts)
         logger.info(f"[DONE] Found {len(sj_df)} splice junctions")
 
         sj_df.to_feather(output_dir / SJ_FEATHER, **feather_kwargs)
@@ -1591,7 +1591,7 @@ class TranscriptIndex:
                 bl_df["max_anchor_right"].astype(np.int32).tolist(),
             )
             self.sj_blacklist_size = int(len(bl_df))
-            logger.info(f"Splice artifact blacklist: {len(bl_df):,} junctions active")
+            logger.info(f"Splice artifact blacklist: {len(bl_df):,} sj active")
         else:
             # No blacklist file → artifact detection is off for this index.
             self.sj_blacklist_size = 0

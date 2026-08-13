@@ -13,7 +13,7 @@ gDNA length pools move by **exactly zero**, and there is a derivation:
 * a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are region_bounds;
 * if the drain picks ∅ the molecule crosses **both** those boundaries, making it a multi-boundary crossing — and
    gives a multi-boundary crossing **no pool**, because it is a gDNA/RNA mixture;
-* if the drain picks a spliced path the fragment used an annotated junction, so it is ``RNA_SPLICED``.
+* if the drain picks a spliced path the fragment used an annotated sj, so it is ``RNA_SPLICED``.
 
 So the drain can only ever touch ``RNA_SPLICED``, and measured on all 8 pilot conditions it does: 100 % of
 the ``pool_lengths`` delta lands there and the four gDNA rows are byte-identical.
@@ -125,7 +125,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
 
     ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region_bounds, so a
     chosen ∅ crosses two boundaries — a multi-boundary crossing, which deliberately gives
-    **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated junction, so
+    **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated sj, so
     it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pool that is supposed to be pure.
 
     ⚠ **An impure pool is worse than a missing one** (§8), and these four pools are what the gDNA
@@ -159,7 +159,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     Measured on the pilot: the anchor's mean error against truth goes from −1.6 % to **+0.00 %**.
     """
     from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.pipeline import run_pipeline
 
     config = _config()
@@ -183,7 +183,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
         # reproduction; it is the same array for both arms, so it cannot decide which one matches.
         fl = build_fl_models(
             payload,
-            junction_opportunity=crossing_probability_from_index(
+            sj_opportunity=crossing_probability_from_index(
                 scenario.index, int(payload.max_length)
             ),
         )

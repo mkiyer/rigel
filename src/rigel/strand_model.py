@@ -15,13 +15,13 @@ read 1's genomic orientation, so the model's estimand is
 
 ⭐ **Two nested views of ONE population, with one source of truth.**
 
-* :class:`SJStrandTable` — sense / antisense counts **per junction**, keyed on
+* :class:`SJStrandTable` — sense / antisense counts **per sj**, keyed on
   ``(ref, start, end, motif strand)``.  This is the primary record.
 * :class:`StrandModel` — the 2×2 contingency table of ``align_strand × reference strand``.
   For the spliced model it is **exactly the table's marginal** and is built from it
   (:meth:`StrandModel.from_sj_table`), never accumulated separately.
 
-The refinement exists because a **dispersion across junctions** cannot be recovered from the
+The refinement exists because a **dispersion across sj** cannot be recovered from the
 2×2: the RNA strand Beta-Binomial's mean (κ) and its overdispersion must be estimated from the
 same population, and the overdispersion previously came from the accumulator's boundary spliced
 channels, which also pool unannotated and implicit splices.  See
@@ -52,17 +52,17 @@ _MIN_STRAND_OBS_WARNING: int = 20
 
 @dataclass(frozen=True, slots=True)
 class SJStrandTable:
-    """Per-junction sense / antisense counts — the primary strand record.
+    """Per-sj sense / antisense counts — the primary strand record.
 
     Six parallel arrays, one row per splice junction, sorted by
     ``(ref_id, start, end, motif_strand)`` in C++ so the contents never depend on thread
-    scheduling or hash order.  A junction is uniquely specified by
+    scheduling or hash order.  A sj is uniquely specified by
     ``(reference, start, end, genomic splice-motif strand)``.
 
     **sense** means the aligner's fragment orientation agrees with the motif strand;
     **antisense** means it does not.  Each strand-qualified fragment contributes exactly ONE
-    observation, to its leftmost annotated junction — ``sj_strand`` is read from the BAM
-    ``XS``/``ts`` tag and is one value per *fragment*, so all junctions a fragment spans share
+    observation, to its leftmost annotated sj — ``sj_strand`` is read from the BAM
+    ``XS``/``ts`` tag and is one value per *fragment*, so all sj a fragment spans share
     a single sense bit and crediting them all would repeat one observation K times, inflating
     the very dispersion this table exists to measure honestly.
 
@@ -71,19 +71,19 @@ class SJStrandTable:
     * the **mean** κ — via the derived 2×2's ``n_same / n_observations``
       (:attr:`StrandModel.p_r1_sense`, then ``calibration.strand_balance.fit_strand_balance``);
     * the **dispersion** — the Beta-Binomial spread of ``(n_sense_j | depth_j)`` across
-      junctions at mean κ (``calibration.gdna_strand.fit_rna_strand_from_sj_table``).
+      sj at mean κ (``calibration.gdna_strand.fit_rna_strand_from_sj_table``).
     """
 
-    ref_id: np.ndarray  # int32[n_junctions]
-    start: np.ndarray  # int64[n_junctions]
-    end: np.ndarray  # int64[n_junctions]
-    motif_strand: np.ndarray  # int8[n_junctions] — Strand.POS / Strand.NEG
-    n_sense: np.ndarray  # int64[n_junctions] — aligner orientation agrees with the motif
-    n_antisense: np.ndarray  # int64[n_junctions]
+    ref_id: np.ndarray  # int32[n_sj]
+    start: np.ndarray  # int64[n_sj]
+    end: np.ndarray  # int64[n_sj]
+    motif_strand: np.ndarray  # int8[n_sj] — Strand.POS / Strand.NEG
+    n_sense: np.ndarray  # int64[n_sj] — aligner orientation agrees with the motif
+    n_antisense: np.ndarray  # int64[n_sj]
 
     @classmethod
     def empty(cls) -> "SJStrandTable":
-        """A table with no junctions (an unspliced or unscanned library)."""
+        """A table with no sj (an unspliced or unscanned library)."""
         return cls(
             ref_id=np.empty(0, dtype=np.int32),
             start=np.empty(0, dtype=np.int64),
@@ -113,13 +113,13 @@ class SJStrandTable:
         )
 
     @property
-    def n_junctions(self) -> int:
+    def n_sj(self) -> int:
         """Distinct splice junctions observed."""
         return int(self.n_sense.size)
 
     @property
     def depth(self) -> np.ndarray:
-        """Per-junction qualified fragment count ``n_j = sense_j + antisense_j``."""
+        """Per-sj qualified fragment count ``n_j = sense_j + antisense_j``."""
         return self.n_sense + self.n_antisense
 
     @property
@@ -130,8 +130,8 @@ class SJStrandTable:
     def contingency(self) -> tuple[int, int, int, int]:
         """The 2×2 ``(pos_pos, pos_neg, neg_pos, neg_neg)`` this table marginalizes to.
 
-        Writing ``sense ≡ (align == motif)``: over motif-POS junctions sense is ``pos_pos``
-        and antisense is ``neg_pos``; over motif-NEG junctions sense is ``neg_neg`` and
+        Writing ``sense ≡ (align == motif)``: over motif-POS sj sense is ``pos_pos``
+        and antisense is ``neg_pos``; over motif-NEG sj sense is ``neg_neg`` and
         antisense is ``pos_neg``.  This identity is the correctness argument for the whole
         refinement and holds exactly — same qualification branch, one observation per fragment.
         """
@@ -145,27 +145,27 @@ class SJStrandTable:
         )
 
     def depth_quantiles(self, qs: tuple[float, ...] = (0.5, 0.9, 0.99)) -> list[int]:
-        """Junction-depth quantiles — "how deep are the junctions that carry the fit"."""
-        if self.n_junctions == 0:
+        """SpliceJunction-depth quantiles — "how deep are the sj that carry the fit"."""
+        if self.n_sj == 0:
             return [0] * len(qs)
         return [int(v) for v in np.quantile(self.depth, qs)]
 
     def to_dict(self) -> dict:
-        """JSON-serializable QC summary: how much junction evidence this library carries."""
+        """JSON-serializable QC summary: how much sj evidence this library carries."""
         depth = self.depth
         q50, q90, q99 = self.depth_quantiles()
         return {
-            "n_junctions": self.n_junctions,
+            "n_sj": self.n_sj,
             "n_observations": self.n_observations,
             "depth_median": q50,
             "depth_p90": q90,
             "depth_p99": q99,
-            "depth_max": int(depth.max()) if self.n_junctions else 0,
-            # "How many junctions are deep enough to see the minority strand" is a
-            # first-class question about a library: at κ ≈ 0.002 a junction needs
+            "depth_max": int(depth.max()) if self.n_sj else 0,
+            # "How many sj are deep enough to see the minority strand" is a
+            # first-class question about a library: at κ ≈ 0.002 a sj needs
             # hundreds of reads before one disagreeing read is even expected.
-            "n_junctions_depth_ge_100": int(np.count_nonzero(depth >= 100)),
-            "n_junctions_depth_ge_1000": int(np.count_nonzero(depth >= 1000)),
+            "n_sj_depth_ge_100": int(np.count_nonzero(depth >= 100)),
+            "n_sj_depth_ge_1000": int(np.count_nonzero(depth >= 1000)),
         }
 
 
@@ -179,10 +179,10 @@ class StrandModel:
 
     ``sj_table`` is present on the **spliced** model only, where the 2×2 is exactly its
     marginal (:meth:`from_sj_table`) — the four counters are never maintained independently of
-    it.  The all-exonic diagnostic model has no junctions and therefore no table.
+    it.  The all-exonic diagnostic model has no sj and therefore no table.
 
     Qualification (applied in C++ by ``get_is_strand_qualified()``, not here): annotated splice
-    junction, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
+    sj, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
 
     ⚠ Deliberately NOT ``slots=True``: development caches under ``_selfsolve_cache`` /
     ``_calib_cache`` hold pickled instances, and a slotted class cannot restore a
@@ -195,8 +195,8 @@ class StrandModel:
     neg_pos: int = 0  # exon NEG, SJ POS
     neg_neg: int = 0  # exon NEG, SJ NEG
 
-    #: The per-junction refinement this 2×2 marginalizes (spliced model only; ``None``
-    #: on the all-exonic diagnostic model, which has no junction identity).
+    #: The per-sj refinement this 2×2 marginalizes (spliced model only; ``None``
+    #: on the all-exonic diagnostic model, which has no sj identity).
     sj_table: SJStrandTable | None = None
 
     # ------------------------------------------------------------------
@@ -219,7 +219,7 @@ class StrandModel:
 
     @classmethod
     def from_sj_table(cls, table: SJStrandTable) -> "StrandModel":
-        """Build from the per-junction table — the 2×2 is its marginal (one source of truth)."""
+        """Build from the per-sj table — the 2×2 is its marginal (one source of truth)."""
         pos_pos, pos_neg, neg_pos, neg_neg = table.contingency()
         return cls(
             pos_pos=pos_pos,
@@ -230,7 +230,7 @@ class StrandModel:
         )
 
     def contingency_matches_table(self) -> bool:
-        """⭐ The invariant, made executable: the 2×2 IS the junction table's marginal.
+        """⭐ The invariant, made executable: the 2×2 IS the sj table's marginal.
 
         Trivially ``True`` when there is no table (the all-exonic diagnostic model). Nothing in the
         production path can violate it — :meth:`from_sj_table` is the only way the pair is built —
@@ -376,7 +376,7 @@ class StrandModels:
     exon/SJ strands.  Annotated splice junctions prove RNA origin,
     making this an uncontaminated measure of library strand specificity.
     Probabilities are pure MLE from observed counts, and its 2×2 is the marginal of the
-    per-junction :class:`SJStrandTable` it carries.
+    per-sj :class:`SJStrandTable` it carries.
 
     One additional sub-model is retained **for diagnostics only** and
     is never used for scoring:
@@ -405,8 +405,8 @@ class StrandModels:
     def from_scan(cls, strand_dict: dict) -> "StrandModels":
         """Build both sub-models from the C++ scanner's ``strand_observations`` dict.
 
-        The spliced model comes from the per-junction table (its 2×2 is the marginal); the
-        all-exonic diagnostic has no junction identity and comes from its label arrays.
+        The spliced model comes from the per-sj table (its 2×2 is the marginal); the
+        all-exonic diagnostic has no sj identity and comes from its label arrays.
         Emits the low-evidence warnings once, here, where the counts first exist.
         """
         models = cls(
@@ -442,7 +442,7 @@ class StrandModels:
 
     @property
     def sj_table(self) -> SJStrandTable:
-        """The RNA model's per-junction table (empty when the library was never scanned)."""
+        """The RNA model's per-sj table (empty when the library was never scanned)."""
         return self.exonic_spliced.sj_table or SJStrandTable.empty()
 
     @property
@@ -480,7 +480,7 @@ class StrandModels:
             f"specificity={self.exonic_spliced.strand_specificity:.4f}"
         )
         logger.info(
-            f"    junctions={table.n_junctions:,} "
+            f"    sj={table.n_sj:,} "
             f"(depth median={table.depth_quantiles((0.5,))[0]:,}, "
             f"≥100={int(np.count_nonzero(table.depth >= 100)):,}, "
             f"≥1000={int(np.count_nonzero(table.depth >= 1000)):,})"

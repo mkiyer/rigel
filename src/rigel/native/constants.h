@@ -34,7 +34,7 @@ static constexpr int32_t SPLICE_SPLICED_UNANNOT = 1;
 static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
 // SRD v2 additions:
 static constexpr int32_t SPLICE_IMPLICIT        = 3;  // PE gap spans an annotated intron
-static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR junction rejected by blacklist
+static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR sj rejected by blacklist
 // ⚠ Must equal `len(rigel.splice.SpliceType)`. It sizes the scanner's per-fragment splice census,
 // so a category added on one side and not the other is caught by `test_every_splice_type_is_censused`
 // rather than reading zero through the stats dict's `.get(key, 0)`.
@@ -209,16 +209,16 @@ struct RawResolveResult {
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
-    // The per-junction SJ strand table's key ---
-    // Coordinates of the LEFTMOST ANNOTATED CIGAR-N junction this fragment
+    // The per-sj SJ strand table's key ---
+    // Coordinates of the LEFTMOST ANNOTATED CIGAR-N sj this fragment
     // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
     // motif strand (one XS/ts tag per fragment), which completes the key.
     //
-    // ⚠ Crediting the FIRST annotated junction is a CHOICE, recorded here so it
+    // ⚠ Crediting the FIRST annotated sj is a CHOICE, recorded here so it
     // is not mistaken for a derivation.  A qualified fragment carries ONE sense
     // bit: `sj_strand` is read from the BAM XS/ts tag, which is per RECORD, and
     // mates that disagree OR to STRAND_AMBIGUOUS, which the qualification
-    // rejects.  So all K junctions of a fragment necessarily agree.
+    // rejects.  So all K sj of a fragment necessarily agree.
     //
     // Two measured reasons for credit-one (2026-07-28):
     //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
@@ -232,13 +232,13 @@ struct RawResolveResult {
     //
     // ⚠ Two costs of the deterministic leftmost pick, recorded so they are not
     // rediscovered as bugs: od_mom is 0.85-0.99x the random-pick value, and 3-5%
-    // of junctions never receive an observation (leftmost and rightmost agree, so
-    // this is concentration on fewer junctions, not a 5'/3' bias). Determinism
+    // of sj never receive an observation (leftmost and rightmost agree, so
+    // this is concentration on fewer sj, not a 5'/3' bias). Determinism
     // wins anyway — random-pick jitter is 3.8% CV and this repo has goldens.
     //
     // ⚠ ANNOTATED, not merely leftmost: `sj_strand` is the OR of the ANNOTATED
     // introns' strands only, so an unannotated intron may carry a different (or
-    // absent) tag.  Keying on an annotated junction is what makes the 2×2
+    // absent) tag.  Keying on an annotated sj is what makes the 2×2
     // marginal identity of §2.1 hold unconditionally.
     int32_t sj_key_ref = -1;
     int32_t sj_key_start = -1;
@@ -255,7 +255,7 @@ struct RawResolveResult {
     //
     // ⚠ An EMPTY hypothesis (no introns) is the UNSPLICED one, and it is the genomic explanation: cutting
     // nothing means the gap is real template. It is present whenever some compatible transcript implies
-    // nothing there, or whenever the fragment carries no annotated CIGAR-N junction and so could be gDNA.
+    // nothing there, or whenever the fragment carries no annotated CIGAR-N sj and so could be gDNA.
     // ⛔ It is never added as a synthetic nascent-shadow candidate -- the shadow IS this hypothesis.
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0

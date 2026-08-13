@@ -18,9 +18,9 @@ THE AXES — three of them, off by one from each other per reference::
     boundaries            boundary 1    boundary 2               c - 2 = 2 contiguous boundaries
 
 A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries; one contributing
-none owns neither, which is legal. Junction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
+none owns neither, which is legal. SpliceJunction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
-junction-boundary id simply BE its slot.
+sj-boundary id simply BE its slot.
 
 WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64.**
 There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
@@ -57,9 +57,9 @@ stopped, so no test could disagree with the claim. A justification with no consu
 gate — `TRAPS: a-guard-outlives-its-divisor`, in prose form.
 
 The trailing ``2`` on every bank is the **genome strand** — ``Strand.POS`` then ``Strand.NEG``, without
-exception. Sense/antisense is transcript-relative, derived by the consumer from the junction's own
+exception. Sense/antisense is transcript-relative, derived by the consumer from the sj's own
 strand, and never stored. ⭐ ``sj_mass`` joined them on 2026-08-13 and is the only mass that has: see
-``JunctionEdge::mass`` for the premise that changed and why it did not reach the other two masses.
+``SpliceJunction::mass`` for the premise that changed and why it did not reach the other two masses.
 
 ⚠ **OWNERSHIP: this object holds VIEWS, and it is the keep-alive.** ``np.ascontiguousarray(x, dtype=D)`` is
 a **no-op** when the array already has dtype ``D``, so nothing here copies — the buffers belong to
@@ -92,7 +92,7 @@ N_FRAGMENT_POOLS = 5
 #: `tests/calibration/test_fl.py` pins them against the executable specification's enum itself.
 #:
 #: Purity is the point (design §8): the two DNA_* contained pools are ~99 % gDNA on real data, and
-#: RNA_SPLICED used an ANNOTATED junction with the splice OBSERVED — gDNA cannot be spliced. ⭐ The two
+#: RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be spliced. ⭐ The two
 #: *_EXON "splash" pools are the only ON-TARGET gDNA population, so they are named rather than folded
 #: into the gDNA model: on-target gDNA runs ~42 bp shorter than off-target (§8.2), and the shipped model
 #: read a gDNA mean of 146.05 against the pure intergenic pool's 88.0 precisely by pooling them in.
@@ -102,7 +102,7 @@ POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — pure gDNA
 POOL_DNA_INTRONIC = 1  # contained in an intronic region — pure gDNA
 POOL_DNA_INTRON_EXON = 2  # crossing one boundary, flanks {intron, exon} — on-target gDNA
 POOL_DNA_INTERGENIC_EXON = 3  # crossing one boundary, {intergenic, exon} — on-target gDNA
-POOL_RNA_SPLICED = 4  # used an annotated junction, splice OBSERVED — pure RNA
+POOL_RNA_SPLICED = 4  # used an annotated sj, splice OBSERVED — pure RNA
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +123,7 @@ class ScanQC:
     #: ⭐ >1 surviving hypothesis, so the fragment's gap is undetermined. ⚠ NOT dropped — it is held
     #: WHOLE for the second pass, and the identity is `deposited + deferred + dropped_* == offered`.
     deferred_undetermined_gap: int
-    unannotated_introns: int  # observed introns with no annotated junction
+    unannotated_introns: int  # observed introns with no annotated sj
     contradictory_sj_strand: int  # the mates' motif tags disagreed; no splice trusted
     introns_absorbed: int  # overlapping or abutting introns merged away
 
@@ -275,8 +275,8 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("sj_count", "sj", np.uint32),
     # ⭐⭐ THE ONE MASS WITH A STRAND, and the only non-integer row in this table. `accumulator.h`'s
     # one-value ruling was reversed on the SJ axis alone (owner, 2026-08-12) because its premise
-    # changed: an artifactual junction accumulates SYMMETRICALLY on both strands like gDNA, so the
-    # existing strand model can detect one — given a per-strand observable. `JunctionEdge::mass` carries
+    # changed: an artifactual sj accumulates SYMMETRICALLY on both strands like gDNA, so the
+    # existing strand model can detect one — given a per-strand observable. `SpliceJunction::mass` carries
     # the full reversal. ⛔ The columns are `sj_count`'s columns, so `mass[c]/count[c]` is a per-strand
     # mean. ⚠ The ruling still STANDS for `boundary_unspliced_mass`, which has no such consumer.
     ("sj_mass", "sj", np.float64),
@@ -498,7 +498,7 @@ class AccumulatorPayload:
     ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
-    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — junction boundaries
+    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — sj boundaries
 
     # -- regions: two disjoint populations, each two genome-strand columns --
     region_contained_count: np.ndarray  # uint32[n_regions, 2] — the whole path lies inside the region
@@ -527,29 +527,29 @@ class AccumulatorPayload:
     #: unspliced mass at the same boundary — NOT "the number of spliced fragments here".
     boundary_spliced_mass: np.ndarray
 
-    # -- junction boundaries: one exact donor->acceptor jump. Pure RNA by construction --
+    # -- sj boundaries: one exact donor->acceptor jump. Pure RNA by construction --
     #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
-    #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
+    #: THEM YET** (owner ruling, 2026-08-08). A sj is stranded by its genomic splicing MOTIF, so
     #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
     #:
     #: ⭐ **The reason is aligner-artifact detection.** Aligners emit false-positive ``N`` CIGAR ops from
     #: plain genomic DNA. ``rigel.splice_blacklist`` catches those the sister tool ``alignable`` has
     #: enumerated by coordinate — an a-priori list, and far from complete. The EMPIRICAL detector is
-    #: this column: in a stranded library a real junction inherits the global strand specificity, while
+    #: this column: in a stranded library a real sj inherits the global strand specificity, while
     #: an artifact deposits on BOTH strands and deviates from it. ⚠ Unstranded data cannot use it
     #: (κ = ½ leaves nothing to deviate from), which is a property of the detector, not a reason to drop
     #: the column.
     #:
-    #: ⛔ The discriminating information lives ONLY in the split — a clean junction and an artifactual
+    #: ⛔ The discriminating information lives ONLY in the split — a clean sj and an artifactual
     #: one carry the same total. Gated by
-    #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
+    #: ``test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
-    #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's junction evidence
+    #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's sj evidence
     #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
     #: COMPUTABLE.** A spliced fragment's block containing no interior boundary deposits on neither boundary
-    #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single region.
+    #: bank, and is not ``contained`` either — its path spans a sj, so it lies in no single region.
     #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
     #:
     #: ⭐ Measured on the origin-split oracle at ladder g50 capture_off: **1,222,375 of 4,830,713 RNA
@@ -587,7 +587,7 @@ class AccumulatorPayload:
     n_refs: int
 
     #: ⭐ Provenance, and it must cover **regions AND boundaries**. The payload is boundary-keyed by construction —
-    #: its junction axis is meaningless against a different junction CSR — and `index.partition_hash`
+    #: its sj axis is meaningless against a different sj CSR — and `index.partition_hash`
     #: deliberately covers `regions.feather` only. A 2026-07-29 flag fix rewrote every `edges.feather` while
     #: leaving every `regions.feather` byte-identical, so a regions-only key would have verified CLEAN against
     #: a stale cache. `None` when the scanner was driven without an index to hash.

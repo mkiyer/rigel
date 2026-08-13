@@ -112,11 +112,11 @@ def _payloads(cache_root: Path, suite: Path, tag: str, index, cfg):
     return {k: read_scan_cache(cache_root / tag / k, index, scan).payload for k in ORIGINS}
 
 
-def measure(parts, index, ra, junctions, boundary_flags) -> dict:
+def measure(parts, index, ra, sj, boundary_flags) -> dict:
     """Per-slot TRUE gDNA density, and the anchor population's own view of it."""
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
 
     gp = parts["gdna"]
     chain = build_region_chain(gp.ref_region_offsets, gp.ref_boundary_offsets)
@@ -126,14 +126,14 @@ def measure(parts, index, ra, junctions, boundary_flags) -> dict:
     size = int(gp.max_length)
     fl = build_fl_models(
         gp,
-        junction_opportunity=crossing_probability_from_index(index, size),
+        sj_opportunity=crossing_probability_from_index(index, size),
         gdna_opportunity=gdna_opportunity_from_index(index, size),
     )
     geom = build_region_geometry(
         chain,
         CalibrationSubstrate.from_payload(gp, ra),
         ra,
-        junctions,
+        sj,
         fl.gdna_pmf,
         fl.rna_pmf,
         None,
@@ -233,10 +233,10 @@ def main() -> int:
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
-    junctions = build_junction_geometry_arrays(index)
+    sj = build_sj_geometry_arrays(index)
     boundary_flags = build_boundary_flags_array(index)
     conds = args.conditions or sorted(p.name for p in cache.iterdir() if p.is_dir())
 
@@ -250,7 +250,7 @@ def main() -> int:
     rows = []
     for tag in conds:
         try:
-            m = measure(_payloads(cache, suite, tag, index, cfg), index, ra, junctions, boundary_flags)
+            m = measure(_payloads(cache, suite, tag, index, cfg), index, ra, sj, boundary_flags)
         except Exception as e:  # noqa: BLE001
             print(f"{tag:<42} SKIP  {type(e).__name__}: {e}")
             continue

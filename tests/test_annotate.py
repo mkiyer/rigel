@@ -622,7 +622,7 @@ class TestAnnotatedBamIntegration:
                 # No blacklist loaded in this scenario → ZB must be 0
                 assert zb == 0, f"ZB={zb} with no blacklist loaded (expected 0)"
 
-    def test_zb_tag_marks_blacklisted_junctions(self, scenario, tmp_path):
+    def test_zb_tag_marks_blacklisted_sj(self, scenario, tmp_path):
         """Injecting a targeted blacklist entry produces ZB>=1 on the
         matching reads, and the sum of ZB across the output BAM equals
         the Pass-1 scanner stat ``n_sj_blacklisted`` (Pass-1/Pass-2
@@ -646,7 +646,7 @@ class TestAnnotatedBamIntegration:
         )
         result = scenario.build(n_fragments=500, sim_config=sim_config)
 
-        # Inject a blacklist covering gene g1's junction (1000, 1500)
+        # Inject a blacklist covering gene g1's sj (1000, 1500)
         # with huge anchor envelopes so every spliced read over it is
         # dropped.  The scenario's ref name equals scenario.name by default.
         ref = scenario.ref_name

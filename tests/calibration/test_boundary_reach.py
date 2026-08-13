@@ -12,10 +12,10 @@ genome-wide and by **+0.36** in the last region before a polyA site.
 independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
 different places give a boundary two different RNA reaches, and averaging them would describe neither.
 
-⚠ **A contiguous boundary's reach is GENOMIC, unlike a junction's, which is EXONIC.** A junction is used
+⚠ **A contiguous boundary's reach is GENOMIC, unlike a sj's, which is EXONIC.** A sj is used
 only by a spliced molecule, so what remains either side of it is exonic. A contiguous boundary is crossed by
 *nascent* RNA too, which is genomic — taking the exonic reach there would declare an intronic nascent
-fragment impossible (`splice_graph.JunctionGeometry`).
+fragment impossible (`splice_graph.SpliceJunctionGeometry`).
 
 ⚠ **A reach of 0 is MEANINGFUL, not a sentinel**. It says there is no template
 of that strand at that boundary at all, so RNA of that strand has zero opportunity — which is what makes
@@ -88,7 +88,7 @@ def test_one_entry_per_boundary_on_the_SAME_axis_as_the_flags(index):
 
 def test_the_strand_axis_is_POS_then_NEG(index):
     """Column 0 is the POS-strand transcript's reach, column 1 the NEG's — the same ordering the
-    accumulator's two columns and ``JunctionGeometry``'s strand join use.
+    accumulator's two columns and ``SpliceJunctionGeometry``'s strand join use.
 
     ⚠ On this fixture chr1 carries a POS transcript at [200,900) and a NEG one at [1000,1200), which
     are disjoint — so there are boundaries where exactly one column is non-zero, and a transposed strand

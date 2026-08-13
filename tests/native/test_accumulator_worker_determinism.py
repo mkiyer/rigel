@@ -10,7 +10,7 @@ Integer addition is associative, so the per-worker merge is now exact.
 ⚠ WHY IT IS NOT ENOUGH TO TEST ``Accumulator.merge_from`` DIRECTLY (the parity module does that). This
 exercises the *scanner's* worker path: each worker builds its own ``AccumulatorSet`` from the scanner's
 members, and the chunk→worker split is data-dependent. A worker whose set was constructed differently —
-junctions installed on the template but not on the copies, say — is invisible to a merge test on one
+sj installed on the template but not on the copies, say — is invisible to a merge test on one
 accumulator and shows up here.
 """
 
@@ -39,18 +39,18 @@ EPS = float(np.finfo(np.float64).eps)
 def oracle(tmp_path):
     """A scenario built so that **every** bank of the tally receives something.
 
-    ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the junction
+    ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the sj
     boundaries and leave **both contiguous-boundary banks identically zero**: every region_bound is an exon boundary, so a
-    mature fragment either fits inside an exon (contained) or splices across the gap (junction boundary), and
+    mature fragment either fits inside an exon (contained) or splices across the gap (sj boundary), and
     it never has bases on both sides of a boundary. A bit-identity gate over an all-zero array passes for the
     wrong reason — this project has already had one report "32/32 IDENTICAL" on an arm with zero rows. So:
 
     * ``t2`` starts at 500, **inside** ``t1``'s first exon. That makes 500 a region_bound, and a ``t1`` fragment
       spanning it has bases on both sides — a contiguous crossing. If that fragment also uses the
-      junction, it is a crossing in the SPLICED bank, which is the channel the old design merged away.
+      sj, it is a crossing in the SPLICED bank, which is the channel the old design merged away.
     * ``t4`` ends at 650, which region_bounds a **50 bp** region out of ``[500, 700)``. Nothing else here can be
       SPANNED: spanning needs one segment covering a region whole, so at 200 bp regions and 220 bp fragments
-      it essentially never happens, and mature RNA can never span the region before a junction at all —
+      it essentially never happens, and mature RNA can never span the region before a sj at all —
       it has no base past the exon end, it splices there. A 50 bp region is spanned by ordinary gDNA.
     * ``gdna_fraction`` puts genomic fragments in the intronic and intergenic regions, which is the
       unspliced bank and the two pure gDNA length pools.
@@ -80,7 +80,7 @@ def oracle(tmp_path):
         [{"t_id": "t3", "exons": [(3000, 3400), (4000, 4400)], "abundance": 40}],
     )
     # ⚠ 300 bp mean at 12,000 fragments, and BOTH numbers are load-bearing. The RESOLVED-gap arm needs
-    # a fragment whose two 100 bp mates straddle the junction with the intron strictly inside the gap,
+    # a fragment whose two 100 bp mates straddle the sj with the intron strictly inside the gap,
     # so it needs length ≥ ~300 on a 1,000 nt transcript — and the simulator now models the effective
     # length, so a 600 bp fragment has 401 placements on that transcript against an 80 bp fragment's
     # 921 and the long tail is genuinely suppressed (a 2.8x tilt). At the old 220/4,000 the arm read
@@ -128,7 +128,7 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
             "no unspliced contiguous crossing — the mixture being deconvolved",
         ),
         ("boundary_spliced_count", "no SPLICED contiguous crossing — the certified-RNA channel"),
-        ("sj_count", "no annotated junction was used"),
+        ("sj_count", "no annotated sj was used"),
         ("pool_lengths", "no fragment entered a length pool"),
     ]:
         assert int(getattr(baseline, key).sum()) > 0, f"{key}: {why}"

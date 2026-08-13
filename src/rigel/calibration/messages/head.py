@@ -75,7 +75,7 @@ class HeadSwitches:
     #: the relay's mass pin ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
     #: ceiling says deleting it outright cost the panel **+0.0002** — it landed on the derivation.
     mass_pin: bool = True
-    #: GRAFT: a flanking BOUNDARY's measured junction density joins the RNA claim entering an EXON.
+    #: GRAFT: a flanking BOUNDARY's measured sj density joins the RNA claim entering an EXON.
     graft: bool = True
     #: the-graft-frame-variance — the graft's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
     graft_frame_var: bool = True
@@ -139,8 +139,8 @@ class _HeadRelay:
         M = np.asarray(ctx.mass, np.float64)
         E_g = np.asarray(ctx.eff_gdna_global, np.float64)
         E_r = np.asarray(ctx.eff_rna, np.float64)
-        SPL = np.asarray(ctx.junction_count, np.float64)
-        ESP = np.asarray(ctx.eff_junction, np.float64)
+        SPL = np.asarray(ctx.sj_count, np.float64)
+        ESP = np.asarray(ctx.eff_sj, np.float64)
         _n_region = np.asarray(ctx.n_slot, np.float64)
         ni = ctx.own
         self._is_bnd_a, self._ex_a, self._fp_a, self._fn_a = is_bnd_a, ex_a, fp_a, fn_a
@@ -168,13 +168,13 @@ class _HeadRelay:
             logvar_tot = np.zeros_like(logvar_tot)
         self._logvar_tot = logvar_tot
 
-        # ── the per-TRANSCRIPT-STRAND junction DENSITY at each boundary ────────────────────────────────────
+        # ── the per-TRANSCRIPT-STRAND sj DENSITY at each boundary ────────────────────────────────────
         def _mature_rho(strand: int) -> np.ndarray:
             c, e = SPL[:, strand], ESP[:, strand]
             live = (c > _EPS) & (e > _EPS)
             return np.where(live, c / np.where(live, e, 1.0), 0.0)
 
-        spl_p = _mature_rho(0)  # + transcript junction density at this boundary (0 on REGION slots)
+        spl_p = _mature_rho(0)  # + transcript sj density at this boundary (0 on REGION slots)
         spl_n = _mature_rho(1)
         self._spl_p, self._spl_n = spl_p, spl_n
 
@@ -228,9 +228,9 @@ class _HeadRelay:
         self._v_own_g, self._v_own_r, self._v_own_lam = v_own_g, v_own_r, v_own_lam
 
         # ── v_mu uses the spliced COUNT, never a mass ──────────────────────────────────────────────────
-        # The accumulator deposits fragments fractionally, so at a junction face the median count is 33
+        # The accumulator deposits fragments fractionally, so at a sj face the median count is 33
         # against a median mass of 11 and the mass would over-state v_mu ~3x. With one count per boundary the
-        # rule is structural rather than a discipline: ``junction_count`` IS the junction fragment count.
+        # rule is structural rather than a discipline: ``sj_count`` IS the sj fragment count.
         self._mu_s = (spl_p, spl_n)
         self._v_mu_s = tuple(
             np.where(c > 0.0, 1.0 / np.maximum(c, _EPS), np.inf) for c in (SPL[:, 0], SPL[:, 1])
@@ -239,11 +239,11 @@ class _HeadRelay:
         # ── ⭐⭐⭐ THE REFRAME FRAME IS A PAIR, ONE TOTAL PER FLANK ──────────────────────────────────────
         # ``rho_lo[k]`` is the total slot ``k`` presents to its genomic-LOW neighbour and ``rho_hi[k]`` the
         # one it presents to its genomic-HIGH neighbour; they differ only at an BOUNDARY, and only by which
-        # junctions' flux belongs on which side.
+        # sj' flux belongs on which side.
         # ⭐⭐ THE PAIRING RULE: a hop always joins two ADJACENT slots ``(k, k+1)``, and whichever is the
         # source the pair is the SAME pair, so ``r = rho_lo[k+1] / rho_hi[k]``. ⛔ DIRECTION DOES NOT
         # ENTER. It is NOT expressible as one array per direction: within ONE forward pass an BOUNDARY at a
-        # junction's low end is the DESTINATION of a hop from its low flank (junction flux INCLUDED) and
+        # sj's low end is the DESTINATION of a hop from its low flank (sj flux INCLUDED) and
         # the SOURCE of the next hop into its high flank (EXCLUDED). Two arrays indexed by ROLE is what
         # expresses that.
         # ⚠ TRAPS: a-message-from-the-destinations-belief DEBT, NAMED: this reads the belief at BOTH ends, so the frame at a hop is a function of the
@@ -355,7 +355,7 @@ class _HeadRelay:
         ⭐ The lift is the same reframe ``r`` the scan uses, so it takes the same FLANK PAIR and the same
         role pairing: for the LEFT flank the neighbour is the genomic-LOW slot, so this slot presents
         ``rho_lo`` and the neighbour ``rho_hi``; the RIGHT flank is the mirror. Reading one
-        junction-inclusive total on both sides lifted each flux by a ratio inflated on exactly the side
+        sj-inclusive total on both sides lifted each flux by a ratio inflated on exactly the side
         facing an intron."""
         is_bnd_a, vl, vr, sl, sr = self._is_bnd_a, self._vl_a, self._vr_a, self._sl_a, self._sr_a
 
@@ -605,9 +605,9 @@ class _HeadRelay:
                 r = (rho_dst_i / rho_src) if (rho_src > _EPS and rho_dst_i > _EPS) else 1.0
             else:
                 r = 1.0  # no frame ⇒ pass-through
-            # GRAFT (BOUNDARY → EXON): the BOUNDARY's measured junction flux is a density AT THE SOURCE, so it
+            # GRAFT (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE, so it
             # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
-            # applied after. Only an EXON receives the graft — an intron carries no junction flux.
+            # applied after. Only an EXON receives the graft — an intron carries no sj flux.
             _gr = sw.graft and ex_l[i] and bnd_l[s]
             # sigma^2_transfer = Var(log r) (the-reframe-scale-variance): 0 on the matched-set GRAFT (r is common-mode across
             # {g,R} and cancels in the composition — charging it there is a double-count), Var(log r)
@@ -629,7 +629,7 @@ class _HeadRelay:
             tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
             tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
             ttau = _damp(tau[s], s2t)  # composition
-            # The grafted junction flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
+            # The grafted sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
             # data and would otherwise drop the graft on the floor. It enters BOTH the mode fusion and the
             # MEASUREMENT stream, never the composition tau: a count is not a composition vote.
@@ -738,9 +738,9 @@ class _HeadRelay:
         # reframe is a false premise and the gDNA LEVEL crosses UNSCALED.
         #
         # ⚠ **A GRAFT boundary does NOT license it, and that is a deliberate divergence from the lambda gate**,
-        # which counts the grafted junction precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-boundary: mature RNA does not
+        # which counts the grafted sj precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-boundary: mature RNA does not
         # cross an intron<->exon BOUNDARY contiguously, so that BOUNDARY's OWN spanning population is gDNA and
-        # unspliced RNA, and the junction flux is a measurement of RNA that lives in the DESTINATION — the
+        # unspliced RNA, and the sj flux is a measurement of RNA that lives in the DESTINATION — the
         # routing operator exists precisely because that component cannot cross by imputation. Using it to
         # license the imputation would be circular.
         #

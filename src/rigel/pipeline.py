@@ -316,9 +316,9 @@ def scan_and_buffer(
     _apply_scan_stats(stats, result["stats"])
 
     # Build the strand models from the scanner's observations. Immutable and built
-    # once — the spliced 2×2 is the marginal of its per-junction SJ strand table.
+    # once — the spliced 2×2 is the marginal of its per-sj SJ strand table.
     strand_models = StrandModels.from_scan(result["strand_observations"])
-    # ONE strand-qualified fragment credits ONE junction. That is what makes the 2×2
+    # ONE strand-qualified fragment credits ONE sj. That is what makes the 2×2
     # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
     # fitted on one population. The
     # C++ counts the fragments independently of the table it builds, so this is a real
@@ -328,7 +328,7 @@ def scan_and_buffer(
         raise RuntimeError(
             f"SJ strand table credited {n_credited:,} observations but the scanner "
             f"qualified {stats.n_strand_trained:,} fragments; one qualified fragment must "
-            "credit exactly one junction."
+            "credit exactly one sj."
         )
 
     logger.info(
@@ -349,7 +349,7 @@ def scan_and_buffer(
 
     if result.get("calibration") is not None:
         # ⚠ The provenance covers regions AND boundaries. The payload is boundary-keyed by construction — its
-        # junction axis is meaningless against a different junction CSR — and `partition_hash` covers
+        # sj axis is meaningless against a different sj CSR — and `partition_hash` covers
         # `regions.feather` only, deliberately.
         calibration_payload = AccumulatorPayload.from_scan_result(
             result, graph_hash=index.graph_hash
@@ -393,8 +393,8 @@ def _drain_side_buffer(
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.junction_opportunity import crossing_probability_from_index
-    from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
+    from .calibration.sj_opportunity import crossing_probability_from_index
+    from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
     held = payload.deferred.n_fragments
@@ -406,7 +406,7 @@ def _drain_side_buffer(
 
     start = time.perf_counter()
     _region_bounds, _offsets, region_types = build_region_partition_arrays(index)
-    junctions = build_junction_edge_arrays(index)
+    sj = build_sj_arrays(index)
     scores = score_held_fragments(
         payload,
         # ⭐ The SAME de-tilted RNA pool the calibrator will read. The scorer weighs a candidate
@@ -415,21 +415,21 @@ def _drain_side_buffer(
         # distribution, or the second pass and the calibration disagree about the library.
         fl_models=build_fl_models(
             payload,
-            junction_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+            sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
             gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
         ),
         # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
         # this is ≈ 0.01, so DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
         region_types=region_types,
-        junctions=junctions,
+        sj=sj,
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
-    drained = drain(payload, choices, region_types=region_types, junctions=junctions)
+    drained = drain(payload, choices, region_types=region_types, sj=sj)
     if _lift is not None:
         # ⛔ ``undrained`` is the payload as it entered here, NOT ``drained``: the drained bank is empty by
         # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
-        _lift.update(undrained=payload, choices=choices, region_types=region_types, junctions=junctions)
+        _lift.update(undrained=payload, choices=choices, region_types=region_types, sj=sj)
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
@@ -450,20 +450,20 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     max_frag_length: int,
 ) -> None:
-    """Install the index's v8 splice graph into a native BamScanner: the region partition, then the junctions.
+    """Install the index's v8 splice graph into a native BamScanner: the region partition, then the sj.
 
     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` flattens the per-reference
     partition into the ``(region_bounds, ref_region_bound_offsets, n_refs, region_types, max_length)`` ABI, and
-    :func:`~rigel.calibration.splice_graph.build_junction_edge_arrays` builds the junction CSR keyed by the
+    :func:`~rigel.calibration.splice_graph.build_sj_arrays` builds the sj CSR keyed by the
     flat region_bound index. Both are derived from ``index.regions_df``/``index.edges_df`` and ordered to match
     ``index.ref_names``, which is the resolver's reference-id space.
 
-    ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the junctions
-    are separate; and ``scan`` refuses to run if the second call is missing, because a missing junction table
-    is invisible — every observed intron would simply read as unannotated, so all 404,168 junction boundaries and
+    ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the sj
+    are separate; and ``scan`` refuses to run if the second call is missing, because a missing sj table
+    is invisible — every observed intron would simply read as unannotated, so all 404,168 sj boundaries and
     both spliced banks would come back empty from a scan that looked perfectly well-formed.
     """
-    from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
+    from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
 
     region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
     n_refs = len(index.ref_names)
@@ -475,13 +475,13 @@ def _wire_calibration_regions(
         int(max_frag_length),
     )
     # ⚠ ``edge_row`` is deliberately NOT passed. It is a join key back to ``index.edges_df``, not the
-    # junction-boundary id — that IS the CSR slot — and using it to index a junction bank would write 1.04 M
+    # sj-boundary id — that IS the CSR slot — and using it to index a sj bank would write 1.04 M
     # rows past the end of a 404,168-entry array.
-    junctions = build_junction_edge_arrays(index)
-    scanner.set_junctions(
-        np.ascontiguousarray(junctions.offsets, dtype=np.int64),
-        np.ascontiguousarray(junctions.boundary_right, dtype=np.int64),
-        np.ascontiguousarray(junctions.strand, dtype=np.int8),
+    sj = build_sj_arrays(index)
+    scanner.set_sj(
+        np.ascontiguousarray(sj.offsets, dtype=np.int64),
+        np.ascontiguousarray(sj.boundary_right, dtype=np.int64),
+        np.ascontiguousarray(sj.strand, dtype=np.int8),
     )
 
 
@@ -917,7 +917,7 @@ def run_pipeline(
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
@@ -933,15 +933,15 @@ def run_pipeline(
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
-    # The junction axis, in the accumulator's own junction slot order: where each junction attaches,
+    # The sj axis, in the accumulator's own sj slot order: where each sj attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
-    # its two endpoint regions — never as a message channel, since every junction closes an undirected
+    # its two endpoint regions — never as a message channel, since every sj closes an undirected
     # loop and the graph is not a polytree.
-    junctions = build_junction_geometry_arrays(index)
+    sj = build_sj_geometry_arrays(index)
 
     # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
     # from a pool that is PURE BY CONSTRUCTION: gDNA from fragments
-    # contained in an intergenic or intronic region, RNA from fragments that used an annotated junction
+    # contained in an intergenic or intronic region, RNA from fragments that used an annotated sj
     # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
     #
     # ⭐ ALL THREE come from the PAYLOAD — one object, one frame, one definition of length. The
@@ -954,15 +954,15 @@ def run_pipeline(
     # `deposited_lengths`. Until then the pools were accumulator-frame and the anchor they were
     # shrunk toward was not.
     #
-    # ⭐ And the RNA pool is de-tilted by its own junction opportunity: "used an annotated junction"
+    # ⭐ And the RNA pool is de-tilted by its own sj opportunity: "used an annotated sj"
     # is a length-dependent selection, so the raw pool is measurably longer than the library.
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.junction_opportunity import crossing_probability_from_index
+    from .calibration.sj_opportunity import crossing_probability_from_index
 
     fl_models = build_fl_models(
         calibration_payload,
-        junction_opportunity=crossing_probability_from_index(
+        sj_opportunity=crossing_probability_from_index(
             index, int(calibration_payload.max_length)
         ),
         gdna_opportunity=gdna_opportunity_from_index(index, int(calibration_payload.max_length)),
@@ -986,28 +986,28 @@ def run_pipeline(
         gdna_fl_pmf=gdna_fl_pmf,
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
-        junctions=junctions,
+        sj=sj,
         diagnostics_out=_calib_diag,
         boundary_flags=boundary_flags,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 
     # ⭐ FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained in
-    # a region or crosses a boundary, RNA also jumps, and at a donor boundary the junction flux IS the gene's whole
+    # a region or crosses a boundary, RNA also jumps, and at a donor boundary the sj flux IS the gene's whole
     # mature output — but each axis is converted by its own population's mass-per-crossing first. Adding
-    # the raw banks counted one fragment once per boundary it crossed AND once per junction it used, which
+    # the raw banks counted one fragment once per boundary it crossed AND once per sj it used, which
     # read `f_gdna` 0.3851 against a truth of 0.5085 on ladder g50 capture_off.
     logger.info(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gDNA_fragments=%.0f RNA_fragments=%.0f (junction incidences %.0f)",
+        "gDNA_fragments=%.0f RNA_fragments=%.0f (sj incidences %.0f)",
         calibration.n_regions,
         calibration.n_boundaries,
-        calibration.n_junctions,
+        calibration.n_sj,
         calibration.gdna_density_global,
         calibration.rna_sense_frac,
         calibration.library_gdna_fragments,
         calibration.library_rna_fragments,
-        float(calibration.mass_rna_junction.sum()),
+        float(calibration.count_rna_sj.sum()),
     )
 
     # -- Quantification: calibration prior → per-locus EM --

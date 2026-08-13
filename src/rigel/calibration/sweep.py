@@ -321,8 +321,8 @@ def solve_chain(
 
     EG = np.asarray(geometry.eff_gdna, np.float64)
     ER = np.asarray(geometry.eff_rna, np.float64)
-    ESP = np.asarray(geometry.eff_junction, np.float64)  # [n, 2] by TRANSCRIPT strand
-    SPL = np.asarray(geometry.junction_count, np.float64)  # [n, 2] by TRANSCRIPT strand
+    ESP = np.asarray(geometry.eff_sj, np.float64)  # [n, 2] by TRANSCRIPT strand
+    SPL = np.asarray(geometry.sj_count, np.float64)  # [n, 2] by TRANSCRIPT strand
     CNT = np.asarray(geometry.unspliced_count, np.float64)  # [n, 2] by GENOME strand
     # the unspliced count is BOTH the density numerator and the Poisson n — one number, not a fractional
     # mass plus a separate integer flux.
@@ -423,8 +423,8 @@ def solve_chain(
         eff_gdna_global=eff_global,
         eff_rna=ER,
         eff_gdna=EG,
-        eff_junction=ESP,
-        junction_count=SPL,
+        eff_sj=ESP,
+        sj_count=SPL,
         unspliced_count=CNT,
         n_slot=n_slot,
         spliced_slot=spliced_slot,
@@ -621,7 +621,7 @@ def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> 
     ``CalibrationResult`` / ``priors`` / ``derive`` consume.
 
     ⚠ **A region's contained population carries no spliced term any more, and that is structural**: the
-    accumulator credits ``region_contained`` only when the fragment used no junction, so a contained
+    accumulator credits ``region_contained`` only when the fragment used no sj, so a contained
     fragment is unspliced by construction. The predecessor added ``+ mass_spliced`` here; that quantity
     is identically zero on the region axis now, and adding it would be adding a channel that cannot exist.
     """

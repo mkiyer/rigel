@@ -204,12 +204,12 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     )
 
 
-def test_the_prior_reads_five_of_the_six_override_fields_and_provably_NOT_the_junction(measured):
+def test_the_prior_reads_five_of_the_six_override_fields_and_provably_NOT_the_sj(measured):
     """⛔ TRAPS: an-ablation-that-never-ran, applied to the override itself. Five of the six arrays ``override_masses``
     writes must reach the prior — an override landing on a field nothing reads is an override that
     never ran, and it would read as "calibration is already correct on that channel".
 
-    ⭐ **And the sixth must provably NOT reach it.** ``mass_rna_junction`` is certified RNA: it is
+    ⭐ **And the sixth must provably NOT reach it.** ``count_rna_sj`` is certified RNA: it is
     exported for QC and the prior deliberately does not read it, because the prior arbitrates only the
     UNSPLICED fragments and a locus whose RNA is fully spliced should have a near-zero
     ``rna_prior_count`` (owner ruling, 2026-07-30). That ruling lives in a docstring; this is what
@@ -220,11 +220,11 @@ def test_the_prior_reads_five_of_the_six_override_fields_and_provably_NOT_the_ju
     for field in PV.OVERRIDE_FIELDS:
         site = _biggest_in_locus_site(measured, field)
         reads[field] = _moved(_nudged_prior(measured, field, site, 1.0), base)
-    assert reads["mass_rna_junction"] is False, (
-        "the junction flux now reaches the prior — that is the owner ruling reversed, not a test "
+    assert reads["count_rna_sj"] is False, (
+        "the sj flux now reaches the prior — that is the owner ruling reversed, not a test "
         "failure to widen"
     )
-    silent = [f for f, m in reads.items() if not m and f != "mass_rna_junction"]
+    silent = [f for f, m in reads.items() if not m and f != "count_rna_sj"]
     assert not silent, f"override fields the prior never reads: {silent}"
 
 
@@ -895,7 +895,7 @@ def _biggest_in_locus_site(measured, field):
         keep[e_idx] = True
     if arr.shape[0] == keep.shape[0]:
         ranked = np.where(keep.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, -np.inf)
-    else:  # the junction axis — never projected, and never read by the prior
+    else:  # the sj axis — never projected, and never read by the prior
         ranked = arr
     site = np.unravel_index(int(np.argmax(ranked)), arr.shape)
     return site

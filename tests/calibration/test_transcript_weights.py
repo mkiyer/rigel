@@ -42,25 +42,25 @@ PMF[FL] = 1.0
 
 
 @pytest.fixture
-def _patched_junctions(monkeypatch):
+def _patched_sj(monkeypatch):
     """⚠ A pytest fixture does not cross modules, so this is declared here rather than imported —
     the same stub ``test_transcript_path`` uses, for the same reason: the fixture index carries its
-    junction boundaries directly, and these gates are about the WEIGHT, not about the CSR builder."""
+    sj boundaries directly, and these gates are about the WEIGHT, not about the CSR builder."""
     import rigel.calibration.splice_graph as SG
 
     class _JA:
         def __init__(self, n):
             self.edge_row = np.arange(n, dtype=np.int64)
 
-    monkeypatch.setattr(SG, "build_junction_edge_arrays", lambda idx: _JA(len(idx.edges_df)))
+    monkeypatch.setattr(SG, "build_sj_arrays", lambda idx: _JA(len(idx.edges_df)))
     return SG
 
 
 def _calibration(
-    n_regions, n_boundaries, n_junctions, *, region_mass, region_opp, boundary_mass=None, boundary_opp=None
+    n_regions, n_boundaries, n_sj, *, region_mass, region_opp, boundary_mass=None, boundary_opp=None
 ) -> CalibrationResult:
     """A real ``CalibrationResult`` — not a stand-in, so a schema change reaches these gates."""
-    z_n, z_e, z_j = (np.zeros(n) for n in (n_regions, n_boundaries, n_junctions))
+    z_n, z_e, z_j = (np.zeros(n) for n in (n_regions, n_boundaries, n_sj))
     return CalibrationResult(
         mass_gdna_region=z_n.copy(),
         mass_rna_region=np.asarray(region_mass, dtype=np.float64),
@@ -68,9 +68,9 @@ def _calibration(
         mass_rna_boundary=z_e.copy() if boundary_mass is None else np.asarray(boundary_mass, dtype=np.float64),
         mass_rna_spliced_boundary=z_e.copy(),
         boundary_mass_per_crossing=np.ones(n_boundaries),
-        mass_rna_junction=z_j.copy(),
+        count_rna_sj=z_j.copy(),
         boundary_spliced_mass_per_crossing=np.ones(n_boundaries),
-        junction_mass_per_crossing=np.ones(n_junctions),
+        sj_mass_per_crossing=np.ones(n_sj),
         gdna_region_eff_len=np.ones(n_regions),
         gdna_boundary_eff_len=np.ones(n_boundaries),
         rna_region_eff_len=np.asarray(region_opp, dtype=np.float64),
@@ -89,7 +89,7 @@ def _calibration(
         rna_strand_overdispersion=0.05,
         n_regions=n_regions,
         n_boundaries=n_boundaries,
-        n_junctions=n_junctions,
+        n_sj=n_sj,
         config=CalibrationConfig(),
     )
 
@@ -101,7 +101,7 @@ def _calibration(
 
 @pytest.mark.parametrize("mode", TW.MODES)
 def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
-    tmp_path, _patched_junctions, mode
+    tmp_path, _patched_sj, mode
 ):
     """⭐⭐ **THE DERIVATION, END TO END.** One transcript, one 1,000 bp exon region_bound by the partition into
     two 500 bp regions plus the boundary between them — three objects of two different kinds and three
@@ -144,7 +144,7 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
 
 
 def test_build_weights_ITSELF_weights_by_opportunity_not_by_object_count(
-    tmp_path, _patched_junctions
+    tmp_path, _patched_sj
 ):
     """⛔⛔ **THE HOLE THIS GATE WAS ADDED TO CLOSE.** The re-partition gates below call
     ``repartition_invariance`` → ``_power_mean`` directly, so replacing ``build_weights``' own
@@ -179,7 +179,7 @@ def test_build_weights_ITSELF_weights_by_opportunity_not_by_object_count(
     assert got != pytest.approx(unweighted * total_opp, rel=1e-3)
 
 
-def test_build_weights_SERVES_the_opportunity_it_was_ASKED_for(tmp_path, _patched_junctions):
+def test_build_weights_SERVES_the_opportunity_it_was_ASKED_for(tmp_path, _patched_sj):
     """⛔⛔ **THE SECOND HOLE PERTURBATION FOUND.** Making ``opportunity="total"`` silently return the
     UNSPLICED array fired zero gates: the quantities are compared in their own test, and the derivation
     gate uses a SINGLE-exon transcript, where the two are equal by construction.
@@ -207,7 +207,7 @@ def test_build_weights_SERVES_the_opportunity_it_was_ASKED_for(tmp_path, _patche
     assert w_total / w_full == pytest.approx(1_801.0 / 1_602.0, rel=1e-9)
 
 
-def test_the_two_opportunities_are_DIFFERENT_quantities(tmp_path, _patched_junctions):
+def test_the_two_opportunities_are_DIFFERENT_quantities(tmp_path, _patched_sj):
     """⛔ ``total`` sums the exon lengths BEFORE ``contained_eff_length`` and ``full`` after, so they
     differ by exactly the intron-crossing a spliced molecule may do and an unspliced one may not.
 
@@ -237,7 +237,7 @@ def test_the_two_opportunities_are_DIFFERENT_quantities(tmp_path, _patched_junct
 @pytest.mark.parametrize("mode", TW.MODES)
 @pytest.mark.parametrize("opportunity", TW.OPPORTUNITIES)
 def test_a_path_that_is_ENTIRELY_ZERO_gets_weight_EXACTLY_ZERO(
-    tmp_path, _patched_junctions, mode, opportunity
+    tmp_path, _patched_sj, mode, opportunity
 ):
     """⛔⛔ **THE LOAD-BEARING CASE, NOT AN BOUNDARY CASE.** 4,579 of 8,750 annotated transcripts are silent
     at ``g00``, and a zero weight is EXACTLY absorbing — so this is the whole of the prior's ability to
@@ -262,14 +262,14 @@ def test_a_path_that_is_ENTIRELY_ZERO_gets_weight_EXACTLY_ZERO(
 
 
 @pytest.mark.parametrize("mode", TW.MODES)
-def test_a_SPLICE_JUNCTION_step_carries_NO_weight(tmp_path, _patched_junctions, mode):
+def test_a_SPLICE_SJ_step_carries_NO_weight(tmp_path, _patched_sj, mode):
     """⛔ The prior is UNSPLICED fragments only — a spliced fragment has no gDNA candidate in the EM and
-    never enters the split the prior arbitrates — so a junction, which is spliced by construction, must
+    never enters the split the prior arbitrates — so a sj, which is spliced by construction, must
     not reach the weight.
 
-    ⭐ Falsified by PERTURBATION rather than by inspection: the junction banks are loaded with a mass
+    ⭐ Falsified by PERTURBATION rather than by inspection: the sj banks are loaded with a mass
     three orders of magnitude above everything else, and the weight must not move by one ulp. Asserting
-    the code skips ``STEP_SPLICE_JUNCTION`` would only restate the implementation.
+    the code skips ``STEP_SPLICE_SJ`` would only restate the implementation.
     """
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000), (9_000, 10_000)]}, strands=[Strand.POS])
@@ -281,8 +281,8 @@ def test_a_SPLICE_JUNCTION_step_carries_NO_weight(tmp_path, _patched_junctions, 
 
     quiet = _calibration(regions.n_regions, n_e, 1, **kw)
     loud = _calibration(regions.n_regions, n_e, 1, **kw)
-    object.__setattr__(loud, "mass_rna_junction", np.array([1e6]))
-    object.__setattr__(loud, "junction_mass_per_crossing", np.array([1e3]))
+    object.__setattr__(loud, "count_rna_sj", np.array([1e6]))
+    object.__setattr__(loud, "sj_mass_per_crossing", np.array([1e3]))
 
     a = TW.build_weights(quiet, regions, idx, PMF, mode=mode, opportunity="total")
     b = TW.build_weights(loud, regions, idx, PMF, mode=mode, opportunity="total")

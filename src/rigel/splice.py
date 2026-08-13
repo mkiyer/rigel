@@ -25,7 +25,7 @@ class SpliceType(IntEnum):
     SPLICED_ANNOT = 2
     # SRD v2 additions:
     SPLICED_IMPLICIT = 3  # PE gap spans an annotated intron of any candidate
-    SPLICE_ARTIFACT = 4  # CIGAR junction was rejected by the SJ blacklist
+    SPLICE_ARTIFACT = 4  # CIGAR sj was rejected by the SJ blacklist
 
 
 NUM_SPLICE_TYPES = len(SpliceType)

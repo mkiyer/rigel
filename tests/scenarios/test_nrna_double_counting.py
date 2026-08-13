@@ -77,7 +77,7 @@ class TestNrnaDoubleCounting:
         )
         # Positive control: multi-exon gene on + strand.
         # Total exon length is 4 kb, matching the original toy, but multiple
-        # junctions keep annotated spliced observations well represented.
+        # sj keep annotated spliced observations well represented.
         # The broad 8 kb span keeps the nRNA/gDNA separation problem active.
         sc.add_gene(
             "g1",
@@ -233,7 +233,7 @@ class TestNrnaDoubleCounting:
             # hard-rejecting ambiguous contained-exon strand imbalance.
             # The weak-SS (< 0.99) tolerance was widened 30 → 40 when the RNA strand
             # Beta-Binomial (docs/em_strand/05) went live: the symmetric RNA overdispersion
-            # softens the strand clue at low strand specificity, and the v1 junction
+            # softens the strand clue at low strand specificity, and the v1 sj
             # double-counting inflates the fitted RNA overdispersion (a multi-exon fragment
             # credits several boundary sides with the same strand → spurious between-side
             # correlation), costing a few fragments of accuracy here. Accepted v1 tradeoff

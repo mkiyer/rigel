@@ -79,7 +79,7 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     gives a different array.
     """
     from rigel.calibration.fl import build_fl_models
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.pipeline import _drain_side_buffer
 
     config = _config()
@@ -98,12 +98,12 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     payload = _drain_side_buffer(
         payload, scenario.index, strand_models, seed=config.second_pass_seed
     )
-    # ⭐ TRAPS: divide-by-a-probability: the RNA pool is de-tilted by its own junction opportunity before the model is fitted, so
+    # ⭐ TRAPS: divide-by-a-probability: the RNA pool is de-tilted by its own sj opportunity before the model is fitted, so
     # the reproduction has to include it. Omitting it here would not merely mismatch — it would make
     # this gate pass on the day production DROPPED the divisor.
     fl_models = build_fl_models(
         payload,
-        junction_opportunity=crossing_probability_from_index(
+        sj_opportunity=crossing_probability_from_index(
             scenario.index, int(payload.max_length)
         ),
     )

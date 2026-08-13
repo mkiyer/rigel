@@ -215,7 +215,7 @@ class TestImplicitSpliceDiscriminant:
         being believed.
 
         ⚠ A partially spliced *unannotated* path — intron 2 removed, intron 1 retained — is physically real
-        and is deliberately NOT a hypothesis (open decision D-B, owner ruling: unannotated junctions are
+        and is deliberately NOT a hypothesis (open decision D-B, owner ruling: unannotated sj are
         out of scope). That is a scope decision, not an oversight, and it is why the answer here is
         UNSPLICED rather than a third possibility.
         """
@@ -259,7 +259,7 @@ class TestImplicitSpliceDiscriminant:
     def test_k_cigar_spliced_unannot_unaffected(self, with_tolerance):
         index, set_k = with_tolerance
         set_k(3)
-        # Use an unannotated SJ inside exon 1 region; matches no annotated junction.
+        # Use an unannotated SJ inside exon 1 region; matches no annotated sj.
         result = _resolve(
             index,
             exons=(_exon(120, 150), _exon(170, 195)),
@@ -383,7 +383,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         #
         # ⚠ TWO hypotheses, and the empty one is not an accident: this fragment's observed splice is
         # UNANNOTATED, so it does NOT certify the molecule as RNA (an unannotated CIGAR-N may be a
-        # misalignment, which is why `FragmentPool.RNA_SPLICED` requires an ANNOTATED junction). The
+        # misalignment, which is why `FragmentPool.RNA_SPLICED` requires an ANNOTATED sj). The
         # unspliced — genomic — hypothesis therefore stays live and the accumulator will defer.
         assert self._emitted(result) == [[self.IMPLIED], []], (
             "the observed gap [62202,62400) is within the K=3 anchor tolerance of the ANNOTATED intron "

@@ -106,7 +106,7 @@ class TestLoaderFromRecords:
         assert df.iloc[0]["max_anchor_left"] == 10
         assert df.iloc[0]["max_anchor_right"] == 12
 
-    def test_multiple_junctions_sorted(self) -> None:
+    def test_multiple_sj_sorted(self) -> None:
         df = load_splice_blacklist_from_records(
             [
                 _row("chr2", 200, 300, 100, 3, 5, 5),

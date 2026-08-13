@@ -296,7 +296,7 @@ def assemble_priors(
     ⚠ **The RNA prior is the UNSPLICED RNA mass only.** A spliced fragment has no gDNA candidate in the
     EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
     of a split that arbitrates only unspliced fragments. ``mass_rna_boundary`` is spliced-inclusive, so
-    ``mass_rna_spliced_boundary`` is subtracted. ⛔ The JUNCTION flux is deliberately NOT added, for the same
+    ``mass_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
     reason (owner ruling, 2026-07-30) — a locus whose RNA is fully spliced SHOULD get a near-zero
     ``rna_prior_count``.
 

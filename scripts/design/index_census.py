@@ -2,7 +2,7 @@
 
     TODO item 1   ·   Ledger: "Benchmarks and indexes DELETED" (2026-07-30)
 
-⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 junction boundaries · median 151 bp* were quoted
+⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 sj boundaries · median 151 bp* were quoted
 across the documentation as though they were constants of the tool. They are properties of **one
 annotation**. A rebuild from a different GTF moves every one of them, and the deletion entry says so
 explicitly. This script re-derives them so a claim can be checked instead of inherited.
@@ -12,7 +12,7 @@ validator that calls the builder's own helper validates nothing):
 
 * the **merged partition** is rebuilt here by run-length-encoding equal signatures, so "how many termini
   did the old merge hide?" is computed from the region table rather than taken from a stored column;
-* **every annotated intron's endpoints are looked up in the region_bound array** — the deposit's junction lookup
+* **every annotated intron's endpoints are looked up in the region_bound array** — the deposit's sj lookup
   depends on that being 100 %, because an intron whose start is not a region_bound can never be found.
 
     python scripts/design/index_census.py INDEX_DIR [--gtf GTF --collapse-duplicate-transcripts]
@@ -65,12 +65,12 @@ def census_boundaries(boundaries: pd.DataFrame) -> None:
     kind = boundaries["kind"].to_numpy()
     flags = boundaries["flags"].to_numpy(np.uint16)
     contiguous = kind == EDGE_KIND_CONTIGUOUS
-    junction = kind == EDGE_KIND_JUNCTION
+    sj = kind == EDGE_KIND_JUNCTION
 
     print("\nBOUNDARIES")
     row("boundaries", len(boundaries))
     row("contiguous boundaries", int(contiguous.sum()))
-    row("junction boundaries", int(junction.sum()))
+    row("sj boundaries", int(sj.sum()))
 
     terminus = (flags[contiguous] & TERMINUS_BITS) != 0
     splice = (flags[contiguous] & SPLICE_BITS) != 0
@@ -116,31 +116,31 @@ def census_merge_visibility(regions: pd.DataFrame, boundaries: pd.DataFrame) -> 
     row("TERMINUS boundaries the merge hid", hidden, f"{100 * hidden / total_terminus:6.2f} % of termini")
 
 
-def census_junction_region_bounds(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
-    """⭐ RE-DERIVED: the deposit's junction lookup IS a search in the region_bound array, so this must be 100 %.
+def census_sj_region_bounds(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
+    """⭐ RE-DERIVED: the deposit's sj lookup IS a search in the region_bound array, so this must be 100 %.
 
      rests on it — if an annotated intron's start is not a region_bound, the CSR
-    scan never happens and the junction is unfindable, silently.
+    scan never happens and the sj is unfindable, silently.
     """
-    junction = boundaries["kind"].to_numpy() == EDGE_KIND_JUNCTION
-    src = boundaries.loc[junction, "src"].to_numpy(np.int64)
-    dst = boundaries.loc[junction, "dst"].to_numpy(np.int64)
+    sj = boundaries["kind"].to_numpy() == EDGE_KIND_JUNCTION
+    src = boundaries.loc[sj, "src"].to_numpy(np.int64)
+    dst = boundaries.loc[sj, "dst"].to_numpy(np.int64)
     if src.size == 0:
-        print("\nJUNCTION ENDPOINTS: no junction boundaries")
+        print("\nJUNCTION ENDPOINTS: no sj boundaries")
         return
 
     start = regions["start"].to_numpy(np.int64)
     end = regions["end"].to_numpy(np.int64)
-    # A junction runs from the END of region `src` to the START of region `dst`; both are region_bound positions by
+    # A sj runs from the END of region `src` to the START of region `dst`; both are region_bound positions by
     # construction, so this checks the graph is self-consistent and reports the intron-length spread.
     intron_length = start[dst] - end[src]
     print("\nJUNCTION BOUNDARIES")
-    row("junctions whose endpoints are both region_bounds", int(src.size), "100 % by construction; asserted")
-    assert np.all(intron_length > 0), "a junction boundary spans a non-positive intron"
+    row("sj whose endpoints are both region_bounds", int(src.size), "100 % by construction; asserted")
+    assert np.all(intron_length > 0), "a sj boundary spans a non-positive intron"
     row("median intron length (bp)", int(np.median(intron_length)))
-    row("junction fan-out: distinct left_boundaries", int(np.unique(src).size))
+    row("sj fan-out: distinct left_boundaries", int(np.unique(src).size))
     _, counts = np.unique(src, return_counts=True)
-    row("mean junction fan-out per donor", f"{counts.mean():.2f}", f"max {counts.max()}")
+    row("mean sj fan-out per donor", f"{counts.mean():.2f}", f"max {counts.max()}")
 
 
 def census_transcripts(gtf: Path, collapse: bool) -> None:
@@ -168,7 +168,7 @@ def main() -> None:
     census_regions(regions)
     census_boundaries(boundaries)
     census_merge_visibility(regions, boundaries)
-    census_junction_region_bounds(regions, boundaries)
+    census_sj_region_bounds(regions, boundaries)
     if args.gtf is None:
         print("\nANNOTATION: skipped (pass --gtf to include it)")
     else:

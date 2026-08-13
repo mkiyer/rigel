@@ -422,7 +422,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
             "n_regions": int(cal.n_regions),
             "n_boundaries": int(cal.n_boundaries),
-            "n_junctions": int(cal.n_junctions),
+            "n_sj": int(cal.n_sj),
         }
     )
     # Capture-enrichment diagnostics — mass-weighted (count-median vs gDNA-mass-
@@ -509,12 +509,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
-            # The per-junction SJ strand table this 2×2 is the marginal of. "How many
-            # junctions are deep enough to measure the strand dispersion" is a
-            # first-class question about a library: at κ ≈ 0.002 a junction needs
+            # The per-sj SJ strand table this 2×2 is the marginal of. "How many
+            # sj are deep enough to measure the strand dispersion" is a
+            # first-class question about a library: at κ ≈ 0.002 a sj needs
             # hundreds of reads before one disagreeing read is even expected, and the
             # RNA strand overdispersion is fitted from exactly this population.
-            "junctions": sm.sj_table.to_dict(),
+            "sj": sm.sj_table.to_dict(),
             # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
             # A positive ``contamination_gap`` means unstranded gDNA is dragging
             # the mixed all-exonic estimate toward 0.5 relative to the clean
@@ -1150,7 +1150,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Path to an alignable Zarr store built for the same genome+aligner. "
             "Provides per-base fractional mappability (for gDNA calibration) "
             "and the splice-junction artifact blacklist (for filtering spurious "
-            "junctions at BAM-scan time). Required unless --no-mappability is "
+            "sj at BAM-scan time). Required unless --no-mappability is "
             "set explicitly."
         ),
     )
@@ -1173,7 +1173,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=2,
         help=(
             "(Advanced) Minimum unique-fragment count per (chrom, intron, "
-            "read_length) for a junction to enter the splice-artifact blacklist. "
+            "read_length) for a sj to enter the splice-artifact blacklist. "
             "Default 2 matches the historical alignable threshold. Lower values "
             "(e.g. 1) admit more singleton artifacts; higher values keep only "
             "the most reproducible. Ignored when --no-mappability is set."

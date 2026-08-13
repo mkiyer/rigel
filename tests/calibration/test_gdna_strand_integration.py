@@ -138,14 +138,14 @@ def test_calibrate_binomial_gdna_floors_to_zero():
     assert _calibrate(payload, ra).gdna_strand_overdispersion < 0.02
 
 
-def test_a_junction_free_library_calibrates(od_true=0.10):
-    """⚠ ``n_sj == 0`` is legal and must not be confused with "no junction flux": this payload's
-    references are all single-region-signature intergenic, so the graph has no junction boundary at all.
-    ``calibrate`` defaults to an empty junction axis and the result carries a length-0 array."""
+def test_a_sj_free_library_calibrates(od_true=0.10):
+    """⚠ ``n_sj == 0`` is legal and must not be confused with "no sj flux": this payload's
+    references are all single-region-signature intergenic, so the graph has no sj boundary at all.
+    ``calibrate`` defaults to an empty sj axis and the result carries a length-0 array."""
     payload, ra = _intergenic_betabinom_payload(
         n_regions=400, depth=150, overdispersion=od_true, seed=11
     )
     result = _calibrate(payload, ra)
-    assert result.n_junctions == 0
-    assert result.mass_rna_junction.shape == (0,)
+    assert result.n_sj == 0
+    assert result.count_rna_sj.shape == (0,)
     assert result.n_boundaries == result.n_regions - 1

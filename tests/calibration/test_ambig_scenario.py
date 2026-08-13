@@ -93,12 +93,12 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
     # ⭐ The same call production makes; see tests/calibration/_oracle.py.
     fl = build_fl_models(pl)
-    # ⚠ The junction axis and the boundary flags are BOTH required against the same index the payload was
+    # ⚠ The sj axis and the boundary flags are BOTH required against the same index the payload was
     # scanned on: an axis addressing a different graph would place every splice on the wrong boundary, and
     # calibrate refuses rather than proceeding.
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
     result = calibrate(
@@ -108,7 +108,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
         fl.gdna_pmf,
         fl.rna_pmf,
         cfg.calibration,
-        junctions=build_junction_geometry_arrays(idx),
+        sj=build_sj_geometry_arrays(idx),
         boundary_flags=build_boundary_flags_array(idx),
     )
     sc.cleanup()

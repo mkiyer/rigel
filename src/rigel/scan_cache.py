@@ -19,7 +19,7 @@ input                        origin                                      cached?
 ``strand_model``             the scan                                    **yes**
 ``region_arrays``            ``RegionArrays.from_index``   (0.11 s)      no
 ``boundary_flags``               ``build_boundary_flags_array``    (0.04 s)      no
-``junctions``                ``build_junction_geometry_arrays``          no
+``sj``                ``build_sj_geometry_arrays``          no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(payload)``             no — derived
 ``config``                   the thing you are varying                   no
 ``injected_priors``          fitted BY ``calibrate``                     no — see below
@@ -38,7 +38,7 @@ cached — freezing its output would mean a change to the FL model silently does
 
 THE KEY NEEDS THREE PARTS, AND THE MIDDLE ONE IS A GAP THAT WAS ALREADY LOGGED
 -----------------------------------------------------------------------------
-* ``graph_hash`` — the region partition plus the junction CSR. The payload already carries it.
+* ``graph_hash`` — the region partition plus the sj CSR. The payload already carries it.
 * ⭐ **a PAYLOAD-SCHEMA digest.** The accumulator's own field list. None of the other keys moves when
   the accumulator changes, so without it a cache written before an accumulator change is accepted and
   then fails deep inside the loader with a bare ``KeyError``. S5.a made that concrete by adding
@@ -62,7 +62,7 @@ needs ``InjectedCalibrationPriors``, which `calibrate` fits and stashes in
 blocker and is now a live test.
 
 ⛔ **It was still xfailing at S5.f for a DIFFERENT reason than the one recorded** — ``calibration_inputs``
-had not been given ``junctions``, which `calibrate` gained at S5.f. A strict xfail proves only that
+had not been given ``sj``, which `calibrate` gained at S5.f. A strict xfail proves only that
 something fails, never that the recorded cause is still the cause; that is why the reason has to be
 re-read when the blocker lifts rather than assumed.
 """
@@ -232,7 +232,7 @@ def deposit_digest() -> str:
     **A deposit-RULE change moves neither**, so a cache written under the old rule was accepted by the key
     and silently served OLD VALUES to NEW CODE. That is ``TRAPS: a-hash-that-misses-its-artifact`` in the
     key written to prevent it, and it has now happened FOUR times: the reach digest; the ``[n,2] → [n]``
-    shape collapse; the region deposit ``1/L → 1/A``; and the junction-boundary rule. ⚠ The third was caught
+    shape collapse; the region deposit ``1/L → 1/A``; and the sj-boundary rule. ⚠ The third was caught
     only because the bank had to be renamed anyway and the rename moved the key — luck, not the key doing
     its job. The fourth changed no name at all and this function is what catches it.
 
@@ -241,8 +241,8 @@ def deposit_digest() -> str:
     across runs, processes and worker counts, because every channel is an integer and integer addition is
     associative.
 
-    ⚠ The fixture is deliberately awkward rather than minimal — two annotated junctions, a short region
-    whose far boundary a fragment may or may not reach, contained / crossing / spliced / junction-only
+    ⚠ The fixture is deliberately awkward rather than minimal — two annotated sj, a short region
+    whose far boundary a fragment may or may not reach, contained / crossing / spliced / sj-only
     fragments — so that a rule change confined to ONE of those cases still moves it.
 
     ⛔ **It runs the NATIVE accumulator, not the specification.** The cache holds what the production
@@ -253,7 +253,7 @@ def deposit_digest() -> str:
     """
     from rigel._bam_impl import Accumulator  # noqa: PLC0415
 
-    #: ⭐ RegionBound indices, not coordinates: the junction CSR is keyed by the LEFT BOUNDARY. 260 is region_bound 3 and 1000 is
+    #: ⭐ RegionBound indices, not coordinates: the sj CSR is keyed by the LEFT BOUNDARY. 260 is region_bound 3 and 1000 is
     #: region_bound 4; 1120 is region_bound 6 and 2000 is region_bound 7.
     region_bounds = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
     accumulator = Accumulator(
@@ -262,9 +262,9 @@ def deposit_digest() -> str:
         max_length=1000,
         ref=0,
     )
-    accumulator.set_junctions(
+    accumulator.set_sj(
         np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32),  # per-donor-region_bound CSR offsets
-        np.array([4, 7], dtype=np.int32),  # acceptor region_bound of each junction
+        np.array([4, 7], dtype=np.int32),  # acceptor region_bound of each sj
         np.array([1, 1], dtype=np.int8),  # STRAND_POS
     )
     for start, end, introns in (
@@ -273,8 +273,8 @@ def deposit_digest() -> str:
         (30, 280, ()),  # crosses three boundaries
         (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a boundary
         (210, 1040, ((260, 1000),)),  # spliced; NEITHER block crosses a boundary
-        (150, 2100, ((260, 1000), (1120, 2000))),  # two junctions AND boundaries
-        (1030, 2050, ((1120, 2000),)),  # one junction, one boundary
+        (150, 2100, ((260, 1000), (1120, 2000))),  # two sj AND boundaries
+        (1030, 2050, ((1120, 2000),)),  # one sj, one boundary
     ):
         # ⚠ ``hypotheses=()`` is REQUIRED — the native binding has no default, unlike the specification,
         # whose default IS ``UNSPLICED_ONLY``. An empty set means "nothing to arbitrate", and it is safe
@@ -321,7 +321,7 @@ class ScanCache:
     """Everything one BAM scan produced that calibration consumes."""
 
     payload: AccumulatorPayload  # the tally — the expensive artifact
-    strand_model: object  # StrandModels, including its per-junction table
+    strand_model: object  # StrandModels, including its per-sj table
     provenance: dict  # the key, the BAM, the scan config, the counts
 
     # ⛔ `fl_global_counts`, `fl_rna_counts` and `fl_max_size` were DELETED by TRAPS: pure-and-length-censored
@@ -336,7 +336,7 @@ class ScanCache:
 
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
-# ⚠ The 2x2 is the MARGINAL of the per-junction table, and the strand OVERDISPERSION is fitted from the
+# ⚠ The 2x2 is the MARGINAL of the per-sj table, and the strand OVERDISPERSION is fitted from the
 # table, not the marginal. A cache that kept only the 2x2 would silently disable the dispersion estimate
 # — which is one of the population priors the toy seed exists to carry.
 _SJ_COLUMNS = ("ref_id", "start", "end", "motif_strand", "n_sense", "n_antisense")
@@ -500,7 +500,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     if payload.graph_hash != expected_graph:
         raise ScanCacheKeyError(
             f"cache graph_hash {payload.graph_hash} != index graph_hash {expected_graph}. The region "
-            f"partition or the junction CSR moved; this tally does not describe this index."
+            f"partition or the sj CSR moved; this tally does not describe this index."
         )
 
     cache = ScanCache(
@@ -567,17 +567,17 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
     return {
         "region_arrays": RegionArrays.from_index(index),
         "boundary_flags": build_boundary_flags_array(index),
-        # ⚠ The JUNCTION axis is index-derived too, and it is not optional: `calibrate` refuses an axis
+        # ⚠ The SJ axis is index-derived too, and it is not optional: `calibrate` refuses an axis
         # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
         # would place every splice on the wrong boundary. Omitting it here was an S5.f miss that only the
         # guard caught.
-        "junctions": build_junction_geometry_arrays(index),
+        "sj": build_sj_geometry_arrays(index),
     }
 
 
@@ -591,15 +591,15 @@ def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
     `deposited_lengths`, binned at the same `L`.
 
     ⭐ The one thing that does NOT come from the payload is the RNA pool's de-tilt: "used an annotated
-    junction" is a length-dependent selection, and how much so is a fact about the ANNOTATION.
+    sj" is a length-dependent selection, and how much so is a fact about the ANNOTATION.
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
-    from .calibration.junction_opportunity import crossing_probability_from_index
+    from .calibration.sj_opportunity import crossing_probability_from_index
 
     fl_models = build_fl_models(
         cache.payload,
-        junction_opportunity=crossing_probability_from_index(index, int(cache.payload.max_length)),
+        sj_opportunity=crossing_probability_from_index(index, int(cache.payload.max_length)),
         gdna_opportunity=gdna_opportunity_from_index(index, int(cache.payload.max_length)),
     )
     return {

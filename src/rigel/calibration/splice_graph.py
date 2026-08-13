@@ -8,13 +8,13 @@ The calibration partition: what the accumulator deposits into, and the structure
 
 * ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``. Carries the 8 structural
   :ref:`flag bits <flags>`.
-* ``JUNCTION(donor, acceptor, strand)`` — one per distinct annotated intron.
+* ``SJ(donor, acceptor, strand)`` — one per distinct annotated intron.
 
 **Every distinct exon endpoint is a region_bound, and adjacent equal-signature regions are NOT merged.** The merge is
 what the predecessor partition did and what made it blind to transcript termini: ⭐ **53.4 %** of real human
 transcript termini (232,451 of 435,291) fall strictly *inside* a merged region and vanish from the partition
 entirely. Measured consequence: 752,654 merged regions → **1,043,881** regions (+38.7 %), median 151 bp,
-15,687 of length 1, plus **404,168** junction boundaries.
+15,687 of length 1, plus **404,168** sj boundaries.
 
 ⚠ The often-quoted **59.5 %** is that same statistic computed under the ``~is_synthetic & ~is_nrna``
 transcript filter — i.e. with 26,475 real single-exon transcripts excluded, which is the very bug
@@ -52,14 +52,14 @@ terminus (measured worth 11.0 % of the mature opportunity genome-wide, and ⭐ `
   a position is the nascent one, and the reach is the **genomic** distance to a covering transcript's
   span ends. ⚠ It is therefore **nonzero inside an intron**: that is where nascent RNA lives, and an
   exonic reach would declare zero RNA opportunity across every intron in the genome.
-* A **JUNCTION** boundary is used only by a molecule that spliced across it, so what remains either side is
-  **exonic**. :func:`_junction_edges` is deliberately left on the exonic reach.
+* A **SJ** boundary is used only by a molecule that spliced across it, so what remains either side is
+  **exonic**. :func:`_sj_edges` is deliberately left on the exonic reach.
 
 ⚠ **Named ``lo``/``hi``, NOT ``donor``/``acceptor``.** Boundaries store ``src < dst``, so ``src`` is genomically
-LEFT whatever the strand — but for a NEG-strand junction the biological donor is on the RIGHT. The
+LEFT whatever the strand — but for a NEG-strand sj the biological donor is on the RIGHT. The
 divisor is symmetric in the two reaches so no number changes, but ``reach_left``/``reach_right`` name the two sides genomically; a
 ``reach_donor`` would mislabel roughly
-half of the 404,168 junctions. ``lo``/``hi`` means genomically lower/higher and cannot be misread.
+half of the 404,168 sj. ``lo``/``hi`` means genomically lower/higher and cannot be misread.
 
 ⚠ **Per STRAND**, because the mature-crossing gate is per strand: at an AMBIG boundary a ``+`` and a ``−``
 transcript have different reaches, and a strand-agnostic maximum would over-state one of them — on exactly
@@ -68,13 +68,13 @@ the population that carries 31.6 % of the calibration suite's error mass.
 **Maximal over isoforms, independently per side** (decision TRAPS: two-gaussians-one-latent). A genomic position usually belongs to
 several transcripts that disagree about where the molecule ends, and the isoform abundances are precisely
 what calibration does not know. Measured (plan TRAPS: divide-by-a-probability): against the alternative of taking the best *realisable*
-pair from a single isoform, the two agree exactly on **93.9 %** of disagreeing junctions with a mean ratio
+pair from a single isoform, the two agree exactly on **93.9 %** of disagreeing sj with a mean ratio
 of **0.9989**, so the simple independent maximum is used. It is one-sided — it over-states opportunity,
 hence under-states ``ρ_mature``, hence over-states ``f_g``.
 
 **A reach of 0 is meaningful, not a sentinel:** no strand-``s`` RNA molecule can occupy that side of the
 boundary, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous boundary
-that now means *outside every transcript span on that strand*; on a junction boundary, *no strand-``s``
+that now means *outside every transcript span on that strand*; on a sj boundary, *no strand-``s``
 molecule splices across it*.
 """
 
@@ -117,16 +117,16 @@ __all__ = [
     "build_splice_graph",
     "build_region_partition_arrays",
     "build_boundary_flags_array",
-    "build_junction_edge_arrays",
+    "build_sj_arrays",
     "build_contiguous_boundary_reach_arrays",
-    "build_junction_geometry_arrays",
+    "build_sj_geometry_arrays",
     "build_transcript_path",
-    "JunctionEdgeArrays",
-    "JunctionGeometry",
+    "SpliceJunctionArrays",
+    "SpliceJunctionGeometry",
     "TranscriptPath",
     "STEP_REGION",
     "STEP_BOUNDARY",
-    "STEP_SPLICE_JUNCTION",
+    "STEP_SPLICE_SJ",
     "is_terminus",
     "is_splice_site",
     "validate_graph",
@@ -335,8 +335,8 @@ def build_splice_graph(
                     np.bitwise_or.at(flags, hit[ok], bit)
         c_reach = _contiguous_reaches(ex, rows, pos)
 
-        # ── 4. junction boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
-        j_src, j_dst, j_strand, j_reach = _junction_edges(region_bounds, intr, i_rows, name)
+        # ── 4. sj boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
+        j_src, j_dst, j_strand, j_reach = _sj_edges(region_bounds, intr, i_rows, name)
 
         src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base
         dst = np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + region_base
@@ -371,9 +371,9 @@ def build_splice_graph(
     )
     if len(edges_df):
         # ⚠ sorted by (src, kind, dst, STRAND). The design doc says (src, kind, dst), but that is not a
-        # TOTAL order: two strand-coincident junctions (§3.3, G18) share all three and differ only in
+        # TOTAL order: two strand-coincident sj (§3.3, G18) share all three and differ only in
         # strand, so the order would be ambiguous and determinism would depend on the input order.
-        # GENCODE contains zero such junctions — which is exactly why only a synthetic case can catch it.
+        # GENCODE contains zero such sj — which is exactly why only a synthetic case can catch it.
         # Adding strand REFINES the documented order, so the "out-boundaries of a region are contiguous" CSR
         # contract is unchanged.
         edges_df = edges_df.sort_values(
@@ -538,8 +538,8 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
     lives. An exonic reach declares zero RNA opportunity across every intron in the genome, which is
     backwards.
 
-    ⚠ This is the **contiguous-boundary** rule only. A junction boundary is used solely by a molecule that
-    spliced across it, so what remains either side of it is exonic — see :func:`_junction_edges`, which
+    ⚠ This is the **contiguous-boundary** rule only. A sj boundary is used solely by a molecule that
+    spliced across it, so what remains either side of it is exonic — see :func:`_sj_edges`, which
     is deliberately left on the exonic reach.
     """
     keys = ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
@@ -585,8 +585,8 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
     return out
 
 
-def _junction_edges(region_bounds, ma_i, mi_, ref_name):
-    """Distinct junction boundaries for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
+def _sj_edges(region_bounds, ma_i, mi_, ref_name):
+    """Distinct sj boundaries for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
     empty = np.zeros(0, np.int64)
     keys = {
         k: empty.copy() for k in ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
@@ -602,7 +602,7 @@ def _junction_edges(region_bounds, ma_i, mi_, ref_name):
     src = np.searchsorted(region_bounds, ua) - 1  # the region ENDING at intron_start
     dst = np.searchsorted(region_bounds, ub)  # the region STARTING at intron_end
     if not (np.all(region_bounds[src + 1] == ua) and np.all(region_bounds[dst] == ub)):
-        raise ValueError(f"ref {ref_name!r}: a junction endpoint is not a region interface (I5)")
+        raise ValueError(f"ref {ref_name!r}: a sj endpoint is not a region interface (I5)")
     out = {k: np.zeros(uniq.shape[0], np.int64) for k in keys}
     for s, kl, kh in (
         (Strand.POS, "reach_lo_pos", "reach_hi_pos"),
@@ -699,7 +699,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if src.size > 1:
         # (src, kind, dst, strand) packed into one strictly-increasing int64 key. STRAND is part of the
         # key because it is part of the order (see the sort in build_splice_graph): without it two
-        # strand-coincident junctions collide and read as a duplicate.
+        # strand-coincident sj collide and read as a duplicate.
         n_regions_ = max(nid.size, 1)
         key = ((src * 2 + kind.astype(np.int64)) * n_regions_ + dst) * 4 + estrand.astype(np.int64)
         if not np.all(np.diff(key) > 0):
@@ -720,12 +720,12 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     if np.any(estrand[c] != 0):
         raise ValueError("I7: a CONTIGUOUS boundary carries a strand.")
 
-    # I5/I6 — junctions land on interfaces, one row per distinct (ref, donor, acceptor, strand)
+    # I5/I6 — sj land on interfaces, one row per distinct (ref, donor, acceptor, strand)
     j = kind == EDGE_KIND_JUNCTION
     if j.any():
         if not np.all(np.isin(estrand[j], [Strand.POS, Strand.NEG])):
-            raise ValueError("I6: a JUNCTION boundary has an invalid strand.")
-        # ⚠ STRAND-COINCIDENT junctions are BIOLOGICALLY IMPOSSIBLE and are reported, not tolerated
+            raise ValueError("I6: a SJ boundary has an invalid strand.")
+        # ⚠ STRAND-COINCIDENT sj are BIOLOGICALLY IMPOSSIBLE and are reported, not tolerated
         # silently. Splicing reads a non-palindromic motif: the reverse complement of a GT..AG intron
         # begins CT, so the same interval cannot be a valid intron on both strands. Measured: ZERO in
         # GENCODE. One in a GTF therefore means the ANNOTATION is wrong (a simulator, or a strand
@@ -748,12 +748,12 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
             )
         key = np.stack([src[j], dst[j], estrand[j].astype(np.int64)], axis=1)
         if np.unique(key, axis=0).shape[0] != key.shape[0]:
-            raise ValueError("I6: a (donor, acceptor, strand) junction appears more than once.")
+            raise ValueError("I6: a (donor, acceptor, strand) sj appears more than once.")
         # I9 — both endpoints carry that strand's exon bit
         for s, bit in ((Strand.POS, BIT_EXON_POS), (Strand.NEG, BIT_EXON_NEG)):
             m = j & (estrand == s)
             if m.any() and not (np.all(sig[src[m]] & bit) and np.all(sig[dst[m]] & bit)):
-                raise ValueError(f"I9: a strand-{int(s)} junction endpoint lacks its exon bit.")
+                raise ValueError(f"I9: a strand-{int(s)} sj endpoint lacks its exon bit.")
 
     # I3b — signature recomputed; I4 — interfaces ARE the events; I11 — every transcript walks;
     # I13 — the flags ARE the events
@@ -880,7 +880,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                         f"interfaces (first at {int(arr[bad][0])})."
                     )
 
-        # I11b — every mature intron is realised by a JUNCTION boundary on that strand
+        # I11b — every mature intron is realised by a SJ boundary on that strand
         if i_rows.size:
             a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
             js = base + np.searchsorted(region_bounds, a) - 1
@@ -894,7 +894,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
             if miss.any():
                 k = int(np.flatnonzero(miss)[0])
                 raise ValueError(
-                    f"I11: reference {name!r} has {int(miss.sum())} mature introns with no JUNCTION "
+                    f"I11: reference {name!r} has {int(miss.sum())} mature introns with no SJ "
                     f"boundary (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
                 )
 
@@ -951,11 +951,11 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
 
 
 @dataclass(frozen=True, slots=True)
-class JunctionEdgeArrays:
-    """The junction boundaries, re-indexed onto **the accumulator's flat region_bound axis** as a CSR.
+class SpliceJunctionArrays:
+    """The sj boundaries, re-indexed onto **the accumulator's flat region_bound axis** as a CSR.
 
     The deposit rule has to answer one question per observed intron, in the BAM-scan hot loop: *is this
-    intron an annotated junction, and if so which boundary?* This is the lookup table for it.
+    intron an annotated sj, and if so which boundary?* This is the lookup table for it.
 
     ⭐ It is cheap because of a measured property of the graph: **every annotated intron has both of its
     endpoints as partition region_bounds** (100.00 % of 404,168 on the human annotation — forced, since a region_bound is
@@ -969,11 +969,11 @@ class JunctionEdgeArrays:
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
             if boundary_right[k] == observed_right_boundary:   # 1-3 iterations at human scale
-                credit junction boundary k          # <- the SLOT is the id; see below
+                credit sj boundary k          # <- the SLOT is the id; see below
 
-    ⚠ **The junction-boundary id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
-    joining a payload row back to ``index.edges_df``, and using it to index a junction bank is a
-    memory-safety bug: the highest junction row is **1,447,755** in a **404,168**-entry bank, so the write
+    ⚠ **The sj-boundary id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
+    joining a payload row back to ``index.edges_df``, and using it to index a sj bank is a
+    memory-safety bug: the highest sj row is **1,447,755** in a **404,168**-entry bank, so the write
     lands past the end, and even in bounds it permutes every surviving row. The accumulator never receives
     this column.
 
@@ -981,23 +981,23 @@ class JunctionEdgeArrays:
     accumulator's ``Partition.from_region_bounds`` must sort identically, or every row permutes and the native
     build's byte-identity gate compares two different labellings. They disagreed once — ``(acceptor,
     donor)`` against ``(strand, acceptor, donor)`` — and it is reachable only through a strand-coincident
-    junction pair. Pinned by ``test_the_csr_slot_order_matches_the_reference_accumulator``.
+    sj pair. Pinned by ``test_the_csr_slot_order_matches_the_reference_accumulator``.
 
-    ``strand`` disambiguates that (biologically improbable, constructible) case of two junctions sharing a
+    ``strand`` disambiguates that (biologically improbable, constructible) case of two sj sharing a
     coordinate pair and differing only in strand; the caller matches on it when the observed motif strand
     is known.
     """
 
     offsets: np.ndarray  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
     boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's HIGH endpoint
-    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-boundary id
-    strand: np.ndarray  # int8[J]  — the junction's genomic strand (Strand POS/NEG)
+    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the sj-boundary id
+    strand: np.ndarray  # int8[J]  — the sj's genomic strand (Strand POS/NEG)
 
 
-def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
-    """Build the :class:`JunctionEdgeArrays` CSR for ``index``.
+def build_sj_arrays(index) -> SpliceJunctionArrays:
+    """Build the :class:`SpliceJunctionArrays` CSR for ``index``.
 
-    A junction boundary stores region ids; the accumulator works in region_bound indices. For a reference whose first
+    A sj boundary stores region ids; the accumulator works in region_bound indices. For a reference whose first
     region is ``region_base`` and whose first region_bound is ``region_bound_base``, region ``i`` spans
     ``[region_bounds[region_bound_base + i - region_base], region_bounds[region_bound_base + i - region_base + 1])``, so::
 
@@ -1014,20 +1014,20 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     for i, ref in enumerate(index.ref_names):
         region_base[i + 1] = region_base[i] + int(counts.get(ref, 0))
 
-    is_junction = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
-    src = edges_df["src"].to_numpy(np.int64)[is_junction]
-    dst = edges_df["dst"].to_numpy(np.int64)[is_junction]
-    strand = edges_df["strand"].to_numpy(np.int8)[is_junction]
-    edge_row = np.flatnonzero(is_junction).astype(np.int64)
+    is_sj = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    src = edges_df["src"].to_numpy(np.int64)[is_sj]
+    dst = edges_df["dst"].to_numpy(np.int64)[is_sj]
+    strand = edges_df["strand"].to_numpy(np.int8)[is_sj]
+    edge_row = np.flatnonzero(is_sj).astype(np.int64)
 
-    # which reference each junction belongs to: region ids are contiguous per reference (I2)
+    # which reference each sj belongs to: region ids are contiguous per reference (I2)
     ref_of = np.searchsorted(region_base, src, side="right") - 1
     shift = region_bound_offsets[ref_of] - region_base[ref_of]
     boundary_left = src + shift + 1
     boundary_right = dst + shift
 
     # ⚠ The sort key includes STRAND, and it must match the reference accumulator's
-    # ``Partition.from_region_bounds`` exactly — the junction-boundary id IS the rank in this order, so the two
+    # ``Partition.from_region_bounds`` exactly — the sj-boundary id IS the rank in this order, so the two
     # disagreeing would permute every row and break byte-identity. It shows up only on a donor/acceptor
     # pair carrying two strands, which is biologically impossible and therefore only ever reachable from
     # a synthetic stress test.
@@ -1035,7 +1035,7 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     boundary_left, boundary_right = boundary_left[order], boundary_right[order]
     offsets = np.zeros(n_region_bounds + 1, dtype=np.int64)
     np.cumsum(np.bincount(boundary_left, minlength=n_region_bounds), out=offsets[1:])
-    return JunctionEdgeArrays(offsets, boundary_right, edge_row[order], strand[order])
+    return SpliceJunctionArrays(offsets, boundary_right, edge_row[order], strand[order])
 
 
 def build_boundary_flags_array(index) -> np.ndarray:
@@ -1049,7 +1049,7 @@ def build_boundary_flags_array(index) -> np.ndarray:
     off-by-one commentary that used to live here goes with the slots.
 
     A contiguous boundary IS the interface to the right of its ``src`` region, so the flags are keyed by
-    ``src``. Junction boundaries carry no flags — they are not a genomic position — and are excluded.
+    ``src``. SpliceJunction boundaries carry no flags — they are not a genomic position — and are excluded.
 
     Returns ``uint16[E]`` with ``E == ref_boundary_offsets[-1]``, aligned element for element with the
     payload's contiguous-boundary axis.
@@ -1088,10 +1088,10 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
      independently per side AND per strand". A POS transcript and a NEG one ending in different places
      give one boundary two different RNA reaches, and a single averaged number describes neither.
 
-     ⚠ **GENOMIC, unlike a junction's EXONIC reach.** A junction is used only by a spliced molecule, so
+     ⚠ **GENOMIC, unlike a sj's EXONIC reach.** A sj is used only by a spliced molecule, so
      what remains either side of it is exonic; a contiguous boundary is also crossed by *nascent* RNA, which
      is genomic. Taking the exonic reach here would declare an intronic nascent fragment impossible
-     (:class:`JunctionGeometry`).
+     (:class:`SpliceJunctionGeometry`).
 
      ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that boundary, so
      that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
@@ -1139,56 +1139,56 @@ def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarra
 
 
 @dataclass(frozen=True, slots=True)
-class JunctionGeometry:
-    """The junction boundaries on **the accumulator's junction axis**, in its own slot order.
+class SpliceJunctionGeometry:
+    """The sj boundaries on **the accumulator's sj axis**, in its own slot order.
 
-    A junction boundary is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
+    A sj boundary is not a chain slot — the graph is a DAG but not a polytree, so a sj must be a
     **factor on its endpoint regions** and never a message channel. This
-    is what a consumer needs to place that factor: where the junction attaches, whose transcript it
+    is what a consumer needs to place that factor: where the sj attaches, whose transcript it
     belongs to, and how much of its own template remains either side.
 
     ⭐ **``strand`` is the TRANSCRIPT strand**, and it is the whole reason the accumulator does not store
     sense/antisense. The accumulator's ``sj_count`` columns are the **genome** strand the read aligned
     to; which transcript the molecule came from is a property of the annotation, stated here. "Sense
-    derived from a junction's own strand" is exactly this join.
+    derived from a sj's own strand" is exactly this join.
 
     ⚠ **``reach_lo``/``reach_hi`` are EXONIC**, unlike a contiguous boundary's (which are genomic spans, so
     that nascent RNA inside an intron is not declared impossible). Only a spliced molecule uses a
-    junction, so what remains either side of it is exonic — see the module docstring. A reach of 0 is
+    sj, so what remains either side of it is exonic — see the module docstring. A reach of 0 is
     meaningful, not a sentinel.
 
     ⚠ ``lo``/``hi`` are genomically lower/higher, never donor/acceptor: boundaries store ``src < dst``, so on
-    a NEG-strand junction the biological donor is on the right.
+    a NEG-strand sj the biological donor is on the right.
     """
 
     src_region: np.ndarray  # int64[J] — global region id; the intron STARTS where this region ends
     dst_region: np.ndarray  # int64[J] — global region id; the intron ENDS where this region begins
-    strand: np.ndarray  # int8[J]  — the junction's own genomic strand == the TRANSCRIPT strand
-    reach_lo: np.ndarray  # float64[J] — exonic reach on the junction's OWN strand
+    strand: np.ndarray  # int8[J]  — the sj's own genomic strand == the TRANSCRIPT strand
+    reach_lo: np.ndarray  # float64[J] — exonic reach on the sj's OWN strand
     reach_hi: np.ndarray  # float64[J]
 
     @property
-    def n_junctions(self) -> int:
+    def n_sj(self) -> int:
         return int(self.src_region.shape[0])
 
 
-def build_junction_geometry_arrays(index) -> JunctionGeometry:
-    """Build :class:`JunctionGeometry` for ``index``, in the accumulator's junction slot order.
+def build_sj_geometry_arrays(index) -> SpliceJunctionGeometry:
+    """Build :class:`SpliceJunctionGeometry` for ``index``, in the accumulator's sj slot order.
 
     ⭐ **The slot order is not recomputed here.** It is read off
-    :func:`build_junction_edge_arrays`, whose ``edge_row`` is already the ``edges_df`` row of each
-    junction slot. That ordering is a byte-identity contract against the reference accumulator's
+    :func:`build_sj_arrays`, whose ``edge_row`` is already the ``edges_df`` row of each
+    sj slot. That ordering is a byte-identity contract against the reference accumulator's
     ``Partition.from_region_bounds``, and two implementations of one ordering is how the same quantity comes to
     differ in two places — so there is one, and this joins through it.
     """
-    rows = build_junction_edge_arrays(index).edge_row
+    rows = build_sj_arrays(index).edge_row
     boundaries = index.edges_df
     strand = boundaries["strand"].to_numpy(np.int8)[rows]
     is_pos = strand == np.int8(Strand.POS)
 
     def reach(column_pos: str, column_neg: str) -> np.ndarray:
-        # A junction row carries ONE strand, so only that strand's pair was populated by the builder;
-        # selecting on the strand is what stops a NEG junction reading a POS column of zeros and
+        # A sj row carries ONE strand, so only that strand's pair was populated by the builder;
+        # selecting on the strand is what stops a NEG sj reading a POS column of zeros and
         # declaring itself opportunity-free.
         return np.where(
             is_pos,
@@ -1196,7 +1196,7 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
             boundaries[column_neg].to_numpy(np.int64)[rows],
         ).astype(np.float64)
 
-    return JunctionGeometry(
+    return SpliceJunctionGeometry(
         src_region=boundaries["src"].to_numpy(np.int64)[rows],
         dst_region=boundaries["dst"].to_numpy(np.int64)[rows],
         strand=strand,
@@ -1257,7 +1257,7 @@ def load_boundaries(path) -> pd.DataFrame:
 #: third kind, because a splice junction is neither a position nor an interval.
 STEP_REGION = 0
 STEP_BOUNDARY = 1
-STEP_SPLICE_JUNCTION = 2
+STEP_SPLICE_SJ = 2
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -1266,7 +1266,7 @@ class TranscriptPath:
 
     ``offsets[t]:offsets[t + 1]`` is transcript ``t``'s steps, and step ``s`` is
     ``(kind[s], obj_id[s])`` where ``obj_id`` indexes the REGION axis, the BOUNDARY axis or the SPLICE
-    JUNCTION axis according to ``kind``.
+    SJ axis according to ``kind``.
 
     ⭐⭐ **THE STEPS ARE IN TRANSCRIPTION ORDER, 5' to 3'** — so a minus-strand transcript's steps run
     DESCENDING in genomic coordinate. ⚠ That is the one property a genomic-order implementation gets
@@ -1293,20 +1293,20 @@ class TranscriptPath:
         return self.kind[lo:hi], self.obj_id[lo:hi]
 
 
-def _splice_junction_by_intron(index) -> dict[tuple, int]:
+def _splice_sj_by_intron(index) -> dict[tuple, int]:
     """``(ref_name, intron_start, intron_end, strand) -> sj_id``, the ONLY admissible join key.
 
     ⛔ **NOT the flanking region pair, and not a row order.** The region pair happens to be unique on
-    the shipped partition — 13,482 distinct pairs for 13,482 junctions — but only because every exon
+    the shipped partition — 13,482 distinct pairs for 13,482 sj — but only because every exon
     endpoint is forced to be a region region_bound; on a coarsened partition it collides (measured: 638 ambiguous
-    pairs hiding 1,552 junctions). And ``sj.feather``'s row order is grouped ALPHABETICALLY by reference
+    pairs hiding 1,552 sj). And ``sj.feather``'s row order is grouped ALPHABETICALLY by reference
     while the graph axis uses ``index.ref_names`` (FASTA order), which diverge on any genome carrying
     chr1/chr2/chr10.
 
-    ⚠ The ``sj_id`` is a DENSE RANK over the junction boundaries, so it is a within-run join key and never a
+    ⚠ The ``sj_id`` is a DENSE RANK over the sj boundaries, so it is a within-run join key and never a
     durable identifier: dropping one annotated intron renumbers almost every surviving slot.
     """
-    ja = build_junction_edge_arrays(index)
+    ja = build_sj_arrays(index)
     rows = index.edges_df.iloc[np.asarray(ja.edge_row, dtype=np.int64)]
     src = rows["src"].to_numpy(np.int64)
     dst = rows["dst"].to_numpy(np.int64)
@@ -1317,7 +1317,7 @@ def _splice_junction_by_intron(index) -> dict[tuple, int]:
     n_ref = regions["ref_name"].to_numpy()
     # ⭐ `src` is the genomically LOWER region on BOTH strands, so the intron is [end[src], start[dst]).
     # Never `donor`/`acceptor`: those are 5'/3' and therefore strand-dependent, and on this index they
-    # would name the wrong end of 6,527 of 13,482 junctions.
+    # would name the wrong end of 6,527 of 13,482 sj.
     return {
         (str(n_ref[s]), int(n_end[s]), int(n_start[d]), int(st)): j
         for j, (s, d, st) in enumerate(zip(src, dst, strand, strict=True))
@@ -1361,12 +1361,12 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
     name_to_id = index.ref_name_to_id
-    sj_of_intron = _splice_junction_by_intron(index)
+    sj_of_intron = _splice_sj_by_intron(index)
 
     n_t = int(index.num_transcripts)
     per_t: list[list[tuple[int, int]]] = [[] for _ in range(n_t)]
     # ⛔ Resolved BEFORE the exon walk, not after: the splice-junction join key contains the strand, so
-    # a strand read later is a strand read as 0 — which silently resolves no junction at all.
+    # a strand read later is a strand read as 0 — which silently resolves no sj at all.
     strand_of = np.zeros(n_t, dtype=np.int64)
     tdf = index.t_df
     if tdf is not None and "strand" in tdf.columns:
@@ -1409,12 +1409,12 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
             if sj is None:
                 unresolved.append((t, key))
             else:
-                per_t[t].append((STEP_SPLICE_JUNCTION, int(sj)))
+                per_t[t].append((STEP_SPLICE_SJ, int(sj)))
         per_t[t].extend(steps)
         prev_end[t] = int(b)
 
     # ⛔⛔ A TRANSCRIPT'S ANNOTATED INTRON THAT RESOLVES TO NO SLOT IS A DEFECT, NOT A GAP TO SKIP.
-    # The junction key is derived from REGION boundaries (`end[src]`, `start[dst]`), which equal the
+    # The sj key is derived from REGION boundaries (`end[src]`, `start[dst]`), which equal the
     # intron's coordinates only because the partition region_bounds at every exon endpoint — measured 0 of 45,609
     # violations on the shipped index. That invariant is ASSUMED by the derivation, so it is asserted
     # here: were it ever to break, every affected transcript would silently lose a step and its path
@@ -1423,7 +1423,7 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
         t0, k0 = unresolved[0]
         raise ValueError(
             f"{len(unresolved)} annotated intron(s) resolved to no splice-junction slot; first is "
-            f"transcript {t0} intron {k0!r}. The junction axis is keyed on region boundaries, so this "
+            f"transcript {t0} intron {k0!r}. The sj axis is keyed on region boundaries, so this "
             f"means an exon endpoint is not a region region_bound — the index and the partition disagree."
         )
 

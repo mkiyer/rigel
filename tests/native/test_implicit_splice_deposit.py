@@ -25,7 +25,7 @@ from rigel.sim import ReadSimConfig, Scenario
 
 SEED = 4242
 
-#: Exons far enough apart, and reads short enough, that a fragment spanning the junction puts BOTH mates
+#: Exons far enough apart, and reads short enough, that a fragment spanning the sj puts BOTH mates
 #: wholly inside an exon and the intron wholly inside the gap — which is what SPLICE_IMPLICIT means.
 SIM = ReadSimConfig(
     frag_mean=260,
@@ -76,7 +76,7 @@ def test_ONE_candidate_transcript_DEPOSITS_with_the_strand_inferred_from_it(scen
         "a single candidate transcript cannot disagree with itself, so nothing here may be deferred"
     )
     assert payload.deferred.n_fragments == 0
-    # It deposited: its junction was credited, and it is barred from the pure-RNA length pool.
+    # It deposited: its sj was credited, and it is barred from the pure-RNA length pool.
     assert int(payload.sj_count.sum()) > 0
 
 
@@ -149,7 +149,7 @@ def test_A_SPAN_OVER_THE_LIMIT_RULES_OUT_the_retained_intron_hypothesis(scenario
 
     The owner's *"if the genomic span exceeds ``max_fragment_length``, assume it is RNA"* is the ordinary
     hypothesis filter applied to the unspliced path, whose ``L`` **is** that span. Spread ``t1``'s exons
-    1800 bp apart and a junction-spanning fragment's unspliced ``L`` is ~2100 bp against a limit of 1000, so
+    1800 bp apart and a sj-spanning fragment's unspliced ``L`` is ~2100 bp against a limit of 1000, so
     the retained-intron explanation is deleted and the spliced path stands alone and deposits.
 
     ⛔ **This is the concern names, and it is why this test exists.** The filter

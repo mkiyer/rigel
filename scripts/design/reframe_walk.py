@@ -8,9 +8,9 @@ rather than inferred from an aggregate.
 **Five sections:**
 
 1. **THE COUNTS** — every REGION and every BOUNDARY: the unspliced crossing per genome strand, the spliced
-   crossing, the junction flux per transcript strand, and the three divisors. Plus the junction axis.
+   crossing, the sj flux per transcript strand, and the three divisors. Plus the sj axis.
 2. ⭐⭐ **THE FLANK PAIR** — per slot, ``rho_unspliced``, ``rho_lo``, ``rho_hi``, and which side the
-   junction flux landed on. ⛔ This is the whole change: a slot where the two differ is a slot the
+   sj flux landed on. ⛔ This is the whole change: a slot where the two differ is a slot the
    predecessor gave ONE number to.
 3. ⭐⭐⭐ **THE FORWARD RELAY (low → high)** and **4. THE BACKWARD RELAY (high → low)**, hop by hop:
    which total each end presented, the reframe ``r``, what ``r`` would have been under the shipped
@@ -20,7 +20,7 @@ rather than inferred from an aggregate.
 5. **THE ANSWER** per slot against per-object truth.
 
 ⚠ **The geometry is REBUILT here, not read out of the solver** — ``build_region_geometry`` is a pure
-function of (chain, substrate, region_arrays, junctions, two pmfs, reach) and this calls it with the same
+function of (chain, substrate, region_arrays, sj, two pmfs, reach) and this calls it with the same
 arguments `calibrate` did. ⛔ That re-derivation is then GATED against the frames the solver published
 (``_uni_static['rho_lo'/'rho_hi']``) to 1e-12, so it cannot silently drift (TRAPS: self-checking-validator).
 
@@ -61,7 +61,7 @@ from rigel.calibration.region_geometry import (  # noqa: E402
     region_total_density,
 )
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
-from rigel.calibration.splice_graph import build_junction_geometry_arrays  # noqa: E402
+from rigel.calibration.splice_graph import build_sj_geometry_arrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -109,14 +109,14 @@ def rebuild_geometry(r):
         r.chain,
         sub,
         ra,
-        build_junction_geometry_arrays(r.index),
+        build_sj_geometry_arrays(r.index),
         r.donor.gdna_fl_pmf,
         r.donor.rna_fl_pmf,
     )
 
 
 def truth_slot_arrays(r):
-    """Per SLOT, from the oracle's origin split: gDNA / RNA unspliced counts, and the junction flux.
+    """Per SLOT, from the oracle's origin split: gDNA / RNA unspliced counts, and the sj flux.
 
     ⚠ Built from ``truth.parts`` directly rather than from ``override_masses``, because that helper folds
     the SPLICED crossing into the RNA boundary mass and `region_total_density` deliberately excludes it from
@@ -155,7 +155,7 @@ def _flux_density(count, eff):
 def truth_flank_pair(r, geom, g_cnt, rna_cnt):
     """TRUTH's own ``(rho_lo, rho_hi)``, built with the SAME flank rule from the oracle's counts.
 
-    ⭐ The junction flux is a MEASUREMENT — gDNA cannot splice — so its density needs no deconvolution
+    ⭐ The sj flux is a MEASUREMENT — gDNA cannot splice — so its density needs no deconvolution
     and truth and solver share it exactly. What differs is the unspliced part, where truth knows the
     split and the solver has to derive it."""
     E_g = np.asarray(geom.eff_gdna, np.float64)
@@ -164,8 +164,8 @@ def truth_flank_pair(r, geom, g_cnt, rna_cnt):
         E_r > EPS, rna_cnt / np.where(E_r > EPS, E_r, 1.0), 0.0
     )
 
-    lo = unspl + _flux_density(geom.junction_count_lo, geom.eff_junction_lo)
-    hi = unspl + _flux_density(geom.junction_count_hi, geom.eff_junction_hi)
+    lo = unspl + _flux_density(geom.sj_count_lo, geom.eff_sj_lo)
+    hi = unspl + _flux_density(geom.sj_count_hi, geom.eff_sj_hi)
     rho_g = np.where(E_g > EPS, g_cnt / np.where(E_g > EPS, E_g, 1.0), 0.0)
     return unspl, lo, hi, rho_g
 
@@ -177,11 +177,11 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
     sizes = np.asarray(ra.region_size_bp, np.int64)
     U = np.asarray(geom.unspliced_count, np.float64)
     SP = np.asarray(geom.spliced_count, np.float64)
-    JL = np.asarray(geom.junction_count_lo, np.float64)
-    JH = np.asarray(geom.junction_count_hi, np.float64)
+    JL = np.asarray(geom.sj_count_lo, np.float64)
+    JH = np.asarray(geom.sj_count_hi, np.float64)
     E_g = np.asarray(geom.eff_gdna, np.float64)
     E_r = np.asarray(geom.eff_rna, np.float64)
-    EJ = np.asarray(geom.eff_junction_lo, np.float64) + np.asarray(geom.eff_junction_hi, np.float64)
+    EJ = np.asarray(geom.eff_sj_lo, np.float64) + np.asarray(geom.eff_sj_hi, np.float64)
     print(f"   {'slot':>4} {'kind':<5} {'what':<26} {'bp':>6} {'unspl+':>8} {'unspl-':>8} "
           f"{'spliced':>8} {'juncLO':>7} {'juncHI':>7} {'E_g':>8} {'E_r':>8} {'E_J':>8}")
     print("   " + "-" * 118)
@@ -192,16 +192,16 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
               f"{U[s, 0]:>8,.0f} {U[s, 1]:>8,.0f} {SP[s].sum():>8,.0f} "
               f"{JL[s].sum():>7,.0f} {JH[s].sum():>7,.0f} "
               f"{E_g[s]:>8,.1f} {E_r[s]:>8,.1f} {EJ[s].sum():>8,.1f}")
-    jg = build_junction_geometry_arrays(r.index)
+    jg = build_sj_geometry_arrays(r.index)
     starts = np.asarray(ra.start, np.int64)
     print()
-    for k in range(int(getattr(jg, "n_junctions", 0))):
+    for k in range(int(getattr(jg, "n_sj", 0))):
         src, dst = int(np.asarray(jg.src_region)[k]), int(np.asarray(jg.dst_region)[k])
         st = "+" if int(np.asarray(jg.strand)[k]) == int(Strand.POS) else "-"
         flux = float(np.asarray(r.payload.sj_count, np.float64)[k].sum())
         lo = int(starts[src] + sizes[src])
         hi = int(starts[dst])
-        print(f"   ⭐ JUNCTION #{k}: {lo:,} → {hi:,}  strand {st}   flux = {flux:,.0f} fragments")
+        print(f"   ⭐ SJ #{k}: {lo:,} → {hi:,}  strand {st}   flux = {flux:,.0f} fragments")
         print(f"      its genomic-LOW end is the BOUNDARY @{lo:,} (index bit DONOR{st.upper()}) — its exon "
               f"is on the LOW side there")
         print(f"      its genomic-HIGH end is the BOUNDARY @{hi:,} (index bit ACCEPTOR{st.upper()}) — its "
@@ -215,10 +215,10 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
 
 
 def section_flank_pair(r, geom, lab, st_cap, t_unspl, t_lo, t_hi):
-    print("\n── 2. ⭐⭐ THE FLANK PAIR — which side of each BOUNDARY the junction flux belongs to ──────────")
+    print("\n── 2. ⭐⭐ THE FLANK PAIR — which side of each BOUNDARY the sj flux belongs to ──────────")
     print("   ⛔ `rho_lo` is what this slot presents to its genomic-LOW neighbour, `rho_hi` to its")
-    print("      genomic-HIGH one. They differ ONLY where junction flux attaches, and the predecessor")
-    print("      used ONE number — the junction-INCLUSIVE total — on both sides of every such slot.")
+    print("      genomic-HIGH one. They differ ONLY where sj flux attaches, and the predecessor")
+    print("      used ONE number — the sj-INCLUSIVE total — on both sides of every such slot.")
     rho_lo, rho_hi = region_total_density(geom, st_cap["_fg_in"])
     # ⛔ the re-derivation gate: the rebuilt geometry must reproduce the solver's published frames
     np.testing.assert_allclose(rho_lo, np.asarray(st_cap["rho_lo"], float), rtol=1e-12, atol=0.0)
@@ -227,8 +227,8 @@ def section_flank_pair(r, geom, lab, st_cap, t_unspl, t_lo, t_hi):
     # ⚠ back out the shared unspliced part from the geometry's OWN flux banks, never from
     # ``|rho_lo − rho_hi|``: that only works when one bank is empty, and at a slot carrying both it is
     # silently wrong. Here it is exact by construction.
-    unspl = rho_lo - _flux_density(geom.junction_count_lo, geom.eff_junction_lo)
-    shipped_all = unspl + _flux_density(geom.junction_count, geom.eff_junction)
+    unspl = rho_lo - _flux_density(geom.sj_count_lo, geom.eff_sj_lo)
+    shipped_all = unspl + _flux_density(geom.sj_count, geom.eff_sj)
     print(f"   {'slot':>4} {'what':<26} {'rho_unspl':>10} {'rho_lo':>10} {'rho_hi':>10} "
           f"{'shipped':>10} | {'TRUE lo':>9} {'TRUE hi':>9} | which side got the flux")
     print("   " + "-" * 128)
@@ -247,7 +247,7 @@ def section_relay(r, direction, rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g
     """One direction of the relay, hop by hop, with the four ratios side by side."""
     fwd = direction == "forward"
     arrow = "low → high  (L→R genomic)" if fwd else "high → low  (R→L genomic)"
-    what = "a SPLICE-OUT at a junction's low end" if fwd else "a SPLICE-IN at a junction's high end"
+    what = "a SPLICE-OUT at a sj's low end" if fwd else "a SPLICE-IN at a sj's high end"
     n = 3 if fwd else 4
     print(f"\n── {n}. ⭐⭐⭐ THE {'FORWARD' if fwd else 'BACKWARD'} RELAY — {arrow} ─────────────────")
     print(f"   Each hop's message travels {arrow.split('(')[0].strip()}, which is {what}.")
@@ -345,8 +345,8 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     * the **gDNA** arm at an BOUNDARY is NOISE-limited — an BOUNDARY is 0 bp, so its opportunity is ~one mean
       fragment length whatever the chromosome does, and it holds tens of counts against a REGION's hundreds.
       Its ratio sits ~1-2 se from 1.0. ⭐ More depth DOES shrink this.
-    * the **RNA** arm across a junction is BIAS-limited — it sits >13 se from 1.0 and more depth makes it
-      MORE significant, not smaller. That is the junction-vs-exon frame gap: the junction's divisor
+    * the **RNA** arm across a sj is BIAS-limited — it sits >13 se from 1.0 and more depth makes it
+      MORE significant, not smaller. That is the sj-vs-exon frame gap: the sj's divisor
       ``E_J = E[w] - 1`` RISES with the fitted mean fragment length while the exon's ``E_r = e - E[w] + 1``
       FALLS, so a length-model error is amplified with opposite sign (`EQUATIONS.md` §3.6b, 0.62 %/bp).
       ⛔ TRAPS: a-variance-cannot-fix-a-bias: a variance cannot fix a biased mode.
@@ -357,10 +357,10 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     print("   sits from 1.0, which is what EVERY ratio here should be with capture off.")
     E_g = np.asarray(geom.eff_gdna, np.float64)
     E_r = np.asarray(geom.eff_rna, np.float64)
-    fl_lo = np.asarray(geom.junction_count_lo, np.float64).sum(1)
-    fl_hi = np.asarray(geom.junction_count_hi, np.float64).sum(1)
-    ej_lo = _flux_density(geom.junction_count_lo, geom.eff_junction_lo)
-    ej_hi = _flux_density(geom.junction_count_hi, geom.eff_junction_hi)
+    fl_lo = np.asarray(geom.sj_count_lo, np.float64).sum(1)
+    fl_hi = np.asarray(geom.sj_count_hi, np.float64).sum(1)
+    ej_lo = _flux_density(geom.sj_count_lo, geom.eff_sj_lo)
+    ej_hi = _flux_density(geom.sj_count_hi, geom.eff_sj_hi)
 
     def side(s, which):
         """(rho_g, rho_R, count_g, count_R) at slot s on flank ``which``."""
@@ -422,7 +422,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     print("      `r_tot` IS `r_g` — nothing foreign enters. Where it is ~0.0006 the source is an expressed")
     print("      exon and `r_tot` is the RNA ratio wearing a total's name.")
     print("   ⛔ And compare the two `se from 1` columns: the gDNA arm is NOISE (a couple of se, shrinks")
-    print("      with depth), the RNA arm across a junction is BIAS (>13 se, GROWS with depth).")
+    print("      with depth), the RNA arm across a sj is BIAS (>13 se, GROWS with depth).")
     print("   ⛔⛔ `NO-r_R` marks a hop whose SOURCE has ZERO of a component the DESTINATION has plenty")
     print("      of, so no per-component ratio exists for it and `r_tot` contains a term with no")
     print("      counterpart at the source at all. That is the extreme of this problem and it is the")

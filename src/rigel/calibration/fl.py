@@ -22,7 +22,7 @@ nothing is ever estimated from the fragments it will later explain.
   ⛔ **Pooling the four RAW is a different operation and it is wrong**: the contained opportunity falls
   with length and the crossing opportunity rises, and one divisor over the sum read a gDNA mean of
   **146.05** where the contained pool said **88.0**. Divide each, then combine.
-* **RNA** = the annotated-junction pool, splice OBSERVED. gDNA cannot be spliced.
+* **RNA** = the annotated-sj pool, splice OBSERVED. gDNA cannot be spliced.
   ⚠ ``sj_implicit`` fragments are already excluded by the accumulator — a splice that was never
   sequenced is a product of the very model this pool is used to fit.
 
@@ -73,7 +73,7 @@ _GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
 #: ⭐ All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.
 _GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
-#: The pure RNA pool: an OBSERVED splice across an annotated junction.
+#: The pure RNA pool: an OBSERVED splice across an annotated sj.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
 
 #: Kept as a name because the report shows on-target gDNA separately; it is now also FITTED, via
@@ -102,7 +102,7 @@ class FLModels:
 
     ``gdna_counts`` is the pure contained-pool histogram (:func:`gdna_fl_mass`) — intergenic + intronic,
     so gDNA *plus* whatever nascent RNA sits in an intron, not a deconvolved pure-gDNA distribution.
-    ``rna_counts`` is the annotated-junction histogram (:func:`rna_fl_mass`).
+    ``rna_counts`` is the annotated-sj histogram (:func:`rna_fl_mass`).
     """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
@@ -187,7 +187,7 @@ def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 
 
 def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The pure RNA length histogram: fragments that used an annotated junction, splice OBSERVED."""
+    """The pure RNA length histogram: fragments that used an annotated sj, splice OBSERVED."""
     return _pool_sum(payload, _RNA_POOLS)
 
 
@@ -233,7 +233,7 @@ def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
 def build_fl_models(
     payload: "AccumulatorPayload",
     *,
-    junction_opportunity: np.ndarray | None = None,
+    sj_opportunity: np.ndarray | None = None,
     gdna_opportunity: "GdnaOpportunity | None" = None,
     prior_ess: float = POOL_EB_PRIOR_ESS,
 ) -> FLModels:
@@ -262,9 +262,9 @@ def build_fl_models(
      ⭐ **Each component pool is divided by ITS OWN opportunity, and the two divisors are different
      objects because the two selections are different.**
 
-     * ``junction_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses
-       an annotated junction at all (:mod:`rigel.calibration.junction_opportunity`). The RNA pool is
-       selected on *"used an annotated junction"*, which longer fragments do more often.
+     * ``sj_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses
+       an annotated sj at all (:mod:`rigel.calibration.sj_opportunity`). The RNA pool is
+       selected on *"used an annotated sj"*, which longer fragments do more often.
      * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
        (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one region*, whose
        opportunity **falls** with length; two are *crossing exactly one boundary*, whose opportunity
@@ -283,10 +283,10 @@ def build_fl_models(
     rna_counts = rna_fl_mass(payload)
     # ⚠ One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
     # "how much evidence stands behind this shape") and drops bins the opportunity says are impossible.
-    from .junction_opportunity import detilt_pool
+    from .sj_opportunity import detilt_pool
 
-    if junction_opportunity is not None:
-        rna_counts = detilt_pool(rna_counts, junction_opportunity)
+    if sj_opportunity is not None:
+        rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
     if gdna_opportunity is None:
         gdna_counts = gdna_contained_fl_mass(payload)

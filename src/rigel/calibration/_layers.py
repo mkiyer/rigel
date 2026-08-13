@@ -66,7 +66,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         (
             "effective_length",
             "capture_eff_length",
-            "junction_opportunity",
+            "sj_opportunity",
             "gdna_opportunity",
             "fl",
         ),

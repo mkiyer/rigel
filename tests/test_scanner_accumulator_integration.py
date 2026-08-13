@@ -55,7 +55,7 @@ def oracle(tmp_path):
 @pytest.fixture
 def blacklisted_oracle(tmp_path):
     """The same scenario twice: its index without a splice blacklist, and with one that names
-    **every junction the simulator wrote**.
+    **every sj the simulator wrote**.
 
     ⭐ This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
     asserted over a zero. A gate that can only ever see 0 on the term it was built for is the
@@ -89,7 +89,7 @@ def blacklisted_oracle(tmp_path):
     )
     result = sc.build_oracle(n_fragments=200, sim_config=sim_config)
 
-    # ⚠ The junctions are read back OUT OF THE BAM rather than derived from the exon list above, so
+    # ⚠ The sj are read back OUT OF THE BAM rather than derived from the exon list above, so
     # the fixture cannot silently blacklist nothing if the simulator's coordinate convention moves.
     introns: set[tuple[str, int, int]] = set()
     with pysam.AlignmentFile(str(result.bam_path), "rb") as bam:
@@ -369,7 +369,7 @@ class TestSpliceCensus:
             Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
 
         ``SPLICE_ARTIFACT`` is subtracted because it is censused and then **held out by the
-        scanner**: a blacklisted CIGAR-N junction may be a real-but-rejected junction OR a wholly
+        scanner**: a blacklisted CIGAR-N sj may be a real-but-rejected sj OR a wholly
         incorrect alignment, so the span that would be deposited is derived from an alignment the
         scanner has already refused to believe. Identifying and filtering those is the scanner's
         job, and the census is where that decision becomes visible.

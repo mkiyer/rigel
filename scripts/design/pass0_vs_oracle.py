@@ -120,7 +120,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: it as a MOVEABLE argument so a gate can perturb the partition and watch it move.
 _EPS = 1.0e-9
 
-#: The two axes ``CalibrationResult`` deconvolves. The junction axis is pure RNA by construction —
+#: The two axes ``CalibrationResult`` deconvolves. The sj axis is pure RNA by construction —
 #: nothing is deconvolved there, so there is nothing to score.
 AXES = ("region", "boundary")
 
@@ -222,7 +222,7 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
     class of mistake a three-axis schema makes possible, and pooling the check invites it.
 
     The region axis holds no spliced molecule (``region_contained`` is credited only when the fragment
-    used no junction); the boundary axis is unspliced + spliced, because ``chain_boundary_deconv`` builds
+    used no sj); the boundary axis is unspliced + spliced, because ``chain_boundary_deconv`` builds
     ``rna = (1−f_g)·unspliced + spliced`` and T must match that or the two are different quantities.
     """
     region_total = np.asarray(full_substrate.region_contained.count, np.float64).sum(axis=1)
@@ -559,16 +559,16 @@ def measure_condition(
     substrate = CalibrationSubstrate.from_payload(payload, ra)
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
 
     max_size = int(payload.max_length)
     fl = build_fl_models(
         payload,
-        junction_opportunity=crossing_probability_from_index(index, max_size),
+        sj_opportunity=crossing_probability_from_index(index, max_size),
         gdna_opportunity=gdna_opportunity_from_index(index, max_size),
     )
     truth_gdna_pmf, truth_rna_pmf = truth_pmfs(max_size) if truth_pmfs is not None else (None, None)
@@ -577,7 +577,7 @@ def measure_condition(
         strand_model=strand_model,
         gdna_fl_pmf=fl.gdna_pmf,
         rna_fl_pmf=fl.rna_pmf,
-        junctions=build_junction_geometry_arrays(index),
+        sj=build_sj_geometry_arrays(index),
         boundary_flags=build_boundary_flags_array(index),
     )
 

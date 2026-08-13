@@ -273,7 +273,7 @@ class TestWiredIntoTheModel:
         assert plain.rna_pmf == pytest.approx(detilted.rna_pmf)
 
     def test_EVERY_production_caller_of_build_fl_models_passes_THE_GDNA_DIVISOR(self):
-        """⛔ Same gate as the junction divisor's, for the same reason: optional means silently absent.
+        """⛔ Same gate as the sj divisor's, for the same reason: optional means silently absent.
 
         ⚠ Source-level on purpose — a runtime check would need a full pipeline run per call site, and
         the failure this guards against is somebody adding a fourth caller.

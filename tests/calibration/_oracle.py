@@ -24,13 +24,13 @@ high-expression exons where the accumulator has the real unspliced exon-body mRN
     regions             region_contained     the whole path lies inside the region
     contiguous boundaries  boundary_unspliced     the mixture being deconvolved
                       boundary_spliced       certified RNA -- gDNA cannot be spliced
-    junction boundaries    sj_count           pure RNA by construction
+    sj boundaries    sj_count           pure RNA by construction
 
 ⛔ **"Spliced" is a BANK now, not a channel.** The predecessor packed unspliced-± and spliced-sense/
 antisense into one 4-column array, which put two strand conventions in one schema. gDNA fragments are
 never spliced, and that is validated here as ``boundary_spliced`` and ``sj_count`` being identically zero in
 the gdna partition — a stronger statement than "columns 2 and 3 are zero", because it covers the
-junction axis the old layout had no room for.
+sj axis the old layout had no room for.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ _BANKS = (
 
 #: The banks a gDNA fragment can NEVER touch — it does not splice. ⭐ ``sj_mass`` joins them, and it is
 #: a STRONGER statement than the two counts: the mass is where a spliced fragment's whole share goes
-#: when its blocks cross no boundary, so a gDNA record leaking onto the junction axis shows up here as
+#: when its blocks cross no boundary, so a gDNA record leaking onto the sj axis shows up here as
 #: fragment-scale mass rather than as a single incidence.
 _RNA_ONLY_BANKS = ("boundary_spliced_count", "sj_count", "sj_mass")
 
@@ -237,7 +237,7 @@ class OracleTruth:
         ⭐⭐ ``drain_with`` makes the oracle valid for a DRAINED tally. Without it, every number an
         instrument reads off this class is an **undrained** one, because the second pass conditions on
         the whole tally and partitions drained independently do not sum to the whole drained
-        (TRAPS: draining-breaks-the-oracle). Pass ``(undrained_whole, choices, region_types, junctions)`` — exactly what
+        (TRAPS: draining-breaks-the-oracle). Pass ``(undrained_whole, choices, region_types, sj)`` — exactly what
         ``pipeline._drain_side_buffer(_lift=...)`` publishes — and each partition is drained by
         REPLAYING the whole's already-drawn choices inside it (`second_pass.lift_choices`).
 
@@ -255,14 +255,14 @@ class OracleTruth:
         if drain_with is not None:
             from rigel.second_pass import drain, lift_choices
 
-            undrained_whole, choices, region_types, junctions = drain_with
+            undrained_whole, choices, region_types, sj = drain_with
             # ⭐ ALL partitions in ONE call — the per-key queue's state is shared across them, so each
             # of the whole's choices is handed out exactly once (`lift_choices`' own docstring).
             lifted, n_ambiguous = lift_choices(
                 undrained_whole, [parts[k] for k in ORIGINS], choices
             )
             parts = {
-                k: drain(parts[k], ch, region_types=region_types, junctions=junctions)
+                k: drain(parts[k], ch, region_types=region_types, sj=sj)
                 for k, ch in zip(ORIGINS, lifted)
             }
         return cls.from_parts(full, parts, read_counts, n_ambiguous=n_ambiguous)
@@ -337,7 +337,7 @@ class OracleTruth:
                     "partition is not the production split, or the accumulator stopped depositing "
                     "per fragment."
                 )
-        # gDNA is never spliced (physical), on EITHER spliced bank — including the junction axis, which
+        # gDNA is never spliced (physical), on EITHER spliced bank — including the sj axis, which
         # the old 4-channel layout had no room for.
         for bank in _RNA_ONLY_BANKS:
             g = int(np.asarray(getattr(self.parts["gdna"], bank), np.int64).sum())
@@ -350,7 +350,7 @@ class OracleTruth:
         basis the calibration deconvolves. ``R`` = mrna + nrna (exon-body + nascent).
 
         ⚠ There is no spliced term to exclude: ``region_contained`` is credited only when the fragment
-        used no junction, so a region's contained population is unspliced by construction.
+        used no sj, so a region's contained population is unspliced by construction.
         """
         nc = lambda k: np.asarray(self.parts[k].region_contained_count, np.float64).sum(1)  # noqa: E731
         return nc("gdna"), nc("mrna") + nc("nrna")
@@ -388,7 +388,7 @@ class OracleTruth:
         because the old accumulator split one crossing across two faces; there is nothing to sum.
 
         ``*_spl`` is ``boundary_spliced``: molecules that crossed this boundary CONTIGUOUSLY having spliced
-        elsewhere. It is a different population from ``sj_count`` (:meth:`junction_flux`), which never
+        elsewhere. It is a different population from ``sj_count`` (:meth:`sj_flux`), which never
         crossed the boundary at all — it jumped.
         """
         eu = lambda k: np.asarray(self.parts[k].boundary_unspliced_count, np.float64)  # noqa: E731
@@ -405,8 +405,8 @@ class OracleTruth:
             nas_spl=es("nrna").sum(1),
         )
 
-    def junction_flux(self) -> dict:
-        """Per-JUNCTION TRUE flux by origin. ⚠ ``gdna`` is identically zero and is returned anyway —
+    def sj_flux(self) -> dict:
+        """Per-SJ TRUE flux by origin. ⚠ ``gdna`` is identically zero and is returned anyway —
         an all-zero row is the statement "gDNA does not splice", and omitting it would make the
         validator blind to a partition that suddenly produced one."""
         sj = lambda k: np.asarray(self.parts[k].sj_count, np.float64).sum(1)  # noqa: E731
@@ -455,7 +455,7 @@ class OracleTruth:
         ``gdna + rna = the full object count`` holds on both axes because the partitions sum to the full
         payload (the validated identity).
 
-        ⚠ ``mass_rna_junction`` is the FULL payload's junction flux, not the RNA partitions' — they are
+        ⚠ ``count_rna_sj`` is the FULL payload's sj flux, not the RNA partitions' — they are
         equal by the same identity, and taking it from ``full`` says so rather than re-deriving it.
         """
         from rigel.calibration.substrate import CalibrationSubstrate
@@ -477,7 +477,7 @@ class OracleTruth:
             mass_gdna_boundary=total(subs["gdna"], "boundary_unspliced"),
             mass_rna_boundary=rna_boundary_unspliced + spliced_boundary,
             mass_rna_spliced_boundary=spliced_boundary,
-            mass_rna_junction=total(full, "junction"),
+            count_rna_sj=total(full, "sj"),
         )
 
 
@@ -510,7 +510,7 @@ def _main():
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
         build_boundary_flags_array,
-        build_junction_geometry_arrays,
+        build_sj_geometry_arrays,
     )
     from dataclasses import replace as dc
 
@@ -524,11 +524,11 @@ def _main():
     # ⭐ Both divisors, exactly as production passes them — a harness that builds a different model
     # from the shipped one is calibrating something the tool does not ship.
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
 
     fl = build_fl_models(
         payload,
-        junction_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
         gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
     )
     cal = calibrate(
@@ -538,7 +538,7 @@ def _main():
         gdna_fl_pmf=fl.gdna_pmf,
         rna_fl_pmf=fl.rna_pmf,
         config=cfg.calibration,
-        junctions=build_junction_geometry_arrays(index),
+        sj=build_sj_geometry_arrays(index),
         boundary_flags=build_boundary_flags_array(index),
     )
     cal_g = np.asarray(cal.mass_gdna_region, np.float64)

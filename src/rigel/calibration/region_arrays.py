@@ -138,8 +138,8 @@ class RegionArrays:
 
 # NOTE: BoundaryArrays (a per-boundary structural-flags CSR view) and the per-region mature_eligible_{pos,neg}
 # columns were deleted in the 2026-07 cleanup — they fed the removed mature/nascent overlay and had no runtime
-# reader. The per-boundary annotation flags they mirrored (is_tss/is_tes/is_splice_junction/genomic_sj_strand)
-# were dropped from the index schema at the same time (INDEX_FORMAT_VERSION 7); the solver reads junction
+# reader. The per-boundary annotation flags they mirrored (is_tss/is_tes/is_splice_sj/genomic_sj_strand)
+# were dropped from the index schema at the same time (INDEX_FORMAT_VERSION 7); the solver reads sj
 # strand from the accumulator splice motif instead.
 
 

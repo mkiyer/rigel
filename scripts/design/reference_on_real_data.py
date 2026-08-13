@@ -3,8 +3,8 @@
     Reference: ``tests/native/_accumulator_reference.py`` · (S2)
 
 ⚠ WHY. The spec matrix exercises the reference on hand-built fixtures of two to six regions. That cannot
-catch a defect that only appears at 1.04 M regions and 404,168 junctions — a per-reference offset that
-drifts, an index space that wraps, a junction lookup that silently misses. The native accumulator is
+catch a defect that only appears at 1.04 M regions and 404,168 sj — a per-reference offset that
+drifts, an index space that wraps, a sj lookup that silently misses. The native accumulator is
 about to be gated on byte-identity to this file, so the file has to be correct on real data first.
 
 WHAT IS CHECKED. Every number the reference reports is re-derived here **by a different method** and
@@ -40,7 +40,7 @@ from native._accumulator_reference import (  # noqa: E402
 
 from rigel.calibration.splice_graph import (  # noqa: E402
     EDGE_KIND_JUNCTION,
-    build_junction_edge_arrays,
+    build_sj_arrays,
     build_region_partition_arrays,
 )
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -50,12 +50,12 @@ from rigel.types import Strand  # noqa: E402
 def build_partition(index) -> Partition:
     """The real index, in the reference's own terms."""
     region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
-    arrays = build_junction_edge_arrays(index)
+    arrays = build_sj_arrays(index)
     boundaries = index.edges_df
-    is_junction = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
-    n_junction = int(is_junction.sum())
-    if arrays.boundary_right.shape[0] != n_junction:
-        raise SystemExit("junction CSR disagrees with edges.feather on the junction count")
+    is_sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    n_sj = int(is_sj.sum())
+    if arrays.boundary_right.shape[0] != n_sj:
+        raise SystemExit("sj CSR disagrees with edges.feather on the sj count")
     return Partition(
         region_bounds=region_bounds,
         ref_region_bound_offsets=region_bound_offsets,
@@ -87,7 +87,7 @@ def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
     The path is the design's: blocks joined across the mate gap, broken at CIGAR ``N``. Introns are
     de-duplicated on ``(start, end)`` — ⚠ the scanner reads the ``XS`` tag once per RECORD, so a pair
     where read 1 carries it and read 2 does not yields the same intron twice, and crediting both would
-    double-count the junction.
+    double-count the sj.
     """
     af = pysam.AlignmentFile(bam, "rb")
     group, current = [], None
@@ -216,7 +216,7 @@ def main() -> None:
     print(f"index      {args.index}")
     print(
         f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
-        f"{partition.n_sj:,} junction boundaries  {partition.region_bounds.size:,} region_bounds"
+        f"{partition.n_sj:,} sj boundaries  {partition.region_bounds.size:,} region_bounds"
     )
     print(f"bam        {args.bam}\n")
 
@@ -225,7 +225,7 @@ def main() -> None:
 
     # independent expectations, re-derived per fragment by a DIFFERENT method (bisect, one region_bound at a time)
     expect_crossings = expect_density = 0
-    expect_junctions = 0
+    expect_sj = 0
     accepted = 0
     lengths: list[int] = []
 
@@ -239,12 +239,12 @@ def main() -> None:
         if outcome is not DepositOutcome.DEPOSITED:
             continue
         accepted += 1
-        crossings, length, junctions = _expected(partition, ref_id, lo, hi, introns, motif)
+        crossings, length, sj = _expected(partition, ref_id, lo, hi, introns, motif)
         expect_crossings += crossings
         # ⛔ `inv_length_quantum(p)` was `round(2^32 / p)` — the fixed-point spelling of `1/p`. The
         # layer went at `94d283c0`; the deposit is the reciprocal itself, in float64.
         expect_density += crossings / (length - 1) if length >= 2 else 0
-        expect_junctions += junctions
+        expect_sj += sj
         lengths.append(length)
     elapsed = time.perf_counter() - t0
 
@@ -271,7 +271,7 @@ def main() -> None:
             int(t.boundary_unspliced_inv_length_sum.sum()) + int(t.boundary_spliced_inv_length_sum.sum()),
             expect_density,
         ),
-        ("junction crossings", int(t.sj_count.sum()), expect_junctions),
+        ("sj crossings", int(t.sj_count.sum()), expect_sj),
     ]
     ok = True
     for label, got, want in checks:
@@ -288,7 +288,7 @@ def main() -> None:
     print(f"  spanning             {spanning:>12,}")
     print(f"  regions with any count {int((t.region_contained_count.sum(1) > 0).sum()):>12,}")
     print(f"  boundaries with any count {int((t.boundary_unspliced_count.sum(1) > 0).sum()):>12,}")
-    print(f"  junctions used       {int((t.sj_count.sum(1) > 0).sum()):>12,}")
+    print(f"  sj used       {int((t.sj_count.sum(1) > 0).sum()):>12,}")
 
     print("\nFRAGMENT-LENGTH POOLS (mean L, from the histogram)")
     bins = np.arange(t.pool_lengths.shape[1])
@@ -319,7 +319,7 @@ def main() -> None:
 
 
 def _expected(partition, ref_id, lo, hi, introns, motif):
-    """Crossings, L and annotated-junction count for one fragment, by bisect rather than searchsorted.
+    """Crossings, L and annotated-sj count for one fragment, by bisect rather than searchsorted.
 
     ⛔ ``length`` is the TOTAL OF THE SEGMENTS, never ``(hi − lo) − Σ intron``. The two differ the moment
     two introns overlap, and this function used to use the naive form — reproducing, inside the harness,
@@ -351,7 +351,7 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
             crossings += 1
             i += 1
 
-    junctions = 0
+    sj = 0
     for s, e in introns:
         d = bisect.bisect_left(region_bounds, s)
         a = bisect.bisect_left(region_bounds, e)
@@ -365,9 +365,9 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
                 continue
             if motif != Strand.NONE and int(partition.sj_strand[k]) != int(motif):
                 continue
-            junctions += 1
+            sj += 1
             break
-    return crossings, length, junctions
+    return crossings, length, sj
 
 
 if __name__ == "__main__":

@@ -275,7 +275,7 @@ class _FakeCal:
     mass_gdna_boundary: object = None
     mass_rna_boundary: object = None
     mass_rna_spliced_boundary: object = None
-    mass_rna_junction: object = None
+    count_rna_sj: object = None
 
 
 # ── GATE 3: the truth column is the REALISED fragment count, not the molar abundance ─────────────

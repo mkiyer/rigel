@@ -72,9 +72,9 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones_like(ez),
-        mass_rna_junction=np.zeros(0, dtype=np.float64),
+        count_rna_sj=np.zeros(0, dtype=np.float64),
         boundary_spliced_mass_per_crossing=np.ones_like(ez),
-        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
+        sj_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=region_eff,
         gdna_boundary_eff_len=boundary_eff,
         rna_region_eff_len=region_eff,
@@ -91,7 +91,7 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
         rna_strand_overdispersion=0.05,
         n_regions=n,
         n_boundaries=lo.shape[0],
-        n_junctions=0,
+        n_sj=0,
         config=CalibrationConfig(),
     )
 
@@ -270,7 +270,7 @@ def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
 # --- nascent<mature inversion guard (2026-07-09): splice-junction boundaries ---------------------------
 # A multi-exon mRNA and a single-exon nascent parent covering the SAME genomic span. A nascent's genomic
 # region set STRICTLY CONTAINS its mature child's, so its EM effective length can never be shorter. Before
-# the junction-boundary fix, a multi-exon mRNA's span_full (with splice junctions DROPPED) fell below its
+# the sj-boundary fix, a multi-exon mRNA's span_full (with splice junctions DROPPED) fell below its
 # contiguous FL-marginal length, and the fl/span_full ratio (growing with exon count) inflated the mature's
 # eff_em ABOVE its nascent parent's under capture — the physically impossible inversion. These pin the fix.
 
@@ -299,17 +299,17 @@ def _field_cal(
     region_arrays: RegionArrays, density: np.ndarray, frag: float = _CROSSING_EFF
 ) -> CalibrationResult:
     """An arbitrary per-region gDNA DENSITY field with an **FL-marginal** region support
-    (``region_eff = size − frag``). That makes a multi-exon mRNA's junction-dropped ``span_full`` fall
-    BELOW its contiguous FL-marginal length — the exact gap the junction boundaries close. Uniform density ⇒
+    (``region_eff = size − frag``). That makes a multi-exon mRNA's sj-dropped ``span_full`` fall
+    BELOW its contiguous FL-marginal length — the exact gap the sj boundaries close. Uniform density ⇒
     every object's m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
     size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     n_boundaries = boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
     return _cal(region_arrays, density, np.maximum(size - frag, 1e-9), np.full(n_boundaries, frag))
 
 
-def test_junction_incidence_multiexon_only(multiexon_index):
+def test_sj_incidence_multiexon_only(multiexon_index):
     """A multi-exon mRNA yields one splice-junction boundary per adjacent exon pair; a single-exon nRNA yields
-    none, and each junction's flanking regions straddle the intron between the two exons."""
+    none, and each sj's flanking regions straddle the intron between the two exons."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     _, _, _, _, jt, jl, jr = _transcript_region_incidence(idx, ra)
@@ -319,16 +319,16 @@ def test_junction_incidence_multiexon_only(multiexon_index):
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
     for k in np.flatnonzero(jt == mrna):
         assert ends[jl[k]] <= starts[jr[k]], (
-            "junction left flank must end at/before the right flank starts"
+            "sj left flank must end at/before the right flank starts"
         )
 
 
 def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     """THE regression guard: under capture on a single exon, eff_em(nascent) >= eff_em(mature).
 
-    Without the junction boundaries a 6-exon mRNA's fl/span_full ≈ 1.5 inflated its eff_em above its nascent
+    Without the sj boundaries a 6-exon mRNA's fl/span_full ≈ 1.5 inflated its eff_em above its nascent
     parent's (an inversion, since the nascent's region set strictly contains the mature's). The imputed
-    junction boundaries close the gap. Also asserts the mature genuinely CONTRACTS (the fix must not silently
+    sj boundaries close the gap. Also asserts the mature genuinely CONTRACTS (the fix must not silently
     disable capture contraction)."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
@@ -350,7 +350,7 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
 
 
 def test_spliced_factor_one_under_uniform(multiexon_index):
-    """Capture-off bit-identity WITH junction boundaries: uniform gDNA ⇒ eff_em == fl for the multi-exon mRNA."""
+    """Capture-off bit-identity WITH sj boundaries: uniform gDNA ⇒ eff_em == fl for the multi-exon mRNA."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     cal = _field_cal(ra, np.full(ra.n_regions, 0.02))

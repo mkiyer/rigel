@@ -98,8 +98,8 @@ def test_gdna_fl_mass_excludes_the_RNA_pool():
     assert float(gdna_fl_mass(SimpleNamespace(pool_lengths=pools)).sum()) == 0.0
 
 
-def test_rna_fl_mass_is_the_ANNOTATED_JUNCTION_pool_alone():
-    """gDNA cannot be spliced, so an observed annotated junction certifies RNA — and only that pool
+def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
+    """gDNA cannot be spliced, so an observed annotated sj certifies RNA — and only that pool
     does. ⚠ ``sj_implicit`` fragments are already excluded by the accumulator, because a splice that was
     never sequenced is a product of the very model this pool is used to fit."""
     r = rna_fl_mass(SimpleNamespace(pool_lengths=_pools()))

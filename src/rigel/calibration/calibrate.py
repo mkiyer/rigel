@@ -39,7 +39,7 @@ unspliced crossing takes ``UNBOUNDED_REACH`` rather than its transcript's real r
 (owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
 over-call and **+0.36** in the last region before a polyA site. It is
 sequenced after this step so that turning it on can be A/B'd against the baseline this step produces.
-Junction boundaries DO take their real exonic reach — they are a new population with no predecessor divisor.
+SpliceJunction boundaries DO take their real exonic reach — they are a new population with no predecessor divisor.
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     from ..scan_payload import AccumulatorPayload
     from ..strand_model import StrandModels
     from .region_arrays import RegionArrays
-    from .splice_graph import JunctionGeometry
+    from .splice_graph import SpliceJunctionGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -112,17 +112,17 @@ class InjectedCalibrationPriors:
     background: BackgroundReference | None = None
 
 
-def _empty_junction_geometry() -> "JunctionGeometry":
-    """A junction axis with no rows — a graph whose references are all single-exon.
+def _empty_sj_geometry() -> "SpliceJunctionGeometry":
+    """A sj axis with no rows — a graph whose references are all single-exon.
 
-    ⚠ Legal, and **not** the same as "no junction flux": a payload scanned against such a graph has
+    ⚠ Legal, and **not** the same as "no sj flux": a payload scanned against such a graph has
     ``n_sj == 0``, so an empty axis is the only consistent input and the alignment check below will say
     so if it is not.
     """
-    from .splice_graph import JunctionGeometry
+    from .splice_graph import SpliceJunctionGeometry
 
     e_i = np.zeros(0, dtype=np.int64)
-    return JunctionGeometry(
+    return SpliceJunctionGeometry(
         src_region=e_i,
         dst_region=e_i.copy(),
         strand=np.zeros(0, dtype=np.int8),
@@ -268,7 +268,7 @@ def calibrate(
     gdna_fl_pmf: "np.ndarray",
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
-    junctions: "JunctionGeometry | None" = None,
+    sj: "SpliceJunctionGeometry | None" = None,
     boundary_rna_reach=None,
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
@@ -282,11 +282,11 @@ def calibrate(
     (a zero-gDNA library) and an object's deconvolved gDNA mass may be ``0`` (a pure-RNA object); both
     are valid, graceful outputs — not failures.
 
-    ``junctions`` is the splice graph's junction axis
-    (:func:`~rigel.calibration.splice_graph.build_junction_geometry_arrays`), in the accumulator's own
-    junction slot order — where each junction attaches, its transcript strand, and its exonic reach.
-    ``None`` means "this library's graph has no junction boundaries", which is legal (a single-exon-only
-    reference) and is NOT the same as "no junction flux".
+    ``sj`` is the splice graph's sj axis
+    (:func:`~rigel.calibration.splice_graph.build_sj_geometry_arrays`), in the accumulator's own
+    sj slot order — where each sj attaches, its transcript strand, and its exonic reach.
+    ``None`` means "this library's graph has no sj boundaries", which is legal (a single-exon-only
+    reference) and is NOT the same as "no sj flux".
 
     ``boundary_flags`` is the splice graph's per-contiguous-boundary structural bits
     (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
@@ -294,13 +294,13 @@ def calibrate(
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
-    junctions = _empty_junction_geometry() if junctions is None else junctions
-    if int(junctions.n_junctions) != int(substrate.n_junctions):
+    sj = _empty_sj_geometry() if sj is None else sj
+    if int(sj.n_sj) != int(substrate.n_sj):
         raise ValueError(
-            f"the junction axis has {int(junctions.n_junctions)} boundaries but the payload has "
-            f"{int(substrate.n_junctions)}. Build it with "
-            "splice_graph.build_junction_geometry_arrays(index) against the SAME index the payload "
-            "was scanned on — a junction axis addressing a different graph would place every splice "
+            f"the sj axis has {int(sj.n_sj)} boundaries but the payload has "
+            f"{int(substrate.n_sj)}. Build it with "
+            "splice_graph.build_sj_geometry_arrays(index) against the SAME index the payload "
+            "was scanned on — a sj axis addressing a different graph would place every splice "
             "on the wrong boundary."
         )
 
@@ -309,7 +309,7 @@ def calibrate(
     # BOUNDARY slot, one rule, one array. Nothing below computes a second length model.
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(
-        chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
+        chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
     )
     statics = build_region_statics(chain, region_arrays, boundary_flags)
 
@@ -352,7 +352,7 @@ def calibrate(
 
     # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
-    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-JUNCTION
+    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-SJ
     # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
     # the RNA Beta-Binomial come from one source. Both shrunk
     # toward the SAME default prior, so under sparse data they collapse to one distribution and an
@@ -580,7 +580,7 @@ def calibrate(
             geometry=geometry,
             statics=statics,
             substrate=substrate,
-            junctions=junctions,
+            sj=sj,
             region_arrays=region_arrays,
             gdna_prior=enrichment_prior,  # the ENRICHMENT NPMLE (QC landscape / injection substrate)
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
@@ -618,18 +618,18 @@ def calibrate(
     # stays spliced-inclusive so per-boundary conservation gdna + rna = unspliced + spliced holds.
     #
     # ⚠ There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
-    # fragment used no junction, so a region's contained population cannot hold a spliced molecule.
+    # fragment used no sj, so a region's contained population cannot hold a spliced molecule.
     mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
     # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this boundary carries.
     # ``assemble_priors`` needs it to turn a per-boundary object-incidence total into a fragment count.
     boundary_mass_per_crossing = substrate.boundary_unspliced.mass_per_crossing
 
-    # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A junction boundary is pure
+    # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A sj boundary is pure
     # mature RNA by construction, so there is nothing to deconvolve: this is ``sj_count`` summed over
     # the genome-strand columns. ``assemble_priors`` does not read it — it is certified RNA in exactly
     # the sense the spliced crossings are withheld for — but the calibration's output should not be
     # silent about the population that at a donor boundary IS the gene's whole mature output.
-    mass_rna_junction = np.asarray(substrate.junction.count, dtype=np.float64).sum(axis=1)
+    count_rna_sj = np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1)
 
     # ⭐ The two remaining INCIDENCE→FRAGMENT conversions, alongside `boundary_mass_per_crossing`. Each is
     # its own population's `mass / count`: applying one population's ratio to another is
@@ -637,7 +637,7 @@ def calibrate(
     # derives the library count from them — a property, never a stored scalar, so an oracle arm that
     # swaps the mass arrays cannot inherit a count describing the arrays it replaced.
     boundary_spliced_mass_per_crossing = substrate.boundary_spliced.mass_per_crossing
-    junction_mass_per_crossing = substrate.junction.mass_per_crossing
+    sj_mass_per_crossing = substrate.sj.mass_per_crossing
 
     result = CalibrationResult(
         mass_gdna_region=regions.gdna_mass,
@@ -646,9 +646,9 @@ def calibrate(
         mass_rna_boundary=boundaries.rna_mass,
         mass_rna_spliced_boundary=mass_rna_spliced_boundary,
         boundary_mass_per_crossing=boundary_mass_per_crossing,
-        mass_rna_junction=mass_rna_junction,
+        count_rna_sj=count_rna_sj,
         boundary_spliced_mass_per_crossing=boundary_spliced_mass_per_crossing,
-        junction_mass_per_crossing=junction_mass_per_crossing,
+        sj_mass_per_crossing=sj_mass_per_crossing,
         gdna_region_eff_len=region_eff_gdna,
         gdna_boundary_eff_len=boundary_eff_gdna,
         rna_region_eff_len=region_eff_rna,
@@ -667,26 +667,26 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_regions=int(substrate.n_regions),
         n_boundaries=int(substrate.n_boundaries),
-        n_junctions=int(substrate.n_junctions),
+        n_sj=int(substrate.n_sj),
         config=config,
     )
-    # Diagnostic: the JUNCTION sense fraction should agree with the StrandModel κ. A large gap flags a
+    # Diagnostic: the SJ sense fraction should agree with the StrandModel κ. A large gap flags a
     # strand-model / accumulator mismatch (κ stays the StrandModel posterior — this is QC only).
     # ⭐ It is also "sense derived, never stored" in one boundary: the accumulator's columns are GENOME
-    # strand, and which of them is *sense* is read off each junction's own annotated transcript strand.
-    _flux = np.asarray(substrate.junction.count, dtype=np.float64)
-    _is_pos = np.asarray(junctions.strand) == np.int8(Strand.POS)
+    # strand, and which of them is *sense* is read off each sj's own annotated transcript strand.
+    _flux = np.asarray(substrate.sj.count, dtype=np.float64)
+    _is_pos = np.asarray(sj.strand) == np.int8(Strand.POS)
     spl_sense = float(np.where(_is_pos, _flux[:, 0], _flux[:, 1]).sum())
     spl_total = float(_flux.sum())
-    junction_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
+    sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags%s) "
-        "rna_strand_overdispersion=%.4g (%d junctions, %d frags%s) "
-        "[junction sense_frac=%.3f vs κ=%.3f]",
+        "rna_strand_overdispersion=%.4g (%d sj, %d frags%s) "
+        "[sj sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.n_boundaries,
-        result.n_junctions,
+        result.n_sj,
         result.gdna_density_global,
         rna_sense_frac,
         gdna_strand_overdispersion,
@@ -697,7 +697,7 @@ def calibrate(
         _rna_seed[0],
         _rna_seed[1],
         ", FALLBACK" if _rna_seed[2] else ("" if _rna_seed[0] >= 0 else ", INJECTED"),
-        junction_sense_frac,
+        sj_sense_frac,
         rna_sense_frac,
     )
     return result

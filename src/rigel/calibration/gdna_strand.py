@@ -14,7 +14,7 @@ components now carry a fitted overdispersion with the **same default prior**, so
 the two collapse to the same distribution and an unstranded region is uninformative — as it must be.
 The gDNA mean ½ and RNA mean κ are unchanged; only RNA gains the overdispersion term.
 
-⭐ **The RNA overdispersion is fit from the PER-JUNCTION SJ strand table — the same population κ is the
+⭐ **The RNA overdispersion is fit from the PER-SJ SJ strand table — the same population κ is the
 marginal of** (:func:`fit_rna_strand_from_sj_table`). It used to be scavenged from the accumulator's
 boundary spliced channels, which pool unannotated and implicit splices; an implicit splice has no
 sequenced motif, so its sense bit is arbitrary, and fitting a dispersion about κ ≈ 0.002 from seeds
@@ -100,7 +100,7 @@ _MAX_OVERDISPERSION: float = overdispersion_for_beta(_CEIL_ALPHA_BETA)
 #: no information. ``a = 14`` ⇒ ``od₀ = 1/29 = 0.0345``. ⭐ **No longer arbitrary**: two assumption-light
 #: measurements now bracket the truth — gDNA from the exact ``od(n=2) = 2·P(both same strand) − 1`` readout
 #: (no Beta assumption, no estimated mean, since μ = ½ is asserted biology) gives a plateau of
-#: **0.007–0.028**; RNA from junctions deep enough to see the minority strand gives **0.0011–0.0158**, and
+#: **0.007–0.028**; RNA from sj deep enough to see the minority strand gives **0.0011–0.0158**, and
 #: the synthetic suite (true od = 0 by construction) gives 0.0008–0.0017. ``od₀`` sits **1.2–30× ABOVE** the
 #: top of every honest measurement, i.e. at the conservative end of measured reality, which is what a
 #: fallback should be. It remains ASSERTED — the measurements bracket it, they do not derive it.
@@ -183,7 +183,7 @@ class GdnaStrandModel:
 class RnaStrandModel:
     """Fitted RNA strand model: the global Beta-Binomial overdispersion of the spliced (pure-RNA)
     strand split + fit provenance. The RNA sense *mean* (``rna_sense_frac``) lives in
-    :class:`strand_balance.StrandBalance`; this carries only the between-JUNCTION overdispersion."""
+    :class:`strand_balance.StrandBalance`; this carries only the between-SJ overdispersion."""
 
     rna_strand_overdispersion: float  # intra-class correlation in [0, _MAX_OVERDISPERSION]
     n_seed_regions: int  # splice junctions that carried strand-qualified fragments
@@ -479,18 +479,18 @@ def fit_rna_strand_from_sj_table(
     prior_overdispersion: float = _PRIOR_OVERDISPERSION,
     prior_weight: float = _PRIOR_INFORMATION,
 ) -> RnaStrandModel:
-    """Fit the global RNA strand overdispersion from the **per-junction SJ strand table**.
+    """Fit the global RNA strand overdispersion from the **per-sj SJ strand table**.
 
     ⭐ **One population, one source of truth.** ``rna_sense_frac`` (κ, the mean) is the marginal of
     this same table — both halves of the Beta-Binomial are now estimated from the same
     strand-qualified population (``SPLICE_SPLICED_ANNOT``, unique-mapper, unambiguous exon and SJ
-    strand, non-chimeric), one observation per fragment. Each junction ``j`` is one seed:
-    ``(sense_j, n_j)``, and the dispersion is the spread of those splits ACROSS junctions at mean κ.
+    strand, non-chimeric), one observation per fragment. Each sj ``j`` is one seed:
+    ``(sense_j, n_j)``, and the dispersion is the spread of those splits ACROSS sj at mean κ.
 
     ⛔ **What this replaces, and why.** ``od_r`` used to be scavenged from the accumulator's
     boundary spliced channels, whose population also pools ``SPLICED_UNANNOT`` and — the damaging
     one — ``SPLICED_IMPLICIT``. An implicit splice's mate gap spans an annotated intron, so it lands
-    on exactly the annotated boundaries where the genuine junctions live, and its motif was never
+    on exactly the annotated boundaries where the genuine sj live, and its motif was never
     sequenced (the annotation supplies the strand), so its sense bit is arbitrary: measured ~0.49 at
     depth ≥ 10 on real cfRNA. Fitting a dispersion about κ ≈ 0.002 from seeds sitting at ½ gave a
     raw pooled ``od_mom`` of **10.7–79.9** — impossible for an intra-class correlation, which is
@@ -502,7 +502,7 @@ def fit_rna_strand_from_sj_table(
     implicit and novel RNA for the peel, the graft and the mature-RNA floor. This fix belongs in the
     strand model, not in the deposit predicate.
 
-    A junction with one fragment contributes no pair to correlate and so no information; the
+    A sj with one fragment contributes no pair to correlate and so no information; the
     information-currency shrinkage (:func:`_null_information`) handles that with no depth threshold.
     """
     n_sense = np.asarray(sj_table.n_sense, dtype=np.float64)

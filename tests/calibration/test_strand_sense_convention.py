@@ -11,7 +11,7 @@ collision between **two different quantities that were both being called strand 
 ``ReadSimConfig.strand_specificity``          *"probability an RNA fragment preserves correct read
                                               orientation … an R1↔R2 swap with probability 1 − ss"*
                                               — protocol FIDELITY, and direction-agnostic.
-``StrandModel.p_r1_sense``                    ``P(align_strand == the junction's strand)`` — DIRECTIONAL,
+``StrandModel.p_r1_sense``                    ``P(align_strand == the sj's strand)`` — DIRECTIONAL,
                                               and its own docstring already says it: *"High (≈0.95) for
                                               R1-sense libraries (KAPA Stranded). Low (≈0.05) for
                                               R1-antisense libraries (Illumina TruSeq dUTP)."*
@@ -118,7 +118,7 @@ def test_strand_specificity_RECOVERS_the_simulated_parameter(simulated):
 def test_the_simulator_emits_an_R1_ANTISENSE_library_so_the_SENSE_fraction_is_LOW():
     """⛔ The fact that was mistaken for a sign error, pinned so it cannot be mistaken again.
 
-    ``p_r1_sense`` is ``P(align_strand == the junction's strand)``. The simulator emits R1-antisense
+    ``p_r1_sense`` is ``P(align_strand == the sj's strand)``. The simulator emits R1-antisense
     (dUTP-style), so a perfectly stranded library has a sense fraction of **~0**, not ~1. That is the
     protocol, not a flip: ``StrandModel``'s own docstring gives ≈0.05 for TruSeq dUTP and ≈0.95 for KAPA.
 

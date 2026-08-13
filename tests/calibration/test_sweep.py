@@ -1,7 +1,7 @@
 """The belief-propagation sweep (`sweep.solve_chain`) and the beliefs it starts from.
 
 ⭐ **Every fixture here is on the S5.e axes** — ``_synthetic.make_chain_parts``, i.e. a region axis, a
-contiguous-boundary axis with ``k − 1`` entries per reference and **no terminal slots**, and a junction axis
+contiguous-boundary axis with ``k − 1`` entries per reference and **no terminal slots**, and a sj axis
 whose boundaries state their own ``(src, dst, strand)``. The per-FACE fixtures this file used to carry are
 gone; ``RegionGeometry``'s own gate is ``test_region_geometry.py``, written from scratch against enumerated
 start positions.
@@ -9,7 +9,7 @@ start positions.
 ⚠ **Two things the old shape hid, and their tests say so in place**: a reference terminal was a
 data-free boundary SLOT that could be G1-locked and emit structural all-gDNA into its neighbour
 (`test_gdna_sweep_zero_gdna_pin_and_monotone`), and the mature flux at an intron↔exon boundary had to be
-placed by hand rather than derived from a junction's endpoints (`_mature_exon_chain`).
+placed by hand rather than derived from a sj's endpoints (`_mature_exon_chain`).
 """
 
 from __future__ import annotations
@@ -431,7 +431,7 @@ def test_density_message_defers_to_decisive_strand():
 # --- mature absorption: the spliced mass "absorbs" the imputed RNA, leaving only NASCENT ---------------
 # The RNA message src→dst is
 #   ρ = src_nascent/E_r + SP[sf][src]/E_spl_src − SP[df][dst]/E_spl_dst.
-# The dst-face term subtracts the mature a junction boundary measures, so a pure-mature exon imputes
+# The dst-face term subtracts the mature a sj boundary measures, so a pure-mature exon imputes
 # ≈0 nascent into the intron beyond it — no wholesale nascent hallucination.
 
 
@@ -445,8 +445,8 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
 
     ⭐ **Five regions, not three, and the extra two are load-bearing.** The predecessor put the mature
     flux on the two intron↔exon *boundaries* by hand, because the old accumulator attributed a splice to
-    the region's boundary. A junction now states its own ``(src, dst)``, so it has to HAVE endpoints: the
-    junction over intron ``n1`` runs ``n0 → n2`` and the one over ``n3`` runs ``n2 → n4``, and
+    the region's boundary. A sj now states its own ``(src, dst)``, so it has to HAVE endpoints: the
+    sj over intron ``n1`` runs ``n0 → n2`` and the one over ``n3`` runs ``n2 → n4``, and
     `build_region_geometry` places their flux on the boundaries they leave and enter. The exon under test
     (``n2``) ends up with mature flux on both its flanking boundaries — which is what the old fixture asserted
     by construction, now derived from the graph instead.
@@ -454,7 +454,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
     introns and every boundary carry balanced gDNA only. ⭐ **`boundary_spliced` is 0 everywhere, and that is a
     measured fact rather than a convenience** — mature RNA never crosses an exon↔intron boundary (0 of 1,146
-    boundaries over 7 conditions). It skips the intron as a junction, never as
+    boundaries over 7 conditions). It skips the intron as a sj, never as
     a contiguous crossing.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
@@ -467,11 +467,11 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     g_half = rho_g * Eg / 2.0  # per-strand contained gDNA count (balanced)
     mat = rho_m * Er  # contained mature count (+ strand only)
     is_exon = np.array([1.0, 0.0, 1.0, 0.0, 1.0])
-    # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning reads are only partially
-    # captured, so the junction UNDER-reports the exon's true mature density ⇒ the boundary→exon mature
+    # ``spl_scale`` < 1 models a CAPTURE-DEPLETED sj: sj-spanning reads are only partially
+    # captured, so the sj UNDER-reports the exon's true mature density ⇒ the boundary→exon mature
     # MEASUREMENT disagrees with the exon's own (confident) unspliced belief. Used by the silencing test.
     j_count = rho_m * cross_r * spl_scale
-    junctions = (
+    sj = (
         [
             (0, 2, Strand.POS, UNBOUNDED_REACH, UNBOUNDED_REACH, j_count),
             (2, 4, Strand.POS, UNBOUNDED_REACH, UNBOUNDED_REACH, j_count),
@@ -487,7 +487,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
         boundary_pos=rho_g * cross_g / 2.0,
         boundary_neg=rho_g * cross_g / 2.0,
         boundary_spliced=0.0,
-        junctions=junctions,
+        sj=sj,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -532,10 +532,10 @@ def test_mature_no_nascent_hallucination_in_introns():
     assert np.all(fg_introns > 0.85), fg_introns
 
 
-# NOTE: `test_mature_absorption_lowers_nascent_message_into_junction` was RETIRED when the mature-crossing gate
+# NOTE: `test_mature_absorption_lowers_nascent_message_into_sj` was RETIRED when the mature-crossing gate
 # landed (Phase 4). It asserted the exon→TRAPS: measure-the-ceiling-first +RNA message FIRES (`app[b1] > 0`) so its absorption term could
 # lower the imputed nascent; the gate now blocks that boundary entirely (the exon may not manufacture nascent into
-# its intron-side junction), so the message no longer exists to absorb. Its replacement is
+# its intron-side sj), so the message no longer exists to absorb. Its replacement is
 # `test_exon_does_not_manufacture_nascent_into_intron` (same fixture, same boundary, inverted assertion). The
 # B→exon MEASUREMENT + absorption path it half-covered is still guarded by the two `test_mature_measurement_*`
 # tests below, which the gate leaves untouched.
@@ -552,11 +552,11 @@ def test_mature_measurement_recovers_exon_rna():
 
 def test_mature_measurement_disagreement_silenced():
     """BUG #2 regression: the mature MEASUREMENT message must be DISAGREEMENT-SILENCED like every other RNA
-    message (the old exemption applied it at full COUNT precision). Under capture, junction-spanning reads are
+    message (the old exemption applied it at full COUNT precision). Under capture, sj-spanning reads are
     only partially captured, so the B→exon mature density UNDER-reports the exon's true RNA → the measurement
     DISAGREES with the exon's own confident belief. Un-silenced it dragged f_pos down → phantom gDNA by simplex
-    complement (−gDNA flagship +0.04→+0.018). Here: a depleted junction genuinely lowers the message target,
-    yet the exon's gDNA fraction stays unchanged vs a consistent junction — the disagreeing measurement was
+    complement (−gDNA flagship +0.04→+0.018). Here: a depleted sj genuinely lowers the message target,
+    yet the exon's gDNA fraction stays unchanged vs a consistent sj — the disagreeing measurement was
     down-weighted, not applied whole (measured: the delivered precision collapses 188.9 → 1.24, 152×).
 
     ⚠ **This was a `strict=True` xfail on an OPEN ITEM, and the open item is RESOLVED.** The defect was a
@@ -576,7 +576,7 @@ def test_mature_measurement_disagreement_silenced():
     ex = MX_EXON
     fin_ok, cap_ok = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=1.0))
     fin_lo, cap_lo = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=0.1))
-    # (1) the depleted junction really did lower the +RNA message target into the exon (a genuine disagreement)…
+    # (1) the depleted sj really did lower the +RNA message target into the exon (a genuine disagreement)…
     assert cap_lo["mode_p"][ex] < cap_ok["mode_p"][ex] - 0.3, (
         cap_lo["mode_p"][ex],
         cap_ok["mode_p"][ex],
@@ -590,16 +590,16 @@ def test_mature_measurement_disagreement_silenced():
     assert float(fin_lo.f_g[ex]) < 0.45, fin_lo.f_g[ex]
 
 
-def test_tau_gag_fix_spliced_junction_emits_when_unstranded():
+def test_tau_gag_fix_spliced_sj_emits_when_unstranded():
     """τ-GAG REGRESSION ( §Phase B, 2026-07-21). On UNSTRANDED data
     (κ=½ ⇒ the strand Fisher info ``I_strand`` is identically 0), a splice-junction boundary still carries
     motif-stranded spliced (mature-RNA) fragments — a DIRECT measurement, independent of strand. That
     measurement MUST reach the exon. The bug: the τ-evidence emission gate (keyed on ``I_strand``+``I_struct``
     only, NOT the spliced count) silenced it, and the spliced-precision credit — which lives *inside* the gated
-    block — never fired (52% of junctions). The fix opens RNA emission on spliced presence while keeping the
+    block — never fired (52% of sj). The fix opens RNA emission on spliced presence while keeping the
     deconvolution PREDICTION τ-gated.
 
-    Pins both halves: (1) a spliced junction DELIVERS a +RNA message to its exon even unstranded; (2) the same
+    Pins both halves: (1) a spliced sj DELIVERS a +RNA message to its exon even unstranded; (2) the same
     chain with the spliced REMOVED delivers zero +RNA authority (a vacuous unstranded region manufactures no
     phantom RNA — the deconvolution stays gated). This exact pair fails on the pre-fix gated code."""
     ex = MX_EXON
@@ -751,8 +751,8 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
 
 # chain region ids for the mature-exon fixture (intergenic|intron R0|B1|exon R1|B2|intron R2|...):
 _R1_EXON = 3  # the expressed exon R1
-_B1 = 2  # intron→exon junction; its right neighbour (backward src) is R1
-_B2 = 4  # exon→intron junction; its left neighbour (forward src) is R1
+_B1 = 2  # intron→exon sj; its right neighbour (backward src) is R1
+_B2 = 4  # exon→intron sj; its left neighbour (forward src) is R1
 
 
 def test_intron_relays_nascent_into_exon_both_directions():
@@ -763,13 +763,13 @@ def test_intron_relays_nascent_into_exon_both_directions():
     _, cap = _sweep(_mature_exon_chain(spliced=True))
     uni = cap["_uni_static"]
     fpp, bpp = uni["fwd_pp"], uni["bwd_pp"]  # forward / backward +RNA precision after the relay
-    # +strand-continuous chain ⇒ the fused +RNA precision is live at the junctions and the exon, both directions
+    # +strand-continuous chain ⇒ the fused +RNA precision is live at the sj and the exon, both directions
     assert fpp[_B1] > 0.0, fpp[
         _B1
-    ]  # forward relay reaches the intron→exon junction TRAPS: measure-the-ceiling-first
+    ]  # forward relay reaches the intron→exon sj TRAPS: measure-the-ceiling-first
     assert bpp[_B2] > 0.0, bpp[
         _B2
-    ]  # backward relay reaches the exon→intron junction TRAPS: score-against-truth
+    ]  # backward relay reaches the exon→intron sj TRAPS: score-against-truth
     assert fpp[_R1_EXON] > 0.0 and bpp[_R1_EXON] > 0.0  # the exon receives +RNA from both flanks
 
 

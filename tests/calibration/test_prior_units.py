@@ -183,11 +183,11 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         mass_rna_boundary=rho_r * cross_r,
         mass_rna_spliced_boundary=np.zeros(ne, dtype=np.float64),
         boundary_mass_per_crossing=_mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r),
-        mass_rna_junction=np.zeros(0, dtype=np.float64),
+        count_rna_sj=np.zeros(0, dtype=np.float64),
         boundary_spliced_mass_per_crossing=np.ones_like(
             _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r)
         ),
-        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
+        sj_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=a_g_region,
         gdna_boundary_eff_len=a_g_boundary,
         rna_region_eff_len=a_r_region,
@@ -204,7 +204,7 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
         rna_strand_overdispersion=0.05,
         n_regions=n,
         n_boundaries=ne,
-        n_junctions=0,
+        n_sj=0,
         config=CalibrationConfig(),
     )
 

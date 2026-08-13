@@ -3,32 +3,32 @@
 **The defect.** The reframe ``r = rho_tot(dst)/rho_tot(src)`` is a COMPOSITION imputation
 (`EQUATIONS.md` §3.5), so its numerator and denominator must be totals over the SAME component set. At an
 BOUNDARY the accumulator holds two disjoint populations: the molecules that cross it CONTIGUOUSLY, and the
-junction flux — the molecules that SPLICE there. The predecessor put the whole junction flux into one
+sj flux — the molecules that SPLICE there. The predecessor put the whole sj flux into one
 total per slot and used it on every hop, in both directions and in both twins. Measured against oracle
 truth on a two-exon toy, that inflated the intron-facing side of the two ``intron|exon`` BOUNDARIES by
 **1.28×** and **1.43×** where the truth ratio is reproduced to 3 % once the term is dropped there.
 
 **The derivation, in one sentence.** A molecule that splices at a position has its body in the exon on
-exactly ONE side of it — the genomically LOW side if that position is the junction's low end, the HIGH
-side if it is the junction's high end — and it never enters the other flank at all. So the total an BOUNDARY
-presents to its low neighbour must count the flux of junctions that START there, the total it presents to
-its high neighbour the flux of junctions that END there, and one number per slot cannot express either.
+exactly ONE side of it — the genomically LOW side if that position is the sj's low end, the HIGH
+side if it is the sj's high end — and it never enters the other flank at all. So the total an BOUNDARY
+presents to its low neighbour must count the flux of sj that START there, the total it presents to
+its high neighbour the flux of sj that END there, and one number per slot cannot express either.
 
 **Three consequences, each gated below.**
 
-1. ⭐ The decision is **per junction**, not per boundary — an BOUNDARY can be the low end of one junction and the
+1. ⭐ The decision is **per sj**, not per boundary — an BOUNDARY can be the low end of one sj and the
    high end of another, and then both flank totals are nonzero with *different* fluxes. So the split has
    to happen where the flux is gathered (`build_region_geometry`), not where it is consumed.
 2. ⭐⭐ It is keyed on the **SIDE only — DIRECTION DOES NOT ENTER.** A hop joins two adjacent slots
    ``(k, k+1)``; whichever is the source, the pair is the same pair, so ``r = rho_lo[k+1]/rho_hi[k]``
    always. Travelling low→high (mature departing — a **splice-out**) versus high→low (mature arriving — a
    **splice-in**, `DESIGN.md` §0) changes only which is numerator. ⛔ But it is NOT one array per
-   direction: within ONE forward pass an BOUNDARY at a junction's low end is the DESTINATION of a hop from
+   direction: within ONE forward pass an BOUNDARY at a sj's low end is the DESTINATION of a hop from
    its low flank (flux INCLUDED) and the SOURCE of the next hop into its high flank (EXCLUDED).
 3. ⛔⛔ It must be **GENOMIC, never donor/acceptor.** ``FLAG_DONOR_s`` marks the genomic-LOW end of an
    ``s``-strand intron on BOTH strands (`splice_graph._terminus_and_splice_events`: ``don_bit`` ←
    ``intron_start``), so on ``−`` it sits at the transcript's biological ACCEPTOR. A predicate written in
-   transcript terms flips sign with the strand; ``test_a_NEG_junction_splits_IDENTICALLY_to_a_POS_one`` is
+   transcript terms flips sign with the strand; ``test_a_NEG_sj_splits_IDENTICALLY_to_a_POS_one`` is
    the gate that catches it, and it is why the fields are named ``_lo``/``_hi``.
 
 ⛔ **A rule keyed on the coarse region type provably cannot do this**, which is why none is attempted:
@@ -44,7 +44,7 @@ predicts** — a change made in three places, gated in one.
 |---|---|---|
 | 1 | put the whole flux in BOTH banks (the shipped behaviour) | 7 of 12: the sum identity, the placement, both-ends, the frame pair, and all three consumer gates |
 | 2 | swap ``_lo``/``_hi`` at the build | 5: the placement gate, ⭐ `−`-strand, both-ends, the frame pair, the solver's publication |
-| 3 | key the split on the junction's STRAND, not its genomic end | ⭐⭐⭐ **the `−`-strand gate ALONE.** This is the sign error `EQUATIONS.md` §3.5b warns about, and exactly one gate in the file can see it — which is why it is written as an equality between the two strand arms rather than as a property of either |
+| 3 | key the split on the sj's STRAND, not its genomic end | ⭐⭐⭐ **the `−`-strand gate ALONE.** This is the sign error `EQUATIONS.md` §3.5b warns about, and exactly one gate in the file can see it — which is why it is written as an equality between the two strand arms rather than as a property of either |
 | 4 | pair the FORWARD relay's arrays the wrong way round | ⭐⭐ the relay mirror gate |
 | 5 | pair the BACKWARD relay's arrays the wrong way round | ⭐⭐ the relay mirror gate |
 | 6 | pair the COMBINE's arrays the wrong way round | the combine gate, via ``_capture['_pin']['r']`` |
@@ -99,23 +99,23 @@ def _delta_pmf(length):
     return pmf
 
 
-#: A two-exon gene: exon / intron / exon, flanked by intergenic. ⭐ The junction runs region 1 → region 3, so
+#: A two-exon gene: exon / intron / exon, flanked by intergenic. ⭐ The sj runs region 1 → region 3, so
 #: the BOUNDARY between regions 1 and 2 is its genomic-LOW end and the one between 2 and 3 its genomic-HIGH end
-#: — and the exon of that junction's transcript is on the LOW side of the first and the HIGH side of the
+#: — and the exon of that sj's transcript is on the LOW side of the first and the HIGH side of the
 #: second, which is the whole asymmetry under test.
 _EXON = np.uint8(BIT_EXON_POS)
 _INTRON = np.uint8(BIT_INTRON_POS)
 _GENE = [np.uint8(0), _EXON, _INTRON, _EXON, np.uint8(0)]
 
 
-def _gene_parts(*, strand=Strand.POS, flux=400.0, junctions=None):
-    """The exon/intron/exon chain, with one junction spanning the intron unless told otherwise."""
+def _gene_parts(*, strand=Strand.POS, flux=400.0, sj=None):
+    """The exon/intron/exon chain, with one sj spanning the intron unless told otherwise."""
     return make_chain_parts(
         _GENE,
         region_size_bp=1000.0,
         region_pos=300.0,
         boundary_pos=120.0,
-        junctions=[(1, 3, strand, 1e9, 1e9, flux)] if junctions is None else junctions,
+        sj=[(1, 3, strand, 1e9, 1e9, flux)] if sj is None else sj,
         gdna_fl=_delta_pmf(50),
         rna_fl=_delta_pmf(80),
     )
@@ -126,7 +126,7 @@ def _boundary_slots(chain):
 
 
 def _low_high_boundaries(chain):
-    """``(low_end_slot, high_end_slot)`` for the fixture's junction — the two BOUNDARIES beside the intron."""
+    """``(low_end_slot, high_end_slot)`` for the fixture's sj — the two BOUNDARIES beside the intron."""
     kind = np.asarray(chain.kind)
     # chain is N E N E N E N E N; the intron is region index 2, i.e. slot 4
     intron_slot = 4
@@ -140,28 +140,28 @@ def _low_high_boundaries(chain):
 
 
 def test_the_split_ACCOUNTS_FOR_THE_WHOLE_FLUX_and_nothing_more():
-    """⛔ The sum identity, both banks. A junction that fell between the two halves would silently
+    """⛔ The sum identity, both banks. A sj that fell between the two halves would silently
     disappear from every total, and one counted twice would inflate both."""
     g = _gene_parts().geometry
     np.testing.assert_allclose(
-        np.asarray(g.junction_count_lo) + np.asarray(g.junction_count_hi),
-        np.asarray(g.junction_count),
+        np.asarray(g.sj_count_lo) + np.asarray(g.sj_count_hi),
+        np.asarray(g.sj_count),
     )
     np.testing.assert_allclose(
-        np.asarray(g.eff_junction_lo) + np.asarray(g.eff_junction_hi),
-        np.asarray(g.eff_junction),
+        np.asarray(g.eff_sj_lo) + np.asarray(g.eff_sj_hi),
+        np.asarray(g.eff_sj),
     )
-    assert float(np.asarray(g.junction_count).sum()) > 0.0, "the fixture must carry flux"
+    assert float(np.asarray(g.sj_count).sum()) > 0.0, "the fixture must carry flux"
 
 
-def test_a_junctions_flux_lands_in_LO_at_its_low_end_and_HI_at_its_high_end():
-    """⭐ The placement itself, which is the derivation's whole content: at the junction's genomic-LOW end
+def test_a_sj_flux_lands_in_LO_at_its_low_end_and_HI_at_its_high_end():
+    """⭐ The placement itself, which is the derivation's whole content: at the sj's genomic-LOW end
     the exon is on the LOW side, so the flux belongs to the LOW-flank total and to nothing else."""
     parts = _gene_parts(flux=400.0)
     g, chain = parts.geometry, parts.chain
     lo_boundary, hi_boundary = _low_high_boundaries(chain)
-    jc_lo = np.asarray(g.junction_count_lo)[:, 0]
-    jc_hi = np.asarray(g.junction_count_hi)[:, 0]
+    jc_lo = np.asarray(g.sj_count_lo)[:, 0]
+    jc_hi = np.asarray(g.sj_count_hi)[:, 0]
     assert jc_lo[lo_boundary] == pytest.approx(400.0)
     assert jc_hi[lo_boundary] == 0.0
     assert jc_lo[hi_boundary] == 0.0
@@ -174,7 +174,7 @@ def test_a_junctions_flux_lands_in_LO_at_its_low_end_and_HI_at_its_high_end():
     assert float(jc_lo[others].sum() + jc_hi[others].sum()) == 0.0
 
 
-def test_a_NEG_junction_splits_IDENTICALLY_to_a_POS_one():
+def test_a_NEG_sj_splits_IDENTICALLY_to_a_POS_one():
     """⭐⭐⭐ THE SIGN GATE, and it is the reason this file exists.
 
     The index flags the genomic-LOW end of a ``−`` intron ``FLAG_DONOR_NEG`` and its genomic-HIGH end
@@ -190,31 +190,31 @@ def test_a_NEG_junction_splits_IDENTICALLY_to_a_POS_one():
     neg = _gene_parts(strand=Strand.NEG, flux=400.0).geometry
     # the flux moves column (genome strand -> transcript strand keying) and NOT slot
     np.testing.assert_allclose(
-        np.asarray(pos.junction_count_lo)[:, 0], np.asarray(neg.junction_count_lo)[:, 1]
+        np.asarray(pos.sj_count_lo)[:, 0], np.asarray(neg.sj_count_lo)[:, 1]
     )
     np.testing.assert_allclose(
-        np.asarray(pos.junction_count_hi)[:, 0], np.asarray(neg.junction_count_hi)[:, 1]
+        np.asarray(pos.sj_count_hi)[:, 0], np.asarray(neg.sj_count_hi)[:, 1]
     )
-    assert float(np.asarray(neg.junction_count_lo)[:, 0].sum()) == 0.0
-    assert float(np.asarray(neg.junction_count_hi)[:, 0].sum()) == 0.0
+    assert float(np.asarray(neg.sj_count_lo)[:, 0].sum()) == 0.0
+    assert float(np.asarray(neg.sj_count_hi)[:, 0].sum()) == 0.0
     # ⛔ and the placement is NOT symmetric, so the equality above has teeth: swapping the two banks
     # would be a different array, not the same one.
     lo_boundary, hi_boundary = _low_high_boundaries(_gene_parts(strand=Strand.NEG).chain)
-    assert np.asarray(neg.junction_count_lo)[lo_boundary, 1] > 0.0
-    assert np.asarray(neg.junction_count_lo)[hi_boundary, 1] == 0.0
+    assert np.asarray(neg.sj_count_lo)[lo_boundary, 1] > 0.0
+    assert np.asarray(neg.sj_count_lo)[hi_boundary, 1] == 0.0
 
 
-def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_another():
+def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_sj_and_the_HIGH_end_of_another():
     """⭐⭐ The case that makes the split necessary rather than merely tidy — and the case a
     per-BOUNDARY rule cannot represent at all.
 
-    Two junctions MEETING at one boundary — ``A = region0 → region2`` and ``B = region1 → region3``, i.e. A's intron
+    Two sj MEETING at one boundary — ``A = region0 → region2`` and ``B = region1 → region3``, i.e. A's intron
     spans region 1 and B's spans region 2, so A ENDS exactly where B BEGINS. On a 5-region chain
     (``N0 E1 N2 E3 N4 E5 N6 E7 N8``, region ``k`` at slot ``2k``) A's high end is ``left(region2) = slot 3``
     and B's low end is ``right(region1) = slot 3``: **one BOUNDARY, both roles.** Both flank totals are then
     nonzero and they carry DIFFERENT fluxes with DIFFERENT divisors, which no per-BOUNDARY number can hold.
 
-    ⚠ On `spliced_exons` and `splice_both_strands` every junction-bearing BOUNDARY has exactly one
+    ⚠ On `spliced_exons` and `splice_both_strands` every sj-bearing BOUNDARY has exactly one
     attachment, so neither of those rungs exercises this — it is gated here instead of assumed.
     """
     parts = make_chain_parts(
@@ -222,7 +222,7 @@ def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_ano
         region_size_bp=1000.0,
         region_pos=300.0,
         boundary_pos=120.0,
-        junctions=[
+        sj=[
             (0, 2, Strand.POS, 1e9, 1e9, 500.0),
             (1, 3, Strand.POS, 40.0, 40.0, 90.0),
         ],
@@ -230,18 +230,18 @@ def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_ano
         rna_fl=_delta_pmf(80),
     )
     g = parts.geometry
-    jc_lo, jc_hi = np.asarray(g.junction_count_lo)[:, 0], np.asarray(g.junction_count_hi)[:, 0]
+    jc_lo, jc_hi = np.asarray(g.sj_count_lo)[:, 0], np.asarray(g.sj_count_hi)[:, 0]
     assert jc_lo[1] == pytest.approx(500.0) and jc_hi[1] == 0.0  # A's low end
     assert jc_lo[5] == pytest.approx(0.0) and jc_hi[5] == pytest.approx(90.0)  # B's high end
     # ⭐⭐ THE SHARED BOUNDARY: A's high end and B's low end at once, each on its own bank
     assert jc_hi[3] == pytest.approx(500.0), "A's flux belongs to the HIGH flank here"
     assert jc_lo[3] == pytest.approx(90.0), "B's flux belongs to the LOW flank here"
-    # ⭐ and the divisors go with them — the two junctions have different reaches, so a bank that pooled
+    # ⭐ and the divisors go with them — the two sj have different reaches, so a bank that pooled
     # them would show the same number on both sides of the shared boundary.
-    ej_lo, ej_hi = np.asarray(g.eff_junction_lo)[:, 0], np.asarray(g.eff_junction_hi)[:, 0]
+    ej_lo, ej_hi = np.asarray(g.eff_sj_lo)[:, 0], np.asarray(g.eff_sj_hi)[:, 0]
     assert ej_hi[3] == pytest.approx(ej_lo[1])
     assert ej_lo[3] == pytest.approx(ej_hi[5])
-    assert ej_lo[3] != pytest.approx(ej_hi[3]), "the two junctions must have distinct divisors"
+    assert ej_lo[3] != pytest.approx(ej_hi[3]), "the two sj must have distinct divisors"
     # ⛔ and the two flank TOTALS at that boundary differ by more than rounding, which is the consequence
     rho_lo, rho_hi = region_total_density(g, np.full(int(parts.chain.n_slots), 0.4))
     assert not np.isclose(rho_lo[3], rho_hi[3])
@@ -250,7 +250,7 @@ def test_ONE_BOUNDARY_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_ano
 def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
     """`region_total_density` returns ``(rho_lo, rho_hi)``: the unspliced total plus, on each side, only
     that side's flux. ⭐ At a REGION both banks are 0, so the pair collapses to one number and every
-    junction-free chain is byte-identical to the predecessor."""
+    sj-free chain is byte-identical to the predecessor."""
     parts = _gene_parts(flux=400.0)
     g, chain = parts.geometry, parts.chain
     f_g = np.full(int(chain.n_slots), 0.4)
@@ -262,7 +262,7 @@ def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
         + 0.6 / np.where(eff_r > 0, eff_r, np.inf)
     )
     lo_boundary, hi_boundary = _low_high_boundaries(chain)
-    ej = np.asarray(g.eff_junction_lo)[lo_boundary, 0]
+    ej = np.asarray(g.eff_sj_lo)[lo_boundary, 0]
     assert ej > 0
     assert rho_lo[lo_boundary] - unspliced[lo_boundary] == pytest.approx(400.0 / ej)
     assert rho_hi[lo_boundary] == pytest.approx(unspliced[lo_boundary])
@@ -272,11 +272,11 @@ def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
     np.testing.assert_allclose(rho_lo[region_slots], rho_hi[region_slots])
 
 
-def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
-    """⛔ The ``--arms base noop`` of this change: with no junction anywhere the two flank totals are
+def test_a_chain_with_NO_sj_has_ONE_frame_and_is_the_falsification_arm():
+    """⛔ The ``--arms base noop`` of this change: with no sj anywhere the two flank totals are
     identically equal, so the pair cannot be measuring the split — it is measuring the rebuild. If this
     fails, every other gate in the file is reading an artefact."""
-    parts = _gene_parts(junctions=[])
+    parts = _gene_parts(sj=[])
     rho_lo, rho_hi = region_total_density(parts.geometry, np.full(int(parts.chain.n_slots), 0.4))
     np.testing.assert_array_equal(rho_lo, rho_hi)
 
@@ -284,8 +284,8 @@ def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
 def test_the_flank_split_is_NOT_A_FACE():
     """⚠ `test_region_geometry.test_NO_FIELD_NAMES_A_FACE` bans a ``_left``/``_right`` pair, and the reason
     is that a 0-bp boundary's own measurement is one set of numbers seen identically from both sides. ⭐ These
-    fields do not reintroduce that: they are ONE measurement — the junction axis's flux — partitioned by
-    which junction attaches where, and the partition is a property of the JUNCTIONS, not of the boundary's own
+    fields do not reintroduce that: they are ONE measurement — the sj axis's flux — partitioned by
+    which sj attaches where, and the partition is a property of the SJ, not of the boundary's own
     counting. The unspliced banks stay single, which is what this asserts."""
     fields = set(RegionGeometry.__dataclass_fields__)
     for dead in ("unspliced_count_lo", "unspliced_count_hi", "eff_gdna_lo", "eff_rna_hi"):
@@ -318,7 +318,7 @@ def _sweep(parts, *, kappa=0.5, n_obs=200_000):
     return cap
 
 
-def test_the_SOLVER_publishes_the_pair_and_they_differ_only_at_the_junction_BOUNDARIES():
+def test_the_SOLVER_publishes_the_pair_and_they_differ_only_at_the_sj_BOUNDARIES():
     """The frame the whole sweep runs on. ⚠ Published as two arrays precisely because an instrument
     reconstructing a hop's ``r`` must pair them by ROLE, and one array cannot express that."""
     cap = _sweep(_gene_parts(flux=400.0))
@@ -327,9 +327,9 @@ def test_the_SOLVER_publishes_the_pair_and_they_differ_only_at_the_junction_BOUN
     lo_boundary, hi_boundary = _low_high_boundaries(_gene_parts().chain)
     differ = set(np.flatnonzero(~np.isclose(rho_lo, rho_hi)).tolist())
     assert differ == {lo_boundary, hi_boundary}, (
-        f"only the two junction-bearing BOUNDARIES may differ between flanks; got {sorted(differ)}"
+        f"only the two sj-bearing BOUNDARIES may differ between flanks; got {sorted(differ)}"
     )
-    assert rho_lo[lo_boundary] > rho_hi[lo_boundary], "the LOW flank of a junction's low end holds the flux"
+    assert rho_lo[lo_boundary] > rho_hi[lo_boundary], "the LOW flank of a sj's low end holds the flux"
     assert rho_hi[hi_boundary] > rho_lo[hi_boundary], "the HIGH flank of its high end holds it"
 
 
@@ -338,8 +338,8 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
     relay-only deletion pass the entire calibration suite — and it is exact rather than approximate.
 
     **The construction.** The fixture is a PALINDROME: signatures ``[·, exon, intron, exon, ·]``, uniform
-    region sizes and counts, and one junction ``region1 → region3`` with equal reaches. So reflecting the chain
-    left-to-right maps it onto itself, slot ``k`` ↔ slot ``n−1−k``, and the junction's genomic-LOW end maps
+    region sizes and counts, and one sj ``region1 → region3`` with equal reaches. So reflecting the chain
+    left-to-right maps it onto itself, slot ``k`` ↔ slot ``n−1−k``, and the sj's genomic-LOW end maps
     onto its genomic-HIGH end.
 
     **The claim.** The forward relay reads its destination's LOW-flank total and its source's HIGH-flank
@@ -349,7 +349,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
         fwd[k]  ==  bwd[n − 1 − k]        exactly, at every slot
 
     ⛔ Pair the forward arrays the other way round and the equality breaks at exactly the two
-    junction-bearing BOUNDARIES — the forward pass then takes the flux-free total where its mirror takes the
+    sj-bearing BOUNDARIES — the forward pass then takes the flux-free total where its mirror takes the
     flux-bearing one. ⚠ It does NOT break for a one-total-per-slot implementation, which is symmetric by
     construction; that case is caught by the placement and frame gates above. The two halves of the change
     therefore have DIFFERENT gates, which is the point of TRAPS: name-the-observable-per-site rather than a gap.
@@ -377,7 +377,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
             "flank total belongs to which role",
         )
     # ⛔ and the mirror is a real constraint here, not an identity: the two flank totals genuinely
-    # differ at the junction BOUNDARIES, so a mis-paired pass has somewhere to go wrong.
+    # differ at the sj BOUNDARIES, so a mis-paired pass has somewhere to go wrong.
     assert not np.isclose(
         np.asarray(st["rho_lo"], float)[lo_boundary], np.asarray(st["rho_hi"], float)[lo_boundary]
     )
@@ -401,7 +401,7 @@ def test_THE_BOUNDARY_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_C
         region_size_bp=[900.0, 400.0, 5000.0, 1100.0, 2500.0],
         region_pos=[40.0, 260.0, 90.0, 610.0, 55.0],
         boundary_pos=[30.0, 140.0, 75.0, 210.0],
-        junctions=[(1, 3, Strand.POS, 1e9, 1e9, 400.0)],
+        sj=[(1, 3, Strand.POS, 1e9, 1e9, 400.0)],
         gdna_fl=_delta_pmf(50),
         rna_fl=_delta_pmf(80),
     )
@@ -473,11 +473,11 @@ def test_THE_COMBINE_pairs_the_frames_the_same_way():
             assert not np.isclose(num[slot] / den[s], other)
 
 
-def test_a_junction_free_chain_SOLVES_IDENTICALLY_under_both_pairings():
-    """⛔ The solver-level falsification arm. With no junction the two frames are the same array, so the
-    role pairing cannot matter — if a junction-free chain's answer depends on it, the plumbing is reading
+def test_a_sj_free_chain_SOLVES_IDENTICALLY_under_both_pairings():
+    """⛔ The solver-level falsification arm. With no sj the two frames are the same array, so the
+    role pairing cannot matter — if a sj-free chain's answer depends on it, the plumbing is reading
     something other than the flux split."""
-    parts = _gene_parts(junctions=[])
+    parts = _gene_parts(sj=[])
     cap = _sweep(parts)
     st = cap["_uni_static"]
     np.testing.assert_array_equal(np.asarray(st["rho_lo"], float), np.asarray(st["rho_hi"], float))

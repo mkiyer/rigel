@@ -284,6 +284,23 @@ every name at once.
 stages after stage 1 renamed `donor_cut` to `boundary_left`. Nothing failed; nothing could. The census
 leftovers list is the only instrument that sees it.
 
+## 3j. STAGE 6 — and the ONE thing deliberately left behind
+
+⭐ `sj` is an allowed term **in prose as well as in identifiers**, so the already-correct phrase
+"splice junction" was protected verbatim and everything else mapped to `sj`. That satisfies the ruling
+without a per-site prose pass.
+
+⛔ **`EDGE_KIND_CONTIGUOUS` / `EDGE_KIND_JUNCTION` ARE THE ONLY BARE `junction` LEFT, AND THAT IS
+DELIBERATE.** They discriminate the rows of `edges_df`, which holds boundaries AND splice junctions —
+a fifth sense of `edge`, the GRAPH edge, and the one place the mixed table still shows through.
+`region_boundary_sj_design.md` §5 rules that this discriminator **disappears rather than being renamed**
+when the table splits in two. Renaming it now would be churn the structural stage deletes.
+
+⭐ **`ROADMAP.md` §2.5 was bundled here and it SAVED a change**: `mass_rna_junction` is an INCIDENCE, not
+a mass, and the wire schema was being rewritten anyway — so `mass`→`count` landed with the vocabulary as
+`count_rna_sj` rather than touching the field twice. Both halves are provably numeric no-ops, and the
+bit-identity gate covers them together.
+
 ## 4. THE METHOD, and the two rules it follows
 
 1. **Identifier-by-identifier, word-boundary-anchored, longest-first** — `sj_acceptor_cut_` must not be

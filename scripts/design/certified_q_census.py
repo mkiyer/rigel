@@ -18,7 +18,7 @@ probability::
 ⭐ The retained term's coefficient is the RAW COUNT and is **frame-free** — any opportunity ratio between
 the two banks' divisors multiplies ``E[S]``, so in log space it is an additive constant and cannot reach
 the coefficient of ``log(1−f_g)``. TRAPS: two-divisors-opposite-sign's opposite-sign trap is structurally absent here: neither
-``eff_rna`` nor ``eff_junction`` appears in the retained term at all. **That half of the derivation is
+``eff_rna`` nor ``eff_sj`` appears in the retained term at all. **That half of the derivation is
 sound and `tests/calibration/test_certified_rna_licence.py` gates it.**
 
 ⛔⛔ **WHAT IS NOT SOUND IS DROPPING THE SECOND TERM.** Keeping only the first makes the claim one-sided —

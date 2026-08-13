@@ -211,7 +211,7 @@ def build(panel: str, cond: str) -> dict:
             )
             parts_d = {
                 k: sp_drain(
-                    parts[k], ch, region_types=lift["region_types"], junctions=lift["junctions"]
+                    parts[k], ch, region_types=lift["region_types"], sj=lift["sj"]
                 )
                 for k, ch in zip(ORIGINS, lifted)
             }

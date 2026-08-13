@@ -5,7 +5,7 @@
 unconditional anchor and the RNA pool describe **one population** and any gap between them is bias.
 §2 measured that gap at **+11.6 % mean / +71.1 % sd** with the scanner's histogram as the anchor; TRAPS: a-purity-filter-is-a-length-filter
 built the accumulator's own histogram and measured **+7.7 % / +32.0 %**, isolating the residual as the
-junction-opportunity tilt (TRAPS: divide-by-a-probability's target). This script says which of those the *shipped* code is on.
+sj-opportunity tilt (TRAPS: divide-by-a-probability's target). This script says which of those the *shipped* code is on.
 
 ⚠ It reads the anchor **through ``build_fl_models``**, not off the payload directly — the question is
 what the tool is wired to use, not what is available to it.
@@ -101,7 +101,7 @@ def _pct(actual: float, reference: float) -> float:
     return 100.0 * (actual - reference) / reference if reference else float("nan")
 
 
-def _drain(cache, index, region_types, junctions, *, seed: int):
+def _drain(cache, index, region_types, sj, *, seed: int):
     """The drained payload for one cached scan — production's own route, via the pipeline's helper.
 
     ⭐ Calls `pipeline._drain_side_buffer` rather than repeating its three steps, so this measurement
@@ -120,14 +120,14 @@ def measure(
     ⚠ Takes the PAYLOAD, not the cache, so the same measurement runs on pass one's tally and on the
     drained one — which is what makes the P4 panel a before/after with one thing varied.
 
-    ⭐ ``crossing`` is the junction-opportunity de-tilt, and passing it is what makes the RNA panel
+    ⭐ ``crossing`` is the sj-opportunity de-tilt, and passing it is what makes the RNA panel
     report the pool the tool FITS FROM rather than the raw histogram. ``None`` reports the raw pool,
     which is the before-C3 arm.
     """
     from rigel.calibration.fl import build_fl_models, rna_fl_mass
-    from rigel.calibration.junction_opportunity import detilt_pool
+    from rigel.calibration.sj_opportunity import detilt_pool
 
-    fl = build_fl_models(payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp)
+    fl = build_fl_models(payload, sj_opportunity=crossing, gdna_opportunity=gdna_opp)
     anchor, rna = np.asarray(fl.global_counts), rna_fl_mass(payload)
     if crossing is not None:
         rna = detilt_pool(rna, crossing)
@@ -250,7 +250,7 @@ def main() -> int:
     index = TranscriptIndex.load(str(args.index))
     crossing = None
     if not args.raw_pool:
-        from rigel.calibration.junction_opportunity import crossing_probability_from_index
+        from rigel.calibration.sj_opportunity import crossing_probability_from_index
 
         # ⚠ Built once, off the ANNOTATION — it does not depend on the condition or on the drain, so
         # the same divisor scores every arm and cannot itself be the thing that moved.
@@ -263,15 +263,15 @@ def main() -> int:
         # ⚠ `--raw-pool` drops BOTH divisors, so it is the before arm for the gDNA model as well as the RNA
         # one — and with both dropped the gDNA pool falls back to the CONTAINED pair, not the raw four.
         gdna_opp = gdna_opportunity_from_index(index, 4096)
-    region_types = junctions = None
+    region_types = sj = None
     if args.drain:
         from rigel.calibration.splice_graph import (
-            build_junction_edge_arrays,
+            build_sj_arrays,
             build_region_partition_arrays,
         )
 
         _c, _o, region_types = build_region_partition_arrays(index)
-        junctions = build_junction_edge_arrays(index)
+        sj = build_sj_arrays(index)
 
     conditions = sorted(p for p in args.pilot.iterdir() if p.is_dir())
     rows = []
@@ -291,7 +291,7 @@ def main() -> int:
         if args.drain:
             row["drained"] = measure(
                 cond.name,
-                _drain(cache, index, region_types, junctions, seed=args.seed),
+                _drain(cache, index, region_types, sj, seed=args.seed),
                 truth,
                 crossing,
                 gdna_opp,
@@ -360,7 +360,7 @@ def main() -> int:
         print("      identity is deposited + deferred + dropped_* == offered. ⚠ Between S1 and S3 the")
         print("      tally is deliberately THINNER — do NOT read the anchor's accuracy as a regression.")
         print("   ⚠ The deferred population is the LONG one: a longer gap admits more hypotheses. So the")
-        print("      surviving anchor is biased SHORT and every junction-opportunity number in the docs")
+        print("      surviving anchor is biased SHORT and every sj-opportunity number in the docs")
         print("      must be re-measured AFTER the drain, not before.")
         print("   ⚠ `TRAPS: variance-fitted-on-the-belief resid` is the mass still above the true ceiling. Measure it; do NOT close it with")
         print("      a constant.")
