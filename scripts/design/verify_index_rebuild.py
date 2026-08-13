@@ -6,7 +6,7 @@
 reports — and **nothing else**. So a correct rebuild has an exactly predictable shape:
 
 * `regions.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
-  used the RIGHT SOURCE: a different FASTA or GTF moves the cuts, and regions would differ immediately.
+  used the RIGHT SOURCE: a different FASTA or GTF moves the region_bounds, and regions would differ immediately.
 * `edges.feather` differing in the four `reach_*` columns of the **contiguous** rows and nowhere else.
   ⚠ Junction reach is deliberately unchanged — a junction boundary is only used by a molecule that spliced
   across it, so what remains either side is exonic, and `_junction_edges` stays on the exonic reach.

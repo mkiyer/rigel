@@ -88,17 +88,17 @@ STRAND_NAME = {
 #: Where the concentration curve is sampled. ⚠ Not thresholds — nothing branches on these. They are
 #: read points on a cumulative curve, chosen to span three orders of magnitude so the SHAPE is
 #: visible rather than a single number that could be read either way.
-CUTS = (10, 100, 1_000, 10_000)
+REGION_BOUNDS = (10, 100, 1_000, 10_000)
 
 
 def concentration(err: np.ndarray) -> list[tuple[int, float, float]]:
-    """``(k, share of Σ|err| in the top k objects, share of objects that is)`` at each cut."""
+    """``(k, share of Σ|err| in the top k objects, share of objects that is)`` at each region_bound."""
     order = np.argsort(-np.abs(err))
     ranked = np.abs(err)[order]
     total = ranked.sum()
     n = ranked.shape[0]
     out = []
-    for k in CUTS:
+    for k in REGION_BOUNDS:
         if k > n:
             break
         out.append((k, float(ranked[:k].sum() / total) if total > 0 else 0.0, k / n))

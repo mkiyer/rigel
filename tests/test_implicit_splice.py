@@ -206,7 +206,7 @@ class TestImplicitSpliceDiscriminant:
         Block 1 runs contiguously from 149 to 400, straight across ``t_three``'s intron (200,299) — the read
         has 99 sequenced bases where ``t_three`` has no exon, so the molecule cannot be ``t_three``. Without
         the compatibility predicate the enumeration would take ``t_three``'s *other* intron (400,499) as a
-        gap hypothesis, cut 99 bp out of ``L`` **on the authority of a transcript the read disproves**, and
+        gap hypothesis, region_bound 99 bp out of ``L`` **on the authority of a transcript the read disproves**, and
         report the fragment as an implicit splice.
 
         ⭐ What is left is the honest answer: no annotated transcript explains this fragment as spliced, so
@@ -326,7 +326,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
     """
 
     OBSERVED = (62200, 62400)  #: sequenced as CIGAR-N; the detector must NOT re-derive it
-    IMPLIED = (62600, 62800)  #: never sequenced; lies inside the mate gap and must be cut from L
+    IMPLIED = (62600, 62800)  #: never sequenced; lies inside the mate gap and must be region_bound from L
 
     #: block1 · block2 · block3, with [62200,62400) crossed by an observed CIGAR-N splice and
     #: [62500,62900) an unsequenced mate gap.

@@ -158,7 +158,7 @@ def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
     ⭐ Binned at ``L``, the molecule length — not at the covered length. Binning at covered length
     collapses the gDNA histogram to a spike at twice the read length, so every long gDNA fragment scores
     as RNA. The accumulator's ``L`` already includes the mate gap and
-    excludes cut introns, so it is the molecule length for both components under one rule.
+    excludes region_bound introns, so it is the molecule length for both components under one rule.
     """
     pool_lengths = payload.pool_lengths
     if pool_lengths is None:

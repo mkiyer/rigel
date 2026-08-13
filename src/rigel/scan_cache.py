@@ -253,18 +253,18 @@ def deposit_digest() -> str:
     """
     from rigel._bam_impl import Accumulator  # noqa: PLC0415
 
-    #: ⭐ Cut indices, not coordinates: the junction CSR is keyed by DONOR CUT. 260 is cut 3 and 1000 is
-    #: cut 4; 1120 is cut 6 and 2000 is cut 7.
-    cuts = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
+    #: ⭐ RegionBound indices, not coordinates: the junction CSR is keyed by the LEFT BOUNDARY. 260 is region_bound 3 and 1000 is
+    #: region_bound 4; 1120 is region_bound 6 and 2000 is region_bound 7.
+    region_bounds = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
     accumulator = Accumulator(
-        cuts=cuts,
+        region_bounds=region_bounds,
         region_types=np.array([0, 2, 2, 1, 2, 2, 1, 2], dtype=np.uint8),
         max_length=1000,
         ref=0,
     )
     accumulator.set_junctions(
-        np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32),  # per-donor-cut CSR offsets
-        np.array([4, 7], dtype=np.int32),  # acceptor cut of each junction
+        np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32),  # per-donor-region_bound CSR offsets
+        np.array([4, 7], dtype=np.int32),  # acceptor region_bound of each junction
         np.array([1, 1], dtype=np.int8),  # STRAND_POS
     )
     for start, end, introns in (

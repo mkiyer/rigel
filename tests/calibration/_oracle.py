@@ -15,7 +15,7 @@ some comparison is approximate, and none is.
 
 This replaces the retired ``oracle_region_masses`` (in the deleted ``_metrics``/``oracle_*`` scripts), which
 deposited WHOLE fragments by SPAN with no intron-cutting — an INCOMPATIBLE basis with the accumulator the
-calibration actually consumes (per-base coverage, introns cut). That mismatch (e.g. it reported 0 RNA in
+calibration actually consumes (per-base coverage, introns region_bound). That mismatch (e.g. it reported 0 RNA in
 high-expression exons where the accumulator has the real unspliced exon-body mRNA) confounded earlier
 "calibration error" conclusions.
 
@@ -155,7 +155,7 @@ def check_walk_alignment(walk: dict, stats) -> None:
 
     ``stats.n_read_names`` is incremented once per qname group inside the scanner's own worker, so it
     IS the number of ``frag_id``\\ s pass 1 issued; ``stats.total`` is every record it read. A walk that
-    matches both has visited the same records in the same order and cut them into the same number of
+    matches both has visited the same records in the same order and region_bound them into the same number of
     groups, which is the whole of what "``frag_origin[frag_id]`` is that fragment's origin" requires.
 
     ⛔ A mismatch is not a small error: every unit's origin label shifts, ``Fo`` stays a plausible

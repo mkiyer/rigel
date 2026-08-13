@@ -41,7 +41,7 @@ and it is not built; until it is, the biased value is the specified value and is
 ⛔ **These tests are deterministic, not simulated.** Every mass below is the accumulator's deposition law
 evaluated exactly through the SPECIFICATION, so a failure is a defect and never noise. That is a
 deliberate departure from the plan's original end-to-end phrasing of T1/T2: rebuilding an index with
-extra cuts also moves the transcript set, the reach and every effective length, so it would not isolate
+extra region_bounds also moves the transcript set, the reach and every effective length, so it would not isolate
 the partition. The end-to-end conservation check against ``region_start_count`` is T3, and it lives in
 `scripts/design/prior_units_check.py`.
 """
@@ -86,11 +86,11 @@ def _enumerate(region_len, w):
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
     from native._accumulator_reference import Accumulator, Partition
 
-    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
-    partition = Partition.from_cuts([cuts.tolist()], region_types=[[0] * (len(cuts) - 1)])
+    region_bounds = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
+    partition = Partition.from_region_bounds([region_bounds.tolist()], region_types=[[0] * (len(region_bounds) - 1)])
     acc = Accumulator(partition, max_fragment_length=10**6)
     n = 0
-    for start in range(0, int(cuts[-1]) - int(w) + 1):
+    for start in range(0, int(region_bounds[-1]) - int(w) + 1):
         acc.deposit(0, start, start + int(w))
         n += 1
     t = acc.tally
@@ -126,17 +126,17 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
         Partition,
     )
 
-    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
-    n_boundaries = max(len(cuts) - 2, 0)
+    region_bounds = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
+    n_boundaries = max(len(region_bounds) - 2, 0)
     mass = np.zeros(n_boundaries, dtype=np.float64)
     count = np.zeros(n_boundaries, dtype=np.float64)
     for rho, pmf in ((rho_g, pmf_g), (rho_r, pmf_r)):
         w = int(np.argmax(pmf))
-        partition = Partition.from_cuts(
-            [cuts.tolist()], region_types=[[0] * (len(cuts) - 1)]
+        partition = Partition.from_region_bounds(
+            [region_bounds.tolist()], region_types=[[0] * (len(region_bounds) - 1)]
         )
         acc = Accumulator(partition, max_fragment_length=max(1000, w + 1))
-        for start in range(0, int(cuts[-1]) - w + 1):
+        for start in range(0, int(region_bounds[-1]) - w + 1):
             acc.deposit(0, start, start + w)
         t = acc.tally
         mass += rho * np.asarray(t.boundary_unspliced_mass, np.float64)

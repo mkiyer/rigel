@@ -26,10 +26,10 @@ from native._accumulator_reference import (
 )
 
 
-#: Two references: chr1 with 4 cuts (3 regions, 2 boundaries) and chr2 with 3 (2 regions, 1 boundary). A third
-#: reference has NO cuts, which is legal and contributes nothing — the case where per-reference offset
+#: Two references: chr1 with 4 region_bounds (3 regions, 2 boundaries) and chr2 with 3 (2 regions, 1 boundary). A third
+#: reference has NO region_bounds, which is legal and contributes nothing — the case where per-reference offset
 #: arithmetic goes wrong if it is written as a plain subtraction.
-CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
+REGION_BOUNDS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
 MAX_LENGTH = 12
 
 #: ⭐ The deferred bank in the fixture is produced by the SPECIFICATION rather than hand-written, so the
@@ -39,12 +39,12 @@ MAX_LENGTH = 12
 #:
 #: ⚠ Four fragments, because ``qc.deferred_undetermined_gap`` below is 4 and the payload refuses a bank
 #: whose record count disagrees with the counter that describes it.
-_DEFERRED_CUTS = [0, 100, 200, 300, 400, 500, 600]
+_DEFERRED_REGION_BOUNDS = [0, 100, 200, 300, 400, 500, 600]
 
 
 def _deferred_bank(n_fragments: int = 4) -> dict[str, np.ndarray]:
     """``n_fragments`` deferred records, flattened exactly as ``Tally.deferred_arrays()`` specifies."""
-    partition = Partition.from_cuts([_DEFERRED_CUTS], region_types=[[0, 2, 1, 2, 1, 0]])
+    partition = Partition.from_region_bounds([_DEFERRED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 1, 0]])
     acc = Accumulator(partition, max_fragment_length=1000)
     for i in range(n_fragments):
         outcome = acc.deposit(
@@ -79,13 +79,13 @@ def _deposited_lengths(total: int) -> np.ndarray:
 
 def _calibration_dict(**overrides) -> dict:
     """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
-    ref_cut_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
-    ref_region_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
-    ref_boundary_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
-    for f, cuts in enumerate(CUTS_PER_REF):
-        ref_cut_offsets[f + 1] = ref_cut_offsets[f] + len(cuts)
-        ref_region_offsets[f + 1] = ref_region_offsets[f] + max(len(cuts) - 1, 0)
-        ref_boundary_offsets[f + 1] = ref_boundary_offsets[f] + max(len(cuts) - 2, 0)
+    ref_region_bound_offsets = np.zeros(len(REGION_BOUNDS_PER_REF) + 1, np.int64)
+    ref_region_offsets = np.zeros(len(REGION_BOUNDS_PER_REF) + 1, np.int64)
+    ref_boundary_offsets = np.zeros(len(REGION_BOUNDS_PER_REF) + 1, np.int64)
+    for f, region_bounds in enumerate(REGION_BOUNDS_PER_REF):
+        ref_region_bound_offsets[f + 1] = ref_region_bound_offsets[f] + len(region_bounds)
+        ref_region_offsets[f + 1] = ref_region_offsets[f] + max(len(region_bounds) - 1, 0)
+        ref_boundary_offsets[f + 1] = ref_boundary_offsets[f] + max(len(region_bounds) - 2, 0)
 
     n_regions, n_boundaries, n_sj = (
         int(ref_region_offsets[-1]),
@@ -95,8 +95,8 @@ def _calibration_dict(**overrides) -> dict:
     ref_sj_offsets = np.asarray([0, 2, 3, 3], np.int64)
 
     cal = {
-        "cut_positions": np.asarray([c for cuts in CUTS_PER_REF for c in cuts], np.int64),
-        "ref_cut_offsets": ref_cut_offsets,
+        "region_bounds": np.asarray([c for region_bounds in REGION_BOUNDS_PER_REF for c in region_bounds], np.int64),
+        "ref_region_bound_offsets": ref_region_bound_offsets,
         "ref_region_offsets": ref_region_offsets,
         "ref_boundary_offsets": ref_boundary_offsets,
         "ref_sj_offsets": ref_sj_offsets,
@@ -133,7 +133,7 @@ def _calibration_dict(**overrides) -> dict:
         "n_strand_columns": N_STRAND_COLUMNS,
         "n_fragment_pools": 5,
         "max_length": MAX_LENGTH,
-        "n_refs": len(CUTS_PER_REF),
+        "n_refs": len(REGION_BOUNDS_PER_REF),
     }
     cal.update(overrides)
     return {"calibration": cal}
@@ -269,7 +269,7 @@ def test_a_MISSING_qc_denominator_is_REJECTED():
         _payload(qc=qc)
 
 
-def test_a_reference_with_no_cuts_contributes_nothing_to_any_axis():
+def test_a_reference_with_no_region_bounds_contributes_nothing_to_any_axis():
     """The third reference is empty. Per-reference offsets written as a plain subtraction go negative."""
     payload = _payload()
     assert payload.ref_region_offsets[-1] == payload.ref_region_offsets[-2]
@@ -303,7 +303,7 @@ def test_the_qc_fields_are_exactly_the_specifications_qc_keys():
 def test_the_gap_census_fields_are_exactly_the_specifications_keys():
     """⛔ Including the ABSENCE of ``gap_resolved_unspliced``.
 
-    That class existed and no fragment could enter it: a spliced hypothesis cuts bases the unspliced one
+    That class existed and no fragment could enter it: a spliced hypothesis region_bounds bases the unspliced one
     keeps, so the unspliced path is always the longest and can never be the sole survivor. Reading the key
     set off the specification is what stops it reappearing on one side only.
     """
@@ -423,12 +423,12 @@ def test_an_array_that_does_not_divide_by_its_axis_is_rejected():
         _payload(region_contained_count=np.arange(7, dtype=np.uint32))
 
 
-def test_the_offsets_must_agree_with_the_cut_axis_they_describe():
-    """A reference contributing ``c`` cuts owns ``c-1`` regions and ``c-2`` boundaries. Re-derived here rather
+def test_the_offsets_must_agree_with_the_region_bound_axis_they_describe():
+    """A reference contributing ``c`` region_bounds owns ``c-1`` regions and ``c-2`` boundaries. Re-derived here rather
     than trusted, because an offset array that merely has the right LENGTH can still be inconsistent."""
     bad = np.asarray(
         [0, 3, 5, 5], np.int64
-    )  # chr1 claims 3 regions; 4 cuts means 3 — chr2 claims 2, ok
+    )  # chr1 claims 3 regions; 4 region_bounds means 3 — chr2 claims 2, ok
     bad[1] = 99
     with pytest.raises(ValueError, match="ref_region_offsets"):
         _payload(ref_region_offsets=bad)

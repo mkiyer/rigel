@@ -42,11 +42,11 @@ GENOME = 8_000
 #: **tQ/tR** imply the SAME gap intron on opposite strands: the D-5 case, where the two paths are
 #: genuinely one path but their strands disagree.
 GTF = (
-    # tP (+): introns (1200,1400) observed, (1600,2000) in the gap  -> cuts 400
+    # tP (+): introns (1200,1400) observed, (1600,2000) in the gap  -> region_bounds 400
     'chr1\ttest\texon\t1001\t1200\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
     'chr1\ttest\texon\t1401\t1600\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
     'chr1\ttest\texon\t2001\t2200\t.\t+\t.\tgene_id "gP"; transcript_id "tP";\n'
-    # tM (-): same observed junction, but its gap intron is (1700,1900) -> cuts 200
+    # tM (-): same observed junction, but its gap intron is (1700,1900) -> region_bounds 200
     'chr1\ttest\texon\t1001\t1200\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
     'chr1\ttest\texon\t1401\t1700\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
     'chr1\ttest\texon\t1901\t2200\t.\t-\t.\tgene_id "gM"; transcript_id "tM";\n'
@@ -64,8 +64,8 @@ GTF = (
 #:   pinned_m  the same reads with a - motif           [1100,2150)   ... and a - motif to tM?
 #:   open      100M @1450            +  100M @2050     [1450,2150)   no motif -> BOTH strands offered
 #:   same_path 100M @3050            +  100M @3650     [3050,3750)   D-5: one path, two strands
-L_PINNED_P = (2150 - 1100) - 200 - 400  # 450 — tP's wide gap intron was cut
-L_PINNED_M = (2150 - 1100) - 200 - 200  # 650 — tM's narrow one was cut
+L_PINNED_P = (2150 - 1100) - 200 - 400  # 450 — tP's wide gap intron was region_bound
+L_PINNED_M = (2150 - 1100) - 200 - 200  # 650 — tM's narrow one was region_bound
 
 
 @pytest.fixture(scope="module")
@@ -173,11 +173,11 @@ def test_an_OBSERVED_junction_PINS_the_gap_hypotheses_to_its_own_strand(scanned)
     """
     lengths = _lengths(scanned)
     assert lengths.get(L_PINNED_P) == 1, (
-        f"expected a fragment at L={L_PINNED_P} (tP's 400 bp gap intron cut, pinned by the + motif); "
+        f"expected a fragment at L={L_PINNED_P} (tP's 400 bp gap intron region_bound, pinned by the + motif); "
         f"deposited lengths are {lengths}"
     )
     assert lengths.get(L_PINNED_M) == 1, (
-        f"expected a fragment at L={L_PINNED_M} (tM's 200 bp gap intron cut, pinned by the - motif); "
+        f"expected a fragment at L={L_PINNED_M} (tM's 200 bp gap intron region_bound, pinned by the - motif); "
         f"deposited lengths are {lengths}"
     )
     # Both pinned fragments RESOLVED; only `open` and `same_path` are held.
@@ -275,7 +275,7 @@ def test_the_fixture_reaches_every_branch_it_claims_to(scanned):
 #
 #   * SPLICED fragment: an observed CIGAR-N intron falls inside the shadow's single exon, so the shadow
 #     cannot explain the read and drops out of `t_inds`. ∅ is then correctly absent — measured in
-#     `test_gap_introns_are_cut.py`, where the certified-RNA `mixed` fragment has exactly ONE hypothesis.
+#     `test_gap_introns_are_region_bound.py`, where the certified-RNA `mixed` fragment has exactly ONE hypothesis.
 #   * UNSPLICED fragment: the shadow survives, implies nothing, and supplies ∅ — which is what
 #     §2's table requires ("no annotated junction ⇒ ∅ always").
 #

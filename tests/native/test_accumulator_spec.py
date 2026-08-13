@@ -50,23 +50,23 @@ def close(got: float, want: float, deposits: int) -> bool:
 # fixtures
 # ---------------------------------------------------------------------------
 
-#: chr1 cuts   0    100   200   201   400   900   1000
+#: chr1 region_bounds   0    100   200   201   400   900   1000
 #: regions        n0    n1    n2*   n3    n4    n5      (* n2 is 1 bp: [200,201))
-#: boundaries           1     2     3     4     5          (local cut index)
-CHR1_CUTS = [0, 100, 200, 201, 400, 900, 1000]
-CHR2_CUTS = [0, 500, 1000]
+#: boundaries           1     2     3     4     5          (local region_bound index)
+CHR1_REGION_BOUNDS = [0, 100, 200, 201, 400, 900, 1000]
+CHR2_REGION_BOUNDS = [0, 500, 1000]
 
 #: coarse region type: 0 intergenic, 1 intron, 2 exon
 CHR1_TYPES = [0, 2, 2, 1, 2, 0]
 CHR2_TYPES = [0, 2]
 
-#: an annotated intron whose endpoints are cuts 3 and 5, so it SWALLOWS the boundary at cut 4
+#: an annotated intron whose endpoints are region_bounds 3 and 5, so it SWALLOWS the boundary at region_bound 4
 JUNCTION = (0, 201, 900, Strand.POS)
 
 
 def _partition(junctions=()):
-    return Partition.from_cuts(
-        [CHR1_CUTS, CHR2_CUTS], region_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
+    return Partition.from_region_bounds(
+        [CHR1_REGION_BOUNDS, CHR2_REGION_BOUNDS], region_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
     )
 
 
@@ -75,8 +75,8 @@ def _acc(junctions=(), **kw):
 
 
 def _boundary(ref, boundary):
-    """Global contiguous-boundary id of the boundary at local cut index ``boundary``."""
-    return (0 if ref == 0 else len(CHR1_CUTS) - 2) + boundary - 1
+    """Global contiguous-boundary id of the boundary at local region_bound index ``boundary``."""
+    return (0 if ref == 0 else len(CHR1_REGION_BOUNDS) - 2) + boundary - 1
 
 
 
@@ -87,14 +87,14 @@ def _contained_quantum(ref, local, length):
     length `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels the
     opportunity identically and the channel is a DENSITY for any length distribution
     (`test_fragment_length_proof.test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_...`). ⚠ Derived from
-    the fixture's own cuts rather than written as a number, so an assertion states the RULE.
+    the fixture's own region_bounds rather than written as a number, so an assertion states the RULE.
     """
-    cuts = CHR1_CUTS if ref == 0 else CHR2_CUTS
-    return 1.0 / (cuts[local + 1] - cuts[local] - length + 1)
+    region_bounds = CHR1_REGION_BOUNDS if ref == 0 else CHR2_REGION_BOUNDS
+    return 1.0 / (region_bounds[local + 1] - region_bounds[local] - length + 1)
 
 
 def _region(ref, local):
-    return (0 if ref == 0 else len(CHR1_CUTS) - 1) + local
+    return (0 if ref == 0 else len(CHR1_REGION_BOUNDS) - 1) + local
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +298,7 @@ def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(orde
     """
     _, direction = order
     junctions = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
-    part = Partition.from_cuts([CHR1_CUTS], region_types=[CHR1_TYPES], junctions=junctions)
+    part = Partition.from_region_bounds([CHR1_REGION_BOUNDS], region_types=[CHR1_TYPES], junctions=junctions)
     assert [int(s) for s in part.sj_strand] == [int(Strand.POS), int(Strand.NEG)], (
         "POS must sort to slot 0 whichever order it was passed in"
     )
@@ -311,7 +311,7 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
     ⚠ The two introns must be separated by a real exon. Abutting introns imply a zero-length exon and are
     malformed (see ``test_ABUTTING_introns_are_MALFORMED_and_merge``), so this needs its own partition
     with room for an exon between them."""
-    part = Partition.from_cuts(
+    part = Partition.from_region_bounds(
         [[0, 100, 200, 300, 400, 500, 600]],
         region_types=[[0, 2, 1, 2, 1, 2]],
         junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
@@ -483,7 +483,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
 
 
 def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragment():
-    acc = Accumulator(Partition.from_cuts([[0, 1000]], region_types=[[0]]))
+    acc = Accumulator(Partition.from_region_bounds([[0, 1000]], region_types=[[0]]))
     assert acc.n_boundaries == 0
     acc.deposit(0, 100, 300)
     assert int(acc.tally.region_contained_count[0, 0]) == 1
@@ -586,9 +586,9 @@ def _corpus(rng, n, ref_len):
 
 
 def _uniform_accumulator(region_bp, ref_len):
-    cuts = list(range(0, ref_len + 1, region_bp))
+    region_bounds = list(range(0, ref_len + 1, region_bp))
     return Accumulator(
-        Partition.from_cuts([cuts], region_types=[[0] * (len(cuts) - 1)]), max_fragment_length=10_000
+        Partition.from_region_bounds([region_bounds], region_types=[[0] * (len(region_bounds) - 1)]), max_fragment_length=10_000
     )
 
 
@@ -762,7 +762,7 @@ SPAN_JUNCTION_NEG = (0, 400, 900, Strand.NEG)
 def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_column():
     """⚠ One array, one convention.
 
-    A spliced fragment cannot be *contained* — both endpoints of an annotated intron are cuts, so it
+    A spliced fragment cannot be *contained* — both endpoints of an annotated intron are region_bounds, so it
     always crosses its junction boundary — but its blocks routinely SPAN a region whole. Measured on real
     cfRNA, **65–69 % of all region_spanning deposits came from spliced fragments**. Indexing those by
     sense-relative-to-motif while the unspliced ones beside them use genome strand would put one array
@@ -771,7 +771,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
 
     ⭐⭐ **RE-HOMED, NOT DELETED.** This test used to ride on ``region_spanning``, which was removed —
     and removing it took away the only REGION-axis population a spliced fragment can reach, since a
-    spliced fragment can never be *contained* (both endpoints of an annotated intron are cuts). The
+    spliced fragment can never be *contained* (both endpoints of an annotated intron are region_bounds). The
     claim is about the CONVENTION, not about that bank, so it now rides on the two banks a spliced
     fragment does reach: ``boundary_spliced_count`` beside ``boundary_unspliced_count`` at the SAME boundary, and
     ``sj_count``. ⛔ Deleting it with its old vehicle would have retired the only gate on a rule this
@@ -845,7 +845,7 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 # implied set fixes `L`, both quanta, the pool bin, the segment list and therefore which boundaries are
 # crossed. There is no partial answer: it cannot deposit spliced (which junction is the unknown), and it
 # cannot deposit unspliced either, because `L` involves an intron and does not fit the length
-# distribution unless one candidate intron is cut out — the very choice in doubt. Forcing a choice is
+# distribution unless one candidate intron is region_bound out — the very choice in doubt. Forcing a choice is
 # choosing an `L` at random. So it deposits NOTHING and waits for the second pass, which has the
 # fragment length AND the strand to discriminate with.
 

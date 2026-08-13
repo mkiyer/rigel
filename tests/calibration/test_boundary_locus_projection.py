@@ -31,7 +31,7 @@ from rigel.locus import Locus, MultiLocus
 
 
 def _regions(bounds, signature=None, ref_id=None) -> RegionArrays:
-    """Regions tiling one (or more) references from the given cut positions."""
+    """Regions tiling one (or more) references from the given region_bound positions."""
     bounds = np.asarray(bounds, dtype=np.int64)
     starts, ends = bounds[:-1], bounds[1:]
     n = starts.shape[0]

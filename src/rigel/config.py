@@ -122,10 +122,10 @@ class FragmentScoringConfig:
     ----------
     overhang_log_penalty : float
         Log-penalty per base of overhang.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each overhang base cuts probability by 10×).
+        (i.e. each overhang base region_bounds probability by 10×).
     mismatch_log_penalty : float
         Log-penalty per NM mismatch.  Default ``log(0.1) ≈ −2.303``
-        (i.e. each mismatch cuts probability by 10×).
+        (i.e. each mismatch region_bounds probability by 10×).
     gdna_splice_penalties : dict or None
         Per-SpliceType gDNA penalties (int keys → float values).
     """

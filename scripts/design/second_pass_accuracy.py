@@ -22,8 +22,8 @@ two mates, and only keys whose fragments all agree on one true `L` are used — 
 unambiguous true length". ⚠ Ambiguous keys are **counted and reported**, never silently dropped: if they
 were a large share, the population being scored would not be the population being held.
 
-**What the assigned `L` is.** `L` = genomic span minus cut introns (the one definition, C0-C2). For a
-held record that is `end - start` less every observed intron (cut under every hypothesis) and every
+**What the assigned `L` is.** `L` = genomic span minus region_bound introns (the one definition, C0-C2). For a
+held record that is `end - start` less every observed intron (region_bound under every hypothesis) and every
 intron implied by the CHOSEN hypothesis.
 
     python scripts/design/second_pass_accuracy.py [--index DIR] [--pilot DIR] [--suite DIR]
@@ -142,7 +142,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
     bottleneck_reach = np.minimum(
         np.asarray(geom.reach_lo, np.float64), np.asarray(geom.reach_hi, np.float64)
     )
-    cuts = payload.cut_positions
+    region_bounds = payload.region_bounds
     n_hyp = int(deferred.hypothesis_offsets[-1])
     implied_all = intron_total(
         deferred.hypothesis_intron_offsets, deferred.hypothesis_introns, np.arange(n_hyp)
@@ -168,8 +168,8 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
         base = int(span_all[i]) - int(observed_all[i])
         kinds, lengths = [], []
         reaches: list[float] = []
-        cut_lo = int(payload.ref_cut_offsets[int(deferred.ref[i])])
-        cut_hi = int(payload.ref_cut_offsets[int(deferred.ref[i]) + 1])
+        region_bound_lo = int(payload.ref_region_bound_offsets[int(deferred.ref[i])])
+        region_bound_hi = int(payload.ref_region_bound_offsets[int(deferred.ref[i]) + 1])
         motif = int(deferred.sj_strand[i])
         for h in range(h0, h1):
             introns = [tuple(p) for p in deferred.hypothesis_introns_of(h).tolist()]
@@ -177,7 +177,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
             lengths.append(base - int(implied_all[h]))
             for a, b in introns:
                 jid = _junction_id(
-                    junctions, cuts, cut_lo, cut_hi, a, b,
+                    junctions, region_bounds, region_bound_lo, region_bound_hi, a, b,
                     motif if motif != int(Strand.NONE) else int(deferred.hypothesis_sj_strand[h]),
                 )
                 if jid >= 0:
@@ -261,7 +261,7 @@ def main() -> int:
     from rigel.second_pass import choose_hypotheses, score_held_fragments
 
     index = TranscriptIndex.load(str(args.index))
-    _cuts, _offsets, region_types = build_region_partition_arrays(index)
+    _region_bounds, _offsets, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)

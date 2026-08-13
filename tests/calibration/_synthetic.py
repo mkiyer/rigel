@@ -27,7 +27,7 @@ from rigel.scan_payload import (
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     """A 1-reference, 3-region payload + aligned :class:`RegionArrays`, with every bank distinct.
 
-    chr1 is cut at 0/100/200/300, so it owns **3 regions and 2 contiguous boundaries** — the axes are off by one
+    chr1 is region_bound at 0/100/200/300, so it owns **3 regions and 2 contiguous boundaries** — the axes are off by one
     per reference, and a fixture that used the same length for both would hide an axis mix-up. One
     junction boundary exists so the third axis is non-trivial.
 
@@ -71,8 +71,8 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         return np.asarray(counts, np.float64).sum(axis=1) / per_crossing
 
     payload = AccumulatorPayload(
-        cut_positions=np.array([0, 100, 200, 300], dtype=np.int64),
-        ref_cut_offsets=np.array([0, 4], dtype=np.int64),
+        region_bounds=np.array([0, 100, 200, 300], dtype=np.int64),
+        ref_region_bound_offsets=np.array([0, 4], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
         ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),

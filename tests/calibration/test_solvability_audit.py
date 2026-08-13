@@ -271,7 +271,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
     ``1/√τ`` nats against a solver that represents only ``λ ∈ [−L, +L]``. The strand arm carries
     ``I(f_g) ∝ (2κ−1)²`` (`EQUATIONS.md` §5.2), **exactly zero at κ = ½** — but κ is FITTED, so on a
     genuinely unstranded library it misses ½ by a few 1e-4 and τ lands at ~1e-7 rather than at 0. The
-    ``τ > 1e-9`` cut then scores that object as SOLVABLE while its own statement has sd ~10³ nats.
+    ``τ > 1e-9`` region_bound then scores that object as SOLVABLE while its own statement has sd ~10³ nats.
 
     ⛔ **AND A BETTER THRESHOLD IS NOT THE FIX — that was tried and REFUTED.** A resolving-power floor
     at ``1/(2L)²`` was derived and implemented, and its own insensitivity gate killed it: τ is

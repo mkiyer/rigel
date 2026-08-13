@@ -314,7 +314,7 @@ struct BamScanStats {
     std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
 
     // Censused, then never offered to `deposit()`: the deposit adapter could not express the
-    // fragment as ONE molecule on ONE cut axis (chiefly blocks on more than one reference), or no
+    // fragment as ONE molecule on ONE region_bound axis (chiefly blocks on more than one reference), or no
     // accumulator was installed. ⭐ It exists to close the books — without it those `return`s are a
     // silent loss, which is the pattern this accumulator was rewritten to delete. With it:
     //
@@ -414,7 +414,7 @@ struct WorkerState {
     //
     // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
     // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
-    // would be cut out of this reference's path. `fragment_genomic_spans` filtered by ref explicitly; the
+    // would be region_bound out of this reference's path. `fragment_genomic_spans` filtered by ref explicitly; the
     // filter has to survive its deletion. Multi-reference fragments DO arrive here: the intergenic call
     // site is not chimera-gated, and `detect_chimera` returns CHIMERA_NONE when the blocks carry empty
     // transcript sets.
@@ -1132,12 +1132,12 @@ public:
     //
     // ⚠ These are MEMBERS because the per-worker sets are built from them inside scan(). Anything
     // installed after that point is invisible to the workers, which is a silent half-empty tally.
-    std::vector<int64_t> cut_positions_;
-    std::vector<int64_t> ref_cut_offsets_;
+    std::vector<int64_t> region_bounds_;
+    std::vector<int64_t> ref_region_bound_offsets_;
     std::vector<uint8_t> region_types_;      // coarse region type, ref-major, one per region
     int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
-    std::vector<int64_t> sj_offsets_;       // n_cuts + 1, CSR over the flat cut axis
-    std::vector<int64_t> sj_boundary_right_;  // flat cut index of each junction's high end
+    std::vector<int64_t> sj_offsets_;       // n_region_bounds + 1, CSR over the flat region_bound axis
+    std::vector<int64_t> sj_boundary_right_;  // flat region_bound index of each junction's high end
     std::vector<int8_t>  sj_strand_;        // each junction's ANNOTATED strand
     bool                 junctions_set_ = false;
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
@@ -1162,16 +1162,16 @@ public:
     // refuses to run twice.
     //
     // Inputs:
-    //   cut_positions:   flat int64[n_cuts_total], the concatenated sorted cut positions of every
-    //                    reference. A reference contributing c cuts owns c-1 regions and c-2 boundaries.
-    //   ref_cut_offsets: int64[n_refs + 1] offsets into cut_positions. A reference with
+    //   region_bounds:   flat int64[n_region_bounds_total], the concatenated sorted region_bound positions of every
+    //                    reference. A reference contributing c region_bounds owns c-1 regions and c-2 boundaries.
+    //   ref_region_bound_offsets: int64[n_refs + 1] offsets into region_bounds. A reference with
     //                    offsets[f+1] == offsets[f] has no partition and accepts no deposits.
     //   n_refs:          number of references (must match ctx_->ref_to_id_).
     //   region_types:      uint8[n_regions_total], the coarse region type, ref-major; it types the length pools.
     //   max_length:      the fragment-length limit applied to L, and the pool-histogram width.
     void set_regions(
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> region_bounds,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_region_bound_offsets,
         int32_t n_refs,
         nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
         int max_length)
@@ -1180,10 +1180,10 @@ public:
             throw std::invalid_argument(
                 "set_regions: n_refs must be non-negative");
         }
-        const std::size_t n_off = ref_cut_offsets.shape(0);
+        const std::size_t n_off = ref_region_bound_offsets.shape(0);
         if (n_off != static_cast<std::size_t>(n_refs) + 1) {
             throw std::invalid_argument(
-                "set_regions: ref_cut_offsets must have length n_refs + 1");
+                "set_regions: ref_region_bound_offsets must have length n_refs + 1");
         }
         if (acc_set_) {
             throw std::runtime_error(
@@ -1199,12 +1199,12 @@ public:
                 ". It is the fragment-length limit applied to L as well as the pool-histogram width, so "
                 "at 0 every real fragment is dropped as too long and the tally is silently empty.");
         }
-        cut_positions_.assign(
-            cut_positions.data(),
-            cut_positions.data() + cut_positions.shape(0));
-        ref_cut_offsets_.assign(
-            ref_cut_offsets.data(),
-            ref_cut_offsets.data() + n_off);
+        region_bounds_.assign(
+            region_bounds.data(),
+            region_bounds.data() + region_bounds.shape(0));
+        ref_region_bound_offsets_.assign(
+            ref_region_bound_offsets.data(),
+            ref_region_bound_offsets.data() + n_off);
         region_types_.assign(
             region_types.data(),
             region_types.data() + region_types.shape(0));
@@ -1217,7 +1217,7 @@ public:
     // ----------------------------------------------------------------
     //
     // A SECOND method rather than two more arguments to set_regions, because that one throws if called
-    // twice. Takes the flat CSR `build_junction_edge_arrays` emits, keyed by the flat cut index;
+    // twice. Takes the flat CSR `build_junction_edge_arrays` emits, keyed by the flat region_bound index;
     // AccumulatorSet slices it per reference.
     //
     // ⚠ Required even when there are none: pass empty arrays to say "this annotation has no junctions".
@@ -1230,7 +1230,7 @@ public:
     {
         if (!acc_set_) {
             throw std::runtime_error(
-                "set_junctions: call set_regions first — the junction CSR is keyed by cut index, so "
+                "set_junctions: call set_regions first — the junction CSR is keyed by region_bound index, so "
                 "there is nothing to key it against until the partition is installed");
         }
         if (boundary_right.shape(0) != sj_strand.shape(0)) {
@@ -1249,10 +1249,10 @@ public:
     // Build a per-worker set over the same partition, locally writable so workers never contend.
     std::unique_ptr<rigel::accumulator::AccumulatorSet> make_accumulator_set() const {
         auto set = std::make_unique<rigel::accumulator::AccumulatorSet>(
-            cut_positions_.data(),
-            cut_positions_.size(),
-            ref_cut_offsets_.data(),
-            ref_cut_offsets_.empty() ? 0 : ref_cut_offsets_.size() - 1,
+            region_bounds_.data(),
+            region_bounds_.size(),
+            ref_region_bound_offsets_.data(),
+            ref_region_bound_offsets_.empty() ? 0 : ref_region_bound_offsets_.size() - 1,
             region_types_.empty() ? nullptr : region_types_.data(),
             region_types_.size(),
             max_length_);
@@ -1267,7 +1267,7 @@ public:
                           sj_boundary_right_.data(),
                           sj_strand_.data(),
                           sj_boundary_right_.size(),
-                          ref_cut_offsets_.data());
+                          ref_region_bound_offsets_.data());
     }
 
     // ----------------------------------------------------------------
@@ -1565,7 +1565,7 @@ private:
         //
         // Turn one assembled fragment into the accumulator's `FragmentPath` and deposit it. The
         // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
-        // — its extent on one reference, the introns cut out of it, and the two independent strands.
+        // — its extent on one reference, the introns region_bound out of it, and the two independent strands.
         //
         // ⭐ THE TWO STRANDS ARE INDEPENDENT, and collapsing them is the bug this rewrite deletes.
         //   align_strand  where the read ALIGNED. Every read has one. It selects the array column.
@@ -1666,9 +1666,9 @@ private:
                 //
                 // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
                 // molecule (design §3.3), and an `OfferedFragment` cannot express it — it carries one
-                // extent on one cut axis. The shipped code had no such check on the intergenic path: it
+                // extent on one region_bound axis. The shipped code had no such check on the intergenic path: it
                 // computed a span per reference and deposited ALL of them onto `exons.front().ref_id`, so
-                // chr7 coordinates landed on chr1's cut axis. `ws.span_ref` recorded which reference each
+                // chr7 coordinates landed on chr1's region_bound axis. `ws.span_ref` recorded which reference each
                 // span belonged to and **nothing ever read it**, which is how that survived.
                 //
                 // ⚠ Deliberately narrow: this tests multi-reference, NOT `cr.chimera_type`. That field is
@@ -2213,8 +2213,8 @@ private:
 
             nb::dict cal;
             // Echo the partition back, so a consumer can locate every object without reloading the index.
-            cal["cut_positions"]   = vec_to_ndarray(std::vector<int64_t>(cut_positions_));
-            cal["ref_cut_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_cut_offsets_));
+            cal["region_bounds"]   = vec_to_ndarray(std::vector<int64_t>(region_bounds_));
+            cal["ref_region_bound_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_region_bound_offsets_));
             cal["ref_region_offsets"] = vec_to_ndarray(std::move(ref_region_offsets));
             cal["ref_boundary_offsets"] = vec_to_ndarray(std::move(ref_boundary_offsets));
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
@@ -2853,23 +2853,23 @@ NB_MODULE(_bam_impl, m) {
         nb::class_<Accumulator>(m, "Accumulator")
             .def("__init__",
                  [](Accumulator* self,
-                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cuts,
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> region_bounds,
                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
                     int max_length,
                     int32_t ref) {
-                     std::vector<int64_t> c(cuts.data(), cuts.data() + cuts.shape(0));
+                     std::vector<int64_t> c(region_bounds.data(), region_bounds.data() + region_bounds.shape(0));
                      std::vector<uint8_t> t(region_types.data(),
                                             region_types.data() + region_types.shape(0));
                      new (self) Accumulator(std::move(c), std::move(t), max_length, ref);
                  },
-                 nb::arg("cuts"),
+                 nb::arg("region_bounds"),
                  nb::arg("region_types"),
                  nb::arg("max_length"),
                  nb::arg("ref"),
-                 "One reference's sorted cut positions, one coarse type per region, the\n"
+                 "One reference's sorted region_bound positions, one coarse type per region, the\n"
                  "fragment-length limit (which is also the pool-histogram width), and WHICH\n"
                  "reference this is — stamped into every deferred record, because the second\n"
-                 "pass replays those onto that reference's cut axis.")
+                 "pass replays those onto that reference's region_bound axis.")
             .def("set_junctions",
                  [](Accumulator& a,
                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> offsets,
@@ -2885,12 +2885,12 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("offsets"),
                  nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
-                 "The junction CSR for THIS reference, keyed by the ref-local donor cut\n"
+                 "The junction CSR for THIS reference, keyed by the ref-local donor region_bound\n"
                  "index. The junction-boundary id is the slot; slot order is a contract.")
             .def_prop_ro("n_regions",     [](const Accumulator& a) { return a.n_regions(); })
             .def_prop_ro("n_boundaries",     [](const Accumulator& a) { return a.n_boundaries(); })
             .def_prop_ro("n_junctions", [](const Accumulator& a) { return a.n_junctions(); })
-            .def_prop_ro("n_cuts",      [](const Accumulator& a) { return a.n_cuts(); })
+            .def_prop_ro("n_region_bounds",      [](const Accumulator& a) { return a.n_region_bounds(); })
             .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
 
             // ── regions ────────────────────────────────────────────────────────────────────────────────
@@ -3135,26 +3135,26 @@ NB_MODULE(_bam_impl, m) {
              "    'calibration'.\n")
           .def("set_regions",
                  [](BamScanner& self,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> region_bounds,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_region_bound_offsets,
                      int32_t n_refs,
                      nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
                      int max_length) {
-                      self.set_regions(cut_positions, ref_cut_offsets, n_refs,
+                      self.set_regions(region_bounds, ref_region_bound_offsets, n_refs,
                                        region_types, max_length);
                  },
-                 nb::arg("cut_positions"),
-                 nb::arg("ref_cut_offsets"),
+                 nb::arg("region_bounds"),
+                 nb::arg("ref_region_bound_offsets"),
                  nb::arg("n_refs"),
                  nb::arg("region_types"),
                  nb::arg("max_length"),
                  "Install the accumulator's region partition. Call set_junctions next.\n\n"
-                 "cut_positions : int64[n_cuts_total]\n"
-                 "    Flat sorted cut positions for all references. A reference\n"
-                 "    contributing c cuts owns c-1 regions and c-2 interior boundaries.\n"
-                 "ref_cut_offsets : int64[n_refs + 1]\n"
-                 "    Per-ref offsets into cut_positions; ref f spans\n"
-                 "    cut_positions[ref_cut_offsets[f]:ref_cut_offsets[f+1]].\n"
+                 "region_bounds : int64[n_region_bounds_total]\n"
+                 "    Flat sorted region_bound positions for all references. A reference\n"
+                 "    contributing c region_bounds owns c-1 regions and c-2 interior boundaries.\n"
+                 "ref_region_bound_offsets : int64[n_refs + 1]\n"
+                 "    Per-ref offsets into region_bounds; ref f spans\n"
+                 "    region_bounds[ref_region_bound_offsets[f]:ref_region_bound_offsets[f+1]].\n"
                  "n_refs : int\n"
                  "    Number of references (matches FragmentResolver).\n"
                  "region_types : uint8[n_regions_total]\n"
@@ -3175,13 +3175,13 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("sj_strand"),
                  "Install the annotated junction boundaries, as build_junction_edge_arrays\n"
                  "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
-                 "offsets : int64[n_cuts_total + 1]\n"
-                 "    CSR over the flat cut axis, keyed by the DONOR cut index.\n"
+                 "offsets : int64[n_region_bounds_total + 1]\n"
+                 "    CSR over the flat region_bound axis, keyed by the DONOR region_bound index.\n"
                  "boundary_right : int64[n_junctions]\n"
-                 "    Flat cut index of each junction's high end. The junction-boundary id\n"
+                 "    Flat region_bound index of each junction's high end. The junction-boundary id\n"
                  "    IS the slot here; edges_df.edge_row is a join key and is not\n"
                  "    passed. Slot order is a contract: sort on\n"
-                 "    (donor cut, acceptor cut, sj_strand).\n"
+                 "    (donor region_bound, acceptor region_bound, sj_strand).\n"
                  "sj_strand : int8[n_junctions]\n"
                  "    Each junction's ANNOTATED strand.\n\n"
                  "Not optional: scan() refuses to run without it, because a missing\n"

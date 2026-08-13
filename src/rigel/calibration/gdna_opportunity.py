@@ -36,7 +36,7 @@ boundary for ``(w-1-a)+`` and the next for ``(w-1-b)+``, and both for ``(w-1-a-b
 boundaries are the only ones that need excluding** — a fragment is an interval containing the boundary, so if it
 reaches any boundary beyond ``p-a`` it must also cross ``p-a``. The inclusion-exclusion over the two
 neighbours is therefore exact rather than a truncation. ⚠ And the reference ends need no special case:
-the partition cuts at ``0`` and at ``L_ref``, so the outermost region's length *is* the distance to the
+the partition region_bounds at ``0`` and at ``L_ref``, so the outermost region's length *is* the distance to the
 wall and the same subtraction removes the impossible starts.
 
 ⛔ **DIVIDE BY THE PROBABILITY, NEVER BY ``A`` ALONE.** ``count(w)/A(w)`` recovers the distribution
@@ -204,9 +204,9 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
     """
     from .splice_graph import build_region_partition_arrays
 
-    cuts, ref_cut_offsets, region_types = build_region_partition_arrays(index)
-    cuts = np.asarray(cuts, dtype=np.int64)
-    offsets = np.asarray(ref_cut_offsets, dtype=np.int64)
+    region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
+    region_bounds = np.asarray(region_bounds, dtype=np.int64)
+    offsets = np.asarray(ref_region_bound_offsets, dtype=np.int64)
     types = np.asarray(region_types, dtype=np.int64)
 
     region_lengths: list[np.ndarray] = []
@@ -218,12 +218,12 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
     for r in range(len(offsets) - 1):
         lo, hi = int(offsets[r]), int(offsets[r + 1])
         if hi - lo < 2:
-            # A reference with no regions contributes no cuts, so it cannot host a gDNA fragment either.
+            # A reference with no regions contributes no region_bounds, so it cannot host a gDNA fragment either.
             continue
-        reference_cuts = cuts[lo:hi]
-        lengths = np.diff(reference_cuts)
+        reference_region_bounds = region_bounds[lo:hi]
+        lengths = np.diff(reference_region_bounds)
         n_regions = len(lengths)
-        reference_lengths.append(int(reference_cuts[-1]))
+        reference_lengths.append(int(reference_region_bounds[-1]))
         region_lengths.append(lengths)
         if n_regions >= 2:
             # Interior boundaries only: boundary i sits between region i-1 and region i.

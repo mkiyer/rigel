@@ -10,7 +10,7 @@ The calibration partition: what the accumulator deposits into, and the structure
   :ref:`flag bits <flags>`.
 * ``JUNCTION(donor, acceptor, strand)`` — one per distinct annotated intron.
 
-**Every distinct exon endpoint is a cut, and adjacent equal-signature regions are NOT merged.** The merge is
+**Every distinct exon endpoint is a region_bound, and adjacent equal-signature regions are NOT merged.** The merge is
 what the predecessor partition did and what made it blind to transcript termini: ⭐ **53.4 %** of real human
 transcript termini (232,451 of 435,291) fall strictly *inside* a merged region and vanish from the partition
 entirely. Measured consequence: 752,654 merged regions → **1,043,881** regions (+38.7 %), median 151 bp,
@@ -294,11 +294,11 @@ def build_splice_graph(
             continue
         rows = by_ref.get(name, EMPTY_I64)
         i_rows = intr_by_ref.get(name, EMPTY_I64)
-        # ── 1. the cut set ────────────────────────────────────────────────────────────────────────
-        cuts = np.unique(
+        # ── 1. the region_bound set ────────────────────────────────────────────────────────────────────────
+        region_bounds = np.unique(
             np.concatenate([ex.start[rows], ex.end[rows], np.array([0, length], np.int64)])
         )
-        starts, ends = cuts[:-1], cuts[1:]
+        starts, ends = region_bounds[:-1], region_bounds[1:]
         n = starts.shape[0]
 
         # ── 2. the 4-bit signature, by difference arrays over the region index ──────────────────────
@@ -307,8 +307,8 @@ def build_splice_graph(
             if iv_s.size == 0:
                 continue
             d = np.zeros(n + 1, np.int32)
-            np.add.at(d, np.searchsorted(cuts, iv_s), 1)
-            np.add.at(d, np.searchsorted(cuts, iv_e), -1)
+            np.add.at(d, np.searchsorted(region_bounds, iv_s), 1)
+            np.add.at(d, np.searchsorted(region_bounds, iv_e), -1)
             sig |= np.where(np.cumsum(d)[:-1] > 0, bit, 0).astype(np.uint8)
 
         n_rows.append(
@@ -325,7 +325,7 @@ def build_splice_graph(
         )
 
         # ── 3. contiguous boundaries: flags + per-strand reaches at each interior interface ────────────
-        pos = cuts[1:-1]  # the n-1 interior interfaces
+        pos = region_bounds[1:-1]  # the n-1 interior interfaces
         flags = np.zeros(pos.shape[0], np.uint16)
         if pos.size:
             for arr, bit in _terminus_and_splice_events(ex, rows, intr, i_rows):
@@ -336,7 +336,7 @@ def build_splice_graph(
         c_reach = _contiguous_reaches(ex, rows, pos)
 
         # ── 4. junction boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
-        j_src, j_dst, j_strand, j_reach = _junction_edges(cuts, intr, i_rows, name)
+        j_src, j_dst, j_strand, j_reach = _junction_edges(region_bounds, intr, i_rows, name)
 
         src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base
         dst = np.concatenate([np.arange(1, n, dtype=np.int64), j_dst]) + region_base
@@ -444,10 +444,10 @@ def _ref_slices(ref_arr):
     n = ref_arr.shape[0]
     if n == 0:
         return {}
-    cut = np.flatnonzero(ref_arr[1:] != ref_arr[:-1]) + 1
+    region_bound = np.flatnonzero(ref_arr[1:] != ref_arr[:-1]) + 1
     return {
         str(ref_arr[a]): np.arange(a, b, dtype=np.int64)
-        for a, b in zip(np.r_[0, cut], np.r_[cut, n])
+        for a, b in zip(np.r_[0, region_bound], np.r_[region_bound, n])
     }
 
 
@@ -585,7 +585,7 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
     return out
 
 
-def _junction_edges(cuts, ma_i, mi_, ref_name):
+def _junction_edges(region_bounds, ma_i, mi_, ref_name):
     """Distinct junction boundaries for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
     empty = np.zeros(0, np.int64)
     keys = {
@@ -599,9 +599,9 @@ def _junction_edges(cuts, ma_i, mi_, ref_name):
     uniq, inv = np.unique(key, axis=0, return_inverse=True)
     inv = np.asarray(inv).ravel()
     ua, ub, ust = uniq[:, 0], uniq[:, 1], uniq[:, 2].astype(np.int8)
-    src = np.searchsorted(cuts, ua) - 1  # the region ENDING at intron_start
-    dst = np.searchsorted(cuts, ub)  # the region STARTING at intron_end
-    if not (np.all(cuts[src + 1] == ua) and np.all(cuts[dst] == ub)):
+    src = np.searchsorted(region_bounds, ua) - 1  # the region ENDING at intron_start
+    dst = np.searchsorted(region_bounds, ub)  # the region STARTING at intron_end
+    if not (np.all(region_bounds[src + 1] == ua) and np.all(region_bounds[dst] == ub)):
         raise ValueError(f"ref {ref_name!r}: a junction endpoint is not a region interface (I5)")
     out = {k: np.zeros(uniq.shape[0], np.int64) for k in keys}
     for s, kl, kh in (
@@ -796,7 +796,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         m = slices.get(name)
         if m is None:
             continue
-        base, cuts = int(m[0]), np.concatenate([start[m], end[m][-1:]])
+        base, region_bounds = int(m[0]), np.concatenate([start[m], end[m][-1:]])
 
         # I4 — the interior interfaces are EXACTLY the annotation events
         rows = by_ref.get(name, EMPTY_I64)
@@ -817,7 +817,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         # ⭐ I3b — recompute the signature from each region's MIDPOINT, by direct interval
         # containment. Deliberately a DIFFERENT algorithm from the builder's cumulative-difference
         # sweep, so the two can only agree by both being right. A region is homogeneous by
-        # construction (every interval endpoint is a cut), so its midpoint decides it.
+        # construction (every interval endpoint is a region_bound), so its midpoint decides it.
         mid = (start[m] + end[m]) // 2
         want = np.zeros(mid.size, np.uint8)
         for bit, iv_s, iv_e in _signature_intervals(ex, rows, intr, i_rows):
@@ -872,8 +872,8 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         # I11a — every mature exon boundary lands exactly on a region interface
         if rows.size:
             for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
-                hit = np.searchsorted(cuts, arr)
-                bad = (hit >= cuts.size) | (cuts[np.clip(hit, 0, cuts.size - 1)] != arr)
+                hit = np.searchsorted(region_bounds, arr)
+                bad = (hit >= region_bounds.size) | (region_bounds[np.clip(hit, 0, region_bounds.size - 1)] != arr)
                 if bad.any():
                     raise ValueError(
                         f"I11: reference {name!r} has {int(bad.sum())} exon {what}s that are not region "
@@ -883,8 +883,8 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         # I11b — every mature intron is realised by a JUNCTION boundary on that strand
         if i_rows.size:
             a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
-            js = base + np.searchsorted(cuts, a) - 1
-            jd = base + np.searchsorted(cuts, b)
+            js = base + np.searchsorted(region_bounds, a) - 1
+            jd = base + np.searchsorted(region_bounds, b)
             want = (js * n_regions + jd) * 4 + st
             if jkey.size == 0:
                 miss = np.ones(want.shape, bool)
@@ -908,7 +908,7 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
     """Flatten the graph into the ``BamScanner.set_regions`` ABI — THE partition the accumulator
     deposits into.
 
-    For each reference in ``index.ref_names`` the cut positions are ``[n0.start, n0.end, n1.end, …]``
+    For each reference in ``index.ref_names`` the region_bound positions are ``[n0.start, n0.end, n1.end, …]``
     over that reference's regions (which tile it contiguously), so ``k`` regions give ``k + 1`` positions.
     References with zero regions contribute none.
 
@@ -916,7 +916,7 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
     the same frame; that is what keeps the calibration geometry and the scanner from addressing
     different partitions.
 
-    Returns ``(cut_positions int64[P], ref_pos_offsets int64[n_refs+1], region_types uint8[N])``, where
+    Returns ``(region_bounds int64[P], ref_pos_offsets int64[n_refs+1], region_types uint8[N])``, where
     ``region_types`` is the coarse type (0=intergenic, 1=intron, 2=exon) aligned 1:1 with the regions —
     the gDNA FL-pool axis.
     """
@@ -937,12 +937,12 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
             continue
         starts = grp["start"].to_numpy(np.int64, copy=False)
         ends = grp["end"].to_numpy(np.int64, copy=False)
-        cuts = np.empty(len(starts) + 1, dtype=np.int64)
-        cuts[:-1] = starts
-        cuts[-1] = ends[-1]
-        positions.append(cuts)
+        region_bounds = np.empty(len(starts) + 1, dtype=np.int64)
+        region_bounds[:-1] = starts
+        region_bounds[-1] = ends[-1]
+        positions.append(region_bounds)
         types.append(coarse_type_array(grp["signature"].to_numpy()))
-        offsets[i + 1] = offsets[i] + cuts.shape[0]
+        offsets[i + 1] = offsets[i] + region_bounds.shape[0]
     return (
         np.concatenate(positions) if positions else np.empty(0, dtype=np.int64),
         offsets,
@@ -952,19 +952,19 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
 
 @dataclass(frozen=True, slots=True)
 class JunctionEdgeArrays:
-    """The junction boundaries, re-indexed onto **the accumulator's flat cut axis** as a CSR.
+    """The junction boundaries, re-indexed onto **the accumulator's flat region_bound axis** as a CSR.
 
     The deposit rule has to answer one question per observed intron, in the BAM-scan hot loop: *is this
     intron an annotated junction, and if so which boundary?* This is the lookup table for it.
 
     ⭐ It is cheap because of a measured property of the graph: **every annotated intron has both of its
-    endpoints as partition cuts** (100.00 % of 404,168 on the human annotation — forced, since a cut is
-    placed at every exon endpoint). So "is this intron annotated?" reduces to *"are both endpoints cuts,
-    and is the pair registered?"* — and finding the cut index is the binary search the deposit already
-    performs to locate the crossed boundaries. If an intron's start is not a cut it is unannotated and the
+    endpoints as partition region_bounds** (100.00 % of 404,168 on the human annotation — forced, since a region_bound is
+    placed at every exon endpoint). So "is this intron annotated?" reduces to *"are both endpoints region_bounds,
+    and is the pair registered?"* — and finding the region_bound index is the binary search the deposit already
+    performs to locate the crossed boundaries. If an intron's start is not a region_bound it is unannotated and the
     table is never consulted.
 
-    Keyed by the **donor** cut index, i.e. the flat index into
+    Keyed by the **donor** region_bound index, i.e. the flat index into
     ``build_region_partition_arrays(index)[0]`` of the intron's LOW endpoint::
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
@@ -978,7 +978,7 @@ class JunctionEdgeArrays:
     this column.
 
     ⚠ **The slot ordering is a contract**, because the id is the rank: this function and the reference
-    accumulator's ``Partition.from_cuts`` must sort identically, or every row permutes and the native
+    accumulator's ``Partition.from_region_bounds`` must sort identically, or every row permutes and the native
     build's byte-identity gate compares two different labellings. They disagreed once — ``(acceptor,
     donor)`` against ``(strand, acceptor, donor)`` — and it is reachable only through a strand-coincident
     junction pair. Pinned by ``test_the_csr_slot_order_matches_the_reference_accumulator``.
@@ -988,8 +988,8 @@ class JunctionEdgeArrays:
     is known.
     """
 
-    offsets: np.ndarray  # int64[P + 1] — CSR over the flat cut axis, P = cut_positions.size
-    boundary_right: np.ndarray  # int64[J] — flat cut index of the intron's HIGH endpoint
+    offsets: np.ndarray  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
+    boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's HIGH endpoint
     edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-boundary id
     strand: np.ndarray  # int8[J]  — the junction's genomic strand (Strand POS/NEG)
 
@@ -997,18 +997,18 @@ class JunctionEdgeArrays:
 def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     """Build the :class:`JunctionEdgeArrays` CSR for ``index``.
 
-    A junction boundary stores region ids; the accumulator works in cut indices. For a reference whose first
-    region is ``region_base`` and whose first cut is ``cut_base``, region ``i`` spans
-    ``[cuts[cut_base + i - region_base], cuts[cut_base + i - region_base + 1])``, so::
+    A junction boundary stores region ids; the accumulator works in region_bound indices. For a reference whose first
+    region is ``region_base`` and whose first region_bound is ``region_bound_base``, region ``i`` spans
+    ``[region_bounds[region_bound_base + i - region_base], region_bounds[region_bound_base + i - region_base + 1])``, so::
 
-        donor cut    = cut_base + (src - region_base) + 1      # the intron starts where src ENDS
-        acceptor cut = cut_base + (dst - region_base)          # and ends where dst BEGINS
+        donor region_bound    = region_bound_base + (src - region_base) + 1      # the intron starts where src ENDS
+        acceptor region_bound = region_bound_base + (dst - region_base)          # and ends where dst BEGINS
     """
     regions_df, edges_df = index.regions_df, index.edges_df
-    _, cut_offsets, _ = build_region_partition_arrays(index)
-    n_cuts = int(cut_offsets[-1])
+    _, region_bound_offsets, _ = build_region_partition_arrays(index)
+    n_region_bounds = int(region_bound_offsets[-1])
 
-    # per-reference region_base, in the same reference order the cut axis uses
+    # per-reference region_base, in the same reference order the region_bound axis uses
     counts = regions_df.groupby("ref_name", sort=False).size()
     region_base = np.zeros(len(index.ref_names) + 1, dtype=np.int64)
     for i, ref in enumerate(index.ref_names):
@@ -1022,19 +1022,19 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
 
     # which reference each junction belongs to: region ids are contiguous per reference (I2)
     ref_of = np.searchsorted(region_base, src, side="right") - 1
-    shift = cut_offsets[ref_of] - region_base[ref_of]
+    shift = region_bound_offsets[ref_of] - region_base[ref_of]
     boundary_left = src + shift + 1
     boundary_right = dst + shift
 
     # ⚠ The sort key includes STRAND, and it must match the reference accumulator's
-    # ``Partition.from_cuts`` exactly — the junction-boundary id IS the rank in this order, so the two
+    # ``Partition.from_region_bounds`` exactly — the junction-boundary id IS the rank in this order, so the two
     # disagreeing would permute every row and break byte-identity. It shows up only on a donor/acceptor
     # pair carrying two strands, which is biologically impossible and therefore only ever reachable from
     # a synthetic stress test.
     order = np.lexsort((strand, boundary_right, boundary_left))
     boundary_left, boundary_right = boundary_left[order], boundary_right[order]
-    offsets = np.zeros(n_cuts + 1, dtype=np.int64)
-    np.cumsum(np.bincount(boundary_left, minlength=n_cuts), out=offsets[1:])
+    offsets = np.zeros(n_region_bounds + 1, dtype=np.int64)
+    np.cumsum(np.bincount(boundary_left, minlength=n_region_bounds), out=offsets[1:])
     return JunctionEdgeArrays(offsets, boundary_right, edge_row[order], strand[order])
 
 
@@ -1178,7 +1178,7 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
     ⭐ **The slot order is not recomputed here.** It is read off
     :func:`build_junction_edge_arrays`, whose ``edge_row`` is already the ``edges_df`` row of each
     junction slot. That ordering is a byte-identity contract against the reference accumulator's
-    ``Partition.from_cuts``, and two implementations of one ordering is how the same quantity comes to
+    ``Partition.from_region_bounds``, and two implementations of one ordering is how the same quantity comes to
     differ in two places — so there is one, and this joins through it.
     """
     rows = build_junction_edge_arrays(index).edge_row
@@ -1298,7 +1298,7 @@ def _splice_junction_by_intron(index) -> dict[tuple, int]:
 
     ⛔ **NOT the flanking region pair, and not a row order.** The region pair happens to be unique on
     the shipped partition — 13,482 distinct pairs for 13,482 junctions — but only because every exon
-    endpoint is forced to be a region cut; on a coarsened partition it collides (measured: 638 ambiguous
+    endpoint is forced to be a region region_bound; on a coarsened partition it collides (measured: 638 ambiguous
     pairs hiding 1,552 junctions). And ``sj.feather``'s row order is grouped ALPHABETICALLY by reference
     while the graph axis uses ``index.ref_names`` (FASTA order), which diverge on any genome carrying
     chr1/chr2/chr10.
@@ -1415,7 +1415,7 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
 
     # ⛔⛔ A TRANSCRIPT'S ANNOTATED INTRON THAT RESOLVES TO NO SLOT IS A DEFECT, NOT A GAP TO SKIP.
     # The junction key is derived from REGION boundaries (`end[src]`, `start[dst]`), which equal the
-    # intron's coordinates only because the partition cuts at every exon endpoint — measured 0 of 45,609
+    # intron's coordinates only because the partition region_bounds at every exon endpoint — measured 0 of 45,609
     # violations on the shipped index. That invariant is ASSUMED by the derivation, so it is asserted
     # here: were it ever to break, every affected transcript would silently lose a step and its path
     # would read as a shorter, well-formed walk. A silent wrong answer is the one outcome to refuse.
@@ -1424,7 +1424,7 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
         raise ValueError(
             f"{len(unresolved)} annotated intron(s) resolved to no splice-junction slot; first is "
             f"transcript {t0} intron {k0!r}. The junction axis is keyed on region boundaries, so this "
-            f"means an exon endpoint is not a region cut — the index and the partition disagree."
+            f"means an exon endpoint is not a region region_bound — the index and the partition disagree."
         )
 
     if tdf is not None and "is_synthetic" in tdf.columns:

@@ -71,8 +71,8 @@ def toy(tmp_path_factory):
     ⭐ Two structures here are load-bearing, and without them two gates below are vacuous:
 
     * **staggered isoform boundaries.** ``boundary_spliced`` — a molecule that crossed a contiguous boundary
-      having spliced *elsewhere* — can only be deposited where a cut falls INSIDE another
-      transcript's exon. A single-isoform gene has no such cut, so its spliced-boundary bank is
+      having spliced *elsewhere* — can only be deposited where a region_bound falls INSIDE another
+      transcript's exon. A single-isoform gene has no such region_bound, so its spliced-boundary bank is
       identically zero and GATE 2's perturbation removes nothing.
     * **a region shorter than the minimum fragment length.** ``region_contained`` requires the fragment
       to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY objects
@@ -86,7 +86,7 @@ def toy(tmp_path_factory):
         [
             {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
             # ⚠ the stagger must sit CLOSE to the junction: the fragment has to reach the boundary
-            # contiguously AND reach the junction, so a cut 700 bp away is one no fragment spans.
+            # contiguously AND reach the junction, so a region_bound 700 bp away is one no fragment spans.
             {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
         ],
     )
@@ -484,7 +484,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     )
 
     # ⭐ AND this partition must stay the SOLVER's gate, not a judgement about scoreability. The
-    # audit answers the second question with a CURVE over sd(λ) = 1/√τ and no cut at all (a floor was
+    # audit answers the second question with a CURVE over sd(λ) = 1/√τ and no region_bound at all (a floor was
     # derived, implemented and refuted — τ is continuous). If a threshold ever appears here, the two
     # questions have been collapsed into one.
     sa = _load_sibling("solvability_audit.py")

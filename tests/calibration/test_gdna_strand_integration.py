@@ -57,8 +57,8 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
         return np.zeros(rows, dtype=dtype)
 
     payload = AccumulatorPayload(
-        cut_positions=np.arange(n_regions + 1, dtype=np.int64) * 100,
-        ref_cut_offsets=np.array([0, n_regions + 1], dtype=np.int64),
+        region_bounds=np.arange(n_regions + 1, dtype=np.int64) * 100,
+        ref_region_bound_offsets=np.array([0, n_regions + 1], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
         ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, 0], dtype=np.int64),

@@ -18,7 +18,7 @@ tally semantics of its own to test — which is the point of building it this wa
 
 ⛔ **The drain does NOT extend ``GapCensus``, and that is structural.** The census has no
 ``gap_resolved_unspliced`` class because pass-one arbitration cannot produce one — a spliced path always
-cuts bases the genomic path keeps, so the genomic path can never be the sole survivor (S1 checked this over
+region_bounds bases the genomic path keeps, so the genomic path can never be the sole survivor (S1 checked this over
 200,000 random hypothesis sets before deleting the class). ⭐ But the drain *chooses*, and it can choose ∅.
 So a naive drain would grow the census by however many draws happened to pick a spliced path while chosen-∅
 fragments vanished from it entirely — a census that depends on the RNG.
@@ -45,14 +45,14 @@ from ._accumulator_reference import (
 )
 
 
-GENOME_CUTS = [0, 1000, 1600, 1700, 1900, 2000, 2200, 4000]
+GENOME_REGION_BOUNDS = [0, 1000, 1600, 1700, 1900, 2000, 2200, 4000]
 #: Two annotated introns inside the gap, so an unspliced fragment spanning it has three hypotheses.
 JUNCTIONS = ((0, 1600, 2000, int(Strand.POS)), (0, 1700, 1900, int(Strand.NEG)))
 MAX_LENGTH = 1000
 
 
 def _partition() -> Partition:
-    return Partition.from_cuts([GENOME_CUTS], junctions=JUNCTIONS)
+    return Partition.from_region_bounds([GENOME_REGION_BOUNDS], junctions=JUNCTIONS)
 
 
 def _hypotheses() -> tuple[GapHypothesis, ...]:

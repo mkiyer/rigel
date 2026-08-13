@@ -103,7 +103,7 @@ def _calibration(
 def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
     tmp_path, _patched_junctions, mode
 ):
-    """⭐⭐ **THE DERIVATION, END TO END.** One transcript, one 1,000 bp exon cut by the partition into
+    """⭐⭐ **THE DERIVATION, END TO END.** One transcript, one 1,000 bp exon region_bound by the partition into
     two 500 bp regions plus the boundary between them — three objects of two different kinds and three
     different opportunities. Load each with exactly the mass ``A_t·ceff(o)/E_t`` the derivation predicts
     and the recovered weight must be ``A_t`` itself, for EVERY rung of the dial: when a transcript is

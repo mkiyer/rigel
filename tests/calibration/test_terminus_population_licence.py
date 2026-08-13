@@ -112,11 +112,11 @@ def neg_index(tmp_path_factory):
 
 
 def _boundary_positions(index) -> np.ndarray:
-    """Genomic position of every contiguous boundary, in boundary order (the interior cuts, per reference)."""
-    positions, cut_offsets, _types = build_region_partition_arrays(index)
+    """Genomic position of every contiguous boundary, in boundary order (the interior region_bounds, per reference)."""
+    positions, region_bound_offsets, _types = build_region_partition_arrays(index)
     out = []
-    for f in range(len(cut_offsets) - 1):
-        lo, hi = int(cut_offsets[f]), int(cut_offsets[f + 1])
+    for f in range(len(region_bound_offsets) - 1):
+        lo, hi = int(region_bound_offsets[f]), int(region_bound_offsets[f + 1])
         if hi - lo >= 2:
             out.append(positions[lo + 1 : hi - 1])
     return np.concatenate(out) if out else np.zeros(0, np.int64)

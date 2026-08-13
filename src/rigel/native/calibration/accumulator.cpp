@@ -230,17 +230,17 @@ void DeferredFragments::canonicalise() {
 // construction
 // ============================================================================
 
-Accumulator::Accumulator(std::vector<std::int64_t> cuts,
+Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
                          std::vector<std::uint8_t> region_types,
                          int max_length,
                          std::int32_t ref_id)
-    : cuts_(std::move(cuts)), ref_id_(ref_id), max_length_(max_length)
+    : region_bounds_(std::move(region_bounds)), ref_id_(ref_id), max_length_(max_length)
 {
     if (ref_id_ < 0) {
         throw std::invalid_argument(
             "accumulator: ref_id must be >= 0, got " + std::to_string(ref_id_) +
             ". It is stamped into every deferred record and the second pass replays those onto that "
-            "reference's cut axis, so there is no such thing as a fragment held for no reference.");
+            "reference's region_bound axis, so there is no such thing as a fragment held for no reference.");
     }
     if (max_length_ < 1) {
         throw std::invalid_argument(
@@ -248,19 +248,19 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
             ". It is the fragment-length limit applied to L as well as the pool-histogram width, so at 0 "
             "every real fragment is dropped as too long and the whole tally is silently empty.");
     }
-    for (std::size_t i = 1; i < cuts_.size(); ++i) {
-        if (cuts_[i] <= cuts_[i - 1]) {
+    for (std::size_t i = 1; i < region_bounds_.size(); ++i) {
+        if (region_bounds_[i] <= region_bounds_[i - 1]) {
             throw std::invalid_argument(
-                "accumulator: cuts must strictly increase, but cuts[" + std::to_string(i) + "] = " +
-                std::to_string(cuts_[i]) + " <= cuts[" + std::to_string(i - 1) + "] = " +
-                std::to_string(cuts_[i - 1]));
+                "accumulator: region_bounds must strictly increase, but region_bounds[" + std::to_string(i) + "] = " +
+                std::to_string(region_bounds_[i]) + " <= region_bounds[" + std::to_string(i - 1) + "] = " +
+                std::to_string(region_bounds_[i - 1]));
         }
     }
 
-    // A reference contributing c cuts owns c-1 regions and c-2 interior boundaries; one contributing fewer than
-    // two cuts owns neither, which is legal and deposits nothing.
-    const std::size_t n_regions = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
-    const std::size_t n_boundaries = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
+    // A reference contributing c region_bounds owns c-1 regions and c-2 interior boundaries; one contributing fewer than
+    // two region_bounds owns neither, which is legal and deposits nothing.
+    const std::size_t n_regions = region_bounds_.size() >= 2 ? region_bounds_.size() - 1 : 0;
+    const std::size_t n_boundaries = region_bounds_.size() >= 2 ? region_bounds_.size() - 2 : 0;
     regions_.assign(n_regions, Region{});
     boundaries_.assign(n_boundaries, Boundary{});
     region_start_count_.assign(n_regions, 0u);
@@ -268,7 +268,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
     // ⚠ REQUIRED whenever this reference owns a region, and it throws rather than quietly skipping the
     // length pools. The shipped accumulator disabled pooling silently on an empty type array, which is a
     // whole output going missing with nothing to notice it by; and the specification has no such state at
-    // all -- `Partition.from_cuts` always materialises a type per region -- so a C++ mode the spec cannot
+    // all -- `Partition.from_region_bounds` always materialises a type per region -- so a C++ mode the spec cannot
     // express could only ever be a way to disagree with it.
     if (n_regions > 0 && region_types.empty()) {
         throw std::invalid_argument(
@@ -296,10 +296,10 @@ void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
                                 std::vector<std::int32_t> boundary_right,
                                 std::vector<std::int8_t>  sj_strand)
 {
-    if (!offsets.empty() && offsets.size() != cuts_.size() + 1) {
+    if (!offsets.empty() && offsets.size() != region_bounds_.size() + 1) {
         throw std::invalid_argument(
-            "accumulator: junction CSR offsets must have length n_cuts + 1 = " +
-            std::to_string(cuts_.size() + 1) + ", got " + std::to_string(offsets.size()));
+            "accumulator: junction CSR offsets must have length n_region_bounds + 1 = " +
+            std::to_string(region_bounds_.size() + 1) + ", got " + std::to_string(offsets.size()));
     }
     if (boundary_right.size() != sj_strand.size()) {
         throw std::invalid_argument(
@@ -318,21 +318,21 @@ void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
 }
 
 // ============================================================================
-// locating things on the cut axis
+// locating things on the region_bound axis
 // ============================================================================
 
 std::int64_t Accumulator::region_of_pos(std::int64_t position) const noexcept {
     if (regions_.empty()) return -1;
-    const auto it = std::upper_bound(cuts_.begin(), cuts_.end(), position);
-    const std::int64_t region = (it - cuts_.begin()) - 1;
+    const auto it = std::upper_bound(region_bounds_.begin(), region_bounds_.end(), position);
+    const std::int64_t region = (it - region_bounds_.begin()) - 1;
     return std::min<std::int64_t>(std::max<std::int64_t>(region, 0),
                                   static_cast<std::int64_t>(regions_.size()) - 1);
 }
 
-std::int64_t Accumulator::exact_cut(std::int64_t position) const noexcept {
-    const auto it = std::lower_bound(cuts_.begin(), cuts_.end(), position);
-    if (it == cuts_.end() || *it != position) return -1;
-    return it - cuts_.begin();
+std::int64_t Accumulator::exact_region_bound(std::int64_t position) const noexcept {
+    const auto it = std::lower_bound(region_bounds_.begin(), region_bounds_.end(), position);
+    if (it == region_bounds_.end() || *it != position) return -1;
+    return it - region_bounds_.begin();
 }
 
 std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
@@ -340,12 +340,12 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
                                      std::int32_t sj_strand) const noexcept
 {
     if (sj_offsets_.empty()) return -1;
-    // ⭐ Every annotated intron has BOTH endpoints as partition cuts (measured: 404,168 of 404,168), so
+    // ⭐ Every annotated intron has BOTH endpoints as partition region_bounds (measured: 404,168 of 404,168), so
     // "is this intron annotated?" reduces to the binary search the deposit already performs. If the start
-    // is not a cut the table is never consulted -- and 70.4 % of cuts are not a donor at all.
-    const std::int64_t donor = exact_cut(intron_start);
+    // is not a region_bound the table is never consulted -- and 70.4 % of region_bounds are not a donor at all.
+    const std::int64_t donor = exact_region_bound(intron_start);
     if (donor < 0) return -1;
-    const std::int64_t acceptor = exact_cut(intron_end);
+    const std::int64_t acceptor = exact_region_bound(intron_end);
     if (acceptor < 0) return -1;
 
     // ⚠ The strand filter applies only when the observed strand is DEFINITE. NONE means the aligner wrote
@@ -418,7 +418,7 @@ std::int64_t normalise_introns(const IntronBlock* observed,
     return absorbed;
 }
 
-/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out.
+/// The path's contiguous genomic segments: [start, end) with the (normalised) introns region_bound out.
 void build_segments(std::int64_t start,
                     std::int64_t end,
                     const std::vector<std::pair<std::int64_t, std::int64_t>>& introns,
@@ -471,15 +471,15 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         ++counters_.dropped_strand_undefined;
         return DepositOutcome::kStrandUndefined;
     }
-    if (cuts_.size() < 2) {
+    if (region_bounds_.size() < 2) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
 
     // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent -- and the
     // clip must precede arbitration, because a hypothesis is filtered on its L.
-    const std::int64_t start = std::max(fragment.start, cuts_.front());
-    const std::int64_t end   = std::min(fragment.end,   cuts_.back());
+    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
+    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
     if (end <= start) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
@@ -493,7 +493,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
     // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
     // kTooLong rejection counts them, as it did before any of this.
-    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "cut nothing beyond what was sequenced" -- and
+    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "region_bound nothing beyond what was sequenced" -- and
     // the executable specification makes that its DEFAULT (`UNSPLICED_ONLY`), not an option:
     // "the degenerate case is the general case, not a branch". A caller offering an EMPTY set is
     // asking the same question, so answer it the same way rather than crashing.
@@ -627,9 +627,9 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
         const auto& [seg_start, seg_end] = scratch.segments[block];
         const std::int64_t first =
-            std::upper_bound(cuts_.begin(), cuts_.end(), seg_start) - cuts_.begin();
+            std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) - region_bounds_.begin();
         const std::int64_t last =
-            std::lower_bound(cuts_.begin(), cuts_.end(), seg_end) - cuts_.begin();
+            std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) - region_bounds_.begin();
 
         for (std::int64_t boundary_idx = first; boundary_idx < last; ++boundary_idx) {
             // ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is
@@ -644,7 +644,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             }
         }
         // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
-        // The crossed cuts split this block into `last - first + 1` slices. Each slice's
+        // The crossed region_bounds split this block into `last - first + 1` slices. Each slice's
         // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
         // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
         //
@@ -671,8 +671,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                 block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
             const std::int64_t n_slices = last - first + 1;
             for (std::int64_t i = 0; i < n_slices; ++i) {
-                const std::int64_t lo = (i == 0) ? seg_start : cuts_[static_cast<std::size_t>(first + i - 1)];
-                const std::int64_t hi = (i == n_slices - 1) ? seg_end : cuts_[static_cast<std::size_t>(first + i)];
+                const std::int64_t lo = (i == 0) ? seg_start : region_bounds_[static_cast<std::size_t>(first + i - 1)];
+                const std::int64_t hi = (i == n_slices - 1) ? seg_end : region_bounds_[static_cast<std::size_t>(first + i)];
                 const std::int64_t left_boundary  = (i > 0) ? first + i - 1 : -1;
                 const std::int64_t right_boundary = (i < n_slices - 1) ? first + i : -1;
                 // The block's own ends are junction boundaries; its interior ends are boundaries. A slice
@@ -727,8 +727,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // limit, which is why `1/(L-1)` is right there and was wrong here.
         // ⚠ `A >= 1` is structural: the fragment IS contained, so `w <= ell`.
         const std::int64_t region_len =
-            cuts_[static_cast<std::size_t>(contained_region) + 1] -
-            cuts_[static_cast<std::size_t>(contained_region)];
+            region_bounds_[static_cast<std::size_t>(contained_region) + 1] -
+            region_bounds_[static_cast<std::size_t>(contained_region)];
         region.contained_count[col] += 1u;
         region.contained_inv_opportunity_sum += 1.0 / static_cast<double>(region_len - length + 1);
     }
@@ -811,9 +811,9 @@ std::int64_t Accumulator::length_under(const OfferedFragment& fragment,
 {
     // ⚠ The SAME clip `deposit` applies, and in the same order: L is measured after clipping to the
     // reference, so a scorer that skipped it would score a length the deposit can never produce.
-    if (cuts_.size() < 2 || hypothesis_index >= fragment.n_hypotheses) return 0;
-    const std::int64_t start = std::max(fragment.start, cuts_.front());
-    const std::int64_t end   = std::min(fragment.end,   cuts_.back());
+    if (region_bounds_.size() < 2 || hypothesis_index >= fragment.n_hypotheses) return 0;
+    const std::int64_t start = std::max(fragment.start, region_bounds_.front());
+    const std::int64_t end   = std::min(fragment.end,   region_bounds_.back());
     if (end <= start) return 0;
     std::int64_t absorbed = 0;
     return hypothesis_length(fragment, fragment.hypotheses[hypothesis_index], start, end, scratch,
@@ -830,20 +830,20 @@ const DeferredFragments& Accumulator::deferred_canonical() {
 // ============================================================================
 
 void Accumulator::merge_from(const Accumulator& other) {
-    // ⚠ The cut arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
+    // ⚠ The region_bound arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
     // 476,732 fragments while every golden test passed, so this compares positions rather than sizes.
     //
     // ⭐ And now it can compare the ref id itself, which is what that bug was actually about — two
-    // references with coincidentally identical cut axes would have passed the position check.
+    // references with coincidentally identical region_bound axes would have passed the position check.
     if (ref_id_ != other.ref_id_) {
         throw std::invalid_argument(
             "accumulator: merge_from requires the same reference (this is ref " +
             std::to_string(ref_id_) + ", other is ref " + std::to_string(other.ref_id_) + ")");
     }
-    if (cuts_ != other.cuts_) {
+    if (region_bounds_ != other.region_bounds_) {
         throw std::invalid_argument(
-            "accumulator: merge_from requires identical cut positions (this has " +
-            std::to_string(cuts_.size()) + ", other has " + std::to_string(other.cuts_.size()) + ")");
+            "accumulator: merge_from requires identical region_bound positions (this has " +
+            std::to_string(region_bounds_.size()) + ", other has " + std::to_string(other.region_bounds_.size()) + ")");
     }
     if (junctions_.size() != other.junctions_.size()) {
         throw std::invalid_argument(
@@ -905,27 +905,27 @@ void Accumulator::merge_from(const Accumulator& other) {
 // AccumulatorSet
 // ============================================================================
 
-AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
+AccumulatorSet::AccumulatorSet(const std::int64_t* region_bounds,
                                std::size_t n_positions,
-                               const std::int64_t* ref_cut_offsets,
+                               const std::int64_t* ref_region_bound_offsets,
                                std::size_t n_refs,
                                const std::uint8_t* region_types,
                                std::size_t n_region_types,
                                int max_length)
 {
-    if (ref_cut_offsets == nullptr || static_cast<std::size_t>(ref_cut_offsets[n_refs]) != n_positions) {
+    if (ref_region_bound_offsets == nullptr || static_cast<std::size_t>(ref_region_bound_offsets[n_refs]) != n_positions) {
         throw std::invalid_argument(
-            "accumulator set: ref_cut_offsets must end at n_positions = " + std::to_string(n_positions));
+            "accumulator set: ref_region_bound_offsets must end at n_positions = " + std::to_string(n_positions));
     }
     accs_.reserve(n_refs);
 
-    // A reference contributing c cuts owns c-1 regions, so the region offset for reference f is
-    // ref_cut_offsets[f] - (number of earlier references that own any region).
+    // A reference contributing c region_bounds owns c-1 regions, so the region offset for reference f is
+    // ref_region_bound_offsets[f] - (number of earlier references that own any region).
     std::size_t region_base = 0;
     for (std::size_t f = 0; f < n_refs; ++f) {
-        const std::size_t lo = static_cast<std::size_t>(ref_cut_offsets[f]);
-        const std::size_t hi = static_cast<std::size_t>(ref_cut_offsets[f + 1]);
-        std::vector<std::int64_t> cuts(cut_positions + lo, cut_positions + hi);
+        const std::size_t lo = static_cast<std::size_t>(ref_region_bound_offsets[f]);
+        const std::size_t hi = static_cast<std::size_t>(ref_region_bound_offsets[f + 1]);
+        std::vector<std::int64_t> ref_region_bounds(region_bounds + lo, region_bounds + hi);
         const std::size_t n_regions = hi - lo >= 2 ? hi - lo - 1 : 0;
 
         std::vector<std::uint8_t> types;
@@ -938,7 +938,7 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
             }
             types.assign(region_types + region_base, region_types + region_base + n_regions);
         }
-        accs_.emplace_back(std::move(cuts), std::move(types), max_length,
+        accs_.emplace_back(std::move(ref_region_bounds), std::move(types), max_length,
                            static_cast<std::int32_t>(f));
         region_base += n_regions;
     }
@@ -949,30 +949,30 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
                                    const std::int64_t* boundary_right,
                                    const std::int8_t* sj_strand,
                                    std::size_t n_junctions,
-                                   const std::int64_t* ref_cut_offsets)
+                                   const std::int64_t* ref_region_bound_offsets)
 {
-    if (offsets == nullptr || ref_cut_offsets == nullptr) {
+    if (offsets == nullptr || ref_region_bound_offsets == nullptr) {
         throw std::invalid_argument(
-            "accumulator set: set_junctions needs both the CSR offsets and ref_cut_offsets");
+            "accumulator set: set_junctions needs both the CSR offsets and ref_region_bound_offsets");
     }
-    const std::size_t n_cuts = static_cast<std::size_t>(ref_cut_offsets[accs_.size()]);
-    if (n_offsets != n_cuts + 1) {
+    const std::size_t n_region_bounds = static_cast<std::size_t>(ref_region_bound_offsets[accs_.size()]);
+    if (n_offsets != n_region_bounds + 1) {
         throw std::invalid_argument(
-            "accumulator set: junction CSR offsets must have length n_cuts + 1 = " +
-            std::to_string(n_cuts + 1) + ", got " + std::to_string(n_offsets));
+            "accumulator set: junction CSR offsets must have length n_region_bounds + 1 = " +
+            std::to_string(n_region_bounds + 1) + ", got " + std::to_string(n_offsets));
     }
-    if (static_cast<std::size_t>(offsets[n_cuts]) != n_junctions) {
+    if (static_cast<std::size_t>(offsets[n_region_bounds]) != n_junctions) {
         throw std::invalid_argument(
-            "accumulator set: the junction CSR ends at " + std::to_string(offsets[n_cuts]) +
+            "accumulator set: the junction CSR ends at " + std::to_string(offsets[n_region_bounds]) +
             " but " + std::to_string(n_junctions) + " junctions were given");
     }
 
     std::vector<std::int32_t> ref_offsets, ref_boundary_right;
     std::vector<std::int8_t>  ref_strand;
     for (std::size_t f = 0; f < accs_.size(); ++f) {
-        const std::int64_t c0 = ref_cut_offsets[f];
-        const std::int64_t c1 = ref_cut_offsets[f + 1];
-        if (c1 <= c0) continue;  // a reference with no cuts owns no regions and no junctions
+        const std::int64_t c0 = ref_region_bound_offsets[f];
+        const std::int64_t c1 = ref_region_bound_offsets[f + 1];
+        if (c1 <= c0) continue;  // a reference with no region_bounds owns no regions and no junctions
         const std::int64_t j0 = offsets[c0];
         const std::int64_t j1 = offsets[c1];
 

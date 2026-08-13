@@ -89,7 +89,7 @@ class PipelineStats:
     n_census_splice_artifact: int = 0
 
     #: Censused but never offered to the accumulator's ``deposit()``: the fragment is not one
-    #: molecule on one cut axis (chiefly blocks on more than one reference). It exists so that
+    #: molecule on one region_bound axis (chiefly blocks on more than one reference). It exists so that
     #:
     #:   Σ census − n_census_splice_artifact
     #:       == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered

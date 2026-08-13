@@ -12,7 +12,7 @@ of it, stated as a property rather than as a recorded output:
 * ⭐ the steps run in TRANSCRIPTION order, so a minus-strand path descends in genomic coordinate.
 
 ⛔ **The junction join goes through INTRON COORDINATES and never through the flanking region pair.** The
-pair is unique on the shipped partition only because every exon endpoint is forced to be a region cut;
+pair is unique on the shipped partition only because every exon endpoint is forced to be a region region_bound;
 on a coarsened partition it collides, and it carries no strand.
 """
 
@@ -149,7 +149,7 @@ def test_a_MULTI_EXON_transcript_takes_its_exons_and_a_junction_between_them(
 
 
 def test_a_boundary_INTERIOR_to_an_exon_is_crossed_and_included(tmp_path, _patched_junctions):
-    """⭐ A boundary exists wherever the partition cut — including where only a SIGNATURE changed (an
+    """⭐ A boundary exists wherever the partition region_bound — including where only a SIGNATURE changed (an
     antisense feature overlapping on the other strand). The molecule crosses it contiguously, so it is
     part of the path. ⛔ Excluding it would drop the only object between two halves of one exon."""
     bounds = [0, 1_000, 1_500, 2_000, 3_000]  # exon [1000,2000) is split at 1500
@@ -255,7 +255,7 @@ def test_two_transcripts_sharing_one_intron_resolve_to_the_SAME_sj_id(
 
 def test_an_UNRESOLVABLE_intron_RAISES_rather_than_dropping_a_step(tmp_path, _patched_junctions):
     """⛔⛔ **THE SILENT FAILURE THIS GUARD EXISTS FOR.** The junction key is derived from REGION
-    boundaries, which equal the intron's coordinates only because the partition cuts at every exon
+    boundaries, which equal the intron's coordinates only because the partition region_bounds at every exon
     endpoint — measured 0 of 45,609 violations on the shipped index, but ASSUMED by the derivation.
 
     If it ever broke, the affected transcript would simply lose a step and its path would still read as

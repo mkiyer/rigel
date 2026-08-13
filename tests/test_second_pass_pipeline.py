@@ -10,7 +10,7 @@ assuming: that calibration really does see the drained tally, and that the drain
 ⭐ **THE gDNA CONTROL IS EXACT, AND IT IS STRUCTURAL.** Not "moves by less than something" — the four
 gDNA length pools move by **exactly zero**, and there is a derivation:
 
-* a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are cuts;
+* a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are region_bounds;
 * if the drain picks ∅ the molecule crosses **both** those boundaries, making it a multi-boundary crossing — and
    gives a multi-boundary crossing **no pool**, because it is a gDNA/RNA mixture;
 * if the drain picks a spliced path the fragment used an annotated junction, so it is ``RNA_SPLICED``.
@@ -123,7 +123,7 @@ def test_the_fixture_actually_HOLDS_fragments(scanned):
 def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
     """⭐ **THE P4 CONTROL, and it is EXACT.** The four pure-gDNA pools are byte-identical after the drain.
 
-    ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are cuts, so a
+    ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region_bounds, so a
     chosen ∅ crosses two boundaries — a multi-boundary crossing, which deliberately gives
     **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated junction, so
     it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pool that is supposed to be pure.

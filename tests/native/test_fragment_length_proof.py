@@ -95,11 +95,11 @@ def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
     return out
 
 
-def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: bool):
+def oracle_deposits(region_bounds, ref_len: int, start: int, end: int, introns, spliced: bool):
     """Every population the deposit rule credits, derived from the covered set alone.
 
     Returns ``(L, crossed_boundaries, contained_region)`` with local indices, or ``None`` for a fragment that
-    deposits nothing. ``cuts`` are this reference's cut positions.
+    deposits nothing. ``region_bounds`` are this reference's region_bound positions.
 
     ⚠ A ``spanned_regions`` set used to be derived and compared here. The bank it checked was removed on
     evidence, and the oracle no longer computes it — an oracle deriving a quantity nothing asserts is
@@ -109,14 +109,14 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
     if not covered:
         return None
     length = len(covered)
-    # A boundary at cut position p is crossed iff the molecule holds the bases on BOTH sides of it.
-    # ⚠ Reported as BOUNDARY indices: a reference's cut ``i`` is its boundary ``i − 1`` (the deposit writes
-    # ``boundary_base + boundary - 1``), because cut 0 is the reference start and owns no interior boundary. The
+    # A boundary at region_bound position p is crossed iff the molecule holds the bases on BOTH sides of it.
+    # ⚠ Reported as BOUNDARY indices: a reference's region_bound ``i`` is its boundary ``i − 1`` (the deposit writes
+    # ``boundary_base + boundary - 1``), because region_bound 0 is the reference start and owns no interior boundary. The
     # oracle re-derives that offset rather than importing it — and it caught me getting it wrong first.
-    crossed = {i - 1 for i, p in enumerate(cuts) if (p - 1) in covered and p in covered}
+    crossed = {i - 1 for i, p in enumerate(region_bounds) if (p - 1) in covered and p in covered}
 
     def region_of(pos):
-        return min(max(int(np.searchsorted(cuts, pos, side="right")) - 1, 0), len(cuts) - 2)
+        return min(max(int(np.searchsorted(region_bounds, pos, side="right")) - 1, 0), len(region_bounds) - 2)
 
     lo, hi = region_of(min(covered)), region_of(max(covered))
     contained = lo if (not spliced and lo == hi) else None
@@ -125,20 +125,20 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
 
 # --- the fixture ------------------------------------------------------------------------------------
 
-_CUTS = np.array(
+_REGION_BOUNDS = np.array(
     [0, 3, 4, 9, 12], dtype=np.int64
 )  # 4 regions: widths 3, 1, 5, 3 — includes a 1 bp region
 _REF_LEN = 12
 
 
 def _acc(max_fragment_length: int = 10_000) -> Accumulator:
-    n_regions = _CUTS.size - 1
+    n_regions = _REGION_BOUNDS.size - 1
     part = Partition(
-        cut_positions=_CUTS.copy(),
-        ref_cut_offsets=np.array([0, _CUTS.size], dtype=np.int64),
+        region_bounds=_REGION_BOUNDS.copy(),
+        ref_region_bound_offsets=np.array([0, _REGION_BOUNDS.size], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
         ref_boundary_offsets=np.array([0, n_regions - 1], dtype=np.int64),
-        sj_offsets=np.zeros(_CUTS.size + 1, dtype=np.int64),
+        sj_offsets=np.zeros(_REGION_BOUNDS.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
         region_types=np.zeros(n_regions, dtype=np.int8),
@@ -161,7 +161,7 @@ def _check_one(start: int, end: int, introns) -> None:
     """Deposit one fragment and assert every population against the set oracle."""
     acc = _acc()
     outcome = acc.deposit(0, start, end, observed_introns=introns)
-    want = oracle_deposits(_CUTS, _REF_LEN, start, end, introns, spliced=False)
+    want = oracle_deposits(_REGION_BOUNDS, _REF_LEN, start, end, introns, spliced=False)
 
     if want is None:
         assert outcome is DepositOutcome.EMPTY, (
@@ -186,7 +186,7 @@ def _check_one(start: int, end: int, introns) -> None:
     if contained is not None:
         # ⭐ The contained deposit is `1/OPPORTUNITY` — `ell − L + 1` admissible starts inside the
         # containing region — so this asserts BOTH the length the oracle derived and the region it landed in.
-        region_len = int(_CUTS[contained + 1]) - int(_CUTS[contained])
+        region_len = int(_REGION_BOUNDS[contained + 1]) - int(_REGION_BOUNDS[contained])
         assert _close(
             float(t.region_contained_inv_opportunity_sum.sum()), 1.0 / (region_len - length + 1), 1
         ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {region_len} bp region"
@@ -237,15 +237,15 @@ def test_randomised_at_realistic_scale():
     smoke test, so it must be reproducible.
     """
     rng = np.random.default_rng(20260731)
-    cuts = np.array([0, 137, 138, 400, 401, 1200, 5000, 5001, 9000], dtype=np.int64)
+    region_bounds = np.array([0, 137, 138, 400, 401, 1200, 5000, 5001, 9000], dtype=np.int64)
     ref_len = 9000
-    n_regions = cuts.size - 1
+    n_regions = region_bounds.size - 1
     part = Partition(
-        cut_positions=cuts.copy(),
-        ref_cut_offsets=np.array([0, cuts.size], dtype=np.int64),
+        region_bounds=region_bounds.copy(),
+        ref_region_bound_offsets=np.array([0, region_bounds.size], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
         ref_boundary_offsets=np.array([0, n_regions - 1], dtype=np.int64),
-        sj_offsets=np.zeros(cuts.size + 1, dtype=np.int64),
+        sj_offsets=np.zeros(region_bounds.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
         region_types=np.zeros(n_regions, dtype=np.int8),
@@ -260,7 +260,7 @@ def test_randomised_at_realistic_scale():
             introns.append((a, a + int(rng.integers(0, 900))))
         acc = Accumulator(part, max_fragment_length=10**9)
         outcome = acc.deposit(0, start, end, observed_introns=introns)
-        want = oracle_deposits(cuts, ref_len, start, end, introns, spliced=False)
+        want = oracle_deposits(region_bounds, ref_len, start, end, introns, spliced=False)
         ctx = f"[{start},{end}) introns={introns}"
         if want is None:
             assert outcome is DepositOutcome.EMPTY, ctx
@@ -399,7 +399,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
 
 def _one_region_acc(region_len: int, max_fragment_length: int = 10_000) -> Accumulator:
     """An accumulator over a SINGLE region ``[0, region_len)`` — no boundaries, so nothing but containment."""
-    part = Partition.from_cuts([[0, region_len]])
+    part = Partition.from_region_bounds([[0, region_len]])
     return Accumulator(part, max_fragment_length=max_fragment_length)
 
 

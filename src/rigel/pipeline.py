@@ -405,7 +405,7 @@ def _drain_side_buffer(
         return payload
 
     start = time.perf_counter()
-    _cuts, _offsets, region_types = build_region_partition_arrays(index)
+    _region_bounds, _offsets, region_types = build_region_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     scores = score_held_fragments(
         payload,
@@ -453,9 +453,9 @@ def _wire_calibration_regions(
     """Install the index's v8 splice graph into a native BamScanner: the region partition, then the junctions.
 
     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` flattens the per-reference
-    partition into the ``(cut_positions, ref_cut_offsets, n_refs, region_types, max_length)`` ABI, and
+    partition into the ``(region_bounds, ref_region_bound_offsets, n_refs, region_types, max_length)`` ABI, and
     :func:`~rigel.calibration.splice_graph.build_junction_edge_arrays` builds the junction CSR keyed by the
-    flat cut index. Both are derived from ``index.regions_df``/``index.edges_df`` and ordered to match
+    flat region_bound index. Both are derived from ``index.regions_df``/``index.edges_df`` and ordered to match
     ``index.ref_names``, which is the resolver's reference-id space.
 
     ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the junctions
@@ -465,11 +465,11 @@ def _wire_calibration_regions(
     """
     from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
 
-    cut_positions, ref_cut_offsets, region_types = build_region_partition_arrays(index)
+    region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
     n_refs = len(index.ref_names)
     scanner.set_regions(
-        np.ascontiguousarray(cut_positions, dtype=np.int64),
-        np.ascontiguousarray(ref_cut_offsets, dtype=np.int64),
+        np.ascontiguousarray(region_bounds, dtype=np.int64),
+        np.ascontiguousarray(ref_region_bound_offsets, dtype=np.int64),
         n_refs,
         np.ascontiguousarray(region_types, dtype=np.uint8),
         int(max_frag_length),

@@ -206,7 +206,7 @@ def test_merged_region_interior_exon_is_mapped(misaligned_index):
 
 def test_incidence_is_correct_on_the_v8_partition_too(misaligned_index):
     """The LIVE path (plan W1b): production builds this geometry with ``from_index``, on the v8 region
-    partition, where the alternative exon start at 150 is a cut rather than a region interior.
+    partition, where the alternative exon start at 150 is a region_bound rather than a region interior.
 
     The three tests above pin the function against a partition that still has interior exon boundaries;
     this one pins it against the partition it actually runs on. Both properties must hold, and only

@@ -56,13 +56,13 @@ def index(tmp_path_factory):
 def _boundary_positions(index) -> np.ndarray:
     """Genomic position of every contiguous boundary, in boundary order.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior boundaries, and boundary
-    ``e`` sits at cut ``e + 1`` — so the interior cuts, per reference, ARE the boundary coordinates.
+    A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries, and boundary
+    ``e`` sits at region_bound ``e + 1`` — so the interior region_bounds, per reference, ARE the boundary coordinates.
     """
-    positions, cut_offsets, _types = build_region_partition_arrays(index)
+    positions, region_bound_offsets, _types = build_region_partition_arrays(index)
     out = []
-    for f in range(len(cut_offsets) - 1):
-        lo, hi = int(cut_offsets[f]), int(cut_offsets[f + 1])
+    for f in range(len(region_bound_offsets) - 1):
+        lo, hi = int(region_bound_offsets[f]), int(region_bound_offsets[f + 1])
         if hi - lo >= 2:
             out.append(positions[lo + 1 : hi - 1])
     return np.concatenate(out) if out else np.zeros(0, np.int64)

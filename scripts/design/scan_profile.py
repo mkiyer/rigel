@@ -86,10 +86,10 @@ def main() -> None:
 
     index = TranscriptIndex.load(args.index)
     scan = BamScanConfig(total_threads=args.threads)
-    cuts, _offsets, _types = build_region_partition_arrays(index)
+    region_bounds, _offsets, _types = build_region_partition_arrays(index)
 
     print(f"index      {args.index}")
-    print(f"partition  {len(index.regions_df):,} regions, {cuts.size:,} cut positions")
+    print(f"partition  {len(index.regions_df):,} regions, {region_bounds.size:,} region_bound positions")
     print(f"threads    {args.threads}   repeats {args.repeats} (minimum used)\n")
     print(f"{'BAM':<26} {'fragments':>12} {'scan':>9} {'accumulator':>12} {'delta/frag':>12}")
     print("-" * 76)

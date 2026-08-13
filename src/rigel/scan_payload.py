@@ -13,11 +13,11 @@ than against a written-out list, for the same reason.
 
 THE AXES — three of them, off by one from each other per reference::
 
-    cuts    0        100       200       600        c = 4 cuts on this reference
+    region_bounds    0        100       200       600        c = 4 region_bounds on this reference
     regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3 regions
     boundaries            boundary 1    boundary 2               c - 2 = 2 contiguous boundaries
 
-A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior boundaries; one contributing
+A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries; one contributing
 none owns neither, which is legal. Junction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 junction-boundary id simply BE its slot.
@@ -147,7 +147,7 @@ class GapCensus:
     its ``L`` depends on whether a gap intron is cut. The subclasses are exhaustive and mutually exclusive,
     and the three ``gap_deferred_*`` are exactly ``qc.deferred_undetermined_gap``.
 
-    ⛔ **Its own axis, and NOT a splice type.** The umbrella cuts ACROSS the splice census: a certified-RNA
+    ⛔ **Its own axis, and NOT a splice type.** The umbrella region_bounds ACROSS the splice census: a certified-RNA
     ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as much as an
     ``UNSPLICED`` one does, so putting these on ``splice_type`` would need two labels per fragment and would
     break TRAPS: pure-and-length-censored's property that the splice census sums to the library.
@@ -161,7 +161,7 @@ class GapCensus:
     The field names are the specification's own ``Tally.gap_resolution`` keys.
     """
 
-    #: One hypothesis survived, and it necessarily cuts something: the gap intron is real and ``L``
+    #: One hypothesis survived, and it necessarily region_bounds something: the gap intron is real and ``L``
     #: excludes it. ⚠ Classifies the ARBITRATION, not the deposit — such a fragment can still be rejected
     #: afterwards as ``TOO_LONG``, which is a different question with its own counter.
     gap_resolved_spliced: int
@@ -349,7 +349,7 @@ class DeferredFragments:
     boundary compares equal by value.
     """
 
-    ref: np.ndarray  # int64[n] — which reference; the drain replays onto THAT cut axis
+    ref: np.ndarray  # int64[n] — which reference; the drain replays onto THAT region_bound axis
     start: np.ndarray  # int64[n] — the CLIPPED extent, because that is what the drain must replay
     end: np.ndarray  # int64[n]
     align_strand: np.ndarray  # int64[n]
@@ -357,7 +357,7 @@ class DeferredFragments:
     observed_intron_offsets: np.ndarray  # int64[n + 1] — in PAIRS, into observed_introns
     observed_introns: (
         np.ndarray
-    )  # int64[2 * n_observed] — flat (start, end); cut under EVERY hypothesis
+    )  # int64[2 * n_observed] — flat (start, end); region_bound under EVERY hypothesis
     hypothesis_offsets: np.ndarray  # int64[n + 1] — into the per-hypothesis arrays below
     hypothesis_sj_strand: (
         np.ndarray
@@ -474,7 +474,7 @@ class DeferredFragments:
         return cls(**arrays)
 
     def observed_introns_of(self, i: int) -> np.ndarray:
-        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. Cut under **every** hypothesis."""
+        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. RegionBound under **every** hypothesis."""
         lo, hi = int(self.observed_intron_offsets[i]), int(self.observed_intron_offsets[i + 1])
         return self.observed_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
 
@@ -494,8 +494,8 @@ class AccumulatorPayload:
     """One BAM scan's tally. Views over C++-owned buffers; this object is the keep-alive."""
 
     # -- the partition, echoed back so a consumer can locate every object without reloading the index --
-    cut_positions: np.ndarray  # int64[n_cuts] — flat, reference-major, ascending within a reference
-    ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
+    region_bounds: np.ndarray  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
+    ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
     ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — junction boundaries
@@ -713,35 +713,35 @@ class AccumulatorPayload:
         offsets = {
             name: _offsets(cal, name, n_refs)
             for name in (
-                "ref_cut_offsets",
+                "ref_region_bound_offsets",
                 "ref_region_offsets",
                 "ref_boundary_offsets",
                 "ref_sj_offsets",
             )
         }
-        cut_positions = np.ascontiguousarray(cal["cut_positions"], dtype=np.int64)
-        if int(offsets["ref_cut_offsets"][-1]) != cut_positions.shape[0]:
+        region_bounds = np.ascontiguousarray(cal["region_bounds"], dtype=np.int64)
+        if int(offsets["ref_region_bound_offsets"][-1]) != region_bounds.shape[0]:
             raise ValueError(
-                f"ref_cut_offsets ends at {int(offsets['ref_cut_offsets'][-1])} but cut_positions has "
-                f"{cut_positions.shape[0]} entries"
+                f"ref_region_bound_offsets ends at {int(offsets['ref_region_bound_offsets'][-1])} but region_bounds has "
+                f"{region_bounds.shape[0]} entries"
             )
 
-        # ⚠ Re-derived from the cut axis rather than trusted. An offset array of the right LENGTH can
+        # ⚠ Re-derived from the region_bound axis rather than trusted. An offset array of the right LENGTH can
         # still be inconsistent, and every consumer slices by these — a per-reference offset that drifts
         # is the defect class that once dropped 476,719 of 476,732 fragments while every golden passed.
-        per_ref_cuts = np.diff(offsets["ref_cut_offsets"])
+        per_ref_region_bounds = np.diff(offsets["ref_region_bound_offsets"])
         for name, per_ref in (
-            ("ref_region_offsets", np.maximum(per_ref_cuts - 1, 0)),
-            ("ref_boundary_offsets", np.maximum(per_ref_cuts - 2, 0)),
+            ("ref_region_offsets", np.maximum(per_ref_region_bounds - 1, 0)),
+            ("ref_boundary_offsets", np.maximum(per_ref_region_bounds - 2, 0)),
         ):
             expected = np.zeros(n_refs + 1, np.int64)
-            np.cumsum(np.where(per_ref_cuts > 0, per_ref, 0), out=expected[1:])
+            np.cumsum(np.where(per_ref_region_bounds > 0, per_ref, 0), out=expected[1:])
             if not np.array_equal(offsets[name], expected):
                 bad = int(np.argmax(offsets[name] != expected))
                 raise ValueError(
-                    f"{name}[{bad}] is {int(offsets[name][bad])} but the cut axis implies "
-                    f"{int(expected[bad])}. A reference contributing c cuts owns c-1 regions and c-2 "
-                    f"interior boundaries, and none at all below two cuts."
+                    f"{name}[{bad}] is {int(offsets[name][bad])} but the region_bound axis implies "
+                    f"{int(expected[bad])}. A reference contributing c region_bounds owns c-1 regions and c-2 "
+                    f"interior boundaries, and none at all below two region_bounds."
                 )
 
         n_regions = int(offsets["ref_region_offsets"][-1])
@@ -805,7 +805,7 @@ class AccumulatorPayload:
                 f"exhaustive by construction, so this is a partition that does not close."
             )
         return cls(
-            cut_positions=cut_positions,
+            region_bounds=region_bounds,
             **offsets,
             **banks,
             region_start_count=region_start_count,

@@ -45,8 +45,8 @@ from rigel.calibration.junction_opportunity import (
 def _oracle_a_j(exon_lengths, w: int) -> int:
     """Count start positions whose ``[s, s+w)`` window strictly contains a junction coordinate."""
     total = int(sum(exon_lengths))
-    cuts = list(itertools.accumulate(exon_lengths))[:-1]
-    return sum(1 for s in range(0, total - w + 1) if any(s < int(c) < s + w for c in cuts))
+    region_bounds = list(itertools.accumulate(exon_lengths))[:-1]
+    return sum(1 for s in range(0, total - w + 1) if any(s < int(c) < s + w for c in region_bounds))
 
 
 def _oracle_total(exon_lengths, w: int) -> int:
@@ -199,13 +199,13 @@ def _enumerate_library(transcripts, theta, pmf):
     pool = np.zeros(n)
     for th, exons in zip(theta, transcripts):
         total = sum(exons)
-        cuts = list(itertools.accumulate(exons))[:-1]
+        region_bounds = list(itertools.accumulate(exons))[:-1]
         for w in range(1, n):
             if pmf[w] == 0.0 or w > total:
                 continue
             for s in range(0, total - w + 1):
                 library[w] += th * pmf[w]
-                if any(s < int(c) < s + w for c in cuts):
+                if any(s < int(c) < s + w for c in region_bounds):
                     pool[w] += th * pmf[w]
     return library, pool
 

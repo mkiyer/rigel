@@ -104,7 +104,7 @@ class RegionGeometry:
 
     ⚠ **The last two are different molecules and routinely differ by two orders of magnitude at the same
     boundary.** At a donor boundary the junction flux is the gene's whole mature output while the spliced
-    crossing is the handful of molecules that read through without splicing; at a cut inside an exon
+    crossing is the handful of molecules that read through without splicing; at a region_bound inside an exon
     there is no junction at all, so ``junction_count`` is 0 while ``spliced_count`` carries everything.
     ⛔ The word *mature* fits both and therefore distinguishes neither, which is why it is not used.
 

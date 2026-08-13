@@ -75,7 +75,7 @@ def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
 
 
 def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_solver():
-    """⚠ The falsification for TRAPS: a-message-from-the-destinations-belief — if a consumer picked its own cut, the identity above breaks."""
+    """⚠ The falsification for TRAPS: a-message-from-the-destinations-belief — if a consumer picked its own region_bound, the identity above breaks."""
     tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
     theirs = tau > 1e-6  # a plausible, wrong, home-made floor
     v_fg, _ = own_composition_logvar(np.full(tau.shape, 0.4), tau, np.zeros(tau.shape, bool))

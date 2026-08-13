@@ -4,9 +4,9 @@
     Spec:  ``tests/native/_accumulator_reference.py``
      step 6
 
-⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-cut partition. It cannot see
+⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-region_bound partition. It cannot see
 a defect that only appears at **1,043,881 regions and 404,168 junctions**: a per-reference offset that drifts,
-a cut index that wraps at int32, a junction CSR slice that is off by one reference. Every such bug this
+a region_bound index that wraps at int32, a junction CSR slice that is off by one reference. Every such bug this
 project has had was invisible on a fixture — a ref-id mismatch once dropped **476,719 of 476,732 fragments
 inside deposit()** while every golden test passed.
 
@@ -70,19 +70,19 @@ _AXIS = {
 def ref_sj_offsets(partition) -> np.ndarray:
     """Per-reference offsets into the junction axis, from the CSR alone.
 
-    The CSR is keyed by the flat donor cut index and references are cut-major, so a reference's junctions
+    The CSR is keyed by the flat donor region_bound index and references are region_bound-major, so a reference's junctions
     are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the junction-boundary
     id can BE the slot: the flat slot order is already the per-reference banks concatenated in order.
     """
-    return partition.sj_offsets[partition.ref_cut_offsets]
+    return partition.sj_offsets[partition.ref_region_bound_offsets]
 
 
 def native_for_ref(partition, ref: int, max_length: int) -> NativeAccumulator:
     """One native accumulator for reference ``ref``, with the junction CSR sliced and rebased."""
-    c0, c1 = int(partition.ref_cut_offsets[ref]), int(partition.ref_cut_offsets[ref + 1])
+    c0, c1 = int(partition.ref_region_bound_offsets[ref]), int(partition.ref_region_bound_offsets[ref + 1])
     n0, n1 = int(partition.ref_region_offsets[ref]), int(partition.ref_region_offsets[ref + 1])
     accumulator = NativeAccumulator(
-        cuts=np.ascontiguousarray(partition.cut_positions[c0:c1], dtype=np.int64),
+        region_bounds=np.ascontiguousarray(partition.region_bounds[c0:c1], dtype=np.int64),
         region_types=np.ascontiguousarray(partition.region_types[n0:n1], dtype=np.uint8),
         max_length=max_length,
     )
@@ -109,7 +109,7 @@ def main() -> None:
     print(f"index      {args.index}")
     print(
         f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
-        f"{partition.n_sj:,} junction boundaries  {partition.cut_positions.size:,} cuts"
+        f"{partition.n_sj:,} junction boundaries  {partition.region_bounds.size:,} region_bounds"
     )
     print(f"bam        {args.bam}\n")
 

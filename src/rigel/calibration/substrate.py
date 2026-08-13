@@ -158,7 +158,7 @@ class CalibrationSubstrate:
     #:
     #: ⚠ A fifth, ``region_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
     #: touches the region axis at all** — a spliced fragment can never be *contained*, because both
-    #: endpoints of an annotated intron are cuts.
+    #: endpoints of an annotated intron are region_bounds.
     region_contained: PopulationView
     boundary_unspliced: PopulationView
     boundary_spliced: PopulationView

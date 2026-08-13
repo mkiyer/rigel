@@ -118,7 +118,7 @@ def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_w: int) -> np.
     ``p``, so if it reaches any line left of ``p-a`` it must also cross ``p-a``. The inclusion-exclusion
     over the two neighbours is therefore **exact**, not an approximation.
 
-    ⚠ The reference ends need no special case. The partition cuts at 0 and at ``L_ref``, so the outermost
+    ⚠ The reference ends need no special case. The partition region_bounds at 0 and at ``L_ref``, so the outermost
     region's length *is* the distance to the wall and the same subtraction removes the impossible starts.
     """
     w = np.arange(max_w + 1, dtype=np.float64)
@@ -136,9 +136,9 @@ def pool_opportunities(index, max_w: int) -> dict[str, np.ndarray]:
     """The four gDNA pools' opportunities plus ``T``, all derived from the region partition alone."""
     from rigel.calibration.splice_graph import build_region_partition_arrays
 
-    cuts, ref_cut_offsets, region_types = build_region_partition_arrays(index)
-    cuts = np.asarray(cuts, dtype=np.int64)
-    offsets = np.asarray(ref_cut_offsets, dtype=np.int64)
+    region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
+    region_bounds = np.asarray(region_bounds, dtype=np.int64)
+    offsets = np.asarray(ref_region_bound_offsets, dtype=np.int64)
     types = np.asarray(region_types, dtype=np.int64)
 
     region_lengths: list[np.ndarray] = []
@@ -151,10 +151,10 @@ def pool_opportunities(index, max_w: int) -> dict[str, np.ndarray]:
         lo, hi = int(offsets[r]), int(offsets[r + 1])
         if hi - lo < 2:
             continue
-        ref_cuts = cuts[lo:hi]
-        lengths = np.diff(ref_cuts)
+        ref_region_bounds = region_bounds[lo:hi]
+        lengths = np.diff(ref_region_bounds)
         n_regions = len(lengths)
-        ref_lengths.append(int(ref_cuts[-1]))
+        ref_lengths.append(int(ref_region_bounds[-1]))
         region_lengths.append(lengths)
         # Interior lines only: line i sits between region i-1 and region i, for i in [1, n_regions).
         if n_regions >= 2:

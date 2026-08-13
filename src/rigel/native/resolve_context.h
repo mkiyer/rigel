@@ -151,7 +151,7 @@ public:
     // fragment-length distribution, which it was neither unconditional nor one quantity.
     //
     // The tool now has ONE definition: the accumulator's `L`, the total length of the fragment's own
-    // path (span minus cut introns, mate gap included), proven exhaustively in TRAPS: two-divisors-opposite-sign and binned for
+    // path (span minus region_bound introns, mate gap included), proven exhaustively in TRAPS: two-divisors-opposite-sign and binned for
     // every deposited fragment by TRAPS: a-purity-filter-is-a-length-filter's `deposited_lengths`.
     // Return t_inds as a Python frozenset for compatibility
     nb::object get_t_inds() const {
@@ -940,8 +940,8 @@ private:
     /// Append every intron of ``t`` lying inside ``gap`` (±K), in genomic order.
     ///
     /// ⛔ EVERY one, not the first. Returning the first and stopping is what made a mate gap spanning two
-    /// annotated introns keep only one cut -- measured at 98.5 % of the fragment-length tail that survived
-    /// the earlier single-cut form -- and it also broke the ambiguity test, because two transcripts differing only in their
+    /// annotated introns keep only one region_bound -- measured at 98.5 % of the fragment-length tail that survived
+    /// the earlier single-region_bound form -- and it also broke the ambiguity test, because two transcripts differing only in their
     /// SECOND intron read as agreeing.
     inline void collect_transcript_introns_in_gap(int32_t t,
                                                   const GapBlock& gap,
@@ -1011,7 +1011,7 @@ private:
         cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
     }
 
-    /// The empty path: cut nothing. ⚠ Idempotent, because two routes can both call for it.
+    /// The empty path: region_bound nothing. ⚠ Idempotent, because two routes can both call for it.
     static void emit_unspliced_hypothesis(RawResolveResult& cr) {
         for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
             if (cr.gap_intron_offsets[h] == cr.gap_intron_offsets[h + 1]) return;

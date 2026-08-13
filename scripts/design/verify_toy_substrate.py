@@ -31,7 +31,7 @@ holds*, which no existing gate does:
 * the path is the fragment's contiguous genomic SEGMENTS; a junction splits it in two;
 * ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
   fragment, so its sum is the deposited count;
-* a cut boundary strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
+* a region_bound boundary strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
   junction, else ``boundary_unspliced``;
 * a region between two consecutively-crossed boundaries OF ONE SEGMENT is SPANNED;
 * every annotated junction used gets ``sj_count`` +1;
@@ -134,7 +134,7 @@ PERTURBATIONS = {
     "pos_blocks": "map a − transcript's mature interval as if it were + (drop the t → L−t reflection)",
     "pos_premrna": "map a − transcript's NASCENT interval as if it were + (drop the reflection)",
     "transcript_order": "take a − transcript's exons in TRANSCRIPT order, not genomic — so its "
-    "junction u-cut and its exon lengths swap",
+    "junction u-region_bound and its exon lengths swap",
     "single_geom": "route every RNA fragment through the FIRST transcript's geometry — the "
     "one-transcript assumption this file used to make",
     "unspliced_zero_everywhere": "assert the OLD structural claim (boundary_unspliced == 0 everywhere on "
@@ -168,7 +168,7 @@ class Geom:
         u = t                on ``+``          u_interval([a,b)) = [a, b)
         u = L − t            on ``−``          u_interval([a,b)) = [L−b, L−a)
 
-    and in ``u``-space the exons are the genomic ones in genomic order, the junction cuts are their
+    and in ``u``-space the exons are the genomic ones in genomic order, the junction region_bounds are their
     cumulative lengths, and a uniform draw over ``t`` is a uniform draw over ``u``. So placement
     combinatorics, containment and per-junction crossing are all strand-FREE once expressed here.
 
@@ -200,7 +200,7 @@ class Geom:
         return tuple(out)
 
     @property
-    def cuts_u(self) -> tuple[int, ...]:
+    def region_bounds_u(self) -> tuple[int, ...]:
         """The junctions' ``u``-space offsets, ascending — one per intron, genomic order."""
         return self.offsets[1:]
 
@@ -259,15 +259,15 @@ class Geom:
     def crossings_per_junction(self, w: int) -> list[int]:
         """Legal starts that cross EACH junction, in ``u``-space — one entry per intron.
 
-        A length-``w`` fragment crosses the cut at ``c`` iff its ``u``-start lies in
+        A length-``w`` fragment crosses the region_bound at ``c`` iff its ``u``-start lies in
         ``[c − w + 1, c − 1]``, intersected with the ``[0, L − w]`` legal range. ⭐ Per junction, not
         pooled: on a 3-exon transcript a long fragment can cross two, and only the per-junction form
         can tell a mis-placed junction from a mis-counted one."""
         total = max(self.spliced_length - w + 1, 0)
         if total <= 0:
-            return [0] * len(self.cuts_u)
+            return [0] * len(self.region_bounds_u)
         return [
-            max(min(c - 1, total - 1) - max(0, c - w + 1) + 1, 0) for c in self.cuts_u
+            max(min(c - 1, total - 1) - max(0, c - w + 1) + 1, 0) for c in self.region_bounds_u
         ]
 
     def exon_of_u(self, u0: int, u1: int) -> int | None:
@@ -290,8 +290,8 @@ class TruthTally:
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
     the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
-    def __init__(self, cuts: np.ndarray, n_regions: int, n_boundaries: int, junctions: dict):
-        self.cuts = np.asarray(cuts, np.int64)
+    def __init__(self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, junctions: dict):
+        self.region_bounds = np.asarray(region_bounds, np.int64)
         self.region_contained = np.zeros(n_regions, np.int64)
         self.region_spanning = np.zeros(n_regions, np.int64)
         self.region_start = np.zeros(n_regions, np.int64)
@@ -302,11 +302,11 @@ class TruthTally:
         self.n_deposited = 0
 
     def _region_of(self, pos: int) -> int:
-        """⚠ ``cut_positions`` carries BOTH reference boundaries — ``n_regions = n_cuts − 1`` — so the
+        """⚠ ``region_bounds`` carries BOTH reference boundaries — ``n_regions = n_region_bounds − 1`` — so the
         region index is one less than the insertion point. Transcribed from the reference's own
         ``_local_region``; getting it wrong shifts every deposit by one region, which is exactly what a
         first run of this file did."""
-        return min(max(int(np.searchsorted(self.cuts, pos, side="right")) - 1, 0), self.cuts.size - 2)
+        return min(max(int(np.searchsorted(self.region_bounds, pos, side="right")) - 1, 0), self.region_bounds.size - 2)
 
     def deposit(self, segments: list[tuple[int, int]], introns: list[tuple[int, int]]):
         if not segments:
@@ -318,13 +318,13 @@ class TruthTally:
         self.n_deposited += 1
         boundary = self.boundary_spliced if spliced else self.boundary_unspliced
         for seg_start, seg_end in segments:
-            first = int(np.searchsorted(self.cuts, seg_start, side="right"))
-            last = int(np.searchsorted(self.cuts, seg_end, side="left"))
+            first = int(np.searchsorted(self.region_bounds, seg_start, side="right"))
+            last = int(np.searchsorted(self.region_bounds, seg_end, side="left"))
             for boundary in range(first, last):
                 boundary[boundary - 1] += 1
             for boundary in range(first, last - 1):
                 self.region_spanning[boundary] += 1
-        # ⚠ ``boundary`` indexes ``cuts``; boundary ``boundary-1`` and region ``boundary`` follow the reference exactly.
+        # ⚠ ``boundary`` indexes ``region_bounds``; boundary ``boundary-1`` and region ``boundary`` follow the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
         if not sj_ids and self._region_of(first_base) == self._region_of(last_base):
@@ -502,8 +502,8 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
         us = [geom.u_interval(f["start"], f["end"]) for f in own]
         print(f"\n   {tid}{geom.strand}   L = {geom.spliced_length:,}   exon lengths "
               f"{geom.exon_lengths} (genomic order)   n = {len(own):,}")
-        for j, cut in enumerate(geom.cuts_u):
-            obs = sum(1 for u0, u1 in us if u0 < cut < u1)
+        for j, region_bound in enumerate(geom.region_bounds_u):
+            obs = sum(1 for u0, u1 in us if u0 < region_bound < u1)
             out[(tid, j)] = obs
             exp = var = 0.0
             for w, n in by_len.items():
@@ -515,7 +515,7 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
                 var += n * p * (1 - p)
             sd = math.sqrt(var)
             gpos = geom.introns[j]
-            print(f"      junction {j} @ genomic {gpos[0]:,}→{gpos[1]:,}  (u-cut {cut:,}): "
+            print(f"      junction {j} @ genomic {gpos[0]:,}→{gpos[1]:,}  (u-region_bound {region_bound:,}): "
                   f"observed {obs:,} · uniform prediction {exp:,.1f} ± {sd:,.1f}")
             if capture_on:
                 continue
@@ -661,7 +661,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     """TRAPS: self-checking-validator — every bank, re-derived from the TRUTH, against the payload. The main event."""
     print("\n── GATE TRAPS: self-checking-validator: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
-    cuts = np.asarray(payload.cut_positions, np.int64)
+    region_bounds = np.asarray(payload.region_bounds, np.int64)
     n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
     # the junction map: (intron_start, intron_end) -> jid, from the index's own junction axis
     from rigel.calibration.splice_graph import build_junction_geometry_arrays
@@ -684,7 +684,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
           "⭐ the index's junction axis is EXACTLY the set of introns the spec declares",
           f"spec {sorted(declared)} vs index {sorted(junctions)}")
 
-    tt = TruthTally(cuts, n_regions, n_boundaries, junctions)
+    tt = TruthTally(region_bounds, n_regions, n_boundaries, junctions)
 
     first_tid = sorted(geoms)[0]
     for f in frags:

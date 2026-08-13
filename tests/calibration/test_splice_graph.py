@@ -115,9 +115,9 @@ def test_G3_three_exon_transcript():
 
 
 def test_G4_alternative_TSS_inside_another_exon():
-    """⭐ THE case v7's merge deletes: an interior cut whose two sides share a signature."""
+    """⭐ THE case v7's merge deletes: an interior region_bound whose two sides share a signature."""
     n, e = _graph([_tx([(400, 1000)], t_id="long"), _tx([(600, 1000)], t_id="short")])
-    assert (600, 1000) in _regions(n), "the alternative-TSS cut at 600 was merged away"
+    assert (600, 1000) in _regions(n), "the alternative-TSS region_bound at 600 was merged away"
     i = _regions(n).index((400, 600))
     assert n["signature"][i] == n["signature"][i + 1], "both sides carry the same signature"
     assert _flags_at(n, e, 600) & FLAG_TSS_POS
@@ -203,7 +203,7 @@ def test_G11_nested_transcript_inside_another_intron():
 
 
 def test_G12_shared_exon_endpoint_across_transcripts():
-    """Exactly one cut, one boundary — the cut set dedups."""
+    """Exactly one region_bound, one boundary — the region_bound set dedups."""
     n, e = _graph([_tx([(400, 800)], t_id="a"), _tx([(400, 800)], t_id="b")])
     assert _regions(n) == [(0, 400), (400, 800), (800, 2000)]
 
@@ -223,7 +223,7 @@ def test_G14_bookended_exons_no_intron():
 
 
 def test_G15_transcript_at_reference_boundaries():
-    """No zero-length region and no duplicate cut when an exon touches 0 or ref_length."""
+    """No zero-length region and no duplicate region_bound when an exon touches 0 or ref_length."""
     n, _e = _graph([_tx([(0, 300), (1700, 2000)])])
     assert int(n["length"].min()) > 0
     assert _regions(n)[0][0] == 0 and _regions(n)[-1][1] == 2000
@@ -367,10 +367,10 @@ def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():
 
 
 def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():
-    """A manufactured nRNA span row contributes no cut, no flag and no reach.
+    """A manufactured nRNA span row contributes no region_bound, no flag and no reach.
 
     ⚠ This test used to build its span with ``is_nrna=True`` alone and assert the *opposite* — that
-    the span cuts the partition but sets no flags. That encoded a real bug (see the test below):
+    the span region_bounds the partition but sets no flags. That encoded a real bug (see the test below):
     on a NON-synthetic row ``is_nrna`` means "this real transcript is single-exon", not "this is a
     manufactured span". The rows that must be excluded are the SYNTHETIC ones, and ``~is_synthetic``
     excludes exactly them.
@@ -378,8 +378,8 @@ def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():
     real = _tx([(400, 600), (1000, 1200)], t_id="real")
     span = _tx([(300, 1500)], t_id="span", is_nrna=True, is_synthetic=True)
     n, e = _graph([real, span])
-    cuts = set(n["start"].tolist()) | set(n["end"].tolist())
-    assert not ({300, 1500} & cuts), "a synthetic span must contribute NO cut"
+    region_bounds = set(n["start"].tolist()) | set(n["end"].tolist())
+    assert not ({300, 1500} & region_bounds), "a synthetic span must contribute NO region_bound"
     assert set(n["end"].tolist()[:-1]) == {400, 600, 1000, 1200}
 
 

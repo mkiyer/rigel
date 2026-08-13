@@ -48,7 +48,7 @@ DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 # The tail thresholds the audit and quote, so the two are comparable.
-TAIL_CUTS = (500, 600, 700, 800)
+TAIL_REGION_BOUNDS = (500, 600, 700, 800)
 
 
 def moments(counts: np.ndarray) -> tuple[float, float, int]:
@@ -64,11 +64,11 @@ def moments(counts: np.ndarray) -> tuple[float, float, int]:
     return mean, float(np.sqrt(max(var, 0.0))), int(nz[-1]) if nz.size else 0
 
 
-def tail_mass(counts: np.ndarray, cut: int) -> float:
-    """Fraction of the histogram's mass at ``length >= cut``."""
+def tail_mass(counts: np.ndarray, region_bound: int) -> float:
+    """Fraction of the histogram's mass at ``length >= region_bound``."""
     c = np.asarray(counts, dtype=np.float64)
     total = c.sum()
-    return float(c[cut:].sum() / total) if total > 0 else float("nan")
+    return float(c[region_bound:].sum() / total) if total > 0 else float("nan")
 
 
 def read_truth(path: Path) -> dict[str, np.ndarray]:
@@ -139,7 +139,7 @@ def measure(
         "anchor": {"mean": a_mean, "sd": a_sd, "ceiling": a_top, "n": int(np.sum(anchor))},
         "rna_pool": {"mean": r_mean, "sd": r_sd, "ceiling": r_top, "n": int(np.sum(rna))},
         "gap_vs_anchor": {"mean_pct": _pct(r_mean, a_mean), "sd_pct": _pct(r_sd, a_sd)},
-        "anchor_tail": {str(cut): tail_mass(anchor, cut) for cut in TAIL_CUTS},
+        "anchor_tail": {str(region_bound): tail_mass(anchor, region_bound) for region_bound in TAIL_REGION_BOUNDS},
         "qc": {
             "deposited": payload.qc.deposited,
             "dropped_too_long": payload.qc.dropped_too_long,
@@ -172,7 +172,7 @@ def measure(
         "sd": g_sd,
         "ceiling": g_top,
         "n": int(np.sum(gdna_pool)),
-        "tail": {str(cut): tail_mass(gdna_pool, cut) for cut in TAIL_CUTS},
+        "tail": {str(region_bound): tail_mass(gdna_pool, region_bound) for region_bound in TAIL_REGION_BOUNDS},
     }
 
     if truth is None:
@@ -200,8 +200,8 @@ def measure(
             # ⭐ G-tail: mass ABOVE the library's true ceiling. Truth is 0 there by construction, so
             # this number is not a comparison — it is an absolute count of impossible molecules.
             "mass_above_truth_ceiling": tail_mass(series, t_top + 1),
-            "tail": {str(cut): tail_mass(series, cut) for cut in TAIL_CUTS},
-            "truth_tail": {str(cut): tail_mass(truth[key], cut) for cut in TAIL_CUTS},
+            "tail": {str(region_bound): tail_mass(series, region_bound) for region_bound in TAIL_REGION_BOUNDS},
+            "truth_tail": {str(region_bound): tail_mass(truth[key], region_bound) for region_bound in TAIL_REGION_BOUNDS},
         }
     return row
 

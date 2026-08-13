@@ -84,7 +84,7 @@ def test_composition_logvar_is_pure_counting_at_the_structural_corner():
 def test_composition_logvar_self_excludes_short_regions_without_a_threshold():
     """The composition coefficient ``[(1/E_g − 1/E_r)/B]²`` grows as ``E_g`` collapses on a short region, so a
     short region carries a LARGE composition variance and down-weights itself as an enrichment reference —
-    exactly §2's exclusion, with NO ``L ≲ fl_mean`` cut. Ordering: long region ≪ boundary ≪ short region."""
+    exactly §2's exclusion, with NO ``L ≲ fl_mean`` region_bound. Ordering: long region ≪ boundary ≪ short region."""
     # isolate the composition term (n→inf ⇒ counting term 0), at the worst-case f_g = ½
     long_reg = float(composition_logvar(0.5, EG_REG, ER_REG, var_fg=1.0, n=np.inf))
     boundary = float(composition_logvar(0.5, EG_BND, ER_BND, var_fg=1.0, n=np.inf))

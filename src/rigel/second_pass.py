@@ -11,7 +11,7 @@ resolves them, in three steps that are three functions::
         of §3, kept apart      draw per fragment     winner ALONE, and consume the bank
 
 ⭐ **``drain`` is PURE: payload in, payload out.** It rebuilds one accumulator per reference from the
-payload's own cut axis, so the whole second pass runs off a *cached* scan — which is what lets one scan be
+payload's own region_bound axis, so the whole second pass runs off a *cached* scan — which is what lets one scan be
 drained repeatedly at different seeds without re-reading the BAM, and what and P6
 both need. It also means the drain never sees a thread, so reproducibility is structural.
 
@@ -98,13 +98,13 @@ class HeldScores:
         return int(self.score.shape[0])
 
 
-def _exact_cut(cuts: np.ndarray, lo: int, hi: int, position: int) -> int:
-    """Flat cut index of ``position`` within ``cuts[lo:hi]``, or -1 if it is not a cut there."""
-    k = lo + int(np.searchsorted(cuts[lo:hi], position))
-    return k if k < hi and int(cuts[k]) == position else -1
+def _exact_region_bound(region_bounds: np.ndarray, lo: int, hi: int, position: int) -> int:
+    """Flat region_bound index of ``position`` within ``region_bounds[lo:hi]``, or -1 if it is not a region_bound there."""
+    k = lo + int(np.searchsorted(region_bounds[lo:hi], position))
+    return k if k < hi and int(region_bounds[k]) == position else -1
 
 
-def _junction_id(junctions, cuts, lo, hi, start, end, sj_strand) -> int:
+def _junction_id(junctions, region_bounds, lo, hi, start, end, sj_strand) -> int:
     """The annotated junction slot for one intron, or -1.
 
     ⚠ Mirrors ``Accumulator::sj_edge_id`` — same CSR, same strand rule (the filter applies only when the
@@ -112,10 +112,10 @@ def _junction_id(junctions, cuts, lo, hi, start, end, sj_strand) -> int:
     length definition: this is a lookup into the index's own table, and the slot IS the payload's junction
     axis index.
     """
-    donor = _exact_cut(cuts, lo, hi, start)
+    donor = _exact_region_bound(region_bounds, lo, hi, start)
     if donor < 0:
         return -1
-    acceptor = _exact_cut(cuts, lo, hi, end)
+    acceptor = _exact_region_bound(region_bounds, lo, hi, end)
     if acceptor < 0:
         return -1
     definite = sj_strand in (int(Strand.POS), int(Strand.NEG))
@@ -129,7 +129,7 @@ def _junction_id(junctions, cuts, lo, hi, start, end, sj_strand) -> int:
 
 
 def _distinguishing_boundaries(
-    cuts: np.ndarray, lo: int, hi: int, start: int, end: int
+    region_bounds: np.ndarray, lo: int, hi: int, start: int, end: int
 ) -> tuple[int, int]:
     """The LOCAL boundary range that separates ∅ from a path splicing ``[start, end)``. Endpoints INCLUDED.
 
@@ -141,16 +141,16 @@ def _distinguishing_boundaries(
     * the spliced path is ``[s, start)`` and ``[end, e)`` and crosses those in ``(s, start)`` and
       ``(end, e)``.
 
-    The difference is the boundaries at cuts ``start <= c <= end`` — and since both endpoints of an annotated
-    intron are cuts by construction, those two boundaries always exist and always discriminate.
+    The difference is the boundaries at region_bounds ``start <= c <= end`` — and since both endpoints of an annotated
+    intron are cut by construction, those two boundaries always exist and always discriminate.
 
     ⛔ **This asked for ``start < c < end`` until 2026-08-02 (D-6).** That drops exactly the two
     guaranteed discriminators, and returns an EMPTY range whenever the intron spans one region — handing ∅
     a structural ``rho`` of 0. Measured over the pilot: on a gdna100 library the shipped rule read
     **43.4 %** of ∅ hypotheses as zero-density where the derived rule reads ⭐ **0.0000**.
     """
-    first = int(np.searchsorted(cuts[lo:hi], start, side="left"))
-    last = int(np.searchsorted(cuts[lo:hi], end, side="right"))
+    first = int(np.searchsorted(region_bounds[lo:hi], start, side="left"))
+    last = int(np.searchsorted(region_bounds[lo:hi], end, side="right"))
     return first, last
 
 
@@ -285,10 +285,10 @@ def _bottleneck(values: list[float]) -> float:
 
 
 class _Accumulators:
-    """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own cut axis, junctions installed.
+    """A lazy ``ref -> Accumulator`` map built from the PAYLOAD's own region_bound axis, junctions installed.
 
     ⭐ **This is what lets the second pass run off a payload rather than off a live scanner.** The
-    accumulator is described by its cut positions, and the payload carries them — so a cached scan can be
+    accumulator is described by its region_bound positions, and the payload carries them — so a cached scan can be
     scored and drained without re-reading the BAM, which is what keeps `build_scan_cache.py` useful for
     every re-measurement and P6 ask for.
 
@@ -298,7 +298,7 @@ class _Accumulators:
     only needs ``length_under`` and would survive without it; the drain would silently credit no junction
     boundary at all.
 
-    ⚠ ``region_types`` comes from the INDEX. The payload echoes the cut axis but not the typing, and the
+    ⚠ ``region_types`` comes from the INDEX. The payload echoes the region_bound axis but not the typing, and the
     typing is what assigns a deposit to a length pool.
 
     ⚠ Lazy, and :attr:`built` is the set that actually exists — which is exactly the delta's support, so
@@ -315,12 +315,12 @@ class _Accumulators:
         if ref in self.built:
             return self.built[ref]
         payload, junctions = self._payload, self._junctions
-        cut_lo = int(payload.ref_cut_offsets[ref])
-        cut_hi = int(payload.ref_cut_offsets[ref + 1])
+        region_bound_lo = int(payload.ref_region_bound_offsets[ref])
+        region_bound_hi = int(payload.ref_region_bound_offsets[ref + 1])
         region_lo = int(payload.ref_region_offsets[ref])
-        n_regions = max(cut_hi - cut_lo - 1, 0)
+        n_regions = max(region_bound_hi - region_bound_lo - 1, 0)
         accumulator = NativeAccumulator(
-            cuts=np.ascontiguousarray(payload.cut_positions[cut_lo:cut_hi], dtype=np.int64),
+            region_bounds=np.ascontiguousarray(payload.region_bounds[region_bound_lo:region_bound_hi], dtype=np.int64),
             region_types=np.ascontiguousarray(
                 self._region_types[region_lo : region_lo + n_regions], dtype=np.uint8
             ),
@@ -330,9 +330,9 @@ class _Accumulators:
         # ⭐ The junction CSR sliced to THIS reference. A junction id IS its rank, so the slot base must
         # agree with the payload's own `ref_sj_offsets[ref]` — checked rather than assumed, because a
         # silent disagreement would write one reference's junction traffic onto another's slots.
-        empty = cut_hi <= cut_lo
-        slot_lo = 0 if empty else int(junctions.offsets[cut_lo])
-        slot_hi = 0 if empty else int(junctions.offsets[cut_hi])
+        empty = region_bound_hi <= region_bound_lo
+        slot_lo = 0 if empty else int(junctions.offsets[region_bound_lo])
+        slot_hi = 0 if empty else int(junctions.offsets[region_bound_hi])
         if slot_lo != int(payload.ref_sj_offsets[ref]):
             raise ValueError(
                 f"reference {ref}'s junctions start at slot {slot_lo} in the index but the payload's "
@@ -343,10 +343,10 @@ class _Accumulators:
             offsets=np.zeros(1, np.int32)
             if empty
             else np.ascontiguousarray(
-                junctions.offsets[cut_lo : cut_hi + 1] - slot_lo, dtype=np.int32
+                junctions.offsets[region_bound_lo : region_bound_hi + 1] - slot_lo, dtype=np.int32
             ),
             boundary_right=np.ascontiguousarray(
-                junctions.boundary_right[slot_lo:slot_hi] - cut_lo, dtype=np.int32
+                junctions.boundary_right[slot_lo:slot_hi] - region_bound_lo, dtype=np.int32
             ),
             sj_strand=np.ascontiguousarray(junctions.strand[slot_lo:slot_hi], dtype=np.int8),
         )
@@ -389,7 +389,7 @@ def score_held_fragments(
     strand = np.ones(n_hyp, np.float64)
     score = np.zeros(n_hyp, np.float64)
 
-    cuts = payload.cut_positions
+    region_bounds = payload.region_bounds
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
@@ -411,7 +411,7 @@ def score_held_fragments(
             for h in range(h0, h1)
         ]
         acc = accumulators[ref]
-        cut_lo, cut_hi = int(payload.ref_cut_offsets[ref]), int(payload.ref_cut_offsets[ref + 1])
+        region_bound_lo, region_bound_hi = int(payload.ref_region_bound_offsets[ref]), int(payload.ref_region_bound_offsets[ref + 1])
         boundary_base = int(payload.ref_boundary_offsets[ref])
         # ⭐ The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
         # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
@@ -445,7 +445,7 @@ def score_held_fragments(
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied_strand
                 observed_densities = []
                 for a, b in introns:
-                    jid = _junction_id(junctions, cuts, cut_lo, cut_hi, a, b, motif)
+                    jid = _junction_id(junctions, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
                     observed_densities.append(
                         0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid])
                     )
@@ -454,7 +454,7 @@ def score_held_fragments(
                 # The genomic path's evidence is the unspliced crossing density where the others jump.
                 boundary_densities = []
                 for a, b in contested:
-                    first, last = _distinguishing_boundaries(cuts, cut_lo, cut_hi, a, b)
+                    first, last = _distinguishing_boundaries(region_bounds, region_bound_lo, region_bound_hi, a, b)
                     for boundary in range(first, last):
                         boundary_densities.append(
                             float(payload.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1])

@@ -26,7 +26,7 @@ What it reports
    are distinguished by whether anything outside the package calls it.
 3. ⭐⭐ **STALE DOCSTRING CROSS-REFERENCES** — every sibling module a docstring names for which **no import
    boundary exists in either direction**. Each one is a sentence pointing at code that is not connected.
-4. **DEAD PUBLIC SURFACE** — exported names that nothing anywhere imports. ⚠ Not automatically a cut: a
+4. **DEAD PUBLIC SURFACE** — exported names that nothing anywhere imports. ⚠ Not automatically a region_bound: a
    name may be an executable reference that a test gates, which is a legitimate second home. The report
    says which, by naming the importers it does have.
 
@@ -233,7 +233,7 @@ def main() -> int:
     # ── 4. DEAD PUBLIC SURFACE ─────────────────────────────────────────────────────────────────────────
     print()
     print("   DEAD PUBLIC SURFACE — exported and imported by nothing")
-    print("      ⚠ NOT automatically a cut: an executable REFERENCE that a test gates is a legitimate")
+    print("      ⚠ NOT automatically a region_bound: an executable REFERENCE that a test gates is a legitimate")
     print("        second home. The count of test-only importers is what tells the two apart.")
     all_src = "\n".join(
         p.read_text(errors="ignore")

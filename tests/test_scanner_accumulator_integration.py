@@ -127,9 +127,9 @@ def multi_reference_bam(tmp_path):
 
     ⭐ This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule
     and a ``FragmentPath`` cannot express it — it carries one extent
-    on one cut axis — so the deposit adapter refuses it. ⚠ The predecessor computed a span per
+    on one region_bound axis — so the deposit adapter refuses it. ⚠ The predecessor computed a span per
     reference and deposited **all** of them onto ``exons.front().ref_id``, so one contig's
-    coordinates landed on another's cut axis. The refusal is right; being silent about it was not.
+    coordinates landed on another's region_bound axis. The refusal is right; being silent about it was not.
 
     ⚠ It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript,
     so the fragment is never classified chimeric and is never filtered upstream. That is precisely
@@ -215,20 +215,20 @@ class TestScannerAccumulatorIntegration:
     def test_payload_shape_matches_index_partition(self, oracle):
         """The payload's three axes must be exactly what the index's partition implies.
 
-        ⭐ ``cuts`` are the CUT POSITIONS; a reference with ``k`` cuts owns ``k − 1`` regions and
+        ⭐ ``region_bounds`` are the REGION_BOUND POSITIONS; a reference with ``k`` region_bounds owns ``k − 1`` regions and
         ``k − 2`` interior boundaries. The predecessor counted ``k`` boundary objects per reference — the
         ``k − 1`` interiors plus two data-free terminals — which is the axis S5.f retired.
         """
         index = oracle.index
-        cuts, ref_cut_offsets, region_types = build_region_partition_arrays(index)
+        region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
         payload = _scan(oracle)
 
-        np.testing.assert_array_equal(payload.cut_positions, cuts)
-        np.testing.assert_array_equal(payload.ref_cut_offsets, ref_cut_offsets)
+        np.testing.assert_array_equal(payload.region_bounds, region_bounds)
+        np.testing.assert_array_equal(payload.ref_region_bound_offsets, ref_region_bound_offsets)
         assert payload.n_refs == len(index.ref_names)
         assert region_types.shape == (payload.n_regions,)  # one type per region
 
-        diffs = np.diff(ref_cut_offsets)
+        diffs = np.diff(ref_region_bound_offsets)
         expected_regions = int(np.sum(np.maximum(diffs - 1, 0)))
         expected_boundaries = int(np.sum(np.maximum(diffs - 2, 0)))
         assert payload.n_regions == expected_regions
@@ -375,7 +375,7 @@ class TestSpliceCensus:
         job, and the census is where that decision becomes visible.
 
         ``n_deposit_not_offered`` covers the fragments the deposit adapter cannot express as one
-        molecule on one cut axis — chiefly blocks on more than one reference. Those returns were
+        molecule on one region_bound axis — chiefly blocks on more than one reference. Those returns were
         silent before this counter; the identity is what makes them countable.
 
         ⚠ This is the same externally-checkable form as TRAPS: a-purity-filter-is-a-length-filter's ``Σ deposited_lengths == qc.deposited``

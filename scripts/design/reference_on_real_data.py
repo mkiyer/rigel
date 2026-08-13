@@ -9,7 +9,7 @@ about to be gated on byte-identity to this file, so the file has to be correct o
 
 WHAT IS CHECKED. Every number the reference reports is re-derived here **by a different method** and
 compared. The reference locates crossed boundaries with two ``searchsorted`` calls per segment and takes the
-resulting index range; this script walks each segment's cuts with ``bisect`` and counts them one at a
+resulting index range; this script walks each segment's region_bounds with ``bisect`` and counts them one at a
 time. Agreement between the two is not automatic — that is the point.
 
     OMP_NUM_THREADS=1 python scripts/design/reference_on_real_data.py INDEX BAM [--limit N]
@@ -49,7 +49,7 @@ from rigel.types import Strand  # noqa: E402
 
 def build_partition(index) -> Partition:
     """The real index, in the reference's own terms."""
-    cuts, cut_offsets, region_types = build_region_partition_arrays(index)
+    region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
     arrays = build_junction_edge_arrays(index)
     boundaries = index.edges_df
     is_junction = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
@@ -57,26 +57,26 @@ def build_partition(index) -> Partition:
     if arrays.boundary_right.shape[0] != n_junction:
         raise SystemExit("junction CSR disagrees with edges.feather on the junction count")
     return Partition(
-        cut_positions=cuts,
-        ref_cut_offsets=cut_offsets,
+        region_bounds=region_bounds,
+        ref_region_bound_offsets=region_bound_offsets,
         region_types=region_types,
-        ref_region_offsets=_offsets(cut_offsets, per_ref=1),
-        ref_boundary_offsets=_offsets(cut_offsets, per_ref=2),
+        ref_region_offsets=_offsets(region_bound_offsets, per_ref=1),
+        ref_boundary_offsets=_offsets(region_bound_offsets, per_ref=2),
         sj_offsets=arrays.offsets,
         sj_boundary_right=arrays.boundary_right,
         sj_strand=arrays.strand,
     )
 
 
-def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
-    """Region (``per_ref=1``) or contiguous-boundary (``per_ref=2``) CSR offsets from the cut offsets.
+def _offsets(region_bound_offsets: np.ndarray, per_ref: int) -> np.ndarray:
+    """Region (``per_ref=1``) or contiguous-boundary (``per_ref=2``) CSR offsets from the region_bound offsets.
 
-    A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` boundaries; one contributing none
+    A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` boundaries; one contributing none
     owns neither, which is why the subtraction is clamped at zero rather than applied blindly.
     """
-    counts = np.diff(cut_offsets.astype(np.int64))
+    counts = np.diff(region_bound_offsets.astype(np.int64))
     sizes = np.maximum(counts - per_ref, 0) * (counts > 0)
-    out = np.zeros(cut_offsets.shape[0], np.int64)
+    out = np.zeros(region_bound_offsets.shape[0], np.int64)
     np.cumsum(sizes, out=out[1:])
     return out
 
@@ -145,7 +145,7 @@ def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
 #: ⛔ The battery ``--self-check`` runs. Every case is an intron pathology on which the naive
 #: ``(hi − lo) − Σ intron`` disagrees with the true segment total, or on which filtering an intron
 #: disagrees with clipping it. Four of the six caught the harness itself on 2026-07-29.
-_SELF_CHECK_CUTS = [0, 100, 200, 300, 400, 500, 600, 1000]
+_SELF_CHECK_REGION_BOUNDS = [0, 100, 200, 300, 400, 500, 600, 1000]
 _SELF_CHECK_CASES = [
     ("overlapping introns (the MO_3021 chr8 case)", 150, 500, [(210, 260), (240, 300)]),
     ("nested introns", 150, 500, [(200, 400), (250, 300)]),
@@ -164,14 +164,14 @@ def self_check() -> int:
     reports agreement. Real data cannot catch it: the discriminating fragment is ~1 in 875,670, so the
     prefix a ``--limit`` run sees is very likely clean.
     """
-    types = [[0] * (len(_SELF_CHECK_CUTS) - 1)]
-    partition = Partition.from_cuts([_SELF_CHECK_CUTS], region_types=types)
+    types = [[0] * (len(_SELF_CHECK_REGION_BOUNDS) - 1)]
+    partition = Partition.from_region_bounds([_SELF_CHECK_REGION_BOUNDS], region_types=types)
     print("SELF-CHECK — this harness's re-derivation vs the reference, on intron pathologies\n")
     print(f"  {'case':44s} {'reference':>10s} {'harness':>8s} {'absorbed':>9s}")
     failures = 0
     for label, lo, hi, introns in _SELF_CHECK_CASES:
         # the reference's L, through the reference's own definition: clip, normalise, sum the segments
-        clipped_lo, clipped_hi = max(lo, _SELF_CHECK_CUTS[0]), min(hi, _SELF_CHECK_CUTS[-1])
+        clipped_lo, clipped_hi = max(lo, _SELF_CHECK_REGION_BOUNDS[0]), min(hi, _SELF_CHECK_REGION_BOUNDS[-1])
         merged, absorbed = _normalise_introns(introns, clipped_lo, clipped_hi)
         reference_length = sum(b - a for a, b in _segments(clipped_lo, clipped_hi, merged))
         _, harness_length, _ = _expected(partition, 0, lo, hi, sorted(introns), Strand.NONE)
@@ -216,14 +216,14 @@ def main() -> None:
     print(f"index      {args.index}")
     print(
         f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
-        f"{partition.n_sj:,} junction boundaries  {partition.cut_positions.size:,} cuts"
+        f"{partition.n_sj:,} junction boundaries  {partition.region_bounds.size:,} region_bounds"
     )
     print(f"bam        {args.bam}\n")
 
     name_to_ref_id = {name: i for i, name in enumerate(index.ref_names)}
     acc = Accumulator(partition, max_fragment_length=args.max_fragment_length)
 
-    # independent expectations, re-derived per fragment by a DIFFERENT method (bisect, one cut at a time)
+    # independent expectations, re-derived per fragment by a DIFFERENT method (bisect, one region_bound at a time)
     expect_crossings = expect_density = 0
     expect_junctions = 0
     accepted = 0
@@ -330,9 +330,9 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
     the reference end instead of truncating it, which is a second way to disagree with the reference — the
     two behaviours differ by 50 bp on the ``[900,1000)`` + intron ``[950,1200)`` case.
     """
-    first, last = int(partition.ref_cut_offsets[ref_id]), int(partition.ref_cut_offsets[ref_id + 1])
-    cuts = partition.cut_positions[first:last].tolist()
-    lo, hi = max(lo, cuts[0]), min(hi, cuts[-1])
+    first, last = int(partition.ref_region_bound_offsets[ref_id]), int(partition.ref_region_bound_offsets[ref_id + 1])
+    region_bounds = partition.region_bounds[first:last].tolist()
+    lo, hi = max(lo, region_bounds[0]), min(hi, region_bounds[-1])
     introns = [(max(s, lo), min(e, hi)) for s, e in introns]
     introns = sorted((s, e) for s, e in introns if s < e)
 
@@ -346,16 +346,16 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
         segments.append((cursor, hi))
     length = sum(b - a for a, b in segments)
     for a, b in segments:
-        i = bisect.bisect_right(cuts, a)
-        while i < len(cuts) and cuts[i] < b:  # one cut at a time, no range arithmetic
+        i = bisect.bisect_right(region_bounds, a)
+        while i < len(region_bounds) and region_bounds[i] < b:  # one region_bound at a time, no range arithmetic
             crossings += 1
             i += 1
 
     junctions = 0
     for s, e in introns:
-        d = bisect.bisect_left(cuts, s)
-        a = bisect.bisect_left(cuts, e)
-        if d >= len(cuts) or cuts[d] != s or a >= len(cuts) or cuts[a] != e:
+        d = bisect.bisect_left(region_bounds, s)
+        a = bisect.bisect_left(region_bounds, e)
+        if d >= len(region_bounds) or region_bounds[d] != s or a >= len(region_bounds) or region_bounds[a] != e:
             continue
         for k in range(
             int(partition.sj_offsets[first + d]),

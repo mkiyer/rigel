@@ -48,7 +48,7 @@ GENOME = 70_000
 #:
 #: ⚠ Measured, not supposed: with everything on one contig, a perturbation giving **every** reference the id
 #: ``0`` passed the entire suite, 1860 tests. A single-contig fixture cannot tell a correct reference stamp
-#: from a constant, and the second pass replays each held record onto that reference's cut axis — so a
+#: from a constant, and the second pass replays each held record onto that reference's region_bound axis — so a
 #: constant stamp would drain chr2's coordinates onto chr1's partition. That is the defect the predecessor
 #: adapter actually had (`multi_reference_bam`'s docstring in ``test_scanner_accumulator_integration.py``).
 #:
@@ -70,12 +70,12 @@ GTF = (
     'chr2\ttest\texon\t66701\t67000\t.\t+\t.\tgene_id "g7"; transcript_id "t_two_b";\n'
 )
 
-#: Which reference each gene sits on, so the gates can say which cut axis a record must replay onto.
+#: Which reference each gene sits on, so the gates can say which region_bound axis a record must replay onto.
 REF_CHR1, REF_CHR2 = 0, 1
 
 # ── the four fragments, and the L each one must produce ────────────────────────────────────────────
 #
-#   name      read1 CIGAR at its start          read2       extent      cut                     L
+#   name      read1 CIGAR at its start          read2       extent      region_bound                     L
 #   pure      62100  100M 200N 100M             62500 100M  [62100,62600)  (62200,62400)        300
 #   mixed     62100  100M 200N 100M             62900 100M  [62100,63000)  + (62600,62800)      500
 #   near      62100  102M 198N 100M             62900 100M  [62100,63000)  (62202,62400)
@@ -87,7 +87,7 @@ L_PURE = 300
 #: ``mixed`` is the population the spec exists to find: observed splice PLUS a gap intron.
 L_MIXED = 500
 #: ``near`` is the §1 trap: its observed intron is 2 bp inside the annotated donor, so the ANNOTATED
-#: intron lies within K=3 of the observed gap. Substituting it would cut 200 bp instead of 198 → 500.
+#: intron lies within K=3 of the observed gap. Substituting it would region_bound 200 bp instead of 198 → 500.
 L_NEAR = 502
 
 #: ⭐ ``near`` and ``ambig`` are DEFERRED, not deposited — for two different reasons, and both are the
@@ -223,14 +223,14 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
 
     ``mixed`` spans [62100,63000) — 900 bp of genome — and is a 500 bp molecule: 200 bp of it was
     spliced out and sequenced as CIGAR-N, another 200 bp was spliced out and never sequenced at all.
-    Before this work only the first cut was made and the fragment measured 700 bp.
+    Before this work only the first region_bound was made and the fragment measured 700 bp.
 
     ⚠ ``mixed``'s junction IS annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and
     its single surviving hypothesis DEPOSITS. ``near`` and ``ambig`` are held instead — U3 and U5 below.
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
         "the deposited fragment lengths are not the molecules this BAM determines. 700 bp for `mixed` "
-        "means the mate-gap intron was never cut (the old SPLICE_UNSPLICED gate) — "
+        "means the mate-gap intron was never region_bound (the old SPLICE_UNSPLICED gate) — "
     )
     assert payload.qc.deposited == 2
     # ⭐ Conservation: nothing is discarded. Four fragments in, two deposited and two held.
@@ -264,7 +264,7 @@ def test_U3_a_near_match_does_not_shorten_L(payload):
 
     They are 2 bp apart and K is 3, so a filter written on *overlap* rather than exact equality lets the
     annotated intron be emitted for a gap the CIGAR already explained. It then normalises together with
-    the observed one into [62200,62400) and cuts 200 bp where the molecule lost 198 — ``L`` too SHORT.
+    the observed one into [62200,62400) and region_bounds 200 bp where the molecule lost 198 — ``L`` too SHORT.
 
     ⭐ Asserted on the ENUMERATED COORDINATES, which is stronger than asserting a deposited length. The
     fragment is now held (its junction is unannotated, so the genomic hypothesis survives too), and what the
@@ -340,7 +340,7 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
     """⛔ **The stamp the drain replays onto, and nothing else in the suite was checking it.**
 
     Each held record carries the reference it came from, because the second pass re-enters ``deposit`` on
-    *that* reference's accumulator — and a coordinate is only meaningful against its own cut axis.
+    *that* reference's accumulator — and a coordinate is only meaningful against its own region_bound axis.
 
     ⚠ **Measured.** A perturbation giving every reference in the ``AccumulatorSet`` the id ``0`` passed the
     entire suite, 1860 tests, because every fixture was single-contig or deferred only on reference 0. A
@@ -357,16 +357,16 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
         f"the held records are stamped {stamped}; `near` is on chr1 and `ambig` is on chr2, so a constant "
         f"stamp — or a swapped one — shows up here and nowhere else"
     )
-    cuts, offsets = payload.cut_positions, payload.ref_cut_offsets
+    region_bounds, offsets = payload.region_bounds, payload.ref_region_bound_offsets
     for i in range(deferred.n_fragments):
         ref = int(deferred.ref[i])
         lo, hi = int(offsets[ref]), int(offsets[ref + 1])
-        assert hi > lo, f"record {i} names reference {ref}, which has no cuts at all"
+        assert hi > lo, f"record {i} names reference {ref}, which has no region_bounds at all"
         assert (
-            int(cuts[lo]) <= int(deferred.start[i]) < int(deferred.end[i]) <= int(cuts[hi - 1])
+            int(region_bounds[lo]) <= int(deferred.start[i]) < int(deferred.end[i]) <= int(region_bounds[hi - 1])
         ), (
             f"record {i} spans [{int(deferred.start[i])},{int(deferred.end[i])}) but reference {ref} "
-            f"covers [{int(cuts[lo])},{int(cuts[hi - 1])}) — the drain would replay it off the axis"
+            f"covers [{int(region_bounds[lo])},{int(region_bounds[hi - 1])}) — the drain would replay it off the axis"
         )
 
 

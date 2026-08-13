@@ -96,7 +96,7 @@ def _gtf() -> str:
             f'chr1\tt\texon\t{base + 1}\t{base + 700}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
             f'chr1\tt\texon\t{base + 901}\t{base + 1200}\t.\t+\t.\tgene_id "g{narrow}"; transcript_id "t{narrow}";\n',
         ]
-    # ⭐ Loci 3 and 4 have ONE isoform on purpose, so the intron's endpoints are ADJACENT cuts and the
+    # ⭐ Loci 3 and 4 have ONE isoform on purpose, so the intron's endpoints are ADJACENT region_bounds and the
     # intron spans exactly one region. That is D-6's case: the boundaries strictly between them are an empty set.
     for base, gene in ((L3, "C"), (L4, "D"), (L6, "G")):
         rows += [
@@ -417,13 +417,13 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
 
     Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
     ``SHALLOW``, so the evidence says the molecule is genomic. ⭐ Its intron spans **exactly one region** —
-    the locus has one isoform, so the intron's endpoints are adjacent cuts — which is precisely the
+    the locus has one isoform, so the intron's endpoints are adjacent region_bounds — which is precisely the
     configuration where the shipped ``_boundaries_inside`` returned an EMPTY evidence set and handed ∅ a
     structural ``rho = 0``.
 
     ⚠ The deposit rule is what settles the right set, not taste: a boundary is crossed iff it is strictly
-    inside a *segment*, so the boundaries distinguishing ∅ from a path splicing ``[a, b)`` are those at cuts
-    ``a <= c <= b`` — **endpoints included**, and both endpoints are always cuts.
+    inside a *segment*, so the boundaries distinguishing ∅ from a path splicing ``[a, b)`` are those at region_bounds
+    ``a <= c <= b`` — **endpoints included**, and both endpoints are always region_bounds.
     """
     shares = _shares(scored[0], scored[1], L3)
     genomic, spliced = (), ((7600, 8000),)

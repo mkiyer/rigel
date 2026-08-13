@@ -27,13 +27,13 @@ from ._accumulator_reference import (
 )
 
 
-#: One reference, cut at every coordinate the owner's §1 example names, so both paths land on real regions.
-CUTS = [0, 1000, 2000, 3000, 3050, 4000, 5000, 6000]
+#: One reference, region_bound at every coordinate the owner's §1 example names, so both paths land on real regions.
+REGION_BOUNDS = [0, 1000, 2000, 3000, 3050, 4000, 5000, 6000]
 TYPES = [0, 2, 1, 2, 1, 2, 0]
 
 
 def _acc(**kw):
-    return Accumulator(Partition.from_cuts([CUTS], region_types=[TYPES]), **kw)
+    return Accumulator(Partition.from_region_bounds([REGION_BOUNDS], region_types=[TYPES]), **kw)
 
 
 # ── the owner's §1 example, to the base pair ───────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def test_the_SAME_fragment_deposits_when_only_ONE_transcript_is_compatible():
 def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
     """⭐ The property the census's shape rests on, pinned as the REASON and not as a consequence.
 
-    A spliced hypothesis cuts bases the genomic one keeps, so ``L_spliced <= L_genomic`` — always, for any
+    A spliced hypothesis region_bounds bases the genomic one keeps, so ``L_spliced <= L_genomic`` — always, for any
     extent, any observed introns and any implied path. The single arbitration filter is
     ``L <= max_fragment_length``, so it follows that **if the genomic path survives, every spliced path
     survives too**, and the survivor set can never be exactly ``{genomic}`` while a spliced path was
@@ -300,7 +300,7 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
     ]  # fmt: skip
     assert arrays["hypothesis_t"].tolist() == [11, 22]
     assert arrays["hypothesis_t_offsets"].tolist() == [0, 0, 0, 1, 2]
-    assert Accumulator(Partition.from_cuts([CUTS], region_types=[TYPES])).tally.deferred_arrays()[
+    assert Accumulator(Partition.from_region_bounds([REGION_BOUNDS], region_types=[TYPES])).tally.deferred_arrays()[
         "hypothesis_offsets"
     ].tolist() == [0]
 

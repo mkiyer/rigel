@@ -36,7 +36,7 @@ unweighted harmonic, geometric or arithmetic mean over path objects inherits tha
 ⭐⭐ **THE REPAIR KEEPS THE THEOREM: weight each object by its OWN OPPORTUNITY.** Splitting an object
 into pieces **of the same density** splits its opportunity with it, so a weighted power mean is
 unchanged for every ``p`` while an unweighted one is not — and that split is precisely the artefact,
-because a signature change can cut a uniform stretch into 990 bp and 10 bp and an unweighted mean then
+because a signature change can region_bound a uniform stretch into 990 bp and 10 bp and an unweighted mean then
 gives the sliver equal say. :func:`repartition_invariance` measures it.
 
 ⛔ **BE PRECISE ABOUT WHAT IS AND IS NOT INVARIANT, BECAUSE THE OVER-CLAIM IS TEMPTING.** Only ``p = 1``
@@ -198,7 +198,7 @@ def transcript_opportunities(index, rna_fl_pmf: np.ndarray) -> tuple[np.ndarray,
 
     ⛔ Neither is ``Σ_regions rna_region_eff_len``, and that would be the easy mistake — it would also
     forbid crossing an INTERIOR region boundary, which a real fragment crosses freely, so it understates
-    every transcript whose exons the partition happened to cut.
+    every transcript whose exons the partition happened to region_bound.
     """
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
@@ -320,7 +320,7 @@ def repartition_invariance(mode: str, *, weighted: bool = True) -> tuple[float, 
     ⛔ **The construction has to be one an estimator can FAIL, and the obvious one is not.** Splitting a
     uniform stretch into EQUAL pieces of equal density leaves every mean — weighted or not — returning
     the same number, so that version tests nothing (`TRAPS: could-the-arm-have-fired`; a fixture is an
-    arm). What separates them is an UNEVEN cut, which is what the annotation actually does: a signature
+    arm). What separates them is an UNEVEN region_bound, which is what the annotation actually does: a signature
     change from an antisense feature slices a 1,000 bp stretch into 990 bp and a 10 bp sliver.
 
     So: 990 bp at density 3.0 beside a 10 bp sliver at density 0.3, and the sliver is then subdivided

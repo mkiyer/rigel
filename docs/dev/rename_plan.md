@@ -266,6 +266,24 @@ five English idioms — **`command line`, `log line`, `one-line-per-condition`**
 "boundary". ⚠ `multi-boundary crossing` is genuine and was correctly left; the two are only separable by
 reading.
 
+## 3i. STAGE 5 — a token that is also a VERB
+
+**⑧ `cut` IS A VERB, and no boundary rule can see that.** *"whether a gap intron is cut"*, *"a spliced
+hypothesis cuts"*, *"both endpoints of an annotated intron are cut by construction"* — five sites where
+the rename produced broken grammar. ⚠ And the discrimination is genuinely subtle: `substrate.py`'s
+*"both endpoints of an annotated intron are region_bounds"* is the NOUN and is CORRECT as renamed, one
+line away from `second_pass.py`'s verb. Only reading separates them.
+
+**⑨ A C++ PARAMETER AND ITS LOCAL SLICE COLLIDED**, the same shape as stage 4's index-vs-object: the flat
+array `cut_positions` and this reference's slice `cuts` both wanted `region_bounds`, and the local
+shadowed the parameter inside its own initialiser. The slice took the name that says what it is,
+`ref_region_bounds`. ⭐ Both collisions were caught by the COMPILER, which is the one gate that reads
+every name at once.
+
+**⑩ ⚠ AND PROSE ROTS APART FROM IDENTIFIERS.** `scan_cache.py` still said *"keyed by DONOR CUT"* four
+stages after stage 1 renamed `donor_cut` to `boundary_left`. Nothing failed; nothing could. The census
+leftovers list is the only instrument that sees it.
+
 ## 4. THE METHOD, and the two rules it follows
 
 1. **Identifier-by-identifier, word-boundary-anchored, longest-first** — `sj_acceptor_cut_` must not be

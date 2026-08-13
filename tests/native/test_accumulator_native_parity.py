@@ -50,7 +50,7 @@ from ._accumulator_reference import (
 # one reference, chosen so every branch of the deposit is reachable
 # ---------------------------------------------------------------------------
 #
-# cuts    0     100    200   201    400        900       1000
+# region_bounds    0     100    200   201    400        900       1000
 # regions   [ n0 ][ n1  ][n2*][  n3  ][    n4   ][   n5   ]        (* n2 is 1 bp)
 # boundaries         1      2    3      4          5
 # types   intergenic, exon, exon, intron, exon, intergenic
@@ -66,25 +66,25 @@ from ._accumulator_reference import (
 # can legitimately use both; [400,900) shares an acceptor with [201,900) but sits on the other strand, so
 # the strand filter has something to discriminate that coordinates alone cannot.
 
-CUTS = [0, 100, 200, 201, 400, 900, 1000]
+REGION_BOUNDS = [0, 100, 200, 201, 400, 900, 1000]
 TYPES = [0, 2, 2, 1, 2, 0]
 
 MAX_LENGTH = 1000
 
 #: ⛔ **NOT ZERO, AND THAT IS THE POINT.** Every deferred record is stamped with the reference it came from,
-#: because the second pass replays it through ``deposit`` onto that reference's cut axis — a wrong stamp
+#: because the second pass replays it through ``deposit`` onto that reference's region_bound axis — a wrong stamp
 #: drains one chromosome's coordinates onto another's partition. The native accumulator has to be TOLD which
-#: reference it is: it is described by its cut positions alone and has no other way to know.
+#: reference it is: it is described by its region_bound positions alone and has no other way to know.
 #:
 #: ⚠ Measured: with ``REF = 0`` a perturbation that hardcodes the stamp to ``0`` instead of reading the
 #: accumulator's own id passed the **entire** suite, 1860 tests. A single-reference fixture cannot tell a
 #: correct stamp from a constant one. So the fixture's reference is 3, and the leading three references
-#: contribute no cuts at all — which is legal, and exercises the per-reference offset arithmetic that goes
+#: contribute no region_bounds at all — which is legal, and exercises the per-reference offset arithmetic that goes
 #: negative when it is written as a plain subtraction.
 REF = 3
 
 #: The partition's reference list: three empty references, then the real one at index ``REF``.
-_CUTS_PER_REF = [[] for _ in range(REF)] + [CUTS]
+_REGION_BOUNDS_PER_REF = [[] for _ in range(REF)] + [REGION_BOUNDS]
 _TYPES_PER_REF = [[] for _ in range(REF)] + [TYPES]
 
 JUNCTIONS = [
@@ -110,15 +110,15 @@ def _pair(max_length: int = MAX_LENGTH, junctions=JUNCTIONS):
     """A reference accumulator and a native one over the same single-reference partition.
 
     ⚠ The native junction CSR is taken **from the reference's own ``Partition``** rather than rebuilt
-    here. That is deliberate: the agreement between ``Partition.from_cuts`` and the index builder
+    here. That is deliberate: the agreement between ``Partition.from_region_bounds`` and the index builder
     ``build_junction_edge_arrays`` is a *different* contract, already pinned by
     ``test_the_csr_slot_order_matches_the_reference_accumulator``. Feeding both sides one CSR isolates
     the thing this module is for — the deposit rule.
     """
-    partition = Partition.from_cuts(_CUTS_PER_REF, region_types=_TYPES_PER_REF, junctions=junctions)
+    partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, junctions=junctions)
     reference = ReferenceAccumulator(partition, max_fragment_length=max_length)
     native = NativeAccumulator(
-        cuts=np.asarray(CUTS, dtype=np.int64),
+        region_bounds=np.asarray(REGION_BOUNDS, dtype=np.int64),
         region_types=np.asarray(TYPES, dtype=np.uint8),
         max_length=max_length,
         ref=REF,
@@ -196,7 +196,7 @@ def _assert_parity(reference, native, label: str) -> None:
 # the named battery — one entry per branch of the deposit, and per bug it has had
 # ---------------------------------------------------------------------------
 
-#: ⭐ Hypotheses, named, so the cases below read as what they mean. ``()`` — cut nothing — is the GENOMIC
+#: ⭐ Hypotheses, named, so the cases below read as what they mean. ``()`` — region_bound nothing — is the GENOMIC
 #: hypothesis and needs no flag: the gap is real template, so the molecule is gDNA or nascent.
 #: ``supporting_t_inds`` are carried but never read by the first pass; they are what the second pass
 #: weights a path by, so the deferred queue has to preserve them and this gate has to compare them.
@@ -339,7 +339,7 @@ CASES: list[tuple[str, dict]] = [
     # ⭐ These are what the arbitration is. Everything above carries the unspliced hypothesis alone, so
     # every one of them is the degenerate case — which is the general case, not a branch.
     (
-        "ONE implied path -> deposits, and its intron is cut from L",
+        "ONE implied path -> deposits, and its intron is region_bound from L",
         dict(start=150, end=950, hypotheses=(LONG_JUNCTION,)),
     ),
     (
@@ -351,11 +351,11 @@ CASES: list[tuple[str, dict]] = [
         dict(start=350, end=950, sj_strand=Strand.NEG, hypotheses=(LONG_JUNCTION,)),
     ),
     (
-        "observed AND implied introns are both cut, and both junctions credited",
+        "observed AND implied introns are both region_bound, and both junctions credited",
         dict(start=50, end=950, observed_introns=[(100, 200)], hypotheses=(LONG_JUNCTION,)),
     ),
     (
-        "an implied intron DUPLICATING an observed one is absorbed, not cut twice",
+        "an implied intron DUPLICATING an observed one is absorbed, not region_bound twice",
         dict(start=50, end=950, observed_introns=[(201, 900)], hypotheses=(LONG_JUNCTION,)),
     ),
     (
@@ -478,25 +478,25 @@ def test_region_of_pos_agrees_everywhere_including_outside_the_reference():
     """``region_of_pos`` is public, so its clamp is reachable even though ``deposit`` cannot reach it.
 
     ⚠ Inside ``deposit`` the clamp is dead by construction — the path is clipped to
-    ``[cuts.front(), cuts.back())`` first, so neither end can fall outside — and a perturbation removing the
+    ``[region_bounds.front(), region_bounds.back())`` first, so neither end can fall outside — and a perturbation removing the
     upper clamp passed the rest of this module for exactly that reason. But the method is bound, a caller
     may pass anything, and out of range it would index one past the last region. So it is pinned here rather
     than left to the branch that cannot exercise it.
     """
     reference, native = _pair()
-    cuts = np.asarray(CUTS, dtype=np.int64)
-    for position in [-1000, -1, *CUTS, *[c - 1 for c in CUTS], *[c + 1 for c in CUTS], 5000]:
-        want = ReferenceAccumulator._local_region(cuts, position)
+    region_bounds = np.asarray(REGION_BOUNDS, dtype=np.int64)
+    for position in [-1000, -1, *REGION_BOUNDS, *[c - 1 for c in REGION_BOUNDS], *[c + 1 for c in REGION_BOUNDS], 5000]:
+        want = ReferenceAccumulator._local_region(region_bounds, position)
         assert native.region_of_pos(position) == want, f"region_of_pos({position})"
     assert reference is not None  # the pair is built for its side effects on the partition
 
 
 def test_a_reference_with_no_junction_table_agrees():
     """``set_junctions`` is a separate call, so "never called" is a real state and must not differ."""
-    partition = Partition.from_cuts(_CUTS_PER_REF, region_types=_TYPES_PER_REF)
+    partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF)
     reference = ReferenceAccumulator(partition, max_fragment_length=MAX_LENGTH)
     native = NativeAccumulator(
-        cuts=np.asarray(CUTS, dtype=np.int64),
+        region_bounds=np.asarray(REGION_BOUNDS, dtype=np.int64),
         region_types=np.asarray(TYPES, dtype=np.uint8),
         max_length=MAX_LENGTH,
         ref=REF,
@@ -508,7 +508,7 @@ def test_a_reference_with_no_junction_table_agrees():
         ),
         ("no table: a plain crossing", dict(start=50, end=500)),
         (
-            "no table: an implied path still cuts its intron",
+            "no table: an implied path still region_bounds its intron",
             dict(start=150, end=950, hypotheses=(LONG_JUNCTION,)),
         ),
         (
@@ -543,7 +543,7 @@ def test_the_deferred_RECORD_carries_the_fragment_WHOLE_and_the_two_agree_on_it(
     got = dict(native.deferred)
     assert got["ref"].tolist() == [REF], (
         f"the record is stamped {got['ref'].tolist()}, not [{REF}]. The second pass replays it through "
-        f"deposit onto THAT reference's cut axis, so a constant stamp drains one chromosome's coordinates "
+        f"deposit onto THAT reference's region_bound axis, so a constant stamp drains one chromosome's coordinates "
         f"onto another's partition."
     )
     assert got["start"].tolist() == [0], "the CLIPPED extent is what the drain must replay"
@@ -575,7 +575,7 @@ def test_TWO_accumulators_STAMP_THEIR_OWN_REFERENCE():
     held = {}
     for ref in (0, REF):
         native = NativeAccumulator(
-            cuts=np.asarray(CUTS, dtype=np.int64),
+            region_bounds=np.asarray(REGION_BOUNDS, dtype=np.int64),
             region_types=np.asarray(TYPES, dtype=np.uint8),
             max_length=MAX_LENGTH,
             ref=ref,
@@ -630,7 +630,7 @@ def test_ten_thousand_random_fragments_are_byte_identical():
     """⭐ The arm that actually finds things.
 
     A named battery tests the cases someone thought of. This one walks the whole coordinate space,
-    including positions that are cuts, positions one base either side of a cut, empty and reversed
+    including positions that are region_bounds, positions one base either side of a region_bound, empty and reversed
     extents, and introns that overlap in every configuration. The seed is fixed, so a failure is
     reproducible and a fix is verifiable.
 
@@ -639,7 +639,7 @@ def test_ten_thousand_random_fragments_are_byte_identical():
     """
     reference, native = _pair()
     rng = np.random.default_rng(0)
-    interesting = np.array(CUTS + [c - 1 for c in CUTS] + [c + 1 for c in CUTS] + [-50, 1500])
+    interesting = np.array(REGION_BOUNDS + [c - 1 for c in REGION_BOUNDS] + [c + 1 for c in REGION_BOUNDS] + [-50, 1500])
 
     for i in range(10_000):
         if rng.random() < 0.5:

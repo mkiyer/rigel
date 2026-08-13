@@ -34,7 +34,7 @@ it, so that is the best answer it could ever have given.
 
 ⭐ **NO TUNED THRESHOLD DECIDES ANYTHING HERE.** ``|z|`` bands are standard-deviation multiples, which
 is a scale the quantity brings with it. And the headline is a **calibration curve** — realised RMS log
-error against claimed sd, per precision decile — which needs no cut at all: a ratio of 1 means the
+error against claimed sd, per precision decile — which needs no region_bound at all: a ratio of 1 means the
 declared precision is earned, above 1 means overconfident. That curve is the answer to "is the solver
 sure and wrong?" without anyone choosing a number.
 
@@ -107,9 +107,9 @@ CHANNELS = ("locked", "strand", "factory", "none")
 #: ⭐⭐ **OWN-EVIDENCE STRENGTH IS A CONTINUUM AND MUST BE REPORTED AS ONE.** ``tau_lam`` is a Fisher
 #: precision on ``λ = log(f_g/f_R)``, so a slot's own statement carries sd ``1/√τ``, in nats, against a
 #: solver that can only represent ``λ ∈ [−L, +L]``. These are DECADE boundaries on that sd — read
-#: points on a distribution, not a cut: nothing branches on them.
+#: points on a distribution, not a region_bound: nothing branches on them.
 #:
-#: ⛔ **A BINARY solvable/undetermined CUT AT ``τ > 1e-9`` WAS THE DEFECT, AND A BETTER THRESHOLD IS
+#: ⛔ **A BINARY solvable/undetermined REGION_BOUND AT ``τ > 1e-9`` WAS THE DEFECT, AND A BETTER THRESHOLD IS
 #: NOT THE FIX.** The strand arm carries ``I(f_g) ∝ (2κ−1)²`` (`EQUATIONS.md` §5.2), *exactly* zero at
 #: κ = ½; but κ is FITTED, so on a genuinely unstranded library it misses ½ by a few 1e-4 and τ lands
 #: at ~1e-7 rather than at 0. ``τ > 1e-9`` then calls that a live channel and the object is scored as
@@ -294,7 +294,7 @@ def undetermined_overreach_rows(a: dict) -> list[tuple]:
 
 def resolving_power_rows(a: dict, mask: np.ndarray) -> list[tuple]:
     """``(label, n, mass, Σ|err|, pred f_g, true f_g)`` per ``sd(λ)`` decade — the CURVE that replaces
-    the solvable/undetermined cut for everything that is not structurally certain.
+    the solvable/undetermined region_bound for everything that is not structurally certain.
 
     ⭐ **This is the shape the measurement actually has.** ``sd(λ) ≫ L`` says the object's own evidence
     is flat across every λ the solver can represent, so whatever it reports came from its neighbours
@@ -374,7 +374,7 @@ def report(m, a: dict, config=None) -> None:
     print(f"      represent λ ∈ [−{_L:g}, +{_L:g}].  ⛔ A row with sd(λ) far above {2 * _L:g} is scored")
     print("      as SOLVABLE and is not: its own evidence is flat over every λ the solver can express,")
     print("      so its answer came from neighbours and the reference. ⚠ NO threshold decides this —")
-    print("      it is a curve, because τ is CONTINUOUS here and any cut would be a tuned constant.")
+    print("      it is a curve, because τ is CONTINUOUS here and any region_bound would be a tuned constant.")
     print(f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
           f"{'pred f_g':>9} {'true f_g':>9}")
     _lock = a["channels"]["locked"] & live
@@ -389,7 +389,7 @@ def report(m, a: dict, config=None) -> None:
     print(f"   ⚠ κ = {_kappa:.6f}, so the strand arm's information is scaled by (2κ−1)² = "
           f"{(2 * _kappa - 1) ** 2:.3e}.")
     print("      At κ = ½ it is EXACTLY zero (EQUATIONS §5.2); a fitted κ makes it merely tiny, and")
-    print("      whether that lands above or below 1e-9 is what the old solvable/undetermined cut read.")
+    print("      whether that lands above or below 1e-9 is what the old solvable/undetermined region_bound read.")
 
     print()
     print("   ⛔⛔ AND THE UNDETERMINED CLASS'S OWN FAILURE MODE — it is EXCLUDED from every error")
@@ -577,7 +577,7 @@ def summarise(a: dict) -> dict:
     # treats as evidenced (``tau > 1e-9``), and that admits a strand arm whose own statement is 10³ nats
     # wide — statistically real, physically nil (TRAPS: a-threshold-on-a-fitted-residue). So report, beside it, the share of the
     # scored error that sits on objects whose own evidence cannot resolve one nat in ten. ⚠ 10 is a
-    # DECADE off the curve, a read point, not a cut: nothing branches on it, and the curve above it in
+    # DECADE off the curve, a read point, not a region_bound: nothing branches on it, and the curve above it in
     # the single-condition report is what a reader should actually consult.
     weak = det & (a["sd_lam"] >= 10.0)
     return {

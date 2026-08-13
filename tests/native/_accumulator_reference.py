@@ -14,7 +14,7 @@ THE MODEL
     blocks, joined across mate gaps and broken by introns::
 
         ref   |······ n0 ······|·· n1 ··|········ n2 ········|
-        cuts  0               100      200                  600
+        region_bounds  0               100      200                  600
         boundaries                  1        2
         path        [====== block ======]                       crosses boundary 1
         path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
@@ -30,7 +30,7 @@ THE MODEL
     already reach off capture, and 141 regions / 822 fragments (0.008 %) under it. Its mass is not lost,
     since a spanning fragment crosses both of the region's boundaries and is deposited there.
     ⛔ One consequence, and it is structural: **no spliced fragment now touches the region axis at all**
-    (a spliced fragment can never be *contained* — both endpoints of an annotated intron are cuts).
+    (a spliced fragment can never be *contained* — both endpoints of an annotated intron are region_bounds).
 
 WHAT EACH OBJECT'S NUMBERS MEAN
     With ``placements`` the number of admissible start positions — ``L`` at a region, ``L − 1`` at a 0-bp
@@ -172,7 +172,7 @@ class GapHypothesis:
     needs no separate "could this be gDNA?" flag and why the nascent shadow transcript is not a candidate:
     it *is* this hypothesis, and it is always in the set unless something rules it out.
 
-    ⚠ ``introns`` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under **every**
+    ⚠ ``introns`` are the IMPLIED ones only. Introns the CIGAR actually stated are region_bound under **every**
     hypothesis and are passed to :meth:`Accumulator.deposit` separately, because they are not in doubt.
     """
 
@@ -187,11 +187,11 @@ class GapHypothesis:
 
     @property
     def is_unspliced(self) -> bool:
-        """True for the empty path — cut nothing, so the gap is template."""
+        """True for the empty path — region_bound nothing, so the gap is template."""
         return not self.introns
 
 
-#: The one hypothesis every fragment has: cut nothing beyond what was sequenced. A fragment with no
+#: The one hypothesis every fragment has: region_bound nothing beyond what was sequenced. A fragment with no
 #: unsequenced gap, or with no annotated intron in the gap it has, has exactly this and deposits with no
 #: arbitration at all — ⭐ the degenerate case is the general case, not a branch.
 UNSPLICED_ONLY: tuple[GapHypothesis, ...] = (GapHypothesis(),)
@@ -201,13 +201,13 @@ class GapResolution(enum.Enum):
     """⭐ The umbrella, and its subclasses — owner ruling, 2026-08-01.
 
     Every fragment for which the enumeration produced **at least one non-genomic hypothesis** is counted
-    here: its ``L`` depends on whether a gap intron is cut, so it is a fragment "needing further
+    here: its ``L`` depends on whether a gap intron is region_bound, so it is a fragment "needing further
     partitioning". The subclasses are exhaustive and mutually exclusive, so the counts close:
 
         Sum(GapResolution) == the umbrella total
         the three DEFERRED_* == qc["deferred_undetermined_gap"]
 
-    ⛔ **This is its own axis and NOT a `splice_type`.** The umbrella cuts ACROSS the splice census: a
+    ⛔ **This is its own axis and NOT a `splice_type`.** The umbrella region_bounds ACROSS the splice census: a
     certified-RNA ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as
     much as an ``UNSPLICED`` one does. Putting these values on ``splice_type`` would need two labels per
     fragment and would break TRAPS: pure-and-length-censored.0's property that the splice census sums to the library.
@@ -217,7 +217,7 @@ class GapResolution(enum.Enum):
 
     ⛔ **THERE IS NO ``RESOLVED_UNSPLICED``, AND IT IS NOT AN OMISSION.** An earlier version of this enum
     had one, described as "the genomic hypothesis survived alone because every spliced path was longer than
-    ``max_fragment_length``". That is impossible. A spliced hypothesis CUTS bases the genomic one keeps, so
+    ``max_fragment_length``". That is impossible. A spliced hypothesis REGION_BOUNDS bases the genomic one keeps, so
     ``L_spliced <= L_genomic`` always; the one filter is ``L <= max_fragment_length``; therefore if the
     genomic path survives the filter **every** spliced path survives it too, and the survivor set can never
     be exactly ``{genomic}`` while a spliced path was offered — which is the condition for being in this
@@ -229,7 +229,7 @@ class GapResolution(enum.Enum):
     making a deleted class necessary again.
     """
 
-    #: One hypothesis survived. It cuts something — see the class docstring for why it cannot be the
+    #: One hypothesis survived. It region_bounds something — see the class docstring for why it cannot be the
     #: genomic one — so the gap intron is real and ``L`` excludes it.
     RESOLVED_SPLICED = "gap_resolved_spliced"
     #: ⛔ The genomic path against exactly one spliced path. The open question is **RNA or gDNA** — one
@@ -295,7 +295,7 @@ _CONTAINED_POOL = {
 
 
 # ---------------------------------------------------------------------------
-# the partition: the cut axis, the region types, and the junction CSR
+# the partition: the region_bound axis, the region types, and the junction CSR
 # ---------------------------------------------------------------------------
 
 
@@ -303,31 +303,31 @@ _CONTAINED_POOL = {
 class Partition:
     """Everything the deposit addresses. Three axes, off by one from each other per reference.
 
-    A reference contributing ``c`` cut positions owns ``c − 1`` regions and ``c − 2`` contiguous boundaries
-    (its interior boundaries). A reference with no regions contributes no cuts at all::
+    A reference contributing ``c`` region_bound positions owns ``c − 1`` regions and ``c − 2`` contiguous boundaries
+    (its interior boundaries). A reference with no regions contributes no region_bounds at all::
 
-        cuts    0        100       200       600        c = 4
+        region_bounds    0        100       200       600        c = 4
         regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
         boundaries            boundary 1    boundary 2               c - 2 = 2
 
-    Junctions are a CSR keyed by the **donor cut index**, which is the index the deposit has already
+    Junctions are a CSR keyed by the **donor region_bound index**, which is the index the deposit has already
     computed while locating the boundaries its path crosses. It is cheap because every annotated intron has
-    both endpoints as cuts, so "is this intron annotated?" reduces to "are both endpoints cuts, and is
-    the pair registered?" — and if the start is not a cut, the table is never consulted.
+    both endpoints as region_bounds, so "is this intron annotated?" reduces to "are both endpoints region_bounds, and is
+    the pair registered?" — and if the start is not a region_bound, the table is never consulted.
     """
 
-    cut_positions: np.ndarray  # int64[n_cuts] — flat, reference-major, ascending within a reference
-    ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
+    region_bounds: np.ndarray  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
+    ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     region_types: np.ndarray  # uint8[n_regions] — 0 intergenic / 1 intron / 2 exon
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1]
-    sj_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
-    sj_boundary_right: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
+    sj_offsets: np.ndarray  # int64[n_region_bounds + 1] — CSR over the donor region_bound index
+    sj_boundary_right: np.ndarray  # int64[n_sj] — flat region_bound index of the intron's high end
     sj_strand: np.ndarray  # int8[n_sj]
 
     @property
     def n_refs(self) -> int:
-        return int(self.ref_cut_offsets.shape[0]) - 1
+        return int(self.ref_region_bound_offsets.shape[0]) - 1
 
     @property
     def n_regions(self) -> int:
@@ -342,28 +342,28 @@ class Partition:
         return int(self.sj_boundary_right.shape[0])
 
     @classmethod
-    def from_cuts(cls, cuts_per_ref, region_types=None, junctions=()) -> "Partition":
-        """Build from per-reference cut lists.
+    def from_region_bounds(cls, region_bounds_per_ref, region_types=None, junctions=()) -> "Partition":
+        """Build from per-reference region_bound lists.
 
-        ``junctions`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be cuts on
-        that reference. Junction ids are assigned by sorting on ``(donor cut, acceptor cut, sj_strand)``,
+        ``junctions`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be region_bounds on
+        that reference. Junction ids are assigned by sorting on ``(donor region_bound, acceptor region_bound, sj_strand)``,
         so they are a deterministic function of the partition alone.
         """
-        cuts_per_ref = [np.asarray(c, dtype=np.int64) for c in cuts_per_ref]
-        n_refs = len(cuts_per_ref)
-        for r, c in enumerate(cuts_per_ref):
+        region_bounds_per_ref = [np.asarray(c, dtype=np.int64) for c in region_bounds_per_ref]
+        n_refs = len(region_bounds_per_ref)
+        for r, c in enumerate(region_bounds_per_ref):
             if c.size and (c.size < 2 or np.any(np.diff(c) <= 0)):
-                raise ValueError(f"reference {r}: cuts must strictly increase, got {c.tolist()}")
+                raise ValueError(f"reference {r}: region_bounds must strictly increase, got {c.tolist()}")
 
-        cut_offsets = np.zeros(n_refs + 1, np.int64)
+        region_bound_offsets = np.zeros(n_refs + 1, np.int64)
         region_offsets = np.zeros(n_refs + 1, np.int64)
         boundary_offsets = np.zeros(n_refs + 1, np.int64)
-        for r, c in enumerate(cuts_per_ref):
-            cut_offsets[r + 1] = cut_offsets[r] + c.size
+        for r, c in enumerate(region_bounds_per_ref):
+            region_bound_offsets[r + 1] = region_bound_offsets[r] + c.size
             region_offsets[r + 1] = region_offsets[r] + max(c.size - 1, 0)
             boundary_offsets[r + 1] = boundary_offsets[r] + max(c.size - 2, 0)
 
-        cut_positions = np.concatenate(cuts_per_ref) if n_refs else np.zeros(0, np.int64)
+        region_bounds = np.concatenate(region_bounds_per_ref) if n_refs else np.zeros(0, np.int64)
         if region_types is None:
             types = np.zeros(int(region_offsets[-1]), np.uint8)
         else:
@@ -376,12 +376,12 @@ class Partition:
 
         left_boundaries, right_boundaries, sj_strands = [], [], []
         for ref, intron_start, intron_end, sj_strand in junctions:
-            donor = _exact_cut(cut_positions, cut_offsets, ref, intron_start)
-            acceptor = _exact_cut(cut_positions, cut_offsets, ref, intron_end)
+            donor = _exact_region_bound(region_bounds, region_bound_offsets, ref, intron_start)
+            acceptor = _exact_region_bound(region_bounds, region_bound_offsets, ref, intron_end)
             if donor < 0 or acceptor < 0:
                 raise ValueError(
                     f"junction [{intron_start}, {intron_end}) on reference {ref} has an endpoint that "
-                    f"is not a cut. Every annotated intron endpoint is a cut by construction, so this "
+                    f"is not a region_bound. Every annotated intron endpoint is a region_bound by construction, so this "
                     f"is a partition/annotation mismatch, not an unannotated junction."
                 )
             left_boundaries.append(donor)
@@ -393,12 +393,12 @@ class Partition:
         order = np.lexsort((sj_strand, boundary_right, boundary_left))
         boundary_left, boundary_right, sj_strand = boundary_left[order], boundary_right[order], sj_strand[order]
 
-        n_cuts = int(cut_offsets[-1])
-        sj_offsets = np.zeros(n_cuts + 1, np.int64)
-        np.cumsum(np.bincount(boundary_left, minlength=n_cuts), out=sj_offsets[1:])
+        n_region_bounds = int(region_bound_offsets[-1])
+        sj_offsets = np.zeros(n_region_bounds + 1, np.int64)
+        np.cumsum(np.bincount(boundary_left, minlength=n_region_bounds), out=sj_offsets[1:])
         return cls(
-            cut_positions=cut_positions,
-            ref_cut_offsets=cut_offsets,
+            region_bounds=region_bounds,
+            ref_region_bound_offsets=region_bound_offsets,
             region_types=types,
             ref_region_offsets=region_offsets,
             ref_boundary_offsets=boundary_offsets,
@@ -408,13 +408,13 @@ class Partition:
         )
 
 
-def _exact_cut(cut_positions, cut_offsets, ref: int, position: int) -> int:
-    """The flat cut index of ``position`` on ``ref``, or -1 if it is not a cut there."""
-    first, last = int(cut_offsets[ref]), int(cut_offsets[ref + 1])
+def _exact_region_bound(region_bounds, region_bound_offsets, ref: int, position: int) -> int:
+    """The flat region_bound index of ``position`` on ``ref``, or -1 if it is not a region_bound there."""
+    first, last = int(region_bound_offsets[ref]), int(region_bound_offsets[ref + 1])
     if last <= first:
         return -1
-    k = first + int(np.searchsorted(cut_positions[first:last], position))
-    return k if k < last and int(cut_positions[k]) == position else -1
+    k = first + int(np.searchsorted(region_bounds[first:last], position))
+    return k if k < last and int(region_bounds[k]) == position else -1
 
 
 def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, int]], int]:
@@ -454,7 +454,7 @@ def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, i
 
 
 def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
-    """The path's contiguous genomic segments: ``[start, end)`` with the introns cut out.
+    """The path's contiguous genomic segments: ``[start, end)`` with the introns region_bound out.
 
     ``introns`` must already be sorted and disjoint (:func:`_normalise_introns`).
     """
@@ -755,7 +755,7 @@ class Accumulator:
 
         ``[start, end)`` is the full genomic extent — leftmost block start to rightmost block end, mate
         gap included. ``introns`` are the introns the CIGAR actually stated, as ``(start, end)`` pairs:
-        they are cut under **every** hypothesis, because they are not in doubt.
+        they are region_bound under **every** hypothesis, because they are not in doubt.
 
         ⭐ **THE ACCUMULATOR IS THE ARBITER** (owner ruling, 2026-08-01). ``hypotheses`` is the set of
         competing answers about the fragment's *unsequenced* gaps — see :class:`GapHypothesis`, where the empty
@@ -814,13 +814,13 @@ class Accumulator:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 
         p = self.partition
-        first_cut, last_cut = int(p.ref_cut_offsets[ref]), int(p.ref_cut_offsets[ref + 1])
-        if last_cut - first_cut < 2:
+        first_region_bound, last_region_bound = int(p.ref_region_bound_offsets[ref]), int(p.ref_region_bound_offsets[ref + 1])
+        if last_region_bound - first_region_bound < 2:
             return self._reject(DepositOutcome.EMPTY)
-        cuts = p.cut_positions[first_cut:last_cut]
+        region_bounds = p.region_bounds[first_region_bound:last_region_bound]
 
         # clip to the reference; L is the CLIPPED length, so the placement count stays consistent
-        start, end = max(int(start), int(cuts[0])), min(int(end), int(cuts[-1]))
+        start, end = max(int(start), int(region_bounds[0])), min(int(end), int(region_bounds[-1]))
         if end <= start:
             return self._reject(DepositOutcome.EMPTY)
 
@@ -851,11 +851,11 @@ class Accumulator:
             )
             return self._reject(DepositOutcome.DEFERRED)
 
-        # ⚠ `cut_introns` and not `introns`: these are the introns actually removed from the molecule —
+        # ⚠ `region_bound_introns` and not `introns`: these are the introns actually removed from the molecule —
         # the observed ones UNIONED with the surviving hypothesis's implied ones, normalised and clipped.
         # Naming them apart from `observed_introns` is what stops the two being confused downstream.
-        hypothesis, length, cut_introns, absorbed = survivors[0]
-        segments = _segments(start, end, cut_introns)
+        hypothesis, length, region_bound_introns, absorbed = survivors[0]
+        segments = _segments(start, end, region_bound_introns)
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
         if length > self.max_fragment_length:
@@ -878,12 +878,12 @@ class Accumulator:
         # filtered list cannot answer that — dropping the unannotated entries destroys the alignment
         # between intron `i` and the gap between blocks `i` and `i+1`.
         if sj_strand == Strand.AMBIGUOUS:
-            sj_id_at_gap: list[int] = [-1] * len(cut_introns)
+            sj_id_at_gap: list[int] = [-1] * len(region_bound_introns)
             self.tally.qc["contradictory_sj_strand"] += 1
         else:
             sj_id_at_gap = [
                 self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
-                for intron_start, intron_end in cut_introns
+                for intron_start, intron_end in region_bound_introns
             ]
             self.tally.qc["unannotated_introns"] += sum(1 for jid in sj_id_at_gap if jid < 0)
         sj_ids = [jid for jid in sj_id_at_gap if jid >= 0]
@@ -897,7 +897,7 @@ class Accumulator:
 
         t = self.tally
         region_base, boundary_base = int(p.ref_region_offsets[ref]), int(p.ref_boundary_offsets[ref])
-        t.region_start_count[region_base + self._local_region(cuts, first_base)] += 1
+        t.region_start_count[region_base + self._local_region(region_bounds, first_base)] += 1
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
         # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
@@ -919,14 +919,14 @@ class Accumulator:
         inv_boundary = 1.0 / (length - 1) if length >= 2 else 0.0
         n_crossed, sole_boundary = 0, -1
         for block, (seg_start, seg_end) in enumerate(segments):
-            first = int(np.searchsorted(cuts, seg_start, side="right"))
-            last = int(np.searchsorted(cuts, seg_end, side="left"))
+            first = int(np.searchsorted(region_bounds, seg_start, side="right"))
+            last = int(np.searchsorted(region_bounds, seg_end, side="left"))
             for boundary in range(first, last):
                 boundary_count[boundary_base + boundary - 1, column] += 1
                 if not spliced:
                     t.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1] += inv_boundary
             # ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ─────────────────────────
-            # The crossed cuts split this block into `last - first + 1` slices. Each slice's
+            # The crossed region_bounds split this block into `last - first + 1` slices. Each slice's
             # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
             # slice disposes of exactly its own bases::
             #
@@ -954,8 +954,8 @@ class Accumulator:
             right_junction = sj_id_at_gap[block] if block < len(sj_id_at_gap) else -1
             n_slices = last - first + 1
             for i in range(n_slices):
-                lo = seg_start if i == 0 else int(cuts[first + i - 1])
-                hi = seg_end if i == n_slices - 1 else int(cuts[first + i])
+                lo = seg_start if i == 0 else int(region_bounds[first + i - 1])
+                hi = seg_end if i == n_slices - 1 else int(region_bounds[first + i])
                 left_boundary = first + i - 1 if i > 0 else -1
                 right_boundary = first + i if i < n_slices - 1 else -1
                 # The block's own ends are junction boundaries; its interior ends are boundaries. A slice
@@ -995,9 +995,9 @@ class Accumulator:
         # contained would place its whole length in a region it only partly overlaps. Such a fragment is
         # neither contained nor crossing: it deposits on no object but is still counted (start_count),
         # so the loss is visible rather than silent.
-        first_region = self._local_region(cuts, first_base)
+        first_region = self._local_region(region_bounds, first_base)
         contained_region = -1
-        if not sj_ids and first_region == self._local_region(cuts, last_base):
+        if not sj_ids and first_region == self._local_region(region_bounds, last_base):
             contained_region = region_base + first_region
             # ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT, and it is what makes this channel a DENSITY.
             # A length-`w` fragment contained in a region of length `ell` had `ell − w + 1` admissible
@@ -1008,7 +1008,7 @@ class Accumulator:
             # but the length SET. An BOUNDARY is the `ell -> 0` limit of this, which is why `1/(L−1)` is
             # right there and was wrong here.
             # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
-            region_len = int(cuts[first_region + 1]) - int(cuts[first_region])
+            region_len = int(region_bounds[first_region + 1]) - int(region_bounds[first_region])
             t.region_contained_count[contained_region, column] += 1
             t.region_contained_inv_opportunity_sum[contained_region] += 1.0 / (
                 region_len - length + 1
@@ -1036,7 +1036,7 @@ class Accumulator:
 
         ⛔ **The drain's outcomes do NOT go into ``gap_resolution``, and that is structural rather than
         stylistic.** The census has no ``gap_resolved_unspliced`` class because pass-one arbitration can
-        never produce one — a spliced path always cuts bases the genomic path keeps, so the genomic path
+        never produce one — a spliced path always region_bounds bases the genomic path keeps, so the genomic path
         can never be the sole survivor. ⭐ But the DRAIN can *choose* it. Folding drain outcomes into that
         census would require resurrecting the class S1 deleted for a proven reason.
 
@@ -1161,21 +1161,21 @@ class Accumulator:
         self.tally.gap_resolution[resolution.value] += 1
 
     @staticmethod
-    def _local_region(cuts: np.ndarray, position: int) -> int:
+    def _local_region(region_bounds: np.ndarray, position: int) -> int:
         """Index within this reference of the region containing ``position``."""
-        return min(max(int(np.searchsorted(cuts, position, side="right")) - 1, 0), cuts.size - 2)
+        return min(max(int(np.searchsorted(region_bounds, position, side="right")) - 1, 0), region_bounds.size - 2)
 
     def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
         """The junction-boundary id for this intron, or -1 if it is not annotated.
 
-        One to three iterations at human scale: 70.4 % of cuts are not a donor at all, and over those
+        One to three iterations at human scale: 70.4 % of region_bounds are not a donor at all, and over those
         that are, the mean fan-out is 1.31.
         """
         p = self.partition
-        donor = _exact_cut(p.cut_positions, p.ref_cut_offsets, ref, intron_start)
+        donor = _exact_region_bound(p.region_bounds, p.ref_region_bound_offsets, ref, intron_start)
         if donor < 0:
             return -1
-        acceptor = _exact_cut(p.cut_positions, p.ref_cut_offsets, ref, intron_end)
+        acceptor = _exact_region_bound(p.region_bounds, p.ref_region_bound_offsets, ref, intron_end)
         if acceptor < 0:
             return -1
         for k in range(int(p.sj_offsets[donor]), int(p.sj_offsets[donor + 1])):

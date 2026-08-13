@@ -19,7 +19,7 @@ import numpy as np
 
 #: Same geometry as ``rigel.scan_cache.deposit_digest``: two annotated junctions, a short region whose far
 #: boundary a fragment may or may not reach, and regions wide enough that containment is reachable.
-CUTS = [0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400]
+REGION_BOUNDS = [0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400]
 REGION_TYPES = [0, 2, 2, 1, 2, 2, 1, 2]
 JUNCTIONS = [(0, 260, 1000, 1), (0, 1120, 2000, 1)]
 
@@ -41,7 +41,7 @@ def reference_deposit_digest(accumulator_cls, partition_cls) -> str:
     """The digest over the specification, byte-compatible with ``scan_cache.deposit_digest``."""
     from rigel.scan_cache import _digest, _schema_names
 
-    partition = partition_cls.from_cuts([CUTS], region_types=[REGION_TYPES], junctions=JUNCTIONS)
+    partition = partition_cls.from_region_bounds([REGION_BOUNDS], region_types=[REGION_TYPES], junctions=JUNCTIONS)
     accumulator = accumulator_cls(partition, max_fragment_length=1000)
     for start, end, introns in FRAGMENTS:
         accumulator.deposit(0, start, end, observed_introns=introns, sj_strand=1)

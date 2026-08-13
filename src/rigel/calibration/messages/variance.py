@@ -32,7 +32,7 @@ across a frame change is a known past defect (§2 of the junction doc). And the 
 carried as a **variance**, not a bool gate: the bounding lemma (§2) says a totally wrong composition still
 pins ``ρ_tot`` to within the effective-length ratio (1.04–1.5× for normal regions, 4×+ for short regions), which
 is a continuous quantity — :func:`composition_logvar` derives it with no tuned threshold, so a short region
-down-weights itself automatically, with no ``L ≲ fl_mean`` cut anywhere in the module.
+down-weights itself automatically, with no ``L ≲ fl_mean`` region_bound anywhere in the module.
 """
 
 from __future__ import annotations

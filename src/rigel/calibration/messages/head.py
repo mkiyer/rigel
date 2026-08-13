@@ -80,7 +80,7 @@ class HeadSwitches:
     #: the-graft-frame-variance — the graft's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
     graft_frame_var: bool = True
     #: P1d — the graft's PREMISE variance, ONE library-level scalar fitted from flanking boundary pairs.
-    #: ⚠ Ledger: CUT from the backbone — re-derive per class when TSS/TES land.
+    #: ⚠ Ledger: REGION_BOUND from the backbone — re-derive per class when TSS/TES land.
     graft_premise_var: bool = True
     #: PEEL: an EXON's RNA leaving into an BOUNDARY is scaled by the CONTINUING share ``w`` (the-continuing-share).
     peel: bool = True
@@ -90,7 +90,7 @@ class HeadSwitches:
     #: self-solve, i.e. never on unstranded data.
     mismatch_var: bool = True
     #: P1e — the conservation SURPRISE as a DL damping term. ⚠⚠ Its own comment: *"PARTLY A DEBT — THIS
-    #: PRICES A BIAS AS A VARIANCE … a variance cannot move a mode toward truth."* Ledger: CUT.
+    #: PRICES A BIAS AS A VARIANCE … a variance cannot move a mode toward truth."* Ledger: REGION_BOUND.
     conservation_var: bool = True
     #: the lambda-EMISSION gate — a source carrying ONE component has no SPLIT to claim.
     lam_emission_gate: bool = True

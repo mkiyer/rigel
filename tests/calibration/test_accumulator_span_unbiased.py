@@ -4,7 +4,7 @@
 deposits the MOLECULE's contiguous genomic span(s), not the sequenced read blocks:
   - unspliced  → one [min,max] span (mate gap filled) ⇒ the boundary-crossing
     density estimator agrees with the exact contained estimator (no over-count);
-  - implicit splice → spliced channel, intron cut (not filled);
+  - implicit splice → spliced channel, intron region_bound (not filled);
   - artifact splice → held out entirely (unrecoverable true span).
 
 Kept small + deterministic (fixed seeds) so they run fast.
@@ -88,7 +88,7 @@ def test_crossing_density_unbiased(tmp_path):
 
 def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     """An implicitly-spliced fragment (annotated intron inside the mate gap, no
-    CIGAR-N) must deposit on the SPLICED channels (ch2/3) and CUT the intron —
+    CIGAR-N) must deposit on the SPLICED channels (ch2/3) and REGION_BOUND the intron —
     not fill across it on the unspliced channels. Pre-Phase-C it was mis-channeled
     as unspliced and filled [min,max], depositing unspliced mass through the intron.
     """
@@ -130,7 +130,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     junction_flux = int(np.asarray(sub.junction.count, np.int64).sum())
     assert junction_flux > 1000, f"expected substantial junction flux, got {junction_flux}"
 
-    # (2) The intron is CUT, not filled: the intron REGION carries no contained mass, and neither of the
+    # (2) The intron is REGION_BOUND, not filled: the intron REGION carries no contained mass, and neither of the
     #     boundaries bounding it carries an unspliced crossing — the implicit molecules skip both.
     from rigel.calibration.region_arrays import region_right_boundary
 
@@ -145,7 +145,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
             if e >= 0:
                 bounding[e] = True
     intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())
-    assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
+    assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not region_bound)"
 
 
 def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):

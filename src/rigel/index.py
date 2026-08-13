@@ -91,9 +91,9 @@ MANIFEST_JSON = "manifest.json"
 #:   8 — the SPLICE GRAPH replaces the region/boundary partition. regions.feather +
 #:        edges.feather are the only partition artifacts and both are MANDATORY;
 #:        regions.feather / boundaries.feather are gone. The scanner is fed the region
-#:        cut array by `calibration.splice_graph.build_region_partition_arrays`.
+#:        region_bound array by `calibration.splice_graph.build_region_partition_arrays`.
 #:        Adjacent regions may share a signature — that is the point: the merge it
-#:        replaces deleted the cut at 53.4 % of real human transcript termini, so the
+#:        replaces deleted the region_bound at 53.4 % of real human transcript termini, so the
 #:        partition could not see them at all.
 INDEX_FORMAT_VERSION = 8
 
@@ -908,7 +908,7 @@ class TranscriptIndex:
         derived value that can go stale against the feathers beside it; this one cannot.
 
         ⚠ **It covers ``regions.feather`` only, and that is deliberate** — it is the key for a cached
-        SCAN, and the scan sees the cut array and nothing else. ``edges.feather`` (the flags and
+        SCAN, and the scan sees the region_bound array and nothing else. ``edges.feather`` (the flags and
         reaches) can change without invalidating a payload, and does: the 2026-07-29 flag-filter fix
         rewrote every boundary file while leaving every region file byte-identical. Anything that caches an
         *boundary*-derived artifact must carry its own provenance; this hash will not catch it.
@@ -934,13 +934,13 @@ class TranscriptIndex:
         """16-hex-char content hash of **everything the accumulator payload depends on** — regions AND boundaries.
 
         ⚠ **`partition_hash` is not enough for a payload, and that is not an oversight in either of them.**
-        That hash keys a cached *scan*, and a scan sees the cut array; this one keys a cached *tally*, whose
+        That hash keys a cached *scan*, and a scan sees the region_bound array; this one keys a cached *tally*, whose
         junction axis is meaningless against a different junction CSR. ⭐ The two genuinely differ: the
         2026-07-29 flag fix rewrote every ``edges.feather`` while leaving every ``regions.feather``
         byte-identical, so a regions-only key would have verified **clean** against a stale payload and fed
         every downstream comparison the pre-fix junctions.
 
-        So it is ``partition_hash``'s inputs plus the junction CSR — the donor offsets, the acceptor cut
+        So it is ``partition_hash``'s inputs plus the junction CSR — the donor offsets, the acceptor region_bound
         indices and the annotated strands, i.e. exactly what crosses into ``set_junctions``.
 
         ⚠ **Computed on demand, never stored.** A hash written beside the data it describes can go stale

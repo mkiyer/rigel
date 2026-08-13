@@ -462,8 +462,8 @@ def two_reference_parts(payload):
             [payload.boundary_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
         ),
         boundary_spliced_count=np.vstack([payload.boundary_spliced_count, np.zeros((1, 2), np.uint32)]),
-        cut_positions=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),
-        ref_cut_offsets=np.array([0, 4, 7], dtype=np.int64),
+        region_bounds=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),
+        ref_region_bound_offsets=np.array([0, 4, 7], dtype=np.int64),
     )
     df = pd.DataFrame(
         {

@@ -65,7 +65,7 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
     implemented and refuted by its own insensitivity gate. On an unstranded library the strand arm
     carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the region's depth over the library's spliced
     depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
-    ⭐ **The consumer's defence is a FIXED-DENOMINATOR score, not a better cut**
+    ⭐ **The consumer's defence is a FIXED-DENOMINATOR score, not a better region_bound**
     (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
     ``test_solvability_denominator.py``).
 

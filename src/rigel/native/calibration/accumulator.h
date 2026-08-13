@@ -5,11 +5,11 @@
  *             Where the two disagree, the Python file wins.
  *
  * THE MODEL
- *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
- *   A reference contributing `c` cuts owns `c - 1` REGIONS and `c - 2` interior BOUNDARIES, and a boundary is a
+ *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted REGION_BOUND positions.
+ *   A reference contributing `c` region_bounds owns `c - 1` REGIONS and `c - 2` interior BOUNDARIES, and a boundary is a
  *   0-bp CONTIGUOUS BOUNDARY between two adjacent regions:
  *
- *       cuts    0        100       200       600        c = 4
+ *       region_bounds    0        100       200       600        c = 4
  *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
  *       boundaries            boundary 1    boundary 2               c - 2 = 2
  *
@@ -113,7 +113,7 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 /// regions / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
 /// the region's boundaries and is deposited there.
 /// ⛔ Consequence, and it is structural: no spliced fragment touches the region axis at all, because a
-/// spliced fragment can never be `contained` (both endpoints of an annotated intron are cuts).
+/// spliced fragment can never be `contained` (both endpoints of an annotated intron are region_bounds).
 struct Region {
     std::uint32_t contained_count[kNStrandColumns];
     /// ⭐ ONE value, while `contained_count` keeps two. The length moments are strand-AGNOSTIC -- which
@@ -254,7 +254,7 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
 /// span. That is why the accumulator needs no separate "could this be gDNA?" flag, and why the nascent
 /// shadow transcript is not a candidate: it IS this hypothesis.
 ///
-/// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under EVERY
+/// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are region_bound under EVERY
 /// hypothesis and live on `OfferedFragment` instead, because they are not in doubt.
 struct GapHypothesis {
     const IntronBlock*  introns;        // implied; empty => the unspliced (genomic) hypothesis
@@ -284,7 +284,7 @@ struct GapHypothesis {
 struct OfferedFragment {
     std::int64_t         start;
     std::int64_t         end;
-    const IntronBlock*   observed_introns;   // CIGAR-N: cut under EVERY hypothesis
+    const IntronBlock*   observed_introns;   // CIGAR-N: region_bound under EVERY hypothesis
     std::size_t          n_observed_introns;
     std::int32_t         align_strand;
     std::int32_t         sj_strand;
@@ -296,7 +296,7 @@ struct OfferedFragment {
 /// one non-unspliced hypothesis, partitioned by how the gap was RESOLVED. Exhaustive and mutually
 /// exclusive, so `sum(GapCensus) == the umbrella` and the three deferred_* == `deferred_undetermined_gap`.
 ///
-/// ⛔ Its own axis, NOT a `splice_type`. The umbrella cuts ACROSS the splice census: a certified-RNA
+/// ⛔ Its own axis, NOT a `splice_type`. The umbrella region_bounds ACROSS the splice census: a certified-RNA
 /// SPLICED_ANNOT fragment with an intron in its mate gap needs resolving exactly as much as an UNSPLICED
 /// one does, so putting these on `splice_type` would need two labels per fragment.
 ///
@@ -304,13 +304,13 @@ struct OfferedFragment {
 /// afterwards as TOO_LONG, which is a different question with its own counter.
 ///
 /// ⛔ THERE IS NO `resolved_unspliced`, AND IT IS NOT AN OMISSION. The field existed and no fragment could
-/// enter it: a spliced hypothesis CUTS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
+/// enter it: a spliced hypothesis REGION_BOUNDS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
 /// and the one filter is `L <= max_length`. If the unspliced path survives the filter then every spliced
 /// path survives it too, so the survivor set can never be exactly {unspliced} while a spliced path was
 /// offered -- which is the condition for being in this census at all. The ORDERING is pinned directly by
 /// `test_gap_hypothesis_arbitration.test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST`.
 struct GapCensus {
-    std::int64_t resolved_spliced        = 0;  // one survivor, and it necessarily cuts something
+    std::int64_t resolved_spliced        = 0;  // one survivor, and it necessarily region_bounds something
     std::int64_t deferred_rna_or_gdna    = 0;  // unspliced vs ONE spliced path: was anything spliced?
     std::int64_t deferred_which_introns  = 0;  // >= 2 spliced paths, none unspliced: certified RNA
     std::int64_t deferred_both           = 0;  // both questions at once
@@ -340,7 +340,7 @@ struct GapCensus {
 /// widening here costs 8 bytes per deferred record and removes a conversion that would otherwise have to
 /// happen at the export, where getting it wrong compares equal by value.
 struct DeferredFragments {
-    std::vector<std::int64_t> ref;                         // which reference: the drain needs the cut axis
+    std::vector<std::int64_t> ref;                         // which reference: the drain needs the region_bound axis
     std::vector<std::int64_t> start, end;                  // the CLIPPED extent
     std::vector<std::int64_t> align_strand, sj_strand;
     std::vector<std::int64_t> observed_intron_offsets{0};  // in PAIRS, into observed_introns
@@ -393,7 +393,7 @@ struct ScoredHypothesis {
 
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
-    std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
+    std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns region_bound out
     std::vector<std::int32_t>                         sj_ids;     // annotated junction boundaries used
     /// ⭐ The same resolution kept PER INTRON POSITION, -1 where unannotated. `sj_ids` is filtered, so
     /// it cannot say which of a block's two ends is a junction — and the conserved mass needs exactly
@@ -427,7 +427,7 @@ struct DepositCounters {
 
 class Accumulator {
 public:
-    /// `cuts` is this reference's sorted, strictly increasing cut positions and is moved in. Length may
+    /// `region_bounds` is this reference's sorted, strictly increasing region_bound positions and is moved in. Length may
     /// be 0 or 1, which is a reference with no regions: legal, and it deposits nothing.
     ///
     /// `region_types` is either empty or one coarse type per region; it types the length pools. `max_length`
@@ -436,15 +436,15 @@ public:
     /// empty.
     ///
     /// ⚠ `ref_id` is which reference this accumulator IS, and it is required rather than defaulted. An
-    /// Accumulator is described by its cut positions alone and has no other way to know: it is stamped
+    /// Accumulator is described by its region_bound positions alone and has no other way to know: it is stamped
     /// into every DEFERRED record, and the second pass replays those through `deposit` -- onto the wrong
-    /// cut axis if the stamp is wrong, which is the failure mode `merge_from`'s cut comparison exists for.
-    explicit Accumulator(std::vector<std::int64_t> cuts,
+    /// region_bound axis if the stamp is wrong, which is the failure mode `merge_from`'s region_bound comparison exists for.
+    explicit Accumulator(std::vector<std::int64_t> region_bounds,
                          std::vector<std::uint8_t> region_types,
                          int max_length,
                          std::int32_t ref_id);
 
-    /// Install this reference's junction boundaries as a CSR keyed by DONOR CUT INDEX -- the index the
+    /// Install this reference's junction boundaries as a CSR keyed by DONOR REGION_BOUND INDEX -- the index the
     /// deposit already computes while locating the boundaries its path crosses.
     ///
     /// ⚠ The junction-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
@@ -452,17 +452,17 @@ public:
     /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
     ///
     /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
-    /// (donor cut, acceptor cut, sj_strand), matching `Partition.from_cuts` in the Python spec.
-    void set_junctions(std::vector<std::int32_t> offsets,       // size n_cuts + 1
-                       std::vector<std::int32_t> boundary_right,  // acceptor CUT INDEX, not a coordinate
+    /// (donor region_bound, acceptor region_bound, sj_strand), matching `Partition.from_region_bounds` in the Python spec.
+    void set_junctions(std::vector<std::int32_t> offsets,       // size n_region_bounds + 1
+                       std::vector<std::int32_t> boundary_right,  // acceptor REGION_BOUND INDEX, not a coordinate
                        std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
     std::size_t n_boundaries()    const noexcept { return boundaries_.size(); }
     std::size_t n_junctions() const noexcept { return junctions_.size(); }
-    std::size_t n_cuts()     const noexcept { return cuts_.size(); }
+    std::size_t n_region_bounds()     const noexcept { return region_bounds_.size(); }
 
-    const std::int64_t* cuts_data() const noexcept { return cuts_.data(); }
+    const std::int64_t* region_bounds_data() const noexcept { return region_bounds_.data(); }
     Region*               regions_data()      noexcept { return regions_.data(); }
     const Region*         regions_data() const noexcept { return regions_.data(); }
     Boundary*     boundaries_data()      noexcept { return boundaries_.data(); }
@@ -515,7 +515,7 @@ public:
     ///
     /// ⚠ Clamped, not -1 on miss: `deposit` has already clipped the path into this reference, so a
     /// position outside cannot arrive, and clamping keeps this byte-compatible with the spec's
-    /// `min(max(searchsorted(cuts, p, 'right') - 1, 0), n_cuts - 2)`.
+    /// `min(max(searchsorted(region_bounds, p, 'right') - 1, 0), n_region_bounds - 2)`.
     std::int64_t region_of_pos(std::int64_t position) const noexcept;
 
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
@@ -533,7 +533,7 @@ public:
                               std::size_t hypothesis_index,
                               DepositScratch& scratch) const;
 
-    /// Element-wise sum of `other` into this accumulator. Requires identical cut positions.
+    /// Element-wise sum of `other` into this accumulator. Requires identical region_bound positions.
     void merge_from(const Accumulator& other);
 
 private:
@@ -570,16 +570,16 @@ private:
                             std::int64_t intron_end,
                             std::int32_t sj_strand) const noexcept;
 
-    /// The flat cut index of `position`, or -1 if it is not a cut on this reference.
-    std::int64_t exact_cut(std::int64_t position) const noexcept;
+    /// The flat region_bound index of `position`, or -1 if it is not a region_bound on this reference.
+    std::int64_t exact_region_bound(std::int64_t position) const noexcept;
 
-    std::vector<std::int64_t>  cuts_;              // n_cuts, strictly increasing
-    std::vector<Region>          regions_;             // n_cuts - 1
-    std::vector<Boundary> boundaries_;            // n_cuts - 2, the interior boundaries
+    std::vector<std::int64_t>  region_bounds_;              // n_region_bounds, strictly increasing
+    std::vector<Region>          regions_;             // n_region_bounds - 1
+    std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
     std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
 
-    std::vector<std::int32_t>  sj_offsets_;        // n_cuts + 1, CSR over the donor cut index
+    std::vector<std::int32_t>  sj_offsets_;        // n_region_bounds + 1, CSR over the donor region_bound index
     std::vector<std::int32_t>  sj_boundary_right_;   // n_junctions
     std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
 
@@ -597,15 +597,15 @@ private:
 // AccumulatorSet — one Accumulator per reference over a flat partition
 // ============================================================================
 //
-// `cut_positions` is the concatenated, reference-major cut array; reference f owns
-// cut_positions[ref_cut_offsets[f] .. ref_cut_offsets[f+1]). A reference with fewer than 2 cuts owns no
+// `region_bounds` is the concatenated, reference-major region_bound array; reference f owns
+// region_bounds[ref_region_bound_offsets[f] .. ref_region_bound_offsets[f+1]). A reference with fewer than 2 region_bounds owns no
 // regions and no boundaries, which is legal.
 //
 class AccumulatorSet {
 public:
-    AccumulatorSet(const std::int64_t* cut_positions,
+    AccumulatorSet(const std::int64_t* region_bounds,
                    std::size_t n_positions,
-                   const std::int64_t* ref_cut_offsets,
+                   const std::int64_t* ref_region_bound_offsets,
                    std::size_t n_refs,
                    const std::uint8_t* region_types,
                    std::size_t n_region_types,
@@ -614,25 +614,25 @@ public:
     std::size_t n_refs() const noexcept { return accs_.size(); }
 
     /// Install the junction CSR for every reference at once, from the FLAT arrays the index emits
-    /// (`build_junction_edge_arrays`), keyed by the flat cut index.
+    /// (`build_junction_edge_arrays`), keyed by the flat region_bound index.
     ///
-    /// The slicing is pure arithmetic and lives here so it exists once. Reference `f` owns cuts
-    /// `[c0, c1)`, and because the CSR is sorted by flat donor cut while references are cut-major, its
+    /// The slicing is pure arithmetic and lives here so it exists once. Reference `f` owns region_bounds
+    /// `[c0, c1)`, and because the CSR is sorted by flat donor region_bound while references are region_bound-major, its
     /// junctions are the contiguous SLOT range `[offsets[c0], offsets[c1])`. So per reference:
     ///
-    ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_cuts + 1)
-    ///     boundary_right -> boundary_right[j0 .. j1] - c0               (a ref-local cut index)
+    ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_region_bounds + 1)
+    ///     boundary_right -> boundary_right[j0 .. j1] - c0               (a ref-local region_bound index)
     ///
     /// ⚠ Two consequences, both load-bearing. A reference's junction-boundary ids are `slot - j0`, so the
     /// payload's junction axis is exactly the flat slot order concatenated in reference order — which is
     /// what lets `edges_df.edge_row` stay a join key that never crosses the ABI. And the narrowing to
-    /// int32 is safe by census: 1.04 M cuts and 404,168 junctions at human scale.
-    void set_junctions(const std::int64_t* offsets,       // n_cuts_total + 1, over the FLAT cut axis
+    /// int32 is safe by census: 1.04 M region_bounds and 404,168 junctions at human scale.
+    void set_junctions(const std::int64_t* offsets,       // n_region_bounds_total + 1, over the FLAT region_bound axis
                        std::size_t n_offsets,
-                       const std::int64_t* boundary_right,  // n_junctions_total, FLAT cut indices
+                       const std::int64_t* boundary_right,  // n_junctions_total, FLAT region_bound indices
                        const std::int8_t* sj_strand,
                        std::size_t n_junctions,
-                       const std::int64_t* ref_cut_offsets);
+                       const std::int64_t* ref_region_bound_offsets);
 
     Accumulator&       at(std::int32_t ref_id);
     const Accumulator& at(std::int32_t ref_id) const;

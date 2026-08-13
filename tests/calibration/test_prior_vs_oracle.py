@@ -62,7 +62,7 @@ def _scenario(name: str, seed: int, work_dir) -> Scenario:
     """Three genes, staggered isoforms, and one region shorter than the shortest fragment.
 
     ⭐ The stagger is load-bearing for the ``boundary_spliced`` bank (a contiguous crossing by a molecule
-    that spliced elsewhere can only land where a cut falls inside another transcript's exon), and the
+    that spliced elsewhere can only land where a region_bound falls inside another transcript's exon), and the
     short region is what gives the toy genuinely EMPTY objects — the population the NaN-not-zero gate is
     about. Both are the same structures ``test_pass0_vs_oracle`` relies on, for the same reasons.
     """

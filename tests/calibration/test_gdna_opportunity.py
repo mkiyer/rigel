@@ -33,14 +33,14 @@ TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON = 0, 1, 2
 # ── the oracle ──────────────────────────────────────────────────────────────────────────────────
 
 
-def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
+def enumerate_pools(region_bounds: list[int], types: list[int], width: int) -> dict:
     """Walk every start position on one reference and classify it exactly as the deposit rule does.
 
-    ``cuts`` is the reference's cut axis, ascending, first 0 and last ``L_ref``. ``types`` is one coarse
-    type per region, so ``len(types) == len(cuts) - 1``.
+    ``region_bounds`` is the reference's region_bound axis, ascending, first 0 and last ``L_ref``. ``types`` is one coarse
+    type per region, so ``len(types) == len(region_bounds) - 1``.
     """
-    reference_length = cuts[-1]
-    boundaries = cuts[1:-1]  # interior boundaries only
+    reference_length = region_bounds[-1]
+    boundaries = region_bounds[1:-1]  # interior boundaries only
     counts = {
         "contained": {TYPE_INTERGENIC: 0, TYPE_INTRON: 0, TYPE_EXON: 0},
         "crossing": {},
@@ -52,7 +52,7 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
         crossed = [i for i, p in enumerate(boundaries) if start < p < end]
         if not crossed:
             # Contained: find the single region holding [start, end).
-            region = max(i for i, c in enumerate(cuts[:-1]) if c <= start)
+            region = max(i for i, c in enumerate(region_bounds[:-1]) if c <= start)
             counts["contained"][types[region]] += 1
         elif len(crossed) == 1:
             boundary = crossed[0]
@@ -61,8 +61,8 @@ def enumerate_pools(cuts: list[int], types: list[int], width: int) -> dict:
     return counts
 
 
-def region_lengths_of(cuts: list[int]) -> np.ndarray:
-    return np.diff(np.asarray(cuts, dtype=np.int64))
+def region_lengths_of(region_bounds: list[int]) -> np.ndarray:
+    return np.diff(np.asarray(region_bounds, dtype=np.int64))
 
 
 # ── the partitions the oracle is run over ───────────────────────────────────────────────────────
@@ -83,24 +83,24 @@ WIDTHS = [1, 2, 3, 7, 20, 41, 55, 99, 130]
 
 
 class TestAgainstTheEnumeratingOracle:
-    @pytest.mark.parametrize("cuts,types", PARTITIONS)
+    @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
-    def test_contained_opportunity_matches_enumeration(self, cuts, types, width):
-        oracle = enumerate_pools(cuts, types, width)
-        lengths = region_lengths_of(cuts)
+    def test_contained_opportunity_matches_enumeration(self, region_bounds, types, width):
+        oracle = enumerate_pools(region_bounds, types, width)
+        lengths = region_lengths_of(region_bounds)
         max_width = max(WIDTHS)
         for region_type in (TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON):
             selected = lengths[np.asarray(types) == region_type]
             computed = contained_opportunity(selected, max_width)[width]
             assert computed == pytest.approx(oracle["contained"][region_type]), (
-                f"type {region_type}, width {width}, cuts {cuts}"
+                f"type {region_type}, width {width}, region_bounds {region_bounds}"
             )
 
-    @pytest.mark.parametrize("cuts,types", PARTITIONS)
+    @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
-    def test_crossing_opportunity_matches_enumeration(self, cuts, types, width):
-        oracle = enumerate_pools(cuts, types, width)
-        lengths = region_lengths_of(cuts)
+    def test_crossing_opportunity_matches_enumeration(self, region_bounds, types, width):
+        oracle = enumerate_pools(region_bounds, types, width)
+        lengths = region_lengths_of(region_bounds)
         max_width = max(WIDTHS)
         if len(lengths) < 2:
             return
@@ -110,31 +110,31 @@ class TestAgainstTheEnumeratingOracle:
             mask = (pairs[0] == pair[0]) & (pairs[1] == pair[1])
             computed = crossing_opportunity(left[mask], right[mask], max_width)[width]
             assert computed == pytest.approx(oracle["crossing"].get(pair, 0)), (
-                f"pair {pair}, width {width}, cuts {cuts}"
+                f"pair {pair}, width {width}, region_bounds {region_bounds}"
             )
 
-    @pytest.mark.parametrize("cuts,types", PARTITIONS)
+    @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
-    def test_total_opportunity_matches_enumeration(self, cuts, types, width):
-        oracle = enumerate_pools(cuts, types, width)
-        computed = total_opportunity(np.asarray([cuts[-1]]), max(WIDTHS))[width]
+    def test_total_opportunity_matches_enumeration(self, region_bounds, types, width):
+        oracle = enumerate_pools(region_bounds, types, width)
+        computed = total_opportunity(np.asarray([region_bounds[-1]]), max(WIDTHS))[width]
         assert computed == pytest.approx(oracle["total"])
 
-    @pytest.mark.parametrize("cuts,types", PARTITIONS)
+    @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
-    def test_every_start_is_accounted_for(self, cuts, types, width):
+    def test_every_start_is_accounted_for(self, region_bounds, types, width):
         """⭐ The pools plus the unpooled remainder must exhaust every admissible start.
 
         This is the one assertion that would catch an opportunity function that is individually
         plausible and collectively wrong — double-counting a start, or losing one at a boundary.
         """
-        oracle = enumerate_pools(cuts, types, width)
+        oracle = enumerate_pools(region_bounds, types, width)
         pooled = sum(oracle["contained"].values()) + sum(oracle["crossing"].values())
         assert pooled <= oracle["total"]
         multi_boundary = oracle["total"] - pooled
         assert multi_boundary >= 0
         # And the closed forms sum to the same pooled figure.
-        lengths = region_lengths_of(cuts)
+        lengths = region_lengths_of(region_bounds)
         max_width = max(WIDTHS)
         computed = sum(
             contained_opportunity(lengths[np.asarray(types) == t], max_width)[width]

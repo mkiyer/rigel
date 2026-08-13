@@ -40,15 +40,15 @@ def oracle(tmp_path):
     """A scenario built so that **every** bank of the tally receives something.
 
     ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the junction
-    boundaries and leave **both contiguous-boundary banks identically zero**: every cut is an exon boundary, so a
+    boundaries and leave **both contiguous-boundary banks identically zero**: every region_bound is an exon boundary, so a
     mature fragment either fits inside an exon (contained) or splices across the gap (junction boundary), and
     it never has bases on both sides of a boundary. A bit-identity gate over an all-zero array passes for the
     wrong reason — this project has already had one report "32/32 IDENTICAL" on an arm with zero rows. So:
 
-    * ``t2`` starts at 500, **inside** ``t1``'s first exon. That makes 500 a cut, and a ``t1`` fragment
+    * ``t2`` starts at 500, **inside** ``t1``'s first exon. That makes 500 a region_bound, and a ``t1`` fragment
       spanning it has bases on both sides — a contiguous crossing. If that fragment also uses the
       junction, it is a crossing in the SPLICED bank, which is the channel the old design merged away.
-    * ``t4`` ends at 650, which cuts a **50 bp** region out of ``[500, 700)``. Nothing else here can be
+    * ``t4`` ends at 650, which region_bounds a **50 bp** region out of ``[500, 700)``. Nothing else here can be
       SPANNED: spanning needs one segment covering a region whole, so at 200 bp regions and 220 bp fragments
       it essentially never happens, and mature RNA can never span the region before a junction at all —
       it has no base past the exon end, it splices there. A 50 bp region is spanned by ordinary gDNA.

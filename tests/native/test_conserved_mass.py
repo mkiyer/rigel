@@ -23,7 +23,7 @@ one numeric convention). The banks are float64 fractions; there is no quantum an
 
 ⚠ Claim 3 states the rule a second time, deliberately and in one place only. The specification reaches
 the answer through slices and two ``searchsorted`` calls; this reaches it by asking of every base "which
-region holds you, and which of that region's bounding cuts lie strictly inside this fragment?". Agreement is
+region holds you, and which of that region's bounding region_bounds lie strictly inside this fragment?". Agreement is
 not automatic — the same shape ``reference_on_real_data.py``'s ``bisect`` walk has against the
 specification's index ranges (``TRAPS: a-test-that-redefines``).
 """
@@ -54,19 +54,19 @@ def budget(deposits: int) -> float:
 #: fragment below — the control, where a crossing fragment can only cross that one boundary. Boundaries 2, 3 and 4
 #: bound a cluster of 50 bp regions, so one 300 bp fragment crosses three at once. Under capture that
 #: cluster IS the geometry: 40.2 % of gDNA fragments are crossings there against 4.8 % off it.
-CUTS = [0, 400, 1000, 1050, 1100, 1500, 1900]
+REGION_BOUNDS = [0, 400, 1000, 1050, 1100, 1500, 1900]
 LENGTHS = (60, 150, 300)
 MAX_LENGTH = 1000
 
 
-def _partition(cuts=CUTS) -> Partition:
-    return Partition.from_cuts([cuts], region_types=[[0] * (len(cuts) - 1)])
+def _partition(region_bounds=REGION_BOUNDS) -> Partition:
+    return Partition.from_region_bounds([region_bounds], region_types=[[0] * (len(region_bounds) - 1)])
 
 
-def _mass_by_base(cuts, start: int, end: int) -> dict[int, Fraction]:
+def _mass_by_base(region_bounds, start: int, end: int) -> dict[int, Fraction]:
     """The per-boundary mass of ONE unspliced fragment, attributed BASE BY BASE.
 
-    Every base is asked which region holds it; the region's two bounding cuts are boundaries iff they lie
+    Every base is asked which region holds it; the region's two bounding region_bounds are boundaries iff they lie
     strictly inside the fragment; the base is split equally between the boundaries that do bound it. Divided
     by the fragment's length, that is the mass — reached without ever forming a slice.
 
@@ -76,19 +76,19 @@ def _mass_by_base(cuts, start: int, end: int) -> dict[int, Fraction]:
     length = end - start
     out: dict[int, Fraction] = {}
     for position in range(start, end):
-        region = bisect.bisect_right(cuts, position) - 1
-        boundaries = [i for i in (region, region + 1) if start < cuts[i] < end]
+        region = bisect.bisect_right(region_bounds, position) - 1
+        boundaries = [i for i in (region, region + 1) if start < region_bounds[i] < end]
         for boundary in boundaries:
             out[boundary] = out.get(boundary, Fraction(0)) + Fraction(1, length * len(boundaries))
     return out
 
 
-def _enumerate(partition, cuts=CUTS, lengths=LENGTHS, perturb=None):
+def _enumerate(partition, region_bounds=REGION_BOUNDS, lengths=LENGTHS, perturb=None):
     """Every fragment of every length at every start position. Returns ``(accumulator, n)``."""
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     n = 0
     for length in lengths:
-        for start in range(cuts[0], cuts[-1] - length + 1):
+        for start in range(region_bounds[0], region_bounds[-1] - length + 1):
             outcome = accumulator.deposit(0, start, start + length)
             assert outcome is DepositOutcome.DEPOSITED, f"[{start},{start + length}) was {outcome}"
             n += 1
@@ -100,7 +100,7 @@ def _enumerate(partition, cuts=CUTS, lengths=LENGTHS, perturb=None):
 # ---------------------------------------------------------------------------
 
 
-def _exact_fragment_mass(partition, cuts, start, end) -> tuple[Fraction, int]:
+def _exact_fragment_mass(partition, region_bounds, start, end) -> tuple[Fraction, int]:
     """``(Σ mass, contained)`` for ONE fragment, in EXACT rational arithmetic.
 
     ⚠ Read out of a FRESH accumulator by differencing nothing — the bank starts at zero, so the sum over
@@ -129,8 +129,8 @@ def test_the_RULE_conserves_exactly_before_any_quantisation():
     or worse, how a real error gets absorbed into a tolerance that was sized for rounding.
     """
     for length in LENGTHS:
-        for start in range(CUTS[0], CUTS[-1] - length + 1):
-            by_base = _mass_by_base(CUTS, start, start + length)
+        for start in range(REGION_BOUNDS[0], REGION_BOUNDS[-1] - length + 1):
+            by_base = _mass_by_base(REGION_BOUNDS, start, start + length)
             if not by_base:
                 continue  # contained: the region bank holds the whole fragment
             assert sum(by_base.values()) == 1, (
@@ -152,9 +152,9 @@ def test_the_BANK_conserves_to_within_the_REPRESENTATION_and_no_more():
     partition = _partition()
     worst = 0.0
     for length in LENGTHS:
-        for start in range(CUTS[0], CUTS[-1] - length + 1):
-            total, contained = _exact_fragment_mass(partition, CUTS, start, start + length)
-            crossings = len(_mass_by_base(CUTS, start, start + length))
+        for start in range(REGION_BOUNDS[0], REGION_BOUNDS[-1] - length + 1):
+            total, contained = _exact_fragment_mass(partition, REGION_BOUNDS, start, start + length)
+            crossings = len(_mass_by_base(REGION_BOUNDS, start, start + length))
             allowed = budget(2 * max(crossings, 1))
             deviation = abs(total + contained - 1)
             worst = max(worst, deviation)
@@ -174,7 +174,7 @@ def test_a_CONTAINED_fragment_deposits_NO_mass_at_all():
     """⛔ Its whole fragment is already ``region_contained_count``; mass at a boundary as well would be it
     counted twice. This is the branch the law's ``contained`` term exists for."""
     partition = _partition()
-    total, contained = _exact_fragment_mass(partition, CUTS, 100, 160)  # well inside region 0
+    total, contained = _exact_fragment_mass(partition, REGION_BOUNDS, 100, 160)  # well inside region 0
     assert contained == 1
     assert total == 0
 
@@ -223,19 +223,19 @@ def test_the_mass_is_the_PER_BASE_attribution():
     accumulator, _n = _enumerate(partition)
     expected: dict[int, Fraction] = {}
     for length in LENGTHS:
-        for start in range(CUTS[0], CUTS[-1] - length + 1):
-            for boundary, mass in _mass_by_base(CUTS, start, start + length).items():
+        for start in range(REGION_BOUNDS[0], REGION_BOUNDS[-1] - length + 1):
+            for boundary, mass in _mass_by_base(REGION_BOUNDS, start, start + length).items():
                 expected[boundary] = expected.get(boundary, Fraction(0)) + mass
 
     bank = np.asarray(accumulator.tally.boundary_unspliced_mass, np.float64)
     count = np.asarray(accumulator.tally.boundary_unspliced_count, np.int64).sum(axis=1)
-    for boundary in range(1, len(CUTS) - 1):
+    for boundary in range(1, len(REGION_BOUNDS) - 1):
         boundary = boundary - 1
         got = float(bank[boundary])
         want = expected.get(boundary, Fraction(0))
         budget = float(count[boundary])
         assert abs(got - want) <= budget, (
-            f"boundary {boundary} @ {CUTS[boundary]}: bank {float(got)} vs per-base {float(want)}, "
+            f"boundary {boundary} @ {REGION_BOUNDS[boundary]}: bank {float(got)} vs per-base {float(want)}, "
             f"quantisation budget {float(budget):.3e}"
         )
 
@@ -255,10 +255,10 @@ def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
 
     wide = [
         boundary
-        for boundary in range(1, len(CUTS) - 1)
-        if min(CUTS[boundary] - CUTS[boundary - 1], CUTS[boundary + 1] - CUTS[boundary]) > max(LENGTHS)
+        for boundary in range(1, len(REGION_BOUNDS) - 1)
+        if min(REGION_BOUNDS[boundary] - REGION_BOUNDS[boundary - 1], REGION_BOUNDS[boundary + 1] - REGION_BOUNDS[boundary]) > max(LENGTHS)
     ]
-    narrow = [boundary for boundary in range(1, len(CUTS) - 1) if boundary not in wide]
+    narrow = [boundary for boundary in range(1, len(REGION_BOUNDS) - 1) if boundary not in wide]
     assert wide and narrow, "the fixture must contain both cases or this gate tests one of them"
 
     for boundary in wide:
@@ -283,9 +283,9 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
     ⭐ The geometry is the staggered case the second bank exists for: the fragment splices over one
     exon boundary and then runs CONTIGUOUSLY across another isoform's boundary inside its second block.
     """
-    cuts = [0, 1000, 2000, 9000, 9050, 10000]
-    partition = Partition.from_cuts(
-        [cuts],
+    region_bounds = [0, 1000, 2000, 9000, 9050, 10000]
+    partition = Partition.from_region_bounds(
+        [region_bounds],
         region_types=[[0, 2, 1, 2, 2]],
         junctions=[(0, 2000, 9000, Strand.POS)],
     )
@@ -326,9 +326,9 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
 def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
     """⚠ Read as "the number of spliced fragments here", this bank is simply wrong — and that is a
     reading a consumer can make, so it is pinned rather than left to the docstring."""
-    cuts = [0, 1000, 2000, 9000, 9050, 10000]
-    partition = Partition.from_cuts(
-        [cuts], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+    region_bounds = [0, 1000, 2000, 9000, 9050, 10000]
+    partition = Partition.from_region_bounds(
+        [region_bounds], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
     )
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     n = 0
@@ -349,12 +349,12 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
 #: The staggered geometry claim 4 uses: one annotated junction, and a short region (9000–9050) whose far
 #: boundary a fragment may or may not reach. That choice is what lets the SAME partition carry both a
 #: spliced fragment that crosses a boundary and one that crosses none.
-SPLICED_CUTS = [0, 1000, 2000, 9000, 9050, 10000]
+SPLICED_REGION_BOUNDS = [0, 1000, 2000, 9000, 9050, 10000]
 
 
 def _spliced_partition() -> Partition:
-    return Partition.from_cuts(
-        [SPLICED_CUTS], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
+    return Partition.from_region_bounds(
+        [SPLICED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 2]], junctions=[(0, 2000, 9000, Strand.POS)]
     )
 
 
@@ -407,12 +407,12 @@ def test_a_spliced_fragment_crossing_NO_BOUNDARY_still_deposits_a_WHOLE_FRAGMENT
 #: the equal-share rule at all — every block it produces is bounded on one side only, so ``len(bounds)``
 #: is always 1 and a rule that forgot to share would pass every gate. Measured: deleting the share made
 #: 18/18 gates pass until this fixture existed (`TRAPS: could-the-arm-have-fired`).
-TWO_JUNCTION_CUTS = [0, 1000, 2000, 5000, 5100, 8000, 9000, 10000]
+TWO_JUNCTION_REGION_BOUNDS = [0, 1000, 2000, 5000, 5100, 8000, 9000, 10000]
 
 
 def _two_junction_partition() -> Partition:
-    return Partition.from_cuts(
-        [TWO_JUNCTION_CUTS],
+    return Partition.from_region_bounds(
+        [TWO_JUNCTION_REGION_BOUNDS],
         region_types=[[0, 2, 1, 2, 1, 2, 0]],
         junctions=[(0, 2000, 5000, Strand.POS), (0, 5100, 8000, Strand.POS)],
     )
@@ -480,9 +480,9 @@ def test_a_fragment_crossing_BOTH_junctions_AND_boundaries_gives_EVERY_crossed_o
 
     so junction 0 is flanked by two boundary-crossing blocks: under the old rule it got nothing.
     """
-    cuts = [0, 1000, 2000, 2500, 5000, 5100, 5200, 8000, 9000, 10000]
-    partition = Partition.from_cuts(
-        [cuts],
+    region_bounds = [0, 1000, 2000, 2500, 5000, 5100, 5200, 8000, 9000, 10000]
+    partition = Partition.from_region_bounds(
+        [region_bounds],
         region_types=[[0, 2, 2, 1, 2, 2, 1, 2, 0]],
         junctions=[(0, 2500, 5000, Strand.POS), (0, 5200, 8000, Strand.POS)],
     )
@@ -547,9 +547,9 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
     traversal counted twice. It cannot, structurally: a boundary is crossed iff it lies STRICTLY inside a
     block, and a junction's donor and acceptor are block endpoints. Asserted rather than assumed.
     """
-    cuts = [0, 1000, 2000, 5000, 5050, 10000, 12000]
-    partition = Partition.from_cuts(
-        [cuts],
+    region_bounds = [0, 1000, 2000, 5000, 5050, 10000, 12000]
+    partition = Partition.from_region_bounds(
+        [region_bounds],
         region_types=[[0, 2, 1, 2, 2, 0]],
         junctions=[(0, 2000, 5000, Strand.POS), (0, 2000, 5050, Strand.POS)],
     )

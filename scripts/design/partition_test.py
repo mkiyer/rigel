@@ -20,8 +20,8 @@ N_REP = 40
 
 
 def run(spacing):
-    cuts = np.arange(0, T + 1, spacing)  # region boundaries; boundaries sit at cuts[1:-1]
-    n_boundary = cuts.size - 2
+    region_bounds = np.arange(0, T + 1, spacing)  # region boundaries; boundaries sit at region_bounds[1:-1]
+    n_boundary = region_bounds.size - 2
     acc = {k: np.zeros(n_boundary) for k in ("R1", "R2", "R3")}
     cnt = np.zeros(n_boundary)
     for _ in range(N_REP):
@@ -29,14 +29,14 @@ def run(spacing):
         lens = np.clip(rng.normal(MU, SD, n).round().astype(np.int64), 30, 600)
         starts = rng.integers(0, T - lens)
         ends = starts + lens  # half-open
-        # boundaries strictly inside the fragment: cuts[j] with start < cuts[j] < end
-        lo = np.searchsorted(cuts, starts, side="right")  # first cut > start
-        hi = np.searchsorted(cuts, ends, side="left")  # first cut >= end
+        # boundaries strictly inside the fragment: region_bounds[j] with start < region_bounds[j] < end
+        lo = np.searchsorted(region_bounds, starts, side="right")  # first region_bound > start
+        hi = np.searchsorted(region_bounds, ends, side="left")  # first region_bound >= end
         K = np.maximum(hi - lo, 0)
         for s, e, L, a, b, k in zip(starts, ends, lens, lo, hi, K):
             if k == 0:
                 continue
-            idx = np.arange(a, b) - 1  # boundary index (cut j -> boundary j-1)
+            idx = np.arange(a, b) - 1  # boundary index (region_bound j -> boundary j-1)
             ok = (idx >= 0) & (idx < n_boundary)
             idx = idx[ok]
             if idx.size == 0:
@@ -45,7 +45,7 @@ def run(spacing):
             acc["R1"][idx] += 1.0 / L
             acc["R2"][idx] += (1.0 / L) / k
             # overlap-weighted: the two region-pieces flanking this boundary, over 2L
-            cj = cuts[a:b][ok]
+            cj = region_bounds[a:b][ok]
             left_ov = cj - np.maximum(s, cj - spacing)
             right_ov = np.minimum(e, cj + spacing) - cj
             acc["R3"][idx] += (1.0 / L) * (left_ov + right_ov) / (2.0 * L)

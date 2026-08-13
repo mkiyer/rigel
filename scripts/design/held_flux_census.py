@@ -60,7 +60,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 INV_LENGTH_SCALE = float(1 << 32)
 
 
-def _lines_strictly_inside(cuts: np.ndarray, lo: int, hi: int, start: int, end: int) -> tuple[int, int]:
+def _lines_strictly_inside(region_bounds: np.ndarray, lo: int, hi: int, start: int, end: int) -> tuple[int, int]:
     """⛔ **THE PRE-D-6 RULE, kept only so the measurement stays reproducible.**
 
     ``rigel.second_pass`` asked for the lines ``start < c < end`` until 2026-08-02. That drops the donor
@@ -69,8 +69,8 @@ def _lines_strictly_inside(cuts: np.ndarray, lo: int, hi: int, start: int, end: 
     :func:`rigel.second_pass._distinguishing_lines`, derived from the deposit; this function exists so
     the ``artefact`` column below can still be computed. ⛔ Do not import it into ``src/``.
     """
-    first = int(np.searchsorted(cuts[lo:hi], start, side="right"))
-    last = int(np.searchsorted(cuts[lo:hi], end, side="left"))
+    first = int(np.searchsorted(region_bounds[lo:hi], start, side="right"))
+    last = int(np.searchsorted(region_bounds[lo:hi], end, side="left"))
     return first, last
 
 
@@ -99,7 +99,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
     from rigel.types import Strand
 
     deferred = payload.deferred
-    cuts = payload.cut_positions
+    region_bounds = payload.region_bounds
     density = scored.terms.density
     n_introns = np.diff(deferred.hypothesis_intron_offsets)
     is_spliced = n_introns > 0
@@ -122,8 +122,8 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
         ref = int(deferred.ref[i])
         observed_motif = int(deferred.sj_strand[i])
         h0, h1 = int(deferred.hypothesis_offsets[i]), int(deferred.hypothesis_offsets[i + 1])
-        cut_lo = int(payload.ref_cut_offsets[ref])
-        cut_hi = int(payload.ref_cut_offsets[ref + 1])
+        region_bound_lo = int(payload.ref_region_bound_offsets[ref])
+        region_bound_hi = int(payload.ref_region_bound_offsets[ref + 1])
         boundary_base = int(payload.ref_boundary_offsets[ref])
 
         contested = [
@@ -139,7 +139,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied
                 worst = 0
                 for a, b in introns:
-                    jid = _junction_id(junctions, cuts, cut_lo, cut_hi, a, b, motif)
+                    jid = _junction_id(junctions, region_bounds, region_bound_lo, region_bound_hi, a, b, motif)
                     if jid < 0:
                         worst = max(worst, 1)
                     elif sj_flux[jid] <= 0.0:
@@ -158,7 +158,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
                 ):
                     values = []
                     for a, b in contested:
-                        first, last = rule(cuts, cut_lo, cut_hi, a, b)
+                        first, last = rule(region_bounds, region_bound_lo, region_bound_hi, a, b)
                         values.extend(
                             boundary_flux[boundary_base + line - 1] for line in range(first, last)
                         )
