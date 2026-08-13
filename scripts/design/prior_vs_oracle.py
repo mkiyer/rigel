@@ -99,7 +99,7 @@ Usage::
 
     python scripts/design/prior_vs_oracle.py --suite ~/Downloads/rigel_runs/suite/ladder \\
         --oracle-cache ~/Downloads/rigel_runs/suite/ladder/oracle_cache --jobs 6
-    python scripts/design/prior_vs_oracle.py --conditions gdna_g25_ss_0.50_nrna_none_capture_on
+    python scripts/design/prior_vs_oracle.py --conditions gdna_g50_ss_0.50_nrna_none_capture_on
     python scripts/design/prior_vs_oracle.py --json out.json --emit-oracle-masses DIR
 """
 

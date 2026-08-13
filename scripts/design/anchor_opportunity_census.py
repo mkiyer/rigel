@@ -68,7 +68,7 @@ claim is true. A claim being false is necessary for the hypothesis and not suffi
 Usage::
 
     python scripts/design/anchor_opportunity_census.py                 # the whole ladder
-    python scripts/design/anchor_opportunity_census.py --conditions gdna_g75_ss_0.99_nrna_none_capture_on
+    python scripts/design/anchor_opportunity_census.py --conditions gdna_g98_ss_0.99_nrna_none_capture_on
 """
 
 from __future__ import annotations

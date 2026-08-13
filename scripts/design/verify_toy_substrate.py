@@ -68,7 +68,14 @@ toy a clean substrate, and what says a pool shortfall on the real panel is about
 not read length.
 
 ⚠ **Perturbations — TRAPS: self-checking-validator's second half, and they are a ``--perturb`` FLAG rather than a hand
-edit so every claim here is reproducible.** All six fire:
+edit so every claim here is reproducible.** All six fire — ⛔⛔ **ON `splice_both_strands`, AND THE SPEC
+IS PART OF THE CLAIM.** Re-verified 2026-08-13. On the owner's `spliced_exons` rung only `drop_sj` fires
+and the other five are SILENT — not a hole, but not a pass either: that spec declares ONE `+`-strand
+transcript, so `pos_blocks` has no `−` fragment to mirror, `single_geom`/`transcript_order` have no
+second geometry to confuse, and the structural-set gate `unspliced_zero_everywhere` flips is VACUOUS
+there (no exon spans a BOUNDARY, so both its sets are empty). ⭐ Reading those five silences as a pass
+is `TRAPS: could-the-arm-have-fired`, and it was read that way once. `pos_premrna` additionally needs
+`--nrna`; the arms below are `--spec splice_both_strands --no-gdna [--nrna 60]`.
 
 | perturbation | what fired |
 |---|---|
@@ -290,15 +297,19 @@ class TruthTally:
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
     the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
-    def __init__(self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, sj: dict):
+    def __init__(
+        self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, sj_id_by_intron: dict
+    ):
         self.region_bounds = np.asarray(region_bounds, np.int64)
         self.region_contained = np.zeros(n_regions, np.int64)
-        self.region_spanning = np.zeros(n_regions, np.int64)
         self.region_start = np.zeros(n_regions, np.int64)
         self.boundary_unspliced = np.zeros(n_boundaries, np.int64)
         self.boundary_spliced = np.zeros(n_boundaries, np.int64)
-        self.sj = Counter()
-        self.sj = sj  #: (intron_start, intron_end) -> jid
+        #: ⛔ TWO DIFFERENT THINGS, AND THEY ONCE SHARED THE NAME ``sj`` — the crossing TALLY below
+        #: was overwritten by the lookup map, so ``deposit`` raised on the first spliced fragment.
+        #: This file's own `TRAPS: two-masks-one-name`; keep the tally and the map named apart.
+        self.sj = Counter()  #: jid -> crossings, the bank ``sj_count`` is scored against
+        self.sj_id_by_intron = sj_id_by_intron  #: (intron_start, intron_end) -> jid
         self.n_deposited = 0
 
     def _region_of(self, pos: int) -> int:
@@ -311,20 +322,22 @@ class TruthTally:
     def deposit(self, segments: list[tuple[int, int]], introns: list[tuple[int, int]]):
         if not segments:
             return
-        sj_ids = [self.sj[i] for i in introns if i in self.sj]
+        sj_ids = [self.sj_id_by_intron[i] for i in introns if i in self.sj_id_by_intron]
         spliced = bool(sj_ids)
         first_base, last_base = segments[0][0], segments[-1][1] - 1
         self.region_start[self._region_of(first_base)] += 1
         self.n_deposited += 1
-        boundary = self.boundary_spliced if spliced else self.boundary_unspliced
+        # ⛔ THE ARRAY AND THE LOOP INDEX MUST NOT SHARE A NAME. They did — ``boundary[boundary - 1]``
+        # raised ``TypeError: 'int' object is not subscriptable`` the moment a fragment crossed one.
+        # The bank carries the ``_count`` suffix exactly as `tests/native/_accumulator_reference.py`
+        # names it, which is the file this one transcribes.
+        boundary_count = self.boundary_spliced if spliced else self.boundary_unspliced
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(self.region_bounds, seg_start, side="right"))
             last = int(np.searchsorted(self.region_bounds, seg_end, side="left"))
             for boundary in range(first, last):
-                boundary[boundary - 1] += 1
-            for boundary in range(first, last - 1):
-                self.region_spanning[boundary] += 1
-        # ⚠ ``boundary`` indexes ``region_bounds``; boundary ``boundary-1`` and region ``boundary`` follow the reference exactly.
+                boundary_count[boundary - 1] += 1
+        # ⚠ ``boundary`` indexes ``region_bounds``; boundary ``boundary-1`` follows the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
         if not sj_ids and self._region_of(first_base) == self._region_of(last_base):
@@ -708,8 +721,12 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print("   " + "-" * 80)
     ok_all = True
     pay = {
+        # ⛔ NO `region_spanning` ROW, AND THE TRUTH-SIDE TALLY IS GONE WITH IT. The bank was DELETED
+        # from the payload on 2026-08-08 (`5591cc01`, "six dead banks gone"); this table went on
+        # naming it, so the gate raised `AttributeError` before it compared anything. A `src/`
+        # deletion is the mechanism that kills an instrument — there is nothing left to score it
+        # against, so keeping the tally would be scoring a bank that no longer exists.
         "region_contained": (col(payload.region_contained_count), tt.region_contained, "region"),
-        "region_spanning": (col(payload.region_spanning_count), tt.region_spanning, "region"),
         "region_start": (np.asarray(payload.region_start_count, np.int64), tt.region_start, "region"),
         "boundary_unspliced": (col(payload.boundary_unspliced_count), tt.boundary_unspliced, "boundary"),
         "boundary_spliced": (col(payload.boundary_spliced_count), tt.boundary_spliced, "boundary"),

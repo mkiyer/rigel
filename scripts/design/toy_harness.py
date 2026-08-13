@@ -57,7 +57,7 @@ Usage::
 
     # list the built-in specs, then run one against a donor condition
     python scripts/design/toy_harness.py --list
-    python scripts/design/toy_harness.py --spec two_exon --donor gdna_g25_ss_0.50_nrna_none_capture_off
+    python scripts/design/toy_harness.py --spec two_exon --donor gdna_g50_ss_0.50_nrna_none_capture_off
     python scripts/design/toy_harness.py --spec all --donor <cond>     # the whole ladder of specs
 
 Gates: ``tests/calibration/test_toy_harness.py``.
@@ -1028,7 +1028,9 @@ def main() -> int:
         help="sweep the transcript's RNA density (counts/bp) instead of one fixed run; "
         "no values = a default decade ladder around the donor's own gDNA density",
     )
-    ap.add_argument("--donor", default="gdna_g25_ss_0.50_nrna_none_capture_off")
+    # ⚠ `g25` until 2026-08-13, retired with the ladder rebuild. `g50` is the surviving mid rung and
+    # is also `verify_toy_substrate.py`'s default, so the harness and its verifier agree by default.
+    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_none_capture_off")
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_toy")

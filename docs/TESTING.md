@@ -9,19 +9,22 @@
 
 ---
 
-## 0. ⭐⭐ THERE ARE TWO PANELS AND A TOY HARNESS, AND THEY ANSWER DIFFERENT QUESTIONS
+## 0. ⭐⭐ THERE IS ONE PANEL ON DISK AND A TOY HARNESS, AND THEY ANSWER DIFFERENT QUESTIONS
 
-Both panels live under `~/Downloads/rigel_runs/suite/` and share one reference and one index. ⛔ **Neither
-replaces the other — deleting either loses a question.** ⭐⭐ **And §0b's TOY HARNESS is the third
-substrate: the panels say how much error there is and where, a toy says WHY.** Localise on a panel,
-isolate on a toy, re-measure on the panel.
+⛔⛔ **`pilot/`, `flgap_short/` and `flgap_long/` WERE DELETED ON 2026-08-13 (owner) AND THE LADDER WAS
+REBUILT FROM SCRATCH AT 16 CONDITIONS.** Only `ladder/` is on disk, under `~/Downloads/rigel_runs/suite/`,
+beside the reference and index that were kept. ⚠ **The `pilot/` column below is retained as a RECORD of
+the Stage-A question no panel currently answers** — its config file survives, nothing is simulated from
+it — because deleting the column would hide that the question went away with it.
+⭐⭐ **And §0b's TOY HARNESS is the other substrate: the panel says how much error there is and where, a
+toy says WHY.** Localise on the panel, isolate on a toy, re-measure on the panel.
 
-| | `pilot/` — 8 conditions | ⭐ `ladder/` — 36 conditions |
+| | ⛔ `pilot/` — 8 conditions, DELETED 2026-08-13 | ⭐ `ladder/` — 16 conditions |
 |---|---|---|
 | **judges** | **Stage A**, the accumulator | **Stage B**, the calibration solver |
 | fragment lengths | REALISTIC and DIFFERENT per origin (RNA 206 ± 98, gDNA 157 ± 125) | ⭐ **IDENTICAL for both origins** (206 ± 98, [50, 500], read 100) |
 | why that way | a length model can only be judged where the components' lengths actually differ | with the length channel neutralised, composition can only come from **density and strand**, so residual error is attributable to those |
-| gDNA axis | {0, 100 %} rate ⇒ f_gdna ∈ {0, 0.5} | ⭐ **9 rungs, f_gdna 0 → 0.98** |
+| gDNA axis | {0, 100 %} rate ⇒ f_gdna ∈ {0, 0.5} | ⭐ **4 rungs, f_gdna 0 / 0.05 / 0.50 / 0.98** |
 | depth | 10 M RNA, gDNA **added on top** (so 10–20 M total) | ⭐ **10 M TOTAL, fixed**; the rate decides only the SPLIT |
 | config | `scripts/sim/configs/pilot.yaml` | `scripts/sim/configs/gdna_ladder.yaml` |
 
@@ -29,12 +32,22 @@ isolate on a toy, re-measure on the panel.
 
 `f_gdna = rate/(1+rate)`, and the RNA share thins as gDNA rises because the **total** is held:
 
-| rung | g00 | g01 | g05 | g10 | g25 | g50 | g75 | g90 | g98 |
-|---|---|---|---|---|---|---|---|---|---|
-| f_gdna | 0 | 0.01 | 0.05 | 0.10 | 0.25 | 0.50 | 0.75 | 0.90 | 0.98 |
-| n_rna | 10.0 M | 9.90 M | 9.50 M | 9.00 M | 7.50 M | 5.00 M | 2.50 M | 1.00 M | 0.20 M |
+| rung | g00 | g05 | g50 | g98 |
+|---|---|---|---|---|
+| rate | 0.0 | 0.052632 | 1.0 | 49.0 |
+| f_gdna | 0 | 0.05 | 0.50 | 0.98 |
+| n_rna | 10.0 M | 9.50 M | 5.00 M | 0.20 M |
 
-× strand {0.50, 0.99} × capture {off, on} = **36**. Owner ruling: real libraries run from almost zero
+⚠ **The rebuild dropped `g01`, `g10`, `g25`, `g75` and `g90`** (2026-08-13). Three things fixed which
+four rungs survived, and none of them is "spread them evenly": **`g00`** is the owner-required
+zero-gDNA control, **`g98`** is the top of the range, and ⛔ **`g05` is there because an INSTRUMENT
+demands it** — `suite_resolves.py`'s requirement (f) is `0 < gdna_rate <= 0.10 WITH capture on`,
+degenerate value 0 conditions, and a `{g00, g50, g98}` panel scores the degenerate value exactly. ⚠ The
+test is on the RATE, not on `f_gdna`: the retired `g10` had rate 0.111 and would not have satisfied it
+either. ⭐ Three levels is itself a floor, not a preference —
+`TRAPS: a-single-level-panel-cannot-see-a-constant`.
+
+× strand {0.50, 0.99} × capture {off, on} = **16**. Owner ruling: real libraries run from almost zero
 gDNA to **> 98 %** of all fragments and Rigel must be robust across all of it; 10 M total per condition
 is the ceiling, and the RNA-side abundance accuracy that thins at the top rungs is an accepted
 trade-off — it is a property of such libraries, not an artifact.
@@ -49,7 +62,14 @@ that residual is WORTH was measured before it was accepted, one thing varied: re
 their pooled average moves the per-object error by **−0.0002** off capture and **−0.0054** under it —
 under 2.5 % of the error, with a *fitted* gap 3–5× larger than the residual. Owner ruling: carry it.
 
-⭐ **An ORACLE CACHE ships beside the panel** at `ladder/oracle_cache/` (36 conditions, 157 MB). It holds
+⭐ **An ORACLE CACHE sits beside the panel** at `ladder/oracle_cache/`, built by `panel.py cache`. ⛔⛔
+**IT HOLDS 12 OF THE 16 CONDITIONS AND THAT IS BY DESIGN, NOT A HALF-BUILT CACHE:** `pass0_vs_oracle.py`,
+which populates it, HOLDS OUT every zero-gDNA condition ("N zero-gDNA row(s) held out as false-positive
+checks"), so the four `g00` cells never get one. ⚠ **`panel.py status` therefore reads `oracle cache
+12/16` and prints a ✘ on a complete panel** — it counts conditions, and the hold-out is invisible to it.
+⭐ Nothing is lost: `quant_accuracy.py`'s `base`, `base_reseed`, `warm_uniform` and every `alloc_*` arm
+do not load an oracle at all, so `g00` scores normally; only the `oracle_*` arms need one, and those are
+the arms a zero-gDNA condition has no truth-split to feed. It holds
 the per-origin split payloads, so `--oracle-cache` turns a 4-minute-per-condition oracle build into
 seconds. ⭐⭐ **It stays valid across every CALIBRATION change** — the oracle depends only on the
 accumulator and the index — so one cache serves an entire solver-debugging campaign. It is keyed by the
@@ -61,7 +81,7 @@ scan cache's own key, so a stale one is refused rather than silently used. ⛔ R
 ## 0b. ⭐⭐ THE TOY HARNESS — a mini chromosome you define, calibrated in under a second
 
 `scripts/design/toy_harness.py`. ⭐ **This is the third substrate and the one to reach for FIRST when a
-mechanism needs isolating.** The two panels above tell you *how much* error there is and *where*; a toy
+mechanism needs isolating.** The panel above tells you *how much* error there is and *where*; a toy
 tells you *why*, because it is small enough to read every object and cheap enough to sweep one variable
 seven times.
 
@@ -116,16 +136,16 @@ python scripts/design/toy_harness.py --list            # the spec ladder, simple
 
 # one spec against one donor — prints EVERY object beside per-object truth   (~0.1-5 s)
 python scripts/design/toy_harness.py --spec TA_single_exon \
-    --donor gdna_g25_ss_0.50_nrna_none_capture_off
+    --donor gdna_g50_ss_0.50_nrna_none_capture_off
 
 # ⭐ sweep the transcript's RNA density; the gDNA background stays PINNED, so one variable moves
 python scripts/design/toy_harness.py --spec TA_single_exon \
-    --donor gdna_g25_ss_0.50_nrna_none_capture_off --sweep-density
+    --donor gdna_g50_ss_0.50_nrna_none_capture_off --sweep-density
 
 python scripts/design/toy_harness.py --spec all --donor <cond>     # the whole ladder
 ```
 
-⚠ Any of the 36 ladder conditions can be the donor, and **which one you pick is an experimental
+⚠ Any of the 16 ladder conditions can be the donor, and **which one you pick is an experimental
 variable** — it sets capture on/off, the strand regime and the gDNA level. Harvesting costs one scan +
 one calibrate (~30 s) and is deliberately **not cached**: the bundle is a function of the calibration
 code that fit it, so a stored copy would go stale on exactly the changes the harness exists to test.
@@ -217,10 +237,14 @@ splice **donor** of TD−'s intron is at 8,500 and the **acceptor** at 2,500. Wh
 derivation. ⛔ `EQUATIONS.md` §3.5b already ruled that this family of predicates must be written in
 GENOMIC terms and never in transcript terms, and it is exactly where a sign gets flipped silently.
 
-⚠ **The substrate verifier does NOT yet cover this rung.** `verify_toy_substrate.py` is written for ONE
-transcript on the **+** strand and refuses anything else. Extending it to multi-transcript and − strand
-is a prerequisite for reading a solver number off this spec (TRAPS: self-checking-validator: re-derive by a different
-algorithm before trusting).
+⭐ **The substrate verifier COVERS this rung, and this rung is where its own falsification lives.**
+`verify_toy_substrate.py` takes any number of transcripts on either strand. Re-verified 2026-08-13 on the
+rebuilt panel: every gate passes and **all six `--perturb` arms fire** — ⛔ **on `splice_both_strands`,
+and the SPEC is part of that claim.** On the one-transcript, `+`-only `spliced_exons` rung only `drop_sj`
+fires and the other five are SILENT, because there is no `−` fragment to mirror, no second geometry to
+confuse, and the structural-set gate is vacuous there. Reading those silences as a pass is
+`TRAPS: could-the-arm-have-fired`, and it was read that way once (TRAPS: self-checking-validator:
+re-derive by a different algorithm before trusting).
 
 ### ⭐⭐ `toy_panel.py` — one spec × EVERY cached condition × an RNA-density ladder
 
@@ -228,7 +252,7 @@ algorithm before trusting).
 the **target** rather than a probe, you want the whole space:
 
 ```bash
-# all 36 conditions x 7 RNA rungs, PRIOR-FREE pass-0, per-object.   ~13 s per condition
+# all 16 conditions x 7 RNA rungs, PRIOR-FREE pass-0, per-object.   ~13 s per condition
 python scripts/design/toy_panel.py --spec spliced_exons --out rows.jsonl
 
 # ⛔ capture-ON MUST be lengthened or it measures an empty chromosome
@@ -390,7 +414,9 @@ chromosomes is what makes the space non-trivial on the gDNA path too.**
 
 The owner's 8-condition minimum, a clean 2³: **gDNA {none, 100 %} × strand {0.50, 0.99} × capture
 {off, on}**, nascent held at `none` so every `gdna_none` cell is a pure false-positive test.
-Config: `scripts/sim/configs/pilot.yaml`.
+Config: `scripts/sim/configs/pilot.yaml`. ⛔ **This grid is the DELETED pilot panel** (removed from disk
+2026-08-13; the config file survives, but nothing is simulated from it). What is on disk is §0's
+16-condition ladder.
 
 ⚠ **`10,000,000` is the RNA depth**, and gDNA is added **on top** at `rate × n_rna` — so a `gdna100`
 condition is 20 M fragments and a `gdna_none` condition is 10 M. The depth is set so that fragments per
@@ -411,7 +437,7 @@ length, so the simulator draws the length marginal proportional to the capture-w
 | | consequence |
 |---|---|
 | counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real sj overdispersion is ≤ 0.02–0.03 |
-| the PANEL is all **R1-antisense** | ⭐ The ENGINE can emit either since 2026-08-11 (`ReadSimConfig.r1_sense`, gated both ways in `test_strand_sense_convention.py`), but `orchestrator.run_condition_grid` does not expose it — so no ladder or flgap condition is R1-sense. ⚠ The gap moved from the simulator to the panel; it did not close. Real cfRNA is dUTP, so this is not urgent |
+| the PANEL is all **R1-antisense** | ⭐ The ENGINE can emit either since 2026-08-11 (`ReadSimConfig.r1_sense`, gated both ways in `test_strand_sense_convention.py`), but `orchestrator.run_condition_grid` does not expose it — so no ladder condition is R1-sense. ⚠ The gap moved from the simulator to the panel; it did not close. Real cfRNA is dUTP, so this is not urgent |
 | the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two regions, and gDNA is no longer simulated on the spike-ins at all |
 | ⭐ each **population is written as one contiguous BLOCK** of read names, not interleaved | measured 2026-08-08: a 10 M-fragment condition has **15** origin transitions in BAM order. So any per-fragment truth JOIN that is checked by "does an impossible label appear?" is nearly blind — a one-fragment slip in the `frag_id` key mislabels ~15 fragments in the whole file and need not produce a single impossible one. ⛔ Gate such a join on a COUNT IDENTITY against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`) and keep the impossible-label check as a secondary that catches a gross slip. `tests/calibration/test_prior_vs_oracle.py` pins both halves, including that the small slip is invisible |
 
@@ -429,7 +455,7 @@ every scorer refused. `scripts/sim/panel.py` is the whole loop (2026-08-11).
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-CFG=scripts/sim/configs/gdna_ladder.yaml       # or pilot.yaml / flgap_short.yaml / …
+CFG=scripts/sim/configs/gdna_ladder.yaml       # the only panel on disk since 2026-08-13
 
 python scripts/sim/panel.py status   --config $CFG              # ⭐ ALWAYS FIRST
 python scripts/sim/panel.py build    --config $CFG              # index + capture probes
@@ -456,15 +482,15 @@ python scripts/sim/build_suite_reference.py \
 ⛔ **THE GATES — run BOTH before quoting anything.** They are not yet stages of `panel.py`:
 
 ```bash
-python scripts/design/simulator_gates.py --suite $SUITE/pilot --reference $SUITE/reference
-python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/pilot
+python scripts/design/simulator_gates.py --suite $SUITE/ladder --reference $SUITE/reference
+python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/ladder
 ```
 
 ⚠ **A cached oracle condition needs ALL FOUR parts** — `gdna`, `mrna`, `nrna` and the undrained `_main`
 payload. `status` counts it complete only then; counting directories would call a half-written condition
 done and fail deep inside an instrument later. Gated by `tests/test_panel_workflow.py`.
 
-⚠ **`pilot.yaml` states `gdna.genomic_refs: [chr21, chr22]` explicitly.** The engine does **not** infer
+⚠ **Every panel config states `gdna.genomic_refs: [chr21, chr22]` explicitly.** The engine does **not** infer
 which references carry genomic DNA, and a config that asks for gDNA without stating it is rejected — "has
 an annotation" is not "is genomic" (TRAPS: annotated-is-not-genomic).
 
@@ -507,11 +533,13 @@ The requirements: (a) a capture **density step**, (b) fragment-length **variance
 **counts**, (d) termini strictly **inside an exon**, (e) ample **single-stranded** regions, (f) a low-gDNA ×
 strong-capture **corner**, (g) **partition resolution**, (h) a **narrowed length-gap** regime.
 
-⚠ **Two are known-failing and both are named work**, not suite defects:
+⚠ **One is known-failing and it is named work**, not a suite defect (the second, `(f)`, was closed by the
+2026-08-13 rebuild):
 * **(c)** needs the overdispersion mechanism built in *and* replicate conditions.
-* **(f)** needs one gDNA rate in the 1–10 % band real libraries live in — one boundary of `pilot.yaml` plus a
-  re-run of the affected conditions. It opens exactly the regime where TRAPS: capture-is-1000x-on-exons says the hardest
-  failure mode lives.
+* ✅ **(f)** PASSES since 2026-08-13. It needs one gDNA RATE in `0 < rate ≤ 0.10`, and the rebuilt ladder
+  carries `g05` (rate 0.052632) precisely for it — 2 conditions, against a degenerate value of 0. ⚠ It was
+  known-failing on the pilot, and a `{g00, g50, g98}` rebuild would have re-broken it. It opens exactly the
+  regime where TRAPS: capture-is-1000x-on-exons says the hardest failure mode lives.
 
 ⭐ **The gate's teeth are proven on three degenerate inputs**, each failing for its own reason: a reference
 shaped like the deleted 10 Mb suite (121 regions == 121 merged regions), a "starved toy" with both-strand

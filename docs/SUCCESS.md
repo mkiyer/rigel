@@ -185,8 +185,9 @@ export OMP_NUM_THREADS=1
 SUITE=~/Downloads/rigel_runs/suite
 
 # 0. is the SUBSTRATE sound?  (TRAPS prove-the-substrate — prove the simulator before the code)
-python scripts/design/simulator_gates.py --suite $SUITE/pilot --reference $SUITE/reference
-python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/pilot
+python scripts/design/simulator_gates.py --suite $SUITE/ladder --reference $SUITE/reference
+python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/ladder
+#    ⛔ $SUITE/pilot was DELETED 2026-08-13 — `ladder` is the only panel on disk.
 
 # A1. fidelity
 python -m pytest tests/native tests/calibration -q
@@ -217,7 +218,9 @@ python scripts/design/arm_identity.py $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_n
 python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_{base,base_reseed,oracle}.jsonl
 ```
 
-⚠ Steps 0–B take about 15 minutes on the pilot. **Run them as a set and record them together** —
+⚠ Steps 0–B take about 15 minutes. ⚠ Step 0 was re-run on the rebuilt 16-condition ladder on
+2026-08-13: `simulator_gates` **6/6**, `suite_resolves` **11/12** (only `(c)` replicate-pairs fails, the
+one deferred by owner ruling 2026-07-30). **Run them as a set and record them together** —
 TRAPS: re-record-the-baseline.
 
 ⭐⭐ **C AND D ARE WHAT "MEASURE THE WHOLE TOOL" MEANS, AND BOTH ARE NEW (2026-08-07).** Everything above

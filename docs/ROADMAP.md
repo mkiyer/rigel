@@ -9,7 +9,7 @@ because that line is what stops it being rebuilt. The derivation goes to `EQUATI
 before its first prune (2026-08-05) by accumulating a section per campaign; if a section here reads like a
 report on work already done, delete it.
 
-⛔ **Every number below was measured on the current tree and the current panel.** Re-derive rather than
+⛔ **Every number below was measured on the tree and panel current at its stamped date.** ⛔ **The panel changed on 2026-08-13**: `pilot`, `flgap_short` and `flgap_long` were DELETED and the ladder rebuilt 36 → 16 conditions (`g00/g05/g50/g98`), so **no number below has been re-derived on the panel now on disk** — and the retired rungs `g01`/`g10`/`g25`/`g75`/`g90` cannot be re-run at all without a further rebuild. Re-derive rather than
 trust — a number that has moved is a result, not a documentation bug.
 
 ---
@@ -34,9 +34,9 @@ one line, and a number nobody can attribute earns none.
 | ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture and untouched by the drain, so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
 | **message propagation** | ⛔ **OFF**, and it stays off until the tool is optimised end to end across all scenarios (owner, 2026-08-10) | net better on 3 of 4 strata (−58 / −44 / −32 %); **+155 % on unstranded × capture-ON**, which is the blind stratum. ⛔ It is the only remaining lever there, and its price must be RE-priced on the rebuilt ladder, never inherited |
 | **the price of that** | ⚠ zero-gDNA golden scenarios go **0.029 → 89.93** and **0.005 → 9.58** | both AMBIG loci — the stratum above |
-| ✅ **the LIBRARY figure is a FRAGMENT COUNT** | ⭐ it was an object-INCIDENCE sum in **all three** consumers that computed it, and the units did not match the truth it was scored against. Now `CalibrationResult.library_{gdna,rna}_fragments`, derived on read, each axis converted by its OWN `mass/count` | ⭐ On the pilot panel: better on **8 of 8** conditions, and the three contaminated ones the tool can see improve **73 / 81 / 98 %**. It RAISES the estimate on the contaminated arm and LOWERS it on the zero arm — both toward truth, which a merely-shifted number cannot do |
+| ✅ **the LIBRARY figure is a FRAGMENT COUNT** | ⭐ it was an object-INCIDENCE sum in **all three** consumers that computed it, and the units did not match the truth it was scored against. Now `CalibrationResult.library_{gdna,rna}_fragments`, derived on read, each axis converted by its OWN `mass/count` | ⭐ On the pilot panel (DELETED 2026-08-13): better on **8 of 8** conditions, and the three contaminated ones the tool can see improve **73 / 81 / 98 %**. It RAISES the estimate on the contaminated arm and LOWERS it on the zero arm — both toward truth, which a merely-shifted number cannot do |
 | ✅ **end to end — the LIBRARY figure** | ⭐ **RE-DERIVED 2026-08-11 on all 36 ladder conditions**, messages OFF, `calibration_truth_ab.py --cache-subdir _main`. Mean `\|err\|` per stratum: **0.0025 / 0.0053 / 0.0056** and ⛔ **0.4040** (max **0.9151**) on unstranded × capture-ON; `g00` control **0.0497** | ⛔ **NEVER quote the pooled 0.1043** — it is 97 % the one blind stratum (`TRAPS: never-pool-the-strata`). ⚠ The retired `0.1060` turns out to have been close, but it was unattributable and the stratified form is what ranks work. ⭐ The three good strata are ~2× better than the "0.005–0.012" row above, measured the same day |
-| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.3 %** of RNA fragments misassigned (**55,916,700** of 178,399,996, 32 contaminated conditions), and a perfect prior removes **32.2 %** of that, to 21.2 % | ⭐ **RE-DERIVED 2026-08-11 on the rebuilt 36-condition ladder**, messages OFF, EM seed pinned — and it lands within 0.2 pp of the pre-rebuild 31.1 %, so the rebuild did not move it. ⛔ The ceiling is ONE STRATUM: unstranded × capture-ON goes **0.405**, the other three are **1.031 / 0.981 / 1.013** — a perfect prior is NEUTRAL-TO-WORSE on them. At GENE level the split is sharper still (**0.215** vs **1.704** on stranded × capture-OFF) |
+| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.3 %** of RNA fragments misassigned (**55,916,700** of 178,399,996, 32 contaminated conditions), and a perfect prior removes **32.2 %** of that, to 21.2 % | ⭐ **RE-DERIVED 2026-08-11 on the 36-condition ladder RETIRED 2026-08-13**, messages OFF, EM seed pinned — and it lands within 0.2 pp of the pre-rebuild 31.1 %, so the rebuild did not move it. ⛔ The ceiling is ONE STRATUM: unstranded × capture-ON goes **0.405**, the other three are **1.031 / 0.981 / 1.013** — a perfect prior is NEUTRAL-TO-WORSE on them. At GENE level the split is sharper still (**0.215** vs **1.704** on stranded × capture-OFF) |
 | ⭐ **the pool level — gDNA vs NASCENT vs ANNOTATED** | ⭐ **NEW 2026-08-11**, `quant_accuracy.py --report` table ⑥. gDNA total is **−0.6 % / −6.4 % / −0.5 %** on three strata and ⛔ **−87.1 %** on unstranded × capture-ON; a perfect prior takes that last one to **−5.5 %** | ⛔ **Read `gDNA (total)`, never `gdna_est`** — the latter is `gdna_em_count` and EXCLUDES intergenic fragments, which are more than half of off-capture gDNA. Scoring it against the origin-count truth reads **−50.7 %** panel-wide that is entirely the missing pool; `score_library`'s docstring records the same mistake once fabricating an off-capture under-call (0.3151 vs a truth of 0.5000) |
 | ✅ **the NASCENT leak — FIXED 2026-08-12** | ⭐ A synthetic nascent entity now receives **ZERO RNA prior**: it is one the index MANUFACTURED, nothing asserts it exists, so the null is that it is absent until the data proves otherwise. In scope: nascent **6,238,406 → 691,796** (0.111), gene Σ\|err\| **0.608**, `g00` gene **0.476** | ⛔ It was **NOT** the prior distributing uniformly — the shipped prior is a COMMON multiplicative factor and is provably neutral on the within-RNA split. The leak was the coverage-weighted warm start; `alpha = 0` is a new sparsity prior that counteracts it. ⚠ `is_synthetic`, NEVER `is_nrna` — a single-exon annotated transcript is flagged `is_nrna` and keeps its prior. ⚠ ~27 % of the freed mass goes to gDNA, not annotated |
 | ⚠ **the price of that, and it is strand-gated** | ⚠ gDNA gains **+4.21 M** panel-wide (73 % of the freed mass returns to annotated). At the weakest in-scope strandedness the split is **86 % annotated / 14 % gDNA** | ⛔ On one nascent-ENRICHED toy (73 % nascent, a fully-nested antisense gene) it inverts to 83 % gDNA and costs 1721 → 1029 correct assignments at SS=0.65 — but **ZERO** at SS=1.0, because gDNA is strand-symmetric and RNA is not. Two strict xfails record it. ⭐ Next: an ACCURATE per-entity nascent prior instead of withholding from all (owner, 2026-08-12) |
@@ -134,8 +134,10 @@ this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysi
 
 ## §2 ⭐⭐ WHAT TO DO NEXT, IN ORDER
 
-⭐ **The panels are rebuilt and gated** (2026-08-11: 184 payloads across ladder / flgap_short / flgap_long /
-pilot, every non-target bank byte-identical). Every instrument under `scripts/design/` runs again — with
+⭐ **The panels were rebuilt and gated** (2026-08-11: 184 payloads across ladder / flgap_short / flgap_long /
+pilot, every non-target bank byte-identical). ⛔ **THEN, ON 2026-08-13, THREE OF THOSE FOUR WERE DELETED**
+and the ladder was rebuilt from scratch at 16 conditions — so any instrument that reads `pilot`,
+`flgap_short` or `flgap_long` no longer runs at all. Every instrument under `scripts/design/` runs again — with
 one exception, which is item 1.
 
 1. ✅ **`ladder_arm_ab.py` — FIXED 2026-08-11, and the dead module path was the small half.**
@@ -420,13 +422,13 @@ carrying mass. ⛔ Two repairs are already refused: letting a BOUNDARY originate
 symptom), and letting the level cross two steps (the chain-fused level is dominated by the 1,312 intergenic
 anchors and hands every exon the off-probe floor, against a true neighbouring density **346×** higher).
 
-⚠ **The measurement to run it against**: at `g01 ss0.50 capture_on`, ψ-boundary ablation with the identity
+⚠ **The measurement to run it against**: at `g01 ss0.50 capture_on` — ⛔ a rung the 2026-08-13 rebuild DROPPED; the nearest surviving condition is `g05 ss0.50 capture_on` — ψ-boundary ablation with the identity
 exact, every single channel ablation is small (+2.3 / +6.8 / +4.9 / −0.1 %) and the joint one is +60.7 % —
 `TRAPS: all-small-singly-large-jointly`, so the four share an upstream quantity. And at HEAD's top-12 error
 slots the self-solve WITH the fitted prior is nearly correct while the messages destroy it; muting the
 certified-RNA channel alone recovers the truth at 8 of the 12.
 
-### §2.2 ⛔⛔ THE LENGTH CHANNEL CANNOT BE PRICED ON THE LADDER — the substrate is BUILT AND CACHED
+### §2.2 ⛔⛔ THE LENGTH CHANNEL CANNOT BE PRICED ON THE LADDER — the substrate WAS built, and was DELETED 2026-08-13
 
 `length_likelihood` defaults **False** and is the **only** channel that can give an unstranded slot its OWN
 composition evidence: it is θ-independent, so the Schur complement that zeroes the strand term at an AMBIG
@@ -435,7 +437,7 @@ at equal component mean lengths the 2×2 is identified only through `μ_g − μ
 with equal configured lengths: the realised post-capture gap is **+1.5 %**. Enabling it there would measure
 approximately nothing and that would be read as "the feature does not work".
 
-⭐⭐ **THE PANELS ARE BUILT AND THE ORACLE CACHES EXIST (2026-08-07)**: `suite/flgap_short` (realised gap
+⭐⭐ **THE PANELS WERE BUILT AND CACHED (2026-08-07) AND WERE DELETED 2026-08-13 — the experiment now costs a full rebuild of BOTH (they are a pair and only work as one)**: `suite/flgap_short` (realised gap
 **−41.0 %**) and `suite/flgap_long` (**+40.4 %**), 4 conditions each, 32 MB of cache each, verified
 byte-identical on a cached re-run (2m39s cold → **21 s** warm). Nothing blocks the experiment but the
 campaign in §1.
@@ -517,7 +519,7 @@ the one-sided certified-RNA bound (−81.9 %, 8/8), and that one is panel-negati
 
 1. ⭐⭐⭐ ~~**WHY IS PRIOR FIDELITY ANTI-CORRELATED WITH DELIVERABLE QUALITY?**~~ ⭐⭐ **LIKELY ANSWERED,
    AND THE ANSWER IS THAT IT IS NOT THE PRIOR — IT IS THE MESSAGES** (2026-08-06, ψ-boundary ablation on
-   HEAD at `g01 ss0.50 capture_on`, TRAPS: byte-identity-gate exact). At every one of HEAD's 12 worst slots the **self-solve WITH
+   HEAD at `g01 ss0.50 capture_on` — ⛔ a rung dropped on 2026-08-13, nearest surviving is `g05` — TRAPS: byte-identity-gate exact). At every one of HEAD's 12 worst slots the **self-solve WITH
    the fitted prior is nearly correct** (0.0043–0.0344 against truths of 0.0007–0.0136) and **the message
    layer then destroys it** (0.05–0.83). Muting the certified-RNA channel alone recovers the truth at 8 of
    the 12. So a better prior cannot show up in the deliverable: it is already right at the objects that
@@ -533,7 +535,8 @@ the one-sided certified-RNA bound (−81.9 %, 8/8), and that one is panel-negati
 3. ⭐ **Do we solve ALTERNATIVE SPLICING correctly?** The `alt_splice` rung exists and is **unverified** — see
    the handoff. Cheap, and it is the only structure where several sj share a BOUNDARY.
 4. ⚠ **The two capture-ON pilot rows disagree about the SIGN of every length correction**, across two
-   independently built panels. Unexplained. ⛔ Do not average them; find which one is lying.
+   independently built panels. Unexplained. ⛔ Do not average them; find which one is lying. ⚠ Both panels
+   were DELETED 2026-08-13, so answering this now requires rebuilding them.
 5. ⚠ **Does the reframe's own `σ²_transfer` correctly price a ratio built on 19 counts?** `EQUATIONS.md`
    §3.5d says it is the right medicine for the noise and the wrong medicine for the share-weighting.
    Unmeasured.

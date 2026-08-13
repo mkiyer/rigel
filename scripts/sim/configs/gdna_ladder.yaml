@@ -2,16 +2,33 @@
 #  THE gDNA LADDER — the debug/optimisation panel. EQUAL fragment lengths, full gDNA spectrum.
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐⭐ WHAT THIS PANEL IS FOR, AND WHY IT IS NOT `pilot.yaml`. The pilot exists to judge the
-# accumulator, and its fragment-length axis is real and load-bearing there. This one exists to
-# debug and optimise CALIBRATION, and for that the length channel is a confound rather than a
-# signal: with gDNA and RNA drawn from the SAME length distribution, composition can only be
-# recovered from density and strand, so any residual error is attributable to those two. Owner
-# ruling, 2026-08-03: clean the noise up first, exactly as the accumulator was, and add the
-# fragment-length channel back afterwards as an additional signal.
+# ⭐⭐ WHAT THIS PANEL IS FOR. This one exists to debug and optimise CALIBRATION, and for that the
+# length channel is a confound rather than a signal: with gDNA and RNA drawn from the SAME length
+# distribution, composition can only be recovered from density and strand, so any residual error is
+# attributable to those two. Owner ruling, 2026-08-03: clean the noise up first, exactly as the
+# accumulator was, and add the fragment-length channel back afterwards as an additional signal.
+#
+# ⭐⭐ **16 CONDITIONS, NOT 36 — REBUILT FROM SCRATCH 2026-08-13, AND EVERY AXIS THAT WAS DROPPED WAS
+# PRICED FIRST.** The 9-rung ladder cost 27 G and five of its rungs bought nothing the other four did
+# not. What may NOT be dropped, each for a measured reason:
+#
+#   · **`g00`, the ZERO-gDNA control** — owner-required on every experiment. Its truth is exactly 0,
+#     so every deviation is a false positive with nothing to cancel it. `ROADMAP.md` §4.1's graveyard
+#     is eleven mechanisms that looked good on their target and died here.
+#   · **unstranded × capture-ON, the BLIND stratum** — ~73 % of panel error and the only open
+#     problem. A panel without it cannot see the thing the tool is worst at.
+#   · **at least THREE gDNA levels** — `TRAPS: a-single-level-panel-cannot-see-a-constant`. A channel
+#     that returns a near-CONSTANT scores well on a single-level panel and is refuted the moment a
+#     second level exists. That trap cost a whole analysis.
+#   · ⛔ **`g05`, and it is here because an instrument demanded it.** `suite_resolves.py`'s
+#     requirement (f) is `0 < gdna_rate <= 0.10 WITH capture on`, degenerate value 0 conditions —
+#     "real libraries live at 1-10 % gDNA". A `{g00, g50, g98}` panel scores the degenerate value
+#     EXACTLY and the instrument exits non-zero. ⚠ Note the test is on the RATE, not on `f_gdna`:
+#     the retired ladder's `g10` had rate 0.111 and did NOT qualify either. Owner ruling 2026-08-13:
+#     add the rung rather than record a second known-failing requirement.
 #
 # ⚠ **"EQUAL" IS A CONFIGURATION, NOT A GUARANTEE — AND IT IS MEASURED, NOT ASSUMED.** Identical
-# parameters for both origins still leave a realised gap, because a mature fragment must fit inside
+# parameters for both origins still leave a realised gap, because an mRNA fragment must fit inside
 # its transcript and gDNA need not: transcript-length truncation pulls the RNA mean down while gDNA
 # keeps the bare truncated-normal mean. Measured on this exact configuration at 400 k fragments:
 #
@@ -22,7 +39,7 @@
 # replaced by their pooled average, so the gap is exactly zero): the per-object mass-weighted error
 # moves by **−0.0002** off capture and **−0.0054** under it, against a mwae of 0.2169 — under 2.5 %
 # of the error, with a *fitted* gap 3–5x larger than the true residual. Owner ruling: carry it.
-# ⛔ Score the length axis against `truth_fragment_lengths.tsv`, never against the numbers below.
+# ⛔ Score the length axis against `truth_fragment_lengths.tsv`, never against the numbers above.
 #
 # ⭐⭐ THE DEPTH MODEL IS `n_total_fragments`, NOT `n_rna_fragments`, AND THAT IS THE POINT. Under the
 # rate model gDNA is added ON TOP of a fixed RNA depth, so a 98 % gDNA library is `rate = 49` —
@@ -35,21 +52,32 @@
 # ⛔ REAL LIBRARIES SPAN THE WHOLE RANGE — from almost zero gDNA to >98 % of all fragments — and
 # Rigel must be robust across all of it. The ladder is `f_gdna = rate/(1+rate)`:
 #
-#     rate    0.0    0.010101  0.052632  0.111111  0.333333   1.0    3.0    9.0    49.0
-#     f_gdna  0 %       1 %       5 %      10 %      25 %     50 %   75 %   90 %   98 %
-#     n_rna   10.0 M   9.90 M    9.50 M    9.00 M    7.50 M   5.0 M  2.5 M  1.0 M  0.20 M
+#     rate    0.0     0.052632    1.0     49.0
+#     f_gdna  0 %        5 %      50 %    98 %
+#     n_rna   10.0 M    9.50 M    5.0 M   0.20 M
 #
 # ⚠ THE FOCUS CONDITION IS `ss_0.50 + capture_on` (owner). It is where the error is largest and it
 # is the one to optimise; the stranded and capture-off cells are CONTROLS that must not regress, and
 # the `f_gdna = 0` rung is the false-positive check. ⛔ Do not tune on the controls.
 #
-# Build the inputs first (shared with the pilot — same reference, same probes):
+# ⛔⛔ **THE INDEX IS BUILT `--no-mappability`, AND THAT IS A RULING, NOT AN OMISSION** (owner,
+# 2026-08-13). An alignable store is on disk and covers every contig here, but per-region mappability
+# was removed in v0.5.0 and SRD calibration does not consume it (`src/rigel/index.py`), so the store's
+# ONLY live effect is the sj artifact blacklist — which collides with **23.3 % of this reference's
+# annotated junctions** (3,147 of 13,482 at the default `min_count=2`). The scanner's rule is OR: drop
+# the sj if EITHER anchor is inside the envelope. On a zero-error simulated panel there are no
+# artifacts to catch, so the filter can only create FALSE NEGATIVES — ~2.0 % of truly-spliced reads
+# silently reclassified as UNSPLICED and 72 junctions silenced outright, which perturbs precisely the
+# spliced/unspliced split this panel exists to measure. ⚠ Raising `min_count` does not separate them:
+# the fully-dark set survives to `min_count=250`.
+#
+# Build the inputs first (shared reference and probes):
 #   python scripts/sim/build_suite_reference.py --fasta genome_controls.fasta.bgz \
 #       --gtf genes_controls.sorted.gtf --refs chr21 chr22 --ercc -o <suite>/reference
 #   python scripts/sim/design_suite_probes.py --gtf <suite>/reference/genes.gtf \
 #       -o <suite>/reference/capture_panel.tsv --capture-fraction 0.5
 #
-# Run:  python scripts/sim/simulate_reads.py --config scripts/sim/configs/gdna_ladder.yaml -j 8
+# Run:  python scripts/sim/panel.py status --config scripts/sim/configs/gdna_ladder.yaml
 
 genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
@@ -64,9 +92,8 @@ simulation:
   n_rna_fragments: 10000000
   sim_seed: 42
   # ⭐ REALISTIC AND IDENTICAL TO THE gDNA BLOCK BELOW. Real fragments run ~50 bp to ~500 bp with
-  # little above that (owner). The mean and sd are MO_3021's measured RNA pool; what has changed
-  # from the pilot is `frag_max` (800 -> 500) and that gDNA now shares every one of these four
-  # values. ⛔ All four must match, not just the mean: a different support is itself a gap.
+  # little above that (owner). The mean and sd are MO_3021's measured RNA pool. ⛔ All four must
+  # match, not just the mean: a different support is itself a gap.
   frag_mean: 206
   frag_std: 98
   frag_min: 50
@@ -85,8 +112,8 @@ abundance:
 
 # ── gDNA: the ladder ────────────────────────────────────────────────────────────────────────────
 gdna:
-  rates:       [0.0, 0.010101, 0.052632, 0.111111, 0.333333, 1.0,  3.0,  9.0,  49.0]
-  rate_labels: [g00, g01,      g05,      g10,      g25,      g50,  g75,  g90,  g98]
+  rates:       [0.0, 0.052632, 1.0, 49.0]
+  rate_labels: [g00, g05,      g50, g98]
   # ⛔ "Has an annotation" is not "is genomic" — every ERCC reference carries one transcript, so
   # inferring this from the annotation once filled a panel with gDNA on RNA-only spike-ins, on the
   # very templates whose truth abundance of zero is the false-positive control. State it.
@@ -103,7 +130,7 @@ gdna:
 # unstranded cells isolate the density channel completely.
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent: held out, as in the pilot ──────────────────────────────────────────────────────────
+# ── Nascent: held out ───────────────────────────────────────────────────────────────────────────
 nrna:
   mode: additive_ratio
   ratios:       [0.0]
