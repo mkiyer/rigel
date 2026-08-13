@@ -161,7 +161,7 @@ def main() -> None:
     ap.add_argument("--collapse-duplicate-transcripts", action="store_true")
     args = ap.parse_args()
 
-    regions = pd.read_feather(args.index_dir / "nodes.feather")
+    regions = pd.read_feather(args.index_dir / "regions.feather")
     boundaries = pd.read_feather(args.index_dir / "edges.feather")
     print(f"index  {args.index_dir}")
 

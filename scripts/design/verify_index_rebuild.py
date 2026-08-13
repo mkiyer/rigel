@@ -44,11 +44,11 @@ def main() -> None:
     print(f"old  {old}\nnew  {new}\n")
 
     # ── regions: byte-identical, which also proves the source was right ─────────────────────────────────
-    if filecmp.cmp(old / "nodes.feather", new / "nodes.feather", shallow=False):
+    if filecmp.cmp(old / "regions.feather", new / "regions.feather", shallow=False):
         print("  OK    regions.feather byte-identical  (the partition did not move)")
     else:
-        old_regions = pd.read_feather(old / "nodes.feather")
-        new_regions = pd.read_feather(new / "nodes.feather")
+        old_regions = pd.read_feather(old / "regions.feather")
+        new_regions = pd.read_feather(new / "regions.feather")
         if old_regions.equals(new_regions):
             print("  OK    regions.feather differs on disk but is EQUAL as a table (compression only)")
         else:

@@ -609,7 +609,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
                 "log_rho": _np.asarray(diag.rug_log_rho, dtype="float64"),
                 "kind": _np.asarray(diag.rug_kind, dtype="int32"),
             }
-        ).to_feather(str(output_dir / "gdna_density_nodes.feather"), **feather_kw)
+        ).to_feather(str(output_dir / "gdna_density_regions.feather"), **feather_kw)
         logging.info(
             f"[DONE] Wrote gdna_density_kde.feather ({len(diag.kde_x)} pts) + "
             f"gdna_density_regions.feather ({diag.rug_log_rho.size} regions)"

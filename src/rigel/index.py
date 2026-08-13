@@ -50,7 +50,7 @@ TRANSCRIPTS_TSV = "transcripts.tsv"
 INTERVALS_FEATHER = "intervals.feather"
 INTERVALS_TSV = "intervals.tsv"
 
-REGIONS_FEATHER = "nodes.feather"
+REGIONS_FEATHER = "regions.feather"
 REGIONS_TSV = "regions.tsv"
 
 BOUNDARIES_FEATHER = "edges.feather"

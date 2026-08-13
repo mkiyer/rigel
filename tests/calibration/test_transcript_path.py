@@ -81,7 +81,7 @@ class _Index:
         n_r = len(bounds) - 1
         self.regions_df = pd.DataFrame(
             {
-                "node_id": np.arange(n_r, dtype=np.int64),
+                "region_id": np.arange(n_r, dtype=np.int64),
                 "ref_name": ["chr1"] * n_r,
                 "start": np.asarray(bounds[:-1], dtype=np.int64),
                 "end": np.asarray(bounds[1:], dtype=np.int64),

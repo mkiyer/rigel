@@ -33,7 +33,7 @@ def _scrambled_region_df():
     ]
     return pd.DataFrame(
         {
-            "node_id": np.arange(len(rows), dtype=np.int64),
+            "region_id": np.arange(len(rows), dtype=np.int64),
             "ref_name": pd.array([r[0] for r in rows], dtype="string"),
             "start": np.array([r[1] for r in rows], dtype=np.int64),
             "end": np.array([r[2] for r in rows], dtype=np.int64),

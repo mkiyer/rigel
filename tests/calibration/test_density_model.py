@@ -56,7 +56,7 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
         pos += 100
     df = pd.DataFrame(
         {
-            "node_id": np.arange(n, dtype=np.int64),
+            "region_id": np.arange(n, dtype=np.int64),
             "ref_name": pd.array(ref_names, dtype="string"),
             "start": np.asarray(starts, dtype=np.int64),
             "end": np.asarray(ends, dtype=np.int64),

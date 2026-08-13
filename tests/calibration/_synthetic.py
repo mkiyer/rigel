@@ -111,7 +111,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     )
     region_df = pd.DataFrame(
         {
-            "node_id": np.arange(3, dtype=np.int64),
+            "region_id": np.arange(3, dtype=np.int64),
             "ref_name": pd.array(["chr1"] * 3, dtype="string"),
             "start": np.array([0, 100, 200], dtype=np.int64),
             "end": np.array([100, 200, 300], dtype=np.int64),

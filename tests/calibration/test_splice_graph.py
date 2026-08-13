@@ -407,7 +407,7 @@ def test_I_all_hold_on_a_valid_graph(sample_graph):
     "inv,mutate",
     [
         ("I1 tiling", lambda n, e: n.__setitem__("end", n["end"].mask(n.index == 0, 999))),
-        ("I2 region_id", lambda n, e: n.__setitem__("node_id", n["node_id"] + 1)),
+        ("I2 region_id", lambda n, e: n.__setitem__("region_id", n["region_id"] + 1)),
         (
             "I3 signature",
             lambda n, e: n.__setitem__("signature", n["signature"].mask(n.index == 0, 99)),
@@ -580,7 +580,7 @@ def test_TD1_rebuilds_are_byte_identical(tmp_path_factory):
 
     a = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_det_a")
     b = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_det_b")
-    for fname in ("nodes.feather", "edges.feather"):
+    for fname in ("regions.feather", "edges.feather"):
         pa = Path(a.index_dir) / fname
         pb = Path(b.index_dir) / fname
         assert pa.exists(), f"{fname} was not written by the index build"
@@ -609,7 +609,7 @@ def test_graph_is_REQUIRED_at_load(tmp_path_factory):
     from conftest import build_test_index
 
     idx = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_opt")
-    for fname in ("nodes.feather", "edges.feather"):
+    for fname in ("regions.feather", "edges.feather"):
         (Path(idx.index_dir) / fname).unlink()
         with pytest.raises(RuntimeError, match=r"(?s)splice graph.*[Rr]ebuild"):
             TranscriptIndex.load(idx.index_dir)

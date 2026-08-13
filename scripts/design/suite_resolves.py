@@ -463,7 +463,7 @@ def empirical_verdicts(suite: Path) -> list[Verdict]:
 
 
 def structural_verdicts(index_dir: Path) -> list[Verdict]:
-    regions = pd.read_feather(index_dir / "nodes.feather")
+    regions = pd.read_feather(index_dir / "regions.feather")
     boundaries = pd.read_feather(index_dir / "edges.feather")
     return [
         *requirement_g_partition(regions, boundaries),

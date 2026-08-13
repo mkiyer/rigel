@@ -467,7 +467,7 @@ def two_reference_parts(payload):
     )
     df = pd.DataFrame(
         {
-            "node_id": np.arange(5, dtype=np.int64),
+            "region_id": np.arange(5, dtype=np.int64),
             "ref_name": pd.array(["chr1"] * 3 + ["chr2"] * 2, dtype="string"),
             "start": np.array([0, 100, 200, 0, 100], dtype=np.int64),
             "end": np.array([100, 200, 300, 100, 200], dtype=np.int64),

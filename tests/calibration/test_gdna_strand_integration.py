@@ -101,7 +101,7 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
     starts = np.arange(n_regions, dtype=np.int64) * 100
     region_df = pd.DataFrame(
         {
-            "node_id": np.arange(n_regions, dtype=np.int64),
+            "region_id": np.arange(n_regions, dtype=np.int64),
             "ref_name": pd.array(["chr1"] * n_regions, dtype="string"),
             "start": starts,
             "end": starts + 100,

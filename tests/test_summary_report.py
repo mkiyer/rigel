@@ -282,6 +282,6 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     if pr.calibration_diagnostics is not None:
         kde = pd.read_feather(out / "gdna_density_kde.feather")
         assert {"log_rho", "log_density", "density"} <= set(kde.columns)
-        assert (out / "gdna_density_nodes.feather").exists()
+        assert (out / "gdna_density_regions.feather").exists()
 
     sc.cleanup()

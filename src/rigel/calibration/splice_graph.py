@@ -134,9 +134,9 @@ __all__ = [
     "load_boundaries",
 ]
 
-REGION_COLUMNS = ["node_id", "ref_name", "start", "end", "length", "signature"]
+REGION_COLUMNS = ["region_id", "ref_name", "start", "end", "length", "signature"]
 REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
-    "node_id": np.int64,
+    "region_id": np.int64,
     "start": np.int64,
     "end": np.int64,
     "length": np.int64,
@@ -314,7 +314,7 @@ def build_splice_graph(
         n_rows.append(
             pd.DataFrame(
                 {
-                    "node_id": np.arange(region_base, region_base + n, dtype=np.int64),
+                    "region_id": np.arange(region_base, region_base + n, dtype=np.int64),
                     "ref_name": name,
                     "start": starts,
                     "end": ends,
@@ -645,7 +645,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     transcripts; the load path does not, because reconstructing them costs ~3 s at human scale.
     """
     reflen = {str(k): int(v) for k, v in ref_lengths.items()}
-    nid = regions_df["node_id"].to_numpy(np.int64)
+    nid = regions_df["region_id"].to_numpy(np.int64)
     start = regions_df["start"].to_numpy(np.int64)
     end = regions_df["end"].to_numpy(np.int64)
     length = regions_df["length"].to_numpy(np.int64)
