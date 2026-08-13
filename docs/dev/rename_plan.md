@@ -43,43 +43,46 @@ everywhere: `node` 1,264 docstrings against ~2,700 code sites; `junction` 646; `
 
 ## 2. ⛔⛔⛔ FOUR AMBIGUITIES — a global replace is WRONG for each, and each needs a ruling
 
-### 2a. `cut` — ⭐⭐ RESPECIFIED BY THE OWNER 2026-08-13, and the answer inverted
+### 2a. `cut` — ⭐⭐⭐ ANSWERED FROM THE CODE: **terminal boundaries serve no purpose. There is no stage 0.**
 
-**The ruling:** a BOUNDARY **includes the terminal anchors** — an intergenic↔exon terminus is a boundary.
-Chromosome-end boundaries at `0` and `L` are *not required* but **may be added if they help
-algorithmically**, and then a chromosome with `N` regions has **`N+1` boundaries**.
+The question asked was the right one: *do terminal boundaries make the code simpler or more elegant?*
+Measured, the answer is **no**, and it was already litigated — `node_chain.py` says so in its own words:
 
-⛔ **MY EARLIER RECOMMENDATION (`cut` → `region_bound`) IS RETRACTED.** It was built on reading BOUNDARY
-as interior-only, which the respecification overturns. Measured on the shipped index, the arithmetic is
-exact and it lands the other way:
+> *"It starts and ends with a NODE, and there are no terminal slots. That is the whole shape change from
+> the predecessor, which ran `B R B R … R B` with **k+1 boundary slots per reference — the two outermost
+> carrying no data and existing only so every region had an object on each side**. A contiguous edge is
+> the line BETWEEN two adjacent nodes; there is no such line before the first or after the last, so **the
+> object does not exist rather than existing empty**. An edge therefore always has a node on both sides,
+> **an invariant the old shape could not state.**"*
 
-| array | count | what it is |
+⛔⛔ **The `N+1` anchored layout IS the predecessor, and it was deliberately deleted.** Proposing it here
+was on the way to rebuilding a refused structure — the `ROADMAP.md` §4 failure mode, in structural form.
+
+**The ledger, measured rather than argued:**
+
+| | |
+|---|---|
+| special cases they would DELETE | **3, all trivial** — one `flatnonzero(right >= 0)` in `edge_node_indices`, two `edges_[line - 1]` in the C++ deposit |
+| special cases they would ADD | a `-1` in `boundary → regions` (a terminal boundary has no region on one side) |
+| slots they would ADD to the SOLVE | **188**, all permanently empty — `NodeChain` builds the solve from this axis, so the quant digest would move |
+| invariants they would BREAK | *"an edge always has a node on both sides"*, and the chain's *"starts and ends with a NODE"* — which `sweep.py`'s propagation-sink logic rests on |
+| modelling need | **none.** Nothing can cross a chromosome end, so a terminal boundary has no crossing population, permanently |
+
+⭐ **And the vocabulary resolves with no structural change at all, because `cut` and `boundary` were
+never the same thing:**
+
+| name | count | what it is |
 |---|---:|---|
-| `cut_positions` | **35,229** | `N + one per chromosome` — ⭐ **already exactly the anchored `N+1` boundary set** |
-| regions `N` | 35,135 | |
-| today's `edge` axis | **35,041** | `N − one per chromosome` — the **interior-only** subset, anchors excluded |
+| **REGION** | 35,135 | a genomic interval, with `start`/`end` |
+| **BOUNDARY** | **35,041** | the position BETWEEN two adjacent regions. ⭐ It does not exist before the first region or after the last — *the object does not exist rather than existing empty* |
+| `cut_positions` → **`region_bounds`** | 35,229 | ⛔ NOT a boundary axis. The packed region ENDPOINTS — a coordinate grid, an input to the partition, not a derived object |
 
-⭐ So `cut` → **`boundary`** after all, as `region_boundary_sj_design.md` §5 originally said. What §5
-missed is that the codebase carries the boundary set **twice, at two different extents**, differing by
-exactly 2 per reference (188 slots).
-
-> **RECOMMENDATION — UNIFY THE TWO AXES *BEFORE* RENAMING, NOT DURING.**
-> Grow the deposit axis from `N−R` to `N+R` so there is ONE boundary concept at ONE length. The two
-> terminal slots per reference simply carry zero crossings — nothing crosses a chromosome end — so it is
-> additive, and 188 zero slots out of 35,229 is free.
->
-> ⭐⭐ **It is not cosmetic: it makes §5's stated arithmetic actually TRUE.** §5 already claims
-> `region r → boundaries (r, r+1)` and `boundary b → regions (b, b+1)` are ARITHMETIC. Today that is
-> false at every reference end, because the edge axis skips the anchors; with the anchored axis it holds
-> everywhere with no special case. It also **deletes a population** rather than renaming one.
->
-> ⛔ **But it is a STRUCTURAL change, not a rename** — the payload's boundary axis changes length — so it
-> gets its own commit and its own gate (`one-thing-varied`). Doing it FIRST is what converts the hardest
-> naming ambiguity into a non-issue, instead of carrying `two-masks-one-name` through 690 rename sites.
-
-⚠ **If the owner prefers not to unify**, the fallback is to keep both and name the extents apart —
-`boundary_positions` (`N+R`, anchored) versus the interior deposit axis. That works, but it preserves the
-ambiguity the rename exists to remove, so it is the worse option and is recorded only as the alternative.
+⚠ **A flip-flop, stated plainly so the record is honest.** `region_bound` was the original
+recommendation; it was retracted after reading the respecification as *"boundaries include the
+chromosome ends"*. Re-reading, the respecification says **terminal anchors (intergenic↔exon)** — which
+are already ordinary INTERIOR boundaries and always were — and says explicitly that boundaries at `0`
+and `L` are *not needed*. The retraction was mine and was wrong; the code settles it in the same
+direction as the original reading.
 
 ### 2b. `junction` — bare form banned, two allowed spellings
 
@@ -145,9 +148,9 @@ refused — it would have to be maintained across nine stages while being exactl
     payload        18 arrays              calibration  19 arrays
     frozen at `4576c3be` + the audit, on `g00 ss0.99 capture_off`
 
-⭐⭐ **The quant digest must not change at ANY stage — stage 0 included.** Stage 0 alters the payload's
-SHAPE, so ① legitimately moves there; the OUTPUT must not, because adding all-zero slots changes no
-number. That makes stage 0's gate sharper than the renames', not looser.
+⭐⭐ **The quant digest must not change at ANY stage, and now there is no exception.** With stage 0
+struck (§2a), every remaining stage is a PURE RENAME — so ① and ② must BOTH be unchanged, every time.
+The reference is frozen once and never re-frozen.
 
 ### 3d. FROZEN, not rolling — this is the answer to "the renames compound"
 
@@ -155,7 +158,7 @@ Every stage compares to the SAME capture, never to the stage before it. ⛔ A ro
 defect introduced at stage 2 become the accepted truth for stages 3-9 — which is precisely the
 compounding failure. This is the one place `TRAPS: re-record-the-baseline` is INVERTED, and deliberately:
 the claim under test is *"nothing has moved since the freeze"*. `--freeze` refuses to overwrite an
-existing reference for that reason; it is re-frozen exactly once, after stage 0.
+existing reference for that reason, and with stage 0 struck it is **never re-frozen at all**.
 
 ### 3e. Falsified, on the comparator AND on real data
 
@@ -169,15 +172,16 @@ nobody mistakes it for coverage. ⭐ On real data a **one-ULP** nudge to a singl
 ## 3f. THE STAGING — each stage is one commit, and lands only on a green `--check`
 
 ⭐ Ordered by **risk of collision**, ascending, so the method is proven on the safe stages first.
+⛔ **There is no stage 0** — §2a struck it. Every stage below is a PURE RENAME, so every one of
+them must read ✅ on `--check` with no exception and no re-freeze.
 
 | # | stage | scope | gate beyond suite + `--check` |
 |---|---|---|---|
-| **0** | ⭐⭐ **STRUCTURAL: unify the boundary axis at `N+R`** (§2a) | payload axis 35,041 → 35,229; 188 new slots | ⛔ the new slots must be **all zero**; the quant digest must NOT move; then **re-freeze** |
 | ✅ 1 | `donor`/`acceptor` → `boundary_left`/`right` | 117 sites, 17 files | done in `4576c3be` (suite-gated; predates the harness) |
 | 2 | **`node` → `region`** | ~2,700 code + 1,264 docstrings; exempt the 10 `ast` sites | C++/spec parity |
 | 3 | **`edge`/`seam` → `boundary`** | ~1,800 code + 877 docstrings | C++/spec parity |
 | 4 | **`line` → `boundary`**, per site | 120 of 180; leave the 60 text lines | — |
-| 5 | **`cut` → `boundary`** | ~690 code + 214 docstrings | — |
+| 5 | **`cut` → `region_bound`** (§2a — it is the region ENDPOINT grid, not a boundary) | ~690 code + 214 docstrings | — |
 | 6 | **`junction` → `sj`**, incl. §2.5's `mass`→`count` | ~900 code + 646 docstrings | — |
 | 7 | **module filenames** | 16 files + every import | — |
 | 8 | **docs, `CLAUDE.md`, `DESIGN.md` §0, memory** | 1,080 | `test_docs_boundary`, `test_no_jargon_labels`; ⭐ `--check` is a NO-OP here and that is the point: prose cannot move a number |
