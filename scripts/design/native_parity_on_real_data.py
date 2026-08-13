@@ -51,19 +51,18 @@ from rigel.index import TranscriptIndex  # noqa: E402
 _AXIS = {
     "node_contained_count": "node",
     "node_contained_inv_opportunity_sum": "node",
-    "node_contained_length_sum": "node",
     "node_spanning_count": "node",
     "node_spanning_inv_length_sum": "node",
     "node_spanning_length_sum": "node",
     "node_start_count": "node",
     "edge_unspliced_count": "edge",
     "edge_unspliced_inv_length_sum": "edge",
-    "edge_unspliced_length_sum": "edge",
     "edge_spliced_count": "edge",
     "edge_spliced_inv_length_sum": "edge",
     "edge_spliced_length_sum": "edge",
     "sj_count": "sj",
     "sj_inv_length_sum": "sj",
+    "sj_mass": "sj",
     "sj_length_sum": "sj",
 }
 
@@ -90,7 +89,7 @@ def native_for_ref(partition, ref: int, max_length: int) -> NativeAccumulator:
     j0, j1 = int(partition.sj_offsets[c0]), int(partition.sj_offsets[c1])
     accumulator.set_junctions(
         np.ascontiguousarray(partition.sj_offsets[c0 : c1 + 1] - j0, dtype=np.int32),
-        np.ascontiguousarray(partition.sj_acceptor_cut[j0:j1] - c0, dtype=np.int32),
+        np.ascontiguousarray(partition.sj_boundary_right[j0:j1] - c0, dtype=np.int32),
         np.ascontiguousarray(partition.sj_strand[j0:j1], dtype=np.int8),
     )
     return accumulator

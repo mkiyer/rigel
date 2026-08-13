@@ -41,16 +41,19 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     # consumer reads it. ``None`` means "this population does not measure that", which is a different
     # statement from "it measured it and got zero", and the view keeps them distinguishable.
     for view, n, channels in (
-        (sub.node_contained, payload.n_nodes, ("inv_length_sum", "length_sum")),
-        (sub.edge_unspliced, payload.n_edges, ("inv_length_sum", "length_sum")),
-        (sub.edge_spliced, payload.n_edges, ()),
-        (sub.junction, payload.n_sj, ("inv_length_sum",)),
+        (sub.node_contained, payload.n_nodes, ("inv_length_sum",)),
+        (sub.edge_unspliced, payload.n_edges, ("inv_length_sum", "mass")),
+        (sub.edge_spliced, payload.n_edges, ("mass",)),
+        (sub.junction, payload.n_sj, ("inv_length_sum", "mass")),
     ):
         assert view.count.shape == (n, 2)
-        for channel in ("inv_length_sum", "length_sum"):
+        for channel in ("inv_length_sum", "mass"):
             value = getattr(view, channel)
             if channel in channels:
-                # ⛔ ONE column: the length moments carry no strand axis, while ``count`` keeps two.
+                # ⛔ ONE column, on BOTH channels: the length moments carry no strand axis and neither
+                # does a mass, while ``count`` keeps two. ⚠ ``sj_mass`` arrives from the payload with
+                # two columns since 2026-08-13 and is FOLDED at this boundary, so this shape assertion
+                # is what pins the fold for the junction row.
                 assert value is not None and value.shape == (n,)
             else:
                 assert value is None, (
@@ -115,43 +118,42 @@ def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(subs
     np.testing.assert_allclose(sub.node_contained.inv_length_sum, counts / 50.0, rtol=1e-7)
 
 
-def test_length_sum_is_NOT_scaled(substrate):
-    """It is a plain sum of integers — no fixed point, no scale. Applying the density decode to it would
-    divide by 4.3 billion and read as zero everywhere."""
-    sub, payload, _ = substrate
-    np.testing.assert_array_equal(
-        sub.node_contained.length_sum, payload.node_contained_length_sum.astype(np.float64)
-    )
-
-
 # ---------------------------------------------------------------------------
 # derived quantities
 # ---------------------------------------------------------------------------
 
 
-def test_mean_length_is_length_sum_over_count(substrate):
-    """The quantity `length_sum` exists for: an object's own mean fragment length, model-free."""
-    sub, _, _ = substrate
-    view = sub.node_contained
-    expected = view.length_sum / view.count.sum(axis=1)
-    np.testing.assert_allclose(view.mean_length, expected)
-    assert np.allclose(view.mean_length, 50.0), "the fixture deposited only 50 bp fragments here"
+def test_the_JUNCTION_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
+    """⭐⭐ ``sj_mass`` went per-strand on 2026-08-13 for artifact detection, and this boundary is where
+    the strand axis stops. :attr:`PopulationView.mass` is strand-agnostic by contract — the mass turns an
+    object-incidence total into a fragment count, a question with no strand in it — so folding here is
+    what left every downstream consumer unchanged by the schema change.
+
+    ⛔ The fixture's two columns are UNEQUAL (0.9 / 0.4), so a fold that took one column, or the max, or
+    the mean, cannot pass (`TRAPS: could-the-arm-have-fired`).
+    """
+    sub, payload, _ = substrate
+    assert payload.sj_mass.ndim == 2, "the payload bank is per strand"
+    assert payload.sj_mass.shape[1] == 2
+    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], "the fixture cannot separate the fold rules"
+    assert sub.junction.mass.ndim == 1, "PopulationView.mass is strand-agnostic"
+    np.testing.assert_allclose(sub.junction.mass, payload.sj_mass.sum(axis=1))
 
 
-def test_mean_length_at_ZERO_count_is_NAN_not_zero():
-    """⛔ An object with no fragments has no mean length, and that is not 0.
+def test_mass_per_crossing_at_ZERO_count_is_the_IDENTITY_not_zero():
+    """⛔ **The lesson that used to live on ``mean_length``, moved to the channel that survives it.**
+    An object the accumulator never saw must emit NOTHING, never a floored value — a "no data" default
+    of 100 % gDNA was once actively seeding false gDNA into neighbouring exons.
 
-    an object with no opportunity must emit NOTHING, never a floored
-    value — a "no data" default of 100 % gDNA was actively seeding false gDNA into neighbouring exons.
-    Zero here would read as "the fragments here are infinitely short".
+    ⭐ For a MASS the null answer is 1.0 rather than NaN, and the direction matters: this factor rescales
+    whatever mass the deconvolution placed at the line, so 0 would DELETE it while 1.0 leaves it alone.
     """
     view = PopulationView(
-        name="node_contained",
+        name="junction",
         count=np.zeros((2, 2), np.int64),
-        inv_length_sum=np.zeros(2, np.float64),
-        length_sum=np.zeros(2, np.float64),
+        mass=np.zeros(2, np.float64),
     )
-    assert np.all(np.isnan(view.mean_length))
+    np.testing.assert_array_equal(view.mass_per_crossing, np.ones(2))
 
 
 def test_total_count_sums_the_two_strands(substrate):

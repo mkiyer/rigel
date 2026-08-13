@@ -75,7 +75,7 @@ to fail could reveal it.
 | **3** | the per-transcript weight LANE into the EM | ✅ 24 gates, 12 perturbations, 0 holes |
 | **4** | `EMConfig.warm_start` = `coverage` / `prior` / `uniform` | ✅ 6 gates |
 | **5** | the PROOF — oracle weights | ✅ **§0** |
-| **6** | the weighting function | ⛔ **not started — this is the next real work** |
+| **6** | the weighting function | ⛔ **BUILT AND REFUSED 2026-08-13 — `ROADMAP.md` §4, and §6a below** |
 
 ### The transcript path (`build_transcript_path`)
 
@@ -190,14 +190,16 @@ keyed structure) · `transcript_sj` CSR · the boundary event bitmask · the two
 `SJStrandTable` counts the leftmost junction only, unique mappers only. Publishing either first ships
 two answers to one question.
 
-### The mass ruling, reversed — with its premise
+### The mass ruling, reversed — ✅ LANDED 2026-08-13
 
-`accumulator.h` ruled a mass bank is ONE value because *"nothing reads a mass per strand"*. ⭐ That
-premise is now false: artifactual splice junctions accumulate SYMMETRICALLY on both strands like gDNA
-and are detectable by the existing strand model, and a per-strand mass is what makes artifact filtering
-single-pass. **Record the reversal with the premise that changed**, or it gets re-litigated in both
-directions. Price: the payload schema digest moves, every scan cache rebuilds — **8.3 s/condition, ~6
-min for the ladder**. ⭐ Bundle it with the two dead banks `ROADMAP.md` §2.7 already wants removed.
+Done, with the premise recorded in `accumulator.h` beside the field. `ROADMAP.md` §2 items **0c** and
+**0c1** carry the change, the retraction of the deleted banks' false justification, and the re-scan
+gate's own repair; do not re-derive them here.
+
+⚠ **Two numbers in the old version of this paragraph were wrong and are corrected there:** the price is
+**~2 min per condition** for the oracle layout (four payloads, including a ~105 s BAM split), not the
+8.3 s that describes the flat scan cache alone — so a full four-panel regeneration is hours, not minutes.
+And the re-scan gate had to be REPAIRED before it could pass at all.
 
 ### Two hazards any new design must not inherit
 
@@ -217,16 +219,44 @@ shipped rule. ⭐ Region mass stays implicit: containment is exclusive, so the c
 
 ---
 
+## 6a. ⛔⛔ STAGE 6 IS BUILT AND REFUSED — and what it settled is worth more than the refusal
+
+The soft min along the path, faithfully: 16 arms on `g00 ss0.99 capture_off`, 3 on the blind stratum,
+`base` re-recorded in the same session (and reproducing the §0 numbers to the fragment). The verdict and
+the mechanism are now in `ROADMAP.md` §4 and `TRAPS: an-upper-bound-is-not-an-estimate`; do not re-derive
+them here. In one line: **worse than `base` at transcript level everywhere, and the one good number —
+gene error 0.395–0.527× at `g00` — collapses to 1.006–1.041× on the blind stratum.**
+
+⭐⭐ **THE FOUR THINGS THAT SURVIVE, because the next attempt should start from them and not from scratch:**
+
+1. **The density identity, gated.** `density(r) = mass_rna_node[r]/ceff(r) = Σ_{t∋r} A_t/E_t` — the
+   object's own opportunity cancels, which is what makes objects of different sizes commensurate. A
+   transcript alone on its path recovers its own abundance exactly, on all four modes.
+2. **The multiplier is settled by measurement**, and it is not the one the budget's units suggest:
+   `oracle_alloc` (TOTAL abundance) **0.163×** beats `oracle_alloc_unspliced` **0.202×** at transcript
+   level, and they invert at gene level (0.128 vs 0.120).
+3. **The opportunity weighting**, which is the deviation from the spec as written and is not optional —
+   `TRAPS: a-mean-of-ratios-inherits-the-partition`. Unweighted forms drift 1.67–3.03× on data that did
+   not change.
+4. ⭐ **The dial is monotone in the theorem's favour on both axes and both strata** — `min` < `harmonic` <
+   `geometric` < `arithmetic`, so the pooled no-deconvolution control is the WORST rung. The soft min is
+   doing real work; it is the SUPPORT that is wrong.
+
+⛔ **So the next candidate is a SPARSITY mechanism, not a better mean.** 0.0 % of expressed transcripts
+are ever zeroed and 3,644 of 4,839 silent ones are not — the entire error is in one direction, and no
+rearrangement of the mean touches it. ⚠ Whatever it is, grep `ROADMAP.md` §4.1 first: eleven mechanisms
+for resolving doubt are already refused there, and every one of them lifted an evidence-free object off
+zero.
+
 ## 6. WHAT IS LEFT, IN ORDER
 
-1. ⭐⭐⭐ **STAGE 6 — the weighting function.** This is the work. The foundation is proven (§0), the
-   evidence is published (§2), the path exists. ⛔ Before designing: re-read §0's three limits and
-   `TRAPS: a-trap-names-the-defect-not-the-repair`.
-2. **Re-run stage 5 on the blind stratum** (unstranded × capture-ON) and one mid-gDNA condition before
-   generalising the 80 %.
-3. **Price what a REAL weighting function could earn** — the ceiling, with the controls §0 omits: a
+1. ⭐⭐⭐ **A SPARSITY MECHANISM for the weight** — §6a. The lane, the arms, the truth instrument and the
+   falsifications are all in place, so a candidate is one function plus one arm.
+2. **Price what a REAL weighting function could earn** — the ceiling, with the controls §0 omits: a
    support-only ablation (inject the oracle only where truth is nonzero) to separate deconvolution from
-   sparsity, and a gene-aggregated oracle to price the within-gene split.
+   sparsity, and a gene-aggregated oracle to price the within-gene split. ⭐ **This is now the
+   better-value half of the two**, because §6a measured the support to be the whole problem and this is
+   what prices it.
 4. **ψ's non-closure** (§3) — owner ruled this a separate branch, after the prior lands.
 5. **The graph refactor** (§5) — the rename, the two sj CSRs, the boundary-event bitmask. `sj_mass[2]`
    is `ROADMAP.md` §2 item 0c: it moves the payload schema digest, so bundle it with the two dead banks

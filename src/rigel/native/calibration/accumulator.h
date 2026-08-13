@@ -121,9 +121,8 @@ struct Node {
     /// consumer summed the two columns before using them. The COUNTS keep both because the strand model
     /// is a Beta-Binomial over them, per strand.
     double contained_inv_opportunity_sum;
-    std::uint64_t contained_length_sum;
 };
-static_assert(sizeof(Node) == 24, "Node must be 24 bytes with no padding");
+static_assert(sizeof(Node) == 16, "Node must be 16 bytes with no padding");
 
 /// A contiguous edge: the 0-bp line between two adjacent nodes. `spliced` means the FRAGMENT used an
 /// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
@@ -131,16 +130,18 @@ static_assert(sizeof(Node) == 24, "Node must be 24 bytes with no padding");
 struct ContiguousEdge {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
-    /// ⭐ ONE value each -- strand-agnostic, see `Node`.
+    /// ⭐ ONE value -- strand-agnostic, see `Node`.
     double unspliced_inv_length_sum;
-    std::uint64_t unspliced_length_sum;
     /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
     /// number cannot be both: `unspliced_count` is `+1` on every line a fragment crosses, so a fragment
     /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the lines it crosses.
     ///
-    /// ⛔ ONE VALUE, NOT TWO, WHILE EVERY BANK ABOVE IS PER STRAND — deliberate. `strand_deconv` reads
-    /// the counts per column; nothing reads a mass per strand, because the mass exists to turn an
-    /// object-incidence total into a fragment count and that question has no strand in it.
+    /// ⛔ ONE VALUE, NOT TWO, AND THE RULING STANDS **HERE** WHILE IT WAS REVERSED ON THE JUNCTION AXIS
+    /// (2026-08-13) — the premise that changed is specific to junctions and does not reach this bank.
+    /// `strand_deconv` reads the counts per column; nothing reads a LINE's mass per strand, because at a
+    /// line the mass exists to turn an object-incidence total into a fragment count and that question
+    /// has no strand in it. ⚠ `one-thing-varied`: widening this too would have been a second change with
+    /// no named consumer. See `JunctionEdge::mass`.
     double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
     /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
@@ -149,7 +150,7 @@ struct ContiguousEdge {
     /// mass at the same line, and is NOT "the number of spliced fragments here".
     double spliced_mass;
 };
-static_assert(sizeof(ContiguousEdge) == 48, "ContiguousEdge must be 48 bytes with no padding");
+static_assert(sizeof(ContiguousEdge) == 40, "ContiguousEdge must be 40 bytes with no padding");
 
 /// A junction edge: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
 /// population; and it is not a genomic position, so it carries no structural flags.
@@ -169,9 +170,27 @@ struct JunctionEdge {
     /// ⛔ The rule ADDS a boundary class; it does not re-apportion an existing one. A block that
     /// crossed a line is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
     /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
-    double mass;
+    ///
+    /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `ContiguousEdge::unspliced_mass`'s ONE-VALUE RULING ON
+    /// THIS AXIS ONLY (owner, 2026-08-12). THE REVERSAL IS ADMISSIBLE BECAUSE THE PREMISE CHANGED, AND
+    /// THE PREMISE IS RECORDED HERE SO IT IS NOT RE-LITIGATED IN EITHER DIRECTION.**
+    /// The ruling was *"nothing reads a mass per strand"*. That is now false for junctions and only for
+    /// junctions: an ARTIFACTUAL splice junction accumulates SYMMETRICALLY on both strands, exactly as
+    /// gDNA does, so the strand model the tool already has can detect one — but only if it is given a
+    /// per-strand observable, and the COUNT is not enough because a count cannot separate a junction
+    /// used by many short fragments from one used by few long ones.
+    /// ⚠ The second reason is structural: without this bank, artifact filtering needs TWO passes over
+    /// the BAM (tally, filter, re-accumulate the mass), which is the one thing the single-pass
+    /// architecture exists to avoid.
+    ///
+    /// ⛔ **The column is `col` — the SAME genome-strand column `count` is deposited at**, so
+    /// `mass[c] / count[c]` is a per-strand mean and not a ratio of two different populations.
+    /// ⚠ Summed over columns this is byte-comparable to the single accumulator it replaces, but NOT
+    /// bit-identical: float addition is not associative and the deposit order per column differs.
+    /// Agreement is ~1e-15 relative, which is the convention this file already documents.
+    double mass[kNStrandColumns];
 };
-static_assert(sizeof(JunctionEdge) == 24, "JunctionEdge must be 24 bytes with no padding");
+static_assert(sizeof(JunctionEdge) == 32, "JunctionEdge must be 32 bytes with no padding");
 
 // ============================================================================
 // the fragment-length pools
@@ -428,14 +447,14 @@ public:
     /// Install this reference's junction edges as a CSR keyed by DONOR CUT INDEX -- the index the
     /// deposit already computes while locating the lines its path crosses.
     ///
-    /// ⚠ The junction-edge id IS the slot: `sj_acceptor_cut[k]` and the bank entry `k` are the same k.
+    /// ⚠ The junction-edge id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
     /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
     /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
     ///
     /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
     /// (donor cut, acceptor cut, sj_strand), matching `Partition.from_cuts` in the Python spec.
     void set_junctions(std::vector<std::int32_t> offsets,       // size n_cuts + 1
-                       std::vector<std::int32_t> acceptor_cut,  // acceptor CUT INDEX, not a coordinate
+                       std::vector<std::int32_t> boundary_right,  // acceptor CUT INDEX, not a coordinate
                        std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
 
     std::size_t n_nodes()    const noexcept { return nodes_.size(); }
@@ -561,7 +580,7 @@ private:
     std::vector<std::uint32_t> node_start_count_;  // n_nodes -- its own array, so Node stays 48 B
 
     std::vector<std::int32_t>  sj_offsets_;        // n_cuts + 1, CSR over the donor cut index
-    std::vector<std::int32_t>  sj_acceptor_cut_;   // n_junctions
+    std::vector<std::int32_t>  sj_boundary_right_;   // n_junctions
     std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
 
     std::vector<std::uint8_t>  node_types_;        // n_nodes, or empty (no pools)
@@ -602,7 +621,7 @@ public:
     /// junctions are the contiguous SLOT range `[offsets[c0], offsets[c1])`. So per reference:
     ///
     ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_cuts + 1)
-    ///     acceptor_cut -> acceptor_cut[j0 .. j1] - c0               (a ref-local cut index)
+    ///     boundary_right -> boundary_right[j0 .. j1] - c0               (a ref-local cut index)
     ///
     /// ⚠ Two consequences, both load-bearing. A reference's junction-edge ids are `slot - j0`, so the
     /// payload's junction axis is exactly the flat slot order concatenated in reference order — which is
@@ -610,7 +629,7 @@ public:
     /// int32 is safe by census: 1.04 M cuts and 404,168 junctions at human scale.
     void set_junctions(const std::int64_t* offsets,       // n_cuts_total + 1, over the FLAT cut axis
                        std::size_t n_offsets,
-                       const std::int64_t* acceptor_cut,  // n_junctions_total, FLAT cut indices
+                       const std::int64_t* boundary_right,  // n_junctions_total, FLAT cut indices
                        const std::int8_t* sj_strand,
                        std::size_t n_junctions,
                        const std::int64_t* ref_cut_offsets);

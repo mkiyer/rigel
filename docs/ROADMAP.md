@@ -203,7 +203,31 @@ one exception, which is item 1.
    the EM; `EMConfig.warm_start` = `coverage`/`prior`/`uniform`; the three-way composition published per
    object; `scripts/design/transcript_truth.py` (true per-transcript counts split by splicedness, 41 s
    per 10 M-fragment condition, seven named gates all passing).
-   ⛔ **What is NOT built: the weighting function.** A first attempt was built and REFUSED (§4).
+   ⛔⛔ **STAGE 6 — THE WEIGHTING FUNCTION IS NOW BUILT, MEASURED AND REFUSED (2026-08-13), AND THE
+   REFUSAL IS THE OWNER'S OWN THEOREM RATHER THAN A DEVIATION FROM IT.** The soft-min-along-the-path
+   family — 12 arms, `min`/`harmonic`/`geometric`/`arithmetic` × three multipliers — is worse than
+   `base` at transcript level on BOTH strata and its `g00` gene-level win (0.395–0.527×) collapses to
+   1.006–1.041× on the blind stratum. §4 carries the full row; `TRAPS: an-upper-bound-is-not-an-estimate`
+   carries the mechanism. ⭐ **The theorem is not what failed and must not be discarded**: the dial is
+   monotone in its favour on every axis and both strata, so the pooled no-deconvolution control is the
+   worst rung of the four. What failed is that a bound shared with a loud neighbour is not evidence about
+   the quiet one, and 75.3 % of silent transcripts have such a neighbour.
+   ⭐⭐ **WHAT THE EXPERIMENT SETTLED, AND IT NARROWS THE NEXT ATTEMPT SHARPLY:**
+   * **The target is TOTAL abundance, not the unspliced count** — `oracle_alloc` (total truth weights)
+     scores **0.163×** against `oracle_alloc_unspliced`'s **0.202×** at transcript level, even though the
+     budget being split is literally unspliced pseudocounts. ⚠ At GENE level they invert (0.128 vs
+     0.120), so this is a transcript-level ruling only.
+   * **The density's units are settled and gated**: `density(r) = mass_rna_node[r]/ceff(r) = Σ_{t∋r} A_t/E_t`
+     — the object's own opportunity CANCELS, which is what makes densities at objects of different sizes
+     commensurate and what the `min` is a min OF. A transcript alone on its path recovers its own
+     abundance exactly, on all four modes (`test_transcript_weights.py`).
+   * **The support problem is the whole problem.** 0.0 % of expressed transcripts are ever zeroed; the
+     error is entirely that 3,644 silent ones are not. Any next candidate is a SPARSITY mechanism, not a
+     better mean.
+   ⚠ The lane, the arms and the falsifications are all in place, so the next candidate is one function:
+   `transcript_weights.build_weights` + one `alloc_*` arm.
+   ⛔ An EARLIER first attempt was also built and REFUSED (§4) — soft-min over EXCLUSIVE objects with a
+   per-object Jeffreys half. That one failed for three unrelated reasons and is a different row.
    ⭐ **Vocabulary ruling (owner):** REGION / BOUNDARY / SPLICE JUNCTION replace node / edge·line·cut /
    junction; `donor`/`acceptor` are banned as strand-dependent (the code is genomically ordered, so the
    name is backwards for 48.4 % of junctions). A CONVERGENCE, not an invention — all three axes already
@@ -236,8 +260,66 @@ one exception, which is item 1.
    indistinguishable from a solved one. `CalibrationResult` publishes the values as solved, bounds each
    to `[0,1]`, and asserts no closure; `test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate`
    pins that as a decision so the assertion is not added before ψ is fixed.
-0c. ⭐⭐ **`sj_mass[2]` — THE PER-STRAND SPLICE-JUNCTION MASS, AND THE RULING IT REVERSES** (owner,
-   2026-08-12). `accumulator.h` ruled that a mass bank is ONE value, not two, because *"nothing reads a
+0c0. ✅ **THE CONSERVED JUNCTION MASS IS PUBLISHED — DONE 2026-08-13, and it needed no re-scan.**
+   `CalibrationResult.junction_conserved_mass` is `float64[n_junctions]`, the accumulator's `sj_mass`
+   bank recovered exactly (12,758 of 13,482 elements bit-identical, worst 9.1e-13 on
+   `g00 ss0.99 capture_off`). ⛔ It exists because the derivation was reachable only by knowing to
+   perform it, while **`mass_rna_junction` sat next to it looking like the answer and reading 2.0719×
+   high** — 5,668,526 incidences against 2,735,958.8 units of mass — so a weight that read it would be
+   wrong in proportion to how spliced a transcript is. ⚠ **A PROPERTY, never a stored field, and that is
+   forced rather than preferred:** `mass_rna_junction` is in `prior_vs_oracle.OVERRIDE_FIELDS`, so a
+   cached array would survive an oracle arm's `dataclasses.replace` and describe the array it replaced
+   (`TRAPS: a-hash-that-misses-its-artifact`, dataclass form — the same reason `library_rna_fragments`
+   is derived). ⭐ `library_rna_fragments` now reads it, so the conversion has ONE home.
+   ⭐ Six gates, four perturbations, and the sharpest is that a `where(count > 0, …)` fallback to the
+   `1.0` identity would publish phantom mass on **4,636 of 13,482** zero-count junctions — a third of
+   the axis, on the one axis that is certified RNA by construction. Exactly one gate catches that.
+0c. ✅ **`sj_mass[2]` — THE PER-STRAND SPLICE-JUNCTION MASS, AND THE RULING IT REVERSES — LANDED
+   2026-08-13** (owner, 2026-08-12), bundled with the two dead banks exactly as planned.
+   ⭐ **The bundle is three parts pulling one way:** `JunctionEdge::mass` → `mass[2]` deposited at the
+   same `col` the count uses (24 → 32 B); `Node::contained_length_sum` and
+   `ContiguousEdge::unspliced_length_sum` deleted (24 → 16 B, 48 → 40 B). Net memory at genome scale is
+   **down** ~19 MB. `sj_mass` moved `SINGLE_COLUMN_AXES` → `BANK_AXES`, and since the shape digest is
+   DERIVED from those two tables it moved itself.
+   ⭐⭐ **`substrate` folds the strand axis at the boundary**, so `PopulationView.mass` stays
+   strand-agnostic and **no consumer below it changed at all**. The per-strand values are not re-exported
+   there: their consumer is artifact filtering, which reads the payload.
+   ⛔⛔ **THE TWO DELETED BANKS' STATED JUSTIFICATION WAS FALSE, and that is what made the deletion
+   clean rather than lossy.** `scan_payload`'s docstring claimed `length_sum` removes the blind spot at
+   `mu_g = mu_r`. It does not: there the third row is `(mu, mu)`, proportional to `(1, 1)` like the other
+   two, so the 3x2 system is still rank one. It is an independent tilt only when the means already
+   differ — precisely when the first two rows suffice. It survived because **nothing consumed it**, so no
+   test could disagree. The retraction is written where the claim was, not merely deleted.
+   ⚠ The lesson `mean_length` carried ("an object with no data must emit NOTHING, never a floored
+   value") was MOVED onto `mass_per_crossing`'s 1.0-identity rather than deleted with its test.
+0c1. ⛔⛔ **AND THE RE-SCAN GATE WAS BROKEN BEFORE ANY OF THIS — REPAIRED 2026-08-13.**
+   `rescan_panels.py` compared every bank byte-exactly, on the stated grounds that *"these are integer
+   tallies"*. The 2026-08-10 one-numeric-convention ruling made six of them float64, and float addition
+   is not associative across worker threads: **two scans of the same BAM by the same binary differ on
+   exactly those six banks**, by up to 3.5e-14 relative. The gate had therefore been UNSATISFIABLE since
+   that ruling, and it failed this change on five banks the change never touched.
+   ⭐ **The repair is a per-element budget `deposits · eps · value`**, with `deposits` read from the COUNT
+   bank at the same object and the ×2 on the mass banks derived from the deposit rule — no tuned
+   constant, and integers stay exact. `--self-test` 14/14, including that a ulp inside the budget is
+   ACCEPTED, that a 1e-9 move is caught, and that a ZERO-count object gets a ZERO budget.
+   ⛔ `TRAPS: a-stale-gate-accuses-the-newest-change`. What resolved it was a control on the INSTRUMENT
+   — scan the same BAM twice — not on the change.
+0c2. ⭐⭐⭐ **ORDERING RULING (2026-08-13): THE CACHES ARE REGENERATED BEFORE THE BULK RENAME, AND THE
+   SECOND RE-SCAN THE RENAME COSTS IS ACCEPTED.** 13 of the payload's 62 schema names carry the old
+   vocabulary (`node_*`, `edge_*`, `sj_*`, `cut_*`), and `payload_schema_digest` hashes NAMES — so the
+   rename moves the digest again and refuses every cache a second time.
+   ⛔ **Bundling them anyway would make the gate VACUOUS, and that is the whole argument.** Its power is
+   *"31 shared banks, every one identical"*; rename the banks and there are almost no shared banks left,
+   so the rebuild would be gated only by "the same symmetric difference appears everywhere" — which
+   cannot see whether a renamed bank's VALUES survived. The gate has just demonstrated its worth twice in
+   one session (it stopped an irreversible write, and it surfaced 0c1), and it only works with ONE change
+   in flight (`one-thing-varied`).
+   ⚠ A second consideration decided it as much as the first: **while every cache is refused, no
+   instrument runs**, so a ~1,000-site mechanical rename would be made blind and then landed against a
+   gate that cannot fail — the worst available combination.
+   ⭐ **PREREQUISITE FOR THE RENAME, and it is easier to build while the caches are valid:** teach
+   `rescan_panels.py` a `--renamed old=new` map, so a rename's rebuild asserts the new bank equals its
+   predecessor within the same derived budget. Without it a pure rename cannot be gated at all. `accumulator.h` ruled that a mass bank is ONE value, not two, because *"nothing reads a
    mass per strand"*. ⭐ **That premise is now FALSE, which is what makes the reversal admissible:**
    artifactual splice junctions accumulate SYMMETRICALLY on both strands, like gDNA, so they are
    detectable by the strand model the tool already has — and a per-strand mass is the observable that
@@ -394,6 +476,7 @@ fixed: TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero, §
 | **the gDNA prior's BIMODAL CAPACITY, and "give the prior more signal"** | a read of `gdna_landscape.py` + the production refit on real conditions | ⛔ **BOTH BRANCHES CLOSED.** The prior already renders the landscape correctly — **2.98 decades** of mode separation at `g75 ss0.99 capture_ON`, 30× more enriched mass ON than OFF, a single pile at the wall at `g00`. And a prior fitted from ORACLE truth is the same prior (0.04 dec). Not capacity, not signal, not location. §3 below |
 | **§2's Jeffreys MEAN density location** | `--arm eta`, the `g00` zero control | ⛔ **REFUTED at +96,299 %.** It cannot say ZERO (`node_init.rho_g` is an exact 0 at 60,544/70,176 slots — the statement earning the −98 % at `g00`), and the TRAPS: a-ratio-cannot-carry-zero benefit it was credited with belongs to **§4**. ⭐ If revisited the derived form is the Gamma **MODE** `max(a−½,0)/E`, which is exactly 0 at a zero count |
 | ⛔⛔ **A SPECIFIC per-transcript allocation RULE — soft-min over exclusive objects with a per-object Jeffreys half** | built end to end and A/B'd on all 36 conditions, seed pinned | ⛔ **REFUSED — worse on EVERY stratum and on the zero control**, transcript Σ\|err\| **57.5 M → 81.6 M (1.42×)**, and a length-proportional variant **2.10×**. ⭐ **The MECHANISM is not what failed** — the gDNA:RNA split moved **+0.2 %**, exactly as the conservation identity requires, so the A/B priced the ALLOCATION alone. Three defects, each measured: exclusivity hard-zeroed **38.7 %** of transcripts; estimating a density on a tiny exclusive region and extrapolating over the whole transcript amplified variance up to **6,534×** (44.6 % of weighted transcripts had their density from <200 bp); and a per-object `+½` revived the silent half of the annotation (`frac_expressed: 0.5`), taking false-positive mass **18.6 M → 41.6 M**. ⛔ The rule and its config flag were DELETED; the LANE it rode on was kept and is now proven (item 0). ⚠ The Jeffreys-mean half of it is §4.1 graveyard row one — see `TRAPS: a-trap-names-the-defect-not-the-repair` |
+| ⛔⛔ **THE SOFT-MIN-ALONG-THE-PATH WEIGHTING FUNCTION — the owner's own theorem, built faithfully and REFUSED** | 12 arms (4 modes × 3 multipliers) on `g00 ss0.99 capture_off`, 3 of them re-run on the blind stratum `g50 ss0.50 capture_on`, base re-recorded in the same session | ⛔ **REFUSED. Worse than `base` at TRANSCRIPT level on every rung of every arm and on both strata** — 1.317–1.604× at `g00`, 1.262–1.331× on the blind stratum — with transcript false-positive mass 1.76–2.20× worse. ⭐ **The one encouraging number does not survive:** at `g00` the same weights took GENE error to **0.395–0.527×** (against `oracle_alloc`'s 0.128×), and on the blind stratum that collapses to **1.006–1.041×**, i.e. nothing. ⭐⭐ **The MECHANISM is `TRAPS: an-upper-bound-is-not-an-estimate`, and it is structural rather than a tuning failure:** the theorem bounds a transcript by the thinnest object on its path, but **3,644 of 4,839 silent transcripts (75.3 %) share an object with an expressed one** and inherit its bound. The zero-weight SET was byte-identical across all twelve arms, because a bound is zero only when every object is — a property of the data, not of the estimator. ⭐ Retreating to GENE granularity (split within the gene by effective length alone) did NOT rescue it — 1.340× against 1.317× — which proves the damage was never the within-gene split. ⚠ **Two things the experiment ESTABLISHED and which the next candidate should keep:** the dial is monotone in the theorem's favour on both axes and both strata (`min` < `harmonic` < `geometric` < `arithmetic`), so the pooled `Σmass/Σopportunity` control is the WORST rung and the soft min is doing real work; and **0.0 % of expressed transcripts were ever zeroed**, so the unrecoverable failure direction never fired. `scripts/design/transcript_weights.py`, `tests/calibration/test_transcript_weights.py` (31 gates) |
 | **a threshold anywhere in the licence family** | TRAPS: a-threshold-on-a-fitted-residue implemented and refuted one | ⛔ τ is continuous across the region, so any floor is a tuned constant (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace — refused three times) |
 
 ### §4.1 ⛔⛔⛔ THE GRAVEYARD — ELEVEN MECHANISMS PRICED, ELEVEN REFUSED. DO NOT REBUILD THESE.

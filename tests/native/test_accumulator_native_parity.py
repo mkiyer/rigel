@@ -125,7 +125,7 @@ def _pair(max_length: int = MAX_LENGTH, junctions=JUNCTIONS):
     )
     native.set_junctions(
         np.ascontiguousarray(partition.sj_offsets, dtype=np.int32),
-        np.ascontiguousarray(partition.sj_acceptor_cut, dtype=np.int32),
+        np.ascontiguousarray(partition.sj_boundary_right, dtype=np.int32),
         np.ascontiguousarray(partition.sj_strand, dtype=np.int8),
     )
     return reference, native

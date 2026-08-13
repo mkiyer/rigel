@@ -293,7 +293,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
 }
 
 void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
-                                std::vector<std::int32_t> acceptor_cut,
+                                std::vector<std::int32_t> boundary_right,
                                 std::vector<std::int8_t>  sj_strand)
 {
     if (!offsets.empty() && offsets.size() != cuts_.size() + 1) {
@@ -301,20 +301,20 @@ void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
             "accumulator: junction CSR offsets must have length n_cuts + 1 = " +
             std::to_string(cuts_.size() + 1) + ", got " + std::to_string(offsets.size()));
     }
-    if (acceptor_cut.size() != sj_strand.size()) {
+    if (boundary_right.size() != sj_strand.size()) {
         throw std::invalid_argument(
-            "accumulator: junction acceptor_cut has " + std::to_string(acceptor_cut.size()) +
+            "accumulator: junction boundary_right has " + std::to_string(boundary_right.size()) +
             " entries but sj_strand has " + std::to_string(sj_strand.size()));
     }
-    if (!offsets.empty() && static_cast<std::size_t>(offsets.back()) != acceptor_cut.size()) {
+    if (!offsets.empty() && static_cast<std::size_t>(offsets.back()) != boundary_right.size()) {
         throw std::invalid_argument(
             "accumulator: junction CSR ends at " + std::to_string(offsets.back()) +
-            " but there are " + std::to_string(acceptor_cut.size()) + " junctions");
+            " but there are " + std::to_string(boundary_right.size()) + " junctions");
     }
     sj_offsets_      = std::move(offsets);
-    sj_acceptor_cut_ = std::move(acceptor_cut);
+    sj_boundary_right_ = std::move(boundary_right);
     sj_strand_       = std::move(sj_strand);
-    junctions_.assign(sj_acceptor_cut_.size(), JunctionEdge{});
+    junctions_.assign(sj_boundary_right_.size(), JunctionEdge{});
 }
 
 // ============================================================================
@@ -356,7 +356,7 @@ std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
     const std::int32_t lo = sj_offsets_[static_cast<std::size_t>(donor)];
     const std::int32_t hi = sj_offsets_[static_cast<std::size_t>(donor) + 1];
     for (std::int32_t k = lo; k < hi; ++k) {  // one to three iterations at human scale
-        if (sj_acceptor_cut_[static_cast<std::size_t>(k)] != acceptor) continue;
+        if (sj_boundary_right_[static_cast<std::size_t>(k)] != acceptor) continue;
         if (definite && sj_strand_[static_cast<std::size_t>(k)] != sj_strand) continue;
         return k;
     }
@@ -641,7 +641,6 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             } else {
                 edge.unspliced_count[col] += 1u;
                 edge.unspliced_inv_length_sum += inv_edge;
-                edge.unspliced_length_sum += static_cast<std::uint64_t>(length);
             }
         }
         // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
@@ -694,7 +693,9 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                     else         edge.unspliced_mass += share;
                 }
                 for (const std::int32_t jid : {left_jid, right_jid}) {
-                    if (jid >= 0) junctions_[static_cast<std::size_t>(jid)].mass += share;
+                    // ⭐ `col` — the SAME genome-strand column `count` is deposited at below, so
+                    // `mass[c] / count[c]` is a per-strand mean rather than a ratio across populations.
+                    if (jid >= 0) junctions_[static_cast<std::size_t>(jid)].mass[col] += share;
                 }
             }
         }
@@ -730,7 +731,6 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             cuts_[static_cast<std::size_t>(contained_node)];
         node.contained_count[col] += 1u;
         node.contained_inv_opportunity_sum += 1.0 / static_cast<double>(node_len - length + 1);
-        node.contained_length_sum += static_cast<std::uint64_t>(length);
     }
 
     if (!pool_lengths_.empty()) {
@@ -862,7 +862,6 @@ void Accumulator::merge_from(const Accumulator& other) {
         }
         // ⚠ Outside the column loop — these have ONE value per node, not one per strand.
         nodes_[i].contained_inv_opportunity_sum += other.nodes_[i].contained_inv_opportunity_sum;
-        nodes_[i].contained_length_sum += other.nodes_[i].contained_length_sum;
         node_start_count_[i] += other.node_start_count_[i];
     }
     for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
@@ -875,16 +874,17 @@ void Accumulator::merge_from(const Accumulator& other) {
         }
         // ⚠ Outside the column loop — these have ONE value per edge, not one per strand.
         edges_[i].unspliced_inv_length_sum += other.edges_[i].unspliced_inv_length_sum;
-        edges_[i].unspliced_length_sum += other.edges_[i].unspliced_length_sum;
         edges_[i].unspliced_mass += other.edges_[i].unspliced_mass;
         edges_[i].spliced_mass   += other.edges_[i].spliced_mass;
     }
     for (std::size_t i = 0; i < junctions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             junctions_[i].count[c]   += other.junctions_[i].count[c];
+            // ⭐ INSIDE the column loop, unlike every other mass in this file: the junction mass is the
+            // one that carries a strand. See `JunctionEdge::mass` for the premise that changed.
+            junctions_[i].mass[c]    += other.junctions_[i].mass[c];
         }
         junctions_[i].inv_length_sum += other.junctions_[i].inv_length_sum;
-        junctions_[i].mass           += other.junctions_[i].mass;
     }
     // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
     // and silently not merging would lose one side's pools entirely — the same class of defect as the
@@ -946,7 +946,7 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
 
 void AccumulatorSet::set_junctions(const std::int64_t* offsets,
                                    std::size_t n_offsets,
-                                   const std::int64_t* acceptor_cut,
+                                   const std::int64_t* boundary_right,
                                    const std::int8_t* sj_strand,
                                    std::size_t n_junctions,
                                    const std::int64_t* ref_cut_offsets)
@@ -967,7 +967,7 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
             " but " + std::to_string(n_junctions) + " junctions were given");
     }
 
-    std::vector<std::int32_t> ref_offsets, ref_acceptor;
+    std::vector<std::int32_t> ref_offsets, ref_boundary_right;
     std::vector<std::int8_t>  ref_strand;
     for (std::size_t f = 0; f < accs_.size(); ++f) {
         const std::int64_t c0 = ref_cut_offsets[f];
@@ -981,15 +981,15 @@ void AccumulatorSet::set_junctions(const std::int64_t* offsets,
         for (std::int64_t c = c0; c <= c1; ++c) {
             ref_offsets.push_back(static_cast<std::int32_t>(offsets[c] - j0));
         }
-        ref_acceptor.clear();
+        ref_boundary_right.clear();
         ref_strand.clear();
-        ref_acceptor.reserve(static_cast<std::size_t>(j1 - j0));
+        ref_boundary_right.reserve(static_cast<std::size_t>(j1 - j0));
         ref_strand.reserve(static_cast<std::size_t>(j1 - j0));
         for (std::int64_t k = j0; k < j1; ++k) {
-            ref_acceptor.push_back(static_cast<std::int32_t>(acceptor_cut[k] - c0));
+            ref_boundary_right.push_back(static_cast<std::int32_t>(boundary_right[k] - c0));
             ref_strand.push_back(sj_strand[k]);
         }
-        accs_[f].set_junctions(ref_offsets, ref_acceptor, ref_strand);
+        accs_[f].set_junctions(ref_offsets, ref_boundary_right, ref_strand);
     }
 }
 

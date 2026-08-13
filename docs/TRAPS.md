@@ -113,6 +113,12 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
   ANNOTATION DREW ITS BOUNDARIES.
 - `a-trap-names-the-defect-not-the-repair` — CITING A TRAP DOES NOT LICENSE A MECHANISM. CHECK THE GRAVEYARD FOR THE
   MECHANISM ITSELF.
+- `a-stale-gate-accuses-the-newest-change` — A GATE WHOSE PREMISE EXPIRED FAILS AND BLAMES WHATEVER IS IN
+  FLIGHT. When a gate fails on something you did not touch, first ask whether it can still pass at all.
+- `an-upper-bound-is-not-an-estimate` — A BOUND THAT IS SHARED IS NOT EVIDENCE ABOUT WHO SHARES IT. If the
+  estimator's SUPPORT does not move as you vary it, you are varying the wrong thing.
+- `a-gate-on-the-helper-is-not-a-gate-on-the-caller` — TESTING THE FUNCTION THAT COMPUTES A QUANTITY DOES NOT
+  TEST THE CALL THAT ASKS FOR IT. Two holes, 29 green gates, both found only by perturbation.
 - `fractional-mass-is-the-problem` — Fractional mass IS the partitioning problem.
 - `conservation-misses-mis-attribution` — Mass conservation does not catch mis-attribution.
 - `a-guard-outlives-its-divisor` — DELETE THE DIVISOR AND THE GUARD AGAINST IT GOES INERT — WHILE ITS TEST KEEPS PASSING.
@@ -903,6 +909,57 @@ and the LOCATION form is in `ROADMAP.md` §4.1's graveyard at +7,269 % on `g00` 
 VARIANCE, not to a share of a total."** ⛔ The rule: before adopting a mechanism because a trap seems to
 motivate it, grep the GRAVEYARD for the mechanism. Eleven were priced and refused; a twelfth was
 re-derived from first principles and was already row one.
+
+**a-stale-gate-accuses-the-newest-change. ⛔⛔ A GATE WHOSE PREMISE EXPIRED DOES NOT GO QUIET — IT FAILS,
+AND IT BLAMES WHATEVER IS IN FLIGHT.** `rescan_panels.py` gates an IRREVERSIBLE cache rebuild on
+byte-identity, stating the reason in its own comparator: *"Byte-identity, never a tolerance: **these are
+integer tallies** and the whole claim is that they did not move."* They were, under the fixed point. The
+2026-08-10 owner ruling replaced it with one numeric convention — a COUNT is an integer, a FRACTION is
+float64 — and float addition is not associative across worker threads, so six banks stopped being
+bit-reproducible **that day**. `scan_payload`'s docstring recorded the consequence and even the remedy
+("tests validate the float banks within a DERIVED tolerance"); this gate was never told.
+⭐ **So on 2026-08-13 it failed a schema change on five banks that change had not touched** — 2,419 of
+35,135 elements here, 3,930 of 13,482 there — and the natural reading, *"my change had a side effect"*,
+was wrong. ⛔ The sibling `a-guard-outlives-its-divisor` is the INERT direction and is the gentler one: a
+gate that stops testing merely lulls you, while one that cannot pass sends you hunting a defect that does
+not exist, at the exact moment you most need to trust it.
+⭐⭐ **WHAT RESOLVED IT WAS A CONTROL ON THE INSTRUMENT, NOT ON THE CHANGE**: scan the same BAM twice with
+the same binary and compare. They differed on exactly those six banks, by at most 3.5e-14 relative — so
+the gate was unsatisfiable for anyone, and had been for three days of commits. **When a gate fails on
+something you did not touch, first ask whether it can still pass at all.**
+⚠ And the exposure is structural: a gate that runs only at an irreversible moment is a gate nothing
+exercises in between, so its rot is invisible until the one day it matters. `--self-test` existed and
+passed 11/11 throughout — it perturbed the comparator against a fixture of its own, never against the
+data the comparator now had to judge.
+
+**an-upper-bound-is-not-an-estimate. ⛔⛔ A BOUND THAT IS SHARED IS NOT EVIDENCE ABOUT WHO SHARES IT.**
+The per-transcript RNA prior's founding theorem is sound: mass at an object is shared by every transcript
+covering it, so no transcript can be denser than the thinnest place on its own path, and its density is
+bounded by the MINIMUM along that path. ⭐ The bound is true. It is also **useless wherever the minimum is
+attained at an object the transcript does not own** — and measured on `g00 ss0.99 capture_off`, **3,644 of
+4,839 silent transcripts (75.3 %) share at least one object with an expressed one**, so they inherit the
+loud neighbour's bound and the prior asserts them into existence. Transcript false-positive mass went
+**1.76–2.20× WORSE than base on all twelve rungs of the family**, while the *same weights* took gene-level
+error to 0.40–0.53×: the bound is informative about the UNION and silent about the split.
+⛔ **The tell is that the zero-weight SET was byte-identical across all twelve arms** — four soft-min modes
+× three multipliers changed nothing about *which* transcripts were zeroed, because a bound is zero only
+when every object is, which is a property of the data and not of the estimator. **When an estimator's
+support does not move as you vary it, you are varying the wrong thing.** ⭐ Retreating to GENE granularity
+did not rescue it (1.340× against 1.317×), which is the confirmation: the damage was never the within-gene
+split. Priced and refused in `ROADMAP.md` §4.
+
+**a-gate-on-the-helper-is-not-a-gate-on-the-caller. ⛔⛔ TESTING THE FUNCTION THAT COMPUTES A QUANTITY DOES
+NOT TEST THE CALL THAT ASKS FOR IT.** Stage 6's weight builder shipped with 29 green gates and **two holes,
+both found by perturbation and neither findable any other way**. (1) The re-partition gates called the
+power-mean helper directly, so replacing the CALLER's opportunity weights with `ones` — the exact defect
+`TRAPS: a-mean-of-ratios-inherits-the-partition` exists to prevent, and the whole reason the module
+deviates from its spec — fired **nothing**. (2) The two opportunity arrays were compared in their own test,
+so making `opportunity="total"` silently serve the UNSPLICED array fired **nothing** — because the
+derivation gate used a SINGLE-exon transcript, where the two are equal by construction.
+⭐ Both repairs are the same shape: a gate that goes through the PUBLIC entry point on a fixture where the
+wrong answer is numerically different. ⚠ And (2) is `could-the-arm-have-fired` wearing a different hat —
+the fixture was drawn from the majority population (single-exon transcripts are most of the annotation by
+count) and the majority population is exactly where the two branches coincide.
 
 **fractional-mass-is-the-problem. Fractional mass IS the partitioning problem.** A fragment spanning 4 nodes writes six fractional
 numbers whose values depend on region sizes, purely because a mass is conserved; the same fragment's

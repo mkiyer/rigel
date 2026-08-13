@@ -81,7 +81,7 @@ only in acceptor (9,000 vs 9,050), so a fragment whose UNSEQUENCED mate gap coul
 different ``L`` values and is DEFERRED to the second pass rather than deposited — the owner's ruling, in
 `tests/native/_accumulator_reference.py`. Measured on the pure-RNA arm: 1,298 of 200,000 fragments, which
 is **13.5 % of the certified channel at @9,100** (9,627 truth vs 8,329 accumulated). ⛔ So the channel is
-systematically UNDER-counted at a terminus EDGE wherever alternative acceptors exist, and that is a
+systematically UNDER-counted at a terminus EDGE wherever alternative right_boundaries exist, and that is a
 property of the channel rather than a bug. It is printed per cell.
 """
 

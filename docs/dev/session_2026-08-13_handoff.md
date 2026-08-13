@@ -53,7 +53,26 @@ was deleted. ⭐ The rewrite is measured, not asserted, and the owner's own desi
 
 ---
 
+## 1b. ⭐⭐ WHAT THE 2026-08-13 (later) SESSION DID — read this before §2, which it partly supersedes
+
+1. ✅ **The conserved junction mass is published** — `CalibrationResult.junction_conserved_mass`, a
+   PROPERTY not a field. `ROADMAP.md` §2 item **0c0** has the reasoning and the numbers. §2.1's warning
+   below is discharged: it was ~40 lines and **zero** fixture churn, because the thing that made the
+   earlier attempt a mess was adding a stored FIELD, and a stored field is exactly what
+   `prior_vs_oracle.OVERRIDE_FIELDS` makes wrong.
+2. ⛔⛔ **STAGE 6 WAS BUILT AND IS REFUSED.** The soft-min-along-the-path family, 16 arms, both strata.
+   `ROADMAP.md` §4 is the row, `TRAPS: an-upper-bound-is-not-an-estimate` the mechanism,
+   `region_boundary_sj_design.md` §6a what survives. ⭐ **Do not re-derive it and do not read §2.1 below
+   as still open** — it is done and the answer is no.
+3. ⭐ **The next candidate is a SPARSITY mechanism, not a better mean**, and the reason is measured: 0.0 %
+   of expressed transcripts are ever zeroed while 3,644 of 4,839 silent ones are not.
+4. ⚠ **`sj_mass[2]` (item 0c) is still NOT started** — §2.5 below stands unchanged.
+
+---
+
 ## 2. ⭐⭐⭐ WHAT TO DO NEXT
+
+⚠ **§2.1 IS CLOSED — see §1b.** The rest stands.
 
 **THE FOUNDATION IS PROVEN. THE WEIGHTING FUNCTION IS THE WORK.**
 

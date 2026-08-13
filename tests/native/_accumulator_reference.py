@@ -322,7 +322,7 @@ class Partition:
     ref_node_offsets: np.ndarray  # int64[n_refs + 1]
     ref_edge_offsets: np.ndarray  # int64[n_refs + 1]
     sj_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
-    sj_acceptor_cut: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
+    sj_boundary_right: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
     sj_strand: np.ndarray  # int8[n_sj]
 
     @property
@@ -339,7 +339,7 @@ class Partition:
 
     @property
     def n_sj(self) -> int:
-        return int(self.sj_acceptor_cut.shape[0])
+        return int(self.sj_boundary_right.shape[0])
 
     @classmethod
     def from_cuts(cls, cuts_per_ref, node_types=None, junctions=()) -> "Partition":
@@ -374,7 +374,7 @@ class Partition:
                 f"{int(node_offsets[-1])} nodes"
             )
 
-        donors, acceptors, sj_strands = [], [], []
+        left_boundaries, right_boundaries, sj_strands = [], [], []
         for ref, intron_start, intron_end, sj_strand in junctions:
             donor = _exact_cut(cut_positions, cut_offsets, ref, intron_start)
             acceptor = _exact_cut(cut_positions, cut_offsets, ref, intron_end)
@@ -384,18 +384,18 @@ class Partition:
                     f"is not a cut. Every annotated intron endpoint is a cut by construction, so this "
                     f"is a partition/annotation mismatch, not an unannotated junction."
                 )
-            donors.append(donor)
-            acceptors.append(acceptor)
+            left_boundaries.append(donor)
+            right_boundaries.append(acceptor)
             sj_strands.append(int(sj_strand))
-        donor_cut = np.asarray(donors, np.int64)
-        acceptor_cut = np.asarray(acceptors, np.int64)
+        boundary_left = np.asarray(left_boundaries, np.int64)
+        boundary_right = np.asarray(right_boundaries, np.int64)
         sj_strand = np.asarray(sj_strands, np.int8)
-        order = np.lexsort((sj_strand, acceptor_cut, donor_cut))
-        donor_cut, acceptor_cut, sj_strand = donor_cut[order], acceptor_cut[order], sj_strand[order]
+        order = np.lexsort((sj_strand, boundary_right, boundary_left))
+        boundary_left, boundary_right, sj_strand = boundary_left[order], boundary_right[order], sj_strand[order]
 
         n_cuts = int(cut_offsets[-1])
         sj_offsets = np.zeros(n_cuts + 1, np.int64)
-        np.cumsum(np.bincount(donor_cut, minlength=n_cuts), out=sj_offsets[1:])
+        np.cumsum(np.bincount(boundary_left, minlength=n_cuts), out=sj_offsets[1:])
         return cls(
             cut_positions=cut_positions,
             ref_cut_offsets=cut_offsets,
@@ -403,7 +403,7 @@ class Partition:
             ref_node_offsets=node_offsets,
             ref_edge_offsets=edge_offsets,
             sj_offsets=sj_offsets,
-            sj_acceptor_cut=acceptor_cut,
+            sj_boundary_right=boundary_right,
             sj_strand=sj_strand,
         )
 
@@ -503,11 +503,9 @@ class Tally:
     #: ⭐ uint64[n_nodes] — ONE column. See :meth:`Tally.zeros`: the length moments are
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
     node_contained_inv_opportunity_sum: np.ndarray
-    node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L, the second length tilt
     node_start_count: np.ndarray  # uint32[n_nodes] — one per accepted fragment; THE invariant
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
     edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column
-    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges] — Sum L, the second length tilt
     #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
     #: A COUNT and a MASS are two different deposits and one number cannot be both: ``count`` is
     #: extensive and discrete (a Beta-Binomial needs integers) and is ``+1`` on every line a fragment
@@ -579,6 +577,12 @@ class Tally:
     #: solely by unannotated introns still has nowhere conserved to send its bases — the same residual
     #: the unspliced rule has always had — so the identity is exact over deposited, ANNOTATED fragments,
     #: which is one qualifier weaker than before rather than none.
+    #:
+    #: ⭐⭐⭐ **float64[n_sj, 2] — TWO COLUMNS, and the only mass that has any.** `accumulator.h`'s
+    #: one-value ruling was reversed here and only here (owner, 2026-08-12): an ARTIFACTUAL junction
+    #: accumulates SYMMETRICALLY on both strands like gDNA, so the existing strand model can detect one
+    #: given a per-strand observable, and a per-strand mass is also what makes artifact filtering
+    #: single-pass rather than tally-filter-re-accumulate. ⛔ The columns are `sj_count`'s columns.
     sj_mass: np.ndarray
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     #: uint32[max_fragment_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, with no
@@ -615,26 +619,19 @@ class Tally:
             # nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
             return np.zeros(rows, np.float64)
 
-        def base_count(rows):
-            # ⚠ A SUM OF LENGTHS IN BASES — an integer, and not a fraction. It keeps an integer type
-            # under the one convention, and it is never divided (`substrate.total_length_sum`).
-            return np.zeros(rows, np.uint64)
-
-
         return cls(
             node_contained_count=counts(n_nodes),
             node_contained_inv_opportunity_sum=fraction(n_nodes),
-            node_contained_length_sum=base_count(n_nodes),
             node_start_count=np.zeros(n_nodes, np.uint32),
             edge_unspliced_count=counts(n_edges),
             edge_unspliced_inv_length_sum=fraction(n_edges),
-            edge_unspliced_length_sum=base_count(n_edges),
             edge_unspliced_mass=fraction(n_edges),
             edge_spliced_count=counts(n_edges),
             edge_spliced_mass=fraction(n_edges),
             sj_count=counts(n_sj),
             sj_inv_length_sum=fraction(n_sj),
-            sj_mass=fraction(n_sj),
+            # ⭐ TWO COLUMNS, unlike every other mass here — see the field.
+            sj_mass=np.zeros((n_sj, N_STRAND_COLUMNS), np.float64),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             deposited_lengths=np.zeros(max_length + 1, np.uint32),
             qc={outcome.value: 0 for outcome in DepositOutcome}
@@ -928,7 +925,6 @@ class Accumulator:
                 edge_count[edge_base + line - 1, column] += 1
                 if not spliced:
                     t.edge_unspliced_inv_length_sum[edge_base + line - 1] += inv_edge
-                    t.edge_unspliced_length_sum[edge_base + line - 1] += length
             # ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ─────────────────────────
             # The crossed cuts split this block into `last - first + 1` slices. Each slice's
             # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
@@ -980,7 +976,9 @@ class Accumulator:
                         edge_mass[edge_base + line - 1] += share
                 for jid in (left_jid, right_jid):
                     if jid >= 0:
-                        t.sj_mass[jid] += share
+                        # ⭐ `column` — the SAME column `sj_count` is deposited at below, so
+                        # `mass[c]/count[c]` is a per-strand mean and not a cross-population ratio.
+                        t.sj_mass[jid, column] += share
             if last > first:
                 sole_line = first if (n_crossed == 0 and last - first == 1) else -1
                 n_crossed += last - first
@@ -1015,7 +1013,6 @@ class Accumulator:
             t.node_contained_inv_opportunity_sum[contained_node] += 1.0 / (
                 node_len - length + 1
             )
-            t.node_contained_length_sum[contained_node] += length
 
         pool = self._pool(spliced, contained_node, sole_line, node_base)
         if pool is not None:
@@ -1182,7 +1179,7 @@ class Accumulator:
         if acceptor < 0:
             return -1
         for k in range(int(p.sj_offsets[donor]), int(p.sj_offsets[donor + 1])):
-            if int(p.sj_acceptor_cut[k]) != acceptor:
+            if int(p.sj_boundary_right[k]) != acceptor:
                 continue
             # ⚠ The strand filter applies only when the motif strand is DEFINITE. AMBIGUOUS means "no
             # strand information", not "a strand that matches nothing" — it used to be treated as the

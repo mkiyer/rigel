@@ -27,7 +27,6 @@ There is no fixed point and no scale constant, so nothing anywhere decodes a ban
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
     inv_length_sum  Sum 1/placements         float64   placements = L at a node, L−1 at a 0-bp line
-    length_sum      Sum L                    integer   — a sum of BASES, not a fraction
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
 ⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
@@ -42,14 +41,25 @@ edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identica
 at a node, where the opportunity is ``(node − L + 1)₊`` and nothing cancels. One word for two concepts is
 the defect this naming avoids.
 
-⭐ **``length_sum`` exists because the other two are blind to one real case.** At an edge the count row is
-``(mu_g − 1, mu_r − 1)`` and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when
-gDNA and RNA share a mean fragment length the pair carries *zero* information about the split, at any
-depth. ``length_sum`` is an independent tilt and removes that blind spot.
+⛔⛔ **RETRACTED, AND DELETED WITH ITS BANKS (2026-08-13).** This paragraph read: *"``length_sum`` exists
+because the other two are blind to one real case. At an edge the count row is ``(mu_g − 1, mu_r − 1)``
+and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when gDNA and RNA share a
+mean fragment length the pair carries zero information about the split, at any depth. ``length_sum`` is
+an independent tilt and removes that blind spot."*
+⭐ **The premise is right and the conclusion does not follow.** At ``mu_g = mu_r = mu`` the third row is
+``(mu, mu)`` — proportional to ``(1, 1)``, exactly like the other two — so the 3x2 system is still rank
+one and ``length_sum`` removes nothing. It is an independent tilt only when the means already differ,
+which is precisely when the first two rows are already sufficient. `TRAPS: equal-lengths-carry-no-composition`
+says the same thing from the other side, and `ROADMAP.md` §1.4 closed the whole θ-independent-length
+programme by measurement on 2026-08-10.
+⚠ **It survived because nothing consumed it**: the banks reached ``PopulationView.length_sum`` and
+stopped, so no test could disagree with the claim. A justification with no consumer is a claim with no
+gate — `TRAPS: a-guard-outlives-its-divisor`, in prose form.
 
 The trailing ``2`` on every bank is the **genome strand** — ``Strand.POS`` then ``Strand.NEG``, without
 exception. Sense/antisense is transcript-relative, derived by the consumer from the junction's own
-strand, and never stored.
+strand, and never stored. ⭐ ``sj_mass`` joined them on 2026-08-13 and is the only mass that has: see
+``JunctionEdge::mass`` for the premise that changed and why it did not reach the other two masses.
 
 ⚠ **OWNERSHIP: this object holds VIEWS, and it is the keep-alive.** ``np.ascontiguousarray(x, dtype=D)`` is
 a **no-op** when the array already has dtype ``D``, so nothing here copies — the buffers belong to
@@ -263,6 +273,13 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("edge_unspliced_count", "edge", np.uint32),
     ("edge_spliced_count", "edge", np.uint32),
     ("sj_count", "sj", np.uint32),
+    # ⭐⭐ THE ONE MASS WITH A STRAND, and the only non-integer row in this table. `accumulator.h`'s
+    # one-value ruling was reversed on the SJ axis alone (owner, 2026-08-12) because its premise
+    # changed: an artifactual junction accumulates SYMMETRICALLY on both strands like gDNA, so the
+    # existing strand model can detect one — given a per-strand observable. `JunctionEdge::mass` carries
+    # the full reversal. ⛔ The columns are `sj_count`'s columns, so `mass[c]/count[c]` is a per-strand
+    # mean. ⚠ The ruling still STANDS for `edge_unspliced_mass`, which has no such consumer.
+    ("sj_mass", "sj", np.float64),
 )
 
 
@@ -271,15 +288,13 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
 #: bank", and widening it to mean "every bank" would silently give the mass a strand column in every
 #: loop that reads it.
 SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
-    # ⭐⭐⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The `*_length_sum`
-    # banks are sums of LENGTHS IN BASES — integers, never divided — so they keep an integer type; every
-    # other entry here is a fraction. There is no fixed point and no scale constant to decode.
+    # ⭐⭐⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. Every row here is a
+    # fraction, so every row is float64; there is no fixed point and no scale constant to decode.
+    # ⚠ The two `*_length_sum` banks were the integer exception and are GONE (2026-08-13) — see the
+    # module docstring for why their stated justification did not survive measurement.
     ("node_contained_inv_opportunity_sum", "node", np.float64),
-    ("node_contained_length_sum", "node", np.uint64),
     ("edge_unspliced_inv_length_sum", "edge", np.float64),
-    ("edge_unspliced_length_sum", "edge", np.uint64),
     ("sj_inv_length_sum", "sj", np.float64),
-    ("sj_mass", "sj", np.float64),
     ("edge_unspliced_mass", "edge", np.float64),
     ("edge_spliced_mass", "edge", np.float64),
 )
@@ -491,13 +506,11 @@ class AccumulatorPayload:
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
     node_contained_inv_opportunity_sum: np.ndarray
-    node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L
     node_start_count: np.ndarray  # uint32[n_nodes] — THE invariant; sums to qc.deposited
 
     # -- contiguous edges: the 0-bp line between two adjacent nodes --
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2] — the mixture being deconvolved
     edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column, strand-agnostic
-    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges] — Sum L
     #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
     #: MASS are two different deposits and one number cannot be both: ``edge_unspliced_count`` is ``+1``
     #: on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per

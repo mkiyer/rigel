@@ -30,11 +30,13 @@ nothing about whether the molecule was gDNA or RNA, so the moments are strand-ag
 consumer summed the two columns before using them. The counts keep both because the strand model is a
 Beta-Binomial over them, per strand.
 
-⚠ **THE FIXED POINT IS DECODED HERE, AND ONLY HERE.** ``inv_length_sum`` arrives as
-``round(2^32 / placements)`` and leaves as a real number. Doing it at the boundary is what stops every
-downstream module needing to know the scale — one place to be wrong instead of many. ``length_sum`` is a
-plain sum of integers and is **not** scaled; applying the density decode to it would divide by 4.3
-billion and read as zero everywhere.
+⭐ **AND THE JUNCTION MASS ARRIVES WITH TWO COLUMNS AND LEAVES WITH ONE.** ``sj_mass`` went per-strand
+on 2026-08-13 for artifact detection (`JunctionEdge::mass` carries the premise), and this boundary folds
+it: :attr:`PopulationView.mass` is strand-agnostic by contract, so nothing downstream of here changed.
+
+⚠ **``length_sum`` and ``mean_length`` are GONE (2026-08-13)** along with the two banks that fed them —
+they reached this view and stopped, so the channel had no consumer and its stated justification was
+false where it claimed to help (`scan_payload`'s docstring has the retraction).
 """
 
 from __future__ import annotations
@@ -60,26 +62,23 @@ class PopulationView:
     """One population's sums. ``count`` is per **genome strand**; the length moments are not.
 
     They answer different questions and are never interchangeable: ``count`` carries the statistical
-    power (a Beta-Binomial needs an integer, per strand), ``inv_length_sum`` carries the level — an exact
-    model-free density at an edge, and *not* a density at a node — and ``length_sum`` is the second
-    length tilt, which is what makes two components with the same mean fragment length separable at all.
+    power (a Beta-Binomial needs an integer, per strand) and ``inv_length_sum`` carries the level — an
+    exact model-free density at an edge, and *not* a density at a node.
 
-    ⛔ **A population carries only the channels a named consumer reads.** The two the deconvolution
-    consumes carry all three; the certified-RNA banks carry fewer, and the absent ones are ``None``
-    rather than zeros — see :meth:`_require`.
+    ⛔ **A population carries only the channels a named consumer reads**, and that rule has teeth: the
+    ``length_sum`` channel was deleted in 2026-08-13's schema change precisely because it had none. The
+    absent ones are ``None`` rather than zeros — see :meth:`_require`.
     """
 
     #: What this population is called, for the error a missing channel raises. ⚠ A view that cannot say
-    #: which population it is turns "no length_sum here" into a traceback nobody can place.
+    #: which population it is turns "no mass here" into a traceback nobody can place.
     name: str
     count: np.ndarray  # int64[n, 2] — genome strand: POS then NEG
     #: float64[n] — DECODED from the fixed point. ⛔ ``None`` where the population does not carry it.
     #: ⭐ ONE column, while ``count`` has two: the length moments are strand-AGNOSTIC, and every consumer
     #: summed the two columns before using them.
     inv_length_sum: np.ndarray | None = None
-    #: float64[n] — Sum L, unscaled. ⛔ ``None`` where the population does not carry it.
-    length_sum: np.ndarray | None = None
-    #: float64[n] — ⭐ **THE CONSERVED MASS**, decoded from the fixed point. Sums to ONE per fragment
+    #: float64[n] — ⭐ **THE CONSERVED MASS**, strand-agnostic. Sums to ONE per fragment
     #: across the objects it touched, where ``count`` is ``+1`` on each of them. ⛔ ``None`` on the two
     #: node populations, which need no such channel: ``node_contained_count`` is already 1 per contained
     #: fragment, i.e. already the conserved node mass.
@@ -100,7 +99,7 @@ class PopulationView:
         ⚠ **A missing channel is None, never an array of zeros.** Zeros would be a lie in the type: a
         consumer cannot tell "this population does not measure that" from "it measured it and got
         nothing", and the second is an ordinary, meaningful state. The same contract
-        ``PopulationView.mean_length`` keeps for a zero count.
+        :meth:`mass_per_crossing` keeps for a line nothing crossed.
         """
         value = getattr(self, channel)
         if value is None:
@@ -128,7 +127,7 @@ class PopulationView:
 
         ⛔ **1.0 where nothing crossed**, the identity, not 0. There is no mass at such a line to
         rescale, and a 0 would delete whatever mass the deconvolution placed on a line the accumulator
-        never saw — the same contract :meth:`mean_length` keeps for a zero count.
+        never saw — the identity is the only value that cannot invent or destroy mass.
         """
         mass = self._require("mass")
         count = self.total_count.astype(np.float64)
@@ -136,19 +135,6 @@ class PopulationView:
         np.divide(mass, count, out=out, where=count > 0)
         return out
 
-    @property
-    def mean_length(self) -> np.ndarray:
-        """float64[n] — this object's own mean fragment length, ``length_sum / count``.
-
-        ⚠ **NaN where the count is zero, deliberately.** An object with no fragments has no mean length,
-        and that is not 0 — zero would read as "the fragments here are infinitely short" and propagate as
-        a confident wrong answer: an object with no opportunity must
-        emit nothing, never a floored value.
-        """
-        count = self.total_count.astype(np.float64)
-        out = np.full(count.shape, np.nan, dtype=np.float64)
-        np.divide(self._require("length_sum"), count, out=out, where=count > 0)
-        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,15 +170,26 @@ class CalibrationSubstrate:
     ) -> "CalibrationSubstrate":
         cls._check_alignment(payload, region_arrays)
 
-        def view(name, count, inv=None, length=None, mass=None) -> PopulationView:
+        def view(name, count, inv=None, mass=None) -> PopulationView:
+            # ⭐⭐ `mass` arrives one-column on two axes and TWO-column on the junction axis, and is
+            # folded to one here. `PopulationView.mass` is strand-agnostic by contract — the mass exists
+            # to turn an object-incidence total into a fragment count, a question with no strand in it —
+            # so folding at the boundary is what keeps every downstream consumer of `sj_mass` unchanged
+            # by the strand split. ⛔ The per-strand values are NOT re-exported here: their consumer is
+            # artifact filtering, which reads the PAYLOAD, and a channel with no consumer is the defect
+            # the two `*_length_sum` banks were deleted for in this same change.
+            m = None
+            if mass is not None:
+                m = np.asarray(mass, dtype=np.float64)
+                if m.ndim == 2:
+                    m = m.sum(axis=1)
             return PopulationView(
                 name=name,
                 count=np.asarray(count, dtype=np.int64),
                 inv_length_sum=None if inv is None else np.asarray(inv, dtype=np.float64),
-                length_sum=None if length is None else np.asarray(length, dtype=np.float64),
                 # ⭐ No decode: the accumulator deposits fractions as float64 directly. This module used
                 # to be "the one decoder"; under one numeric convention there is nothing to decode.
-                mass=None if mass is None else np.asarray(mass, dtype=np.float64),
+                mass=m,
             )
 
         return cls(
@@ -205,13 +202,11 @@ class CalibrationSubstrate:
                 "node_contained",
                 payload.node_contained_count,
                 payload.node_contained_inv_opportunity_sum,
-                payload.node_contained_length_sum,
             ),
             edge_unspliced=view(
                 "edge_unspliced",
                 payload.edge_unspliced_count,
                 payload.edge_unspliced_inv_length_sum,
-                payload.edge_unspliced_length_sum,
                 mass=payload.edge_unspliced_mass,
             ),
             edge_spliced=view(

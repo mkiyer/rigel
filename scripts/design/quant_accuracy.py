@@ -77,8 +77,11 @@ import pandas as pd  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
+sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _oracle import ORIGINS, OracleTruth  # noqa: E402
+
+import transcript_weights as TW  # noqa: E402
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
@@ -107,8 +110,27 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: weights also hand over the true SUPPORT — a zero weight is exactly absorbing, so every silent
 #: transcript is switched off for free, and silent transcripts carry 23.1 % of the transcript error at
 #: g00. Pricing what a REAL weighting function could earn needs controls this arm deliberately omits.
+#: ⭐⭐⭐ STAGE 6 — ``alloc_<mode>_<opportunity>``, the COMPUTED weighting function, one arm per rung of
+#: the power-mean dial (`transcript_weights.py` has the derivation and the re-partition falsification).
+#: ⛔ Each runs with the warm start ZEROED, exactly as ``oracle_alloc`` does, so the two are comparable:
+#: `oracle_alloc` is then the CAPABILITY PROOF above the family and `base` the floor below it.
+#: ⚠ ``alloc_arithmetic_*`` is the CONTROL of the family, not a proposal — at ``p = 1`` the weighted
+#: power mean collapses to the pooled `Σmass / Σopportunity`, which does no deconvolution along the path
+#: at all. A soft-min rung that cannot beat it is not paying for its noise.
+ALLOC_ARMS = tuple(
+    f"alloc_{m}_{o}" for m in TW.MODES for o in TW.OPPORTUNITIES
+) + tuple(
+    f"allocg_{m}_{o}" for m in TW.MODES for o in TW.OPPORTUNITIES
+)
+
+#: ⭐⭐ ``oracle_alloc_unspliced`` SHARPENS THE TARGET, and it is a control stage 5 omitted. `oracle_alloc`
+#: weights by each transcript's TOTAL observed fragments, but the budget being split is UNSPLICED
+#: pseudocounts — a spliced fragment has no gDNA candidate and is assigned directly. So the two arms ask
+#: *which quantity should a weighting function estimate*, and until one of them wins, stage 6 is aiming
+#: at an unnamed target. ⛔ It needs `--truth-by-transcript` (from `transcript_truth.py`).
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
-        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip")
+        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip",
+        "oracle_alloc_unspliced") + ALLOC_ARMS
 
 #: ⛔⛔ **THE SHIPPED PIPELINE IS NOT REPRODUCIBLE RUN TO RUN, AND EVERY ARM HERE PINS THE SEED THAT
 #: MAKES IT SO.** ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so
@@ -395,10 +417,11 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     warm = pipeline_config.em.warm_start
     if arm == "warm_uniform":
         warm = "uniform"
-    elif arm == "oracle_alloc":
+    elif arm in ("oracle_alloc", "oracle_alloc_unspliced") or arm.startswith(("alloc_", "allocg_")):
         # ⭐ the seed is zeroed so `theta` starts proportional to the prior ALONE — otherwise a
         # coverage-weighted seed is MULTIPLIED by an allocation from a different method and the result
-        # is neither method's answer.
+        # is neither method's answer. ⛔ Every stage-6 `alloc_*` arm takes the same setting as
+        # `oracle_alloc`, or the capability proof is not the yardstick it is being read as.
         warm = "prior"
     return dataclasses.replace(
         pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
@@ -426,6 +449,90 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
         if i is not None:
             w[int(i)] += float(n)
     return w
+
+
+def unspliced_truth_weights(truth_by_transcript: Path, index) -> np.ndarray:
+    """``float64[n_transcripts]`` — the true UNSPLICED fragment count per transcript.
+
+    ⭐ The target ``oracle_alloc`` does NOT aim at. That arm weights by each transcript's TOTAL observed
+    fragments, and the budget being allocated is the UNSPLICED pseudocount — spliced fragments have no
+    gDNA candidate in the EM and never enter the split the prior arbitrates. The two differ by exactly
+    how spliced a transcript is, so which one wins names the quantity stage 6's estimator should target.
+
+    ⚠ ``transcript_truth.py`` already folds exact-duplicate transcripts onto the twin the index kept.
+    """
+    t = pd.read_csv(truth_by_transcript, sep="\t")
+    t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
+    w = np.zeros(int(index.num_transcripts), dtype=np.float64)
+    for tid, n in zip(t["transcript_id"], t["n_unspliced"], strict=True):
+        i = t_index.get(str(tid))
+        if i is not None:
+            w[int(i)] += float(n)
+    return w
+
+
+def install_computed_weights(mode: str, opportunity: str, index, granularity: str = "transcript"):
+    """⭐⭐⭐ STAGE 6 — compute the weights from CALIBRATION and hand them to the EM.
+
+    ⛔ **Three seams, because the inputs appear at three different moments.** ``rna_fl_pmf`` is an
+    argument to ``calibrate`` and is on no published object; the ``CalibrationResult`` first exists at
+    ``assemble_priors``; and the weights are consumed per locus below that. Each is patched at the
+    module attribute the caller imports FUNCTION-LOCALLY, so the patch is picked up at call time — the
+    same mechanism ``prior_vs_oracle.capture_priors`` relies on.
+
+    ⚠ The weights are built ONCE and cached: they are a function of the calibration, which does not
+    change across loci, and rebuilding per locus would re-read ``intervals.feather`` 1,269 times.
+
+    ⛔⛔ **THE COUNTER WATCHES THE ESTIMATOR, NOT THE BUILDER**, for the reason
+    :func:`install_truth_weights` records at length: a counter on the array this function produced
+    stayed healthy through a whole session while ``_run_locus_em_partitioned`` silently dropped the
+    parameter. ⭐ ``--arm oracle_alloc_flip`` remains the end-to-end half of that check and must be
+    re-run whenever this lane is touched.
+    """
+    import rigel.calibration as CAL
+    import rigel.pipeline as PL
+    from rigel.estimator import AbundanceEstimator
+
+    orig_cal, orig_assemble = CAL.calibrate, PRIORS.assemble_priors
+    inner, inner_em = PL._run_locus_em_partitioned, AbundanceEstimator.run_batch_locus_em_partitioned
+    box: dict = {"rna_pmf": None, "w": None}
+    fired = {"n": 0}
+
+    def cal_wrapper(*a, **kw):
+        box["rna_pmf"] = np.asarray(kw["rna_fl_pmf"], dtype=np.float64)
+        return orig_cal(*a, **kw)
+
+    def assemble_wrapper(calibration, region_arrays, multi_loci):
+        if box["w"] is None:
+            if box["rna_pmf"] is None:
+                raise RuntimeError("⛔ assemble_priors ran before calibrate — the pmf seam moved")
+            box["w"] = TW.build_weights(
+                calibration, region_arrays, index, box["rna_pmf"],
+                mode=mode, opportunity=opportunity, granularity=granularity,
+            )
+        return orig_assemble(calibration, region_arrays, multi_loci)
+
+    def em_partition_wrapper(*args, **kw):
+        kw["rna_prior_weight"] = box["w"]
+        return inner(*args, **kw)
+
+    def em_wrapper(self, *args, **kw):
+        w = kw.get("rna_prior_weight")
+        if w is not None and int(np.asarray(w).size) and float(np.asarray(w).sum()) > 0.0:
+            fired["n"] += 1
+        return inner_em(self, *args, **kw)
+
+    CAL.calibrate = cal_wrapper
+    PRIORS.assemble_priors = assemble_wrapper
+    PL._run_locus_em_partitioned = em_partition_wrapper
+    AbundanceEstimator.run_batch_locus_em_partitioned = em_wrapper
+
+    def restore():
+        CAL.calibrate, PRIORS.assemble_priors = orig_cal, orig_assemble
+        PL._run_locus_em_partitioned = inner
+        AbundanceEstimator.run_batch_locus_em_partitioned = inner_em
+
+    return restore, fired, box
 
 
 def install_truth_weights(weights: np.ndarray):
@@ -471,19 +578,34 @@ def install_truth_weights(weights: np.ndarray):
 
 
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
-                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED) -> list[dict]:
+                  oracle_cache: Path | None, em_seed: int = DEFAULT_EM_SEED,
+                  truth_by_transcript: Path | None = None) -> list[dict]:
     bam = str(suite / condition / "sim_oracle.bam")
     truth = pd.read_csv(suite / condition / "truth_abundances.tsv", sep="\t")
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
     pipeline_config = seeded(pipeline_config, arm, em_seed)
 
     oracle = None
-    if arm not in ("base", "base_reseed", "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip"):
+    if not (arm in ("base", "base_reseed", "warm_uniform")
+            or arm.startswith(("oracle_alloc", "alloc_", "allocg_"))):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
 
-    if arm == "oracle_alloc_flip":
+    weight_box = None
+    if arm.startswith(("alloc_", "allocg_")):
+        # ⭐⭐ STAGE 6: the weights are COMPUTED from calibration, not read from truth. `allocg_` takes
+        # the soft min at GENE granularity and splits within the gene by effective length alone.
+        prefix, mode, opportunity = arm.split("_", 2)
+        restore, fired, weight_box = install_computed_weights(
+            mode, opportunity, index,
+            granularity="gene" if prefix == "allocg" else "transcript",
+        )
+    elif arm == "oracle_alloc_unspliced":
+        if truth_by_transcript is None:
+            raise SystemExit(f"⛔ arm {arm!r} needs --truth-by-transcript (see transcript_truth.py)")
+        restore, fired = install_truth_weights(unspliced_truth_weights(truth_by_transcript, index))
+    elif arm == "oracle_alloc_flip":
         w = truth_weights(truth, index)
         # ⛔ FALSIFICATION OF THE HARNESS, not a treatment: put the weight where the truth is NOT.
         # If a maximally wrong allocation moves nothing, the allocation never reached the solver.
@@ -515,6 +637,16 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     quant = result.estimator.get_counts_df(index)
     common = {"arm": arm, "condition": condition, "seconds": seconds,
               "em_seed": int(pipeline_config.em.seed)}
+    if weight_box is not None:
+        # ⭐ The WEIGHT VECTOR's own agreement with truth, recorded beside the end-to-end score. They
+        # answer different questions and a stage-6 arm needs both: a weight that correlates well and
+        # still scores badly says the failure is downstream of the allocation.
+        w = weight_box["w"]
+        common["weight_nonzero"] = int((np.asarray(w) > 0).sum())
+        if truth_by_transcript is not None:
+            common.update({f"w_{k}": v for k, v in
+                           TW.weight_vs_truth(w, pd.read_csv(truth_by_transcript, sep="\t"),
+                                              index).items()})
     return [
         {**common, "axis": "transcript", **score_transcripts(quant, truth)},
         # ⭐ the SAME scorer over genes — isoform ambiguity summed away, see score_genes
@@ -776,6 +908,9 @@ def main() -> int:
                     help="⛔ pinned, because the shipped default is None and the EM's hard "
                          "assignment is an unseeded categorical draw — see DEFAULT_EM_SEED")
     ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument("--truth-by-transcript", type=Path, default=None,
+                    help="transcript_truth.py --out TSV. Required by `oracle_alloc_unspliced`; on an "
+                         "`alloc_*` arm it adds the weight-vs-truth columns beside the score")
     args = ap.parse_args()
 
     if args.report:
@@ -807,6 +942,8 @@ def main() -> int:
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
+            if args.truth_by_transcript is not None:
+                cmd += ["--truth-by-transcript", str(args.truth_by_transcript)]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           stderr=subprocess.STDOUT, text=True))
         rc = 0
@@ -832,7 +969,8 @@ def main() -> int:
     for name in names:
         print(f"  … {args.arm}  {name}", flush=True)
         rows += run_condition(args.arm, args.suite, index, name, pipeline_config, cache,
-                              em_seed=args.em_seed)
+                              em_seed=args.em_seed,
+                              truth_by_transcript=args.truth_by_transcript)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as fh:
         for r in rows:

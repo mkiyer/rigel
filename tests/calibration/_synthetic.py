@@ -78,17 +78,17 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         node_contained_count=contained,
         node_contained_inv_opportunity_sum=inv(contained, 50),
-        node_contained_length_sum=lengths(contained, 50),
         node_start_count=np.array([11, 12, 13], dtype=np.uint32),
         edge_unspliced_count=unspliced,
         edge_unspliced_inv_length_sum=inv(unspliced, 25),
-        edge_unspliced_length_sum=lengths(unspliced, 26),
         edge_unspliced_mass=mass(unspliced),
         edge_spliced_count=spliced,
         edge_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
-        sj_mass=inv(sj, 10),
+        # ⭐ TWO COLUMNS, and they SUM to what the one-column bank held (1.3), so every
+        # expectation downstream of the substrate's fold is unchanged by the strand split.
+        sj_mass=np.asarray(sj, np.float64) / 10.0,
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
         # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no

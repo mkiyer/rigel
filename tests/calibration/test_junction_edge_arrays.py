@@ -86,7 +86,7 @@ def _cut_index(cuts, offsets, ref_id, position):
     return k if k < hi and int(cuts[k]) == position else -1
 
 
-def _lookup(arrays, donor_cut, acceptor_cut):
+def _lookup(arrays, boundary_left, boundary_right):
     """What the deposit's inner loop does: scan the donor's CSR slice for the acceptor.
 
     Returns the **junction-edge id, which is the CSR slot itself**, paired with its strand — or ``None``.
@@ -95,10 +95,10 @@ def _lookup(arrays, donor_cut, acceptor_cut):
     ⚠ It returns ``k``, not ``edge_row[k]``. ``edge_row`` is the key for joining back to ``edges_df`` and
     is not an index into any junction bank; see :class:`JunctionEdgeArrays`.
     """
-    if donor_cut < 0 or acceptor_cut < 0:
+    if boundary_left < 0 or boundary_right < 0:
         return None
-    for k in range(int(arrays.offsets[donor_cut]), int(arrays.offsets[donor_cut + 1])):
-        if int(arrays.acceptor_cut[k]) == acceptor_cut:
+    for k in range(int(arrays.offsets[boundary_left]), int(arrays.offsets[boundary_left + 1])):
+        if int(arrays.boundary_right[k]) == boundary_right:
             return k, int(arrays.strand[k])
     return None
 
@@ -111,12 +111,12 @@ def test_the_csr_addresses_the_flat_cut_axis(index):
     assert arrays.offsets.shape == (cuts.shape[0] + 1,)
     assert int(arrays.offsets[0]) == 0
     assert int(arrays.offsets[-1]) == n_junction
-    assert arrays.acceptor_cut.shape == arrays.edge_row.shape == arrays.strand.shape
-    assert arrays.acceptor_cut.shape == (n_junction,)
+    assert arrays.boundary_right.shape == arrays.edge_row.shape == arrays.strand.shape
+    assert arrays.boundary_right.shape == (n_junction,)
     assert int(offsets[-1]) == cuts.shape[0]
 
 
-def test_every_annotated_intron_is_found_at_its_donor_cut(index):
+def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
     """The four annotated introns, looked up the way the deposit will look them up."""
     arrays = build_junction_edge_arrays(index)
     cuts, offsets, _ = build_node_partition_arrays(index)
@@ -134,7 +134,7 @@ def test_every_annotated_intron_is_found_at_its_donor_cut(index):
         )
         assert hit is not None, f"intron [{start},{end}) on ref {ref_id} not found"
         slot, got_strand = hit
-        assert 0 <= slot < arrays.acceptor_cut.shape[0]
+        assert 0 <= slot < arrays.boundary_right.shape[0]
         row = index.edges_df.iloc[int(arrays.edge_row[slot])]  # the JOIN, not the id
         assert int(row["kind"]) == EDGE_KIND_JUNCTION
         assert got_strand == int(strand)
@@ -151,12 +151,12 @@ def test_a_shared_donor_keeps_BOTH_junctions(index):
     donor = _cut_index(cuts, offsets, 0, 400)
     lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
     assert hi - lo == 2
-    landed = sorted(int(cuts[arrays.acceptor_cut[k]]) for k in range(lo, hi))
+    landed = sorted(int(cuts[arrays.boundary_right[k]]) for k in range(lo, hi))
     assert landed == [700, 1000]
 
 
-def test_a_cut_that_is_not_a_donor_has_an_empty_slice(index):
-    """Most cuts are not donors — measured 70.4 % on both the toy and the human annotation. The slice
+def test_a_cut_that_is_not_a_LEFT_BOUNDARY_has_an_empty_slice(index):
+    """Most cuts are not left_boundaries — measured 70.4 % on both the toy and the human annotation. The slice
     must be empty rather than absent, so the deposit needs no special case."""
     arrays = build_junction_edge_arrays(index)
     cuts, offsets, _ = build_node_partition_arrays(index)
@@ -188,7 +188,7 @@ def test_the_csr_round_trips_to_the_edge_table(index):
     cuts, offsets, _ = build_node_partition_arrays(index)
     donor = np.repeat(np.arange(cuts.shape[0]), np.diff(arrays.offsets))
     from_csr = np.stack(
-        [cuts[donor], cuts[arrays.acceptor_cut], arrays.strand.astype(np.int64)], axis=1
+        [cuts[donor], cuts[arrays.boundary_right], arrays.strand.astype(np.int64)], axis=1
     )
 
     edges = index.edges_df
@@ -270,7 +270,7 @@ def test_the_csr_slot_order_matches_the_reference_accumulator(fixture, request):
     reference = _reference_partition(index)
 
     assert np.array_equal(reference.sj_offsets, arrays.offsets)
-    assert np.array_equal(reference.sj_acceptor_cut, arrays.acceptor_cut)
+    assert np.array_equal(reference.sj_boundary_right, arrays.boundary_right)
     assert np.array_equal(reference.sj_strand, arrays.strand)
 
 
@@ -286,5 +286,5 @@ def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):
     donor = _cut_index(cuts, offsets, 0, 400)
     lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
     assert hi - lo == 2, "the strand-coincident pair collapsed to one junction edge"
-    assert [int(cuts[arrays.acceptor_cut[k]]) for k in range(lo, hi)] == [800, 800]
+    assert [int(cuts[arrays.boundary_right[k]]) for k in range(lo, hi)] == [800, 800]
     assert [int(arrays.strand[k]) for k in range(lo, hi)] == [int(Strand.POS), int(Strand.NEG)]

@@ -85,6 +85,30 @@ def test_junction_flux_is_exported_VERBATIM_and_never_deconvolved():
     np.testing.assert_array_equal(result.mass_rna_junction, JUNCTION_FLUX)
 
 
+def test_the_conserved_junction_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
+    """⭐⭐ ``junction_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as
+    ``sj_mass`` itself — the bank the scanner wrote, not an approximation of it.
+
+    ⛔ **This is the gate that says the published quantity is the CONSERVED one.** The fixture's
+    junction carries 13 incidences and ``sj_mass`` 1.3, a **10×** gap, so the two cannot be confused by
+    coincidence — which they could on real data at a line where every fragment used one junction. On
+    ``g00 ss0.99 capture_off`` the same round trip agrees with the bank to 9.1e-13.
+    """
+    payload, _ = make_synthetic_payload()
+    result = _run()
+    # ⭐ SUMMED over the strand columns: `sj_mass` went per strand on 2026-08-13 and `substrate` folds
+    # it, because the incidence→fragment conversion has no strand in it. This gate therefore now pins
+    # the FOLD as well as the conversion — and the fixture's columns are unequal (0.9 / 0.4), so a fold
+    # that took one column or their mean cannot pass.
+    np.testing.assert_allclose(
+        result.junction_conserved_mass, payload.sj_mass.sum(axis=1), rtol=0, atol=1e-12
+    )
+    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], "the fixture cannot separate the fold rules"
+    # ⚠ Could this have failed? The incidence is 10× the mass here, so passing by accident is not
+    # available (`TRAPS: could-the-arm-have-fired`).
+    assert not np.allclose(payload.sj_mass.sum(axis=1), JUNCTION_FLUX)
+
+
 def test_masses_bounded_by_their_own_totals():
     result = _run()
     for g, tot in (

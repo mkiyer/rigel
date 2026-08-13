@@ -118,18 +118,27 @@ class CalibrationResult:
     edge_mass_per_crossing: np.ndarray
 
     # --- the JUMPING population, per junction edge (float64[n_junctions]) ---
-    #: ⭐ **Never deconvolved: a junction edge is pure mature RNA by construction**, so this is
-    #: ``sj_count`` summed over the genome-strand columns and nothing else. It is the third population
-    #: at a line, and it is routinely two orders of magnitude larger than ``mass_rna_spliced_edge`` at
-    #: the same place: at a donor seam the junction flux is the gene's whole mature output while the
-    #: spliced crossing is the handful of molecules that read through without splicing.
+    #: ⛔⛔ **AN INCIDENCE COUNT DESPITE THE NAME — IT IS NOT A MASS, AND THE GAP IS LARGE.** This is
+    #: ``sj_count`` summed over the genome-strand columns and nothing else, and a fragment deposits
+    #: ``+1`` on EVERY junction it uses. Measured on ``g00 ss0.99 capture_off``: **2.0719 incidences per
+    #: unit of conserved mass** (5,668,526 against 2,735,958.8), and the over-count grows with how many
+    #: junctions a fragment spans. ⭐ **A consumer that wants the mass wants
+    #: :attr:`junction_conserved_mass`**, which is this array converted; reading this one instead is
+    #: wrong in proportion to how SPLICED the object is, and for a per-transcript weight that is exactly
+    #: the axis the answer varies over. ⚠ ``ROADMAP.md`` §2.5 renames it to ``count_rna_junction``
+    #: alongside the two ``mass_*_edge`` incidences; that rename is its own commit.
+    #:
+    #: ⭐ **Never deconvolved: a junction edge is pure mature RNA by construction**, so there is nothing
+    #: to split. It is the third population at a line, and it is routinely two orders of magnitude
+    #: larger than ``mass_rna_spliced_edge`` at the same place: at a donor seam the junction flux is the
+    #: gene's whole mature output while the spliced crossing is the handful of molecules that read
+    #: through without splicing.
     #: ⚠ **``assemble_priors`` does NOT consume it, and that is deliberate.** Junction fragments are
     #: certified RNA in exactly the sense ``mass_rna_spliced_edge`` is withheld for, so feeding them to
     #: ``rna_prior_count`` would load the RNA side of a split that arbitrates only unspliced fragments.
     #: It is exported for QC and reporting — the calibration's output should not be silent about the
     #: population that dominates a donor seam (owner ruling, 2026-07-30).
     mass_rna_junction: np.ndarray
-
 
     #: float64[n_edges] — the ``edge_spliced`` twin of ``edge_mass_per_crossing``, and
     #: float64[n_junctions] — the junction one, ``sj_mass / sj_count``. Same kind of quantity as
@@ -302,6 +311,42 @@ class CalibrationResult:
             self.rna_strand_overdispersion, "rna_strand_overdispersion", open_upper=True
         )
 
+    # ── ⭐⭐ THE CONSERVED JUNCTION MASS — the third axis in FRAGMENT units, in ONE place ──
+
+    @property
+    def junction_conserved_mass(self) -> np.ndarray:
+        """float64[n_junctions] — the CONSERVED fragment mass at each junction. **Sums to one per
+        spliced fragment across the junctions it used**, where :attr:`mass_rna_junction` is ``+1`` on
+        each of them.
+
+        ⭐⭐ **THIS IS THE ACCUMULATOR'S ``sj_mass`` BANK, RECOVERED EXACTLY.**
+        ``junction_mass_per_crossing`` is ``sj_mass / sj_count`` and ``mass_rna_junction`` is
+        ``sj_count``, so the product is ``sj_mass`` identically. Measured on ``g00 ss0.99 capture_off``
+        (13,482 junctions): **12,758 elements bit-identical** to the bank and a worst element of
+        **9.1e-13**, which is float division-then-multiplication and not a modelling gap.
+
+        ⭐ **At a junction nothing crossed it is 0, and that needs the multiplication rather than a
+        branch.** ``mass_per_crossing`` deliberately keeps the ``1.0`` identity where the count is zero
+        — there is no mass at an unobserved line to rescale — and multiplying by the zero incidence is
+        what turns it back into the 0 that is correct here. **4,636 of those 13,482 junctions are
+        zero-count**, so a ``where(count > 0, …)`` fallback to the factor would publish phantom mass on
+        a third of the axis, on the one axis that is certified RNA by construction.
+
+        ⛔ **It exists because the derivation was reachable only by knowing to perform it**, while a
+        field named ``mass_rna_junction`` sat next to it looking like the answer and reading **2.0719×**
+        high (5,668,526 incidences against 2,735,958.8 units of mass). Every other axis publishes its
+        own conversion; this one made the caller do it.
+
+        ⚠ **A PROPERTY, never a stored field, and that is forced rather than preferred.**
+        ``mass_rna_junction`` is in ``prior_vs_oracle.OVERRIDE_FIELDS``: an oracle arm swaps it with
+        ``dataclasses.replace``, and a cached array would survive that swap and silently describe the
+        array it replaced — ``TRAPS: a-hash-that-misses-its-artifact`` in dataclass form, the same
+        reason :attr:`library_rna_fragments` is derived.
+        """
+        return np.asarray(self.mass_rna_junction, dtype=np.float64) * np.asarray(
+            self.junction_mass_per_crossing, dtype=np.float64
+        )
+
     # ── ⭐⭐⭐ THE LIBRARY FRAGMENT COUNT — the deliverable, in FRAGMENT units, derived in ONE place ──
 
     @property
@@ -355,10 +400,9 @@ class CalibrationResult:
                 np.asarray(self.mass_rna_spliced_edge, dtype=np.float64)
                 * np.asarray(self.edge_spliced_mass_per_crossing, dtype=np.float64)
             ).sum()
-            + (
-                np.asarray(self.mass_rna_junction, dtype=np.float64)
-                * np.asarray(self.junction_mass_per_crossing, dtype=np.float64)
-            ).sum()
+            # ⭐ ONE home for the junction conversion — this term used to spell the product out a second
+            # time, so a caller reading the property and a caller reading this sum could disagree.
+            + self.junction_conserved_mass.sum()
         )
 
 

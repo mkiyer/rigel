@@ -346,10 +346,10 @@ def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
     """
     n, e = _graph([_tx([(500, 700), (1200, 1500)])])
     ns = _nodes(n)
-    at_donor = ns.index((500, 700))  # the edge at 700, the intron's low end
-    at_acceptor = ns.index((700, 1200))  # the edge at 1200, the intron's high end
-    assert _reach(e, at_donor, at_donor + 1, EDGE_KIND_CONTIGUOUS) == (200, 800, 0, 0)
-    assert _reach(e, at_acceptor, at_acceptor + 1, EDGE_KIND_CONTIGUOUS) == (700, 300, 0, 0)
+    at_left_boundary = ns.index((500, 700))  # the edge at 700, the intron's low end
+    at_right_boundary = ns.index((700, 1200))  # the edge at 1200, the intron's high end
+    assert _reach(e, at_left_boundary, at_left_boundary + 1, EDGE_KIND_CONTIGUOUS) == (200, 800, 0, 0)
+    assert _reach(e, at_right_boundary, at_right_boundary + 1, EDGE_KIND_CONTIGUOUS) == (700, 300, 0, 0)
 
 
 def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():

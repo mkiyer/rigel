@@ -54,7 +54,7 @@ def build_partition(index) -> Partition:
     edges = index.edges_df
     is_junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
     n_junction = int(is_junction.sum())
-    if arrays.acceptor_cut.shape[0] != n_junction:
+    if arrays.boundary_right.shape[0] != n_junction:
         raise SystemExit("junction CSR disagrees with edges.feather on the junction count")
     return Partition(
         cut_positions=cuts,
@@ -63,7 +63,7 @@ def build_partition(index) -> Partition:
         ref_node_offsets=_offsets(cut_offsets, per_ref=1),
         ref_edge_offsets=_offsets(cut_offsets, per_ref=2),
         sj_offsets=arrays.offsets,
-        sj_acceptor_cut=arrays.acceptor_cut,
+        sj_boundary_right=arrays.boundary_right,
         sj_strand=arrays.strand,
     )
 
@@ -361,7 +361,7 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
             int(partition.sj_offsets[first + d]),
             int(partition.sj_offsets[first + d + 1]),
         ):
-            if int(partition.sj_acceptor_cut[k]) != first + a:
+            if int(partition.sj_boundary_right[k]) != first + a:
                 continue
             if motif != Strand.NONE and int(partition.sj_strand[k]) != int(motif):
                 continue

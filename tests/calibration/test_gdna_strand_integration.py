@@ -67,11 +67,9 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
         node_contained_inv_opportunity_sum=(
             contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)
         ),
-        node_contained_length_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(_FRAG_LEN)),
         node_start_count=contained.sum(axis=1).astype(np.uint32),
         edge_unspliced_count=edge_zeros(np.uint32),
         edge_unspliced_inv_length_sum=flat(n_edges, np.float64),
-        edge_unspliced_length_sum=flat(n_edges, np.uint64),
         # ⚠ ONE value per edge — the conserved mass has no strand axis. Zero here is a real state and
         # not a stub: this fixture deposits no crossings at all, so there is no mass to conserve.
         edge_unspliced_mass=np.zeros(n_edges, dtype=np.float64),

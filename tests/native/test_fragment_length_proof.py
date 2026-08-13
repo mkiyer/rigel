@@ -139,7 +139,7 @@ def _acc(max_fragment_length: int = 10_000) -> Accumulator:
         ref_node_offsets=np.array([0, n_nodes], dtype=np.int64),
         ref_edge_offsets=np.array([0, n_nodes - 1], dtype=np.int64),
         sj_offsets=np.zeros(_CUTS.size + 1, dtype=np.int64),
-        sj_acceptor_cut=np.zeros(0, dtype=np.int64),
+        sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
         node_types=np.zeros(n_nodes, dtype=np.int8),
     )
@@ -246,7 +246,7 @@ def test_randomised_at_realistic_scale():
         ref_node_offsets=np.array([0, n_nodes], dtype=np.int64),
         ref_edge_offsets=np.array([0, n_nodes - 1], dtype=np.int64),
         sj_offsets=np.zeros(cuts.size + 1, dtype=np.int64),
-        sj_acceptor_cut=np.zeros(0, dtype=np.int64),
+        sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
         node_types=np.zeros(n_nodes, dtype=np.int8),
     )

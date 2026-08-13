@@ -955,7 +955,7 @@ class TranscriptIndex:
         junctions = build_junction_edge_arrays(self)
         # ⚠ `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses the
         # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated edge row moved.
-        for array in (junctions.offsets, junctions.acceptor_cut, junctions.strand):
+        for array in (junctions.offsets, junctions.boundary_right, junctions.strand):
             contiguous = np.ascontiguousarray(array)
             h.update(str(contiguous.dtype).encode())
             h.update(contiguous.tobytes())

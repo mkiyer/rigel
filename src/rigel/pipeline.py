@@ -480,7 +480,7 @@ def _wire_calibration_regions(
     junctions = build_junction_edge_arrays(index)
     scanner.set_junctions(
         np.ascontiguousarray(junctions.offsets, dtype=np.int64),
-        np.ascontiguousarray(junctions.acceptor_cut, dtype=np.int64),
+        np.ascontiguousarray(junctions.boundary_right, dtype=np.int64),
         np.ascontiguousarray(junctions.strand, dtype=np.int8),
     )
 

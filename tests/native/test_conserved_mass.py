@@ -443,7 +443,10 @@ def test_a_block_bounded_by_TWO_junctions_SPLITS_its_mass_between_them():
         accumulator.deposit(0, start, end, observed_introns=introns, sj_strand=Strand.POS)
         is DepositOutcome.DEPOSITED
     )
-    bank = np.asarray(accumulator.tally.sj_mass, np.float64)
+    # ⭐ SUMMED over the strand columns. `sj_mass` went per strand on 2026-08-13 for artifact
+    # detection, and CONSERVATION is a strand-agnostic property — a fragment's 1.0 is shared across the
+    # objects it touched whatever strand it aligned to — so every gate in this file reads the total.
+    bank = np.asarray(accumulator.tally.sj_mass, np.float64).sum(axis=1)
     assert bank.size == 2, "the fixture must carry both junctions or this gate tests one of them"
     got = [float(v) for v in bank]
 
@@ -498,7 +501,7 @@ def test_a_fragment_crossing_BOTH_junctions_AND_lines_gives_EVERY_crossed_object
     assert crossed_junctions.size == 2, "the fixture must use both junctions"
 
     line_mass = np.asarray(tally.edge_spliced_mass, np.float64)
-    sj_mass = np.asarray(tally.sj_mass, np.float64)
+    sj_mass = np.asarray(tally.sj_mass, np.float64).sum(axis=1)  # strand-agnostic, see above
     for edge in crossed_lines:
         assert line_mass[edge] > 0, f"line {edge} was crossed but holds no mass"
     for jid in crossed_junctions:
@@ -568,7 +571,7 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
     )
 
     edge_at_5050 = float(np.asarray(tally.edge_spliced_mass, np.float64)[3])
-    junction = float(np.asarray(tally.sj_mass, np.float64)[0])
+    junction = float(np.asarray(tally.sj_mass, np.float64)[0].sum())
     want_junction = Fraction(200 + 25, length)
     want_edge = Fraction(25 + 150, length)
     assert abs(junction - want_junction) <= budget(2), (

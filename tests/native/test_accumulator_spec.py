@@ -399,6 +399,44 @@ def test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
     )
 
 
+def test_the_junction_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
+    """⭐⭐⭐ **THE MASS TWIN OF THE TEST ABOVE, AND THE REVERSED RULING MADE FALSIFIABLE.**
+    ``accumulator.h`` ruled a mass bank is ONE value because *"nothing reads a mass per strand"*. The
+    premise changed and the ruling was reversed on this axis alone (owner, 2026-08-12): the empirical
+    artifact detector above needs the split, and a COUNT cannot separate a junction used by many short
+    fragments from one used by few long ones — only a mass can. It is also what makes the filter
+    single-pass instead of tally-filter-re-accumulate.
+
+    ⛔ The gate is that the mass lands in the SAME column the count does. If the two used different
+    conventions, ``mass[c]/count[c]`` would be a ratio across two different populations and the detector
+    would be reading noise.
+    ⚠ The ruling still STANDS for ``edge_unspliced_mass`` and ``edge_spliced_mass``, which have no such
+    consumer — ``one-thing-varied``, checked by the shape gate in ``test_accumulator_payload``.
+    """
+    pos, neg = STRAND_COLUMNS[Strand.POS], STRAND_COLUMNS[Strand.NEG]
+
+    def one(align):
+        acc = _acc(junctions=[JUNCTION])
+        acc.deposit(0, 150, 950, observed_introns=[(201, 900)], align_strand=align,
+                    sj_strand=Strand.POS)
+        return acc.tally
+
+    t_pos, t_neg = one(Strand.POS), one(Strand.NEG)
+    assert t_pos.sj_mass.ndim == 2, "the junction mass carries a strand"
+
+    # ⭐ each deposit reaches its OWN column and only its own — the split is real, not decorative
+    assert t_pos.sj_mass[0, pos] > 0.0 and t_pos.sj_mass[0, neg] == 0.0
+    assert t_neg.sj_mass[0, neg] > 0.0 and t_neg.sj_mass[0, pos] == 0.0
+    # ⛔ ...and it is the column the COUNT used, not merely "some column"
+    assert int(t_pos.sj_count[0, pos]) == 1 and int(t_neg.sj_count[0, neg]) == 1
+    # ⭐ the two agree, because the DEPOSIT RULE has no strand in it: the split is per strand, the rule
+    # is not. A column-dependent share would be a different defect and this is what would catch it.
+    assert close(float(t_pos.sj_mass[0, pos]), float(t_neg.sj_mass[0, neg]), 12)
+    # ⭐⭐ and summing the columns returns what the one-column bank held — the property that left every
+    # consumer below `substrate` unchanged by the schema move.
+    assert close(float(t_pos.sj_mass.sum()), float(t_pos.sj_mass[0, pos]), 12)
+
+
 def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
     acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
@@ -1019,45 +1057,8 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
 
 
 # ---------------------------------------------------------------------------
-# length_sum — the second length tilt
+# the strand collapse — and the ONE channel that does not collapse
 # ---------------------------------------------------------------------------
-
-
-def test_length_sum_records_L_on_EVERY_object_the_fragment_touches():
-    """One fragment, one ``L``, deposited whole on each object it lands on.
-
-    ``length_sum`` is ``Sum L`` over that object's own fragments, so a fragment crossing three lines
-    contributes its FULL ``L`` to each of them — the same no-partitioning rule the count and the
-    reciprocal sum already follow. A share would re-create the partition dependence the redesign deletes.
-    """
-    acc = _acc()
-    acc.deposit(0, 150, 500)  # L = 350, crosses lines 2, 3, 4 and spans nodes n2, n3
-    t = acc.tally
-    assert [int(t.edge_unspliced_length_sum[_edge(0, j)]) for j in (2, 3, 4)] == [350, 350, 350]
-    assert int(t.node_contained_length_sum.sum()) == 0
-
-
-def test_length_sum_is_L_and_NOT_the_genomic_span():
-    """The molecule's length, so a cut intron does not count — the same ``L`` the pools bin at.
-
-    Binning at the covered/genomic length instead is a defect this project has already paid for once:
-    it collapsed the gDNA length pool to a spike at twice the read length
-    trap 8), and here it would put a number in ``length_sum`` that no fragment-length model can explain.
-
-    ⚠ **The intron here is UNANNOTATED on purpose.** ``length_sum`` survives only on the two banks the
-    deconvolution consumes, and a SPLICED fragment reaches neither — the certified-RNA banks carry no
-    length moments, because nothing deconvolves a fragment already known to be RNA. An unannotated
-    intron cuts exactly the same bases out of ``L`` while routing to ``edge_unspliced``, so the claim is
-    unchanged and observable.
-    """
-    acc = _acc()  # no junction table: (201, 900) is not annotated
-    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.POS)
-    t = acc.tally
-    length = (201 - 150) + (950 - 900)  # 101; the genomic span is 800
-    # the only line either block crosses is at position 200 — the block [900, 950) crosses none, and
-    # the intron is jumped, never crossed
-    assert int(t.edge_unspliced_length_sum[_edge(0, 2)]) == length
-    assert int(t.edge_unspliced_length_sum.sum()) == length
 
 
 def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
@@ -1080,7 +1081,6 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.NEG]]) == 1
     # ...and the moments pool them into the single slot
     assert close(float(t.node_contained_inv_opportunity_sum[node]), 2 * _contained_quantum(0, 3, 160), 2)
-    assert int(t.node_contained_length_sum[node]) == 2 * 160
 
     edge_acc = _acc()
     edge_acc.deposit(0, 120, 320, align_strand=Strand.POS)
@@ -1089,91 +1089,6 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     line = _edge(0, 2)
     assert int(e.edge_unspliced_count[line].sum()) == 2
     assert close(float(e.edge_unspliced_inv_length_sum[line]), 2.0 / (200 - 1), 2)
-    assert int(e.edge_unspliced_length_sum[line]) == 2 * 200
-
-
-def test_length_sum_and_count_SHARE_a_support():
-    """``length_sum`` is zero exactly where ``count`` is zero, on every bank.
-
-    ⚠ ``inv_length_sum`` does NOT have this property — an ``L == 1`` path on a junction books a count
-    against a reciprocal sum of 0, the schema's one co-support violation — so a consumer must not assume
-    the two behave alike. ``length_sum`` cannot do that: ``L >= 1`` always.
-    """
-    acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 500)
-    acc.deposit(0, 220, 380)
-    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
-    acc.deposit(0, 500, 501)  # L == 1: the co-support edge case
-    t = acc.tally
-    # ⚠ ``count`` is per genome strand and ``length_sum`` is not, so the support is compared on the
-    # count's STRAND-SUMMED total — which is the population the single-column moment describes.
-    for count, length_sum in (
-        (t.node_contained_count, t.node_contained_length_sum),
-        (t.edge_unspliced_count, t.edge_unspliced_length_sum),
-    ):
-        total = count.sum(axis=1)
-        assert np.array_equal(total > 0, length_sum > 0)
-        assert int(length_sum[total > 0].min(initial=1)) >= 1
-
-
-def test_length_sum_over_count_is_the_MEAN_fragment_length_at_that_object():
-    """The whole point of the channel: it makes an object's own mean fragment length observable.
-
-    Two components are told apart by their length distributions, and this ratio is the first moment of
-    the mixture actually present at this object — no fitted model anywhere in it.
-    """
-    acc = _acc()
-    lengths = (120, 200, 260)
-    for length in lengths:  # each crosses the line at 400 and nothing else
-        acc.deposit(0, 400 - length // 2, 400 - length // 2 + length)
-    t = acc.tally
-    edge = _edge(0, 4)
-    assert int(t.edge_unspliced_count[edge, 0]) == len(lengths)
-    assert int(t.edge_unspliced_length_sum[edge]) == sum(lengths)
-    mean = t.edge_unspliced_length_sum[edge] / t.edge_unspliced_count[edge, 0]
-    assert mean == pytest.approx(sum(lengths) / len(lengths))
-
-
-def test_length_sum_SEPARATES_two_populations_that_count_AND_inv_length_sum_CANNOT():
-    """⭐ THE reason this channel exists, as an exact arithmetic identity rather than a simulation.
-
-    Two fragment sets are constructed with the SAME count and a BYTE-IDENTICAL ``inv_length_sum``
-    (``1/2 + 1/3 + 1/6 == 1/2 + 1/4 + 1/4``, and the fixed-point quanta happen to sum exactly), yet
-    different total length. The shipped ``(count, inv_length_sum)`` pair is provably blind to the
-    difference; ``length_sum`` sees it.
-
-    This is the per-object shadow of the structural result: at an edge the count row is
-    ``(mu_g − 1, mu_r − 1)`` and the reciprocal row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``
-    and the pair carries ZERO information about the gDNA/RNA split when the two means agree.
-    """
-    edge = _edge(0, 4)  # the line at 400, flanked by two wide nodes
-
-    def deposit_lengths(lengths):
-        acc = _acc()
-        for length in lengths:
-            acc.deposit(0, 399, 399 + length)  # every one crosses the line at 400, and only it
-        t = acc.tally
-        return (
-            int(t.edge_unspliced_count[edge, 0]),
-            float(t.edge_unspliced_inv_length_sum[edge]),
-            int(t.edge_unspliced_length_sum[edge]),
-        )
-
-    count_a, inv_a, len_a = deposit_lengths((3, 4, 7))  # placements 2, 3, 6
-    count_b, inv_b, len_b = deposit_lengths((3, 5, 5))  # placements 2, 4, 4
-
-    assert count_a == count_b == 3, "same number of fragments"
-    # ⭐⭐⭐ THE PROOF: `1/2 + 1/3 + 1/6` and `1/2 + 1/4 + 1/4` are both exactly 1 in real arithmetic,
-    # so the (count, inv_length_sum) pair cannot tell the two length sets apart — at any depth.
-    # ⚠ Stated against the REAL-ARITHMETIC answer, not against the representation's own closed form.
-    # The predecessor asserted `== INV_LENGTH_SCALE` exactly, which held only because two fixed-point
-    # rounding errors happened to cancel on THIS triple: `1/3 + 1/3 + 1/3` was one quantum short, and
-    # float64 is exact on both (`TRAPS: a-gate-that-reconstructs`).
-    assert close(inv_a, 1.0, 3) and close(inv_b, 1.0, 3), (
-        f"the OLD pair must not separate these: {inv_a!r} vs {inv_b!r}"
-    )
-    assert close(inv_a, inv_b, 3), "the OLD pair cannot tell these apart"
-    assert (len_a, len_b) == (14, 13), "the new channel can"
 
 
 def test_the_density_FIELD_NAME_is_gone_everywhere():
@@ -1185,4 +1100,4 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
     t = _acc().tally
     stale = [name for name in t.__slots__ if name.endswith("_density")]
     assert stale == []
-    assert {"node_contained_inv_opportunity_sum", "node_contained_length_sum"} <= set(t.__slots__)
+    assert {"node_contained_inv_opportunity_sum"} <= set(t.__slots__)

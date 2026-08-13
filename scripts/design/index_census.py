@@ -138,7 +138,7 @@ def census_junction_cuts(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
     row("junctions whose endpoints are both cuts", int(src.size), "100 % by construction; asserted")
     assert np.all(intron_length > 0), "a junction edge spans a non-positive intron"
     row("median intron length (bp)", int(np.median(intron_length)))
-    row("junction fan-out: distinct donors", int(np.unique(src).size))
+    row("junction fan-out: distinct left_boundaries", int(np.unique(src).size))
     _, counts = np.unique(src, return_counts=True)
     row("mean junction fan-out per donor", f"{counts.mean():.2f}", f"max {counts.max()}")
 

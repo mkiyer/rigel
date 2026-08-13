@@ -454,18 +454,12 @@ def two_reference_parts(payload):
         node_contained_inv_opportunity_sum=np.concatenate(
             [payload.node_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
-        node_contained_length_sum=np.concatenate(
-            [payload.node_contained_length_sum, np.zeros(2, np.uint64)]
-        ),
         node_start_count=np.concatenate([payload.node_start_count, np.zeros(2, np.uint32)]),
         edge_unspliced_count=np.vstack(
             [payload.edge_unspliced_count, np.array([[3, 3]], np.uint32)]
         ),
         edge_unspliced_inv_length_sum=np.concatenate(
             [payload.edge_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
-        ),
-        edge_unspliced_length_sum=np.concatenate(
-            [payload.edge_unspliced_length_sum, np.zeros(1, np.uint64)]
         ),
         edge_spliced_count=np.vstack([payload.edge_spliced_count, np.zeros((1, 2), np.uint32)]),
         cut_positions=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),

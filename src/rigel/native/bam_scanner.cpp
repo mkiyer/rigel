@@ -1137,7 +1137,7 @@ public:
     std::vector<uint8_t> node_types_;      // coarse node type, ref-major, one per node
     int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
     std::vector<int64_t> sj_offsets_;       // n_cuts + 1, CSR over the flat cut axis
-    std::vector<int64_t> sj_acceptor_cut_;  // flat cut index of each junction's high end
+    std::vector<int64_t> sj_boundary_right_;  // flat cut index of each junction's high end
     std::vector<int8_t>  sj_strand_;        // each junction's ANNOTATED strand
     bool                 junctions_set_ = false;
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
@@ -1225,7 +1225,7 @@ public:
     // intron simply reads as unannotated, and 404,168 annotated junctions become zero silently.
     void set_junctions(
         nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
         nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand)
     {
         if (!acc_set_) {
@@ -1233,14 +1233,14 @@ public:
                 "set_junctions: call set_regions first — the junction CSR is keyed by cut index, so "
                 "there is nothing to key it against until the partition is installed");
         }
-        if (acceptor_cut.shape(0) != sj_strand.shape(0)) {
+        if (boundary_right.shape(0) != sj_strand.shape(0)) {
             throw std::invalid_argument(
-                "set_junctions: acceptor_cut has " + std::to_string(acceptor_cut.shape(0)) +
+                "set_junctions: boundary_right has " + std::to_string(boundary_right.shape(0)) +
                 " entries but sj_strand has " + std::to_string(sj_strand.shape(0)));
         }
         sj_offsets_.assign(offsets.data(), offsets.data() + offsets.shape(0));
-        sj_acceptor_cut_.assign(
-            acceptor_cut.data(), acceptor_cut.data() + acceptor_cut.shape(0));
+        sj_boundary_right_.assign(
+            boundary_right.data(), boundary_right.data() + boundary_right.shape(0));
         sj_strand_.assign(sj_strand.data(), sj_strand.data() + sj_strand.shape(0));
         junctions_set_ = true;
         install_junctions(*acc_set_);
@@ -1264,9 +1264,9 @@ public:
         if (!junctions_set_) return;
         set.set_junctions(sj_offsets_.data(),
                           sj_offsets_.size(),
-                          sj_acceptor_cut_.data(),
+                          sj_boundary_right_.data(),
                           sj_strand_.data(),
-                          sj_acceptor_cut_.size(),
+                          sj_boundary_right_.size(),
                           ref_cut_offsets_.data());
     }
 
@@ -2117,18 +2117,18 @@ private:
 
             std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
             std::vector<double> node_contained_inv_opportunity_sum(n_nodes, 0.0);
-            std::vector<uint64_t> node_contained_length_sum(n_nodes, 0u);
             std::vector<uint32_t> node_start_count(n_nodes, 0u);
             std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
             std::vector<double> edge_unspliced_inv_length_sum(n_edges, 0.0);
-            std::vector<uint64_t> edge_unspliced_length_sum(n_edges, 0u);
             std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
             // ⚠ NOT multiplied by kNStrandColumns — the conserved mass has ONE value per edge.
             std::vector<double> edge_unspliced_mass(n_edges, 0.0);
             std::vector<double> edge_spliced_mass(n_edges, 0.0);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
             std::vector<double> sj_inv_length_sum(n_sj, 0.0);
-            std::vector<double> sj_mass(n_sj, 0.0);
+            // ⭐ MULTIPLIED by kNStrandColumns, unlike every other mass here — the junction mass is
+            // the one that carries a strand (owner 2026-08-12; premise in `JunctionEdge::mass`).
+            std::vector<double> sj_mass(n_sj * kNStrandColumns, 0.0);
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
@@ -2163,7 +2163,6 @@ private:
                     }
                     // ⚠ Outside the column loop: ONE value per node, keyed without kNStrandColumns.
                     node_contained_inv_opportunity_sum[node_base + i] = nodes[i].contained_inv_opportunity_sum;
-                    node_contained_length_sum[node_base + i] = nodes[i].contained_length_sum;
                 }
                 for (std::size_t i = 0; i < a.n_edges(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
@@ -2173,7 +2172,6 @@ private:
                     }
                     // ⚠ Outside the column loop, and keyed WITHOUT kNStrandColumns: one value per edge.
                     edge_unspliced_inv_length_sum[edge_base + i] = edges[i].unspliced_inv_length_sum;
-                    edge_unspliced_length_sum[edge_base + i] = edges[i].unspliced_length_sum;
                     edge_unspliced_mass[edge_base + i] = edges[i].unspliced_mass;
                     edge_spliced_mass[edge_base + i]   = edges[i].spliced_mass;
                 }
@@ -2181,9 +2179,9 @@ private:
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (sj_base + i) * kNStrandColumns + c;
                         sj_count[o]   = junctions[i].count[c];
+                        sj_mass[o]    = junctions[i].mass[c];
                     }
                     sj_inv_length_sum[sj_base + i] = junctions[i].inv_length_sum;
-                    sj_mass[sj_base + i]           = junctions[i].mass;
                 }
                 // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
                 // ⚠ A size mismatch throws instead of being skipped: skipping would drop that reference's
@@ -2222,11 +2220,9 @@ private:
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
             cal["node_contained_count"]   = vec_to_ndarray(std::move(node_contained_count));
-            cal["node_contained_length_sum"] = vec_to_ndarray(std::move(node_contained_length_sum));
             cal["node_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(node_contained_inv_opportunity_sum));
             cal["node_start_count"]       = vec_to_ndarray(std::move(node_start_count));
             cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
-            cal["edge_unspliced_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_length_sum));
             cal["edge_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_inv_length_sum));
             cal["edge_spliced_count"]     = vec_to_ndarray(std::move(edge_spliced_count));
             cal["edge_unspliced_mass"]    = vec_to_ndarray(std::move(edge_unspliced_mass));
@@ -2877,17 +2873,17 @@ NB_MODULE(_bam_impl, m) {
             .def("set_junctions",
                  [](Accumulator& a,
                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> offsets,
-                    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+                    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> boundary_right,
                     nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
                      a.set_junctions(
                          std::vector<int32_t>(offsets.data(), offsets.data() + offsets.shape(0)),
-                         std::vector<int32_t>(acceptor_cut.data(),
-                                              acceptor_cut.data() + acceptor_cut.shape(0)),
+                         std::vector<int32_t>(boundary_right.data(),
+                                              boundary_right.data() + boundary_right.shape(0)),
                          std::vector<int8_t>(sj_strand.data(),
                                              sj_strand.data() + sj_strand.shape(0)));
                  },
                  nb::arg("offsets"),
-                 nb::arg("acceptor_cut"),
+                 nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
                  "The junction CSR for THIS reference, keyed by the ref-local donor cut\n"
                  "index. The junction-edge id is the slot; slot order is a contract.")
@@ -2910,12 +2906,6 @@ NB_MODULE(_bam_impl, m) {
                 constexpr int64_t row = sizeof(Node) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.nodes_data()[0].contained_inv_opportunity_sum, {a.n_nodes()}, h, {row}).cast();
-            })
-            .def_prop_ro("node_contained_length_sum", [](nb::handle h) {
-                auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
-                    &a.nodes_data()[0].contained_length_sum, {a.n_nodes()}, h, {row}).cast();
             })
             .def_prop_ro("node_start_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
@@ -2943,12 +2933,6 @@ NB_MODULE(_bam_impl, m) {
                 constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.edges_data()[0].unspliced_inv_length_sum, {a.n_edges()}, h, {row}).cast();
-            })
-            .def_prop_ro("edge_unspliced_length_sum", [](nb::handle h) {
-                auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
-                    &a.edges_data()[0].unspliced_length_sum, {a.n_edges()}, h, {row}).cast();
             })
             // ⭐ The conserved mass — ndim<1>, because it has one value per edge and not one per
             // strand. The stride is still the struct row, so this is a view into the same array.
@@ -2979,11 +2963,14 @@ NB_MODULE(_bam_impl, m) {
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.junctions_data()[0].inv_length_sum, {a.n_junctions()}, h, {row}).cast();
             })
+            // ⭐ ndim<2>, unlike every other mass here — the junction mass carries a strand, and its
+            // columns are `sj_count`'s columns. See `JunctionEdge::mass` for the premise that changed.
             .def_prop_ro("sj_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(JunctionEdge) / sizeof(double);
-                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.junctions_data()[0].mass, {a.n_junctions()}, h, {row}).cast();
+                return nb::ndarray<nb::numpy, const double, nb::ndim<2>>(
+                    &a.junctions_data()[0].mass[0], {a.n_junctions(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
             })
 
             // ── the length pools, and the denominators ───────────────────────────────────────────────
@@ -3179,18 +3166,18 @@ NB_MODULE(_bam_impl, m) {
           .def("set_junctions",
                  [](BamScanner& self,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_right,
                      nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
-                      self.set_junctions(offsets, acceptor_cut, sj_strand);
+                      self.set_junctions(offsets, boundary_right, sj_strand);
                  },
                  nb::arg("offsets"),
-                 nb::arg("acceptor_cut"),
+                 nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
                  "Install the annotated junction edges, as build_junction_edge_arrays\n"
                  "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
                  "offsets : int64[n_cuts_total + 1]\n"
                  "    CSR over the flat cut axis, keyed by the DONOR cut index.\n"
-                 "acceptor_cut : int64[n_junctions]\n"
+                 "boundary_right : int64[n_junctions]\n"
                  "    Flat cut index of each junction's high end. The junction-edge id\n"
                  "    IS the slot here; edges_df.edge_row is a join key and is not\n"
                  "    passed. Slot order is a contract: sort on\n"

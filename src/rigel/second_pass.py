@@ -120,7 +120,7 @@ def _junction_id(junctions, cuts, lo, hi, start, end, sj_strand) -> int:
         return -1
     definite = sj_strand in (int(Strand.POS), int(Strand.NEG))
     for k in range(int(junctions.offsets[donor]), int(junctions.offsets[donor + 1])):
-        if int(junctions.acceptor_cut[k]) != acceptor:
+        if int(junctions.boundary_right[k]) != acceptor:
             continue
         if definite and int(junctions.strand[k]) != sj_strand:
             continue
@@ -345,8 +345,8 @@ class _Accumulators:
             else np.ascontiguousarray(
                 junctions.offsets[cut_lo : cut_hi + 1] - slot_lo, dtype=np.int32
             ),
-            acceptor_cut=np.ascontiguousarray(
-                junctions.acceptor_cut[slot_lo:slot_hi] - cut_lo, dtype=np.int32
+            boundary_right=np.ascontiguousarray(
+                junctions.boundary_right[slot_lo:slot_hi] - cut_lo, dtype=np.int32
             ),
             sj_strand=np.ascontiguousarray(junctions.strand[slot_lo:slot_hi], dtype=np.int8),
         )

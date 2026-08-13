@@ -57,7 +57,8 @@ terminus (measured worth 11.0 % of the mature opportunity genome-wide, and ⭐ `
 
 ⚠ **Named ``lo``/``hi``, NOT ``donor``/``acceptor``.** Edges store ``src < dst``, so ``src`` is genomically
 LEFT whatever the strand — but for a NEG-strand junction the biological donor is on the RIGHT. The
-divisor is symmetric in the two reaches so no number changes, but ``reach_donor`` would mislabel roughly
+divisor is symmetric in the two reaches so no number changes, but ``reach_left``/``reach_right`` name the two sides genomically; a
+``reach_donor`` would mislabel roughly
 half of the 404,168 junctions. ``lo``/``hi`` means genomically lower/higher and cannot be misread.
 
 ⚠ **Per STRAND**, because the mature-crossing gate is per strand: at an AMBIG seam a ``+`` and a ``−``
@@ -966,8 +967,8 @@ class JunctionEdgeArrays:
     Keyed by the **donor** cut index, i.e. the flat index into
     ``build_node_partition_arrays(index)[0]`` of the intron's LOW endpoint::
 
-        for k in range(offsets[donor_cut], offsets[donor_cut + 1]):
-            if acceptor_cut[k] == observed_acceptor_cut:   # 1-3 iterations at human scale
+        for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
+            if boundary_right[k] == observed_right_boundary:   # 1-3 iterations at human scale
                 credit junction edge k          # <- the SLOT is the id; see below
 
     ⚠ **The junction-edge id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
@@ -988,7 +989,7 @@ class JunctionEdgeArrays:
     """
 
     offsets: np.ndarray  # int64[P + 1] — CSR over the flat cut axis, P = cut_positions.size
-    acceptor_cut: np.ndarray  # int64[J] — flat cut index of the intron's HIGH endpoint
+    boundary_right: np.ndarray  # int64[J] — flat cut index of the intron's HIGH endpoint
     edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-edge id
     strand: np.ndarray  # int8[J]  — the junction's genomic strand (Strand POS/NEG)
 
@@ -1022,19 +1023,19 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     # which reference each junction belongs to: node ids are contiguous per reference (I2)
     ref_of = np.searchsorted(node_base, src, side="right") - 1
     shift = cut_offsets[ref_of] - node_base[ref_of]
-    donor_cut = src + shift + 1
-    acceptor_cut = dst + shift
+    boundary_left = src + shift + 1
+    boundary_right = dst + shift
 
     # ⚠ The sort key includes STRAND, and it must match the reference accumulator's
     # ``Partition.from_cuts`` exactly — the junction-edge id IS the rank in this order, so the two
     # disagreeing would permute every row and break byte-identity. It shows up only on a donor/acceptor
     # pair carrying two strands, which is biologically impossible and therefore only ever reachable from
     # a synthetic stress test.
-    order = np.lexsort((strand, acceptor_cut, donor_cut))
-    donor_cut, acceptor_cut = donor_cut[order], acceptor_cut[order]
+    order = np.lexsort((strand, boundary_right, boundary_left))
+    boundary_left, boundary_right = boundary_left[order], boundary_right[order]
     offsets = np.zeros(n_cuts + 1, dtype=np.int64)
-    np.cumsum(np.bincount(donor_cut, minlength=n_cuts), out=offsets[1:])
-    return JunctionEdgeArrays(offsets, acceptor_cut, edge_row[order], strand[order])
+    np.cumsum(np.bincount(boundary_left, minlength=n_cuts), out=offsets[1:])
+    return JunctionEdgeArrays(offsets, boundary_right, edge_row[order], strand[order])
 
 
 def build_edge_flags_array(index) -> np.ndarray:

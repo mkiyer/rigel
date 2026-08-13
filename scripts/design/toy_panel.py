@@ -12,8 +12,8 @@ prior and corrupts everything downstream. ``--refit-iters 3`` gives the shipped 
 the two answer different questions — do not quote one for the other.
 
 ⭐ **The RNA density is quoted as a MULTIPLE of each donor's own gDNA density**, never absolutely. What the
-solver has to resolve is the RATIO, and the donors' gDNA rates span ~100× across the ladder, so an absolute
-density would put different donors at completely different true ``f_g`` on the "same" rung.
+solver has to resolve is the RATIO, and the left_boundaries' gDNA rates span ~100× across the ladder, so an absolute
+density would put different left_boundaries at completely different true ``f_g`` on the "same" rung.
 
 ⚠ **What it cannot say.** Every cached condition is ``nrna_none``, so on any spec with an intron the
 intron↔exon EDGEs have truth exactly 1.0 and the panel structurally cannot distinguish "no RNA crosses this

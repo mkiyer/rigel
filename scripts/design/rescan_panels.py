@@ -63,6 +63,63 @@ PAYLOADS = ("_main", *ORIGINS)
 #: Manifest sub-dictionaries that a DEPOSIT or ARBITRATION change moves. Compared alongside the arrays.
 DEPOSIT_SENSITIVE_SCALARS = ("qc", "gap_resolution")
 
+#: ⛔⛔ **WHICH COUNT BANK BOUNDS EACH FLOAT BANK'S REASSOCIATION ERROR, AND HOW MANY DEPOSITS EACH
+#: COUNTED FRAGMENT MAKES INTO IT.** ``{float bank: (count bank, deposits per counted fragment)}``.
+#:
+#: ⭐ Summing ``n`` POSITIVE floats round-to-nearest gives an error bounded by ``(n-1)·eps·Σ|x|``, and
+#: every bank here is a sum of positive quantities, so ``Σ|x|`` **is** the stored value. That makes the
+#: budget ``n · eps · value`` — and ``n`` is not a guess: the count bank at the same object IS the
+#: number of deposits, so the tolerance is per-element and derived from data already in the payload.
+#:
+#: ⚠ The factor is 2 for the MASS banks and 1 for the others, and it comes from the deposit rule rather
+#: than from padding: a fragment crossing ``K`` lines makes ``2K`` deposits (``K+1`` slices, the two ends
+#: depositing once and each interior one twice — `test_conserved_mass.py` derives this), and a junction
+#: can be claimed at BOTH its positions.
+FLOAT_BANK_DEPOSITS = {
+    "node_contained_inv_opportunity_sum": ("node_contained_count", 1),
+    "edge_unspliced_inv_length_sum": ("edge_unspliced_count", 1),
+    "edge_unspliced_mass": ("edge_unspliced_count", 2),
+    "edge_spliced_mass": ("edge_spliced_count", 2),
+    "sj_inv_length_sum": ("sj_count", 1),
+    "sj_mass": ("sj_count", 2),
+}
+
+#: ⛔ DERIVED, not chosen — the machine's, not a tolerance anyone picked (`TRAPS: no-magic-numbers`).
+EPS = float(np.finfo(np.float64).eps)
+
+
+def _reassociation_budget(name, a, b, arrays):
+    """The largest honest difference between two scans of the SAME data, per element — or ``None``.
+
+    ⛔⛔ **THIS EXISTS BECAUSE THE GATE'S PREMISE DIED AND THE GATE DID NOT NOTICE.** :func:`compare`
+    demanded byte-identity on the stated grounds that *"these are integer tallies"*. They were, under the
+    fixed point. The 2026-08-10 owner ruling replaced it with one numeric convention — **a COUNT is an
+    integer, a FRACTION is float64** — and float addition is not associative across worker threads, so
+    six banks stopped being bit-reproducible at that moment. ``scan_payload``'s docstring recorded the
+    consequence ("the integer banks still reproduce exactly, the float ones agree to ~1e-15 … tests
+    validate the float banks within a DERIVED tolerance"); this instrument was not updated, and its gate
+    has been **unsatisfiable for those six banks on every re-scan since**, whatever the change.
+    ⭐ Measured 2026-08-13 on ``g00 ss0.99 capture_off``: two scans of the same BAM by the same binary
+    differ on exactly those six banks, by at most **3.5e-14** relative.
+
+    ⚠ Returns ``None`` for a bank with no entry — integers, which DO reproduce exactly and are still
+    held to byte-identity. Widening those would throw away the half of the gate that still works.
+    """
+    spec = FLOAT_BANK_DEPOSITS.get(name)
+    if spec is None or a.dtype.kind != "f":
+        return None
+    count_bank, per_fragment = spec
+    counts = arrays.get(count_bank)
+    if counts is None:
+        return None
+    n = np.asarray(counts, np.float64)
+    if n.ndim == 2:
+        n = n.sum(axis=1)
+    scale = np.maximum(np.abs(a), np.abs(b))
+    if a.ndim == 2 and n.ndim == 1:
+        n = n[:, None]
+    return per_fragment * n * EPS * scale
+
 
 # ────────────────────────────────────────────────────────────────────────────────────────────────────
 # The comparator — pure, and the only thing --self-test exercises.
@@ -72,9 +129,12 @@ DEPOSIT_SENSITIVE_SCALARS = ("qc", "gap_resolution")
 def compare(old_arrays, old_scalars, new_arrays, new_scalars, expect_changed=()):
     """Compare two payload snapshots. Returns ``(only_old, only_new, differing, changed_as_expected)``.
 
-    ``differing`` lists every shared key whose value is not byte-identical — arrays by
-    :func:`numpy.array_equal` after a shape check, scalars by equality. ⛔ Byte-identity, never a
-    tolerance: these are integer tallies and the whole claim is that they did not move.
+    ``differing`` lists every shared key whose value moved. ⛔ **Byte-identity for the INTEGER banks,
+    which reproduce exactly and where the whole claim is that they did not move.** The six float banks
+    are compared within a per-element budget DERIVED from their own deposit counts — see
+    :func:`_reassociation_budget` for why, and for the premise that died under this gate without it
+    noticing. ⚠ The budget is ~1e-14 relative; a real deposit-rule change moves these banks by parts in
+    a thousand, so the gate keeps its teeth.
 
     ⭐ ``expect_changed`` names the banks a DEPOSIT-RULE change is supposed to move. They are reported
     in ``changed_as_expected`` instead of ``differing``, so the gate keeps its real teeth — *nothing
@@ -105,8 +165,19 @@ def compare(old_arrays, old_scalars, new_arrays, new_scalars, expect_changed=())
         elif a.dtype != b.dtype:
             differing.append(f"{k}: dtype {a.dtype} -> {b.dtype}")
         elif not np.array_equal(a, b):
-            n = int((a != b).sum())
-            differing.append(f"{k}: {n} of {a.size} elements differ")
+            budget = _reassociation_budget(k, a, b, new_arrays)
+            if budget is None:
+                differing.append(f"{k}: {int((a != b).sum())} of {a.size} elements differ")
+                continue
+            over = np.abs(a - b) > budget
+            if np.any(over):
+                # ⭐ Report the WORST element in budget-multiples, so "how far past honest rounding" is
+                # a number rather than an impression.
+                worst = float(np.max(np.abs(a - b)[over] / np.maximum(budget[over], 1e-300)))
+                differing.append(
+                    f"{k}: {int(over.sum())} of {a.size} elements exceed the reassociation budget "
+                    f"(worst {worst:.1f}x)"
+                )
     for group in DEPOSIT_SENSITIVE_SCALARS:
         a, b = old_scalars.get(group), new_scalars.get(group)
         if a != b:
@@ -253,7 +324,14 @@ def _delta_key(record) -> tuple:
 
 
 def self_test() -> int:
-    base_a = {"x": np.arange(10, dtype=np.uint64), "y": np.ones(4, dtype=np.float64)}
+    # ⭐ `y` is now a REAL float bank name with its REAL count bank beside it, because the comparator's
+    # tolerance is derived from that pairing — a fixture using an anonymous "y" could not exercise it.
+    base_a = {
+        "x": np.arange(10, dtype=np.uint64),
+        "y": np.ones(4, dtype=np.float64),
+        "sj_mass": np.full(4, 1000.0),
+        "sj_count": np.full((4, 2), 500, dtype=np.uint32),  # 1,000 deposits ⇒ budget 2·1000·eps·value
+    }
     base_s = {"qc": {"deposited": 7}, "gap_resolution": {"a": 1}}
 
     def fresh():
@@ -265,11 +343,36 @@ def self_test() -> int:
     o, n, d, _e = compare(*fresh(), *fresh())
     checks.append(("identical => no difference", (o, n, d) == ([], [], [])))
 
-    # ⛔ a 1-ULP nudge in a float bank
+    # ⛔ a 1-ULP nudge in a float bank with NO count bank to derive a budget from: still exact
     a2, s2 = fresh()
     a2["y"][2] = np.nextafter(a2["y"][2], 2.0)
     o, n, d, _e = compare(*fresh(), a2, s2)
-    checks.append(("1-ULP float nudge => caught", len(d) == 1 and d[0].startswith("y:")))
+    checks.append(("1-ULP nudge, no budget derivable => caught", len(d) == 1 and d[0].startswith("y:")))
+
+    # ✅ ⭐⭐ REASSOCIATION IS ACCEPTED — the repair. Two scans of the same BAM differ by ulps on the six
+    # float banks (measured 3.5e-14 relative), and the old exact gate was UNSATISFIABLE because of it.
+    a2, s2 = fresh()
+    a2["sj_mass"][1] = np.nextafter(a2["sj_mass"][1], 2000.0)
+    o, n, d, _e = compare(*fresh(), a2, s2)
+    checks.append(("a ulp inside the derived budget => ACCEPTED", d == []))
+
+    # ⛔ ...and the gate still has teeth: past the budget it fires. 2·1000·eps ~ 4.4e-13 relative, so a
+    # 1e-9 relative move is ~2,000x over and must be caught.
+    a2, s2 = fresh()
+    a2["sj_mass"][1] *= 1.0 + 1e-9
+    o, n, d, _e = compare(*fresh(), a2, s2)
+    checks.append(("a real move past the budget => caught",
+                   len(d) == 1 and d[0].startswith("sj_mass:") and "budget" in d[0]))
+
+    # ⛔ the budget SCALES with the deposit count, so a low-count object gets a TIGHT one. Same absolute
+    # nudge, one deposit instead of a thousand: it must now be caught.
+    a2, s2 = fresh()
+    a2["sj_count"] = np.zeros((4, 2), dtype=np.uint32)
+    a3 = {k: v.copy() for k, v in a2.items()}
+    a3["sj_mass"][1] = np.nextafter(a3["sj_mass"][1], 2000.0)
+    o, n, d, _e = compare(a2, s2, a3, s2)
+    checks.append(("a ZERO-count object gets a ZERO budget => caught",
+                   len(d) == 1 and d[0].startswith("sj_mass:")))
 
     # ⛔ a single count off by one
     a2, s2 = fresh()
@@ -309,7 +412,10 @@ def self_test() -> int:
     # ⛔ an EMPTY baseline must not read as agreement (arm_identity.py's recorded lie: zero rows
     # once scored "32/32 IDENTICAL")
     o, n, d, _e = compare({}, base_s, *fresh())
-    checks.append(("empty baseline => every bank is `only_new`", n == ["x", "y"] and d == []))
+    # ⚠ Read off the fixture rather than written out: a hand-listed set silently stops covering a bank
+    # the moment the fixture gains one, which is exactly what happened when it did.
+    checks.append(("empty baseline => every bank is `only_new`",
+                   n == sorted(base_a) and d == []))
 
     # ⭐ --expect-changed: a NAMED bank that moved is expected, not a failure — but the gate must keep
     # its teeth for every OTHER bank in the same comparison.
