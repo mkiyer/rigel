@@ -32,7 +32,7 @@ spelled "is there a TSS here" passes on one index and fails on its mirror.
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population — RNA splices out or in — but
 there the flux is MEASURED (``sj_count``) and the graft and the peel exist to route it. A terminus
 has no flux to measure: a transcript simply begins. That is the derived boundary between the two
-treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1 **reframe-and-level-together**).
+treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1.1 **the-cancelling-pair**).
 
 ⭐ Measured on `toy_harness.py --spec nested_exons`, where every BOUNDARY carries a terminus: the gene's
 mass-weighted ``|Δf_g|`` goes **0.2264 → 0.0541**, and its strand mirror ``nested_exons_neg``
@@ -221,7 +221,7 @@ def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     double-count. This predicate must therefore read the four TERMINUS bits and nothing else.
 
     ⚠ Extending it to splice sites is a separate experiment with its own measurement: deleting the
-    sj channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1 **reframe-and-level-together**)."""
+    sj channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1.1 **the-cancelling-pair**)."""
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,

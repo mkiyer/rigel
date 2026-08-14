@@ -126,7 +126,7 @@ _RA: dict = {}
 
 
 def _install_kappa_half():
-    """⭐⭐ THE ARM `ROADMAP.md` §1 **the-capture-level-residual** ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
+    """⭐⭐ THE ARM `ROADMAP.md` §4 **the-capture-level-residual** ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
 
     On a genuinely unstranded library the strand channel carries **exactly** zero information about
     composition — the Fisher information is ``∝ (2κ−1)²`` and κ is ½. But κ is FITTED, so it lands on
@@ -1223,7 +1223,7 @@ def main() -> int:
     # `CalibrationConfig()`, so when the shipped default of `message_propagation` flipped to False at
     # `0d9d422b` twenty-two of the twenty-six arms silently became no-ops and NOTHING said so.
     # ⭐ Default is the SHIPPED value, so `base` is still the tool as it ships and no existing invocation
-    # changes meaning; `on` is what items 3 and 4 of `ROADMAP.md` §2 need.
+    # changes meaning; `on` is what ranks 6 and 7 of `ROADMAP.md` §1 need.
     ap.add_argument(
         "--messages", choices=("off", "on"), default=None,
         help="message_propagation. Default: whatever CalibrationConfig ships. Recorded in every row, so "

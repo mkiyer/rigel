@@ -236,7 +236,7 @@ def report(rows, args) -> bool:
 
     print()
     print("  ⭐⭐⭐ GATE B — THE SUBSTRATE: does the subsample reproduce the defect it must remove?")
-    print("     ROADMAP 1.1 ④ on the FULL panel: gDNA arm rel 0.179 capture ON, 0.005 capture OFF, "
+    print("     `prior_vs_oracle.py` table ④ on the FULL panel: gDNA arm rel 0.179 capture ON, 0.005 capture OFF, "
           "net +15.1 % under capture.")
     print(f"    {'condition':<44} {'F (truth)':>13} {'O shipped':>13} {'O/F':>7} {'rel':>7} "
           f"{'net':>13}")

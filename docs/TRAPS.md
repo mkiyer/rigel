@@ -21,7 +21,7 @@ because they were the other meanings above. A name cannot collide that way: noth
 called `no-magic-numbers`.
 
 ⛔⛔ **THE SHAPE OF AN ENTRY, AND IT IS ENFORCED BY PRUNING.** A trap is **the mistake, the tell, and the
-rule** — three or four boundaries. The investigation that produced it is in git; the number that describes
+rule** — three or four lines. The investigation that produced it is in git; the number that describes
 current state is in `ROADMAP.md`. ⚠ This file reached 741 lines and 91 entries before its first prune
 (2026-08-05) because entries were being *appended to* as new instances arrived. ⭐ **Instances of ONE lesson
 belong in a LIST inside that lesson, not as new entries** — see `TRAPS: a-message-from-the-destinations-belief`, which is nine costumes of one mistake.
@@ -32,13 +32,21 @@ merged rule survives as a row in its family's table, under its own name.
 "exact factor of 2", a "12× over-represented"). Current measured state lives in `ROADMAP.md`; anything
 here that reads like a status report is a bug in this file.
 
+⚠ **AND A MEASUREMENT IS NEVER DELETED — ONLY STAMPED.** Where a number here was measured on the
+**36-condition** gDNA ladder it predates that panel's rebuild to **16 conditions** (2026-08-13); it is kept
+as a historical record rather than restated, because a lesson does not expire with its panel. Anything you
+need as *current* comes from `ROADMAP.md`, never from a number in this file.
+
 ---
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **105 rules, and every one has exactly one body — checked, because the header said 99 while the file
-held 101. Read the group that matches what you are about to do, then open only those.** Cite one
+⭐ **118 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
+you are about to do, then open only those.** Cite one
 as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
+⚠ A hand-carried count has now drifted twice, which is `TRAPS: re-record-the-baseline` committed by this
+file's own index — count the index entries, do not adjust the number.
 
 **Validation and gates**
 
@@ -62,6 +70,8 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `honesty-metrics-reward-ignorance` — EVERY HONESTY METRIC IMPROVES AS THE SOLVER STOPS KNOWING ANYTHING — SO NONE IS READABLE
 - `predicate-contradicts-its-docstring` — A PREDICATE CAN CONTRADICT ITS OWN DOCSTRING FOR MONTHS IF SOMETHING ELSE IS MASKING IT —
 - `a-test-that-redefines` — A TEST THAT RE-DERIVES A DEFINITION CANNOT DETECT DRIFT IN IT.
+- `a-gates-power-is-its-invariant-set` — A COMPARISON GATE'S POWER IS THE SIZE OF ITS INVARIANT SET; a change that
+  shrinks that set disarms the gate, so it must not ride along with the change being gated.
 - `a-gate-that-reconstructs` — A GATE THAT RECONSTRUCTS A VALUE IS VACUOUS WHEREVER THE CODE DECIDES NOT TO USE IT — GATE A
 - `off-grid-message-mode` — A MESSAGE MODE OUTSIDE ITS GRID'S DOMAIN IS NOT A WEAK CLAIM, IT IS A PIN AT THE BOUNDARY —
 - `a-comment-quoted-as-a-finding` — A WORD BORROWED FROM A COMMENT IS NOT A MEASUREMENT, AND ONE PROPAGATED INTO THE DOCS INVENTED
@@ -89,9 +99,13 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `capture-inverts-the-counted-side` — "THE WELL-COUNTED SIDE" IS NOT A FIXED SIDE — CAPTURE INVERTS IT.
 - `admitting-an-object-costs` — ADMITTING AN OBJECT TO THE SCORED POPULATION IS A COST, AND A MECHANISM CAN DO IT SILENTLY.
 - `substitution-understates-a-source` — A CEILING BY SUBSTITUTION UNDERSTATES A MESSAGE SOURCE.
+- `a-symptom-is-not-a-second-defect` — A WRONG NUMBER FED A WRONG INPUT IS A SYMPTOM. Substitute ONLY the
+  upstream input, re-run the SHIPPED downstream function — and check the ceiling's injection point.
 - `a-locked-object-is-not-a-control` — A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.
 - `draining-breaks-the-oracle` — A per-fragment-independent partition stops being one the moment a downstream step conditions on
 - `an-equal-length-panel-defeats-the-lift` — THE REPAIR FOR THE RULE ABOVE HAS A SUBSTRATE IT CANNOT WORK ON, AND IT IS THE
+- `a-length-gap-bypasses-calibration` — A LARGE gDNA-vs-RNA LENGTH GAP LETS THE EM ANSWER ON LENGTH ALONE
+  AND MASKS CALIBRATION BUGS. The equal-length panel is what exposes them.
 - `weight-it-like-the-consumer` — A bp-weighted mean and a fragment-weighted mean answer different questions.
 - `a-support-ceiling-is-the-clamp` — A SUPPORT CEILING THAT MATCHES THE CLAMP IS NOT A MATCH — it is the clamp.
 - `log-variance-is-not-linear` — Every "is the declared precision earned?" number written before 2026-07-28 compared a LOG-space
@@ -438,12 +452,13 @@ unstranded ladder conditions — `g75`/`g90 ss0.50 capture_off` and `g98 ss0.50 
 `(κ̂−½)²` = 4.74e-07 against `σ²_d` = 3.42e-07 at g75, a margin of 1.39×. ⛔ **And `I_strand = N_eff·disc·[…]`
 then MULTIPLIES noise by the depth**, so the phantom information grows linearly in coverage. ⭐⭐ The damage
 is not accuracy — forcing κ = ½ moves Σ|err| by −0.6 %/−5.3 %/**+4.6 %** across the three big classes, a
-wash, reproducing `ROADMAP` §3's −0.2 %. **The damage is that `solv%` goes 77–90 % → 0.0 %**: the panel
+wash, reproducing the −0.2 % that `ROADMAP.md` §4's κ-residue row records. **The damage is that `solv%` goes 77–90 % → 0.0 %**: the panel
 declared 92,154 objects confidently wrong and `calib` = 3.67 at a condition with *no solvable objects at
 all*. ⛔⛔ **So the column used to pick the worst condition was inflated by the defect being looked for** —
 TRAPS: honesty-metrics-reward-ignorance's lesson with the arrow reversed. ⭐ The repair is to propagate rather than gate:
 `I = (½−κ̂)² / [p(1−p)/N_eff + (1−f_g)²·Var(κ̂)]`, which is smooth, needs no `max(0,·)`, and whose
-`Var(κ̂)` denominator cancels the depth exactly. `ROADMAP` §1 step 3.
+`Var(κ̂)` denominator cancels the depth exactly. ⚠ Not built: `ROADMAP.md` §4's κ-residue row prices
+the gate's ACCURACY cost at −0.2 %, so this repairs the honesty columns rather than the deliverable.
 
 **honesty-metrics-reward-ignorance. ⛔⛔ EVERY HONESTY METRIC IMPROVES AS THE SOLVER STOPS KNOWING ANYTHING — SO NONE IS READABLE
 WITHOUT A FIXED-DENOMINATOR ACCURACY NUMBER BESIDE IT.** A destruction control (force a 97-σ real strand
@@ -459,7 +474,7 @@ AND THE WRONG VERSION CAN BE LOAD-BEARING.** ``strand_evidence``'s ``struct_lock
 to true intergenic REGIONs" — i.e. ``g1_locked ∧ REGION``, and `node_geometry.g1_locked` exists as the
 designated ONE HOME for exactly that predicate (TRAPS: a-test-that-redefines). The code is handed ``locked = ~solvable`` with
 ``solvable = (free_pos|free_neg) & (n > 0)``, so it is true at **every zero-count REGION**: measured **19,709**
-ladder slots against **1,312** that are actually TRAPS: no-magic-numbers, so **18,397** empty exons and introns declare their
+ladder slots against **1,312** that are actually structurally pure-gDNA objects, so **18,397** empty exons and introns declare their
 composition CERTAIN. ⚠ It was INERT until 2026-08-06 because ``own_precision``'s ``n > 0`` gate silenced
 every zero-count slot; removing that gate un-masked it. ⛔⛔ **And scoping it correctly is
 PANEL-NEGATIVE**: the target row moved −1.2 %, ``g98`` went +0.4 % (worse), and the zero-gDNA control went
@@ -474,6 +489,21 @@ the test. Changing one instrument fired nothing. It is TRAPS: self-checking-vali
 checked have to come from *different* places, and for a shared definition that means **one home**, with
 every consumer importing it. Here the home is production code (`node_geometry.g1_locked`), because the
 predicate is a production concept and `scripts/` is deliberately not importable.
+
+**a-gates-power-is-its-invariant-set. ⭐⭐ A COMPARISON GATE'S POWER IS THE SIZE OF ITS INVARIANT SET, SO A
+CHANGE THAT SHRINKS THAT SET MUST NOT RIDE ALONG WITH THE CHANGE IT IS MEANT TO GATE.** `rescan_panels.py`
+gates a schema change by rebuilding every cache and demanding that **every bank the change did not touch
+comes back identical** — its whole power is *"31 shared banks, every one identical"*. Bundling a ~1,000-site
+mechanical rename into the same re-scan was proposed and refused (2026-08-13): renaming the banks leaves
+almost no shared banks, so the rebuild would be gated only by "the same symmetric difference appears on
+every condition" — which cannot see whether a renamed bank's **values** survived. The gate would still read
+green, and would have proved nothing. ⭐ *The tell:* before bundling, ask **how many objects the gate will
+still be comparing afterwards**; if the answer is "almost none", the gate has been disarmed rather than
+satisfied. ⚠ **A second consideration decided it as much as the first: while every cache is refused, no
+instrument runs** — so the rename would have been made BLIND and then landed against a gate that could not
+fail, which is the worst available combination. Same family as `TRAPS: one-thing-varied`, one level up: not
+"two changes confound each other's measurement" but "the second change deletes the first one's measuring
+instrument".
 
 **a-gate-that-reconstructs. ⭐⭐ A GATE THAT RECONSTRUCTS A VALUE IS VACUOUS WHEREVER THE CODE DECIDES NOT TO USE IT — GATE A
 SYMMETRY THE CODE CANNOT FAKE INSTEAD.** A relay gate recomputed the delivered gDNA level and asked which
@@ -602,6 +632,15 @@ over objects that cannot be solved buries the answer — but an exclusion is a p
 some other way (TRAPS: excluding-a-population-hides-it); (ii) a pooled mean hides a sign flip between strata; (iii) mass-weighting lets one
 huge object set the number. ⭐ Report per stratum, with the denominator named.
 
+⛔⛔ **AND SINCE 2026-08-14 THERE IS A FOURTH REASON, SHARPER THAN THE OTHER THREE: ONE STRATUM IS NOT A
+DEVELOPMENT TARGET.** The 0.8.0 scope puts unstranded × capture-ON out of scope — DEFERRED, still
+measured and still reported, but not what work is aimed at — while the three in-scope strata are
+unstranded × capture-OFF, stranded × capture-OFF and stranded × capture-ON. The deferred cell carries
+**64.5 % of transcript error and 90 % of gene-level error** on the rebuilt 16-condition ladder, so a
+pooled total is mostly a report on the one stratum 0.8.0 does not ship, and an arm ranked on it is ranked
+by the wrong number. ⚠ This is not the same objection as (ii): there the pooled mean *hid* a real signal,
+here it faithfully reports a quantity nobody is optimising.
+
 **a-threshold-on-a-fitted-residue. A BINARY REGION_BOUND ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
 NOT THE FIX.** `τ > 1e-9` promoted objects whose own statement was 1,377 nats wide into the scored
 population, hiding a 1.06 M-fragment error. ⛔ A floor was implemented and refuted: τ is continuous across
@@ -673,6 +712,38 @@ gene's error, while the object they feed accounted for 82.7 %. ⭐ For a source 
 arm — pin it and RE-SOLVE — and an instrument that offers substitution must say which of the two it is
 doing (`toy_panel.py` now does).
 
+**a-symptom-is-not-a-second-defect. ⛔⛔ A DOWNSTREAM NUMBER THAT IS WRONG BECAUSE ITS INPUT IS WRONG IS A
+SYMPTOM, NOT A SECOND DEFECT — AND THE PROOF IS TO SUBSTITUTE ONLY THE UPSTREAM INPUT AND RE-RUN THE
+*SHIPPED* DOWNSTREAM FUNCTION.** Measured 2026-08-13/14 on the effective-length shrinkage.
+
+The shrinkage read as an independent bug, and a large one: at the ZERO-gDNA control the shipped factor
+contracts **13,673 of 15,669** transcripts by a mean **0.345** where the correct answer is
+exactly **1.000** — including on capture-OFF, where the module's own contract says the factor must be 1.
+Every instinct says go and repair the shrinkage.
+
+⭐ **It is not the shrinkage.** Substituting ONLY the composition arrays with truth and re-running the
+SHIPPED function returns the right factor: `g00` capture-OFF **0.345 → 1.000**, and `g50` unstranded ×
+capture-ON **0.834 → 0.401** against a truth of 0.401. `rho_ref` is fabricated entirely out of
+false-positive gDNA. There is ONE split with two consumers and one function — `priors.py` imports
+`_global_reference_density` from `capture_eff_length.py` — so repairing the composition repairs both, and
+"repairing" the shrinkage would have installed a second error to cancel the first
+(`TRAPS: a-cancelling-defect-pair`).
+
+⛔ **The substitution is admissible here for a reason you must NAME before trusting the arm: the downstream
+is a PURE FUNCTION of the substituted input, with no feedback.** Where the downstream feeds back — a message
+source — the identical arm understates (`TRAPS: substitution-understates-a-source`) and the honest ceiling
+is a pin-and-re-solve instead. Say which of the two you have before reading the number.
+
+⛔⛔ **AND THE SECOND HALF IS WHY NOBODY HAD SEEN IT: A CEILING PRICES ONLY WHAT IS BUILT *AFTER* ITS
+INJECTION POINT.** `effective_lengths_em` is built at `pipeline.py:816`, `assemble_priors` is called at
+`pipeline.py:839`, and **every** measurement arm in the tree patches `assemble_priors`. The shrinkage was
+therefore upstream of every ceiling ever run — identical in the baseline and in the ceiling, so it cancels
+out of the difference and reads as worth nothing. **Every ceiling number in this project was measured with
+a wrong ruler already installed.** ⭐ *The rule:* for every ceiling, write down WHERE the injection happens
+and WHAT was already computed above it; anything above that point is not being priced, it is being assumed
+correct. `TRAPS: measure-the-ceiling-first` says to price the ceiling — this says to check which stages the
+ceiling can even see.
+
 **a-locked-object-is-not-a-control. A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.** An `intergenic|exon` boundary predicts
 `f_g = 1.0000` exactly against a truth of 1.0, and that was read as the healthy twin of the broken
 `intron|exon` boundary beside it — "the same object structurally, and the only difference is the sj
@@ -704,6 +775,41 @@ sides UNDRAINED and then *price* the caveat instead of asserting it was small: r
 on the drained payload moves it by **0.153 %** (gDNA arm) and **0.462 %** (RNA arm), against effects of
 2.5–94 %. ⚠ A returned-and-reported ambiguity count is what made this a two-minute diagnosis instead of a
 silently biased truth source — the same argument as `waive-with-a-measurement`, one layer down.
+⚠ **Stamped 2026-08-14:** the counts above belong to the 36-condition ladder, since rebuilt to 16
+conditions — a record, not a restatement. ⛔ **And equal lengths are NOT the panel's mistake**: read
+`TRAPS: a-length-gap-bypasses-calibration` immediately below for what they buy and why the ladder keeps
+them. The lift is what gets priced, not the substrate.
+
+**a-length-gap-bypasses-calibration. ⛔⛔⛔ A LARGE gDNA-vs-RNA FRAGMENT-LENGTH GAP LETS THE EM ASSIGN
+FRAGMENTS ON LENGTH ALONE, SO THE TOOL ANSWERS CORRECTLY WITH CALIBRATION BROKEN — AN EQUAL-LENGTH PANEL IS
+WHAT EXPOSES THE BUG.** Owner, 2026-08-14. This is the gDNA ladder's real design reason, and the one that
+had been written down is the weaker one.
+
+**The EM ALREADY READS THE FRAGMENT-LENGTH DISTRIBUTION.** `second_pass.length_likelihood` scores every
+hypothesis under the pmf appropriate to it, so a well-separated `μ_g` and `μ_r` separate the two populations
+at the FRAGMENT level, before calibration's composition claim is consulted at all. The transcript numbers
+then come out acceptable **however wrong that claim is**. Calibration is not being exercised on such a
+panel; it is being carried.
+
+⭐ **So the ladder's EQUAL fragment lengths are a FORCING FUNCTION, not a simplification.** With the means
+equal the length channel carries exactly zero composition information
+(`TRAPS: equal-lengths-carry-no-composition`), which leaves strand, density and — when it is switched on —
+propagation across objects. Those are the code under test. ⛔ The weaker reason the docs used to give —
+*"the length channel is neutralised, so the residual error is attributable to density and strand"* — is a
+CONSEQUENCE, not the reason. Attribution is convenient; **not being lied to is the point.**
+
+⛔ **The tell that a gap is carrying you, and it is free:** score the CALIBRATION result against ORACLE
+CALIBRATION and print it beside the end-to-end number. A healthy end-to-end number sitting on top of an
+unhealthy composition claim is the signature. Measured 2026-08-13/14: on unstranded × capture-ON the tool
+emits a near-constant near-ZERO gDNA fraction regardless of truth — exon `f_g` **0.040 / 0.0016 / 0.0021**
+against truths **0.054 / 0.518 / 0.982** — so at the lowest gDNA rung it looks correct by coincidence
+(`TRAPS: a-single-level-panel-cannot-see-a-constant`, and it is why three gDNA levels is the minimum).
+
+⭐ **The general form, and it is settled before the panel is built: for each axis a substrate varies, ask
+which STAGE that axis lets a LATER stage answer WITHOUT.** A benchmark that hands the deliverable a
+shortcut measures the shortcut. ⚠ It is the mirror of `TRAPS: an-equal-length-panel-defeats-the-lift`
+directly above — equal lengths COST the drained oracle lift and BUY the only substrate on which calibration
+can be caught being wrong. Both are true at once, and the panel keeps its equal lengths.
 
 **weight-it-like-the-consumer. A bp-weighted mean and a fragment-weighted mean answer different questions.** An "11 % over-call"
 was a bp-weighted geometric mean; the estimator is fragment-weighted, 89 % of the mass sat where the
@@ -761,6 +867,13 @@ the DELIVERABLE is one of them.** A panel can be rich in every other dimension a
 fixed, here it holds the *answer* fixed — and of the standing rule not to score on the zero-gDNA arm
 ALONE. Both arms are required because each is one-sided on its own.
 
+⛔⛔ **DEFERRED POST-0.8.0** (owner, 2026-08-14). The `length_likelihood` above is the fragment-length
+COMPOSITION channel for CALIBRATION. It never shipped in `src/`, and 0.8.0 ships without it: **do not
+propose it, do not rank it, do not list it as a candidate.** This entry is the record of why, not an
+invitation to rebuild it. ⚠ It is a DIFFERENT thing from `second_pass.length_likelihood`, the per-fragment
+assignment factor, which ships and is untouched by the ruling. ⭐ The PANEL lesson — a panel that holds the
+deliverable fixed cannot tell an estimator from a constant — is general and is why this entry exists.
+
 **a-moment-match-is-not-sufficient. ⛔ MATCHING A MODEL'S MOMENTS TO ITS POPULATION'S CAN MAKE THE ANSWER
 WORSE, SO A MOMENT RATIO IS A NECESSARY AND NOT A SUFFICIENT GATE.** Measured 2026-08-10 on the length
 channel. A derived opportunity took the RNA crossing moments from `realised/predicted` 0.925 to 0.971 off
@@ -769,6 +882,9 @@ went 0.307 → 0.177 off capture (a large win) and **0.042 → 0.080 under it** 
 likelihood reads a JOINT function of both components' moments and their covariance; improving one
 component's marginal moment can move the pair apart. ⛔ So a table of moment ratios ranks candidate
 repairs; it does not certify one. Score the deliverable.
+⛔ **DEFERRED POST-0.8.0** (owner, 2026-08-14): the fragment-length COMPOSITION channel this was measured on
+is not a 0.8.0 candidate — do not propose it, rank it or build it; it never shipped in `src/`. ⭐ The moment
+lesson is general and stands without it.
 
 **score-the-consumers-own-count. ⛔⛔ TRUTH IS NOT A YARDSTICK UNTIL YOU NAME THE CONSUMER — A TRUTH
 NOTHING READS MEASURES YOUR CHOICE OF TARGET, AND IT WILL DO IT IN THE RIGHT UNITS.** Found and fixed
@@ -794,7 +910,7 @@ in `quant_accuracy.py` scored `gdna_est` against `gdna_true` and read **−50.7 
 spectacular, publishable gDNA under-call. `gdna_est` is `gdna_em_count`, which EXCLUDES fragments that
 reached no locus; `gdna_true` is the simulator's origin count, which includes them. **Off capture more
 than half of gDNA is intergenic**, so the "defect" was the missing pool and nothing else — with them the
-same panel reads **−0.6 %**. ⭐ `score_library`'s own docstring, four boundaries above the field being
+same panel reads **−0.6 %**. ⭐ `score_library`'s own docstring, four lines above the field being
 misused, records the identical mistake fabricating an off-capture EM under-call (0.3151 against a truth
 of 0.5000). ⛔ *The lesson on top of the lesson:* **a documented trap does not protect the NEXT consumer
 of the same field.** The columns not summing to the library was the tell, and it was visible on the
@@ -1197,6 +1313,16 @@ it is the cost of one. ⚠ And a stored artifact that is a PURE FUNCTION of stor
 build-time byte-identity gate proving the read-time derivation reproduces the production call
 (`_gate_p_is_recomputable`), otherwise dropping it from the blob is an unproven claim.
 
+⚠ **A THIRD FORM, IN A DATACLASS, WITH NO CACHE ANYWHERE: A STORED FIELD SURVIVES
+`dataclasses.replace`.** An oracle arm builds itself by swapping a `CalibrationResult`'s mass and count
+arrays for truth with `dataclasses.replace` (`prior_vs_oracle.OVERRIDE_FIELDS`). Any field *computed at
+construction* from those arrays comes through the swap intact and then silently describes **the arrays it
+replaced** — the same staleness as a missed hash key, with no key to inspect and nothing to invalidate.
+⭐ *The rule:* **if a value's inputs are in somebody's override list, that value may not be a stored
+field.** `sj_conserved_mass` and `library_rna_fragments` are `@property` for exactly this reason, so the
+oracle arm's number is the oracle's by construction — the same repair as the second form (store the
+inputs, derive at read time) applied to an object rather than a blob.
+
 **integer-channels-reproduce. Integer channels are bit-identical across worker counts; float channels are not.** Max relative
 3.7e-7 per cell, which propagated to a ~2.6 % difference in the calibration output. Integer addition is
 associative — that is the whole fix. *Corollary:* the one bank whose ORDER is observable (a list, not a
@@ -1271,7 +1397,8 @@ triangle bound `f_g ≤ 1 − |d|`: tight on a single-strand region, slack on a 
 
 **a-linear-likelihood-emits-a-sign. ⛔⛔ A LIKELIHOOD THAT IS ASYMPTOTICALLY LINEAR IN ITS PARAMETER HAS
 NO MODE, ONLY A DIRECTION — AND ON A BOUNDED GRID THAT DIRECTION SATURATES AT AN ENDPOINT.** Measured
-2026-08-10 on the drained arm; it cost a feature, and the feature was deleted at `f470a570`.
+2026-08-10 on the drained arm; it cost a feature, and the feature was purged at `b7ed7a0b` (`f470a570`
+is the measurement checkpoint before it, which changed no `src/` and is where the instruments survive).
 
 A fragment-length composition channel was built on a bivariate Gaussian in `(Σ1/w, Σw)` whose mean moves
 with the composition `π` by `N·Δ`, `Δ = μ_g − μ_r`. The term quadratic in `π` is `O(Δ²)` while the linear
@@ -1290,6 +1417,9 @@ refused. The fragment-length MODELS were exonerated by the same run.
 the order of the leading term.** If it is linear, the argmax is a sign and the object is a vote, not an
 estimate. The sufficient summary of such a channel is `(π̂, I)` — a location and an information — never a
 row handed to a normaliser.
+⛔ **DEFERRED POST-0.8.0** (owner, 2026-08-14): the channel was purged at `b7ed7a0b`, does not exist in
+`src/`, and is not a 0.8.0 candidate — do not propose it, rank it or build it. ⭐ The lesson about a
+likelihood that is linear in its parameter is general and applies to any channel.
 
 **amplitude-fades-influence-does-not. ⛔ A TERM THAT NORMALISES AWAY CAN STILL DECIDE THE ANSWER, BECAUSE
 AN ARGMAX IS SCALE-FREE.** Same campaign, and it is why fixing the precision was never going to be enough.
@@ -1303,6 +1433,9 @@ and `Δ = 5e-12 bp` gave **100.00 %** of the library mass. Its **declared precis
 ⭐ **Three quantities, three different behaviours, and only the first one was ever checked.** When a term
 enters a normalised sum, report its amplitude, its participation and its declared precision SEPARATELY;
 they do not fade together, and it is the two that do not fade that decide the answer.
+⛔ **DEFERRED POST-0.8.0** (owner, 2026-08-14): same channel, same ruling as
+`TRAPS: a-linear-likelihood-emits-a-sign` — not a 0.8.0 candidate, so do not propose it. ⭐ The
+three-quantities rule applies to ANY term entering a normalised sum and is why the entry is kept.
 
 **a-pooled-conversion-applied-per-component. ⛔ A RATIO MEASURED ON THE POOLED POPULATION AND APPLIED TO
 EACH COMPONENT SEPARATELY IS POPULATION-BLIND — AND THE BLINDNESS NEED NOT BE THE AXIS YOU EXPECT.**
@@ -1354,6 +1487,11 @@ scope is an assumption wearing the clothes of a theorem.
 composition, at any depth.** The 2×2 deconvolution is identified only through `μ_g − μ_r`. A claim that
 one storage choice beats another was measured at a 4× mean separation and is **false** at every region
 ≥ 250 bp and reversed at equal means.
+⭐⭐ **This fact is the gDNA ladder's FORCING FUNCTION, not merely a caveat about it** — zero length
+information is exactly what stops the EM answering WITHOUT calibration
+(`TRAPS: a-length-gap-bypasses-calibration`). ⛔ **DEFERRED POST-0.8.0** (owner, 2026-08-14): the
+composition channel built on the non-equal case is not a 0.8.0 candidate — this entry states a domain fact,
+never a candidate to build.
 
 **capture-is-1000x-on-exons. Hybrid capture is ~1000× on exons and only gDNA reads it cleanly.** RNA's own 10⁴ expression range
 hides the probe pattern; gDNA's uniform baseline does not. And **capture destroys the intron signal 75×**,

@@ -2,11 +2,28 @@
 #  THE gDNA LADDER — the debug/optimisation panel. EQUAL fragment lengths, full gDNA spectrum.
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐⭐ WHAT THIS PANEL IS FOR. This one exists to debug and optimise CALIBRATION, and for that the
-# length channel is a confound rather than a signal: with gDNA and RNA drawn from the SAME length
-# distribution, composition can only be recovered from density and strand, so any residual error is
-# attributable to those two. Owner ruling, 2026-08-03: clean the noise up first, exactly as the
-# accumulator was, and add the fragment-length channel back afterwards as an additional signal.
+# ⭐⭐ WHAT THIS PANEL IS FOR. This one exists to debug and optimise CALIBRATION — the focus of the
+# 0.8.0 release, whose metric is the CALIBRATION RESULT scored against ORACLE CALIBRATION and not the
+# end-to-end transcript number (owner, 2026-08-14). `docs/SUCCESS.md` carries the metric.
+#
+# ⛔⛔ WHY BOTH ORIGINS GET THE SAME LENGTH DISTRIBUTION — AND THE REASON IS STRONGER THAN THE ONE
+# THIS FILE USED TO GIVE. It used to say only that "the length channel is a confound rather than a
+# signal, so any residual error is attributable to density and strand". That is a CONSEQUENCE, and
+# stated alone it reads as tidiness. THE EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION —
+# `scoring.cpp` carries TWO length tables, `fl_log_prob_` for RNA and `gdna_fl_log_prob_` for gDNA —
+# so a large gDNA-vs-RNA length gap lets the EM split the two origins on LENGTH ALONE, BYPASSING
+# calibration entirely and MASKING its bugs, and the panel then reads green with calibration broken.
+# Equal lengths remove that shortcut and FORCE the calibration phase to be exercised, leaving it
+# strand and density (plus belief propagation across objects, which is currently off).
+#
+# ⛔⛔ AND THE FRAGMENT-LENGTH CHANNEL IS NOT COMING BACK BEFORE 0.8.0. This paragraph used to end
+# "clean the noise up first, exactly as the accumulator was, and add the fragment-length channel back
+# afterwards as an additional signal" (owner, 2026-08-03). SUPERSEDED: the fragment-length / "length
+# likelihood" channel AS A CALIBRATION COMPOSITION CHANNEL is DEFERRED POST-0.8.0 (owner,
+# 2026-08-14). 0.8.0 ships without it; do not propose it, list it as a candidate or rank it.
+# ⚠ It does not exist in `src/` — it was A/B'd once on 2026-08-10 and never shipped.
+# ⚠ `length_likelihood` in `src/rigel/second_pass.py` is a DIFFERENT thing (per-fragment second-pass
+# assignment) and is untouched by that ruling.
 #
 # ⭐⭐ **16 CONDITIONS, NOT 36 — REBUILT FROM SCRATCH 2026-08-13, AND EVERY AXIS THAT WAS DROPPED WAS
 # PRICED FIRST.** The 9-rung ladder cost 27 G and five of its rungs bought nothing the other four did
@@ -15,8 +32,14 @@
 #   · **`g00`, the ZERO-gDNA control** — owner-required on every experiment. Its truth is exactly 0,
 #     so every deviation is a false positive with nothing to cancel it. `ROADMAP.md` §4.1's graveyard
 #     is eleven mechanisms that looked good on their target and died here.
-#   · **unstranded × capture-ON, the BLIND stratum** — ~73 % of panel error and the only open
-#     problem. A panel without it cannot see the thing the tool is worst at.
+#   · **unstranded × capture-ON, the DEFERRED stratum** — **64.5 % of transcript error and 90 % of
+#     gene-level error** (measured 2026-08-13/14 on this panel; the "~73 %" once recorded here was
+#     the retired 36-condition ladder's figure). ⛔⛔ DEFERRED IS NOT DROPPED (owner, 2026-08-14):
+#     it is not a 0.8.0 development target until the three IN-SCOPE strata — unstranded × capture-OFF,
+#     stranded × capture-OFF, stranded × capture-ON — are fully optimised, but it REMAINS in every
+#     benchmark and must keep being reported. A panel without it cannot see the thing the tool is
+#     worst at, and it is the one cell where a mechanism that helps everywhere else can hide a
+#     catastrophe. ⛔ Read it PER STRATUM: a pooled total is mostly this cell and ranks nothing.
 #   · **at least THREE gDNA levels** — `TRAPS: a-single-level-panel-cannot-see-a-constant`. A channel
 #     that returns a near-CONSTANT scores well on a single-level panel and is refuted the moment a
 #     second level exists. That trap cost a whole analysis.
@@ -56,9 +79,16 @@
 #     f_gdna  0 %        5 %      50 %    98 %
 #     n_rna   10.0 M    9.50 M    5.0 M   0.20 M
 #
-# ⚠ THE FOCUS CONDITION IS `ss_0.50 + capture_on` (owner). It is where the error is largest and it
-# is the one to optimise; the stranded and capture-off cells are CONTROLS that must not regress, and
-# the `f_gdna = 0` rung is the false-positive check. ⛔ Do not tune on the controls.
+# ⛔⛔ THE FOCUS IS NO LONGER `ss_0.50 + capture_on`, AND THAT IS AN OWNER RULING (2026-08-14). This
+# file used to read "THE FOCUS CONDITION IS `ss_0.50 + capture_on` (owner). It is where the error is
+# largest and it is the one to optimise; the stranded and capture-off cells are CONTROLS that must
+# not regress" — retained here as the record of what the focus used to be. SUPERSEDED: `ss_0.50 +
+# capture_on` is the UNSTRANDED half of the strand axis and is the one DEFERRED stratum, so the three
+# in-scope cells are the development targets and this one is reported rather than ranked.
+# ⚠ Largest error is exactly why it needed a ruling rather than a follow-the-error loop: the tool's
+# answer there is FLAT, not noisy, so an optimiser overfits it rather than fixing it.
+# ⛔ The `f_gdna = 0` rung remains the false-positive check on every stratum, in scope or not, and
+# it is still true that you do not tune on a control.
 #
 # ⛔⛔ **THE INDEX IS BUILT `--no-mappability`, AND THAT IS A RULING, NOT AN OMISSION** (owner,
 # 2026-08-13). An alignable store is on disk and covers every contig here, but per-region mappability

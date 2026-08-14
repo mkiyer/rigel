@@ -25,7 +25,7 @@ arm              the BOUNDARY's own ``f_g``      ``struct_lock``     what the de
 
 ⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.head``'s ``mg_own``), and
 `region_init.strand_evidence` scopes it to REGION slots — so an BOUNDARY can only ever RELAY a gDNA level, never
-ORIGINATE one. That is `ROADMAP.md` §1 **reframe-and-level-together**= stated as code, and ``lock_only`` is its ceiling.
+ORIGINATE one. That is `ROADMAP.md` §1.1 **the-cancelling-pair** stated as code, and ``lock_only`` is its ceiling.
 
 The override reuses `region_init`'s own `own_precision` / `own_composition_logvar`, so there is no second
 implementation of the precision arithmetic to drift (TRAPS: two-docstrings-one-quantity).
@@ -532,7 +532,7 @@ def report(rows, spec_name, refit_iters):
     print()
     print("── 4. ⭐⭐ THE CHANNEL: is the BOUNDARY→exon gDNA message ALIVE? (`cm_g` at the EXON slots) ────")
     print("   `cm_g` is the gDNA MEASUREMENT precision ψ receives. 0 ⇒ the level is carried only as a")
-    print("   mode with no weight — `ROADMAP.md` §1 **reframe-and-level-together**=, a G1 BOUNDARY cannot ORIGINATE.")
+    print("   mode with no weight — `ROADMAP.md` §1.1 **the-cancelling-pair**, a G1 BOUNDARY cannot ORIGINATE.")
     exon_keys = [k for k in by if k.startswith("exon@")]
     print(f"\n   {'object':<26} {'arm':<14} {'cm_g':>12} {'c_tau':>12} {'% slots cm_g=0':>16}")
     for k in exon_keys:

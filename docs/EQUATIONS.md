@@ -4,6 +4,13 @@
 does not have to be reconstructed from the code, and so two modules cannot come to disagree about one
 quantity (TRAPS: two-docstrings-one-quantity).
 
+⚠ **ONE BLOCK IS AN EXCEPTION AND IT IS BANNER-HEADED AS ONE.** §3d–§3e derive the fragment-length
+**composition** channel, which is **DEFERRED POST-0.8.0** (owner, 2026-08-14) and is not in the tree —
+nor is the §3.1 2×2 it rests on solved anywhere in calibration. They are kept because a derivation is a
+record and it will be wanted after the release. ⛔ Nothing else here is optional in that way, and the
+deferral does **not** reach the length **model**: the opportunities, effective lengths and length moments
+of §1, §3.6b and §4 are live and shipping, and so is the second pass's per-fragment length term (§10).
+
 ⛔ **No measurements here.** Where a number appears it is a property of the *formula* (a limit, a
 degenerate case, a worked value that makes the shape concrete), never a property of a library.
 
@@ -104,6 +111,22 @@ Identified **iff the two MEAN lengths differ**; the second row being literally `
 2×2 well conditioned. `N / Σ(1/L)` is the abundance-weighted mean fragment length.
 ⛔ **So the identifying quantity is the GAP `μ_g − μ_r`, not either mean.** At equal means the channel
 carries exactly zero information at any depth (TRAPS: equal-lengths-carry-no-composition).
+
+⛔⛔ **AND THE CHANNEL THIS 2×2 DESCRIBES IS DEFERRED POST-0.8.0** (owner, 2026-08-14). Fragment length as
+a CALIBRATION composition channel is out of scope for the release, so the 2×2 above stands as a
+derivation and **no calibration module solves it**: outside `substrate.py` nothing in `calibration/` reads
+an `inv_length_sum` bank at all (⚠ `sj_inv_length_sum` *is* live — in the SECOND PASS, §10, which is a
+different question). ⛔ Do not propose it, do not rank it — §3d–§3e carry the banner, the verdict and the
+mechanism.
+
+⭐⭐ **AND THIS IS WHY THE STAGE-B LADDER GIVES gDNA AND RNA EQUAL FRAGMENT LENGTHS — the reason is
+STRONGER than the one that used to be written down.** It is not "the length channel is neutralised, so the
+residual is attributable to density and strand". It is that **the EM ALREADY USES THE FL DISTRIBUTION**: a
+large gDNA-vs-RNA length gap lets the EM assign fragments on LENGTH ALONE, **bypassing calibration
+entirely and MASKING its bugs**. Equal lengths FORCE the calibration phase to be exercised, and what
+calibration then has to work with is strand and density (plus propagation across objects, currently off).
+⚠ So equal lengths are a property of the INSTRUMENT and never a claim about real libraries; §3b records
+what that choice costs, and why a gapped panel is where that cost is measured instead.
 
 **3.2 Density is the frame-invariant currency; a fraction is not.** `ρ_c = C_c/E_c` agrees across the
 contained / crossing / spliced frames to ~0.36 % and does not degrade across 1×/30×/300× capture. The
@@ -318,7 +341,7 @@ unstranded. TRAPS: capture-inverts-the-counted-side.
 is worth **−0.000** on capture-OFF × unstranded and −0.033 on capture-ON × unstranded; the achievable
 form (the intron's share) captures 82 % of that. Carried to the 36-condition ladder it is **negative**:
 solvable mwae 0.0413 → 0.0426, confidently-wrong 20,173 → 22,336. ⭐ The identity above is not what
-failed — improving that BOUNDARY is simply not worth anything where the tool is wrong. `ROADMAP.md` §3.
+failed — improving that BOUNDARY is simply not worth anything where the tool is wrong. §9a is the general form of that reading.
 
 **3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN BOUNDARY HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
 2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `node_total_density`.)
@@ -396,6 +419,11 @@ composition ratio applied to a level). Correcting one of a cancelling pair is wo
 ⛔ **So this is priced jointly with that defect or not at all** — `EQUATIONS.md` §3.6c.
 
 **3.6b ⭐⭐ THE SJ AND CONTAINED FRAMES ARE A LEVER ON THE FRAGMENT-LENGTH MEAN, AT 0.62 %/bp.**
+
+⚠ **This is the length model as a DIVISOR — live, shipping, and NOT the deferred composition channel of
+§3d–§3e.** A fitted-mean error here moves an *opportunity*, and it does so whether or not anything ever
+reads length as evidence about composition.
+
 `E_J` and the exon's `E_r` are built from one pmf and are exactly consistent — measured 202.8 and 797.2 on
 a 1,000 bp exon, summing to 1,000.0. But they differentiate with **opposite sign**:
 
@@ -537,7 +565,7 @@ must come from instead.
 
 ## 3b. ⭐⭐⭐ THE CONSERVED MASS, AND WHY ONE SHARE FOR TWO COMPONENTS IS A BIAS
 
-Derived 2026-08-08 when `edge_unspliced_mass` landed. The accumulator deposits `+1` on every boundary a
+Derived 2026-08-08 when `boundary_unspliced_mass` landed. The accumulator deposits `+1` on every boundary a
 fragment crosses — `max(K, 1)` of them — so a sum over objects is an object-INCIDENCE count while the EM
 adds a FRAGMENT count. The mass bank closes that gap: it sums to ONE per fragment.
 
@@ -571,6 +599,10 @@ components by it gives
 is right to the fragment while the split is wrong (`TRAPS: conservation-misses-mis-attribution`). It is
 identically zero iff `share_g = share_r`, which holds whenever `f_g = f_r` — which is why an
 equal-length panel is *structurally* blind to it (`TRAPS: an-equal-length-panel-defeats-the-lift`).
+
+⚠ **That blindness is a PRICE THE LADDER PAYS ON PURPOSE, not an argument for giving it a length gap**
+(§3.1): a gap lets the EM assign on length alone and bypass the phase the ladder exists to exercise. The
+gapped `flgap` pair is where this bias is measured; the ladder is where calibration is measured.
 
 ⚠⚠ **THE SECOND BOUNDARY IS EXACT PER BOUNDARY AND NOT AT A LOCUS, AND THE GAP IS LARGE ENOUGH TO MIS-SIZE A
 CORRECTION** (measured 2026-08-08, `tests/calibration/test_prior_units.py`). `share_pooled` cancels from
@@ -629,23 +661,141 @@ fragment-length gap that biases every divisor is also the *only* θ-independent 
 AMBIG slot can get. ⛔ **So the tool may not be made gap-robust by shrinking the estimated gap** — that
 destroys the identifying quantity. Robustness must come from per-component divisors.
 
-## 3d–3e. ⛔ THE LENGTH CHANNEL'S PRECISION AND MOMENTS — REMOVED WITH THE CHANNEL
+⛔⛔ **AND THE EXIT THAT LAST PARAGRAPH IMPLIES — hand an AMBIG slot its composition from a local mean
+length — IS DEFERRED POST-0.8.0 AND MUST NOT BE PROPOSED FOR THE RELEASE** (owner, 2026-08-14). It is the
+same channel §3d–§3e derive, and it has been measured: A/B'd on the flgap pair on 2026-08-10 it is better
+on 7 of 8 conditions and *appears* to resolve the blindness (0.0324 → 0.5222 against a truth of 0.507) —
+and on the `g00` ZERO-gDNA control it reports **54–57 % gDNA in a library containing none**, because it
+returns a near-CONSTANT regardless of the truth (~0.5 on that arm, 0.59–0.72 on the gap sweep of §3d–§3e)
+while the flgap panel is all `g50` (`TRAPS: a-single-level-panel-cannot-see-a-constant`).
+⭐ **The identity above is untouched by that and is still live** — it is a statement about `E[w]`, which
+is a measurement, not about `f_g`, which is the inversion that was refused.
 
-**These two sections derived the precision and the moment corrections for `length_likelihood`, which was
-MEASURED TO A VERDICT AND DELETED on 2026-08-10 (`f470a570`).** They are removed rather than left as
-derivations for a module that does not exist — a reader looking for the length channel would otherwise
-find two pages of live-looking mathematics for it.
+## 3d–3e. ⛔⛔⛔ THE LENGTH CHANNEL — DEFERRED POST-0.8.0, AND THE DERIVATIONS ARE KEPT
 
-⛔ **Do not rebuild the channel.** Its answer was not a function of the pmf gap at all: at a gap of ~1e-9 bp
-it reported 0.72 / 0.59 / 0.72 on libraries whose truth was 0.00 / 0.00 / 0.57, and CLOSING the gap made
-every one worse. The mechanism is `TRAPS: a-linear-likelihood-emits-a-sign` — a Gaussian log-likelihood is
-asymptotically LINEAR in the composition, so its argmax is a sign saturated at a grid endpoint — and
-`TRAPS: amplitude-fades-influence-does-not` for why fixing the precision could never have been enough.
-The instruments that priced it are in `f470a570`.
+⛔⛔ **OWNER RULING, 2026-08-14. Fragment length as a CALIBRATION composition channel is OUT OF SCOPE for
+0.8.0, and 0.8.0 ships without it.** Do not propose it, do not list it as a candidate, do not rank it
+against anything, and do not open it as "the next thing to try" — it becomes admissible again only after
+the release, and only against the objections recorded below.
 
-⭐ **What survives, and where:** the opportunity-tilted length moments live in
-`calibration/effective_length.py`, where they were always a geometry rather than a composition claim.
-§3c above — the model-free local mean length — is unaffected and still live.
+⭐ **What is deferred, precisely, so the ruling is not over-read:**
+
+| | |
+|---|---|
+| ⛔ **DEFERRED** | `length_likelihood` as CALIBRATION's composition channel — a length row over the `λ` grid, the precision derived in §3d, the moment repair in §3e, and any per-slot `f_g` inverted from a local mean length (§3c) |
+| ⭐ LIVE | the length **model** as an OPPORTUNITY and a DIVISOR — `E_g`, `E_r`, `E_J` (§1), the four gDNA pools and the sj pool (§4), the frame gap §3.6b prices, and the opportunity-tilted moments in `calibration/effective_length.py`, where they were always a geometry rather than a composition claim |
+| ⭐ LIVE | `length_likelihood` in `src/rigel/second_pass.py` — a **DIFFERENT thing** with the same word in its name: the per-fragment assignment term of §10. The deferral does not touch it |
+
+⚠ **This is a SCOPE ruling about what may be proposed, not a code removal waiting to happen.** The module
+is already out of the tree: `calibration/length_likelihood.py`, its config flag, its wiring and the seven
+instruments that priced it went in `b7ed7a0b` (2026-08-10), byte-identical on every production path
+because the flag defaulted False.
+
+⭐⭐ **THE TWO SECTIONS BELOW ARE KEPT DELIBERATELY, AND DELETING THEM AGAIN IS THE WRONG MOVE.** They are
+a derivation and its measurements; a derivation is a record, and this one will be wanted after 0.8.0, when
+the objections should be the starting point rather than a surprise. ⚠ They were written on 2026-08-10
+while the module still existed, so read every present tense in them as of that date, and every script they
+name as recoverable from `f470a570` rather than runnable now. Module names are the current ones
+(`region_init`, not the `node_init` of the day).
+
+⛔⛔ **AND READ THE VERDICT BEFORE THE DERIVATIONS, because it is not a pricing question and §3d does not
+answer it.** The channel's answer was **not a function of the pmf gap at all**: at a gap of ~1e-9 bp it
+reported 0.72 / 0.59 / 0.72 on libraries whose truth was 0.00 / 0.00 / 0.57, and CLOSING the gap made
+every one of them worse. The mechanism is `TRAPS: a-linear-likelihood-emits-a-sign` — a Gaussian
+log-likelihood is asymptotically LINEAR in the composition, so its argmax is a sign saturated at a grid
+endpoint — with `TRAPS: amplitude-fades-influence-does-not` for why repairing the precision (§3d) could
+never have been enough on its own. ⭐ So a post-0.8.0 attempt starts at the MODE, not at the precision and
+not at the moments.
+
+### 3d. ⭐⭐⭐ THE LENGTH CHANNEL'S OWN PRECISION — smooth shrinkage, not a gate
+
+⚠ **DERIVED AND MEASURED, NOT LANDED** (2026-08-10). Recorded here so it is not re-derived; the reason it
+did not land is at the end.
+
+**The problem.** `length_likelihood` returns a log-likelihood row over the `λ` grid, and `region_init`
+registers its curvature as source 4 of a slot's composition precision. That curvature is measured
+NUMERICALLY — normalise `exp(row)` over the grid, take the variance, invert. ⛔ A flat row normalises to
+the UNIFORM distribution on the grid, so the precision has a FLOOR that is not information:
+
+    tau_flat  =  1 / Var(uniform over the lambda grid)  =  0.029016
+
+Measured at `g00` (zero gDNA, the two fitted pmfs **1.2 bp** apart): the channel reported bias **+0.66**
+and median `|Δ| = 1.0000` on 5.1 M fragments with `med tau = 0.029` — the grid's own width sold as
+evidence, on 43–99 % of slots. ⛔ And it lands where it does most harm: `tau_len` is deliberately
+UNGATED, because the channel exists to speak on AMBIG slots where every other channel is silent, so
+there a grid-width claim at an arbitrary grid EDGE is the ONLY evidence and it wins.
+
+⛔ **A wider gate is not the repair** (owner, 2026-08-09: this codebase prefers a channel that fades to
+one that switches, and three thresholds in this family have already been refused). The channel's own
+Fisher information fades on its own.
+
+**The derivation.** The likelihood is a bivariate Gaussian on `(Σu, Σw)` whose MEAN moves with `pi`:
+
+    mean = N·mu(pi),  mu(pi) = pi·mu_g + (1−pi)·mu_r      cov = N·V(pi)
+
+For a Gaussian whose mean depends on a parameter the information from the mean is
+`(dm/dpi)' Sigma^-1 (dm/dpi)`, and with `dm/dpi = N·Delta` where `Delta = mu_g − mu_r`:
+
+    I_pi  =  (N·Delta)' (N·V)^-1 (N·Delta)  =  N · Delta' V^-1 Delta
+    I_lam =  I_pi · [pi(1−pi)]²                              (push forward, pi = sigma(lam))
+
+⭐ `Delta' V^-1 Delta` is the **squared Mahalanobis distance between the two components' length
+signatures** — how distinguishable gDNA and RNA are by length here, in the metric the noise itself sets.
+
+⭐⭐ **Why it is the right shape.** `Delta → 0 ⇒ I → 0` QUADRATICALLY, so the channel fades smoothly as
+the two pmfs converge and `Delta = 0` exactly is merely the limiting case — the exact-inequality guard
+stops being load-bearing and becomes numerical hygiene. It is linear in `N`. It never touches the grid, so
+it has neither floor nor ceiling. And it introduces no constant.
+
+⛔ **It deliberately omits `½ tr[(V^-1 dV/dpi)²]`**, the heteroscedastic term from the covariance also
+moving with `pi` — the same `−½ log det` that displaces the peak by **0.32 at N = 1**. That term is
+`O(1)` in `N`, so it does NOT vanish at low depth where it is least trustworthy. Omitting it is the
+conservative reading.
+
+**Measured** (`length_channel_census.py` table ④, deleted with the channel), REGION slots at `N >= 50`:
+
+| | tabulated `tau` | analytic `I_lam` |
+|---|---|---|
+| `g00`, pmf gap **1.2 bp** | 0.0292 (43–99 % of slots pinned at the floor) | **0.0021** |
+| `flgap_long/OFF`, gap **110 bp** | 0.2032 | **10.68** |
+
+⭐ `tau` separates "no gap" from "real gap" by **7×**; the analytic form by **5,000×**, growing smoothly
+with `N` (0.0011 → 10.68).
+
+⛔⛔ **WHY IT DID NOT LAND.** `tau` is bounded at BOTH ends — a floor at `1/Var(grid)` and a ceiling at
+the grid spacing — so `I/tau` runs **0.04 → 52** across the depth range. The analytic form does not only
+shrink uninformative slots, it **amplifies confident ones 40–50×**, faithfully amplifying whatever the
+moments underneath say including their error (§3e). ⭐ It affects ONLY the precision, never the mode
+(`tau_lam` feeds `region_init.own_composition_logvar`; `fg_loc` comes from ψ) — ⛔ which is exactly why it
+was never the repair: the verdict in the banner above is a MODE failure, and a precision that is right
+about a mode that is wrong is worse, not better.
+
+### 3e. ⚠ THE LENGTH CHANNEL'S MOMENTS MUST DESCRIBE THE POPULATION IN ITS BANK
+
+The channel models the length distribution of fragments landing at an object as `g_c(w) ∝ f_c(w)·A(w)`
+— the library pmf times the opportunity. ⭐ The opportunity is exact for a UNIFORMLY placed component and
+that is verified rather than assumed: gDNA cannot splice, and off capture its predicted moments match the
+realised bank to **1.000** (REGIONs) and **0.996** (BOUNDARIES), at every region-length stratum.
+
+⛔ **The RNA arm is off by 2.3 % (REGIONs) and 7.5 % (BOUNDARIES), and it is NOT the pmf.** `pi(w)`'s
+de-tilt of the spliced pool is essentially exact — spliced-pool ÷ `pi(w)` reads **211.77** against a true
+library **212.20** with per-bin ratios 1.005 … 0.979 — and feeding the TRUE pmf in place of the fitted one
+leaves the residual almost unchanged (193.49 → 194.00; 246.57 → 247.19). What is missing is a
+per-population SELECTION term: at a BOUNDARY, `A(w) = w − 1` counts every crossing while the bank
+`boundary_unspliced` holds only the unspliced ones (one that spliced elsewhere is in `boundary_spliced`).
+At a REGION nothing is missing — containment excludes splicing structurally.
+
+⛔⛔ **AND THE OBVIOUS REPAIR IS NOT ADMISSIBLE.** Bounding the crossing opportunity by the containing
+exonic block closes 62–67 % of the BOUNDARY deficit with no free parameter, but it assumes every RNA
+molecule at a BOUNDARY is confined to an exonic block. RNA that has not spliced at the intron it meets
+runs straight through it and violates that; and the block's extent is per-TRANSCRIPT, which is what the
+EM solves, so the constraint is circular (owner, 2026-08-10). ⭐ `A(w) = w − 1` is the CONSERVATIVE
+bound — exactly right for gDNA always, exactly right for unspliced RNA always, and too permissive only
+for RNA that spliced elsewhere — so it errs in one direction for one sub-population. ⛔ Every ladder
+condition is `nrna_none`, i.e. the substrate most favourable to the tighter bound and the least
+representative; a repair validated there is not validated.
+⚠ `length_channel_census.py` regenerated every number here and `short_exon_fl_probe.py` priced the
+tighter bound; both were deleted in `b7ed7a0b` and are recoverable from `f470a570`.
 
 ## 4. Opportunity corrections for length pools
 
@@ -758,6 +908,26 @@ knob.
 `p(ρ_c) ∝ ρ_c^(c−1)` gives `Beta(c,c)`. `c = ½` (Jeffreys) is the only grid-width-stable choice — see
 TRAPS: no-prior-means-haldane for what omitting the term does instead.
 
+### 9a. ⛔⛔ WHY A SIMPLEX VERTEX IS UNREACHABLE WITHOUT EVIDENCE — and why that is not headroom
+
+ψ lands 5–8 % short of `f_g = 1` on unexpressed genes, and that gap was once ranked as the top defect. It
+is a **theorem, not a bug**:
+
+* every PROPER prior on `[0,1]` has a median strictly INSIDE `(0,1)`;
+* an object with zero composition evidence has posterior = prior;
+* ⇒ a vertex is unreachable there **in any coordinate, at any depth**.
+
+⭐ The empirical companion says the estimator is honest rather than merely stuck: measured per object,
+`|f_g − truth| / sd(f_g)` has median **z = 0.5–0.6** on both simplex vertices, so every wrong answer sits
+inside its own 1σ with a variance that is if anything conservative.
+⛔ **Therefore the ceiling a vertex-pinning arm measures is the value of MISSING INFORMATION, not headroom
+for a fix** — `scripts/design/vertex_ceiling.py` prices it and its docstring carries the number. ⛔ And
+"fit a prior to fix it" is circular: pass-0 must stay prior-free, because its purpose is to produce the
+substrate a prior is fitted ON. ⭐ The defect worth hunting is in the **confidently-wrong** population,
+which is a different set of objects.
+⚠ The one channel that could have supplied vertex evidence is closed independently: a certified-RNA count
+of zero is consistent with `f_g = 1` too, gated by `tests/calibration/test_certified_rna_licence.py`.
+
 ---
 
 ## 9b. ⭐⭐ THE EM's RNA PRIOR, AND WHY A SYNTHETIC NASCENT ENTITY GETS NONE
@@ -842,6 +1012,11 @@ identically zero still collects posterior mass. Design against ~0.16–0.47, not
 
 
 ## 10. The second pass's score
+
+⚠ **`f(L)` here is the SECOND PASS's per-fragment length term (`second_pass.py`'s `length_likelihood`
+array), and the 0.8.0 deferral of the length COMPOSITION channel (§3d–§3e) does not touch it.** The two
+share a word and nothing else: this one ranks one fragment's already-enumerated candidates against each
+other, and never claims a composition.
 
     score  =  ρ × f(L) × s
 

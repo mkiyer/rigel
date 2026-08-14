@@ -125,8 +125,8 @@ class CalibrationResult:
     #: sj a fragment spans. ⭐ **A consumer that wants the mass wants
     #: :attr:`sj_conserved_mass`**, which is this array converted; reading this one instead is
     #: wrong in proportion to how SPLICED the object is, and for a per-transcript weight that is exactly
-    #: the axis the answer varies over. ⚠ ``ROADMAP.md`` §2.5 renames it to ``count_rna_sj``
-    #: alongside the two ``mass_*_boundary`` incidences; that rename is its own commit.
+    #: the axis the answer varies over. ⚠ The two remaining ``mass_*_boundary`` incidences are due the
+    #: same INCIDENCE-vs-MASS rename; that is its own commit.
     #:
     #: ⭐ **Never deconvolved: a sj boundary is pure mature RNA by construction**, so there is nothing
     #: to split. It is the third population at a boundary, and it is routinely two orders of magnitude

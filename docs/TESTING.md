@@ -23,7 +23,7 @@ toy says WHY.** Localise on the panel, isolate on a toy, re-measure on the panel
 |---|---|---|
 | **judges** | **Stage A**, the accumulator | **Stage B**, the calibration solver |
 | fragment lengths | REALISTIC and DIFFERENT per origin (RNA 206 ± 98, gDNA 157 ± 125) | ⭐ **IDENTICAL for both origins** (206 ± 98, [50, 500], read 100) |
-| why that way | a length model can only be judged where the components' lengths actually differ | with the length channel neutralised, composition can only come from **density and strand**, so residual error is attributable to those |
+| why that way | a length model can only be judged where the components' lengths actually differ | ⭐⭐ **because the EM ALREADY USES THE FL DISTRIBUTION** — a large gDNA-vs-RNA length gap lets it split the two origins on LENGTH ALONE, BYPASSING calibration and MASKING bugs in it. Equal lengths FORCE calibration to be exercised. See below |
 | gDNA axis | {0, 100 %} rate ⇒ f_gdna ∈ {0, 0.5} | ⭐ **4 rungs, f_gdna 0 / 0.05 / 0.50 / 0.98** |
 | depth | 10 M RNA, gDNA **added on top** (so 10–20 M total) | ⭐ **10 M TOTAL, fixed**; the rate decides only the SPLIT |
 | config | `scripts/sim/configs/pilot.yaml` | `scripts/sim/configs/gdna_ladder.yaml` |
@@ -52,8 +52,54 @@ gDNA to **> 98 %** of all fragments and Rigel must be robust across all of it; 1
 is the ceiling, and the RNA-side abundance accuracy that thins at the top rungs is an accepted
 trade-off — it is a property of such libraries, not an artifact.
 
-⚠ **The focus condition is `ss_0.50 + capture_on`** (owner). Everything else is a CONTROL that must not
-regress, and the `g00` rung is the false-positive check. ⛔ Do not tune on the controls.
+### ⭐⭐ The four strata — THREE are in scope for 0.8.0 and ONE is DEFERRED
+
+⛔⛔ **OWNER RULING, 2026-08-14, AND IT SUPERSEDES THE EARLIER "the focus condition is `ss_0.50 +
+capture_on`"** (owner, retained here as the record of what the focus used to be). `ss_0.50` is the
+UNSTRANDED half of the strand axis, and that cell is the deferred one:
+
+| stratum | 0.8.0 |
+|---|---|
+| unstranded (`ss_0.50`) × capture **off** | ⭐ **IN SCOPE** — a development target |
+| stranded (`ss_0.99`) × capture **off** | ⭐ **IN SCOPE** — a development target |
+| stranded (`ss_0.99`) × capture **on** | ⭐ **IN SCOPE** — a development target |
+| ⛔ unstranded (`ss_0.50`) × capture **on** | ⛔⛔ **DEFERRED** — not a development target until the other three are fully optimised |
+
+⛔ **DEFERRED IS NOT DROPPED, AND THE DIFFERENCE IS THE WHOLE POINT.** The deferred stratum REMAINS in
+every benchmark and every measurement and must keep being REPORTED on every table; it simply is not what
+work is aimed at. If it improves as a side effect of the other three, that is a free win.
+
+⛔⛔ **AND IT IS WHERE THE ERROR IS, SO A POOLED PANEL NUMBER IS MOSTLY A STRATUM NOBODY IS OPTIMISING.**
+Measured 2026-08-13/14 on the rebuilt 16-condition ladder (noise floor 0.996–1.013): unstranded ×
+capture-ON carries **64.5 % of transcript error and 90 % of gene-level error**; the three in-scope strata
+carry the rest. ⛔ On it the tool emits a near-zero gDNA fraction REGARDLESS of truth — exon `f_g`
+**0.040 / 0.0016 / 0.0021** at `g05` / `g50` / `g98` against truths **0.054 / 0.518 / 0.982** — so it
+looks acceptable at low gDNA **by coincidence**, and a low-gDNA pass there is not evidence of anything.
+⭐ Report per stratum, never pooled (TRAPS: a-single-level-panel-cannot-see-a-constant is the same
+disease one axis over).
+
+⚠ The `g00` rung is the false-positive check on every stratum, in scope or not. ⛔ Do not tune on a
+control.
+
+### ⭐⭐⭐ WHY THE LADDER GIVES gDNA AND RNA EQUAL FRAGMENT LENGTHS
+
+⛔⛔ **THE REASON IS NOT THE ONE THIS FILE USED TO GIVE, AND THE WEAKER VERSION IS WHY THIS HEADING
+EXISTS** (owner, 2026-08-14). It used to say the length channel was "neutralised, so residual error is
+attributable to density and strand". That is a *consequence*, and stated alone it reads as tidiness.
+
+⭐⭐ **The reason is that the EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION.** Give gDNA and RNA
+visibly different lengths and the EM can assign fragments on **LENGTH ALONE** — it separates the two
+origins downstream, **BYPASSING calibration entirely**, and a panel built that way scores well while
+calibration is broken. ⛔ **A length gap MASKS calibration bugs.** Equal lengths remove that shortcut and
+**FORCE the calibration phase to be exercised**: with the two origins length-indistinguishable, the only
+channels left are **density** and **strand** — plus belief propagation across objects, which is currently
+off (`CLAUDE.md`, message propagation).
+
+⚠ **This is about the EM's use of the FL pmf, which is real and shipped.** The fragment-length channel as
+a **CALIBRATION composition channel** is a different thing: it does **not** exist in `src/`, it was A/B'd
+once and never shipped, and it is **DEFERRED POST-0.8.0** by owner ruling — do not read "the length
+channel is neutralised" as a claim that calibration has one. ⚠ `length_likelihood` in
+`src/rigel/second_pass.py` is per-fragment second-pass assignment and is a third, unaffected thing.
 
 ⛔ **"EQUAL" IS CONFIGURED, NOT ACHIEVED — AND THE RESIDUAL IS MEASURED, NOT ASSUMED.** Identical
 parameters still leave a realised gap of **+4.68 bp off capture / +3.57 on** (TRAPS: configured-lengths-are-not-realised: a mature
@@ -75,6 +121,25 @@ seconds. ⭐⭐ **It stays valid across every CALIBRATION change** — the oracl
 accumulator and the index — so one cache serves an entire solver-debugging campaign. It is keyed by the
 scan cache's own key, so a stale one is refused rather than silently used. ⛔ Rebuild it after any
 **accumulator** change (delete the directory; it repopulates).
+
+### ⭐⭐ EVERY SCENARIO MUST BE CACHED — a requirement of the 0.8.0 loop, not an optimisation
+
+⛔ **Owner ruling, 2026-08-14.** The focus of development is **CALIBRATION**, so the loop is *change
+calibration → re-run calibration → score it against oracle calibration*, and **nothing in that loop may
+re-scan a BAM**. A scan is minutes per condition and an oracle build was 4 minutes; a calibration re-run
+off a cache is seconds. Two caches carry it and ⭐ **`panel.py cache` builds BOTH**:
+
+| cache | holds | invalidated by |
+|---|---|---|
+| **scan** (`build_scan_cache.py`, `panel.py cache`) | the accumulator payload — scan once, calibrate many times | ⛔ any **accumulator** change (`payload_schema_digest`), the **index** (`graph_hash`, `reach_digest`) |
+| **oracle** (`ladder/oracle_cache/`) | the per-origin split truth every scoring instrument reads | ⛔ the **accumulator** or the **index**, and nothing else |
+
+⭐⭐ **Neither is invalidated by a CALIBRATION change** — that is precisely what makes a one-second
+calibration iteration possible, and it is why one cache serves an entire solver-debugging campaign.
+⛔ A scenario without both caches is not usable for development: `panel.py status` names which are
+missing, and an instrument fed a stale one REFUSES it rather than silently using it.
+⚠ The toy harness's donor bundle is the deliberate exception and for the opposite reason (§0b): it is a
+function of the calibration code that fit it, so caching it would serve a stale answer.
 
 ---
 
@@ -146,7 +211,9 @@ python scripts/design/toy_harness.py --spec all --donor <cond>     # the whole l
 ```
 
 ⚠ Any of the 16 ladder conditions can be the donor, and **which one you pick is an experimental
-variable** — it sets capture on/off, the strand regime and the gDNA level. Harvesting costs one scan +
+variable** — it sets capture on/off, the strand regime and the gDNA level. ⛔ **It therefore selects a
+STRATUM**: `ss_0.50 × capture_on` is the DEFERRED one (§0), so a mechanism isolated on that donor alone is
+not aimed at a 0.8.0 target. Harvesting costs one scan +
 one calibrate (~30 s) and is deliberately **not cached**: the bundle is a function of the calibration
 code that fit it, so a stored copy would go stale on exactly the changes the harness exists to test.
 ⭐ Harvest once per session and run many toys against it (`harvest()` then `run_toy()` in a loop).
@@ -314,6 +381,14 @@ consequences, all measured, and the sweep prints a ⛔ STARVED banner naming whi
 | ⭐⭐ an **boundary**, capture **ON** | ⭐⭐ **YES — LENGTHEN IT** | and this is the OPPOSITE of the capture-OFF row, which is why the two are listed separately. The gDNA budget is `rate × genome_length` while the probe footprint is **fixed**, and the sampler's on-probe share is `binding·overlap / (off_target·L + binding·overlap)` — so a longer chromosome hands capture a bigger budget to concentrate onto the same probes, and a boundary's count grows with `L` until that ratio saturates |
 | … and what else lifts a boundary? | ⭐ **probe geometry, then binding strength** | probes must **tile PER EXON** so each one abuts the exon↔intron boundaries and none straddles a sj (below). Raising `binding_per_base` also works but **un-matches the toy from the donor's chemistry**; lengthening keeps every harvested global intact, so it is the clean lever |
 
+⛔ **STAMP: the three tables that follow were measured 2026-08-04 on the RETIRED 36-condition ladder, and
+the donors `g01` / `g10` / `g25` / `g75` / `g90` NO LONGER EXIST** (§0 — the 2026-08-13 rebuild kept
+`g00` / `g05` / `g50` / `g98`, and the panel is now 16 conditions, **8** of them capture-ON). They are
+retained because the *mechanism* they establish is not panel-specific — capture moves the gDNA signal off
+the intergenic and intronic REGIONs and onto the BOUNDARIES abutting an exon, and lengthening the
+chromosome is the clean lever. ⚠ Re-measure the counts before quoting one; on the surviving rungs `g50`
+and `g98` bracket the solvable end and `g05` / `g00` the starved end.
+
 ⭐⭐ **Measured, `spliced_exons` × `g75 ss0.50 capture_on`, 12 kb → 120 kb, same donor and same
 chemistry** — this is the table that says capture-ON depletion is *the signal moving*, not starvation:
 
@@ -432,6 +507,11 @@ length, so the simulator draws the length marginal proportional to the capture-w
 `f_post(w) ∝ f_pre(w) · total_eff(w)`. ⛔ **Score against `truth_fragment_lengths.tsv`, never against
 `frag_mean`** — the configured parameters describe a library that was never sequenced (TRAPS: capture-selects-for-length).
 
+⛔ **AND THAT IS TWO DIFFERENT pmfs, WHICH BELONGS TO THE DELETED PILOT — the Stage-A panel.** The ladder
+on disk hands **both** origins the RNA pool's parameters, because a gDNA-vs-RNA length gap lets the EM
+split the origins on **length alone**, bypass calibration and mask its bugs — §0's *why the ladder gives
+gDNA and RNA equal fragment lengths*.
+
 ### ⚠ What the simulator still does NOT do
 
 | | consequence |
@@ -460,7 +540,7 @@ CFG=scripts/sim/configs/gdna_ladder.yaml       # the only panel on disk since 20
 python scripts/sim/panel.py status   --config $CFG              # ⭐ ALWAYS FIRST
 python scripts/sim/panel.py build    --config $CFG              # index + capture probes
 python scripts/sim/panel.py simulate --config $CFG --jobs 8     # ~21 min, ~16 GB
-python scripts/sim/panel.py cache    --config $CFG --jobs 8     # BOTH caches
+python scripts/sim/panel.py cache    --config $CFG --jobs 8     # ⛔ BOTH caches — MANDATORY, see §0
 python scripts/sim/panel.py score    --config $CFG --jobs 8 --arms base oracle noop
 python scripts/sim/panel.py report   --config $CFG --arms base oracle
 ```
@@ -468,7 +548,8 @@ python scripts/sim/panel.py report   --config $CFG --arms base oracle
 ⭐ **`status` is the command to run when you do not know where you are.** Every stage is expensive and
 resumable, and it prints what exists, what is missing, and which stage to run next. It reads real state
 — pointed at the pilot and the ladder on the same day it correctly reported the *inverse* cache pattern
-(pilot: scan cache 8/8, oracle 0/8; ladder: scan 0/36, oracle 36/36).
+(pilot: scan cache 8/8, oracle 0/8; ladder: scan 0/36, oracle 36/36). ⚠ Both panels in that record are
+pre-rebuild: the pilot is deleted and the ladder is now 16 conditions.
 
 ⚠ **`build` cannot carve the reference** — that needs the source genome/GTF the panel was region bound from, which
 the panel config does not name. It prints the exact `build_suite_reference.py` command and stops:
@@ -549,12 +630,25 @@ regions and no single-stranded ones, and truth files written to sd 0 / capture o
 
 ## 5. How results are evaluated
 
-⭐ **There are TWO evaluation questions and they need different instruments.**
+⛔⛔ **THE 0.8.0 DEVELOPMENT METRIC IS THE CALIBRATION RESULT SCORED AGAINST ORACLE CALIBRATION, NOT THE
+END-TO-END TRANSCRIPT NUMBER** (owner, 2026-08-14). The focus of development is calibration; the
+transcript table is a thermometer, and a change is judged on what it does to calibration against truth.
+
+⭐ **There are THREE evaluation questions and they need different instruments.**
 
 | question | instrument |
 |---|---|
-| how WRONG is the answer? — per transcript, per pool, against per-fragment truth | ⭐⭐ `panel.py score` / `report`, i.e. `quant_accuracy.py`. **The only scorer.** |
+| ⭐⭐ how wrong is **CALIBRATION**, against **ORACLE calibration**? — **the 0.8.0 metric** | `prior_vs_oracle.py` (calibration's endpoint, the `LocusPriors` the EM actually reads) · `solvability_audit.py` (pass-0) · `pass0_vs_oracle.py` for the T/C/P decomposition |
+| how WRONG is the end-to-end answer? — per transcript, per pool, against per-fragment truth | ⭐⭐ `panel.py score` / `report`, i.e. `quant_accuracy.py`. **The only end-to-end scorer**, and a thermometer rather than the target |
 | WHERE did the misassigned fragments go? | `rigel.sim.net_flow` (`analyze_net_flow`, `FlowData`) |
+
+⛔⛔ **AND A CEILING ONLY PRICES WHAT ITS ARM CAN REACH — measured 2026-08-13/14, this invalidated a
+whole family of them.** `effective_lengths_em` is built inside `_setup_geometry_and_estimator`, called at
+`pipeline.py:816` — **before** `assemble_priors` at `pipeline.py:839` — and every existing measurement arm
+patches `assemble_priors`, so the
+effective-length shrinkage has **never been priced by any ceiling**, and every ceiling number to date was
+measured with a wrong ruler installed. ⭐ Say which call your arm patches, and check it sits downstream of
+everything you mean to price.
 
 ⛔ **`rigel.sim.analysis` and `scripts/sim/evaluate_suite.py` were DELETED on 2026-08-11** (owner). That
 was a 1,589-line second scorer running the tool and rendering its own accuracy tables beside
@@ -582,8 +676,9 @@ python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,235 passing, 0 skipped, 7 xfail** (measured
-2026-08-11). **Any failure is a regression** — which is a stronger
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,404 passing, 0 skipped, 10 xfail** (re-derived
+2026-08-14; it was 3,397 on 2026-08-13 and 3,235 / 7 xfail on 2026-08-11, and `CLAUDE.md` carries every
+delta ACCOUNTED rather than adjusted). **Any failure is a regression** — which is a stronger
 and cheaper rule than counting expected ones. ⚠ Re-derive it rather than adjusting it; several tests are
 parametrised over doc, source and script files, so adding or retiring one moves the count by a few.
 

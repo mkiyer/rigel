@@ -50,8 +50,8 @@ an independent tilt and removes that blind spot."*
 ``(mu, mu)`` — proportional to ``(1, 1)``, exactly like the other two — so the 3x2 system is still rank
 one and ``length_sum`` removes nothing. It is an independent tilt only when the means already differ,
 which is precisely when the first two rows are already sufficient. `TRAPS: equal-lengths-carry-no-composition`
-says the same thing from the other side, and `ROADMAP.md` §1.4 closed the whole θ-independent-length
-programme by measurement on 2026-08-10.
+says the same thing from the other side, and `TRAPS: a-linear-likelihood-emits-a-sign` carries the
+measurement that closed the whole θ-independent-length programme on 2026-08-10.
 ⚠ **It survived because nothing consumed it**: the banks reached ``PopulationView.length_sum`` and
 stopped, so no test could disagree with the claim. A justification with no consumer is a claim with no
 gate — `TRAPS: a-guard-outlives-its-divisor`, in prose form.

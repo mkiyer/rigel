@@ -2,7 +2,25 @@
 #  THE FRAGMENT-LENGTH GAP PANEL — gDNA SHORT, RNA LONG
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# ⭐⭐ WHY THIS PANEL EXISTS. `length_likelihood` is OFF by default (`config.py:319`) and is the ONLY
+# ⛔⛔⛔ STAMP 2026-08-14 — READ THIS BEFORE THE HEADER BELOW, WHICH IS A HISTORICAL RECORD.
+#   · THE PANEL IS NOT ON DISK. It was DELETED 2026-08-13; the 16-condition `gdna_ladder.yaml` is the
+#     only panel that exists. Four instruments that read this pair are dark until it is rebuilt.
+#   · ⛔ THE CHANNEL THIS PANEL WAS BUILT TO PRICE IS DEFERRED POST-0.8.0 (owner ruling, 2026-08-14).
+#     The fragment-length / "length likelihood" channel AS A CALIBRATION COMPOSITION CHANNEL is not a
+#     0.8.0 candidate: do not propose it, list it or rank it. It was A/B'd on 2026-08-10 and PURGED
+#     the same day (`b7ed7a0b`), so the paragraph below describing it in the present tense describes
+#     something that no longer exists in `src/`. ⚠ `length_likelihood` in `src/rigel/second_pass.py`
+#     is a DIFFERENT thing (per-fragment second-pass assignment) and is untouched by the ruling.
+#   · ⚠ DEAD CITATIONS BELOW, left as written rather than silently repaired: there is no
+#     `config.py:319` (the config is `src/rigel/config.py` and the flag is gone), no `tau_len`, and
+#     `node_init` is now `region_init`. `TRAPS.md`'s rules are NAMED, never lettered — the "F3" below
+#     is `TRAPS: equal-lengths-carry-no-composition`, the "A8" is `TRAPS: can-the-benchmark-resolve-it`, and the
+#     "F7" is the never-assume-an-ordering rule now carried in memory.
+#   · ⭐ WHAT STAYS TRUE AND IS WHY THIS FILE IS KEPT: the one-thing-varied construction against the
+#     ladder, and the pair-only design. If the pair is ever rebuilt it is for `prior_yardstick.py`,
+#     NOT for the length channel, which is RETIRED until after 0.8.0 — `ROADMAP.md`'s scope block.
+#
+# ⭐⭐ WHY THIS PANEL EXISTS (as written 2026-08-07; see the stamp above). `length_likelihood` is OFF by default (`config.py:319`) and is the ONLY
 # channel that can give an UNSTRANDED slot its own composition evidence: it is theta-independent, so
 # the Schur complement that zeroes the strand term at an AMBIG node does not apply to it
 # (`simplex_logodds.py:519-524`), and `tau_len` enters `tau_lam` UNGATED (`node_init.py:304-312`).

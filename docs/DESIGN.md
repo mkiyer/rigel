@@ -16,7 +16,8 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **REGION** | a **contiguous genomic interval** — a region of the partition. Has a length in bp | `region` is tolerated: it is the index's own word for the same thing |
 | **BOUNDARY** | a **single genomic position** separating two adjacent REGIONs. Zero bp wide | `boundary` · `boundary` · `crossing` (as a noun for an object) |
 | **BOUNDARY** | ⭐ an accepted synonym for BOUNDARY, kept because the code and the earlier docs are full of it | — |
-| **sj** | ⚠ a **splice** sj — a *different* object on a *different* axis, directed donor→acceptor. Never a synonym for BOUNDARY | — |
+| **SPLICE JUNCTION** (`sj`) | ⚠ a splice junction — a *different* object on a *different* axis, directed `src → dst` in **GENOMIC** order (`src < dst`, always). Never a synonym for BOUNDARY | — |
+| **the sj's LOW end / HIGH end** — `_lo` / `_hi`, or `boundary_left` / `boundary_right` | the two BOUNDARIES a sj is anchored at, named in GENOMIC order, which is the order the code stores them in | ⛔ `donor` · `acceptor` — see below |
 | **slot** | one entry of the chain, which alternates REGION, BOUNDARY, REGION, BOUNDARY … A slot is a REGION **or** a BOUNDARY | — |
 | **step** | one adjacency move along the chain: REGION→BOUNDARY or BOUNDARY→REGION. So REGION→BOUNDARY→REGION is **two steps** | `hop` |
 | **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `node_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
@@ -27,6 +28,20 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **switched off** | an A/B in which one code path is disabled and the run repeated, to establish that it is the cause | `ablated` |
 | **splice-out** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA departs** through the sj there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `peel` |
 | **splice-in** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA arrives** through the sj there — the spliced flux joins the destination's population | ⛔ `graft` |
+
+⛔⛔ **`donor` / `acceptor` ARE BANNED, AND WHAT BANS THEM IS A MEASUREMENT** (owner ruling, carried here
+2026-08-14). They are 5′/3′ names and therefore **strand-dependent**, while every structure in this tree is
+stored in GENOMIC order. Measured on the suite index: `src < dst` holds on all **13,482** sj including all
+**6,527** minus-strand ones — the code is CORRECT — so an identifier such as `donor_cut` holds the
+**ACCEPTOR** for **48.4 %** of sj. ⛔ That is worse than a vague name: **the name lies about correct code**,
+and a reader who trusts it writes a sign error. Say `boundary_left` / `boundary_right`, or `_lo` / `_hi`.
+
+⚠ **The index's structural flag bits are the one place the words survive, and they are the hazard itself
+rather than an exemption.** `FLAG_DONOR_s` marks the genomic-LOW end of an `s`-strand intron on **both**
+strands, so on `−` it sits at the transcript's biological ACCEPTOR. `region_geometry.py` therefore states
+this at every consumer and names its arrays `_lo` / `_hi`; `test_splice_flux_reframe` gates it on a
+`−`-strand sj specifically. ⚠ `TESTING.md` §0b records the same trap from the toy side, where the bits
+decide the sign of a whole scenario.
 
 ⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Peel"
 and "graft" named two operators; the same BOUNDARY is a splice-out for a message travelling one way and a
@@ -52,6 +67,98 @@ first; this section is the canonical one.
 docstrings. They are being converged as each area is touched, not in one sweep: a blanket regex over that
 much prose mis-fires (`crossing_eff_length` and "crossing fragment" are correct; the fragment-length
 "anchor" is a third, unrelated meaning), and a 1,500-line mechanical diff is not reviewable.
+
+---
+
+## 0b. ⭐⭐⭐ THE 0.8.0 RELEASE SCOPE — owner ruling, 2026-08-14
+
+⛔ **This is the organising frame for the whole phase, and it is settled.** The shipped version is
+`0.7.1` (`pyproject.toml`); the target is **0.8.0**. `ROADMAP.md` ranks the work *inside* this scope;
+what is in it and what is out of it is decided here.
+
+### Three strata are the optimisation target, and the fourth is DEFERRED
+
+The panel crosses **strandedness × capture**, and the four cells are not equally healthy.
+
+> ⭐ **IN SCOPE FOR OPTIMISATION — three strata:** unstranded × capture-OFF, stranded × capture-OFF,
+> stranded × capture-ON.
+>
+> ⛔ **DEFERRED — unstranded × capture-ON.** It is not a development target until the other three are
+> fully optimised.
+
+⛔⛔ **DEFERRED IS NOT DROPPED, and that distinction carries the ruling.** The deferred stratum **stays in
+every benchmark and every measurement, and must keep being reported**: a panel that cannot see the cell
+the tool is worst at cannot tell a real win from a re-labelling, and it is the one cell where a mechanism
+that helps everywhere else can hide a catastrophe. ⭐ If it improves as a side effect of work on the other
+three, that is a free win — it is never the *justification* for a change. ⛔ It follows that every score
+is read **PER STRATUM and never pooled**: a panel total that averages the deferred cell into the three
+in-scope ones states neither quantity.
+
+⭐ **Why this shape.** Measured 2026-08-13/14 on the rebuilt 16-condition ladder (noise floor
+0.996–1.013): the error is CONCENTRATED — unstranded × capture-ON carries **64.5 % of transcript error
+and 90 % of gene-level error**, and the three in-scope strata carry the rest. ⛔ And that cell is not a
+gradient anyone can descend yet: on it the tool emits a near-ZERO gDNA fraction *regardless of truth*
+(exon `f_g` 0.040 / 0.0016 / 0.0021 at `g05` / `g50` / `g98` against truths 0.054 / 0.518 / 0.982), so it
+looks acceptable at low gDNA **by coincidence**. A stratum whose answer barely responds to the truth is
+one an optimiser overfits rather than fixes.
+
+### ⛔⛔ The LENGTH CHANNEL is deferred until after 0.8.0
+
+> ⛔ **The fragment-length / "length likelihood" channel as a CALIBRATION COMPOSITION channel is future
+> work. 0.8.0 ships WITHOUT it. Do not propose it, do not list it as a candidate, do not rank it.**
+
+⚠ **It does not exist in `src/`.** It was A/B'd once, on 2026-08-10, and never shipped — so this is a
+scope ruling and not a code removal, and any doc presenting it as "the next thing to try" is stale.
+
+⛔ **`length_likelihood` in `src/rigel/second_pass.py` is a DIFFERENT thing and is NOT affected** by this
+ruling: it is the per-fragment second-pass assignment factor of §4 below, the `f(L)` in
+`score = ρ × f(L) × s`. Same words, other axis.
+
+⚠ The two rulings interlock: the optimisation panel gives both origins the SAME length distribution (the
+ladder ruling below), so it is structurally incapable of pricing a length composition channel
+(TRAPS: equal-lengths-carry-no-composition). The panel and the scope agree.
+
+### CALIBRATION is the focus, and the metric is calibration against ORACLE CALIBRATION
+
+> ⭐ **The focus of development is CALIBRATION.** The metric is the **calibration result scored against
+> ORACLE calibration** — not the end-to-end transcript number.
+
+⭐ The end-to-end number stays a thermometer rather than a target (`SUCCESS.md` says why): it moves for
+reasons that have nothing to do with calibration — the EM's own evidence, the fragment-length scorer,
+depth — so a change to calibration must be scored where it acts. ⛔ The oracle is the origin-split truth,
+and the instruments that already own that comparison are `solvability_audit.py`, `pass0_vs_oracle.py` and
+`prior_vs_oracle.py`; a calibration change is not measured until one of them has spoken.
+
+⭐ **Scenarios must be CACHED so calibration can be re-run extremely efficiently.** A scan is minutes and
+a re-solve is seconds, and every mechanism this project has found came out of the fast loop —
+`scripts/design/build_scan_cache.py`, `scripts/design/flgap_study_cache.py`, and the `cache` stage of
+`scripts/sim/panel.py`, which builds the oracle cache beside the scan one.
+
+### ⭐⭐⭐ WHY THE LADDER GIVES gDNA AND RNA EQUAL FRAGMENT LENGTHS
+
+> ⭐⭐ **THE EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION.** A large gDNA-vs-RNA length difference lets
+> the EM assign fragments on LENGTH ALONE — **bypassing calibration entirely and MASKING bugs in it**.
+> Equal lengths FORCE the calibration phase to be exercised.
+
+⭐ It is structural rather than a preference: `scoring.cpp` carries **two** fragment-length lookup tables,
+`fl_log_prob_` for RNA and `gdna_fl_log_prob_` for gDNA, so where the two distributions are far apart a
+fragment's own length separates the components one fragment at a time and it barely matters what
+calibration supplied. The panel would then read green with calibration broken.
+
+⚠ **This reason is STRONGER than the one previously written down**, which was "the length channel is
+neutralised, so residual error is attributable to density and strand". That is true and it says what the
+panel MEASURES; it does not say what the panel PREVENTS. Where a doc still carries only the weaker form
+it is incomplete rather than wrong.
+
+⭐ **What calibration is left with is exactly STRAND and DENSITY** — plus belief propagation across
+objects, which is currently OFF (`SilentPolicy`, §6.1 below) — and on an unstranded library it is density
+alone, since the strand λ-term is exactly 0 at κ = ½ (§7 below). That is the substrate the three in-scope
+strata are optimised on.
+
+⛔ **"Equal" is a CONFIGURATION and never a guarantee**: identical parameters still leave a small realised
+gap, because an mRNA fragment must fit inside its transcript and gDNA need not. `TESTING.md` carries the
+measured residual and what it was priced at; ⛔ score the length axis against the simulator's own truth
+table, never against a nominal parameter.
 
 ---
 
@@ -88,7 +195,8 @@ essentially free and calibration is the whole budget.**
   **no merging** (`EQUATIONS.md` §1.7). 1 bp regions are legal and common — nothing may assume length > 1.
 - **Two boundary kinds.** *Contiguous* boundaries are the boundary between genomically adjacent regions: bidirectional,
   carrying gDNA + RNA, endpoints **implicit** (boundary `i` sits between region `i` and `i+1`). *Junction* boundaries
-  are directed donor→acceptor, **pure mature RNA** by construction, need explicit `(src, dst, strand)`,
+  are directed `src → dst` in GENOMIC order (§0 — never donor→acceptor), **pure mature RNA** by
+  construction, need explicit `(src, dst, strand)`,
   and carry no unspliced channel and no structural flags.
 - A splice jump deposits on its **sj boundary only** — never on the contiguous boundaries it splices over.
 - Boundaries always run `src < dst`, so **genomic order is a topological order and there is no graph traversal
@@ -119,25 +227,36 @@ byte-identity to it; where it and a document disagree, the reference wins.
 ⭐⭐ **A CHANNEL IS STORED WHERE A NAMED CONSUMER READS IT, AND NOWHERE ELSE** (owner-set, 2026-08-08).
 The populations therefore do NOT all carry the same channels, and that asymmetry is the design:
 
-    node_contained   count  inv_length_sum  length_sum
-    edge_unspliced   count  inv_length_sum  length_sum  mass
-    edge_spliced     count                              mass     certified RNA — nothing deconvolves it
-    sj         count  inv_length_sum                       inv_length_sum is LIVE in second_pass
+    region_contained    count  inv_opportunity_sum
+    boundary_unspliced  count  inv_length_sum       mass
+    boundary_spliced    count                       mass      certified RNA — nothing deconvolves it
+    sj                  count  inv_length_sum       mass[2]   inv_length_sum is LIVE in second_pass
 
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
-| `inv_length_sum` | `Σ 1/placements` (float64) | an exact model-free density **at a boundary**, and *not* one at a region — which is why it is not called `density` |
-| `length_sum` | `Σ L` | carries the only information about the gDNA/RNA split when the two components share a mean length; the other two carry **zero** there |
+| `inv_length_sum` / `inv_opportunity_sum` | `Σ 1/placements` (float64) | an exact model-free density **at a boundary**, and *not* one at a region — which is why it is not called `density` |
 | `mass` | `Σ (slice/L)/n_bounds` (float64) | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. ⭐⭐ A SJ BOUNDARY is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, sj included. `EQUATIONS.md` §3b |
 
-⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `node_spanning_*`, the two spliced-edge
-length moments, and `sj_length_sum`. Structs went `Region` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**,
-`JunctionEdge` 40 → **16 B**. ⚠ Deleting `node_spanning` has one structural consequence worth knowing:
-**no spliced fragment touches the region axis at all** now — a spliced fragment can never be *contained*,
-because both endpoints of an annotated intron are region bounds.
+⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `region_spanning_*`, the two
+spliced-boundary length moments, and `sj_length_sum`. Structs went `Region` 80 → **24 B**, `Boundary`
+80 → **48 B**, `SpliceJunction` 40 → **16 B**. ⚠ Deleting `region_spanning` has one structural consequence
+worth knowing: **no spliced fragment touches the region axis at all** now — a spliced fragment can never be
+*contained*, because both endpoints of an annotated intron are region bounds.
 
-⛔ **THE COUNTS KEEP BOTH GENOME-STRAND COLUMNS; THE LENGTH MOMENTS AND THE MASS KEEP ONE.** Which strand
+⛔⛔ **AND TWO MORE WENT ON 2026-08-13 — `region_contained_length_sum` and `boundary_unspliced_length_sum`
+— BECAUSE THEIR STATED JUSTIFICATION WAS FALSE, WHICH IS WHAT MADE THE DELETION CLEAN RATHER THAN LOSSY.**
+This section used to carry a `length_sum  Σ L` row claiming it *"carries the only information about the
+gDNA/RNA split when the two components share a mean length"*. It does not: at `mu_g = mu_r = mu` the third
+row is `(mu, mu)`, proportional to `(1, 1)` exactly like the other two, so the 3×2 system is still rank
+one and `length_sum` removes nothing. It is an independent tilt **only when the means already differ** —
+precisely when the first two rows already suffice (`TRAPS: equal-lengths-carry-no-composition`).
+⚠ **The claim survived because nothing consumed it**: the banks reached `PopulationView.length_sum` and
+stopped, so no test could disagree — a justification with no consumer is a claim with no gate. ⭐ The
+retraction is written where the claim was, in `scan_payload.py`'s module docstring, not merely deleted.
+
+⛔ **THE COUNTS KEEP BOTH GENOME-STRAND COLUMNS; THE INV-LENGTH SUMS AND THE BOUNDARY MASSES KEEP ONE —
+AND `sj_mass` IS THE ONE REVERSAL OF THAT, RECORDED BELOW.** Which strand
 a read aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed the
 two columns — so a strand axis there is half the bank wasted, and worse, a claim that the split is
 meaningful. The counts keep both because the strand model is a Beta-Binomial over them, per strand.
@@ -153,13 +272,41 @@ a reason to drop the column. ⭐ The discriminating information lives ONLY in th
 and an artifactual one at the same depth carry the same total. Gated by
 `test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`.
 
+⛔⛔⛔ **AND THAT SAME PREMISE REVERSES THE ONE-VALUE MASS RULING — ON THE SJ AXIS ALONE** (owner,
+2026-08-12; landed 2026-08-13). `sj_mass` is `mass[2]`, and it is the only mass with a strand column.
+⭐⭐ **The reversal is admissible because the PREMISE CHANGED, and the premise is recorded WITH the ruling
+so that neither direction is re-litigated.** The original ruling was *"nothing reads a mass per strand"*.
+That is now false for sj and only for sj: an **artifactual** splice junction accumulates SYMMETRICALLY on
+both strands, exactly as gDNA does, so the strand model the tool already has can detect one — but only if it
+is given a per-strand OBSERVABLE, and the count alone is not enough, because a count cannot separate a sj
+used by many short fragments from one used by few long ones. ⚠ The second reason is structural: without the
+bank, artifact filtering needs TWO passes over the BAM (tally, filter, re-accumulate the mass), which is the
+one thing the single-pass architecture exists to avoid.
+⛔ **The column is `col` — the SAME genome-strand column the count is deposited at** — so `mass[c]/count[c]`
+is a per-strand mean and not a ratio of two different populations. ⚠ Summed over columns it is
+byte-*comparable* to the single accumulator it replaced but **not bit-identical**: float addition is not
+associative and the per-column deposit order differs (~1e-15 relative).
+⛔ **SCOPE IT DELIBERATELY: the reversal is for the SJ axis, because that is where the consumer is.**
+Whether the BOUNDARY axis's `unspliced_mass` / `spliced_mass` should also go per-strand is a SEPARATE
+question with **no consumer named**, and `TRAPS: one-thing-varied` says do not bundle it — the one-value
+ruling still STANDS there.
+⭐ **`substrate` folds the strand axis at its own boundary**, so `PopulationView.mass` stays
+strand-agnostic and no consumer below it changed at all. The per-strand values are deliberately not
+re-exported there: their consumer is artifact filtering, which reads the payload.
+⭐ **The memory ledger of the bundle, and it goes DOWN.** `SpliceJunction` 16 → **32 B** for the second
+mass, against `Region` 24 → **16 B** and `Boundary` 48 → **40 B** for the two `length_sum` banks deleted
+with it — **net ~19 MB lower at genome scale**. `sj_mass` moved `SINGLE_COLUMN_AXES` → `BANK_AXES`, and
+since the shape digest is DERIVED from those two tables it moved itself.
+
 ⛔ **THE FIXED POINT IS GONE** (owner ruling, 2026-08-11: one numeric convention, and mixing two in one
 schema is worse than either). **A COUNT is an integer; a FRACTION is float64.** There is no scale
 constant and nothing decodes a bank. Headroom is no longer a question anyone has to answer.
 ⭐ It is also the more ACCURATE choice, measured against exact rational arithmetic on the
 reciprocal-opportunity theorem: the fixed point missed the answer by 7.0e-10 … 2.0e-07 where float64
-misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer. Memory is unchanged and still flat — ~85 MB at human
-scale (region 24 B, contiguous boundary 48 B, sj boundary 24 B), no hash map.
+misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer. Memory is unchanged **by this ruling** and still flat —
+~85 MB at human scale on the struct sizes of the day, no hash map. ⚠ The 2026-08-13 bundle above took a
+further ~19 MB off that; the current sizes are `Region` **16 B**, `Boundary` **40 B**, `SpliceJunction`
+**32 B**, and the `static_assert`s beside them are the only place worth reading them from.
 
 ⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `edge_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at a boundary, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
 
@@ -510,6 +657,11 @@ apart, so no threshold is being bought.
 
 Two measurements that shape every design choice above, both worth keeping because they are about the
 *structure* rather than about a particular library:
+
+⚠ **Both decompose the error by OBJECT CLASS.** The decomposition by STRATUM — which cell of
+strandedness × capture carries it, and therefore which three strata are the 0.8.0 optimisation target —
+is §0b above, and the two are read together: an object class carrying the error is a mechanism, a stratum carrying it
+is a scope.
 
 **Regions and boundaries measure different components.** The gDNA/RNA opportunity ratio is **0.25 at a crossing
 point** (4× RNA-selective) against **115.7 at a 100 bp region**, 25.5 at 147 bp, 2.5 at 300 bp, 1.19 at
