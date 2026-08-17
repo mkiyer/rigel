@@ -18,14 +18,32 @@ Two things landed and are COMMITTED. Suite **0 failed / 3,496 passed / 0 skipped
 ⛔ Both are *correctness* wins sitting inside the panel's 0.996–1.013 noise floor. **Neither moved the
 0.8.0 metric materially.** The items that would are `ROADMAP.md` §1 ranks 0–4, and rank 0 is half-run.
 
-## ⛔ WHAT TO DO FIRST — rank 0, and it is cheap
+## ⛔⛔ WHAT TO DO FIRST — `ROADMAP.md` §1 RANK 1, THE ZERO-gDNA FALSE POSITIVE
 
-`quant_accuracy.py --arm oracle_efflen` on the current tree AND on the pre-closure tree. The closure work
-moved calibration −0.4 % while `em_effective_length` moved up to **19.4 %**, so the ruler amplifies
-composition changes and nobody knows whether it amplifies signal or noise. ⛔ **One arm is not an A/B** —
-the old-composition arm needs `git stash` of the `simplex_logodds.py` diff. Two runs, ~25 min each.
+⛔ **AND THE RANKING WAS CORRECTED BY THE OWNER, WHICH IS WORTH RECORDING.** This doc first ranked the
+post-calibration ruler items on top. The owner's stance is to move through the pipeline IN ORDER — scan →
+accumulator → **calibration** → post-calibration → EM → output — and `CLAUDE.md`'s own 0.8.0 scope agrees:
+*"THE FOCUS IS CALIBRATION, and the metric is the calibration result against ORACLE CALIBRATION — not the
+end-to-end transcript number."* The ruler and the per-transcript prior are post-calibration; they move the
+THERMOMETER. Tuning them against a calibration with a 17.68 % hole would be tuning against a broken input.
 
-⭐ It re-ranks §1's rank 1 and rank 3, which are both ruler items. Do it before either.
+**MEASURED 2026-08-17, all four `g00` conditions through `calibrate`.** Truth is `f_g = 0.0000` at every
+object, so every gDNA fragment is a false positive with nothing to cancel it::
+
+    unstranded x capture OFF   1,898,257   17.68 %   <- IN SCOPE, and 63x the stranded rate
+    unstranded x capture ON      350,623    3.50 %
+    stranded   x capture OFF      29,692    0.28 %
+    stranded   x capture ON       21,348    0.21 %
+
+    REGION intergenic      0 (0.0 %)          REGION exon   1,164,526 (61.3 %, aggregate f_g 0.2541)
+    REGION intron          0 (0.0 %)          BOUNDARY        733,731 (38.7 %, 0.1192)
+
+⭐ It is LIVE in the shipped configuration — unlike the relay items, which sit behind
+`message_propagation = False` — and it is perfectly localised: the two classes the structural reference
+pins contribute NOTHING, and all of it sits where mature RNA can be.
+
+⚠ The oracle-effective-length diagnostic (§1 rank 0) is still half-run and still cheap; it is rank 0 only
+because it re-ranks two POST-calibration items and costs half an hour, not because it outranks this.
 
 ## ⚠ THE HONEST STATE OF THE TWO WINS
 
