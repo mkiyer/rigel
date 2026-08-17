@@ -318,8 +318,25 @@ def build_region_init(
     v_log_fg, v_log_fr = own_composition_logvar(fg_loc, tau_lam, struct_lock)
 
     # ⭐⭐ THE LOCATION IS UNCHANGED AND THAT IS DELIBERATE — only the PRECISION was ever broken.
-    #    ``rho_c = f_c*M/E_c`` keeps the composition identity ``sum_c rho_c*E_c = M`` exactly, which is
-    #    what the relay's mass pin exists to enforce; and the relay fuses in LINEAR density space
+    # ⛔⛔ **AND THE IDENTITY THIS COMMENT USED TO CLAIM IS FALSE — MEASURED 2026-08-17.** It read
+    #    *"``rho_c = f_c*M/E_c`` keeps the composition identity ``sum_c rho_c*E_c = M`` exactly"*. The
+    #    THREE-component form below uses ``f_pos``/``f_neg``, and ψ's composition DOES NOT CLOSE:
+    #    ``f_g`` is the posterior MEDIAN while ``f_pos + f_neg`` is ``1 − E[f_g]``, the posterior MEAN,
+    #    so ``SUM = 1 + median − mean`` — the skew — and therefore
+    #
+    #        sum_c rho_c*E_c  =  M * SUM ,   off by up to 9.5 % on a three-slot toy.
+    #
+    #    ⭐ The TWO-component statement in `region_geometry.region_rna_geometry` is a DIFFERENT claim and
+    #    is still true: it pairs ``f_g`` with ``1 − f_g``, which close by construction — which is also why
+    #    the published masses (`sweep`'s ``f_g*count`` / ``(1-f_g)*count``) conserve fragments exactly and
+    #    this defect reaches NEITHER them, NOR the EM prior, NOR `derive`.
+    #    ⚠ ``rho_pos``/``rho_neg`` have exactly one production consumer, `messages/head.py`, and
+    #    `message_propagation` is OFF — so this is dormant today and goes live with a per-transcript prior
+    #    reading composition per object (`sweep`'s own note at the boundary projection).
+    #    ⭐ The repair is to estimate the PARAMETERS and map: ``λ → f_g``, RNA total ``:= 1 − f_g``,
+    #    ``θ →`` the tilt SHARE. Closure is then structural. `ROADMAP.md` carries the ranking.
+    #    ⚠ What the relay's mass pin enforces is a different frame (`region_total_density`); and the
+    #    relay fuses in LINEAR density space
     #    (the scan's inverse-variance fuse), so ``rho = 0`` is perfectly expressible. A zero density was never the
     #    problem — an INFINITE precision on it was (TRAPS: a-zero-count-is-a-measurement).
     #    ⛔ A first version of this fix also moved the location to the ``Gamma(a+½, E)`` posterior mean

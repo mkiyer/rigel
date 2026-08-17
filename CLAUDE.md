@@ -282,9 +282,22 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,476 passing, 0 SKIPPED, 11 xfail** (re-derived
-2026-08-16, after `CalibrationConfig.structural_reference` landed and was DEFAULTED ON). **Any failure at
-all is a regression** — a stronger and cheaper rule than counting expected ones.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,496 passing, 0 SKIPPED, 11 xfail** (re-derived
+2026-08-17, after ψ's composition was made to close structurally). **Any failure at all is a regression** —
+a stronger and cheaper rule than counting expected ones.
+
+⛔⛔ **AND DERIVE THE FAILURE SET, NEVER EYEBALL THE TAIL** (`TRAPS: read-the-whole-failure-list`). pytest
+prints the last screen; a long summary scrolls the rest away. 21 failures were once reported here as
+"21 golden failures" from the visible eleven — **two were real**, and one of them was the most informative
+result of that session. Use::
+
+    python -m pytest tests/ -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c
+
+⚠ **It read 3,476 / 11 xfail before that, and the delta is `+20 = 17 own + 2 meta + 1 dev doc`, all of it
+`tests/calibration/test_composition_closes.py`** — re-derived with
+`pytest --collect-only -q | grep test_composition_closes`. ⛔ That commit also regenerated **21**
+`tests/golden/` scenarios; the diffs were read BEFORE regenerating (`em_effective_length` up to 19.4 %,
+`count` ≤ 1.1e-2) rather than waved through.
 
 ⚠ **It read 3,459 / 10 xfail before that, and the delta is `+17 passed / +1 xfail = +18 COLLECTED`, all
 of it `tests/calibration/test_structural_reference.py`** — 16 of its own cases (15 passing plus the strict

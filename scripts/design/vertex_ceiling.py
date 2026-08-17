@@ -163,7 +163,9 @@ _TAU_FREE = 1.0e-4
 #: filled by the wrappers, one call before `build_region_init` needs them.
 _CTX: dict = {}
 #: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
-_FIRED: dict = {"init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "loc": 0, "conditions": 0}
+_FIRED: dict = {
+    "init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "loc": 0, "psi_mean": 0, "conditions": 0,
+}
 
 
 # ── the plumbing: get the oracle's per-object truth and the geometry to `build_region_init` ────────────
@@ -308,6 +310,28 @@ def _location_estimate(chain, statics, geometry, region_arrays, variant: str):
     # floor on the structural slots, which is what their panel rows were measured with.
     m = np.clip(rho * eff_g / np.maximum(M, 1e-12), 0.0, 1.0)
     return np.where(mature, m, expected_g / (expected_g + 1.0))
+
+
+def _install_psi_mean():
+    """⭐⭐⭐ f_g AS THE POSTERIOR MEAN INSTEAD OF THE MEDIAN — the one change that makes ψ's composition
+    CLOSE, and this arm is what prices it.
+
+    ⛔ The composition does not close because ``f_g`` is the posterior MEDIAN while ``f_pos``/``f_neg`` are
+    posterior MEANS of ``1 − f_g``, so ``SUM = 1 + median − mean`` EXACTLY — the shortfall IS the
+    posterior's skew (verified to 5.8e-15). Swapping the median for the mean closes it by linearity of
+    expectation, at ZERO other cost in machinery: `_posterior_median_fg` is the single function both the
+    single-strand and the AMBIG solve call.
+
+    ⚠ It is not free: the median is measurably CLOSER to truth at both simplex vertices, and the
+    vertex population carries 49-83 % of in-scope error. That is what this arm measures."""
+    real = SL._posterior_median_fg
+
+    def as_mean(post, lam, fg):
+        _FIRED["psi_mean"] += 1
+        return np.asarray(post, np.float64) @ np.asarray(fg, np.float64)
+
+    SL._posterior_median_fg = as_mean
+    del real
 
 
 def _count_structural_builder():
@@ -618,7 +642,7 @@ def _compare(paths: list[Path]) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", default=None,
-                    help="base | noop | vertex_free | vertex_all | ref_c=<float> "
+                    help="base | noop | psi_mean | vertex_free | vertex_all | ref_c=<float> "
                          "| ref_loc={noop,struct,struct_grid,struct_soft,pooled,local}")
     ap.add_argument("--compare", nargs="*", type=Path, default=None)
     ap.add_argument("--conditions", nargs="*", default=None)
@@ -639,7 +663,11 @@ def main() -> int:
     arm = args.arm
     expect_fire: list[str] = []
     structural_reference = False
-    if arm == "config_struct":
+    if arm == "psi_mean":
+        # ⭐ the CLOSURE arm: f_g as the posterior mean, which closes the simplex exactly.
+        _install_psi_mean()
+        expect_fire = ["psi_mean"]
+    elif arm == "config_struct":
         # ⭐⭐⭐ THE SHIPPED PATH, NOT AN OVERRIDE. Nothing is patched: the flag is set on the config and
         #   `calibrate` threads it to `solve_chain`'s ONE `CompositionPriors` site. ⚠ The counter wraps the
         #   PRODUCTION builder rather than replacing it, so TRAPS: an-ablation-that-never-ran is still

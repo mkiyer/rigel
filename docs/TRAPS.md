@@ -41,11 +41,12 @@ need as *current* comes from `ROADMAP.md`, never from a number in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **129 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **132 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-16 AND THE INDEX IS COMPLETE: 129 entries, 129 bodies, and BOTH set differences
-print empty.** (It read 124/124 before the five rules the composition-reference work added to §D.)
+⭐⭐ **RE-DERIVED 2026-08-17 AND THE INDEX IS COMPLETE: 132 entries, 132 bodies, and BOTH set differences
+print empty.** (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
+simplex-closure work added three more.)
 ⛔⛔ **The "120 index entries against 125 rule BODIES" this paragraph used to record was a COUNTING
 ARTEFACT, not a gap — and that is the sharper lesson.** The body count came from matching `**<token>.` at
 the start of a line, which also matches a bolded NUMBER where prose wraps: `**64.5 % of transcript
@@ -170,6 +171,12 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
   CANNOT SEPARATE RNA FROM gDNA.
 - `a-priors-curvature-is-not-the-datas-information` — A PRIOR MAY NOT CONTRIBUTE TO A FISHER PRECISION.
   Feeding one in is a gate flip that releases the full count precision, and it credits data-free slots.
+- `deriving-one-coordinate-propagates-its-error` — closing a composition by deriving B from A makes B
+  inherit A's defects, including ones B's own estimator did not have.
+- `interpolate-on-the-axis-where-the-lattice-is-uniform` — a quantile interpolated on a non-uniform
+  transform of the grid is biased toward the middle, by 2.7e-03 at n_grid 60.
+- `read-the-whole-failure-list` — "21 golden failures" read off the last eleven lines; two were real.
+  Derive the failure set with grep, never eyeball the tail.
 - `a-four-decimal-print-is-not-a-zero` — 4.21e-05 printed as `0.0000` and a whole mechanism was built on
   it being zero. `repr` the number a diagnosis turns on.
 - `a-refutability-test-needs-the-refuting-channel-in-the-fixture` — a prior measured with no evidence that
@@ -1330,6 +1337,38 @@ which is what makes it usable pre-solve. ⛔ But its accuracy is exactly the acc
 peel scores **1.091**, i.e. worse than the uninformative reference. On the panel that became a **5.3×
 LOSS** on stranded × capture-ON. ⭐ So price the DENSITY against truth before believing anything built on
 it, and state the peel's verdict per stratum of that density rather than pooled.
+
+**deriving-one-coordinate-propagates-its-error. ⛔⛔⛔ CLOSING A COMPOSITION BY DERIVING ONE COORDINATE
+FROM ANOTHER MAKES THE DERIVED ONE INHERIT EVERY DEFECT OF THE SOURCE — INCLUDING ONES THE OLD ESTIMATOR
+DID NOT HAVE.** ψ's composition was closed by defining the RNA total as ``1 − f_g`` instead of reading it
+independently. Correct, and it removed a real defect — but ``f_g`` was the GRID-SNAPPED median, and the
+retired read-out had been the posterior MEAN, which on an evidence-free object is **exactly ½** because the
+reference is symmetric. So the fix silently traded an exact number for a snapped one: `test_relay_mass_pin`
+read ``R_own = 0.51256`` where it had been ``0.5``. ⭐ *The rule:* when you make coordinate B a function of
+coordinate A, enumerate what B used to be exact about and check A is exact about it too — the merge is only
+sound if A is at least as good, and "at least as good on average" is not the test. ⚠ The repair was not to
+undo the derivation but to fix the SOURCE (a continuous quantile), after which both were exact. Related:
+`TRAPS: interpolate-on-the-axis-where-the-lattice-is-uniform`.
+
+**interpolate-on-the-axis-where-the-lattice-is-uniform. ⛔⛔ A QUANTILE INTERPOLATED ON A NON-UNIFORM
+TRANSFORM OF THE GRID IS BIASED TOWARD THE MIDDLE, AND IT LOOKS RIGHT.** ψ's ½-quantile was interpolated in
+``f_g``-space, where the σ lattice spacing runs ~1e-5 at the ends and ~0.085 in the middle. A bin's midpoint
+in ``f`` is NOT the image of its midpoint in ``λ``, so a posterior concentrated on one grid point came back
+**biased toward ½ by 2.71e-03** at ``n_grid`` 60 (1.48e-04 at 256) on every interior point. Interpolating on
+``λ`` — where the lattice IS uniform — returns that posterior's own grid point to **2.2e-16**, and σ being
+monotone makes the mapped quantile exact. ⭐ *The rule:* do quantile arithmetic on the axis the grid was
+BUILT on, then map; never on the transformed axis. ⚠ It also restores the property the estimator exists for:
+``|median(1−f) − (1 − median(f))|`` went **8.45e-02 → 3.3e-15**. ⛔ And the case is not synthetic — an
+unsolved slot's fed-back belief produces a one-hot posterior, landing exactly on the bias.
+
+**read-the-whole-failure-list. ⛔⛔ 21 FAILURES WERE REPORTED AS "21 GOLDEN FAILURES" FROM THE LAST ELEVEN
+LINES OF THE OUTPUT. TWO WERE REAL.** pytest prints the tail; a long ``short test summary info`` scrolls the
+rest away, and reading the visible names and generalising is how a genuine regression is filed as expected
+churn. One was a broken caller (a changed return arity), the other was the composition defect above — the
+single most informative failure of the session, nearly dismissed. ⭐ *The rule:* derive the failure set,
+never eyeball it — ``pytest -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c`` prints one line per
+FILE and fits on a screen at any failure count. ⚠ Same shape as `TRAPS: re-record-the-baseline` one level
+up: the number was read faithfully and the METHOD of reading it was never checked.
 
 **a-priors-curvature-is-not-the-datas-information. ⛔⛔⛔ A PRIOR MAY NOT CONTRIBUTE TO A FISHER PRECISION,
 AND THREE SEPARATE MEASUREMENTS SAY SO.** `region_init`'s `tau_lam` is the DATA's information on the

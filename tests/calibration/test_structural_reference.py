@@ -379,11 +379,18 @@ def test_the_overturn_budget_holds_only_where_the_likelihood_is_informative():
     assert _overturn(m, 1.0, 0.0) > 0.15
     assert _overturn(m, 10.0, 0.0) < 0.03
     assert _overturn(m, 100.0, 0.0) < 0.005
-    # ⛔ the perturbation, and the whole reason the strength moved: in the FLAT regime the old lattice-wide
-    #    location still shifted a 5,000-fragment slot, and the declared-weight one stays under a grid step
+    # ⛔⛔ **AND THE FLAT-REGIME RESIDUAL LARGELY DISSOLVED WHEN `_posterior_median_fg` BECAME A
+    #    CONTINUOUS QUANTILE — A CLAIM THIS FILE USED TO MAKE AND NO LONGER CAN.** It read "the old
+    #    lattice-wide location still shifts a 5,000-fragment slot by 0.0058, 370x the budget". With the
+    #    snap gone that is **0.00018**, and the shipped location is **0.00011** — a factor of 1.6, both
+    #    two orders of magnitude under one K=60 grid step. So most of what looked like a 9.31-nat prior
+    #    surviving 5,000 fragments was the MEDIAN'S GRID SNAP, not the prior.
+    #    ⭐ The strength ruling therefore rests on the refutability sweep and its panel arm
+    #    (0.930 / 0.908 / 0.925, control bit-identical), NOT on this residual.
     old = float(expit(_L))
-    assert _overturn(old, 4750.0, 250.0) > 0.003, _overturn(old, 4750.0, 250.0)
-    assert _overturn(m, 4750.0, 250.0) < 0.085, _overturn(m, 4750.0, 250.0)
+    r_old, r_new = _overturn(old, 4750.0, 250.0), _overturn(m, 4750.0, 250.0)
+    assert r_old < 0.001 and r_new < 0.001, (r_old, r_new)
+    assert r_old > r_new, (r_old, r_new)  # the louder prior is still the louder one, barely
 
 
 def test_the_strength_is_independent_of_the_window_and_of_the_clamp():
@@ -557,8 +564,13 @@ def test_a_neutral_location_is_a_bit_identical_no_op_through_psi():
     structural reference claims to say nothing about, and the ~37,000 mature slots are exactly the
     population the gDNA landscape is fitted to serve.
 
-    ⭐ :func:`_location_term` therefore returns an EXACT zero at the neutral location. ⛔ The perturbation
-    is the near-constant the fix replaces: it must NOT be bit-identical, or there was nothing to fix."""
+    ⭐ :func:`_location_term` therefore returns an EXACT zero at the neutral location.
+
+    ⚠ **AND THE KNIFE-EDGE HAS SINCE BEEN REMOVED AT SOURCE**, so this guard is now defence in depth
+    rather than the only thing standing between the flag and a 0.0845 shift: `_posterior_median_fg` is a
+    continuous ½-quantile and no longer snaps to a lattice point, so a 1e-12 perturbation of the location
+    moves nothing. ⛔ It stays because the exact zero is the honest statement of "this term says nothing
+    here" and does not depend on how the quantile is read."""
     lam, _ = _logodds_grid(60, _L)
     assert np.all(_location_term(lam, np.array([_NEUTRAL_LOCATION]))[0] == 0.0)
 
@@ -587,11 +599,12 @@ def test_a_neutral_location_is_a_bit_identical_no_op_through_psi():
         base = solve(None, u, u if kw.get("allow_neg", True) else 0.0, **kw)
         neutral = solve(_NEUTRAL_LOCATION, u, u if kw.get("allow_neg", True) else 0.0, **kw)
         assert neutral == base, (u, kw, base, neutral)
-    # ⛔ the perturbation: a location a hair off neutral — the same magnitude of claim the float64
-    #   rounding used to make by accident — DOES move that slot, so the equalities above are the exact
-    #   zero doing its job and not the knife-edge being unreachable
-    nudged = solve(_NEUTRAL_LOCATION + 1e-12, 100.0, 100.0)
-    assert nudged != solve(None, 100.0, 100.0), nudged
+    # ⛔ the perturbation: a location that IS a real claim moves the slot, so the equalities above are the
+    #   neutral being genuinely neutral and not the solve being insensitive to `location` altogether.
+    # ⚠ A 1e-12 nudge no longer moves anything — that is the continuous quantile having removed the
+    #   knife-edge at source, and it is why this perturbation had to be re-specified.
+    assert solve(0.6, 100.0, 100.0) != solve(None, 100.0, 100.0)
+    assert solve(_NEUTRAL_LOCATION + 1e-12, 100.0, 100.0) == solve(None, 100.0, 100.0)
 
 
 def test_a_pure_gdna_intron_rises_when_the_prior_says_it_is_pure_gdna():

@@ -215,16 +215,116 @@ def _logodds_grid(n_grid: int, L: float = _DEFAULT_L):
     return lam, expit(lam)
 
 
-def _posterior_median_fg(post, fg):
-    """Per-region point estimate of ``f_g``: the grid MEDIAN — ``fg`` at the grid point where the CDF first
-    reaches 0.5. Transform-invariant and robust to the SKEW of the f_g posterior; the log-odds quantization
-    (Δf_g≈0.085 at n_grid=60) is de-quantized by the finer single-strand grid (``sweep_n_grid_single_strand``),
-    NOT by a different estimator (a sub-grid mode would silently under-call skewed/vertex-near posteriors).
-    ``post``: (m,K) normalized posterior; ``fg``=σ(λ). Returns (m,)."""
-    K = fg.shape[0]
-    cw = np.cumsum(post, axis=1)
-    idx = np.clip((cw < 0.5).sum(axis=1), 0, K - 1)
-    return fg[idx]
+def _posterior_median_fg(post, lam, fg):
+    """Per-region point estimate of ``f_g``: the posterior's ½-QUANTILE, read off the CDF.
+
+    Transform-invariant and robust to the SKEW of the ``f_g`` posterior, which is why ``f_g`` is a median
+    and not a mean — measured, the mean is worse at BOTH simplex vertices at every depth, and the vertices
+    carry 49–83 % of in-scope error (`vertex_ceiling.py --arm psi_mean`: 1.352 / 1.573 / 3.756 on the three
+    in-scope strata, 1.801 on the zero control).
+
+    ⭐⭐⭐ **IT IS A CONTINUOUS QUANTILE, NOT THE GRID POINT WHERE THE CDF FIRST REACHES ½.** The grid mass
+    is treated as a histogram — bin edges at the midpoints — and the crossing bin is interpolated. ⛔ The
+    predecessor returned ``fg[(cw < 0.5).sum()]``, which SNAPS to a lattice point and therefore carries up
+    to half a grid step of quantisation (Δf_g ≈ 0.085 at ``n_grid`` 60, 0.0196 at ``n_grid_ss`` 256). That
+    snap was not noise to be averaged away:
+
+    * on an EVIDENCE-FREE object the posterior IS the reference — symmetric, so its ½-quantile is exactly
+      ½ — and the snapped version returned the adjacent grid point instead. ⭐ Exact here by the symmetry
+      of ``σ``: ``σ(δ) + σ(−δ) = 1``, so the edge between the two central bins is exactly 0.5;
+    * at ``κ = ½`` the strand term is bit-flat, so EVERY slot is in that state and the snap was a constant
+      ±0.0423 (``n_grid`` 60) that did not shrink with depth — it was the whole closure defect there;
+    * and it propagates: `_compose` builds the RNA fractions from ``1 − f_g``, so a snapped ``f_g`` snaps
+      the whole composition. `test_relay_mass_pin`'s ``R_own = 0.5`` is what caught it.
+
+    ⚠ **NOT the "sub-grid MODE" this docstring used to refuse**, and the distinction is the point: a mode
+    is an argmax and can chase a single spike, which is what would under-call a skewed or vertex-near
+    posterior. A quantile cannot — it is monotone in the CDF and reads the same half-mass crossing the
+    snapped version was approximating.
+
+    ⭐⭐⭐ **THE INTERPOLATION IS DONE ON λ, NOT ON f_g, AND THAT IS WHAT KEEPS IT TRANSFORM-INVARIANT.**
+    ``σ`` is monotone, so the ½-quantile in ``λ`` maps through it to the ½-quantile in ``f_g`` exactly —
+    median equivariance, which is the whole reason ``f_g`` is a median. ⛔ Interpolating in ``f``-space
+    instead looks equivalent and is not: the σ grid is highly NON-uniform (spacing ~1e-5 at the ends,
+    ~0.085 in the middle), so a bin's midpoint in ``f`` is not the image of its midpoint in ``λ``, and a
+    posterior concentrated on one grid point comes back **biased toward ½** — measured **2.71e-03** at
+    ``n_grid`` 60 and 1.48e-04 at 256, on every interior point. On ``λ`` the same posterior returns its
+    own grid point to **2.2e-16**. ⚠ That case is not synthetic: an unsolved slot's fed-back belief
+    produces a one-hot posterior.
+
+    ``post``: (m,K) normalized posterior; ``lam`` the UNIFORM log-odds grid; ``fg`` = σ(λ). Returns (m,)."""
+    p = np.asarray(post, np.float64)
+    x = np.asarray(lam, np.float64)
+    # histogram edges on the UNIFORM λ lattice — the two outer half-bins mirrored.
+    edges = np.empty(x.shape[0] + 1, np.float64)
+    edges[1:-1] = 0.5 * (x[:-1] + x[1:])
+    edges[0] = x[0] - 0.5 * (x[1] - x[0])
+    edges[-1] = x[-1] + 0.5 * (x[-1] - x[-2])
+    tot = p.sum(axis=1, keepdims=True)
+    cdf = np.concatenate(
+        [np.zeros((p.shape[0], 1)), np.cumsum(p / np.where(tot > 0.0, tot, 1.0), axis=1)], axis=1
+    )
+    k = np.clip((cdf < 0.5).sum(axis=1), 1, x.shape[0])
+    lo = np.take_along_axis(cdf, (k - 1)[:, None], 1)[:, 0]
+    hi = np.take_along_axis(cdf, k[:, None], 1)[:, 0]
+    span = hi - lo
+    t = np.where(span > 0.0, (0.5 - lo) / np.where(span > 0.0, span, 1.0), 0.5)
+    return expit(edges[k - 1] + t * (edges[k] - edges[k - 1]))
+
+
+def _compose(f_g, w_pos, allow_pos, allow_neg):
+    """ψ's composition, as the MAP from its parameters → ``(f_pos, f_neg)``.
+
+    ⭐⭐⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE, AND THIS IS WHERE THAT IS WRITTEN
+    DOWN.** ψ solves a point on the 2-simplex, parametrised by
+
+        λ  — the gDNA-vs-RNA LEVEL, read out as ``f_g`` (the posterior median over the λ grid)
+        θ  — the RNA-internal TILT, a SHARE with no absolute scale, read out as ``w_pos``
+
+    and the composition is their image::
+
+        f_pos = (1 − f_g)·w_pos        f_neg = (1 − f_g)·(1 − w_pos)
+
+    ⛔⛔ **CLOSURE IS THEREFORE STRUCTURAL — IT CANNOT FAIL**, because the map lands on the simplex.
+    ``f_g + f_pos + f_neg = 1`` identically (measured: ``|SUM − 1| ≤ 1.11e-16`` on both ψ paths at every
+    κ and depth), so no consumer has to check it and no arithmetic has to be renormalised.
+
+    ⚠ **WHAT THIS REPLACED, AND WHY IT WAS WRONG.** ψ used to read out all THREE coordinates
+    independently — ``f_g`` as the posterior MEDIAN over λ, and ``f_pos``/``f_neg`` as posterior MEANS of
+    the grid quantity ``1 − f_g``. Mixing a quantile with expectations does not land on the simplex:
+
+        SUM = median(f_g) + (1 − mean(f_g)) = 1 + median(f_g) − mean(f_g)
+
+    i.e. **the closure error was exactly the posterior's SKEW** (verified to 5.8e-15), and only 74–77 % of
+    real objects closed. ⛔ It was never a decision: the median for ``f_g`` was argued for, and the RNA
+    fractions were never chosen at all — they fell out as expectations of a grid array.
+
+    ⛔ **The repair is NOT "take means everywhere".** That closes too, by linearity of expectation, and was
+    measured on all 16 ladder conditions at **1.352 / 1.573 / 3.756** on the three in-scope strata and
+    **1.801** on the zero control: the median is closer to the truth at both simplex vertices, where
+    49–83 % of in-scope error lives. ⛔ Nor is it renormalising three numbers at publication, which would
+    make a 15 %-short object indistinguishable from a solved one. Nothing here is rescaled: ``f_g`` and the
+    RNA total are exact complements *by parametrisation*, and the tilt is estimated as a SHARE because a
+    share is what it is.
+
+    ``w_pos`` is the + strand's share of RNA — the RNA-mass-weighted posterior share on an AMBIG slot.
+    ⛔ **ADMISSIBILITY IS ENFORCED HERE, NOT BY THE CALLER**, because a share that ignores it loses RNA
+    silently: with only the + strand free, ``w_pos = ½`` would place half the RNA on a forbidden strand,
+    where it is zeroed and simply vanishes. The tilt of a single-strand slot is structurally locked, so
+    the admissible strand takes the whole RNA total whatever ``w_pos`` says. ⚠ A slot with NEITHER strand
+    admissible has no RNA to place and returns ``(0, 0)`` — its composition is ``f_g`` alone, which is the
+    honest statement and not a closure failure (nothing dispatches such a slot to a ψ solve anyway).
+    """
+    fr = 1.0 - np.asarray(f_g, np.float64)
+    ap = np.asarray(allow_pos, bool)
+    an = np.asarray(allow_neg, bool)
+    # ⛔ ``w_pos`` is a SHARE, so it is clamped to [0,1] here rather than trusted. Unclamped, a share
+    #   outside the range produces a NEGATIVE fraction that still sums to 1 — a composition that passes a
+    #   closure check and is nonsense. ⚠ Not reachable from the shipped AMBIG caller (it is a ratio of two
+    #   non-negative expectations), which is exactly why the constraint belongs where it can be seen.
+    w = np.clip(np.asarray(w_pos, np.float64), 0.0, 1.0)
+    w = np.where(ap & an, w, np.where(ap, 1.0, 0.0))
+    return np.where(ap, fr * w, 0.0), np.where(an, fr * (1.0 - w), 0.0)
 
 
 def _slice_rows(a, msk):
@@ -668,7 +768,9 @@ def _local_loglik_logodds(
     #    prior. ⛔ The reference IS written, always, in both arms; this comment read "and NO reference
     #    prior … ψ_λ = strand + logP_g + logP_r, bare" until 2026-08-15, describing a retired design in
     #    which a fitted prior REPLACED the reference. ⇒ ψ_λ = strand + (ref + logP_g) + (ref + logP_r). ──
-    return psi, f_pos, f_neg
+    # ⭐ ``f_pos``/``f_neg`` are LOCAL to the strand mixture and are no longer returned: the caller builds
+    #   the composition from the PARAMETERS (:func:`_compose`), so it never needed the grid arrays.
+    return psi
 
 
 def _solve_regions_logodds(
@@ -696,12 +798,14 @@ def _solve_regions_logodds(
 ) -> RegionDeconv:
     """The log-odds 1-D per-region solve for SINGLE-STRAND regions.
 
-    Read-out: ``f_g`` = posterior median over the ``λ`` grid; ``f_pos``/``f_neg`` = posterior MEANS;
+    Read-out: ``f_g`` = posterior median over the ``λ`` grid, and ``f_pos``/``f_neg`` are its IMAGE under
+    :func:`_compose` — a single-strand slot's tilt is structurally locked, so the RNA total ``1 − f_g``
+    goes entirely to the admissible strand and the composition closes by construction.
     ``*_frac_var`` = the grid-moment ``Var(log f_c)``. The dead strand is locked-certain (var 0); zero-mass
     regions report 0. ``f_g_ref``/``f_pos_ref``/``f_neg_ref`` (per-region) are the count-zero-info variance
     freeze reference (§2). AMBIG regions are out of contract — masked out."""
     lam, fg = _logodds_grid(int(n_grid), L)
-    psi, f_pos_g, f_neg_g = _local_loglik_logodds(
+    psi = _local_loglik_logodds(
         u_pos,
         u_neg,
         allow_pos,
@@ -727,10 +831,10 @@ def _solve_regions_logodds(
     an = np.asarray(allow_neg, bool)
     post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
     # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
-    f_g = _posterior_median_fg(post, fg)
-    # composition: f_g median + f_pos/f_neg posterior MEANS (the current-state fractions).
-    f_pos = np.sum(post * f_pos_g, axis=1)
-    f_neg = np.sum(post * f_neg_g, axis=1)
+    f_g = _posterior_median_fg(post, lam, fg)
+    # ⭐⭐ THE COMPOSITION IS THE MAP FROM THE PARAMETERS — see :func:`_compose`. A single-strand slot has
+    #    ONE degree of freedom (λ); its tilt is structurally locked, so the RNA total goes entirely to the
+    #    admissible strand and the simplex closes by construction.
     # precision state = Var(log f_c), moment-matched on the grid. The dead strand is locked-certain
     # (f=0) → var 0. Capping is AUTOMATIC: the send prec_log = 1/(var+σ²+pois) ≤ 1/(σ²+pois).
     Lg = _log_fg(lam)
@@ -741,10 +845,13 @@ def _solve_regions_logodds(
     var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
     var_pos = np.where(ap & ~an, var_act, 0.0)
     var_neg = np.where(an & ~ap, var_act, 0.0)
+    # ⛔ ``_compose`` runs on the CLIPPED ``f_g``, so the RNA total is its exact complement and the clip
+    #   on ``f_pos``/``f_neg`` — which is what used to break the simplex — has nothing left to do.
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
-    f_neg = np.where(active, np.clip(f_neg, 0.0, 1.0), 0.0)
+    f_pos, f_neg = _compose(f_g, 0.0, ap, an)
+    f_pos = np.where(active, f_pos, 0.0)
+    f_neg = np.where(active, f_neg, 0.0)
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
@@ -888,17 +995,23 @@ def _solve_ambig_logodds(
     # θ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
     psi_lam = _lse(psi, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
-    f_g = _posterior_median_fg(post_lam, fg)
+    f_g = _posterior_median_fg(post_lam, lam, fg)
     # precision state = Var(log f_g) over the θ-marginal λ-posterior (TRAPS: two-gaussians-one-latent).
     mLg = post_lam @ log_fg_grid
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
-    # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
+    # Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64), and the TILT
+    # SHARE that :func:`_compose` maps into the composition.
     flat = psi.reshape(psi.shape[0], -1)
     post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m,K,Kt) f32
     fp_grid = fpk[None, :, :]
     fn_grid = fnk[None, :, :]
-    f_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
-    f_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
+    # ⭐ ``f_pos_kt + f_neg_kt = 1 − f_g`` POINTWISE, so these two sum to the posterior MEAN of the RNA
+    #   total and their RATIO is the RNA-mass-weighted posterior mean of the + share — which is the
+    #   natural estimator of θ, since the tilt matters in proportion to how much RNA is there.
+    m_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
+    m_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
+    rna = m_pos + m_neg
+    w_pos = np.where(rna > 0.0, m_pos / np.where(rna > 0.0, rna, 1.0), 0.5)
     mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
     mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
     var_pos = np.maximum(
@@ -907,10 +1020,15 @@ def _solve_ambig_logodds(
     var_neg = np.maximum(
         np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
     )
+    # ⭐ AMBIG: BOTH strands are admissible, so the tilt share splits the RNA total between them.
+    #   The clip is on ``f_g`` ALONE — ``f_pos``/``f_neg`` are its image under :func:`_compose` and are
+    #   in [0,1] by construction, so clipping them independently (which is what used to break the
+    #   simplex) has nothing left to do.
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
-    f_neg = np.where(active, np.clip(f_neg, 0.0, 1.0), 0.0)
+    f_pos, f_neg = _compose(f_g, w_pos, np.ones_like(active), np.ones_like(active))
+    f_pos = np.where(active, f_pos, 0.0)
+    f_neg = np.where(active, f_neg, 0.0)
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)

@@ -97,7 +97,8 @@ earns its place only by saying *do not work here*, and a number nobody can attri
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — regions, contiguous boundaries and sj boundaries together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no boundary deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
-| ✅ **the SUITE is green with no skips** | ⭐ **0 failed / 3,476 passed / 0 skipped / 11 xfail** (re-derived 2026-08-16 after `structural_reference` landed and was defaulted ON, which also regenerated 6 `tests/golden/` scenarios); it was **3,459** earlier that day and **3,420** on 2026-08-15 after the object-composition work and **3,412** on 2026-08-14 after the ruler work and **3,404** earlier that day and **3,397** on 2026-08-13 and **3,235 / 0 / 7** on 2026-08-11, and every delta is ACCOUNTED file by file in `CLAUDE.md`, never adjusted. Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 interrogated on 2026-08-11 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries that split; ⚠ the three added since have not been interrogated the same way |
+| ✅ **ψ's COMPOSITION CLOSES — STRUCTURALLY** | ⭐ **NEW 2026-08-17.** `simplex_logodds._compose` builds the composition as the IMAGE of ψ's two parameters (`λ → f_g`, RNA total `:= 1 − f_g`, `θ →` the tilt share) instead of reading three coordinates independently, and `_posterior_median_fg` is a CONTINUOUS ½-quantile read on the λ lattice. Measured on real conditions: **100.00 % of published objects close**, both axes, every class, min/p5/p95 exactly 1.0000 — against **74.7 % / 77.2 %** before. Panel per stratum **0.999 / 0.995 / 0.996**, deferred 1.000, `g00` control **0.995**, pass-0 unstranded **0.993** | ⚠ Inside the 0.996–1.013 noise floor, so read it as neutral-to-marginally-better on accuracy; the WIN is correctness and simplicity (`DESIGN.md` §6c). ⛔ Taking MEANS everywhere also closes and is REFUSED at 1.352 / 1.573 / 3.756 and 1.801 on the control |
+| ✅ **the SUITE is green with no skips** | ⭐ **0 failed / 3,496 passed / 0 skipped / 11 xfail** (re-derived 2026-08-17 after ψ's simplex closure landed, which regenerated 21 `tests/golden/` scenarios); it was **3,476** after `structural_reference` was defaulted ON, **3,459** before that, and **3,420** on 2026-08-15 after the object-composition work and **3,412** on 2026-08-14 after the ruler work and **3,404** earlier that day and **3,397** on 2026-08-13 and **3,235 / 0 / 7** on 2026-08-11, and every delta is ACCOUNTED file by file in `CLAUDE.md`, never adjusted. Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 interrogated on 2026-08-11 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries that split; ⚠ the three added since have not been interrogated the same way |
 | ✅ **ONE NUMERIC CONVENTION** | ⭐ a COUNT is an integer, a FRACTION is float64. No fixed point, no scale constant, nothing decodes a bank (owner, 2026-08-11) | ⭐ float64 is **1e5–7e5× MORE accurate** than the fixed point it replaced, measured against exact rational arithmetic. ⛔ The ~2.6 % once quoted against float is a **float32** number — `TRAPS: integer-channels-reproduce` |
 | ⭐ **calibration, the THREE IN-SCOPE strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × capture-ON/OFF and unstranded × capture-OFF — **the 0.8.0 target**. ⚠ 36-condition ladder, RETIRED 2026-08-13 |
 | ⛔ **calibration, unstranded × capture-ON — the DEFERRED stratum** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short. ⭐ Re-measured 2026-08-13/14 on the rebuilt ladder at the exon objects: `f_g` **0.040 / 0.0016 / 0.0021** at `g05 / g50 / g98` against truths **0.054 / 0.518 / 0.982** — a NEAR-ZERO answer regardless of truth, which **looks acceptable at low gDNA by coincidence** | not noisy; a flat boundary. ⛔⛔ **DEFERRED for 0.8.0** (owner, 2026-08-14) — reported on every panel, not a development target until the other three are optimised. The length channel was tried and refused, and is retired until after 0.8.0 (the scope block above) |
@@ -152,12 +153,13 @@ stratum, so ranking on it ranks the thing 0.8.0 does not ship.
 
 | rank | the work | why it is there |
 |---|---|---|
+| **0** | ⏳ ⭐⭐ **FINISH THE ORACLE-EFFECTIVE-LENGTH DIAGNOSTIC — half an hour, and it re-ranks 1 and 3** | ⚠ **STARTED, NOT FINISHED (2026-08-17).** ψ's closure work moved the calibration metric −0.4 % while `em_effective_length` moved up to **19.4 %** on the golden scenarios — so the ruler AMPLIFIES composition changes and we do not know whether it amplifies signal or noise. ⭐ The test: `quant_accuracy.py --arm oracle_efflen` on the CURRENT tree and on the pre-closure tree (`git stash` the two-file diff), and see whether substituting a perfect effective length erases the difference. ⛔ It needs the stashed-tree arm or it measures nothing — one arm is not an A/B. ⚠ Two runs, ~25 min each. **Do this before ranking 1 or 3**, because both are ruler items and this says which of them is real |
 | **1** | ⭐⭐⭐ **BUILD THE `U` RULER ARM — the oracle ruler is NOT the ceiling at capture-OFF** | the ruler arm is built and the panel is run (§0). Its verdict is that a *perfect-composition* ruler is **2.5–2.7× WORSE** on the two capture-OFF in-scope strata, because at capture-OFF the correct factor is **1.000** and the oracle ruler (0.919–0.924) is *further* from it than the shipped one (0.932–0.939). ⭐ The arm that would actually price the ruler is the **uniform-gDNA null**, measured at **0.9963–0.9967** and derivable with no fitting |
 | **2** | ⭐⭐⭐ **THE RELAY CARRIES A CORRECT STRUCTURAL CLAIM ACROSS A POPULATION CHANGE — a confirmed bug, and the precondition for message propagation ever returning** | `HeadPolicy`'s composition licence implements *"where two objects do not measure the same population, the composition may not be imputed"* for transcript TERMINI only (`terminus_flank_gain`). `mrna_active` flipping across a hop is a population change too and is not checked, so a correct "pure gDNA" claim at an intron is relayed into the adjacent exon and drives it to a confident wrong vertex. ⭐ Localised: nulling `lam_channel` restores the right answer exactly, `cm_g`/`cm_p` stay 0. ⚠ Independent of the prior's strength — 0.7661 at both `m = 0.75` and `m = σ(L)`. Recorded as a strict xfail in `tests/calibration/test_structural_reference.py`. ⛔ Hypothesis worth testing, not a claim: this is a candidate mechanism for part of the +155 % that keeps `message_propagation` off |
 | **3** | ⭐⭐⭐ **THE SHRINKAGE AT `g00`, REPAIRED UPSTREAM** | 0.345 where the truth is exactly 1.000, on 13,673 of 15,669 transcripts, **including capture-OFF where the contract says 1** — and it is a SYMPTOM: feed the shipped function correct composition arrays and it returns the correct factor. ⛔ Repair the composition, not the function |
 | **4** | ⭐⭐⭐ **PASS THE PER-TRANSCRIPT PRIOR LANE — and the weighting function is the work** | built end to end, omitted at the production call site, so the EM carries **zero** per-transcript information. The prize is the largest in-scope one measured: **0.37–0.58** gene-level on the three strata and false-positive mass **100–200×** down |
 | **5** | ⭐⭐ **RE-DERIVE THE IN-SCOPE NUMBERS ON THE 16-CONDITION LADDER** | almost every number in §0 was measured on the ladder retired 2026-08-13. Noise floor **0.996–1.013** — an arm inside that band moved nothing |
-| **6** | ⭐⭐ **ψ's COMPOSITION DOES NOT CLOSE** | a real defect on every stratum: 25.25 % of REGIONs and 22.71 % of BOUNDARYs sum into (0,1), p5 **0.869** / **0.850**. Owner ruled it its own branch, taken after the per-transcript prior |
+| **6** | ⭐⭐ **THE f32 CUBE MANUFACTURES A STRAND TILT AT κ = ½ — one dtype, and the falsification is already written** | ⭐ **NEW 2026-08-17**, found while bug-hunting ψ's closure. At κ = ½ the strand mean is `½` identically, so the RNA tilt is PROVABLY UNIDENTIFIED and `w_pos` must be exactly ½; the AMBIG cube evaluates that sum in **float32**, where it departs from 1 by ~1e-7 τ-DEPENDENTLY, giving a spurious tilt that grows linearly in depth. Measured `\|w − ½\|`: 7e-6 at 1e4 fragments, 3.4e-4 at 1e6, **5.3e-3** at 1e7, **0.199** at 1e8, **0.425** at 1e9. ⭐ **Falsified decisively: recompute the same cube with the strand term in float64 — everything else unchanged, cube still stored f32 — and `w_pos → 0.500000000` at every depth.** ⛔ κ = 0.9/0.99 unaffected; specific to the degenerate-κ ridge, i.e. the `ss 0.50` half of the ladder | ⚠ **NEGLIGIBLE AT PANEL SCALE and entirely PRE-EXISTING**, which is why it is rank 6 and not higher: 10 M fragments over ~70 k slots is ~140 per slot (largest ~1e5–1e6), so ≤ 3.4e-4 there. It would bite a very deep library with a dominant locus. ⭐ The repair is one dtype on the strand term inside `_solve_ambig_logodds`, NOT the whole cube — the f32 cube is an authorised memory/perf choice and the reductions already accumulate in f64. ⛔ Price it on the panel before landing (`TRAPS: panel-before-src`) and check the AMBIG cube's memory does not move |
 | **7** | ⭐ **PRICE THE CANCELLING PAIR TOGETHER** | five xfails go green iff it lands, and neither half has an honest price alone. ⛔ It can only be priced with `--messages on` |
 | **8** | ⚠ **RE-PRICE MESSAGE PROPAGATION** | ⛔ **its recorded price falls ENTIRELY on the deferred stratum**, so the in-scope question is what it costs the ZERO controls. The owner's 2026-08-10 ruling stands; this is a measurement, not a flip |
 | **9** | the index's duplicate map · `mass_*_boundary` → `count_*_boundary` · restore the moment tests · the cheap ledger | correctness and hygiene, each its own commit, `TRAPS: one-thing-varied` |
@@ -455,13 +457,105 @@ instrument under `scripts/design/` runs.
   | REGION | 74.72 % | **25.25 %** — median 0.978, p5 **0.869** | 12 |
   | BOUNDARY | 77.24 % | **22.71 %** — median 0.979, p5 **0.850** | 16 |
 
-  ⭐ **The mechanism is visible at `sweep.py`'s write-back**: the three posterior means are
-  `np.clip(·, 0, 1)`-ed **INDEPENDENTLY**, and an unsolvable slot keeps an init instead — neither
-  preserves a simplex. ⚠ By linearity of expectation three posterior means over ONE lattice should
-  close, so the deficit is not inherent to taking means and the clip is a symptom rather than the whole
-  cause. ⛔ It was invisible because nothing consumed the strand split: the crossing axis published
-  `0` for both RNA strands, so its composition summed to `f_g` alone.
-  ⛔ **Do NOT repair it by renormalising at publication** — that makes a 15 %-short object
+  ⛔⛔ **THE MECHANISM RECORDED HERE WAS WRONG IN BOTH HALVES, AND IT IS NOW MEASURED (2026-08-17).**
+  It read *"the three posterior means are `np.clip`-ed INDEPENDENTLY, and an unsolvable slot keeps an
+  init instead"*, and reasoned *"by linearity of expectation three posterior means over ONE lattice
+  should close"*. ⭐ **They are not three means.** `f_g` is the posterior **MEDIAN**
+  (`_posterior_median_fg`) while `f_pos`/`f_neg` are posterior **MEANS** of `1 − f_g`, so
+
+      SUM = 1 + median(f_g) − mean(f_g)     — the closure error IS the posterior's SKEW
+
+  verified to **5.8e-15** on both ψ paths. ⚠ The clip never fires (the solver returns `[0, 0.987]` over
+  48,000 slots × 3 components) and unsolvable slots close to **exactly 1.000000** — so neither recorded
+  cause is real. ⚠ The asymmetry was never a decision: the median for `f_g` was argued for; the RNA
+  fractions fall out as expectations of the grid quantity `1 − f_g`.
+
+  ⭐ **TWO CONTRIBUTING TERMS, and the second only looks big on a toy.** (a) genuine posterior SKEW —
+  plateaus at ~0.026 under grid refinement, shrinks with depth, **~95 % of it on real data**; (b) GRID
+  QUANTISATION of the median — exactly the half-step (0.0423 at `n_grid` 60, 0.0098 at
+  `n_grid_ss` 256), constant at every depth, 0.6–8 % on real data. ⛔ A float32 attribution for (b) was
+  measured and **refused**: forcing the AMBIG cube to float64 leaves `|SUM−1|` at 0.042272 vs 0.042275.
+
+  ⭐⭐ **SEVERITY: DORMANT, AND IT IS A LANDMINE IN FRONT OF RANK 1.** It reaches NEITHER the published
+  masses (`f_g*count` / `(1-f_g)*count`, closed by construction), NOR the EM prior, NOR `derive` —
+  `priors.py`/`derive.py`/`track.py` hold zero references to the strand split. `region_init`'s
+  `rho_pos`/`rho_neg` carry it (`Σρ_c·E_c = M·SUM`, off by up to 9.5 % on a toy) and their only
+  production consumer is `messages/head.py`, with `message_propagation` **OFF**. ⛔ A claimed
+  "+7.0 % library `f_gdna` inflation on unstranded data" was **REFUTED** — measured −0.0007…−0.0031,
+  opposite sign, 11–52× smaller. ⚠ `sweep.py`'s own note names the trigger: *"a per-transcript prior
+  reading composition per object"* — which is §1's top item.
+
+  ⛔⛔ **AND THE OBVIOUS FIX IS MEASURED CATASTROPHIC.** `f_g` as the posterior MEAN closes the simplex
+  exactly by linearity, and `vertex_ceiling.py --arm psi_mean` on all 16 conditions scores
+  **1.352 / 1.573 / 3.756** on the three in-scope strata and **1.801** on the `g00` control. The median
+  beats the mean at both vertices in **16/16** cases against a proper continuous quantile, so this is a
+  real property and not the grid rounding (shipped-vs-proper bias −0.0017, i.e. noise).
+
+  ⭐⭐⭐ **THE REPAIR IS TO ESTIMATE THE PARAMETERS AND MAP, WHICH MAKES CLOSURE STRUCTURAL.** The
+  composition has TWO degrees of freedom, not three: `λ → f_g`, RNA total `:= 1 − f_g` (the
+  parametrisation, not a second estimate), `θ →` the tilt SHARE splitting it (`simplex_logodds._compose`).
+  Measured: closure exact to **2.22e-16 (1 ulp)** on both ψ paths at every κ, depth and strand split.
+
+  ⛔⛔ **AND IT TOOK A SECOND CHANGE, WHICH THE FIRST ONE'S OWN FALLOUT FORCED.** Deriving the RNA total
+  from `f_g` propagates whatever error `f_g` carries — and `_posterior_median_fg` SNAPPED to a lattice
+  point. On an evidence-free object the posterior IS the reference, symmetric, mean exactly ½; the old
+  read-out got `f_pos = 1 − mean = 0.5` exactly while the new one inherited the snap
+  (`test_relay_mass_pin`'s `R_own` read **0.51256**). So the quantile became CONTINUOUS — a histogram on
+  the λ lattice, interpolated in the crossing bin.
+  ⚠ **On λ, not on f_g**: σ's grid is highly non-uniform, and interpolating there biases a concentrated
+  posterior toward ½ by **2.71e-03** at `n_grid` 60. On λ the same posterior returns its own grid point to
+  **2.2e-16**, and σ being monotone makes the mapped quantile exact — median equivariance, which is the
+  median's whole justification. Measured: `|median(1−f) − (1 − median(f))|` = **3.3e-15**, against
+  **8.45e-02** for the snapped version.
+
+  ⛔ **`f_g` IS THEREFORE *NOT* BIT-IDENTICAL** — an earlier draft of this row said it was, which was true
+  of the composition change ALONE and false once the quantile moved: `f_g` shifts by up to the half-grid
+  step it used to snap by (**9.8e-03** single-strand, **4.2e-02** AMBIG). ⚠ The panel must therefore be
+  re-measured rather than argued from, and it was.
+  ⛔ **This is NOT the renormalisation refused below**: nothing is rescaled to hide a residual — `f_g`
+  and the RNA total are exact complements by construction, and a tilt is estimated as a share because a
+  share is what it IS.
+
+  ⛔⛔ **AND CLOSURE IS *NOT* THE VERTEX PROBLEM IN DISGUISE — HYPOTHESIS RAISED AND REFUTED
+  (2026-08-17), WHICH SAVES AN EXPENSIVE EXPERIMENT.** The reading was that both are posterior
+  ASYMMETRY, so fixing the vertex by structural certainty would collapse skew, closure and vertex bias
+  together — and it would have been tested by rescoping `struct_lock`, i.e. by walking into
+  `TRAPS: a-cancelling-defect-pair`. Measured against the origin-split oracle on three conditions, per
+  band of the TRUTH's distance to a vertex, mass-weighted `|SUM − 1|`:
+
+      truth band          g50 ss0.99   g50 ss0.50   g98 ss0.99 ON
+      vertex   <0.02        0.0021       0.0074        0.0064
+      centre   >0.30        0.0108       0.0282        0.0613      ⇐ 4-10x LARGER
+
+  `corr(|closure|, closeness-to-vertex)` = **−0.069 / −0.149 / −0.080** — negative on all three. Closure
+  fails **at the CENTRE of the simplex, not at the vertices**: a posterior pinned at a vertex is NARROW,
+  so median ≈ mean; a low-information slot mid-composition is WIDE and skewed. ⭐ The driver is posterior
+  WIDTH, not vertex repulsion. ⚠ The median's advantage over the mean is also not vertex-concentrated —
+  `corr` with it is **−0.104 / −0.491 / +0.262**, inconsistent in sign, and by mass the median wins only
+  46.4 % of the vertex band on `g50 ss0.99`. (That does not contradict the `psi_mean` panel arm: the arm
+  changes the whole SOLVE — belief, refit, landscape — while this compares readouts on one solve.)
+  ⭐⭐ **So closure needs its own fix and will not come free from the vertex work** — which is exactly why
+  the parametrise-and-map repair above is worth having: it is structural, and independent of both.
+  ⚠ The only population that closes exactly is the one that never reaches ψ: measured, **1,243 of 21,522
+  slots close, and all 1,243 are intergenic** (0 introns, 0 exons) — the unsolvable slots that keep their
+  simplex-valued init.
+
+  ⚠⚠ **A SEPARATE, PRE-EXISTING DEFECT FOUND WHILE HUNTING BUGS IN THE ABOVE — RECORDED, NOT FIXED.**
+  At `κ = ½` the strand mean is `p = ½·(f_g+f_pos+f_neg) = ½` identically, so the RNA tilt is PROVABLY
+  UNIDENTIFIED and `w_pos` must be exactly ½. The AMBIG cube evaluates that sum in **float32**, where it
+  departs from 1 by ~1e-7 in a τ-DEPENDENT way; times the slot count, that is a spurious log-likelihood
+  tilt growing linearly in depth. Measured `|w − ½|`: **7e-6** at 1e4 fragments, 3.4e-4 at 1e6,
+  **5.3e-3** at 1e7, **0.199** at 1e8, **0.425** at 1e9 (a 92.5/7.5 split where the truth is 50/50).
+  Falsified decisively: recompute the same cube with the strand term in float64 — everything else
+  unchanged, cube still stored f32 — and `w_pos → 0.500000000` at every depth. ⭐ κ = 0.9/0.99 are
+  unaffected; it is specific to the degenerate-κ ridge, i.e. the `ss 0.50` half of the ladder.
+  ⭐ **NEGLIGIBLE AT PANEL SCALE** — 10 M fragments over ~70 k slots is ~140 per slot, largest ~1e5–1e6,
+  so ≤ 3.4e-4 — and **entirely pre-existing**: the retired read-out published `m_pos` directly, the
+  parametrised one publishes `(1−f_g)·m_pos/(m_pos+m_neg)`, the SAME ratio with only the total rescaled.
+  ⛔ It would matter on a very deep library with a dominant locus, and the repair is one dtype on the
+  strand term, not a redesign.
+
+  ⛔ **Do NOT repair it by renormalising all three at publication** — that makes a 15 %-short object
   indistinguishable from a solved one. `CalibrationResult` publishes the values as solved, bounds each
   to `[0,1]`, and asserts no closure; `test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate`
   pins that as a decision so the assertion is not added before ψ is fixed.

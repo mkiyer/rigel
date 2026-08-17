@@ -137,7 +137,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
     computes (TRAPS: self-checking-validator)."""
     lam, fg = _logodds_grid(1024, 10.0)
     u_pos, u_neg, ap, an, _mu, _ms = _regions(1)
-    psi, _fp, _fn = SL._local_loglik_logodds(
+    psi = SL._local_loglik_logodds(
         u_pos,
         u_neg,
         ap,

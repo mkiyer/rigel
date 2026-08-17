@@ -751,6 +751,44 @@ measured **0.98** without probes and **113–114** with, a 116× separation with
 ⚠ The in-gene anchor is a DETECTOR and not a calibrated level: it under-reads the on-target gDNA density
 by **2.6–3.6×** because it sits at the EDGE of the probe footprint.
 
+## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
+
+⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE.** ψ solves a point on the 2-simplex,
+parametrised by `λ` (the gDNA-vs-RNA LEVEL) and `θ` (the RNA-internal TILT, a SHARE with no absolute
+scale). The composition is their IMAGE — `simplex_logodds._compose`:
+
+    f_g  = the ½-quantile of the λ posterior        RNA total := 1 − f_g
+    f_pos = (1 − f_g)·w        f_neg = (1 − f_g)·(1 − w)
+
+so `f_g + f_pos + f_neg = 1` identically. ⭐ **Measured on real conditions: 100.00 % of published objects
+close, on both axes and every annotation class, min/p5/p95 all exactly 1.0000** — against 74.7 % of REGIONs
+and 77.2 % of BOUNDARYs before.
+
+⛔⛔ **WHAT IT REPLACED WAS NEVER A DECISION.** `f_g` was the posterior MEDIAN and `f_pos`/`f_neg` were
+independent posterior MEANS of the grid quantity `1 − f_g`, so `SUM = 1 + median − mean` — the closure
+error was exactly the posterior's SKEW. The median was argued for; the RNA fractions fell out as
+expectations of an array nobody revisited.
+
+⛔ **TAKING MEANS EVERYWHERE ALSO CLOSES AND IS REFUSED.** It closes by linearity of expectation and scores
+**1.352 / 1.573 / 3.756** on the three in-scope strata and **1.801** on the zero control
+(`vertex_ceiling.py --arm psi_mean`, 16 conditions): the median is closer to truth at both simplex
+vertices, where 49–83 % of in-scope error lives. ⛔ Nor is this renormalisation at publication — nothing is
+rescaled to hide a residual; `f_g` and the RNA total are exact complements BY PARAMETRISATION, and a tilt
+is estimated as a share because a share is what it is.
+
+⭐⭐ **THE ½-QUANTILE IS CONTINUOUS AND IS READ ON λ.** Snapping to a lattice point put up to half a grid
+step into `f_g`, and deriving the RNA total from it propagated that into the whole composition
+(`TRAPS: deriving-one-coordinate-propagates-its-error`). ⛔ And the interpolation must be on `λ`, where the
+lattice is uniform: in `f_g`-space a concentrated posterior comes back biased toward ½ by **2.71e-03** at
+`n_grid` 60, on λ it returns its own grid point to **2.2e-16**
+(`TRAPS: interpolate-on-the-axis-where-the-lattice-is-uniform`). ⭐ That also restores the property the
+estimator exists for: `|median(1−f) − (1 − median(f))|` went **8.45e-02 → 3.3e-15**.
+
+⚠ **ADMISSIBILITY IS ENFORCED INSIDE THE MAP**, not by the caller: an unclamped or strand-blind share
+produces a NEGATIVE fraction that still sums to 1 — a composition that passes every closure check and is
+nonsense. ⚠ A slot with no admissible strand or no counts publishes `(0, 0, 0)` — "no data", not a
+composition claim — and `region_init` replaces it with the signature-binary init, which is a simplex point.
+
 ## 7. Where the error is, structurally
 
 Two measurements that shape every design choice above, both worth keeping because they are about the
