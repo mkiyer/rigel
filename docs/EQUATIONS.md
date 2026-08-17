@@ -1011,6 +1011,116 @@ uses `log(theta + eps)` with `std::exp` and **no** cutoff, so a component whose 
 identically zero still collects posterior mass. Design against ~0.16–0.47, not against 0.0014.
 
 
+## 9c. ⭐⭐⭐ ψ's COMPOSITION REFERENCE IS A Beta, AND ITS MEAN IS A THIRD TERM THE CODE DID NOT CARRY
+
+`a·log f_g + b·log(1−f_g)` on the λ grid **is exactly Beta(a, b) in `f_g`** — verified numerically to six
+decimals — so `a` and `b` are PSEUDO-COUNTS with a STRENGTH `a + b` and a MEAN `a/(a+b)`. The shipped
+`_JEFFREYS_REF = ½` fixes BOTH: strength 1, which is the ignorance statement and is correct; and mean ½,
+which **asserts the library is half gDNA**.
+
+**The derivation.** Give the two components independent Gamma rate priors `ρ_c ~ Gamma(α_c, β_c)` with
+Poisson counts `n_c ~ Poisson(ρ_c E_c)`. Then `X = ρ_g E_g ~ Gamma(a, s_g)` and `Y = ρ_r E_r ~ Gamma(b, s_r)`
+with `s_c = β_c/E_c`. Writing `f = X/(X+Y)`, `T = X+Y` and integrating `T` out:
+
+    p(f, T) ∝ f^(a−1)(1−f)^(b−1) · T^(a+b−1) · e^(−T(s_g f + s_r(1−f)))
+    ⇒ p(f)  ∝ f^(a−1)(1−f)^(b−1) / ( s_g·f + s_r·(1−f) )^(a+b)
+
+and on the solver's grid, where `|df/dλ| = f(1−f)`,
+
+    log p(λ) = a·log f_g + b·log(1−f_g) − (a+b)·log( f_g + r·(1−f_g) ) ,   r = s_r/s_g
+
+⛔⛔ **The shipped reference is exactly this with `s_g = s_r`** — the code has silently committed to the
+two components having MATCHED SCALES, which is the "half gDNA" assertion appearing as a MISSING TERM
+rather than as a chosen number. With `m` the object's prior expected composition
+`ρ̄_g E_g / (ρ̄_g E_g + ρ̄_r E_r)` and `β_c = α_c/ρ̄_c`, the ratio is `r = (b/a)·m/(1−m)`, and at the
+shipped `a = b = ½` the third term collapses to
+
+    − log[ (1−m)·f_g + m·(1−f_g) ]
+
+**Four properties, all structural.** (i) `m = ½` makes the bracket the constant ½, so the term drops — a
+strict generalisation agreeing with the shipped constant exactly where its assumption is true.
+(ii) ⭐⭐ **The tails stay `e^(−|λ|/2)` for every `m`** — in the `+λ` tail the bracket → `m(1−f_g)` and the
+`log(1−f_g)` cancels one Jeffreys half — so **only the LOCATION moves and `L`-invariance is untouched**.
+⛔ Moving `a`/`b` instead cannot do this: they set the tails and the location together, and `b = 0.03`
+leaves 57 % of the mass outside `L = 10`. (iii) Proper for every `m ∈ (0,1)`. (iv) ⭐ Substituting
+`u = f/(f + r(1−f)) ~ Beta(a,b)`, which is symmetric at `a = b`, gives **`median(f_g) = m` in closed
+form** — the re-derivation of the relay's hard-coded `R_own = ½`.
+
+### 9c.1 ⭐⭐⭐ THE SHIPPED LOCATION AND ITS STRENGTH — `L − log 2` NATS, AND NO CONSTANT IS CHOSEN
+
+⛔ **THE CLAMP IS NOT A CHOSEN EPSILON, AND IT IS NOT A PER-OBJECT FLOOR EITHER.** Three candidates were
+priced on the 16-condition ladder. A flat `eps = 1/Σeff_g` reads `m = 1 − 1e-8`, at which **99.1 % of the
+reference's mass falls outside `L = 10`** and the answer becomes a function of the grid
+(`TRAPS: a-clamp-at-the-closed-end-escapes-the-window`). The derived per-object floor
+`m_i = E[g]_i/(E[g]_i + 1)` — one pseudo-fragment of RNA *here* — keeps 0.909–0.990 of the mass inside the
+window but was measured **WORSE on every stratum** (0.609 / 1.045 / 0.580 / 1.000, against 0.381 / 0.659 /
+0.363 / 0.800 for the hard clamp): on a structurally pure-gDNA object the truth IS `f_g = 1`, and a soft
+floor pulls it back off the vertex it should sit on.
+
+⭐⭐⭐ **THE STRENGTH IS A LOG-ODDS, AND THAT IS WHAT MAKES IT CHOOSABLE WITHOUT A CONSTANT.** The term is
+`−log[(1−m)f_g + m(1−f_g)]`; at `f_g → 1` it is `−log(1−m)` and at `f_g → 0` it is `−log m`, so its full
+range — how far it can move ψ — is
+
+    strength  =  log( m / (1−m) )  =  logit(m)          ⇒   the claim's ODDS are e^strength
+
+**The location written on the λ scale IS its strength in nats.** So the question "how strong?" is exactly
+"what odds does the annotation entitle us to?", and Bayes answers it on the reference's own exponents: one
+pseudo-observation of gDNA takes `Beta(a, b)` to `Beta(a+1, b)`, whose mean is
+
+    m  =  (a + 1) / (a + b + 1)  =  0.75   exactly at   a = b = ½        (strength log 3 = 1.0986 nats)
+
+⭐ A composition mean from pseudo-counts — same units as `m`, no new number, and it tracks `_JEFFREYS_REF`
+automatically. ⚠ **Not `m = σ(a+b)`**, which an earlier draft used: `a + b` is a pseudo-COUNT and a strength
+is a NAT, so equating them is an analogy rather than a derivation. Numerically they barely differ
+(0.731 vs 0.75) and the measured optimum is BROAD — 0.69 → 1.50 nats within 6 % — which is what makes the
+derived value safe rather than lucky.
+
+⛔⛔ **WHAT THIS REPLACES, AND WHY THE LATTICE WAS THE WRONG PLACE TO GET IT.** *"A prior may not assert
+more than the lattice can represent"* is a valid CAP — it is applied — but it was being used to CHOOSE, as
+`m = σ(L)`. On the grid that saturates at
+
+    strength  =  log[ (m² + (1−m)²) / (2m(1−m)) ]  =  L − log 2 + O(e^(−L)) ,   m = σ(L)
+
+i.e. **9.31 nats ≈ 10,000:1** at `L = 10` — while the term's own docstring claimed "influence bounded by
+one fragment". ⚠ It also breaks above `L ≈ 20.72`, where `1 − σ(L)` falls under the location clamp and the
+strength sticks at `log(1/2ε) = 20.723` forever (measured 20.709 at `L = 25` against a claimed 24.307).
+
+**The overturn depth, in FRAGMENTS.** One sense read on a `κ`-stranded library is worth `log(2κ)` nats, so
+
+    n  =  strength / log(2κ)      fragments
+
+which at `κ = 0.99` is **1.46** for the shipped `log 3` and was **13.6** for `σ(L)`. ⚠ The budget assumes
+each fragment delivers `log(2κ)` nats ON THE λ AXIS, and near the vertex it does not — `I_strand ∝
+[f_g(1−f_g)]²` collapses exactly where this prior points, so at `σ(L)` the residual reached **0.0058 at
+5,000 fragments**, 370× the budget. ⭐ At `log 3` that residual never exceeds **0.006**, below one `K = 60`
+grid step (0.085): a prior that cannot move the answer by a representable amount cannot outvote anything.
+⛔⛔ At `κ = ½` the strand channel carries no composition information, `log(2κ) = 0`, and this budget
+DIVERGES — there the refutation must come from the DENSITY mechanism (`fit_intron_background` +
+`density_lambda_factor`), which measures `τ_fac = 161.4` at an intron and is what actually overturns the
+claim on unstranded data.
+
+⚠ **The strength is one pseudo-fragment on the EXPONENTS, so the location is swamped where evidence exists
+and DECIDES where none does.** Measured, swinging `m` 0.02 → 0.98 on a single-strand object at `κ = 0.9`
+moves `f_g` by 0.7700 at 6 fragments, 0.0090 at 120 and **0.0000** at 15,000 — but on an AMBIG object, or
+once `κ = ½` kills the strand channel, by **0.95 at any depth**, because posterior = prior there.
+
+### 9c.2 ⛔⛔⛔ WHY THE LOCATION MAY NOT ENTER `τ_λ` — the Jacobian, in one line
+
+`I_strand ∝ [f_g(1−f_g)]² / (4p(1−p))` (§5.2). So when the location moves a slot's mode from
+`f_g = 0.98576` to `0.99975`, the strand term falls by
+
+    [0.98576·0.01424]² / [0.99975·0.00025]²  =  3,154×
+
+against a MEASURED `tau_lam` fall of 3,227× — **~98 % of it is the Jacobian.** The likelihood is genuinely
+that flat on λ at the point the prior chose; nothing was lost and there is nothing to restore.
+
+⛔ And restoring it would not be a small increment. `own_composition_logvar` gives
+`Var(log f_g) = (1−f_g)²/τ_λ`, which at the vertex is `~8e-08`, so `own_precision = 1/(Var + count_logvar)`
+saturates at the COUNT ceiling: **τ = 0.029 and τ = 1e6 both return 850.44 against a ceiling of 850.50.**
+Only `τ > 0` does any work, so feeding a prior in is a BOOLEAN gate flip that releases the whole count
+precision — and, carrying no count, it does so at empty slots too (`n = 0` ⇒ `prec_g` 0 → `1/ψ'(½)` =
+0.2026). `TRAPS: a-priors-curvature-is-not-the-datas-information`.
+
 ## 10. The second pass's score
 
 ⚠ **`f(L)` here is the SECOND PASS's per-fragment length term (`second_pass.py`'s `length_likelihood`

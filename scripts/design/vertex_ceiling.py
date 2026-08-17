@@ -23,6 +23,12 @@ so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-ob
 | ``vertex_free`` | pins oracle truth at every vertex-truth object with **no own composition evidence** | ⭐⭐ **THE CEILING.** The population a vertex fix can reach |
 | ``vertex_all`` | pins oracle truth at **every** vertex-truth object | a looser upper bound — includes objects that have their own evidence |
 | ``ref_c=<C>`` | sets ψ's reference exponent to ``C`` instead of ½ | ⭐ the mechanism prototype (TRAPS: panel-before-src — the panel arm before ``src/``) |
+| ``ref_loc=noop`` | the full location path, taking NO location | ⭐ byte-identical to ``base`` on 16/16 conditions — the family's own falsification |
+| ⭐ ``ref_loc=struct`` | ψ's reference MEAN pinned near 1 wherever mature RNA cannot be | **the candidate.** Final err-sum per stratum 0.381 / 0.659 / 0.363 / 0.800, control 1.000 |
+| ``ref_loc=struct_grid`` | the same, capped at the highest grid point ``sigma(L)`` | ⭐⭐ the DERIVED strength — exactly ``L`` nats, no constant. Reproduces ``struct`` to 3 dp (0.384 / 0.660 / 0.366 / 0.800) |
+| ``ref_loc=struct_soft`` | the same, floored at one pseudo-fragment AT THE OBJECT | ⛔ REFUSED — worse on every stratum (0.609 / 1.045 / 0.580 / 1.000) |
+| ⛔ ``ref_loc={pooled,local}`` | the peel ``rho_g*E_g/M`` on the non-structural slots too | ⛔ REFUSED — **5.3x WORSE** on stranded × capture-ON, because the on-target gDNA density is under-read 2.6-3.6x pre-solve |
+| ⭐⭐⭐ ``config_struct`` | ``CalibrationConfig(structural_reference=True)`` and **NO monkeypatch at all** | the same claim THROUGH ``calibrate``. ⛔ It is not a duplicate of ``ref_loc=struct_grid`` — that one injects at ψ's construction site and cannot reach `region_init`'s ``tau_lam``, which the shipped path now feeds too, so the two are DIFFERENT MEASUREMENTS and only this one is the deliverable |
 
 ⚠ ``vertex_free``'s "no own evidence" test is ``tau_lam <= 1e-4``, and that is a CLASSIFICATION FOR A
 CEILING, never a production predicate — TRAPS: a-threshold-on-a-fitted-residue refused exactly this shape as a mechanism. Both
@@ -157,7 +163,7 @@ _TAU_FREE = 1.0e-4
 #: filled by the wrappers, one call before `build_region_init` needs them.
 _CTX: dict = {}
 #: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
-_FIRED: dict = {"init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "conditions": 0}
+_FIRED: dict = {"init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "loc": 0, "conditions": 0}
 
 
 # ── the plumbing: get the oracle's per-object truth and the geometry to `build_region_init` ────────────
@@ -176,15 +182,184 @@ def _wrap_oracle():
     P0.load_or_build_oracle = wrapper
 
 
-def _wrap_region_sweep():
-    """Stash `region_arrays` — `region_sweep` receives it and calls `build_region_init` after."""
-    orig = CAL.region_sweep
+def _wrap_solve_chain():
+    """Stash `region_arrays` — `solve_chain` receives it and calls `build_region_init` after.
+
+    ⚠ It was ``CAL.region_sweep`` until the sweep was renamed, and this harness kept wrapping a name
+    that no longer existed — an `AttributeError` on the first arm, so the instrument was DEAD while the
+    suite stayed green. `TRAPS: a-green-suite-hid-five-dead-instruments`; `--self-test` is the gate that
+    catches it now."""
+    orig = CAL.solve_chain
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
         _CTX["region_arrays"] = region_arrays
         return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
 
-    CAL.region_sweep = wrapper
+    CAL.solve_chain = wrapper
+
+
+def _location_estimate(chain, statics, geometry, region_arrays, variant: str):
+    """⭐⭐⭐ ψ's per-slot reference MEAN ``m_i``, PRIOR-FREE — the arm's whole payload.
+
+    ⛔ **Nothing here reads a deconvolved array.** It reads the payload's own per-slot totals, the
+    annotation, and the two opportunity models — which is what makes an estimate admissible at pass-0,
+    where the gDNA landscape does not exist yet.
+
+    ``m_i = rho_g,i * E_g,i / M_i``: the gDNA the object's own density predicts, as a share of what it
+    actually holds. ⭐ **RNA is the RESIDUAL and is never predicted** — the asymmetry that makes this
+    possible at all, since gDNA is near-uniform pre-solve while RNA spans six decades with no genomic
+    autocorrelation (owner, 2026-08-16).
+
+    ``variant`` selects where the density comes from, so the arms differ in ONE thing:
+
+    ``struct``  only where mature RNA CANNOT be (``~mrna_active``) — the annotation-determined strata.
+                psi's shipped 1/2 everywhere else, i.e. the landscape's population is left alone
+    ``pooled``  the above, plus one pooled off-target density applied everywhere else
+    ``local``   ⭐ the above, but an exon takes the density of its OWN flanking ``exon|intron`` splice
+                boundaries when it has any. The boundary sits in the same probe footprint as its exon,
+                so the capture enrichment CANCELS and never has to be estimated
+    """
+    import importlib.util as _il
+
+    if "object_composition" not in sys.modules:
+        _sp = _il.spec_from_file_location("object_composition", DESIGN / "object_composition.py")
+        _m = _il.module_from_spec(_sp)
+        sys.modules["object_composition"] = _m
+        _sp.loader.exec_module(_m)
+    OC = sys.modules["object_composition"]
+    cls = OC.strata(chain, statics, geometry, region_arrays)
+    label = cls["label"]
+    # ⭐ ONE accessor for the pair, the same one the solver itself uses, so the estimate and the solve
+    #   cannot end up on different bases: `region_contained` at a REGION, `boundary_unspliced` at a
+    #   BOUNDARY, over the matching gDNA opportunity.
+    M, eff_g = region_gdna_geometry(geometry)
+    M = np.asarray(M, np.float64)
+    eff_g = np.asarray(eff_g, np.float64)
+    mature = np.asarray(statics.mrna_active_pos, bool) | np.asarray(statics.mrna_active_neg, bool)
+
+    # the OFF-TARGET pooled density: intergenic + intron REGIONs, Sum mass / Sum E (never a mean of ratios)
+    off = np.isin(label, list(OC.PURE_GDNA_STRATA))
+    rho_off = OC.pooled_density(M, eff_g, off)
+    rho = np.full(int(chain.n_slots), rho_off)
+
+    if variant == "local":
+        # ⭐ each slot's OWN flanking `exon|intron` splice boundaries, pooled over the one or two of them
+        ei = (label == OC.ONTARGET_GDNA_STRATUM) & (
+            np.asarray(geometry.eff_sj, np.float64).sum(1) > 0.0
+        )
+        num = np.zeros(int(chain.n_slots))
+        den = np.zeros(int(chain.n_slots))
+        for side in (np.asarray(chain.left, np.int64), np.asarray(chain.right, np.int64)):
+            ok = side >= 0
+            q = np.zeros(int(chain.n_slots), bool)
+            q[ok] = ei[side[ok]]
+            b = side[q]
+            num[q] += M[b]
+            den[q] += eff_g[b]
+        rho = np.where(den > 0.0, num / np.maximum(den, 1e-12), rho_off)
+
+    # ⭐⭐⭐ THE STRUCTURAL CLAIM, WITH ITS OWN STRENGTH: where mature RNA CANNOT be, the expected gDNA
+    #   count is ``rho_g * E_g,i`` and the RNA floor is exactly ONE PSEUDO-FRAGMENT **AT THIS OBJECT**::
+    #
+    #       m_i = E[g]_i / (E[g]_i + 1)
+    #
+    #   ⛔⛔ **The "one" must be one fragment HERE, not one over the genome's pooled opportunity.** A flat
+    #   epsilon (``1/Sum eff_g`` = 1e-8) reads ``m = 1 - 1e-8``, at which **99.1 % of the reference's mass
+    #   falls OUTSIDE the shipped L = 10 window** — worse than the (a,b) route this term exists to avoid,
+    #   and the answer becomes a function of the grid. With the per-object floor the mass inside is
+    #   **0.909-0.990** and ``m`` spans p5 0.788 / median 0.917 / p95 0.998 (measured, g50 ss0.99 off).
+    #   ⭐ It is also the right MEANING: a big intergenic region may assert "pure gDNA" confidently, a
+    #   tiny one may not, and the strength of the claim scales with the count the object expects.
+    # ⛔⛔ **TWO FLOORS, AND THE PANEL PREFERS THE HARD ONE — kept as named variants because the choice
+    #   is a MEASUREMENT, not a preference.**
+    #   `struct`      pins `m -> 1 - eps` with a flat `eps = 1/Sum eff_g` (~1e-8).
+    #   `struct_soft` uses the derived per-object floor `E[g]/(E[g]+1)` — ONE pseudo-fragment of RNA at
+    #                 this object — which is the principled reading of the derivation.
+    #   ⭐ Measured on the panel, final Sum|d| per stratum, ratio to base: hard **0.381 / 0.659 / 0.363 /
+    #   0.800**, soft 0.609 / 1.045 / 0.580 / 1.000. The soft floor is WORSE on every stratum.
+    #   ⭐⭐ The reason is the finding the whole investigation started from: on a structurally pure-gDNA
+    #   object the truth IS `f_g = 1`, and objects at true `f_g ~ 1` carry **49-83 %** of in-scope error
+    #   precisely because psi holds them off that vertex. A near-improper prior pushes them onto it; the
+    #   soft floor pulls them back off (its median `m` is 0.917).
+    #   ⚠ **The cost of the hard floor is real and this panel cannot see it**: at `m = 1 - 1e-8` only
+    #   **0.94 %** of the reference's mass lies inside the shipped `L = 10` window, so the answer is a
+    #   function of the grid (`TRAPS: a-clamp-at-the-closed-end-escapes-the-window`). ⛔ What is actually
+    #   un-chosen here is the reference's STRENGTH on those slots — the second Beta degree of freedom,
+    #   which every measurement in this project has held at `a + b = 1`. That is the open item, and
+    #   picking either floor by its panel number alone would be tuning.
+    expected_g = rho * eff_g
+    if variant == "struct_soft":
+        return np.where(mature, 0.5, expected_g / (expected_g + 1.0))
+    if variant == "struct":
+        e = 1.0 / max(float(np.sum(eff_g)), 1.0)
+        return np.where(mature, 0.5, 1.0 - e)
+    if variant == "struct_grid":
+        # ⭐⭐⭐ **THE CAP IS THE GRID'S OWN RANGE, SO THERE IS NO CONSTANT TO CHOOSE** (owner,
+        #   2026-08-16). A prior may not assert more than the lattice can represent, so the strongest
+        #   admissible location is the highest grid point, ``m = sigma(L)``.
+        #   ⭐ Its strength is then EXACTLY ``L`` nats — the term is worth ``log(1/eps)`` nats and
+        #   ``eps = sigma(-L)`` — and the override budget is ``L / log(2*kappa)`` fragments: **14.6** at
+        #   ``L = 10, kappa = 0.99``, against **27.0** for the flat clamp's 18.42 nats. ⛔ ``L`` is
+        #   already ``CalibrationConfig.sweep_logodds_window``, gated and chosen; it is not a new number.
+        from scipy.special import expit as _expit
+
+        return np.where(mature, 0.5, float(_expit(_CTX["logodds_window"])))
+    # the peel elsewhere: RNA is the RESIDUAL and is never predicted. ⚠ `pooled`/`local` carry the SOFT
+    # floor on the structural slots, which is what their panel rows were measured with.
+    m = np.clip(rho * eff_g / np.maximum(M, 1e-12), 0.0, 1.0)
+    return np.where(mature, m, expected_g / (expected_g + 1.0))
+
+
+def _count_structural_builder():
+    """Count calls to the PRODUCTION location builder, without replacing it.
+
+    ⛔ Every other arm here installs an override, so its fire counter is a property of the harness. This
+    one measures the shipped path, so the counter must not become one: the real function is called and its
+    result returned untouched, and only the tally is the harness's."""
+    real = SL.structural_reference_location
+
+    def counted(statics, logodds_window):
+        _FIRED["loc"] += 1
+        return real(statics, logodds_window)
+
+    SL.structural_reference_location = counted
+    SW.structural_reference_location = counted
+
+
+def _install_reference_location(variant: str):
+    """Inject ``m_i`` at ψ's ONE ``CompositionPriors`` construction site.
+
+    ⭐ ``sweep`` holds the only construction; ``select``/``regrid`` rebuild through the real class inside
+    ``simplex_logodds``, so patching the name in ``sweep`` intercepts exactly once and the slicing and
+    regridding paths stay the shipped ones."""
+    real = SL.CompositionPriors
+
+    def factory(gdna=None, rna=None, location=None):
+        _FIRED["loc"] += 1
+        return real(gdna=gdna, rna=rna, location=_CTX.get("location"))
+
+    SW.CompositionPriors = factory
+
+    orig = CAL.solve_chain
+
+    def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
+        _CTX["region_arrays"] = region_arrays
+        # ⛔ Read L from the CALL, never from a default: `struct_grid`'s whole claim is that its strength
+        #   is the grid's own range, so silently assuming 10.0 while the solve ran on another window
+        #   would make the arm's strength and its justification disagree with no tell.
+        if "logodds_window" not in kw:
+            raise SystemExit(
+                "⛔ solve_chain was called without `logodds_window`; `ref_loc` cannot derive the grid cap."
+            )
+        _CTX["logodds_window"] = float(kw["logodds_window"])
+        _CTX["location"] = (
+            None
+            if variant == "noop"
+            else _location_estimate(chain, statics, geometry, region_arrays, variant)
+        )
+        return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
+
+    CAL.solve_chain = wrapper
 
 
 def _truth_fg_per_slot(chain):
@@ -323,27 +498,38 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
     SW.build_region_init = wrapper
 
 
-def _install_ref_exponent(c_value: float):
-    """⭐ THE MECHANISM PROTOTYPE — ψ's reference exponent as a free number instead of ½.
+def _install_ref_exponent(a_value: float, b_value: float | None = None):
+    """⭐⭐ ψ's two reference exponents as free numbers instead of the single shipped ½.
 
-    ψ writes ONE constant twice with opposite signs (``simplex_logodds._JEFFREYS_REF``):
-    ``+C·log f_g`` bounds ``f_g → 0`` and ``+C·log(1−f_g)`` bounds ``f_g → 1``. Those two terms are the
-    ONLY things holding the posterior median off the two vertices.
+    ⭐⭐⭐ **THEY ARE PSEUDO-COUNTS, AND THE PAIR IS A Beta.** ``a·log f_g + b·log(1−f_g)`` on the λ grid
+    is exactly ``Beta(a, b)`` in ``f_g`` — the Jacobian ``|df/dλ| = f(1−f)`` turns ``f^{a−1}(1−f)^{b−1}``
+    into ``f^a (1−f)^b``. So the pair has a STRENGTH ``a+b`` (one prior pseudo-fragment at the shipped
+    value) and a MEAN ``a/(a+b)``, and the shipped ``a = b = ½`` fixes the mean at ½ — which asserts the
+    library is half gDNA.
 
-    ⛔ ``C = 0`` makes ψ improper on both sides (Beta(0,0) — TRAPS: no-prior-means-haldane's Haldane, a vertex
-    amplifier), so a small ``C`` is a PROTOTYPE that bounds what a derived fix could buy, never the fix
-    itself. The point of putting it in this harness is that it is priced on the same panel and by the
-    same instrument as the ceiling above."""
-    def _gdna_arm(lam, global_logprior):
+    ⛔ ``a = b = 0`` makes ψ improper on both sides (Beta(0,0) — TRAPS: no-prior-means-haldane's Haldane,
+    a vertex amplifier), so small exponents are a PROTOTYPE that bounds what a derived rule could buy,
+    never the rule itself.
+
+    ⚠ ``b_value = None`` keeps the two equal, which is the historical one-knob behaviour; passing both
+    is what an unequal-arm design needs. ⛔ The RNA arm takes ``rna_logprior`` exactly as its gDNA twin
+    takes ``global_logprior``: this patch shadowed a one-argument ``_rna_arm`` after the arms were made
+    symmetric, which raised on the first solve."""
+    b_value = a_value if b_value is None else b_value
+
+    def _gdna_arm(lam, global_logprior=None):
         _FIRED["ref_g"] += 1
-        ref = float(c_value) * SL._log_fg(lam)[None, :]
+        ref = float(a_value) * SL._log_fg(lam)[None, :]
         if global_logprior is None:
             return ref
         return ref + np.asarray(global_logprior, np.float64)
 
-    def _rna_arm(lam):
+    def _rna_arm(lam, rna_logprior=None):
         _FIRED["ref_r"] += 1
-        return float(c_value) * SL._log1m_fg(lam)[None, :]
+        ref = float(b_value) * SL._log1m_fg(lam)[None, :]
+        if rna_logprior is None:
+            return ref
+        return ref + np.asarray(rna_logprior, np.float64)
 
     SL._gdna_arm = _gdna_arm
     SL._rna_arm = _rna_arm
@@ -432,7 +618,8 @@ def _compare(paths: list[Path]) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", default=None,
-                    help="base | noop | vertex_free | vertex_all | ref_c=<float>")
+                    help="base | noop | vertex_free | vertex_all | ref_c=<float> "
+                         "| ref_loc={noop,struct,struct_grid,struct_soft,pooled,local}")
     ap.add_argument("--compare", nargs="*", type=Path, default=None)
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
@@ -448,10 +635,19 @@ def main() -> int:
         ap.error("--arm and --out are required unless --compare is given")
 
     _wrap_oracle()
-    _wrap_region_sweep()
+    _wrap_solve_chain()
     arm = args.arm
     expect_fire: list[str] = []
-    if arm == "vertex_free":
+    structural_reference = False
+    if arm == "config_struct":
+        # ⭐⭐⭐ THE SHIPPED PATH, NOT AN OVERRIDE. Nothing is patched: the flag is set on the config and
+        #   `calibrate` threads it to `solve_chain`'s ONE `CompositionPriors` site. ⚠ The counter wraps the
+        #   PRODUCTION builder rather than replacing it, so TRAPS: an-ablation-that-never-ran is still
+        #   satisfied without the measurement running through a wrapper (TRAPS: byte-identity-gate).
+        structural_reference = True
+        _count_structural_builder()
+        expect_fire = ["loc"]
+    elif arm == "vertex_free":
         _install_vertex_pin(True)
         expect_fire = ["pinned"]
     elif arm == "vertex_all":
@@ -462,14 +658,21 @@ def main() -> int:
         #   to `base`, and if it is not, the wrapper itself is changing the answer (TRAPS: byte-identity-gate).
         _install_vertex_pin(True, force_empty=True)
         expect_fire = ["init"]
+    elif arm.startswith("ref_loc="):
+        # ⭐ the per-slot reference MEAN on the REAL panel, before any of it goes into `src/`
+        #   (TRAPS: panel-before-src — four toy-positive changes have been panel-negative).
+        _install_reference_location(arm.split("=", 1)[1])
+        expect_fire = ["loc"]
     elif arm.startswith("ref_c="):
-        _install_ref_exponent(float(arm.split("=", 1)[1]))
+        # ⭐ `ref=C` keeps both arms equal; `ref=A,B` drives them unequal (the Beta(a,b) design).
+        _spec = arm.split("=", 1)[1]
+        _install_ref_exponent(*(float(x) for x in _spec.split(",")))
         expect_fire = ["ref_g", "ref_r"]
     elif arm != "base":
         ap.error(f"unknown arm {arm!r}")
 
     index = TranscriptIndex.load(str(args.index))
-    config = CalibrationConfig()
+    config = CalibrationConfig(structural_reference=structural_reference)
     names = args.conditions or sorted(
         p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
     )

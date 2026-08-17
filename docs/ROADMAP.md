@@ -97,12 +97,15 @@ earns its place only by saying *do not work here*, and a number nobody can attri
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — regions, contiguous boundaries and sj boundaries together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no boundary deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
-| ✅ **the SUITE is green with no skips** | ⭐ **0 failed / 3,404 passed / 0 skipped / 10 xfail** (re-derived 2026-08-14); it was **3,397** on 2026-08-13 and **3,235 / 0 / 7** on 2026-08-11, and every delta is ACCOUNTED file by file in `CLAUDE.md`, never adjusted. Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 interrogated on 2026-08-11 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries that split; ⚠ the three added since have not been interrogated the same way |
+| ✅ **the SUITE is green with no skips** | ⭐ **0 failed / 3,476 passed / 0 skipped / 11 xfail** (re-derived 2026-08-16 after `structural_reference` landed and was defaulted ON, which also regenerated 6 `tests/golden/` scenarios); it was **3,459** earlier that day and **3,420** on 2026-08-15 after the object-composition work and **3,412** on 2026-08-14 after the ruler work and **3,404** earlier that day and **3,397** on 2026-08-13 and **3,235 / 0 / 7** on 2026-08-11, and every delta is ACCOUNTED file by file in `CLAUDE.md`, never adjusted. Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 interrogated on 2026-08-11 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries that split; ⚠ the three added since have not been interrogated the same way |
 | ✅ **ONE NUMERIC CONVENTION** | ⭐ a COUNT is an integer, a FRACTION is float64. No fixed point, no scale constant, nothing decodes a bank (owner, 2026-08-11) | ⭐ float64 is **1e5–7e5× MORE accurate** than the fixed point it replaced, measured against exact rational arithmetic. ⛔ The ~2.6 % once quoted against float is a **float32** number — `TRAPS: integer-channels-reproduce` |
 | ⭐ **calibration, the THREE IN-SCOPE strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × capture-ON/OFF and unstranded × capture-OFF — **the 0.8.0 target**. ⚠ 36-condition ladder, RETIRED 2026-08-13 |
 | ⛔ **calibration, unstranded × capture-ON — the DEFERRED stratum** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short. ⭐ Re-measured 2026-08-13/14 on the rebuilt ladder at the exon objects: `f_g` **0.040 / 0.0016 / 0.0021** at `g05 / g50 / g98` against truths **0.054 / 0.518 / 0.982** — a NEAR-ZERO answer regardless of truth, which **looks acceptable at low gDNA by coincidence** | not noisy; a flat boundary. ⛔⛔ **DEFERRED for 0.8.0** (owner, 2026-08-14) — reported on every panel, not a development target until the other three are optimised. The length channel was tried and refused, and is retired until after 0.8.0 (the scope block above) |
 | ⛔⛔ **the EFFECTIVE-LENGTH SHRINKAGE at the ZERO-gDNA control** | ⛔ **NEW 2026-08-14.** The shipped shrinkage contracts every transcript by a mean factor **0.345** when the correct answer is exactly **1.000**, on **13,673 of 15,669** transcripts — **INCLUDING on capture-OFF, where the module contract says the factor must be 1**. `rho_ref` is fabricated entirely from false-positive gDNA | ⭐ **It is a SYMPTOM of the composition error, not an independent bug**: substituting ONLY the composition arrays and re-running the SHIPPED shrinkage function gives the correct factor (`g00` capture-off **0.345 → 1.000**; `g50` unstranded capture-on **0.834 → 0.401**, the truth). ⛔ So repair the composition it reads, not the function. One split, two consumers, one function — `priors.py` imports `_global_reference_density` **from** `capture_eff_length.py` |
-| ⛔⛔ **EVERY CEILING WAS MEASURED WITH A WRONG RULER INSTALLED** | ⛔ **NEW 2026-08-14.** `effective_lengths_em` is built by `_setup_geometry_and_estimator` **BEFORE** `assemble_priors` runs, and **every existing measurement arm patches `assemble_priors`** — so the shrinkage has **NEVER been priced by any ceiling** | ⛔ This invalidates the PRECISION of every prior-injection ceiling in this file, not their sign. It is why §1's rank 1 is an instrument and not a mechanism |
+| ⛔⛔⛔ **THE RULER IS NOW MEASURABLE, AND ON THE PANEL A PERFECT ONE IS A *LOSS* ON THE TWO CAPTURE-OFF IN-SCOPE STRATA** | ⭐ **PRICED ON ALL 16 CONDITIONS, 2026-08-14.** `oracle_ruler` substitutes at the `calibrate` boundary so it reaches BOTH consumers; `oracle` substitutes all three `LocusPriors` fields, so **`oracle_ruler` − `oracle` is the shrinkage and nothing else**. Transcript Σ\|err\| against `base`, per stratum — `oracle` / `oracle_ruler`: stranded × OFF **1.022 / 2.510**, stranded × ON **0.936 / 1.077**, unstranded × OFF **1.005 / 2.678**, ⛔ deferred **0.267 / 0.259**, `g00` control **0.928 / 0.207**. Gene level the same shape (1.697 / 0.816 / 2.047 / 0.104 / **0.060**); false-positive mass **2.955× and 3.340× WORSE** on the two capture-OFF strata and **0.074×** at the control | ⛔⛔ **THE ONE-CONDITION READING WAS WRONG AND THE PANEL IS WHY WE KNOW.** On `g00 ss_0.50 capture_off` alone a perfect ruler took transcript Σ\|err\| to **0.043×** where a perfect prior alone reached 0.802×, and that invited "every ceiling was measuring a fifth of the win". ⛔ It is not: the win is **confined to the zero control and the DEFERRED stratum**, and on the two in-scope capture-OFF strata a perfect ruler is **2.5–2.7× worse**. `TRAPS: panel-before-src` and `TRAPS: a-single-level-panel-cannot-see-a-constant`, met on a ceiling instead of a mechanism |
+| ⭐⭐ **WHY A "PERFECT" RULER LOSES — the `U` null already said so and it was read too weakly** | ⭐ At capture-OFF there are no probes, so the physically correct contraction factor is **exactly 1.000**, and `calibration_vs_oracle.py`'s no-enrichment null confirms the estimator can reach it (**0.9963–0.9967**). But BOTH arms sit far below it: shipped **0.9318 / 0.9391** and *oracle* **0.9241 / 0.9193** — ⛔ **the shipped ruler is CLOSER to the truth than the oracle one**, so `oracle_ruler` substitutes one wrong ruler for a slightly worse one | ⛔ **So `oracle_ruler` is NOT a ceiling at capture-OFF; it is an A/B between two wrong rulers.** ⭐ The real ceiling arm is the **`U` ruler** (uniform gDNA field ⇒ factor ≈ 1.000), which is derivable with no fitting, and it has not been run. ⚠ Note also that a ~1–2 % aggregate gap costs 2.5× at transcript level, so `Σeff/Σfl` HIDES a large per-transcript redistribution — read `ruler_n_moved`, not the aggregate |
+| ⭐ **the RULER's own error, per stratum** | ⭐ **NEW 2026-08-14**, `calibration_vs_oracle.py`, `factor = Σeff_em/Σfl` (1.000 = no contraction): **0.9318 / 0.0794 / 0.9391** on the three in-scope strata against O's 0.9241 / 0.0797 / 0.9193 — ⛔ and **0.0951 against a truth of exactly 1.000** at the `g00` control, 1.06 **billion** bp of opportunity on a library containing no gDNA | ⭐ **The no-enrichment null `U` settles that the shrinkage is a SYMPTOM, not a second defect**: O's own gDNA total laid down at exactly uniform density — the physically correct capture-OFF field, contract 1.000 — reads **0.9963–0.9967**, so perfect composition leaves only ~0.4 % of manufactured contraction. ⚠ **Two aggregates disagree by 3.6×**: the recorded **0.345** is `mean(eff/fl)`, this is `Σeff/Σfl`; the contraction falls hardest on LONG transcripts. Rank on `Σeff/Σfl` |
+| ✅ **ψ's REFERENCE MEAN IS SET FROM THE ANNOTATION, AND IT IS ON** | ⭐ **NEW 2026-08-16, `CalibrationConfig.structural_reference = True`.** `m → (a+1)/(a+b+1) = 0.75` wherever `¬mrna_active`, neutral ½ elsewhere. Measured through `calibrate` — `vertex_ceiling.py --arm config_struct` vs a `base` re-recorded in the same session — final Σ\|Δ\| per stratum **0.930 / 0.908 / 0.925** on the three IN-SCOPE strata, 0.998 deferred, `g00` control **BIT-IDENTICAL on all 8 rows** at pass-0, final and `conf_wrong_err`. Better on all 12 contaminated conditions, worse on none; pass-0 **0.922 / 0.955 / 0.973**; confidently-wrong error **0.956 / 0.962 / 0.783 / 0.501**. Thermometer transcript **0.994 / 0.995 / 0.995**, deferred 1.002 | ⛔ **THE STRENGTH, NOT THE LOCATION, WAS THE WORK — and the ladder cannot rank a strength.** `strength = logit(m)`, so a location IS its strength in nats. The first form took it from the LATTICE (`m = σ(L)` ⇒ 9.31 nats ≈ 10,000:1) and scored **0.384 / 0.660 / 0.366** here — ⛔ but **worse than NO PRIOR at being refuted** (2.0247 vs 0.3946), because the ladder holds `nrna = 0` and therefore scores only the DELIVER obligation, where more nats is monotonically better. ⭐ One pseudo-observation on the reference's own exponents gives 0.75 exactly, a 3:1 claim refuted by ~1.5 stranded fragments and by `τ_fac = 161.4` unstranded. ⚠ Gene-level thermometer deltas (2.5–3.5 k) are BELOW the ~6,700-fragment noise floor and are not attributable; transcript-level (10–26 k) are |
 | ⛔ **the PER-TRANSCRIPT prior lane is BUILT and NEVER PASSED** | ⛔ **NEW 2026-08-14.** `rna_prior_weight` is built end to end and the production call site in `pipeline.py` **omits it**, so the EM's default rule carries **zero per-transcript information** | ⚠ Passing it needs a weighting function, and the two built so far were REFUSED (§4). The lane, its arms and its falsifications are all in place |
 | ⭐ **what a PERFECT prior is worth, by GRANULARITY** | ⭐ **NEW 2026-08-14.** Per-**LOCUS**: gene-level error on the deferred stratum **0.099**. Per-**TRANSCRIPT**: the three in-scope strata to **0.37–0.58** gene-level, with false-positive mass cut **100–200×** | ⛔ Per-transcript does **NOT** rescue unstranded × capture-ON (**0.641**) — which is the deferred stratum, so that is a reported fact and not a blocker. ⭐ The in-scope prize is the per-transcript one |
 | ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`) |
@@ -149,15 +152,16 @@ stratum, so ranking on it ranks the thing 0.8.0 does not ship.
 
 | rank | the work | why it is there |
 |---|---|---|
-| **1** | ⭐⭐⭐ **THE RULER FIRST — get the effective-length shrinkage inside a measurement arm** | `effective_lengths_em` is built BEFORE `assemble_priors`, and every arm patches `assemble_priors`, so **no ceiling has ever priced it**. Until an arm reaches it, every ranking below is provisional — including this one |
-| **2** | ⭐⭐⭐ **THE SHRINKAGE AT `g00`, REPAIRED UPSTREAM** | 0.345 where the truth is exactly 1.000, on 13,673 of 15,669 transcripts, **including capture-OFF where the contract says 1** — and it is a SYMPTOM: feed the shipped function correct composition arrays and it returns the correct factor. ⛔ Repair the composition, not the function |
-| **3** | ⭐⭐⭐ **PASS THE PER-TRANSCRIPT PRIOR LANE — and the weighting function is the work** | built end to end, omitted at the production call site, so the EM carries **zero** per-transcript information. The prize is the largest in-scope one measured: **0.37–0.58** gene-level on the three strata and false-positive mass **100–200×** down |
-| **4** | ⭐⭐ **RE-DERIVE THE IN-SCOPE NUMBERS ON THE 16-CONDITION LADDER** | almost every number in §0 was measured on the ladder retired 2026-08-13. Noise floor **0.996–1.013** — an arm inside that band moved nothing |
-| **5** | ⭐⭐ **ψ's COMPOSITION DOES NOT CLOSE** | a real defect on every stratum: 25.25 % of REGIONs and 22.71 % of BOUNDARYs sum into (0,1), p5 **0.869** / **0.850**. Owner ruled it its own branch, taken after the per-transcript prior |
-| **6** | ⭐ **PRICE THE CANCELLING PAIR TOGETHER** | five xfails go green iff it lands, and neither half has an honest price alone. ⛔ It can only be priced with `--messages on` |
-| **7** | ⚠ **RE-PRICE MESSAGE PROPAGATION** | ⛔ **its recorded price falls ENTIRELY on the deferred stratum**, so the in-scope question is what it costs the ZERO controls. The owner's 2026-08-10 ruling stands; this is a measurement, not a flip |
-| **8** | the index's duplicate map · `mass_*_boundary` → `count_*_boundary` · restore the moment tests · the cheap ledger | correctness and hygiene, each its own commit, `TRAPS: one-thing-varied` |
-| **9** | ⏸ **PROFILE — the one characterisation item never started** | new code means slowdown and it has been a while. ⛔ It does not move the 0.8.0 metric, and it has a trap of its own: profile on real cfRNA, never on this panel |
+| **1** | ⭐⭐⭐ **BUILD THE `U` RULER ARM — the oracle ruler is NOT the ceiling at capture-OFF** | the ruler arm is built and the panel is run (§0). Its verdict is that a *perfect-composition* ruler is **2.5–2.7× WORSE** on the two capture-OFF in-scope strata, because at capture-OFF the correct factor is **1.000** and the oracle ruler (0.919–0.924) is *further* from it than the shipped one (0.932–0.939). ⭐ The arm that would actually price the ruler is the **uniform-gDNA null**, measured at **0.9963–0.9967** and derivable with no fitting |
+| **2** | ⭐⭐⭐ **THE RELAY CARRIES A CORRECT STRUCTURAL CLAIM ACROSS A POPULATION CHANGE — a confirmed bug, and the precondition for message propagation ever returning** | `HeadPolicy`'s composition licence implements *"where two objects do not measure the same population, the composition may not be imputed"* for transcript TERMINI only (`terminus_flank_gain`). `mrna_active` flipping across a hop is a population change too and is not checked, so a correct "pure gDNA" claim at an intron is relayed into the adjacent exon and drives it to a confident wrong vertex. ⭐ Localised: nulling `lam_channel` restores the right answer exactly, `cm_g`/`cm_p` stay 0. ⚠ Independent of the prior's strength — 0.7661 at both `m = 0.75` and `m = σ(L)`. Recorded as a strict xfail in `tests/calibration/test_structural_reference.py`. ⛔ Hypothesis worth testing, not a claim: this is a candidate mechanism for part of the +155 % that keeps `message_propagation` off |
+| **3** | ⭐⭐⭐ **THE SHRINKAGE AT `g00`, REPAIRED UPSTREAM** | 0.345 where the truth is exactly 1.000, on 13,673 of 15,669 transcripts, **including capture-OFF where the contract says 1** — and it is a SYMPTOM: feed the shipped function correct composition arrays and it returns the correct factor. ⛔ Repair the composition, not the function |
+| **4** | ⭐⭐⭐ **PASS THE PER-TRANSCRIPT PRIOR LANE — and the weighting function is the work** | built end to end, omitted at the production call site, so the EM carries **zero** per-transcript information. The prize is the largest in-scope one measured: **0.37–0.58** gene-level on the three strata and false-positive mass **100–200×** down |
+| **5** | ⭐⭐ **RE-DERIVE THE IN-SCOPE NUMBERS ON THE 16-CONDITION LADDER** | almost every number in §0 was measured on the ladder retired 2026-08-13. Noise floor **0.996–1.013** — an arm inside that band moved nothing |
+| **6** | ⭐⭐ **ψ's COMPOSITION DOES NOT CLOSE** | a real defect on every stratum: 25.25 % of REGIONs and 22.71 % of BOUNDARYs sum into (0,1), p5 **0.869** / **0.850**. Owner ruled it its own branch, taken after the per-transcript prior |
+| **7** | ⭐ **PRICE THE CANCELLING PAIR TOGETHER** | five xfails go green iff it lands, and neither half has an honest price alone. ⛔ It can only be priced with `--messages on` |
+| **8** | ⚠ **RE-PRICE MESSAGE PROPAGATION** | ⛔ **its recorded price falls ENTIRELY on the deferred stratum**, so the in-scope question is what it costs the ZERO controls. The owner's 2026-08-10 ruling stands; this is a measurement, not a flip |
+| **9** | the index's duplicate map · `mass_*_boundary` → `count_*_boundary` · restore the moment tests · the cheap ledger | correctness and hygiene, each its own commit, `TRAPS: one-thing-varied` |
+| **10** | ⏸ **PROFILE — the one characterisation item never started** | new code means slowdown and it has been a while. ⛔ It does not move the 0.8.0 metric, and it has a trap of its own: profile on real cfRNA, never on this panel |
 
 ⛔ **NOT ON THIS LIST, DELIBERATELY:** the length channel (retired until after 0.8.0 — the scope block
 above) and anything whose only target is unstranded × capture-ON (deferred). §4 is everything else
@@ -174,21 +178,162 @@ place the prior assembler is scored the way production runs it, and that — not
 the reason rebuilding the flgap PAIR might be worth paying for (they only work as a pair). Every other
 instrument under `scripts/design/` runs.
 
-- ⏳ **OPEN · RANK 1 — THE RULER: THE EFFECTIVE-LENGTH SHRINKAGE HAS NEVER BEEN INSIDE A MEASUREMENT ARM**
-  (found 2026-08-14). `effective_lengths_em` is built by `_setup_geometry_and_estimator`, which runs
-  **before** `assemble_priors`; **every** existing measurement arm — every `oracle_*` arm of
-  `quant_accuracy.py`, every ceiling — patches `assemble_priors`. So the ruler the EM measures transcripts
-  with was never substituted, and **every ceiling number in this file was measured with a wrong ruler
-  installed.**
-  ⛔ **This ranks FIRST because it ranks everything else.** It does not change the SIGN of any recorded
-  ceiling; it changes how much of the residual is attributable to the prior rather than to the length the
-  prior is divided by. Until an arm can substitute both, "a perfect prior is worth X" is a statement about
-  a composite.
-  ⭐ **The build is an arm, not a mechanism**: an override that reaches `effective_lengths_em` at the same
-  point the pipeline builds it, plus the `noop` gate the harness family already requires — and ⚠ the noop
-  gate must be specified against the `base_reseed` noise floor, not byte-identity, for the reason §0's own
-  row records.
-- ⏳ **OPEN · RANK 2 — THE SHRINKAGE IS WRONG AT THE ZERO-gDNA CONTROL, AND IT IS A SYMPTOM** (measured
+- ⏳ **OPEN · RANK 1 — THE ARM IS BUILT AND FALSIFIED; WHAT IS OPEN IS THE PANEL RUN AND THE RE-PRICING**
+  (built 2026-08-14). `quant_accuracy.py --arm oracle_ruler` wraps `rigel.calibration.calibrate` as a
+  module attribute — `run_pipeline` imports it function-locally, so the name resolves at call time — and
+  the substituted `CalibrationResult` therefore reaches **both** consumers: `transcript_capture_eff_lengths`
+  (the ruler) and `assemble_priors` (the prior).
+  ⭐⭐ **`oracle_ruler` − `oracle` is the shrinkage and NOTHING else**, because `LocusPriors` has exactly
+  three fields and `oracle` already takes all three from O. That is what makes it an attribution rather
+  than one more composite.
+  ⛔ **The counter watches the SHRINKAGE, not `calibrate`.** `calibrate` being called is necessary and not
+  sufficient: hand `_setup_geometry_and_estimator` a `None` calibration and the arm silently degrades into
+  `oracle` under another name. The arm additionally requires the substituting variant to have MOVED the
+  ruler (measured `max\|Δ\| = 1,115,202` bp) and the noop not to have moved it at all (measured exactly
+  `0.0`) — `TRAPS: an-ablation-that-never-ran`. ⚠ The noop reproduces `base` exactly on `count_abs_err` at
+  both axes; `fp_mass` differs by **2 fragments**, ~4 orders below the `base_reseed` floor, which is the
+  §0 row's point about byte-identity being unreachable for a `quant_accuracy` arm.
+  ⭐ **A second thing had to be built for it to reach the control at all**: `quant_accuracy.load_oracle`
+  now falls back to `scan_cache/<condition>` when the oracle cache holds no `_main`. `pass0_vs_oracle.py`
+  holds every zero-gDNA condition out, so it never wrote one, and **no oracle arm could reach `g00` before
+  this**. `_main` is the undrained full payload — the same quantity — and `from_parts` re-runs sum-to-full
+  either way.
+  ⛔⛔ **THE PANEL IS RUN, AND IT INVERTED THE ONE-CONDITION READING — §0 carries the table.** A perfect
+  ruler is a large win at the `g00` control (**0.207×** transcript, **0.060×** gene) and on the DEFERRED
+  stratum (0.259×), and a **2.5–2.7× LOSS** on the two capture-OFF in-scope strata. ⭐ The reason is in
+  the instrument's own null column: at capture-OFF the correct factor is **1.000**, and the shipped ruler
+  (0.932–0.939) is CLOSER to it than the oracle ruler (0.919–0.924) — so this arm is an A/B between two
+  wrong rulers rather than a ceiling.
+  ⭐⭐ **WHAT IS OPEN: the `U` ARM.** Substitute the uniform-gDNA null ruler — O's own gDNA total laid down
+  at exactly uniform density, factor **0.9963–0.9967**, no fitting and no constant — and price THAT. It is
+  a ceiling at capture-OFF in a way the oracle ruler is not. ⚠ It is admissible only at capture-OFF: with
+  probes the field genuinely is not uniform.
+  ⚠ **And read `ruler_n_moved`, never the aggregate factor.** A 1–2 % gap in `Σeff/Σfl` costs 2.5× at
+  transcript level, so the aggregate is hiding a large per-transcript redistribution.
+- ⏳ **OPEN · RANK 2 — ψ's COMPOSITION REFERENCE IS A Beta(a,b), AND ITS MEAN WAS NEVER CHOSEN**
+  (2026-08-15). `a·log f_g + b·log(1−f_g)` on the λ grid **is exactly Beta(a,b) in `f_g`** — verified
+  numerically to six decimals — so `a` and `b` are PSEUDO-COUNTS. A Beta has two degrees of freedom and
+  `_JEFFREYS_REF = 0.5` fixes both: strength `a+b = 1` (one prior pseudo-fragment, correct) and **mean
+  `a/(a+b) = ½`, which asserts the library is half gDNA**. That assertion is wrong on most libraries.
+  ⭐ **THE ERROR IT CAUSES:** objects whose TRUE `f_g ≥ 0.999` carry **49–83 %** of all calibration error
+  on the three in-scope strata, read **0.13–0.23 BELOW** the vertex; and the `[0, 0.2]` bucket is
+  over-called on every stratum. One pull-toward-the-middle, both ends.
+  ⭐⭐ **BUT ~¾ OF THE VERTEX SHORTFALL IS IRREDUCIBLE AND THAT MUST NOT BE FORGOTTEN.** Driving the solver
+  on a synthetic pure-gDNA object, `1 − f_g ∝ n^(−1/2)` — ordinary statistical resolution, NOT a
+  structural block, and the grid window is not binding (`L` 10 → 20 → 40 moves it ~2e-4). The panel's
+  vertex objects have **median 9–58 fragments**, and the `n^(−1/2)` law alone accounts for **72–83 %** of
+  the observed shortfall. The reference is a MULTIPLIER on that law (13× at `n = 100`, 1.9× at `n = 1e6`),
+  and that multiplier is the addressable quarter. `EQUATIONS.md` §9a's "value of missing information".
+  ⭐ **THE CANDIDATE:** keep the strength at 1 and set the mean to the library's own composition,
+  `a = f_lib`, `b = 1 − f_lib`. It reduces EXACTLY to the shipped constant at `f_lib = ½` — measured
+  0.997 / 0.999 at `g50`, the null case returning the null answer. Panel **0.198×** over 8 capture-OFF
+  conditions; `g00 ss0.50`, the worst IN-SCOPE condition at 1,906,953 fragments, falls to **0.002×**.
+  L-robust at `L` = 10 / 20 / 40.
+  ⛔⛔ **THREE THINGS BLOCK IT, ALL MEASURED:** `g05` REGRESSES **1.43×** on both strand settings;
+  `f_lib` is calibration's own OUTPUT so the loop has POSITIVE feedback with both vertices attracting;
+  and the optimum sits ABOVE the true `f_lib`, which says the target is the **OBJECT-weighted** mean
+  composition rather than the fragment-weighted `f_lib`. ⭐ All three point at one diagnosis.
+  ⛔⛔⛔ **THAT THIRD BLOCKER IS NOW MEASURED AND ITS DIAGNOSIS WAS WRONG — THE TWO CANDIDATE TARGETS
+  SPLIT BY STRAND AND NEITHER WINS EVERYWHERE** (2026-08-15, `object_composition.py` +
+  `vertex_ceiling.py --arm ref_c=a,b`, all 16 conditions, `base` re-recorded in session). The two
+  quantities do differ by an order of magnitude — object-weighted **0.6497** against `f_lib` **0.0669**
+  at `g05` capture-OFF, 0.7920 vs 0.5762 at `g50` — but fed to ψ from TRUTH on both sides, Σ\|Δ\| in
+  FRAGMENTS per stratum reads **`f_lib` / object-weighted**: stranded × OFF 0.705 / **0.584**,
+  stranded × ON 0.692 / **0.452**, ⛔ unstranded × OFF 0.907 / **5.570**, deferred 0.170 / 0.397.
+  ⭐⭐ **The object-weighted mean wins on both STRANDED strata and loses 5.6× on unstranded ×
+  capture-OFF.** ⛔ The sweep that produced "the optimum sits above `f_lib`" was `ss_0.99` on three of
+  its four rows — `TRAPS: never-pool-the-strata`, reached on a SWEEP rather than a panel. ⭐ The
+  mechanism: at `κ = ½` the strand λ-term is identically zero, so the reference's mean IS the answer
+  rather than a nudge, and it is scored in fragments while it applies per object (`g05 ss0.50 off`
+  library `f_g` final **0.1696** against a truth of 0.0479).
+  ⭐⭐⭐ **WHAT SURVIVES IS THE ZERO CONTROL, AND IT IS THE LARGEST NUMBER IN THE STUDY: 0.003× —
+  a 333-fold reduction — on ALL THREE arms.** The shipped mean of ½ is catastrophically wrong when the
+  library contains no gDNA, and any estimate of the truth repairs it.
+  ⭐⭐ **AND THE QUANTITY IS ESTIMABLE PRIOR-FREE, BY TWO ROUTES THAT FAIL IN OPPOSITE PLACES.** The
+  pooled gDNA density of the intergenic + intronic REGIONs is **exact at `g00`** (the anchors are empty,
+  so it reads 0) and within 0.06–0.12 at capture-OFF, and ⛔ collapses under capture, where probes
+  deplete the off-target anchors ~30× (`rho` **0.000216** against a true **0.007303**) — which shows up
+  in the arm as **1.731×** on stranded × capture-ON exactly as predicted. The certified sj flux is
+  stable across capture and reads ⛔ **0.62–0.72 at a control containing no gDNA**.
+  ⛔ **The owner's sj-boundary proposal is answered and the answer is ONE SLOT OVER**: `sj_count/eff_sj`
+  overstates RNA at its own BOUNDARY by **7.1–10.0×** (the flux is a density on the SPLICED template;
+  the boundary's RNA divisor is the unbounded-reach UNSPLICED-crossing one), and recovers the true RNA
+  density at the ADJACENT EXON REGION to **1.020–1.281** off capture and **0.740–0.997** on it, on all
+  16. ⚠ Intronic REGIONs are pure gDNA here only because `nrna = 0`, and they move the estimate by
+  **< 0.002** — resolution, not accuracy.
+  ⭐⭐⭐ **AND THE WHOLE SEARCH WAS IN THE WRONG SPACE — THE REFERENCE DOES NOT HAVE TO BE LIBRARY-WIDE**
+  (owner, 2026-08-15). ψ solves one object at a time and the gDNA arm's fitted term is ALREADY per slot
+  `(n_slots, K)`; the reference is the only scalar left in ψ. Derived from two Gamma rate priors, the
+  induced prior on the λ grid has a THIRD term the code does not carry —
+  `− (a+b)·log(f_g + r_i·(1−f_g))` — and **the shipped reference is exactly the degenerate case where
+  the two components' scales match**. With `m_i = ρ_g,i·E_g,i / (ρ_g,i·E_g,i + ρ_r,i·E_r,i)` and Jeffreys'
+  `a = b = ½` kept, it is `−log[(1−m_i)·f_g + m_i·(1−f_g)]`. ⭐ It reduces EXACTLY to the shipped constant
+  at `m_i = ½`, keeps the `e^(−|λ|/2)` tails so `L`-invariance is untouched, is proper for every
+  `m_i ∈ (0,1)`, introduces **no constant**, and makes `R_own = m_i` a closed form rather than the
+  hard-coded ½.
+  ⭐⭐ **MEASURED, prior-free, `Σ|m_i − f_g,i|·M_i` in FRAGMENTS against the shipped ½, per stratum:**
+  **0.123 / 0.401 / 0.123 / 0.401** on the four strata and **0.096–0.103** at the `g00` control, against
+  a truth-fed ceiling of 0.081 / 0.346 / 0.081 / 0.346 — ⭐ **8× at capture-OFF, 2.5× at capture-ON, 10×
+  at the control, and within 1.5× of the ceiling everywhere.** `g05`, which regressed 1.43× under every
+  library-wide mean, reads **0.191**.
+  ⭐⭐⭐ **The per-object variation is carried by the OPPORTUNITY GEOMETRY, not by per-object densities**
+  — swapping the pooled RNA density for the per-object sj flux is WORSE (0.515 vs 0.123). Two pooled
+  scalars plus exact per-object geometry is the whole mechanism: no landscape, no substrate selection,
+  no fit. ⭐ Four of six strata go to **0.000** (the ones the annotation determines); the entire residual
+  is the two EXONIC strata.
+  ⛔⛔ **THE BOUNDARY ANCHOR MUST BE CURATED TO `exon|intron`, NOT "has a sj"** (owner): mature RNA
+  crosses an `exon|exon` boundary freely, which is why the uncurated pool read `f_g = 0.0000` over
+  955,428 fragments at the zero control. Curated, it reads `ρ_g` **0.050249 against a true 0.050327**.
+  ⭐ The same `mrna_active` predicate then gates the RNA density and takes `R intron` 0.498 → **0.000**
+  and `B exon|intron` 0.485 → **0.000**.
+  ⭐⭐ **Hybrid capture needs no detection step**: the ratio of the two anchors IS the enrichment —
+  **0.98** without probes, **113–114** with, a 116× separation with no threshold and no flag. ⛔ The
+  in-gene anchor is a detector and not yet a calibrated LEVEL: it under-reads on-target gDNA by
+  **2.6–3.6×** under capture, because it sits at the EDGE of the probe footprint while `eff_gdna` is
+  built with unbounded reach. That is an opportunity-model repair, not a new estimator.
+  ⭐⭐⭐ **STAGE 0 IS RUN (2026-08-16) AND THE PRIOR-FREE `m_i` NOW READS 0.040 / 0.326 / 0.040 / 0.326
+  AND EXACTLY 0.000 AT BOTH ZERO CONTROLS** — 25× better than the shipped ½ at capture-OFF and 3× at
+  capture-ON, with `g05` at **0.009**. Three things moved it: dropping a spliced-count subtraction that
+  over-corrected at `exon|exon`, shrinking the local sj flux toward the population rate by ONE
+  pseudo-observation (raw local flux with a fallback is 0.121; shrunk is 0.040, and the naive
+  `rho_r = 0`-where-absent form reads **0.088–0.130 at the zero control** where the shrunk one reads
+  0.000), and letting the reference speak EVERYWHERE rather than only where the annotation determines the
+  answer (restricting it is 10× worse — at pass-0 there is no landscape, so its exonic constant beats ½).
+  ⛔⛔ **THE CLASS-POOLED TRUTH ARM IS NOT A CEILING**: the prior-free form beats it on every stratum,
+  because that arm hands an on-target RNA density to objects mature RNA cannot occupy.
+  ⛔ **AND THE WIN IS NOT PER-OBJECT RESOLUTION AT EXONS.** Within `R exon`, `m_i` has sd **0.0021**
+  against a true `f_g` sd of **0.4441**, and within `B exon|exon` its sd is exactly 0 — it is a better
+  CONSTANT there. The four ANNOTATION-DETERMINED strata go to exactly 0.000; exons, `exon|exon` and AMBIG
+  are precisely the population the gDNA LANDSCAPE exists to serve, so the two terms partition the object
+  universe rather than competing on it.
+  ⭐⭐ **The post-solve on-target update DOES NOT RUN AWAY.** Iterated with each object's own likelihood
+  removed — a strict upper bound on the feedback — four starts spanning three decades converge to the
+  same fixed point to six decimals on all twelve contaminated conditions and to exactly 0.000 at the
+  control. The per-object geometry damps what a library-wide scalar could not.
+  ⭐⭐ **THE TERM IS IN `src/` AND IS INERT** (2026-08-16). `CompositionPriors.location` (a per-slot
+  scalar) and `simplex_logodds._location_term` are shipped, added at BOTH ψ call sites; `None` ⇒ the term
+  is not written ⇒ **bit-identical**, proven on real data (19/19 output arrays, with a perturbation that
+  moves 10/19). 36 gates in `tests/calibration/test_reference_location.py`. ⛔ **Nothing sets it**, so
+  behaviour is unchanged.
+  ⭐⭐ **THE PANEL ARM IS RUN AND `struct` IS THE CANDIDATE** — the reference MEAN pinned near 1 wherever
+  mature RNA cannot be, which is exactly the four annotation-determined classes (intergenic REGION,
+  gene-edge BOUNDARY, intron REGION, exon\|intron BOUNDARY = 33,347 of 70,176 slots, true `f_g` **1.0000**,
+  **zero** fragment cost, and EMPTY at `g00`). Final Σ\|Δ\| per stratum, ratio to base:
+  **0.381 / 0.659 / 0.363 / 0.800**, control **1.000**, `noop` byte-identical 16/16.
+  ⭐ Its strength needs no constant: the term is worth `log(1/eps)` nats, and capping at the highest grid
+  point (`eps = sigma(-L)`) makes it exactly `L` — reproducing `struct` to three decimals (0.384 / 0.660 /
+  0.366 / 0.800). ⛔ The peel on non-structural slots is REFUSED: **5.3x worse** on stranded × capture-ON.
+  ⛔⛔ **AND ONE BLOCKER STOPS THE DEFAULT BEING FLIPPED.** With the reference forced on, a hand-built
+  pure-gDNA intron goes **0.9006 → 0.7661** — the wrong way. The local solve is RIGHT (`fg_loc`
+  0.9858 → 0.9998); what inverts it is `tau_lam` collapsing to **exactly 0**, and `tau_lam > eps` is the
+  predicate for *"this slot has no own composition evidence"*. ⭐ The strand term legitimately vanishes at
+  the vertex (`c*a^2 ∝ f_g^2(1-f_g)^2`), and a FLOOR is already refused by
+  `has_own_composition_evidence`'s own docstring. ⭐⭐⭐ **The repair is an asymmetry, not a rule**: the
+  location term is a λ-FACTOR and must contribute its curvature via the shipped
+  `density_factor_precision`, exactly as `intron_prior` already does. The working design lives in the dev
+  sandbox.
+
+- ⏳ **OPEN · RANK 3 — THE SHRINKAGE IS WRONG AT THE ZERO-gDNA CONTROL, AND IT IS A SYMPTOM** (measured
   2026-08-14). At `g00` the shipped shrinkage contracts **13,673 of 15,669** transcripts by a mean factor
   **0.345** where the correct factor is exactly **1.000** — ⛔ including on **capture-OFF**, where the
   module's own contract says a uniform enrichment must give exactly 1. `rho_ref` is fabricated **entirely**
@@ -205,8 +350,44 @@ instrument under `scripts/design/` runs.
   ⭐ **One split, two consumers, one function**: `priors.py` imports `_global_reference_density` **from**
   `capture_eff_length.py`, so the transcript-level ruler and the per-locus gDNA effective length are the
   same derivation reached from two places. A repair lands once.
-  ⚠ Ranks below the ruler only because without rank 1 its price cannot be read off any panel arm.
-- ⏳ **OPEN · RANK 3 — THE PER-TRANSCRIPT RNA PRIOR: THE FOUNDATION IS BUILT AND PROVEN; THE WEIGHTING
+  ⭐⭐ **AND THE "SYMPTOM" CLAIM IS NOW MEASURED FROM THE OTHER SIDE TOO, NOT ONLY ARGUED.**
+  `calibration_vs_oracle.py`'s `U` arm is O's own gDNA total laid down at EXACTLY uniform density — at
+  capture-OFF the physically correct field, where the module contract demands a factor of exactly 1.000.
+  It reads **0.9963–0.9967**, so under perfect composition the estimator manufactures only ~0.4 % of
+  spurious contraction from sampling noise. ⛔ **A separate shrinkage repair therefore remains the wrong
+  move**, and this is the number that says so rather than the reasoning.
+  ⭐⭐⭐ **WHERE THE TARGET IS, AND WHETHER A CHANNEL EXISTS THERE — dissected 2026-08-14.** The largest
+  IN-SCOPE composition error on the whole panel is **`g00 ss_0.50 capture_off`, region mwae 0.2558**: 6×
+  the next in-scope number and **67× its own stranded twin** (0.0038) on identical geometry and identical
+  (zero) gDNA. Split by population, truth 0 everywhere:
+
+  | population | regions | FALSE gDNA at ss 0.50 | at ss 0.99 |
+  |---|---|---|---|
+  | `g1_locked` — RNA **inadmissible** | 1,312 | **0** (it holds no mass at all) | **0** |
+  | TS_POS | 14,774 | 533,654 (`f_g` 0.2720) | 4,099 (0.0021) |
+  | TS_NEG | 13,808 | 382,935 (0.2485) | 3,787 (0.0025) |
+  | TS_AMBIG | 5,241 | 255,829 (0.2368) | 9,355 (0.0087) |
+
+  ⛔ **NO channel reaches an RNA-admissible region there, and it is structural.** Strand is dead
+  (`rna_sense_frac` fits 0.500369, so the λ-term is identically 0); the stranded twin gets 130× / 99× /
+  27× lower error using precisely that channel, and its own worst residual is **TS_AMBIG** — the class
+  strand cannot resolve even at ss 0.99, which is the mechanism confirming itself. The pure-gDNA anchors
+  are EMPTY, and every rule for making an evidence-free slot speak is §4.1's graveyard.
+  ⭐ **One thing found that is NOT one of the eleven:** the `g1_locked` zero is a Poisson observation over
+  **50.8 Mbp** of support, so it bounds ρ from above with no fitting and no constant — 95 % UB **5.9e-08**
+  against a fitted `gdna_density_global` of **1.9e-02**, a factor of **322,000**. ⭐ It falsifies cleanly:
+  the same population predicts its own observed count to **5.6 %** at `g05` and **2.1 %** at `g50`, so it
+  is informative rather than structurally empty. And it pulls the level DOWN, where all eleven refused
+  mechanisms lifted an evidence-free slot UP.
+  ⛔⛔ **BUT IT IS A DIAGNOSTIC AND NOT A LEVER, AND THAT MUST BE SAID BEFORE ANYONE BUILDS ON IT.**
+  `derive.py` computes `gdna_density_global` **from** the per-object solve; its only consumers are
+  `cli.py`, a log line and the QC report, and `density_model.py`'s docstring states there is no
+  density→deconv→density feedback loop. Repairing the scalar would change a reported number and nothing
+  else — a real lever has to sit inside the solve, which is exactly where the eleven died.
+  ⚠ **And the bound is admissible only at capture-OFF**: `anchor_opportunity_census.py` measured the
+  empty-anchor density claim false by **346×** under capture and true off it, because probes concentrate
+  gDNA. That still covers two of the three in-scope strata.
+- ⏳ **OPEN · RANK 4 — THE PER-TRANSCRIPT RNA PRIOR: THE FOUNDATION IS BUILT AND PROVEN; THE WEIGHTING
   FUNCTION IS THE WORK** (owner, 2026-08-12/13). The end goal is a prior that says WHICH transcript a
   locus's RNA pseudocounts belong to.
   ⛔⛔ **AND THE LANE IS NOT PASSED IN PRODUCTION** (found 2026-08-14): `rna_prior_weight` is built end to
@@ -264,7 +445,7 @@ instrument under `scripts/design/` runs.
   their own.
   ⚠ **The shipped warm start is NOT the cause of the tool's error** — a UNIFORM start scores 0.976–1.024×
   against base on four conditions, at the noise floor.
-- ⏳ **OPEN · RANK 5** — ⛔⛔⛔ **ψ's COMPOSITION DOES NOT CLOSE — a defect, and its own work path** (found 2026-08-12 while
+- ⏳ **OPEN · RANK 6** — ⛔⛔⛔ **ψ's COMPOSITION DOES NOT CLOSE — a defect, and its own work path** (found 2026-08-12 while
   publishing the three-way composition; owner ruled it a separate branch, taken up after the
   per-transcript prior lands). `NodeDeconv` asserts *"posterior means; f_pos+f_neg+gdna_frac = 1"*.
   Measured on `g00 ss0.99 capture_off`, every object addressed by a chain slot:
@@ -284,7 +465,7 @@ instrument under `scripts/design/` runs.
   indistinguishable from a solved one. `CalibrationResult` publishes the values as solved, bounds each
   to `[0,1]`, and asserts no closure; `test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate`
   pins that as a decision so the assertion is not added before ψ is fixed.
-- ⏳ **OPEN · RANK 6 — Price the CANCELLING PAIR together** — `struct_lock` rescoped to
+- ⏳ **OPEN · RANK 7 — Price the CANCELLING PAIR together** — `struct_lock` rescoped to
   `g1_locked & REGION` AND the
   `intergenic|exon` boundary claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
   xfails interrogated on 2026-08-11 go green if and only if this lands. ⛔ Neither half may be priced
@@ -297,7 +478,7 @@ instrument under `scripts/design/` runs.
   `SilentPolicy` never performs. Priced against a messages-off base it would read as "worth nothing",
   which is the exact reading `ladder_arm_ab.py`'s `--messages` stamp and up-front refusal exist to make
   impossible (`TRAPS: an-ablation-that-never-ran`).
-- ⏳ **OPEN · RANK 7 — Re-price message propagation, and READ IT AGAINST THE 0.8.0 SCOPE.** Its recorded
+- ⏳ **OPEN · RANK 8 — Re-price message propagation, and READ IT AGAINST THE 0.8.0 SCOPE.** Its recorded
   +155 % predates the conserved-count rewrite AND the numeric convention, and both of its recorded
   halves have moved scope: the −58 / −44 / −32 % is on the **three IN-SCOPE strata** and the +155 % is on
   the **DEFERRED** one. ⛔ So the question 0.8.0 asks of it is not "does it rescue the blind stratum" —
@@ -307,7 +488,7 @@ instrument under `scripts/design/` runs.
   ⭐ It is one pair of commands — `ladder_arm_ab.py --arm base --messages off` against
   `--arm base --messages on`, `--jobs 8` — with the setting stamped into every row of both.
   ⚠ It also closes two of the xfails, which is a consequence and not a reason.
-- ⏳ **OPEN · RANK 8 — CORRECTNESS AND HYGIENE.** ⛔ Each is its own commit (`TRAPS: one-thing-varied`),
+- ⏳ **OPEN · RANK 9 — CORRECTNESS AND HYGIENE.** ⛔ Each is its own commit (`TRAPS: one-thing-varied`),
   and none of them moves the 0.8.0 metric.
   * ⭐ **THE INDEX SHOULD EMIT ITS DUPLICATE MAP** (owner, 2026-08-13). The index drops EXACT duplicates
     — same ref, strand and sorted exon tuple — and is right to: they are *"mathematically unidentifiable
@@ -338,7 +519,7 @@ instrument under `scripts/design/` runs.
     false in premise and harmless in effect; `module_census.py` re-run, since the purge left stale
     sibling references; and `UNDOCUMENTED_DEBT` — 8 scripts on disk and unlisted, in
     `tests/test_scripts_index.py`.
-- ⏸ **OPEN · RANK 9 — PROFILE, AND THE PERFORMANCE SUBSTRATE IS A TRAP.** The one characterisation item
+- ⏸ **OPEN · RANK 10 — PROFILE, AND THE PERFORMANCE SUBSTRATE IS A TRAP.** The one characterisation item
   never started; new code means slowdown and it has been a while. Measured 2026-08-07 on one 10 M-fragment
   ladder condition (a 35,135-REGION chr22 index): per-locus EM **15.9 s (47 %)**, native scan 6.5 s,
   calibration 6.5 s, second-pass drain 3.5 s, total 33.5 s. ⚠ Message propagation costs nothing measurable
@@ -473,6 +654,42 @@ records; re-opening one means re-running it on the 16-condition panel, not re-re
 | ⛔⛔ **A SPECIFIC per-transcript allocation RULE — soft-min over exclusive objects with a per-object Jeffreys half** | built end to end and A/B'd on all 36 conditions, seed pinned | ⛔ **REFUSED — worse on EVERY stratum and on the zero control**, transcript Σ\|err\| **57.5 M → 81.6 M (1.42×)**, and a length-proportional variant **2.10×**. ⭐ **The MECHANISM is not what failed** — the gDNA:RNA split moved **+0.2 %**, exactly as the conservation identity requires, so the A/B priced the ALLOCATION alone. Three defects, each measured: exclusivity hard-zeroed **38.7 %** of transcripts; estimating a density on a tiny exclusive region and extrapolating over the whole transcript amplified variance up to **6,534×** (44.6 % of weighted transcripts had their density from <200 bp); and a per-object `+½` revived the silent half of the annotation (`frac_expressed: 0.5`), taking false-positive mass **18.6 M → 41.6 M**. ⛔ The rule and its config flag were DELETED; the LANE it rode on was kept and is now proven (§1, rank 3). ⚠ The Jeffreys-mean half of it is §4.1 graveyard row one — see `TRAPS: a-trap-names-the-defect-not-the-repair` |
 | ⛔⛔ **THE SOFT-MIN-ALONG-THE-PATH WEIGHTING FUNCTION — the owner's own theorem, built faithfully and REFUSED** | 12 arms (4 modes × 3 multipliers) on `g00 ss0.99 capture_off`, 3 of them re-run on the blind stratum `g50 ss0.50 capture_on`, base re-recorded in the same session | ⛔ **REFUSED. Worse than `base` at TRANSCRIPT level on every rung of every arm and on both strata** — 1.317–1.604× at `g00`, 1.262–1.331× on the blind stratum — with transcript false-positive mass 1.76–2.20× worse. ⭐ **The one encouraging number does not survive:** at `g00` the same weights took GENE error to **0.395–0.527×** (against `oracle_alloc`'s 0.128×), and on the blind stratum that collapses to **1.006–1.041×**, i.e. nothing. ⭐⭐ **The MECHANISM is `TRAPS: an-upper-bound-is-not-an-estimate`, and it is structural rather than a tuning failure:** the theorem bounds a transcript by the thinnest object on its path, but **3,644 of 4,839 silent transcripts (75.3 %) share an object with an expressed one** and inherit its bound. The zero-weight SET was byte-identical across all twelve arms, because a bound is zero only when every object is — a property of the data, not of the estimator. ⭐ Retreating to GENE granularity (split within the gene by effective length alone) did NOT rescue it — 1.340× against 1.317× — which proves the damage was never the within-gene split. ⚠ **Two things the experiment ESTABLISHED and which the next candidate should keep:** the dial is monotone in the theorem's favour on both axes and both strata (`min` < `harmonic` < `geometric` < `arithmetic`), so the pooled `Σmass/Σopportunity` control is the WORST rung and the soft min is doing real work; and **0.0 % of expressed transcripts were ever zeroed**, so the unrecoverable failure direction never fired. `scripts/design/transcript_weights.py`, `tests/calibration/test_transcript_weights.py` (31 gates) |
 | **a threshold anywhere in the licence family** | TRAPS: a-threshold-on-a-fitted-residue implemented and refuted one | ⛔ τ is continuous across the region, so any floor is a tuned constant (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace — refused three times) |
+
+### §4.2 ⛔⛔ SEVEN MORE, FROM THE REFERENCE INVESTIGATION (2026-08-15/16). DO NOT REBUILD THESE EITHER.
+
+⭐ Kept SEPARATE from §4.1 because that table is eleven rules for resolving DOUBT at an evidence-free slot
+and is not to be edited. These are attempts to give ψ's reference a MEAN — plus two that came out of
+SHIPPING it — and each was built, measured on the panel with both zero controls, and refused.
+⛔ The form that survived is `DESIGN.md` §6b.1, and it now ships **ON** — see §0 for its measured numbers.
+
+⛔⛔ **6 — GIVING `τ_λ` THE LOCATION TERM'S CURVATURE, "the asymmetry with the intron factory".** Built,
+measured, refused on three counts, and the reasoning that motivated it was wrong at every step: the 3,227×
+fall in `τ_λ` at a pinned slot is **~98 % the `[f(1−f)]²` Jacobian** (nothing was lost); the contribution
+is a **BOOLEAN gate flip** that releases the full COUNT precision, not a ¾-unit increment (τ = 0.029 and
+τ = 1e6 both return 850.44 of a 850.50 ceiling); and it carries no count, so it credits **data-free** slots
+(`n = 0` ⇒ `prec_g` 0 → 0.2026) — the very population the structural reference's safety argument rests on
+being empty. ⚠ Measured, it was **bit-identical on the deliverable on all 32 panel rows** and moved only
+`has_own_composition_evidence`, which is 0.8.0's own denominator.
+`TRAPS: a-priors-curvature-is-not-the-datas-information`.
+
+⛔ **7 — SOFTENING THE PRIOR TO A PER-OBJECT ONE-PSEUDO-FRAGMENT FLOOR** (`m_i = E[g]_i/(E[g]_i+1)`), the
+principled reading of the derivation. Worse on **every** stratum (0.609 / 1.045 / 0.580 / 1.000 against
+0.381 / 0.659 / 0.363 / 0.800): on a structurally pure-gDNA object the truth IS `f_g = 1`, and a soft floor
+pulls it back off the vertex it should sit on. ⭐ What replaced it introduces no constant at all — the
+lattice's own top point `σ(L)` — see `EQUATIONS.md` §9c.1.
+
+| # | mechanism | why it was refused |
+|---|---|---|
+| 1 | **a fitted RNA density `logP_r`**, the mirror of the gDNA landscape | ⛔ the only non-circular form (fit from the solver's own belief) reads **0.988 / 0.997 / 1.037** — nothing, then worse: feeding ψ a density fitted from ψ's own belief tells it what it already believes. ⭐ And the ORACLE version's gain did not survive a shuffle — a shape that is wrong on purpose BEAT the true one at `g98` (0.786 vs 0.854), so the attribution was never established (`TRAPS: attribution-must-survive-a-shuffle`) |
+| 2 | **a library-wide Beta mean, `a = f_lib`** | ⛔ `g05` regresses **1.43×**; `f_lib` is calibration's own output so the loop has positive feedback with both vertices attracting; and moving `a`/`b` sets the TAILS as well as the location, so `b = 0.03` leaves **57 %** of the prior outside `L = 10` |
+| 3 | **the OBJECT-weighted mean instead of `f_lib`** | ⛔ **the two split by STRAND and neither wins everywhere**: object-weighted 0.584 / 0.452 on the two stranded strata but **5.570×** on unstranded × capture-OFF. ⚠ The sweep that motivated it was `ss_0.99` on three of its four rows — `TRAPS: never-pool-the-strata`, met on a sweep rather than a panel |
+| 4 | **a stratified ASSERTION** — pure-gDNA strata claim `f_g = 1`, reweighted by stratum size | ⛔ reads 1.000 at every condition **including `g00`**: an assertion cannot see a library with no gDNA in it. ⭐ What replaced it is a per-object DENSITY, which needs no reweighting at all — the strata select the training set, not the answer |
+| 5 | **a pooled RNA density from sj flux** | ⛔ RNA spans six decades with no genomic autocorrelation, so a pooled flux is not a population parameter (owner). It scored well only by sitting on the mass-weighted centre — `TRAPS: a-mean-hits-the-mass-weighted-centre-by-luck`. ⭐ Replaced by RNA-as-residual, which predicts no RNA at all |
+
+⚠ **One more that is a CAUTION rather than a refusal:** `f_g ≤ 1 − S/M` as an assumption-free bound from
+certified RNA. `boundary_spliced` is a SEPARATE bank from `boundary_unspliced`, not a subset, so the bound
+is simply false — the truth violated it by **302**. The correct statement is the identity
+`ρ_r·E_r = unspliced_RNA + S`, i.e. S SUBTRACTS.
 
 ### §4.1 ⛔⛔⛔ THE GRAVEYARD — ELEVEN MECHANISMS PRICED, ELEVEN REFUSED. DO NOT REBUILD THESE.
 

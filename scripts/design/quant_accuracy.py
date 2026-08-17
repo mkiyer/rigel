@@ -128,9 +128,32 @@ ALLOC_ARMS = tuple(
 #: pseudocounts — a spliced fragment has no gDNA candidate and is assigned directly. So the two arms ask
 #: *which quantity should a weighting function estimate*, and until one of them wins, stage 6 is aiming
 #: at an unnamed target. ⛔ It needs `--truth-by-transcript` (from `transcript_truth.py`).
+#: ⭐⭐⭐ THE RULER ARMS — the only arms that substitute at the ``calibrate`` BOUNDARY, and the reason
+#: they had to exist. A ``CalibrationResult`` has TWO consumers and every other arm in this file
+#: reaches one of them::
+#:
+#:     calibrate(...)                          <- the ruler arms substitute HERE
+#:       |-- transcript_capture_eff_lengths()  <- consumer A: `effective_lengths_em`, the EM's RULER
+#:       |-- assemble_priors()                 <- consumer B: `LocusPriors`  (every other arm wraps this)
+#:
+#: ``pipeline._setup_geometry_and_estimator`` builds consumer A **before** ``assemble_priors`` runs, so
+#: the effective-length shrinkage had never been inside any measurement arm and every ceiling in this
+#: project was measured with the shipped (wrong) ruler still installed.
+#:
+#: ⭐⭐ **``oracle_ruler`` minus ``oracle`` is the shrinkage and NOTHING else, which is what makes this
+#: an attribution rather than another composite.** ``LocusPriors`` has exactly three fields and
+#: ``oracle`` already takes all three from O, so the two arms differ in one thing: whether the ruler
+#: the EM divides by was built from the true split or the shipped one.
+#:
+#: ⛔ The value is a BOOL — substitute, or take nothing — and the dispatch is EXACT MEMBERSHIP rather
+#: than a prefix test. This file already keys on the arm name in twelve places across three
+#: inconsistent families, and a name that passes one test and fails another is how an arm comes to be
+#: scored as the thing it never installed (TRAPS: an-ablation-that-never-ran).
+_RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
+
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip",
-        "oracle_alloc_unspliced") + ALLOC_ARMS
+        "oracle_alloc_unspliced", "struct_ref") + tuple(_RULER_ARMS) + ALLOC_ARMS
 
 #: ⛔⛔ **THE SHIPPED PIPELINE IS NOT REPRODUCIBLE RUN TO RUN, AND EVERY ARM HERE PINS THE SEED THAT
 #: MAKES IT SO.** ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so
@@ -168,8 +191,21 @@ def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) ->
     """
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     root = Path(cache_root) / tag
+    # ⭐⭐ THE ZERO-gDNA ROWS HAVE NO ``_main``, AND WITHOUT THIS FALLBACK NO ORACLE ARM CAN REACH THEM.
+    # ``pass0_vs_oracle.py`` — which populates this cache — holds every zero-gDNA condition out as a
+    # false-positive check, so it never wrote one for `g00`. That is deliberate on its part and it is
+    # not a reason `g00` cannot be measured: ``_main`` is the UNDRAINED FULL PAYLOAD, which is the same
+    # quantity as the plain scan cache beside it, and ``from_parts`` re-runs sum-to-full over whichever
+    # one it is handed. ⛔ The two are two independent scans of one BAM, so they are NOT byte-identical
+    # — float addition is not associative across worker threads and the six float64 banks differ by
+    # ~1e-14 relative. That is inside ``_validate``'s derived budget and far outside anything a real
+    # partition error would produce, so the substitution is sound for measurement — ⛔ but it must
+    # never be used as a byte-identity gate.
+    main = root / "_main"
+    if not main.is_dir():
+        main = Path(cache_root).parent / "scan_cache" / tag
     try:
-        full = read_scan_cache(root / "_main", index, scan).payload
+        full = read_scan_cache(main, index, scan).payload
         parts = {k: read_scan_cache(root / k, index, scan).payload for k in ORIGINS}
     except (FileNotFoundError, KeyError, ScanCacheKeyError) as exc:
         raise SystemExit(
@@ -203,6 +239,31 @@ def install_arm(arm: str, oracle: OracleTruth | None):
         # check must not fail on the one arm that has no override. The thing it guards — an
         # injection that silently did not happen — cannot occur here.
         return (lambda: None), {"n": 1}
+
+    if arm == "struct_ref":
+        # ⭐⭐ THE ONE ARM DRIVEN BY A CONFIG FLAG RATHER THAN AN OVERRIDE (`seeded`). It patches nothing,
+        #   so there is no injection to count — ⛔ but returning a hard ``{"n": 1}`` like ``base`` would
+        #   make the guard a lie: unlike ``base``, this arm CAN silently fail to reach the solve if the
+        #   flag stops being threaded. So COUNT THE PRODUCTION BUILDER, wrapping it without replacing it:
+        #   the real function runs and its result is returned untouched, and only the tally is ours.
+        import rigel.calibration.simplex_logodds as _SL
+        import rigel.calibration.sweep as _SW
+
+        real_loc = _SL.structural_reference_location
+        fired = {"n": 0}
+
+        def counted(statics, logodds_window):
+            fired["n"] += 1
+            return real_loc(statics, logodds_window)
+
+        _SL.structural_reference_location = counted
+        _SW.structural_reference_location = counted
+
+        def restore_loc():
+            _SL.structural_reference_location = real_loc
+            _SW.structural_reference_location = real_loc
+
+        return restore_loc, fired
 
     fields = _ARM_FIELDS[arm]
 
@@ -423,9 +484,19 @@ def seeded(pipeline_config, arm: str, em_seed: int):
         # is neither method's answer. ⛔ Every stage-6 `alloc_*` arm takes the same setting as
         # `oracle_alloc`, or the capability proof is not the yardstick it is being read as.
         warm = "prior"
-    return dataclasses.replace(
+    out = dataclasses.replace(
         pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
     )
+    if arm == "struct_ref":
+        # ⭐⭐ THE THERMOMETER ARM for psi's annotation-set reference MEAN. ⛔ It is a CONFIG FLAG and not
+        #   an override — nothing here is patched, so this reads the shipped path end to end and differs
+        #   from `base` in exactly one boolean. `CalibrationConfig.structural_reference`'s own gate is
+        #   `tests/calibration/test_structural_reference.py`; the calibration-level score is
+        #   `vertex_ceiling.py --arm config_struct`, and THIS is only the thermometer above it.
+        out = dataclasses.replace(
+            out, calibration=dataclasses.replace(out.calibration, structural_reference=True)
+        )
+    return out
 
 
 def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
@@ -535,6 +606,78 @@ def install_computed_weights(mode: str, opportunity: str, index, granularity: st
     return restore, fired, box
 
 
+def install_ruler_arm(arm: str, oracle: OracleTruth):
+    """⭐⭐⭐ Wrap ``calibrate`` so a corrected split reaches BOTH consumers. Returns ``(restore, fired)``.
+
+    ⭐ ``rigel.calibration.calibrate`` is patched as a MODULE ATTRIBUTE, and that works because
+    ``run_pipeline`` does ``from .calibration import calibrate`` function-locally — the name is
+    resolved at call time, not at module load. Same mechanism as :func:`install_computed_weights`.
+
+    ⛔⛔ **CALIBRATE BEING CALLED IS NECESSARY AND NOT SUFFICIENT, SO THE COUNTER WATCHES THE RULER.**
+    ``_setup_geometry_and_estimator`` builds ``effective_lengths_em`` only when it is handed both a
+    calibration and the region arrays; hand it ``None`` for either and the substituted result would
+    reach the prior alone, the arm would silently become ``oracle``, and the difference between them —
+    the one quantity this arm exists to measure — would read as exactly zero. Counting where the
+    SHRINKAGE runs makes that impossible to miss, exactly as ``install_truth_weights`` counts where the
+    solver receives its weights rather than where they were handed over.
+
+    ⭐ ``max_abs_delta`` is the end-to-end half of the same check and it is recorded per condition:
+    ``oracle_ruler`` MUST move the ruler and ``oracle_ruler_noop`` must not move it at all. An arm that
+    cannot move the number it names is not a measurement of zero effect.
+
+    ⚠ The ``noop`` variant still reads the oracle, still builds the override and still calls
+    ``dataclasses.replace`` — it takes no field. A noop that short-circuits earlier would prove the
+    ``if`` works and nothing else (TRAPS: could-the-arm-have-fired).
+    """
+    import rigel.calibration as CAL
+    from rigel.calibration import capture_eff_length as CEL
+
+    substitute = _RULER_ARMS[arm]
+    orig_calibrate = CAL.calibrate
+    orig_ruler = CEL.transcript_capture_eff_lengths
+    shipped: dict = {"cal": None}
+    fired = {"n": 0, "ruler": 0, "max_abs_delta": 0.0}
+
+    def cal_wrapper(*a, **kw):
+        cal = orig_calibrate(*a, **kw)
+        region_arrays = kw.get("region_arrays")
+        if region_arrays is None:
+            raise RuntimeError(
+                "⛔ calibrate was not called with region_arrays by keyword — the pipeline boundary "
+                "moved, and override_masses cannot be built without it."
+            )
+        override = oracle.override_masses(region_arrays)
+        shipped["cal"] = cal
+        fired["n"] += 1
+        if not substitute:
+            # ⭐ The noop's field set is read off ``override`` ITSELF, never from a local copy of the
+            # list. A second copy is a second home, and the day ``override_masses`` writes a seventh
+            # field the noop would replace six with themselves while the arm replaced seven — and both
+            # would still print the word "identical".
+            return dataclasses.replace(cal, **{f: getattr(cal, f) for f in override})
+        return dataclasses.replace(cal, **override)
+
+    def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths):
+        out = orig_ruler(calibration, region_arrays, index, fl_eff_lengths)
+        # ⭐ the SHIPPED ruler, computed alongside, so "did this arm move the ruler" is a number rather
+        # than an inference. ~0.3 s against a run measured in minutes.
+        base = orig_ruler(shipped["cal"], region_arrays, index, fl_eff_lengths)
+        fired["ruler"] += 1
+        fired["max_abs_delta"] = max(
+            fired["max_abs_delta"], float(np.abs(np.asarray(out) - np.asarray(base)).max())
+        )
+        return out
+
+    CAL.calibrate = cal_wrapper
+    CEL.transcript_capture_eff_lengths = ruler_wrapper
+
+    def restore():
+        CAL.calibrate = orig_calibrate
+        CEL.transcript_capture_eff_lengths = orig_ruler
+
+    return restore, fired
+
+
 def install_truth_weights(weights: np.ndarray):
     """Pass per-transcript weights into the EM, and COUNT THE ARM AT THE DEEPEST POINT IT CAN OBSERVE.
 
@@ -619,6 +762,11 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
         # the allocation. `oracle_alloc` also zeroes the seed, which additionally removes RNA's evidence
         # advantage over calibration's gDNA prior — two changes, not one.
         restore, fired = install_truth_weights(truth_weights(truth, index))
+    elif arm in _RULER_ARMS:
+        # ⛔ EXACT MEMBERSHIP, and placed before the fall-through: `oracle_ruler` starts with "oracle"
+        # and would otherwise land in `install_arm`, whose `_ARM_FIELDS[arm]` would raise — or worse,
+        # would not have, had the name been one letter different.
+        restore, fired = install_ruler_arm(arm, oracle)
     else:
         restore, fired = install_arm(arm, oracle)
     start = time.perf_counter()
@@ -629,14 +777,38 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     if fired["n"] == 0:
         # ⛔ TRAPS: an-ablation-that-never-ran — an injection that never ran reads as "a perfect prior changes nothing".
         raise RuntimeError(
-            f"{condition} [{arm}]: assemble_priors was never wrapped-and-called. This is not a "
+            f"{condition} [{arm}]: the override was never wrapped-and-called. This is not a "
             "measurement of zero effect."
         )
+    if arm in _RULER_ARMS:
+        # ⛔ The ruler arms carry a SECOND requirement, because reaching `assemble_priors` is the thing
+        # they were built NOT to settle for: the shrinkage must have run on the substituted result, and
+        # the substituting arm must have MOVED it.
+        if fired["ruler"] == 0:
+            raise RuntimeError(
+                f"{condition} [{arm}]: the effective-length shrinkage never ran, so this arm reached "
+                "the prior only — which is the `oracle` arm, measured under a different name."
+            )
+        if _RULER_ARMS[arm] and fired["max_abs_delta"] == 0.0:
+            raise RuntimeError(
+                f"{condition} [{arm}]: the substitution did not move `effective_lengths_em` by one "
+                "ULP. An arm that cannot move the quantity it names has not measured it."
+            )
+        if not _RULER_ARMS[arm] and fired["max_abs_delta"] != 0.0:
+            raise RuntimeError(
+                f"{condition} [{arm}]: the NOOP arm moved `effective_lengths_em` by "
+                f"{fired['max_abs_delta']:.3e}. Replacing six arrays with themselves must be inert."
+            )
     seconds = time.perf_counter() - start
 
     quant = result.estimator.get_counts_df(index)
     common = {"arm": arm, "condition": condition, "seconds": seconds,
               "em_seed": int(pipeline_config.em.seed)}
+    if arm in _RULER_ARMS:
+        # ⭐ How far the substituted split moved the EM's ruler, in base pairs of opportunity on the
+        # worst transcript. Recorded rather than only asserted, so the arm's REACH is readable off the
+        # output file beside the score it produced.
+        common["ruler_max_abs_delta"] = float(fired["max_abs_delta"])
     if weight_box is not None:
         # ⭐ The WEIGHT VECTOR's own agreement with truth, recorded beside the end-to-end score. They
         # answer different questions and a stage-6 arm needs both: a weight that correlates well and

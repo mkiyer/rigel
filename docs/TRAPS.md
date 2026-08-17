@@ -41,12 +41,25 @@ need as *current* comes from `ROADMAP.md`, never from a number in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **118 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **129 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
-you are about to do, then open only those.** Cite one
-as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
-⚠ A hand-carried count has now drifted twice, which is `TRAPS: re-record-the-baseline` committed by this
-file's own index — count the index entries, do not adjust the number.
+you are about to do, then open only those.**
+⭐⭐ **RE-DERIVED 2026-08-16 AND THE INDEX IS COMPLETE: 129 entries, 129 bodies, and BOTH set differences
+print empty.** (It read 124/124 before the five rules the composition-reference work added to §D.)
+⛔⛔ **The "120 index entries against 125 rule BODIES" this paragraph used to record was a COUNTING
+ARTEFACT, not a gap — and that is the sharper lesson.** The body count came from matching `**<token>.` at
+the start of a line, which also matches a bolded NUMBER where prose wraps: `**64.5 % of transcript
+error…`, `**0.00 / 0.51 / 0.98**`, `**146.05**`, `**1.76–2.20× WORSE…`, `**3.4e9× finer**`. Exactly five,
+and they were read as five missing rules. ⭐ **A rule name always begins with a LETTER**, so the
+reproducible derivation is::
+
+    index   ^- `([a-z0-9-]+)`          in the section above
+    bodies  ^\*\*([a-z][a-z0-9-]*)\.\s in the sections below
+
+⚠ **This is `TRAPS: re-record-the-baseline` committed one level up: the number was re-derived faithfully
+and the METHOD was never validated, so a re-derivation reproduced the same wrong answer.** Re-derive with
+the pattern above and check BOTH directions print empty; do not adjust the number. Cite a rule as
+`TRAPS: <name>` — the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
 
 **Validation and gates**
 
@@ -84,6 +97,10 @@ file's own index — count the index entries, do not adjust the number.
 **Measurement and inference**
 
 - `measure-the-ceiling-first` — MEASURE THE CEILING BEFORE BUILDING THE CORRECTION.
+- `a-broad-population-carries-no-prior` — a population prior transfers information only if the pooled
+  distribution is TIGHTER than the per-object uncertainty. RNA's is 3 decades wide: worth nothing.
+- `attribution-must-survive-a-shuffle` — an oracle arm a SCRAMBLED oracle also wins has not priced
+  the truth. Permute the truth you fed it and check the gain disappears.
 - `score-against-truth` — Score against TRUTH, not against the previous run.
 - `zero-target-guards-are-one-sided` — A zero-target guard is ONE-SIDED.
 - `hard-labels-miss-soft-change` — Hard-label metrics are nearly blind to soft changes.
@@ -151,6 +168,16 @@ file's own index — count the index entries, do not adjust the number.
 - `identical-paralogs-are-bimodal` — An identical-paralog split is bimodal, and depth does not fix it.
 - `compatibility-is-geometry-not-composition` — A PREDICATE BUILT FROM WHAT A FRAGMENT IS COMPATIBLE WITH
   CANNOT SEPARATE RNA FROM gDNA.
+- `a-priors-curvature-is-not-the-datas-information` — A PRIOR MAY NOT CONTRIBUTE TO A FISHER PRECISION.
+  Feeding one in is a gate flip that releases the full count precision, and it credits data-free slots.
+- `a-four-decimal-print-is-not-a-zero` — 4.21e-05 printed as `0.0000` and a whole mechanism was built on
+  it being zero. `repr` the number a diagnosis turns on.
+- `a-refutability-test-needs-the-refuting-channel-in-the-fixture` — a prior measured with no evidence that
+  could overturn it looked catastrophic; the channel was missing from the chain, not from the design.
+- `a-strength-is-a-nat-a-prior-weight-is-a-count` — a prior's strength comes from what it CLAIMS, never
+  from what the lattice can hold. The representation's limit is a cap, and a cap is not a choice.
+- `a-constant-in-exact-arithmetic-is-not-constant-in-float64` — a term that "cancels" carried 2.2e-16 of
+  asymmetry and tipped a median knife-edge by a full grid step. Return the vanishing value.
 
 **Structure, indexes and plumbing**
 
@@ -196,6 +223,10 @@ file's own index — count the index entries, do not adjust the number.
 - `converge-and-delete` — Converge and delete.
 - `the-source-does-not-cite-docs` — The source does not reference the docs.
 - `running-an-arm-is-a-fresh-process` — SIX OPERATIONAL TRAPS FROM RUNNING PANEL ARMS, each of which cost a
+- `shard-an-arm-sweep-by-condition` — Shard a panel sweep by CONDITION, never by ARM over one condition: the instruments WRITE their caches and three writers on one directory truncated a payload.
+- `a-mean-hits-the-mass-weighted-centre-by-luck` — A scalar that "wins" on a mass-weighted metric may only be sitting on the mass-weighted centre of a bimodal population; compare it against its own class mean.
+- `a-clamp-at-the-closed-end-escapes-the-window` — A prior clamped at the closed end of its support can put almost all its mass outside the solve window; derive the floor at the OBJECT, not over the pool.
+- `the-peel-is-as-good-as-the-density-it-is-handed` — A residual estimator inherits the error of the density it subtracts; price that density against truth first.
 - `no-enumeration-without-a-census` — Do not re-propose path or cell enumeration without a memory census.
 
 ---
@@ -608,6 +639,25 @@ coupling constant; the ceiling showed a **perfect** model of it bought ~1 %, whi
 ranking was worth 21 %. An A/B tells you whether a change helped; a ceiling tells you whether the work is
 worth starting — and it is available whenever the simulator writes truth.
 *Instrument:* `scripts/design/calibration_truth_ab.py --ceiling`.
+
+**a-broad-population-carries-no-prior. ⛔⛔ A POPULATION PRIOR ONLY TRANSFERS INFORMATION IF THE POPULATION IS TIGHT.**
+The gDNA landscape works because gDNA is near-uniform: pooling genuinely tells one object the library's level.
+The same machinery fitted to RNA is worth **nothing** — measured 0.988 / 0.997 / 1.037 against base — because
+the per-object RNA density spans ~3 decades, so the pooled distribution is wider than the per-object
+uncertainty it was meant to reduce and the prior is flat where it matters. ⭐ *The rule:* before fitting a
+population prior, measure the pooled distribution's WIDTH against the per-object uncertainty. If it is wider,
+there is no prior to be had and the fit will read as neutral-to-worse. ⚠ The width was measured EARLY here
+(2.4–3.0 decades) and read as "harmless"; it also means "uninformative", and that single reading would have
+predicted the refusal before anything was built.
+
+**attribution-must-survive-a-shuffle. ⛔⛔ AN ORACLE ARM THAT A SCRAMBLED ORACLE ALSO WINS HAS NOT PRICED THE TRUTH.**
+An oracle RNA density fitted from the origin-split truth improved the panel 0.78–0.85×. Refitting it from the
+SAME truth values SHUFFLED against their own opportunities — a shape wrong on purpose — **beat the true shape
+at `g98` (0.786 vs 0.854)** and was neutral-to-worse elsewhere. So the gain was partly "any shape leaning
+toward the vertex helps", not "the true density helps", and the ceiling did not mean what its name said.
+⭐ *The rule:* before believing a ceiling built from truth, re-run it with that truth SCRAMBLED. If the gain
+survives the scramble, the arm is measuring a property of the mechanism, not of the truth you fed it.
+⚠ Cheap — one permutation — and it is the only check that separates the two.
 
 **score-against-truth. Score against TRUTH, not against the previous run.** The simulator writes per-fragment ground truth
 into the oracle BAM's read names. That is what found a score-annihilation bug, and what turned "the
@@ -1251,6 +1301,116 @@ outside the RNA likelihood terms, and it is a bug to localise rather than noise 
 
 ---
 
+**a-mean-hits-the-mass-weighted-centre-by-luck. A scalar that "wins" on a mass-weighted metric may only be
+sitting on the mass-weighted centre.** Measured FOUR times in one investigation (2026-08-15/16), each time
+looking like a result: the library-wide `f_lib` reference mean, the object-weighted mean, the pooled RNA
+density, and the exonic class constant. ⭐ The population in each case was BIMODAL — objects at `f_g ≈ 0`
+and at `f_g ≈ 1` with an empty valley — and a mean of a bimodal population is the LEAST likely value, so
+the scalar carried no per-object information at all and scored well because `Σ|Δ|·M` weights by mass and
+the mass sat at one mode. ⛔ **The tell: compare the candidate against ITS OWN CLASS MEAN.** If replacing
+it by a constant costs nothing (measured 168,551 vs 164,074 fragments at `R exon`), it IS a constant, and
+its sd against the truth's sd says so directly (0.0021 against 0.4441). ⭐ Report the sd and the
+class-mean substitution beside any per-object claim.
+
+**a-clamp-at-the-closed-end-escapes-the-window. A prior clamped at the closed end of its support can put
+almost all its mass outside the solve window, and a sweep over the interior will never see it.** ψ's
+reference location was clamped with a flat `eps = 1/Σeff_g = 1e-8`, i.e. `m = 1 − 1e-8`. Measured, **only
+0.94 % of the reference's mass then lies inside the shipped `L = 10` window** — worse than the 57 % the
+refused unequal-exponent design leaves outside, and the answer becomes a function of the grid. ⛔ The
+`L`-invariance gate did not catch it because it sweeps `m ∈ [0.01, 0.99]` and the arm operated only at the
+clamp. ⭐ **The repair is to derive the floor AT THE OBJECT, not over the pool**: one pseudo-fragment
+*here* gives `m_i = E[g]_i/(E[g]_i + 1)`, which reads p5 0.788 / median 0.917 / p95 0.998 and keeps
+0.909–0.990 of the mass inside the window. ⚠ A pooled floor (`1/Σeff_r`) does NOT fix it (0.0404 inside).
+⭐ **Test a prior at the value the code will actually use, not only across its interior.**
+
+**the-peel-is-as-good-as-the-density-it-is-handed. A residual estimator inherits the error of the density
+it subtracts, amplified.** `f_g = ρ_g·E_g/M` needs no RNA model — RNA is whatever the gDNA peel leaves —
+which is what makes it usable pre-solve. ⛔ But its accuracy is exactly the accuracy of `ρ_g`: measured
+1.00× of truth at capture-OFF where the peel scores **0.026**, and 0.28–0.38× under capture where the same
+peel scores **1.091**, i.e. worse than the uninformative reference. On the panel that became a **5.3×
+LOSS** on stranded × capture-ON. ⭐ So price the DENSITY against truth before believing anything built on
+it, and state the peel's verdict per stratum of that density rather than pooled.
+
+**a-priors-curvature-is-not-the-datas-information. ⛔⛔⛔ A PRIOR MAY NOT CONTRIBUTE TO A FISHER PRECISION,
+AND THREE SEPARATE MEASUREMENTS SAY SO.** `region_init`'s `tau_lam` is the DATA's information on the
+composition axis. When ψ's reference gained an annotation-set MEAN, a slot it pinned sat at the λ grid's
+edge where the strand term `c·a² ∝ f_g²(1−f_g)²` vanishes, and `tau_lam` fell **3,227×** (0.1358 →
+4.21e-05) exactly as the slot's belief became most certain. The reading — *"the information moved into a
+λ-factor whose curvature nothing reads; `density_factor_precision` already reads the intron factory's, so
+let it read the location's too"* — was built and REFUSED:
+
+* **the fall is the JACOBIAN, not a loss.** `[f(1−f)]²` between `f_g = 0.98576` and `0.99975` predicts
+  **3,154×** on its own — ~98 % of it. The likelihood genuinely is that flat on λ at the point the prior
+  chose. There was nothing to recover.
+* **it is a BOOLEAN GATE FLIP, not a contribution.** At the vertex `Var(log f_g) = (1−f_g)²/τ ≈ 8e-08`, so
+  `own_precision` saturates at the COUNT ceiling: τ = 0.029 and τ = 1e6 both return **850.44** against a
+  ceiling of **850.50**. Only `τ > 0` does any work, and what it releases is 850 fragments of count
+  precision — bought with a prior worth one.
+* **it credits DATA-FREE slots.** The location carries no count, so it hands the same value to an empty
+  slot and to a 10⁶-fragment one: `n = 0` goes `prec_g` 0 → 0.2026. `intron_prior` is NOT the precedent it
+  looks like — its NegBinom curvature is count-derived and self-limits on thin data.
+
+⭐ *The rule:* before adding any term to a precision, ask whether it scales with the DATA. If it does not,
+it is a prior, and its place is in the posterior — never in the Fisher information. ⚠ Measured, the
+contribution was **bit-identical on the deliverable across all 32 panel rows** and moved only
+`solvable_mass_share` (13.16 → 11.91) and `weak_evidence_mass_share` (0.338 → 1.549) — i.e. it changed
+0.8.0's own DENOMINATOR (`has_own_composition_evidence`) and nothing else. Related:
+`TRAPS: a-four-decimal-print-is-not-a-zero`, which is how the wrong diagnosis was reached.
+
+**a-refutability-test-needs-the-refuting-channel-in-the-fixture. ⛔⛔⛔ A PRIOR MEASURED WITHOUT THE
+EVIDENCE THAT COULD OVERTURN IT IS NOT BEING TESTED — IT IS BEING ASKED TO ANSWER ALONE.** ψ's structural
+prior (*presume gDNA where no annotated mature transcript crosses*) was measured against nascent RNA on a
+toy chain and read **2.1–5.7× WORSE**, and the conclusion drawn was that the claim itself was unsafe. The
+chain was `exon|intron|exon|intron|exon` with **no intergenic regions** — and `fit_intron_background` pools
+INTERGENIC regions only, so it returned uninformative, `_build_intron_prior` returned `None`, and the
+intron-vs-intergenic density mechanism **was not in the room**. At κ = ½ the strand mechanism is dead by
+derivation too, so the fixture had NO refutation channel at all. Rebuilt with intergenic flanks — which
+production always has — the same mechanism reads **τ_fac = 161.4** at every intron and the same prior
+YIELDS to the same nascent, to within 0.02 of the no-prior answer.
+⭐ *The rule:* before measuring whether a prior can be overturned, ASSERT that the overturning channel is
+live in the fixture — `bg.informative`, a nonzero `τ`, a fired counter. ⚠ It is the same shape as
+`TRAPS: an-ablation-that-never-ran` pointed the other way: there an override never ran, here the EVIDENCE
+never ran, and both make the thing under test look like it has no competition.
+
+**a-strength-is-a-nat-a-prior-weight-is-a-count. ⛔⛔ THE TWO ARE NOT THE SAME UNIT, AND EQUATING THEM IS AN
+ANALOGY WEARING A DERIVATION'S CLOTHES.** ψ's location term has range `logit(m)` — a LOG-ODDS in nats — and
+the reference it rides on is `Beta(a, b)` with a declared weight `a + b = 1` PSEUDO-COUNT. Setting
+`m = σ(a+b)` reads as principled, gives 0.731, and is numerically fine; it is still dimensionally wrong.
+⭐ The derivation that stays in one currency is *what mean would one pseudo-observation produce*:
+`Beta(a,b) → Beta(a+1,b)`, mean `(a+1)/(a+b+1)` = **0.75** at `a = b = ½` — a composition mean from
+pseudo-counts, tracking the exponents automatically.
+⛔⛔ **And what it replaced is the sharper lesson: the strength had been taken from the LATTICE** (`m = σ(L)`
+⇒ 9.31 nats ≈ 10,000:1), which is not a statement about the claim at all. Measured against being refuted it
+was **worse than having no prior** (2.0247 vs 0.3946). ⭐ *The rule:* a prior's strength must come from what
+it CLAIMS, never from what the representation can hold — the representation's limit is a CAP, and a cap is
+not a choice. ⚠ Check the optimum is BROAD before trusting any derived value: here 0.69 → 1.50 nats lie
+within 6 %, so the derivation is doing the work rather than a fit.
+
+**a-four-decimal-print-is-not-a-zero. ⛔⛔ A DIAGNOSTIC PRINTED AT FOUR DECIMALS READ `0.0000`, AND A
+SESSION'S WHOLE MECHANISM WAS BUILT ON IT BEING ZERO.** `tau_lam` under a sharp prior was recorded as
+collapsing to **0.0000**, and the diagnosis followed: *"`tau_lam > eps` is `has_own_composition_evidence`,
+so the strongest possible prior makes a slot read as evidence-FREE"*. The value was **4.21e-05**, the
+predicate returns **True** on it, and the slot was never evidence-free. The real effect was a 3,227×
+change of MAGNITUDE, which needs a different repair and — as it turned out — no repair at all.
+⭐ *The rule:* a number that a diagnosis TURNS ON is `repr`'d, never formatted, and a claim of "exactly
+zero" is asserted with `== 0.0` rather than read off a table. ⚠ The cost was a falsification gate written
+against a non-defect: it demanded that a prior never LOWER the data's Fisher information at the posterior
+mode, which is false for any nonlinear reparametrisation. It was verified failing, the code was changed to
+make it pass, and both were wrong.
+
+**a-constant-in-exact-arithmetic-is-not-constant-in-float64. ⛔⛔ "THIS TERM IS CONSTANT SO IT CANCELS" IS
+A CLAIM ABOUT ℝ, AND THE GRID DOES NOT LIVE THERE.** ψ's location term at its NEUTRAL mean `m = ½` is the
+constant `log 2` in exact arithmetic — its whole reduction property, and the reason setting a location on
+some slots is supposed to leave every other slot alone. In float64 `logaddexp` leaves that row with
+**`ptp = 2.22e-16` over three distinct values, at every grid size**. `_posterior_median_fg` reads the grid
+point where the CDF first reaches ½, so wherever a posterior is exactly SYMMETRIC that rounding tips the
+knife-edge: a balanced AMBIG slot at `κ = ½` moved `f_g` **0.5423 → 0.4577**, one full grid step, at a slot
+the prior claimed to say nothing about — and there are ~37,000 of them, the exact population the gDNA
+landscape is fitted to serve. ⭐ *The rule:* where a term is documented as vanishing, RETURN the vanishing
+value rather than computing something that equals it; and gate the reduction on the ANSWER
+(`solve(neutral) == solve(None)`, bit-for-bit), not on `allclose` of the term. ⚠ An `atol = 1e-15`
+closeness gate on the term itself passed throughout.
+
 ## E. Structure, indexes and plumbing
 
 **one-reference-hides-refid-bugs. Single-reference synthetic indexes hide reference-id-space mismatches.** A resolver assigned ref-ids
@@ -1555,11 +1715,27 @@ about the model; they are about not wasting an hour.
 start-up, so a mid-flight edit silently changes what half the shards measured. Adding a NEW arm to
 `scripts/` is safe. (ii) ⛔ **zsh does not word-split an unquoted variable** — use an array and
 `"${CONDS[@]}"`. (iii) ⛔ **A wait-loop whose `pgrep` pattern matches its own wrapper deadlocks** — wait on
-a log marker instead. (iv) ⚠ **`pass0_vs_oracle.DEFAULT_SUITE` is the PILOT, not the ladder** — always pass
-`--suite .../suite/ladder` explicitly. (v) ⚠ **Node-axis and region+boundary figures differ by ~2×** — say which
-one, every time. (vi) ⚠ **A composite arm fires only its COMPONENTS' names**, so an
+a log marker instead. (iv) ✅ **`pass0_vs_oracle.DEFAULT_SUITE` pointed at the deleted PILOT panel until
+2026-08-15** — three instruments read it from there and all three died on "Failed to open BAM" in their
+no-argument form. Repaired to `ladder`; `prior_vs_oracle.py` carries a second copy that was already
+correct, which is how one of two homes goes stale unnoticed. (v) ⚠ **Node-axis and region+boundary figures
+differ by ~2×** — say which one, every time. (vi) ⚠ **A composite arm fires only its COMPONENTS' names**, so an
 `TRAPS: an-ablation-that-never-ran` guard keyed on the arm's own name trips after a complete, valid run —
 check WHY a guard fired before distrusting the data.
+
+**shard-an-arm-sweep-by-condition. Shard a panel sweep by CONDITION, never by ARM over one condition —
+the instruments WRITE their caches.** `pass0_vs_oracle.measure_condition` writes
+`<oracle_cache>/<condition>/_main` whenever `--oracle-cache` is passed, and `load_or_build_oracle` writes
+the three origin partitions when they are missing. Running three arms concurrently on the SAME condition
+therefore races three writers on one directory: measured 2026-08-15, one `payload.npz` came out truncated
+and every later read of it raised `BadZipFile`. ⭐ **The damage is loud rather than silent, and that is
+worth knowing before panicking**: a torn zip raises, `read_scan_cache` re-verifies four digests, and
+`OracleTruth.from_parts` re-runs sum-to-full on every bank — so a race cannot quietly feed a wrong truth,
+it can only kill the run. The fifteen survivors were checked against `scan_cache/<condition>` and were
+bit-identical on every INTEGER bank and **3.513e-14** apart on the six float ones, exactly the recorded
+re-association floor. ⚠ Different arms on DIFFERENT conditions is safe and is the shard that parallelises;
+so is one arm sequentially over the panel. ⛔ And an instrument that only READS should take its full
+payload from `scan_cache/`, not from a directory another instrument writes.
 
 **no-enumeration-without-a-census. Do not re-propose path or cell enumeration without a memory census.** Possible unspliced paths ≈
 1 M regions × 3–6 reachable ends at ~100 B each = 0.3–0.6 GB, plus spliced paths. It was killed by memory,

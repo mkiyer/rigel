@@ -1,28 +1,36 @@
-"""The population gDNA-density hyperprior — the **landscape**.
+"""The population component-density hyperprior — the **landscape**.
 
-This is the Phase-2 object: fit `P(log ρ_g)` over the population from pass-0's deconvolved gDNA, then feed
-it to ψ's composition arm on the re-solve. It replaces the δ-pin `DensityNPMLE` in that role (which is
-retired, not deleted — see :mod:`.npmle`).
+Fit `P(log ρ_c)` over the population from the previous solve's deconvolved mass for ONE component, then
+feed it to that component's ψ composition arm on the re-solve. It replaces the δ-pin `DensityNPMLE` in
+that role (which is retired, not deleted — see :mod:`.npmle`).
 
-**The shape of the truth it has to represent.** gDNA is uniform, so the depleted level is a near point mass;
-hybrid capture lifts the covered regions into one enriched mode ~2.7 decades above it. Two components, one
-sharp and one broad, several decades apart — so the estimator must resolve a spike *and* a wide bump on the
-same axis, which is what fixes the design below.
+⭐⭐ **THE ESTIMATOR IS COMPONENT-AGNOSTIC, AND DELIBERATELY SO.** Every step below is arithmetic on
+``(count, mass, eff)`` for whichever component the caller selected: :func:`_grid` is ``mass/eff``,
+:func:`_poisson_kernels` is `P(count | ρ·E)`, :func:`knn_widths` is nearest-neighbour spacing on a
+1-D axis, :func:`_render` is convolution. **Nothing here knows which component it is fitting.**
+⛔ **The component-specific reasoning — which objects train it, and what an anchor MEANS — is the
+caller's**, and it lives beside each caller's substrate selector where the chain is. Two decisions that
+used to be stated here are stated there instead: the REGIONs-only / AMBIG-excluded / anchor-bearing
+selection, and what a zero-count object is evidence *of*.
 
-**Three decisions, each measured**:
+**The shape of the truth it has to represent.** A component's density is typically one near point mass
+plus one broad bump some decades away — for gDNA, a uniform depleted level with hybrid capture lifting
+the covered regions ~2.7 decades above it; for RNA, a silent majority against an expressed spread. Two
+components, one sharp and one broad, several decades apart — so the estimator must resolve a spike *and*
+a wide bump on the same axis, which is what fixes the design below.
 
-1. **SUBSTRATE** — REGIONs only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
-   excluded (owner, 2026-07-27): they are ~as numerous as regions but only 5.1 % of them are truly enriched
-   against the regions' 12.1 %, so including them nearly halves the enriched component's census and their
-   two-flank mixture fills the valley between the two true modes (74 % of all valley mass). The zero-count
-   anchor is *critically* load-bearing — dropping it costs +0.26 / +0.61 EMD, and +1.04 on zero-gDNA.
-   Selection lives in `calibrate._fit_gdna_hyperprior`, which is where the chain is.
+**Two decisions, each measured**:
 
-2. **PRECISION IS A CONTINUOUS WEIGHT, NEVER AN ADMISSION RULE.** A hard precision cutoff scores *worse than
-   ignoring precision altogether* (+0.175 vs +0.001 ambig; +0.359 vs +0.098 quick). See :func:`_reliability`.
+1. **PRECISION IS A CONTINUOUS WEIGHT, NEVER AN ADMISSION RULE.** A hard precision cutoff scores *worse
+   than ignoring precision altogether* (+0.175 vs +0.001 ambig; +0.359 vs +0.098 quick). See
+   :func:`_reliability`.
 
-3. **RESOLUTION IS A POPULATION QUANTITY, NOT A MEASUREMENT ONE.** See :func:`knn_widths` — this is the one
-   that had a real bug in it, and it is worth reading before touching the kernel.
+2. **RESOLUTION IS A POPULATION QUANTITY, NOT A MEASUREMENT ONE.** See :func:`knn_widths` — this is the
+   one that had a real bug in it, and it is worth reading before touching the kernel.
+
+⚠ **The two constants below were SELECTED AGAINST gDNA-SHAPED DATA** (`_KNN_SCALE`, `_S0`). They are
+not component-specific by construction, but they have only ever been validated on one component; a
+second caller inherits them and must say so in its results rather than discover it later.
 """
 
 from __future__ import annotations
@@ -69,7 +77,7 @@ _S0 = (0.15 * _LN10) ** 2
 
 
 @dataclass(frozen=True)
-class GdnaLandscape:
+class DensityLandscape:
     """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid.
 
     ``strength`` is a temperature on the whole term. Default 1 is exact Bayes; below 1 tempers a prior that
@@ -83,31 +91,41 @@ class GdnaLandscape:
     n_train: int
     strength: float = 1.0
 
-    def logprior(self, fg_grid, mass, eff) -> np.ndarray:
-        """Project onto the ψ solve grid → ``(n_regions, K)`` additive term ``= log P(log ρ_g)`` evaluated at
-        ``ρ_g = f_g·M/E``. **Bare** — no reference prior, no measure term, no Jacobian; ψ's `_gdna_arm` adds
-        the reference itself.
+    def logprior(self, frac_grid, mass, eff) -> np.ndarray:
+        """Project onto the ψ solve grid → ``(n_slots, K)`` additive term ``= log P(log ρ_c)`` evaluated at
+        ``ρ_c = f_c·M/E_c``. **Bare** — no reference prior, no measure term, no Jacobian; ψ's arm adds the
+        reference itself.
 
-        The latents are rates, conditioning on ``M`` contributes no ``f_g``-dependent Jacobian, and because
+        ⭐⭐ **``frac_grid`` is the COMPONENT's fraction, which is what makes this serve either component.**
+        The caller passes ``f_g`` for gDNA and ``1 − f_g`` for RNA, with that component's own opportunity
+        as ``eff``. Nothing else differs between the two: the arithmetic below is
+        ``log ρ_c = log f_c + log M − log E_c`` for whichever component is asked about.
+
+        ⚠ **``(n_slots, K)``, not ``(n_regions, K)``** — the first axis is the unified region+boundary
+        CHAIN, the same axis as ``u_pos``/``u_neg``. This docstring said "regions" until 2026-08-15 and a
+        reader sizing a new array off it would have built the wrong shape.
+
+        The latents are rates, conditioning on ``M`` contributes no ``f_c``-dependent Jacobian, and because
         ``logP`` is a density in **log**-rate its conversion to a linear-rate density cancels the
-        ``log σ'(λ)`` change-of-variable exactly — so neither is written, here or in the caller.
+        ``log σ'(λ)`` change-of-variable exactly — so neither is written, here or in the caller. ⭐ That
+        cancellation is *per component*, which is why it keeps holding when both arms carry a fitted prior.
 
         Off-grid values clamp to the end values rather than extrapolating: the grid already spans the data's
-        own support (:func:`_grid`), so this only fires on the ψ grid's extreme ``f_g``, where the honest
+        own support (:func:`_grid`), so this only fires on the ψ grid's extreme fractions, where the honest
         statement is "no more information out here", not a linear extension of the last slope.
         """
         eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
         mass = np.maximum(np.asarray(mass, dtype=np.float64), _EPS)
-        fg = np.clip(np.asarray(fg_grid, dtype=np.float64), _EPS, 1.0 - _EPS)
-        log_rho_g = np.log(fg)[None, :] + (np.log(mass) - np.log(eff))[:, None]
+        frac = np.clip(np.asarray(frac_grid, dtype=np.float64), _EPS, 1.0 - _EPS)
+        log_rho_c = np.log(frac)[None, :] + (np.log(mass) - np.log(eff))[:, None]
         lp = np.interp(
-            log_rho_g.ravel(), self.log_rho, self.logP, left=self.logP[0], right=self.logP[-1]
-        ).reshape(log_rho_g.shape)
+            log_rho_c.ravel(), self.log_rho, self.logP, left=self.logP[0], right=self.logP[-1]
+        ).reshape(log_rho_c.shape)
         return lp if self.strength == 1.0 else float(self.strength) * lp
 
 
 def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:
-    """The log10 rate axis = **exactly the domain :meth:`GdnaLandscape.logprior` can be asked about.** No
+    """The log10 rate axis = **exactly the domain :meth:`DensityLandscape.logprior` can be asked about.** No
     asserted range, and nothing left over to choose.
 
     ψ evaluates the prior at ``ρ_g = f_g·M/E`` for ``f_g ∈ (0, 1]``, so:
@@ -260,9 +278,9 @@ def _render(
     return out
 
 
-def fit_gdna_landscape(
+def fit_landscape(
     count, mass, eff, var, *, anchor, strength: float = 1.0, knn_scale: float = _KNN_SCALE
-) -> "GdnaLandscape | None":
+) -> "DensityLandscape | None":
     """Fit the landscape from pass-0's per-region deconvolved gDNA. Returns ``None`` if it cannot be fit.
 
     Parameters mirror one training region each: ``count`` the deconvolved gDNA mass ``f_g·M``, ``mass`` the
@@ -301,7 +319,7 @@ def fit_gdna_landscape(
     # bounded by log W and the prior stays WEAK AND CORRECTABLE — the governing principle for pass-0 output,
     # which is exactly what this is fitted from.
     density = (density + total / (grid.size * max(float(weights.sum()), 1.0))) / total
-    return GdnaLandscape(
+    return DensityLandscape(
         log_rho=grid * _LN10,
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),

@@ -1,5 +1,13 @@
 # Handoff — 0.8.0 is scoped, and the next session is CALIBRATION
 
+## ⭐ WHERE THE SETTLED PARTS WENT — this file is a HANDOFF, not the state
+
+⛔ It was written to hand one session to the next and is now superseded: the ranked list is
+`ROADMAP.md` §1, the state is `ROADMAP.md` §0, and the reference work it points at has moved to
+`EQUATIONS.md` §9c / `DESIGN.md` §6b / `ROADMAP.md` §4.2. ⚠ **Nothing may cite it**, and any number
+here that disagrees with `ROADMAP.md` is stale by definition.
+
+
     ⚠ **A DEV DOC.** Provisional; nothing may cite it. When something settles, MOVE it to its
     permanent home and delete it here in the same edit.
 
@@ -55,34 +63,14 @@ stratum; the per-transcript prior is the lever on the three that matter for 0.8.
 
 ## 3. ⭐⭐⭐ NEXT STEPS, in order
 
-### 3a. Make the ruler measurable — wrap `calibrate` at the pipeline boundary
+### 3a. ~~Make the ruler measurable~~ — ✅ **DONE 2026-08-14. MOVED OUT OF THIS FILE.**
 
-⛔ **Nothing has ever been able to price the effective-length shrinkage.** The order is:
+The build is `quant_accuracy.py --arm oracle_ruler` / `oracle_ruler_noop` and
+`scripts/design/calibration_vs_oracle.py`; what it measured is `ROADMAP.md` §0 and its rank 1, and the
+session write-up is `session_2026-08-14_the_ruler.md` beside this file.
 
-```
-pipeline.py:982   calibration = calibrate(...)              ← WRAP HERE
-pipeline.py:816   _setup_geometry_and_estimator(...)
-pipeline.py:521       transcript_capture_eff_lengths(...)   ← consumer A (the shrinkage)
-pipeline.py:839   priors = assemble_priors(...)             ← consumer B (the prior)
-pipeline.py:841   _run_locus_em_partitioned(...)
-```
-
-Every existing measurement arm patches `assemble_priors` (:839), which is **after** the shrinkage is
-built (:816). So **every ceiling number in the docs was measured with a wrong ruler installed** and
-each is a LOWER bound.
-
-⭐ Wrapping `calibrate` is the only single point upstream of both consumers. Mechanically
-`import rigel.calibration as CAL; CAL.calibrate = wrapper` — `run_pipeline` imports it
-function-locally at `pipeline.py:916`, so the attribute resolves at call time. Exact precedent:
-`quant_accuracy.install_computed_weights` already does this at `:525`.
-
-⭐ Substitute with `dataclasses.replace(cal, **oracle.override_masses(region_arrays))` — the same
-call `install_arm` makes at `quant_accuracy.py:214`. Six fields, all deconvolutions with a defined
-truth: `mass_gdna_region`, `mass_rna_region`, `mass_gdna_boundary`, `mass_rna_boundary`,
-`mass_rna_spliced_boundary`, `count_rna_sj`.
-
-⚠ **Leave the geometry fields shipped** — `*_eff_len`, `*_mass_per_crossing`. They are identical
-under any split, and perfecting them is a different experiment.
+⛔ **Nothing about it is repeated here on purpose** — a dev doc that keeps its own copy of a settled
+finding is the second home that then diverges, which is the one rule this sandbox has.
 
 ### 3b. Run the scenarios, look at the whole error spectrum, pick ONE target
 
@@ -150,12 +138,8 @@ a reason `g00` cannot be measured.
 
 ### The metric
 
-⭐⭐ **Score the CALIBRATION RESULT against ORACLE CALIBRATION**, not the end-to-end number.
-The comparison is `calibrate(...)` versus `dataclasses.replace(cal, **OracleTruth.from_parts(...)
-.override_masses(ra))` on the same payload — same object, only the deconvolved arrays replaced.
-⚠ No shipped instrument does exactly this yet. `prior_vs_oracle.py` is one level DOWNSTREAM (it
-scores `LocusPriors`), and `quant_accuracy.py` is two levels downstream. Building the direct
-comparison is step one of the next session, and it is cheap: **~6 s per condition, no solver.**
+✅ **BUILT 2026-08-14 as `scripts/design/calibration_vs_oracle.py`** — measured 5–12 s per condition,
+the whole ladder in ~2 min, no solver. ⛔ Its numbers live in `ROADMAP.md` §0 and are not copied here.
 
 ⛔ **Score per stratum, never pooled.** On 8 of 12 conditions the shipped composition is already
 within ~1 % of truth, so a pooled number reads any calibration experiment as a small effect.

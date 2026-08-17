@@ -534,7 +534,7 @@ span". **The real-transcript filter is `~is_synthetic`, alone** (TRAPS: nrna-doe
 and **`messages/` (the POLICY: `silent` `head` `variance`)** · `node_chain` `node_geometry` `node_init` ·
 `substrate` `region_arrays` `signature` · `effective_length` `capture_eff_length` `fl`
 `junction_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand` `strand_balance`
-`strand_deconv` `strand_summary` · `density_deconv` `density_model` `gdna_landscape` `npmle`
+`strand_deconv` `strand_summary` · `density_deconv` `density_model` `landscape` `npmle`
 `background_reference` · `simplex` `simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
 `diagnostics` `track`.
 
@@ -652,6 +652,104 @@ messages that AGREE on `τ = ±1`, and TRAPS: off-grid-message-mode's real overs
 apart, so no threshold is being bought.
 
 ---
+
+## 6b. ⭐⭐⭐ ψ's REFERENCE HAS A PER-OBJECT MEAN — the rulings behind it (2026-08-16)
+
+⭐ **The reference does NOT have to be library-wide, and the machinery was already per-slot.** ψ solves
+one REGION or one BOUNDARY at a time and the gDNA arm's fitted term is already `(n_slots, K)`; the
+reference was the only scalar left in it. `CompositionPriors.location` carries the per-slot mean and
+`simplex_logodds._location_term` writes it; `None` means the term is not written at all, which is the
+shipped behaviour. The derivation is `EQUATIONS.md` §9c.
+
+⛔⛔ **RNA IS THE RESIDUAL AND IS NEVER PREDICTED.** gDNA is near-uniform over the genome and measurable
+before any solve; RNA spans six orders of magnitude with essentially no genomic autocorrelation, so a
+pooled RNA density is not a population parameter and pooling splice-junction flux across the genome is
+inadmissible (owner, 2026-08-16). The reference's location is therefore `m_i = ρ_g·E_g,i / M_i` — the
+gDNA an object's own density predicts, as a share of what it holds — and whatever is left is RNA.
+
+⭐⭐ **THE BOUNDARY AXIS SPLITS ON WHETHER MATURE RNA CAN CROSS, NOT ON WHETHER A SPLICE JUNCTION
+ATTACHES** (owner, 2026-08-15). A BOUNDARY owns the fragments that cross it CONTIGUOUSLY, and mature RNA
+can do that only where the template is contiguous exon on both sides. So an `exon|intron` boundary is
+near-pure gDNA under sparse unspliced nascent, while an `exon|exon` boundary — an alternative splice site
+inside a contiguous exonic stretch — is crossed freely by mature RNA and is not an anchor. ⛔ The
+predicate is the solver's own `mrna_active`. A pool defined as "a splice junction attaches here" measured
+true `f_g` **0.0000 over 955,428 fragments** at the zero-gDNA control, because it lumps `exon|exon` in.
+
+⭐⭐ **THE REFERENCE AND THE gDNA LANDSCAPE PARTITION THE OBJECT UNIVERSE RATHER THAN COMPETING.** Where
+the annotation determines the answer — intergenic and intron REGIONs, `exon|intron`, `intron|intron`,
+gene-edge and opposite-strand `exon|exon` BOUNDARIES, 47.5 % of slots — the reference carries it before
+any solve exists. Exons, same-strand `exon|exon` and AMBIG have no structural claim and are the
+population the landscape is fitted to serve. ⛔ **The overlap is bounded ONLY where evidence exists**: the
+reference is worth one pseudo-fragment, so it is swamped by any evidence channel — but on an
+evidence-free object posterior = prior at any depth, and there the reference and the landscape are the
+only two voices.
+
+### 6b.1 ⭐⭐⭐ THE SHIPPED FORM — `structural_reference`, and the four rulings behind it (2026-08-16)
+
+`CalibrationConfig.structural_reference` sets ψ's reference MEAN from the ANNOTATION:
+`simplex_logodds.structural_reference_location` returns `σ(L)` wherever `¬mrna_active` and the neutral ½
+everywhere else, and `sweep.solve_chain` threads it to the ONE `CompositionPriors` construction.
+Gate: `tests/calibration/test_structural_reference.py`.
+
+⭐⭐ **① THE CLAIM IS ABOUT THE ANNOTATION AND ITS PRECISE STATEMENT IS NOT "NOTHING IS TRANSCRIBED
+HERE".** An intron flank IS transcribed — as nascent. What is asserted is that **no annotated MATURE
+transcript is continuous across this position**, which is exactly `mrna_active`, and it leaves the
+unspliced population as gDNA + nascent. ⚠ That makes the NASCENT LEVEL the load-bearing quantity, and
+deconvolving it out of the introns is what would turn this from assumed into measured.
+
+⭐⭐⭐ **② THE STRENGTH IS ONE PSEUDO-OBSERVATION, AND THE LOCATION IS HOW IT IS WRITTEN.**
+`strength = logit(m)`, so a location on the λ scale IS its strength in nats and the claim's odds are
+`e^strength`. One pseudo-observation of gDNA takes `Beta(a,b)` to `Beta(a+1,b)`, whose mean is
+`(a+1)/(a+b+1)` = **0.75** exactly at `a = b = _JEFFREYS_REF` — a 3:1 claim, `log 3` nats, overturned by
+**1.46** fragments at κ = 0.99. No new number, and it tracks the exponents (`EQUATIONS.md` §9c.1).
+
+⛔⛔ **THIS REPLACED `m = σ(L)`, THE LATTICE'S OWN WIDTH, WHICH ASSERTED 9.31 NATS (~10,000:1) AND WAS
+MEASURED WORSE THAN NO PRIOR AT ALL AT BEING REFUTED** (refute-err 2.0247 against no-prior's 0.3946).
+*"A prior may not assert more than the lattice can represent"* is a valid CAP and is still applied; using
+it to CHOOSE was the error. ⚠ **The 16-condition ladder cannot rank a strength** — it holds `nrna = 0`, so
+it scores only the DELIVER obligation, where more nats is monotonically better, which is exactly why it
+preferred the worst option. The instrument that ranks it is a REFUTABILITY test
+(`tests/calibration/test_structural_reference.py`).
+
+⭐⭐ **THE TWO MECHANISMS THAT REFUTE IT ARE BUILT AND BOTH ARE REACHED** (owner, 2026-08-16): ① strand
+asymmetry inside an intron (`i_strand`, dead at κ = ½) and ② intron-vs-intergenic density
+(`fit_intron_background` + `density_lambda_factor` ⇒ `tau_fac`, **alive unstranded**, `intron_factory` is
+`True` in production). Measured, ② carries **τ_fac = 161.4** at an intron slot, and with it live the prior
+yields to nascent RNA at κ = ½ to within 0.02 of the no-prior answer.
+⛔⛔ **A REFUTABILITY TEST IS ONLY VALID IF THE CHANNEL IS IN THE FIXTURE**: `fit_intron_background` pools
+INTERGENIC regions only, so on a chain without them ② is silently absent and the prior looks catastrophic.
+Assert the channel before measuring.
+
+⛔⛔⛔ **③ τ_λ IS THE DATA'S INFORMATION AND THE REFERENCE MAY NOT ADD TO IT.** The location term has real
+curvature on λ (`density_factor_precision` reads 0.743 off it) and contributing it was built, measured and
+REFUSED: the 3,227× fall in `tau_lam` at a pinned slot is ~98 % the `[f(1−f)]²` Jacobian rather than a
+loss; feeding the prior in is a BOOLEAN gate flip that releases the full COUNT precision (τ = 0.029 and
+τ = 1e6 both return 850.44 of a 850.50 ceiling); and it credits data-free slots (`n = 0` → `prec_g`
+0.2026), which is exactly the population the reference's own safety argument rests on being empty.
+⚠ Measured, the contribution was **bit-identical on the deliverable on all 32 panel rows** and moved only
+`has_own_composition_evidence` — 0.8.0's own denominator. `TRAPS: a-priors-curvature-is-not-the-datas-information`.
+
+⛔ **④ THE NEUTRAL LOCATION IS RETURNED AS AN EXACT ZERO, NOT COMPUTED.** `m = ½` gives the constant
+`log 2` on paper but a row with `ptp = 2.22e-16` in float64, which tips `_posterior_median_fg`'s knife-edge
+at a symmetric posterior and moves `f_g` by a full grid step (0.5423 → 0.4577) at slots the reference
+claims to say nothing about. `TRAPS: a-constant-in-exact-arithmetic-is-not-constant-in-float64`.
+
+⭐ **MEASURED, through `calibrate` and against a `base` re-recorded in the same session** — final Σ|Δ| in
+fragments per stratum, ratio to base: **0.384 / 0.660 / 0.366** on the three in-scope strata, **0.800** on
+the deferred one, and the `g00` zero control **bit-identical on all 8 rows**. `ROADMAP.md` §0.
+
+⚠ **AND IT EXPOSED A RELAY DEFECT IT DOES NOT CAUSE.** With `message_propagation` ON, the relay carries a
+CORRECT structural claim across an exon↔intron boundary — where the mature-RNA population changes — and
+drives the exon to a confident wrong vertex. The composition licence knows about transcript TERMINI
+(`terminus_flank_gain`) and not about `mrna_active` flipping, which is precisely the predicate that says
+the RNA population differs across that hop. Recorded as a strict xfail; it is not a blocker under the
+shipped `off`.
+
+⭐ **HYBRID CAPTURE NEEDS NO DETECTION STEP.** Measure the gDNA density at both the off-target anchors
+(intergenic + intron REGIONs) and the in-gene `exon|intron` boundaries; their RATIO is the enrichment —
+measured **0.98** without probes and **113–114** with, a 116× separation with no threshold and no flag.
+⚠ The in-gene anchor is a DETECTOR and not a calibrated level: it under-reads the on-target gDNA density
+by **2.6–3.6×** because it sits at the EDGE of the probe footprint.
 
 ## 7. Where the error is, structurally
 

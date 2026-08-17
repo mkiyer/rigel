@@ -109,7 +109,13 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_SUITE = _RUNS / "suite" / "pilot"
+#: ⛔ **The CURRENT panel, and this default has been stale once already.** It read ``pilot`` until
+#: 2026-08-15, four days after that suite was deleted and the ladder rebuilt at 16 conditions — so the
+#: no-argument form of this file, ``solvability_audit.py`` and ``vertex_ceiling.py`` all died on
+#: "Failed to open BAM" pointing at a directory that no longer exists. ⚠ Three instruments read it from
+#: here; ``prior_vs_oracle.py`` carries its own copy and was already correct, which is exactly how one
+#: of two homes goes stale without the other noticing.
+DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 #: ⭐ NOT DEFINED HERE ANY MORE. "Has own composition evidence" has ONE home in production —

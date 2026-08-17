@@ -1,4 +1,4 @@
-"""Unit tests for the population gDNA-density hyperprior (`calibration.gdna_landscape`).
+"""Unit tests for the population gDNA-density hyperprior (`calibration.landscape`).
 
 One test per property the design actually rests on, so a regression names itself.
 """
@@ -6,9 +6,9 @@ One test per property the design actually rests on, so a regression names itself
 import numpy as np
 import pytest
 
-from rigel.calibration.gdna_landscape import (
-    GdnaLandscape,
-    fit_gdna_landscape,
+from rigel.calibration.landscape import (
+    DensityLandscape,
+    fit_landscape,
     knn_widths,
 )
 
@@ -32,8 +32,8 @@ def _density(ls):
 def test_fit_is_deterministic():
     args = _two_mode()
     anchor = np.zeros(args[0].size, bool)
-    a = fit_gdna_landscape(*args, anchor=anchor)
-    b = fit_gdna_landscape(*args, anchor=anchor)
+    a = fit_landscape(*args, anchor=anchor)
+    b = fit_landscape(*args, anchor=anchor)
     assert np.array_equal(a.logP, b.logP) and np.array_equal(a.log_rho, b.log_rho)
 
 
@@ -41,7 +41,7 @@ def test_recovers_both_modes():
     """The estimator exists to keep a capture-enriched MINORITY — 15 % of regions here — so a fit that
     smooths them into the depleted bulk is the failure mode, not a nuance."""
     count, mass, eff, var = _two_mode()
-    ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     x, d = ls.log_rho / LN10, _density(ls)
     assert d[x < 0].sum() > 0.5, "depleted bulk lost"
     assert d[x > 0.5].sum() > 0.05, "enriched minority competed away"
@@ -52,7 +52,7 @@ def test_grid_is_the_domain_logprior_is_asked_about():
     """ψ evaluates at ρ_g = f_g·M/E with f_g ≤ 1, so the grid top is max(M/E) and the bottom is the deepest
     one-count resolution wall. Nothing outside is representable, so nothing outside is represented."""
     count, mass, eff, var = _two_mode()
-    ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     x = ls.log_rho / LN10
     assert x[0] == pytest.approx(np.min(-np.log10(eff)))
     assert x[-1] == pytest.approx(np.max(np.log10(mass) - np.log10(eff)))
@@ -62,7 +62,7 @@ def test_zero_count_anchor_is_native_and_low():
     """A region with no gDNA must say 'ρ is anything below the wall' — a downward decay, NOT an invented
     location at 1/E. It is also the depleted anchor, and dropping it costs +0.26/+0.61 EMD."""
     eff = np.full(200, 500.0)
-    ls = fit_gdna_landscape(
+    ls = fit_landscape(
         np.zeros(200), np.full(200, 1000.0), eff, np.full(200, np.inf), anchor=np.ones(200, bool)
     )
     d = _density(ls)
@@ -86,7 +86,7 @@ def test_reliability_weight_damps_but_never_deletes():
 
     def mass_near(v):
         var[0] = v
-        ls = fit_gdna_landscape(count, mass, eff, var, anchor=anchor)
+        ls = fit_landscape(count, mass, eff, var, anchor=anchor)
         near = np.abs(ls.log_rho - at) < 0.4 * LN10
         return float(_density(ls)[near].sum())
 
@@ -103,8 +103,8 @@ def test_anchor_is_trusted_outright():
     var[:20] = np.inf  # unidentified composition, but zero mass ⇒ still an exact density statement
     count, mass = count.copy(), mass.copy()
     count[:20], mass[:20] = 0.0, 0.0
-    anchored = fit_gdna_landscape(count, mass, eff, var, anchor=np.arange(count.size) < 20)
-    unanchored = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    anchored = fit_landscape(count, mass, eff, var, anchor=np.arange(count.size) < 20)
+    unanchored = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     low = _density(anchored)[: len(anchored.logP) // 4].sum()
     low_un = _density(unanchored)[: len(unanchored.logP) // 4].sum()
     assert low > low_un, "the anchor must carry full weight into the depleted floor"
@@ -144,20 +144,20 @@ def test_knn_width_widens_as_the_sample_thins():
 
 def test_logprior_shape_and_strength():
     count, mass, eff, var = _two_mode()
-    ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     fg = np.linspace(0.01, 0.99, 7)
     lp = ls.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0))
     assert lp.shape == (4, 7) and np.isfinite(lp).all()
-    half = GdnaLandscape(ls.log_rho, ls.logP, ls.n_train, 0.5)
+    half = DensityLandscape(ls.log_rho, ls.logP, ls.n_train, 0.5)
     assert np.allclose(half.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0)), 0.5 * lp)
-    zero = GdnaLandscape(ls.log_rho, ls.logP, ls.n_train, 0.0)
+    zero = DensityLandscape(ls.log_rho, ls.logP, ls.n_train, 0.0)
     assert np.all(zero.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0)) == 0.0)
 
 
 def test_logprior_tracks_the_region_mass():
     """ρ_g = f_g·M/E, so at fixed f_g a heavier region sits higher on the landscape."""
     count, mass, eff, var = _two_mode()
-    ls = fit_gdna_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
+    ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     fg = np.array([0.5])
     lo = ls.logprior(fg, np.array([100.0]), np.array([500.0]))
     hi = ls.logprior(fg, np.array([100000.0]), np.array([500.0]))
@@ -166,7 +166,7 @@ def test_logprior_tracks_the_region_mass():
 
 def test_declines_gracefully_on_degenerate_input():
     assert (
-        fit_gdna_landscape(
+        fit_landscape(
             np.array([1.0]),
             np.array([1.0]),
             np.array([0.0]),
@@ -176,7 +176,7 @@ def test_declines_gracefully_on_degenerate_input():
         is None
     )
     assert (
-        fit_gdna_landscape(
+        fit_landscape(
             np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0), anchor=np.zeros(0, bool)
         )
         is None

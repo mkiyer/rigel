@@ -72,7 +72,7 @@ from .gdna_strand import (
 )
 from .region_chain import build_region_chain
 from .result import CalibrationResult
-from .gdna_landscape import GdnaLandscape, fit_gdna_landscape
+from .landscape import DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
 from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
@@ -205,14 +205,26 @@ _MIN_TRAIN = 5
 def _fit_gdna_hyperprior(
     chain, belief, statics, region_arrays, mass_global, eff_global, *, strength
 ):
-    """Select the training substrate from the chain and fit the :class:`GdnaLandscape` on the initial solve's
+    """Select the training substrate from the chain and fit the :class:`DensityLandscape` on the initial solve's
     peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
     **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions
     in ``region_sweep`` are a separate mechanism and are untouched).
 
-    The substrate is the whole of this function's job; the estimator itself is in
-    :mod:`.gdna_landscape`. Four axes decide membership, and conflating them is the mistake this replaces
+    ⭐⭐ **The substrate is the whole of this function's job; the estimator in :mod:`.landscape` is
+    component-agnostic and knows nothing about gDNA.** Two facts that used to live in that module's
+    docstring are stated here instead, because they are decisions about WHICH OBJECTS TRAIN IT rather
+    than about how it fits:
+
+    * **BOUNDARIES ARE EXCLUDED** (owner, 2026-07-27). They are ~as numerous as regions but only 5.1 %
+      of them are truly enriched against the regions' 12.1 %, so including them nearly halves the
+      enriched component's census, and their two-flank mixture fills the valley between the two true
+      modes — 74 % of all valley mass.
+    * **THE ZERO-COUNT ANCHOR IS CRITICALLY LOAD-BEARING**, and what it is evidence *of* is specific to
+      gDNA: a live region that sequenced no unspliced mass has gDNA density ``0`` for every ``f_g``.
+      Dropping it costs **+0.26 / +0.61 EMD, and +1.04 on zero-gDNA libraries**.
+
+    Four axes decide membership, and conflating them is the mistake this replaces
     (production plan §2.2):
 
     * **circularity → structural exclusion.** AMBIG regions are out. They are the two-root ambiguity the prior
@@ -222,7 +234,7 @@ def _fit_gdna_hyperprior(
     * **identifiability → structural INCLUSION.** A live region with no unspliced mass has density ``0`` for
       every ``f_g``: "gDNA is absent here" is the strongest depletion evidence there is, and it anchors the
       depleted mode. Dropping it costs +0.26 / +0.61 EMD (+1.04 on zero-gDNA libraries).
-    * **precision → a continuous weight**, never admission (`gdna_landscape._reliability`).
+    * **precision → a continuous weight**, never admission (`landscape._reliability`).
     * **geometry → boundaries are EXCLUDED** (owner, 2026-07-27). They cross rather than contain, are ~as
       numerous as regions, and only 5.1 % of them are truly enriched against the regions' 12.1 %; their
       two-flank mixture lands between the two true modes and supplies 74 % of all the mass in the valley.
@@ -251,7 +263,7 @@ def _fit_gdna_hyperprior(
     if int(sel.sum()) < _MIN_TRAIN:
         return None
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
-    return fit_gdna_landscape(
+    return fit_landscape(
         np.asarray(belief.f_g, dtype=np.float64)[sel] * mass,
         mass,
         np.asarray(eff_global, dtype=np.float64)[sel],
@@ -465,6 +477,8 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             intron_prior=intron_prior,
+            # ⭐ ψ's reference MEAN from the annotation. OFF ⇒ `location=None` ⇒ no term ⇒ bit-identical.
+            structural_reference=config.structural_reference,
             # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
             # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
             # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
@@ -543,7 +557,7 @@ def calibrate(
         )
     else:
         background = None
-    gdna_hyperprior: GdnaLandscape | None = None
+    gdna_hyperprior: DensityLandscape | None = None
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
             chain,

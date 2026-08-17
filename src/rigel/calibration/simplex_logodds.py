@@ -44,6 +44,8 @@ them out via ``solvable``, so no reference is applied to a region whose composit
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.special import expit, log_expit
 
@@ -51,7 +53,12 @@ from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry. The remaining private helpers stay importable
 # for tests but are not part of the module's external API.
-__all__ = ["_logodds_grid", "_solve_regions_logodds_all"]
+__all__ = [
+    "CompositionPriors",
+    "structural_reference_location",
+    "_logodds_grid",
+    "_solve_regions_logodds_all",
+]
 
 _EPS = 1.0e-9
 
@@ -62,9 +69,10 @@ _EPS = 1.0e-9
 # Berger–Bernardo reference prior for the composition with `f_g` of interest and the tilt as nuisance, whose
 # `f_g` marginal is Beta(½,½) — the SAME `+½·log f_g + ½·log(1−f_g)`.
 #
-# Its ONLY job is to make ψ PROPER (Beta(½,½) integrates; Beta(0,0) does not). It carries no information, so
-# it must be REPLACED by `logP_g`/`logP_r` as those are fitted — never added on top, which double-counts that
-# arm and is what broke the first attempt at this.
+# Its ONLY job is to make ψ PROPER (Beta(½,½) integrates; Beta(0,0) does not). A fitted `logP_g`/`logP_r`
+# is ADDED to it, never substituted for it — the reference is the MEASURE ψ is written against, not an
+# information claim to be superseded. ⛔ This comment said "must be REPLACED … never added on top" until
+# 2026-08-15, which contradicted `_gdna_arm`'s own code and the argument in its docstring.
 #
 # ⚠ A DECLARED CHOICE, not forced by the likelihood: the observed-data Fisher information for f_g is
 # `∝ n(½−κ)²` = EXACTLY 0 on unstranded libraries, where the strand term is bit-flat and the posterior simply
@@ -219,6 +227,69 @@ def _posterior_median_fg(post, fg):
     return fg[idx]
 
 
+def _slice_rows(a, msk):
+    """One prior array's rows for a block, or ``None``. ⚠ Kept module-level so
+    :class:`CompositionPriors` can use it; the solver's own ``_s`` closure is the same operation."""
+    return None if a is None else np.asarray(a)[msk]
+
+
+@dataclass(frozen=True, slots=True)
+class CompositionPriors:
+    """ψ's two fitted composition arms, carried as ONE object.
+
+    ⭐⭐ **Why a pair rather than two parameters.** ψ's solvers already take eighteen arguments, and the
+    two arms are one concept: the fitted population density for each component of the gDNA-vs-RNA split.
+    Replacing ``global_logprior`` with this adds no parameter and gives the concept a name.
+
+    ⛔⛔ **AND IT MAKES A WHOLE CLASS OF BUG UNREPRESENTABLE.** Each arm has to be row-SLICED per solve
+    block and, on the fine single-strand grid, RE-GRIDDED from the coarse λ lattice. Those are two
+    separate operations applied at two separate call sites, so a second arm threaded by hand could
+    easily be sliced and not regridded — which would not raise, would not change shape, and would
+    silently evaluate one component's prior on the wrong lattice. :meth:`select` and :meth:`regrid`
+    apply to BOTH members at once, so the two arms cannot drift apart.
+
+    ``None`` on either member means that arm is **not fitted** and takes its derived reference — which
+    is not the same as "no term" (see :func:`_gdna_arm`).
+
+    ⭐⭐⭐ **``location`` is the reference's own MEAN, per slot, and it completes the object.** With it the
+    class stops meaning "the two fitted arms" and means **ψ's composition prior** — the whole concept
+    rather than half of one. See :func:`_location_term` for what it is and why the reference had one all
+    along without anyone choosing it.
+    """
+
+    gdna: np.ndarray | None = None
+    rna: np.ndarray | None = None
+    #: float64 ``(m,)`` — the reference's per-slot mean ``m_i``, or ``None`` for the shipped constant ½.
+    #: ⚠ A per-slot SCALAR, never a ``(m, K)`` grid array, which is what makes it un-regriddable and
+    #: therefore immune to the bug class this dataclass exists to prevent.
+    location: np.ndarray | None = None
+
+    def select(self, msk) -> "CompositionPriors":
+        """Both arms and the location restricted to one solve block's rows."""
+        return CompositionPriors(
+            _slice_rows(self.gdna, msk), _slice_rows(self.rna, msk), _slice_rows(self.location, msk)
+        )
+
+    def regrid(self, n_from: int, n_to: int, L: float) -> "CompositionPriors":
+        """Both arms carried from the coarse λ lattice to the fine single-strand one.
+
+        ⭐ ``location`` passes through UNCHANGED, and that is the point of storing it as a per-slot
+        scalar rather than as a pre-evaluated ``(m, K)`` grid: a scalar has no lattice to be carried
+        between, so ``regrid-in-the-right-variable`` cannot apply to it at all. The grid it acts on is
+        formed inside :func:`_location_term` from whichever ``lam`` the caller is solving on.
+        """
+        return CompositionPriors(
+            _regrid_global(self.gdna, n_from, n_to, L),
+            _regrid_global(self.rna, n_from, n_to, L),
+            self.location,
+        )
+
+
+#: The prior-free solve — both arms take their derived reference. ⭐ A first-class configuration, not a
+#: degenerate one: pass-0 runs here by design.
+_NO_PRIORS = CompositionPriors()
+
+
 def _regrid_global(glp, n_from, n_to, L):
     """Interpolate a ``(m, n_from)`` global-logprior (evaluated on the σ(λ) grid at ``n_from``) onto the
     ``n_to`` σ(λ) grid (Fix 3). The single-strand solve runs on a finer grid than the AMBIG cube, so the
@@ -256,15 +327,208 @@ def _gdna_arm(lam, global_logprior):
     return ref + np.asarray(global_logprior, np.float64)
 
 
-def _rna_arm(lam):
+def _rna_arm(lam, rna_logprior=None):
     """The RNA-**total** arm of ψ over the λ grid → broadcastable to ``(m, K)``.
 
-    The ``_JEFFREYS_REF`` reference ``+½·log(1 − f_g)`` → ``(1, K)``. ``logP_r`` is NOT fitted — there is no
-    parameter to pass one, by design, because nothing produces it today.
+    The ``_JEFFREYS_REF`` reference ``+½·log(1 − f_g)`` → ``(1, K)``, plus a fitted ``logP_r`` when one is
+    supplied — the exact mirror of :func:`_gdna_arm`. ``None`` means "not fitted", **not** "no term".
+
     This is the **two-group** arm (gDNA vs RNA-total): the per-strand split is the nuisance tilt, integrated
-    out on the θ axis, and needs no prior of its own. `logP_r` is not fitted yet — the reference is what bounds
-    the ``f_g → 1`` vertex today, and it is the ONLY thing doing so."""
-    return _JEFFREYS_REF * _log1m_fg(lam)[None, :]
+    out on the θ axis, and needs no prior of its own.
+
+    ⛔⛔ **NOTHING FITS ``logP_r`` YET, AND THE COST OF THAT IS MEASURED.** Until one does, the reference
+    alone bounds the ``f_g → 1`` vertex — and unlike its gDNA twin it is never swamped by evidence, so it
+    is a FIXED repulsion of **3.107 nats** at ``f_g = 0.999`` relative to ``f_g = ½`` (a 22:1 handicap).
+    Measured 2026-08-15 on the 16-condition ladder: objects whose TRUE ``f_g ≥ 0.999`` carry **49–83 %** of
+    all calibration error on the three in-scope strata, read **0.13–0.23 below** the vertex. ⭐ The
+    parameter exists now so that an estimator can close that asymmetry; the socket is not speculative
+    surface, it is the repair's landing point."""
+    ref = _JEFFREYS_REF * _log1m_fg(lam)[None, :]
+    if rna_logprior is None:
+        return ref
+    return ref + np.asarray(rna_logprior, np.float64)
+
+
+#: The location at which :func:`_location_term` says NOTHING — the value at which it is identically
+#: constant and drops out of ψ, returned there as an exact zero.
+#: ⭐ It is not the number ½ chosen again — it is the MEAN ``a/(a+b)`` of the shipped reference, and it is
+#: ½ because that reference is SYMMETRIC (``a = b = _JEFFREYS_REF``), for any value of the exponent. Written
+#: as the formula it comes from so that moving the exponent cannot silently leave a stale constant behind.
+_NEUTRAL_LOCATION = _JEFFREYS_REF / (_JEFFREYS_REF + _JEFFREYS_REF)
+
+
+def _location_term(lam, location):
+    """ψ's reference MEAN, per slot → ``(m, K)``. ``None`` ⇒ ``0.0``, i.e. the term is not written at all
+    and every caller is bit-identical to the path before this existed.
+
+    ⭐⭐⭐ **THE REFERENCE ALWAYS HAD A MEAN; NOBODY CHOSE IT.** ``a·log f_g + b·log(1−f_g)`` on the λ grid
+    is exactly ``Beta(a, b)`` in ``f_g``, so ``a`` and ``b`` are PSEUDO-COUNTS with a STRENGTH ``a+b`` and
+    a MEAN ``a/(a+b)``. Jeffreys fixes both, and its mean of ½ **asserts the library is half gDNA** — an
+    assertion, not ignorance. Measured as a prior against the origin-split truth on the 16-condition
+    ladder, that assertion misplaces **13.2 M fragments** at capture-OFF where a per-object mean misplaces
+    0.008 of them.
+
+    **The derivation, which is why this is a term and not a knob.** Give the two components independent
+    Gamma rate priors, ``rho_c ~ Gamma(alpha_c, beta_c)``, with Poisson counts ``n_c ~ Poisson(rho_c E_c)``.
+    Then ``X = rho_g E_g ~ Gamma(a, s_g)`` and ``Y = rho_r E_r ~ Gamma(b, s_r)`` with ``s_c = beta_c/E_c``,
+    and marginalising the total out of ``f = X/(X+Y)`` gives
+
+        p(f)  ∝  f^(a−1) (1−f)^(b−1) / ( s_g·f + s_r·(1−f) )^(a+b)
+
+    which on the λ grid, where ``|df/dλ| = f(1−f)``, is
+
+        log p(λ)  =  a·log f_g  +  b·log(1−f_g)  −  (a+b)·log( f_g + r·(1−f_g) ) ,   r = s_r/s_g
+
+    ⛔⛔ **The shipped reference is exactly this with ``s_g = s_r``** — the code has silently committed to
+    the two components having MATCHED SCALES, which is the same assertion as "half gDNA", visible as a
+    MISSING TERM rather than as a chosen number. Writing ``m`` for the object's prior expected composition
+    ``rho_g E_g / (rho_g E_g + rho_r E_r)``, the ratio is ``r = (b/a)·m/(1−m)``, and at the shipped
+    ``a = b = ½`` the whole term collapses to what this function returns::
+
+        −log[ (1−m)·f_g  +  m·(1−f_g) ]
+
+    ⭐ **FOUR PROPERTIES, ALL STRUCTURAL, AND THE FIRST THREE ARE WHY THIS AND NOT A DIFFERENT ``(a, b)``.**
+
+    1. ``m = ½`` makes the bracket the constant ½, so the term is constant and drops. **A strict
+       generalisation that agrees with the shipped constant exactly where its assumption is true.**
+    2. ⭐⭐ **The TAILS ARE UNTOUCHED at ``e^(−|λ|/2)`` for every ``m``** — only the LOCATION moves. So
+       ``L``-invariance, which this module's own header calls its acceptance test, holds for every ``m``,
+       and ~0.9 % of the reference's mass sits outside ``L = 10`` regardless. ⛔ Moving ``a`` and ``b``
+       instead cannot do this: they set the tail exponents AND the location together, and ``b = 0.03``
+       leaves **57 %** of the mass outside the window.
+    3. **Proper for every ``m`` in (0, 1)**, degenerate only at exactly 0 or 1. The clamp is one
+       pseudo-fragment over the pooled opportunity — a derived bound, not a tuned one. **No constant is
+       introduced anywhere in this function.**
+    4. ⭐ ``median(f_g) = m`` in CLOSED FORM: ``u = f/(f + r(1−f)) ~ Beta(a,b)``, symmetric at ``a = b``,
+       so the median sits where ``u = ½``, which is ``f = m``. That is what re-derives
+       ``test_relay_mass_pin``'s hard-coded ``R_own = 0.5`` instead of widening it.
+
+    ⭐⭐ **AND IT DOES NOT COMPETE WITH THE FITTED ARMS OR THE MESSAGES.** The reference is worth
+    ``a + b = 1`` pseudo-fragment; ``density_lambda_factor``'s NegBinom precision scales with the counts,
+    and a message carries its sender's own precision. So wherever any evidence channel speaks, this term
+    is negligible **by construction** — it decides only objects where nothing else does, and its total
+    influence is bounded by one fragment.
+
+    ⚠ **The bracket is formed by ``logaddexp`` over ``_log_fg``/``_log1m_fg``**, never as
+    ``exp`` of either, so it inherits their exactness in both depleted tails. Its range is
+    ``log(max(m,1−m)/min(m,1−m))``, i.e. bounded — which is what makes it safe under the AMBIG path's
+    float32 cast, where a ``b = 0.03``-style exponent (50 nats) would not be.
+
+    ⛔⛔ **PROPERTY 1 IS ENFORCED, NOT MERELY TRUE IN EXACT ARITHMETIC — and the difference was measured
+    at 0.0845 in ``f_g``.** At ``m = ½`` the bracket is the constant ½ on paper, but in float64 the row has
+    ``ptp = 2.22e-16`` over three distinct values at every grid size. That is enough to tip
+    :func:`_posterior_median_fg`'s ``(cw < 0.5).sum()`` knife-edge wherever a slot's posterior is exactly
+    symmetric: a balanced AMBIG slot at ``κ = ½`` moves **0.5423 → 0.4577**, one full grid step, purely
+    from rounding. ⭐ So the neutral row is returned as an EXACT zero rather than as a near-constant. This
+    is not a special case bolted on — the neutral location is the one value at which this function is
+    DEFINED to say nothing, and 1e-16 of noise is not a smaller claim than ½, it is a different one.
+    """
+    if location is None:
+        return 0.0
+    m = np.clip(np.asarray(location, np.float64), _EPS, 1.0 - _EPS)[:, None]
+    term = -np.logaddexp(np.log1p(-m) + _log_fg(lam)[None, :], np.log(m) + _log1m_fg(lam)[None, :])
+    return np.where(m == _NEUTRAL_LOCATION, 0.0, term)
+
+
+def structural_reference_location(statics, logodds_window: float) -> np.ndarray:
+    """ψ's per-slot reference MEAN from the ANNOTATION ALONE — ``(n_slots,)``, feeding
+    :attr:`CompositionPriors.location`.
+
+    ⭐⭐⭐ **THE CLAIM, AND IT IS ABOUT THE ANNOTATION RATHER THAN ABOUT BIOLOGY.** Where **no annotated
+    MATURE transcript is continuous across the position**, the unspliced population there is presumed gDNA
+    until evidence says otherwise, so ``m → 1``. Everywhere else the shipped neutral ½ is kept and the term
+    vanishes identically, so this touches ONLY the annotation-determined slots.
+
+    ``¬mrna_active`` is that predicate and it is the solver's own — a REGION's own exon bits, a BOUNDARY's
+    AND over its two flanks (`region_geometry.build_region_statics`). Measured on the human index it is
+    exactly four shapes — intergenic REGION, gene-edge BOUNDARY, intron REGION, one-flank-exonic BOUNDARY,
+    ``1,312 + 2,620 + 9,805 + 19,610 = 33,347`` of 70,176 slots with no remainder — whose true ``f_g`` is
+    **1.0000** on every condition, so asserting 1 costs **zero fragments**; all four are EMPTY in a
+    zero-gDNA library, which is why the claim is never made where it would be wrong. ⛔ That enumeration is
+    a property of an annotation, not of the predicate, and is asserted by
+    ``tests/calibration/test_structural_reference.py`` rather than assumed here.
+
+    ⛔⛔⛔ **THE PRECISE STATEMENT IS NOT "NOTHING IS TRANSCRIBED HERE", AND THE DIFFERENCE IS THIS
+    FUNCTION'S WHOLE RISK.** An intron flank IS transcribed — as nascent. What is asserted is that nothing
+    MATURE CROSSES, which leaves the unspliced population as **gDNA + NASCENT**. So the claim ``m → 1`` is
+    true only where the nascent level is negligible, and the nascent level is therefore the load-bearing
+    quantity this function does not measure.
+
+    ⛔⛔ **AND THE 16-CONDITION LADDER CANNOT PRICE THAT, BECAUSE IT HOLDS ``nrna = 0`` ON EVERY ROW.** The
+    panel's "true ``f_g`` = 1.0000 at all four classes, so asserting 1 costs zero fragments" is
+    ``nrna = 0`` RESTATED, not a measurement of this predicate. Measured on a toy that PUTS nascent in the
+    introns, shipped `SilentPolicy`, mass-weighted ``Σ|f_g − truth|·M`` over the slots this speaks about::
+
+        kappa  rho_nascent   truth@intron      OFF ->   ON     ratio
+         0.50     0.00           1.0000       1,103 ->    1    0.001  ⭐
+         0.50     0.25           0.6539         524 -> 1,099   2.099  ⛔
+         0.50     1.00           0.3208         766 -> 4,396   5.736  ⛔
+         0.99     0.25           0.9497          78 ->   248   3.165  ⛔
+
+    ⛔ **On UNSTRANDED data the damage is permanent** — κ = ½ leaves no channel to overturn it with — and
+    unstranded × capture-OFF is an IN-SCOPE 0.8.0 stratum. **This is why ``structural_reference`` DEFAULTS
+    OFF and why the panel's 0.384 / 0.660 / 0.366 is not licence to flip it.** The exit is to deconvolve
+    the nascent density out of the introns and set ``m`` from it, which makes the claim measured rather
+    than assumed.
+
+    ⭐⭐⭐ **THE STRENGTH IS ONE PSEUDO-OBSERVATION, WRITTEN AS THE MEAN THAT ONE WOULD PRODUCE.**
+    Observing a single gDNA fragment takes ``Beta(a, b)`` to ``Beta(a+1, b)``, whose mean is::
+
+        m  =  (a + 1) / (a + b + 1)   =   0.75   exactly at   a = b = _JEFFREYS_REF
+
+    So *"presume gDNA, worth one observation"* is a composition mean derived from the reference's own
+    exponents — same units as ``m``, no new number, and it moves automatically if ``_JEFFREYS_REF`` does.
+
+    ⚠ **The ODDS ARE ``e^strength``**, because the term's range over the grid is exactly ``log(m/(1−m))``:
+    the location written on the log-odds scale IS its strength in nats. Here that is ``log 3 = 1.0986``,
+    i.e. **3:1 gDNA**. ⛔ An earlier draft set the strength to the pseudo-count total ``a + b = 1`` directly
+    — numerically close (σ(1) = 0.731) but **dimensionally wrong**: a pseudo-count is not a nat, and
+    equating them is an analogy dressed as a derivation. The route above has consistent units throughout.
+    ⭐ Measured, the two are indistinguishable (total 1.1142 vs 1.1128) and the optimum is BROAD —
+    0.69 → 1.50 nats all lie within 6 % — which is what makes a derived value safe rather than lucky.
+
+    ⛔⛔ **THIS REPLACES ``m = σ(L)``, THE LATTICE'S OWN RANGE, WHICH WAS MEASURED WORSE THAN NO PRIOR AT
+    ALL.** *"A prior may not assert more than the lattice can represent"* is a valid CAP — it is applied
+    below — but it was being used to CHOOSE the strength, which made the term worth **9.31 nats** (~10,000:1)
+    while its own docstring claimed "influence bounded by one fragment". Swept against BOTH obligations —
+    DELIVER where the claim is true (nascent = 0, truth ``f_g`` = 1) and YIELD where evidence refutes it —
+    over a depth ladder and both κ, ``Σ|f_g − truth|``::
+
+        strength      deliver-err   refute-err    total
+        no prior         1.2286       0.3946     1.6231
+        ⭐ 1 nat  (a+b)   0.8454       0.2674     1.1128   <- BETTER THAN NO PRIOR ON BOTH
+           2 nats         0.4966       0.7823     1.2788
+           5 nats         0.0656       1.7740     1.8396
+        ⛔ 9.31 (σ(L))    0.0037       2.0247     2.0285   <- worst of all, 5.1x no-prior at refuting
+
+    ⚠ **AND THE 16-CONDITION LADDER CANNOT RANK THIS, WHICH IS WHY IT PICKED THE WORST ROW.** It holds
+    ``nrna = 0``, so it scores the DELIVER column alone — where more nats is monotonically better. The panel
+    ranks the LOCATION; only a refutability test ranks the STRENGTH
+    (`TRAPS: a-single-level-panel-cannot-see-a-constant`, met on a strength rather than a level).
+
+    ⭐ **And that converts to fragments — but the conversion is NOT uniform, and stating only its
+    optimistic half was an error worth recording.** One sense read on a ``κ``-stranded library is worth
+    ``log(2κ)`` nats, so the nats budget predicts overturn after ``strength/log(2κ)`` = **13.6** fragments
+    at ``L = 10, κ = 0.99``. ⭐ Measured, that is right where the likelihood is informative: a slot whose
+    truth is ``f_g ≈ 0`` is overturned between **10 and 30** fragments and is untouched by 300. ⛔⛔ **And
+    it understates by 70–140× exactly where this prior POINTS**: at a slot whose truth is ``f_g = 0.90``
+    the strand Fisher information is ``I ∝ [f_g(1−f_g)]²``, ~100× smaller, and the real overturn depth is
+    **996–1,993 fragments** — the prior is strongest precisely where the likelihood is flattest.
+    ⛔⛔ **On UNSTRANDED data (``κ = ½``) it is never overturned at any depth** (measured 0.9998 against a
+    pure-RNA truth at 10,000 fragments): there "proven otherwise" has to come from a neighbour, i.e. from
+    the relay, and the claim's safety rests entirely on it being true.
+
+    ⚠ ``statics`` is duck-typed (``mrna_active_pos`` / ``mrna_active_neg``): ``region_geometry`` imports
+    THIS module, so naming its type at runtime would close a cycle. It is a sideways dependency either way.
+    """
+    # ⭐ ONE pseudo-observation of gDNA on the reference's own exponents: Beta(a,b) → Beta(a+1,b), whose
+    #   mean is (a+1)/(a+b+1) = 0.75 at a = b = ½. A composition mean from pseudo-counts — same units, no
+    #   new number. ⛔ Capped by the lattice (a prior may not assert more than the grid can represent);
+    #   the cap is kept because it is the rule, not because it fires — it needs L < 1.0986 to bind.
+    a = b = _JEFFREYS_REF
+    m = min((a + 1.0) / (a + b + 1.0), float(expit(float(logodds_window))))
+    mature = np.asarray(statics.mrna_active_pos, bool) | np.asarray(statics.mrna_active_neg, bool)
+    return np.where(mature, _NEUTRAL_LOCATION, m)
 
 
 def _tilt_grid(n_tilt: int) -> np.ndarray:
@@ -309,7 +573,7 @@ def _local_loglik_logodds(
     f_g_ref,
     f_pos_ref,
     f_neg_ref,
-    global_logprior=None,
+    priors: "CompositionPriors | None" = None,
     gdna_imp_mode=None,
     gdna_imp_prec=None,
     rna_imp_mode=None,
@@ -325,7 +589,7 @@ def _local_loglik_logodds(
     conversions cancel ``log σ'(λ)`` exactly (module docstring §2). Both arms are ALWAYS written: a fitted
     ``logP`` if we have one, else the ``_JEFFREYS_REF`` reference. Omitting one is not neutral.
 
-    ``global_logprior`` must already be evaluated on THIS ``fg`` grid → ``(m, K)``; ``None`` ⇒ the gDNA arm
+    ``priors`` carries each arm already evaluated on THIS ``fg`` grid → ``(m, K)``; a ``None`` member ⇒ that arm
     takes its reference (a PRIOR-FREE solve is not a REFERENCE-FREE solve).
 
     ``f_g_ref`` / ``f_pos_ref`` / ``f_neg_ref`` (per-region ``(m,)``) are the count-zero-information freeze
@@ -359,10 +623,15 @@ def _local_loglik_logodds(
     #    derived Jeffreys reference. ALWAYS both — see `_gdna_arm` / `_rna_arm`. Together they make ψ proper
     #    (Beta(½,½) when neither is fitted); the gDNA arm alone would leave f_g→1 unbounded, and the RNA arm
     #    alone would leave f_g→0 unbounded. ──
-    psi = psi + _gdna_arm(lam, global_logprior) + _rna_arm(lam)
+    _p = priors or _NO_PRIORS
+    # ⭐ The location term is the reference's MEAN and belongs to NEITHER arm — it is the coupling between
+    #    the two components' scales (`_location_term`), so it is added once beside them rather than folded
+    #    into one, where it would read as a property of that component. ``None`` ⇒ 0.0 ⇒ bit-identical.
+    psi = psi + _gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna) + _location_term(lam, _p.location)
     # ── the gDNA INTRON FACTORY λ-factor: a per-region (m,K) log-likelihood on
-    #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED (not folded into the gDNA arm — that arm
-    #    REPLACES the Jeffreys reference; folding would drop the f_g→1 bound). It peels confident gDNA from
+    #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED as its own term rather than folded into
+    #    the gDNA arm — it is a per-region LIKELIHOOD, not a population density, so it does not belong inside
+    #    a term whose units are `log P(log ρ)`. It peels confident gDNA from
     #    introns against the intergenic background; zero on non-intron regions ⇒ a no-op there. ──
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)
@@ -393,11 +662,12 @@ def _local_loglik_logodds(
         lm_ = np.asarray(lam_imp_mode, np.float64)[:, None]
         lp_ = np.asarray(lam_imp_prec, np.float64)[:, None]
         psi = psi - 0.5 * lp_ * (lam[None, :] - lm_) ** 2
-    # ── NO change-of-variable Jacobian, and NO reference prior. Both are deliberate, and they are the SAME
-    #    fact: `DensityNPMLE.logP` is a density in LOG-rate, so its conversion to a linear-rate density
-    #    (−log f_g, up to a constant) cancels log σ'(λ) = log f_g + log(1−f_g) exactly, once per component.
-    # Writing either alone is what produced the improper +0.5·λ ramp.
-    #    ⇒ ψ_λ = strand + logP_g + logP_r, bare. ──
+    # ── NO change-of-variable Jacobian, and that is deliberate: a fitted `logP` is a density in LOG-rate,
+    #    so its conversion to a linear-rate density (−log f_c, up to a constant) cancels log σ'(λ) exactly,
+    #    ONCE PER COMPONENT — which is why the cancellation keeps holding as each arm acquires a fitted
+    #    prior. ⛔ The reference IS written, always, in both arms; this comment read "and NO reference
+    #    prior … ψ_λ = strand + logP_g + logP_r, bare" until 2026-08-15, describing a retired design in
+    #    which a fitted prior REPLACED the reference. ⇒ ψ_λ = strand + (ref + logP_g) + (ref + logP_r). ──
     return psi, f_pos, f_neg
 
 
@@ -415,7 +685,7 @@ def _solve_regions_logodds(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    global_logprior=None,
+    priors: "CompositionPriors | None" = None,
     gdna_imp_mode=None,
     gdna_imp_prec=None,
     rna_imp_mode=None,
@@ -444,7 +714,7 @@ def _solve_regions_logodds(
         f_g_ref,
         f_pos_ref,
         f_neg_ref,
-        global_logprior=global_logprior,
+        priors=priors,
         gdna_imp_mode=gdna_imp_mode,
         gdna_imp_prec=gdna_imp_prec,
         rna_imp_mode=rna_imp_mode,
@@ -501,7 +771,7 @@ def _solve_ambig_logodds(
     n_grid,
     L: float = _DEFAULT_L,
     n_tilt: int | None = None,
-    global_logprior=None,
+    priors: "CompositionPriors | None" = None,
     gdna_imp_mode=None,
     gdna_imp_prec=None,
     rna_imp_mode=None,
@@ -524,7 +794,7 @@ def _solve_ambig_logodds(
     the SAME expression as the 1-D path: strand + ``_gdna_arm`` + ``_rna_arm`` + messages. The 1-DOF/AMBIG
     reference asymmetry is closed **identically**, not approximately.
 
-    ``global_logprior`` is ``(m, K)`` evaluated on the σ(λ) grid (broadcast over θ). The cube is only
+    ``priors``' members are ``(m, K)`` on the σ(λ) grid (broadcast over θ). The cube is only
     materialized for the AMBIG subset (the caller masks); ``K·K_t`` is the per-region cost."""
     lam, fg = _logodds_grid(int(n_grid), L)  # (K,)
     Kt = int(n_tilt) if n_tilt else int(n_grid)
@@ -572,7 +842,13 @@ def _solve_ambig_logodds(
     log_fneg = np.maximum(log_fnk[None, :, :], log_floor)
     # ── the two composition arms (θ-independent — they live on the λ axis, which is exactly what makes the
     #    tilt a nuisance). Identical call to the 1-D path; see `_gdna_arm` / `_rna_arm`. ──
-    psi += np.asarray(_gdna_arm(lam, global_logprior) + _rna_arm(lam), F)[:, :, None]
+    _p = priors or _NO_PRIORS
+    # ⚠ The location term is INSIDE the float32 cast with the arms, deliberately: it is bounded by
+    #   ``log(max(m,1−m)/min(m,1−m))`` and so is representable there, and casting it separately would put
+    #   two summands of the same quantity through two different precisions.
+    psi += np.asarray(
+        _gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna) + _location_term(lam, _p.location), F
+    )[:, :, None]
     # ── the gDNA INTRON FACTORY λ-factor (θ-independent — it lives on the λ axis), ADDED like the arms; the
     #    [:, :, None] broadcast makes it constant across the tilt, so θ is integrated out cleanly. ──
     if lam_logprior is not None:
@@ -663,7 +939,7 @@ def _solve_regions_logodds_all(
     L: float = _DEFAULT_L,
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
-    global_logprior=None,
+    priors: "CompositionPriors | None" = None,
     gdna_imp_mode=None,
     gdna_imp_prec=None,
     rna_imp_mode=None,
@@ -684,7 +960,7 @@ def _solve_regions_logodds_all(
     drop-in for the lattice ``_local_loglik``+``_region_marginals`` pair: same ψ terms — the log-density
     log-fraction Gaussian messages + the global prior — evaluated on the ``σ(λ)`` log-odds grid.
 
-    All array inputs are full length ``m``; ``global_logprior`` is ``(m, K)`` on the σ(λ) grid;
+    All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
     ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class."""
     m = int(np.asarray(u_pos).shape[0])
     ap_all = np.asarray(allow_pos, bool)
@@ -757,7 +1033,7 @@ def _solve_regions_logodds_all(
                     od_r=od_r,
                     n_grid=k_ss,
                     L=L,
-                    global_logprior=_regrid_global(_s(global_logprior, bidx), n_grid, k_ss, L),
+                    priors=(priors or _NO_PRIORS).select(bidx).regrid(n_grid, k_ss, L),
                     gdna_imp_mode=_s(gdna_imp_mode, bidx),
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
@@ -789,7 +1065,7 @@ def _solve_regions_logodds_all(
                     n_grid=n_grid,
                     L=L,
                     n_tilt=n_tilt,
-                    global_logprior=_s(global_logprior, bidx),
+                    priors=(priors or _NO_PRIORS).select(bidx),
                     gdna_imp_mode=_s(gdna_imp_mode, bidx),
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),

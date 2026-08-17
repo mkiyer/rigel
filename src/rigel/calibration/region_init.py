@@ -85,7 +85,8 @@ class RegionInit:
     0). ``prec_*`` are the own per-component PRECISIONS from the four sources — the strand + intron-factory
     composition evidence combined with the Poisson count power (0 where a region is genuinely uninformed).
     ``struct_lock`` marks the structurally composition-certain (pure-gDNA) regions; ``tau_lam`` is the combined
-    ``λ``-axis evidence (I_strand + I_factory), retained for tests/diagnostics."""
+    ``λ``-axis evidence (I_strand + I_factory) — ⛔ **the DATA's information, never a prior's**, see
+    :func:`build_region_init` — retained for tests/diagnostics."""
 
     f_g: np.ndarray
     f_pos: np.ndarray
@@ -208,7 +209,7 @@ def build_region_init(
     n_tilt: int | None,
     n_grid_ss: int | None,
     belief,
-    global_logprior=None,
+    priors=None,
     intron_prior=None,
 ) -> RegionInit:
     """The pass-0 per-region self-solve → :class:`RegionInit`. Runs the message-free strand deconvolution
@@ -217,7 +218,7 @@ def build_region_init(
 
     The strand deconvolution reference (`fg_ref`/`fpos_ref`/`fneg_ref`) is the incoming ``belief`` — the
     count-zero-information variance freeze evaluates the composition variance near the truth, not at a flat ½.
-    ``global_logprior`` (the anchored population gDNA prior, ``(m, K)``) and ``intron_prior`` (the intron
+    ``priors`` (ψ's two composition arms, each ``(m, K)`` or ``None``) and ``intron_prior`` (the intron
     factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
     is_reg = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, bool)
@@ -244,7 +245,7 @@ def build_region_init(
         L=float(logodds_window),
         n_tilt=n_tilt,
         n_grid_ss=n_grid_ss,
-        global_logprior=global_logprior,
+        priors=priors,
         lam_logprior=intron_prior,
         fg_ref=np.asarray(belief.f_g, np.float64),
         fpos_ref=np.asarray(belief.f_pos, np.float64),
@@ -290,6 +291,26 @@ def build_region_init(
     )  # I_density (NB curvature) on the λ axis
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
+    # ⛔⛔⛔ **THE COMPOSITION REFERENCE'S LOCATION DOES *NOT* CONTRIBUTE HERE, AND THAT IS A RULING RATHER
+    # THAN AN OMISSION (2026-08-16).** It was built, measured and REFUSED, and the argument for it was
+    # wrong in a way worth recording because it will be proposed again.
+    #
+    # ⭐ The argument was: a slot the reference PINS sits at the λ grid's edge, where the strand term
+    # ``c·a² ∝ f_g²(1−f_g)²`` vanishes, so ``τ_λ`` falls **3,227×** exactly when the slot's belief becomes
+    # most certain; the location term is a λ-factor like `intron_prior`, so let it pay its curvature too.
+    # ⛔ **Every step of that is false, and each was measured:**
+    #   ① the 3,227× is **~98 % the ``[f(1−f)]²`` JACOBIAN alone** (predicted 3,154×). ``τ_λ`` is the
+    #     DATA's Fisher information on λ, and a prior that moves the evaluation point legitimately changes
+    #     it. Nothing "moved into a factor nothing reads" — there was nothing to recover.
+    #   ② it is not a curvature contribution at all but a **BOOLEAN GATE FLIP**. At the vertex
+    #     ``Var(log f_g) = (1−f_g)²/τ`` is ~8e-08, so :func:`own_precision` saturates at the COUNT ceiling
+    #     ``1/count_logvar(n)``: τ = 0.029 and τ = 1e6 both return 850.44 against a ceiling of 850.50. The
+    #     magnitude does no work; only ``τ > 0`` does, and that releases 850 fragments of count precision.
+    #   ③ the location term **carries no count**, so it hands the identical value to an empty slot and to a
+    #     10⁶-fragment one: an n = 0 slot goes ``prec_g`` 0 → 0.2026. `intron_prior` is not the precedent it
+    #     looks like — its NegBinom curvature is count-derived and self-limits on thin data.
+    # ⚠ And ``has_own_composition_evidence`` is 0.8.0's own denominator (`solvability_audit`), so flipping
+    # it on 33,347 slots silently redefines what "confidently wrong" counts.
 
     # ── the own per-component densities + precisions — ONE set of numbers per slot, no faces to pool ──
     mass_global, eff_global = region_gdna_geometry(geometry)

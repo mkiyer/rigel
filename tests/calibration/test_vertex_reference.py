@@ -178,7 +178,18 @@ def _set_exponents(monkeypatch, c_g: float, c_r: float):
             else c_g * SL._log_fg(lam)[None, :] + np.asarray(glp, np.float64)
         ),
     )
-    monkeypatch.setattr(SL, "_rna_arm", lambda lam: c_r * SL._log1m_fg(lam)[None, :])
+    # ⭐ The RNA replacement mirrors the gDNA one, fitted-prior socket included. It took no prior until
+    # 2026-08-15, when `_rna_arm` gained the parameter its twin always had; patching it with the old
+    # one-argument shape raised rather than silently ignoring the arm, which is the outcome to want.
+    monkeypatch.setattr(
+        SL,
+        "_rna_arm",
+        lambda lam, rlp=None: (
+            c_r * SL._log1m_fg(lam)[None, :]
+            if rlp is None
+            else c_r * SL._log1m_fg(lam)[None, :] + np.asarray(rlp, np.float64)
+        ),
+    )
 
 
 def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_other(monkeypatch):

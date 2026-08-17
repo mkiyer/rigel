@@ -47,10 +47,13 @@ from .region_geometry import (
     RegionStatics,
     g1_locked,
     region_gdna_geometry,
+    region_rna_geometry,
 )
 from .region_init import build_region_init
 from .signature import coarse_type_array
 from .simplex_logodds import (
+    CompositionPriors,
+    structural_reference_location,
     _log_fg,
     _logodds_grid,
     _solve_regions_logodds_all,
@@ -290,7 +293,9 @@ def solve_chain(
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     gdna_prior=None,
+    rna_prior=None,
     intron_prior=None,
+    structural_reference: bool = False,
     policy=None,
     _capture: dict | None = None,
 ) -> RegionBelief:
@@ -305,6 +310,10 @@ def solve_chain(
     both arms. Prior-free is not reference-free. ⭐ That pass's only job is to be a training substrate for
     the population gDNA hyperprior — it is not the deliverable, and it does not have to answer objects it
     cannot solve.
+
+    ``structural_reference`` gives that reference its MEAN from the annotation
+    (`structural_reference_location`) instead of the unchosen ½. ⛔ ``False`` ⇒ no term is written and the
+    whole solve is bit-identical to the path before it existed.
     """
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
@@ -359,7 +368,7 @@ def solve_chain(
             L=float(logodds_window),
             n_tilt=n_tilt,
             n_grid_ss=n_grid_ss,
-            global_logprior=g_arr,
+            priors=g_arr,
             gdna_imp_mode=msg.gdna_mode,
             gdna_imp_prec=msg.gdna_prec,
             rna_imp_mode=msg.rna_mode,
@@ -386,8 +395,26 @@ def solve_chain(
     # THE gDNA ARM of ψ — the COMPOSITION prior, and ONLY that. A total-density model is an ENRICHMENT
     # model, not a DNA composition prior: letting it vote a slot's f_g is the count-votes-composition
     # regression.
-    global_lp = (
-        gdna_prior.logprior(solve_grid, mass_global, eff_global) if gdna_prior is not None else None
+    # ⭐ ONE construction site for ψ's composition arms. The RNA member stays ``None`` until something
+    # fits an RNA landscape; ``None`` there means "that arm takes its derived reference", which is the
+    # shipped behaviour and a first-class configuration rather than a gap.
+    # ⭐ The RNA arm asks the SAME landscape about the OTHER component: the complementary fraction
+    # `1 - f_g` against RNA's own opportunity. `mass_global` is shared because both components split one
+    # unspliced population (`region_rna_geometry`).
+    # ⭐ The LOCATION is the reference's own MEAN and belongs to neither arm: it is set from the ANNOTATION
+    # alone (`structural_reference_location`), so it is admissible at pass-0 where no landscape exists yet.
+    # ⛔ ``False`` ⇒ ``None`` ⇒ no term is written and every downstream path is bit-identical.
+    _rna_mass, _eff_rna = region_rna_geometry(geometry)
+    global_lp = CompositionPriors(
+        gdna=gdna_prior.logprior(solve_grid, mass_global, eff_global)
+        if gdna_prior is not None
+        else None,
+        rna=rna_prior.logprior(1.0 - solve_grid, _rna_mass, _eff_rna)
+        if rna_prior is not None
+        else None,
+        location=structural_reference_location(statics, float(logodds_window))
+        if structural_reference
+        else None,
     )
 
     # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
@@ -413,7 +440,7 @@ def solve_chain(
         n_tilt=n_tilt,
         n_grid_ss=n_grid_ss,
         belief=belief,
-        global_logprior=global_lp,
+        priors=global_lp,
         intron_prior=intron_prior,
     )
 
@@ -523,7 +550,7 @@ def solve_chain(
             L=float(logodds_window),
             n_tilt=n_tilt,
             n_grid_ss=n_grid_ss,
-            global_logprior=None,
+            priors=None,
         ).gdna_frac
         # the message-free self-solve variances, for the local-error attribution — a debug-only solve, so
         # the production path carries none of it (the self-solve fractions come from ``own``).

@@ -42,7 +42,7 @@ class CalibrationDiagnostics:
         so the rug is empty).
 
         ⛔ **It does NOT accept a**
-        :class:`~rigel.calibration.gdna_landscape.GdnaLandscape` — that landscape has no ``bandwidth`` and no
+        :class:`~rigel.calibration.landscape.DensityLandscape` — that landscape has no ``bandwidth`` and no
         ``n_cells``, so this raises ``AttributeError`` on one. This docstring claimed it did; the claim was
         never exercised, because `calibrate` only ever calls this with the enrichment prior.
         ⚠ **So the QC report's "bimodal ⇒ capture enrichment" caption is computed from the TOTAL-density

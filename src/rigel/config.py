@@ -278,6 +278,29 @@ class CalibrationConfig:
     #: ``[4.5e-5, 1−4.5e-5]``, bracketing the vertex mass Phase 0 measured).
     sweep_logodds_window: float = 10.0
 
+    #: **ψ's composition reference takes its MEAN from the ANNOTATION** — ``m → σ(L)`` wherever no annotated
+    #: MATURE transcript is continuous across the position (``¬mrna_active``), and the shipped neutral ½
+    #: everywhere else (`calibration.simplex_logodds.structural_reference_location`).
+    #:
+    #: ⭐ ``a·log f_g + b·log(1−f_g)`` on the λ grid IS ``Beta(a, b)``, so the reference has always had a
+    #: MEAN ``a/(a+b)`` and nobody chose it: Jeffreys' ½ **asserts the library is half gDNA**. This turns
+    #: that assertion into a per-slot statement the annotation can actually make.
+    #:
+    #: ⭐⭐ **THE STRENGTH IS ONE PSEUDO-OBSERVATION AND INTRODUCES NO CONSTANT.** ``strength = logit(m)``,
+    #: so a location IS its strength in nats; one pseudo-observation of gDNA takes ``Beta(a,b)`` to
+    #: ``Beta(a+1,b)``, mean ``(a+1)/(a+b+1)`` = **0.75** at ``a = b = _JEFFREYS_REF`` — a 3:1 claim,
+    #: overturned by ~1.5 stranded fragments, and refuted unstranded by the intron-vs-intergenic density
+    #: factor (`density_lambda_factor`, ``τ_fac = 161.4`` at an intron).
+    #:
+    #: ⭐ **ON, measured 2026-08-16 through `calibrate` on all 16 ladder conditions** against a `base`
+    #: re-recorded in the same session — final Σ|Δ| in fragments per stratum **0.930 / 0.908 / 0.925** on
+    #: the three IN-SCOPE strata, 0.998 on the deferred one, and the ``g00`` ZERO-gDNA control
+    #: **BIT-IDENTICAL on all 8 rows**. Better on all 12 contaminated conditions, worse on none.
+    #:
+    #: ⛔ ``False`` ⇒ ``location=None`` ⇒ the term is not written at all and every path is BIT-IDENTICAL to
+    #: the one before it existed.
+    structural_reference: bool = True
+
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
@@ -362,7 +385,7 @@ class CalibrationConfig:
     message_propagation: bool = False
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
-    #: landscape (:class:`~rigel.calibration.gdna_landscape.GdnaLandscape`) on the *current* solved gDNA
+    #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA
     #: densities + belief widths, then **fully resets the belief** and re-solves with it. So nothing but the
     #: fitted landscape carries between iterations, and the prior sharpens only where the data has earned it.
     #: ``0`` ⇒ the prior-free pass-0 alone.
@@ -378,7 +401,7 @@ class CalibrationConfig:
     calib_refit_iters: int = 3
 
     #: **gDNA hyperprior STRENGTH** — a temperature on ψ's fitted composition arm
-    #: (``calibration.gdna_landscape.GdnaLandscape``). ``1.0`` is exact Bayes. Below 1 tempers a prior that
+    #: (``calibration.landscape.DensityLandscape``). ``1.0`` is exact Bayes. Below 1 tempers a prior that
     #: is, after all, fitted from *biased* pass-0 output, which is robustness rather than a fudge: it is what
     #: lets real data overcome a wrong prior, and it is the intended control for the one measured failure
     #: direction — on zero-gDNA and capture-OFF libraries the landscape places 0.2–2.4 % of its mass in the

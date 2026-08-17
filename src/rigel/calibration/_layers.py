@@ -100,7 +100,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "density_model",
             "density_deconv",
             "npmle",
-            "gdna_landscape",
+            "landscape",
             "background_reference",
         ),
     ),
