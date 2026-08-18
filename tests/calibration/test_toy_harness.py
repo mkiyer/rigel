@@ -242,20 +242,6 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
 # ── GATE 4: the harness reproduces the finding it was built to isolate ────────────────────────────
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="⛔⛔ OWNER'S RULING 2026-08-05: the splice-flux reframe is theoretically CORRECT and is now "
-    "the default, ungated. This gate then fails at 2.19x against its 2.0 bound — and the assertion is "
-    "KEPT AGAINST THE TRUTH rather than widened to the number reached, because it is measuring a real "
-    "interaction and not a defect in the reframe.\n"
-    "⭐ What it is measuring: correcting the sj leak removes ONE error from a compensating PAIR "
-    "(TRAPS: a-cancelling-defect-pair). An evidence-free exon is fed through `intron -> BOUNDARY -> exon`; the two hops' errors "
-    "cancelled under the old sj-inclusive total, and the second hop still carries its own defect — a "
-    "correct composition ratio applied to a LEVEL (`EQUATIONS.md` §3.5/§3.5d). So this gate is now the "
-    "project's detector for THAT defect, and it must go green again when the pair is fixed jointly.\n"
-    "⛔ Widening the 2.0 bound would delete the only automatic detector of this mechanism. `ROADMAP.md` "
-    "step 0= is the joint arm that is expected to clear it.",
-)
 def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, tmp_path):
     """⭐⭐ The substantive gate, **REWRITTEN 2026-08-04 because the defect it pinned was fixed** — which
     is what its predecessor instructed ("rewrite this gate to pin the NEW behaviour rather than deleting
@@ -267,6 +253,17 @@ def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, t
     ``|Δf_g|`` **0.156 dry vs 0.005 wet, a factor of 31**; against the six-gene synthetic donor this
     fixture builds, 0.209 vs 0.167. Only the direction and ordering were assertable, because the
     magnitude is donor-dependent and the harness itself surfaced that.
+
+    ⭐⭐⭐ **IT WAS A STRICT xfail FROM 2026-08-05 TO 2026-08-18 AND IS GREEN AGAIN — BUT READ HOW, BECAUSE
+    IT IS NOT THE ROUTE THE xfail PREDICTED.** The recorded reason was: correcting the sj leak removes ONE
+    error from a compensating PAIR (`TRAPS: a-cancelling-defect-pair`) — an evidence-free exon is fed
+    through `intron → BOUNDARY → exon`, the two hops' errors cancelled under the old sj-inclusive total,
+    and the second hop still carried its own defect (a correct composition ratio applied to a LEVEL). It
+    failed at **2.19× against its 2.0 bound**, and the bound was KEPT rather than widened so it would stay
+    the detector for that mechanism. ⚠ It went green when `message_propagation` was turned back ON
+    (owner, 2026-08-18) — the relay changes the second hop — and **NOT** by the pair being fixed jointly,
+    which is still open (`ROADMAP.md`'s cancelling-pair item). ⛔ So do not read this passing as evidence
+    that the pair is resolved; read it as the detector having moved into the relay-on regime with it.
 
     ⭐⭐ **What it pins now: the dependence is GONE.** The mechanism was the reframe imputing the
     source's composition share onto the destination's observed total (`EQUATIONS.md` §3.5), and a

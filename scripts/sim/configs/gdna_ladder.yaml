@@ -160,11 +160,20 @@ gdna:
 # unstranded cells isolate the density channel completely.
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent: held out ───────────────────────────────────────────────────────────────────────────
+# ── Nascent: THE AXIS, added 2026-08-18 (owner) ─────────────────────────────────────────────────
+# ⛔⛔ IT WAS HELD OUT AT [0.0] UNTIL NOW, AND THAT MADE A WHOLE POOL UNMEASURABLE. With `nrna = 0`
+# on every row the panel cannot price ANY claim about nascent RNA — most importantly the two
+# "intronic mass is gDNA until proven otherwise" mechanisms (`structural_reference`,
+# `intron_factory`), whose whole risk is that an intron flank IS transcribed, as nascent. The
+# `structural_reference_location` docstring says so in its own words: the panel's "true f_g = 1.0000
+# at all four annotation-determined classes, so asserting 1 costs zero fragments" is `nrna = 0`
+# RESTATED, not a measurement.
+# ⭐ 0.25 is the rung its own toy table already measured the damage at (2.099x at kappa = 0.50), so
+# it is a level known to separate the arms rather than a guess.
 nrna:
   mode: additive_ratio
-  ratios:       [0.0]
-  ratio_labels: [none]
+  ratios:       [0.0,  0.25]
+  ratio_labels: [none, mid]
 
 # ── Capture ─────────────────────────────────────────────────────────────────────────────────────
 capture:

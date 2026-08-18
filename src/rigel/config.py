@@ -378,8 +378,8 @@ class CalibrationConfig:
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
 
-    #: ⛔⛔⛔ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT OFF**
-    #: (owner, 2026-08-07). ``False`` installs ``messages.silent.SilentPolicy``, which sends nothing: ψ
+    #: ⭐⭐⭐ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT ON**
+    #: (owner, 2026-08-18), after ~11 days muted. ``False`` installs ``messages.silent.SilentPolicy``, ψ
     #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the derived
     #: reference, the fitted gDNA prior and the intron factory. ``True`` installs
     #: ``messages.head.HeadPolicy``, every operator behind its own named switch.
@@ -423,7 +423,22 @@ class CalibrationConfig:
     #: of the fragment-length gap at all — closing the gap to 1e-9 bp leaves it reporting 0.59-0.72 on
     #: libraries whose truth is 0.00-0.57 — because a Gaussian log-likelihood is asymptotically LINEAR in
     #: the composition, so its argmax is a SIGN saturated at a grid endpoint. See `TRAPS.md`.
-    message_propagation: bool = False
+    #: ⭐⭐⭐ **WHY IT IS BACK ON (owner, 2026-08-18).** The mute was always a STUDY configuration and the
+    #: numbers above are stale in two independent ways — the 36-condition ladder they were measured on was
+    #: RETIRED on 2026-08-13, and many unrelated improvements have landed since. ⭐ What re-opened it: on
+    #: the scoped pass-0 exon population the relay is the ONLY thing that solves a slot with no own
+    #: evidence. On unstranded capture-OFF those exons have ``fg_strand == fg_loc`` exactly and a mean
+    #: |error| of **0.500** — ψ's uninformative ½, i.e. no own evidence at all — and the relay takes them
+    #: to **0.000087**. Whole-chain at the ``g00`` control it is **3,777,038 → 70,246 fragments** (0.019×).
+    #: ⛔ **IT IS NOT UNIFORMLY BETTER AND THAT IS THE DEBUGGING TARGET, NOT A REASON TO RE-MUTE**: on
+    #: STRANDED CONTAMINATED data it is worse whole-chain — ``g98 ss0.99 capture_off`` 156,767 → 255,263
+    #: (1.628×), ``g98 ss0.99 capture_on`` 281,487 → 728,103 (2.587×). The relay's win is concentrated
+    #: where the local solve is BLIND (unstranded, and every zero-gDNA control); its loss is where the
+    #: strand channel already had the answer.
+    #: ⚠ **Flipping this default is a CONFIG DEFAULT FLIP** — the trigger that once left six instruments
+    #: dead while the suite stayed green, because the TEST readers install the policy themselves. Run the
+    #: instruments, not just the suite (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+    message_propagation: bool = True
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA

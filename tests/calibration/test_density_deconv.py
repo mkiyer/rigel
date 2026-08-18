@@ -14,17 +14,17 @@ from rigel.calibration.density_deconv import (
     GdnaBackground,
     _log_negbinom,
     density_lambda_factor,
+    fit_gdna_background,
 )
 
 _GRID = np.linspace(1e-6, 1.0 - 1e-6, 400)  # dense f_g grid to locate the peak
 
 
-def _bg(log_mu_bg, alpha=np.inf, sg=1.0e6, n0=0.0, informative=True):
+def _bg(log_mu_bg, alpha=np.inf, size=1.0e6, informative=True):
     return GdnaBackground(
         log_mu_bg=float(np.log(log_mu_bg)) if log_mu_bg > 0 else -np.inf,
         alpha=float(alpha),
-        sg=float(sg),
-        n0=float(n0),
+        size=float(size),
         n_regions=100,
         informative=informative,
     )
@@ -95,9 +95,12 @@ def test_regime_nascent_present_peels_to_background():
 
 
 def test_regime_dna_free_pins_low():
-    """Σg = 0 (DNA-free): μ falls to the resolution wall ⇒ the factor pulls f_g toward ~0."""
-    # wall ρ_res tiny; ρ_obs modest ⇒ f_g ≈ ρ_res/ρ_obs ≈ 0
-    bg = _bg(1e-4, alpha=np.inf, sg=0.0, n0=500.0)  # Σg=0, wall at 1e-4
+    """Σg = 0 (DNA-free): the posterior sits at ½/ΣE with honest width ⇒ the factor pulls f_g to ~0.
+
+    ⭐ Through :func:`fit_gdna_background` rather than a hand-built background, because the DNA-free
+    regime is exactly where the hand-built wall and the real fit used to diverge (the 2026-08-18
+    detonation) — this regime test must exercise the real path."""
+    bg = fit_gdna_background(np.zeros(200), np.full(200, 5_000.0))  # a genuinely empty pool
     C = np.array([2.0])  # a sparse intron, ρ_obs = 2/1000 = 2e-3
     fac = density_lambda_factor(bg, C, np.array([1000.0]), _GRID)
     assert _peak_fg(fac[0]) < 0.2
@@ -136,7 +139,7 @@ def test_overdispersion_widens_the_peel():
 
 def test_non_informative_is_flat():
     """An empty background pool ⇒ a flat (all-zero) factor: the factory says nothing."""
-    bg = _bg(0.0, sg=0.0, n0=0.0, informative=False)
+    bg = _bg(0.0, size=0.5, informative=False)
     fac = density_lambda_factor(bg, np.array([100.0, 5.0]), np.array([1000.0, 1000.0]), _GRID)
     assert fac.shape == (2, 400)
     assert np.allclose(fac, 0.0)
@@ -151,3 +154,69 @@ def test_factor_shape_and_finiteness():
     assert fac.shape == (3, _GRID.shape[0])
     assert np.all(np.isfinite(fac))
     assert np.allclose(fac.max(axis=1), 0.0)
+
+
+# ---- ⭐⭐⭐ the SMOOTH background posterior — the 2026-08-18 zero-gDNA catastrophe, pinned ----
+#
+# The shipped fit branched: pooled MLE at Σg>0, a "resolution wall" mean(1/E) fallback at Σg=0. That
+# wall is a mean of reciprocals and is OWNED by the smallest regions of the partition
+# (TRAPS: a-mean-of-ratios-inherits-the-partition): measured on the ladder, ONE intergenic sliver
+# (E=0.0074 bp) carried 35 % of it and the wall landed at 0.2985/bp on a library whose true background
+# was EXACTLY 0 — so the intron factory confidently manufactured mu = 0.2985*E phantom gDNA and 80 % of
+# all nascent intron mass was called gDNA. The repair is the conjugate posterior
+# rho_bg ~ Gamma(Sumg + 1/2, SumE): ONE formula, no branch, no wall, honest width, and its Sumg >> 1
+# limit is the shipped pooled rate exactly. These four tests are the falsification set for that repair.
+
+
+def test_the_background_location_is_sliver_invariant():
+    """⛔ THE BUG, PINNED: one fragment-length intergenic sliver must not move the background."""
+    E = np.full(50, 10_000.0)
+    g = np.zeros(50)
+    clean = fit_gdna_background(g, E)
+    slivered = fit_gdna_background(np.append(g, 0.0), np.append(E, 0.01))
+    assert abs(clean.log_mu_bg - slivered.log_mu_bg) < 0.01, (
+        clean.log_mu_bg,
+        slivered.log_mu_bg,
+    )
+
+
+def test_the_background_is_smooth_through_zero_counts():
+    """⛔ One observed fragment may move the location by ~(1+1/2)/(0+1/2) = 3x — never by orders."""
+    E = np.full(50, 10_000.0)
+    at0 = fit_gdna_background(np.zeros(50), E)
+    g1 = np.zeros(50)
+    g1[7] = 1.0
+    at1 = fit_gdna_background(g1, E)
+    assert abs(at1.log_mu_bg - at0.log_mu_bg) <= np.log(3.0) + 1e-9
+
+
+def test_an_empty_pool_is_not_confident():
+    """⛔ Σg=0 says "around 1/(2ΣE), and I genuinely do not know" — the factor must neither place the
+    peel away from ~0 on a dense intron NOR carry populated-pool precision. The shipped path read
+    tau ~ 3e8 here and called 80 % of nascent gDNA."""
+    from rigel.calibration.density_deconv import density_factor_precision
+
+    E = np.full(500, 10_000.0)
+    empty = fit_gdna_background(np.zeros(500), E)
+    # ⛔ the information HALF of the contract, pinned directly: an empty region is not a unit of
+    #   Fisher information, so 500 empty regions carry exactly the Jeffreys ½ — never 500. A break
+    #   that restores ``Σg + n0`` here changes no factor peak (the location is already tiny), so the
+    #   behavioural gates below cannot see it; this line is the one that fires.
+    assert empty.size == pytest.approx(0.5), empty.size
+    C, Eg = np.array([10_000.0]), np.array([5_000.0])
+    fac = density_lambda_factor(empty, C, Eg, _GRID)
+    assert _peak_fg(fac[0]) < 0.01
+    lam = np.log(_GRID) - np.log1p(-_GRID)
+    tau_empty = density_factor_precision(fac, lam)[0]
+    full = fit_gdna_background(np.full(500, 500.0), E)  # same support, populated
+    tau_full = density_factor_precision(density_lambda_factor(full, C, Eg, _GRID), lam)[0]
+    assert tau_empty < 1e-2 * tau_full, (tau_empty, tau_full)
+
+
+def test_the_populated_limit_is_the_pooled_rate():
+    """⭐ Σg ≫ 1 reduces to the shipped pooled MLE exactly: ln((Σg+1/2)/ΣE) − ln(Σg/ΣE) ~ 1/(2Σg)."""
+    g = np.full(100, 10_000.0)
+    E = np.full(100, 20_000.0)
+    bg = fit_gdna_background(g, E)
+    assert bg.log_mu_bg == pytest.approx(np.log(g.sum() / E.sum()), abs=1e-6)
+    assert bg.informative

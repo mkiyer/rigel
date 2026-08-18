@@ -298,8 +298,7 @@ def test_density_factor_precision_tracks_curvature_and_count():
     bg = GdnaBackground(
         log_mu_bg=float(np.log(0.01)),
         alpha=np.inf,
-        sg=1.0e5,
-        n0=0.0,
+        size=1.0e5 + 0.5,  # the Gamma-posterior shape: Σg + ½
         n_regions=500,
         informative=True,
     )

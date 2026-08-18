@@ -272,20 +272,24 @@ def test_a_writeback_confined_to_solvable_is_accepted():
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_message_propagation_is_a_config_switch_and_defaults_OFF():
+def test_message_propagation_is_a_config_switch_and_defaults_ON():
     """⛔⛔ **THE LARGEST BEHAVIOUR SWITCH IN THE TOOL, AND IT MUST BE A WRITTEN DECISION.** The two
     policies differ by **99.9 %** on the panel total and by **−58 % to +155 %** depending on the stratum, so
     which one ships can never be inherited from a function default that an edit could silently change.
 
-    ⭐ It is OFF as of 2026-08-07 (owner): muting the relay is a net improvement on three of the four
-    strata. ⚠ **And the price is real and is on the zero control** — see
-    `test_the_price_of_silence_on_an_AMBIG_zero_gdna_locus`, which pins it so it cannot rot into a habit."""
+    ⭐ **It is ON as of 2026-08-18 (owner)**, after ~11 days muted. ⚠ The 2026-08-07 mute was a STUDY
+    configuration measured on the 36-condition ladder RETIRED on 2026-08-13; what re-opened it is that on
+    a slot with NO own evidence the relay is the only thing that can solve it at all — on unstranded
+    capture-OFF those exons read ψ's uninformative ½ EXACTLY (mean |error| 0.500) muted, and 0.000087
+    with the relay live. ⛔ It is NOT uniformly better — on stranded CONTAMINATED data it is worse
+    whole-chain (`g98 ss0.99 capture_off` 1.628×) — and that asymmetry is the debugging target rather
+    than a reason to re-mute."""
     import inspect
 
     import rigel.calibration.calibrate as _c  # noqa: PLC0415
     from rigel.config import CalibrationConfig  # noqa: PLC0415
 
-    assert CalibrationConfig().message_propagation is False
+    assert CalibrationConfig().message_propagation is True
     src = inspect.getsource(_c)
     assert "config.message_propagation" in src, (
         "calibrate no longer reads the switch — whichever policy it now hard-codes, the config option is "
