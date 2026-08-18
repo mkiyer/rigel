@@ -282,12 +282,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,498 passing, 0 SKIPPED, 10 xfail** (re-derived
-2026-08-17, after the λ-bracket work and the doc/instrument cleanup). **Any failure at all is a
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,501 passing, 0 SKIPPED, 10 xfail** (re-derived
+2026-08-17 on a CLEAN TREE at `4cfd35d9`, after the λ-bracket, the instrument resurrection, the fixture
+restoration and the doc lockdown all landed). **Any failure at all is a
 regression** — a stronger and cheaper rule than counting expected ones.
 
 ⚠ **It read 3,496 / 11 xfail that morning and BOTH moves are ACCOUNTED, not adjusted. The COLLECTED
-total is unchanged at 3,508, which is the real check.**
+total is unchanged at 3,508, which is the real check.** ⚠ It then moved to **3,511 collected** as the
+instrument work landed: the gate was EXTENDED to `scripts/profiling/` (a third tree, previously covered by
+nothing) while two dark `scripts/design/` instruments and one executed dev doc were deleted. Re-derive
+with `--collect-only`; never adjust.
 * **`+1` passing** is ONE `test_no_jargon_labels::test_no_numbered_rule_labels` case for one new
   `docs/dev/` file, re-derived with `pytest --collect-only -q | grep <stem>`, which printed exactly one
   line. The dev-doc `+1` rule is confirmed a third time.
