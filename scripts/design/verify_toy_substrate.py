@@ -671,8 +671,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
 
 
 def gate_accumulator(frags, geoms, res, payload, ra, spec):
-    """TRAPS: self-checking-validator — every bank, re-derived from the TRUTH, against the payload. The main event."""
-    print("\n── GATE TRAPS: self-checking-validator: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
+    """A1 — every bank, re-derived from the TRUTH, against the payload. The main event."""
+    print("\n── GATE A1: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
     region_bounds = np.asarray(payload.region_bounds, np.int64)
     n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
@@ -786,8 +786,8 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
 
 
 def gate_invariants(payload, tt, frags):
-    """TRAPS: perturb-every-gate — the accumulator's own externally-checkable identities."""
-    print("\n── GATE TRAPS: perturb-every-gate: THE ACCUMULATOR'S OWN INVARIANTS ─────────────────────────────────────────")
+    """A2 — the accumulator's own externally-checkable identities."""
+    print("\n── GATE A2: THE ACCUMULATOR'S OWN INVARIANTS ─────────────────────────────────────────")
     qc = {f.name: getattr(payload.qc, f.name) for f in dataclasses.fields(payload.qc)}
     start_sum = int(np.asarray(payload.region_start_count, np.int64).sum())
     dep_len_sum = int(np.asarray(payload.deposited_lengths, np.int64).sum())

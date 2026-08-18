@@ -79,13 +79,9 @@ def mixed_reference(tmp_path):
     sequences = {name: "".join(random_dna_array(n, rng)) for name, n in lengths.items()}
     fasta = _write_fasta(tmp_path, sequences)
     transcripts = [
-        _transcript(
-            "TRAPS: self-checking-validator", "chrA", [(2_000, 4_000), (6_000, 8_000)], 100.0
-        ),
-        _transcript("TRAPS: perturb-every-gate", "chrA", [(20_000, 24_000)], 50.0),
-        _transcript(
-            "TRAPS: measure-the-ceiling-first", "chrB", [(3_000, 5_000), (9_000, 11_000)], 100.0
-        ),
+        _transcript("A1", "chrA", [(2_000, 4_000), (6_000, 8_000)], 100.0),
+        _transcript("A2", "chrA", [(20_000, 24_000)], 50.0),
+        _transcript("B1", "chrB", [(3_000, 5_000), (9_000, 11_000)], 100.0),
         # The spike-in: one transcript covering nearly the whole reference, as ERCC does.
         _transcript("SPIKE_T1", SPIKE_REF, [(30, 860)], 200.0),
     ]

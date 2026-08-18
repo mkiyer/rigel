@@ -79,7 +79,7 @@ def _build_scenario(tmp_path, name="ab_test"):
         work_dir=tmp_path / name,
     )
     sc.add_gene(
-        "TRAPS: no-magic-numbers",
+        "G1",
         "+",
         [
             {
@@ -90,7 +90,7 @@ def _build_scenario(tmp_path, name="ab_test"):
         ],
     )
     sc.add_gene(
-        "TRAPS: one-thing-varied",
+        "G2",
         "-",
         [
             {

@@ -194,8 +194,8 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     gtf = tmp_path / "a.gtf"
     # 2-exon transcript → annotated sj at 0-based [200, 300).
     gtf.write_text(
-        'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
-        'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
     )
     idx_dir = tmp_path / "idx"
     TranscriptIndex.build(fasta_file=str(fasta), gtf_file=str(gtf), output_dir=str(idx_dir))

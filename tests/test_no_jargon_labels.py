@@ -53,20 +53,55 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "G3": ("*",),
     # SUCCESS.md numbers its own Stage-A acceptance criteria A1/A2/A3 (FIDELITY / BIAS / SUFFICIENCY).
     # ⚠ They are a different KIND of thing from a trap, and they are scoped to one file.
-    "A1": ("docs/SUCCESS.md", "docs/TRAPS.md"),
-    "A2": ("docs/SUCCESS.md",),
+    # ⛔⛔ A1/A2/B1/B2 ARE ALSO FIXTURE IDS AND A GATE SERIES, AND OMITTING THOSE SCOPES IS WHAT CORRUPTED
+    # THEM. The rename met `"A1"` in a GTF gene id and in `── GATE A1:` — data, not citations — and
+    # resolved the collision by REWRITING THE DATA to `"TRAPS: self-checking-validator"`. 127 gene ids
+    # across 15 test files and two script labels went that way, and the suite stayed green because a
+    # gene name is arbitrary and the substitution was injective. The scoped exemption is the remedy this
+    # file's own assertion message names; destroying the fixture is not.
+    # ⚠ `verify_toy_substrate.py`'s series is S1/S2/S3/A1/A2 — the S rungs survived only because `S`
+    # falls outside LABEL's `[A-G]` class, which is what proves A1/A2 there are the same KIND of label.
+    "A1": (
+        "docs/SUCCESS.md",
+        "docs/TRAPS.md",
+        "tests/test_second_pass_scoring.py",
+        "tests/test_sim_genomic_refs.py",
+        "scripts/design/verify_toy_substrate.py",
+    ),
+    "A2": (
+        "docs/SUCCESS.md",
+        "tests/test_second_pass_scoring.py",
+        "tests/test_sim_genomic_refs.py",
+        "scripts/design/verify_toy_substrate.py",
+    ),
     "A3": ("docs/SUCCESS.md",),
+    "B1": ("tests/test_second_pass_scoring.py", "tests/test_sim_genomic_refs.py"),
+    "B2": ("tests/test_second_pass_scoring.py",),
+    # gene ids in the implicit-splice GTF fixture, and two rungs of `test_vertex_reference.py`'s own
+    # G1…G6 case series — both beside their definitions
+    "G4": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py"),
+    "G5": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py"),
     # moment variables in the opportunity-tilted length quadrature
     "C2": (
         "src/rigel/calibration/effective_length.py",
         "src/rigel/native/fast_exp.h",
         "docs/TRAPS.md",
+        "tests/calibration/test_certified_rna_licence.py",
     ),  # quoted inside the migration lesson
     # ⚠ A TEST FILE'S OWN CASE IDS, scoped to the file that defines them. A local id a reader meets beside
     # its definition is legible; the SAME id cited from another document is not, and those citations were
     # rewritten into prose rather than exempted here.
+    # ⛔⛔ AND SCOPING ONLY THE SUB-LETTERED SURVIVORS IS WHAT DESTROYED THEIR PLAIN-NUMBERED SIBLINGS.
+    # `C2b` and `G1b` are two rungs of two series — C1…C5 and G1…G6 — each mirrored in this repo by the
+    # `def test_<id>_…` names that still carry them. The bulk rename rewrote the plain-numbered rungs of
+    # both into trap names and left the sub-lettered ones alone, so the surviving exemption below was
+    # evidence that the whole series belonged here. Restored 2026-08-17 with the series scoped whole.
     "C2b": ("tests/calibration/test_certified_rna_licence.py",),
     "G1b": ("tests/calibration/test_vertex_reference.py",),
+    "D1": ("tests/calibration/test_solvability_denominator.py",),
+    "D2": ("tests/calibration/test_solvability_denominator.py",),
+    "D3": ("tests/calibration/test_solvability_denominator.py",),
+    "D4": ("tests/calibration/test_solvability_denominator.py",),
     "G14": ("src/rigel/calibration/splice_graph.py", "tests/calibration/test_splice_graph.py"),
     "G17": (
         "src/rigel/calibration/splice_graph.py",
@@ -81,10 +116,11 @@ ALLOWED: dict[str, tuple[str, ...]] = {
         "src/rigel/calibration/effective_length.py",
         "docs/TRAPS.md",
         "src/rigel/native/fast_exp.h",
+        "tests/calibration/test_certified_rna_licence.py",
     ),  # Taylor coefficients 1/n!
-    "C3": ("src/rigel/native/fast_exp.h",),
-    "C4": ("src/rigel/native/fast_exp.h",),
-    "C5": ("src/rigel/native/fast_exp.h",),
+    "C3": ("src/rigel/native/fast_exp.h", "tests/calibration/test_certified_rna_licence.py"),
+    "C4": ("src/rigel/native/fast_exp.h", "tests/calibration/test_certified_rna_licence.py"),
+    "C5": ("src/rigel/native/fast_exp.h", "tests/calibration/test_certified_rna_licence.py"),
     "C6": ("src/rigel/native/fast_exp.h",),
     "C7": ("src/rigel/native/fast_exp.h",),
     "C8": ("src/rigel/native/fast_exp.h",),
@@ -93,7 +129,6 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "C11": ("src/rigel/native/fast_exp.h",),
     "F32": ("src/rigel/native/em_solver.cpp",),
     "F64": ("src/rigel/native/em_solver.cpp",),
-    # a GENE NAME in a GTF fixture, and the accumulator suite's own hold-out label
     # ⭐ TRAPS.md's own header explains WHAT WAS RENAMED and must name the old labels to do it — that is
     # the migration note a reader needs, and it is one paragraph in the canonical home.
     "A16": ("docs/TRAPS.md",),

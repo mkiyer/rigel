@@ -69,7 +69,7 @@ def _build_scenario(tmp_path, name="opp_strand"):
     )
     # T1: + strand, multi-exon
     sc.add_gene(
-        "TRAPS: no-magic-numbers",
+        "G1",
         "+",
         [
             {
@@ -81,7 +81,7 @@ def _build_scenario(tmp_path, name="opp_strand"):
     )
     # T2: - strand, multi-exon, on opposite strand
     sc.add_gene(
-        "TRAPS: one-thing-varied",
+        "G2",
         "-",
         [
             {

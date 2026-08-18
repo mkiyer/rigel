@@ -86,10 +86,7 @@ L_ARM5_WIDE, L_ARM5_NARROW = 300, 500
 
 def _gtf() -> str:
     rows = []
-    for base, wide, narrow in (
-        (L1, "TRAPS: self-checking-validator", "TRAPS: measure-the-ceiling-first"),
-        (L2, "TRAPS: perturb-every-gate", "TRAPS: score-against-truth"),
-    ):
+    for base, wide, narrow in ((L1, "A1", "B1"), (L2, "A2", "B2")):
         rows += [
             f'chr1\tt\texon\t{base + 1}\t{base + 600}\t.\t+\t.\tgene_id "g{wide}"; transcript_id "t{wide}";\n',
             f'chr1\tt\texon\t{base + 1001}\t{base + 1200}\t.\t+\t.\tgene_id "g{wide}"; transcript_id "t{wide}";\n',

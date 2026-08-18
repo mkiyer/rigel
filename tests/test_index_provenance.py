@@ -60,9 +60,9 @@ def sources(tmp_path: Path) -> tuple[Path, Path]:
 
     gtf = tmp_path / "ann.gtf"
     gtf.write_text(
-        'chr1\tsrc\texon\t1\t300\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
-        'chr1\tsrc\texon\t401\t700\t.\t+\t.\tgene_id "TRAPS: no-magic-numbers"; transcript_id "T1";\n'
-        'chr1\tsrc\texon\t1\t1000\t.\t+\t.\tgene_id "TRAPS: one-thing-varied"; transcript_id "T2";\n'
+        'chr1\tsrc\texon\t1\t300\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t401\t700\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t1\t1000\t.\t+\t.\tgene_id "G2"; transcript_id "T2";\n'
     )
     return fasta, gtf
 
