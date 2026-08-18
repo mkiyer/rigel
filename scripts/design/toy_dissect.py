@@ -61,9 +61,11 @@ INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
 TYPES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 
-def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
+def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path, messages: bool):
     index = TranscriptIndex.load(str(INDEX))
-    cfg = dataclasses.replace(CalibrationConfig(), calib_refit_iters=0)
+    cfg = TH.with_messages(
+        dataclasses.replace(CalibrationConfig(), calib_refit_iters=0), messages
+    )
     donor = TH.harvest(SUITE / cond, index, config=cfg)
     spec = TH.SPECS["spliced_exons"]
     if genome_length:
@@ -75,8 +77,11 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
               rna_fl_pmf=donor.rna_fl_pmf, config=cfg, injected_priors=donor.priors, _debug=dbg,
               **index_derived_inputs(sub.index))
     cap, chain = dbg["capture"], dbg["chain"]
-    uni = cap["_uni"][-1]
-    st = cap["_uni_static"]
+    # ⛔ `_uni` is written ONLY by `messages/head.py`, i.e. only under `HeadPolicy`. Read the artifact
+    # rather than the flag, and degrade the channel tables when the relay is muted — this file used to
+    # die here with `KeyError: '_uni'` the moment `message_propagation` shipped as False.
+    uni = TH.relay_channels(cap)
+    st = TH.relay_static(cap)
     ra = sub.region_arrays
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     starts, sizes = np.asarray(ra.start, np.int64), np.asarray(ra.region_size_bp, np.int64)
@@ -94,6 +99,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
           f"{sub.n_gdna_target:,} gDNA fragments (donor rate {donor.gdna_rate_per_base:.6g}/bp)")
     print(f"   kappa = {donor.priors.rna_sense_frac:.6f}   strand specificity "
           f"{donor.strand_specificity:g}   capture {'ON' if donor.capture_on else 'off'}")
+    print(TH.messages_stamp(messages))
     print("=" * 132)
     print("\n── THE SOLVER'S OWN LADDER, per slot.  strand-only → self-solve → final ───────────────")
     print(f"\n   {'slot':<26} {'n':>7} {'TRUTH':>7} {'fg_strand':>10} {'fg_loc':>8} {'f_g':>8} "
@@ -124,42 +130,59 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
     print("   cm_g  = the gDNA MEASUREMENT precision psi receives (0 ⇒ the level arrives with no weight)")
     print("   c_tau = the COMPOSITION precision (the single-λ message)")
     print("   cg    = the fused gDNA DENSITY the messages deliver;  own = this slot's own self-solve")
+    if uni is None:
+        print(TH.relay_silent_note("EVERY CHANNEL COLUMN (own rho_g, msg cg, cm_g, c_tau, lam_msg)"))
     print(f"\n   {'slot':<26} {'own rho_g':>10} {'msg cg':>10} {'cm_g':>9} {'c_tau':>9} "
           f"{'lam_msg':>9} {'M/E_g':>9} {'E_g':>8} {'E_r':>8}")
     print("   " + "-" * 118)
+
+    def _u(bank, key, s, w, p=4):
+        """One relay-derived cell. ⛔ '—' when the relay is MUTED: it published no claim, and a 0 here
+        would read as a measured zero (`TRAPS: an-ablation-that-never-ran`)."""
+        return f"{bank[key][s]:>{w}.{p}g}" if bank is not None else f"{'—':>{w}}"
+
     for s, label, n, truth in rows:
         M, Eg, Er = st["M"][s], st["E_g"][s], st["E_r"][s]
-        print(f"   {label:<26} {st['og'][s]:>10.4g} {uni['cg'][s]:>10.4g} {uni['cm_g'][s]:>9.3g} "
-              f"{uni['c_tau'][s]:>9.3g} {uni['lam_msg'][s]:>9.3g} "
+        print(f"   {label:<26} {_u(st if uni is not None else None, 'og', s, 10)} "
+              f"{_u(uni, 'cg', s, 10)} {_u(uni, 'cm_g', s, 9, 3)} "
+              f"{_u(uni, 'c_tau', s, 9, 3)} {_u(uni, 'lam_msg', s, 9, 3)} "
               f"{(M / Eg if Eg > 0 else float('nan')):>9.4g} {Eg:>8.1f} {Er:>8.1f}")
 
     print("\n── WHERE THE gDNA LEVEL AT THE EXONS COMES FROM ───────────────────────────────────────")
+    if uni is None:
+        print(TH.relay_silent_note("THE DELIVERED-LEVEL DECOMPOSITION (cg, fwd_g/bwd_g, mo_*, cm_*)"))
     for s, label, n, truth in rows:
         if not label.startswith("exon"):
             continue
         M, Eg = st["M"][s], st["E_g"][s]
+        Er = st["E_r"][s]
         print(f"\n   {label}   n = {n:,.0f}   truth f_g = {truth:.4f}   final f_g = "
               f"{cap['f_g'][s]:.4f}")
         print(f"      the slot's own total density M/E_g            {M / Eg:>12.5g}")
-        print(f"      the gDNA density the messages delivered (cg)  {uni['cg'][s]:>12.5g}")
-        print(f"      implied gDNA fraction  cg·E_g/M               "
-              f"{uni['cg'][s] * Eg / max(M, 1e-9):>12.5g}")
-        print(f"      forward relay level  fwd_g / backward  bwd_g  "
-              f"{st['fwd_g'][s]:>12.5g} {st['bwd_g'][s]:>12.5g}")
-        print(f"      psi inputs: mo_g {uni['mo_g'][s]:>8.4f} at cm_g {uni['cm_g'][s]:>8.4g}   "
-              f"lam {uni['lam_msg'][s]:>8.4f} at c_tau {uni['c_tau'][s]:>8.4g}")
-        # ⭐⭐ THE RNA MEASUREMENT CHANNEL — the graft. A mature-RNA count at the flanking sj is
-        # a CERTIFIED-RNA measurement of this exon's RNA density (gDNA cannot be spliced), and on a
-        # slot with no gDNA evidence and no strand it is the ONLY thing that can move f_g off psi's
-        # uninformative reference. It is what the gDNA channels being dead leaves behind.
-        cmp_, cmn_ = uni["cm_p"][s], uni["cm_n"][s]
-        rho_r = (np.exp(uni["mo_p"][s]) + np.exp(uni["mo_n"][s])) * M / max(Er, 1e-9)
-        print(f"      ⭐ RNA measurement: mo_p {uni['mo_p'][s]:>8.4f} at cm_p {cmp_:>9.4g}   "
-              f"mo_n {uni['mo_n'][s]:>8.4f} at cm_n {cmn_:>9.4g}")
-        print(f"         ⇒ delivered RNA density {rho_r:>12.5g}   against the slot's own total "
-              f"M/E_r = {M / max(Er, 1e-9):>10.5g}")
-        print(f"         ⇒ implied f_g = 1 − rho_R·E_r/M = "
-              f"{1.0 - rho_r * Er / max(M, 1e-9):>10.5g}   (final {cap['f_g'][s]:.4f})")
+        if uni is None:
+            # ⛔ every remaining line of this block is a relay quantity, and the relay sent nothing.
+            print("      the gDNA density the messages delivered (cg)  "
+                  f"{'— relay MUTED':>12}")
+        else:
+            print(f"      the gDNA density the messages delivered (cg)  {uni['cg'][s]:>12.5g}")
+            print(f"      implied gDNA fraction  cg·E_g/M               "
+                  f"{uni['cg'][s] * Eg / max(M, 1e-9):>12.5g}")
+            print(f"      forward relay level  fwd_g / backward  bwd_g  "
+                  f"{st['fwd_g'][s]:>12.5g} {st['bwd_g'][s]:>12.5g}")
+            print(f"      psi inputs: mo_g {uni['mo_g'][s]:>8.4f} at cm_g {uni['cm_g'][s]:>8.4g}   "
+                  f"lam {uni['lam_msg'][s]:>8.4f} at c_tau {uni['c_tau'][s]:>8.4g}")
+            # ⭐⭐ THE RNA MEASUREMENT CHANNEL — the graft. A mature-RNA count at the flanking sj is
+            # a CERTIFIED-RNA measurement of this exon's RNA density (gDNA cannot be spliced), and on a
+            # slot with no gDNA evidence and no strand it is the ONLY thing that can move f_g off psi's
+            # uninformative reference. It is what the gDNA channels being dead leaves behind.
+            cmp_, cmn_ = uni["cm_p"][s], uni["cm_n"][s]
+            rho_r = (np.exp(uni["mo_p"][s]) + np.exp(uni["mo_n"][s])) * M / max(Er, 1e-9)
+            print(f"      ⭐ RNA measurement: mo_p {uni['mo_p'][s]:>8.4f} at cm_p {cmp_:>9.4g}   "
+                  f"mo_n {uni['mo_n'][s]:>8.4f} at cm_n {cmn_:>9.4g}")
+            print(f"         ⇒ delivered RNA density {rho_r:>12.5g}   against the slot's own total "
+                  f"M/E_r = {M / max(Er, 1e-9):>10.5g}")
+            print(f"         ⇒ implied f_g = 1 − rho_R·E_r/M = "
+                  f"{1.0 - rho_r * Er / max(M, 1e-9):>10.5g}   (final {cap['f_g'][s]:.4f})")
         print(f"      sj flux at the flanking boundaries: "
               f"{float(np.asarray(cap['mature'], float)[s - 1]):,.0f} / "
               f"{float(np.asarray(cap['mature'], float)[s + 1]):,.0f}"
@@ -173,9 +196,15 @@ def main() -> int:
     ap.add_argument("--n-rna", type=int, default=20000)
     ap.add_argument("--genome-length", type=int, default=0)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_dissect"))
+    # ⭐ the SHIPPED setting by default: the ladder — this file's headline table and step 3 of the debug
+    # loop — is policy-independent, so the instrument must be readable in the configuration that ships.
+    # The two channel tables then degrade rather than the whole file dying.
+    TH.add_messages_flag(ap, default=TH.MESSAGES_SHIPPED)
     args = ap.parse_args()
+    messages = TH.messages_on(args)
     for c in args.conditions:
-        dissect(c, n_rna=args.n_rna, genome_length=args.genome_length, work_dir=args.work_dir)
+        dissect(c, n_rna=args.n_rna, genome_length=args.genome_length, work_dir=args.work_dir,
+                messages=messages)
         print()
     return 0
 
