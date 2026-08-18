@@ -69,7 +69,9 @@ _KNN_SCALE = 0.5
 #: The old reading — enriched recovery 0.69 at capture-ON and 0.29 at VSTRONG against 0.84 / 1.24 with flat
 #: weights — was taken on the retired 32-condition suite and predates the 2026-08-06 pass-0 change, which
 #: shrank ``Var(log f_g)`` across the board and so drove ``ref/(v+ref)`` toward 1. Re-measured on the
-#: 36-condition ladder through the production refit: the mean weight is **0.90–0.93** (not the 0.46 this
+#: 36-condition ladder through the production refit (⚠ that ladder is ALSO retired — it was rebuilt at 16
+#: conditions on 2026-08-13 and ``g75`` is no longer a rung, so the numbers below stand as recorded and
+#: are not reproducible as written): the mean weight is **0.90–0.93** (not the 0.46 this
 #: file records for exons) and shipped-vs-flat moves the enriched prior mass by **0.97× / 1.07× / 1.08×**
 #: at ``g75`` capture-ON / capture-OFF / ``g00`` — i.e. nothing. ⚠ VSTRONG is not a ladder condition, so the
 #: old worst case is *unreproduced here*, not disproven.
@@ -122,6 +124,46 @@ class DensityLandscape:
             log_rho_c.ravel(), self.log_rho, self.logP, left=self.logP[0], right=self.logP[-1]
         ).reshape(log_rho_c.shape)
         return lp if self.strength == 1.0 else float(self.strength) * lp
+
+    def required_logodds_window(self, mass, eff) -> float:
+        """⭐⭐⭐ **THE λ BRACKET THIS PRIOR'S OWN SUPPORT DEMANDS — derived, with no constant chosen.**
+
+        :meth:`logprior` is evaluated at ``log ρ_i(f) = log f + log M_i − log E_i`` and ψ can only offer
+        ``f ∈ [σ(−L), σ(L)]``. So this prior is EXPRESSIBLE at slot ``i`` only if ψ can place that slot on
+        the landscape's own floor ``ρ_floor = exp(log_rho[0])`` — :func:`_grid`'s **resolution wall**::
+
+            σ(−L)·M_i/E_i ≤ ρ_floor   ⇔   σ(−L) ≤ f_i := ρ_floor·E_i/M_i   ⇔   L ≥ log((1 − f_i)/f_i)
+
+        and the bracket the chain needs is the maximum over the slots ψ evaluates. ⭐ For ``f_i ≪ 1``
+        (measured median ``1.2e-07``) that collapses to ``max_i log(M_i/E_i) − log ρ_floor``, i.e.
+        **this landscape's own log-dynamic range** — which is why nothing is chosen here. Verified
+        against the exact per-slot maximum on four conditions: predicted 22.764 / 21.013 / 21.804 /
+        21.073, measured 22.76 / 21.01 / 21.80 / 21.07.
+
+        ⛔ **A slot with ``f_i ≥ 1`` imposes NO constraint** — its own total density already sits at or
+        below the wall, so ψ can express it at any bracket. Those return a non-positive ``L_i`` and are
+        dominated by the maximum, which is why no mask is needed beyond "has mass and has opportunity".
+
+        ⚠ **The caller must take ``max(configured L, this)``, never this alone.** The configured bracket
+        is the state-space range the Beta(½,½) REFERENCE needs to stay proper (~0.9 % of its mass lies
+        outside ``L = 10``); this is the ADDITIONAL demand the fitted prior makes. Narrowing below the
+        configured value would trade one defect for another.
+
+        ⛔ **This is not an accuracy knob and must not become one.** It restores the property
+        :mod:`.simplex_logodds` already claims as its acceptance test — that the answer does not depend
+        on ``L`` — by making the bracket wide enough that the prior is representable. Widening past this
+        must therefore change nothing, and that saturation is the gate.
+        """
+        m = np.asarray(mass, dtype=np.float64)
+        e = np.asarray(eff, dtype=np.float64)
+        live = (m > 0.0) & (e > 0.0)
+        if not live.any():
+            return 0.0
+        rho_floor = float(np.exp(self.log_rho[0]))
+        # f_i is a FRACTION, so clip into (0, 1): at f_i ≥ 1 the slot imposes nothing (L_i ≤ 0), and the
+        # lower clip is the float guard, not a floor on the answer.
+        f = np.clip(rho_floor * e[live] / m[live], _EPS, 1.0 - _EPS)
+        return float(max(0.0, np.max(np.log1p(-f) - np.log(f))))
 
 
 def _grid(mass: np.ndarray, eff: np.ndarray) -> np.ndarray:

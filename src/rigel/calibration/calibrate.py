@@ -13,10 +13,10 @@ is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.ca
       -> strand balance: rna_sense_frac (κ)
       -> region_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
       -> signature-binary init (G1/G2/G3)
-      -> PASS 1 region_sweep (no KDE prior): ONE forward + ONE backward pass — each object integrates its
+      -> PASS 1 solve_chain (no KDE prior): ONE forward + ONE backward pass — each object integrates its
            strand likelihood + the conservative gDNA floor + the belief-free density messages
       -> train the Phase-2 gDNA-density KDE on the pass-1 belief
-      -> PASS 2 region_sweep (the KDE prior added per object) -> the converged per-object pie
+      -> PASS 2 solve_chain (the KDE prior added per object) -> the converged per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
       -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
@@ -45,7 +45,7 @@ SpliceJunction boundaries DO take their real exonic reach — they are a new pop
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -209,7 +209,7 @@ def _fit_gdna_hyperprior(
     peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
     **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions
-    in ``region_sweep`` are a separate mechanism and are untouched).
+    in ``sweep.solve_chain`` are a separate mechanism and are untouched).
 
     ⭐⭐ **The substrate is the whole of this function's job; the estimator in :mod:`.landscape` is
     component-agnostic and knows nothing about gDNA.** Two facts that used to live in that module's
@@ -271,6 +271,21 @@ def _fit_gdna_hyperprior(
         anchor=anchor[sel],
         strength=strength,
     )
+
+
+def _scaled_grid(n: int, window: float, required: float) -> int:
+    """Grid points at the widened bracket, holding the lattice spacing ``dlam = 2L/(n−1)`` FIXED.
+
+    ⛔ **The bracket and the RESOLUTION are two different knobs, and an arm that moves both at once is
+    uninterpretable.** Measured on the zero-gDNA control: widening ``L`` at a FIXED ``n`` coarsens
+    ``dlam`` and reads better at 20 but **REVERSES at 40** (`g50 ss_0.50 off` 1.0383×), while holding
+    ``dlam`` fixed SATURATES (0.9843× → 0.9842×). Saturation is what distinguishes a truncated bracket
+    from an improper ψ, so the spacing must not move. ``n`` is therefore linear in ``L``, exactly.
+
+    ⚠ The rounding is the only slack: ``dlam`` is preserved to within half a grid point, which is the
+    best a discrete lattice can do and is far below the effect being measured.
+    """
+    return int(round(1.0 + (n - 1) * (required / window)))
 
 
 def calibrate(
@@ -450,6 +465,31 @@ def calibrate(
         if (config.intron_factory and intron_background is not None)
         else None
     )
+    # ⛔⛔ **THE INTRON FACTORY'S λ-FACTOR IS EVALUATED *ON* THE SOLVE GRID, so it is a function of
+    # (n_grid, L) and must be REBUILT when the bracket moves — not regridded.** `_regrid_global`
+    # interpolates a prior BETWEEN two grids of the same L; there is no such map onto a WIDER domain,
+    # because the factor was never evaluated out there. ⚠ Found by the arm raising `IndexError` in
+    # `_regrid_global`, which is the honest failure: the array simply was not the shape the solve
+    # claimed. ⭐ Memoised, because only two brackets ever occur in one call (the configured one and the
+    # derived one) and `_build_intron_prior` is a per-slot NegBinom over the whole grid.
+    _intron_priors = {
+        (int(config.sweep_n_grid), float(config.sweep_logodds_window)): intron_prior
+    }
+
+    def _intron_prior_at(n_grid: int, window: float):
+        key = (int(n_grid), float(window))
+        if key not in _intron_priors:
+            _intron_priors[key] = _build_intron_prior(
+                chain,
+                substrate,
+                region_arrays,
+                region_eff_gdna,
+                replace(
+                    config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)
+                ),
+                bg=intron_background,
+            )
+        return _intron_priors[key]
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
@@ -460,6 +500,32 @@ def calibrate(
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
     def _sweep(prior):
         capture = {} if _debug is not None else None
+        # ⭐⭐⭐ THE λ BRACKET IS `max(the reference's floor, the fitted prior's own demand)`. ψ evaluates
+        # the landscape at `log ρ = log f + log M − log E` and can only offer `f ∈ [σ(−L), σ(L)]`, so a
+        # bracket narrower than the prior's own support leaves ψ with no coordinate for what the prior is
+        # telling it — and the answer then depends on `L`, which `simplex_logodds` calls its own
+        # acceptance test. The demand is DERIVED (`required_logodds_window`), never chosen.
+        # ⛔ The prior-free Phase-1 solve has no landscape to widen for, and is L-invariant to seven
+        # digits, so it keeps the floor. That is the whole of the conditional.
+        # ⛔ `dlam` is held FIXED, so the grids scale with the bracket: widening `L` at a fixed grid size
+        # coarsens the lattice and confounds two knobs — measured, that variant REVERSES at L = 40 while
+        # this one saturates.
+        # ⭐ The TILT axis does NOT scale. `θ` is the RNA-internal SHARE and has no bracket problem, so it
+        # stays at the configured resolution; that is what keeps the AMBIG cube ~2.3× rather than ~5.2×.
+        window = float(config.sweep_logodds_window)
+        n_grid, n_grid_ss = int(config.sweep_n_grid), int(config.sweep_n_grid_single_strand)
+        n_tilt = config.sweep_n_tilt if config.sweep_n_tilt is not None else int(config.sweep_n_grid)
+        if prior is not None:
+            required = prior.required_logodds_window(mass_global, eff_global)
+            if required > window:
+                n_grid = _scaled_grid(n_grid, window, required)
+                n_grid_ss = _scaled_grid(n_grid_ss, window, required)
+                window = required
+                logger.debug(
+                    "calibration: λ bracket %.4f (the landscape's support), n_grid %d, n_grid_ss %d, "
+                    "n_tilt %d (unscaled)", window, n_grid, n_grid_ss, n_tilt,
+                )
+        lam_factor = _intron_prior_at(n_grid, window)
         out = solve_chain(
             chain,
             statics,
@@ -471,19 +537,20 @@ def calibrate(
             rna_strand_overdispersion=rna_strand_overdispersion,
             n_gdna_obs=n_gdna_obs,
             n_rna_obs=n_rna_obs,
-            n_grid=config.sweep_n_grid,
-            logodds_window=config.sweep_logodds_window,
-            n_tilt=config.sweep_n_tilt,
-            n_grid_ss=config.sweep_n_grid_single_strand,
+            n_grid=n_grid,
+            logodds_window=window,
+            n_tilt=n_tilt,
+            n_grid_ss=n_grid_ss,
             gdna_prior=prior,
-            intron_prior=intron_prior,
+            intron_prior=lam_factor,
             # ⭐ ψ's reference MEAN from the annotation. OFF ⇒ `location=None` ⇒ no term ⇒ bit-identical.
             structural_reference=config.structural_reference,
             # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
             # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
             # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
-            # factory. Measured on the 36-condition ladder, muting the message layer is a net IMPROVEMENT
-            # on THREE OF THE FOUR STRATA:
+            # factory. Measured on the 36-condition ladder — RETIRED, rebuilt at 16 conditions on
+            # 2026-08-13, so these are as-recorded and not reproducible as written — muting the message
+            # layer is a net IMPROVEMENT on THREE OF THE FOUR STRATA:
             #
             #     stranded   x capture ON    -58.3 %   16/16 conditions better
             #     stranded   x capture OFF   -43.7 %   16/16 better

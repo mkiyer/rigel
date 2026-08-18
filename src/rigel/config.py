@@ -248,7 +248,7 @@ class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
     The calibrator is the **belief-propagation sweep** over the region↔boundary chain — a single
-    forward-backward pass per region_sweep call, with the belief-free Poisson disagreement-variance message
+    forward-backward pass per solve_chain call, with the belief-free Poisson disagreement-variance message
     precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-region log-odds solve grid. See
     :func:`rigel.calibration.calibrate.calibrate`.
     """
@@ -274,13 +274,42 @@ class CalibrationConfig:
     #: recovers a 4×-finer-grid accuracy at any ``K``; ``256`` is where the pair saturates (512 adds <1%).
     sweep_n_grid_single_strand: int = 256
 
-    #: **Log-odds grid window** ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]`` (``L=10`` ⇒
-    #: ``[4.5e-5, 1−4.5e-5]``, bracketing the vertex mass Phase 0 measured).
+    #: **Log-odds grid FLOOR** ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
+    #: Beta(½,½) REFERENCE needs to stay proper — under it ~0.9 % of the reference's mass lies outside
+    #: ``L = 10`` — and it is a FLOOR, not the value.
+    #:
+    #: ⭐⭐⭐ **THE BRACKET ACTUALLY SOLVED ON IS ``max(this, the fitted prior's own demand)``**, and the
+    #: second term is DERIVED rather than chosen: `calibration.landscape.DensityLandscape.required_logodds_window`.
+    #: ψ evaluates the landscape at ``log ρ = log f + log M − log E`` and can only offer
+    #: ``f ∈ [σ(−L), σ(L)]``; at ``L = 10`` that floor is ``4.540e-05``, which on a zero-gDNA library sits
+    #: **370×** above the median density the prior points at, so ψ had no coordinate for what its own
+    #: prior was telling it. The demand is the landscape's log-dynamic range — 21.0–23.0 nats on the human
+    #: index — so the shipped 10 was less than half of it.
+    #:
+    #: ⭐⭐ **MEASURED THROUGH `calibrate` ON ALL 16 LADDER CONDITIONS**, Σ|Δ| in object-incidence
+    #: fragments against the origin-split oracle, derived ÷ fixed, per stratum::
+    #:
+    #:     unstranded x capture OFF   0.4339      g00 0.3449 / g05 0.9917 / g50 0.9840 / g98 0.9766
+    #:     stranded   x capture OFF   0.9075      g00 0.3242 / g05 0.9914 / g50 0.9820 / g98 0.9732
+    #:     stranded   x capture ON    0.9674      g00 0.3951 / g05 0.9972 / g50 1.0077 / g98 0.9739
+    #:     unstranded x capture ON    0.9847      (the DEFERRED stratum — reported, not targeted)
+    #:
+    #: ⭐ All four strata improve; 11 of the 12 IN-SCOPE conditions improve and one regresses
+    #: (`g50 ss_0.99 capture_on`, 1.0077). ⭐⭐ `g05` is the tell — it regressed **1.43×** under every
+    #: library-wide reference mean ever tried, the blocker that killed that whole family, and here it
+    #: improves on both strand settings.
+    #: ⛔ The resolution-only control — the lattice doubled at the OLD bracket — moves the OTHER way
+    #: (1.0147× / 1.0046× / 1.0036×), so the effect is the BRACKET and not the lattice.
     sweep_logodds_window: float = 10.0
 
-    #: **ψ's composition reference takes its MEAN from the ANNOTATION** — ``m → σ(L)`` wherever no annotated
+
+    #: **ψ's composition reference takes its MEAN from the ANNOTATION** — ``m → 0.75`` wherever no annotated
     #: MATURE transcript is continuous across the position (``¬mrna_active``), and the shipped neutral ½
     #: everywhere else (`calibration.simplex_logodds.structural_reference_location`).
+    #: ⛔ This line read ``m → σ(L)`` until 2026-08-17, which is the LATTICE-derived form the function it
+    #: names records as REPLACED and measured WORST OF ALL (9.31 nats; refute-err 2.0247 against no-prior's
+    #: 0.3946). The shipped value is the one derived two paragraphs down, and the cap is all that is left
+    #: of ``σ(L)``: ``m = min((a+1)/(a+b+1), σ(L))``, which needs ``L < 1.0986`` to bind.
     #:
     #: ⭐ ``a·log f_g + b·log(1−f_g)`` on the λ grid IS ``Beta(a, b)``, so the reference has always had a
     #: MEAN ``a/(a+b)`` and nobody chose it: Jeffreys' ½ **asserts the library is half gDNA**. This turns
@@ -342,7 +371,9 @@ class CalibrationConfig:
     #: (``messages.head`` — ``I_factory``). Before that the factory shifted an intron's own
     #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
     #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
-    #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite: mwae 0.1361 → 0.0949, corr 0.688 → 0.736,
+    #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite (⚠ DELETED — see
+    #: `rigel.sim.capture.sampler`; these numbers stand as recorded and are not reproducible as written):
+    #: mwae 0.1361 → 0.0949, corr 0.688 → 0.736,
     #: 20 scenarios better / 1 worse / 11 flat; intron mwae 0.1781 → 0.0117 (its share of suite error 17.0 % →
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
@@ -353,13 +384,23 @@ class CalibrationConfig:
     #: reference, the fitted gDNA prior and the intron factory. ``True`` installs
     #: ``messages.head.HeadPolicy``, every operator behind its own named switch.
     #:
-    #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** On the 36-condition ladder, muting the message
-    #: layer is a net IMPROVEMENT on THREE OF THE FOUR STRATA::
+    #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** Measured 2026-08-07 on the 36-condition ladder —
+    #: ⚠ RETIRED, rebuilt at 16 conditions on 2026-08-13, so the numbers below stand as recorded and are
+    #: not reproducible as written. Muting the message layer is a net IMPROVEMENT on THREE OF THE FOUR
+    #: STRATA::
     #:
     #:     stranded   x capture ON    -58.3 %   16/16 conditions better
     #:     stranded   x capture OFF   -43.7 %   16/16 better
     #:     unstranded x capture OFF   -32.1 %   14/16 better
     #:     unstranded x capture ON   +154.8 %    0/16 better
+    #:
+    #: ⭐ **THE ``/16`` IS SCORED ROWS, NOT CONDITIONS, AND BOTH LABELS ARE CORRECT** (settled 2026-08-17
+    #: by reading ``scripts/design/arm_score.py``, not by inference). Its rows are keyed
+    #: ``(condition, axis)`` and every per-stratum line predicates on ``not is_g00(k)`` — the zero control
+    #: gets its own line. So a 36-condition ladder is 9 rungs x 2 ss x 2 capture, of which one rung is the
+    #: control: **8 scored conditions x 2 axes = 16 rows per stratum**, exactly. ⚠ On the 16-condition
+    #: ladder the same arithmetic gives **6**, so a future re-price reads ``n/6`` and that is not a
+    #: regression in coverage — it is a smaller panel.
     #:
     #: ⛔⛔ **AND THE PRICE IS CONCENTRATED, LARGE, AND ON THE ZERO CONTROL.** The panel total is +99.9 %
     #: worse because that one stratum carries 73 % of the error — and end-to-end it is worse than the
@@ -391,7 +432,8 @@ class CalibrationConfig:
     #: ``0`` ⇒ the prior-free pass-0 alone.
     #:
     #: **Default 3, measured (2026-07-28).** The bootstrap converges geometrically — suite mass-weighted
-    #: mwae over the 32-condition battery goes 0.0788 → 0.0525 → 0.0486 → **0.0475** → 0.0471 → 0.0468, with
+    #: mwae over the 32-condition battery (⚠ RETIRED; the panel is now the 16-condition ladder, so these
+    #: stand as recorded and are not reproducible as written) goes 0.0788 → 0.0525 → 0.0486 → **0.0475** → 0.0471 → 0.0468, with
     #: successive increments shrinking 2–3× each step, and it is **monotone on every stratum including the
     #: zero-gDNA false-positive guard** (0.0667 → 0.0109), so extra iterations never trade specificity for
     #: accuracy. Iteration 3 captures **96 %** of the total available gain; past it the increments are below
