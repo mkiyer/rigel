@@ -177,11 +177,27 @@ hit an API error — so it is still open.
   `f_g = 0` unconditionally through a degenerate clip. The answer is right; the control is testing
   nothing. Check the code path before quoting it.
 
-## §4 WHAT IS UNCOMMITTED RIGHT NOW
+## §4 THE TREE IS CLEAN — everything below is COMMITTED
 
-~105 files, nothing staged. The λ bracket in `src/`; the instrument resurrection and doc reconciliation
-across `scripts/` and `docs/`; the golden regeneration for 2 scenarios. Suite **3,501 passed / 10 xfail /
-0 failed** at the last full run, `ruff` clean. ⛔ Re-derive it — two cleanup tracks were still writing.
+    76702b91  docs: re-derive the standing baseline on a clean tree
+    4cfd35d9  scripts: retire the profiling tree's legacy, and let the gate cover it
+    c2599979  docs: lock down message passing so it is not re-derived a fifth time
+    3425e341  tests: restore the fixture ids and gate labels the bulk rename overwrote
+    21bf6aca  scripts: fix toy_dissect's leaked loop variable — a printed density moves 2.25x
+    46bb8ee1  scripts: resurrect ten dead instruments, and delete two that cannot run
+    648cf9a1  calibration: derive ψ's λ bracket from the fitted prior's own support
 
-⚠ **Every reference experiment from this session is PROBE-ONLY in the scratchpad.** Nothing half-built is
-in `src/`, and there is nothing to revert.
+**Baseline: 3,501 passed / 10 xfail / 0 skipped / 0 failed, 3,511 collected.** `ruff` clean.
+⛔ Re-derive it rather than trusting this line (`TRAPS: re-record-the-baseline`).
+
+⚠ **Every reference experiment from that session was PROBE-ONLY and is NOT in the tree.** Nothing is
+half-built in `src/`, and there is nothing to revert. The probes live in the session scratchpad and are
+gone; the MEASUREMENTS they produced are in `EQUATIONS.md` §9d, `DESIGN.md` §0c and `ROADMAP.md` §0.
+
+⚠ **One judgement to know about, because it is a live disagreement resolved against my first instinct.**
+Mid-session I restored `scripts/profiling/pyspy_driver.py` and 8 config YAMLs, reading their deletion as
+over-pruning ahead of the mandatory performance work. `scripts/README.md` documents the opposite and is
+right: the configs name a `--config` flag no instrument has and keys absent from `src/rigel/config.py`,
+and `py-spy record -- python scripts/profiling/profiler.py` replaces the driver exactly. The tree was
+never deleted — **the GATE was extended to it**, which is the thing that was actually missing. If you
+want the driver back, that is an owner call and `4cfd35d9^` has it.
