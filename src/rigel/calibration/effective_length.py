@@ -285,8 +285,15 @@ def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) ->
     """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at BOUNDARY slots.
 
     The same slot layout `build_region_geometry` uses for ``eff_gdna``/``eff_rna``, so ``moments.eff`` is
-    that array — asserted by ``test_eff_matches_the_solver_divisor``, because two implementations of one
-    quantity is how a ½ went unnoticed for months.
+    that array. Two implementations of one quantity is how a ½ went unnoticed for months, so the identity
+    wants a gate.
+
+    ⛔ **AND IT DOES NOT HAVE ONE. This docstring named ``test_eff_matches_the_solver_divisor`` until
+    2026-08-17 and no test of that name exists anywhere in the tree; nothing under ``tests/`` imports this
+    function at all** (grep, 2026-08-17) — its only caller is `scripts/design/pass0_vs_oracle.py`. What
+    would restore the claim is a case asserting ``build_slot_moments(...).eff`` equals
+    `region_geometry.build_region_geometry`'s ``eff_gdna``/``eff_rna`` element for element on one real
+    chain. Until then the sentence above is an intention, not a gate.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)

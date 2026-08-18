@@ -114,8 +114,28 @@ def _rna_residual(log_f, mode):
 # because both arms are now always written (`_JEFFREYS_REF`): under Beta(½,½) ~0.9% of the reference's mass
 # lies outside L=10, and the answer is L-invariant. An improper ψ (either arm omitted) has plateau mass
 # growing linearly in L, and then L silently sets the prior strength — which is what the `+0.5·λ` ramp was.
-# **L-invariance is the acceptance test for this file.** NB: production does not read this default —
-# `sweep.solve_chain` threads `logodds_window` (=10.0) explicitly.
+# **L-invariance is the acceptance test for PRIOR-FREE ψ**, where it holds to seven digits.
+#
+# ⛔⛔ **AND IT IS SCOPED TO PRIOR-FREE ψ BECAUSE THE SHIPPED PIPELINE FAILS IT — MEASURED 2026-08-17. This
+# comment claimed the property unconditionally, for the whole file, until then.** Holding the lattice
+# spacing `dlam` fixed at 0.3390 and widening ONLY the bracket, Σ|Δ| in object-incidence fragments
+# (`pass0_vs_oracle.score_axis`, region+boundary):
+#
+#     condition                  L=10 (shipped)   L=20 K=119/511    L=40 K=237/1021   resolution-only L=10
+#     g00 ss_0.50 capture_off         1,898,257   614,587  0.3238x  592,135  0.3119x  1,926,127  1.0147x
+#     g50 ss_0.50 capture_off           116,807   114,974  0.9843x  114,960  0.9842x    117,343  1.0046x
+#     g98 ss_0.99 capture_off           119,332   116,162  0.9734x  116,152  0.9733x    119,767  1.0036x
+#
+# It SATURATES by L=40 and the resolution-only control (K raised at L=10) moves the OTHER way, so the
+# effect is the BRACKET and not the lattice. ⭐ The mechanism is the FITTED landscape, which is why
+# prior-free ψ is untouched: `landscape.logprior` evaluates at `log rho = log f_c + log M − log E`, and ψ
+# can only offer `f_c ∈ [σ(−L), σ(L)]` — at g00 `σ(−10) = 4.540e-05` sits 370x ABOVE the median density
+# the fitted prior points at (1.225e-07), so the low end of the bracket is a wall the prior is pushing
+# against rather than empty state space. ⛔ Do not read the table as licence to raise L: the derivation
+# and the repair are the owner's, and no arm here has priced what a wider bracket costs elsewhere.
+#
+# NB: production does not read this default — `sweep.solve_chain` threads `logodds_window` (=10.0)
+# explicitly, from `CalibrationConfig.sweep_logodds_window`.
 _DEFAULT_L = 10.0
 
 # Cache-tiling target for BOTH per-region solves, as a working-set size rather than a row count — the per-row
@@ -565,11 +585,32 @@ def structural_reference_location(statics, logodds_window: float) -> np.ndarray:
          0.50     1.00           0.3208         766 -> 4,396   5.736  ⛔
          0.99     0.25           0.9497          78 ->   248   3.165  ⛔
 
-    ⛔ **On UNSTRANDED data the damage is permanent** — κ = ½ leaves no channel to overturn it with — and
-    unstranded × capture-OFF is an IN-SCOPE 0.8.0 stratum. **This is why ``structural_reference`` DEFAULTS
-    OFF and why the panel's 0.384 / 0.660 / 0.366 is not licence to flip it.** The exit is to deconvolve
-    the nascent density out of the introns and set ``m`` from it, which makes the claim measured rather
-    than assumed.
+    ⛔ **On UNSTRANDED data mechanism ① — strand asymmetry inside an intron — is dead by derivation**
+    (κ = ½ makes the strand λ-term identically 0), and unstranded × capture-OFF is an IN-SCOPE 0.8.0
+    stratum.
+    ⛔⛔ **BUT "THE DAMAGE IS PERMANENT UNSTRANDED", WHICH THIS PARAGRAPH SAID UNTIL 2026-08-17, IS
+    FALSE AND ITS OWN GATE SAYS SO.** Mechanism ② — the intron-vs-intergenic density factor
+    (``fit_intron_background`` ⇒ ``density_lambda_factor`` ⇒ ``tau_fac``) — is **alive unstranded** and
+    ``intron_factory`` is ``True`` in production;
+    ``tests/calibration/test_structural_reference.py::test_the_prior_yields_to_the_density_mechanism_on_unstranded_data``
+    measures ``tau_fac = 161.4`` at every intron slot and asserts the solve lands within 0.02 of the
+    no-prior answer at κ = ½. ⭐ **The sentence was true only of the fixture it was measured on**: that
+    chain has NO intergenic REGIONs, so ② has no pool to fit and cannot exist — which the sibling gate
+    ``test_with_no_refutation_channel_at_all_the_prior_is_the_only_voice`` keeps deliberately, as a
+    boundary rather than an alarm. That is
+    ``TRAPS: a-refutability-test-needs-the-refuting-channel-in-the-fixture``, committed inside the
+    docstring of the thing the rule is about.
+
+    ⛔⛔ **THE TABLE ABOVE IS THE PRICED RISK THE SHIPPED FLAG CARRIES — IT IS NOT A REASON THE FLAG IS
+    OFF, AND THIS DOCSTRING ASSERTED THAT IT WAS UNTIL 2026-08-17.** ``structural_reference`` DEFAULTS
+    **ON** (owner, 2026-08-16); the default and its ladder measurement live with the field, on
+    :class:`rigel.config.CalibrationConfig`. ⚠ And no ladder number licenses the flag in either
+    direction, the panel's **0.384 / 0.660 / 0.366** included — that score belongs to the RETIRED
+    ``m = σ(L)`` form (the sweep below), not to the shipped ``m = 0.75``, and every ladder row holds
+    ``nrna = 0``, so the panel scores the DELIVER obligation alone. ⭐ **What would falsify the shipped
+    flag is the table above re-measured on a panel row with ``nrna > 0``.** The exit is to deconvolve the
+    nascent density out of the introns and set ``m`` from it, which makes the claim measured rather than
+    assumed.
 
     ⭐⭐⭐ **THE STRENGTH IS ONE PSEUDO-OBSERVATION, WRITTEN AS THE MEAN THAT ONE WOULD PRODUCE.**
     Observing a single gDNA fragment takes ``Beta(a, b)`` to ``Beta(a+1, b)``, whose mean is::
@@ -1074,7 +1115,7 @@ def _solve_regions_logodds_all(
     """The full per-region log-odds dispatcher (Phase 3 #1): routes single-strand regions to the 1-D
     ``λ`` solve (:func:`_solve_regions_logodds`) and AMBIG regions to the 2-D ``(λ, τ)`` solve
     (:func:`_solve_ambig_logodds`), scattering both into full-length arrays. G1 / zero-mass regions
-    report 0 (``region_sweep`` keeps their signature-binary init via the ``solvable`` write-back). A
+    report 0 (``sweep.solve_chain`` keeps their signature-binary init via the ``solvable`` write-back). A
     drop-in for the lattice ``_local_loglik``+``_region_marginals`` pair: same ψ terms — the log-density
     log-fraction Gaussian messages + the global prior — evaluated on the ``σ(λ)`` log-odds grid.
 

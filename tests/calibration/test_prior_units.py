@@ -429,7 +429,11 @@ def test_the_prior_ratio_moves_with_the_length_ratio_by_exactly_the_pooled_share
 def test_the_ratio_IS_exact_where_the_two_components_share_a_length():
     """⛔⛔ **AND AT EQUAL LENGTHS THE BIAS IS EXACTLY ZERO — which is why a panel built that way cannot
     measure it** (`TRAPS: an-equal-length-panel-defeats-the-lift`). The ladder's realised gDNA/RNA gap is
-    +1.5–2.1 %; the flgap PAIR exists because of this boundary.
+    +1.5–2.1 %; the `flgap` PAIR existed because of this boundary. ⛔ **It no longer exists** — both
+    panels went on 2026-08-13 and their configs and the two instruments that read them on 2026-08-17 — so
+    NOTHING ON DISK MEASURES THE GAPPED SIDE, and this gate is now the only executable statement of the
+    equal-length half. Re-deriving the other half means DESIGNING a length-gap panel, not restoring a
+    deleted file (`EQUATIONS.md` §3b).
 
     ⭐ Asserted at two very different mixtures, because "exact" here must not depend on the mixing ratio:
     when ``q_g == q_r`` the pooled share equals both regardless of ``phi``.

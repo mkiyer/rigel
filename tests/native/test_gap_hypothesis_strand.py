@@ -219,7 +219,7 @@ def test_ONE_PATH_claimed_by_BOTH_STRANDS_is_marked_AMBIGUOUS(scanned):
 
     Grouping by path is right — it **is** one path, and one hypothesis is the correct count. ⛔ But the
     hypothesis carries ONE ``sj_strand``, and taking the first supporter's silently asserts a strand the
-    evidence does not support: swap the two GTF boundaries and the answer flips.
+    evidence does not support: swap the two GTF lines and the answer flips.
 
     ⭐ ``AMBIGUOUS`` is what that state is called everywhere else in this codebase — the fragment-level
     ``sj_strand`` uses it for exactly this, "contradictory evidence rather than missing evidence", and

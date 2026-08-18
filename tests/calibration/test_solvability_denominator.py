@@ -17,11 +17,11 @@ prescribes and what the table did not carry:** ``mwae`` over ALL live objects, a
 ``Σ|err|`` in fragments. Neither has a denominator the solver can move by declining to answer.
 
 ===  ===========================================================================================
-TRAPS: a-variance-cannot-fix-a-bias   ``summarise`` emits ``all_mwae`` and ``abs_err``
-TRAPS: two-gaussians-one-latent   ⭐ they are FIXED-DENOMINATOR — shrinking the solvable set leaves both BIT-IDENTICAL, while
+D1   ``summarise`` emits ``all_mwae`` and ``abs_err``
+D2   ⭐ they are FIXED-DENOMINATOR — shrinking the solvable set leaves both BIT-IDENTICAL, while
      every existing headline field moves. This is the property the whole file exists for
-TRAPS: variance-fitted-on-the-belief   ``all_mwae`` is the honest mass-weighted mean over the live population (brute-forced)
-TRAPS: a-message-from-the-destinations-belief   ONE HOME for "has own composition evidence" — the instruments import the solver's predicate
+D3   ``all_mwae`` is the honest mass-weighted mean over the live population (brute-forced)
+D4   ONE HOME for "has own composition evidence" — the instruments import the solver's predicate
      instead of restating ``1e-9`` (TRAPS: a-test-that-redefines)
 ===  ===========================================================================================
 """
@@ -55,7 +55,7 @@ def _fixture(n=400, seed=3):
     )
 
 
-# ── TRAPS: a-message-from-the-destinations-belief — one home ───────────────────────────────────────────────────────────────────────────────
+# ── D4 — one home ───────────────────────────────────────────────────────────────────────────────
 
 
 def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
@@ -82,7 +82,7 @@ def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_solver():
     assert not np.array_equal(theirs, np.isfinite(v_fg))
 
 
-# ── TRAPS: a-variance-cannot-fix-a-bias/TRAPS: variance-fitted-on-the-belief — the two fixed-denominator fields ────────────────────────────────────────────────────
+# ── D1/D3 — the two fixed-denominator fields ────────────────────────────────────────────────────
 
 
 def _summarise(fx, det):
@@ -129,7 +129,7 @@ def test_D1_D3_summarise_emits_all_mwae_and_abs_err_and_they_are_correct():
     assert s["abs_err"] == pytest.approx(float(err.sum()), rel=1e-12)
 
 
-# ── TRAPS: two-gaussians-one-latent — the property the whole file exists for ─────────────────────────────────────────────────
+# ── D2 — the property the whole file exists for ─────────────────────────────────────────────────
 
 
 def test_D2_the_new_columns_are_BIT_IDENTICAL_when_the_solvable_set_SHRINKS():

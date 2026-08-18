@@ -3,11 +3,12 @@
        Gate: ``tests/calibration/test_layering.py``
        Census: ``python scripts/design/module_census.py``
 
-⛔⛔ **THE PROBLEM THIS FILE EXISTS FOR.** The package has 35 modules and had no stated shape, and the shape
-is not what "35 modules" suggests: measured from the AST, there are **no import cycles** and **18 of the 35
-modules have exactly one importer**. It was never a knot. It was a **FLAT PILE of 35 peers** — and a flat
-pile is the one structure that cannot tell you where to add anything, because every file is equally
-plausible.
+⛔⛔ **THE PROBLEM THIS FILE EXISTS FOR.** The package had no stated shape, and the shape is not what a
+flat module list suggests: measured from the AST when this file landed (2026-08-07, 35 modules), there were
+**no import cycles** and **18 of the 35 modules had exactly one importer**. It was never a knot. It was a
+**FLAT PILE of peers** — and a flat pile is the one structure that cannot tell you where to add anything,
+because every file is equally plausible. ⚠ The counts move whenever a module is added or retired; the
+census re-derives them, and no number here is maintained by hand.
 
 ⭐ The layers below were not invented. They were **read off the existing import boundaries**: every one of them
 was already there, and the only thing missing was a name and a gate. That is why declaring them costs no
@@ -30,10 +31,12 @@ what one neighbour tells another           6 · the solve  (⭐ and `messages/` 
 turning the solve into a result            7 · assemble
 =========================================  ==========================================================
 
-⚠ **A layer is not a promise that its modules are the right SIZE.** Layer 4 is five modules and 939 boundaries
-for one concept; layer 5 is six and 1,858. Whether those should be fewer files is a separate question with
-its own risk, and this file deliberately does not answer it — it answers *where*, which is what was blocking
-a reader. The census prints the boundary counts so the question stays visible.
+⚠ **A layer is not a promise that its modules are the right SIZE.** Layer 4 is five modules for one concept
+and layer 5 is six. Whether those should be fewer files is a separate question with its own risk, and this
+file deliberately does not answer it — it answers *where*, which is what was blocking a reader. ⛔ The
+per-layer line counts that used to be quoted here (939 for layer 4, 1,858 for layer 5, measured 2026-08-07)
+had drifted and are dropped rather than re-stated: the census prints them live, which is the only place a
+count of a moving thing belongs.
 """
 
 from __future__ import annotations
@@ -75,7 +78,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         3,
         "geometry and the per-slot solve",
         # One slot's own numbers, and ψ — the log-density log-odds posterior over (f_pos, f_neg, f_g).
-        # ⚠ `simplex_logodds` is ψ and is 784 boundaries; it is the single densest thing in the package.
+        # ⚠ `simplex_logodds` is ψ and was 784 boundaries when this file landed (2026-08-07); it is the
+        # single densest thing in the package. ⛔ Like every other count once quoted here that number has
+        # DRIFTED and is not maintained by hand — the census re-derives it.
         ("region_geometry", "simplex_logodds"),
     ),
     (
@@ -94,7 +99,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         5,
         "density and prior",
-        # How dense a component is, and every fitted population prior. ⚠ SIX modules, 1,858 boundaries.
+        # How dense a component is, and every fitted population prior. ⚠ SIX modules; 1,858 boundaries when
+        # this file landed (2026-08-07) — the same drifted count the module docstring above records, kept
+        # here with its date rather than restated as current. The census prints it live.
         (
             "run_fill",
             "density_model",

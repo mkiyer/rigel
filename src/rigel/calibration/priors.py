@@ -24,9 +24,15 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
 
-# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
-# the per-locus projection, so a boundary whose left flank is such a region must be re-attributed to its
-# (locus) right flank or its gDNA is lost (see boundary_owner_regions).
+# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by the
+# per-locus projection.
+# ⛔ **The RE-ATTRIBUTION this comment described is GONE, and so is the function it pointed at.** It read
+# *"so a boundary whose left flank is such a region must be re-attributed to its (locus) right flank or its
+# gDNA is lost (see boundary_owner_regions)"*. That re-key existed only to serve ``boundary_owner_regions``,
+# which folded a boundary's mass into ONE flank region; projecting a BOUNDARY as a BOUNDARY removed both —
+# see :func:`assemble_priors`'s own "what this replaced, so it does not come back" note.
+# ⚠ The constant itself now has NO production consumer; ``tests/calibration/test_prior_vs_oracle.py``
+# imports it to rebuild the same in-locus predicate. Retiring it is a source change, left to the owner.
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 # Numerical floor for the gDNA-component effective length: matches the EM's own

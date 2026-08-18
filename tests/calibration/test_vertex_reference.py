@@ -25,16 +25,16 @@ silent gene is exactly zero, the strongest possible evidence for the vertex. ψ 
 second RNA species.
 
 ===  =========================================================================================
-TRAPS: no-magic-numbers   the price law — ``λ`` buys ~½·ln10 nats per DECADE of precision on ``log f_c``
+G1   the price law — ``λ`` buys ~½·ln10 nats per DECADE of precision on ``log f_c``
 G1b  the mirror at the other vertex
-TRAPS: one-thing-varied   ψ's slope in the vertex tail is exactly ``−C``
-TRAPS: converge-and-delete   the two halves are ORTHOGONAL — each is worth >20x more at its own vertex than at the other
-TRAPS: the-source-does-not-cite-docs   halving ``C`` moves ``λ`` by a bounded, sub-nat step  ⭐ the perturbation for TRAPS: one-thing-varied
-TRAPS: no-enumeration-without-a-census   the SAME claim delivered on ``λ`` is honoured AT PAR  ⭐ the control for TRAPS: no-magic-numbers
+G2   ψ's slope in the vertex tail is exactly ``−C``
+G3   the two halves are ORTHOGONAL — each is worth >20x more at its own vertex than at the other
+G4   halving ``C`` moves ``λ`` by a bounded, sub-nat step  ⭐ the perturbation for G2
+G5   the SAME claim delivered on ``λ`` is honoured AT PAR  ⭐ the control for G1
 G6   ⛔ ψ is BLIND to the certified-RNA channel — the observable a fix must move
 ===  =========================================================================================
 
-⭐ TRAPS: no-enumeration-without-a-census is why G1 is a falsification and not a truism: without it, G1 reads as "a grid cannot represent a
+⭐ G5 is why G1 is a falsification and not a truism: without it, G1 reads as "a grid cannot represent a
 vertex", which is false — the grid reaches ``σ(±10) = 4.5e-5`` and a λ-message gets there at par. The
 COORDINATE is the price, not the lattice.
 """
@@ -95,7 +95,7 @@ def _msg_dn(p):
     )
 
 
-# ── TRAPS: no-magic-numbers — the price law ──────────────────────────────────────────────────────────────────────────────
+# ── G1 — the price law ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_G1_a_log_f_g_message_buys_log_odds_only_LOGARITHMICALLY_in_its_precision():
@@ -107,7 +107,7 @@ def test_G1_a_log_f_g_message_buys_log_odds_only_LOGARITHMICALLY_in_its_precisio
     ``p`` is at best linear in the count while ``λ`` is logarithmic in ``p``.
 
     ⚠ Kept clear of ``p ≥ 1e8``, where ``λ`` hits the ``L = 10`` window and the law stops being the
-    binding constraint — that ceiling is a separate fact and TRAPS: no-enumeration-without-a-census is what shows it is not the cause."""
+    binding constraint — that ceiling is a separate fact and G5 is what shows it is not the cause."""
     lam_of = {e: float(_lam(_solve(**_msg_up(10.0**e))[0])) for e in (2, 3, 4, 5, 6)}
     es = sorted(lam_of)
     slope = float(np.polyfit(es, [lam_of[e] for e in es], 1)[0])
@@ -118,14 +118,14 @@ def test_G1_a_log_f_g_message_buys_log_odds_only_LOGARITHMICALLY_in_its_precisio
 
 def test_G1b_the_price_law_is_the_SAME_at_the_other_vertex():
     """The mirror. ``f_g → 0`` is bounded by the gDNA half of the same constant, so the slope in
-    ``|λ|`` must match TRAPS: no-magic-numbers' — one constant, two signs (which TRAPS: converge-and-delete then pins as orthogonal)."""
+    ``|λ|`` must match G1's — one constant, two signs (which G3 then pins as orthogonal)."""
     lam_of = {e: float(_lam(_solve(**_msg_dn(10.0**e))[0])) for e in (2, 3, 4, 5, 6)}
     es = sorted(lam_of)
     slope = float(np.polyfit(es, [-lam_of[e] for e in es], 1)[0])
     assert slope == pytest.approx(_NATS_PER_DECADE, rel=0.15), (slope, _NATS_PER_DECADE, lam_of)
 
 
-# ── TRAPS: one-thing-varied — the reference is the only slope in the tail ─────────────────────────────────────────────────
+# ── G2 — the reference is the only slope in the tail ─────────────────────────────────────────────────
 
 
 def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent():
@@ -159,7 +159,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
     assert abs(slope + SL._JEFFREYS_REF) < 5e-3, (slope, -SL._JEFFREYS_REF)
 
 
-# ── TRAPS: converge-and-delete — the two halves are orthogonal ──────────────────────────────────────────────────────────────
+# ── G3 — the two halves are orthogonal ──────────────────────────────────────────────────────────────
 
 
 def _set_exponents(monkeypatch, c_g: float, c_r: float):
@@ -227,7 +227,7 @@ def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_
     assert own > 20.0 * max(other, 1e-12), (own, other)
 
 
-# ── TRAPS: the-source-does-not-cite-docs — the perturbation that makes TRAPS: one-thing-varied non-vacuous ─────────────────────────────────────────────────
+# ── G4 — the perturbation that makes G2 non-vacuous ─────────────────────────────────────────────────
 
 
 def test_G4_softening_the_reference_moves_lambda_MONOTONICALLY_and_by_a_BOUNDED_step(monkeypatch):
@@ -249,11 +249,11 @@ def test_G4_softening_the_reference_moves_lambda_MONOTONICALLY_and_by_a_BOUNDED_
     assert (seen[-1] - seen[0]) < 4.0 * _NATS_PER_DECADE, seen
 
 
-# ── TRAPS: no-enumeration-without-a-census — the CONTROL: on λ, the same claim is honoured at par ────────────────────────────────────────
+# ── G5 — the CONTROL: on λ, the same claim is honoured at par ────────────────────────────────────────
 
 
 def test_G5_the_SAME_claim_delivered_on_lambda_is_honoured_AT_PAR():
-    """⭐⭐⭐ THE CONTROL THAT MAKES TRAPS: no-magic-numbers A FALSIFICATION (TRAPS: a-gate-that-already-passed).
+    """⭐⭐⭐ THE CONTROL THAT MAKES G1 A FALSIFICATION (TRAPS: a-gate-that-already-passed).
 
     ``f_g = 1 − 1e-4`` is ``λ = +9.21``, which the ``L = 10`` grid represents exactly. Delivered on the λ
     axis the claim is honoured; delivered on ``log f_g`` — the SAME claim, the same precision — it is
@@ -275,7 +275,7 @@ def test_G5_the_SAME_claim_delivered_on_lambda_is_honoured_AT_PAR():
 def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
     """⛔⛔ THE ROOT CAUSE, AS AN OBSERVABLE — and the one a fix MUST move (TRAPS: name-the-observable-per-site).
 
-    ``f_g = 1`` is a claim about ``ρ_r = 0``. No gDNA-side message can establish it at any precision (TRAPS: no-magic-numbers
+    ``f_g = 1`` is a claim about ``ρ_r = 0``. No gDNA-side message can establish it at any precision (G1
     prices exactly that attempt). The channel that CAN is the CERTIFIED SPLICE — ``boundary_spliced``, the
     fragments that crossed this boundary contiguously having spliced elsewhere. A spliced fragment cannot be
     gDNA, so this channel has no gDNA term at all; at a silent gene it is exactly zero, which is the
@@ -305,8 +305,9 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
     ``test_certified_rna_licence.py``'s zero-spliced-count gate pins that. The information in this channel lives entirely in ``S > 0`` and points AWAY
     from this vertex, so **nothing here rescues the vertex population.** And the coefficient that would
     make this gate fail — ``(½ + S)`` on the RNA arm — is measured WORSE than the uninformative reference
-    on 12 of the 36 ladder conditions (gates ``TRAPS: pure-and-length-censored``/``TRAPS: divide-by-a-probability``). What survives is the algebra, not the
-    coefficient: reference + term is exactly Beta(½, ½+S), gate ``TRAPS: opposite-tilts-must-not-pool``."""
+    on 12 of the 36 ladder conditions (that file's flat-profile and unbounded-raw-count gates). What
+    survives is the algebra, not the coefficient: reference + term is exactly Beta(½, ½+S), which is that
+    file's Beta gate."""
     quiet = float(_solve(mass_spliced=np.zeros(2), **_msg_up(10.0))[0])
     loud = float(_solve(mass_spliced=np.full(2, 1e5), **_msg_up(10.0))[0])
     assert loud == pytest.approx(quiet, abs=0.0), (quiet, loud)

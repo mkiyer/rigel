@@ -502,7 +502,7 @@ class AccumulatorPayload:
 
     # -- regions: two disjoint populations, each two genome-strand columns --
     region_contained_count: np.ndarray  # uint32[n_regions, 2] — the whole path lies inside the region
-    #: ⭐ uint64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
+    #: ⭐ float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
     region_contained_inv_opportunity_sum: np.ndarray
@@ -510,8 +510,11 @@ class AccumulatorPayload:
 
     # -- contiguous boundaries: the 0-bp boundary between two adjacent regions --
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
-    boundary_unspliced_inv_length_sum: np.ndarray  # uint64[n_boundaries] — ONE column, strand-agnostic
-    #: ⭐⭐ uint64[n_boundaries] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
+    boundary_unspliced_inv_length_sum: np.ndarray  # float64[n_boundaries] — ONE column, strand-agnostic
+    #: ⭐⭐ float64[n_boundaries] — **THE CONSERVED MASS**. ⚠ This line said uint64 and named a fixed point
+    #: at ``INV_LENGTH_SCALE`` until 2026-08-17; the fixed-point layer and that constant went with the ONE
+    #: NUMERIC CONVENTION ruling (`94d283c0`) — a FRACTION is float64, and there is no scale to decode.
+    #: A COUNT and a
     #: MASS are two different deposits and one number cannot be both: ``boundary_unspliced_count`` is ``+1``
     #: on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
     #: fragment. That is what lets a consumer turn an object-incidence total into a FRAGMENT COUNT
@@ -521,7 +524,7 @@ class AccumulatorPayload:
     #: uint32[n_boundaries, 2] — certified RNA: gDNA cannot be spliced. ⭐ COUNT AND MASS ONLY: nothing
     #: deconvolves a certified-RNA crossing, so its two length moments had no consumer and are gone.
     boundary_spliced_count: np.ndarray
-    #: ⭐ uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
+    #: ⭐ float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
     #: one channel that ignores the split. ⛔ A PARTIAL, never a conservation ledger: it sums to
     #: ``crossed_block_len / L`` per fragment. A per-BOUNDARY certified-RNA term, commensurate with the
     #: unspliced mass at the same boundary — NOT "the number of spliced fragments here".
@@ -544,10 +547,10 @@ class AccumulatorPayload:
     #: one carry the same total. Gated by
     #: ``test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
-    #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's sj evidence
+    #: float64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's sj evidence
     #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
-    #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
+    #: float64[n_sj, 2] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
     #: COMPUTABLE.** A spliced fragment's block containing no interior boundary deposits on neither boundary
     #: bank, and is not ``contained`` either — its path spans a sj, so it lies in no single region.
     #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.

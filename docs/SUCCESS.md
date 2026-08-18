@@ -244,16 +244,18 @@ threshold is not available and was refuted:** τ is *continuous* across the regi
 conditions, so any floor would be a tuned constant. ⭐⭐ **Read `weak%` before `mwae`.** A row with
 `weak%` near 100 is reporting the relay and the reference, not a solve.
 
-⚠ And `locked` is the **TRAPS: no-magic-numbers** class on *both* axes (`node_geometry.g1_locked`), never
-`~solvable & is_node` — a structurally-locked *boundary* is certain, not ignorant. ⛔ It is deliberately
-**not** the same mask as `node_init`'s node-only `struct_lock`, which governs message *emission*
-(TRAPS: two-masks-one-name).
+⚠ And `locked` is the **G1 / structurally pure-gDNA** class on *both* axes (`region_geometry.g1_locked`),
+never `~solvable & is_region` — a structurally-locked *boundary* is certain, not ignorant. ⛔ It is
+deliberately **not** the same mask as `region_init`'s region-only `struct_lock`, which governs message
+*emission* (TRAPS: two-masks-one-name).
 
 ### The instrument — `scripts/design/pass0_vs_oracle.py`
 
 ✅ **Built.** It scans, builds T, runs four arms, and scores every one of them per object and per class.
-Gates: `tests/calibration/test_pass0_vs_oracle.py`, nine, each carrying its own perturbation. ⭐ It is
-also what POPULATES the oracle cache every other scorer reads, which is why `panel.py cache` runs it.
+Gates: `tests/calibration/test_pass0_vs_oracle.py`, **eleven**, each carrying its own perturbation
+(re-derived 2026-08-17 with `pytest --collect-only -q`; this line and the script's own docstring both
+still said *nine*, and the script's copy is the one that has not been corrected yet). ⭐ It is also what
+POPULATES the oracle cache every other scorer reads, which is why `panel.py cache` runs it.
 
 ⛔ **C is TWO ceilings, each defined by a lever that already exists, and never an estimator.** "The best
 split any estimator could produce" is not something you can write down; trying to is the magic-number
@@ -278,7 +280,7 @@ confidence threshold because it is a cell of a partition rather than a cutoff.
 The two classifications, both mutually exclusive and exhaustive (gated: the mass *and* the error
 decompose over each exactly):
 
-* **the solver's own** — `own_evidence` / `relay_only` / `struct_lock`, reproducing `node_init`'s
+* **the solver's own** — `own_evidence` / `relay_only` / `struct_lock`, reproducing `region_init`'s
   definitions and cross-checked against `composition_evidence_census.py`'s;
 * **C_info's** — `identified` / `undet_no_separation` / `undet_out_of_range` / `absent`.
 
@@ -377,9 +379,12 @@ python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX \
 #    (b) per OBJECT: solvable, solved wrong, and CONFIDENTLY wrong.  Read `weak%` before `mwae`.
 python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
-#    (c) the one-number summary: the library f_gdna against truth.  `--pilot` is the scan-cache ROOT;
+#    (c) the one-number summary: the library f_gdna against truth.  `--scan-cache` is the scan-cache ROOT;
 #        `_main` is the undrained full payload the oracle cache already holds.
-python scripts/design/calibration_truth_ab.py --pilot $LADDER/oracle_cache --cache-subdir _main \
+#        ⚠ a panel cached only by `pass0_vs_oracle.py` has NO `_main` on the four `g00` rows, because it
+#        holds every zero-gDNA condition out — so read which conditions this actually scored rather than
+#        assuming 16 (`TESTING.md` §0: the oracle cache's count is not stable in either direction).
+python scripts/design/calibration_truth_ab.py --scan-cache $LADDER/oracle_cache --cache-subdir _main \
        --suite $LADDER --index $INDEX
 
 # 4. THE TWO ZERO CONTROLS — owner-required on EVERY experiment, both arms.
@@ -396,7 +401,7 @@ python -m pytest tests/native tests/calibration -q     # FIDELITY
 python scripts/design/fl_anchor_gap.py --drain         # BIAS: anchor + both length models vs truth
 python scripts/design/gdna_pool_census.py              #       the four gDNA pools, each vs its opportunity
 python scripts/design/second_pass_accuracy.py          #       per-fragment length assignment
-python scripts/design/calibration_truth_ab.py --pilot $LADDER/oracle_cache --cache-subdir _main \
+python scripts/design/calibration_truth_ab.py --scan-cache $LADDER/oracle_cache --cache-subdir _main \
        --suite $LADDER --index $INDEX --ceiling        # SUFFICIENCY: what a perfect length model is worth
 ```
 

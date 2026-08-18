@@ -159,8 +159,8 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
 
 ## ⭐⭐⭐ WHERE DOES A CHANGE GO? — the calibration layering
 
-`src/rigel/calibration/` is 39 modules. It is **not a knot** — measured from the AST there are no import
-cycles, and 18 of them have exactly one importer. It was a **FLAT PILE of peers**, which is the one shape
+`src/rigel/calibration/` is **38 modules, 13,216 lines** (re-derived 2026-08-17 — ⛔ do not carry this number, run `module_census.py`; the `39` it replaces was one of five counts in three homes that had all drifted). It is **not a knot** — measured from the AST there are no import
+cycles, and 18 of them had exactly one importer when this was measured on 2026-08-07. It was a **FLAT PILE of peers**, which is the one shape
 that cannot tell you where to add anything. `rigel/calibration/_layers.py` names the layers that were
 already in the boundaries, and `tests/calibration/test_layering.py` enforces them.
 
@@ -282,9 +282,23 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,496 passing, 0 SKIPPED, 11 xfail** (re-derived
-2026-08-17, after ψ's composition was made to close structurally). **Any failure at all is a regression** —
-a stronger and cheaper rule than counting expected ones.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,498 passing, 0 SKIPPED, 10 xfail** (re-derived
+2026-08-17, after the λ-bracket work and the doc/instrument cleanup). **Any failure at all is a
+regression** — a stronger and cheaper rule than counting expected ones.
+
+⚠ **It read 3,496 / 11 xfail that morning and BOTH moves are ACCOUNTED, not adjusted. The COLLECTED
+total is unchanged at 3,508, which is the real check.**
+* **`+1` passing** is ONE `test_no_jargon_labels::test_no_numbered_rule_labels` case for one new
+  `docs/dev/` file, re-derived with `pytest --collect-only -q | grep <stem>`, which printed exactly one
+  line. The dev-doc `+1` rule is confirmed a third time.
+* ⭐⭐ **`+1` passing / `−1` xfail is AN XFAIL CLOSED BY REPAIRING THE THING, which is the precedent this
+  project keeps**: `test_scripts_index.py` calls `pytest.xfail` only while a script is BOTH listed in
+  `BROKEN_ON_IMPORT` and genuinely broken. `prior_units_check.py` was repaired, so the gate stopped
+  xfailing and — correctly — **FAILED on the stale exemption** until the entry was removed. That dict is
+  now EMPTY and should stay so.
+⛔ **The doc and instrument cleanup moved the collected total by ZERO and that is the check**: edits to
+comments, docstrings and prose add no cases, so a content-only sweep of ~50 files must leave it where it
+was. A moved total after a content-only sweep means a file was added or removed.
 
 ⛔⛔ **AND DERIVE THE FAILURE SET, NEVER EYEBALL THE TAIL** (`TRAPS: read-the-whole-failure-list`). pytest
 prints the last screen; a long summary scrolls the rest away. 21 failures were once reported here as
@@ -360,11 +374,13 @@ gaining one case per new file). `+43` is this session: `+6` for the conserved sj
 ⭐ **Re-derive it the same way**: `pytest --collect-only | grep <new file stem>` prints exactly which
 meta-tests gained a case, which is faster and more honest than reasoning about the multipliers.
 
-⛔⛔ **AND THAT GATE EXISTS BECAUSE A GREEN SUITE HID FIVE DEAD INSTRUMENTS.** Nothing checked that a
-script still IMPORTS — only that it was indexed and had a docstring, both true of a file that raises on
-boundary 1. Two commits took five out: `94d283c0` deleted the fixed-point layer (`INV_LENGTH_SCALE`,
-`inv_length_quantum`) and killed three, `0d9d422b` deleted `enrichment_frame` and killed one, and one
-died on `_component_node_arrays`. ⭐ A `src/` deletion is the mechanism, so run the suite after one.
+⛔⛔ **AND THAT GATE EXISTS BECAUSE A GREEN SUITE HID FIVE DEAD INSTRUMENTS — the rule and its two
+recorded mechanisms are `TRAPS: a-green-suite-hid-five-dead-instruments`, which now has a BODY.** ⚠ This
+paragraph used to carry that rule's text; it was the two-homes failure the MOVE rule exists to stop, so it
+has been moved rather than copied. ⭐ What you need here is only the trigger list: run the suite **and the
+instruments** after a `src/` DELETION *and* after a **CONFIG DEFAULT FLIP** — the second was found on
+2026-08-17, when six instruments were dead under the shipped `message_propagation = False` while the suite
+stayed green, because the TEST readers install `HeadPolicy` themselves.
 
 ⛔ **RE-DERIVE THE COUNT, NEVER ADJUST IT** (`TRAPS: re-record-the-baseline`). Several suite tests are
 PARAMETRISED OVER DOC, SOURCE AND SCRIPT FILES — roughly 2 per src module, 3 per script, 1 per doc — so
@@ -397,13 +413,25 @@ Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
 ## Tooling under `scripts/`
 
-`docs/SUCCESS.md` lists these in the order you would run them. ⚠ Everything not listed here was deleted as
-unrunnable; if a script is not in this table, treat it as not existing.
-⛔ **That claim is currently FALSE for eight files** and the drift is recorded rather than silently
-tolerated: `bam_spans.py`, `implicit_splice_census.py`, `inv_L_limits.py`, `length_sieve.py`,
-`partition_test.py`, `reference_on_real_data.py`, `sigma_inv_L.py`, `spanning.py` are on disk and unlisted.
-They pre-date 2026-08-05, none was run this campaign, and none should be trusted without re-running it —
-either promote a row or delete the file, but do not assume the table is complete until that is done.
+`docs/SUCCESS.md` lists these in the order you would run them.
+
+⛔⛔ **THE TABLE IS AN INDEX OF `scripts/design/` PLUS FOUR `sim/` ROWS AND NOTHING ELSE — DO NOT READ AN
+ABSENCE AS A DELETION.** It used to say *"everything not listed here was deleted as unrunnable"*, which was
+false in three trees. Re-derived 2026-08-17: **73 `.py` under `scripts/` = 61 `design` + 8 `sim` +
+3 `profiling` + `__init__`**.
+* **8 `design/` files are on disk and unlisted** — `bam_spans.py`, `implicit_splice_census.py`,
+  `inv_L_limits.py`, `length_sieve.py`, `partition_test.py`, `reference_on_real_data.py`,
+  `sigma_inv_L.py`, `spanning.py`. ⭐ All eight were re-run this campaign and all eight COMPLETE;
+  `bam_spans.py` carries a PROMOTE recommendation.
+* **4 `sim/` files are indexed nowhere**: `build_toy_2exon_reference.py`, `locus_sweep.py`,
+  `simulate_suite.py`, `snapshot_suite.py`.
+* ⛔⛔ **THE WHOLE OF `scripts/profiling/` IS COVERED BY NO GATE** — `tests/test_scripts_index.py`'s
+  `ALL_SCRIPTS` is `design + sim` — and **2 of its 3 files were dead** when that was measured
+  (`pyspy_driver.py` on 2026-08-11, `scan_profile.py` on 2026-08-17). That tree has now rotted twice with
+  the defect class the existing gate already catches, only out of its reach. **Extend the gate to a third
+  tree, or delete the directory** — an owner decision, recorded in `scripts/README.md`.
+⚠ **And a basename collides across trees**: `design/scan_profile.py` (indexed) vs
+`profiling/scan_profile.py` (unindexed). Both are live; renaming one is an owner call.
 
 ⭐⭐ **The GROUPS are ordered by 0.8.0 priority** — calibration against oracle calibration first, then the
 panel and its caches, then the thermometer above them. A row's own ⭐s rate the INSTRUMENT; the group says
@@ -431,11 +459,9 @@ whether this phase is pointed at it.
 | `design/transcript_truth.py` | ⭐⭐⭐ **THE TRUE PER-TRANSCRIPT COUNT, SPLIT BY SPLICEDNESS** — what a per-transcript prior is scored against, and the one quantity no other instrument produced (`prior_vs_oracle.py` is per multi-locus; `quant_accuracy.py` scores the tool's OUTPUT). One pass over the oracle BAM, **read names only, 41 s per 10 M-fragment condition**. ⛔⛔ **Splicedness comes from the read name's interval in SPLICED TRANSCRIPT coordinates against the transcript's interior cumulative-exon boundaries — NEVER from the CIGAR**, which misses every sj falling in the unsequenced inner gap: measured **1,233,428 of 10 M (12.3 %)** truly-spliced fragments carry no `N`, and **0** in the reverse direction. ⭐ Seven NAMED gates; the free falsification is that a CIGAR `N` where truth says unspliced is structurally impossible, and it reads **0**. ⚠ `t_df` encodes strand as `{1: POS, 2: NEG}`, not `±1` — reading it as a sign silently disables the minus-strand exon reversal. ⛔ The `indexed` gate currently FAILS by design: **329 fragments from 2 transcripts the index does not contain** (`ENST00000397293.6`, `ENST00000432560.6`), reported rather than absorbed as "unspliced" |
 | `design/transcript_weights.py` | ⛔⛔ **THE SOFT-MIN PER-TRANSCRIPT WEIGHT — BUILT, PRICED AND REFUSED (2026-08-13). Read `ROADMAP.md` §4's row before touching it; this is a RECORD, not a proposal.** The owner's theorem — a transcript's density is bounded by the MINIMUM along its path — implemented as an opportunity-weighted power mean `M_p`, one dial from the pooled `Σmass/Σopportunity` (`p=1`, the control, no deconvolution at all) through the owner's harmonic (`p=-1`) to the theorem verbatim (`p→-∞`), times a transcript opportunity (`total` / `full` / `seen`). ⛔ **16 arms, both strata: worse than `base` at transcript level EVERYWHERE (1.26–1.60×), and the `g00` gene-level win of 0.395–0.527× collapses to 1.006–1.041× on the blind stratum.** ⭐ **What survives and is worth reusing:** the gated density identity `density(r) = Σ_{t∋r} A_t/E_t` (the object's own opportunity cancels — this is what makes the `min` a min of something); the measured multiplier ruling (TOTAL abundance beats the true unspliced count, 0.163× vs 0.202×); the opportunity weighting, which is a **deliberate deviation from the spec as written** because `TRAPS: a-mean-of-ratios-inherits-the-partition` was measured *while designing this prior*; and the monotone dial (`min` < `harmonic` < `geometric` < `arithmetic` on every axis), which says the theorem is not what failed. ⛔ What failed is `TRAPS: an-upper-bound-is-not-an-estimate`. ⚠ Standalone it runs ONLY its own falsification — the re-partition gate, where unweighted forms drift 1.67–3.03× on data that did not change and weighted ones do not move. Scoring belongs to `quant_accuracy.py`'s `alloc_*`/`allocg_*` arms; a second scorer here is how a baseline and a ceiling drift apart |
 | `rigel.sim.net_flow` (a MODULE, not a script) | ⭐⭐ **WHERE DID EACH MISASSIGNED FRAGMENT GO?** — the one question `quant_accuracy.py` does not answer. It measures the MAGNITUDE of transcript error; this decomposes its DIRECTION, per transcript, into gDNA-sourced and RNA-isoform-sourced flow. ⛔ **All that survived `sim/analysis.py`, retired 2026-08-11** (owner): that was a 1,589-line SECOND SCORER rendering its own accuracy tables against its own truth, and two scorers is how a baseline and a ceiling drift apart. 618 lines kept with their tests, 971 deleted along with `scripts/sim/evaluate_suite.py`. Gate: `tests/test_net_flow.py` |
-| `design/prior_yardstick.py` | ⛔ **ITS PANEL IS GONE — `flgap_short`/`flgap_long` were DELETED 2026-08-13, so this cannot run until both are rebuilt (the configs survive; they are a PAIR and only work as one).** ⭐⭐⭐ **IS THE PRIOR ASSEMBLER RIGHT? — the flgap pair, DRAINED, against the EM's own count.** The one place the assembler can be scored the way production runs it: `prior_vs_oracle.py` must stay undrained (a drained oracle is inadmissible on the ladder), and this reads the flgap study cache, which holds both. ⭐⭐ **Verdict: with perfect masses AND perfect per-component shares the assembler reproduces `Fo` to `rel` 2.8e-5 … 2.0e-3, and the pooled share is 82–99 % of the whole residual — the "72 % open residual" was the yardstick.** ⛔ Prints the drained arm's contamination FIRST (flgap_short leaks 1 spliced gDNA record, flgap_long 8,641 — short is the verdict, long the cross-check). ⭐ Table ④ scores the composition claim against the UNSPLICED pool — the population `a_g:a_r` describes, because a spliced unit never gets a gDNA candidate — and it is exact there (`Δphi` ≤ 5e-4). ⛔ Scoring it against ALL RNA units reads a phantom +0.07…+0.10 tilt; that mistake was made and retracted on 2026-08-08. ⭐ It also reports the prior's STRENGTH, which is 1.000 pseudo-fragment per real one by construction — the posterior is a 50/50 blend of calibration and the EM's evidence, with no knob |
-| `design/flgap_study_cache.py` | ⛔ **ITS PANEL AND ITS CACHE ARE GONE (deleted 2026-08-13); rebuild both flgap panels before reaching for this.** ⭐⭐⭐ **SCAN ONCE, INTERROGATE MANY TIMES** — the flgap pair's four conditions cached whole: scored `multi_loci`, calibration, the DRAINED payloads with their lifted origin partitions, the oracle masses and per-component shares, the raw per-region start counts, and ⭐ the per-unit `(true origin, is_spliced)` pair the `Fo` arm joins on, for both scoring stages. Building is ~5 min/condition; loading is ~1 s. ⭐ **`priors.py` is deliberately OUTSIDE the cache key**, so testing an `assemble_priors` change is a one-second loop — ⛔ which is only sound because **nothing `priors.py` produces is stored**: every arm (P, O, S, F) is derived on load. It used to store `p_arm` and `f_gdna` and served them stale beside a fresh O (`TRAPS: a-hash-that-misses-its-artifact`, second form). ⛔ Keyed on the scan manifest + a content hash of every producing source file, the builder itself included; a mismatch REBUILDS rather than warning. ⚠ Stores `gdna_spliced_leak` and `lift_ambiguous` — **1** on flgap_short vs **1,491 / 8,641** on flgap_long (⭐ BOTH spliced banks summed; the "1,010 / 5,827" once recorded here was `edge_spliced_count` alone, because `_validate` raises on the FIRST nonzero bank and its message was quoted as a total), which is why flgap_short is the admissible panel for a drained measurement and flgap_long a cross-check |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **EVERY RENAME STAGE PROVEN BIT-IDENTICAL — the gate the bulk rename lands on.** A rename is a numeric NO-OP and this makes the claim falsifiable: `--freeze` captures a reference ONCE, `--check` compares after every stage. ⭐⭐ **It can exist only because `total_threads=1` makes the scan bit-reproducible** — measured, the shipped all-cores default differs run-to-run on SIX float banks by ~3.5e-14, so the harness pins the thread count, the BGZF threads, `OMP_NUM_THREADS` and the EM seed. ⛔⛔ **It compares CONTENT, never NAMES, because the names are the thing under test**: ① the sorted `(dtype, shape, sha256)` multiset of every array, names discarded, and ② the transcript table, which carries no region/boundary vocabulary at all. Neither alone suffices — ① is blind to two arrays SWAPPING names and ② is not — and the hole is pinned as a hole in `--self-test` (8/8) so it is not mistaken for coverage. ⛔ No name map: that is the compatibility hack the owner refused. ⚠ The reference is FROZEN, never rolling — `--freeze` refuses to overwrite — because the renames COMPOUND and a rolling baseline lets a stage-2 defect become the accepted truth for stages 3-9; this is the one place `TRAPS: re-record-the-baseline` is deliberately inverted. ⭐ Falsified on real data: a ONE-ULP nudge to one element of a 13,482-element array fires it, and a restore reads clean |
-| `design/rename_census.py` | ⭐⭐⭐ **THE BULK RENAME'S LANDSCAPE, RE-DERIVED — every name the vocabulary ruling touches, by KIND.** REGION (was region) · BOUNDARY (a single position BETWEEN TWO REGIONS — was boundary/region bound/boundary/boundary) · SPLICE JUNCTION or `sj`, never bare `sj`. Measures ~10,900 occurrences: 5,192 Python identifiers over 845 distinct names, 978 in C++, and ⭐ **4,733 in PROSE — 43 % of the job**, so a code-only rename leaves half the vocabulary stale. ⛔ **It REPORTS and never renames**, because the danger is not the volume but the names carrying TWO senses, where a correct-looking global replace silently corrupts the other one — four found so far: `region bound` (35,229 positions vs 35,041 interior boundaries — three populations, and mapping it wholesale would recreate `TRAPS: two-masks-one-name`), `boundary` (120 boundaries vs **60 ordinary boundaries of text**), `donor` (a splice donor vs the toy harness's SOURCE CONDITION), and `region` (vs `ast` regions, in this very file). ⭐ `--sense <token>` dumps every site of one token with context, for a per-site ruling. Plan: `docs/dev/rename_plan.md` |
+| `design/rename_census.py` | ⭐⭐⭐ **THE BULK RENAME'S LANDSCAPE, RE-DERIVED — every name the vocabulary ruling touches, by KIND.** REGION (was `node`) · BOUNDARY (a single position BETWEEN TWO REGIONS — was `edge`/`cut`/`line`/`seam`) · SPLICE JUNCTION or `sj`, never bare `junction`. Measures ~10,900 occurrences: 5,192 Python identifiers over 845 distinct names, 978 in C++, and ⭐ **4,733 in PROSE — 43 % of the job**, so a code-only rename leaves half the vocabulary stale. ⛔ **It REPORTS and never renames**, because the danger is not the volume but the names carrying TWO senses, where a correct-looking global replace silently corrupts the other one — four found so far: `cut` (35,229 positions vs 35,041 interior boundaries — three populations, and mapping it wholesale would recreate `TRAPS: two-masks-one-name`), `line` (120 boundaries vs **60 ordinary lines of text**), `donor` (a splice donor vs the toy harness's SOURCE CONDITION), and `node` (vs `ast` nodes, in this very file). ⛔⛔ **THE HISTORICAL TOKENS ABOVE ARE BACKTICKED BECAUSE THIS ROW WAS ITSELF EATEN BY THE RENAME IT DOCUMENTS** — it read *"REGION (was region)"* and *"60 ordinary boundaries of text"* until 2026-08-17, restored from `391aa5eb^`. That is `TRAPS: a-rename-resolves-an-ambiguity-silently` committed against the index entry of the instrument built to prevent it. ⭐ `--sense <token>` dumps every site of one token with context, for a per-site ruling. Plan: `docs/dev/rename_plan.md` |
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** — the calibration package's real shape, re-derived from the AST: the layering with every upward import, the graph with each module's importers inside and outside, ⭐ **docstrings that name a sibling with no import boundary** (14 measured, 6 genuinely stale), and dead public surface. ⛔ It REPORTS, it does not judge — an entry point looks dead, and a gated reference implementation looks duplicated |
 | **⭐⭐⭐ the backbone** | |
 | `design/arm_identity.py` | ⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE? — the A5 gate.** `arm_score.py` AGGREGATES, so a difference that cancels between two fields is invisible there; this compares **every scored field of every row** and exits nonzero on any difference. ⛔ Both of A5's recorded lies are gated: the row-key sets must be EQUAL (an arm with ZERO rows once scored "32/32 IDENTICAL") and both files' mtimes are printed (a stale baseline is what A5 warns about — re-record it, B8). ⭐ Falsified by perturbation: it resolves a **1-ULP** nudge and refuses an empty file |

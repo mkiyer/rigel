@@ -14,12 +14,12 @@ The model is one population of contiguous crossings at one boundary, split by wh
                  \\___ retained ___/    \\_______ dropped _______/
 
 ===  ==========================================================================================
-TRAPS: a-purity-filter-is-a-length-filter   ⭐ SOUND — the retained coefficient is the RAW COUNT, and no opportunity ratio can reach it
-TRAPS: pure-and-length-censored   ⛔ NOT SOUND — with ``q`` unknown the profile likelihood in ``f_g`` is EXACTLY FLAT on [0,1)
+C1   ⭐ SOUND — the retained coefficient is the RAW COUNT, and no opportunity ratio can reach it
+C2   ⛔ NOT SOUND — with ``q`` unknown the profile likelihood in ``f_g`` is EXACTLY FLAT on [0,1)
 C2b  ⛔ and ``S = 0`` is flat on the CLOSED interval, so a zero count is not vertex evidence either
-TRAPS: divide-by-a-probability   ⛔ the raw-count term is one-sided and UNBOUNDED — at ``S = 1000`` it answers ~0 whatever the truth
-TRAPS: opposite-tilts-must-not-pool   ⭐ SOUND — reference + term is exactly Beta(½, ½+S), so ``S = 0`` recovers today's ψ identically
-TRAPS: fractional-mass-is-the-problem   ⛔ ``density_factor_precision`` must NOT price this factor — on a monotone factor it reads the WINDOW
+C3   ⛔ the raw-count term is one-sided and UNBOUNDED — at ``S = 1000`` it answers ~0 whatever the truth
+C4   ⭐ SOUND — reference + term is exactly Beta(½, ½+S), so ``S = 0`` recovers today's ψ identically
+C5   ⛔ ``density_factor_precision`` must NOT price this factor — on a monotone factor it reads the WINDOW
 ===  ==========================================================================================
 
 ⭐ **The measured consequence, which is why this file exists rather than a mechanism**
@@ -56,7 +56,7 @@ def _residual(S, c, M, lam):
     return _Poisson.logpmf(S, c * (1.0 - expit(lam)) * M) - S * log_expit(-lam)
 
 
-# ── TRAPS: a-purity-filter-is-a-length-filter — the half that IS sound: no opportunity ratio can reach the retained coefficient ─────────────
+# ── C1 — the half that IS sound: no opportunity ratio can reach the retained coefficient ─────────────
 
 
 @pytest.mark.parametrize("S", [1.0, 7.0, 500.0])
@@ -86,7 +86,7 @@ def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIV
 
 
 def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
-    """⚠ The falsification for TRAPS: a-purity-filter-is-a-length-filter. ``c·S`` — an opportunity-scaled count, which is the other candidate
+    """⚠ The falsification for C1. ``c·S`` — an opportunity-scaled count, which is the other candidate
     §2f offered — leaves a λ-dependent remainder, so the gate above is not a truism about subtraction."""
     lam = np.linspace(-6.0, 6.0, 4001)
     S, c, M = 7.0, 0.03, 900.0
@@ -95,7 +95,7 @@ def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
     assert not np.allclose(flat, flat[0], rtol=0.0, atol=1e-9)
 
 
-# ── TRAPS: pure-and-length-censored — the half that is NOT sound: q is not a nuisance you may drop ────────────────────────────────
+# ── C2 — the half that is NOT sound: q is not a nuisance you may drop ────────────────────────────────
 
 
 @pytest.mark.parametrize("S", [1.0, 3.0, 40.0, 1000.0])
@@ -140,7 +140,7 @@ def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
 
 
 def test_C2_perturbation_FIXING_q_restores_an_interior_maximum_and_FIRES():
-    """⚠ The falsification for TRAPS: pure-and-length-censored, and the constructive half of it: the flatness is a statement about
+    """⚠ The falsification for C2, and the constructive half of it: the flatness is a statement about
     ``q`` being unknown, NOT about the observation being worthless. Pin ``q`` and the same likelihood
     acquires a sharp interior maximum at the true split — so the channel is blocked on an opportunity
     model, not on physics."""
@@ -172,7 +172,7 @@ def test_C2b_a_ZERO_certified_count_is_flat_on_the_CLOSED_interval_so_it_is_NOT_
     assert np.allclose(profile, 0.0, rtol=0.0, atol=1e-8), profile
 
 
-# ── TRAPS: divide-by-a-probability — the raw-count term's damage, as a number ────────────────────────────────────────────────────
+# ── C3 — the raw-count term's damage, as a number ────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("S,ceiling", [(10.0, 0.07), (100.0, 8e-3), (1000.0, 8e-4)])
@@ -191,7 +191,7 @@ def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
     assert hi < lo
 
 
-# ── TRAPS: opposite-tilts-must-not-pool — the half that survives, and is what a future build should reuse ─────────────────────────────
+# ── C4 — the half that survives, and is what a future build should reuse ─────────────────────────────
 
 
 @pytest.mark.parametrize("S", [0.0, 1.0, 10.0, 100.0])
@@ -202,7 +202,7 @@ def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
     returns today's Beta(½,½) identically: whatever a future build does with this channel, it needs no
     new normalisation and no ``S = 0`` branch.
 
-    ⛔ It is the COEFFICIENT that is unlicensed (TRAPS: pure-and-length-censored), not the algebra."""
+    ⛔ It is the COEFFICIENT that is unlicensed (C2), not the algebra."""
     lam, fg = _logodds_grid(1 << 16, 20.0)
     lp = _JEFFREYS_REF * log_expit(lam) + (_JEFFREYS_REF + S) * log_expit(-lam)
     w = np.exp(lp - lp.max())
@@ -211,7 +211,7 @@ def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
     assert grid_median == pytest.approx(float(_Beta.ppf(0.5, 0.5, 0.5 + S)), abs=2e-4)
 
 
-# ── TRAPS: fractional-mass-is-the-problem — the precision the plan reached for reports the WINDOW, not the information ──────────────────
+# ── C5 — the precision the plan reached for reports the WINDOW, not the information ──────────────────
 
 
 def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor():

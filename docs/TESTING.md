@@ -108,14 +108,26 @@ that residual is WORTH was measured before it was accepted, one thing varied: re
 their pooled average moves the per-object error by **−0.0002** off capture and **−0.0054** under it —
 under 2.5 % of the error, with a *fitted* gap 3–5× larger than the residual. Owner ruling: carry it.
 
-⭐ **An ORACLE CACHE sits beside the panel** at `ladder/oracle_cache/`, built by `panel.py cache`. ⛔⛔
-**IT HOLDS 12 OF THE 16 CONDITIONS AND THAT IS BY DESIGN, NOT A HALF-BUILT CACHE:** `pass0_vs_oracle.py`,
-which populates it, HOLDS OUT every zero-gDNA condition ("N zero-gDNA row(s) held out as false-positive
-checks"), so the four `g00` cells never get one. ⚠ **`panel.py status` therefore reads `oracle cache
-12/16` and prints a ✘ on a complete panel** — it counts conditions, and the hold-out is invisible to it.
-⭐ Nothing is lost: `quant_accuracy.py`'s `base`, `base_reseed`, `warm_uniform` and every `alloc_*` arm
-do not load an oracle at all, so `g00` scores normally; only the `oracle_*` arms need one, and those are
-the arms a zero-gDNA condition has no truth-split to feed. It holds
+⭐ **An ORACLE CACHE sits beside the panel** at `ladder/oracle_cache/`, built by `panel.py cache`.
+⛔⛔ **ITS CONDITION COUNT IS NOT STABLE AND MUST NOT BE READ AS EVIDENCE IN EITHER DIRECTION — this
+paragraph used to assert a fixed `12/16`, and that is now wrong on disk.** Re-derived 2026-08-17: the
+cache holds **16/16, all four parts (`gdna`/`mrna`/`nrna`/`_main`) on every condition including the four
+`g00` rows**, and `panel.py status` prints **✔ every stage complete**. Two facts pull against each other
+and a reader needs both:
+
+* ⭐ `pass0_vs_oracle.py`'s own sweep **HOLDS OUT every zero-gDNA condition** ("N zero-gDNA row(s) held
+  out as false-positive checks") and builds no cache for one — so a panel cached only by that route
+  legitimately reads **12/16**, and `panel.py status` then prints a **✘ on a complete panel**, because it
+  counts conditions and the hold-out is invisible to it. ⛔ That ✘ is a false alarm, not a half-built
+  panel, and it has cost a session.
+* ⛔ But `pass0_vs_oracle.measure_condition` **WRITES** `<oracle_cache>/<condition>/_main` whenever an arm
+  runs with `--oracle-cache`, and other instruments do sweep the `g00` rows — so any such run fills the
+  missing four and the count goes to 16/16. **A `_main` beside a `g00` row therefore proves nothing about
+  what has been measured there** (`TRAPS: shard-an-arm-sweep-by-condition`).
+
+⭐ Either way nothing is lost: `quant_accuracy.py`'s `base`, `base_reseed`, `warm_uniform` and every
+`alloc_*` arm do not load an oracle at all, so `g00` scores normally; only the `oracle_*` arms need one,
+and those are the arms a zero-gDNA condition has no truth-split to feed. It holds
 the per-origin split payloads, so `--oracle-cache` turns a 4-minute-per-condition oracle build into
 seconds. ⭐⭐ **It stays valid across every CALIBRATION change** — the oracle depends only on the
 accumulator and the index — so one cache serves an entire solver-debugging campaign. It is keyed by the
@@ -225,17 +237,18 @@ code that fit it, so a stored copy would go stale on exactly the changes the har
 nesting was, so the two rungs differ by exactly one structure.
 
 ```
-REGION intergenic [0, 1000)         BOUNDARY @1,000   intergenic|exon, pure gDNA (TSS+)   TRAPS: no-magic-numbers
-REGION exon  [1000, 2000)   TA e1   BOUNDARY @2,000   intron|exon, the DONOR+ side        ⭐ NOT TRAPS: no-magic-numbers
-REGION intron [2000, 9000)  TA i1   BOUNDARY @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT TRAPS: no-magic-numbers
-REGION exon  [9000, 10000)  TA e2   BOUNDARY @10,000  intergenic|exon, pure gDNA (TES+)   TRAPS: no-magic-numbers
+REGION intergenic [0, 1000)         BOUNDARY @1,000   intergenic|exon, pure gDNA (TSS+)   G1 object
+REGION exon  [1000, 2000)   TA e1   BOUNDARY @2,000   intron|exon, the DONOR+ side        ⭐ NOT a G1 object
+REGION intron [2000, 9000)  TA i1   BOUNDARY @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT a G1 object
+REGION exon  [9000, 10000)  TA e2   BOUNDARY @10,000  intergenic|exon, pure gDNA (TES+)   G1 object
 REGION intergenic [10000, 12000)
 SJ BOUNDARY 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
 ```
 
 ⭐ **What it adds, and why it is the hard rung: the two exon↔intron BOUNDARIES.** Mature RNA cannot cross an
 exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary), so their truth is pure gDNA — but the solver's own
-continuity gate says a strand IS admissible there (nascent could cross), so they are **not** TRAPS: no-magic-numbers and the
+continuity gate says a strand IS admissible there (RNA that has not spliced *there* could cross), so they
+are **not** G1 objects (`DESIGN.md` §0) and the
 solver has to *derive* what the structure already implies. ⛔ Every cached condition is `nrna_none`, so
 their truth is exactly 1.000 and the panel cannot distinguish "no RNA crosses" from "no *mature* RNA
 crosses". Use `nrna_abundance > 0` as the control — it is the only way to test that face non-trivially.
@@ -371,7 +384,9 @@ false positive with nothing to cancel against it.
 ### ⚠⚠ CAPTURE-ON needs care, and the harness will tell you when it is starved
 
 Under capture the donor's **off-target** density is ~24× lower than its capture-OFF twin
-(0.00106 vs 0.02566 counts/bp on `g25`), and capture actively *depletes* intergenic space. Three
+(0.00106 vs 0.02566 counts/bp on `g25` — ⚠ a donor of the **RETIRED** 36-condition ladder, deleted
+2026-08-13 and not re-derived on the 16-condition rebuild; see the STAMP below), and capture actively
+*depletes* intergenic space. Three
 consequences, all measured, and the sweep prints a ⛔ STARVED banner naming which one has bitten:
 
 | starved object | does `--genome-length` help? | why |
@@ -461,7 +476,9 @@ how a tiling loop was written.
 ### ⚠ What a toy CANNOT judge
 
 * **Magnitudes do not transfer between donors.** The same `nrna` contrast is a factor of **31** against
-  the `g25` ladder donor and **1.25** against a six-gene synthetic donor: direction preserved, size not.
+  the `g25` ladder donor (⚠ RETIRED with the 36-condition ladder on 2026-08-13; the *contrast* is the
+  lesson, and neither factor has been re-derived on a surviving donor) and **1.25** against a six-gene
+  synthetic donor: direction preserved, size not.
   A small donor cannot determine the enrichment landscape or the intron background, so its injected
   globals are a different regime. ⛔ Gate on direction and ordering; quote magnitudes with their donor.
 * **It cannot rank defects.** Five objects cannot tell you what fraction of a real library's error a
@@ -518,7 +535,7 @@ gDNA and RNA equal fragment lengths*.
 |---|---|
 | counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real sj overdispersion is ≤ 0.02–0.03 |
 | the PANEL is all **R1-antisense** | ⭐ The ENGINE can emit either since 2026-08-11 (`ReadSimConfig.r1_sense`, gated both ways in `test_strand_sense_convention.py`), but `orchestrator.run_condition_grid` does not expose it — so no ladder condition is R1-sense. ⚠ The gap moved from the simulator to the panel; it did not close. Real cfRNA is dUTP, so this is not urgent |
-| the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two regions, and gDNA is no longer simulated on the spike-ins at all |
+| the tool's **gDNA reach** assumption is untested | `region_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two regions, and gDNA is no longer simulated on the spike-ins at all |
 | ⭐ each **population is written as one contiguous BLOCK** of read names, not interleaved | measured 2026-08-08: a 10 M-fragment condition has **15** origin transitions in BAM order. So any per-fragment truth JOIN that is checked by "does an impossible label appear?" is nearly blind — a one-fragment slip in the `frag_id` key mislabels ~15 fragments in the whole file and need not produce a single impossible one. ⛔ Gate such a join on a COUNT IDENTITY against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`) and keep the impossible-label check as a secondary that catches a gross slip. `tests/calibration/test_prior_vs_oracle.py` pins both halves, including that the small slip is invisible |
 
 ---
@@ -676,9 +693,16 @@ python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,404 passing, 0 skipped, 10 xfail** (re-derived
-2026-08-14; it was 3,397 on 2026-08-13 and 3,235 / 7 xfail on 2026-08-11, and `CLAUDE.md` carries every
-delta ACCOUNTED rather than adjusted). **Any failure is a regression** — which is a stronger
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,497 passing, 0 skipped, 11 xfail** (re-derived here
+2026-08-17 with `python -m pytest tests/ -q`; it read 3,404 / 10 xfail on 2026-08-14, 3,397 on
+2026-08-13 and 3,235 / 7 xfail on 2026-08-11). ⛔ **`CLAUDE.md` is the HOME of this number and carries
+every delta ACCOUNTED rather than adjusted; this line is a convenience copy and had gone stale by
++92 / +1 xfail before it was re-derived** — when the two disagree, re-derive rather than pick one.
+⚠ It moved **3,496 → 3,497 inside that same session**, and the `+1` is ACCOUNTED rather than adjusted:
+one new **dev doc**, which `test_no_jargon_labels` parametrises over and the docs-boundary gate does not
+(`pytest --collect-only -q | grep <stem>` prints exactly the one case). A doc-only edit does not move the
+count; adding or retiring a FILE does.
+**Any failure is a regression** — which is a stronger
 and cheaper rule than counting expected ones. ⚠ Re-derive it rather than adjusting it; several tests are
 parametrised over doc, source and script files, so adding or retiring one moves the count by a few.
 
@@ -702,6 +726,35 @@ two end-to-end runs (`quant_accuracy.py` does, and prints a `base_reseed` noise 
 
 **Develop on controlled toys, validate on real data.** A big suite has confounds that hide mechanisms; a
 toy ranks hotspots backwards (TRAPS: toys-rank-hotspots-backwards). Both, in that order.
+
+### ⛔⛔ PROFILING TARGETS A HIGH-DEPTH REAL RNA-seq LIBRARY, **NOT** cfRNA — owner, 2026-08-17
+
+⭐⭐ **This REVERSES a standing instruction**, so read it as a correction rather than an addition. The old
+rule — *"profile on real cfRNA, never a small synthetic suite"* — got the second half right and the first
+half wrong, and it is still written that way in `CLAUDE.md`'s working rules and in three `ROADMAP.md`
+rows. ⚠ Where the two disagree, **this is the ruling**; those sites are stale until the lead updates them.
+
+⛔ **Why cfRNA is the wrong substrate for a COMPUTE measurement, even though it is a fine one for an
+ACCURACY measurement.** The cfRNA libraries on disk are **sparse and small**: most confident-gDNA regions
+carry zero counts (64–94 % across libraries, `DESIGN.md`), so they under-fill exactly the structures whose
+cost the performance work is about — the grid solve, the per-slot arrays, the fragment buffer. A library
+that never fills them cannot price them, and a profile taken there ranks hotspots by a distribution the
+production target does not have. ⭐ This is `TRAPS: toys-rank-hotspots-backwards` applied one rung up: the
+lesson was never "cfRNA", it was **"profile on the substrate whose SHAPE you are optimising for"**, and a
+small sparse library is a toy in the only sense that matters here.
+
+⭐ So the profiling substrate is, in order of preference: a **deep, real, high-complexity RNA-seq BAM**;
+never a panel condition (`TRAPS: toys-rank-hotspots-backwards` outright); never cfRNA. ⚠ The two rules
+this does **not** touch, because they are about design inputs rather than profiling substrates:
+`TRAPS: real-data-is-a-test-input` (real data is a TEST input, never a DESIGN input — still binding, and
+it is *why* the profiling target is a domain call rather than a tuning input) and the accuracy panel,
+which stays the 16-condition ladder.
+
+⭐ The instruments are `scripts/profiling/profiler.py` (whole pipeline; wall clock **and** per-phase peak
+RSS across `scan` / `calibrate` / `quant`) and `scripts/profiling/scan_profile.py` (the scan alone, swept
+across thread and chunk budgets). `scripts/README.md` is their index and both are gated by
+`tests/test_scripts_index.py`. ⛔ Set `OMP_NUM_THREADS` deliberately: the shipped default is all cores and
+a threaded number answers a different question from a single-thread one.
 
 **Any both-strand stress test needs ample single-stranded regions** — the population prior trains on them,
 and a "starved toy" is one of the three degenerate inputs `suite_resolves.py` is proven against.

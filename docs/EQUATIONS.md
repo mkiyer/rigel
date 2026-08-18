@@ -11,8 +11,28 @@ record and it will be wanted after the release. ⛔ Nothing else here is optiona
 deferral does **not** reach the length **model**: the opportunities, effective lengths and length moments
 of §1, §3.6b and §4 are live and shipping, and so is the second pass's per-fragment length term (§10).
 
+⚠ **A SECOND EXCEPTION, AND IT IS THE OPPOSITE KIND — §9d is a derivation AHEAD of the tree rather than
+behind it.** The capture reference's spike-and-slab is derived, its three limits are checked and every one
+of its parameters is measurable off the shipped payload today — but **nothing in `src/` builds the
+mixture**, and what ships is §9c/§9c.1's Beta with the structural per-object location. It is banner-headed
+as such, and the numbers inside it measure the BOUNDS and the gDNA FIELD, never a shipped estimator.
+
 ⛔ **No measurements here.** Where a number appears it is a property of the *formula* (a limit, a
 degenerate case, a worked value that makes the shape concrete), never a property of a library.
+
+⚠ **THAT RULE IS THE INTENT AND THE FILE DOES NOT FULLY KEEP IT.** Several derivations below are anchored
+by the measurement that verified them, and those stay — a derivation with no verification is worth less,
+and deleting one to satisfy the rule loses the finding rather than the untidiness. ⛔ What is required of
+them instead is a **PANEL**: a number describing a library must name what it was measured on.
+
+⛔⛔ **STAMP, APPLYING TO THE WHOLE FILE: THE 36-CONDITION LADDER AND THE `flgap_short` / `flgap_long`
+PAIR WERE RETIRED ON 2026-08-13.** The ladder was rebuilt from scratch at **16** conditions
+(`g00/g05/g50/g98` × ss `0.50/0.99` × capture off/on) and both `flgap` panels were deleted from disk —
+only their configs survive, and they are a PAIR that works only as one. So every number below attributed
+to *"the 36-condition ladder"*, to a `g01` / `g10` / `g25` / `g75` / `g90` donor, or to a `flgap`
+condition was measured on a panel that **no longer exists**, and **none of them has been re-derived on
+the panel now on disk**. ⭐ They are kept because a measurement is a record. **Re-derive rather than
+trust — a number that has moved is a result, not a documentation bug.**
 
 ---
 
@@ -173,7 +193,7 @@ composition may be imputed across a step iff **both** hold:
 and `T(BOUNDARY) = T(right)` fails iff a transcript's body **begins** at the BOUNDARY, `T(BOUNDARY) = T(left)` iff one
 **ends** there. So a transcript **terminus** is exactly what makes one flank's population larger, the test
 is an **equality** per `(BOUNDARY, side)` pair (both directions of mismatch corrupt `φ_g`), and it is per-step
-rather than per-object. `node_geometry.terminus_flank_gain`.
+rather than per-object. `region_geometry.terminus_flank_gain`.
 
 ⛔⛔ **WRITE IT IN GENOMIC TERMS, NEVER IN TSS/TES.** TSS/TES is transcript-relative and the strand flips
 it:
@@ -344,7 +364,7 @@ solvable mwae 0.0413 → 0.0426, confidently-wrong 20,173 → 22,336. ⭐ The id
 failed — improving that BOUNDARY is simply not worth anything where the tool is wrong. §9a is the general form of that reading.
 
 **3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN BOUNDARY HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
-2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `node_total_density`.)
+2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `region_total_density`.)
 
 §3.6 gives the two faces of an `intron|exon` BOUNDARY as a property of the OBJECT. Made per-STEP it becomes a
 statement about which of the two flanks a hop is talking to, and then it applies at every BOUNDARY with
@@ -442,7 +462,8 @@ at length `w` is `f_pre(w)·(L−w+1)·(w−1)/(L−w+1) = f_pre(w)·(w−1)` an
 Computed exactly from the pmf, `k = 1.000000` at every transcript length. ⛔ The whole gap is the
 length-model mismatch, with no geometric component. TRAPS: two-divisors-opposite-sign.
 
-✅ **This WITHDRAWS the sign correction this section used to carry.** `bp_solver`'s P1d asserts
+✅ **This WITHDRAWS the sign correction this section used to carry.** `calibration/messages/variance.py`'s
+`graft_premise_logvar` (P1d) asserts
 `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, a LOWER bound, and that is **right**: the measured ratio of
 **1.103** (no nascent) and **1.049** (with) is `1 + (1−s)(k−1)` with `k` the frame gap above and `s` the
 nascent share of the exon's RNA — the nascent arm is measured in the exon's own frame and dilutes it,
@@ -602,7 +623,13 @@ equal-length panel is *structurally* blind to it (`TRAPS: an-equal-length-panel-
 
 ⚠ **That blindness is a PRICE THE LADDER PAYS ON PURPOSE, not an argument for giving it a length gap**
 (§3.1): a gap lets the EM assign on length alone and bypass the phase the ladder exists to exercise. The
-gapped `flgap` pair is where this bias is measured; the ladder is where calibration is measured.
+gapped `flgap` pair is where this bias **was** measured; the ladder is where calibration is measured.
+⛔ **Both `flgap` panels were DELETED on 2026-08-13, so nothing on disk can measure this bias today, and
+on 2026-08-17 their configs and the two instruments that read them went too** (`prior_yardstick.py`,
+`flgap_study_cache.py` — dark since the panels went, and neither could be repointed at the ladder because
+the whole premise is a DRAINED oracle, which the ladder refuses). ⛔ **Re-measuring therefore means
+DESIGNING a length-gap panel, not restoring one**, and the paragraph above is the argument it has to
+answer first. ⚠ This is a statement about what is reproducible, not a licence to give the ladder a gap.
 
 ⚠⚠ **THE SECOND BOUNDARY IS EXACT PER BOUNDARY AND NOT AT A LOCUS, AND THE GAP IS LARGE ENOUGH TO MIS-SIZE A
 CORRECTION** (measured 2026-08-08, `tests/calibration/test_prior_units.py`). `share_pooled` cancels from
@@ -626,7 +653,13 @@ is added** — and a per-locus factor derived from this ratio would be wrong by 
 ASSEMBLER'S WHOLE RESIDUAL, AND THERE IS NOTHING ELSE LEFT TO EXPLAIN.** With the truth masses in, the
 assembler misses the EM's own candidate count by `rel` 8.8e-4 … 0.0111; give each component its own true
 per-line share as well and that falls to **2.8e-5 … 2.0e-3** — 67 to 9,653 fragments out of 2.4–4.9 M.
-`scripts/design/prior_yardstick.py`.
+⛔ **This paragraph is the ONLY home of that verdict.** It was measured by `prior_yardstick.py`, which was
+deleted on 2026-08-17 along with the `flgap` panels its measurement required — so nothing on disk
+reproduces these numbers, and re-deriving them means designing a drainable length-gap panel first.
+⭐ Also measured there, and recorded where it belongs: the assembler's composition claim is exact against
+the UNSPLICED pool (`DESIGN.md`, `Δphi ≤ 5e-4`); scoring it against ALL RNA units instead reads a phantom
+`+0.07…+0.10` tilt (`TRAPS: score-the-consumers-own-count`); and the prior's STRENGTH is one
+pseudo-fragment per real unspliced fragment by construction, with no knob (`DESIGN.md`).
 
 ⛔ **The predecessor of this paragraph said "25–28 % … the other ~72 % survives perfect per-component
 shares", and the 72 % did not exist.** It was scored against a per-locus count of the fragments whose
@@ -809,7 +842,7 @@ population.
 
 ⛔ Never `count(w)/A(w)` — see TRAPS: divide-by-a-probability.
 
-**4.2 The sj pool** (`calibration/junction_opportunity.py`). For a transcript with exon lengths
+**4.2 The sj pool** (`calibration/sj_opportunity.py`). For a transcript with exon lengths
 `e_1..e_K` and total `L = Σ e_i`, the starts at which a length-`w` window crosses **at least one**
 sj:
 
@@ -855,6 +888,34 @@ triangle bound `f_g ≤ 1 − |d|`.
 
 **exactly zero at κ = ½** for any count and any overdispersion, and saturating in `N` at
 `(½−κ)²/(p(1−p)·od)` — capped by dispersion, not by depth.
+
+**5.2b ⭐⭐ WHAT THE CODE ADDITIONALLY DOES — the DERIVED noise-floor DEADBAND, which §5.2 above does not
+describe.** `κ` is **fitted**, so `(2κ−1)²` is a squared point estimate and is strictly positive on a
+genuinely unstranded library. `region_init.strand_evidence` therefore does not evaluate §5.2's `I(f_g)`
+verbatim — it evaluates
+
+    N_eff  =  N / (1 + (N−1)·od_r)                          the OVERDISPERSED effective count
+    σ²_d   =  ¼·(1/N_rna + od_r)  +  ¼·(1/N_gdna + od_g)     the noise floor on κ̂
+    disc   =  4·max(0, (κ−½)² − σ²_d)                        ⭐ REPLACES  (2κ−1)² = 4(κ−½)²
+    I_strand  =  N_eff · disc · [f_g(1−f_g)]² / (4·p(1−p))
+
+⚠ `p` here is §5.1's `p = ½·f_g + κ·(1−f_g)` — written in the code as `κ + f_g·(½−κ)`, the same
+expression — and **not** §5.2's tilt form `½ + (κ−½)·d`, which is a different parametrisation. §5.2 uses
+the letter for both and this is the one place that matters.
+
+⭐ **`disc` is `(2κ−1)²` with the sampling variance of `κ̂` subtracted and floored at 0**: a κ̂ within
+`√σ²_d` of ½ is not composition signal. No constant is chosen — each half is the binomial `¼/N` plus that
+arm's fitted overdispersion — so this is the derived answer to `TRAPS: a-licence-with-no-floor` and
+`TRAPS: a-threshold-on-a-fitted-residue`, both of which refused a tuned floor.
+
+⛔⛔ **AND IT HAS ONE CONSEQUENCE §5.2's "exactly zero at κ = ½" DOES NOT COVER: a gDNA-FREE library
+switches the channel off at EVERY κ.** `N_gdna = 0` is guarded as `max(N_gdna, _EPS)` with
+`_EPS = 1e-9`, so `1/N_gdna` becomes `1e9`, `σ²_d ≈ 2.5e8`, and since `(κ−½)² ≤ ¼` always, `disc = 0`
+**even at κ = 0.99**. Measured 2026-08-17 on the 16-condition ladder: `tau_lam` is exactly **0.0 at all
+70,176 slots on all four `g00` rows**.
+⚠ **Read that as the derivation's own boundary case, not as a defect**: with no gDNA there is no
+gDNA/RNA split for strand to speak about. What it *is* is a gap in this section — §5.2 alone predicts a
+live channel on a stranded zero-gDNA library, and the code has never had one.
 
 **5.3 gDNA's strand term is ½.** Double-stranded, no sense direction. A fitted mixture marginal was
 implemented and **refuted**: the orientation discrimination is `(1−p)/p` and any *constant* for the
@@ -917,9 +978,41 @@ is a **theorem, not a bug**:
 * an object with zero composition evidence has posterior = prior;
 * ⇒ a vertex is unreachable there **in any coordinate, at any depth**.
 
+⛔⛔ **THE FIRST BULLET IS TRUE FOR PRIORS WITH A DENSITY AND IS FALSE IN GENERAL — §9a.1 states the
+premise, which was never written down and has been read across this project as "no prior can reach the
+vertex".** The theorem is kept; what changes is that "irreducible" turns out to be a property of the prior
+FAMILY. Read §9a.1 before quoting the bullets or a vertex ceiling.
+
 ⭐ The empirical companion says the estimator is honest rather than merely stuck: measured per object,
 `|f_g − truth| / sd(f_g)` has median **z = 0.5–0.6** on both simplex vertices, so every wrong answer sits
 inside its own 1σ with a variance that is if anything conservative.
+
+⛔⛔ **THE COMPANION IS SCOPED TO THE STRANDED CASE, AND AT `κ = ½` IT MAKES NO PREDICTION AT ALL**
+(measured 2026-08-17). "Inside its own 1σ" carries an implied RATE: `sd(f_g)` shrinks like `n^(−1/2)`, so
+the vertex shortfall should shrink with depth at the same rate. That rate is bought by the strand
+channel, and §5.2 says the channel is identically zero at `κ = ½`. Measured, the shortfall's **log-log
+slope against depth**:
+
+| `κ` | slope | window it was measured on |
+|---|---|---|
+| the stranded arm | **−0.5221** | `n ≤ 50` fragments/slot |
+| the real unstranded fit, `κ = 0.500369` | **−0.0000 in every decade** | 5.4 decades, 1.0 → 263,621 fragments/slot |
+
+⭐ So `n^(−1/2)` is the **STRANDED** reading, and on unstranded data the shortfall is **depth-independent**:
+there is no rate to quote and no depth at which it closes.
+⛔ **Do not quote an `n^(−1/2)` shrinkage on an unstranded stratum, and do not read a flat shortfall there
+as a regression.**
+
+⚠⚠ **THE TWO ROWS ARE NOT ONE ARM SWEPT OVER `κ`, SO READ THE MEASUREMENT AND NOT AN ATTRIBUTION.** The
+stranded row reproduces a clause that was established by DRIVING the solver on a synthetic pure-gDNA
+object; the unstranded row is the shipped pipeline with the fitted landscape LIVE. More than one thing
+differs between them. ⛔ In particular *"no strand channel ⇒ posterior = prior"* does **not** follow from
+`κ = ½` on its own: `region_init.build_region_init` SUMS `τ_λ` over sources and
+`density_deconv.density_factor_precision` is a second one — zero in the prior-free pass-0 the conclusion
+below is about, and non-zero once a `λ`-factor is passed. **The depth-independence is measured; what
+causes it is not settled here.**
+⚠ The `κ = 0.500369` above is one fit on one panel; `SUCCESS.md` records **0.500689** from a different
+run, and the point is the *order of magnitude of `κ̂ − ½`*, never either digit.
 ⛔ **Therefore the ceiling a vertex-pinning arm measures is the value of MISSING INFORMATION, not headroom
 for a fix** — `scripts/design/vertex_ceiling.py` prices it and its docstring carries the number. ⛔ And
 "fit a prior to fix it" is circular: pass-0 must stay prior-free, because its purpose is to produce the
@@ -927,6 +1020,46 @@ substrate a prior is fitted ON. ⭐ The defect worth hunting is in the **confide
 which is a different set of objects.
 ⚠ The one channel that could have supplied vertex evidence is closed independently: a certified-RNA count
 of zero is consistent with `f_g = 1` too, gated by `tests/calibration/test_certified_rna_licence.py`.
+
+### 9a.1 ⛔⛔⛔ THE PROOF NEEDS A CONTINUOUS CDF, AND A SPIKE-AND-SLAB HAS AN ATOM (2026-08-17)
+
+⭐⭐ **THE THEOREM ABOVE IS KEPT AND IS CORRECT. WHAT IS ADDED IS ITS PREMISE.** The argument for *every
+proper prior on `[0,1]` has a median strictly inside `(0,1)`* runs through the CDF: `F` is **continuous**
+and **strictly increasing** on `(0,1)`, so `F(x) = ½` has a solution there and that solution is the
+median. ⛔ **Both of those are properties of a DENSITY, not of properness.** For a general proper prior the
+median is the quantile
+
+    median  =  inf { x : F(x) ≥ ½ }
+
+and an ATOM at `x₀` carrying mass `π ≥ ½` makes that infimum exactly `x₀`: `F` *jumps* across ½ at a single
+point and there is nothing to solve. Three consequences, and the third is the one that matters:
+
+* a **Beta** — §9c's family, atom-free, `F` continuous and strictly increasing — **cannot** put its median
+  at `f_g = 0` or `f_g = 1`, at any strength, in any coordinate, ever. The bullets above hold verbatim;
+* a **spike-and-slab** (§9d.4) is a proper prior on the same interval and **can**, whenever its spike
+  carries at least half the mass;
+* **no theorem is violated** — the premise simply does not hold for the second family.
+
+⛔⛔ **THEREFORE "the value of MISSING INFORMATION", AND THE RECORDED READING THAT ABOUT THREE QUARTERS OF
+THE VERTEX SHORTFALL IS IRREDUCIBLE, ARE STATEMENTS ABOUT THE PRIOR FAMILY AND NOT ABOUT THE DATA.**
+`scripts/design/vertex_ceiling.py` prices the shortfall under the family the tree ships, which is the right
+thing to price and is not headroom *within* that family — but a family with an atom moves the ceiling
+itself, so **do not quote the shortfall as a property of the evidence.**
+
+⛔ **This is not a licence to widen a bound, to soften the reference, or to fit a prior at pass-0** — all
+three are refused above and stay refused. **The atom has to be EARNED**: §9d.4's spike is *located by a
+measurement* (the off-target anchors, available before any solve) and is exactly `ρ_0 = 0` at the `g00`
+zero control, which is why it reaches the vertex there rather than being placed there. An atom asserted
+without a measurement behind it is the `m = σ(L)` mistake of §9c.1 in a new coordinate.
+
+⭐⭐ **AND THE TWO SCOPES NOW ON THIS SECTION READ TOGETHER RATHER THAN COMPETING — they narrow different
+things.** The `n^(−1/2)` companion is scoped to the STRANDED case: a statement about EVIDENCE and the rate
+at which depth buys it. This one is scoped to priors with a DENSITY: a statement about the PRIOR. They meet
+at the object that has neither — on unstranded data the shortfall is depth-independent (log-log slope
+**−0.0000** over 5.4 decades, above), so posterior = prior there and **the prior family is the only thing
+left that can reach a vertex**. ⛔ Neither scope licenses the other's claim: more depth still buys nothing
+at `κ = ½`, and an atom still buys nothing where evidence exists, because it is worth one
+pseudo-observation (§9c.1) and is swamped exactly as the Beta location is.
 
 ---
 
@@ -983,7 +1116,12 @@ arbitrates the contested intronic fragment when it is strong enough.
 ⚠ `alpha = 0` is the correct null but a blunt instrument: it cannot distinguish a nascent entity with
 real intronic support from one with none. The successor is a per-transcript allocation of the RNA prior.
 
-### 9c. ⭐⭐ THE PRIOR IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT — the weights are the design
+### 9b.1 ⭐⭐ THE PRIOR IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT — the weights are the design
+
+⚠ **This subsection was numbered `9c` until 2026-08-17, which collided with the ψ-reference `§9c` below —
+two different sections carried one number, so a citation could not say which it meant.** It is renumbered
+`9b.1` because it is a property of `§9b`'s rule and nothing else changed; `§9c` now means the Beta
+reference alone, which is the sense `DESIGN.md` §6b and `ROADMAP.md` cite.
 
 The rule above is habitually described as "multiplicative, hence neutral on the within-RNA split". That
 is a description of one CHOICE OF WEIGHTS, not of a different kind of update. Writing `A` for
@@ -1120,6 +1258,217 @@ saturates at the COUNT ceiling: **τ = 0.029 and τ = 1e6 both return 850.44 aga
 Only `τ > 0` does any work, so feeding a prior in is a BOOLEAN gate flip that releases the whole count
 precision — and, carrying no count, it does so at empty slots too (`n = 0` ⇒ `prec_g` 0 → `1/ψ'(½)` =
 0.2026). `TRAPS: a-priors-curvature-is-not-the-datas-information`.
+
+## 9d. ⭐⭐⭐ THE REFERENCE UNDER HYBRID CAPTURE — `ρ_g = ρ_0·ε`, AND WHY A PROBE PANEL MAKES `p(ε)` SPIKE-AND-SLAB
+
+⛔ **STATUS, SO NOBODY GREPS FOR IT: THIS IS A DERIVATION AHEAD OF THE TREE.** Nothing in `src/` builds the
+mixture below; what ships is §9c's Beta with §9c.1's strength and the structural per-object location
+(`DESIGN.md` §6b.1). Everything here is derived, its three limits are checked, and every parameter it
+needs is measurable off the shipped payload before any solve runs.
+
+§9c gives the reference a per-object MEAN, `m_i = ρ_g,i·E_g,i / M_i`, and §9c.1 its strength.
+⭐⭐ **EVERY TERM IN `m_i` IS EXACTLY KNOWN PER OBJECT EXCEPT `ρ_g,i`**, so the whole of the remaining work
+is one question — *what is the gDNA density at THIS object?* This section answers it and changes nothing
+else: the mean's form, the strength, the closed-end clamp (§9c.1) and the Jacobian ruling (§9c.2) all carry
+over unchanged.
+
+### 9d.1 ⛔⛔ AN EXON'S `ρ_g` IS NOT MEASURABLE — SO IT IS IMPUTED FROM NEIGHBOURS, AND THAT IS MESSAGE PASSING
+
+gDNA is genomically continuous (AXIOM 0), so its density is **directly measurable exactly where no mature
+transcript crosses**: intergenic REGIONs, intron REGIONs, and the BOUNDARIES against them (`exon|intron`,
+`exon|intergenic`) — the `¬mrna_active` population, `DESIGN.md` §6b. At an EXON the unspliced mass is
+`gDNA + unspliced RNA`, which **is the quantity being solved for**, so
+
+    an exon's ρ_g cannot be measured at the exon — at any depth, in any coordinate
+
+and the only remaining source is the objects either side of it along the chain:
+
+    intron REGION  ↔  intron|exon BOUNDARY  ↔  exon REGION  ↔  exon|intron BOUNDARY  ↔  intron REGION
+
+    intron REGION         deconvolve            → gDNA + unspliced RNA
+    intron|exon BOUNDARY  unspliced             → gDNA + unspliced RNA ;  SPLICED → certified RNA
+    exon REGION           the TARGET            → gDNA + RNA, unmeasurable alone
+
+⛔⛔⛔ **IMPUTING A QUANTITY AT ONE OBJECT FROM ITS NEIGHBOURS ALONG A CHAIN IS MESSAGE PASSING, AND THERE
+IS NO SECOND MECHANISM.** Any scheme that gives an exon a gDNA level from the objects around it *is* a
+message, whatever it is called; re-deriving it under a new name is this project's most repeated wasted
+turn. ⭐ **The mechanism is already BUILT**: `messages/head.py`'s GRAFT is exactly the
+BOUNDARY → EXON hop — only an EXON receives it; what it carries is a MEASUREMENT (a COUNT) and not an
+imputation; it carries its own precision; its transfer variance is 0; and it is deliberately not `τ`-gated, so it
+survives unstranded data where the strand channel is dead (§5.2). It sits behind
+`CalibrationConfig.message_propagation = False`.
+⚠ **The recorded price of switching it on is not evidence about the fixed relay**: it was measured with a
+named, confirmed defect live — the composition licence checks transcript TERMINI (`terminus_flank_gain`)
+and **not** `mrna_active` flipping, which is precisely the predicate saying the RNA population differs
+across an exon↔intron hop, so a correct pure-gDNA claim is transported into the adjacent exon and drives it
+to a confident wrong vertex (strict xfail,
+`tests/calibration/test_structural_reference.py`) — and on the retired 36-condition ladder. **Re-price;
+never inherit.**
+⭐ **What this section supplies is the DISTRIBUTION the imputation is over, not a new transport.**
+
+### 9d.2 ⛔⛔ WHY BOTH OBVIOUS IMPUTATIONS FAIL UNDER CAPTURE — the field is neither smooth nor scalar
+
+Off capture the gDNA field is near-uniform, so *any* imputation works. Under capture it is a per-EXON,
+nonlinear, **arbitrary** function of which probes the panel happens to contain. Measured on the
+16-condition ladder at `g98 ss0.99` (2026-08-17), the four anchor classes:
+
+| | intergenic REGION | intron REGION | `exon\|intergenic` | `exon\|intron` | span |
+|---|---|---|---|---|---|
+| capture OFF | 0.100521 | 0.100452 | 0.098343 | 0.098391 | **1.0×** |
+| capture ON | 0.00418 | 0.00422 | 0.510 | 0.478 | **122×** |
+
+All three imputations available before a solve therefore fail (16-condition ladder,
+stranded × capture-ON, ratio to a `base` re-recorded in the same session, 2026-08-17):
+
+| imputation | stranded × capture-ON | capture-OFF |
+|---|---|---|
+| a POOLED scalar reference | **3.90× WORSE** | — |
+| the NEAREST anchor rung | 1.27× worse | — |
+| LOCAL — `density_model.region_gdna_density` | 1.50× worse | **0.4037–0.4977, much BETTER than base** |
+
+⭐ **The last row is the whole difficulty in one line: the same local form is the best thing available off
+capture and a regression on it.** A single functional form cannot serve both, which is what forces a
+MIXTURE rather than a better point estimate.
+
+⚠ **And the anchor ladder is not a clean ladder.** Rungs 2 and 3 are PARTIALLY enriched — probes overlap
+exons, and a fragment crossing an `exon|intron` BOUNDARY only partially overlaps a probe — so the in-gene
+anchor under-reads a true exon's gDNA density by **2.6–3.6×**. It is a DETECTOR of enrichment, not a
+calibrated level of it (`DESIGN.md` §6b.1).
+
+⛔ **AND THE CAPTURE MODEL ALREADY IN THE TREE CANNOT BE BORROWED TO CLOSE THIS.**
+`transcript_capture_eff_lengths(calibration: CalibrationResult, …)` consumes a **solved**
+`CalibrationResult`, so using it to supply `ρ_g,i` to the reference that precedes the solve is circular.
+
+### 9d.3 ⭐⭐⭐ THE TWO BOUNDS ON AN EXON — both from neighbours, off §3b's conserved identity
+
+Write `M_i` for the object's conserved UNSPLICED mass (§3b's bank, which sums to ONE per fragment),
+`E_g,i` / `E_r,i` for its two opportunities, `ρ_anchor,i` for the gDNA density measured at the adjacent
+`exon|intron` flank, and `S` for the certified SPLICED count at the adjacent BOUNDARY — a spliced fragment
+cannot be gDNA (AXIOM 0), so it is certified RNA and needs no deconvolution. §3b's conserved bank gives
+each component's expected mass as `ρ_c·E_c`, and the RNA component's mass splits over exactly the two banks
+it can land in:
+
+    ρ_r·E_r  =  unspliced_RNA  +  S            ← §3b's conserved identity; SPLICED is a SEPARATE bank
+
+⛔ **So `S` SUBTRACTS inside the RNA term rather than bounding `f_g` on its own.** `f_g ≤ 1 − S/M` is a
+different statement and it is FALSE — a first draft wrote it and the origin-split truth violated it.
+
+⚠⚠ **`E_r,i` IN THAT IDENTITY IS THE RNA's TOTAL CROSSING OPPORTUNITY — BOTH BANKS — AND IT IS NOT THE
+`E_r` INSIDE §9c's `m_i`, WHICH IS THE UNSPLICED ONE.** The two differ by exactly `S`, and `f_g` is the
+UNSPLICED fraction everywhere in this file; carrying one symbol for both is
+`TRAPS: two-masks-one-name` committed in a derivation. ⭐ The algebra below is self-consistent in the
+total-opportunity sense and lands back on the unspliced `f_g` exactly — that is what the `− S` does.
+⚠ **And `ρ_r` is ONE ADJACENT BOUNDARY's own count, never a pooled RNA density**: `DESIGN.md` §6b's ruling
+that RNA is the residual and is never predicted stands unweakened, and §6b carries the scope for the
+capture case.
+
+**LOWER — from the flank, because enrichment is MONOTONE in probe proximity.** The adjacent `exon|intron`
+BOUNDARY sits at the EDGE of the probe footprint and the exon interior sits inside it, so `ρ_anchor,i` is a
+lower bound on the exon's own `ρ_g,i` (this is the same 2.6–3.6× under-read of §9d.2, used in the one
+direction it is sound). The gDNA mass is at least `ρ_anchor,i·E_g,i`, hence
+
+    f_g  ≥  ρ_anchor,i · E_g,i / M_i
+
+**UPPER — from the adjacent BOUNDARY's SPLICE-JUNCTION FLUX.** The unspliced pool is
+`M_i = gDNA + unspliced_RNA`; substituting the conserved identity for `unspliced_RNA` gives
+
+    f_g  =  1 − (ρ_r·E_r,i − S) / M_i          exact, if ρ_r were the exon's own true RNA density
+
+The junction flux measures the RNA that actually splices through ONE adjacent junction, which is a SUBSET
+of the transcripts crossing the exon, so it UNDER-states `ρ_r` and the equality relaxes to
+
+    f_g  ≤  1 − (ρ_r·E_r,i − S) / M_i
+
+Measured, mass-weighted over exon REGIONs against the origin-split oracle (16-condition ladder,
+2026-08-17), the UPPER bound only:
+
+| condition | true `f_g` | upper bound | mass in violation |
+|---|---|---|---|
+| `g00 ss0.50` off | 0.0000 | 0.6039 | **0.0 %** |
+| `g50 ss0.50` off | 0.0627 | 0.6150 | 5.6 % |
+| `g98 ss0.99` off | 0.7672 | 0.8332 | 19.5 % |
+| `g50 ss0.99` ON | 0.5220 | 0.8272 | 9.8 % |
+| `g98 ss0.99` ON | 0.9817 | **0.9918** | 4.6 % |
+
+⭐⭐ **The bound is LOOSE where RNA is abundant and TIGHT where RNA is scarce**, which is the right way
+round: it is worth most exactly where the composition question is hardest. At `g98 ss0.99` capture-ON the
+endpoint ALONE carries an error of **0.0170** against the neutral ½'s **0.4817**.
+
+⛔⛔ **IT IS A SUPPORT CONSTRAINT, NOT AN ESTIMATE** (`TRAPS: an-upper-bound-is-not-an-estimate`, measured
+while refusing the soft-min per-transcript weight). It says where the answer CAN be; reading an endpoint as
+the answer is the refused move, and the nonzero violation mass above is the honest record that both
+premises — monotone probe proximity, and the junction being a subset — are not universal. ⭐ **The two are
+COMPLEMENTARY**: the lower bound is tight at low `f_g` and fails under capture, the upper is tight at high
+`f_g` under capture. A bound with a measured violation rate is a support with a tail, which is exactly what
+the slab below is.
+
+### 9d.4 ⭐⭐⭐ THE MIXTURE — an ATOM plus a SLAB, and NO NEW CONSTANT
+
+Decompose the object's gDNA density into an un-enriched level and an enrichment,
+
+    ρ_g,i  =  ρ_0 · ε_i ,        ε_i ≥ 1
+
+A probe panel is a FINITE LIST of targets, so `ε` is not a smooth field with a scale: an exon is either in
+the panel or it is not. **Unprobed ⇒ `ε = 1` exactly** — the same molecules, no pull-down — which is a
+POINT MASS, not a narrow density. **Probed ⇒ `ε` is a large factor** set by probe count, overlap and
+efficiency, about which the object itself says almost nothing — a broad SLAB. ⭐ **That is the physical
+structure of a capture panel, not an analogy**, and it is what the 122× span and the partially-enriched
+middle rungs of §9d.2 look like when read as a distribution rather than as a field. Hence, on `log ρ_g`:
+
+    p(log ρ_g,i)  =  π · N( log ρ_0 , σ_0² )  +  (1 − π) · Unif[ log ρ_anchor,i , log ρ_max,i ]
+
+    ρ_max,i  =  ( M_i − (ρ_r·E_r,i − S) ) / E_g,i    ← §9d.3's UPPER bound, in density coordinates
+             →  M_i / E_g,i                          ← where no adjacent junction supplies ρ_r:
+                                                       f_g = 1, the structural cap
+
+⛔ **THE SLAB'S UPPER ENDPOINT IS §9d.3's BOUND, AND THE STRUCTURAL CAP IS ITS DEGENERATE CASE — the two
+are not the same number and this is where it is reconciled.** *"An object cannot hold more gDNA than the
+mass it holds"* gives `ρ_g ≤ M_i/E_g,i`, i.e. `f_g ≤ 1`, which is the endpoint whenever no adjacent
+junction supplies `ρ_r`; where one does, §9d.3's flux term subtracts the RNA it proves is there and the
+endpoint is strictly tighter. ⚠ **`DESIGN.md` §0c.3's table names this endpoint *"the object's OWN total
+density"* while its own limit ③ quotes `0.9918` rather than `1.0000` — those are the two cases above, and
+the ruling should say which it means.** Limit ③ below is the flux case.
+
+| term | where it comes from | why it is not a new constant |
+|---|---|---|
+| `ρ_0` | the OFF-TARGET anchors — intergenic + intron REGIONs | MEASURED exactly, before any solve; the `¬mrna_active` population of §9d.1 |
+| `σ_0²` | the same anchors' own spread | an empirical second moment of a measured population |
+| slab LOWER | §9d.3's monotone flank bound `ρ_anchor,i` | derived from the geometry, per object |
+| slab UPPER | §9d.3's upper bound `ρ_max,i` — the object's own total density LESS the RNA the adjacent junction proves is there, degenerating to that total density where there is no flux to subtract | structural at both ends: **an object cannot hold more gDNA than the mass it holds**, and the flux term is a NEIGHBOUR's own count (§9d.3) |
+| the slab's SHAPE | uniform on `log ρ` | the scale-invariant (Jeffreys) prior for a positive RATE restricted to a known interval — the same ignorance statement §9 already makes with `c = ½`, written in the coordinate a rate has |
+| `π`, the UNPROBED fraction | at pass-0, nothing has been observed about the probe indicator, and the reference's own Jeffreys exponents (`a = b = _JEFFREYS_REF`) give a symmetric Beta with mean and median **½** | the SAME convention §9c.1 uses to fix the strength — and `π` is MEASURABLE rather than assumed: the ratio of the off-target anchor to the in-gene one IS the enrichment (**0.98** without probes, **113–114** with, `DESIGN.md` §6b.1), so where probes exist it is read off the data, and where a panel's target list is supplied it is COUNTED |
+
+**THE THREE LIMITS, each checked.**
+
+**① capture-OFF ⇒ the shipped form, exactly.** The measured anchor ratio is **0.98**: `ε = 1` within
+measurement, so there is no enriched population for the slab to describe, `π → 1`, and the mixture IS the
+spike — a single measured density, which is the capture-OFF reference §9c and `DESIGN.md` §6b.1 already
+validate. ⭐ This is the *"a strict generalisation agreeing with the shipped constant exactly where its
+assumption is true"* property §9c's (i) demands of any reference term, met **by construction
+rather than by tuning**.
+
+**② `g00`, the ZERO-gDNA control ⇒ the vertex.** The anchors measure `ρ_0 = 0`, and the flank bound is 0
+as well, so the spike and the slab's lower endpoint COINCIDE at 0. ⭐ `m` is a MEDIAN (§9c's (iv)) and a
+median commutes with the monotone map `ρ_g ↦ ρ_g·E_g,i/M_i`, so §9a.1's atom argument carries from
+`log ρ_g` to `f_g` unchanged: at the pass-0 `π = ½`, and at every `π > ½`, the median IS the atom and
+`m_i → 0`. ⛔ **It is NOT "whatever `π` is", and that overstatement was in a draft of this section**: the
+slab still spans up to `ρ_max,i` — 0.6039 in `f_g` at this very condition (§9d.3's table) — so a MINORITY
+spike does not reach the vertex. That is §9a.1's `π ≥ ½` condition restated, not an extra assumption.
+⛔ This is the limit that makes §9a.1 concrete: the reachable vertex is reached **because a measurement put
+the atom there**, not because a family was chosen for its reach.
+⚠ **AND IT IS THE ONE PLACE THE COORDINATE BREAKS**: `log ρ` is undefined at `ρ = 0`, so at the zero
+control the slab must be taken in `ρ` rather than `log ρ`, or its endpoint clamped exactly as §9c.1 clamps
+the location (`TRAPS: a-clamp-at-the-closed-end-escapes-the-window`). The LIMIT is well defined — both
+components sit at 0 — the log coordinate is not.
+
+**③ `g98` capture-ON ⇒ the slab's upper endpoint is informative on its own.** It reads **0.9918** against a
+truth of **0.9817** (§9d.3's table), i.e. the support alone already excludes the neutral ½.
+
+⛔ **WHAT THIS SECTION DOES NOT CHANGE, so it is not re-opened as a side effect.** §9c.1's strength is
+untouched: a location is worth ONE pseudo-observation (`log 3` nats, overturned by 1.46 fragments at
+`κ = 0.99`), atom or no atom, and it is swamped wherever evidence exists. §9c.2 still forbids the location
+from entering `τ_λ` (`TRAPS: a-priors-curvature-is-not-the-datas-information`). And §9d.1's transport
+question is separate from this section's distribution question — deriving one does not settle the other.
 
 ## 10. The second pass's score
 

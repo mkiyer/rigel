@@ -387,7 +387,7 @@ def _drain_side_buffer(
     the whole's already-drawn choices inside each partition — which needs the choices, the undrained
     whole they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside
     this function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and
-    drift (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` / ``region_sweep(_capture=)``, and
+    drift (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` / ``solve_chain(_capture=)``, and
     inert in production, where nobody passes it. ⚠ An empty side buffer leaves ``_lift`` UNTOUCHED — the
     early return below is the "nothing was drained" signal on this path too.
     """

@@ -12,7 +12,9 @@ means without a lookup, and it is still one greppable string with one home.
 
 ⚠ **The numbers were not merely opaque, they were AMBIGUOUS, and that is what forced this.** Measured
 across the tree, `A1` meant a validation trap here *and* the FIDELITY criterion in `SUCCESS.md`; `C1` meant
-a pool trap here *and* a moment variable in `length_likelihood.py`; and **`G1` meant "no magic numbers"
+a pool trap here *and* a moment variable in the length quadrature — then in `length_likelihood.py`, a module
+PURGED at `b7ed7a0b`, the moments being mis-filed rather than dead: they live in `effective_length.py`,
+which is where `tests/test_no_jargon_labels.py` scopes the `C1` exemption today; and **`G1` meant "no magic numbers"
 here and "a structurally pure-gDNA object" in the solver — 201 occurrences, and a reader could not tell
 which.** That is this file's own `TRAPS: two-masks-one-name` committed by the labelling scheme.
 
@@ -36,17 +38,30 @@ here that reads like a status report is a bug in this file.
 **36-condition** gDNA ladder it predates that panel's rebuild to **16 conditions** (2026-08-13); it is kept
 as a historical record rather than restated, because a lesson does not expire with its panel. Anything you
 need as *current* comes from `ROADMAP.md`, never from a number in this file.
+⛔ **The same stamp covers the `flgap_short` / `flgap_long` pair, which was DELETED in that same rebuild.**
+Every flgap number below is a historical record and **cannot be re-run by anything on disk**: the panels
+went on 2026-08-13, and their configs, their study cache and the two instruments that read them went on
+2026-08-17. ⚠ Re-deriving one means DESIGNING a length-gap panel, not restoring a deleted file — and
+`EQUATIONS.md` §3b is the argument any such design has to answer first.
 
 ---
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **132 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **137 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-17 AND THE INDEX IS COMPLETE: 132 entries, 132 bodies, and BOTH set differences
+⭐⭐ **RE-DERIVED 2026-08-17 AND THE INDEX IS COMPLETE: 137 entries, 137 bodies, and BOTH set differences
 print empty.** (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
-simplex-closure work added three more.)
+simplex-closure work added three more; 132/132 before the doc audit below added one; 133/133 before the
+message-passing lock-down added four — two to §D and two to §A.)
+⛔⛔ **AND THE +1 IS ITS OWN LESSON: `a-green-suite-hid-five-dead-instruments` HAD A NAME, FOUR CITATIONS
+AND NO BODY.** `CLAUDE.md` and three instruments (`vertex_ceiling.py`, `toy_harness.py`,
+`toy_trace_error.py`) cited it as `TRAPS: a-green-suite-hid-five-dead-instruments` while its text lived
+only in `CLAUDE.md`'s prose — so the rule had two homes, one of which was not this file, and the citation
+led nowhere. ⭐ **The set-difference derivation above cannot see that**, because it compares this file
+against itself; a dangling citation is found only by grepping `TRAPS: ` across the tree and checking each
+name resolves here.
 ⛔⛔ **The "120 index entries against 125 rule BODIES" this paragraph used to record was a COUNTING
 ARTEFACT, not a gap — and that is the sharper lesson.** The body count came from matching `**<token>.` at
 the start of a line, which also matches a bolded NUMBER where prose wraps: `**64.5 % of transcript
@@ -76,7 +91,14 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `byte-identity-gate` — A bit-identity gate has lied in both directions.
 - `the-deliverable-is-not-reproducible-by-default` — THE SHIPPED PIPELINE DOES NOT REPRODUCE ITSELF, SO AN END-TO-END A/B ON
 - `a-clip-hides-a-scale-error` — A min() clip hid an exact factor of 2 for months.
+- `an-inverted-clip-is-a-constant` — a two-endpoint clip is silently a CONSTANT both when lo > hi and when
+  lo == hi — and at a zero control that constant is the right answer, testing nothing.
 - `an-ablation-that-never-ran` — AN ABLATION THAT NEVER RAN READS AS "NO EFFECT", AND TWO IMPORT HABITS MAKE THAT EASY.
+- `an-inert-arm-reads-as-a-refutation` — ⭐⭐ AN INERT ABLATION READS "NO EFFECT"; AN INERT PROTOTYPE READS
+  "YOUR IDEA DOES NOT WORK", AND THAT KILLS A DESIGN DIRECTION. Assert the patch target, count the firings,
+  BEFORE any number is read.
+- `a-green-suite-hid-five-dead-instruments` — AN INSTRUMENT DIES WHEN THE TREE MOVES UNDER IT, AND A GREEN
+  SUITE SAYS NOTHING. Two mechanisms so far: a `src/` DELETION, and a CONFIG DEFAULT FLIP.
 - `a-zero-count-is-a-measurement` — A ZERO COUNT IS A MEASUREMENT OF A DENSITY, NOT AN ABSENCE OF DATA — AND KEYING PRECISION
 - `a-ratio-cannot-carry-zero` — THE RELAY'S CURRENCY IS A DENSITY RATIO, AND ZERO IS NOT IN THE MULTIPLICATIVE GROUP —
 - `the-divergence-was-a-barrier` — THE DIVERGENCE WAS DOING A SECOND JOB, AND REMOVING IT TURNED A RELAY BARRIER INTO A
@@ -106,7 +128,7 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `zero-target-guards-are-one-sided` — A zero-target guard is ONE-SIDED.
 - `hard-labels-miss-soft-change` — Hard-label metrics are nearly blind to soft changes.
 - `never-pool-the-strata` — THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE WAYS.
-- `a-threshold-on-a-fitted-residue` — A BINARY REGION_BOUND ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
+- `a-threshold-on-a-fitted-residue` — A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
 - `excluding-a-population-hides-it` — EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
 - `name-the-observable-per-site` — IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
 - `starved-is-not-depleted` — "STARVED" AND "DEPLETED" ARE NOT THE SAME DIAGNOSIS.
@@ -158,6 +180,14 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 
 **Estimation and solver design**
 
+- `we-keep-re-deriving-message-passing` — ⭐⭐⭐ **READ THIS ONE FIRST.** THREE OR FOUR sessions have
+  re-derived message passing from scratch. *The tell:* you are reasoning about how an EXON gets its gDNA level and
+  have not yet said the words. An exon's level cannot be measured — only imputed from neighbours — and
+  imputation across the chain IS message passing. Carries the four STALE beliefs that keep sending
+  sessions back to the start, and a pointer to the one home of the derivation.
+- `one-hop-lifted-out-is-still-the-relay` — ⭐⭐ Lifting one hop out of `messages/` because it carries a
+  MEASUREMENT rather than a BELIEF does not make it something else. A private copy of a framework you
+  switched off is not a way to avoid the switch — fix the framework's known bug and re-price.
 - `a-variance-cannot-fix-a-bias` — You cannot fix a biased mode with a variance.
 - `two-gaussians-one-latent` — Never hand a solver two Gaussians built from one latent.
 - `variance-fitted-on-the-belief` — Never fit a variance on the current, not-yet-solved belief.
@@ -361,6 +391,22 @@ catch exactly this — passed with the bug present. *Lessons:* a clip can hide a
 test; repair fixtures, never relax assertions; **an exact algebraic 2 is never a modelling
 approximation.**
 
+**an-inverted-clip-is-a-constant. ⛔ A TWO-ENDPOINT CLIP HAS TWO SILENT DEGENERACIES AND BOTH TURN THE
+ESTIMATOR INTO A CONSTANT — AND AT A ZERO CONTROL THAT CONSTANT IS THE RIGHT ANSWER.** **(a)**
+`np.clip(m, lo, hi)` with `lo > hi` returns `hi`, with no warning and no error — verified directly.
+**(b)** `lo == hi` returns that one value, which is not a defect in `np.clip` at all and is the harder of
+the two to see. Measured 2026-08-17 while pricing an anchor-derived bound on an exon's `f_g`: at the `g00`
+(zero-gDNA) condition **every anchor density is 0**, both endpoints collapse onto 0, and the arm asserts
+`f_g = 0` unconditionally — the answer is right, and the zero control is testing nothing. ⭐ *The rule:*
+**a zero control passed by a degenerate estimator may not be quoted as evidence that the estimator
+DISCRIMINATES.** ⛔ *And the guard has to be the right one:* `assert lo <= hi` catches form (a) and
+**PASSES form (b), which is the one that actually happened** — so the check that bites is to require the
+SAME estimator to **MOVE at a contaminated condition** before either number is read, and to report the
+interval's WIDTH at the control beside its verdict, because a zero-width interval is the tell. ⚠ Siblings,
+each a different way the same thing hides: `TRAPS: a-clip-hides-a-scale-error` (a clip hiding a scale),
+`TRAPS: an-all-zero-factor-is-inert`, `TRAPS: a-single-level-panel-cannot-see-a-constant` (a panel that
+cannot tell a good estimator from a constant).
+
 **an-ablation-that-never-ran. AN ABLATION THAT NEVER RAN READS AS "NO EFFECT", AND TWO IMPORT HABITS MAKE THAT EASY.** An arm
 deleting a whole channel scored **byte-identical on every class of every condition** — a clean, publishable
 "this channel is inert". It was inert only because the monkeypatch missed the module that binds the name
@@ -393,6 +439,52 @@ under both policies and requires INERT under one and MOVED under the other.
 warning and no diff — the files still parsed, still carried every row, and still scored. The setting is now
 stamped into every row, which is `TRAPS: a-hash-that-misses-its-artifact` in its second form: **the artifact
 must carry its own key.**
+
+**an-inert-arm-reads-as-a-refutation. ⛔⛔ AN ABLATION THAT NEVER RAN READS AS "NO EFFECT"; A *PROTOTYPE*
+ARM THAT NEVER RAN READS AS "YOUR IDEA DOES NOT WORK" — AND THAT ONE KILLS A DESIGN DIRECTION.** Same
+mechanism as the rule above, strictly worse consequence, and it cost real measurements on 2026-08-17: three
+arms testing a new exon reference were driven by `import rigel.calibration.calibrate as CAL` and
+`CAL.solve_chain = ...`. `rigel/calibration/__init__.py` does `from .calibrate import calibrate`, so that
+name binds the **FUNCTION**, not the module, and the patch set an attribute nothing reads. A **314-second**
+run reported *all three arms byte-identical* — which reads as a clean, publishable NEGATIVE rather than as
+an error, and it was believed.
+⛔ **This is `TRAPS: an-ablation-that-never-ran` in a new costume, and its (i) records this EXACT import
+from 2026-08-07** — so the mechanism and its fix (`sys.modules["rigel.calibration.calibrate"]`) live there
+and are deliberately not repeated here. ⚠ Note what that means: the rule was already written, already
+named, already cited, and the mistake was made anyway. A rule a reader has to remember is not a guard.
+⭐ *What is new is the ORDER, and it is the rule:* **a monkeypatch arm ASSERTS ITS TARGET EXISTS and COUNTS
+ITS OWN FIRINGS before any number is read** — not after the run, not when a result looks odd; a zero-firing
+arm raises instead of scoring. ⚠ *Why the order matters more here than for an ablation:* an inert ABLATION
+at least looks suspicious, because "no effect" invites a check. An inert PROTOTYPE looks like the negative
+result you were braced for, and nobody audits a confirmation.
+
+**a-green-suite-hid-five-dead-instruments. ⛔⛔ AN INSTRUMENT DIES WHEN THE TREE MOVES UNDER IT, AND A
+GREEN SUITE SAYS NOTHING — BECAUSE NOTHING CHECKED THAT A SCRIPT STILL IMPORTS.** `tests/test_scripts_index.py`
+checked only that a script was INDEXED and had a DOCSTRING, both true of a file that raises on line 1.
+⭐ *The name records the FIRST mechanism, a `src/` DELETION:* `94d283c0` deleted the fixed-point layer
+(`INV_LENGTH_SCALE`, `inv_length_quantum`) and killed three instruments, `0d9d422b` deleted
+`enrichment_frame` and killed one, and one more died on `_component_node_arrays` — **five**, all found at
+once. ⭐ *The rule as first written:* an import gate, and **run the suite after a `src/` deletion**.
+
+⛔⛔ **AND IT RECURRED ON 2026-08-17 THROUGH A MECHANISM THAT RULE DOES NOT COVER: A CONFIG DEFAULT FLIP,
+WITH NOTHING DELETED AND NOTHING RENAMED.** The diagnostic key `_uni` is written **only** by
+`messages/head.py` — i.e. only under `HeadPolicy` — and `CalibrationConfig.message_propagation` ships
+`False`, which installs `SilentPolicy`. **Six more instruments** were dead: five raised
+`KeyError: '_uni'` and `reframe_walk.py` raised `KeyError: 'rho_lo'`, another HeadPolicy-only capture.
+⛔ **The import gate cannot see any of it** — every one of those files imports perfectly; they die on the
+first read of a key the shipped configuration never writes. ⛔⛔ **And the suite stays green for a reason
+worth stating on its own: the TEST readers install the policy THEMSELVES.**
+`tests/calibration/test_gdna_scale_rule.py` binds `functools.partial(solve_chain, policy=HeadPolicy())`
+and says why (its assertions would be vacuous otherwise) — so the tests exercise a configuration the
+instruments do not, and no gate spans the gap. ⚠ A seventh, `psi_channel_ablation.py`, was found dead in
+a way **no** config revives.
+
+⭐ *The rule, extended:* **an instrument is alive only under the configuration it is RUN in, and a shipped
+default is part of that configuration.** Run the instruments — not the suite — after a `src/` deletion,
+after a rename, **and after flipping any shipped default**, because a default decides which diagnostic
+keys exist at all. ⚠ Same family as `TRAPS: an-ablation-that-never-ran`'s third form (*"the config is part
+of the arm's definition"*), one layer out: there a live arm could not move a number, here a whole
+instrument cannot start.
 
 **compatibility-is-geometry-not-composition. ⛔⛔ A PREDICATE BUILT FROM WHAT A FRAGMENT IS COMPATIBLE
 WITH CANNOT SEPARATE RNA FROM gDNA — BECAUSE COMPATIBILITY IS GEOMETRY, AND gDNA IS COMPATIBLE WITH
@@ -468,7 +560,7 @@ logvar_tot[dst] + logvar_tot[src]`` no longer being ``∞``. Reverting only that
 "before" column **to the fragment** (295,453 and 304,815), and a from-git pre-fix tree agrees to 0.17 %.
 ⭐⭐ **The mechanism is not the zero-count SOURCE, it is every hop that TOUCHES a zero-mass slot.**
 ``1/(1/p + ∞) = 0`` annihilated messages in both directions, so ``_fuse`` fell back to the destination's own
-belief and **the chain was region bound into segments at every empty slot**. Under capture the off-probe gaps between
+belief and **the chain was cut into segments at every empty slot**. Under capture the off-probe gaps between
 probe islands ARE the zero-mass slots, so a gDNA level now travels between capture strata that were
 isolated — and it crosses UNSCALED, because ``framed`` needs ``ρ_tot > 0`` at both ends and forces ``r = 1``.
 ⛔ Muting every zero-mass emitter recovers **1.2–7.7 %**; restoring the barrier recovers **100 %**. So it is
@@ -588,7 +680,7 @@ dominated by the intergenic anchors and hands every exon the off-probe floor, 34
 **before repeating a source comment as a finding, check what the comment was written to justify** — and
 never let a term of art cross from a code comment into a design doc without re-deriving it from the code.
 ⭐ **Settled by construction 2026-08-07:** the backbone's `_scan` is now literally `for i in seq: step(s, i)`
-over one direction, called twice, so "one forward pass and one backward pass" is readable in six boundaries
+over one direction, called twice, so "one forward pass and one backward pass" is readable in six lines
 instead of inferred from a 1,635-line function — and the word is gone from the tree.
 Same family as TRAPS: two-docstrings-one-quantity, one layer up: there, two docstrings disagreed about one quantity; here, a docstring
 and a document agreed on a word that meant different things in each.
@@ -698,7 +790,7 @@ pooled total is mostly a report on the one stratum 0.8.0 does not ship, and an a
 by the wrong number. ⚠ This is not the same objection as (ii): there the pooled mean *hid* a real signal,
 here it faithfully reports a quantity nobody is optimising.
 
-**a-threshold-on-a-fitted-residue. A BINARY REGION_BOUND ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
+**a-threshold-on-a-fitted-residue. A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
 NOT THE FIX.** `τ > 1e-9` promoted objects whose own statement was 1,377 nats wide into the scored
 population, hiding a 1.06 M-fragment error. ⛔ A floor was implemented and refuted: τ is continuous across
 the region, so any floor is a tuned constant. ⭐ The honest repair is to propagate the fitted parameter's
@@ -973,8 +1065,8 @@ of 0.5000). ⛔ *The lesson on top of the lesson:* **a documented trap does not 
 of the same field.** The columns not summing to the library was the tell, and it was visible on the
 first render.
 
-⛔ **The tell, and it is available before any measurement: write down which boundary of the consumer reads
-the number.** If that boundary's population is a different set than the truth arm's population, the arm is
+⛔ **The tell, and it is available before any measurement: write down which LINE of the consumer reads
+the number.** If that line's population is a different set than the truth arm's population, the arm is
 measuring the difference between the two sets and calling it error. Here the consumer was one C++
 function and the answer took one grep. ⚠ Provenance is not the check — `F` had the best provenance
 available and was still the wrong quantity; "exact" was a claim about the *bank*, not about the *target*.
@@ -1016,7 +1108,7 @@ the length marginal by the same opportunity, so the factor cancels exactly. ⭐ 
 effect in a simulated substrate, read the simulator's own sampling code — not the docstring, the code.**
 
 **frame-free-is-not-assumption-free. ⭐⭐⭐ A TERM THAT IS FRAME-FREE IS NOT THEREFORE ASSUMPTION-FREE — LOOK AT THE NUISANCE YOU
-PROFILED OUT, NOT ONLY AT THE DIVISOR THAT CANCELLED.** `edge_spliced` is certified RNA, so the obvious
+PROFILED OUT, NOT ONLY AT THE DIVISOR THAT CANCELLED.** `boundary_spliced` is certified RNA, so the obvious
 move is a coefficient `S` on ψ's RNA arm: `E[S] = c·(1−f_g)·M`, and every opportunity ratio lives in `c`,
 which multiplies the MEAN and is therefore an additive constant in log space. That reasoning is correct —
 TRAPS: two-divisors-opposite-sign's opposite-sign trap is structurally absent, neither divisor reaches the retained term — and it is
@@ -1143,7 +1235,7 @@ INTEGRAL, or the non-integer observable returns and the count stops being a coun
 twice, and credit a boundary it never crossed, with total mass still exactly 1.0.
 
 ⭐⭐ **AND IT IS FAR WORSE THAN "a defect can slip through": AN ENTIRE ALTERNATIVE RULE CONSERVES.**
-Measured 2026-08-08 while landing `edge_unspliced_mass`. The shipped deposit shares a slice's
+Measured 2026-08-08 while landing `boundary_unspliced_mass`. The shipped deposit shares a slice's
 `slice_len / L` between the boundaries that bound it; the `1/K` rule an earlier design draft proposed gives
 every crossed boundary an equal `1/K`. **Both sum to exactly one per fragment.** Injecting `1/K` into the
 specification left *every* conservation gate green — both per-fragment laws, the exhaustiveness sum over
@@ -1226,6 +1318,76 @@ conversion was *untested* until a perturbation said so (`TRAPS: perturb-every-ga
 ---
 
 ## D. Estimation and solver design
+
+**we-keep-re-deriving-message-passing. ⭐⭐⭐ THREE OR FOUR SEPARATE SESSIONS HAVE INDEPENDENTLY RE-DERIVED
+MESSAGE PASSING FROM SCRATCH, EACH TAKING MANY TURNS TO REACH THE SAME ENDPOINT, AND THE OWNER HAS HAD TO
+EXPLAIN IT EVERY TIME** (the owner's own count, 2026-08-17; `DESIGN.md`'s message-passing section quotes
+him). It is the most expensive recurring cost in this project, and it is not a
+modelling error — nobody reasoned wrongly, everybody was slow. ⛔ **This entry exists so that arriving is
+CHEAP; it deliberately does not contain the derivation.**
+
+⭐⭐ *The tell, and a rule without a tell does not fire:* **you are reasoning about how an EXON gets its
+gDNA level — from anchors, a ladder of rungs, a pooled reference, local imputation, run-fill, a throttle or
+a bound — and you have not yet written the words "message passing".** Stop there. You are already inside
+it, and the rest of this entry is what you were about to spend the session re-deriving.
+
+⭐ *The endpoint, in two lines, so you can recognise having ARRIVED instead of re-deriving:* gDNA is
+directly measurable ONLY where no mature transcript crosses — intergenic REGIONs, intron REGIONs, and the
+BOUNDARIES against them. An EXON's unspliced mass is gDNA + RNA, which is the unknown itself, so an exon's
+gDNA level **cannot be measured** and must be IMPUTED FROM ITS NEIGHBOURS along
+`intron REGION ↔ intron|exon BOUNDARY ↔ exon REGION`. **Imputation across that chain IS message passing.**
+
+⛔ *Where the settled derivation lives — ONE home each, and do not open a second:* the ruling is in
+`DESIGN.md`, under the heading **"CALIBRATION IS MESSAGE PASSING, AND THE EXON IS WHY"**, and the maths in
+`EQUATIONS.md` (both 2026-08-17). Find them with
+**`grep -in 'message passing' docs/DESIGN.md docs/EQUATIONS.md`** rather than by section number: those two
+files number by INSERTION (§3b, §6b, §9c are all inserts), so a section number quoted from here goes stale,
+and this file has already been burned by exactly that.
+
+⛔⛔ *And the reason a session re-derives rather than reads: FOUR stale beliefs, each of which reads as
+"message passing was considered and rejected".* None is a reason to start over, and each is corrected in
+one line:
+- *"the relay was measured bad, so it is off"* — the **+154.8 %** price was measured with a NAMED,
+  CONFIRMED bug live and on the **36-condition** ladder retired 2026-08-13. The bug: the composition
+  licence knows about transcript TERMINI (`terminus_flank_gain`) and not about `mrna_active` flipping,
+  which is the predicate that says the RNA population DIFFERS across an exon↔intron hop — so a correct
+  pure-gDNA claim is relayed across a population change. It is a strict xfail in
+  `tests/calibration/test_structural_reference.py`. ⛔ **Re-price, never inherit**
+  (`TRAPS: re-record-the-baseline`).
+- *"the mechanism does not exist yet"* — it is BUILT and switched off. `messages/head.py`'s GRAFT
+  (BOUNDARY → EXON) is exactly the sj-flux hop: only an EXON receives it, it carries a COUNT rather than
+  an imputed belief, it has its own precision, and it is deliberately NOT tau-gated, so it survives
+  unstranded data where the strand channel is dead. The switch is
+  `CalibrationConfig.message_propagation = False`.
+- *"a simplex vertex is unreachable, so most of the shortfall is irreducible"* — that theorem requires the
+  prior to have a DENSITY, and it is correct and untouched FOR THAT FAMILY. It says nothing about a prior
+  with an ATOM. `EQUATIONS.md`'s vertex section carries the scope; read it before quoting "irreducible".
+- *"an exon can surely just borrow a density from somewhere"* — priced 2026-08-17 on stranded ×
+  capture-ON, against `base`: a POOLED scalar reference **3.90× WORSE**, a NEAREST-RUNG one **1.27×**, a
+  LOCALLY IMPUTED one **1.50×** — while that same local form is **0.4037–0.4977** (much BETTER than base)
+  at capture-OFF. Hybrid-capture enrichment is PER EXON and arbitrary — it depends which probes the panel
+  contains — and the anchors under-read a true exon by **2.6–3.6×**. ⛔ `capture_eff_length` cannot rescue
+  it either: `transcript_capture_eff_lengths` takes a `CalibrationResult`, so it REQUIRES an
+  already-solved system. ⚠ These five numbers are the RULING's, summarised here only so the shortcut reads
+  as CLOSED; the anchor-ladder table beside them is their one home, and if the two ever disagree the ruling
+  wins.
+
+**one-hop-lifted-out-is-still-the-relay. ⛔⛔ LIFTING ONE HOP OUT OF `messages/` DOES NOT MAKE IT SOMETHING
+OTHER THAN MESSAGE PASSING — PROPOSED THREE TIMES IN ONE SESSION** (2026-08-17). Each time the argument was
+that the hop carries a MEASUREMENT — a count, an sj flux, a measured density — rather than a BELIEF, and so
+"is not the relay". ⛔ *Owner's correction:* **it is message passing regardless of what it carries.** A
+value computed at one object and consumed at another is a message; the payload's type is not the
+definition, and "it is only one hop" is not either.
+
+⭐ *The tell:* you are about to write a private copy of a mechanism that already exists behind a switch, and
+the sentence justifying it begins *"this isn't really the relay, because…"*.
+
+⭐ *The rule:* **rebuilding a private copy of a framework you have switched off is not a way of avoiding the
+switch.** It is a second home for one mechanism, with none of the framework's licences, precisions, damping
+or gates, and `TRAPS: converge-and-delete` forbids it. **The honest move is to fix the framework's KNOWN bug
+and RE-PRICE it** — named in `TRAPS: we-keep-re-deriving-message-passing` above. ⚠ It is also the cheaper
+move: the hop being reached for is usually already implemented (the GRAFT), so the private copy is a
+re-implementation rather than a new capability.
 
 **a-variance-cannot-fix-a-bias. You cannot fix a biased mode with a variance.** Established three times independently. Under
 capture a counting estimate was systematically ~2× low but PRECISE — both flanking boundaries sat at the same
@@ -1493,24 +1655,27 @@ a flag fix rewrote every boundary file while leaving every region file byte-iden
 verify CLEAN. **Never store a derived hash beside the data it describes; compute it on demand.**
 
 ⚠ **A SECOND FORM, and it is the one you build deliberately: AN EXCLUSION FROM A KEY IS A CLAIM ABOUT
-WHAT IS STORED.** Measured 2026-08-08 on `scripts/design/flgap_study_cache.py`, whose docstring says
-`priors.py` is *deliberately* outside the key "so that editing the assembler does not invalidate a
+WHAT IS STORED.** Measured 2026-08-08 on a study cache for the `flgap` pair, whose docstring said
+`priors.py` was *deliberately* outside the key "so that editing the assembler does not invalidate a
 5-minute scan" — a genuinely good decision that is sound only while nothing `priors.py` produces is in
 the blob. Two things were: the assembled `p_arm` and the projected `f_gdna`. So an assembler edit served
 a **fresh O beside a stale P and F**, and the comparison between them — the whole point of the cache —
-was meaningless, with the key still reading `ok`.
+was meaningless, with the key still reading `ok`. ⚠ That cache and its one consumer were deleted on
+2026-08-17 with the panels they read, so this paragraph is the lesson's only home; the rule is about
+CACHE KEYS, not about that file.
 
-⭐ **The repair is not a better key, it is to store the INPUTS and derive at read time.** The blob now
-holds `cal`, `multi_loci`, the truth masses/shares and the raw per-region start counts; P, O, S and F
-are all assembled on load, so they are always the same assembler. ⛔ And the two files that *produce*
-the stored truth (`_oracle.py`, `prior_vs_oracle.py`) were missing from the key entirely, as was the
-builder itself — a build that starts storing a new artifact must invalidate the blobs that lack it.
+⭐ **The repair is not a better key, it is to store the INPUTS and derive at read time.** The blob was
+changed to hold `cal`, `multi_loci`, the truth masses/shares and the raw per-region start counts, with
+P, O, S and F all assembled on load, so they were always the same assembler. ⛔ And the two files that
+*produced* the stored truth (`_oracle.py`, `prior_vs_oracle.py`) were missing from the key entirely, as
+was the builder itself — a build that starts storing a new artifact must invalidate the blobs that lack
+it.
 
 ⛔ **The tell: read the key's exclusion list as a sentence.** "This file is excluded *because* nothing it
 makes is stored here" is checkable in one grep; "excluded because the loop is faster" is not a reason,
 it is the cost of one. ⚠ And a stored artifact that is a PURE FUNCTION of stored inputs should carry a
-build-time byte-identity gate proving the read-time derivation reproduces the production call
-(`_gate_p_is_recomputable`), otherwise dropping it from the blob is an unproven claim.
+build-time byte-identity gate proving the read-time derivation reproduces the production call, otherwise
+dropping it from the blob is an unproven claim.
 
 ⚠ **A THIRD FORM, IN A DATACLASS, WITH NO CACHE ANYWHERE: A STORED FIELD SURVIVES
 `dataclasses.replace`.** An oracle arm builds itself by swapping a `CalibrationResult`'s mass and count
@@ -1638,7 +1803,7 @@ three-quantities rule applies to ANY term entering a normalised sum and is why t
 
 **a-pooled-conversion-applied-per-component. ⛔ A RATIO MEASURED ON THE POOLED POPULATION AND APPLIED TO
 EACH COMPONENT SEPARATELY IS POPULATION-BLIND — AND THE BLINDNESS NEED NOT BE THE AXIS YOU EXPECT.**
-Measured 2026-08-10, `edge_q_population.py`.
+Measured 2026-08-10, `boundary_q_population.py`.
 
 `assemble_priors` converts a boundary's crossing INCIDENCE to a FRAGMENT count with `q = mass/count`, measured
 per boundary on the whole population and applied to the gDNA and RNA parts separately. `q` is an explicit
@@ -1673,7 +1838,7 @@ per-fragment truth: gDNA `1.000x` deposited, RNA `0.747x`. The asymmetry names i
 splice — and the repair followed in one step.
 
 ⛔ **The second half of the trap: a docstring had already promised the missing accounting existed.**
-`edge_spliced_mass` said a block with no interior boundary has *"their accounting on the sj axis"* —
+`boundary_spliced_mass` said a block with no interior boundary has *"their accounting on the sj axis"* —
 and there was no `sj_mass`, so nothing kept the promise. **A cross-reference to a bank is not evidence the
 bank exists.** Same family as TRAPS: two-docstrings-one-quantity: prose that describes an intended design reads
 as prose that describes the code.

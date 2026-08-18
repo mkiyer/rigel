@@ -29,12 +29,18 @@ Contents:
   ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
 * `RegionStatics` / `build_region_statics` — the static per-slot solver inputs (per-strand counts, masks).
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
-* `_region_region_type` — per-slot coarse region type (intergenic/intron/exon), shared with the prior
-  subsystem and `gdna_density_prior`.
+* `_region_region_type` — per-slot coarse region type (intergenic/intron/exon), a thin re-keying of
+  `signature.coarse_type_array`. ⛔ **It has NO caller today — inside this package or outside it** (grep,
+  2026-08-17). This line claimed it was *"shared with the prior subsystem and ``gdna_density_prior``"*;
+  the sharing is `coarse_type_array`'s, and `gdna_density_prior` is a module DELETED at `9b0f7419` whose
+  successor is `landscape`. Retiring the helper is a source change and is left to the owner.
 
-Layering: LAYER 3. Imports only `region_chain`, `signature`, `effective_length`, `simplex_logodds`
-and `splice_graph` (all lower layers) — never `sweep` or `gdna_density_prior`, so it sits cleanly
-below both. ⚠ `splice_graph` is imported for the four TERMINUS FLAG BITS alone, which
+Layering: LAYER 3. It imports DOWN to `region_chain` and `signature` (0), `splice_graph` (1) and
+`effective_length` (2), and SIDEWAYS to `simplex_logodds` (3) — never `sweep` (layer 6) or `landscape`
+(layer 5), so it sits cleanly below both. ⚠ This line read "(all lower layers)" until 2026-08-17, which
+is wrong about `simplex_logodds`: `_layers` puts it in layer 3 beside this module, so that import is
+sideways, which its own rule (down or sideways, never up) allows. ⚠ `splice_graph` is imported for the
+four TERMINUS FLAG BITS alone, which
 :func:`terminus_flank_gain` has to know the meaning of; the module already carried the flags array
 through `RegionStatics` without knowing what any bit meant.
 """
@@ -401,7 +407,13 @@ def region_total_density(geometry: RegionGeometry, f_g):
 class RegionBelief:
     """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED
     mass + its per-component posterior variance in LOG-FRACTION space, `(var_pos, var_neg, var_gdna)` =
-    **`Var(log f_c)`, NOT `Var(f_c)`**. All length ``n_regions``.
+    **`Var(log f_c)`, NOT `Var(f_c)`**. All length ``n_slots``.
+
+    ⚠ **The first axis is the unified region+boundary CHAIN, not the region axis.** This line said
+    ``n_regions`` until 2026-08-17, while its own first sentence already said "on the chain" and its last
+    one already said a BOUNDARY has one composition: :func:`init_beliefs` builds every array from
+    ``geometry.unspliced_count``, which is ``float64[n_slots, 2]``. The same defect
+    `region_init.RegionInit` and `landscape.DensityLandscape.logprior` each carried and had corrected.
 
     ⚠ **The variances are log-space** — grid moments of `log f_c` over the λ lattice
     (`simplex_logodds._solve_regions_logodds`), matching the log-density message currency. They are therefore

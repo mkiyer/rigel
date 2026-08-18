@@ -22,8 +22,11 @@ sources below:
    (``τ_λ = 0 ⇒ Var(log f) = ∞ ⇒ p = 0``), left for the sweep + population prior to resolve.
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
-Layer: imports only lower layers (`region_geometry`, `simplex_logodds`, `density_deconv`), never
-`sweep`, so it sits cleanly beneath the backbone that consumes :func:`build_region_init`.
+Layer: LAYER 6. It imports DOWN to `region_chain` (0), `region_geometry` and `simplex_logodds` (3) and
+`density_deconv` (5), and SIDEWAYS to `messages/variance` (6, for ``count_logvar``) — never `sweep`, so it
+sits cleanly beneath the backbone that consumes :func:`build_region_init`. ⚠ This line read *"imports only
+lower layers"* and omitted `messages/variance` and `region_chain` until 2026-08-17; the sideways import is
+legal (`_layers`: down or sideways, never up) and the census re-derives the whole graph.
 """
 
 from __future__ import annotations
@@ -78,7 +81,14 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class RegionInit:
-    """The per-region message-free self-solve (length ``n_regions``) — the pass-0 relay's starting beliefs.
+    """The per-slot message-free self-solve (length ``n_slots``) — the pass-0 relay's starting beliefs.
+
+    ⚠ **The first axis is the unified region+boundary CHAIN, not the region axis.** This line said
+    ``n_regions`` until 2026-08-17: :func:`build_region_init` reads `RegionGeometry`, whose every array is
+    ``n_slots``, and a reader sizing a new array off it would have built the wrong shape — the same defect
+    `landscape.DensityLandscape.logprior` had corrected in `25e55b32` (2026-08-17); this line said
+    "2026-08-15" until the date was traced to the commit, which is `vertex_ceiling.py`'s repair and a
+    different thing.
 
     ``f_*`` are the composition MODE (strand / intron / structural-default fractions). ``rho_*`` are the own
     per-component DENSITIES ``ρ_c = f_c·M_region/E_c`` (the message currency; a killed / count-free component is
@@ -318,23 +328,27 @@ def build_region_init(
     v_log_fg, v_log_fr = own_composition_logvar(fg_loc, tau_lam, struct_lock)
 
     # ⭐⭐ THE LOCATION IS UNCHANGED AND THAT IS DELIBERATE — only the PRECISION was ever broken.
-    # ⛔⛔ **AND THE IDENTITY THIS COMMENT USED TO CLAIM IS FALSE — MEASURED 2026-08-17.** It read
-    #    *"``rho_c = f_c*M/E_c`` keeps the composition identity ``sum_c rho_c*E_c = M`` exactly"*. The
-    #    THREE-component form below uses ``f_pos``/``f_neg``, and ψ's composition DOES NOT CLOSE:
-    #    ``f_g`` is the posterior MEDIAN while ``f_pos + f_neg`` is ``1 − E[f_g]``, the posterior MEAN,
-    #    so ``SUM = 1 + median − mean`` — the skew — and therefore
-    #
-    #        sum_c rho_c*E_c  =  M * SUM ,   off by up to 9.5 % on a three-slot toy.
-    #
-    #    ⭐ The TWO-component statement in `region_geometry.region_rna_geometry` is a DIFFERENT claim and
-    #    is still true: it pairs ``f_g`` with ``1 − f_g``, which close by construction — which is also why
-    #    the published masses (`sweep`'s ``f_g*count`` / ``(1-f_g)*count``) conserve fragments exactly and
-    #    this defect reaches NEITHER them, NOR the EM prior, NOR `derive`.
-    #    ⚠ ``rho_pos``/``rho_neg`` have exactly one production consumer, `messages/head.py`, and
-    #    `message_propagation` is OFF — so this is dormant today and goes live with a per-transcript prior
-    #    reading composition per object (`sweep`'s own note at the boundary projection).
-    #    ⭐ The repair is to estimate the PARAMETERS and map: ``λ → f_g``, RNA total ``:= 1 − f_g``,
-    #    ``θ →`` the tilt SHARE. Closure is then structural. `ROADMAP.md` carries the ranking.
+    # ⭐⭐ **``sum_c rho_c*E_c = M`` HOLDS, AND IT HOLDS STRUCTURALLY — the defect this comment described
+    #    was REPAIRED in the same commit that described it (`4f0472d3`), and the description outlived it
+    #    by one commit.** The historical statement, kept because it names the mechanism: ``f_g`` was the
+    #    posterior MEDIAN while ``f_pos + f_neg`` was ``1 − E[f_g]``, the posterior MEAN, so
+    #    ``SUM = 1 + median − mean`` — exactly the posterior's skew (verified to 5.8e-15 on both ψ paths)
+    #    — and ``sum_c rho_c*E_c = M * SUM``, off by up to 9.5 % on a three-slot toy, with only 74.7 % of
+    #    REGIONs and 77.2 % of BOUNDARYs closing on a real condition.
+    #    ⭐ The repair was to estimate the PARAMETERS and map (`simplex_logodds._compose`): ``λ → f_g``,
+    #    RNA total ``:= 1 − f_g``, ``θ →`` the tilt SHARE, with the ½-quantile taken CONTINUOUSLY on the
+    #    λ lattice so the derived RNA total does not inherit a snap. Closure stopped being something to
+    #    check and became something that cannot fail — measured 100.00 % of published objects closing on
+    #    both axes, every annotation class, every condition, min/p5/p95 all exactly 1.0000.
+    #    ⚠ Read the scope with it, which `tests/calibration/test_composition_closes.py` states in its own
+    #    gates: closure is over SOLVED slots. A zero-count slot publishes ``(0, 0, 0)`` — no data rather
+    #    than a composition — and the `locked` slots below take the signature-binary belief instead.
+    #    ⭐ The TWO-component statement in `region_geometry.region_rna_geometry` was always the DIFFERENT
+    #    and still-true claim: it pairs ``f_g`` with ``1 − f_g``, which close by construction — which is
+    #    also why the published masses (`sweep`'s ``f_g*count`` / ``(1-f_g)*count``) conserved fragments
+    #    exactly and the defect never reached them, NOR the EM prior, NOR `derive`.
+    #    ⚠ ``rho_pos``/``rho_neg`` still have exactly one production consumer, `messages/head.py`, and
+    #    `message_propagation` is OFF, so that pair is dormant today either way.
     #    ⚠ What the relay's mass pin enforces is a different frame (`region_total_density`); and the
     #    relay fuses in LINEAR density space
     #    (the scan's inverse-variance fuse), so ``rho = 0`` is perfectly expressible. A zero density was never the
