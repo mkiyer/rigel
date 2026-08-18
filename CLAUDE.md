@@ -97,7 +97,7 @@ error is attributable to density and strand". ⛔ The actual reason: **the EM AL
 FRAGMENT-LENGTH DISTRIBUTION.** A large gDNA-vs-RNA length difference lets the EM assign fragments on
 **LENGTH ALONE**, bypassing calibration entirely and **MASKING bugs in it**. Equal lengths **FORCE** the
 calibration phase to be exercised. What calibration then has is strand and density — plus belief
-propagation across objects, which is currently off (see MESSAGE PROPAGATION IS OFF BY DEFAULT, below).
+propagation across objects, ON since 2026-08-18 (see MESSAGE PROPAGATION IS ON, below).
 
 ⭐ **SCENARIOS ARE CACHED, and that is a scope requirement rather than a convenience**: calibration must
 re-run in seconds off a cached scan, so `panel.py cache` / `build_scan_cache.py` come before any
@@ -183,42 +183,35 @@ sibling with no import boundary**: 14 were measured on 2026-08-07 and **6 were g
 claiming four consumers that had one. A layer is *not* a claim that its modules are the right SIZE — layer 4
 is five modules for one concept — and that question is deliberately still open.
 
-## ⛔⛔⛔ MESSAGE PROPAGATION IS OFF BY DEFAULT
+## ⭐⭐⭐ MESSAGE PROPAGATION IS ON — and the relay is under ACTIVE PER-BUG REPAIR
 
-`CalibrationConfig.message_propagation = False` (owner, 2026-08-07) installs `messages.silent.SilentPolicy`
-— ψ carries each slot's OWN evidence alone. ⭐ A measurement put it there: muting the relay is a net
-improvement on **three of the four strata** (−58.3 % / −43.7 % / −32.1 %, and 16/16 on the two stranded
-ones). ⛔ **The price is large and concentrated**: +154.8 % on unstranded × capture-ON, and on zero-gDNA
-golden scenarios the false-positive gDNA mass goes up ~1,900–3,100×.
+`CalibrationConfig.message_propagation = True` (owner, 2026-08-18), after ~11 days muted. ⛔ **The
+2026-08-07 mute and its −58/−44/−32/+155 % table are HISTORY, not the current state** — measured with a
+confirmed licence bug live, on a panel retired 2026-08-13. The current standing, re-priced on the
+32-condition nascent-bearing ladder against certified truth (`relay_pool_ab.py`, 2026-08-18):
 
-⭐⭐ **THE THREE STRATA THE MUTE IMPROVES ARE EXACTLY 0.8.0'S THREE IN-SCOPE STRATA, and the one it hurts
-is the DEFERRED one** — so the shipped `off` is aligned with the scope rather than in tension with it.
-⚠ That stratum carried **73 % of the panel's error** when this was measured, on the retired 36-condition
-ladder; on the 16-condition rebuild it is **64.5 % of transcript error and 90 % of gene-level error**
-(2026-08-13/14). The number moved; the concentration did not.
+* ⭐ the relay is a **large win** on unstranded × capture-ON (0.31× vs muted) and at every zero-gDNA
+  control (0.04–0.45×), and it is what solves a slot with NO own evidence at all;
+* ⛔ it still **costs the three IN-SCOPE contaminated strata ~1.5–1.65× vs muted** — down from ~2.0×
+  before the per-strand licence landed, and closing bug by bug.
 
-⚠ **This is still a STUDY configuration, not a shipping one**, and it stays down until the tool is
-optimised end to end across all scenarios (owner, 2026-08-10). Turning it back on is one config flag, and
-every operator inside `HeadPolicy` is still behind its own named switch.
+⭐⭐ **THE DISSECTION LOOP IS THE METHOD AND IT HAS CONVERTED THREE MYSTERIES INTO MECHANISMS IN ONE
+DAY**: the sliver-dominated background wall (fixed — the Gamma(Σg+½, ΣE) posterior), and the reframe's
+composition smuggling at termini (fixed — the PER-STRAND population licence, `rna_level_scale`:
+population intact on both strands ⇒ reframe by `r`; this strand intact, other changed ⇒ `r = 1`, a
+DENSITY transfer; this strand changed ⇒ NO CLAIM, value and precisions zeroed). Owner's ruling: a
+boundary where the RNA populations differ — TSS/TES on either strand, strand-activity changes — may
+transfer a DENSITY, never a composition.
 
-⛔⛔ **AND THE ONE EXIT THIS PARAGRAPH USED TO NAME IS BOTH MEASURED-BAD AND OUT OF SCOPE — DO NOT REACH
-FOR IT.** It used to say the exit was to give an AMBIG slot its own composition evidence from a
-fragment-LENGTH likelihood, "the only θ-independent channel". That channel was A/B'd for the first time on
-2026-08-10: on the flgap pair it was better on 7 of 8 conditions and appeared to resolve the blindness
-(0.0324 → 0.5222 against a truth of 0.507) — and on the `g00` ZERO-gDNA control it reported **54–57 % gDNA
-in a library containing none**. It returns a near-CONSTANT ~0.5, and the flgap panel was all `g50`
-(`TRAPS: a-single-level-panel-cannot-see-a-constant`). ⛔⛔ **On top of that measurement, the owner has
-DEFERRED the length channel as a calibration composition channel until AFTER 0.8.0 (2026-08-14): it is not
-a candidate — do not propose it, do not rank it, do not list it** (see THE 0.8.0 SCOPE above, which also
-names the three unrelated things called "length"). ⚠ It is **not** in `src/` — the prototype module was
-purged the same day it was priced (`b7ed7a0b`, 2026-08-10), so there is nothing to remove and this is a
-scope ruling rather than a deletion. ⭐ The measurement is kept, not deleted, and its homes are permanent
-ones: `TRAPS.md` carries the numbers (`a-single-level-panel-cannot-see-a-constant`,
-`a-linear-likelihood-emits-a-sign`, `amplitude-fades-influence-does-not`) and `EQUATIONS.md` §3d–§3e the
-derivation, which says in its own words that deleting them again is the wrong move. ⚠ `ROADMAP.md`'s
-copy went with the 2026-08-14 compaction — it is not a changelog. ⭐ **If an exit exists, it comes out of the 0.8.0 calibration work** — `ROADMAP.md`'s ranked
-list — and not from here.
+⛔ **THE OPEN FRONT IS THE ZERO CONTROLS**: the per-strand licence improved every stratum vs the
+pre-licence relay EXCEPT `g00` (154 k → 431 k false-positive fragments, worst at `g00 nrna_mid
+capture_on`). ⚠ Part of what it removed was the SELF-CONFIRMING ECHO — an `r`-scaled delivery of the
+destination's own total, which at a zero-gDNA library is coincidentally always "right" (any RNA-favoring
+message is). Whether an honest channel was also silenced (the graft where a terminus and an sj share a
+boundary) is the named next dissection. `docs/dev/NEXT_SESSION_relay_licence_v2.md` is the handoff.
 
+⚠ The owner intends a VOCABULARY RENAME of the message layer (`graft`/`peel`/`pin` are obscure) as a
+dedicated future effort — keep the current names until it runs (`TRAPS: two-masks-one-name`).
 ## ⛔⛔ CITE A RULE BY ITS NAME. NUMBERED LABELS ARE BANNED
 
 `TRAPS.md`'s rules used to be `A16`, `D4j`, `C0b`. They are **named**: cite them as
@@ -282,9 +275,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,518 passing, 0 SKIPPED, 9 xfail, 3,527 collected**
-(re-derived 2026-08-18 after the Gamma-posterior background fix, the relay default flip, the nascent
-panel axis and the certified-oracle tooling landed). **Any failure at all is a regression** — a
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,521 passing, 0 SKIPPED, 9 xfail, 3,530 collected**
+(re-derived 2026-08-18, second commit: the PER-STRAND population licence). ⚠ The `+3` over 3,527 is the
+three-case licence contract's unit gates in `test_gdna_scale_rule.py`, re-derived with
+`pytest --collect-only -q | grep gdna_scale`; the licence work's golden moves were 1e-6–6e-4 relative,
+read before regenerating. **Any failure at all is a regression** — a
 stronger and cheaper rule than counting expected ones.
 
 ⚠ **It read 3,501 / 10 xfail / 3,511 collected before that, and every move is ACCOUNTED, not

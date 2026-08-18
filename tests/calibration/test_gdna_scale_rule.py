@@ -348,3 +348,96 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
     assert np.abs(np.log(np.maximum(r[un], 1e-300))).max() > 1.0, (
         f"the fixture's r is already ~1 on every unlicensed step: {r[un]}"
     )
+
+
+# ── ⭐⭐⭐ THE RNA LEVEL LICENCE — the population licence is PER STRAND (owner, 2026-08-18) ─────────
+#
+# Found by the dissection loop on `g05 ss0.50 capture_off`, in two measured halves. ① At a TSS− boundary
+# the licence refused the hop and the gDNA level crossed unscaled — but the RNA arms were still
+# multiplied by the FULL total-density ratio, crushing a continuing + population 7x (its density barely
+# changes across the OTHER strand's terminus; the total drops because the ENDING population exits): true
+# f_g 0.0023 solved to 0.9009. ② The v1 repair — every arm unscaled at a denied hop — fixed those slots
+# and FLOODED same-strand tandem genes instead (+114,812 fragments, 52 % in ten slots flanked by
+# TES+|TSS+ pairs): where THIS strand's population changes, the source does not measure the
+# destination's population at all, and neither `r` (a self-confirming echo,
+# TRAPS: a-message-from-the-destinations-belief) nor `1` (the neighbour gene's level, unbounded) is valid.
+#
+# The rule, one decision per arm: both populations intact ⇒ reframe by r; THIS arm intact but the OTHER
+# changed ⇒ r = 1 (a DENSITY transfer); THIS arm changed ⇒ NO CLAIM — value and precisions zeroed.
+
+
+def _transport_fixture(pop_pair: bool, pop_p: bool, pop_n: bool):
+    """One hop through the vectorised `_transport` with explicit pair and per-strand licences."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from test_sweep_backbone import _ctx
+
+    from rigel.calibration.messages import NeighbourState
+
+    ctx = _ctx(free_neg=np.ones(8, bool))  # both strands admissible: the zeroing gate is not under test
+    n = ctx.n_slots
+    z = np.zeros(n)
+    own = SimpleNamespace(
+        rho_g=z, rho_pos=z, rho_neg=z, prec_g=z, prec_pos=z, prec_neg=z,
+        tau_lam=z, struct_lock=np.zeros(n, bool), f_g=np.full(n, 0.5),
+    )
+    two = np.zeros((n, 2))
+    geom = SimpleNamespace(
+        n_slots=n, unspliced_count=np.full((n, 2), 50.0), eff_gdna=np.full(n, 200.0),
+        eff_rna=np.full(n, 200.0), spliced_count=two, sj_count=two, eff_sj=np.full((n, 2), 200.0),
+        sj_count_lo=two, sj_count_hi=two, eff_sj_lo=np.full((n, 2), 200.0),
+        eff_sj_hi=np.full((n, 2), 200.0),
+    )
+    ctx = dataclasses.replace(ctx, own=own, geometry=geom)
+    relay = HeadPolicy().prepare(ctx)
+    src = np.arange(n) - 1
+    valid = src >= 0
+    src = np.clip(src, 0, n - 1)
+    rg, rp, rn = np.full(n, 0.05), np.full(n, 1.60), np.full(n, 0.80)
+    pg, pp, pn = np.full(n, 2.0), np.full(n, 3.0), np.full(n, 3.0)
+    zero = np.zeros(n)
+    nb = NeighbourState(state=(rg, rp, rn, pg, pp, pn, pg.copy(), pp.copy(), pn.copy(), zero),
+                        valid=valid, src=src)
+    out = relay._transport(
+        nb, np.full(n, 2.0), np.full(n, 10.0),  # a 5x frame step: r = 0.2 wherever framed
+        np.full(n, pop_pair), np.full(n, pop_p), np.full(n, pop_n),
+    )
+    return valid, (rg, rp, rn), out
+
+
+def test_a_terminus_on_one_strand_silences_that_arm_and_frees_the_other():
+    """⛔ A − terminus: the − arm delivers NO CLAIM (value AND precisions zero); the + arm crosses as a
+    DENSITY (r = 1, because the total ratio is corrupted by the − population's exit); the gDNA level
+    crosses unscaled (the pair licence is refused)."""
+    valid, (rg, rp, rn), out = _transport_fixture(False, True, False)
+    tg, tp, tn, tpp, tpn = out[0], out[1], out[2], out[4], out[5]
+    tmn = out[8]
+    assert np.allclose(tg[valid], rg[valid]), "gDNA level scaled on an unlicensed pair"
+    assert np.allclose(tp[valid], rp[valid]), "the intact + arm must cross as a DENSITY (r = 1)"
+    assert np.all(tn[valid] == 0.0), "the changed − arm delivered a value"
+    assert np.all(tpn[valid] == 0.0) and np.all(tmn[valid] == 0.0), (
+        "the changed − arm delivered PRECISION — a zero at live precision is the claim 'there is no "
+        "− RNA', which the source cannot make about a population it does not measure"
+    )
+    assert np.all(tpp[valid] > 0.0), "the intact + arm lost its precision"
+
+
+def test_a_terminus_on_both_strands_silences_both_arms():
+    """⛔ TSS+ and TES− at one boundary: neither RNA population crosses; both arms deliver nothing."""
+    valid, (rg, _rp, _rn), out = _transport_fixture(False, False, False)
+    tg, tp, tn, tpp, tpn = out[0], out[1], out[2], out[4], out[5]
+    assert np.allclose(tg[valid], rg[valid])
+    assert np.all(tp[valid] == 0.0) and np.all(tn[valid] == 0.0)
+    assert np.all(tpp[valid] == 0.0) and np.all(tpn[valid] == 0.0)
+
+
+def test_a_clean_hop_still_reframes_every_arm():
+    """⭐ No population change anywhere ⇒ the reframe is licensed and EVERY arm scales by r — the rule
+    must not turn the composition sharing off wholesale."""
+    valid, (rg, rp, rn), out = _transport_fixture(True, True, True)
+    tg, tp, tn = out[0], out[1], out[2]
+    r = 0.2
+    assert np.allclose(tg[valid], rg[valid] * r)
+    assert np.allclose(tp[valid], rp[valid] * r)
+    assert np.allclose(tn[valid], rn[valid] * r)

@@ -48,11 +48,11 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **137 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **138 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-17 AND THE INDEX IS COMPLETE: 137 entries, 137 bodies, and BOTH set differences
-print empty.** (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
+⭐⭐ **RE-DERIVED 2026-08-18 AND THE INDEX IS COMPLETE: 138 entries, 138 bodies, and BOTH set differences
+print empty.** (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
 simplex-closure work added three more; 132/132 before the doc audit below added one; 133/133 before the
 message-passing lock-down added four — two to §D and two to §A.)
 ⛔⛔ **AND THE +1 IS ITS OWN LESSON: `a-green-suite-hid-five-dead-instruments` HAD A NAME, FOUR CITATIONS
@@ -128,6 +128,8 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `zero-target-guards-are-one-sided` — A zero-target guard is ONE-SIDED.
 - `hard-labels-miss-soft-change` — Hard-label metrics are nearly blind to soft changes.
 - `never-pool-the-strata` — THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE WAYS.
+- `a-scorer-scoped-to-the-mechanisms-targets` — A SCORER RESTRICTED TO THE POPULATION A MECHANISM TARGETS WILL REPORT A WIN
+  THE WHOLE CHAIN REFUSES; the sign can flip. The scoped score is a diagnostic, never a verdict.
 - `a-threshold-on-a-fitted-residue` — A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
 - `excluding-a-population-hides-it` — EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
 - `name-the-observable-per-site` — IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
@@ -738,6 +740,16 @@ coupling constant; the ceiling showed a **perfect** model of it bought ~1 %, whi
 ranking was worth 21 %. An A/B tells you whether a change helped; a ceiling tells you whether the work is
 worth starting — and it is available whenever the simulator writes truth.
 *Instrument:* `scripts/design/calibration_truth_ab.py --ceiling`.
+
+**a-scorer-scoped-to-the-mechanisms-targets. ⛔⛔ A SCORER RESTRICTED TO THE POPULATION A MECHANISM TARGETS WILL REPORT A WIN
+THE WHOLE CHAIN REFUSES — and the sign can flip, not just the size.** Measured 2026-08-18: a relay arm
+scored over the step-0 QUALIFYING exons read **0.916×** (a win) on unstranded × capture-OFF while the
+same arm over EVERY live slot read **1.126×** (a loss) — the mechanism helped exactly the 9–18 % of exon
+mass it was aimed at and hurt the rest. The scoped score is the right DIAGNOSTIC (it says whether the
+mechanism does its own job) and the wrong VERDICT. This is `never-pool-the-strata`'s other axis: not
+WHICH stratum, but WHICH SLOTS WITHIN one. Every verdict-level number is over all live objects; a scoped
+number is labelled as a diagnostic or not reported.
+*Sibling:* `never-pool-the-strata`. *Instrument:* `relay_pool_ab.py` scores all live slots for this reason.
 
 **a-broad-population-carries-no-prior. ⛔⛔ A POPULATION PRIOR ONLY TRANSFERS INFORMATION IF THE POPULATION IS TIGHT.**
 The gDNA landscape works because gDNA is near-uniform: pooling genuinely tells one object the library's level.

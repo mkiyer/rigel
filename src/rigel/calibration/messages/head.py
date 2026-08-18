@@ -28,6 +28,12 @@ from dataclasses import dataclass, fields
 import numpy as np
 
 from ..region_geometry import g1_locked, region_total_density, terminus_flank_gain
+from ..splice_graph import (
+    FLAG_TES_NEG as _TES_NEG_BIT,
+    FLAG_TES_POS as _TES_POS_BIT,
+    FLAG_TSS_NEG as _TSS_NEG_BIT,
+    FLAG_TSS_POS as _TSS_POS_BIT,
+)
 from ..region_init import own_composition_logvar
 from . import NeighbourState, PsiMessage, StepContext
 from .variance import (
@@ -70,8 +76,22 @@ class HeadSwitches:
     #: of the pair. OFF ⇒ the gDNA arm is reframed like the RNA arms (``r_g = r``).
     gdna_level_scale: bool = True
     #: the POPULATION half of the composition licence — do the two objects measure the same RNA
-    #: population? OFF ⇒ granted everywhere.
+    #: population? OFF ⇒ granted everywhere. ⚠ TERMINI (TSS/TES, either strand); `strand_population`
+    #: is the other structural signature of a population change.
     terminus_population: bool = True
+    #: ⭐⭐ the SECOND population predicate (owner, 2026-08-18): a strand ADMISSIBLE on one side of a hop
+    #: and not the other is a different RNA population by construction — the structural signature of the
+    #: set the owner named ("different stranded RNAs, or transcripts starting/stopping"). OFF ⇒ only the
+    #: terminus half applies.
+    strand_population: bool = True
+    #: ⭐⭐⭐ the RNA twin of `gdna_level_scale`, and the 2026-08-18 dissection's repair: an RNA LEVEL
+    #: crosses UNSCALED where the population licence is refused. The shipped code reframed the RNA arms
+    #: by the FULL total-density ratio at every hop — at a TSS− boundary that crushed a continuing RNA
+    #: population 7x (its true density barely changes across a terminus; the total drops because the
+    #: ENDING population exits) and ψ booked the deficit as gDNA: true f_g 0.0023 solved to 0.9009.
+    #: Scaling one arm and not the other IS a composition transfer; refusing the hop must refuse it for
+    #: every arm — a DENSITY transfer. OFF ⇒ the pre-2026-08-18 behaviour.
+    rna_level_scale: bool = True
     #: the relay's mass pin ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
     #: ceiling says deleting it outright cost the panel **+0.0002** — it landed on the derivation.
     mass_pin: bool = True
@@ -195,13 +215,53 @@ class _HeadRelay:
         # BOUNDARY and the pair ``(i, left[i])`` IS the pair ``(left[i], right[left[i]])`` — so one array
         # answers it for the left-hand step of every slot and the other is that array read through
         # ``right``.
+        # ⭐ The licence is a CONJUNCTION of population predicates, each behind its own switch. A hop is
+        # licensed only if NO predicate says the two objects measure different RNA populations.
+        _pop_l_a = _vl_a.copy()
         if sw.terminus_population:
             _rgain, _lgain = terminus_flank_gain(ctx.boundary_flags)
-            _pop_l_a = np.where(is_bnd_a, ~_lgain, ~_rgain[_sl_a]) & _vl_a
-            _pop_r_a = np.where(_vr_a, _pop_l_a[_sr_a], False)
-        else:
-            _pop_l_a, _pop_r_a = _vl_a.copy(), _vr_a.copy()
+            _pop_l_a &= np.where(is_bnd_a, ~_lgain, ~_rgain[_sl_a])
+        if sw.strand_population:
+            # a strand admissible on exactly one side of the hop ⇒ different populations (owner,
+            # 2026-08-18). XOR per strand, OR over strands — a composition is a claim about the whole
+            # {gDNA, RNA+, RNA−} pair, the same OR `terminus_flank_gain` takes.
+            # ⚠ SCOPED to hops where BOTH sides admit some RNA — the genuine two-population mismatch
+            # (AMBIG ↔ single-stranded). Where one side admits none (a gene edge), the RNA arms are
+            # zeroed by the ``fp``/``fn`` admissibility gates regardless and the TERMINUS flags are the
+            # licence's authority — an unscoped flip made the flags redundant there, and
+            # `test_the_RELAY_honours_the_population_test_TOO`'s control (flags cleared ⇒ licensed
+            # again) could no longer tell the two mechanisms apart.
+            _fp = np.asarray(ctx.free_pos, bool)
+            _fn = np.asarray(ctx.free_neg, bool)
+            _flip = (_fp ^ _fp[_sl_a]) | (_fn ^ _fn[_sl_a])
+            _both_rna = (_fp | _fn) & (_fp | _fn)[_sl_a]
+            _pop_l_a &= ~(_flip & _both_rna)
+        # THE PAIR ALGEBRA: the pair ``(i, left[i])`` IS the pair ``(left[i], right[left[i]])``, so the
+        # right-hand array is the left-hand one read through ``right``. With every switch OFF this
+        # reproduces the unlicenced ``_vr_a`` exactly.
+        _pop_r_a = np.where(_vr_a, _pop_l_a[_sr_a], False)
         self._pop_l_a, self._pop_r_a = _pop_l_a, _pop_r_a
+
+        # ── ⭐⭐⭐ the PER-STRAND population licences (owner, 2026-08-18) ─────────────────────────────
+        # "Different RNA populations on either side" is a PER-STRAND fact: a TSS− changes the − population
+        # and leaves + intact. One licence per arm, the same sided pair algebra as above. The genomic-end
+        # pairing is `terminus_flank_gain`'s, split by strand: a + body extends HIGH from TSS+ (right
+        # flank gains) and LOW from TES+ (left gains); a − body extends LOW from TSS− and HIGH from TES−.
+        _fl = np.asarray(ctx.boundary_flags, np.uint16)
+        _lg_p = (_fl & _TES_POS_BIT) != 0  # left flank gains + RNA
+        _rg_p = (_fl & _TSS_POS_BIT) != 0
+        _lg_n = (_fl & _TSS_NEG_BIT) != 0  # left flank gains − RNA
+        _rg_n = (_fl & _TES_NEG_BIT) != 0
+        if sw.terminus_population:
+            _pop_p_l = np.where(is_bnd_a, ~_lg_p, ~_rg_p[_sl_a]) & _vl_a
+            _pop_n_l = np.where(is_bnd_a, ~_lg_n, ~_rg_n[_sl_a]) & _vl_a
+        else:
+            _pop_p_l = _vl_a.copy()
+            _pop_n_l = _vl_a.copy()
+        self._pop_p_l_a = _pop_p_l
+        self._pop_n_l_a = _pop_n_l
+        self._pop_p_r_a = np.where(_vr_a, _pop_p_l[_sr_a], False)
+        self._pop_n_r_a = np.where(_vr_a, _pop_n_l[_sr_a], False)
 
         # ── own per-component densities + precisions — the message-free SELF-SOLVE ─────────────────────
         og, op, on = ni.rho_g, ni.rho_pos, ni.rho_neg
@@ -318,6 +378,8 @@ class _HeadRelay:
         self._vgp_l, self._vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
         self._rho_lo_l, self._rho_hi_l = rho_lo.tolist(), rho_hi.tolist()
         self._pop_l_l, self._pop_r_l = _pop_l_a.tolist(), _pop_r_a.tolist()
+        self._pop_p_l_l, self._pop_p_r_l = self._pop_p_l_a.tolist(), self._pop_p_r_a.tolist()
+        self._pop_n_l_l, self._pop_n_r_l = self._pop_n_l_a.tolist(), self._pop_n_r_a.tolist()
 
         # ── the static half of the diagnostics capture ──────────────────────────────────────────────────
         if cap is not None:
@@ -566,6 +628,8 @@ class _HeadRelay:
         rho_dst = self._rho_hi_l if backward else self._rho_lo_l
         rho_src_a = self._rho_lo_l if backward else self._rho_hi_l
         pop = self._pop_r_l if backward else self._pop_l_l
+        pop_p = self._pop_p_r_l if backward else self._pop_p_l_l
+        pop_n = self._pop_n_r_l if backward else self._pop_n_l_l
 
         # every operand below is a Python float or bool — see the ``.tolist()`` block in __init__
         og_l, op_l, on_l = self._og_l, self._op_l, self._on_l
@@ -625,9 +689,24 @@ class _HeadRelay:
             # with it.
             _lend = pop[i] and pg[s] > 0.0 and (pp[s] + pn[s]) > 0.0
             r_g = r if (_lend or not sw.gdna_level_scale) else 1.0
-            tg, tp, tn = rg[s] * r_g, (rp[s] + gp) * r, (rn[s] + gn) * r
+            # ⭐ the PER-STRAND three-case rule — the scalar twin of ``_transport``'s (owner, 2026-08-18):
+            # both populations intact ⇒ r; this one intact, the other changed ⇒ 1 (density transfer);
+            # this one changed ⇒ NO CLAIM (value and precisions zeroed below, the fp/fn pattern).
+            if sw.rna_level_scale:
+                _r_s = r if (pop_p[i] and pop_n[i]) else 1.0
+                tp = ((rp[s] + gp) * _r_s) if pop_p[i] else 0.0
+                tn = ((rn[s] + gn) * _r_s) if pop_n[i] else 0.0
+            else:
+                tp, tn = (rp[s] + gp) * r, (rn[s] + gn) * r
+            tg = rg[s] * r_g
             tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
             tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
+            if sw.rna_level_scale:
+                # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
+                if not pop_p[i]:
+                    tpp, tmp = 0.0, 0.0
+                if not pop_n[i]:
+                    tpn, tmn = 0.0, 0.0
             ttau = _damp(tau[s], s2t)  # composition
             # The grafted sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
@@ -703,7 +782,7 @@ class _HeadRelay:
         return step, publish
 
     # ── THE COMBINE: both neighbours transported into this slot's frame, then the message packet ───────
-    def _transport(self, nb: NeighbourState, rho_dst, rho_src_a, pop):
+    def _transport(self, nb: NeighbourState, rho_dst, rho_src_a, pop, pop_p, pop_n):
         """The VECTORISED twin of :meth:`scan`'s ``step`` — see the do-not-merge note there.
 
         ⛔ ``nb.state`` arrives ALREADY INDEXED AT THE SOURCE, so this function has no way to read a
@@ -750,7 +829,27 @@ class _HeadRelay:
         # density to be 0, and then ``rg[src]*r_g`` is 0 whatever the scale.
         lend = pop & (pg > 0.0) & ((pp + pn) > 0.0)
         r_g = np.where(lend, r, np.where(valid, 1.0, 0.0)) if sw.gdna_level_scale else r
-        tg, tp, tn = rg * r_g, (rp + gp) * r, (rn + gn) * r
+        # ⭐⭐⭐ the PER-STRAND rule (owner, 2026-08-18) — one decision per arm, three cases:
+        #   · both strand populations unchanged  ⇒ reframe by ``r`` (the composition sharing the relay
+        #     is designed around — the total ratio is meaningful);
+        #   · THIS strand unchanged, the OTHER changes ⇒ ``r = 1`` — a DENSITY transfer. The continuing
+        #     population's density is frame-invariant across the other population's terminus, and the
+        #     total ratio is corrupted by exactly that population's exit (measured: a continuing + RNA
+        #     crushed 7x crossing a TSS−; true f_g 0.0023 solved to 0.9009);
+        #   · THIS strand changes ⇒ NO CLAIM — value and precision zeroed, the ``fp``/``fn`` pattern.
+        #     Neither scale is valid: the source does not measure the destination's s-population at all.
+        #     ⛔ ``r`` there is the self-confirming echo (TRAPS: a-message-from-the-destinations-belief)
+        #     and ``r = 1`` floods a sparse gene with its same-strand neighbour's level — measured
+        #     +114,812 fragments on `g05 ss0.50 off`, 52 % of it in ten tandem-gene slots.
+        if sw.rna_level_scale:
+            both = pop_p & pop_n
+            r_p = np.where(both, r, np.where(valid, 1.0, 0.0))
+            r_n = r_p
+            tp = np.where(pop_p, (rp + gp) * r_p, 0.0)
+            tn = np.where(pop_n, (rn + gn) * r_n, 0.0)
+        else:
+            tp, tn = (rp + gp) * r, (rn + gn) * r
+        tg = rg * r_g
         s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
 
         def _dv(p, s2=s2t):
@@ -758,6 +857,10 @@ class _HeadRelay:
 
         tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
         tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
+        if sw.rna_level_scale:
+            # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
+            tpp, tmp = np.where(pop_p, tpp, 0.0), np.where(pop_p, tmp, 0.0)
+            tpn, tmn = np.where(pop_n, tpn, 0.0), np.where(pop_n, tmn, 0.0)
         ttau = _dv(tau, s2t)  # composition (tau) → the lambda-message
         # the graft's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a GRAFT
         # boundary, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
@@ -972,10 +1075,10 @@ class _HeadRelay:
         rho_lo, rho_hi = self._rho_lo, self._rho_hi
 
         ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = self._transport(
-            left, rho_lo, rho_hi, self._pop_l_a
+            left, rho_lo, rho_hi, self._pop_l_a, self._pop_p_l_a, self._pop_n_l_a
         )
         bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = self._transport(
-            right, rho_hi, rho_lo, self._pop_r_a
+            right, rho_hi, rho_lo, self._pop_r_a, self._pop_p_r_a, self._pop_n_r_a
         )
 
         def _fuse_add(

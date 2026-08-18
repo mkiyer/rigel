@@ -404,7 +404,7 @@ def _ambig_chain(flags_by_boundary):
     return parts
 
 
-def _relay_levels(parts):
+def _relay_levels(parts, *, policy=None):
     """``(pg_own, forward running gDNA level)`` per slot — the RELAY's own output, before the combine."""
     # ⚠ this gate exercises a HEADPOLICY operator (the population half of the composition licence), so
     # the policy is named explicitly — `solve_chain` defaults to SilentPolicy and the gate would be
@@ -412,7 +412,7 @@ def _relay_levels(parts):
     from rigel.calibration.messages.head import HeadPolicy
     from rigel.calibration.sweep import solve_chain
 
-    region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+    region_sweep = functools.partial(solve_chain, policy=policy or HeadPolicy())
 
     cap = {}
     region_sweep(
@@ -444,7 +444,14 @@ def test_the_RELAY_honours_the_population_test_TOO():
     unchanged and the statement is exact: the level must cross UNSCALED.
 
     ⚠ Two-sided against the same chain with the flags cleared, where the step IS licensed and the level
-    must move — otherwise the gate would pass on a fixture where the two branches happen to agree."""
+    must move — otherwise the gate would pass on a fixture where the two branches happen to agree.
+    ⚠⚠ **The control arm switches ``strand_population`` OFF, and that is a fixture necessity, not a
+    dodge** (2026-08-18): the owner's second population predicate makes this very hop — single-stranded
+    boundary into an AMBIG region — unlicensed by the STRAND flip alone, flags or no flags. With both
+    predicates live the control could no longer isolate the FLAGS mechanism, which is the twin-drift this
+    gate exists to catch; switching the strand half off restores a control where only the flags decide."""
+    from rigel.calibration.messages.head import HeadPolicy, HeadSwitches
+
     boundary, dst = 3, 4  # chain N E N E N E N E N → BOUNDARY 1 is slot 3, its RIGHT flank is slot 4
     flags = [
         0,
@@ -453,7 +460,10 @@ def test_the_RELAY_honours_the_population_test_TOO():
         0,
     ]  # a transcript's genomic LOW end at BOUNDARY 1 ⇒ the right flank gains
     own_f, lvl_f = _relay_levels(_ambig_chain(flags))
-    own_p, lvl_p = _relay_levels(_ambig_chain(_NO_FLAGS[:4]))
+    own_p, lvl_p = _relay_levels(
+        _ambig_chain(_NO_FLAGS[:4]),
+        policy=HeadPolicy(HeadSwitches(strand_population=False)),
+    )
     assert own_f[dst] == 0.0 and own_p[dst] == 0.0, (
         f"slot {dst} has own gDNA precision ({own_f[dst]:.4g}), so the relayed claim is not readable "
         "there and this fixture has drifted"
