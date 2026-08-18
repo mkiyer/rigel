@@ -1,6 +1,11 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ WHAT IS PERFECTING THE SIMPLEX VERTEX WORTH? — the re-solve ceiling, on the REAL 36-condition
+"""⭐⭐⭐ WHAT IS PERFECTING THE SIMPLEX VERTEX WORTH? — the re-solve ceiling, on the REAL
 ladder, plus the mechanism prototype in the same harness so the two are directly comparable.
+
+⚠ **THE LADDER IS 16 CONDITIONS** (rebuilt 2026-08-13, when ``pilot``/``flgap_short``/``flgap_long`` were
+deleted). Every ``36``-row number below was measured on the RETIRED 36-condition ladder and is stamped as
+such where it appears; none of them can be reproduced by running this file today, and re-running an arm
+re-measures rather than confirming them.
 
 ⛔⛔ **THIS IS THE MEASUREMENT THAT DECIDES BUILD-VS-NOTE** (TRAPS: measure-the-ceiling-first, which has re-ranked this
 project five times). A silent gene's objects are pure gDNA and the truth is ``f_g = 1.000`` exactly; a
@@ -58,6 +63,11 @@ has posterior = prior, so a vertex is unreachable there in ANY coordinate at ANY
 look for the pass-0 defect in the **confidently-wrong** population instead, which is a different set of
 objects.
 
+⚠ **EVERY NUMBER IN THIS SECTION WAS MEASURED ON THE RETIRED 36-CONDITION LADDER** (2026-08-05). The rung
+names it quotes — ``gdna_g01_ss_0.50_capture_on`` below — do not exist on the 16-condition rebuild, whose
+gDNA rungs are ``g00``/``g05``/``g50``/``g98``. ⛔ Do not compare a fresh run against them; re-run both
+arms if the comparison is the point.
+
 ``vertex_free``, against a ``base`` re-recorded in the same run, with ``noop`` byte-identical on all 36
 rows of both axes (the harness's own falsification passing):
 
@@ -104,6 +114,9 @@ therefore entirely on unstranded data — which is also the panel's worst stratu
 
 Usage::
 
+    # ⭐ FIRST — the harness's own gates, perturbed, with no I/O and no solver (~1 s)
+    python scripts/design/vertex_ceiling.py --self-test
+
     # one condition first, to check the levers are connected
     python scripts/design/vertex_ceiling.py --arm base       --conditions gdna_g50_ss_0.50_nrna_none_capture_off --out /tmp/v_base.jsonl
     python scripts/design/vertex_ceiling.py --arm vertex_free --conditions gdna_g50_ss_0.50_nrna_none_capture_off --out /tmp/v_free.jsonl
@@ -117,10 +130,14 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import inspect
+import io
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -160,6 +177,11 @@ _EPS = 1.0e-9
 #: assumed.
 _TAU_FREE = 1.0e-4
 
+#: every ``ref_loc=`` variant this harness can express. ⛔ ONE list, read by the argparse help, by the
+#: installer's validation and by `--self-test`, because a help string and a dispatch that drift apart is
+#: how a typo'd arm gets reported under the wrong name.
+_REF_LOC_VARIANTS = ("noop", "struct", "struct_grid", "struct_soft", "pooled", "local")
+
 #: filled by the wrappers, one call before `build_region_init` needs them.
 _CTX: dict = {}
 #: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
@@ -189,8 +211,12 @@ def _wrap_solve_chain():
 
     ⚠ It was ``CAL.region_sweep`` until the sweep was renamed, and this harness kept wrapping a name
     that no longer existed — an `AttributeError` on the first arm, so the instrument was DEAD while the
-    suite stayed green. `TRAPS: a-green-suite-hid-five-dead-instruments`; `--self-test` is the gate that
-    catches it now."""
+    suite stayed green. `TRAPS: a-green-suite-hid-five-dead-instruments`. ⛔ That sentence then promised
+    *"`--self-test` is the gate that catches it now"* for **eight months of commits in which no such flag
+    existed** — a promised gate reads as coverage and is worse than none. It exists as of 2026-08-17:
+    :func:`self_test`'s PATCH-TARGET block asserts every name this harness rebinds is still present, still
+    callable, and still the SAME OBJECT as its definition, and perturbs each check against the dead
+    ``CAL.region_sweep`` name itself."""
     orig = CAL.solve_chain
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
@@ -306,10 +332,15 @@ def _location_estimate(chain, statics, geometry, region_arrays, variant: str):
         from scipy.special import expit as _expit
 
         return np.where(mature, 0.5, float(_expit(_CTX["logodds_window"])))
-    # the peel elsewhere: RNA is the RESIDUAL and is never predicted. ⚠ `pooled`/`local` carry the SOFT
-    # floor on the structural slots, which is what their panel rows were measured with.
-    m = np.clip(rho * eff_g / np.maximum(M, 1e-12), 0.0, 1.0)
-    return np.where(mature, m, expected_g / (expected_g + 1.0))
+    if variant in ("pooled", "local"):
+        # the peel elsewhere: RNA is the RESIDUAL and is never predicted. ⚠ `pooled`/`local` carry the
+        # SOFT floor on the structural slots, which is what their panel rows were measured with.
+        m = np.clip(rho * eff_g / np.maximum(M, 1e-12), 0.0, 1.0)
+        return np.where(mature, m, expected_g / (expected_g + 1.0))
+    # ⛔ UNREACHABLE while `_install_reference_location` validates, and kept because the fall-through it
+    #   replaces was SILENT: `--arm ref_loc=strcut` ran the `pooled` peel and reported it under the typo's
+    #   name, which is a publishable wrong number (TRAPS: an-ablation-that-never-ran's shape).
+    raise SystemExit(f"⛔ unknown ref_loc variant {variant!r} — one of {', '.join(_REF_LOC_VARIANTS)}")
 
 
 def _install_psi_mean():
@@ -355,7 +386,15 @@ def _install_reference_location(variant: str):
 
     ⭐ ``sweep`` holds the only construction; ``select``/``regrid`` rebuild through the real class inside
     ``simplex_logodds``, so patching the name in ``sweep`` intercepts exactly once and the slicing and
-    regridding paths stay the shipped ones."""
+    regridding paths stay the shipped ones.
+
+    ⛔ The variant is validated HERE, before any condition is read, because the alternative was a silent
+    fall-through: an unrecognised name ran the ``pooled`` peel and every row was stamped with the name the
+    user typed."""
+    if variant not in _REF_LOC_VARIANTS:
+        raise SystemExit(
+            f"⛔ unknown ref_loc variant {variant!r} — one of {', '.join(_REF_LOC_VARIANTS)}"
+        )
     real = SL.CompositionPriors
 
     def factory(gdna=None, rna=None, location=None):
@@ -639,11 +678,213 @@ def _compare(paths: list[Path]) -> int:
     return 0
 
 
+# ── --self-test: PERTURB EVERY GATE, WITH NO I/O AND NO SOLVER ──────────────────────────────────────
+# ⛔⛔ This exists because the docstring PROMISED it and it did not exist, while the instrument was dead.
+#    The two recorded deaths were both PATCH-TARGET DRIFT — a wrapped name that vanished
+#    (`CAL.region_sweep`) and a replacement whose arity no longer matched the shipped one (`_rna_arm`) —
+#    so those are the first two blocks, and each is perturbed against the exact shape that killed it.
+
+
+#: every name this harness REBINDS, as ``(module, attribute, definition_module_or_None)``. When the third
+#: entry is given, the attribute must be the SAME OBJECT as its definition — patching a re-export only
+#: reaches the solver while the re-export is live, and that is precisely what stopped being true.
+def _patch_targets():
+    return (
+        (CAL, "solve_chain", SW),
+        (P0, "load_or_build_oracle", None),
+        (NI, "build_region_init", None),
+        (SW, "build_region_init", NI),
+        (SW, "CompositionPriors", SL),
+        (SW, "structural_reference_location", SL),
+        (SL, "CompositionPriors", None),
+        (SL, "_posterior_median_fg", None),
+        (SL, "_gdna_arm", None),
+        (SL, "_rna_arm", None),
+        (SL, "structural_reference_location", None),
+    )
+
+
+def _target_live(mod, attr, definition) -> bool:
+    """Is this patch target present, callable, and still the object it is a re-export OF?"""
+    obj = getattr(mod, attr, None)
+    if obj is None or not callable(obj):
+        return False
+    return definition is None or obj is getattr(definition, attr, None)
+
+
+def _same_params(a, b) -> bool:
+    """Same parameter NAMES in the same order. ⭐ Names rather than count, because the death was a
+    KEYWORD (`rna_logprior`) the shipped caller passes by name."""
+    return [p.name for p in inspect.signature(a).parameters.values()] == [
+        p.name for p in inspect.signature(b).parameters.values()
+    ]
+
+
+def _try(fn):
+    """Call ``fn`` and return its value, or ``None`` if it raised.
+
+    ⛔ Without this a BROKEN replacement takes the whole self-test down with a traceback, and the FAIL row
+    for the check that already caught it never prints — the arity block is what diagnoses the failure, and
+    the numeric block two lines later is what crashes. Measured while falsifying this file: restoring the
+    recorded one-argument ``_rna_arm`` produced a ``TypeError`` and NO check output at all."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 — the self-test's job is to REPORT a broken arm, not to inherit it
+        return None
+
+
+def self_test() -> int:
+    checks: list[tuple[str, bool]] = []
+    saved = {(m.__name__, a): getattr(m, a, None) for m, a, _ in _patch_targets()}
+
+    def restore():
+        _CTX.clear()
+        for m, a, _ in _patch_targets():
+            v = saved[(m.__name__, a)]
+            if v is not None:
+                setattr(m, a, v)
+
+    # ── ① PATCH TARGETS: present, callable, and the same object as their definition ──────────────────
+    dead = [f"{m.__name__.rsplit('.', 1)[-1]}.{a}" for m, a, d in _patch_targets()
+            if not _target_live(m, a, d)]
+    checks.append((f"all {len(_patch_targets())} patch targets are live", not dead))
+    if dead:
+        print(f"  ⛔ DEAD PATCH TARGETS: {', '.join(dead)}", flush=True)
+
+    # ⛔ PERTURBATION, and it is the exact name whose disappearance killed this file: the SAME predicate
+    #   must REFUSE `CAL.region_sweep`. A checker that cannot fail is not a check.
+    checks.append(("the predicate REFUSES the dead `CAL.region_sweep` name",
+                   not _target_live(CAL, "region_sweep", None)))
+
+    # ⛔ PERTURBATION: break one re-export and the identity half must fire, not just the presence half.
+    SW.build_region_init = lambda *a, **k: None
+    checks.append(("a re-export rebound to a stranger => target reads DEAD",
+                   not _target_live(SW, "build_region_init", NI)))
+    restore()
+    checks.append(("…and restoring it reads live again", _target_live(SW, "build_region_init", NI)))
+
+    # ── ② ARITY: every replacement must take the shipped function's parameter names ──────────────────
+    _install_ref_exponent(0.5)
+    checks.append(("ref_c's two arms match the shipped signatures",
+                   _same_params(SL._gdna_arm, saved[(SL.__name__, "_gdna_arm")])
+                   and _same_params(SL._rna_arm, saved[(SL.__name__, "_rna_arm")])))
+    # ⛔ PERTURBATION: the recorded death verbatim — a one-argument `_rna_arm` after the arms were made
+    #   symmetric. The same comparison must reject it.
+    checks.append(("a one-argument `_rna_arm` is REJECTED by the same comparison",
+                   not _same_params(lambda lam: None, saved[(SL.__name__, "_rna_arm")])))
+
+    # ── ③ ref_c reproduces the shipped reference at ½, and moves off it elsewhere ────────────────────
+    lam = np.linspace(-10.0, 10.0, 21)
+    ship_g = saved[(SL.__name__, "_gdna_arm")](lam, None)
+    ship_r = saved[(SL.__name__, "_rna_arm")](lam, None)
+    before = dict(_FIRED)
+    half_g = _try(lambda: SL._gdna_arm(lam, None))
+    half_r = _try(lambda: SL._rna_arm(lam, None))
+    checks.append(("ref_c=0.5 is BIT-IDENTICAL to the shipped ½ reference, both arms",
+                   half_g is not None and half_r is not None
+                   and np.array_equal(half_g, ship_g) and np.array_equal(half_r, ship_r)))
+    checks.append(("…and both fire counters moved (TRAPS: an-ablation-that-never-ran)",
+                   _FIRED["ref_g"] > before["ref_g"] and _FIRED["ref_r"] > before["ref_r"]))
+    restore()
+    # ⛔ PERTURBATION: a different exponent must NOT reproduce it, or the arm is inert.
+    _install_ref_exponent(0.25)
+    q_g = _try(lambda: SL._gdna_arm(lam, None))
+    checks.append(("ref_c=0.25 DIFFERS from the shipped reference",
+                   q_g is not None and not np.array_equal(q_g, ship_g)))
+    restore()
+    # ⛔ PERTURBATION: the pair is a Beta(a,b), so the two arms must be drivable INDEPENDENTLY.
+    _install_ref_exponent(0.5, 2.0)
+    ab_g = _try(lambda: SL._gdna_arm(lam, None))
+    ab_r = _try(lambda: SL._rna_arm(lam, None))
+    checks.append(("ref=A,B moves the RNA arm alone",
+                   ab_g is not None and ab_r is not None
+                   and np.array_equal(ab_g, ship_g) and not np.array_equal(ab_r, ship_r)))
+    restore()
+
+    # ── ④ psi_mean really is the MEAN and not the median ─────────────────────────────────────────────
+    _install_psi_mean()
+    post = np.array([[0.6, 0.4]])       # a deliberately skewed 2-point posterior …
+    fg = np.array([0.0, 1.0])            # … whose mean (0.4) and median (0.0) differ
+    got = SL._posterior_median_fg(post, lam, fg)
+    checks.append(("psi_mean returns the posterior MEAN (0.4), not the median (0.0)",
+                   float(np.ravel(got)[0]) == 0.4 and _FIRED["psi_mean"] > 0))
+    restore()
+
+    # ── ⑤ the vertex pin's `noop` shape: the wrapper runs and returns the init UNTOUCHED ─────────────
+    sentinel = object()
+    NI.build_region_init = lambda chain, statics, geometry, **kw: sentinel
+    _install_vertex_pin(True, force_empty=True)
+    before = dict(_FIRED)
+    out = SW.build_region_init(None, None, None)
+    checks.append(("noop: wrapper fires, pins nothing, returns the init object itself",
+                   out is sentinel and _FIRED["init"] > before["init"]
+                   and _FIRED["pinned"] == before["pinned"]))
+    restore()
+
+    # ── ⑥ ref_loc: the location reaches ψ's ONE construction site, and a typo is REFUSED ─────────────
+    _install_reference_location("struct")
+    _CTX["location"] = np.arange(3.0)
+    built = SW.CompositionPriors(gdna=None, rna=None)
+    checks.append(("ref_loc threads `location` into the CompositionPriors ψ actually builds",
+                   isinstance(built, SL.CompositionPriors)
+                   and np.array_equal(np.asarray(built.location), np.arange(3.0))))
+    restore()
+    # ⛔ PERTURBATION: an unrecognised variant used to run the `pooled` peel and stamp the typo's name on
+    #   every row. It must now refuse BEFORE any condition is read.
+    typo_refused = False
+    try:
+        _install_reference_location("strcut")
+    except SystemExit:
+        typo_refused = True
+    checks.append(("a typo'd ref_loc variant is REFUSED up front", typo_refused))
+    restore()
+
+    # ── ⑦ the comparator: byte-identical must be LABELLED, and differently for `noop` ────────────────
+    def _rows(arm, bump=0.0):
+        return "".join(
+            json.dumps({"arm": arm, "condition": f"c{i}", "axis": ax,
+                        "mwae_all": 0.10 + bump, "abs_err_all": 1000.0}) + "\n"
+            for i in range(2) for ax in ("region", "boundary")
+        )
+
+    with tempfile.TemporaryDirectory() as td:
+        base_p = Path(td) / "base.jsonl"
+        base_p.write_text(_rows("base"))
+        for arm, bump, want in (("noop", 0.0, "own falsification PASSES"),
+                                ("vertex_free", 0.0, "did not fire"),
+                                ("vertex_free", 0.05, None)):
+            p = Path(td) / f"{arm}_{bump}.jsonl"
+            p.write_text(_rows(arm, bump))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                _compare([base_p, p])
+            txt = buf.getvalue()
+            if want is None:
+                checks.append(("a MOVED arm is called neither identical nor unfired",
+                               "own falsification PASSES" not in txt and "did not fire" not in txt))
+            else:
+                checks.append((f"identical `{arm}` is labelled {want!r}", want in txt))
+        # ⛔ PERTURBATION: one arm alone is not a comparison and must be refused.
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _compare([base_p])
+        checks.append(("a single arm is REFUSED rather than compared with itself", rc == 1))
+
+    width = max(len(name) for name, _ in checks)
+    for name, ok in checks:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name:<{width}}", flush=True)
+    failed = [name for name, ok in checks if not ok]
+    print(f"\n{len(checks) - len(failed)}/{len(checks)} harness gates fire", flush=True)
+    return 1 if failed else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--arm", default=None,
-                    help="base | noop | psi_mean | vertex_free | vertex_all | ref_c=<float> "
-                         "| ref_loc={noop,struct,struct_grid,struct_soft,pooled,local}")
+                    help="base | noop | psi_mean | config_struct | vertex_free | vertex_all "
+                         "| ref_c=<a>[,<b>] | ref_loc={" + ",".join(_REF_LOC_VARIANTS) + "}")
+    ap.add_argument("--self-test", action="store_true",
+                    help="perturb every harness gate; no I/O, no solver")
     ap.add_argument("--compare", nargs="*", type=Path, default=None)
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
@@ -653,10 +894,12 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
+    if args.self_test:
+        return self_test()
     if args.compare:
         return _compare(args.compare)
     if not args.arm or not args.out:
-        ap.error("--arm and --out are required unless --compare is given")
+        ap.error("--arm and --out are required unless --compare or --self-test is given")
 
     _wrap_oracle()
     _wrap_solve_chain()

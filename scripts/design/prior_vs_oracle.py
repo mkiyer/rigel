@@ -362,36 +362,6 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
     return captured["multi_loci"], captured["priors"], captured["units"]
 
 
-def assemble_oracle_arm(override: dict, calibration, region_arrays, multi_loci):
-    """**O**, from a mass override dict — the shipped assembler, one lever moved.
-
-    ⭐ Split out of :func:`oracle_priors` so a caller holding a CACHED ``override_masses`` dict (the
-    flgap study cache does; it is locus-free and survives an assembler edit) assembles O through this
-    exact call rather than repeating the ``dataclasses.replace`` (TRAPS: a-test-that-redefines).
-    """
-    return PRIORS.assemble_priors(
-        dataclasses.replace(calibration, **override), region_arrays, multi_loci
-    )
-
-
-def assemble_share_arm(override: dict, shares: dict, calibration, region_arrays, multi_loci):
-    """**S**, from a mass override and the true per-component shares. See :func:`share_priors`."""
-    truth_cal = dataclasses.replace(calibration, **override)
-    gdna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["gdna"]),
-        region_arrays, multi_loci,
-    )
-    rna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["rna"]),
-        region_arrays, multi_loci,
-    )
-    return PRIORS.LocusPriors(
-        gdna_prior_count=gdna.gdna_prior_count,
-        rna_prior_count=rna.rna_prior_count,
-        gdna_eff_len=gdna.gdna_eff_len,
-    )
-
-
 def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
     """**O** — the prior a perfect deconvolution would produce, and the ``noop`` gate beside it.
 
@@ -440,9 +410,21 @@ def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
     ⛔ **The shares are MEASURED off the origin split** (``OracleTruth.component_shares``), never derived
     from a pmf — see that method for why an analytic share would make this a model arm.
     """
-    override = oracle.override_masses(region_arrays)
     shares = oracle.component_shares()
-    return assemble_share_arm(override, shares, calibration, region_arrays, multi_loci), shares
+    truth_cal = dataclasses.replace(calibration, **oracle.override_masses(region_arrays))
+    gdna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["gdna"]),
+        region_arrays, multi_loci,
+    )
+    rna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["rna"]),
+        region_arrays, multi_loci,
+    )
+    return PRIORS.LocusPriors(
+        gdna_prior_count=gdna.gdna_prior_count,
+        rna_prior_count=rna.rna_prior_count,
+        gdna_eff_len=gdna.gdna_eff_len,
+    ), shares
 
 
 def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
@@ -618,22 +600,8 @@ def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     ``Σ F + dropped == the library total`` is checkable rather than assumed.
     """
     parts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64) for k in ORIGINS}
-    return project_start_counts(
-        {"gdna": parts["gdna"], "rna": parts["mrna"] + parts["nrna"]}, region_arrays, multi_loci
-    )
-
-
-def project_start_counts(starts: dict, region_arrays, multi_loci):
-    """The projection half of :func:`fragment_truth`, taking the per-region start counts directly.
-
-    ⭐ Split out for the same reason as :func:`assemble_oracle_arm`: a cache should store the raw
-    per-region counts and project them at read time, so that editing ``priors._project_regions_to_loci``
-    — which the study cache deliberately keeps OUT of its key — cannot serve a stale ``F``
-    (TRAPS: a-guard-outlives-its-divisor's shape: the exclusion was justified by "the arms are rebuilt
-    on load", and then an artifact the excluded file produces started being stored).
-    """
-    g = np.asarray(starts["gdna"], np.float64)
-    r = np.asarray(starts["rna"], np.float64)
+    g = parts["gdna"]
+    r = parts["mrna"] + parts["nrna"]
     proj = PRIORS._project_regions_to_loci(
         region_arrays, multi_loci, len(multi_loci), {"gdna": g, "rna": r}
     )

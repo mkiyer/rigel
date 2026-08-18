@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
-"""Scan-only profiler for Rigel's native BAM scanner.
+"""WHAT DOES THE SCAN ALONE COST, AND HOW DOES IT ANSWER TO ITS THREAD AND CHUNK KNOBS?
 
-This harness loads a Rigel index once, then runs only ``scan_and_buffer`` for
-one or more scan/decompression thread combinations. It is intended as the
-command launched under macOS Instruments/xctrace so native samples land almost
-entirely inside ``rigel._bam_impl`` and htslib.
+This harness loads a Rigel index once, then runs only ``scan_and_buffer`` across a grid of
+scan/decompression thread budgets, reporting wall time, throughput and RSS for each. It is also the
+command to launch under macOS Instruments/xctrace or py-spy, because native samples then land almost
+entirely inside ``rigel._bam_impl`` and htslib rather than in a harness.
+
+⭐ It is the only instrument here that SWEEPS a knob, and its shape is the one a memory-bounded
+chunked solve wants: name a knob, sweep it, and put wall clock and peak RSS in the same row.
+⚠ Its knobs are the scanner's (``--threads``, ``--scan-bgzf-threads``, ``--scan-fragments-per-chunk``,
+``--scan-buffer-size``); it reaches no calibration or EM knob, and ``profiler.py`` is the instrument
+that sees those phases at all.
+
+⛔⛔ **PROFILE A HIGH-DEPTH REAL RNA-seq LIBRARY, NOT cfRNA AND NOT A PANEL CONDITION** (owner,
+2026-08-17). `docs/TESTING.md` §7 is the ruling.
+
+⛔⛔ **TWO FILES ARE CALLED ``scan_profile.py`` AND THEY MEASURE DIFFERENT THINGS.**
+``scripts/design/scan_profile.py`` regresses the ACCUMULATOR's cost per fragment over several BAMs
+(wired vs unwired, slope and intercept). This one measures the SCAN itself. Neither is a version of
+the other; a reader who greps the basename finds both, and the gate that covers them prints the tree
+in the case id so a failure is never ambiguous.
 """
 
 from __future__ import annotations
@@ -21,15 +36,14 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+if str(Path(__file__).resolve().parent) not in sys.path:  # `profiler.py` is a sibling, not a package
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from profiler import MemoryTimeline, _peak_rss_mb, _snap_rss_current  # noqa: E402
 from rigel.config import BamScanConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.native import detect_sj_strand_tag  # noqa: E402
 from rigel.pipeline import scan_and_buffer  # noqa: E402
-from scripts.profiling.profiler import MemoryTimeline, _snap_rss_current  # noqa: E402
 
 logger = logging.getLogger("rigel_scan_profile")
 
@@ -42,7 +56,11 @@ class ScanRun:
     bam_path: str
     index_path: str
     wall_time_sec: float
+    #: ⭐ the largest CURRENT-RSS sample inside THIS run's span — falls when memory is released
     peak_rss_mb: float
+    #: ⚠ ``ru_maxrss``: exact, but a LIFETIME high-water mark, so in a sweep it can only rise. Reported
+    #: beside the sampled peak rather than instead of it, because the two answer different questions.
+    process_peak_rss_mb: float
     rss_before_mb: float
     rss_after_scan_mb: float
     rss_after_release_mb: float
@@ -138,6 +156,14 @@ def _run_one(
         scan_cfg.buffer_size_bytes / 1024**3,
     )
     timeline.start()
+    if not timeline.available:
+        # ⛔ Say it, per run, rather than printing `nan` columns that read as a measurement.
+        logger.warning(
+            "no CURRENT-RSS reader on this platform (%s): every rss_* column in %s is `nan`. "
+            "Wall time and throughput are unaffected.",
+            platform.system(),
+            name,
+        )
     t0 = time.perf_counter()
     stats, strand_models, buffer, cal_payload = scan_and_buffer(
         str(bam_path),
@@ -169,6 +195,7 @@ def _run_one(
         index_path=str(index_path),
         wall_time_sec=wall,
         peak_rss_mb=timeline.peak_mb,
+        process_peak_rss_mb=_peak_rss_mb(),
         rss_before_mb=rss_before,
         rss_after_scan_mb=rss_after_scan,
         rss_after_release_mb=rss_after_release,

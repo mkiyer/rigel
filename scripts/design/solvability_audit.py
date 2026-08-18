@@ -133,7 +133,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     used, and with the length channel off, whatever remains of ``tau_lam`` is the strand arm. So these
     are the solver's own numbers, split, not a second opinion about them.
 
-    ⛔ **``locked`` IS THE TRAPS: no-magic-numbers CLASS ON BOTH AXES** (:func:`~rigel.calibration.region_geometry.g1_locked`).
+    ⛔ **``locked`` IS THE G1 CLASS ON BOTH AXES** (:func:`~rigel.calibration.region_geometry.g1_locked`).
     It used to be ``~solvable & (kind == REGION)``, which dropped every structurally-locked **boundary** — an
     intergenic↔exon boundary, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
     at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
@@ -154,7 +154,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
             f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
-    # TRAPS: no-magic-numbers, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes
+    # G1, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes
     # and why `region_init.struct_lock` is deliberately NOT.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
     lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
@@ -378,7 +378,7 @@ def report(m, a: dict, config=None) -> None:
     print(f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
           f"{'pred f_g':>9} {'true f_g':>9}")
     _lock = a["channels"]["locked"] & live
-    print(f"   {'CERTAIN (TRAPS: no-magic-numbers)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
+    print(f"   {'CERTAIN (G1)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
           f"{err[_lock].sum():>14,.0f} {err[_lock].sum() / max(err[det].sum(), 1):>9.1%} "
           f"{'—':>9} {'—':>9}   structurally pure gDNA; nothing was asked of it")
     for label, n, mass, e, pred, true in resolving_power_rows(a, det & ~_lock):

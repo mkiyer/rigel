@@ -380,12 +380,14 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
     rows = TH.object_rows(r)
     # ⭐ the channel state at every slot, so a null result can be ATTRIBUTED rather than guessed:
     # `cm_g` is the gDNA MEASUREMENT precision ψ receives (0 ⇒ the gDNA message is inert — TRAPS: conservation-misses-mis-attribution).
-    uni = debug["capture"]["_uni"][-1]
+    # ⛔ These four are DECORATION on the ceiling, not the ceiling: `_uni` exists only under
+    # `HeadPolicy`, and this file used to die here with `KeyError: '_uni'` under the shipped
+    # `message_propagation = False`. Muted, they are NaN — the relay published no claim, and a 0 would
+    # read as a measured inert channel (`TRAPS: an-ablation-that-never-ran`).
+    uni = TH.relay_channels(debug["capture"])
     for s, row in enumerate(rows):
-        row["cm_g"] = float(uni["cm_g"][s])
-        row["c_tau"] = float(uni["c_tau"][s])
-        row["cg"] = float(uni["cg"][s])
-        row["mo_g"] = float(uni["mo_g"][s])
+        for key in ("cm_g", "c_tau", "cg", "mo_g"):
+            row[key] = float(uni[key][s]) if uni is not None else float("nan")
     return rows
 
 
@@ -393,9 +395,12 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
 
 
 def measure(spec_name, conditions, *, suite, index_path, work_dir, refit_iters, genome_length, nrna,
-            arms, ladder=LADDER, abs_rna=0):
+            arms, ladder=LADDER, abs_rna=0, messages=TH.MESSAGES_SHIPPED):
     index = TranscriptIndex.load(str(index_path))
-    config = dataclasses.replace(CalibrationConfig(), calib_refit_iters=int(refit_iters))
+    config = TH.with_messages(
+        dataclasses.replace(CalibrationConfig(), calib_refit_iters=int(refit_iters)), messages
+    )
+    print(TH.messages_stamp(messages), flush=True)
     base = TH.SPECS[spec_name]
     if genome_length:
         base = dataclasses.replace(base, genome_length=int(genome_length))
@@ -424,6 +429,10 @@ def measure(spec_name, conditions, *, suite, index_path, work_dir, refit_iters, 
                     yield {
                         "condition": cond,
                         "arm": arm,
+                        # ⭐ STAMPED INTO EVERY ROW, the `ladder_arm_ab.py` contract: `--out` rows outlive
+                        # the run, and `cm_g`/`c_tau`/`cg`/`mo_g` are NaN under the muted relay — a row
+                        # that does not carry its own message setting cannot be read later.
+                        "messages": "on" if messages else "off",
                         "capture": "on" if donor.capture_on else "off",
                         "strand": f"{donor.strand_specificity:g}",
                         "gdna_rate": g_rate,
@@ -534,6 +543,11 @@ def report(rows, spec_name, refit_iters):
     print("   `cm_g` is the gDNA MEASUREMENT precision ψ receives. 0 ⇒ the level is carried only as a")
     print("   mode with no weight — `ROADMAP.md` §1.1 **the-cancelling-pair**, a G1 BOUNDARY cannot ORIGINATE.")
     exon_keys = [k for k in by if k.startswith("exon@")]
+    # ⛔ THE MUTED RELAY MUST NOT BE READ AS A DEAD CHANNEL. Rows carry their own `messages` stamp, and
+    # a muted row has NaN in all four channel columns — so `% slots cm_g=0` would report 0 % (nothing is
+    # `<= 0`) and read as "the channel is alive" on a run where no channel was ever asked.
+    if any(r.get("messages", "on") == "off" for rs in by.values() for r in rs):
+        print(TH.relay_silent_note("SECTION 4 (cm_g / c_tau at the exon slots)"))
     print(f"\n   {'object':<26} {'arm':<14} {'cm_g':>12} {'c_tau':>12} {'% slots cm_g=0':>16}")
     for k in exon_keys:
         for a in arms:
@@ -541,8 +555,10 @@ def report(rows, spec_name, refit_iters):
             if not g:
                 continue
             cm = np.array([r["cm_g"] for r in g])
+            asked = np.isfinite(cm)
+            zero = f"{(cm[asked] <= 0).mean():>15.0%}" if asked.any() else f"{'— not asked':>15}"
             print(f"   {k:<26} {a:<14} {cm.mean():>12.4g} "
-                  f"{np.mean([r['c_tau'] for r in g]):>12.4g} {(cm <= 0).mean():>15.0%}")
+                  f"{np.mean([r['c_tau'] for r in g]):>12.4g} {zero}")
 
     print()
     print("── 5. THE SWEEP, on the objects that carry the error ───────────────────────────────────────")
@@ -584,6 +600,9 @@ def main() -> int:
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_toy_ceiling"))
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--report", type=Path, default=None)
+    # ⭐ the SHIPPED setting by default: the ceiling — hand one object class a different own belief and
+    # re-solve — is policy-independent, and the four `_uni` columns are attribution decoration on it.
+    TH.add_messages_flag(ap, default=TH.MESSAGES_SHIPPED)
     args = ap.parse_args()
 
     if args.report:
@@ -602,7 +621,7 @@ def main() -> int:
                            genome_length=args.genome_length, nrna=args.nrna, arms=args.arms,
                            ladder=(tuple(float(x) for x in args.rungs.split(","))
                                    if args.rungs else LADDER),
-                           abs_rna=args.abs_rna):
+                           abs_rna=args.abs_rna, messages=TH.messages_on(args)):
             rows.append(row)
             if fh:
                 fh.write(json.dumps(row) + "\n")

@@ -28,6 +28,14 @@ thing the solver ever does: there is nothing to deconvolve.
 If ``fg_loc`` is right and ``f_g`` is not, it is the messages. ⛔ Reading only the final number cannot tell
 those apart, and they have completely different fixes.
 
+⛔⛔ **AND UNDER THE SHIPPED CONFIG THERE IS NO THIRD RUNG.** ``CalibrationConfig.message_propagation``
+is ``False``, which installs ``SilentPolicy`` — no relay runs, so rung 3 can only repeat rung 2. This
+instrument **prints the two rungs' measured maximum separation** rather than implying a relay ran, and
+its relay-derived column reads ``—`` rather than a zero. ⭐ ``--messages on`` restores the third rung and
+the stamp then says the configuration is not the shipped one. ⚠ It defaults to the SHIPPED setting on
+purpose: this is the admissibility control the owner requires on **every experiment**, and an experiment
+runs the configuration the tool ships.
+
 ⚠ **A zero arm can be DEGENERATE, and then it is not a control at all** (TRAPS: could-the-arm-have-fired). An object with
 zero counts has no density, so the reframe is skipped and every message into it is inert — the arm then
 reports "no error" while testing nothing. So this prints the COUNTS beside every answer and flags any
@@ -94,6 +102,9 @@ def silence(spec):
 def report(spec_name, arm, r, expect):
     """Per object: the counts, the three rungs, and the deviation from a CONSTANT truth."""
     cap = r.capture
+    # ⭐ read off the ARTIFACT, not off the flag: `head.py` is `_uni`'s only writer, so its presence is
+    # the relay's own signature and a config that failed to thread through cannot lie about it.
+    relay = TH.relay_channels(cap)
     fg = np.asarray(cap["f_g"], float)
     loc = np.asarray(cap["fg_loc"], float)
     strand = np.asarray(cap["fg_strand"], float)
@@ -130,6 +141,19 @@ def report(spec_name, arm, r, expect):
         return
     print(f"   ⭐ worst object: {worst[1]} {worst[2]}  Δ = {worst[0]:+.4f}   "
           f"·   error share of mass = {tot_err / max(mass, 1):.4%}")
+    # ⭐⭐ RUNG 3 vs RUNG 2, MEASURED. Under `SilentPolicy` the relay sends nothing, so the third rung can
+    # only repeat the second — but that is a claim about the code, and this instrument's job is to print
+    # the NUMBER instead. `max|f_g − fg_loc|` over the live objects is that number, and it is also the
+    # honest proof that the muted arm is not silently doing something (`TRAPS: an-ablation-that-never-ran`).
+    _live = np.asarray([float(cnt[row["slot"]]) > 0 for row in rows], bool)
+    _sl = np.asarray([row["slot"] for row in rows], np.int64)[_live]
+    _sep = float(np.max(np.abs(fg[_sl] - loc[_sl]))) if _sl.size else float("nan")
+    if relay is None:
+        print(f"   ⭐ RUNG 3 − RUNG 2, over the {live} live objects: max|f_g − fg_loc| = {_sep:.3g}   "
+              f"— the relay is MUTED, so this is what 'no third rung' MEASURES")
+    else:
+        print(f"   ⭐ RUNG 3 − RUNG 2, over the {live} live objects: max|f_g − fg_loc| = {_sep:.3g}   "
+              f"— what the relay MOVED")
     # ⛔⛔ THE LOCALISATION, and it must NOT be a raw comparison of |Δ fg_loc| against |Δ f_g|.
     # An object with no own composition evidence is SUPPOSED to return psi's uninformative reference
     # (~0.49) at zero precision — that is correct behaviour, not an error, so a rule that reads a large
@@ -143,11 +167,14 @@ def report(spec_name, arm, r, expect):
     # ``cg . E_g / M``. If that already implies f_g >= 1 and psi still returns less, the shortfall is
     # psi's SOLVE and not the level — a completely different fix from anything in the message layer, and
     # no amount of work on the reframe can reach it.
-    uni = r.capture["_uni"][-1]
-    cg = np.asarray(uni["cg"], float)
-    st = r.capture["_uni_static"]
+    # ⛔ `_uni` exists only under `HeadPolicy`; muted, there is NO delivered density to convert, and a 0
+    # here would read as "the relay delivered nothing useful" rather than "the relay was not asked".
+    cg = np.asarray(relay["cg"], float) if relay is not None else None
+    st = TH.relay_static(r.capture)  # M / E_g survive the mute — the BACKBONE publishes them
     M = np.asarray(st["M"], float)
     E_g = np.asarray(st["E_g"], float)
+    if relay is None:
+        print(TH.relay_silent_note("THE 'msg implies f_g' COLUMN"))
     print(f"\n   {'slot':>4} {'own evidence?':<14} {'|Δ| local':>10} {'|Δ| final':>10} "
           f"{'gap closed':>11} {'msg implies f_g':>16}   reading")
     fin_bad = 0.0
@@ -162,13 +189,19 @@ def report(spec_name, arm, r, expect):
         if df < 1e-6:
             reading = "✅ exact"
         elif not has_own:
-            reading = ("⚠ NO own evidence — carried by messages, which stopped short"
-                       if closed == closed and closed > 0.5
-                       else "⛔ NO own evidence and the messages did not carry it")
+            # ⛔ THE WORDING IS THE MEASUREMENT. Muted, "the messages did not carry it" is trivially true
+            # of a relay that was never asked, and reads as a message-layer verdict. Say which it is.
+            if relay is None:
+                reading = "⛔ NO own evidence, and the relay is MUTED — nothing COULD carry it"
+            else:
+                reading = ("⚠ NO own evidence — carried by messages, which stopped short"
+                           if closed == closed and closed > 0.5
+                           else "⛔ NO own evidence and the messages did not carry it")
         else:
             reading = "⛔ has own evidence and is still wrong — an INITIALISATION defect"
         cl = f"{closed:>10.1%}" if closed == closed else f"{'—':>10}"
-        imp = cg[s] * E_g[s] / M[s] if M[s] > 0 else float("nan")
+        imp = (cg[s] * E_g[s] / M[s] if M[s] > 0 else float("nan")) if relay is not None \
+            else float("nan")
         ims = f"{imp:>16.4f}" if imp == imp else f"{'—':>16}"
         if expect == 1.0 and imp == imp and imp >= 0.999 and df > 1e-6:
             reading = "⛔⛔ the MESSAGE already implies f_g >= 1 — the shortfall is psi's SOLVE"
@@ -185,14 +218,21 @@ def main() -> int:
     ap.add_argument("--arms", nargs="*", default=["rna", "gdna"], choices=["rna", "gdna"])
     ap.add_argument("--n-rna", type=int, default=200_000, help="the ZERO-gDNA arm's RNA depth")
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_zero_controls"))
+    # ⭐ defaults to the SHIPPED setting: this is the admissibility control the owner requires on every
+    # experiment, so it must run the configuration the tool ships.
+    TH.add_messages_flag(ap, default=TH.MESSAGES_SHIPPED)
     args = ap.parse_args()
 
     index = TranscriptIndex.load(str(INDEX))
-    config = dataclasses.replace(CalibrationConfig(), calib_refit_iters=0)
+    messages = TH.messages_on(args)
+    config = TH.with_messages(
+        dataclasses.replace(CalibrationConfig(), calib_refit_iters=0), messages
+    )
     print("=" * 118)
     print("⭐⭐⭐ THE TWO ZERO CONTROLS — a CONSTANT truth, so every deviation is a false positive")
     print("=" * 118)
     print("   capture OFF · unstranded · PRIOR-FREE pass-0 (calib_refit_iters=0)")
+    print(TH.messages_stamp(messages))
 
     if "rna" in args.arms:
         donor = TH.harvest(SUITE / DONOR_GDNA, index, config=config)

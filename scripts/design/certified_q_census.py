@@ -29,38 +29,55 @@ sound and `tests/calibration/test_certified_rna_licence.py` gates it.**
 
 ---
 
-⭐⭐⭐ **WHAT IT MEASURED — the full 36-condition ladder, 2026-08-05. No solver runs.**
+⭐⭐⭐ **WHAT IT MEASURED — RE-MEASURED 2026-08-17 ON THE 16-CONDITION LADDER. No solver runs, ~4 s.**
 
-**1. ``q`` is nowhere near 1.** Mass-weighted median ``q`` = **0.19–0.71**, and **60–98 % of the mass sits
-at q < 0.9** in every one of the 36 conditions. So the dropped term is not a correction, it is comparable
-to the term being kept.
+⛔ **The numbers below replace a table measured on the 36-condition ladder retired 2026-08-13, and the
+replacement was a RE-RUN rather than an edit** (`TRAPS: re-record-the-baseline`). Every row that still
+has a condition to stand on reproduced to the printed digit; the one row that did not is named under
+point 2, because a rung that no longer exists cannot be re-measured and must not be quietly renumbered.
+The command is the Usage line: ``python scripts/design/certified_q_census.py``.
+
+**1. ``q`` is nowhere near 1.** Mass-weighted median ``q`` = **0.192–0.706**, and **60.4–97.9 % of the
+mass sits at q < 0.9** in every one of the 16 conditions. So the dropped term is not a correction, it is
+comparable to the term being kept.
 
 **2. The raw-count term is therefore not a floor — it is a PRIOR TOWARD RNA, and it is panel-negative on
-a third of the ladder.** Scoring the median of Beta(½, ½+S) — which is exactly ψ's reference plus the term
-with nothing else speaking — against per-BOUNDARY truth, mass-weighted over the BOUNDARIES the term fires on:
+more than a third of the ladder.** Scoring the median of Beta(½, ½+S) — which is exactly ψ's reference plus
+the term with nothing else speaking — against per-BOUNDARY truth, mass-weighted over the BOUNDARIES the
+term fires on:
 
 =========================  ==========  ==========  ==========  ==========
 condition                  q med       mwae term   mwae ref    Δ
 =========================  ==========  ==========  ==========  ==========
 g00 ss0.50 capture_off     0.200       0.0107      0.5000      **−0.4893**
+g00 ss0.50 capture_on      0.195       0.0077      0.5000      **−0.4923**
 g50 ss0.50 capture_off     0.234       0.0695      0.4540      −0.3845
 g50 ss0.50 capture_on      0.356       0.5245      0.3285      **+0.1960**
-g90 ss0.50 capture_on      0.600       0.8654      0.4076      **+0.4578**
+g98 ss0.50 capture_off     0.706       0.6854      0.3347      +0.3507
 g98 ss0.50 capture_on      0.694       0.9230      0.4779      +0.4451
+g98 ss0.99 capture_on      0.700       0.9244      0.4785      **+0.4459**
 =========================  ==========  ==========  ==========  ==========
 
-**WORSE on 12 of 36 conditions**; worst **+0.4578** at ``g90 ss0.50 capture_on``, where **98.3 % of the
-mass** sits on BOUNDARIES whose truth is gDNA-rich (mean true ``f_g`` = 0.84) and the term answers ``0.04``.
+**WORSE on 6 of 16 conditions**; worst **+0.4459** at ``g98 ss0.99 capture_on``, where **100.0 % of the
+mass** sits on BOUNDARIES whose truth is gDNA-rich (mass-weighted mean true ``f_g`` = **0.9785**) and the
+term answers **0.0541**.
 
-⭐⭐ **3. And the two arms of the ladder ARE the two zero controls, which is what makes the diagnosis
-certain rather than suggestive.** At ``g00`` the truth is all-RNA and the term is worth −0.49 — the best
-result on the panel. At ``g98`` the truth is nearly all-gDNA and the term is worth +0.35 — the worst. The
-sign of the effect is the sign of the truth. ⛔ **A channel whose benefit tracks the answer rather than
-the evidence has not added information; it has added a prior** (TRAPS: honesty-metrics-reward-ignorance's shape).
+⛔ **ONE RECORDED NUMBER IS UNREPRODUCIBLE AND IS NOT REPLACED BY A NEARBY ONE.** The retired verdict's
+worst row was ``+0.4578`` at ``g90 ss0.50 capture_on``. The rebuilt ladder's gDNA rungs are
+``g00/g05/g50/g98`` — **there is no g90**, and ``g98`` is a different mixture, not a re-measurement of
+the same one. What would reproduce it is a panel carrying a ``g90`` rung, and nothing on disk does.
+
+⭐⭐ **3. And the two ends of the ladder ARE the two zero controls, which is what makes the diagnosis
+certain rather than suggestive.** At ``g00`` the truth is all-RNA and the term is worth **−0.4893 …
+−0.4923** — the best results on the panel. At ``g98 capture_on`` the truth is nearly all-gDNA and the term
+is worth **+0.4451 … +0.4459** — the worst. The sign of the effect is the sign of the truth. ⛔ **A channel
+whose benefit tracks the answer rather than the evidence has not added information; it has added a prior**
+(TRAPS: honesty-metrics-reward-ignorance's shape).
 
 **4. And ``q`` is a property of the RNA GEOMETRY, not of the composition.** Per-BOUNDARY ``q`` at ``g00`` vs
 ``g50`` agrees to a Spearman **ρ = 0.9257** on 5,241 shared BOUNDARIES — a 50-point swing in the gDNA fraction
 barely moves it, because ``q`` asks only "of the RNA crossing this boundary, what fraction shows a splice?".
+⚠ That pair is the one the code below reaches for by name, so it is re-derived on every run rather than quoted.
 ⭐ So the missing quantity is
 computable in principle: ``1−q`` is the share of the crossing opportunity that fits inside the unbroken
 EXONIC reach either side of the boundary. ⛔ But that array does not exist —

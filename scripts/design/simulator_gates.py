@@ -34,8 +34,13 @@ discarded. G-S3 is the gate that falsifies.
 and never the configured `frag_mean`. The configured value describes a library that was never
 sequenced; post-capture is the baseline (`docs/TRAPS.md` capture-selects-for-length).
 
-    python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/pilot \\
+    python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/ladder \\
         --reference ~/Downloads/rigel_runs/suite/reference [--genomic-refs chr21 chr22]
+
+⚠ **The example named `suite/pilot` until 2026-08-17 and that panel does not exist**: `pilot`,
+`flgap_short` and `flgap_long` were deleted on 2026-08-13 and `gdna_ladder.yaml` (16 conditions) is the
+only panel on disk. Nothing here is pilot-specific — `--suite` is any panel directory holding a
+`manifest.json` — so only the example was wrong.
 
 Exits non-zero if any gate fails.
 """
@@ -285,7 +290,7 @@ class Report:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--suite", type=Path, required=True, help="pilot directory (holds manifest.json)")
+    ap.add_argument("--suite", type=Path, required=True, help="panel directory (holds manifest.json)")
     ap.add_argument("--reference", type=Path, required=True, help="reference directory")
     ap.add_argument(
         "--genomic-refs",
@@ -295,7 +300,17 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    manifest = json.loads((args.suite / "manifest.json").read_text())
+    # ⛔ Fail FAST and by name. Pointed at the deleted `pilot` panel this raised a bare
+    # `FileNotFoundError` traceback, which says a file is missing but not that the PANEL is.
+    manifest_path = args.suite / "manifest.json"
+    if not manifest_path.is_file():
+        raise SystemExit(
+            f"no panel manifest at {manifest_path}\n"
+            f"   `--suite` is a panel directory built by `scripts/sim/panel.py`. ⚠ `pilot`,\n"
+            f"   `flgap_short` and `flgap_long` were deleted on 2026-08-13; `gdna_ladder.yaml`\n"
+            f"   (16 conditions) is the only panel on disk."
+        )
+    manifest = json.loads(manifest_path.read_text())
     conditions = manifest["conditions"]
     ref_lengths = read_fai(args.reference / "genome.fa.fai")
 

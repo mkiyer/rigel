@@ -7,6 +7,15 @@ pinned suite and emits a normalized JSON digest (manifest condition identity + p
 truth-file hashes + per-condition oracle-BAM record digest), with all absolute paths / timestamps
 stripped so the digest is location-independent and reproducible from a fixed seed.
 
+⚠ **The suite it runs is its OWN pinned smoke suite, not the 16-condition ladder**, and its condition
+names (`gdna_equal_ss_0.50_nrna_none`) come from that pinned profile. That is deliberate — the digest has
+to be cheap and reproducible from a fixed seed — but it means a name printed here is NOT a panel rung and
+must not be looked up in `sim/configs/gdna_ladder.yaml`.
+
+⛔ **IT PARSED NO ARGUMENTS AT ALL UNTIL 2026-08-17**: every flag was silently discarded and
+`--help` ran a full simulation and printed a digest, exiting 0. A tool that answers `--help` with a
+measurement is indistinguishable from one that ignored what you asked it.
+
 Usage:
     # before a refactor phase:
     python scripts/sim/snapshot_suite.py > /tmp/sim_before.json
@@ -14,11 +23,13 @@ Usage:
     python scripts/sim/snapshot_suite.py > /tmp/sim_after.json
     diff <(jq -S . /tmp/sim_before.json) <(jq -S . /tmp/sim_after.json)   # must be empty
 
-`digest_suite_dir(path)` can also digest an existing suite dir for ad-hoc comparison.
+    # digest a suite that already exists, instead of running the pinned one
+    python scripts/sim/snapshot_suite.py --suite-dir ~/Downloads/rigel_runs/suite/ladder
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import subprocess
@@ -94,20 +105,48 @@ def digest_suite_dir(suite_dir: Path) -> dict:
 
 
 def run_pinned_suite(outdir: Path) -> None:
+    """⛔ The child's stderr is CAPTURED AND REPRINTED on failure, never discarded. It was sent to
+    ``DEVNULL`` on both streams, so a simulator that raised surfaced here as a bare
+    ``CalledProcessError`` with the reason thrown away — the digest's whole job is to notice a change in
+    the simulator, and swallowing its error message is the one way to make that impossible."""
     cmd = [
         sys.executable, str(Path(__file__).parent / "simulate_suite.py"),
         "--outdir", str(outdir), *_SUITE_ARGS,
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    done = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    if done.returncode != 0:
+        sys.stderr.write(done.stderr or "")
+        raise SystemExit(f"⛔ the pinned suite failed (rc={done.returncode}): {' '.join(cmd)}")
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory() as tmp:
-        outdir = Path(tmp) / "suite"
-        run_pinned_suite(outdir)
-        digest = digest_suite_dir(outdir)
-    json.dump(digest, sys.stdout, indent=1, sort_keys=True)
-    sys.stdout.write("\n")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--suite-dir", type=Path, default=None,
+                    help="digest THIS suite directory instead of running the pinned one")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="write the digest here instead of stdout")
+    args = ap.parse_args()
+
+    if args.suite_dir is not None:
+        if not (args.suite_dir / "manifest.json").is_file():
+            print(f"⛔ no manifest.json under {args.suite_dir} — that is not a simulator suite dir",
+                  file=sys.stderr)
+            return 2
+        digest = digest_suite_dir(args.suite_dir)
+    else:
+        with tempfile.TemporaryDirectory() as tmp:
+            outdir = Path(tmp) / "suite"
+            run_pinned_suite(outdir)
+            digest = digest_suite_dir(outdir)
+
+    text = json.dumps(digest, indent=1, sort_keys=True) + "\n"
+    if args.out is not None:
+        args.out.write_text(text)
+        print(f"wrote {args.out}", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
     return 0
 
 

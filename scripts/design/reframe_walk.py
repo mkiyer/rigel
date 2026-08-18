@@ -462,6 +462,7 @@ def section_answer(r, lab, g_cnt, rna_cnt):
 def run_arm(arm, donor_name, spec, index, config, work_dir):
     print("\n" + "=" * 132)
     print(f"════ ARM: {arm.upper()} gDNA   ·   donor {donor_name}   ·   capture OFF · UNSTRANDED")
+    print(TH.messages_stamp(bool(config.message_propagation)))
     print("=" * 132)
     donor = TH.harvest(SUITE / donor_name, index, config=config)
     r = TH.run_toy(spec, donor, work_dir, config=config)
@@ -471,7 +472,12 @@ def run_arm(arm, donor_name, spec, index, config, work_dir):
     print(f"   kappa = {donor.priors.rna_sense_frac:.6f}  (½ ⇒ EXACTLY zero strand information, `EQUATIONS.md` §5.2)")
     geom = rebuild_geometry(r)
     lab = labels(r.chain, r.region_arrays)
-    st_cap = dict(r.capture["_uni_static"])
+    # ⛔⛔ EVERY SECTION BELOW SECTION 1 IS A HOP, and a hop exists only under `HeadPolicy`. The frames
+    # (`rho_lo`/`rho_hi`), the relay state (`fwd_*`/`bwd_*`) and the mass pins (`_pin`) are all published
+    # by the message layer, so this file died with `KeyError: 'rho_lo'` — the same class of defect as the
+    # four `KeyError: '_uni'` instruments, at a different key. Refuse rather than walk an empty relay.
+    TH.require_relay(r.capture, what="the reframe walk (every hop, both directions, with its frames)")
+    st_cap = TH.relay_static(r.capture)
     # the belief the frames were built at — the sweep's INPUT f_g, which it publishes as fg_init
     st_cap["_fg_in"] = np.asarray(r.capture["fg_init"], float)
     g_cnt, rna_cnt, _full = truth_slot_arrays(r)
@@ -492,10 +498,15 @@ def main() -> int:
                     help="HIGH by default: enough counts everywhere that nothing is sparse")
     ap.add_argument("--spec", default="spliced_exons")
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_reframe_walk"))
+    # ⭐ DEFAULTS TO `on`: this instrument IS the relay — "every hop in BOTH directions". Under the
+    # shipped mute there are no hops, so it refuses rather than printing an empty walk.
+    TH.add_messages_flag(ap, default=True)
     args = ap.parse_args()
 
     index = TranscriptIndex.load(str(INDEX))
-    config = dataclasses.replace(CalibrationConfig(), calib_refit_iters=0)
+    config = TH.with_messages(
+        dataclasses.replace(CalibrationConfig(), calib_refit_iters=0), TH.messages_on(args)
+    )
     spec = dataclasses.replace(TH.SPECS[args.spec], n_rna_fragments=int(args.n_rna))
     print("=" * 132)
     print("⭐⭐⭐ THE REFRAME, WALKED — one two-exon transcript, every count, every hop, both directions")

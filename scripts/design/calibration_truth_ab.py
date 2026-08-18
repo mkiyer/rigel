@@ -7,6 +7,13 @@ second pass are upstream plumbing: one definition of fragment length, then an ac
 was measured at **a 10 % length-model error is worth 0.010–0.026 of composition** — so a length error
 that went from +27 % to +0.00 % should be visible here, or the coupling is not what it was thought to be.
 
+⛔⛔ **"LENGTH" HERE IS THE fl PMF INSIDE THE *OPPORTUNITY* MODEL — NOT THE COMPOSITION CHANNEL THAT IS
+DEFERRED PAST 0.8.0, AND THE TWO SHARE A WORD AND NOTHING ELSE.** `--ceiling` hands `calibrate` the
+simulator's own post-capture length **distributions** in place of the fitted ones; it does not add a
+fragment-length composition channel, which is out of scope and must not be proposed. ⚠ Said here because
+this docstring's own headline says "the whole fragment-length track", and a reader who meets that sentence
+alone can reach for the retired thing.
+
 ⚠ **Three sentences of this docstring were WRECKAGE from the numbered-label rename** — a dangling
 "Baseline it replaces:," with no referent, and a rule citation that had become
 "TRAPS: two-divisors-opposite-sign–TRAPS: pure-and-length-censored.6". They named documents and labels
@@ -14,16 +21,36 @@ that no longer exist and are deleted rather than guessed at (2026-08-11).
 
 ⭐ **ONE THING VARIED.** The same cached scan, the same index, the same config; the only difference is
 whether the side buffer has been **drained** before calibration reads the tally. The undrained arm is
-exactly what shipped before P4.
+exactly what shipped before the second-pass drain landed. ⚠ That sentence said "before P4" until
+2026-08-17; `P4` is a HISTORICAL phase label and it resolves nowhere — it appears in none of the six
+permanent docs (checked). The mechanism is named instead, and `rigel.pipeline._drain_side_buffer` is it.
 
-⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE**. Truth there is
+⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE** (`TRAPS: zero-target-guards-are-one-sided`). Truth there is
 `f_gdna = 0` *exactly*, so any change that lowers the estimate scores better — a one-sidedness that has
-already reversed a verdict in this project once. The **gdna100** arm carries the real signal: truth is
-5 M mRNA against 5 M gDNA fragments, so `f_gdna = 0.5`.
+already reversed a verdict in this project once. The CONTAMINATED rungs carry the real signal: on the
+ladder, `g50` is 5 M gDNA against a fixed 10 M total, so `f_gdna = 0.5`.
+
+⚠ **The rungs were named `gdna100` / zero-gDNA until 2026-08-17** — pilot condition labels, and that panel
+was deleted on 2026-08-13. The 16-condition `gdna_ladder.yaml` names them `g00` / `g05` / `g50` / `g98`,
+and `--scan-cache` (was `--pilot`) now defaults to it.
+
+⛔⛔ **THE MESSAGE POLICY IS STAMPED ON EVERY ROW, because this number MOVES WITH IT and nothing said so
+(added 2026-08-17).** This instrument calls `calibrate` under a plain `CalibrationConfig()`, so it runs
+whatever `message_propagation` currently ships — `False` today. ⭐ Measured on
+`gdna_g50_ss_0.99_nrna_none_capture_off`, one thing varied: the undrained `f_gdna` reads **0.503297**
+with the relay muted and **0.496667** with it on, against a truth of exactly 0.500 — the SAME magnitude
+with the SIGN FLIPPED. ⛔ That is larger than the drain effect this instrument exists to measure
+(+0.0033 → −0.0053), so an unstamped row from a study configuration is indistinguishable from a shipped
+one and would read as the mechanism (`TRAPS: an-ablation-that-never-ran`, in the reporting direction).
+⭐ `ladder_arm_ab.py` stamps `messages` on every arm row for exactly this reason and `arm_score.py`
+refuses to aggregate across it; `ROADMAP.md` §0 had to hand-annotate "messages OFF" beside this
+instrument's own numbers, which is the same fact written down by hand. ⚠ **STAMPED, not switchable** —
+no `--messages` flag is added here: the shipped default is what this measures, and a knob is a decision
+for the owner rather than a review repair.
 
 Usage::
 
-    python scripts/design/calibration_truth_ab.py [--index DIR] [--pilot DIR] [--json out.json]
+    python scripts/design/calibration_truth_ab.py [--index DIR] [--scan-cache DIR] [--json out.json]
 """
 
 from __future__ import annotations
@@ -40,16 +67,18 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
+DEFAULT_SCAN_CACHE = _RUNS / "suite" / "ladder" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 
 def truth_f_gdna(condition_dir: Path) -> float | None:
     """The library's TRUE gDNA fragment fraction, from the simulator's own origin counts.
 
-    ⚠ Read from ``truth_summary.json``'s ``origin_counts`` rather than from the condition NAME. "gdna100"
-    is a rate knob, not a fraction — it happens to give 5 M gDNA against 5 M mRNA, i.e. 0.5, and inferring
-    that from the string would be one rename away from silently wrong.
+    ⚠ Read from ``truth_summary.json``'s ``origin_counts`` rather than from the condition NAME. ⛔ On the
+    retired pilot the name was a RATE knob ("gdna100" gave 5 M gDNA against 5 M mRNA, i.e. 0.5) and the
+    gap was obvious. On the 16-condition ladder it is worse: the label happens to be the fraction exactly
+    — ``g05`` / ``g50`` / ``g98`` measure **0.050000 / 0.500000 / 0.980000** — which is precisely when
+    parsing the string starts to look safe, and it is still one rename away from silently wrong.
     """
     path = condition_dir / "truth_summary.json"
     if not path.is_file():
@@ -111,15 +140,17 @@ def f_gdna_of(result) -> float:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    # ⚠ `--pilot` is a HISTORICAL NAME: it is simply the scan-cache ROOT, and it has pointed at panels
-    # other than the pilot for a long time. Kept rather than renamed because instruments and notes call
-    # it by this name; what it means is documented here and in the module docstring.
-    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT,
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    # ⛔ WAS `--pilot`, RENAMED 2026-08-17. It is simply the scan-cache ROOT and always was; the name
+    # survived the `pilot` panel by four days and its DEFAULT pointed at a directory that no longer
+    # exists, so the instrument exited 2 out of the box. ⚠ `docs/SUCCESS.md` still spells the old name.
+    ap.add_argument("--scan-cache", type=Path, default=DEFAULT_SCAN_CACHE,
                     help="the scan-cache ROOT — a directory of <condition>/ caches")
     # ⭐ THE LADDER'S FULL SCAN IS CACHED ONE LEVEL DEEPER. `pass0_vs_oracle` writes the undrained main
     # payload to `<oracle_cache>/<condition>/_main`, in exactly the `write_scan_cache` layout this
-    # reads — so the 36-condition panel needs a subdirectory, not a second 27 GB copy of the scans.
+    # reads — so the 16-condition panel needs a subdirectory, not a second copy of every scan.
     ap.add_argument("--cache-subdir", default="",
                     help="subdirectory under each condition holding the cache; use `_main` to read an "
                          "oracle_cache built by pass0_vs_oracle.py / prior_vs_oracle.py")
@@ -136,10 +167,10 @@ def main() -> int:
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
-    if not args.pilot.is_dir():
-        print(f"no pilot scan-cache dir at {args.pilot}", file=sys.stderr)
+    if not args.scan_cache.is_dir():
+        print(f"no scan-cache dir at {args.scan_cache}", file=sys.stderr)
         return 2
-    suite = args.suite or args.pilot.parent
+    suite = args.suite or args.scan_cache.parent
 
     from rigel.calibration.calibrate import calibrate
     from rigel.calibration.fl import build_fl_models
@@ -170,10 +201,10 @@ def main() -> int:
             **derived,
         )
 
-    names = args.conditions or sorted(p.name for p in args.pilot.iterdir() if p.is_dir())
+    names = args.conditions or sorted(p.name for p in args.scan_cache.iterdir() if p.is_dir())
     rows = []
     for name in names:
-        root = args.pilot / name
+        root = args.scan_cache / name
         if args.cache_subdir:
             root = root / args.cache_subdir
         cache = read_scan_cache(root, index)
@@ -184,6 +215,10 @@ def main() -> int:
         after = f_gdna_of(run(drained, cache.strand_model))
         row = {
             "condition": name,
+            # ⛔ PART OF THE MEASUREMENT, not metadata — see the module docstring: flipping this alone
+            # moves the undrained number from +0.0033 to −0.0033 against truth on `g50` stranded
+            # capture-OFF. A saved row without it cannot be attributed to a configuration.
+            "messages": "on" if config.message_propagation else "off",
             "truth_f_gdna": truth,
             "undrained_f_gdna": before,
             "drained_f_gdna": after,
@@ -216,7 +251,11 @@ def main() -> int:
         print(f"  {name:<44} done in {rows[-1]['seconds']:.0f} s")
 
     print()
-    print("═══ ⭐ f_gdna against TRUTH — undrained (what shipped before P4) vs drained ═══")
+    messages = "on" if config.message_propagation else "off"
+    print(
+        f"═══ ⭐ f_gdna against TRUTH — undrained (what shipped before the drain) vs drained "
+        f"· messages={messages} ═══"
+    )
     print(
         f"{'condition':<44} {'truth':>7} {'undrained':>10} {'err':>8} {'⭐ drained':>11} {'err':>8} {'move':>8}"
     )
@@ -234,8 +273,9 @@ def main() -> int:
             f"{r['drained_f_gdna']:>11.4f} {ea:>+8.4f} {abs(ea) - abs(eb):>+8.4f}"
         )
     print("   `move` is |err| after − |err| before: NEGATIVE is an improvement.")
-    print("   ⛔ Judge on the gdna100 rows. The zero-gDNA rows are saturated at truth = 0 exactly, so any")
-    print("      change that lowers the estimate 'improves' them — trap 19, which has reversed a verdict here.")
+    print("   ⛔ Judge on the CONTAMINATED rows (g05/g50/g98). The g00 rows are saturated at truth = 0")
+    print("      exactly, so any change that lowers the estimate 'improves' them —")
+    print("      TRAPS: zero-target-guards-are-one-sided, which has reversed a verdict here.")
 
     scored = [r for r in rows if r["truth_f_gdna"]]
     if scored:
@@ -284,8 +324,9 @@ def main() -> int:
                 mean = np.mean([abs(r[key] - r["truth_f_gdna"]) for r in values])
                 delta = f"{100 * (mean - base) / base:+.1f} %" if base > 0 else "—"
                 print(f"   {label:<56} {mean:.4f}   {delta}")
-            print("   ⚠ A ceiling is what perfecting a channel is WORTH, not a result. Trap 31: it is")
-            print("     available whenever the simulator writes truth, and it costs one afternoon.")
+            print("   ⚠ A ceiling is what perfecting a channel is WORTH, not a result.")
+            print("     TRAPS: measure-the-ceiling-first — it is available whenever the simulator writes")
+            print("     truth, and it costs one afternoon.")
 
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2, sort_keys=True))

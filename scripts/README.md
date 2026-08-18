@@ -8,14 +8,45 @@ toolkit — **neither of the last two has existed for months** — and it did no
 which is 56 files and the toolkit people actually use. ⛔ A directory listing takes one second; prefer it
 to this file if the two disagree, and then fix this file.
 
+⚠ **Every count in the table below is hand-carried prose and nothing gates it, so re-derive rather than
+trust** (`TRAPS: re-record-the-baseline`): `ls scripts/<dir>/*.py | grep -v __init__ | wc -l`. What IS
+gated is the membership — `tests/test_scripts_index.py` holds `design/` against `CLAUDE.md`'s table and
+`profiling/` against this file, in both directions.
+
 ## The four directories
 
 | dir | what it is |
 |---|---|
-| ⭐⭐ `design/` | **the instrument shelf — 56 files.** The debug loop, the panel harnesses, the truth-scoring instruments. ⛔ Indexed in `CLAUDE.md`'s table, and `tests/test_scripts_index.py` enforces that the index and the disk agree in BOTH directions and that every file still IMPORTS |
-| ⭐ `sim/` | thin CLI wrappers over the simulator engine in `src/rigel/sim/`, plus the panel YAML configs in `sim/configs/`. ⭐⭐ **`panel.py` is the one entry point** — build, simulate, cache, score, report |
-| `profiling/` | profiling drivers (`profiler.py`, `pyspy_driver.py`, `scan_profile.py`) + configs |
+| ⭐⭐ `design/` | **the instrument shelf — 59 files** (re-derived 2026-08-17, after `flgap_study_cache.py` and `prior_yardstick.py` were deleted; the row said 56, and its own rule is to prefer the directory listing and then fix the file). The debug loop, the panel harnesses, the truth-scoring instruments. ⛔ Indexed in `CLAUDE.md`'s table, and `tests/test_scripts_index.py` enforces that the index and the disk agree in BOTH directions and that every file still IMPORTS |
+| ⭐ `sim/` | **8 files** — thin CLI wrappers over the simulator engine in `src/rigel/sim/`, plus the panel YAML configs in `sim/configs/`. ⭐⭐ **`panel.py` is the one entry point** — build, simulate, cache, score, report |
+| ⭐ `profiling/` | **where the time and the memory go — 2 files, and this row is their index.** ⭐⭐ **`profiling/profiler.py`** — the whole pipeline, wall clock AND per-phase peak RSS across `scan` / `calibrate` / `quant`, plus `held` (what a phase hands ON rather than borrows), with optional cProfile. ⭐ **`--sweep SECTION.FIELD=V1,V2,…` puts any `PipelineConfig` field on the x-axis**, which is how compute is priced against memory: `calibration.sweep_n_grid` 30 → 120 costs **5.2 s → 16.2 s** in calibrate and **+1.1 GB** peak (10 M fragments, 4 threads). `--self-test` falsifies the memory instrumentation with no BAM and no index (3/3, and it pins the one hole it cannot cover). ⭐ **`profiling/scan_profile.py`** — the scan alone, swept across thread and chunk budgets, and the process to launch under Instruments/xctrace or py-spy. ⛔⛔ **PROFILE A HIGH-DEPTH REAL RNA-seq LIBRARY, NOT cfRNA AND NOT A PANEL CONDITION** (owner, 2026-08-17) — `docs/TESTING.md` §7 is the ruling |
 | `publishing/` | release scripts (`release.sh`, `post_release.sh`, `conda_publish.sh`) |
+
+### ⭐⭐ `profiling/` — the decision, taken 2026-08-17
+
+**Extend the gate to a third tree; do not delete the directory.** The performance work before 0.8.0
+needs these two instruments, and the reason the choice had to be made at all is that the tree had
+**rotted twice** with the one defect class `tests/test_scripts_index.py` already catches next door —
+`pyspy_driver.py` read `sys.argv[1]` at import time (found 2026-08-11), `scan_profile.py` imported two
+names `profiler.py` did not export so even `--help` raised (found 2026-08-17). Only the gate's REACH
+differed (`TRAPS: a-green-suite-hid-five-dead-instruments`). `ALL_SCRIPTS` is now
+`design + sim + profiling`, the docstring gate covers all three, and **this row is the profiling tree's
+index** — a file there that no row names fails the suite, and a row naming a deleted file fails it too.
+
+**Deleted in the same pass, as legacy:** `configs/` (8 YAML files naming a `--config` flag that no
+instrument has, a `scripts/profiler.py` path that does not exist, a `benchmark.py` deleted months ago,
+and `em_mode` / `em_iterations` / `em_convergence_delta` keys absent from `src/rigel/config.py`); and
+`pyspy_driver.py`, which was a second way to run the pipeline once — `profiler.py` does that and more,
+so `py-spy record -o pipeline.svg -- python scripts/profiling/profiler.py --bam … --index …` replaces
+it exactly.
+
+⛔ **A BASENAME STILL COLLIDES, AND THE RENAME IS AN OWNER CALL.** `design/scan_profile.py` (the
+accumulator's ns/fragment, regressed over several BAMs) and `profiling/scan_profile.py` (the scan's own
+wall time and RSS across thread budgets) are different instruments sharing a filename. The gate no
+longer *breaks* on it — case ids are tree-qualified (`design/scan_profile.py`,
+`profiling/scan_profile.py`), so a failure names the tree — but a reader who greps the basename still
+finds two files. ⭐ Proposed, not done: rename `design/scan_profile.py` to `accumulator_cost.py`, which
+is what it measures; it has a row in `CLAUDE.md` that moves with it.
 
 ## ⭐⭐⭐ The simulation + benchmarking workflow
 

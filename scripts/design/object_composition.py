@@ -122,7 +122,7 @@ the arm that does not depend on it — no transcript covers those regions at any
 on unstranded data only.
 
 Gates: ``tests/test_object_composition_self_test.py``. ``--self-test`` perturbs every comparator with no
-I/O, which is the other half of the discipline (TRAPS: falsification-needs-perturbation).
+I/O, which is the other half of the discipline (TRAPS: perturb-every-gate).
 
 Usage::
 

@@ -33,7 +33,12 @@ and the probability form is the correct one either way.
 of the four de-tilted pools — and under Poisson counts `Var(count_p) ∝ A_p`, so weights proportional to
 `A_p` are exactly inverse-variance. There is no tunable weight.
 
-    python scripts/design/gdna_pool_census.py [--index DIR] [--pilot DIR] [--suite DIR]
+⚠ **It reads a SCAN CACHE, so `panel.py cache` comes first.** The default is the ladder's, which is the
+only panel on disk. ⛔ It pointed at `suite/pilot/scan_cache` until 2026-08-17 — a panel DELETED on
+2026-08-13 — so every bare invocation between those dates died on a `FileNotFoundError` traceback with no
+statement of what was missing. The flag that named that panel (`--pilot`) went with it.
+
+    python scripts/design/gdna_pool_census.py [--index DIR] [--scan-cache DIR] [--suite DIR]
         [--conditions ...] [--json out.json]
 """
 
@@ -42,6 +47,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -49,7 +55,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
+#: the LADDER's scan cache — the only panel on disk since the 2026-08-13 rebuild deleted `pilot`,
+#: `flgap_short` and `flgap_long`. ⚠ Built by `panel.py cache`; this instrument never builds one.
+DEFAULT_SCAN_CACHE = _RUNS / "suite" / "ladder" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 #: Coarse region types, as `signature.coarse_type_array` emits them.
@@ -234,27 +242,47 @@ def pct(value: float, truth: float) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT)
+    ap.add_argument("--scan-cache", type=Path, default=DEFAULT_SCAN_CACHE,
+                    help="a panel's scan_cache/ directory, one subdirectory per condition")
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
-    ap.add_argument("--suite", type=Path, default=None)
+    ap.add_argument("--suite", type=Path, default=None,
+                    help="where the per-condition truth files live (default: the scan cache's parent)")
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--no-drain", action="store_true", help="measure pass 1 only, before the side buffer drains")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
-    suite = args.suite or args.pilot.parent
+    # ⛔ FAIL FAST AND NAME WHAT IS MISSING. A missing panel used to surface as a raw traceback out of
+    #   `read_scan_cache`, which a batch runner cannot tell from a real crash — same defect, two exit
+    #   codes. Every input this instrument cannot build itself is checked here, before any work.
+    for label, path, how in (("scan cache", args.scan_cache, "`panel.py cache` (or pass --scan-cache)"),
+                             ("index", args.index, "`rigel index` (or pass --index)")):
+        if not path.is_dir():
+            print(f"⛔ no {label} at {path} — build it with {how}", file=sys.stderr)
+            return 2
+    suite = args.suite or args.scan_cache.parent
+    if not suite.is_dir():
+        print(f"⛔ no suite dir at {suite} — it must hold each condition's truth_fragment_lengths.tsv",
+              file=sys.stderr)
+        return 2
+
     from rigel.index import TranscriptIndex
     from rigel.pipeline import _drain_side_buffer
     from rigel.scan_cache import read_scan_cache
 
     index = TranscriptIndex.load(str(args.index))
-    names = args.conditions or sorted(p.name for p in args.pilot.iterdir() if p.is_dir())
+    names = args.conditions or sorted(p.name for p in args.scan_cache.iterdir() if p.is_dir())
+    missing_truth = [n for n in names if not (suite / n / "truth_fragment_lengths.tsv").is_file()]
+    if missing_truth:
+        print(f"⛔ {len(missing_truth)} condition(s) have no truth_fragment_lengths.tsv under {suite}: "
+              f"{', '.join(missing_truth[:4])}{' …' if len(missing_truth) > 4 else ''}", file=sys.stderr)
+        return 2
 
     opportunity: dict[str, np.ndarray] | None = None
     rows = []
     for name in names:
-        cache = read_scan_cache(args.pilot / name, index)
+        cache = read_scan_cache(args.scan_cache / name, index)
         payload = cache.payload
         if not args.no_drain:
             payload = _drain_side_buffer(payload, index, cache.strand_model, seed=args.seed)

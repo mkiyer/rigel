@@ -77,9 +77,11 @@ def _labels(chain, ra):
     return out
 
 
-def run(cond, *, n_rna, genome_length, nrna, work_dir):
+def run(cond, *, n_rna, genome_length, nrna, work_dir, messages=True):
     index = TranscriptIndex.load(str(INDEX))
-    cfg = dataclasses.replace(CalibrationConfig(), calib_refit_iters=0)
+    cfg = TH.with_messages(
+        dataclasses.replace(CalibrationConfig(), calib_refit_iters=0), messages
+    )
     donor = TH.harvest(SUITE / cond, index, config=cfg)
     spec = TH.SPECS["spliced_exons"]
     if genome_length:
@@ -101,13 +103,23 @@ def main() -> int:
     ap.add_argument("--genome-length", type=int, default=0)
     ap.add_argument("--nrna", type=float, default=0.0)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_trace"))
+    # ⭐ DEFAULTS TO `on`, AND THAT IS THE HONEST DEFAULT HERE: sections 3, 4, 5 and 6 ARE the relay
+    # (hop by hop, what ψ receives, the channel ablation, and withholding the composition licence in
+    # both twins). Under the shipped mute there are no hops to walk and no channels to ablate, so this
+    # instrument RUNS SECTION 1 AND THEN REFUSES rather than printing zeros for five sections.
+    TH.add_messages_flag(ap, default=True)
     args = ap.parse_args()
+    messages = TH.messages_on(args)
 
     donor, spec, sub, dbg, cfg = run(args.condition, n_rna=args.n_rna,
                                     genome_length=args.genome_length, nrna=args.nrna,
-                                    work_dir=args.work_dir)
+                                    work_dir=args.work_dir, messages=messages)
     cap, chain = dbg["capture"], dbg["chain"]
-    uni, st = cap["_uni"][-1], cap["_uni_static"]
+    # ⛔ `_uni` is written only by `messages/head.py`. Sections 2–6 all read it (or a head-only
+    # `_uni_static` key such as `og` / `pg_own` / `struct_lock`), so the refusal is deferred to just
+    # after section 1 — the one section that is policy-independent.
+    st = TH.relay_static(cap)
+    uni = TH.relay_channels(cap)
     ra = sub.region_arrays
     lab = _labels(chain, ra)
     kind, obj = np.asarray(chain.kind), np.asarray(chain.obj_idx, np.int64)
@@ -126,6 +138,7 @@ def main() -> int:
     print(f"   kappa {donor.priors.rna_sense_frac:.6f} · strand specificity "
           f"{donor.strand_specificity:g} · capture {'ON' if donor.capture_on else 'off'} · "
           f"pass-0 (prior-free)")
+    print(TH.messages_stamp(messages))
     print("=" * 132)
 
     # ── 1. every object ──────────────────────────────────────────────────────────────────────────
@@ -154,6 +167,13 @@ def main() -> int:
     worst = max(recs, key=lambda z: z["err"])
     print(f"\n   ⭐ HIGHEST ERROR MASS: {worst['lab']}  "
           f"({worst['err']:.1f} of {tot_err:.1f} fragments, {worst['err'] / tot_err:.1%})")
+
+    # ⛔⛔ EVERYTHING BELOW IS A MESSAGE-LAYER MEASUREMENT, so refuse rather than print zeros for five
+    # sections (the `ladder_arm_ab.py` contract: an arm the policy cannot express is REFUSED up front).
+    # ⚠ Section 1 above is policy-independent and has already printed, which is why the refusal is here
+    # and not at argparse time.
+    TH.require_relay(cap, what="sections 2–6 of the error trace (init sources, the relay hop by hop, "
+                               "what ψ receives, the channel ablation, the licence arm)")
 
     # ── 2. the four init sources ─────────────────────────────────────────────────────────────────
     print("\n── 2. THE FOUR INIT SOURCES — does the object have ANY own evidence? ───────────────────")
@@ -227,8 +247,15 @@ def main() -> int:
         od_r=float(donor.priors.rna_strand_overdispersion or 0.0),
         n_grid=int(cfg.sweep_n_grid), L=float(cfg.sweep_logodds_window),
         n_tilt=cfg.sweep_n_tilt, n_grid_ss=cfg.sweep_n_grid_single_strand,
-        global_logprior=cap["global_lp"], lam_logprior=cap["intron_prior"],
-        length_loglik=None,
+        # ⛔⛔ A SECOND, INDEPENDENT DEATH IN THIS FILE, and it is NOT the `_uni` one: this arm called
+        # `_solve_regions_logodds_all(global_logprior=…, length_loglik=None)` and NEITHER parameter
+        # exists any more. `global_logprior` became `priors` — one `CompositionPriors` bundling the gDNA
+        # arm, the RNA arm and the reference LOCATION, which is exactly what `sweep.py` publishes as
+        # `global_lp`. `length_loglik` was PURGED with the fragment-length composition channel
+        # (`b7ed7a0b`) and has no successor, so it is simply gone rather than renamed.
+        # ⚠ `TRAPS: a-green-suite-hid-five-dead-instruments`: the import gate cannot see a stale kwarg
+        # inside a function body.
+        priors=cap["global_lp"], lam_logprior=cap["intron_prior"],
         fg_ref=cap["fg_init"], fpos_ref=cap["fpos_init"], fneg_ref=cap["fneg_init"],
     )
     ch = dict(gdna_imp_mode=uni["mo_g"], gdna_imp_prec=uni["cm_g"],
@@ -296,7 +323,12 @@ def main() -> int:
     print("   hop, in BOTH twins at once, and is the only way to ask whether the licensed reframe is")
     print("   what inflates the delivered level. ⚠ A DIAGNOSTIC, not a proposal: the licence is")
     print("   load-bearing elsewhere (`EQUATIONS.md` §3.5b/§3.5c).")
-    from rigel.calibration import sweep as BP
+    # ⛔⛔ A THIRD, INDEPENDENT DEATH IN THIS FILE — the same species as the two above and again invisible
+    # to an import gate. This patched `rigel.calibration.sweep.terminus_flank_gain`, a name that is NOT
+    # THERE: the licence's only consumer is `messages/head.py`, which binds the function at import time
+    # (`from ..region_geometry import … terminus_flank_gain`). ⭐ Patch the CONSUMER's binding, because
+    # patching `region_geometry` would be too late for a name already bound.
+    from rigel.calibration.messages import head as BP
 
     orig = BP.terminus_flank_gain
 
@@ -314,7 +346,7 @@ def main() -> int:
     finally:
         BP.terminus_flank_gain = orig
     cap2 = dbg2["capture"]
-    uni2 = cap2["_uni"][-1]
+    uni2 = TH.require_relay(cap2, what="the licence-withheld twin arm")
     print(f"\n      {'slot':<28} {'TRUE rho_g':>11} {'cg SHIPPED':>11} {'cg no-licence':>14} "
           f"{'f_g SHIPPED':>12} {'f_g no-lic':>11} {'truth':>8}")
     for x in recs:

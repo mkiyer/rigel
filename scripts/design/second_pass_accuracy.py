@@ -13,8 +13,11 @@ against it, including the annihilation bug (P4.1), where an all-zero score facto
 two and collapsed the record to a coin toss.
 
 ⛔ **THIS EXISTED ONLY AS AN AD-HOC MEASUREMENT UNTIL 2026-08-03**, which meant the second pass's
-headline number — "90.5 % exact, +0.12 bp" — could not be re-derived when the panel was regenerated.
-That is what this file is for.
+headline number — "90.5 % exact, +0.12 bp", measured on the since-deleted `pilot` panel — could not be
+re-derived when the panel was regenerated. That is what this file is for, and it has now done it: on the
+16-condition ladder's `gdna_g00_ss_0.99_nrna_none_capture_off`, 2026-08-17, **90.8 % exact** and a mean
+error of **−0.03 bp** over 336,351 of 339,431 held fragments matched to an unambiguous true length.
+⚠ Different panel, so this is a re-derivation of the QUANTITY and not a reproduction of the number.
 
 **How a held record is linked to its truth.** The side buffer stores the fragment's clipped genomic
 extent, not its name. So the oracle BAM is indexed by `(ref, leftmost, rightmost)` over each fragment's
@@ -22,12 +25,27 @@ two mates, and only keys whose fragments all agree on one true `L` are used — 
 unambiguous true length". ⚠ Ambiguous keys are **counted and reported**, never silently dropped: if they
 were a large share, the population being scored would not be the population being held.
 
-**What the assigned `L` is.** `L` = genomic span minus region_bound introns (the one definition, C0-C2). For a
-held record that is `end - start` less every observed intron (region_bound under every hypothesis) and every
+**What the assigned `L` is.** `L` = genomic span minus EXCISED introns — the one definition. For a
+held record that is `end - start` less every observed intron (excised under every hypothesis) and every
 intron implied by the CHOSEN hypothesis.
+⚠ That sentence said *"minus region_bound introns … (region_bound under every hypothesis)"* until
+2026-08-17, and it was a BULK-RENAME CASUALTY: `5126cc89` mapped `cut -> REGION_BOUND` wholesale, and
+here `cut` was ordinary English for *excised*, not the REGION_BOUND concept. That is
+`TRAPS: two-masks-one-name` committed by a rename, and it is exactly what `rename_census.py` refuses to
+do automatically. The identifiers it renamed in the same commit (`payload.region_bounds`,
+`ref_region_bound_offsets`) are correct and untouched.
 
-    python scripts/design/second_pass_accuracy.py [--index DIR] [--pilot DIR] [--suite DIR]
-        [--conditions gdna_none_ss_0.99_nrna_none_capture_off] [--seed 0]
+⛔ **ITS DEFAULT PANEL WAS DELETED AND THE FILE STILL POINTED AT IT.** `~/…/suite/pilot/scan_cache` went
+with the 2026-08-13 rebuild, so a bare run died on `FileNotFoundError` at a `manifest.json` under a
+directory that no longer exists — and `docs/SUCCESS.md` invokes this file bare. The default is now the
+16-condition ladder's own scan cache, and the default condition is `gdna_g00_ss_0.99_…` (the ladder
+spells the zero-gDNA rung `g00`; the pilot spelled it `none`). ⚠ **Four sibling instruments still
+declare the same deleted path** — `held_flux_census.py`, `calibration_truth_ab.py`,
+`gdna_pool_census.py`, `fl_anchor_gap.py`, each with its own `DEFAULT_PILOT` literal. One shared home is
+the right final shape; five copies is how they came to rot together.
+
+    python scripts/design/second_pass_accuracy.py [--index DIR] [--scan-cache DIR] [--suite DIR]
+        [--conditions gdna_g00_ss_0.99_nrna_none_capture_off] [--seed 0]
 """
 
 from __future__ import annotations
@@ -47,12 +65,15 @@ import pysam  # noqa: E402
 from rigel.sim.read_name import parse_origin  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
+#: ⛔ The 16-condition ladder, which is the ONLY panel on disk. The name is `scan_cache` and not
+#: `pilot` because the flag pointing here must not be named after a panel that was deleted.
+DEFAULT_SCAN_CACHE = _RUNS / "suite" / "ladder" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 #: ⭐ The zero-gDNA stranded condition is the falsification condition: every fragment is RNA, so a held
 #: fragment's true `L` is its transcript-space length with no gDNA population to confuse the scoring.
-DEFAULT_CONDITION = "gdna_none_ss_0.99_nrna_none_capture_off"
+#: ⚠ `g00`, not `none` — the rebuilt ladder spells its zero rung with the same `gNN` grammar as the rest.
+DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_none_capture_off"
 
 
 def truth_by_extent(bam_path: Path) -> tuple[dict[tuple[int, int, int], int], int]:
@@ -229,7 +250,8 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, sj, fl) -> 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT)
+    ap.add_argument("--scan-cache", type=Path, default=DEFAULT_SCAN_CACHE,
+                    help="a panel's scan_cache/ directory (default: the 16-condition ladder's)")
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--suite", type=Path, default=None, help="where the oracle BAMs live")
     ap.add_argument("--conditions", nargs="*", default=[DEFAULT_CONDITION])
@@ -248,7 +270,28 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    suite = args.suite or args.pilot.parent
+    # ⛔ FAIL FAST AND NAME WHAT IS MISSING. A deleted panel used to surface here as a bare
+    # `FileNotFoundError` on a `manifest.json` several directories below the thing that was actually
+    # absent, which reads as a corrupt cache rather than an absent panel.
+    missing = [n for n in args.conditions if not (args.scan_cache / n / "manifest.json").is_file()]
+    if not args.scan_cache.is_dir() or missing:
+        # ⚠ The absent thing is named off `is_dir()`, never off an EMPTY listing: a scan-cache
+        # directory that exists and holds nothing is a different fault from one that was never built,
+        # and keying the message on `have` reported the second when it was the first.
+        have = sorted(p.name for p in args.scan_cache.iterdir()) if args.scan_cache.is_dir() else []
+        raise SystemExit(
+            f"⛔ no scan cache for "
+            f"{'the directory itself' if not args.scan_cache.is_dir() else missing} under "
+            f"{args.scan_cache}\n"
+            + (f"   present there: {', '.join(have)}\n" if have else
+               "   the directory itself holds no condition.\n" if args.scan_cache.is_dir() else "")
+            + "   Build it with:  python scripts/sim/panel.py cache --config "
+              "scripts/sim/configs/gdna_ladder.yaml\n"
+              "   (`panel.py status` first — every stage is expensive and resumable, and it names the "
+              "next one.)"
+        )
+
+    suite = args.suite or args.scan_cache.parent
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
     from rigel.calibration.sj_opportunity import crossing_probability_from_index
@@ -269,7 +312,7 @@ def main() -> int:
 
     rows = []
     for name in args.conditions:
-        cache = read_scan_cache(args.pilot / name, index)
+        cache = read_scan_cache(args.scan_cache / name, index)
         payload, deferred = cache.payload, cache.payload.deferred
         if deferred.n_fragments == 0:
             print(f"  {name}: nothing held; the side buffer is empty")

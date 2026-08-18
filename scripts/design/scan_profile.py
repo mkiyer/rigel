@@ -53,7 +53,12 @@ def _timed_scan(bam: str, index: TranscriptIndex, scan: BamScanConfig, accumulat
         pipeline._wire_calibration_regions = lambda *a, **k: None
     try:
         t0 = time.perf_counter()
-        stats, _strand, _fl, _buffer, payload = pipeline.scan_and_buffer(bam, index, scan)
+        # ⚠ FOUR values. This read FIVE until 2026-08-17 and had raised `ValueError` on its first arm
+        # since `40006126` (2026-08-01) deleted the scanner's own fragment-length histogram from the
+        # return. ⛔ `tests/test_scripts_index.py` covers this tree and did NOT catch it: the gate
+        # IMPORTS a script, and an arity mismatch lives in a call site
+        # (`TRAPS: a-green-suite-hid-five-dead-instruments` — the same class, one level deeper).
+        stats, _strand, _buffer, payload = pipeline.scan_and_buffer(bam, index, scan)
         return time.perf_counter() - t0, stats, payload
     finally:
         pipeline._wire_calibration_regions = original

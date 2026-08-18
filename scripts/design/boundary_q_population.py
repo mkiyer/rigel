@@ -28,16 +28,43 @@ what the conserved mass says is true::
 ``phi = A_g/(A_g+A_r)`` against ``phi_true = T_g/(T_g+T_r)`` is what the EM actually consumes.
 
 ⛔ **THE NULL IS LOAD-BEARING AND IS RUN FIRST.** The ladder is built with EQUAL configured fragment
-lengths, so ``q_g`` must equal ``q_r`` there and the error must vanish. A panel that showed an error on
-flgap and none on the ladder is the signature; an error on BOTH means the instrument is measuring
+lengths, so ``q_g`` must equal ``q_r`` there and the error must vanish. A panel that showed an error at a
+length GAP and none at the null is the signature; an error on BOTH means the instrument is measuring
 something else (`TRAPS: could-the-arm-have-fired`).
+
+⛔⛔ **HALF THE RECORDED VERDICT IS NO LONGER ESTABLISHED BY ANYTHING ON DISK, AND NO ARM HERE CAN
+RESTORE IT (2026-08-17).** The published verdict is *"the defect is real, is NOT driven by fragment
+length (the equal-length null shows ``q_g`` 0.633 vs ``q_r`` 0.523 …), and is bounded at ≤ 0.6 pp of
+composition"*. ⭐ **The equal-length null half REPRODUCES EXACTLY** — re-run 2026-08-17, ``q_g`` 0.6330 vs
+``q_r`` 0.5233 — so the mechanism claim stands. ⛔ **The ≤ 0.6 pp BOUND does not.** It was established
+across two OPPOSITE-SIGN length gaps carried by panels deleted on 2026-08-13; the two rows that survive
+read ``d phi TOTAL`` **+0.00095** (null) and **+0.00244** (capture gap), which are consistent with the
+bound but are not evidence FOR it, because the conditions that would stress it are the ones that are
+missing. ⚠ **Do not re-quote the bound and do not invent a replacement.** ⛔ Nor is the answer to keep a
+disabled arm here waiting for a substrate: this file carried four hard-coded panel rows that could only
+ever SKIP, and they were deleted on 2026-08-17 with the panels and their configs. Restoring the
+opposite-sign cross-check means designing a length-gap panel, not re-adding a name.
+
+⭐ **What DOES run is the null plus ONE weaker gap arm, and the difference is stated on every row.**
+The ladder's CONFIGURED lengths are equal, but hybrid capture SELECTS on length and manufactures a
+realised gap of its own (`TRAPS: configured-lengths-are-not-realised`) — so ladder capture-OFF is the
+null and ladder capture-ON is a genuine, single-signed, capture-sized length gap. The opposite-sign
+cross-check is what was lost, not the arm.
 
 ⛔ It DRAINS by default, because production drains and the drain moves the RNA length distribution by
 6-8 bp — which is a change to the very quantity this defect is a function of.
 
 Usage::
 
-    python scripts/design/boundary_q_population.py                # flgap pair + the ladder null
+    python scripts/design/boundary_q_population.py   # the ladder null + the capture gap arm
+
+⛔⛔ **A SINGLE CONDITION IS NOT A RUN OF THIS INSTRUMENT, AND BOTH GATES NOW SAY SO.** The null alone
+cannot see the defect and the gap arm alone cannot show the defect is not the instrument, so Ⓖ3 and Ⓖ4
+each FAIL when their own arm is missing — measured 2026-08-17, `--conditions ladder:…capture_off` exits
+1 on Ⓖ3 and `--conditions ladder:…capture_on` exits 1 on Ⓖ4. Pass the PAIR::
+
+    python scripts/design/boundary_q_population.py --conditions \\
+        ladder:gdna_g50_ss_0.50_nrna_none_capture_off ladder:gdna_g50_ss_0.50_nrna_none_capture_on
 """
 
 from __future__ import annotations
@@ -60,14 +87,11 @@ for _p in (_REPO / "scripts" / "design", _REPO / "tests" / "calibration"):
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 INDEX = RUNS / "suite" / "rigel_index"
 
-#: ⛔ The flgap pair carries the two LARGEST realised length gaps on disk and in OPPOSITE directions, so a
-#: sign flip between them is available as a check. The ladder condition is the NULL: equal configured
-#: lengths, so the defect must be absent there or the instrument is measuring something else.
+#: ⭐ Capture-OFF is the NULL (equal configured lengths, so the defect must vanish); capture-ON is the
+#: only length-gap arm there is — capture SELECTS on length and manufactures a realised gap
+#: (`TRAPS: configured-lengths-are-not-realised`). ⛔ Both are REQUIRED: Ⓖ3 and Ⓖ4 below each fail when
+#: their own arm is absent, because neither alone is a run of this instrument.
 _DEFAULT = (
-    ("flgap_short", "gdna_g50_ss_0.50_nrna_none_capture_off"),
-    ("flgap_short", "gdna_g50_ss_0.50_nrna_none_capture_on"),
-    ("flgap_long", "gdna_g50_ss_0.50_nrna_none_capture_off"),
-    ("flgap_long", "gdna_g50_ss_0.50_nrna_none_capture_on"),
     ("ladder", "gdna_g50_ss_0.50_nrna_none_capture_off"),
     ("ladder", "gdna_g50_ss_0.50_nrna_none_capture_on"),
 )
@@ -82,18 +106,21 @@ def _gate(name: str, ok: bool, detail: str) -> None:
 
 
 def _boundary_banks(payload):
-    """``(count, mass)`` per contiguous boundary, both strand columns summed and the mass descaled.
+    """``(count, mass)`` per contiguous boundary, both strand columns summed.
 
-    ⚠ The descale is ``substrate.INV_LENGTH_SCALE`` because the mass is a fixed point at the SAME scale
-    as ``inv_length_sum`` — decoding it any other way here would be a second decoder
-    (`TRAPS: a-test-that-redefines`).
+    ⛔ **THERE IS NOTHING TO DECODE.** This helper used to divide the mass by
+    ``substrate.INV_LENGTH_SCALE`` (2^32) because the bank was FIXED POINT. The whole fixed-point layer
+    went at `94d283c0` under ONE NUMERIC CONVENTION — a count is an integer, a fraction is float64, and
+    nothing decodes a bank — so the constant no longer exists and importing it is what killed this
+    instrument (`TRAPS: a-green-suite-hid-five-dead-instruments`). ⚠ The repair is to DELETE the
+    division, not to re-derive the scale: ``boundary_unspliced_mass`` is declared float64 in
+    `scan_payload.py` and is already in fragment units. Ⓖ1 below is what proves it — the pooled ``q``
+    built here must reproduce the SHIPPED ``mass_per_crossing`` bit for bit, and a stray 2^32 could not.
     """
-    from rigel.calibration.substrate import INV_LENGTH_SCALE
-
     count = np.asarray(payload.boundary_unspliced_count, np.float64)
     if count.ndim == 2:
         count = count.sum(axis=1)
-    mass = np.asarray(payload.boundary_unspliced_mass, np.float64) / INV_LENGTH_SCALE
+    mass = np.asarray(payload.boundary_unspliced_mass, np.float64)
     return count, mass
 
 
@@ -150,17 +177,23 @@ def main() -> int:  # noqa: C901
     cfg = PipelineConfig()
 
     print()
-    print("=" * 116)
+    print("=" * 131)
     print("  ⭐⭐⭐ IS THE PRIOR'S CROSSING→FRAGMENT CONVERSION POPULATION-BLIND?   (DRAINED, no solver)")
-    print("=" * 116)
-    print(f"\n  {'condition':<40}{'mu_g-mu_r':>10}{'q_g':>7}{'q_r':>7}{'boundary%':>8}"
-          f"{'BOUNDARY err':>11}{'TOTAL err':>11}{'d phi boundary':>10}{'d phi TOT':>10}")
-    print("  " + "-" * 114)
+    print("=" * 131)
+    # ⚠ EVERY WIDTH HERE MUST MATCH THE ROW BELOW. They did not: `q_r`, `boundary%` and `BOUNDARY err`
+    # were given widths NARROWER than their own labels, so the header printed as `q_rboundary%BOUNDARY
+    # err` while the numbers underneath were correctly spaced — a header that cannot be read off the
+    # column it names.
+    print(f"\n  {'condition':<40}{'mu_g-mu_r':>10}{'q_g':>8}{'q_r':>8}{'boundary%':>12}"
+          f"{'BOUNDARY err':>13}{'TOTAL err':>13}{'d phi BOUNDARY':>15}{'d phi TOTAL':>12}")
+    print("  " + "-" * 131)
 
     rows = []
+    skipped: list[str] = []
     for panel, cond in todo:
         if not (RUNS / "suite" / panel / "oracle_cache" / cond / "_main" / "payload.npz").exists():
-            print(f"  ⚠ SKIP {panel}/{cond} — no cached payload")
+            print(f"  ⚠ SKIP {panel}/{cond} — no cached payload (`panel.py cache` builds it)")
+            skipped.append(f"{panel}/{cond}")
             continue
         payload, parts, _n_amb = load_drained(panel, cond, cfg, index)
 
@@ -229,42 +262,72 @@ def main() -> int:  # noqa: C901
         gap = float((w * fl.gdna_pmf).sum()) - float((w * fl.rna_pmf).sum())
 
         rows.append((f"{panel}/{cond}", gap, qg, qr, qp, err_g, err_r, phi_a - phi_t))
-        print(f"  {panel + '/' + cond.replace('nrna_none_', ''):<40}{gap:>+10.2f}{qg:>7.4f}{qr:>7.4f}"
-              f"{100 * boundary_share:>8.1f}%{100 * err_g:>10.3f}%{100 * err_tot_g:>10.3f}%"
-              f"{phi_a - phi_t:>+10.5f}{phi_tot_a - phi_tot_t:>+10.5f}")
+        print(f"  {panel + '/' + cond.replace('nrna_none_', ''):<40}{gap:>+10.2f}{qg:>8.4f}{qr:>8.4f}"
+              f"{100 * boundary_share:>11.1f}%{100 * err_g:>12.3f}%{100 * err_tot_g:>12.3f}%"
+              f"{phi_a - phi_t:>+15.5f}{phi_tot_a - phi_tot_t:>+12.5f}")
 
-    print("  " + "-" * 114)
+    print("  " + "-" * 131)
     print("  ⭐ A_c = SUM_e count_c*q_pooled (what the assembler computes with a PERFECT f_g);")
     print("     T_c = SUM_e mass_c (the conserved truth). `d phi` is the composition error the EM sees.")
-    print("  ⛔ THE NULL: the ladder rows have equal configured lengths, so q_g must equal q_r and every")
-    print("     error must vanish there. An error on the ladder too means this measures something else.")
+    print("  ⛔ THE NULL is ladder CAPTURE-OFF: equal configured lengths, so q_g must equal q_r and every")
+    print("     error must vanish there. An error on the null too means this measures something else.")
+    print("  ⚠ ladder capture-ON is NOT a null — capture SELECTS on length and manufactures a realised")
+    print("     gap — but it is single-signed, so no row here can show a SIGN FLIP.")
 
-    # ── Ⓖ3 the PERTURBATION: swapping the two components' q must move the answer ──────────────────
+    # ── Ⓖ3 the SENSITIVITY arm: without a realised length gap there is nothing for this to see ────
     if rows:
         print()
-        biggest = max(rows, key=lambda r: abs(r[1]))
-        _gate("Ⓖ3 the flgap arm HAS a length gap to be sensitive to",
-              abs(biggest[1]) > 1.0, f"largest |mu_g-mu_r| = {abs(biggest[1]):.2f} bp on {biggest[0]}")
         # ⛔ The null is the ladder CAPTURE-OFF arm only. The ladder's CONFIGURED lengths are equal, but
         # hybrid capture SELECTS on length and manufactures a realised gap of its own (+15.33 bp measured,
         # consistent with the recorded +13.6 bp capture defect in the gDNA pmf) — so ladder capture_on is
         # not an equal-length condition and must not be read as the null.
         nulls = [r for r in rows if "ladder" in r[0] and "capture_off" in r[0]]
-        if nulls:
-            _gate("Ⓖ4 the NULL (ladder capture-OFF) is equal-length",
-                  max(abs(r[1]) for r in nulls) < 8.0,
-                  f"|mu_g-mu_r| = {max(abs(r[1]) for r in nulls):.2f} bp; "
-                  f"⚠ capture_on is NOT a null, capture manufactures a gap")
+        # ⛔⛔ THIS GATE USED TO NAME A PANEL THAT WAS NOT ON DISK, and it kept passing on rows from
+        # somewhere else entirely. ⛔ Worse, its candidate set included the NULL: Ⓖ3 asks for > 1.0 bp
+        # and Ⓖ4 allows the null up to 8.0, so a run containing ONLY the null satisfied BOTH — the
+        # sensitivity control was answered by the very row whose gap is supposed to be zero
+        # (`TRAPS: could-the-arm-have-fired`). The candidates are now the NON-null rows, and a run with
+        # none of them FAILS rather than reporting an arm that could not have fired.
+        gap_arms = [r for r in rows if r not in nulls]
+        biggest = max(gap_arms, key=lambda r: abs(r[1])) if gap_arms else None
+        _gate("Ⓖ3 a NON-null arm has a realised length gap",
+              biggest is not None and abs(biggest[1]) > 1.0,
+              f"largest |mu_g-mu_r| = {abs(biggest[1]):.2f} bp on {biggest[0]}" if biggest
+              else "NO non-null arm in this run — nothing here can see the defect, only the null")
+        # ⛔⛔ AND RESCOPING Ⓖ3 LEFT THE MIRROR HOLE OPEN UNTIL 2026-08-17: Ⓖ4 was guarded by
+        # `if nulls:`, so a run carrying ONLY the gap arm SKIPPED it and printed a clean
+        # "✅ every gate passed" with no caveat, while the LOAD-BEARING null silently did not run —
+        # measured, `--conditions ladder:…capture_on` alone. That is the same defect Ⓖ3 was rescoped to
+        # remove, pointing the other way (`TRAPS: could-the-arm-have-fired`). The two arms are
+        # SYMMETRIC — the gap arm alone cannot show the defect is not the instrument, exactly as the
+        # null alone cannot see the defect — so neither may be skipped, and a missing arm FAILS.
+        _gate("Ⓖ4 the NULL (ladder capture-OFF) is equal-length",
+              bool(nulls) and max(abs(r[1]) for r in nulls) < 8.0,
+              f"|mu_g-mu_r| = {max(abs(r[1]) for r in nulls):.2f} bp; "
+              "⚠ capture_on is NOT a null, capture manufactures a gap" if nulls
+              else "NO null arm in this run — nothing here can say the defect is not the instrument")
+
+    # ⛔ WHAT DID NOT RUN IS PART OF THE RESULT, and the two gates above are now the whole of that
+    # statement: a run missing the null fails Ⓖ4 and a run missing the gap arm fails Ⓖ3, so an
+    # incomplete panel can no longer print a clean verdict. ⚠ `skipped` is echoed anyway, because a
+    # SKIP line scrolls away above the table and the reader's eye is here.
+    if skipped:
+        print()
+        print(f"  ⚠ {len(skipped)} condition(s) had no cached payload and did not run: "
+              f"{', '.join(skipped)}")
 
     print()
-    print("=" * 116)
+    print("=" * 131)
     if _FAILED:
         print(f"  ⛔ {len(_FAILED)} GATE(S) FAILED — every number above is void until they pass:")
         for f in _FAILED:
             print(f"      {f}")
     else:
         print("  ✅ every gate passed")
-    print("=" * 116)
+    print("  ⛔ This is the NULL plus ONE single-signed capture gap. The published ≤ 0.6 pp bound was")
+    print("     measured across two OPPOSITE-SIGN gaps that no panel on disk supplies — do not re-quote")
+    print("     it from these rows.")
+    print("=" * 131)
     return 1 if _FAILED else 0
 
 

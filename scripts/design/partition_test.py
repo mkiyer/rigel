@@ -8,6 +8,22 @@ Three candidate rules, each evaluated at every boundary against the KNOWN true d
 
 Ground truth: molecules of length L land with START density rho per template position, uniform.
 Everything is exact -- no approximation anywhere -- so any departure from rho is the rule's own bias.
+
+⚠ **PRE-DATES THE CURRENT CAMPAIGN** -- it is carried in `tests/test_scripts_index.py`'s
+``UNDOCUMENTED_DEBT``, which means a decision is owed on it: promote it to `CLAUDE.md`'s table or delete
+it. ⭐ **RE-RUN 2026-08-17 and the table reproduces byte-identically** (the seed is pinned at module
+level, so it is deterministic); the decision is still owed and this file does not make it.
+
+⛔ **The body moved into ``main()`` on 2026-08-17 for the reason ``bam_spans.py`` moved on 2026-08-11,
+and here it also cost time.** The 40-replicate simulation ran at MODULE level, so
+`tests/test_scripts_index.py`'s ``test_every_instrument_still_imports`` -- which calls
+``spec.loader.exec_module`` -- executed the whole study as its "does it import" check: **39.74 s of
+every suite run**, measured 2026-08-17. ⛔ The cost was the smaller half. For a script with no guard,
+"does it import" and "does it run to completion" are the SAME question, so a runtime defect here would
+surface as a suite failure while the identical defect in any guarded instrument stays invisible -- the
+asymmetry the gate exists to remove (`TRAPS: a-gate-that-reconstructs`).
+
+    python scripts/design/partition_test.py
 """
 
 import numpy as np
@@ -58,15 +74,20 @@ def run(spacing):
     )
 
 
-print(f"truth rho = {RHO};  fragment length ~ N({MU:.0f},{SD:.0f})")
-print(f"{'region spacing':>13} {'mean K':>8} | {'R1 no-part':>11} {'R2 1/K':>9} {'R3 overlap':>11}")
-print("-" * 62)
-for s in (50, 100, 200, 400, 1000, 4000):
-    r, c = run(s)
-    meanK = c / (RHO * MU) * (MU / s) if False else None
-    print(
-        f"{s:>13} {'~' + str(round(MU / s, 2)):>8} | "
-        f"{r['R1']:>11.4f} {r['R2']:>9.4f} {r['R3']:>11.4f}"
-    )
-print("\n(values are estimate / truth; 1.0000 = unbiased)")
-print("R2 and R3 depend on the REGION SPACING -- a property of the annotation, not the sample.")
+def main() -> int:
+    print(f"truth rho = {RHO};  fragment length ~ N({MU:.0f},{SD:.0f})")
+    print(f"{'region spacing':>13} {'mean K':>8} | {'R1 no-part':>11} {'R2 1/K':>9} {'R3 overlap':>11}")
+    print("-" * 62)
+    for s in (50, 100, 200, 400, 1000, 4000):
+        r, _c = run(s)
+        print(
+            f"{s:>13} {'~' + str(round(MU / s, 2)):>8} | "
+            f"{r['R1']:>11.4f} {r['R2']:>9.4f} {r['R3']:>11.4f}"
+        )
+    print("\n(values are estimate / truth; 1.0000 = unbiased)")
+    print("R2 and R3 depend on the REGION SPACING -- a property of the annotation, not the sample.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

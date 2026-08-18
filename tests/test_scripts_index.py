@@ -1,10 +1,19 @@
 """⭐⭐ THE INSTRUMENT SHELF HAS AN INDEX, AND THE INDEX IS CHECKED — because a hand-written one drifts.
 
-`scripts/design/` is **49 instruments, 15,904 boundaries**, and it is the project's debug loop rather than
-sprawl: measured 2026-08-07, **every one of them imports cleanly** and 35 of 49 lead with the question they
-answer. The problem was never the count. It was that the only index — a table in `CLAUDE.md` — is
-hand-maintained, and by the time it was measured it had **drifted by eight entries**, which `CLAUDE.md`
-itself had to admit in prose.
+`scripts/design/` is **59 instruments** (re-derived 2026-08-17, after the two dark `flgap` instruments
+were deleted), and it is the project's debug loop rather than sprawl. The problem was never the count. It
+was that the only index — a table in `CLAUDE.md` — is hand-maintained, and by the time it was measured it
+had **drifted by eight entries**, which `CLAUDE.md` itself had to admit in prose.
+
+⚠ Even that one figure is hand-carried prose, so re-derive rather than trust
+(`TRAPS: re-record-the-baseline`): `ls scripts/design/*.py | wc -l`. It is at least *constrained* — the
+two gates below force `rows(CLAUDE.md) + UNDOCUMENTED_DEBT == on disk`, so a wrong count here is visible
+from inside this file. ⛔ **A LINE COUNT IS NOT, AND ONE WAS CARRIED HERE UNTIL IT WENT STALE TWICE.**
+The predecessor read "49 instruments, 15,904 boundaries" and its successor "59 instruments, 25,180 lines",
+which was already wrong by five within the session that measured it — every prose edit to any instrument
+moves it and nothing consumes it, so it has been dropped rather than re-measured. ⚠ "boundaries" in the
+first of those was a bulk rename landing on the word *lines* in its ordinary-English sense, which is the
+two-senses hazard `rename_census.py` exists to flag.
 
 ⛔ **An index nobody can trust is worse than none**, because a reader takes its silence as "that script
 does not exist" and rebuilds it. This file makes the table's two promises true:
@@ -31,7 +40,8 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLAUDE = ROOT / "CLAUDE.md"
-DESIGN_DIR = ROOT / "scripts" / "design"
+SCRIPTS = ROOT / "scripts"
+DESIGN_DIR = SCRIPTS / "design"
 
 #: rows look like ``| `design/toy_panel.py` | … |``
 _ROW = re.compile(r"`design/([a-z0-9_]+\.py)`")
@@ -55,30 +65,57 @@ UNDOCUMENTED_DEBT: frozenset[str] = frozenset(
 ON_DISK = frozenset(p.name for p in DESIGN_DIR.glob("*.py") if p.name != "__init__.py")
 IN_TABLE = frozenset(_ROW.findall(CLAUDE.read_text()))
 
-SIM_DIR = ROOT / "scripts" / "sim"
+SIM_DIR = SCRIPTS / "sim"
+
+#: ⛔⛔ **THE THIRD TREE, GATED SINCE 2026-08-17 — AND THE REASON IS TWO ROTS, NOT A PREFERENCE.**
+#: `scripts/profiling/` was covered by NO gate while `design/` and `sim/` were, and it rotted **twice**
+#: with the one defect class the gate here already catches: `pyspy_driver.py` read ``sys.argv[1]`` at
+#: import time (found 2026-08-11) and `scan_profile.py` imported two names `profiler.py` did not export,
+#: so even ``--help`` raised (found 2026-08-17). Both times the defect was identical to one this file
+#: had been catching for months in the next directory along, and only its REACH differed
+#: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+#: ⭐ The owner's decision, recorded in `scripts/README.md`: extend the gate rather than delete the tree,
+#: because the performance work before 0.8.0 needs it.
+PROFILING_DIR = SCRIPTS / "profiling"
 
 #: ⛔⛔ **INSTRUMENTS THAT DO NOT IMPORT, EACH WITH THE REASON AND THE DECISION OWED.** Same contract as
 #: ``UNDOCUMENTED_DEBT``: adding to this is not a fix, it is a way of saying "not yet", and the list
 #: should only ever SHRINK. ⚠ A name here is still gated — the test asserts it fails for the RECORDED
 #: reason, so a script that starts working, or breaks a NEW way, both fail loudly.
-BROKEN_ON_IMPORT: dict[str, str] = {
-    # `_component_region_arrays` was deleted from `calibration/priors.py` and has no successor: the module
-    # now exposes `_region_locus_shares` / `_boundary_locus_shares` / `_project_regions_to_loci`. ⭐ The
-    # DECISION is not a repair — this instrument compares the EM prior "in fragment units vs the OLD
-    # incidence sum", and `ROADMAP.md` §0 records that migration as DONE, so its question is closed.
-    # Delete it or re-point it at the surviving API; do not leave it here.
-    "prior_units_check.py": "_component_region_arrays",
-}
+#: ⭐ **EMPTY, AND IT SHOULD STAY THAT WAY.** An entry here is a script the gate KNOWS is dead; it buys
+#: time to repair one, and nothing else. ⛔ The gate refuses a STALE entry as loudly as a broken script,
+#: because an exemption that outlives its defect hides the next real break — which is exactly how five
+#: dead instruments once sat behind a green suite (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+#: ⚠ `prior_units_check.py` was the last entry, exempted on the deleted `_component_region_arrays`, and
+#: it was repaired on 2026-08-17 — at which point THIS gate fired on the stale exemption, which is the
+#: behaviour it was written for.
+BROKEN_ON_IMPORT: dict[str, str] = {}
 
-#: every script the import gate covers, both trees.
+def _instruments(directory: pathlib.Path) -> list[pathlib.Path]:
+    return [p for p in directory.glob("*.py") if p.name != "__init__.py"]
+
+
+#: every script the import + docstring gates cover, all THREE trees.
 ALL_SCRIPTS = sorted(
-    [p for p in DESIGN_DIR.glob("*.py") if p.name != "__init__.py"]
-    + [p for p in SIM_DIR.glob("*.py") if p.name != "__init__.py"],
-    key=lambda p: p.name,
+    _instruments(DESIGN_DIR) + _instruments(SIM_DIR) + _instruments(PROFILING_DIR),
+    key=lambda p: (p.parent.name, p.name),
 )
 
 
-@pytest.mark.parametrize("path", ALL_SCRIPTS, ids=lambda p: p.name)
+def _case_id(path: pathlib.Path) -> str:
+    """⛔⛔ **NAME THE TREE, NEVER THE BASENAME ALONE — A BASENAME COLLIDES ACROSS TREES.**
+
+    `design/scan_profile.py` (the accumulator's ns/fragment, regressed over several BAMs) and
+    `profiling/scan_profile.py` (the scan's own wall time and RSS across thread budgets) are different
+    instruments that share a filename. Under a basename id pytest would silently de-duplicate them to
+    `scan_profile.py0` / `scan_profile.py1`, whose ORDER is an implementation detail — so a failure
+    would name neither file, and `-k` could not select one. ⚠ The collision itself is not fixed here;
+    renaming a file is an owner call, and `scripts/README.md` records the proposal.
+    """
+    return f"{path.parent.name}/{path.name}"
+
+
+@pytest.mark.parametrize("path", ALL_SCRIPTS, ids=_case_id)
 def test_every_instrument_still_imports(path):
     """⛔⛔ **A `src/` DELETION KILLS INSTRUMENTS SILENTLY, AND NOTHING HERE COULD SEE IT.**
 
@@ -155,6 +192,29 @@ def test_the_index_does_not_point_at_ghosts():
     )
 
 
+def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
+    """⛔ **THE THIRD TREE HAS ITS OWN INDEX, AND IT IS `scripts/README.md` RATHER THAN `CLAUDE.md`.**
+
+    `CLAUDE.md`'s table indexes `scripts/design/`; the profiling drivers are indexed in the README's
+    `profiling/` row instead, so this checks the same two promises there — nothing on disk is invisible,
+    and no row points at a ghost. ⚠ One test rather than two parametrised ones, because the tree is
+    small and the failure message can name both directions at once.
+    """
+    readme = (SCRIPTS / "README.md").read_text()
+    # ⚠ TREE-QUALIFIED, like `CLAUDE.md`'s `design/…` rows: a bare basename would let the README's
+    # mention of `design/scan_profile.py` satisfy the row for a different instrument of the same name.
+    listed = frozenset(re.findall(r"`profiling/([a-z0-9_]+\.py)`", readme))
+    on_disk = frozenset(p.name for p in _instruments(PROFILING_DIR))
+    assert on_disk, "scripts/profiling/ is empty — delete the row and this gate, or restore the tree"
+    missing = sorted(on_disk - listed)
+    ghosts = sorted(listed - on_disk)
+    assert not missing, (
+        f"profiling instruments not named in scripts/README.md: {missing}. A reader takes the README's "
+        f"silence as 'that script does not exist' and rebuilds it."
+    )
+    assert not ghosts, f"scripts/README.md names profiling files that do not exist: {ghosts}"
+
+
 def test_the_documented_debt_is_real_debt():
     """⚠ The debt list may only name files that EXIST and are NOT in the table. A stale entry there would
     let a real gap hide behind a name that has already been dealt with."""
@@ -167,14 +227,18 @@ def test_the_documented_debt_is_real_debt():
     )
 
 
-@pytest.mark.parametrize("name", sorted(ON_DISK))
-def test_every_instrument_says_what_it_is_for(name):
+@pytest.mark.parametrize("path", ALL_SCRIPTS, ids=_case_id)
+def test_every_instrument_says_what_it_is_for(path):
     """⛔ A module docstring is the only thing a reader has before running it. An instrument with none is
-    unusable without reading its argument parser."""
-    doc = ast.get_docstring(ast.parse((DESIGN_DIR / name).read_text()))
+    unusable without reading its argument parser.
+
+    ⚠ It covers all three trees, where it used to cover `design/` alone — the same reach the import gate
+    was given on 2026-08-17, and for the same reason.
+    """
+    doc = ast.get_docstring(ast.parse(path.read_text()))
     assert doc and len(doc.strip()) > 60, (
-        f"scripts/design/{name} has no usable module docstring. Lead with the QUESTION it answers — "
-        f"35 of the 49 already do, and that is what makes the shelf navigable."
+        f"scripts/{_case_id(path)} has no usable module docstring. Lead with the QUESTION it answers — "
+        f"that is what makes the shelf navigable."
     )
 
 

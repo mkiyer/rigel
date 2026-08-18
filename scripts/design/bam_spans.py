@@ -4,9 +4,13 @@ Groups a name-collated BAM by query name, builds each group's genomic span on it
 subtracts CIGAR-N introns to get L, and reports how concentrated the boundary-crossing load is with and
 without a limit on L.
 
-⚠ **PRE-DATES THE CURRENT CAMPAIGN AND HAS NOT BEEN RE-RUN IN IT** — it is carried in
-`tests/test_scripts_index.py`'s ``UNDOCUMENTED_DEBT``, which means a decision is owed on it: promote it
-to `CLAUDE.md`'s table or delete it. Its numbers should not be quoted without re-running it.
+⚠ **A DECISION IS OWED — it is carried in `tests/test_scripts_index.py`'s ``UNDOCUMENTED_DEBT``: promote
+it to `CLAUDE.md`'s table or delete it.** ⭐ **RE-RUN 2026-08-17 on a ladder BAM and the recommendation is
+PROMOTE**: it is the only instrument that answers *how concentrated is the boundary-crossing load, with
+and without a limit on L* from a real BAM, it runs clean at full scale, and its body was already moved
+into ``main()`` for the import gate — that repair should not be thrown away. ⛔ Promoting it takes two
+edits this file cannot make: a row in `CLAUDE.md`'s table and the name struck from ``UNDOCUMENTED_DEBT``.
+⚠ Until then its numbers are still un-quoted history; re-run it.
 
 ⭐ The body moved into ``main()`` on 2026-08-11 for ONE reason: it read ``sys.argv[1]`` at module level,
 so merely IMPORTING it raised ``IndexError``. That made it invisible to the import gate the same file's
@@ -68,20 +72,30 @@ def census(bam_path: str, region_bp: float) -> int:
         f"L percentiles: p50={np.percentile(L, 50):.0f} p90={np.percentile(L, 90):.0f} "
         f"p99={np.percentile(L, 99):.0f} p99.9={np.percentile(L, 99.9):.0f} max={L.max():,}"
     )
+    # ⛔ A RATE OVER AN EMPTY SUBPOPULATION IS UNDEFINED, AND `nan%` READS AS A MEASUREMENT THAT WAS
+    # MADE. On every ladder BAM `span > 1 Mb` selects ZERO groups, so this line printed
+    # "of those nan% carry a supplementary record" at rc=0 — nothing flagged it. Report the empty
+    # denominator instead: the reader needs to know the question could not be asked, not a nan.
     wide = span > 1e6
-    print(
-        f"span > 1 Mb: {wide.sum():,} groups; of those "
-        f"{(100 * supp[wide].mean()) if wide.any() else float('nan'):.1f}% "
-        f"carry a supplementary record; blocks on >1 reference: {multi.sum():,}"
+    detail = (
+        f"; of those {100 * supp[wide].mean():.1f}% carry a supplementary record"
+        if wide.any()
+        else " — an EMPTY subpopulation, so the supplementary rate is undefined, not 0 % and not nan %"
     )
+    print(f"span > 1 Mb: {wide.sum():,} groups{detail}; blocks on >1 reference: {multi.sum():,}")
     print(f"\n{'limit on L':>12} {'dropped':>10} {'%':>9}   (compare: limit on SPAN)")
     for lim in (500, 1000, 2000, 5000):
         print(
             f"{lim:>12,} {(L > lim).sum():>10,} {100 * (L > lim).mean():>8.3f}%   "
             f"span: {100 * (span > lim).mean():.3f}%"
         )
+    # ⚠ The same discipline on the concentration curve: every share below has `cross.sum()` in its
+    # denominator, and a selection that keeps nothing makes that 0. Say so rather than dividing.
     cross = np.maximum(L / region_bp, 0)
     o = np.argsort(-cross)
+    if cross.sum() <= 0:
+        print("\nunbounded: no group carries a crossing — no concentration curve to report")
+        return 0
     print(
         f"\nunbounded: top 1,000 groups carry "
         f"{100 * cross[o[:1000]].sum() / cross.sum():.1f}% of crossings"
@@ -89,6 +103,9 @@ def census(bam_path: str, region_bp: float) -> int:
     for lim in (1000, 2000):
         k = L <= lim
         c = cross[k]
+        if c.sum() <= 0:
+            print(f"L<={lim:,}: kept {k.sum():,} groups carrying no crossing — share undefined")
+            continue
         print(
             f"L<={lim:,}: top 1,000 carry {100 * c[np.argsort(-c)[:1000]].sum() / c.sum():.2f}%  "
             f"| mean crossings/fragment {c.mean():.2f}  (kept {k.sum():,})"

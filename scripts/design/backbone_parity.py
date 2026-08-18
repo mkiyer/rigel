@@ -3,19 +3,34 @@
 
 Two policies, one real 70,176-slot chain, one process, **every output array compared element by element**.
 
-⭐ **It is strictly stronger per condition than the panel, and strictly weaker across conditions.** The
-panel reports 1,872 SCALARS, so an error that cancels between two slots is invisible there and visible
-here; the panel in turn covers 36 conditions and this covers one. Run this first, on the condition with the
+⭐ **It is strictly stronger per condition than the panel, and strictly weaker across conditions.** An
+aggregate score is a handful of SCALARS, so an error that cancels between two slots is invisible there and
+visible here; the panel in turn covers the whole ladder (**16** conditions since the 2026-08-13 rebuild)
+and this covers one. Run this first, on the condition with the
 most structure, then run the panel. ⛔ It is also the honest answer to TRAPS: all-small-singly-large-jointly — *when every single
 ablation is small and the joint one is large, go one stage upstream* — because an aggregate cannot tell a
 switch that moves nothing from one that moves two slots in opposite directions.
 
-⭐⭐ **THE VERDICT IT WAS BUILT FOR, and the reason it exists at all.** It gated the backbone restructure
-against the solver it replaced: ``HeadPolicy`` reproduced the shipped answer on **421,056 output elements
-and 18,245,830 diagnostic elements, zero differences**, and ``SilentPolicy`` reproduced muting psi's four
-imputed channels on all 421,056 — which also PROVES the relay reaches the answer ONLY through those four
-channels, since one arm runs the whole relay and discards it while the other never runs it at all. The
-predecessor is deleted; the machinery is kept because pricing the switches one at a time needs exactly it.
+⛔⛔ **THE VERDICT THIS DOCSTRING USED TO CARRY IS NO LONGER REPRODUCIBLE, AND SAYING SO IS THE POINT.**
+It read: *"``HeadPolicy`` reproduced the shipped answer on 421,056 output elements and 18,245,830
+diagnostic elements, zero differences"*. That was ``HeadPolicy`` against **the solver the backbone
+replaced**, and that solver is DELETED — there is no second arm to put on the other side, so no invocation
+of this file can produce the number again. ⛔ Do not re-attach it to any arm pair this file still offers:
+``head`` vs ``silent`` is an ABLATION and is expected to DIFFER. ⭐ What would reproduce it is a checkout
+of the tree that still held the predecessor; nothing here will.
+
+⭐⭐ **What the machinery is FOR now** is pricing the switches one at a time — ``--arm-a head
+--arm-b no_<switch>`` — and the two structural claims that survive without the predecessor: ``noop``-shaped
+arm pairs must be byte-identical, and an arm the policy cannot express must be visible as such rather than
+scored as inert.
+
+⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** The shipped
+``CalibrationConfig.message_propagation = False`` installs ``SilentPolicy``; every other instrument that
+reads relay state therefore needs a flag to say which policy it ran under. Here the policy **IS** the arm —
+it is named on both sides of every comparison and printed before each run — so a ``--messages`` flag would
+be a second, contradictable source for the same fact. ⚠ The one calibration run at the top exists ONLY to
+capture ``solve_chain``'s inputs, which are built before any policy is consulted, so it is correctly left
+on the shipped config.
 
 What it compares
 ----------------
@@ -47,6 +62,7 @@ than a reproducibility test.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -58,27 +74,79 @@ from rigel.calibration import sweep as SW  # noqa: E402
 from rigel.calibration.messages.head import HeadPolicy, HeadSwitches  # noqa: E402
 from rigel.calibration.messages.silent import SilentPolicy  # noqa: E402
 
-#: capture keys that CANNOT match by construction, with the reason. ⛔ Keep this list empty unless the
+#: capture keys that CANNOT match by construction, with the reason. ⛔ Keep this set EMPTY unless the
 #: reason is structural — every entry is a hole in the gate.
-_EXPECTED_ABSENT = {
-    # the backbone publishes its assertion counts; the predecessor had no assertions to count.
-    "backbone_assertions",
-}
+#: ⚠ It held ``backbone_assertions`` until 2026-08-17, on the reason *"the predecessor had no assertions
+#: to count"*. The predecessor is deleted, and ``sweep.solve_chain`` publishes that key unconditionally
+#: inside its own ``_capture`` block, so BOTH arms now always carry it — the entry could only ever have
+#: hidden a real regression.
+_EXPECTED_ABSENT: set[str] = set()
 
 
-def _cmp(a, b):
-    """Element-wise identity, not closeness. Returns ``(n_elements, n_differing, max_abs_delta)``."""
+def _cmp(a, b, where: str = ""):
+    """Element-wise identity, not closeness. Returns ``(n_elements, n_differing, max_abs_delta)``.
+
+    ⛔⛔ **AN UNKNOWN TYPE RAISES HERE RATHER THAN FALLING THROUGH TO ``!=``, and that is the repair this
+    function needed** (2026-08-17). The fall-through read *"anything numpy will not take is a scalar,
+    compare it with ``!="``* — and when ``sweep`` began publishing ``global_lp`` as a
+    :class:`CompositionPriors` **dataclass holding numpy arrays**, ``np.asarray(.., float64)`` raised
+    ``TypeError`` and the handler then raised ``ValueError: The truth value of an array … is ambiguous``
+    from inside the dataclass's own ``__eq__``. ⚠ The instrument was DEAD for two commits with a green
+    suite: nothing in ``tests/`` reads ``_capture["global_lp"]``. So a type this function does not
+    understand is now a LOUD failure naming the key, never a silent guess.
+    """
     if a is None and b is None:
         return 0, 0, 0.0
     if (a is None) != (b is None):
         return 1, 1, float("inf")
+    # ⛔⛔ A dict is walked KEY BY KEY **here** as well as by the caller, and the difference matters.
+    #   ``main`` walks the TOP level of ``_capture`` itself, so this branch used to read
+    #   ``return 0, 0, 0.0  # compared key-by-key by the caller where it matters`` — but a dict reached
+    #   through a LIST element or a DATACLASS FIELD has no such caller, and that return reported
+    #   "0 elements, 0 differing" on data that DIFFERED. ⚠ Falsified 2026-08-17: a dataclass holding
+    #   ``{"a": zeros(5)}`` vs ``{"a": ones(5)}`` scored ``(0, 0, 0.0)``. That is the same silent guess
+    #   the ``!=`` fall-through below was removed for, one level down.
     if isinstance(a, dict) or isinstance(b, dict):
-        return 0, 0, 0.0  # compared key-by-key by the caller where it matters
+        if not (isinstance(a, dict) and isinstance(b, dict)):
+            return 1, 1, float("inf")
+        el = nd = 0
+        d = 0.0
+        for kk in sorted(set(a) & set(b)):
+            e, n, dd = _cmp(a[kk], b[kk], f"{where}[{kk}]")
+            el += e
+            nd += n
+            d = max(d, dd)
+        one_sided = set(a) ^ set(b)
+        if one_sided:
+            el += len(one_sided)
+            nd += len(one_sided)
+            d = float("inf")
+        return el, nd, d
+    # ⭐ A DATACLASS is walked FIELD BY FIELD, because its members are what carry the numbers. Comparing
+    #   the objects instead would ask a generated ``__eq__`` to reduce an array to one bool, which is
+    #   exactly the failure above; and a field-wise walk keeps the ELEMENT COUNT honest, so a dataclass
+    #   whose members are all ``None`` contributes 0 comparisons rather than a spurious 1.
+    if dataclasses.is_dataclass(a) or dataclasses.is_dataclass(b):
+        if type(a) is not type(b):
+            return 1, 1, float("inf")
+        el = nd = 0
+        d = 0.0
+        for f in dataclasses.fields(a):
+            e, n, dd = _cmp(getattr(a, f.name), getattr(b, f.name), f"{where}.{f.name}")
+            el += e
+            nd += n
+            d = max(d, dd)
+        return el, nd, d
+    if isinstance(a, (str, bytes)) or isinstance(b, (str, bytes)):
+        return 1, int(a != b), 0.0
     try:
         x = np.asarray(a, np.float64)
         y = np.asarray(b, np.float64)
-    except (TypeError, ValueError):
-        return 1, int(a != b), 0.0
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"⛔ _cmp cannot compare {where or '<unnamed>'}: {type(a).__name__} vs {type(b).__name__}. "
+            "Add a branch for it — falling through to `!=` is what killed this instrument once."
+        ) from exc
     if x.shape != y.shape:
         return max(x.size, y.size), max(x.size, y.size), float("inf")
     same = (x == y) | (np.isnan(x) & np.isnan(y))
@@ -186,7 +254,7 @@ def main() -> int:
 
     rows, tot_el, tot_diff = [], 0, 0
     for f in ("f_pos", "f_neg", "f_g", "var_pos", "var_neg", "var_gdna"):
-        el, nd, d = _cmp(getattr(old, f), getattr(new, f))
+        el, nd, d = _cmp(getattr(old, f), getattr(new, f), f"belief.{f}")
         rows.append((f"belief.{f}", el, nd, d))
         tot_el += el
         tot_diff += nd
@@ -199,7 +267,7 @@ def main() -> int:
         except AttributeError:
             continue  # region_arrays is not the substrate object; the belief comparison covers it
         for f in ("gdna_mass", "rna_mass", "gdna_frac", "rna_pos_frac", "rna_neg_frac"):
-            el, nd, d = _cmp(getattr(a, f), getattr(b, f))
+            el, nd, d = _cmp(getattr(a, f), getattr(b, f), f"{nm}.{f}")
             rows.append((f"{nm}.{f}", el, nd, d))
             tot_el += el
             tot_diff += nd
@@ -218,7 +286,7 @@ def main() -> int:
                 continue
             for j, (xa, xb) in enumerate(zip(a, b)):
                 for kk in sorted(set(xa) & set(xb)) if isinstance(xa, dict) else []:
-                    el, nd, d = _cmp(xa[kk], xb[kk])
+                    el, nd, d = _cmp(xa[kk], xb[kk], f"_capture[{k}][{j}][{kk}]")
                     cap_el += el
                     cap_diff += nd
                     if nd:
@@ -226,7 +294,7 @@ def main() -> int:
             continue
         if isinstance(a, dict) and isinstance(b, dict):
             for kk in sorted(set(a) & set(b)):
-                el, nd, d = _cmp(a[kk], b[kk])
+                el, nd, d = _cmp(a[kk], b[kk], f"_capture[{k}][{kk}]")
                 cap_el += el
                 cap_diff += nd
                 if nd:
@@ -234,7 +302,7 @@ def main() -> int:
             for kk in sorted(set(a) - set(b)):
                 cap_bad.append((f"_capture[{k}][{kk}] MISSING", 1, 1, float("inf")))
             continue
-        el, nd, d = _cmp(a, b)
+        el, nd, d = _cmp(a, b, f"_capture[{k}]")
         cap_el += el
         cap_diff += nd
         if nd:
@@ -251,11 +319,22 @@ def main() -> int:
     print(f"   {'_capture TOTAL':<34} {cap_el:>12,} {cap_diff:>10,}")
 
     if cap_bad:
-        print("\n   ⛔ capture differences (the dissect loop reads these):")
+        # ⛔⛔ VALUE differences are printed BEFORE structural ones, and this is not cosmetic. A policy
+        #   ablation produces dozens of "key MISSING" rows by construction, and the list is truncated at
+        #   40 — so a real numeric difference sorted below them was reported only as a count in the
+        #   TOTAL line. Caught while falsifying this file: two deliberately nudged elements moved
+        #   `_capture TOTAL` differing by exactly +2 and appeared nowhere in the listing.
+        n_val = sum(1 for _n, _e, _d, dd in cap_bad if np.isfinite(dd))
+        cap_bad.sort(key=lambda r: (0 if np.isfinite(r[3]) else 1, -r[2]))
+        # ⚠ "structural" is every row whose delta is not finite, and that is MORE than a missing key:
+        #   a shape mismatch, a None on one side only, and a type mismatch all land here too. Naming it
+        #   as only "a key one arm does not publish" would mis-describe the other three.
+        print(f"\n   ⛔ capture differences (the dissect loop reads these): {n_val:,} carry a VALUE "
+              f"delta, {len(cap_bad) - n_val:,} are structural (a missing key, shape, None or type)")
         for nm, el, nd, d in cap_bad[:40]:
             print(f"      {nm:<52} {nd:>9,}/{el:<10,} max {d:.6g}")
         if len(cap_bad) > 40:
-            print(f"      … and {len(cap_bad) - 40} more")
+            print(f"      … and {len(cap_bad) - 40} more (VALUE deltas are listed first)")
     if missing:
         print(f"\n   ⚠ diagnostic keys only ARM A publishes: {missing}")
         print("      ⭐ EXPECTED for an ablation (a silent or switched-off operator publishes nothing);")

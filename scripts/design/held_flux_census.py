@@ -5,6 +5,11 @@
     Scores through the shipped `rigel.second_pass.score_held_fragments` — the question is what the
     tool does, not what could be done.
 
+⚠ **`D-3`, `P2` and `D-6` below are HISTORICAL labels and they no longer resolve anywhere** — the
+decision register that defined them is gone, and none of the three appears in any of the six permanent
+docs (checked 2026-08-17). They are kept because this docstring states each question in its own words
+immediately below; ⛔ do not go looking for the register, and do not cite them from anywhere new.
+
 D-3 asks whether a sj with zero flux is *impossible* or *merely unobserved*::
 
     ⛔ A hard zero makes the hypothesis unselectable and can empty the score vector.
@@ -26,9 +31,9 @@ The four causes, and why the split matters
                         question at all — a lookup miss, and a different decision from D-3's
 ``annotated_empty``     the slot exists and `sj_inv_length_sum == 0`. ⭐ **THIS IS D-3'S POPULATION**
 ``no_evidence_set``     ⛔ ∅ only, and it is an ARTEFACT: the scorer's contiguous-boundary set is empty.
-                        See :func:`_lines_inside_inclusive` — the deposit rule says which lines
-                        distinguish ∅ from a spliced path, and the shipped scorer asks for a strict
-                        subset of them, empty whenever the intron spans exactly one region
+                        See :func:`rigel.second_pass._distinguishing_boundaries` — the deposit rule says
+                        which BOUNDARIES distinguish ∅ from a spliced path, and the pre-D-6 scorer asked
+                        for a strict subset of them, empty whenever the intron spans exactly one region
 ``zero_boundary``           ∅'s evidence set is non-empty but some boundary in it carries no unspliced mass
 ======================  ============================================================================
 
@@ -36,10 +41,22 @@ The four causes, and why the split matters
 deposit, because the two differ and the difference is not small. That is one thing varied, and it is the
 only way the ∅ zero rate can be read as data rather than as the artefact.
 
+⚠ **REPAIRED 2026-08-17 — it had been DEAD, and the suite could not see it.** Three things had rotted:
+
+* the FUNCTION-LOCAL import of ``rigel.second_pass._distinguishing_lines``, renamed to
+  ``_distinguishing_boundaries`` by the REGION/BOUNDARY vocabulary work. ⛔ It is function-local, so
+  ``tests/test_scripts_index.py``'s ``test_every_instrument_still_imports`` executes module scope only
+  and never reached it — the census raised on EVERY condition while the suite stayed green;
+* a resurrected ``INV_LENGTH_SCALE = float(1 << 32)``, from the fixed-point layer deleted at
+  ``94d283c0``. ⭐ It was DEAD in this file — defined and never referenced once — so no number here was
+  ever scaled by it, and it is deleted rather than repaired;
+* ``--pilot``, whose default named the ``pilot`` panel deleted on 2026-08-13. The flag is now
+  ``--scan-cache``, which is what it always was, and it defaults to the 16-condition ladder.
+
 Usage::
 
-    python scripts/design/held_flux_census.py [--index DIR] [--pilot DIR] [--json out.json]
-    python scripts/design/held_flux_census.py --conditions gdna_none_ss_0.99_nrna_none_capture_off
+    python scripts/design/held_flux_census.py [--index DIR] [--scan-cache DIR] [--json out.json]
+    python scripts/design/held_flux_census.py --conditions gdna_g50_ss_0.99_nrna_none_capture_off
 """
 
 from __future__ import annotations
@@ -53,21 +70,18 @@ from pathlib import Path
 import numpy as np
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
+DEFAULT_SCAN_CACHE = _RUNS / "suite" / "ladder" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: The fixed-point scale `inv_length_quantum` deposits in. Decoded, never chosen.
-INV_LENGTH_SCALE = float(1 << 32)
 
-
-def _lines_strictly_inside(region_bounds: np.ndarray, lo: int, hi: int, start: int, end: int) -> tuple[int, int]:
+def _boundaries_strictly_inside(region_bounds: np.ndarray, lo: int, hi: int, start: int, end: int) -> tuple[int, int]:
     """⛔ **THE PRE-D-6 RULE, kept only so the measurement stays reproducible.**
 
-    ``rigel.second_pass`` asked for the lines ``start < c < end`` until 2026-08-02. That drops the donor
-    and acceptor lines — the two that are guaranteed to exist and guaranteed to discriminate — and
-    returns an EMPTY range when the intron spans one region. The shipped rule is now
-    :func:`rigel.second_pass._distinguishing_lines`, derived from the deposit; this function exists so
-    the ``artefact`` column below can still be computed. ⛔ Do not import it into ``src/``.
+    ``rigel.second_pass`` asked for the boundaries ``start < c < end`` until 2026-08-02. That drops the
+    donor and acceptor boundaries — the two that are guaranteed to exist and guaranteed to discriminate —
+    and returns an EMPTY range when the intron spans one region. The shipped rule is now
+    :func:`rigel.second_pass._distinguishing_boundaries`, derived from the deposit; this function exists
+    so the ``artefact`` column below can still be computed. ⛔ Do not import it into ``src/``.
     """
     first = int(np.searchsorted(region_bounds[lo:hi], start, side="right"))
     last = int(np.searchsorted(region_bounds[lo:hi], end, side="left"))
@@ -95,7 +109,7 @@ def census(payload, scored, sj, t_ids, truth: dict[str, float] | None) -> dict:
     shipped scorer's own density array and the run aborts on any disagreement. A census that has drifted
     from the code it describes is worse than no census.
     """
-    from rigel.second_pass import _distinguishing_lines, _sj_id
+    from rigel.second_pass import _distinguishing_boundaries, _sj_id
     from rigel.types import Strand
 
     deferred = payload.deferred
@@ -153,8 +167,8 @@ def census(payload, scored, sj, t_ids, truth: dict[str, float] | None) -> dict:
                 empty_old_zero[h] = worst != 0
             else:
                 for rule, sink in (
-                    (_distinguishing_lines, "shipped"),
-                    (_lines_strictly_inside, "old"),
+                    (_distinguishing_boundaries, "shipped"),
+                    (_boundaries_strictly_inside, "old"),
                 ):
                     values = []
                     for a, b in contested:
@@ -258,18 +272,21 @@ def census(payload, scored, sj, t_ids, truth: dict[str, float] | None) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--scan-cache", type=Path, default=DEFAULT_SCAN_CACHE,
+                    help="the scan-cache ROOT — a directory of <condition>/ caches")
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--suite", type=Path, default=None, help="where the truth files live")
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
-    if not args.pilot.is_dir():
-        print(f"no pilot scan-cache dir at {args.pilot}", file=sys.stderr)
+    if not args.scan_cache.is_dir():
+        print(f"no scan-cache dir at {args.scan_cache}", file=sys.stderr)
         return 2
-    suite = args.suite or args.pilot.parent
+    suite = args.suite or args.scan_cache.parent
 
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
@@ -291,10 +308,10 @@ def main() -> int:
     sj = build_sj_arrays(index)
     t_ids = index.t_df["t_id"].to_numpy()
 
-    names = args.conditions or sorted(p.name for p in args.pilot.iterdir() if p.is_dir())
+    names = args.conditions or sorted(p.name for p in args.scan_cache.iterdir() if p.is_dir())
     rows = []
     for name in names:
-        cache = read_scan_cache(args.pilot / name, index)
+        cache = read_scan_cache(args.scan_cache / name, index)
         payload = cache.payload
         scored = score_held_fragments(
             payload,
