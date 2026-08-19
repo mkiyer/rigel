@@ -224,10 +224,19 @@ through an empty slot (capture's conduits). ⚠ `g00` is ONE-SIDED: any RNA-favo
 ("deconvolve the gDNA off, RNA is the residual") in `density_deconv` / `calibrate` / `object_composition` and in
 `TRAPS: the-deconvolution-is-as-good-as-the-density-it-is-handed`; that sense is UNCHANGED and unruled
 (`TRAPS: two-masks-one-name` — run `rename_census.py --sense <token>` BEFORE renaming anything).
-⚠ **STILL TO RENAME, each ruled by the owner and each needing its own sense check first**: `mass_rescale` →
-`rescale`; `RelayPolicy`/`head.py` → `RelayPolicy`/`relay.py`; `arm` → `component` for the
-{gDNA, RNA+, RNA−} sense ONLY (1,358 sites, two senses — the experiment-arm sense keeps `arm`); `lend`,
-`hop_logvar`. ⛔ The land/sea analogy is an EXPLANATION and must never enter code or docs (owner, 2026-08-18) —
+⭐ **ALSO LANDED 2026-08-18**: `peel`'s DECONVOLUTION sense → **`deconvolve`** (owner: *"peeling is for
+fruits"*), carrying the renamed rule `TRAPS: the-deconvolution-is-as-good-as-the-density-it-is-handed`;
+`mass_pin` → **`mass_rescale`** and the capture key `_pin` → `_rescale` — SCOPED, because `pin` also means
+the ordinary verb (a pinned seed, a pinned thread count); `HeadPolicy`/`HeadSwitches`/`head.py` →
+**`RelayPolicy`/`RelaySwitches`/`relay.py`** — scoped by IDENTIFIER, so `_bam_header` and git HEAD are
+untouched; `lend` → **`may_share_composition`**; `s2t` → **`hop_logvar`**.
+⛔⛔ **STILL TO RENAME — `arm` ALONE, DEFERRED FOR A MEASURED REASON: IT HAS THREE SENSES.** An EXPERIMENT
+arm (`--arm`, `arm_score.py`, `ladder_arm_ab.py`); a COMPONENT arm ({gDNA, RNA+, RNA−} — the sense the
+owner ruled becomes `component`); and ⛔ **`__ARM_NEON` in the C++ scanner**. 1,358 sites. It needs its own
+`--sense` pass, never a tail-end sweep.
+⚠ **AND A RENAME REWRITES THE LIST OF THINGS TO RENAME** — this paragraph was itself rewritten by the pass
+it describes (`mass_pin` → `mass_rescale` inside the sentence saying to rename it). Write such a list with
+the tokens in a form the pass cannot match, or re-read it afterwards. ⛔ The land/sea analogy is an EXPLANATION and must never enter code or docs (owner, 2026-08-18) —
 it is at zero occurrences and must stay there. `docs/dev/PLAN_message_propagation_rebuild.md` §5 is the
 review; `rename_identity.py` is the gate.
 ## ⛔⛔ CITE A RULE BY ITS NAME. NUMBERED LABELS ARE BANNED
