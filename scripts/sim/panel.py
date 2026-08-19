@@ -186,8 +186,15 @@ def cmd_cache(p: Panel, args) -> int:
     `pass0_vs_oracle.py`, which is why it was invisible in the documented recipe."""
     need(bool(p.conditions), f"simulated conditions in {p.dir}", "panel.py simulate")
     conds = args.conditions or p.conditions
+    # ⛔ `--force` MUST reach the scan cache, and this used to be the one stage it did not. A scan cache
+    #    is keyed by the index, the graph and the scan CONFIG — never by the accumulator's output — so a
+    #    change to what the scanner DEPOSITS leaves the key identical and the stale cache is silently
+    #    reused. Measured 2026-08-19: after the chimera repair every condition reported `cached / skip`
+    #    and the rebuild was a no-op (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`
+    #    is the change that exposed it).
     run([sys.executable, DESIGN / "build_scan_cache.py", "--index", p.index, "--suite", p.dir,
-         "--out", p.scan_cache, *(["--conditions", *conds] if args.conditions else [])],
+         "--out", p.scan_cache, *(["--force"] if args.force else []),
+         *(["--conditions", *conds] if args.conditions else [])],
         what=f"scan cache -> {p.scan_cache}")
     run([sys.executable, DESIGN / "pass0_vs_oracle.py", "--suite", p.dir, "--index", p.index,
          "--oracle-cache", p.oracle_cache,
