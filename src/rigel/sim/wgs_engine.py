@@ -9,7 +9,6 @@ lives in :mod:`wgs_config`; the suite frontend (config parsing, abundance, run_s
 
 from __future__ import annotations
 
-import contextlib
 import gzip
 import logging
 import multiprocessing
@@ -35,7 +34,6 @@ from rigel.sim.bam import (
     FLAG_REVERSE,
     blocks_to_cigar,
     make_aligned_segment,
-    premrna_to_genomic_interval,
     transcript_to_genomic_blocks,
 )
 from rigel.sim.capture import CaptureConfig, CaptureSampler
@@ -216,13 +214,23 @@ class WholeGenomeSimulator:
     2. Pre-compute abundance weight vectors (numpy arrays).
     3. Sample from the fragment-length distribution in bulk, counting
        fragments per unique length.
-    4. For each fragment length, sample mRNA/nRNA transcripts
-       proportional to abundance × effective_length. Accumulate
-       per-transcript fragment counts.
-    5. Iterate transcripts: pull sequence ONCE, extract all fragments
-       via numpy fancy indexing, and write FASTQ.gz + BAM simultaneously
-       (a unified RNA writer handles both mRNA and nRNA). gzip
-       compression is multi-threaded via pgzip when available.
+    4. For each fragment length, ONE multinomial over every RNA row — the mature row of each
+       transcript and the nascent row of each nRNA ENTITY — with probability ∝ abundance ×
+       capture-aware effective length. Accumulate per-row fragment counts.
+    5. Iterate rows: pull sequence ONCE, extract all fragments via numpy fancy indexing, and write
+       FASTQ.gz + BAM simultaneously (one RNA writer; a nascent row differs from a mature one ONLY by
+       its read-name origin tag, ``nrna_<entity id>``). gzip compression is multi-threaded via pgzip
+       when available.
+
+    ⭐ **Nascent RNA is a TRANSCRIPT, not a parallel pre-mRNA space** (owner, 2026-08-19). The
+    transcript list comes from the rigel index and already holds the nascent entities — single-exon
+    transcripts over each clustered TSS/TES span — with the nascent molecules pooled onto them
+    (`whole_genome.assign_nrna_to_entities`). Their template is their own (single-exon) sequence, the
+    same one the mature writer uses, and their capture intervals are whatever probes overlap the span
+    — any transcript's, any strand — exactly as for gDNA. ⛔ The previous per-transcript pre-mRNA
+    space scoped a nascent molecule's capture to its OWN transcript's probes, which under-enriched
+    nascent spanning another transcript's probed exon by up to 6x against the gDNA there
+    (`hop_currency.py`, 2026-08-19).
     """
 
     def __init__(
@@ -237,6 +245,7 @@ class WholeGenomeSimulator:
         r1_sense: bool = False,
         seed: int | None = None,
         capture_config: CaptureConfig | None = None,
+        capture_sampler: "CaptureSampler | None" = None,
     ):
         self.fasta = pysam.FastaFile(str(fasta_path))
         self.transcripts = transcripts
@@ -248,10 +257,6 @@ class WholeGenomeSimulator:
         self.r1_sense = bool(r1_sense)
         eff_seed = seed if seed is not None else sim_params.sim_seed
         self._rng = np.random.default_rng(eff_seed)
-        # Nascent RNA draws on a DEDICATED, independent stream (entropy key "NRNA"=0x4E524E41) so
-        # toggling nascent on/off never perturbs the mature-RNA or gDNA streams: a nascent-off run is
-        # bit-identical to its nascent-on twin minus the nascent layer (head-to-head benchmarking).
-        self._nrna_rng = np.random.default_rng(np.random.SeedSequence([int(eff_seed), 0x4E524E41]))
 
         N = len(transcripts)
         self._genome = GenomeCache(self.fasta)
@@ -265,25 +270,21 @@ class WholeGenomeSimulator:
             self._t_seq_bytes.append(_seq_to_bytes(seq))
             self._t_lengths[i] = len(seq)
 
-        # Pre-mRNA lengths and sequences
-        self._premrna_lengths = np.array(
-            [t.end - t.start for t in transcripts],
-            dtype=np.int64,
-        )
-
-        # Pre-extract pre-mRNA sequences for nRNA-eligible transcripts
-        logger.info("Pre-extracting pre-mRNA sequences for nRNA...")
-        self._premrna_seq_bytes: list[np.ndarray | None] = [None] * N
-        for i, t in enumerate(transcripts):
-            if t.nrna_abundance > 0 and len(t.exons) > 1:
-                self._premrna_seq_bytes[i] = self._fetch_premrna_bytes(t)
-
         # Strand chars and abundance arrays
         self._t_strand_chars: list[str] = [
             "r" if t.strand == Strand.NEG else "f" for t in transcripts
         ]
         self._mrna_abund = np.array([t.abundance or 0.0 for t in transcripts])
+        # ⛔ nascent lives on single-exon ENTITY rows only: a multi-exon row carrying nascent would be
+        # sampled on a SPLICED template and written as contiguous genomic reads — wrong both ways.
         self._nrna_abund = np.array([t.nrna_abundance for t in transcripts])
+        bad = [t.t_id for t in transcripts if t.nrna_abundance > 0 and len(t.exons) != 1]
+        if bad:
+            raise ValueError(
+                f"{len(bad)} multi-exon transcripts carry nrna_abundance > 0 (e.g. {bad[:3]}); "
+                "nascent RNA must be pooled onto single-exon nRNA entities "
+                "(whole_genome.assign_nrna_to_entities)"
+            )
 
         # Quality string cache
         self._quals_cache: dict[int, str] = {}
@@ -336,7 +337,10 @@ class WholeGenomeSimulator:
         self._ref_names = list(self.fasta.references)
         self._ref_lengths = [self.fasta.get_reference_length(r) for r in self._ref_names]
         self._ref_name_to_id: dict[str, int] = {name: i for i, name in enumerate(self._ref_names)}
-        self.capture = CaptureSampler.from_config(
+        # ⭐ A prebuilt sampler is REUSED ACROSS CONDITIONS: its probe layout and its partition memo
+        # depend only on the panel and the templates, never on abundances (`CaptureSampler`), and the
+        # partition is 260 s per condition otherwise.
+        self.capture = capture_sampler or CaptureSampler.from_config(
             capture_config,
             transcripts,
             dict(zip(self._ref_names, self._ref_lengths)),
@@ -380,21 +384,6 @@ class WholeGenomeSimulator:
         if t.strand == Strand.NEG:
             seq = reverse_complement(seq)
         return seq
-
-    def _fetch_premrna_bytes(self, t: Transcript) -> np.ndarray:
-        """Fetch unspliced pre-mRNA sequence as uint8 array."""
-        seq = self.fasta.fetch(t.ref, t.start, t.end).upper()
-        if t.strand == Strand.NEG:
-            seq = reverse_complement(seq)
-        return _seq_to_bytes(seq)
-
-    def _get_premrna_bytes(self, t_idx: int) -> np.ndarray:
-        """Get pre-mRNA bytes, fetching on demand if not pre-cached."""
-        arr = self._premrna_seq_bytes[t_idx]
-        if arr is None:
-            arr = self._fetch_premrna_bytes(self.transcripts[t_idx])
-            self._premrna_seq_bytes[t_idx] = arr
-        return arr
 
     def _get_quals(self, read_len: int) -> str:
         """Return cached quality string of the given length."""
@@ -581,77 +570,40 @@ class WholeGenomeSimulator:
 
         return dict(counts)
 
-    @contextlib.contextmanager
-    def _use_nrna_rng(self):
-        """Bind the dedicated nascent-RNA RNG stream for the duration of the block.
-
-        Always restores the prior ``self._rng`` on exit (even on exception) so the
-        surrounding pools/streams are untouched by whether/how much nascent was drawn.
-        """
-        _main_rng = self._rng
-        self._rng = self._nrna_rng
-        try:
-            yield
-        finally:
-            self._rng = _main_rng
-
     def _accumulate_rna_counts(
-        self,
-        n_rna: int,
-        *,
-        n_mrna: int | None = None,
-        n_nrna: int | None = None,
+        self, n_rna: int
     ) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, int]]]:
-        """Sample fragment lengths and transcript assignments.
+        """ONE multinomial over every RNA row: the mature row of each transcript (``abundance``) and
+        the nascent row of each nRNA entity (``nrna_abundance``), each weighted by its abundance ×
+        capture-aware effective length on its OWN template. The nascent fragment share is therefore a
+        consequence of molecules and lengths, never an imposed count.
 
-        If *n_mrna* and *n_nrna* are given, samples each pool
-        independently (fragment-count control).  Otherwise falls back
-        to the combined-pool approach where *n_rna* fragments are
-        drawn jointly from mRNA + nRNA weighted by abundance × length.
-
-        Returns (mrna_counts, nrna_counts) where each is
-        dict[t_idx, dict[frag_len, count]].
+        Returns ``(mrna_counts, nrna_counts)``, each ``dict[t_idx, dict[frag_len, count]]`` — two
+        dicts only because the writer tags the two rows' read names differently.
         """
-        # Separate-pool mode: precise fragment-level control
-        if n_mrna is not None and n_nrna is not None:
-            mrna_counts = self._accumulate_pool(
-                n_mrna,
-                self._mrna_abund,
-                self._t_lengths,
-                space="mrna",
-            )
-            # Nascent on the dedicated stream; restore self._rng so the gDNA pool (next) and the
-            # mature pool (above) are untouched by whether/how much nascent was drawn.
-            with self._use_nrna_rng():
-                nrna_counts = self._accumulate_pool(
-                    n_nrna,
-                    self._nrna_abund,
-                    self._premrna_lengths,
-                    space="nrna",
-                )
-            return mrna_counts, nrna_counts
-
-        # Combined-pool mode (original behaviour)
         if n_rna <= 0:
             return {}, {}
 
         N = len(self.transcripts)
         rng = self._rng
-
         frag_lengths = self._sample_rna_frag_lengths(n_rna)
 
         mrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         nrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
+        # ⭐ Only rows with nonzero abundance can carry a fragment, and the effective length is the
+        # expensive term (`partition_array` was 96.6 % of a capture-on run), so it is evaluated on the
+        # LIVE rows only; `eff` is still full length with zeros in the dead rows, so the draw is
+        # bit-identical to computing every row (`tests/test_sim_capture_partition.py`).
+        live = np.flatnonzero((self._mrna_abund > 0) | (self._nrna_abund > 0))
+        live_keys = live.tolist()
+        live_lengths = self._t_lengths[live]
+
         def weights_at(width: int) -> np.ndarray:
-            mrna_eff = self.capture.partition_array("mrna", range(N), self._t_lengths, width)
-            nrna_eff = self.capture.partition_array("nrna", range(N), self._premrna_lengths, width)
-            return np.concatenate(
-                [
-                    self._mrna_abund * mrna_eff,
-                    self._nrna_abund * nrna_eff,
-                ]
-            )
+            eff = np.zeros(N, dtype=np.float64)
+            if live.size:
+                eff[live] = self.capture.partition_array("mrna", live_keys, live_lengths, width)
+            return np.concatenate([self._mrna_abund * eff, self._nrna_abund * eff])
 
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
             frag_lengths, weights_at, rng
@@ -664,11 +616,9 @@ class WholeGenomeSimulator:
             total_w = weights.sum()
             if total_w <= 0:
                 continue
-
             probs = weights / total_w
             indices = rng.choice(2 * N, size=fc, p=probs)
             unique_idx, idx_counts = np.unique(indices, return_counts=True)
-
             for idx, cnt in zip(unique_idx, idx_counts):
                 idx, cnt = int(idx), int(cnt)
                 if idx < N:
@@ -690,25 +640,22 @@ class WholeGenomeSimulator:
         *,
         is_nrna: bool,
     ) -> int:
-        """Generate and write all mRNA or nRNA reads for one transcript.
-
-        When ``is_nrna=False``, uses the pre-extracted spliced mRNA sequence.
-        When ``is_nrna=True``, uses the pre-mRNA (unspliced) sequence.
+        """Generate and write all reads of one RNA row — a transcript's mature row, or an nRNA
+        entity's nascent row (``is_nrna``), which differs ONLY by its read-name origin tag: the
+        template is the transcript's own sequence in both cases (an entity is single-exon, so its
+        sequence IS its genomic span) and the BAM blocks come from the same exon structure.
         """
         t = self.transcripts[t_idx]
         rng = self._rng
         ss = self.strand_specificity
         strand_char = self._t_strand_chars[t_idx]
         t_id = t.t_id
+        if is_nrna and len(t.exons) != 1:
+            raise ValueError(f"nascent row on a multi-exon transcript {t_id}")
 
-        if is_nrna:
-            seq_bytes = self._get_premrna_bytes(t_idx)
-            seq_len = int(self._premrna_lengths[t_idx])
-            qname_prefix = f"nrna_{t_id}"
-        else:
-            seq_bytes = self._t_seq_bytes[t_idx]
-            seq_len = int(self._t_lengths[t_idx])
-            qname_prefix = t_id
+        seq_bytes = self._t_seq_bytes[t_idx]
+        seq_len = int(self._t_lengths[t_idx])
+        qname_prefix = f"nrna_{t_id}" if is_nrna else t_id
 
         ref_id = self._ref_name_to_id.get(t.ref) if bam_fh else None
         n_written = 0
@@ -720,9 +667,8 @@ class WholeGenomeSimulator:
             if eff_len <= 0:
                 continue
 
-            capture_space = "nrna" if is_nrna else "mrna"
             frag_starts = self.capture.sample_starts(
-                capture_space,
+                "mrna",
                 t_idx,
                 seq_len,
                 frag_len,
@@ -774,32 +720,18 @@ class WholeGenomeSimulator:
 
             # BAM records (pysam API requires per-record construction)
             if bam_fh is not None and ref_id is not None:
-                if is_nrna:
-                    self._write_nrna_bam_batch(
-                        bam_fh,
-                        qnames,
-                        r1_seqs,
-                        r2_seqs,
-                        t,
-                        frag_starts,
-                        frag_len,
-                        read_len,
-                        flip_mask,
-                        ref_id,
-                    )
-                else:
-                    self._write_mrna_bam_batch(
-                        bam_fh,
-                        qnames,
-                        r1_seqs,
-                        r2_seqs,
-                        t,
-                        frag_starts,
-                        frag_len,
-                        read_len,
-                        flip_mask,
-                        ref_id,
-                    )
+                self._write_mrna_bam_batch(
+                    bam_fh,
+                    qnames,
+                    r1_seqs,
+                    r2_seqs,
+                    t,
+                    frag_starts,
+                    frag_len,
+                    read_len,
+                    flip_mask,
+                    ref_id,
+                )
 
             n_written += count
 
@@ -892,88 +824,6 @@ class WholeGenomeSimulator:
                     tags=tags,
                 )
             )
-
-    def _write_nrna_bam_batch(
-        self,
-        bam_fh: pysam.AlignmentFile,
-        qnames: list[str],
-        r1_seqs: np.ndarray,
-        r2_seqs: np.ndarray,
-        t: Transcript,
-        frag_starts: np.ndarray,
-        frag_len: int,
-        read_len: int,
-        flip_mask: np.ndarray | None,
-        ref_id: int,
-    ) -> None:
-        for i in range(len(qnames)):
-            frag_start = int(frag_starts[i])
-            frag_end = frag_start + frag_len
-            flipped = flip_mask is not None and flip_mask[i]
-
-            g_start, g_end = premrna_to_genomic_interval(frag_start, frag_end, t)
-            if t.strand == Strand.POS:
-                r2_g_start = g_start
-                r2_g_end = min(g_start + read_len, g_end)
-                r1_g_start = max(g_end - read_len, g_start)
-                r1_g_end = g_end
-                r2_is_rev, r1_is_rev = False, True
-            else:
-                r1_g_start = g_start
-                r1_g_end = min(g_start + read_len, g_end)
-                r2_g_start = max(g_end - read_len, g_start)
-                r2_g_end = g_end
-                r2_is_rev, r1_is_rev = True, False
-            if flipped:
-                r2_is_rev, r1_is_rev = not r2_is_rev, not r1_is_rev
-                r1_g_start, r2_g_start = r2_g_start, r1_g_start
-                r1_g_end, r2_g_end = r2_g_end, r1_g_end
-
-            tlen = g_end - g_start
-
-            r1_flag, r2_flag = _mate_flags(r1_is_rev, r2_is_rev)
-
-            r1_tlen = tlen if r1_g_start <= r2_g_start else -tlen
-            r2_tlen = -r1_tlen
-
-            r1_read_len = r1_g_end - r1_g_start
-            r2_read_len = r2_g_end - r2_g_start
-
-            r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[i], r1_is_rev)
-            r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[i], r2_is_rev)
-
-            bam_fh.write(
-                make_aligned_segment(
-                    self._bam_header,
-                    qnames[i],
-                    r1_seq_str,
-                    r1_flag,
-                    ref_id,
-                    r1_g_start,
-                    [(pysam.CMATCH, r1_read_len)],
-                    ref_id,
-                    r2_g_start,
-                    r1_tlen,
-                    tags=self._nh1_tags,
-                )
-            )
-            bam_fh.write(
-                make_aligned_segment(
-                    self._bam_header,
-                    qnames[i],
-                    r2_seq_str,
-                    r2_flag,
-                    ref_id,
-                    r2_g_start,
-                    [(pysam.CMATCH, r2_read_len)],
-                    ref_id,
-                    r1_g_start,
-                    r2_tlen,
-                    tags=self._nh1_tags,
-                )
-            )
-
-    # -- gDNA reads (vectorized per chromosome) -----------------------------
 
     def _accumulate_gdna_counts(self, n_gdna: int) -> dict[tuple[int, int], int]:
         """Sample gDNA fragment lengths + chromosomes.
@@ -1171,45 +1021,31 @@ class WholeGenomeSimulator:
 
     # -- Abundance-weighted pool splits (single-condition / Scenario use) ----
 
-    def _rna_eff_weights(self) -> tuple[float, float]:
-        """``(mrna_weight, nrna_weight)`` = abundance × capture-effective-length at the mean RNA
-        fragment length — the basis for splitting an RNA pool into mature vs nascent."""
+    def _rna_weight(self) -> float:
+        """Σ over every RNA row of abundance × capture-effective length at the mean RNA fragment
+        length — mature rows and nascent entity rows on the same templates."""
         mean_frag = int(self.sim_params.frag_mean)
         n = len(self.transcripts)
-        mrna_eff = self.capture.partition_array("mrna", range(n), self._t_lengths, mean_frag)
-        nrna_eff = self.capture.partition_array("nrna", range(n), self._premrna_lengths, mean_frag)
-        return (
-            float(np.sum(self._mrna_abund * mrna_eff)),
-            float(np.sum(self._nrna_abund * nrna_eff)),
-        )
+        eff = self.capture.partition_array("mrna", range(n), self._t_lengths, mean_frag)
+        return float(np.sum((self._mrna_abund + self._nrna_abund) * eff))
 
-    def rna_split(self, n_rna: int) -> tuple[int, int]:
-        """Split ``n_rna`` RNA fragments into ``(n_mrna, n_nrna)`` by abundance × effective length."""
-        mrna_w, nrna_w = self._rna_eff_weights()
-        total = mrna_w + nrna_w
-        if total <= 0:
-            return 0, 0
-        n_nrna = int(round(n_rna * nrna_w / total))
-        return max(0, n_rna - n_nrna), n_nrna
-
-    def pool_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int, int]:
-        """Split ``n_total`` fragments 3-way into ``(n_mrna, n_nrna, n_gdna)`` by abundance ×
-        effective length, with gDNA weighted by ``gdna_abundance × genome effective length``
-        (summed over the annotated references). The abundance-weighted 3-way generalization of
-        the 2-way RNA-only ``rna_split``."""
-        mrna_w, nrna_w = self._rna_eff_weights()
+    def rna_gdna_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int]:
+        """Split ``n_total`` fragments into ``(n_rna, n_gdna)`` by abundance × effective length, with
+        gDNA weighted by ``gdna_abundance × genome effective length`` (summed over the genomic
+        references). The mature/nascent split INSIDE ``n_rna`` is not imposed — it is what the one
+        multinomial over the RNA rows realises."""
+        rna_w = self._rna_weight()
         gdna_mean_frag = int(self.gdna_config.frag_mean)
         genome_eff = sum(
             self.capture.partition("gdna", ref, length, gdna_mean_frag)
             for ref, length in zip(self._gdna_refs, self._gdna_ref_lengths)
         )
         gdna_w = float(gdna_abundance) * genome_eff
-        total = mrna_w + nrna_w + gdna_w
+        total = rna_w + gdna_w
         if total <= 0:
-            return 0, 0, 0
-        n_nrna = int(round(n_total * nrna_w / total))
+            return 0, 0
         n_gdna = int(round(n_total * gdna_w / total))
-        return max(0, n_total - n_nrna - n_gdna), n_nrna, n_gdna
+        return max(0, n_total - n_gdna), n_gdna
 
     # -- Main entry point ---------------------------------------------------
 
@@ -1219,19 +1055,14 @@ class WholeGenomeSimulator:
         n_rna: int,
         n_gdna: int = 0,
         *,
-        n_mrna: int | None = None,
-        n_nrna: int | None = None,
         oracle_bam: bool = True,
         prefix: str = "sim",
         n_workers: int = 1,
     ) -> tuple[Path, Path, Path | None]:
         """Single-pass simulation: accumulate counts, generate, write.
 
-        When *n_mrna* and *n_nrna* are provided, the mRNA and nRNA
-        fragment pools are sampled independently (precise fragment-count
-        control).  *n_rna* is ignored in this mode but still used for
-        logging.  Otherwise *n_rna* fragments are drawn from the
-        combined mRNA + nRNA pool (original behaviour).
+        *n_rna* fragments are drawn from ONE multinomial over every RNA row (mature rows and nascent
+        entity rows, :meth:`_accumulate_rna_counts`); *n_gdna* from the genomic references.
 
         When *n_workers* > 1 the per-transcript and per-(chrom, frag-len)
         gDNA work is sharded across worker processes (fork-based) and the
@@ -1248,11 +1079,7 @@ class WholeGenomeSimulator:
         # Phase 1: accumulate per-transcript / per-chunk counts (main process).
         # Uses self._rng so determinism follows the configured seed.
         logger.info("Accumulating RNA fragment counts...")
-        mrna_counts, nrna_counts = self._accumulate_rna_counts(
-            n_rna,
-            n_mrna=n_mrna,
-            n_nrna=n_nrna,
-        )
+        mrna_counts, nrna_counts = self._accumulate_rna_counts(n_rna)
         gdna_counts = self._accumulate_gdna_counts(n_gdna)
 
         total_mrna = sum(sum(d.values()) for d in mrna_counts.values())
@@ -1338,17 +1165,15 @@ class WholeGenomeSimulator:
                         bam_fh,
                         is_nrna=False,
                     )
-                # Nascent reads on the dedicated stream; restore so gDNA writing (next) is unaffected.
-                with self._use_nrna_rng():
-                    for t_idx in sorted(nrna_counts):
-                        self._write_rna_reads(
-                            t_idx,
-                            nrna_counts[t_idx],
-                            r1_buf,
-                            r2_buf,
-                            bam_fh,
-                            is_nrna=True,
-                        )
+                for t_idx in sorted(nrna_counts):
+                    self._write_rna_reads(
+                        t_idx,
+                        nrna_counts[t_idx],
+                        r1_buf,
+                        r2_buf,
+                        bam_fh,
+                        is_nrna=True,
+                    )
                 self._write_gdna_from_counts(gdna_counts, r1_buf, r2_buf, bam_fh)
                 r1_buf.close()
                 r2_buf.close()
@@ -1458,10 +1283,8 @@ class WholeGenomeSimulator:
         seed: int,
     ) -> tuple[str, str, str | None]:
         """Worker entry: write one shard's FASTQ + BAM files."""
-        # Independent RNG per shard; nascent on its own dedicated stream (head-to-head: the mature +
-        # gDNA shard reads are unaffected by whether the nascent shard is written).
+        # Independent RNG per shard.
         self._rng = np.random.default_rng(seed)
-        self._nrna_rng = np.random.default_rng(np.random.SeedSequence([int(seed), 0x4E524E41]))
 
         shard_path = Path(shard_dir)
         r1_path = shard_path / f"{prefix}.shard{shard_id:03d}.R1.fq.gz"
@@ -1491,17 +1314,15 @@ class WholeGenomeSimulator:
                         bam_fh,
                         is_nrna=False,
                     )
-                # nascent shard on the dedicated stream
-                with self._use_nrna_rng():
-                    for t_idx, len_counts in nrna_items:
-                        self._write_rna_reads(
-                            t_idx,
-                            len_counts,
-                            r1_buf,
-                            r2_buf,
-                            bam_fh,
-                            is_nrna=True,
-                        )
+                for t_idx, len_counts in nrna_items:
+                    self._write_rna_reads(
+                        t_idx,
+                        len_counts,
+                        r1_buf,
+                        r2_buf,
+                        bam_fh,
+                        is_nrna=True,
+                    )
                 n_offset = 0
                 for (ref_idx, fl), count in gdna_items:
                     n_offset += self._write_gdna_chunk(

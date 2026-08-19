@@ -75,13 +75,14 @@ def make_sampler(
         gdna_split_penalty=0.2,
         min_overlap=overrides.get("min_overlap", 1),
     )
-    sampler = CaptureSampler.__new__(CaptureSampler)
-    sampler.config = config
-    sampler._enabled = True
+    # ⛔⛔ **BUILT THROUGH THE REAL `__init__`, NEVER `__new__`** — only the probe intervals are then
+    # injected, which is the one thing this fixture exists to control. It used to bypass the
+    # constructor and hand-set four attributes, so any state `__init__` gained afterwards was simply
+    # ABSENT here: on 2026-08-19 a new per-width partition memo landed and **242 of this file's tests
+    # failed with `AttributeError`** while the sampler worked perfectly in production. That is
+    # `TRAPS: a-gate-that-reconstructs` — a fixture that rebuilds its subject tests the rebuild.
+    sampler = CaptureSampler(config, transcripts=(), ref_lengths={}, enabled=True)
     sampler._mrna_intervals = intervals_by_key
-    sampler._nrna_intervals = {}
-    sampler._gdna_intervals = {}
-    sampler._flat_probe_cache = {}
     return sampler
 
 
@@ -303,18 +304,55 @@ class TestNoUnboundedCache:
     """
 
     def test_no_per_call_state_accumulates_across_fragment_lengths(self) -> None:
+        """⚠ **ONE dict is now ALLOWED to hold one entry per WIDTH, and the rule that replaces "no
+        growth" is stricter about the thing that actually cost 38 GB** (2026-08-19). `_mass_cache` grew
+        per call and was NEVER READ BACK; `_partition_memo` is read back by every later condition
+        sharing the capture panel (measured 260 s -> 0.2 s), and it is bounded because a different
+        template population CLEARS it. So: every OTHER dict must still not grow, and the memo must be
+        bounded by the number of distinct widths — never by the number of calls.
+        """
         sampler = make_sampler({i: LAYOUTS["three probes, dense"] for i in range(40)})
         lengths = np.full(40, SEQ_LEN, dtype=np.int64)
-        before = {k: v for k, v in vars(sampler).items() if isinstance(v, dict)}
-        sizes_before = {k: len(v) for k, v in before.items()}
-        for frag_len in range(50, 350):
+        sizes_before = {k: len(v) for k, v in vars(sampler).items() if isinstance(v, dict)}
+        widths = list(range(50, 350))
+        for frag_len in widths:
             sampler.partition_array("mrna", range(40), lengths, frag_len)
         for name, size in sizes_before.items():
+            if name == "_partition_memo":
+                continue
             grown = len(getattr(sampler, name)) - size
             assert grown <= 1, (
                 f"{name} grew by {grown} entries across 300 fragment lengths. Anything that scales "
                 f"with fragment length here is the 38 GB coming back."
             )
+        assert len(sampler._partition_memo) == len(widths), "the memo holds exactly one entry per width"
+
+        # ⭐ REPEATING the same sweep must add NOTHING — that is the difference from `_mass_cache`
+        for frag_len in widths:
+            sampler.partition_array("mrna", range(40), lengths, frag_len)
+        assert len(sampler._partition_memo) == len(widths), "a repeat sweep must be pure cache hits"
+
+        # ⛔ and a DIFFERENT template population must not accumulate beside the first
+        other = np.full(40, SEQ_LEN + 1, dtype=np.int64)
+        for frag_len in widths:
+            sampler.partition_array("mrna", range(40), other, frag_len)
+        assert len(sampler._partition_memo) == len(widths), (
+            "a second population must CLEAR the memo, not accumulate beside it — that is the 38 GB"
+        )
+
+    def test_the_memo_returns_what_recomputation_would(self) -> None:
+        """⛔ A cache that returns a stale or aliased vector is worse than no cache. Every width is
+        compared against a freshly-built sampler's answer, and the returned array must be a COPY (a
+        caller mutating its result must not poison the memo)."""
+        layout = {i: LAYOUTS["three probes, dense"] for i in range(4)}
+        cached_sampler = make_sampler(layout)
+        lengths = np.full(4, SEQ_LEN, dtype=np.int64)
+        for frag_len in (60, 120, 121, 200):
+            first = cached_sampler.partition_array("mrna", range(4), lengths, frag_len)
+            first[:] = -12345.0  # a caller mutating its result
+            again = cached_sampler.partition_array("mrna", range(4), lengths, frag_len)
+            fresh = make_sampler(layout).partition_array("mrna", range(4), lengths, frag_len)
+            np.testing.assert_allclose(again, fresh, err_msg=f"memo differs at width {frag_len}")
 
     def test_sample_starts_does_not_accumulate_state_either(self) -> None:
         sampler = make_sampler({0: LAYOUTS["three probes, dense"]})

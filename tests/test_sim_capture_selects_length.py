@@ -141,7 +141,7 @@ def _gdna_lengths(simulator, n: int) -> dict[int, int]:
 
 def _mrna_lengths(simulator, n: int) -> dict[int, int]:
     counts: dict[int, int] = {}
-    mrna, _nrna = simulator._accumulate_rna_counts(n, n_mrna=n, n_nrna=0)
+    mrna, _nrna = simulator._accumulate_rna_counts(n)
     for per_length in mrna.values():
         for length, count in per_length.items():
             counts[length] = counts.get(length, 0) + count

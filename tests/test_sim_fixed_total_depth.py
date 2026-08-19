@@ -37,12 +37,12 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
     """
     sim = _params(n_total_fragments=TOTAL)
     for rate in LADDER:
-        d = resolve_depths(sim, gdna_rate=rate, nrna_ratio=None, nrna_mode="file")
+        d = resolve_depths(sim, gdna_rate=rate)
         assert d.n_rna + d.n_gdna == TOTAL, f"rate {rate}: {d.n_rna} + {d.n_gdna} != {TOTAL}"
 
     legacy = _params(n_total_fragments=None)
     totals = {
-        resolve_depths(legacy, gdna_rate=r, nrna_ratio=None, nrna_mode="file").total for r in LADDER
+        resolve_depths(legacy, gdna_rate=r).total for r in LADDER
     }
     assert len(totals) > 1, "the legacy path already fixes the total; the new mode adds nothing"
 
@@ -57,7 +57,7 @@ def test_the_realised_gDNA_FRACTION_tracks_the_rung():
     sim = _params(n_total_fragments=TOTAL)
     fracs = []
     for rate in LADDER:
-        d = resolve_depths(sim, gdna_rate=rate, nrna_ratio=None, nrna_mode="file")
+        d = resolve_depths(sim, gdna_rate=rate)
         want = rate / (1.0 + rate)
         got = d.n_gdna / d.total
         assert abs(got - want) <= 1.0 / TOTAL, f"rate {rate}: f_gdna {got:.6f} != {want:.6f}"
@@ -67,23 +67,58 @@ def test_the_realised_gDNA_FRACTION_tracks_the_rung():
     assert fracs == sorted(fracs), "the ladder must be monotone"
 
 
-def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top():
+def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
     """With nascent enabled the total must still hold: nRNA comes out of the RNA share, it is not
-    added on top. Otherwise the nascent axis silently changes the depth and every cross-condition
-    comparison acquires a confound.
+    added on top. ⭐ Since 2026-08-19 that is STRUCTURAL — the nascent entities are rows of the one
+    RNA multinomial — so the gate is on the ENGINE: every fragment the RNA draw assigns, mature or
+    nascent, is one of the ``n_rna`` the budget gave it.
 
-    PERTURBATION: the same call with ``nrna_ratio=0`` must give a strictly larger ``n_mrna`` — if the
-    ratio is being ignored, this gate is vacuous.
+    PERTURBATION: the same draw with the entity's nascent abundance zeroed must put strictly more
+    fragments on the mature row — if nascent were ignored, this gate is vacuous.
     """
-    sim = _params(n_total_fragments=TOTAL)
-    d = resolve_depths(sim, gdna_rate=1.0, nrna_ratio=0.25, nrna_mode="additive_ratio")
-    assert d.n_mrna + d.n_nrna == d.n_rna
-    assert d.n_rna + d.n_gdna == TOTAL
-    assert d.n_nrna > 0
+    from rigel.sim.annotation import GeneBuilder
+    from rigel.sim.genome import MutableGenome
+    from rigel.sim.wgs_config import GDNASimConfig
+    from rigel.sim.wgs_engine import WholeGenomeSimulator
+    from rigel.sim.whole_genome import assign_nrna_to_entities
+    from rigel.transcript import Transcript
+    from rigel.types import Interval, Strand
 
-    none = resolve_depths(sim, gdna_rate=1.0, nrna_ratio=0.0, nrna_mode="additive_ratio")
-    assert none.n_nrna == 0 and none.n_mrna > d.n_mrna
-    assert none.n_rna + none.n_gdna == TOTAL
+    d = resolve_depths(_params(n_total_fragments=TOTAL), gdna_rate=1.0)
+    assert d.n_rna + d.n_gdna == TOTAL
+
+    genome = MutableGenome(4000, seed=3, name="chr1")
+    builder = GeneBuilder(genome)
+    builder.add_gene("g1", "+", [{"t_id": "T1", "exons": [(500, 1000), (2000, 2500)], "abundance": 100.0}])
+    fasta = genome.write_fasta(tmp_path)
+    mature = builder.get_transcripts()[0]
+    mature.t_index = 0
+    mature.nrna_t_index = 1
+    entity = Transcript(ref="chr1", strand=Strand.POS, exons=[Interval(500, 2500)], t_id="N1",
+                        g_id="N1", t_index=1, is_nrna=True, is_synthetic=True, abundance=0.0)
+    entity.length = entity.compute_length()
+
+    def draw(nascent_per_mature: float) -> tuple[int, int]:
+        import numpy as np
+        rows = [mature, entity]
+        assign_nrna_to_entities(rows, np.array([100.0 * nascent_per_mature, 0.0]))
+        sim = WholeGenomeSimulator(
+            fasta, rows,
+            SimulationParams(sim_seed=5, frag_mean=100, frag_std=1, frag_min=100, frag_max=100,
+                             read_length=50),
+            GDNASimConfig(), genomic_refs=["chr1"],
+        )
+        try:
+            m, n = sim._accumulate_rna_counts(2000)
+        finally:
+            sim.close()
+        return sum(sum(v.values()) for v in m.values()), sum(sum(v.values()) for v in n.values())
+
+    m_on, n_on = draw(0.25)
+    assert m_on + n_on == 2000, "every RNA fragment is one of the budget's n_rna"
+    assert n_on > 0 and n_on < 2000
+    m_off, n_off = draw(0.0)
+    assert n_off == 0 and m_off == 2000 and m_off > m_on
 
 
 def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
@@ -95,14 +130,12 @@ def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
     """
     legacy = _params(n_total_fragments=None)
     for rate in LADDER:
-        d = resolve_depths(legacy, gdna_rate=rate, nrna_ratio=None, nrna_mode="file")
+        d = resolve_depths(legacy, gdna_rate=rate)
         assert d.n_rna == 10_000_000
         assert d.n_gdna == round(rate * 10_000_000)
 
-    on = resolve_depths(
-        _params(n_total_fragments=TOTAL), gdna_rate=1.0, nrna_ratio=None, nrna_mode="file"
-    )
-    off = resolve_depths(legacy, gdna_rate=1.0, nrna_ratio=None, nrna_mode="file")
+    on = resolve_depths(_params(n_total_fragments=TOTAL), gdna_rate=1.0)
+    off = resolve_depths(legacy, gdna_rate=1.0)
     assert (on.n_rna, on.n_gdna) != (off.n_rna, off.n_gdna)
 
 
@@ -114,10 +147,6 @@ def test_a_total_too_small_for_the_rung_RAISES_rather_than_rounding_to_zero():
     PERTURBATION: a total that IS large enough must not raise.
     """
     with pytest.raises(ValueError, match="RNA"):
-        resolve_depths(
-            _params(n_total_fragments=10), gdna_rate=49.0, nrna_ratio=None, nrna_mode="file"
-        )
-    ok = resolve_depths(
-        _params(n_total_fragments=TOTAL), gdna_rate=49.0, nrna_ratio=None, nrna_mode="file"
-    )
+        resolve_depths(_params(n_total_fragments=10), gdna_rate=49.0)
+    ok = resolve_depths(_params(n_total_fragments=TOTAL), gdna_rate=49.0)
     assert ok.n_rna == 200_000

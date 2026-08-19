@@ -215,8 +215,17 @@ class TestWholeGenomeOracleBamOrientation:
             _make_pos_transcript([(200, 500), (700, 1000)], t_id="tx_pos", g_id="g_pos"),
             _make_neg_transcript([(1400, 1700), (1900, 2200)], t_id="tx_neg", g_id="g_neg"),
         ]
-        for transcript in transcripts:
-            transcript.nrna_abundance = 100.0
+        # nascent lives on single-exon ENTITIES over each span (one per strand here), as the index
+        # makes them; the entities' reads carry the `nrna_` tag and contiguous genomic blocks
+        pos_entity = Transcript(ref="ref", strand=Strand.POS, exons=[Interval(200, 1000)], t_id="n_pos",
+                                g_id="n_pos", t_index=2, is_nrna=True, is_synthetic=True,
+                                abundance=0.0, nrna_abundance=100.0)
+        neg_entity = Transcript(ref="ref", strand=Strand.NEG, exons=[Interval(1400, 2200)], t_id="n_neg",
+                                g_id="n_neg", t_index=3, is_nrna=True, is_synthetic=True,
+                                abundance=0.0, nrna_abundance=100.0)
+        for t in (pos_entity, neg_entity):
+            t.length = t.compute_length()
+        transcripts += [pos_entity, neg_entity]
 
         fasta_path = genome.write_fasta(tmp_path)
         sim = WholeGenomeSimulator(
@@ -239,9 +248,7 @@ class TestWholeGenomeOracleBamOrientation:
         try:
             _, _, bam_path = sim.simulate_and_write(
                 tmp_path / "out",
-                n_rna=0,
-                n_mrna=80,
-                n_nrna=80,
+                n_rna=160,
                 n_gdna=80,
                 oracle_bam=True,
                 n_workers=1,

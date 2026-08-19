@@ -25,8 +25,10 @@ from pathlib import Path
 
 from .manifest import condition_dir_name
 from .truth import write_post_capture_truth
+from .capture import CaptureSampler
 from .whole_genome import (
     WholeGenomeSimulator,
+    apply_nrna_fragment_share,
     apply_nrna_ratio,
     apply_random_nrna_fraction,
     write_truth_abundances,
@@ -43,11 +45,11 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class ConditionDepths:
-    """How one condition's fragment budget splits. ``n_mrna``/``n_nrna`` are ``None`` in file mode,
-    where the RNA pool is a single population with no explicit mature/nascent split."""
+    """How one condition's fragment budget splits between RNA and gDNA. ⭐ The mature/nascent split
+    INSIDE ``n_rna`` is never imposed (owner, 2026-08-19): nascent entities are transcripts in the same
+    multinomial, so their share follows from molecules and lengths and is read off the realised
+    origin counts afterwards."""
 
-    n_mrna: int | None
-    n_nrna: int | None
     n_rna: int
     n_gdna: int
 
@@ -56,7 +58,7 @@ class ConditionDepths:
         return self.n_rna + self.n_gdna
 
 
-def resolve_depths(sim, *, gdna_rate: float, nrna_ratio, nrna_mode: str) -> ConditionDepths:
+def resolve_depths(sim, *, gdna_rate: float) -> ConditionDepths:
     """Split one condition's fragment budget between RNA and gDNA.
 
     ⭐ **TWO MODES, AND THE SECOND ONE EXISTS BECAUSE THE FIRST CANNOT REACH THE HIGH-gDNA END.**
@@ -74,23 +76,18 @@ def resolve_depths(sim, *, gdna_rate: float, nrna_ratio, nrna_mode: str) -> Cond
     thins as gDNA rises, so per-transcript abundance accuracy degrades at the top of the ladder — that
     is a property of such libraries, not an artifact.
 
-    ⚠ **Nascent comes OUT of the RNA share, never on top**, so the total holds across the nascent axis
-    too; otherwise turning nascent on would silently change the depth and confound every comparison.
+    ⚠ **Nascent comes OUT of the RNA share, never on top** — and since 2026-08-19 that is structural
+    rather than arithmetic: the nascent entities are rows of the ONE RNA multinomial, so ``n_rna`` is
+    the whole RNA budget and the mature/nascent split inside it is realised, not imposed.
 
     Gates: ``tests/test_sim_fixed_total_depth.py``.
     """
     total = getattr(sim, "n_total_fragments", None)
-    ratio = float(nrna_ratio or 0.0)
-    split = nrna_mode in {"additive_ratio", "random_fraction"}
 
     if total is None:
         # ── legacy: RNA depth fixed, gDNA added on top ────────────────────────────────────────
-        if split:
-            n_mrna = int(sim.n_rna_fragments)
-            n_nrna = round(n_mrna * ratio)
-            return ConditionDepths(n_mrna, n_nrna, n_mrna + n_nrna, round(gdna_rate * n_mrna))
         n_rna = int(sim.n_rna_fragments)
-        return ConditionDepths(None, None, n_rna, round(gdna_rate * n_rna))
+        return ConditionDepths(n_rna, round(gdna_rate * n_rna))
 
     # ── fixed total: `rate` decides the split only ────────────────────────────────────────────
     total = int(total)
@@ -108,12 +105,7 @@ def resolve_depths(sim, *, gdna_rate: float, nrna_ratio, nrna_mode: str) -> Cond
             f"n_total_fragments={total} at gdna_rate={gdna_rate} leaves {n_rna} RNA fragments. "
             "A condition with no RNA is not an RNA-seq library; raise the total or lower the rate."
         )
-    if not split:
-        return ConditionDepths(None, None, n_rna, n_gdna)
-    # ⚠ mature is the REMAINDER so mature + nascent == the RNA share exactly, for the same reason
-    # gDNA is a remainder above.
-    n_nrna = round(n_rna * ratio / (1.0 + ratio))
-    return ConditionDepths(n_rna - n_nrna, n_nrna, n_rna, n_gdna)
+    return ConditionDepths(n_rna, n_gdna)
 
 
 def stable_seed(base_seed: int, *parts: object) -> int:
@@ -131,10 +123,11 @@ def capture_paired_condition_seed(
 ) -> int:
     """Seed shared by the capture **and nascent** variants of one ``(gdna, ss)`` base condition.
 
-    ``nrna_label`` is intentionally **excluded** from the seed so that a nascent-on cell and its
-    nascent-off twin share the same mature-RNA + gDNA streams (the nascent layer draws from a
-    dedicated RNG; see ``WholeGenomeSimulator._nrna_rng``) — making nascent on/off bit-identical
-    head-to-head, exactly as the capture variants already are.
+    ``nrna_label`` is intentionally **excluded** from the seed so the variants of one base condition
+    start from the same stream. ⚠ Since 2026-08-19 nascent rows are drawn in the SAME multinomial as
+    the mature rows, so a nascent-on cell and its nascent-off twin share the seed but NOT a
+    bit-identical mature stream — turning nascent on re-allocates the RNA budget, as it physically
+    must; the gDNA stream is unaffected.
     """
     seed_name = condition_dir_name(gdna_label, strand_specificity, "_paired")
     return stable_seed(base_seed, seed_name)
@@ -166,12 +159,23 @@ def run_condition_grid(
     """Run the full condition grid and return the per-condition manifest entries.
 
     ``nrna_pairs`` entries are ``(label, mode, value, index)`` (see ``whole_genome._build_nrna_pairs``):
-    mode ``additive_ratio`` / ``random_fraction`` spike nRNA onto the base abundances and allocate
-    explicit mRNA/nRNA counts; any other mode (``file``) leaves abundances as loaded and allocates a
-    single RNA pool. ``capture_meta_by_label`` supplies the suite's probe-provenance fields per
+    mode ``additive_ratio`` / ``random_fraction`` pool nascent molecules onto the index's nRNA entities
+    (`whole_genome.assign_nrna_to_entities`); any other mode (``file``) leaves abundances as loaded.
+    Either way the RNA budget is ONE multinomial over mature and nascent rows. ``capture_meta_by_label`` supplies the suite's probe-provenance fields per
     capture label (empty for the reference-driven path). The caller writes the manifest.
     """
     capture_meta_by_label = capture_meta_by_label or {}
+    # ⭐⭐ ONE CaptureSampler PER CAPTURE SCENARIO, built once and reused by every condition that shares
+    # it. The probe layout and the per-(width) partition depend only on the panel and the templates —
+    # not on abundance, gDNA rate, strand or nascent — so rebuilding per condition recomputed 260 s of
+    # identical numbers each time (measured 2026-08-19).
+    from rigel.index import load_reference_lengths
+
+    _ref_lengths = load_reference_lengths(genome_path)
+    samplers = {
+        scenario.label: CaptureSampler.from_config(scenario.config, transcripts, _ref_lengths)
+        for scenario in capture_scenarios
+    }
     conditions: list[dict] = []
     cond_num = 0
     total = (
@@ -190,9 +194,15 @@ def run_condition_grid(
 
         nrna_ratio: float | None = None
         nrna_ratio_range: tuple[float, float] | None = None
+        nrna_share: float | None = None
         if nrna_mode == "additive_ratio":
             nrna_ratio = float(nrna_value or 0.0)
             apply_nrna_ratio(cond_transcripts, nrna_ratio)
+        elif nrna_mode == "fragment_share":
+            # ⭐ the config states the nascent share of RNA FRAGMENTS; the MOLECULAR ratio is solved
+            # from the annotation (`whole_genome.apply_nrna_fragment_share`) and recorded per condition
+            nrna_share = float(nrna_value or 0.0)
+            nrna_ratio = apply_nrna_fragment_share(cond_transcripts, nrna_share, sim)
         elif nrna_mode == "random_fraction":
             nrna_ratio_range = tuple(nrna_value)  # type: ignore[arg-type]
             nrna_ratio = apply_random_nrna_fraction(
@@ -222,10 +232,7 @@ def run_condition_grid(
                         continue
                     cond_num += 1
 
-                    depths = resolve_depths(
-                        sim, gdna_rate=gdna_rate, nrna_ratio=nrna_ratio, nrna_mode=nrna_mode
-                    )
-                    n_mrna, n_nrna = depths.n_mrna, depths.n_nrna
+                    depths = resolve_depths(sim, gdna_rate=gdna_rate)
                     n_rna, n_gdna = depths.n_rna, depths.n_gdna
 
                     condition_seed = capture_paired_condition_seed(
@@ -253,6 +260,7 @@ def run_condition_grid(
                         "nrna_label": nrna_label,
                         "nrna_mode": nrna_mode,
                         "nrna_ratio": nrna_ratio,
+                        "nrna_fragment_share": nrna_share,
                         "nrna_ratio_range": nrna_ratio_range,
                         "nrna_eligible_fraction": (
                             nrna.eligible_fraction if nrna_mode == "random_fraction" else None
@@ -264,8 +272,6 @@ def run_condition_grid(
                         "capture_probe_panel": probe_meta.get("panel"),
                         "capture_probe_tsv": probe_meta.get("tsv"),
                         "capture_probe_bed": probe_meta.get("bed"),
-                        "n_mrna": n_mrna,
-                        "n_nrna": n_nrna,
                         "n_rna": n_rna,
                         "n_gdna": n_gdna,
                         "n_total": n_rna + n_gdna,
@@ -309,6 +315,7 @@ def run_condition_grid(
                             genomic_refs=genomic_refs,
                             strand_specificity=strand_spec,
                             capture_config=capture_scenario.config,
+                            capture_sampler=samplers[capture_scenario.label],
                         )
                         _, _, bam_path = simulator.simulate_and_write(
                             cond_dir,
@@ -316,8 +323,6 @@ def run_condition_grid(
                             n_gdna,
                             oracle_bam=oracle_bam,
                             prefix="sim",
-                            n_mrna=n_mrna,
-                            n_nrna=n_nrna,
                             n_workers=sim.n_workers,
                         )
                         simulator.close()

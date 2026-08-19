@@ -82,10 +82,16 @@ def test_transcript_probe_weights_match_overlap_example(tmp_path):
     assert sampler.fragment_weight("mrna", 0, 2000, 1480, 200) == pytest.approx(121.0)
 
 
-def test_transcript_probe_crossing_sj_penalizes_gdna_and_nrna(tmp_path):
+def test_transcript_probe_crossing_sj_penalizes_gdna_and_the_nascent_entity(tmp_path):
+    """A probe across a splice junction binds the spliced transcript whole (scale 1), and binds gDNA
+    and the NASCENT ENTITY — a single-exon transcript over the span, the index's nRNA row — as two
+    separated genomic pieces at ``gdna_split_penalty``. ⭐ The entity is an ordinary transcript in the
+    list (owner, 2026-08-19): its capture comes from every probe whose genomic blocks it overlaps, so
+    its weight equals the gDNA weight at the same position, which is the physics."""
     probes = tmp_path / "sj_probe.tsv"
     probes.write_text("transcript_id\tstart\tend\nT\t80\t140\n")
     transcript = _transcript("T", [(100, 200), (400, 500)])
+    entity = _transcript("T_nascent", [(100, 500)])
     sampler = CaptureSampler.from_config(
         CaptureConfig(
             probes=str(probes),
@@ -93,13 +99,46 @@ def test_transcript_probe_crossing_sj_penalizes_gdna_and_nrna(tmp_path):
             off_target_weight=1.0,
             gdna_split_penalty=0.2,
         ),
-        [transcript],
+        [transcript, entity],
         {"chr1": 1000},
     )
 
     assert sampler.fragment_weight("mrna", 0, 200, 80, 60) == pytest.approx(61.0)
     assert sampler.fragment_weight("gdna", "chr1", 1000, 170, 280) == pytest.approx(13.0)
-    assert sampler.fragment_weight("nrna", 0, 400, 70, 280) == pytest.approx(13.0)
+    # the entity: transcript coordinate 70 of its 400-bp span is genomic 170, the same fragment
+    assert sampler.fragment_weight("mrna", 1, 400, 70, 280) == pytest.approx(13.0)
+    # ⛔ there is no per-transcript nascent space any more
+    with pytest.raises(ValueError):
+        sampler.fragment_weight("nrna", 0, 400, 70, 280)
+
+
+def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
+    """⭐ Owner, 2026-08-19: a probe maps to compatible transcripts by GENOMIC overlap, any isoform, any
+    gene, either strand — and to gDNA. A sibling isoform sharing the probed exon, a single-exon
+    transcript of another gene under the probe on the OPPOSITE strand, and a nascent entity spanning it
+    all carry the probe; a transcript whose exons miss it does not."""
+    probes = tmp_path / "probes.tsv"
+    probes.write_text("transcript_id\tstart\tend\nT1\t20\t80\n")  # genomic [120, 180) of T1
+    t1 = _transcript("T1", [(100, 200), (400, 500)])
+    sibling = _transcript("T2", [(100, 200), (600, 700)])  # shares exon 1, not probed itself
+    antisense = _transcript("A", [(150, 300)], strand=Strand.NEG)  # another gene, other strand, under the probe
+    entity = _transcript("N", [(100, 700)])  # a nascent entity spanning the lot
+    far = _transcript("F", [(800, 900)])  # no overlap
+    sampler = CaptureSampler.from_config(
+        CaptureConfig(probes=str(probes), binding_per_base=1.0, off_target_weight=1.0),
+        [t1, sibling, antisense, entity, far],
+        {"chr1": 1000},
+    )
+    # a 60-bp fragment lying exactly under the probe, in each transcript's own coordinates
+    assert sampler.fragment_weight("mrna", 0, 200, 20, 60) == pytest.approx(61.0)  # T1
+    assert sampler.fragment_weight("mrna", 1, 200, 20, 60) == pytest.approx(61.0)  # sibling
+    # antisense transcript A = genomic [150, 300) on −, so its coordinate x is genomic 300 − x and the
+    # probe's overlap with it is genomic [150, 180) = A's [120, 150): a 60-bp fragment at A's 90
+    # covers genomic [150, 210) and binds the 30 overlapping bases
+    assert sampler.fragment_weight("mrna", 2, 150, 90, 60) == pytest.approx(31.0)
+    assert sampler.fragment_weight("mrna", 3, 600, 20, 60) == pytest.approx(61.0)  # entity
+    assert sampler.fragment_weight("mrna", 4, 100, 20, 60) == pytest.approx(1.0)  # far: off target
+    assert sampler.fragment_weight("gdna", "chr1", 1000, 120, 60) == pytest.approx(61.0)
 
 
 def test_bed12_probe_projects_to_transcript_and_gdna(tmp_path):
@@ -317,7 +356,7 @@ def test_whole_genome_simulator_uses_capture_partition_for_assignment(tmp_path):
         capture_config=CaptureConfig(probes=str(probes), binding_per_base=10.0),
     )
     try:
-        mrna_counts, _ = sim._accumulate_rna_counts(0, n_mrna=500, n_nrna=0)
+        mrna_counts, _ = sim._accumulate_rna_counts(500)
     finally:
         sim.close()
 

@@ -83,6 +83,18 @@ class NRNAConfig:
       entry draws per-transcript ratios uniformly from a ``(lo, hi)`` range,
       applied to a random ``eligible_fraction`` of transcripts (the rest get
       zero nascent).
+    - ⭐ ``fragment_share`` (via ``shares``): each entry states the nascent share
+      of RNA **FRAGMENTS** in the uncaptured library, and the simulator SOLVES for
+      the common molecular scale that produces it. ⛔ This is the mode a panel
+      wants, and the reason is a factor of four: a nascent ENTITY spans a whole
+      gene (mean 40,667 bp on the ladder's index) while a mature transcript is
+      spliced (mean 1,708 bp), so a molecular ratio of 0.25 puts **86 %** of RNA
+      fragments in nascent RNA, not 25 % (measured 2026-08-19). The molecular
+      ratio that gives a 20 % fragment share is **0.0100** — which is also the
+      biologically sensible pre-mRNA:mRNA molar ratio. ⚠ The scale is solved on
+      UNCAPTURED effective lengths, i.e. it fixes the LIBRARY's molecular
+      composition; the realised fragment share then differs under capture, which
+      is the physics (capture acts after the molecules exist).
 
     When abundances come from a file that already contains explicit nRNA
     data, the configured sweep is ignored and the file's nRNA values are
@@ -92,6 +104,8 @@ class NRNAConfig:
     mode: str = "additive_ratio"
     ratios: list[float] = field(default_factory=lambda: [0.0])
     ratio_ranges: list[tuple[float, float]] | None = None
+    #: nascent share of RNA FRAGMENTS in the uncaptured library, for ``mode="fragment_share"``
+    shares: list[float] | None = None
     ratio_labels: list[str] | None = None
     eligible_fraction: float = 1.0
     seed: int = 42
@@ -103,6 +117,12 @@ class WholeGenomeSimConfig:
 
     genome: str = ""
     gtf: str = ""
+    #: ⭐ The rigel index the simulation's TRANSCRIPTOME comes from (owner, 2026-08-19). The simulator
+    #: takes the index's transcript list — annotated transcripts PLUS the synthetic nascent-RNA entities
+    #: `rigel index` creates (`index.create_nrna_transcripts`, TSS/TES clustered within
+    #: `NRNA_MERGE_TOLERANCE`) — so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an
+    #: index is built from ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
+    index: str | None = None
     outdir: str = "sim_output"
     transcript_filter: str = "all"  # "all", "basic", "mane", "ccds"
 

@@ -17,13 +17,19 @@ distribution:
     log_total ~ Uniform(log(min), log(max))
     total = exp(log_total)
 
-Nascent RNA is controlled separately by the ``nrna`` section. The canonical
-benchmark mode is additive:
+Nascent RNA is controlled separately by the ``nrna`` section, and it lives on the
+rigel index's NASCENT-RNA ENTITIES (owner, 2026-08-19): every multi-exon transcript
+links (``nrna_t_index``) to one single-exon entity over its TSS/TES-clustered span —
+a synthetic transcript, or an annotated single-exon transcript that already covers
+the span. The canonical benchmark mode is a MOLECULAR ratio:
 
-    mRNA = base abundance
-    nRNA = base abundance × nrna_ratio
+    entity.nrna_abundance = Σ over the entity's contributors of (contributor.abundance × nrna_ratio)
 
-Single-exon transcripts always get nRNA = 0.
+i.e. ``nrna_ratio`` nascent molecules per mature molecule of each contributor, pooled
+onto the entity whose span they share. Sampling is ONE multinomial over every row —
+mature rows and entity rows alike — with probability ∝ abundance × effective length,
+so the nascent FRAGMENT share follows from the molecules and their lengths and is
+never imposed. Annotated multi-exon transcripts carry ``nrna_abundance = 0`` always.
 
 **file** — Load from a TSV with columns ``transcript_id``,
 ``mrna_abundance``, ``nrna_abundance``.
@@ -84,6 +90,7 @@ except ImportError:
     pgzip = None  # type: ignore[assignment]
 
 from rigel.transcript import Transcript
+from rigel.types import Interval, Strand
 
 # Config dataclasses live in wgs_config (data layer); re-exported so existing
 # `from rigel.sim.whole_genome import SimulationParams` call sites keep working.
@@ -193,6 +200,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     cfg = WholeGenomeSimConfig()
     cfg.genome = raw.get("genome", "")
     cfg.gtf = raw.get("gtf", "")
+    cfg.index = raw.get("index", None)
     cfg.outdir = raw.get("outdir", "sim_output")
     cfg.transcript_filter = raw.get("transcript_filter", "all")
 
@@ -227,8 +235,15 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
     nrna.mode = str(nrna_raw.get("mode", "additive_ratio"))
-    if nrna.mode not in {"additive_ratio", "random_fraction"}:
-        raise ValueError("nrna.mode must be 'additive_ratio' or 'random_fraction'")
+    if nrna.mode not in {"additive_ratio", "random_fraction", "fragment_share"}:
+        raise ValueError(
+            "nrna.mode must be 'additive_ratio', 'fragment_share' or 'random_fraction'"
+        )
+    raw_shares = nrna_raw.get("shares", None)
+    if raw_shares is not None:
+        nrna.shares = [float(x) for x in raw_shares]
+    if nrna.mode == "fragment_share" and nrna.shares is None:
+        raise ValueError("nrna.shares is required for mode='fragment_share'")
     if "fracs" in nrna_raw or "frac_labels" in nrna_raw:
         raise ValueError("nrna.fracs is no longer supported; use nrna.ratios")
     raw_ratios = nrna_raw.get("ratios", None)
@@ -244,6 +259,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         raise ValueError("nrna.eligible_fraction must be between 0 and 1")
     if nrna.mode == "additive_ratio":
         expected_len = len(nrna.ratios)
+    elif nrna.mode == "fragment_share":
+        for share in nrna.shares or []:
+            if not 0.0 <= share < 1.0:
+                raise ValueError("nrna.shares entries must satisfy 0 <= share < 1")
+        expected_len = len(nrna.shares or [])
     else:
         if nrna.ratio_ranges is None:
             raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
@@ -338,6 +358,76 @@ def load_transcripts(
     return transcripts
 
 
+def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
+    """⭐ The simulation's transcriptome IS the rigel index's (owner, 2026-08-19).
+
+    Rebuilds one :class:`Transcript` per index row — annotated transcripts AND the synthetic nascent
+    entities, with ``is_nrna`` / ``is_synthetic`` / ``nrna_t_index`` / ``nrna_n_contributors`` exactly as
+    the index carries them and ``t_index`` equal to the index row — so the simulator, the oracle and
+    `rigel quant` all speak about the same transcript set. ⛔ The GTF loader is not used here because
+    it cannot know what the index did (duplicate collapse, nascent consolidation); feeding the simulator
+    the raw GTF is how its nascent model diverged from the tool's.
+    """
+    from ..index import TranscriptIndex
+
+    index = TranscriptIndex.load(index_dir, retain_test_structures=True)
+    t_df = index.t_df
+    transcripts: list[Transcript] = []
+    for row in t_df.itertuples(index=False):
+        exons = index.get_exon_intervals(int(row.t_index))
+        if exons is None or len(exons) == 0:
+            raise ValueError(f"index row {row.t_index} ({row.t_id}) has no exon intervals")
+        t = Transcript(
+            ref=str(row.ref),
+            strand=Strand(int(row.strand)),
+            exons=[Interval(int(s), int(e)) for s, e in np.asarray(exons).tolist()],
+            t_id=str(row.t_id),
+            g_id=str(row.g_id),
+            g_name=str(row.g_name) if row.g_name is not None else None,
+            g_type=str(row.g_type) if row.g_type is not None else None,
+            t_index=int(row.t_index),
+            g_index=int(row.g_index),
+            is_basic=bool(row.is_basic),
+            is_mane=bool(row.is_mane),
+            is_ccds=bool(row.is_ccds),
+            is_nrna=bool(row.is_nrna),
+            is_synthetic=bool(row.is_synthetic),
+            nrna_t_index=int(row.nrna_t_index),
+            nrna_n_contributors=int(row.nrna_n_contributors),
+        )
+        t.length = t.compute_length()
+        transcripts.append(t)
+    if [t.t_index for t in transcripts] != list(range(len(transcripts))):
+        raise ValueError("index rows are not contiguous t_index 0..n-1")
+    n_syn = sum(1 for t in transcripts if t.is_synthetic)
+    logger.info(
+        "Loaded %d transcripts from index %s (%d synthetic nascent entities)",
+        len(transcripts), index_dir, n_syn,
+    )
+    return transcripts
+
+
+def ensure_index(cfg: "WholeGenomeSimConfig") -> Path:
+    """The index the simulation reads its transcriptome from: ``cfg.index`` if set, else built from
+    ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` (duplicates collapsed, as `panel.py build`
+    does) — and reused on the next run."""
+    from ..index import TranscriptIndex
+
+    if cfg.index:
+        index_dir = Path(cfg.index)
+        if not index_dir.is_dir():
+            raise FileNotFoundError(f"index not found: {index_dir}")
+        return index_dir
+    index_dir = Path(cfg.outdir) / "rigel_index"
+    if not index_dir.is_dir():
+        logger.info("No index configured — building one from %s + %s into %s", cfg.genome, cfg.gtf, index_dir)
+        TranscriptIndex.build(
+            cfg.genome, cfg.gtf, index_dir,
+            write_tsv=False, collapse_duplicate_transcripts=True,
+        )
+    return index_dir
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Abundance assignment
 # ═══════════════════════════════════════════════════════════════════
@@ -362,9 +452,13 @@ def assign_random_abundances(
 
     rng = np.random.default_rng(config.seed)
     n = len(transcripts)
+    # ⛔ A synthetic nascent entity is not a mature molecule: it never draws a mature abundance. The
+    # draw runs over the ANNOTATED rows only, in index order, so the synthetic rows do not shift it.
+    annotated = np.array([not t.is_synthetic for t in transcripts], dtype=bool)
 
     # Step 1: expressed?
-    expressed = rng.random(n) < config.frac_expressed
+    expressed = np.zeros(n, dtype=bool)
+    expressed[annotated] = rng.random(int(annotated.sum())) < config.frac_expressed
 
     # Step 2: log-uniform total RNA for expressed transcripts
     total_rna = np.zeros(n)
@@ -478,38 +572,130 @@ def _load_abundance_map(
     return abund_map, fmt
 
 
+def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.ndarray) -> int:
+    """⭐ Pool each contributor's nascent molecules onto its nRNA ENTITY (owner, 2026-08-19).
+
+    ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance (zero for anything that
+    is not an expressed multi-exon transcript). Every multi-exon transcript links to one entity through
+    ``nrna_t_index`` — the index's synthetic single-exon transcript over the clustered span, or the
+    annotated single-exon transcript that already covers it — and the entity's ``nrna_abundance`` is
+    the SUM over its contributors. Annotated multi-exon transcripts end with ``nrna_abundance = 0``:
+    their nascent molecules are the entity's, and are sampled on the entity's template.
+
+    ⛔ A contributor with no entity (``nrna_t_index < 0``) is an index defect, not a case to skip.
+    Returns the number of entities that received nascent.
+    """
+    by_index = {t.t_index: t for t in transcripts}
+    for t in transcripts:
+        t.nrna_abundance = 0.0
+    n_entities = 0
+    for t, amount in zip(transcripts, per_contributor):
+        if amount <= 0.0:
+            continue
+        if len(t.exons) <= 1:
+            raise ValueError(f"{t.t_id} is single-exon and cannot contribute nascent RNA")
+        if t.nrna_t_index < 0 or t.nrna_t_index not in by_index:
+            raise ValueError(
+                f"{t.t_id} is multi-exon but links to no nascent entity (nrna_t_index="
+                f"{t.nrna_t_index}); the transcript list did not come from a rigel index"
+            )
+        entity = by_index[t.nrna_t_index]
+        if entity.nrna_abundance == 0.0:
+            n_entities += 1
+        entity.nrna_abundance += float(amount)
+    return n_entities
+
+
 def apply_nrna_ratio(
     transcripts: list[Transcript],
     ratio: float,
 ) -> None:
-    """Set nRNA abundance as an additive ratio of mature RNA abundance."""
-    n_spiked = 0
-    n_single = 0
-
-    for t in transcripts:
-        mrna = t.abundance or 0.0
-        if mrna <= 0:
-            t.nrna_abundance = 0.0
-            continue
-        if len(t.exons) <= 1:
-            t.nrna_abundance = 0.0
-            n_single += 1
-            continue
-        t.nrna_abundance = mrna * ratio
-        if ratio > 0:
-            n_spiked += 1
-
+    """Nascent RNA at a MOLECULAR ratio of mature RNA: ``ratio`` nascent molecules per mature molecule
+    of every expressed multi-exon transcript, pooled onto its nRNA entity
+    (:func:`assign_nrna_to_entities`)."""
+    per = np.array(
+        [
+            (t.abundance or 0.0) * ratio if (t.abundance or 0.0) > 0 and len(t.exons) > 1 else 0.0
+            for t in transcripts
+        ]
+    )
+    n_entities = assign_nrna_to_entities(transcripts, per)
+    n_contrib = int(np.sum(per > 0))
     total_mrna = sum(t.abundance or 0.0 for t in transcripts)
     total_nrna = sum(t.nrna_abundance for t in transcripts)
     logger.info(
-        "Set additive nRNA ratio: %.3g (%d transcripts, mRNA=%.1f, nRNA=%.1f, "
-        "%d single-exon zeroed)",
-        ratio,
-        n_spiked,
-        total_mrna,
-        total_nrna,
-        n_single,
+        "Set nRNA molecular ratio %.3g: %d contributors onto %d entities (mRNA=%.1f, nRNA=%.1f)",
+        ratio, n_contrib, n_entities, total_mrna, total_nrna,
     )
+
+
+def fl_pmf(sim: "SimulationParams") -> tuple[np.ndarray, np.ndarray]:
+    """The fragment-length pmf the engine draws from — a Normal truncated to ``[frag_min, frag_max]``,
+    evaluated exactly rather than sampled, so a quantity derived from it is deterministic.
+    Matches `sampling.truncated_normal_frag_lengths`'s rejection loop in distribution."""
+    widths = np.arange(int(sim.frag_min), int(sim.frag_max) + 1, dtype=np.int64)
+    logp = -0.5 * ((widths - float(sim.frag_mean)) / float(sim.frag_std)) ** 2
+    p = np.exp(logp - logp.max())
+    return widths, p / p.sum()
+
+
+def expected_rna_weights(
+    transcripts: list[Transcript], sim: "SimulationParams"
+) -> tuple[float, float]:
+    """``(mature, nascent)`` expected sampling weight in the UNCAPTURED library:
+    ``Σ_t abundance_t · E_w[max(0, L_t − w + 1)]``, the exact expectation over the fragment-length
+    pmf rather than the effective length at the mean width (they differ wherever a transcript is
+    short relative to the fragment length, which is most of them).
+    """
+    widths, p = fl_pmf(sim)
+    L = np.array([float(t.length or t.compute_length()) for t in transcripts])
+    eff = (np.maximum(0.0, L[:, None] - widths[None, :] + 1.0) * p[None, :]).sum(axis=1)
+    am = np.array([float(t.abundance or 0.0) for t in transcripts])
+    an = np.array([float(t.nrna_abundance) for t in transcripts])
+    return float((am * eff).sum()), float((an * eff).sum())
+
+
+def apply_nrna_fragment_share(
+    transcripts: list[Transcript], share: float, sim: "SimulationParams"
+) -> float:
+    """⭐ Set nascent molecules so nascent takes ``share`` of the RNA **FRAGMENTS** in the uncaptured
+    library, and return the molecular ratio that achieves it.
+
+    ⛔ **Why a panel states the FRAGMENT share and not the molecular ratio.** A nascent entity spans a
+    whole gene and a mature transcript is spliced — on the ladder's index, mean 40,667 bp against
+    1,708 bp — so a molecular ratio of 0.25 puts **86 %** of RNA fragments in nascent RNA. The ratio
+    that gives the 20 % the panel has always meant is **0.0100**, and it is a property of the
+    annotation, not a number anyone should hand-write into a config
+    (`TRAPS: no-magic-numbers`).
+
+    Each expressed multi-exon transcript contributes ``ratio × abundance`` nascent molecules to its
+    entity, so ``W_nascent`` is linear in the ratio and the solve is exact::
+
+        share = c·W_n1 / (W_m + c·W_n1)   ⇒   c = (share / (1 − share)) · W_m / W_n1
+
+    with ``W_n1`` the nascent weight at ratio 1. ⚠ Solved on UNCAPTURED lengths: it fixes the
+    LIBRARY's molecular composition, and the realised share then moves under capture, which is
+    physically right — capture acts on molecules that already exist.
+    """
+    if not 0.0 <= share < 1.0:
+        raise ValueError(f"nrna share must be in [0, 1); got {share}")
+    if share == 0.0:
+        assign_nrna_to_entities(transcripts, np.zeros(len(transcripts)))
+        return 0.0
+    apply_nrna_ratio(transcripts, 1.0)
+    w_mature, w_nascent_unit = expected_rna_weights(transcripts, sim)
+    if w_nascent_unit <= 0.0:
+        raise ValueError(
+            "no nascent opportunity: no expressed multi-exon transcript has an nRNA entity, so a "
+            f"nascent fragment share of {share} is unreachable"
+        )
+    ratio = (share / (1.0 - share)) * w_mature / w_nascent_unit
+    apply_nrna_ratio(transcripts, ratio)
+    logger.info(
+        "nRNA fragment share %.4g ⇒ molecular ratio %.6g (W_mature=%.4g, W_nascent@1=%.4g)",
+        share, ratio, w_mature, w_nascent_unit,
+    )
+    return ratio
 
 
 def apply_random_nrna_fraction(
@@ -533,10 +719,10 @@ def apply_random_nrna_fraction(
     n_eligible = 0
     n_spiked = 0
     n_single = 0
+    per = np.zeros(len(transcripts))
 
-    for t in transcripts:
+    for i, t in enumerate(transcripts):
         mrna = t.abundance or 0.0
-        t.nrna_abundance = 0.0
         if mrna <= 0:
             continue
         if len(t.exons) <= 1:
@@ -546,9 +732,11 @@ def apply_random_nrna_fraction(
         if rng.random() >= eligible_fraction:
             continue
         ratio = float(rng.uniform(lo, hi)) if hi > lo else lo
-        t.nrna_abundance = mrna * ratio
+        per[i] = mrna * ratio
         if ratio > 0:
             n_spiked += 1
+    # the per-contributor molecules are pooled onto the nRNA entities, as in `apply_nrna_ratio`
+    assign_nrna_to_entities(transcripts, per)
 
     total_mrna = sum(t.abundance or 0.0 for t in transcripts)
     total_nrna = sum(t.nrna_abundance for t in transcripts)
@@ -592,23 +780,30 @@ def assign_file_abundances(
 
     matched = 0
     has_nrna_data = False
+    # ⭐ A file names ANNOTATED transcripts, and its nRNA column is that transcript's nascent
+    # molecules — which live on its ENTITY (owner, 2026-08-19). Collect them per contributor and pool
+    # in one pass, exactly as the ratio modes do; a file row naming an entity directly is honoured too.
+    per_contributor = np.zeros(len(transcripts))
 
-    for t in transcripts:
+    for i, t in enumerate(transcripts):
         if t.t_id in abund_map:
             total_or_mrna, nrna = abund_map[t.t_id]
+            t.abundance = total_or_mrna
             if nrna is not None:
-                # File provided both mRNA and nRNA
-                t.abundance = total_or_mrna
-                t.nrna_abundance = nrna
                 has_nrna_data = True
-            else:
-                # File provided total RNA only (salmon/kallisto TPM)
-                t.abundance = total_or_mrna
-                t.nrna_abundance = 0.0
+                if len(t.exons) > 1:
+                    per_contributor[i] = nrna
+                else:
+                    t.nrna_abundance = nrna  # already an entity / single-exon row
             matched += 1
         else:
             t.abundance = 0.0
-            t.nrna_abundance = 0.0
+    if per_contributor.any():
+        direct = {i: transcripts[i].nrna_abundance for i in range(len(transcripts))
+                  if transcripts[i].nrna_abundance > 0}
+        assign_nrna_to_entities(transcripts, per_contributor)
+        for i, amount in direct.items():  # keep any nascent named on an entity row directly
+            transcripts[i].nrna_abundance += amount
 
     logger.info(
         "File abundances (%s): matched=%d/%d, has_nrna=%s",
@@ -688,6 +883,13 @@ def _build_nrna_pairs(
             label = nrna_label_for_ratio(ratio, cfg.nrna.ratio_labels, i)
             pairs.append((label, mode, ratio, i))
         return pairs
+    if mode == "fragment_share":
+        if cfg.nrna.shares is None:
+            raise ValueError("nrna.shares is required for mode='fragment_share'")
+        for i, share in enumerate(cfg.nrna.shares):
+            label = nrna_label_for_ratio(share, cfg.nrna.ratio_labels, i)
+            pairs.append((label, mode, share, i))
+        return pairs
     if mode == "random_fraction":
         if cfg.nrna.ratio_ranges is None:
             raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
@@ -740,10 +942,17 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     if not gtf_path.exists():
         raise FileNotFoundError(f"GTF not found: {gtf_path}")
 
-    # 1. Load transcripts
-    transcripts = load_transcripts(gtf_path, transcript_filter=cfg.transcript_filter)
+    # 1. Load transcripts — from the rigel INDEX, so the simulated transcriptome (annotated transcripts
+    #    plus the synthetic nascent entities) is exactly the one `rigel quant` reads.
+    if cfg.transcript_filter != "all":
+        raise ValueError(
+            "transcript_filter is not applicable when the transcriptome comes from a rigel index: the "
+            "index IS the transcript set. Build the index from a filtered GTF instead."
+        )
+    index_dir = ensure_index(cfg)
+    transcripts = load_transcripts_from_index(index_dir)
     if not transcripts:
-        raise RuntimeError("No transcripts loaded from GTF")
+        raise RuntimeError(f"No transcripts loaded from index {index_dir}")
 
     # 2. Assign base abundances (total RNA, nRNA = 0)
     ab = cfg.abundance

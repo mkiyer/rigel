@@ -20,7 +20,7 @@ import numpy as np
 from ...transcript import Transcript
 from ...types import Strand
 from ..bam import transcript_to_genomic_blocks
-from ..intervals import merge_intervals, project_genomic_blocks_to_transcript
+from ..intervals import merge_intervals
 from .config import CaptureConfig
 
 logger = logging.getLogger(__name__)
@@ -73,9 +73,29 @@ class CaptureSampler:
         for idx, t in enumerate(transcripts):
             if t.ref is not None:
                 self._tx_by_ref[str(t.ref)].append(idx)
+        #: ⭐ Per reference, transcripts sorted by START with the running maximum END beside them, so a
+        #: probe finds the transcripts it overlaps by two bisects instead of scanning the reference.
+        #: ⛔ Not an optimisation to taste: a probe now maps to EVERY overlapping transcript, so the
+        #: naive scan is O(probes x transcripts) — measured **131 s** for 13,824 probes against 15,669
+        #: transcripts, per condition, before this (2026-08-19).
+        self._tx_index: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
+        for ref, idxs in self._tx_by_ref.items():
+            starts = np.array([transcripts[i].start for i in idxs], dtype=np.int64)
+            ends = np.array([transcripts[i].end for i in idxs], dtype=np.int64)
+            order = np.argsort(starts, kind="mergesort")
+            starts, ends = starts[order], ends[order]
+            arr = np.array(idxs, dtype=np.int64)[order]
+            # suffix maximum of END: transcripts at or after position j whose end exceeds a query
+            suffix_max_end = np.maximum.accumulate(ends[::-1])[::-1]
+            self._tx_index[ref] = (starts, ends, arr, suffix_max_end)
 
+        #: ⭐ ONE transcript space (owner, 2026-08-19): a probe is mapped to every transcript whose
+        #: exons its GENOMIC blocks overlap — any gene, any isoform, any strand — and to gDNA by the same
+        #: overlap. The nascent entities are single-exon transcripts in this list, so a probe on another
+        #: gene's exon inside an entity's span reaches the entity exactly as it reaches the gDNA there.
+        #: ⛔ There is no per-transcript "nrna" space any more: scoping a pre-mRNA's capture to its own
+        #: transcript's probes under-enriched nascent against gDNA by up to 6x (`hop_currency.py`).
         self._mrna_intervals: dict[int, list[WeightedInterval]] = defaultdict(list)
-        self._nrna_intervals: dict[int, list[WeightedInterval]] = defaultdict(list)
         self._gdna_intervals: dict[str, list[WeightedInterval]] = defaultdict(list)
         self._next_probe_group = 1
 
@@ -83,6 +103,33 @@ class CaptureSampler:
         #: first use and never rebuilt. A one-tuple holding ``None`` means "this space needs the
         #: per-key path" (a probe group with more than one interval); see `_flat_probes`.
         self._flat_probe_cache: dict[str, tuple] = {}
+        #: ⭐⭐ **PARTITION MEMO — the capture-aware effective length depends ONLY on the probe panel,
+        #: the templates and the fragment width.** It knows nothing about abundances, gDNA rate, strand
+        #: specificity or nascent level, so every condition sharing a capture panel computes the SAME
+        #: vectors. ⛔ Measured 2026-08-19: 0.45 s per width over 169,399 probe intervals, ~450 widths
+        #: ⇒ **260 s per condition**, recomputed identically for each one; shared across conditions the
+        #: second and later ones cost **0.2 s**.
+        #: ⛔⛔ **IT IS BOUNDED BY CONSTRUCTION, AND THAT IS NOT OPTIONAL** — its ancestor `_mass_cache`
+        #: reached **38 GB** by growing per call and never being read back
+        #: (`tests/test_sim_capture_partition.py::TestNoUnboundedCache`). This one holds ONE
+        #: ``(space, keys, lengths)`` population at a time: a call with a different population CLEARS
+        #: it, so the size is at most the number of distinct fragment widths (~450 vectors, ~56 MB at
+        #: 15,669 templates) and every entry is one that a later condition reads back.
+        self._partition_memo: dict[tuple, np.ndarray] = {}
+        self._partition_memo_population: tuple | None = None
+
+    def _transcripts_overlapping(self, ref: str, lo: int, hi: int) -> np.ndarray:
+        """Indices of the transcripts on ``ref`` whose span intersects ``[lo, hi)``."""
+        idx = self._tx_index.get(ref)
+        if idx is None:
+            return np.empty(0, dtype=np.int64)
+        starts, ends, arr, _suffix = idx
+        # candidates start before `hi`; among those keep the ones ending after `lo`
+        j = int(np.searchsorted(starts, hi, side="left"))
+        if j == 0:
+            return np.empty(0, dtype=np.int64)
+        keep = ends[:j] > lo
+        return arr[:j][keep]
 
     @classmethod
     def disabled(
@@ -112,9 +159,8 @@ class CaptureSampler:
         sampler = cls(config, transcripts, ref_lengths, enabled=True)
         sampler._load_probe_file(Path(config.probes))
         logger.info(
-            "Hybrid capture enabled: %d mRNA targets, %d nRNA targets, %d gDNA refs",
+            "Hybrid capture enabled: %d transcript targets (incl. nascent entities), %d gDNA refs",
             len(sampler._mrna_intervals),
-            len(sampler._nrna_intervals),
             len(sampler._gdna_intervals),
         )
         return sampler
@@ -163,7 +209,6 @@ class CaptureSampler:
 
         intervals_by_key = {
             "mrna": self._mrna_intervals,
-            "nrna": self._nrna_intervals,
             "gdna": self._gdna_intervals,
         }[space]
 
@@ -220,11 +265,21 @@ class CaptureSampler:
         result = eff.astype(np.float64) * self.config.off_target_weight
         if not self.enabled or self.config.binding_per_base <= 0:
             return result
+        population = (space, tuple(keys), lengths.tobytes())
+        if population != self._partition_memo_population:
+            # a different template population: the stored vectors can never be read again
+            self._partition_memo.clear()
+            self._partition_memo_population = population
+        memo_key = width
+        cached = self._partition_memo.get(memo_key)
+        if cached is not None:
+            return cached.copy()
 
         flat = self._flat_probes(space)
         flat_keys, starts, ends, scales, probe_groups = flat
         if not flat_keys:
-            return result
+            self._partition_memo[memo_key] = result
+            return result.copy()
 
         key_to_pos = {key: pos for pos, key in enumerate(keys)}
         positions = np.fromiter(
@@ -234,12 +289,15 @@ class CaptureSampler:
             positions, starts, ends, scales, probe_groups, eff, int(frag_len)
         )
         if landscape is None:
-            return result
+            self._partition_memo[memo_key] = result
+            return result.copy()
         buffer, run_offset, _run_start, run_first, kept_positions = landscape
 
         run_sums = np.add.reduceat(buffer, run_offset[:-1])
         sums = np.bincount(kept_positions[run_first], weights=run_sums, minlength=len(keys))
-        return result + self.config.binding_per_base * sums
+        result = result + self.config.binding_per_base * sums
+        self._partition_memo[memo_key] = result
+        return result.copy()
 
     def _run_landscape(self, positions, starts, ends, scales, probe_groups, eff, width):
         """The capture landscape over MERGED PROBE RUNS — the one hot computation, shared by both users.
@@ -515,12 +573,9 @@ class CaptureSampler:
             )
 
         probe_group = self._new_probe_group()
-        self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0, probe_group))
         transcript = self.transcripts[t_idx]
         blocks = transcript_to_genomic_blocks(start, end, transcript)
-        split_scale = self._split_scale(blocks)
-        self._add_gdna_blocks(str(transcript.ref), blocks, split_scale, probe_group)
-        self._add_nrna_blocks(t_idx, blocks, split_scale, probe_group)
+        self._add_genomic_probe(str(transcript.ref), blocks, probe_group)
 
     def _add_bed12_probe(
         self,
@@ -528,20 +583,41 @@ class CaptureSampler:
         strand: Strand,
         blocks: list[tuple[int, int]],
     ) -> None:
-        split_scale = self._split_scale(blocks)
-        probe_group = self._new_probe_group()
-        self._add_gdna_blocks(ref, blocks, split_scale, probe_group)
+        # ⚠ ``strand`` is parsed and ignored: the library is DNA at capture time, so a probe binds the
+        # molecules of either strand that carry its sequence (owner, 2026-08-19).
+        del strand
+        self._add_genomic_probe(ref, blocks, self._new_probe_group())
 
-        for t_idx in self._tx_by_ref.get(ref, []):
-            transcript = self.transcripts[t_idx]
-            if strand != Strand.NONE and transcript.strand != strand:
+    def _add_genomic_probe(
+        self,
+        ref: str,
+        blocks: Sequence[tuple[int, int]],
+        probe_group: int,
+    ) -> None:
+        """One probe, as GENOMIC blocks, mapped by overlap to gDNA and to EVERY transcript on the
+        reference whose exons it touches — the owner's ruling, 2026-08-19.
+
+        Per transcript each block is CLIPPED to the exons it overlaps and projected into transcript
+        coordinates — overlap, not containment: a fragment carries whatever probe bases it holds, and
+        the weight is the fragment's overlap with those, exactly as it is for gDNA at an exon edge.
+        The landed pieces keep the full scale when they sit contiguously in transcript coordinates;
+        pieces SEPARATED by an intron — a nascent entity's span, like gDNA — take ``gdna_split_penalty``,
+        the model's one price for a probe that cannot hybridise as a contiguous whole.
+        """
+        self._add_gdna_blocks(ref, blocks, self._split_scale(blocks), probe_group)
+        lo = min(b[0] for b in blocks)
+        hi = max(b[1] for b in blocks)
+        for t_idx in self._transcripts_overlapping(ref, lo, hi):
+            transcript = self.transcripts[int(t_idx)]
+            landed = _clip_blocks_to_transcript(transcript, blocks)
+            if not landed:
                 continue
-            projected = project_genomic_blocks_to_transcript(transcript, blocks)
-            if projected is None:
-                continue
-            for start, end in merge_intervals(projected):
-                self._mrna_intervals[t_idx].append(WeightedInterval(start, end, 1.0, probe_group))
-            self._add_nrna_blocks(t_idx, blocks, split_scale, probe_group)
+            merged = merge_intervals(landed)
+            scale = 1.0 if len(merged) == 1 else self.config.gdna_split_penalty
+            for start, end in merged:
+                self._mrna_intervals[int(t_idx)].append(
+                    WeightedInterval(start, end, scale, probe_group)
+                )
 
     def _add_gdna_blocks(
         self,
@@ -558,23 +634,6 @@ class CaptureSampler:
             if interval is not None:
                 self._gdna_intervals[ref].append(interval)
 
-    def _add_nrna_blocks(
-        self,
-        t_idx: int,
-        blocks: Sequence[tuple[int, int]],
-        scale: float,
-        probe_group: int,
-    ) -> None:
-        transcript = self.transcripts[t_idx]
-        seq_len = int(self._premrna_lengths[t_idx])
-        for start, end in blocks:
-            mapped = _genomic_block_to_premrna_interval(transcript, start, end)
-            if mapped is None:
-                continue
-            interval = _clip_interval(mapped[0], mapped[1], seq_len, scale, probe_group)
-            if interval is not None:
-                self._nrna_intervals[t_idx].append(interval)
-
     def _new_probe_group(self) -> int:
         group = self._next_probe_group
         self._next_probe_group += 1
@@ -590,8 +649,6 @@ class CaptureSampler:
     def _get_intervals(self, space: str, key: int | str) -> list[WeightedInterval]:
         if space == "mrna":
             return self._mrna_intervals.get(int(key), [])
-        if space == "nrna":
-            return self._nrna_intervals.get(int(key), [])
         if space == "gdna":
             return self._gdna_intervals.get(str(key), [])
         raise ValueError(f"unknown capture coordinate space: {space!r}")
@@ -776,16 +833,25 @@ def _clip_interval(
 # rigel.sim.intervals — shared with suite.py's capture-probe design.
 
 
-def _genomic_block_to_premrna_interval(
-    transcript: Transcript,
-    block_start: int,
-    block_end: int,
-) -> tuple[int, int] | None:
-    if block_start < transcript.start or block_end > transcript.end or block_end <= block_start:
-        return None
-    if transcript.strand == Strand.NEG:
-        premrna_len = transcript.end - transcript.start
-        return premrna_len - (block_end - transcript.start), premrna_len - (
-            block_start - transcript.start
-        )
-    return block_start - transcript.start, block_end - transcript.start
+def _clip_blocks_to_transcript(
+    transcript: Transcript, blocks: Sequence[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """The parts of genomic ``blocks`` that fall inside ``transcript``'s exons, in transcript
+    coordinates (strand-oriented). ⚠ Unlike `intervals.project_genomic_block_to_transcript` this does
+    NOT require a block to be fully exonic — capture binds by overlap, so a probe hanging off an exon
+    edge still binds the bases that are there."""
+    tx_len = int(transcript.length or transcript.compute_length())
+    out: list[tuple[int, int]] = []
+    for block_start, block_end in blocks:
+        consumed = 0
+        for exon in transcript.exons:
+            lo = max(block_start, exon.start)
+            hi = min(block_end, exon.end)
+            if lo < hi:
+                tx_start = consumed + (lo - exon.start)
+                tx_end = consumed + (hi - exon.start)
+                if transcript.strand == Strand.NEG:
+                    tx_start, tx_end = tx_len - tx_end, tx_len - tx_start
+                out.append((tx_start, tx_end))
+            consumed += exon.end - exon.start
+    return out

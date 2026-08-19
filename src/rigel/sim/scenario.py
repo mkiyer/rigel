@@ -26,6 +26,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 
 from ..index import TranscriptIndex
 from ..transcript import Transcript
@@ -35,7 +37,13 @@ from .annotation import GeneBuilder
 from .capture import CaptureConfig
 from .genome import MutableGenome
 from .reads import GDNAConfig, ReadSimConfig
-from .whole_genome import GDNASimConfig, SimulationParams, WholeGenomeSimulator
+from .whole_genome import (
+    GDNASimConfig,
+    SimulationParams,
+    WholeGenomeSimulator,
+    assign_nrna_to_entities,
+    load_transcripts_from_index,
+)
 from .truth import (
     count_mrna_by_transcript_from_bam,
     count_mrna_by_transcript_from_fastq,
@@ -297,6 +305,38 @@ class Scenario:
 
     # -- Build ----------------------------------------------------------------
 
+    def _index_and_transcriptome(
+        self, fasta_path: Path, gtf_path: Path, nrna_abundance: float
+    ) -> tuple[Path, TranscriptIndex, list[Transcript], list[Transcript]]:
+        """⭐ The toy is simulated from the SAME transcriptome `rigel quant` will read (owner,
+        2026-08-19): build the TranscriptIndex from the written GTF FIRST, load its transcript list —
+        annotated transcripts plus the synthetic nascent entities — carry the annotation's abundances
+        onto the annotated rows by ``t_id``, and pool each multi-exon transcript's nascent molecules
+        onto its entity (`whole_genome.assign_nrna_to_entities`).
+
+        ``nrna_abundance > 0`` overrides every expressed multi-exon transcript's own value, as
+        :meth:`build` documents; ``0.0`` keeps the per-transcript values from ``add_gene``.
+
+        Returns ``(index_dir, index, all_rows, annotated_rows)``.
+        """
+        index_dir = self.work_dir / "index"
+        TranscriptIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
+        rows = load_transcripts_from_index(index_dir)
+        by_id = {t.t_id: t for t in self.annotation.get_transcripts()}
+        per_contributor = np.zeros(len(rows))
+        for i, row in enumerate(rows):
+            src = by_id.get(row.t_id)
+            if src is None:
+                continue  # a synthetic entity: no mature molecules of its own
+            row.abundance = float(src.abundance or 0.0)
+            if len(row.exons) > 1 and row.abundance > 0:
+                own = float(src.nrna_abundance or 0.0)
+                per_contributor[i] = nrna_abundance if nrna_abundance > 0 else own
+        assign_nrna_to_entities(rows, per_contributor)
+        index = TranscriptIndex.load(index_dir)
+        annotated = [t for t in rows if not t.is_synthetic]
+        return index_dir, index, rows, annotated
+
     def build(
         self,
         n_fragments: int = 1000,
@@ -353,27 +393,20 @@ class Scenario:
         logger.info(f"[{self.name}] Writing genome FASTA...")
         fasta_path = self.genome.write_fasta(wdir)
 
-        # 2. GTF annotation
+        # 2. GTF annotation, then the INDEX and the transcriptome it defines (entities included)
         logger.info(f"[{self.name}] Writing GTF annotations...")
         gtf_path = self.annotation.write_gtf(wdir)
-        transcripts = self.annotation.get_transcripts()
-
-        # Apply nascent RNA abundance to all expressed transcripts.
-        # nrna_abundance is set independently of abundance (mature mRNA).
-        # When nrna_abundance > 0, it overrides per-transcript values.
-        # When nrna_abundance == 0 (default), per-transcript values from
-        # add_gene() dicts are preserved.
-        if nrna_abundance > 0:
-            for t in transcripts:
-                if t.abundance and t.abundance > 0:
-                    t.nrna_abundance = nrna_abundance
+        logger.info(f"[{self.name}] Building TranscriptIndex...")
+        index_dir, index, rows, transcripts = self._index_and_transcriptome(
+            fasta_path, gtf_path, nrna_abundance
+        )
 
         # 3. Simulate reads (one engine: WholeGenomeSimulator, FASTQ mode)
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
         sim = WholeGenomeSimulator(
             fasta_path,
-            transcripts,
+            rows,
             _to_sim_params(sim_config, n_fragments),
             _to_gdna_sim(effective_gdna),
             genomic_refs=[self.ref_name],
@@ -382,14 +415,12 @@ class Scenario:
             capture_config=effective_capture,
         )
         gdna_abundance = effective_gdna.abundance if effective_gdna else 0.0
-        n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
+        n_rna, n_gdna = sim.rna_gdna_split(n_fragments, gdna_abundance)
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
         r1_path, r2_path, _ = sim.simulate_and_write(
             wdir,
-            n_mrna + n_nrna,
+            n_rna,
             n_gdna,
-            n_mrna=n_mrna,
-            n_nrna=n_nrna,
             oracle_bam=False,
             prefix=self.name,
         )
@@ -398,12 +429,6 @@ class Scenario:
         # 4. Align with minimap2 → SAM → name-sorted BAM
         logger.info(f"[{self.name}] Aligning with minimap2...")
         bam_path = self._align(fasta_path, r1_path, r2_path, gtf_path=gtf_path)
-
-        # 5. Build TranscriptIndex
-        logger.info(f"[{self.name}] Building TranscriptIndex...")
-        index_dir = wdir / "index"
-        TranscriptIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
-        index = TranscriptIndex.load(index_dir)
 
         logger.info(f"[{self.name}] Scenario build complete.")
         return ScenarioResult(
@@ -475,15 +500,11 @@ class Scenario:
         # 1. Genome FASTA
         fasta_path = self.genome.write_fasta(wdir)
 
-        # 2. GTF annotation
+        # 2. GTF annotation, then the INDEX and the transcriptome it defines (entities included)
         gtf_path = self.annotation.write_gtf(wdir)
-        transcripts = self.annotation.get_transcripts()
-
-        # Apply nascent RNA abundance
-        if nrna_abundance > 0:
-            for t in transcripts:
-                if t.abundance and t.abundance > 0:
-                    t.nrna_abundance = nrna_abundance
+        index_dir, index, rows, transcripts = self._index_and_transcriptome(
+            fasta_path, gtf_path, nrna_abundance
+        )
 
         # 3. Oracle BAM (perfect alignments) — one engine: WholeGenomeSimulator (oracle_bam=True).
         if sim_config is None:
@@ -495,7 +516,7 @@ class Scenario:
             n_gdna = int(round(n_rna * gdna_fraction)) if gdna_fraction and effective_gdna else 0
             sim = WholeGenomeSimulator(
                 fasta_path,
-                transcripts,
+                rows,
                 _to_sim_params(sim_config, n_rna),
                 _to_gdna_sim(effective_gdna),
                 genomic_refs=[self.ref_name],
@@ -503,12 +524,11 @@ class Scenario:
                 r1_sense=sim_config.r1_sense,
                 capture_config=effective_capture,
             )
-            n_mrna, n_nrna = sim.rna_split(n_rna)
         else:
-            # Fixed-total mode (a): abundance-weighted 3-way split.
+            # Fixed-total mode (a): abundance-weighted RNA/gDNA split.
             sim = WholeGenomeSimulator(
                 fasta_path,
-                transcripts,
+                rows,
                 _to_sim_params(sim_config, n_fragments),
                 _to_gdna_sim(effective_gdna),
                 genomic_refs=[self.ref_name],
@@ -516,23 +536,16 @@ class Scenario:
                 r1_sense=sim_config.r1_sense,
                 capture_config=effective_capture,
             )
-            n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
+            n_rna, n_gdna = sim.rna_gdna_split(n_fragments, gdna_abundance)
         _, _, bam_path = sim.simulate_and_write(
             wdir,
-            n_mrna + n_nrna,
+            n_rna,
             n_gdna,
-            n_mrna=n_mrna,
-            n_nrna=n_nrna,
             oracle_bam=True,
             prefix=self.name,
         )
         sim.close()
-        n_simulated_total = n_mrna + n_nrna + n_gdna
-
-        # 4. Build TranscriptIndex
-        index_dir = wdir / "index"
-        TranscriptIndex.build(fasta_path, gtf_path, index_dir, write_tsv=False)
-        index = TranscriptIndex.load(index_dir)
+        n_simulated_total = n_rna + n_gdna
 
         return ScenarioResult(
             fasta_path=fasta_path,

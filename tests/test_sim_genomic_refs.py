@@ -108,8 +108,6 @@ def _simulate_gdna(tmp_path, fasta, transcripts, *, genomic_refs, n_gdna, seed=1
         _, _, bam_path = simulator.simulate_and_write(
             tmp_path / "out",
             n_rna=0,
-            n_mrna=0,
-            n_nrna=0,
             n_gdna=n_gdna,
             oracle_bam=True,
             n_workers=1,

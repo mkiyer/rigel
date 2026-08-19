@@ -111,6 +111,10 @@
 
 genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+# ⭐ THE TRANSCRIPTOME THE SIMULATION DRAWS FROM — the same index `rigel quant` will read, so the
+# synthetic nascent-RNA entities are identical on both sides (owner, 2026-08-19). `panel.py build`
+# creates it; without this key one is built into `<outdir>/rigel_index`.
+index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
 outdir: /Users/mkiyer/Downloads/rigel_runs/suite/ladder
 transcript_filter: all
 
@@ -160,20 +164,36 @@ gdna:
 # unstranded cells isolate the density channel completely.
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent: THE AXIS, added 2026-08-18 (owner) ─────────────────────────────────────────────────
-# ⛔⛔ IT WAS HELD OUT AT [0.0] UNTIL NOW, AND THAT MADE A WHOLE POOL UNMEASURABLE. With `nrna = 0`
-# on every row the panel cannot price ANY claim about nascent RNA — most importantly the two
-# "intronic mass is gDNA until proven otherwise" mechanisms (`structural_reference`,
-# `intron_factory`), whose whole risk is that an intron flank IS transcribed, as nascent. The
-# `structural_reference_location` docstring says so in its own words: the panel's "true f_g = 1.0000
-# at all four annotation-determined classes, so asserting 1 costs zero fragments" is `nrna = 0`
-# RESTATED, not a measurement.
-# ⭐ 0.25 is the rung its own toy table already measured the damage at (2.099x at kappa = 0.50), so
-# it is a level known to separate the arms rather than a guess.
+# ── Nascent: ALWAYS ON, AND NO LONGER AN AXIS (owner ruling, 2026-08-19) ────────────────────────
+# ⛔⛔ THE AXIS COST HALF THE PANEL TO ANSWER A QUESTION THE TOY HARNESS ANSWERS IN SECONDS. Owner:
+# *"we don't need to spend 16/32 scenarios just to add nascent RNA … if we are building the behavior
+# with the toy harness, we have an easy way to simulate nascent RNA — just add a single-exon
+# transcript spanning the multi-exon transcripts"*, which is exactly what a nascent ENTITY is. So the
+# nascent ON/OFF contrast is a TOY experiment and the panel carries nascent in every condition:
+# 16 conditions, not 32.
+# ⭐ Keeping it ON everywhere is the half that matters. With `nrna = 0` the panel cannot price ANY
+# claim about nascent RNA — most importantly the "intronic mass is gDNA until proven otherwise"
+# mechanisms, whose whole risk is that an intron flank IS transcribed. A reading taken on an
+# `nrna = 0` row is `nrna = 0` RESTATED, not a measurement, and that caveat now disappears from every
+# row of this panel.
+# ⭐⭐ THE KNOB IS THE NASCENT SHARE OF RNA **FRAGMENTS**, AND THAT IS A CORRECTION, NOT A RENAME
+# (owner, 2026-08-19). It read `mode: additive_ratio, ratios: [0.0, 0.25]` and the old engine then
+# IMPOSED the count split (`n_nrna = n_rna x ratio/(1+ratio)`), so every condition of this panel has
+# always carried nascent at exactly **20 % of RNA fragments** — check any manifest row.
+# ⛔ Since the simulator became index-driven, nascent RNA is the index's ENTITY and is drawn in ONE
+# multinomial with the mature rows, so nothing imposes a count any more and a MOLECULAR ratio of 0.25
+# would put **86 %** of RNA fragments in nascent RNA: an entity spans a whole gene (mean 40,667 bp on
+# this index) while a mature transcript is spliced (mean 1,708 bp). Stating the FRAGMENT share keeps
+# this panel the library it has always been; the simulator solves the molecular ratio from the
+# annotation (**0.00992** here, also the biologically sensible pre-mRNA:mRNA molar ratio) and records
+# it per condition. ⛔ No hand-written ratio: it is a property of the annotation, not a constant
+# (`TRAPS: no-magic-numbers`).
+# ⚠ The share is solved on UNCAPTURED lengths — it fixes the LIBRARY's molecular composition — so the
+# realised share differs under capture. That is the physics: capture acts on molecules that exist.
 nrna:
-  mode: additive_ratio
-  ratios:       [0.0,  0.25]
-  ratio_labels: [none, mid]
+  mode: fragment_share
+  shares:       [0.20]
+  ratio_labels: [mid]
 
 # ── Capture ─────────────────────────────────────────────────────────────────────────────────────
 capture:
