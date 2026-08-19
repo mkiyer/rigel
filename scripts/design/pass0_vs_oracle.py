@@ -939,6 +939,15 @@ def main() -> int:
         "solver-debugging campaign. Keyed by the scan cache's own key, so a stale one is refused.",
     )
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument(
+        "--jobs", type=int, default=1,
+        help="PRE-WARM the per-origin oracle caches with this many worker processes. ⭐ It parallelises "
+             "ONLY the cache build — the BAM split plus four scans per condition, which is ~95 %% of the "
+             "wall clock — and leaves the measurement loop serial and in its original order, so the "
+             "numbers are bit-identical to --jobs 1. ⚠ Core-bound, not memory-bound: one worker "
+             "saturates ONE core at ~2 GB of real memory (a condition's ~45 GB RSS is reclaimable page "
+             "cache, not a footprint).")
+    ap.add_argument("--_prewarm", default=None, help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     if not args.suite.is_dir():
@@ -976,6 +985,37 @@ def main() -> int:
     pipeline_config = PipelineConfig()
     calibration_config = CalibrationConfig()
     work_dir = args.work_dir / "rigel_pass0_oracle"
+
+    # ⭐ ONE condition's cache, then exit — the worker half of `--jobs`. Not part of the public CLI.
+    if args._prewarm is not None:
+        c = args._prewarm
+        payload = read_scan_cache(Path(args.suite) / "scan_cache" / c, index).payload
+        load_or_build_oracle(str(Path(args.suite) / c / "sim_oracle.bam"), index, pipeline_config,
+                             work_dir / f"w_{c}", c, payload, args.oracle_cache)
+        return 0
+
+    # ── ⭐⭐ PRE-WARM IN PARALLEL, THEN MEASURE SERIALLY OFF WARM CACHES ────────────────────────────
+    # ⛔ The split is what makes `--jobs` safe. `load_or_build_oracle` is a PURE cache fill keyed by the
+    # SHIPPED loader, so filling it in another process cannot move a number: `measure_condition` re-runs
+    # `OracleTruth.from_parts`'s sum-to-full gate over whatever it loads, cached or not. The SCORING loop
+    # stays serial and in order, so `--jobs N` is bit-identical to `--jobs 1`.
+    # ⚠ A worker that fails is NOT fatal: the serial loop rebuilds that condition itself, same code path.
+    if args.jobs > 1 and args.oracle_cache is not None and len(scored) > 1:
+        import concurrent.futures as _cf
+        import subprocess as _sp
+        todo = [c for c in scored
+                if not all((Path(args.oracle_cache) / c / k / "payload.npz").is_file() for k in ORIGINS)]
+        if todo:
+            n = max(1, min(int(args.jobs), len(todo)))
+            print(f"  pre-warming {len(todo)} oracle cache(s), {n} worker(s) …", flush=True)
+            base = [sys.executable, str(Path(__file__).resolve()), "--suite", str(args.suite),
+                    "--index", str(args.index), "--oracle-cache", str(args.oracle_cache),
+                    "--work-dir", str(args.work_dir)]
+            def _one(c):
+                return c, _sp.run(base + ["--_prewarm", c], capture_output=True, text=True).returncode
+            with _cf.ThreadPoolExecutor(max_workers=n) as ex:
+                for c, rc in ex.map(_one, todo):
+                    print(f"    {'✔' if rc == 0 else '⚠ serial loop will rebuild'} {c}", flush=True)
 
     measurements = []
     for name in scored:

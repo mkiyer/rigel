@@ -140,15 +140,16 @@ currency oracle could not run where it matters most.
 per condition — the heaviest multi-boundary crossers. The ruling is `DESIGN.md` §3.1b-ii
 (compatibility before chimera), the lesson is
 `TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`, and the numbers are `ROADMAP.md` §0.
-⚠ **What remains is bookkeeping**: rebuild the scan and oracle caches and re-stamp `slot_truth.npz`, after
-which FIELD certification should read 32/32 and §2's currency oracle is unblocked on capture-OFF.
+✅ **The rebuild is DONE** (2026-08-19): 32/32 scan caches, 32/32 oracle caches, all 32
+`slot_truth.npz` stamped COMPOSITION + FIELD with zero class-bias flags. **§2's currency oracle is now
+unblocked on the capture-OFF strata**, which was the whole point of Stage 1.
 
 ## 3. THE PLAN
 
 | stage | what | acceptance |
 |---|---|---|
 | **0 · VOCABULARY** | §5's review, ruled by the owner, then ONE rename (never piecemeal), gated by `rename_identity.py` byte-identity | every stage proven a numeric NO-OP; suite green; `DESIGN.md` §0 carries the ruling |
-| **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — the deficit was a silent chimera drop (§2d) | FIELD certification 24/32 → 32/32, pending the cache rebuild |
+| **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — a silent chimera drop (§2d); panel fully rebuilt | ✅ FIELD certification **24/32 → 32/32**, zero class-bias flags |
 | **2 · THE MAP** (no `src/`) | (a) depth + hop census, all 32, per stratum; (b) currency oracle, all 32, with §2c caveat 2's splice-in fix, per hop type × stratum × nascent level; (c) the residual census — hop types where `min(LEVEL, COMP)` is still large | one measured currency table; every place a third mechanism is REQUIRED is named before one is built |
 | **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
 | **4 · THE PANEL** | all 32, three policies, RAW COUNTS (est / true / misplaced fragments), bar written first | never a bare ratio — the ratio framing hid a 1,978,148-fragment win for eleven days |

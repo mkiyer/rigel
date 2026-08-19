@@ -196,8 +196,12 @@ def cmd_cache(p: Panel, args) -> int:
          "--out", p.scan_cache, *(["--force"] if args.force else []),
          *(["--conditions", *conds] if args.conditions else [])],
         what=f"scan cache -> {p.scan_cache}")
+    # ⭐ `--jobs` reaches the oracle stage too. Building one condition's cache is a BAM split plus four
+    #    scans, ~95 % of this stage's wall clock, and it saturates exactly ONE core at ~2 GB of real
+    #    memory — so the stage is core-bound and shards cleanly. Measured 2026-08-19: serial, the stage
+    #    used 1 of 16 cores.
     run([sys.executable, DESIGN / "pass0_vs_oracle.py", "--suite", p.dir, "--index", p.index,
-         "--oracle-cache", p.oracle_cache,
+         "--oracle-cache", p.oracle_cache, "--jobs", str(args.jobs),
          *(["--conditions", *conds] if args.conditions else [])],
         what=f"oracle cache (origin-split truth) -> {p.oracle_cache}")
     return 0
