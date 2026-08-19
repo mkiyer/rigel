@@ -262,7 +262,46 @@ is a DETECTOR, not a calibrated level"*.
 per-exon; ③ fails because it is downstream of the answer. What is left is the neighbours, and using the
 neighbours is message passing.
 
-### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT, AND IT IS SWITCHED OFF — do not build it again
+### 0c.0 ⭐⭐⭐ A HOP CARRIES A **LEVEL** OR A **COMPOSITION**, AND THE TWO INVARIANCES ARE COMPLEMENTARY
+
+⭐⭐ **This is the rule the message layer is being rebuilt around (owner, 2026-08-18/19).** The owner's
+synopsis gives a currency per hop type; ONE reason sits under all of them, and stating it turns a table to
+memorise into a rule to apply:
+
+| currency | what it is | INVARIANT to | DESTROYED by |
+|---|---|---|---|
+| **LEVEL** `rho_g` | gDNA fragments per placement | **POPULATION** changes — TSS, TES, strand flips, splicing. gDNA is genomically continuous and knows nothing about transcripts | **ENRICHMENT** changes — a probe edge between the two objects |
+| **COMPOSITION** `f_g` | the gDNA share of the crossing population | **ENRICHMENT** changes — a probe enriches everything overlapping it, both components alike, so the ratio survives | **POPULATION** changes — the denominator is a different set of molecules |
+
+⭐ **They are complementary, so at every hop at least one is intact: use that one.** The licence question
+*is* the currency question, asked once per hop type. No licence hierarchy, no three-case rule, no
+per-strand patch.
+
+⛔ **THE SHIPPED RELAY HAS THIS BACKWARDS, AND THAT IS WHY IT IS BEING REPLACED RATHER THAN REPAIRED.**
+`RelayPolicy` transports a COMPOSITION by default (the reframe `r = rho_tot(dst)/rho_tot(src)`) and bolts
+population licences on top — but the population is exactly what changes at the `exon|exon` boundaries that
+carry the largest destination mass on the panel. Every licence bug of 2026-08-18 was an attempt to REPAIR a
+currency CHOICE instead of changing it.
+
+⭐⭐⭐ **AND THE POPULATION OF A MESSAGE IS DIRECTION-DEPENDENT** (owner, 2026-08-18) — *"always answer the
+question: what crosses INTO this region?"*
+
+| direction | what crosses into the destination | spliced fragments |
+|---|---|---|
+| BOUNDARY → EXON, i.e. **SPLICE IN** | unspliced boundary crossings (gDNA + nascent RNA) **plus the spliced fragments, which splice IN to this exon** | **INCLUDED** |
+| EXON → BOUNDARY, i.e. **SPLICE OUT** | the unspliced fragments crossing contiguously | **EXCLUDED** — they splice OUT and land elsewhere |
+
+⭐ So SPLICE IN and SPLICE OUT are not two bolted-on operators: they are **one rule — the message's
+population is whatever physically enters the destination — evaluated in the two directions.** That is the
+whole justification for the pair, and it is why both must exist.
+
+⛔ **THREE THINGS ARE SETTLED AND MUST NOT BE RE-ASKED**: forward-backward STAYS (an object may need a
+message from BOTH neighbours; an ordered single pass delivers from one side only); the three arms
+`{gDNA, RNA+, RNA−}` are carried NATIVELY (AXIOM 0 — collapsing the RNA pair would destroy the strand
+channel, which is the primary intron deconvolution on stranded data); and the land/sea analogy the owner
+used to explain the geometry is an EXPLANATION and never enters code or docs.
+
+### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT AND IS NOW ON — do not build it again
 
 ⛔⛔ **The hop the derivation above asks for EXISTS IN `src/`, is individually switchable, and is behind
 one config flag.** It is the **SPLICE IN** — `messages/relay.py`, switch `splice_in` on `RelayPolicy`:
@@ -287,7 +326,13 @@ and survives only in commit messages and in the history recorded here — a grep
 `messages/silent.py`'s `SilentPolicy`, which sends nothing (§6.1). Turning the relay on is one flag; every
 operator inside `RelayPolicy` remains behind its own named switch, so the SPLICE IN can be priced alone.
 
-### 0c.2 ⭐⭐⭐ WHY IT IS OFF — a NAMED, CONFIRMED BUG, and NOT a verdict on the mechanism
+### 0c.2 ⚠ HISTORY — WHY IT *WAS* OFF, AND WHY THAT TABLE MAY NOT BE QUOTED
+
+⛔⛔ **THE RELAY IS ON. `CalibrationConfig.message_propagation = True` (owner, 2026-08-18) and
+`calibrate.py` installs `RelayPolicy()`.** Everything in this subsection is the record of the ~11-day
+mute, kept because its NUMBERS are still quoted at people; it is not the current state. ⚠ And the
+policy it describes is itself being replaced — §0c.0 is the ruling, and the relay is REBUILT rather
+than repaired.
 
 ⭐ **The mute is a MEASUREMENT and it stands.** Measured 2026-08-07 (`config.py`'s
 `message_propagation` is the home of these digits) — ⚠ **on the 36-condition ladder, RETIRED and rebuilt

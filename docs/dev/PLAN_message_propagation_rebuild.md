@@ -65,7 +65,14 @@ side only. Forward-backward is what guarantees both arrive.
 the strand channel, which is the primary intron deconvolution on stranded data. ⛔ Asking the question at
 all was a failure to apply AXIOM 0; it is recorded here so the next session does not re-ask it.
 
-## 2. WHAT THE MEASUREMENTS SAY (2026-08-18; no solver in any of them)
+## 2. WHAT THE MEASUREMENTS SAY
+
+⛔⛔ **EVERY NUMBER IN THIS SECTION IS STALE BY CONSTRUCTION, AND STAGE 2 EXISTS TO REPLACE IT.** All of it
+was measured on 2026-08-18/19 against the PRE-FIX caches — before the chimera repair moved boundary
+crossings by **2.4 %** and before the panel was rebuilt (FIELD certification 24/32 → 32/32). The deficit
+fell precisely on the CROSSING axis, which is exactly what the hop census and the currency oracle read.
+⭐ **So treat what follows as the SHAPE to expect and the method to reuse — never as a result to cite.**
+⚠ Two rows are additionally known-wrong on their own terms; see §2c's caveats.
 
 ### 2a. Imputed stretches are DEEP, so the chain stays
 
@@ -141,7 +148,10 @@ per condition — the heaviest multi-boundary crossers. The ruling is `DESIGN.md
 (compatibility before chimera), the lesson is
 `TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`, and the numbers are `ROADMAP.md` §0.
 ✅ **The rebuild is DONE** (2026-08-19): 32/32 scan caches, 32/32 oracle caches, all 32
-`slot_truth.npz` stamped COMPOSITION + FIELD with zero class-bias flags. **§2's currency oracle is now
+`slot_truth.npz` stamped COMPOSITION + FIELD, zero class-bias flags. ⚠ **Read that stamp honestly**: the
+uniformity gate is **VACUOUS on the 16 capture-ON conditions** by design (capture makes the field
+deliberately non-uniform), so the real verification is **16/16 capture-OFF, up from 8/16** — which is
+still exactly the win, since all eight failures were capture-OFF. **§2's currency oracle is now
 unblocked on the capture-OFF strata**, which was the whole point of Stage 1.
 
 ## 3. THE PLAN
@@ -149,11 +159,55 @@ unblocked on the capture-OFF strata**, which was the whole point of Stage 1.
 | stage | what | acceptance |
 |---|---|---|
 | **0 · VOCABULARY** | §5's review, ruled by the owner, then ONE rename (never piecemeal), gated by `rename_identity.py` byte-identity | every stage proven a numeric NO-OP; suite green; `DESIGN.md` §0 carries the ruling |
-| **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — a silent chimera drop (§2d); panel fully rebuilt | ✅ FIELD certification **24/32 → 32/32**, zero class-bias flags |
-| **2 · THE MAP** (no `src/`) | (a) depth + hop census, all 32, per stratum; (b) currency oracle, all 32, with §2c caveat 2's splice-in fix, per hop type × stratum × nascent level; (c) the residual census — hop types where `min(LEVEL, COMP)` is still large | one measured currency table; every place a third mechanism is REQUIRED is named before one is built |
+| **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — a silent chimera drop (§2d); panel fully rebuilt | ✅ the field gate on the conditions where it RUNS: **8/16 → 16/16 capture-OFF**, zero class-bias flags (the 16 capture-ON rows are vacuous by design) |
+| **2 · THE MAP** (no `src/`) | ⭐ **NEXT SESSION STARTS HERE.** Build ONE instrument and run it on all 32 — full spec in §3a | a measured currency table with a WINNER per hop type, and every place where BOTH currencies fail named before any mechanism is proposed |
 | **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
 | **4 · THE PANEL** | all 32, three policies, RAW COUNTS (est / true / misplaced fragments), bar written first | never a bare ratio — the ratio framing hid a 1,978,148-fragment win for eleven days |
 | **5 · RETIRE** | delete `RelayPolicy` and everything the panel proves dead | §3's predictions, checked not assumed |
+
+### 3a. ⭐⭐⭐ STAGE 2 IN FULL — this is what the next session does
+
+⛔ **NO `src/` CHANGE. NO SOLVER RUNS.** Everything here reads the certified caches and the annotation.
+
+**Build ONE instrument**, `scripts/design/hop_currency.py`, to the repo's standard: a docstring that opens
+with what it is FOR and its verdict, and a `--self-test` falsified by perturbation with no I/O. It is
+picked up by `tests/test_scripts_index.py` — ⚠ a new `scripts/design/` file is worth **+4** collected tests.
+⚠ It was prototyped in a session scratchpad that no longer exists; the spec below is complete, and §2's
+tables are the SHAPE its output should have (not numbers to reproduce — those were pre-fix).
+
+It answers three questions, on each of the 32 conditions, per stratum:
+
+**① THE HOP CENSUS.** Classify every ordered adjacent pair `(dst ← src)` by the two slots' classes
+(`object_composition.strata`'s seven labels — already partition-asserted). Report hop count and
+DESTINATION MASS per type. ⭐ Also report the DEPTH distribution: hops from each mrna-active slot to the
+nearest slot where no mature transcript crosses (`¬mrna_active`), mass-weighted. That is what says whether
+the chain is needed at all — the pre-fix answer was emphatically yes, with ~28 % of that mass ≥ 9 hops
+from any measured gDNA at capture-OFF.
+
+**② THE CURRENCY ORACLE — the decisive one.** For every hop, transport the source's TRUE value BOTH ways
+and score both at the destination in the SAME units, `Σ|f_hat − true_f_g|·M` in FRAGMENTS::
+
+    LEVEL:        f_hat(dst) = rho_g_true(src) · E_g(dst) / M(dst)
+    COMPOSITION:  f_hat(dst) = f_g_true(src)
+
+The source is PERFECT, so what remains is the RULE's error and the smaller column IS that hop type's
+currency. ⛔ **Fix the prototype's two known defects**: (a) in the SPLICE IN direction the source population
+must be *unspliced crossings PLUS the spliced fragments that splice in* (`DESIGN.md` §0c.0's direction
+rule), not the raw `slot_truth` composition — the prototype used the latter and that row is unusable;
+(b) run the `nrna_mid` rows too — on `nrna_none` every gDNA-measuring object is pure gDNA, so `f_g = 1 = 1`
+and a COMPOSITION "win" there is `nrna = 0` restated rather than a measurement.
+
+**③ THE RESIDUAL CENSUS.** Where `min(LEVEL, COMPOSITION)` is STILL large, neither currency works and a
+third MECHANISM is required. The pre-fix run put that at the hops into an exon under capture (~35–43 %),
+which is `ROADMAP.md` §1 rank 3's spike-and-slab — ⛔ re-establish it, never inherit it.
+
+**ACCEPTANCE**: one table, per hop type × stratum × nascent level, naming the currency and its residual,
+`--self-test` green, instrument committed. ⛔ **No policy code is written until that table exists** — the
+entire point is that the currency is MEASURED rather than argued.
+
+⚠ **Scoring discipline that has already cost one false finding**: score per gDNA-BEARING REFERENCE, never
+pooled (`TRAPS: a-ratio-needs-a-population-that-can-supply-its-numerator`), and report FRAGMENTS, never a
+bare ratio (`TRAPS: never-pool-the-strata`).
 
 ⭐⭐ **Why a third policy and not a rewrite.** `DESIGN.md` §6.1's backbone/policy seam already makes
 `SilentPolicy` (5 lines) and `RelayPolicy` (1,200) peers behind one gated interface, with five backbone
