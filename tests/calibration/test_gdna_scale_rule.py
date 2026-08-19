@@ -375,18 +375,34 @@ def _transport_fixture(pop_pair: bool, pop_p: bool, pop_n: bool):
 
     from rigel.calibration.messages import NeighbourState
 
-    ctx = _ctx(free_neg=np.ones(8, bool))  # both strands admissible: the zeroing gate is not under test
+    ctx = _ctx(
+        free_neg=np.ones(8, bool)
+    )  # both strands admissible: the zeroing gate is not under test
     n = ctx.n_slots
     z = np.zeros(n)
     own = SimpleNamespace(
-        rho_g=z, rho_pos=z, rho_neg=z, prec_g=z, prec_pos=z, prec_neg=z,
-        tau_lam=z, struct_lock=np.zeros(n, bool), f_g=np.full(n, 0.5),
+        rho_g=z,
+        rho_pos=z,
+        rho_neg=z,
+        prec_g=z,
+        prec_pos=z,
+        prec_neg=z,
+        tau_lam=z,
+        struct_lock=np.zeros(n, bool),
+        f_g=np.full(n, 0.5),
     )
     two = np.zeros((n, 2))
     geom = SimpleNamespace(
-        n_slots=n, unspliced_count=np.full((n, 2), 50.0), eff_gdna=np.full(n, 200.0),
-        eff_rna=np.full(n, 200.0), spliced_count=two, sj_count=two, eff_sj=np.full((n, 2), 200.0),
-        sj_count_lo=two, sj_count_hi=two, eff_sj_lo=np.full((n, 2), 200.0),
+        n_slots=n,
+        unspliced_count=np.full((n, 2), 50.0),
+        eff_gdna=np.full(n, 200.0),
+        eff_rna=np.full(n, 200.0),
+        spliced_count=two,
+        sj_count=two,
+        eff_sj=np.full((n, 2), 200.0),
+        sj_count_lo=two,
+        sj_count_hi=two,
+        eff_sj_lo=np.full((n, 2), 200.0),
         eff_sj_hi=np.full((n, 2), 200.0),
     )
     ctx = dataclasses.replace(ctx, own=own, geometry=geom)
@@ -397,11 +413,16 @@ def _transport_fixture(pop_pair: bool, pop_p: bool, pop_n: bool):
     rg, rp, rn = np.full(n, 0.05), np.full(n, 1.60), np.full(n, 0.80)
     pg, pp, pn = np.full(n, 2.0), np.full(n, 3.0), np.full(n, 3.0)
     zero = np.zeros(n)
-    nb = NeighbourState(state=(rg, rp, rn, pg, pp, pn, pg.copy(), pp.copy(), pn.copy(), zero),
-                        valid=valid, src=src)
+    nb = NeighbourState(
+        state=(rg, rp, rn, pg, pp, pn, pg.copy(), pp.copy(), pn.copy(), zero), valid=valid, src=src
+    )
     out = relay._transport(
-        nb, np.full(n, 2.0), np.full(n, 10.0),  # a 5x frame step: r = 0.2 wherever framed
-        np.full(n, pop_pair), np.full(n, pop_p), np.full(n, pop_n),
+        nb,
+        np.full(n, 2.0),
+        np.full(n, 10.0),  # a 5x frame step: r = 0.2 wherever framed
+        np.full(n, pop_pair),
+        np.full(n, pop_p),
+        np.full(n, pop_n),
     )
     return valid, (rg, rp, rn), out
 
@@ -441,3 +462,171 @@ def test_a_clean_hop_still_reframes_every_arm():
     assert np.allclose(tg[valid], rg[valid] * r)
     assert np.allclose(tp[valid], rp[valid] * r)
     assert np.allclose(tn[valid], rn[valid] * r)
+
+
+# ── ⭐⭐⭐ THE GRAFT AT A NO-CLAIM HOP — found by the zero-control dissection (2026-08-18, session 2) ────
+#
+# `g00 ss0.50 nrna_mid capture_on` (62 k → 228 k under the per-strand licence) walked to its mechanism:
+# a zero RNA claim WITH LIVE PRECISION, relayed one hop, where the mass pin's licence (`_lend`: both
+# components supplied) then rescales the whole budget onto gDNA — ``k = M/(tg·E_g)`` — and delivers
+# ``M/E_g``, "all your mass is gDNA", into a 26 k-fragment exon (slot 3568: true 0.000 → 0.9037). One of
+# its two feeders is the graft: at a hop the per-strand rule refuses, the arm's VALUE (which had the sj
+# density ``gp`` folded in) is zeroed, and the graft block then adds the sj COUNT'S precision back onto
+# the zeroed arm — a confident "there is no RNA on this strand", the exact claim
+# `test_a_terminus_on_one_strand_silences_that_arm_and_frees_the_other` forbids, reached through the
+# graft path its fixture (no sj) never exercised. Measured at 56584 → 56583: ``n = 0 @ pn = 280``.
+#
+# The rule stands as landed — THIS strand changed ⇒ NO CLAIM — and the graft is a claim about this strand.
+# ψ reads ``rna_mode = log(cp·E_r/M)`` as a LEVEL, so delivering the sj density alone would be a partial
+# level (RNA biased low ⇒ false gDNA), and the exon's own certified spliced count is already in its own
+# evidence. So a refused arm delivers NOTHING, graft included: value AND precision zero, both twins.
+
+
+def _graft_transport_fixture(pop_p: bool):
+    """One hop through `_transport` where every even slot is an EXON and every odd slot a BOUNDARY
+    carrying + sj flux, so the hop odd → even is a GRAFT; the + arm's licence is the argument."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from test_sweep_backbone import _ctx
+
+    from rigel.calibration.messages import NeighbourState
+
+    ctx = _ctx(free_neg=np.ones(8, bool))
+    n = ctx.n_slots
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    sj = np.zeros((n, 2))
+    sj[is_bnd, 0] = 40.0  # + sj flux at every boundary
+    ctx = dataclasses.replace(ctx, is_exon_region=~is_bnd, sj_count=sj)
+    z = np.zeros(n)
+    own = SimpleNamespace(
+        rho_g=z,
+        rho_pos=z,
+        rho_neg=z,
+        prec_g=z,
+        prec_pos=z,
+        prec_neg=z,
+        tau_lam=z,
+        struct_lock=np.zeros(n, bool),
+        f_g=np.full(n, 0.5),
+    )
+    two = np.zeros((n, 2))
+    geom = SimpleNamespace(
+        n_slots=n,
+        unspliced_count=np.full((n, 2), 50.0),
+        eff_gdna=np.full(n, 200.0),
+        eff_rna=np.full(n, 200.0),
+        spliced_count=two,
+        sj_count=sj,
+        eff_sj=np.full((n, 2), 200.0),
+        sj_count_lo=two,
+        sj_count_hi=two,
+        eff_sj_lo=np.full((n, 2), 200.0),
+        eff_sj_hi=np.full((n, 2), 200.0),
+    )
+    ctx = dataclasses.replace(ctx, own=own, geometry=geom)
+    relay = HeadPolicy().prepare(ctx)
+    src = np.arange(n) - 1
+    valid = src >= 0
+    src = np.clip(src, 0, n - 1)
+    rg, rp, rn = np.full(n, 0.05), np.full(n, 1.60), np.full(n, 0.80)
+    pg, pp, pn = np.full(n, 2.0), np.full(n, 3.0), np.full(n, 3.0)
+    zero = np.zeros(n)
+    nb = NeighbourState(
+        state=(rg, rp, rn, pg, pp, pn, pg.copy(), pp.copy(), pn.copy(), zero), valid=valid, src=src
+    )
+    out = relay._transport(
+        nb,
+        np.full(n, 2.0),
+        np.full(n, 10.0),
+        np.full(n, pop_p),
+        np.full(n, pop_p),
+        np.ones(n, bool),
+    )
+    graft = valid & ~is_bnd & is_bnd[src]
+    assert graft.any(), "the fixture built no graft hop"
+    return graft, out
+
+
+def test_the_graft_delivers_no_precision_on_a_refused_arm_VECTORISED():
+    """⛔ At a no-claim hop the graft's sj precision must go with the arm's value — a zero at the sj
+    count's precision is 'there is no + RNA here', which the source cannot claim."""
+    graft, out = _graft_transport_fixture(pop_p=False)
+    tp, tpp, tmp = out[1], out[4], out[7]
+    assert np.all(tp[graft] == 0.0), "a refused + arm delivered a value"
+    assert np.all(tpp[graft] == 0.0), (
+        f"the graft added MODE-FUSION precision back onto a refused arm: {tpp[graft]}"
+    )
+    assert np.all(tmp[graft] == 0.0), (
+        f"the graft added MEASUREMENT precision back onto a refused arm: {tmp[graft]}"
+    )
+    # …and the control: with the arm licensed the SAME fixture's graft is live, so the gate above is not
+    # passing vacuously (TRAPS: could-the-arm-have-fired).
+    graft, out = _graft_transport_fixture(pop_p=True)
+    assert np.all(out[4][graft] > 0.0) and np.all(out[7][graft] > 0.0), (
+        "the control's graft is dead"
+    )
+
+
+def _graft_scan_fixture(refuse: bool):
+    """The SCALAR twin: the same chain through `scan(backward=False)`, the + licence set from the
+    boundary flags (TSS+ at every boundary ⇒ the right flank gains + RNA ⇒ the + arm into every exon is
+    refused; 0 ⇒ licensed)."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    from test_sweep_backbone import _ctx
+
+    from rigel.calibration.splice_graph import FLAG_TSS_POS
+
+    ctx = _ctx(free_neg=np.ones(8, bool))
+    n = ctx.n_slots
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    sj = np.zeros((n, 2))
+    sj[is_bnd, 0] = 40.0
+    flags = np.where(is_bnd, int(FLAG_TSS_POS) if refuse else 0, 0).astype(np.uint16)
+    z = np.zeros(n)
+    own = SimpleNamespace(
+        rho_g=z,
+        rho_pos=z,
+        rho_neg=z,
+        prec_g=z,
+        prec_pos=z,
+        prec_neg=z,
+        tau_lam=z,
+        struct_lock=np.zeros(n, bool),
+        f_g=np.full(n, 0.5),
+    )
+    two = np.zeros((n, 2))
+    geom = SimpleNamespace(
+        n_slots=n,
+        unspliced_count=np.full((n, 2), 50.0),
+        eff_gdna=np.full(n, 200.0),
+        eff_rna=np.full(n, 200.0),
+        spliced_count=two,
+        sj_count=sj,
+        eff_sj=np.full((n, 2), 200.0),
+        sj_count_lo=two,
+        sj_count_hi=two,
+        eff_sj_lo=np.full((n, 2), 200.0),
+        eff_sj_hi=np.full((n, 2), 200.0),
+    )
+    ctx = dataclasses.replace(
+        ctx, is_exon_region=~is_bnd, sj_count=sj, boundary_flags=flags, own=own, geometry=geom
+    )
+    relay = HeadPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    for i in range(1, n):
+        step(i - 1, i)
+    rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = publish()
+    exons = ~is_bnd & (np.arange(n) >= 2)  # exons whose left neighbour is a sj-carrying boundary
+    return exons, rp, pp, mp
+
+
+def test_the_graft_delivers_no_precision_on_a_refused_arm_SCALAR():
+    """The scan twin of the gate above; the two must agree (`TRAPS: two twins`)."""
+    exons, rp, pp, mp = _graft_scan_fixture(refuse=True)
+    assert np.all(pp[exons] == 0.0), f"scan: graft precision survived a refused + arm: {pp[exons]}"
+    assert np.all(mp[exons] == 0.0), f"scan: graft MEASUREMENT precision survived: {mp[exons]}"
+    exons, rp, pp, mp = _graft_scan_fixture(refuse=False)
+    assert np.all(pp[exons] > 0.0) and np.all(mp[exons] > 0.0), "the scan control's graft is dead"

@@ -203,12 +203,20 @@ DENSITY transfer; this strand changed ⇒ NO CLAIM, value and precisions zeroed)
 boundary where the RNA populations differ — TSS/TES on either strand, strand-activity changes — may
 transfer a DENSITY, never a composition.
 
-⛔ **THE OPEN FRONT IS THE ZERO CONTROLS**: the per-strand licence improved every stratum vs the
-pre-licence relay EXCEPT `g00` (154 k → 431 k false-positive fragments, worst at `g00 nrna_mid
-capture_on`). ⚠ Part of what it removed was the SELF-CONFIRMING ECHO — an `r`-scaled delivery of the
-destination's own total, which at a zero-gDNA library is coincidentally always "right" (any RNA-favoring
-message is). Whether an honest channel was also silenced (the graft where a terminus and an sj share a
-boundary) is the named next dissection. `docs/dev/NEXT_SESSION_relay_licence_v2.md` is the handoff.
+⛔ **THE OPEN FRONT IS STILL THE ZERO CONTROLS, AND ITS MECHANISM IS NOW NAMED** (2026-08-18, session
+2): the per-strand licence's `g00` regression (154 k → 431 k) walked to ONE shape — a zero RNA claim WITH
+LIVE PRECISION, relayed one hop, where the mass pin's licence reads both arms as supplied and rescales
+the whole budget onto gDNA (`k = M/(tg·E_g)`, 467,000×) — "all your mass is gDNA" into a 26 k-fragment
+exon. Two feeders: ① the GRAFT added the sj count's precision back onto an arm the licence had just
+zeroed — **FIXED, both twins, gated** (`TRAPS: zero-the-precision-with-the-value`): in-scope
+**0.931 / 0.999 / 1.000**, `g00` **431 k → 324 k**, all 8 zero-control rows improve, deferred 1.000;
+② the mis-scoped `struct_lock` (`~solvable`, the strict xfail) gives an EMPTY exon "RNA = 0 @ 0.2026"
+on every arm — **OPEN**. ⛔ The xfail's fix (`g1_locked ∧ REGION`) and a zero-mass-source pin guard were
+BOTH priced on all 32 and both fail the written bar with NAMED losses (`ROADMAP.md` §1 rank 1) — the
+sharp predicate must refuse a source's OWN zero-count artefact and keep a RELAYED composition passing
+through an empty slot (capture's conduits). ⚠ `g00` is ONE-SIDED: any RNA-favoring message reads as
+"right" there, and the empty exons' "gDNA = 0 @ 0.2026" is such a coincidence — the graveyard's pattern.
+`docs/dev/NEXT_SESSION_zero_control_pin.md` is the handoff.
 
 ⚠ The owner intends a VOCABULARY RENAME of the message layer (`graft`/`peel`/`pin` are obscure) as a
 dedicated future effort — keep the current names until it runs (`TRAPS: two-masks-one-name`).
@@ -275,12 +283,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,521 passing, 0 SKIPPED, 9 xfail, 3,530 collected**
-(re-derived 2026-08-18, second commit: the PER-STRAND population licence). ⚠ The `+3` over 3,527 is the
-three-case licence contract's unit gates in `test_gdna_scale_rule.py`, re-derived with
-`pytest --collect-only -q | grep gdna_scale`; the licence work's golden moves were 1e-6–6e-4 relative,
-read before regenerating. **Any failure at all is a regression** — a
-stronger and cheaper rule than counting expected ones.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,523 passing, 0 SKIPPED, 9 xfail, 3,532 collected**
+(re-derived 2026-08-18, third commit: the graft keeps its precision WITH its value at a refused hop).
+⚠ The `+2` over 3,530 is the two graft gates (VECTORISED + SCALAR) in `test_gdna_scale_rule.py`, an
+EXISTING file so no meta-test drift, re-derived with `pytest --collect-only -q | grep graft_delivers`;
+that fix moved NO golden. **Any failure at all is a regression** — a stronger and cheaper rule than
+counting expected ones.
+
+⚠ **It read 3,521 / 9 xfail / 3,530 collected before that** (the PER-STRAND population licence): the `+3`
+over 3,527 was the three-case licence contract's unit gates in `test_gdna_scale_rule.py`; the licence
+work's golden moves were 1e-6–6e-4 relative, read before regenerating.
 
 ⚠ **It read 3,501 / 10 xfail / 3,511 collected before that, and every move is ACCOUNTED, not
 adjusted.** `+16` collected = `+12` for three new `scripts/design/` instruments

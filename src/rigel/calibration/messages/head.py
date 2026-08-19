@@ -701,12 +701,6 @@ class _HeadRelay:
             tg = rg[s] * r_g
             tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
             tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
-            if sw.rna_level_scale:
-                # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
-                if not pop_p[i]:
-                    tpp, tmp = 0.0, 0.0
-                if not pop_n[i]:
-                    tpn, tmn = 0.0, 0.0
             ttau = _damp(tau[s], s2t)  # composition
             # The grafted sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
@@ -728,6 +722,18 @@ class _HeadRelay:
                 _vgp, _vgn = vgp_l[i], vgn_l[i]
                 tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
                 tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
+            if sw.rna_level_scale:
+                # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
+                # ⛔ AFTER the graft block, so the sj precision goes with the sj density it certified.
+                # Zeroing before it delivered "+ RNA = 0 @ the sj count's precision" — a confident
+                # nothing — which the next hop's mass pin turned into "all gDNA" (measured: an empty exon
+                # at n = 0 @ pn = 280, then M/E_g at the boundary beyond it; the 2026-08-18 zero-control
+                # gap). The graft is a claim about THIS strand, and ψ reads the RNA channel as a LEVEL, so
+                # a refused arm delivers nothing, graft included — not the sj density alone as a level.
+                if not pop_p[i]:
+                    tpp, tmp = 0.0, 0.0
+                if not pop_n[i]:
+                    tpn, tmn = 0.0, 0.0
 
             if sw.peel and bnd_l[i] and ex_l[s]:  # EXON → BOUNDARY: PEEL by COMPOSITION
                 (_wp, _vwp), (_wn, _vwn) = peel_share_scalar(i, tg, tpg, tp, tn)
@@ -857,10 +863,6 @@ class _HeadRelay:
 
         tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
         tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
-        if sw.rna_level_scale:
-            # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
-            tpp, tmp = np.where(pop_p, tpp, 0.0), np.where(pop_p, tmp, 0.0)
-            tpn, tmn = np.where(pop_n, tpn, 0.0), np.where(pop_n, tmn, 0.0)
         ttau = _dv(tau, s2t)  # composition (tau) → the lambda-message
         # the graft's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a GRAFT
         # boundary, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
@@ -883,6 +885,12 @@ class _HeadRelay:
         _vgn = np.where(graft, self._vgn_prem, 0.0)
         tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
         tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
+        if sw.rna_level_scale:
+            # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
+            # ⛔ AFTER the graft, for the reason the scalar twin gives: the sj precision must go with the
+            # sj density it certified, or a refused arm delivers a confident zero.
+            tpp, tmp = np.where(pop_p, tpp, 0.0), np.where(pop_p, tmp, 0.0)
+            tpn, tmn = np.where(pop_n, tpn, 0.0), np.where(pop_n, tmn, 0.0)
 
         peel = (is_bnd_a & ex_a[src] & valid) if sw.peel else np.zeros_like(valid)
         (_wp, _vwp), (_wn, _vwn) = self._peel_share(tg, tpg, tp, tn)

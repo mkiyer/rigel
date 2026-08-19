@@ -130,6 +130,9 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `never-pool-the-strata` — THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE WAYS.
 - `a-scorer-scoped-to-the-mechanisms-targets` — A SCORER RESTRICTED TO THE POPULATION A MECHANISM TARGETS WILL REPORT A WIN
   THE WHOLE CHAIN REFUSES; the sign can flip. The scoped score is a diagnostic, never a verdict.
+- `zero-the-precision-with-the-value` — A REFUSED CLAIM MUST LOSE ITS PRECISION IN THE SAME STATEMENT THAT ZEROES ITS
+  VALUE, or a later operator hands the precision back and the "no claim" becomes a confident ZERO — which the
+  mass pin then rescales into "all gDNA".
 - `a-threshold-on-a-fitted-residue` — A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
 - `excluding-a-population-hides-it` — EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
 - `name-the-observable-per-site` — IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
@@ -563,7 +566,7 @@ logvar_tot[dst] + logvar_tot[src]`` no longer being ``∞``. Reverting only that
 ⭐⭐ **The mechanism is not the zero-count SOURCE, it is every hop that TOUCHES a zero-mass slot.**
 ``1/(1/p + ∞) = 0`` annihilated messages in both directions, so ``_fuse`` fell back to the destination's own
 belief and **the chain was cut into segments at every empty slot**. Under capture the off-probe gaps between
-probe islands ARE the zero-mass slots, so a gDNA level now travels between capture strata that were
+the gaps between probe-covered stretches ARE the zero-mass slots, so a gDNA level now travels between capture strata that were
 isolated — and it crosses UNSCALED, because ``framed`` needs ``ρ_tot > 0`` at both ends and forces ``r = 1``.
 ⛔ Muting every zero-mass emitter recovers **1.2–7.7 %**; restoring the barrier recovers **100 %**. So it is
 PROPAGATION, not origination, and the previous session's hypothesis — an empty intergenic anchor asserting
@@ -610,7 +613,17 @@ ladder slots against **1,312** that are actually structurally pure-gDNA objects,
 composition CERTAIN. ⚠ It was INERT until 2026-08-06 because ``own_precision``'s ``n > 0`` gate silenced
 every zero-count slot; removing that gate un-masked it. ⛔⛔ **And scoping it correctly is
 PANEL-NEGATIVE**: the target row moved −1.2 %, ``g98`` went +0.4 % (worse), and the zero-gDNA control went
-**+3,207 %** — the mis-scoped mask is what carries the zero-gDNA win. ⭐ *Lessons:* a gate that hands the
+**+3,207 %** — the mis-scoped mask is what carries the zero-gDNA win. ⚠ **RE-PRICED 2026-08-18 on the
+32-condition ladder with the per-strand licence + graft fix live, and the sign on the control has
+FLIPPED but the verdict has not**: on top of the graft fix, `g1_locked ∧ REGION` takes the eight `g00` rows
+**324 k → 232 k (0.71×)** — because the empty exons' own "RNA = 0 @ 0.2026" is one of the two feeders of the
+pin's "all gDNA" (TRAPS: zero-the-precision-with-the-value) — while REGRESSING the four `nrna_none` zero
+controls **1.8–15×** and the in-scope contaminated strata **+2.5 / +2.1 / +0.5 %** (deferred +17 %) — every
+ratio here is against the graft-fix tree. The
+loss mechanism is named: at AMBIG `exon|exon` boundaries in an RNA-only library ψ was held at `f_g ≈ 0` by
+the empty exons' "gDNA = 0 @ 0.2026" — a zero count over ~0.05 placements, right at `g00` for any reason —
+and without it an RNA+ level claim with no RNA− claim drifts ψ to 0.38. Still half of a pair; the pair
+is now sharper (see the dev-sandbox handoff). ⭐ *Lessons:* a gate that hands the
 predicate in as an ARGUMENT cannot see the caller compute it wrong (`test_strand_evidence_struct_lock_regions_only`
 did exactly that, and passed throughout) — gate it through the PRODUCTION path; and when a docstring and its
 code disagree, find out which one the panel is relying on before "fixing" either.
@@ -1436,6 +1449,30 @@ source and tests, so the labels are kept; the investigations that produced them 
 | **TRAPS: recompute-from-the-oracle** | an "enrichment ratio" of 1.46 with capture OFF looked impossible and was correct: `ρ_tot` is a TOTAL and the destination held 55 RNA fragments where the source held 0. Compounded, 2.159 used vs 2.153 true | ⭐ **recompute the quantity from the ORACLE before assuming the formula is broken** — the alternative reading sends you to rewrite a correct function |
 | **TRAPS: a-cancelling-defect-pair** | ⛔⛔ **fixing one of two errors that CANCEL is worse than fixing neither.** TRAPS: recompute-from-the-oracle's leak cancels across a two-hop pair; correcting one hop alone moved a toy's evidence-free exon 0.0107 → **0.0244** while the rung it was aimed at improved 26 % | ⭐ **when a fix is negative and its object sits on a multi-hop path, price it in the arm that also removes the other defect.** A pair of defects that cancel is one experiment, not two |
 | **TRAPS: a-variance-cap-asserts-certainty** | ⛔⛔ **A VARIANCE CAP OF ``f(1−f)`` ASSERTS CERTAINTY AT THE CORNER, AND AN EVIDENCE-FREE SLOT'S DEFAULT BELIEF PARKS THERE.** ``node_sweep`` caps ``Var(f_g)`` at ``f_g(1−f_g)`` ("a fraction's max variance"), and the unsolved init is ``f_g = 1`` **exactly** — so the composition half of ``Var(log ρ_tot)`` is 0 at every slot with no evidence, and ``σ²_transfer`` there is the counting term alone. ⭐ Found by PERTURBING a gate for a different defect (TRAPS: perturb-every-gate): the gate still failed with ``struct_lock`` corrected, because the corner and not the mask is what zeroes it | ⭐ Replacing it with the reference prior's own variance — ``Beta(½,½)`` ⇒ ``⅛``, no tuned constant — is derivable, passes the zero control BYTE-IDENTICALLY, and is **inert (−0.3 %)**: at ``f_g = 1`` the coefficient ``[(1/E_g − 1/E_r)/B]²`` collapses to ``(1 − E_g/E_r)² ≲ 1`` too, so the term is bounded by ⅛ against ``trigamma(½) = 4.93``. ⛔ **The "coefficient diverges as ``E_g`` collapses" behaviour ``composition_logvar`` promises needs ``f_g < 1``** — any repair routed through that term is bounded by this |
+
+**zero-the-precision-with-the-value. ⛔⛔ A REFUSED CLAIM MUST LOSE ITS PRECISION IN THE SAME STATEMENT THAT ZEROES ITS
+VALUE — a value zeroed at one line and a precision added back at a later one is not "no claim", it is the
+CONFIDENT ZERO the licence exists to forbid, and the relay's mass pin then converts it into its opposite.**
+Found by the 2026-08-18 zero-control dissection (`g00 ss0.50 nrna_mid capture_on`, 62 k → 228 k under the
+per-strand licence). The per-strand rule zeroed a refused RNA arm's value (with the sj graft ``gp`` already
+folded in) and its precisions, and the GRAFT block eleven lines later added the sj COUNT's precision back:
+measured ``n = 0 @ pn = 280`` delivered into an empty exon. One hop on, the pin's licence read both arms as
+SUPPLIED (``pg > 0``, ``pn > 0``), rescaled the budget onto the only non-zero component —
+``k = M/(tg·E_g) = 467,000×`` — and delivered ``tg = M/E_g``, "all your mass is gDNA", at the gDNA arm's
+unchanged precision, into a 26 k-fragment exon (true 0.000 → 0.9037). ⭐ *The rule:* an operator that
+grants a precision (graft, premise variance, conservation term) must run BEFORE the licence's zeroing, so
+the zeroing is the last word — both twins, and the falsification fixture must carry the operator's input
+(the first three-case gate had no sj, so its "precision zero" assertion passed on the graft path it never
+exercised). ⚠ *The same shape, from the other feeder:* an EMPTY exon whose ``struct_lock`` is the mis-scoped
+``~solvable`` (TRAPS: predicate-contradicts-its-docstring) owns "RNA = 0 @ 1/trigamma(½)" on every arm, and once the
+licence isolates that arm the same pin turns it into "all gDNA". ⛔ The scorer lesson beside it: a census
+of the signature AT THE DELIVERED DESTINATION read 2.6 % of the error, because the damage lands one hop
+past the confident zero — score the mechanism where it LANDS, not where it is written
+(TRAPS: a-scorer-scoped-to-the-mechanisms-targets, second form).
+*Repair landed:* the zeroing moved after the graft in both twins (`test_gdna_scale_rule.py`, VECTORISED +
+SCALAR gates, each fired by breaking its own twin). Panel: in-scope **0.931 / 0.999 / 1.000**, and
+`g00` **0.753×** with all 8 zero-control rows improving, deferred 1.000 / 0.827.
+*Sibling:* `a-licence-with-no-floor` (a boolean licence on a precision — here the pin's ``_lend``).
 
 **no-prior-means-haldane. "No prior" does not exist on a grid — omitting a term lets the grid supply Haldane**
 (`p(x) ∝ 1/x`, improper, an amplifier toward the vertices). Posterior median spread over grid half-widths
