@@ -1,0 +1,44 @@
+##gtf-version 2.2
+##description THE METHOD-DEVELOPMENT TEST TRANSCRIPTOME — hand-edited, one transcript at a time.
+##
+## ⭐⭐⭐ THIS FILE IS THE BENCHMARK. Owner, 2026-08-19: "over the course of this method development we
+## will add transcripts to a 'test chromosome'. Collectively, the test reference chromosome, test
+## transcript GTF, and test abundances comprise a critical method development benchmark."
+##
+## ⛔ IT STARTED AT ZERO TRANSCRIPTS AND GROWS ONE STRUCTURE AT A TIME. Every addition is a deliberate
+## step in the message-propagation policy's development: the policy must solve the new transcript AND
+## everything already here (`docs/dev/PLAN_message_propagation_rebuild.md`).
+##
+## ⭐ The FASTA is DERIVED from this file, never hand-edited — `build_test_reference.py` generates the
+## 1,000,000 bp chromosome from a fixed seed and injects a GT..AG motif at every intron this GTF
+## declares, so the sequence can never disagree with the annotation.
+##
+## ⭐ NAMES CARRY THE SIZE, AND THE SIZE IS THE SPLICED LENGTH. `T3_1p_SE_5KB` is 5,000 bp of exon.
+## ⚠ Two arrived misdescribing themselves and were corrected on the owner's instruction (2026-08-19):
+##      T3_1p_SE_4BP -> T3_1p_SE_5KB   (5,000 bp, not 4)
+##      T3_2p_SE_4BP -> T3_2p_SE_2KB   (2,000 bp, not 4)
+##      T6_3exon_2kb -> T6_3exon_3KB   (1,000 + 500 + 1,500 = 3,000 bp, not 2,000)
+##
+## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates.
+##   test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "gX"; transcript_id "TX";
+##
+## ⚠ Abundances live in `test_abundances.tsv`, capture probes in `test_probes.bed`.
+##
+## ── STAGE 1: SINGLE-EXON TRANSCRIPTS (owner, 2026-08-19) ────────────────────────────────────────
+test_chr	rigel_test	exon	10001	11000	.	+	.	gene_id "G1"; transcript_id "T1p_SE_1KB";
+test_chr	rigel_test	exon	5001	6000	.	+	.	gene_id "G1cap"; transcript_id "T1p_cap_SE_1KB";
+test_chr	rigel_test	exon	15001	15050	.	+	.	gene_id "G2"; transcript_id "T2p_SE_50BP";
+test_chr	rigel_test	exon	20001	25000	.	+	.	gene_id "G3"; transcript_id "T3_1p_SE_5KB";
+test_chr	rigel_test	exon	22001	24000	.	+	.	gene_id "G3"; transcript_id "T3_2p_SE_2KB";
+##
+## ── STAGE 2: SPLICED TRANSCRIPTS, MINUS STRAND (owner, 2026-08-19) ──────────────────────────────
+## ⭐ The first introns on this chromosome, so the first splice junctions — and therefore the first
+## CERTIFIED RNA (a spliced fragment cannot be gDNA) and the first synthetic NASCENT ENTITIES, one
+## single-exon transcript spanning each of these three.
+test_chr	rigel_test	exon	30001	31000	.	-	.	gene_id "G4"; transcript_id "T4_cap_2exon_2KB";
+test_chr	rigel_test	exon	34001	35000	.	-	.	gene_id "G4"; transcript_id "T4_cap_2exon_2KB";
+test_chr	rigel_test	exon	36001	37000	.	-	.	gene_id "G5"; transcript_id "T5_nocap_2exon_2KB";
+test_chr	rigel_test	exon	39001	40000	.	-	.	gene_id "G5"; transcript_id "T5_nocap_2exon_2KB";
+test_chr	rigel_test	exon	45001	46000	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";
+test_chr	rigel_test	exon	48001	48500	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";
+test_chr	rigel_test	exon	51001	52500	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";

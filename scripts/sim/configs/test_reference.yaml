@@ -1,0 +1,78 @@
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE METHOD-DEVELOPMENT SCENARIOS — the test chromosome, swept over the axes that matter
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# ⭐⭐⭐ WHAT THIS IS. The message-propagation policy is developed against `test_reference/` — a
+# 1 Mb chromosome that grows ONE TRANSCRIPT AT A TIME (owner, 2026-08-19). This config sweeps that
+# reference over the same axes as the big ladder, at a depth that simulates in seconds, so a policy
+# change can be scored end to end in the development loop rather than on a 23 GB panel.
+#
+# ⛔ THE TRANSCRIPTS AND THEIR ABUNDANCES ARE NOT HERE. They are `test_reference/test_chr.gtf` and
+# `test_reference/test_abundances.tsv`, both hand-edited; the FASTA and this sweep are derived.
+# `docs/TESTING.md` §0a.
+#
+# ⚠ NASCENT IS 0 AND THAT IS FORCED BY THE ANNOTATION, NOT A CHOICE. A synthetic nascent entity is
+# created for each MULTI-EXON transcript; stage 1 is single-exon only, so there is no nascent
+# opportunity at all and a nonzero share would be unreachable (the simulator raises rather than
+# silently producing none). The moment the first spliced transcript lands, set a share here.
+#
+# ⚠ ABUNDANCE MODE IS `file`, so `test_abundances.tsv` is the ONE source of truth for both the mature
+# and the nascent weight of every transcript. That is why the nascent sweep is skipped and the label
+# reads `nrna_file`.
+
+genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
+gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
+index: /Users/mkiyer/Downloads/rigel_runs/test_reference/idx
+outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios
+
+simulation:
+  # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
+  n_total_fragments: 200000
+  n_rna_fragments: 200000
+  sim_seed: 42
+  # ⛔ IDENTICAL to the gdna block below: equal fragment lengths force calibration to be exercised
+  # rather than letting the EM split the origins on length alone (`docs/TESTING.md` §0).
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 8
+
+abundance:
+  mode: file
+  file: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_abundances.tsv
+
+gdna:
+  # ⭐ the zero control and a heavily contaminated rung. `g00`'s truth is exactly 0, so every gDNA
+  # fragment the tool reports there is a false positive with nothing to cancel it.
+  rates:       [0.0, 1.0]
+  rate_labels: [g00, g50]
+  genomic_refs: [test_chr]
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+
+# ⭐ unstranded and stranded: on unstranded data the strand channel is dead and the density channel
+# is all there is, which is where message propagation has to carry the answer.
+strand_specificities: [0.50, 0.99]
+
+nrna:
+  mode: fragment_share
+  shares:       [0.0]
+  ratio_labels: [none]
+
+capture:
+  probe_format: bed12
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_probes.bed}
+
+oracle_bam: true
+verbose: true

@@ -79,8 +79,16 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "B2": ("tests/test_second_pass_scoring.py",),
     # gene ids in the implicit-splice GTF fixture, and two rungs of `test_vertex_reference.py`'s own
     # G1…G6 case series — both beside their definitions
-    "G4": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py"),
-    "G5": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py"),
+    # ⭐ AND the METHOD-DEVELOPMENT TEST CHROMOSOME's gene ids (owner's convention, 2026-08-19:
+    #   *"Genes with capital G"*), which name genes rather than rules exactly as `G1`/`G2`/`G3` above
+    #   name signature classes. ⛔ Scoped to the files that carry them; never a blanket exemption.
+    #   ⚠ These keys are declared ONCE — `G4`/`G5`/`G6` appeared twice in this dict when the test
+    #   chromosome was added and the LATER literal silently won, so the new scopes had no effect and
+    #   the gate stayed red. A duplicate key in a dict literal is not an error; it is a lost edit.
+    "G4": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py",
+           "docs/TESTING.md"),
+    "G5": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py",
+           "docs/TESTING.md"),
     # moment variables in the opportunity-tilted length quadrature
     "C2": (
         "src/rigel/calibration/effective_length.py",
@@ -139,6 +147,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
         "tests/test_implicit_splice.py",
         "tests/test_scanner_accumulator_integration.py",
         "tests/calibration/test_vertex_reference.py",
+        "docs/TESTING.md",
     ),
     # this file, which must name the banned labels in order to ban them
     "*": ("tests/test_no_jargon_labels.py",),

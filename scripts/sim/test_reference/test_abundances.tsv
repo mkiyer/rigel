@@ -1,0 +1,9 @@
+transcript_id	mrna_abundance	nrna_abundance
+T1p_SE_1KB	100	0
+T1p_cap_SE_1KB	100	0
+T2p_SE_50BP	100	0
+T3_1p_SE_5KB	100	0
+T3_2p_SE_2KB	100	0
+T4_cap_2exon_2KB	100	10
+T5_nocap_2exon_2KB	100	10
+T6_3exon_3KB	100	10
