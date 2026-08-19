@@ -174,7 +174,7 @@ def splice_in_frame_logvar(r):
 
         f_g : f_R  =  ρ_g^src·E_g^dst : (ρ_ν^src + ρ_μ)·E_r^dst
 
-    (``r`` and the ``_pin_v`` factor multiply every component alike and cancel exactly — verified to 1.8e-15
+    (``r`` and the ``_rescale_v`` factor multiply every component alike and cancel exactly — verified to 1.8e-15
     against the shipped arrays). So ``ρ_μ`` is being ratioed against the **source's** gDNA density. But a
     spliced fragment's two blocks lie in the flanking EXONS, so ``ρ_μ = S/E_spl`` is measured in the
     DESTINATION exon's frame, not the boundary's — structurally, the same kind of geometric fact as the

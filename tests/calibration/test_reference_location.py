@@ -87,7 +87,7 @@ def test_none_writes_no_term_at_all():
 def test_the_prior_median_is_m_in_closed_form(m):
     """⭐⭐ ``u = f/(f + r(1−f)) ~ Beta(a,b)`` is symmetric at ``a = b``, so the median sits at ``u = ½``,
     which is ``f = m``. Measured error **4e-6 … 5e-5**. **This is what re-derives
-    ``test_relay_mass_pin``'s hard-coded ``R_own = 0.5`` rather than widening it**: the neutral default
+    ``test_relay_mass_rescale``'s hard-coded ``R_own = 0.5`` rather than widening it**: the neutral default
     stops being a number and becomes a formula whose ``m = ½`` case is that number.
 
     ⚠ **On the UNTRUNCATED prior.** Inside the shipped ``L = 10`` window the median is displaced by up to

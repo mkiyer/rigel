@@ -268,7 +268,7 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `shard-an-arm-sweep-by-condition` — Shard a panel sweep by CONDITION, never by ARM over one condition: the instruments WRITE their caches and three writers on one directory truncated a payload.
 - `a-mean-hits-the-mass-weighted-centre-by-luck` — A scalar that "wins" on a mass-weighted metric may only be sitting on the mass-weighted centre of a bimodal population; compare it against its own class mean.
 - `a-clamp-at-the-closed-end-escapes-the-window` — A prior clamped at the closed end of its support can put almost all its mass outside the solve window; derive the floor at the OBJECT, not over the pool.
-- `the-peel-is-as-good-as-the-density-it-is-handed` — A residual estimator inherits the error of the density it subtracts; price that density against truth first.
+- `the-deconvolution-is-as-good-as-the-density-it-is-handed` — A residual estimator inherits the error of the density it subtracts; price that density against truth first.
 - `no-enumeration-without-a-census` — Do not re-propose path or cell enumeration without a memory census.
 
 ---
@@ -473,13 +473,13 @@ once. ⭐ *The rule as first written:* an import gate, and **run the suite after
 
 ⛔⛔ **AND IT RECURRED ON 2026-08-17 THROUGH A MECHANISM THAT RULE DOES NOT COVER: A CONFIG DEFAULT FLIP,
 WITH NOTHING DELETED AND NOTHING RENAMED.** The diagnostic key `_uni` is written **only** by
-`messages/head.py` — i.e. only under `HeadPolicy` — and `CalibrationConfig.message_propagation` ships
+`messages/relay.py` — i.e. only under `RelayPolicy` — and `CalibrationConfig.message_propagation` ships
 `False`, which installs `SilentPolicy`. **Six more instruments** were dead: five raised
-`KeyError: '_uni'` and `reframe_walk.py` raised `KeyError: 'rho_lo'`, another HeadPolicy-only capture.
+`KeyError: '_uni'` and `reframe_walk.py` raised `KeyError: 'rho_lo'`, another RelayPolicy-only capture.
 ⛔ **The import gate cannot see any of it** — every one of those files imports perfectly; they die on the
 first read of a key the shipped configuration never writes. ⛔⛔ **And the suite stays green for a reason
 worth stating on its own: the TEST readers install the policy THEMSELVES.**
-`tests/calibration/test_gdna_scale_rule.py` binds `functools.partial(solve_chain, policy=HeadPolicy())`
+`tests/calibration/test_gdna_scale_rule.py` binds `functools.partial(solve_chain, policy=RelayPolicy())`
 and says why (its assertions would be vacuous otherwise) — so the tests exercise a configuration the
 instruments do not, and no gate spans the gap. ⚠ A seventh, `psi_channel_ablation.py`, was found dead in
 a way **no** config revives.
@@ -548,7 +548,7 @@ the four `g00` rows BYTE-IDENTICAL** — the conditions it was designed for did 
 two-step probe says exactly why: after the fix `NodeInit.prec_g > 0` at **1,298** intergenic slots
 (value exactly `1/trigamma(½) = 0.2026`), and the relay publishes `prec_g > 0` at **0** of them. ⭐ The
 reframe transports `r = ρ_tot(dst)/ρ_tot(src)` and every guard on that path is `rho > _EPS`
-(the reframe's guards in `messages/head.py`): a ratio with a zero denominator is undefined, so a source whose true
+(the reframe's guards in `messages/relay.py`): a ratio with a zero denominator is undefined, so a source whose true
 density is **0** cannot participate however precisely it knows it. ⛔⛔ **That is why the single most
 informative statement available at a zero-gDNA library — 50.7 Mb of opportunity with no fragments — is
 structurally unsayable.** ⭐ The lesson generalises past this solver: *before fixing a source that will
@@ -1379,7 +1379,7 @@ one line:
   pure-gDNA claim is relayed across a population change. It is a strict xfail in
   `tests/calibration/test_structural_reference.py`. ⛔ **Re-price, never inherit**
   (`TRAPS: re-record-the-baseline`).
-- *"the mechanism does not exist yet"* — it is BUILT and switched off. `messages/head.py`'s SPLICE IN
+- *"the mechanism does not exist yet"* — it is BUILT and switched off. `messages/relay.py`'s SPLICE IN
   (BOUNDARY → EXON) is exactly the sj-flux hop: only an EXON receives it, it carries a COUNT rather than
   an imputed belief, it has its own precision, and it is deliberately NOT tau-gated, so it survives
   unstranded data where the strand channel is dead. The switch is
@@ -1472,7 +1472,7 @@ past the confident zero — score the mechanism where it LANDS, not where it is 
 *Repair landed:* the zeroing moved after the SPLICE IN in both twins (`test_gdna_scale_rule.py`, VECTORISED +
 SCALAR gates, each fired by breaking its own twin). Panel: in-scope **0.931 / 0.999 / 1.000**, and
 `g00` **0.753×** with all 8 zero-control rows improving, deferred 1.000 / 0.827.
-*Sibling:* `a-licence-with-no-floor` (a boolean licence on a precision — here the pin's ``_lend``).
+*Sibling:* `a-licence-with-no-floor` (a boolean licence on a precision — here the pin's ``_may_share``).
 
 **no-prior-means-haldane. "No prior" does not exist on a grid — omitting a term lets the grid supply Haldane**
 (`p(x) ∝ 1/x`, improper, an amplifier toward the vertices). Posterior median spread over grid half-widths
@@ -1541,20 +1541,20 @@ clamp. ⭐ **The repair is to derive the floor AT THE OBJECT, not over the pool*
 0.909–0.990 of the mass inside the window. ⚠ A pooled floor (`1/Σeff_r`) does NOT fix it (0.0404 inside).
 ⭐ **Test a prior at the value the code will actually use, not only across its interior.**
 
-**the-peel-is-as-good-as-the-density-it-is-handed. A residual estimator inherits the error of the density
-it subtracts, amplified.** `f_g = ρ_g·E_g/M` needs no RNA model — RNA is whatever the gDNA peel leaves —
+**the-deconvolution-is-as-good-as-the-density-it-is-handed. A residual estimator inherits the error of the density
+it subtracts, amplified.** `f_g = ρ_g·E_g/M` needs no RNA model — RNA is whatever the gDNA deconvolve leaves —
 which is what makes it usable pre-solve. ⛔ But its accuracy is exactly the accuracy of `ρ_g`: measured
-1.00× of truth at capture-OFF where the peel scores **0.026**, and 0.28–0.38× under capture where the same
-peel scores **1.091**, i.e. worse than the uninformative reference. On the panel that became a **5.3×
+1.00× of truth at capture-OFF where the deconvolution scores **0.026**, and 0.28–0.38× under capture where the same
+deconvolve scores **1.091**, i.e. worse than the uninformative reference. On the panel that became a **5.3×
 LOSS** on stranded × capture-ON. ⭐ So price the DENSITY against truth before believing anything built on
-it, and state the peel's verdict per stratum of that density rather than pooled.
+it, and state the deconvolution's verdict per stratum of that density rather than pooled.
 
 **deriving-one-coordinate-propagates-its-error. ⛔⛔⛔ CLOSING A COMPOSITION BY DERIVING ONE COORDINATE
 FROM ANOTHER MAKES THE DERIVED ONE INHERIT EVERY DEFECT OF THE SOURCE — INCLUDING ONES THE OLD ESTIMATOR
 DID NOT HAVE.** ψ's composition was closed by defining the RNA total as ``1 − f_g`` instead of reading it
 independently. Correct, and it removed a real defect — but ``f_g`` was the GRID-SNAPPED median, and the
 retired read-out had been the posterior MEAN, which on an evidence-free object is **exactly ½** because the
-reference is symmetric. So the fix silently traded an exact number for a snapped one: `test_relay_mass_pin`
+reference is symmetric. So the fix silently traded an exact number for a snapped one: `test_relay_mass_rescale`
 read ``R_own = 0.51256`` where it had been ``0.5``. ⭐ *The rule:* when you make coordinate B a function of
 coordinate A, enumerate what B used to be exact about and check A is exact about it too — the merge is only
 sound if A is at least as good, and "at least as good on average" is not the test. ⚠ The repair was not to

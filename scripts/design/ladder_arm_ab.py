@@ -69,7 +69,7 @@ construction: on a stranded, gDNA-rich exon the RNA arms' component count ``f_c�
 evenly and barely moves.
 
 ⛔ Each arm asserts it FIRED (TRAPS: an-ablation-that-never-ran — an ablation that never ran reads as "no effect", and
-``composition_logvar`` is bound as a module global in ``messages.head`` as well as in its own leaf module, so
+``composition_logvar`` is bound as a module global in ``messages.relay`` as well as in its own leaf module, so
 patching one name is exactly the miss TRAPS: an-ablation-that-never-ran records). ``--arm base`` against itself is the byte-identity
 falsification (TRAPS: byte-identity-gate).
 """
@@ -110,7 +110,7 @@ P0 = _sibling("pass0_vs_oracle.py")
 
 import rigel.calibration.strand_balance  # noqa: E402,F401  (registers the module for patching)
 from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
-from rigel.calibration.messages import head as HD, variance as VAR  # noqa: E402
+from rigel.calibration.messages import relay as HD, variance as VAR  # noqa: E402
 from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.calibration.region_geometry import g1_locked, region_gdna_geometry  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
@@ -170,7 +170,7 @@ _FIRED: dict = {}
 #: ⭐ **The two shapes, and they fail differently, which is why the counter alone is not enough:**
 #:
 #: * ``composition_logvar`` / ``_solve_regions_logodds_all``'s imputation arguments are reached ONLY from
-#:   ``HeadPolicy.prepare``. Those arms never fire and the counter DOES catch them — after a full run.
+#:   ``RelayPolicy.prepare``. Those arms never fire and the counter DOES catch them — after a full run.
 #: * ⛔ every arm that moves a PRECISION (``own_precision``, ``struct_lock``, ``own_composition_logvar``,
 #:   or a ``rho`` at a zero-mass slot) fires on tens of thousands of slots and changes NO scored field:
 #:   with no message to fuse against, ``_fuse(own, p, silent) = own`` for every ``p``. **The counter is
@@ -179,7 +179,7 @@ _FIRED: dict = {}
 #: ⚠ MEASURED, not declared: `--self-test` runs every arm under both settings and requires this set to be
 #: precisely the arms that move nothing with messages OFF and something with them ON.
 _NEEDS_MESSAGES = frozenset({
-    "backbone_head", "backbone", "msgfree_p0", "msgfree_all",
+    "backbone_relay", "backbone", "msgfree_p0", "msgfree_all",
     "msgscale_0.001", "msgscale_0.01", "msgscale_0.1", "msgscale_0.5", "onesided_rna",
     "zc_own_count", "zc_total_n", "zc_live_count", "zc_transfer", "zc_anchor_mute",
     "zc_jeffreys_mean", "zc_logmean", "zc_struct_lock_g1", "zc_reference_var",
@@ -188,8 +188,8 @@ _NEEDS_MESSAGES = frozenset({
 
 #: The arms that are MEANT to score byte-identical to `base`; for these "moved nothing" is the pass.
 #: ⛔ ``zc_noop`` re-derives HEAD's own decisions through the rebuild path the three reverts use, and
-#: ``backbone_head`` asserts the shipped policy is reaching the solver. Both are TRAPS: byte-identity-gate.
-_IDENTITY_ARMS = frozenset({"zc_noop", "backbone_head"})
+#: ``backbone_relay`` asserts the shipped policy is reaching the solver. Both are TRAPS: byte-identity-gate.
+_IDENTITY_ARMS = frozenset({"zc_noop", "backbone_relay"})
 
 
 def _require(arm: str, messages: bool) -> None:
@@ -305,13 +305,13 @@ def _install_zc_transfer():
     included. That is the annihilation TRAPS: a-ratio-cannot-carry-zero records, and it is the half of the fix the 39 %
     was actually attributed to.
 
-    ⛔⛔ **BOTH BINDINGS ARE PATCHED, and that is TRAPS: an-ablation-that-never-ran verbatim.** ``messages.head`` does
+    ⛔⛔ **BOTH BINDINGS ARE PATCHED, and that is TRAPS: an-ablation-that-never-ran verbatim.** ``messages.relay`` does
     ``from .variance import composition_logvar``, which makes a SEPARATE module global; patching
     only the leaf module leaves the solver calling the original and the arm reads as inert.
     ⚠ ``transfer_logvar``'s ``~isfinite`` guard is NOT restored — it was deleted as treating the
     symptom, and restoring it here would vary two things.
 
-    ⛔ **MESSAGE-LAYER ARM** — ``composition_logvar`` has exactly one caller, ``HeadPolicy.prepare``, so
+    ⛔ **MESSAGE-LAYER ARM** — ``composition_logvar`` has exactly one caller, ``RelayPolicy.prepare``, so
     this arm is structurally unreachable under ``SilentPolicy``. :func:`_require` refuses it up front."""
     orig = VAR.composition_logvar
 
@@ -378,7 +378,7 @@ def _install_zc_jeffreys_mean():
 
     ⭐ **The mass-pin objection does not reach ``M = 0``.** ``Σ_c ρ_c·E_c = M`` is what forbade the
     ``(a+½)/E`` location in general (three components each gaining ½ breaks it by 3/2 —
-    `test_relay_mass_pin`'s ``R_own = 0.5 + 1/M``). At ``M = 0`` there is no mass to partition, the
+    `test_relay_mass_rescale`'s ``R_own = 0.5 + 1/M``). At ``M = 0`` there is no mass to partition, the
     identity is vacuous, and the live components are independent Poisson RATES rather than shares of a
     total. So this is scoped to exactly the slots where the constraint that refused it does not apply.
 
@@ -433,7 +433,7 @@ def _install_zc_reference_var():
     ⚠ Both bindings of ``composition_logvar`` are patched (TRAPS: an-ablation-that-never-ran), and ``tau_lam``/``struct_lock``
     are captured from the ``build_region_init`` call that ``region_sweep`` makes immediately before.
 
-    ⛔ **MESSAGE-LAYER ARM** — the patched ``composition_logvar`` is called only by ``HeadPolicy.prepare``,
+    ⛔ **MESSAGE-LAYER ARM** — the patched ``composition_logvar`` is called only by ``RelayPolicy.prepare``,
     so under ``SilentPolicy`` the ``bni`` half still runs and changes nothing. :func:`_require` refuses it
     up front rather than letting it read as inert."""
     orig_bni = NI.build_region_init
@@ -526,7 +526,7 @@ def _install_zc_ref_prior():
     ⚠ ``has_own_composition_evidence`` is NOT touched, so the instruments' `relay_only`/`own_evidence`
     classification is unchanged and `solv%` cannot move (TRAPS: admitting-an-object-costs — admitting objects to the scored
     population is a cost that would confound the reading).
-    ⚠ ``messages.head``'s ``v_own_lam`` is a SEPARATE expression with its own ``∞`` branch inside a closure and
+    ⚠ ``messages.relay``'s ``v_own_lam`` is a SEPARATE expression with its own ``∞`` branch inside a closure and
     is NOT reachable here, so the λ stream keeps ``∞`` while the per-component streams get the reference.
     Inconsistent, and deliberate for a prototype — it is one of the things the standalone sweep unifies."""
     ref_tau = 1.0 / (np.pi**2)  # = 1/(2·psi_1(1/2)); the Jeffreys reference's own precision on lambda
@@ -585,7 +585,7 @@ def _install_zc_discrepancy():
     """⭐⭐⭐ **S1a** — the geometric midpoint and its variance, applied to the delivered gDNA share.
 
     ⛔ **THE PATCH POINT IS CHOSEN SO THAT NOTHING IN `src/` MOVES** (TRAPS: panel-before-src). The operator belongs
-    in ``messages.head``'s combine, inside a closure and therefore unreachable — but everything it needs
+    in ``messages.relay``'s combine, inside a closure and therefore unreachable — but everything it needs
     is reconstructible one call later, at `simplex_logodds._solve_regions_logodds_all`, which is module-level:
 
         gdna_imp_mode = log(cg·E_g/M) = log φ_g^msg      ⭐ ALREADY the delivered gDNA SHARE
@@ -756,9 +756,9 @@ def _install_backbone(silent: bool):
     five assertions) plus a message-composition POLICY (``messages/``). The restructure's whole value is that
     byte-identity PROVES it changed nothing, so it is gated twice and in opposite directions:
 
-    ``backbone_head``  ``HeadPolicy()``, every switch ON — **must be BYTE-IDENTICAL to ``base``.** This is
+    ``backbone_relay``  ``RelayPolicy()``, every switch ON — **must be BYTE-IDENTICAL to ``base``.** This is
                        what production runs, so the arm changes nothing and instead ASSERTS that the policy
-                       reaching the solver is a full HeadPolicy. ⭐ That is not a tautology: ``solve_chain``
+                       reaching the solver is a full RelayPolicy. ⭐ That is not a tautology: ``solve_chain``
                        defaults to ``SilentPolicy``, so a future edit that drops ``calibrate``'s ``policy=``
                        argument would be a ~50 % behaviour change with no error, and this arm is the thing
                        that would catch it.
@@ -770,11 +770,11 @@ def _install_backbone(silent: bool):
     ⛔ TRAPS: an-ablation-that-never-ran — ``rigel.calibration.calibrate`` is SHADOWED by the re-exported function, so the patch goes
     through ``sys.modules`` (``CAL``, set at import), and the arm RAISES if it never fired.
     """
-    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.messages.relay import RelayPolicy
     from rigel.calibration.messages.silent import SilentPolicy
 
     orig = CAL.solve_chain
-    tag = "backbone" if silent else "backbone_head"
+    tag = "backbone" if silent else "backbone_relay"
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
         _RA["region_arrays"] = region_arrays
@@ -785,15 +785,15 @@ def _install_backbone(silent: bool):
             # ⛔ TRAPS: could-the-arm-have-fired in its strongest form: this arm changes NOTHING, so it has to prove that what it left
             # alone is what we think it is. A silent or partially-switched-off policy here would make the
             # identity gate below vacuous.
-            if not isinstance(pol, HeadPolicy):
+            if not isinstance(pol, RelayPolicy):
                 raise RuntimeError(
-                    f"backbone_head: calibrate passed policy={pol!r}, not a HeadPolicy. The shipped "
-                    f"answer is HeadPolicy with every switch on; `solve_chain` DEFAULTS to SilentPolicy, "
+                    f"backbone_relay: calibrate passed policy={pol!r}, not a RelayPolicy. The shipped "
+                    f"answer is RelayPolicy with every switch on; `solve_chain` DEFAULTS to SilentPolicy, "
                     f"so this is a real behaviour change and not a naming detail (TRAPS.md an-ablation-that-never-ran/TRAPS: could-the-arm-have-fired)."
                 )
             if pol.switches.off():
                 raise RuntimeError(
-                    f"backbone_head: HeadPolicy has switches OFF: {pol.switches.off()}. "
+                    f"backbone_relay: RelayPolicy has switches OFF: {pol.switches.off()}. "
                     f"This arm is the all-on identity gate."
                 )
         _fire(tag)
@@ -827,7 +827,7 @@ def _wrap_region_sweep():
 def _install_onesided_rna():
     """⭐⭐⭐ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND. DELIVER IT AS ONE.**
 
-    ``messages/head.py``'s SPLICE OUT-share docstring states the premise in the source's own words: *"what the SPLICE IN actually knows
+    ``messages/relay.py``'s SPLICE OUT-share docstring states the premise in the source's own words: *"what the SPLICE IN actually knows
     is an INEQUALITY, ``rho_R(exon) >= rho_nu(B) + rho_mu(B)`` … and it uses it as an equality."* ψ then
     applies ``-1/2 p (log f_active - mo_p)^2`` in BOTH code paths — symmetric in the residual, no hinge
     anywhere in the file — so a destination holding MORE RNA than the bound, which the inequality
@@ -1068,7 +1068,7 @@ def _install_face_one():
 #: same tuple, so an arm cannot be added and left out of the falsification.
 _ARM_CHOICES = (
     "base",
-    "backbone_head",
+    "backbone_relay",
     "backbone",
     "msgfree_p0",
     "msgfree_all",
@@ -1306,7 +1306,7 @@ def main() -> int:
         return 0
 
     #   the shipped one — wrapping first would leave the base sweep in the chain.
-    if args.arm in ("backbone", "backbone_head"):
+    if args.arm in ("backbone", "backbone_relay"):
         _install_backbone(silent=args.arm == "backbone")
     elif args.arm in ("msgfree_p0", "msgfree_all"):
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")

@@ -120,7 +120,7 @@ is true and `struct` leaves it at ½ by design.
 
 * `a-mean-hits-the-mass-weighted-centre-by-luck` — hit **four** times before it was named.
 * `a-clamp-at-the-closed-end-escapes-the-window` — an `L`-sweep over the interior never sees the clamp.
-* `the-peel-is-as-good-as-the-density-it-is-handed` — price the density before believing the residual.
+* `the-deconvolution-is-as-good-as-the-density-it-is-handed` — price the density before believing the residual.
 * `shard-an-arm-sweep-by-condition` — the instruments WRITE their caches; three arms on one condition
   truncated a `payload.npz`.
 * ⚠ **Twice a gate failed and the code was right** — my threshold was wrong both times, and

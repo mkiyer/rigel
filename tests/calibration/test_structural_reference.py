@@ -53,7 +53,7 @@ from rigel.calibration.effective_length import (
     contained_eff_length,
     crossing_eff_length,
 )
-from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.messages.relay import RelayPolicy
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import init_beliefs
@@ -626,7 +626,7 @@ def test_a_pure_gdna_intron_rises_when_the_prior_says_it_is_pure_gdna():
 @pytest.mark.xfail(
     strict=True,
     reason="⛔ A RELAY DEFECT THE REFERENCE EXPOSES, NOT ONE IT CAUSES — and `message_propagation` is "
-    "OFF, so this is a STUDY configuration. Under `HeadPolicy` the same intron goes 0.9006 → 0.7661, "
+    "OFF, so this is a STUDY configuration. Under `RelayPolicy` the same intron goes 0.9006 → 0.7661, "
     "the wrong way, and it is the λ-message that does it (nulling `lam_channel` restores 0.9006 "
     "exactly; `cm_g`/`cm_p` stay 0). The reference's claim is CORRECT at every slot it makes one — true "
     "f_g is 1.0000 there — and the relay then transports that correct claim ACROSS an exon↔intron "
@@ -641,12 +641,12 @@ def test_the_relay_does_not_carry_a_structural_claim_across_a_population_change(
     than as a bound to be widened.
 
     ⚠ Before the reference existed this pathway had never been exercised at ``κ = ½``: measured,
-    `HeadPolicy`/OFF is **bit-identical to `SilentPolicy`/OFF on all 9 slots**, because every slot's
+    `RelayPolicy`/OFF is **bit-identical to `SilentPolicy`/OFF on all 9 slots**, because every slot's
     ``τ_λ`` is 0 there and no message carries precision. The reference supplies the first confident
     neighbour the unstranded relay has ever had."""
     args = _mature_exon_chain()
-    off = _sweep(args, structural=False, policy=HeadPolicy())
-    on = _sweep(args, structural=True, policy=HeadPolicy())
+    off = _sweep(args, structural=False, policy=RelayPolicy())
+    on = _sweep(args, structural=True, policy=RelayPolicy())
     intr = np.asarray(MX_INTRONS)
     assert np.all(on.f_g[intr] > off.f_g[intr]), (off.f_g[intr], on.f_g[intr])
 
@@ -806,7 +806,7 @@ def test_with_no_refutation_channel_at_all_the_prior_is_the_only_voice(rho_n):
 # ── the SWITCH: off is not "a neutral term", it is NO term ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize("policy", (SilentPolicy, HeadPolicy), ids=("silent", "head"))
+@pytest.mark.parametrize("policy", (SilentPolicy, RelayPolicy), ids=("silent", "head"))
 def test_the_flag_off_is_bit_identical_through_the_whole_solve(policy):
     """⛔⛔ **THE STAGE-1 CONTRACT, AT THE SWITCH RATHER THAN AT THE TERM.**
     ``tests/calibration/test_reference_location.py`` pins ``location=None`` ⇒ no term inside ψ; this pins

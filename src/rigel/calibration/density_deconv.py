@@ -1,7 +1,7 @@
 """Generic DENSITY DECONVOLUTION — deconvolve a region's counts into gDNA + RNA against a gDNA prior.
 
 A region's unspliced count ``C`` (over its gDNA effective length ``E_g``) is ``gDNA + RNA``. If we know the
-**gDNA density prior** — how dense gDNA is at this region, as a distribution ``π_bg`` — we can peel the gDNA
+**gDNA density prior** — how dense gDNA is at this region, as a distribution ``π_bg`` — we can deconvolve the gDNA
 (``g ≈ ρ_bg·E_g``) and read the residual as RNA, with honest, count-derived precision. This is the generic
 count-deconvolution primitive; the **intron factory** is its special case (`fit_intron_background`), where the
 gDNA prior is the intergenic region distribution (introns are off-target, at the same capture depletion as
@@ -13,7 +13,7 @@ mappability spread, fitted from the pool) mixed by the per-region Poisson sampli
 with a **flat one-sided RNA prior** ``r ≥ 0`` (RNA carries no informative density prior, and this dodges any
 cutoff), so the posterior on the gDNA fraction is ``P(g | C) ∝ NegBinom(g; ρ_bg·E_g, α_eff)·1[g ≤ C]``. On the
 ``f_g`` solve grid this is the factor ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` (the truncation is automatic
-since ``f_g ≤ 1 ⇒ g ≤ C``). It peels **gDNA only** (gDNA is strand-symmetric, so no strand is assigned; the
+since ``f_g ≤ 1 ⇒ g ≤ C``). It deconvolves **gDNA only** (gDNA is strand-symmetric, so no strand is assigned; the
 residual RNA's strand is the tilt ``θ``, left to the strand solver — the SYNERGY of the two deconvolutions).
 
 **The background rate is a POSTERIOR, not an MLE with a fallback** (owner, 2026-08-18): with a Jeffreys
@@ -163,7 +163,7 @@ def density_lambda_factor(
     """The per-region factor on ``λ`` over the ``f_g = σ(λ)`` solve grid: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``.
 
     ``count`` (``C``), ``eff_g`` (``E_g``) are per-region arrays ``(n,)``; ``fg_grid`` is the ``(K,)`` grid.
-    Returns ``(n, K)``, peaked at ``f_g = ρ_bg/ρ_obs`` (the confident gDNA peel), with the honest
+    Returns ``(n, K)``, peaked at ``f_g = ρ_bg/ρ_obs`` (the confident gDNA deconvolve), with the honest
     ``μ + μ²/α_eff`` curvature. Each row is offset so its max is 0 (an ``f_g``-independent constant is
     irrelevant to ψ; this only keeps the numbers well-scaled). A non-informative background returns all-zero."""
     C = np.asarray(count, dtype=np.float64)
@@ -193,7 +193,7 @@ def density_factor_precision(lam_logprior, lam_grid):
     The factor :func:`density_lambda_factor` is a genuine, reference-FREE likelihood on ``λ`` (external
     ``ρ_bg`` information about this region's composition), so its precision belongs on the composition ``λ``-axis
     alongside the strand evidence. ``τ_λ = 1/Var_λ`` under the normalized factor; the NegBinom
-    ``Var(g) = μ + μ²/α_eff`` makes a low-count / high-overdispersion region peel IMPRECISELY and a dense one
+    ``Var(g) = μ + μ²/α_eff`` makes a low-count / high-overdispersion region deconvolve IMPRECISELY and a dense one
     confidently, so it self-limits on thin data. A FLAT row (a non-deconvolved region, or an uninformative
     background) carries NO information ⇒ ``τ = 0``. Returns ``(m,)`` (all-zero when ``lam_logprior`` is None)."""
     if lam_logprior is None:

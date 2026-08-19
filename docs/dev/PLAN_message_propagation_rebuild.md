@@ -12,7 +12,7 @@
 > *"We MUST fix our vocabulary and terminology. This is THE HIGHEST PRIORITY … I would review our naming
 > conventions and clean them up as the first step in the plan."*
 
-RULED: **SPLICE IN** replaces `splice_in`. **SPLICE OUT** replaces `peel`. The land/sea analogy the owner used
+RULED: **SPLICE IN** replaces `splice_in`. **SPLICE OUT** replaces `deconvolve`. The land/sea analogy the owner used
 to explain the geometry is **for understanding only and must not enter code or docs** — this file uses the
 predicate instead: an object is **gDNA-MEASURING** where no mature transcript crosses it (the solver's own
 `¬mrna_active`) and **IMPUTED** where one does. §5 is the naming review this ruling asks for.
@@ -31,7 +31,7 @@ to memorise into a rule to apply:
 *is* the currency question, asked once per hop type. No licence hierarchy, no three-case rule, no
 per-strand patch.
 
-⛔ **This is what the shipped relay has backwards.** `HeadPolicy` transports a COMPOSITION by default (the
+⛔ **This is what the shipped relay has backwards.** `RelayPolicy` transports a COMPOSITION by default (the
 reframe `r = rho_tot(dst)/rho_tot(src)`) and bolts population licences on top — but the population is
 exactly what changes at the `exon|exon` boundaries carrying the largest destination mass. Every licence bug
 of the last two sessions repaired a currency CHOICE instead of changing it.
@@ -148,13 +148,13 @@ work.
 | **0 · VOCABULARY** | §5's review, ruled by the owner, then ONE rename (never piecemeal), gated by `rename_identity.py` byte-identity | every stage proven a numeric NO-OP; suite green; `DESIGN.md` §0 carries the ruling |
 | **1 · UNBLOCK** | the 2.5 % boundary-crossing deficit, dedicated session | FIELD certification **24/32 → 32/32** |
 | **2 · THE MAP** (no `src/`) | (a) depth + hop census, all 32, per stratum; (b) currency oracle, all 32, with §2c caveat 2's splice-in fix, per hop type × stratum × nascent level; (c) the residual census — hop types where `min(LEVEL, COMP)` is still large | one measured currency table; every place a third mechanism is REQUIRED is named before one is built |
-| **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `HeadPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
+| **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
 | **4 · THE PANEL** | all 32, three policies, RAW COUNTS (est / true / misplaced fragments), bar written first | never a bare ratio — the ratio framing hid a 1,978,148-fragment win for eleven days |
-| **5 · RETIRE** | delete `HeadPolicy` and everything the panel proves dead | §3's predictions, checked not assumed |
+| **5 · RETIRE** | delete `RelayPolicy` and everything the panel proves dead | §3's predictions, checked not assumed |
 
 ⭐⭐ **Why a third policy and not a rewrite.** `DESIGN.md` §6.1's backbone/policy seam already makes
-`SilentPolicy` (5 lines) and `HeadPolicy` (1,200) peers behind one gated interface, with five backbone
-assertions a policy cannot violate. `HeadPolicy` is NOT touched, so nothing that works can break and the
+`SilentPolicy` (5 lines) and `RelayPolicy` (1,200) peers behind one gated interface, with five backbone
+assertions a policy cannot violate. `RelayPolicy` is NOT touched, so nothing that works can break and the
 A/B is a config value rather than a diff. ⛔ The 2026-08 clean rebuild that came out **+103 %** replaced the
 whole solver at once; this replaces one peer.
 
@@ -181,8 +181,8 @@ zero controls (zero-RNA ⇒ `f_g = 1` everywhere; zero-gDNA ⇒ `f_g = 0`) befor
 | switch | why it should not survive |
 |---|---|
 | `terminus_population`, `strand_population`, `gdna_level_scale`, `rna_level_scale` | these four ARE the hop-type table, badly factored — one lookup replaces them |
-| `mass_pin` | see §5's entry: it forces a message's three densities to add up to the destination's observed count. Under either currency the claim already accounts for `M` by construction, so there is nothing to restore |
-| `conservation_var` | prices the residual `mass_pin` discards; dies with it |
+| `mass_rescale` | see §5's entry: it forces a message's three densities to add up to the destination's observed count. Under either currency the claim already accounts for `M` by construction, so there is nothing to restore |
+| `conservation_var` | prices the residual `mass_rescale` discards; dies with it |
 | `flank_pair`, `transfer_var`, `splice_in_frame_var` | all are properties of `r`, so they survive only on COMPOSITION hops and may be far smaller scoped there |
 | `lam_emission_gate` | "this source has no composition to lend" is a hop-type fact, i.e. the table |
 | **SURVIVES** | SPLICE IN (the sj-flux RNA level — the operator `DESIGN.md` §0c says the exon needs), SPLICE OUT, the intron deconvolution, ψ's four channels, every precision |
@@ -204,12 +204,12 @@ Occurrences across `src/` · `tests/` · `scripts/` · `docs/` · memory, and ho
 | name | total | code ids | what it actually does | proposal |
 |---|---:|---:|---|---|
 | `splice_in` | 163 | 30 | a flanking BOUNDARY's measured sj flux joins the RNA claim entering an EXON | ✅ **RULED → SPLICE IN** (`splice_in`) |
-| `peel` | 96 | 7 | an EXON's RNA leaving into a BOUNDARY is scaled by the continuing share | ✅ **RULED → SPLICE OUT** (`splice_out`) |
-| `pin` / `mass_pin` | 207 | 19 | rescales a message's three densities by a common factor so they exactly account for the destination's OBSERVED fragment count | ⛔ **NEEDS A RULING.** Proposal: `budget_rescale`, or delete it (§3 predicts it is unnecessary) |
-| `head` / `HeadPolicy` | 145 | 22 | the name of the shipped policy. Carries no meaning at all | ⛔ **NEEDS A RULING.** It is being retired; the NEW policy should be named for what it does, e.g. `ChainPolicy` |
+| `deconvolve` | 96 | 7 | an EXON's RNA leaving into a BOUNDARY is scaled by the continuing share | ✅ **RULED → SPLICE OUT** (`splice_out`) |
+| `pin` / `mass_rescale` | 207 | 19 | rescales a message's three densities by a common factor so they exactly account for the destination's OBSERVED fragment count | ⛔ **NEEDS A RULING.** Proposal: `budget_rescale`, or delete it (§3 predicts it is unnecessary) |
+| `head` / `RelayPolicy` | 145 | 22 | the name of the shipped policy. Carries no meaning at all | ⛔ **NEEDS A RULING.** It is being retired; the NEW policy should be named for what it does, e.g. `ChainPolicy` |
 | `reframe` / `frame` | 91 / 192 | 3 / 26 | multiply a source's claim by `rho_tot(dst)/rho_tot(src)` — i.e. transport a COMPOSITION | proposal: `composition_transport` / `share_transport`; `r` → `total_ratio` |
 | `lend` | 71 | 17 | "may this source supply a composition to this destination?" | proposal: `may_share_composition` |
-| `s2t` | 25 | 20 | `Var(log r)` — the transport's own scale-sampling variance | proposal: `transport_logvar` (it already has a spelled-out twin, `transfer_logvar`) |
+| `hop_logvar` | 25 | 20 | `Var(log r)` — the transport's own scale-sampling variance | proposal: `transport_logvar` (it already has a spelled-out twin, `transfer_logvar`) |
 | `premise` | 68 | 0 | the variance of the assumption a hop rests on | prose only; keep or fold into the above |
 | `arm` | 1,358 | 235 | ⚠ **TWO SENSES** — an experiment arm (A/B) and a component arm (gDNA/RNA+/RNA−). `TRAPS: two-masks-one-name` | ⛔ **NEEDS A RULING.** Proposal: keep `arm` for experiments, use `component` for {gDNA, RNA+, RNA−} |
 | `relay` | 344 | 25 | the message-passing machinery | probably fine; owner call |

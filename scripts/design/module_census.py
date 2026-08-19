@@ -153,7 +153,7 @@ def _imported_dotted(p: pathlib.Path) -> set[str]:
     ``from .calibration.X import`` site in `src/rigel/` was invisible — 9 distinct modules on
     2026-08-17, re-derivable in one AST pass rather than quoted — so all nine ``out`` counts were
     understated and `strand_summary` is simply the one whose understatement reached zero.
-    ⛔ Nested modules were worse: the predecessor keyed on the SHORT name, so `messages/head` was
+    ⛔ Nested modules were worse: the predecessor keyed on the SHORT name, so `messages/relay` was
     looked up as ``"rigel.calibration.head"`` and read 1 outside importer where it has 10.
     ⭐ Widening the regex was the wrong repair: a MENTION is not an import, and the text scan also
     counted a docstring that names the dotted path. The AST counts boundaries and nothing else.
@@ -191,7 +191,7 @@ def _outside(pkg: pathlib.Path, mods: dict[str, dict]) -> dict[str, set[str]]:
     outside: dict[str, set[str]] = {m: set() for m in mods}
     pkg_rel = pkg.relative_to(ROOT / "src") if (ROOT / "src") in pkg.parents else pkg
     dotted = str(pkg_rel).replace("/", ".")
-    #: the module key ("messages/head") against the dotted name an import would spell
+    #: the module key ("messages/relay") against the dotted name an import would spell
     targets = {f"{dotted}.{m.replace('/', '.')}": m for m in mods if m != "<pkg>"}
     for base in ("src", "tests", "scripts"):
         for p in (ROOT / base).rglob("*.py"):

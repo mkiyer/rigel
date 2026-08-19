@@ -33,7 +33,7 @@ empty pool for a pool that was measured and found small.
 
 ⛔ Both arms are run IN ONE PROCESS off the SAME cached payload, so the only thing that differs is
 ``CalibrationConfig.message_propagation`` — no re-scan, no second truth source, no reseeding.
-⛔ The relay arm ASSERTS IT RAN: ``_uni`` is written only under ``HeadPolicy``, and the muted arm must
+⛔ The relay arm ASSERTS IT RAN: ``_uni`` is written only under ``RelayPolicy``, and the muted arm must
 reproduce ``f_g == fg_loc`` exactly. An arm that silently did not switch is
 TRAPS: an-ablation-that-never-ran, which has already cost this project a 314-second run reported as
 "all arms byte-identical".
@@ -108,14 +108,14 @@ def arm(payload, kw, *, messages: bool) -> np.ndarray:
     call = {k: v for k, v in kw.items() if k != "payload"}
     calibrate(payload=payload, config=cfg, _debug=debug, **call)
     cap = debug["capture"]
-    # ⛔ THE ARM RAN, AND BOTH DIRECTIONS ARE CHECKED. `_uni` is written only at messages/head.py,
-    #    i.e. only under HeadPolicy; and muted, ψ carries each slot's own evidence alone, so the
+    # ⛔ THE ARM RAN, AND BOTH DIRECTIONS ARE CHECKED. `_uni` is written only at messages/relay.py,
+    #    i.e. only under RelayPolicy; and muted, ψ carries each slot's own evidence alone, so the
     #    final belief must BE the message-free local solve, bit for bit.
     relay_ran = "_uni" in cap
     if relay_ran != messages:
         raise AssertionError(
             f"messages={messages} but the relay {'ran' if relay_ran else 'did not run'} — this arm is "
-            "not the arm it claims to be (`_uni` is written only under HeadPolicy)."
+            "not the arm it claims to be (`_uni` is written only under RelayPolicy)."
         )
     f_g = np.asarray(cap["f_g"], np.float64)
     if not messages:

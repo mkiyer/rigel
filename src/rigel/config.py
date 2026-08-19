@@ -359,16 +359,16 @@ class CalibrationConfig:
     #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
     background_robust_trim_mad: float | None = None
 
-    # **gDNA intron factory**. ``True`` ⇒ peel confident gDNA
+    # **gDNA intron factory**. ``True`` ⇒ deconvolve confident gDNA
     #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
-    #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
+    #: density, a two-sided estimate; deconvolves gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
     #: prior-free pass-0 currently leaves at ~½ (fixes both the zero-gDNA false-positive and the gDNA under-call),
     #: and seeds the Phase-2 hyperprior fit with clean intron gDNA. ``False`` ⇒ byte-identical to the
     #: pre-factory pass-0.
     #:
     #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
-    #: (``messages.head`` — ``I_factory``). Before that the factory shifted an intron's own
+    #: (``messages.relay`` — ``I_factory``). Before that the factory shifted an intron's own
     #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
     #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
     #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite (⚠ DELETED — see
@@ -382,7 +382,7 @@ class CalibrationConfig:
     #: (owner, 2026-08-18), after ~11 days muted. ``False`` installs ``messages.silent.SilentPolicy``, ψ
     #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the derived
     #: reference, the fitted gDNA prior and the intron factory. ``True`` installs
-    #: ``messages.head.HeadPolicy``, every operator behind its own named switch.
+    #: ``messages.relay.RelayPolicy``, every operator behind its own named switch.
     #:
     #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** Measured 2026-08-07 on the 36-condition ladder —
     #: ⚠ RETIRED, rebuilt at 16 conditions on 2026-08-13, so the numbers below stand as recorded and are
@@ -415,7 +415,7 @@ class CalibrationConfig:
     #: slot has NO own composition evidence and a message is the only source there is.
     #:
     #: ⚠ **So this default is a STUDY CONFIGURATION**, and turning it back on is one word — every
-    #: operator inside ``HeadPolicy`` remains individually switchable.
+    #: operator inside ``RelayPolicy`` remains individually switchable.
     #:
     #: ⛔ **The planned way out has been MEASURED AND REFUSED.** This comment used to say the exit was to
     #: give that slot its own θ-independent evidence via a fragment-length composition channel. That

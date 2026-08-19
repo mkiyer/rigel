@@ -97,8 +97,8 @@ _KNOWN_VIOLATIONS: dict[str, str] = {
     "share_sum_at_most_one": (
         "⛔⛔ MEASURED at 31,174 of 50,984 live packets (61.1 %) on g50 ss0.50 capture_on, pass-0 — a "
         "MAJORITY of delivered packets assert that the three components TOGETHER account for more fragments "
-        "than the slot observed. This is the identity Sigma_c rho_c E_c = M that the mass pin exists to "
-        "restore, and the pin is licensed in only two states, so everywhere else the residual is delivered "
+        "than the slot observed. This is the identity Sigma_c rho_c E_c = M that the mass rescale exists to "
+        "restore, and the rescale is licensed in only two states, so everywhere else the residual is delivered "
         "rather than fixed. ⭐ It is consistent with a number already in the tree — messages/variance.py "
         "records the over-claim on 52-71 % of regions — but nothing had surfaced it as a checkable invariant, "
         "so nothing could rank it. ⚠ It is a SUPERSET of share_in_unit_interval by construction and the two "
@@ -248,7 +248,7 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
         live = p > 0.0
         counts.note("share_in_unit_interval", live & (m > 0.0), live)
 
-    # ⭐ AND THE SUM, which is the identity the mass pin exists to restore: the three components account for
+    # ⭐ AND THE SUM, which is the identity the mass rescale exists to restore: the three components account for
     # the fragments the slot observed, so ``Sigma_c exp(mode_c) <= 1``. A per-component check passes while
     # three shares of 0.4 each assert 120 % of the slot's mass between them, and that is a different defect
     # from any one of them being over unity.
@@ -304,7 +304,7 @@ def solve_chain(
     ``policy`` is the message-composition policy (:mod:`~.messages`). ⭐ **It defaults to
     :class:`~.messages.silent.SilentPolicy`, which sends nothing** — so a reader of this file plus five
     boundaries holds the whole working system. The shipped answer is
-    :class:`~.messages.head.HeadPolicy`, which ``calibrate`` passes explicitly.
+    :class:`~.messages.relay.RelayPolicy`, which ``calibrate`` passes explicitly.
 
     ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the derived reference alone on
     both arms. Prior-free is not reference-free. ⭐ That pass's only job is to be a training substrate for
@@ -377,7 +377,7 @@ def solve_chain(
             lam_imp_prec=msg.lam_prec,
             theta_imp_mode=msg.theta_mode,
             theta_imp_prec=msg.theta_prec,
-            # the gDNA intron-factory λ-factor (anchored, per-intron, 0 elsewhere): peels confident gDNA
+            # the gDNA intron-factory λ-factor (anchored, per-intron, 0 elsewhere): deconvolves confident gDNA
             # from introns against the intergenic background BEFORE the sweep resolves the pie. Added to ψ,
             # distinct from the gDNA arm; participates in the local solve AND the relay.
             lam_logprior=intron_prior,

@@ -54,7 +54,7 @@ file and it is not honestly repairable into one, for three separate reasons:
   MASS paragraph above.
 * ⛔⛔ **It was measured BEFORE ``message_propagation`` was defaulted OFF, and check (c) is a RELAY
   quantity.** ``cm_p`` / ``cm_n`` are the relay's own RNA measurement precisions and exist only under
-  ``HeadPolicy``. Reporting "(c) FAILS, precisions are 0" against a run in which the relay was never
+  ``RelayPolicy``. Reporting "(c) FAILS, precisions are 0" against a run in which the relay was never
   installed would be `TRAPS: an-ablation-that-never-ran`, so under the mute this file now reports (c)
   **UNANSWERABLE** and exits non-zero rather than passing OR failing.
 
@@ -225,7 +225,7 @@ def main() -> int:
                 return 1
             cap = r.capture
             st = TH.relay_static(cap)  # E_r survives the mute — the BACKBONE publishes it
-            # ⛔ `_uni` exists only under `HeadPolicy`, and CHECK (c) IS a relay quantity: `cm_p`/`cm_n`
+            # ⛔ `_uni` exists only under `RelayPolicy`, and CHECK (c) IS a relay quantity: `cm_p`/`cm_n`
             # are the relay's own RNA measurement precisions. Muted, (c) is UNANSWERABLE, never FAILED —
             # see the `_UNASKED` note below. This file used to die here with `KeyError: '_uni'`.
             uni = TH.relay_channels(cap)
@@ -286,7 +286,7 @@ def main() -> int:
                     # ⛔⛔ THE TEST IS `uni is None` — THE RELAY'S OWN ARTIFACT — AND NOT `cm_p != cm_p`.
                     #   Keying on NaN conflates two different verdicts: muted (`_uni` absent, nothing was
                     #   asked) and INSTALLED-BUT-PUBLISHED-A-NON-NUMBER, which is a (c) FAILURE. A NaN
-                    #   under `HeadPolicy` would have printed "the relay is MUTED", which is false, and
+                    #   under `RelayPolicy` would have printed "the relay is MUTED", which is false, and
                     #   filed a real wiring defect under `unasked` where nothing reads it. ⭐ Same
                     #   discipline as `toy_harness.relay_live`: trust the artifact, never the flag —
                     #   and here, never a sentinel value the artifact might legitimately carry.

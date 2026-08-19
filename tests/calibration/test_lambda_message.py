@@ -4,7 +4,7 @@ The composition is ONE DOF ``λ = logit f_g``; the two-message per-component com
 ``log f_g`` AND an RNA message on ``log f_R``) counts it TWICE (rank-1, ~2× over-confident,
 These pin the replacement: ψ accepts a SINGLE Gaussian on the grid
 variable ``λ`` directly (both region classes) + a SEPARATE Gaussian on the tilt ``θ`` (AMBIG only, the genuinely
-distinct strand-balance DOF). The three-stream relay that feeds these lives in `messages.head` (next).
+distinct strand-balance DOF). The three-stream relay that feeds these lives in `messages.relay` (next).
 """
 
 from __future__ import annotations

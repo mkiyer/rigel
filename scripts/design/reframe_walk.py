@@ -263,20 +263,20 @@ def section_relay(r, direction, rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g
     nbr = np.asarray(r.chain.left if fwd else r.chain.right, np.int64)
     lvl = np.asarray(st_cap["fwd_g" if fwd else "bwd_g"], float)
     prec = np.asarray(st_cap["fwd_pg" if fwd else "bwd_pg"], float)
-    # ⭐⭐ THE THREE CONJUNCTS OF THE LICENCE, so nobody has to take `lend` on trust. The solver's own
-    # expression is `_lend = pop[dst] & (pg[src] > 0) & ((pp + pn)[src] > 0)` — a POPULATION test on the
+    # ⭐⭐ THE THREE CONJUNCTS OF THE LICENCE, so nobody has to take `may_share_composition` on trust. The solver's own
+    # expression is `_may_share = pop[dst] & (pg[src] > 0) & ((pp + pn)[src] > 0)` — a POPULATION test on the
     # pair, and the SOURCE's own running gDNA and RNA precisions. All three are the relay's own state at
     # the moment the hop is taken (the forward pass writes slot s before it reads it at s < i, so the
     # published arrays ARE the values used).
     pg_s = np.asarray(st_cap["fwd_pg" if fwd else "bwd_pg"], float)
     pp_s = np.asarray(st_cap["fwd_pp" if fwd else "bwd_pp"], float)
     pn_s = np.asarray(st_cap["fwd_pn" if fwd else "bwd_pn"], float)
-    lend = np.asarray(pin["lend"], bool)
+    may_share_composition = np.asarray(pin["may_share_composition"], bool)
     r_comb = np.asarray(pin["r"], float)
     num, den = (rho_lo, rho_hi) if fwd else (rho_hi, rho_lo)
     tnum, tden = (t_lo, t_hi) if fwd else (t_hi, t_lo)
     print(f"\n   {'hop':<44} {'r NEW':>8} {'r SHIPPED':>10} {'r TRUE':>8} {'r TRUE_g':>9} "
-          f"| {'framed?':>7} {'pg[src]':>9} {'pR[src]':>9} {'pop':>5} {'lend':>5} {'r_g':>7} "
+          f"| {'framed?':>7} {'pg[src]':>9} {'pR[src]':>9} {'pop':>5} {'may_share_composition':>5} {'r_g':>7} "
           f"{'level in':>9} {'level out':>10}")
     print("   " + "-" * 172)
     order = range(int(r.chain.n_slots)) if fwd else range(int(r.chain.n_slots) - 1, -1, -1)
@@ -292,11 +292,11 @@ def section_relay(r, direction, rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g
         )
         rt = tnum[i] / tden[s] if (tden[s] > EPS and tnum[i] > EPS) else float("nan")
         rtg = t_rho_g[i] / t_rho_g[s] if t_rho_g[s] > EPS else float("nan")
-        rg = rn if lend[i] else 1.0
+        rg = rn if may_share_composition[i] else 1.0
         framed = bool(den[s] > EPS and num[i] > EPS)
         pR = float(pp_s[s] + pn_s[s])
         # pop is not published; it is RECOVERABLE exactly when the other two conjuncts hold
-        pop = "True" if lend[i] else ("False" if (pg_s[s] > 0.0 and pR > 0.0) else "—")
+        pop = "True" if may_share_composition[i] else ("False" if (pg_s[s] > 0.0 and pR > 0.0) else "—")
         mark = ""
         if abs(ro - rn) > 1e-9:
             # the shipped ratio differs from the new one -> this is a hop the change touches
@@ -307,7 +307,7 @@ def section_relay(r, direction, rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g
             )
         print(f"   {lab[s][:20]:<20} → {lab[i][:20]:<20} {rn:>8.4f} {ro:>10.4f} {rt:>8.4f} "
               f"{rtg:>9.4f} | {('YES' if framed else 'NO-FRAME'):>7} {pg_s[s]:>9.3g} {pR:>9.3g} "
-              f"{pop:>5} {str(bool(lend[i]))[:5]:>5} {rg:>7.4f} {lvl[s]:>9.5f} {lvl[i]:>10.5f}"
+              f"{pop:>5} {str(bool(may_share_composition[i]))[:5]:>5} {rg:>7.4f} {lvl[s]:>9.5f} {lvl[i]:>10.5f}"
               f"{mark}")
         if abs(float(r_comb[i]) - rn) > 1e-9 and prec[s] >= 0:
             print(f"      ⚠ the combine published r = {float(r_comb[i]):.6f} for this hop; the relay's "
@@ -318,7 +318,7 @@ def section_relay(r, direction, rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g
     print("   ⛔ `framed?` = NO-FRAME means one END had ZERO density, so the reframe was SKIPPED and")
     print("      r was forced to 1 — a DEGENERATE hop, not a decision. A row that is NO-FRAME tells you")
     print("      nothing about the reframe logic either way.")
-    print("   ⛔ `lend` is the solver's own `pop[dst] & pg[src]>0 & pR[src]>0`, printed beside all three")
+    print("   ⛔ `may_share_composition` is the solver's own `pop[dst] & pg[src]>0 & pR[src]>0`, printed beside all three")
     print("      conjuncts so it can be checked rather than trusted. `pop` shows `—` where it is not")
     print("      recoverable (one of the other two already failed).")
 
@@ -413,7 +413,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
             # so ``r_tot`` contains a term with NO counterpart at the source. It is a ratio of densities
             # only dimensionally; as a scale factor it is meaningless. ⭐ This is exactly what the
             # composition licence exists to catch, via its "did the source SUPPLY both components?"
-            # conjunct — check the `lend` column in the next section: it is False on both these rows and
+            # conjunct — check the `may_share_composition` column in the next section: it is False on both these rows and
             # the gDNA level crosses UNSCALED. Marked NO-r_R rather than as a failure.
             if rs <= EPS or gs <= EPS:
                 ok = "NO-r_R" if rs <= EPS else "NO-r_g"
@@ -429,7 +429,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     print("   ⛔⛔ `NO-r_R` marks a hop whose SOURCE has ZERO of a component the DESTINATION has plenty")
     print("      of, so no per-component ratio exists for it and `r_tot` contains a term with no")
     print("      counterpart at the source at all. That is the extreme of this problem and it is the")
-    print("      case the composition licence already withholds — `lend` is False on those rows.")
+    print("      case the composition licence already withholds — `may_share_composition` is False on those rows.")
 
 
 def section_answer(r, lab, g_cnt, rna_cnt):
@@ -472,8 +472,8 @@ def run_arm(arm, donor_name, spec, index, config, work_dir):
     print(f"   kappa = {donor.priors.rna_sense_frac:.6f}  (½ ⇒ EXACTLY zero strand information, `EQUATIONS.md` §5.2)")
     geom = rebuild_geometry(r)
     lab = labels(r.chain, r.region_arrays)
-    # ⛔⛔ EVERY SECTION BELOW SECTION 1 IS A HOP, and a hop exists only under `HeadPolicy`. The frames
-    # (`rho_lo`/`rho_hi`), the relay state (`fwd_*`/`bwd_*`) and the mass pins (`_pin`) are all published
+    # ⛔⛔ EVERY SECTION BELOW SECTION 1 IS A HOP, and a hop exists only under `RelayPolicy`. The frames
+    # (`rho_lo`/`rho_hi`), the relay state (`fwd_*`/`bwd_*`) and the mass rescales (`_pin`) are all published
     # by the message layer, so this file died with `KeyError: 'rho_lo'` — the same class of defect as the
     # four `KeyError: '_uni'` instruments, at a different key. Refuse rather than walk an empty relay.
     TH.require_relay(r.capture, what="the reframe walk (every hop, both directions, with its frames)")
@@ -484,7 +484,7 @@ def run_arm(arm, donor_name, spec, index, config, work_dir):
     t_unspl, t_lo, t_hi, t_rho_g = truth_flank_pair(r, geom, g_cnt, rna_cnt)
     section_counts(r, geom, lab, g_cnt, rna_cnt)
     rho_lo, rho_hi, unspl, shipped_all = section_flank_pair(r, geom, lab, st_cap, t_unspl, t_lo, t_hi)
-    pins = r.capture["_pin"]
+    pins = r.capture["_rescale"]
     section_decompose(r, geom, lab, g_cnt, rna_cnt)
     section_relay(r, "forward", rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g, lab, st_cap, pins[0])
     section_relay(r, "backward", rho_lo, rho_hi, shipped_all, t_lo, t_hi, t_rho_g, lab, st_cap, pins[1])

@@ -167,7 +167,7 @@ def report(spec_name, arm, r, expect):
     # ``cg . E_g / M``. If that already implies f_g >= 1 and psi still returns less, the shortfall is
     # psi's SOLVE and not the level — a completely different fix from anything in the message layer, and
     # no amount of work on the reframe can reach it.
-    # ⛔ `_uni` exists only under `HeadPolicy`; muted, there is NO delivered density to convert, and a 0
+    # ⛔ `_uni` exists only under `RelayPolicy`; muted, there is NO delivered density to convert, and a 0
     # here would read as "the relay delivered nothing useful" rather than "the relay was not asked".
     cg = np.asarray(relay["cg"], float) if relay is not None else None
     st = TH.relay_static(r.capture)  # M / E_g survive the mute — the BACKBONE publishes them

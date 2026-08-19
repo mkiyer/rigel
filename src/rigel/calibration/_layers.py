@@ -122,7 +122,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "messages",
             "messages/variance",
             "messages/silent",
-            "messages/head",
+            "messages/relay",
         ),
     ),
     (
@@ -144,7 +144,7 @@ _OF: dict[str, int] = {m: num for num, _t, members in LAYERS for m in members}
 
 
 def layer_of(module: str) -> int | None:
-    """The layer of a module, by its package-relative name (``"sweep"``, ``"messages/head"``).
+    """The layer of a module, by its package-relative name (``"sweep"``, ``"messages/relay"``).
 
     ``None`` means UNPLACED, which the gate treats as a failure rather than as a default — a module with no
     declared home is exactly the flat-pile state this file exists to end.

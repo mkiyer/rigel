@@ -59,7 +59,7 @@ because it re-ranks two POST-calibration items and costs half an hour, not becau
 Three defects were introduced and caught, all by gates or by adversarial hunting, none by inspection:
 
 * deriving the RNA total from `f_g` made it inherit `f_g`'s grid SNAP, where the retired posterior-mean
-  read-out had been exact (`test_relay_mass_pin` caught it) — `TRAPS: deriving-one-coordinate-propagates-its-error`;
+  read-out had been exact (`test_relay_mass_rescale` caught it) — `TRAPS: deriving-one-coordinate-propagates-its-error`;
 * the ½-quantile was first interpolated in `f_g`-space, biasing a concentrated posterior toward ½ by
   2.7e-03 — `TRAPS: interpolate-on-the-axis-where-the-lattice-is-uniform`;
 * `_compose` did not clamp the tilt share, so an out-of-range share gave a NEGATIVE fraction that still

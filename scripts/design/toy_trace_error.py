@@ -115,7 +115,7 @@ def main() -> int:
                                     genome_length=args.genome_length, nrna=args.nrna,
                                     work_dir=args.work_dir, messages=messages)
     cap, chain = dbg["capture"], dbg["chain"]
-    # ⛔ `_uni` is written only by `messages/head.py`. Sections 2–6 all read it (or a head-only
+    # ⛔ `_uni` is written only by `messages/relay.py`. Sections 2–6 all read it (or a head-only
     # `_uni_static` key such as `og` / `pg_own` / `struct_lock`), so the refusal is deferred to just
     # after section 1 — the one section that is policy-independent.
     st = TH.relay_static(cap)
@@ -179,9 +179,9 @@ def main() -> int:
     print("\n── 2. THE FOUR INIT SOURCES — does the object have ANY own evidence? ───────────────────")
     print("   struct = structural certainty (pure-gDNA object) · tau_own = the λ-axis evidence it earned")
     print("   ⭐ fg_strand is the strand likelihood ALONE; fg_loc adds the intron factory and ψ's reference")
-    print("   ⭐⭐ `prec_+` is the SUPPLY conjunct of the composition licence: a source may lend a")
+    print("   ⭐⭐ `prec_+` is the SUPPLY conjunct of the composition licence: a source may may_share_composition a")
     print("      composition only if it supplied BOTH components at nonzero precision. A source whose")
-    print("      RNA precision is 0 cannot lend, and its gDNA LEVEL then crosses UNSCALED.")
+    print("      RNA precision is 0 cannot may_share_composition, and its gDNA LEVEL then crosses UNSCALED.")
     print(f"\n   {'slot':<28} {'u+':>6} {'u−':>6} {'struct':>7} {'tau_own':>10} {'fg_strand':>10} "
           f"{'fg_loc':>8} {'own rho_g':>10} {'prec_g':>9} {'prec_+':>9} {'|Δ loc|':>8}")
     print("   " + "-" * 118)
@@ -196,19 +196,19 @@ def main() -> int:
 
     # ── 3. the relay, hop by hop ─────────────────────────────────────────────────────────────────
     print("\n── 3. THE RELAY, HOP BY HOP — how the gDNA level travels, and where it is rescaled ─────")
-    print("   `lend` = the composition licence. When it is FALSE the level crosses UNSCALED and the")
-    print("   mass pin is off; when TRUE the source's SHARE is imputed onto the destination's total.")
-    for name, pin in zip(("forward L→R", "backward R→L"), cap["_pin"]):
+    print("   `may_share_composition` = the composition licence. When it is FALSE the level crosses UNSCALED and the")
+    print("   mass rescale is off; when TRUE the source's SHARE is imputed onto the destination's total.")
+    for name, pin in zip(("forward L→R", "backward R→L"), cap["_rescale"]):
         src = np.asarray(pin["src"], np.int64)
         val = np.asarray(pin["valid"], bool)
         print(f"\n   {name}")
-        print(f"      {'dst slot':<28} {'← src':<28} {'r':>8} {'lend':>6} {'tg delivered':>13} "
+        print(f"      {'dst slot':<28} {'← src':<28} {'r':>8} {'may_share_composition':>6} {'tg delivered':>13} "
               f"{'tpg':>9} {'SPLICE IN J':>8} {'spl_prec':>9}")
         for s in range(n_slots):
             if not val[s]:
                 continue
             print(f"      {lab[s]:<28} {lab[int(src[s])]:<28} {float(pin['r'][s]):>8.4f} "
-                  f"{str(bool(pin['lend'][s])):>6} {float(pin['tg'][s]):>13.5g} "
+                  f"{str(bool(pin['may_share_composition'][s])):>6} {float(pin['tg'][s]):>13.5g} "
                   f"{float(pin['tpg'][s]):>9.3g} "
                   f"{float(pin['spl_p'][s]) + float(pin['spl_n'][s]):>8.0f} "
                   f"{float(pin['spl_prec'][s]):>9.3g}")
@@ -317,18 +317,18 @@ def main() -> int:
 
     # ── 6. the RELAY-level test the channel ablations cannot do ──────────────────────────────────
     print("\n── 6. ⭐⭐⭐ THE RELAY-LEVEL ARM — withhold the COMPOSITION LICENCE everywhere ────────────")
-    print("   `_lend = pop & (the source supplied both components)`. When it is TRUE the reframe")
+    print("   `_may_share = pop & (the source supplied both components)`. When it is TRUE the reframe")
     print("   multiplies the gDNA LEVEL by `r = rho_tot(dst)/rho_tot(src)`; when FALSE the level crosses")
-    print("   UNSCALED. Forcing the POPULATION conjunct to fail everywhere makes `_lend` false on every")
+    print("   UNSCALED. Forcing the POPULATION conjunct to fail everywhere makes `_may_share` false on every")
     print("   hop, in BOTH twins at once, and is the only way to ask whether the licensed reframe is")
     print("   what inflates the delivered level. ⚠ A DIAGNOSTIC, not a proposal: the licence is")
     print("   load-bearing elsewhere (`EQUATIONS.md` §3.5b/§3.5c).")
     # ⛔⛔ A THIRD, INDEPENDENT DEATH IN THIS FILE — the same species as the two above and again invisible
     # to an import gate. This patched `rigel.calibration.sweep.terminus_flank_gain`, a name that is NOT
-    # THERE: the licence's only consumer is `messages/head.py`, which binds the function at import time
+    # THERE: the licence's only consumer is `messages/relay.py`, which binds the function at import time
     # (`from ..region_geometry import … terminus_flank_gain`). ⭐ Patch the CONSUMER's binding, because
     # patching `region_geometry` would be too late for a name already bound.
-    from rigel.calibration.messages import head as BP
+    from rigel.calibration.messages import relay as BP
 
     orig = BP.terminus_flank_gain
 

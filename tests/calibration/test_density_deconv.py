@@ -71,7 +71,7 @@ def test_negbinom_large_size_approaches_poisson():
 
 
 def test_factor_peaks_at_rho_bg_over_rho_obs():
-    """The gDNA peel lands at f_g = ρ_bg/ρ_obs = μ/C (the confident background peel)."""
+    """The gDNA deconvolve lands at f_g = ρ_bg/ρ_obs = μ/C (the confident background deconvolve)."""
     rho_bg, E_g = 0.5, 1000.0
     C = np.array([2000.0])  # ρ_obs = 2.0 ⇒ f_g* = 0.25
     fac = density_lambda_factor(_bg(rho_bg), C, np.array([E_g]), _GRID)
@@ -79,7 +79,7 @@ def test_factor_peaks_at_rho_bg_over_rho_obs():
 
 
 def test_regime_pure_gdna_fg_near_one():
-    """ρ_obs ≈ ρ_bg (no nascent) ⇒ f_g peels near 1 (all gDNA)."""
+    """ρ_obs ≈ ρ_bg (no nascent) ⇒ f_g deconvolves near 1 (all gDNA)."""
     rho_bg, E_g = 0.5, 1000.0
     C = np.array([rho_bg * E_g])  # ρ_obs = ρ_bg
     fac = density_lambda_factor(_bg(rho_bg), C, np.array([E_g]), _GRID)
@@ -107,7 +107,7 @@ def test_regime_dna_free_pins_low():
 
 
 def test_precision_monotone_in_count():
-    """Honest count-over-length: a higher-count intron peels f_g more sharply (narrower factor)."""
+    """Honest count-over-length: a higher-count intron deconvolves f_g more sharply (narrower factor)."""
     rho_bg, E_g = 0.5, 1000.0
 
     def width(C):
@@ -192,7 +192,7 @@ def test_the_background_is_smooth_through_zero_counts():
 
 def test_an_empty_pool_is_not_confident():
     """⛔ Σg=0 says "around 1/(2ΣE), and I genuinely do not know" — the factor must neither place the
-    peel away from ~0 on a dense intron NOR carry populated-pool precision. The shipped path read
+    deconvolve away from ~0 on a dense intron NOR carry populated-pool precision. The shipped path read
     tau ~ 3e8 here and called 80 % of nascent gDNA."""
     from rigel.calibration.density_deconv import density_factor_precision
 

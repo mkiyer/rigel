@@ -12,8 +12,8 @@ ablation is small and the joint one is large, go one stage upstream* — because
 switch that moves nothing from one that moves two slots in opposite directions.
 
 ⛔⛔ **THE VERDICT THIS DOCSTRING USED TO CARRY IS NO LONGER REPRODUCIBLE, AND SAYING SO IS THE POINT.**
-It read: *"``HeadPolicy`` reproduced the shipped answer on 421,056 output elements and 18,245,830
-diagnostic elements, zero differences"*. That was ``HeadPolicy`` against **the solver the backbone
+It read: *"``RelayPolicy`` reproduced the shipped answer on 421,056 output elements and 18,245,830
+diagnostic elements, zero differences"*. That was ``RelayPolicy`` against **the solver the backbone
 replaced**, and that solver is DELETED — there is no second arm to put on the other side, so no invocation
 of this file can produce the number again. ⛔ Do not re-attach it to any arm pair this file still offers:
 ``head`` vs ``silent`` is an ABLATION and is expected to DIFFER. ⭐ What would reproduce it is a checkout
@@ -71,7 +71,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rigel.calibration import sweep as SW  # noqa: E402
-from rigel.calibration.messages.head import HeadPolicy, HeadSwitches  # noqa: E402
+from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches  # noqa: E402
 from rigel.calibration.messages.silent import SilentPolicy  # noqa: E402
 
 #: capture keys that CANNOT match by construction, with the reason. ⛔ Keep this set EMPTY unless the
@@ -234,14 +234,14 @@ def main() -> int:
         if spec == "silent":
             return SilentPolicy()
         if spec == "head":
-            return HeadPolicy()
+            return RelayPolicy()
         if spec.startswith("no_"):
             name = spec[3:]
-            if name not in HeadSwitches().names():
+            if name not in RelaySwitches().names():
                 raise SystemExit(
-                    f"⛔ no such switch {name!r}. Available: {', '.join(HeadSwitches().names())}"
+                    f"⛔ no such switch {name!r}. Available: {', '.join(RelaySwitches().names())}"
                 )
-            return HeadPolicy(HeadSwitches(**{name: False}))
+            return RelayPolicy(RelaySwitches(**{name: False}))
         raise SystemExit(f"⛔ unknown arm {spec!r} — use 'head', 'silent' or 'no_<switch>'")
 
     pa, pb = policy_for(args.arm_a), policy_for(args.arm_b)

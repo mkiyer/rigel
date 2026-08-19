@@ -22,7 +22,7 @@ import pytest
 
 from rigel.types import Strand
 
-from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.messages.relay import RelayPolicy
 from rigel.calibration.sweep import solve_chain
 
 from rigel.calibration.effective_length import (
@@ -47,7 +47,7 @@ from rigel.calibration.signature import (
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=RelayPolicy())
 
 
 def _delta_pmf(length):

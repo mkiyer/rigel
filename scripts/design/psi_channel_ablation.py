@@ -13,7 +13,7 @@ records — *the first sentence won* — so the claim is deleted here rather tha
 
 ⛔⛔ **THIS IS A MESSAGE-LAYER INSTRUMENT AND IT DEFAULTS TO ``--messages on``, WHICH IS *NOT* THE
 SHIPPED CONFIGURATION.** All four arms null a ``*_imp_*`` channel, and those keyword arguments are
-written by ``messages/head.py`` alone — under the shipped ``CalibrationConfig.message_propagation =
+written by ``messages/relay.py`` alone — under the shipped ``CalibrationConfig.message_propagation =
 False`` (``SilentPolicy``) the solver is never handed one, so every arm is structurally inert. ⚠ Until
 2026-08-17 the file had no way to express its own policy: it ran the shipped config, recorded **0**
 combines carrying a non-``None`` ``lam_imp_prec``, and died on ``IndexError: list index out of range``
@@ -142,7 +142,7 @@ def main() -> int:
     # cannot express must not be run and reported as "no effect" (`TRAPS: an-ablation-that-never-ran`).
     if not messages:
         raise SystemExit(
-            "⛔ every arm of psi_channel_ablation nulls a `*_imp_*` channel, and `messages/head.py` is "
+            "⛔ every arm of psi_channel_ablation nulls a `*_imp_*` channel, and `messages/relay.py` is "
             "the ONLY writer of those\n"
             "   keyword arguments. With message_propagation=False (SilentPolicy) the solver is handed "
             "none of them, so all four\n"

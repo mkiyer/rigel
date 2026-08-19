@@ -23,7 +23,7 @@ arm              the BOUNDARY's own ``f_g``      ``struct_lock``     what the de
 ``oracle_lock``  ORACLE TRUTH                ⭐ ON               the absolute ceiling for this object
 ===============  ==========================  ==================  =====================================
 
-⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.head``'s ``mg_own``), and
+⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.relay``'s ``mg_own``), and
 `region_init.strand_evidence` scopes it to REGION slots — so an BOUNDARY can only ever RELAY a gDNA level, never
 ORIGINATE one. That is `ROADMAP.md` §1.1 **the-cancelling-pair** stated as code, and ``lock_only`` is its ceiling.
 
@@ -381,7 +381,7 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
     # ⭐ the channel state at every slot, so a null result can be ATTRIBUTED rather than guessed:
     # `cm_g` is the gDNA MEASUREMENT precision ψ receives (0 ⇒ the gDNA message is inert — TRAPS: conservation-misses-mis-attribution).
     # ⛔ These four are DECORATION on the ceiling, not the ceiling: `_uni` exists only under
-    # `HeadPolicy`, and this file used to die here with `KeyError: '_uni'` under the shipped
+    # `RelayPolicy`, and this file used to die here with `KeyError: '_uni'` under the shipped
     # `message_propagation = False`. Muted, they are NaN — the relay published no claim, and a 0 would
     # read as a measured inert channel (`TRAPS: an-ablation-that-never-ran`).
     uni = TH.relay_channels(debug["capture"])

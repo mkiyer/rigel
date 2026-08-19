@@ -21,7 +21,7 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **slot** | one entry of the chain, which alternates REGION, BOUNDARY, REGION, BOUNDARY … A slot is a REGION **or** a BOUNDARY | — |
 | **step** | one adjacency move along the chain: REGION→BOUNDARY or BOUNDARY→REGION. So REGION→BOUNDARY→REGION is **two steps** | `hop` |
 | **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `region_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
-| **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`messages/head.py`'s `_pin_v` and its scalar twin inside the scan kernel). "Pin" because the function is named for it | `the mass anchor` |
+| **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`messages/relay.py`'s `_rescale_v` and its scalar twin inside the scan kernel). "Pin" because the function is named for it | `the mass anchor` |
 | **counts** | discrete integer fragment counts | — |
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
 | **crossing fragment** | ⭐ a **fragment** that spans a BOUNDARY. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are REGIONs and BOUNDARIES, never "crossings" |
@@ -51,13 +51,13 @@ this at every consumer and names its arrays `_lo` / `_hi`; `test_splice_flux_ref
 `−`-strand sj specifically. ⚠ `TESTING.md` §0b records the same trap from the toy side, where the bits
 decide the sign of a whole scenario.
 
-⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Peel"
+⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Deconvolution"
 and "graft" named two operators; the same BOUNDARY is a splice-out for a message travelling one way and a
 splice-in for a message travelling the other, so the pair names one thing seen from two sides.
 ⭐⭐⭐ **LANDED 2026-08-18 (owner: vocabulary is the highest priority).** `graft` → `splice_in` tree-wide
-(verified unambiguous); `peel` → `splice_out` **SENSE-SCOPED**, because `peel` also names the DECONVOLUTION
-verb — *"peel the gDNA off, RNA is the residual"* — in `density_deconv`, `calibrate`, `object_composition`
-and in the named rule `TRAPS: the-peel-is-as-good-as-the-density-it-is-handed`. ⛔ That second sense is
+(verified unambiguous); `deconvolve` → `splice_out` **SENSE-SCOPED**, because `deconvolve` also names the DECONVOLUTION
+verb — *"deconvolve the gDNA off, RNA is the residual"* — in `density_deconv`, `calibrate`, `object_composition`
+and in the named rule `TRAPS: the-deconvolution-is-as-good-as-the-density-it-is-handed`. ⛔ That second sense is
 DELIBERATELY UNCHANGED: a global replace corrupts it, which is `TRAPS: two-masks-one-name` and is exactly
 what `rename_census.py --sense` exists to catch. ⚠ The deconvolution sense has NOT been ruled on and still
 carries a retired word — an owner call, and the next naming decision.
@@ -265,7 +265,7 @@ neighbours is message passing.
 ### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT, AND IT IS SWITCHED OFF — do not build it again
 
 ⛔⛔ **The hop the derivation above asks for EXISTS IN `src/`, is individually switchable, and is behind
-one config flag.** It is the **SPLICE IN** — `messages/head.py`, switch `splice_in` on `HeadPolicy`:
+one config flag.** It is the **SPLICE IN** — `messages/relay.py`, switch `splice_in` on `RelayPolicy`:
 
 > **SPLICE IN (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE**, which joins the
 > RNA claim entering the destination EXON.
@@ -276,7 +276,7 @@ one config flag.** It is the **SPLICE IN** — `messages/head.py`, switch `splic
 |---|---|
 | **only an EXON receives it** | an intron carries no sj flux, so there is nothing to SPLICE IN there — the operator is already scoped to the one slot class that has no observation of its own |
 | **it is a MEASUREMENT (a COUNT), not an imputation** | so it carries **its own precision**, rather than inheriting the source's belief. This is the difference between an upper bound with a variance and a guess |
-| **its transfer variance `s2t` is identically 0** | on a matched-set SPLICE IN the reframe ratio `r` is common-mode and cancels, so the hop adds no scale-sampling variance of its own |
+| **its transfer variance `hop_logvar` is identically 0** | on a matched-set SPLICE IN the reframe ratio `r` is common-mode and cancels, so the hop adds no scale-sampling variance of its own |
 | ⭐⭐ **it is explicitly NOT tau-gated** | the source's PREDICTION precision is 0 on unstranded data, and a tau gate would drop the SPLICE IN on the floor there. ⛔ So the SPLICE IN **survives exactly the stratum where the strand channel is dead** — which is the stratum the exon problem is hardest on |
 
 ⚠ **VOCABULARY.** §0 names this operator **SPLICE IN**, and `src/` now spells it that way
@@ -285,7 +285,7 @@ and survives only in commit messages and in the history recorded here — a grep
 
 ⛔ **Where it is switched off:** `CalibrationConfig.message_propagation = False` installs
 `messages/silent.py`'s `SilentPolicy`, which sends nothing (§6.1). Turning the relay on is one flag; every
-operator inside `HeadPolicy` remains behind its own named switch, so the SPLICE IN can be priced alone.
+operator inside `RelayPolicy` remains behind its own named switch, so the SPLICE IN can be priced alone.
 
 ### 0c.2 ⭐⭐⭐ WHY IT IS OFF — a NAMED, CONFIRMED BUG, and NOT a verdict on the mechanism
 
@@ -308,7 +308,7 @@ gives **`n/6`**, and that is a smaller panel rather than a coverage regression.
 ⛔⛔⛔ **BUT THE +154.8 % IS NOT EVIDENCE ABOUT THE RELAY AS IT WOULD BE FIXED, AND INHERITING IT IS THE
 ERROR THIS RULING EXISTS TO PREVENT.** It was measured **with a confirmed bug live**:
 
-> `HeadPolicy`'s **composition licence** implements §4.1's rule — *a composition may be imputed across a
+> `RelayPolicy`'s **composition licence** implements §4.1's rule — *a composition may be imputed across a
 > step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION* — for
 > transcript **TERMINI ONLY** (`region_geometry.terminus_flank_gain`). ⛔ **`mrna_active` flipping across
 > a hop is a population change too, and it is NOT checked.** So a **CORRECT** pure-gDNA claim at an intron
@@ -769,7 +769,7 @@ the fragments it counts are the same population" stays absolute. Pass one's numb
 
 | | |
 |---|---|
-| ⭐⭐ **a composition may be imputed across a step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, you cannot tell enrichment from a population difference. Derivation + the genomic form of the predicate: `EQUATIONS.md` §3.5b. ⛔ **Termini only** — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the SPLICE IN and the peel route it |
+| ⭐⭐ **a composition may be imputed across a step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, you cannot tell enrichment from a population difference. Derivation + the genomic form of the predicate: `EQUATIONS.md` §3.5b. ⛔ **Termini only** — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the SPLICE IN and the deconvolution route it |
 | ⭐ **the population test is written in GENOMIC terms, never TSS/TES** | the strand flips which flank a terminus implicates; `region_geometry.terminus_flank_gain` is the one home, gated on two mirror-image annotations (TRAPS: substitute-the-definitions-first family) |
 | ⭐ **the mass pin carries the same licence, plus the structural case** | it fires iff no BELIEF can reach its budget: the composition was supplied, **or** the destination is a structurally pure-gDNA object whose `f_g = 1` is structure and whose `M/E_g` is therefore an observation. `EQUATIONS.md` §3.5c, TRAPS: the-pin-had-a-fixed-point/TRAPS: no-belief-not-no-numbers |
 | gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5.3) |
@@ -837,11 +837,11 @@ argument about what a message should say were interleaved. It is now two things,
 |---|---|---|
 | `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, splices in, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
 | `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five lines. | A reader who holds `sweep.py` plus this holds the entire working system |
-| `messages/head.py` | `HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
+| `messages/relay.py` | `RelayPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
 | `messages/variance.py` | was `enrichment_frame.py` — the policy's variance toolbox | ⚠ `count_logvar` is also imported by `region_init`; it has ONE home and this is it |
 
 ⛔⛔ **`SilentPolicy` BEING THE DEFAULT IS NOT A STATEMENT THAT MESSAGE PASSING IS UNNECESSARY — §0c
-proves the opposite, and `HeadPolicy` ALREADY CONTAINS THE OPERATOR THE EXON NEEDS** (the SPLICE IN / SPLICE-IN,
+proves the opposite, and `RelayPolicy` ALREADY CONTAINS THE OPERATOR THE EXON NEEDS** (the SPLICE IN / SPLICE-IN,
 §0c.1). Read §0c.2 before quoting the price of turning the flag back on.
 
 ⭐⭐⭐ **HOW IT WAS ACCEPTED, and this is the part that generalises: a restructure is gated, a rewrite is
@@ -849,7 +849,7 @@ not.** Two `TRAPS: byte-identity-gate` gates, opposite in direction, both passed
 
 | | must be | result |
 |---|---|---|
-| `--arm backbone_head` (every switch ON) | **byte-identical to `base`** | ✅ **1,872 / 1,872 scored fields, 72 / 72 rows** |
+| `--arm backbone_relay` (every switch ON) | **byte-identical to `base`** | ✅ **1,872 / 1,872 scored fields, 72 / 72 rows** |
 | `--arm backbone` (`SilentPolicy`) | **byte-identical to `msgfree_all`** | ✅ **1,872 / 1,872 scored fields, 72 / 72 rows** |
 
 and, per-array on one real 70,176-slot chain (`scripts/design/backbone_parity.py`): **421,056 output
@@ -1174,7 +1174,7 @@ different instrument. Two things the older sweep could not say:
   that an exon is structurally one of them, so this figure locates the error at exactly the population the
   relay is the only mechanism for. ⛔ Reading it as *"the relay is what breaks it, so mute it"* is the
   re-derivation §0c exists to stop.
-  ⛔ So the coverage of the density peel is a *frame and region-type restriction*, not a limit of what is
+  ⛔ So the coverage of the density deconvolve is a *frame and region-type restriction*, not a limit of what is
   knowable — and `EQUATIONS.md` §3.2 (density is frame-invariant to ~0.36 %) is the argument that ρ_bg
   should transport to the crossing frame at all. What it cannot survive is non-uniform gDNA placement,
   which is precisely what capture creates at exons (TRAPS: capture-is-1000x-on-exons).

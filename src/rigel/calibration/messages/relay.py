@@ -1,4 +1,4 @@
-"""HeadPolicy — every operator the evolved solver carried, each behind a NAMED switch.
+"""RelayPolicy — every operator the evolved solver carried, each behind a NAMED switch.
 
        Gate: ``tests/calibration/test_sweep_backbone.py`` (per-array parity against the shipped answer)
 
@@ -17,7 +17,7 @@ is large, go one stage upstream*. One switch per independently-ablatable operato
 ⚠ **The two twins are still twins.** ``_step`` (scalar, one slot at a time) and ``deliver`` (vectorised) run
 the same transform in the same order, and the duplication is DELIBERATE: routing the sequential scan through
 the numpy form was measured at **15.7×** per operation. They also differ in three boundary cases ON PURPOSE, and
-those differences are NOT bugs to unify — see :meth:`_HeadRelay.scan`.
+those differences are NOT bugs to unify — see :meth:`_PreparedRelay.scan`.
 """
 
 from __future__ import annotations
@@ -52,13 +52,13 @@ from .variance import (
     transfer_logvar,
 )
 
-__all__ = ["HeadPolicy", "HeadSwitches"]
+__all__ = ["RelayPolicy", "RelaySwitches"]
 
 _EPS = 1.0e-9
 
 
 @dataclass(frozen=True, slots=True)
-class HeadSwitches:
+class RelaySwitches:
     """One boolean per independently-ablatable operator. **All default ON**, which is the shipped answer.
 
     ⛔ Turning one OFF is an EXPERIMENT, and the operator ledger predicts the sign for several of them: most
@@ -92,9 +92,9 @@ class HeadSwitches:
     #: Scaling one arm and not the other IS a composition transfer; refusing the hop must refuse it for
     #: every arm — a DENSITY transfer. OFF ⇒ the pre-2026-08-18 behaviour.
     rna_level_scale: bool = True
-    #: the relay's mass pin ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
+    #: the relay's mass rescale ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
     #: ceiling says deleting it outright cost the panel **+0.0002** — it landed on the derivation.
-    mass_pin: bool = True
+    mass_rescale: bool = True
     #: SPLICE IN: a flanking BOUNDARY's measured sj density joins the RNA claim entering an EXON.
     splice_in: bool = True
     #: the-splice-in-frame-variance — the SPLICE IN's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
@@ -129,24 +129,24 @@ class HeadSwitches:
         return tuple(f.name for f in fields(self) if not getattr(self, f.name))
 
 
-class HeadPolicy:
-    """The shipped message layer. ``HeadPolicy()`` — every switch ON — is the shipped answer."""
+class RelayPolicy:
+    """The shipped message layer. ``RelayPolicy()`` — every switch ON — is the shipped answer."""
 
     name = "head"
 
-    def __init__(self, switches: HeadSwitches | None = None):
-        self.switches = switches if switches is not None else HeadSwitches()
+    def __init__(self, switches: RelaySwitches | None = None):
+        self.switches = switches if switches is not None else RelaySwitches()
         if self.switches.off():
             self.name = "head-" + "-".join(f"no_{s}" for s in self.switches.off())
 
-    def prepare(self, ctx: StepContext) -> _HeadRelay:
-        return _HeadRelay(ctx, self.switches)
+    def prepare(self, ctx: StepContext) -> _PreparedRelay:
+        return _PreparedRelay(ctx, self.switches)
 
 
-class _HeadRelay:
+class _PreparedRelay:
     """One sweep's worth of prepared state. Everything derived here is a POLICY derivation."""
 
-    def __init__(self, ctx: StepContext, sw: HeadSwitches):
+    def __init__(self, ctx: StepContext, sw: RelaySwitches):
         self.ctx = ctx
         self.sw = sw
         cap = ctx.capture
@@ -366,7 +366,7 @@ class _HeadRelay:
         self._ex_l, self._bnd_l, self._fp_l, self._fn_l = (
             a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a)
         )
-        # the destination's own composition CERTAINTY — case (ii) of the mass pin's licence. Both axes: an
+        # the destination's own composition CERTAINTY — case (ii) of the mass rescale's licence. Both axes: an
         # ``intergenic|exon`` BOUNDARY is as structurally pure-gDNA as an intergenic REGION, and it is gated on
         # ``g1_locked`` rather than on ``region_init``'s region-only ``struct_lock`` because the object in
         # question is an BOUNDARY.
@@ -648,9 +648,9 @@ class _HeadRelay:
         mg, mp, mn = mg_own_l.copy(), mp_own_l.copy(), mn_own_l.copy()  # MEASUREMENT
         tau = tau_own_l.copy()  # COMPOSITION (tau_lambda) → the lambda-message
 
-        def _damp(p, s2t):
+        def _damp(p, hop_logvar):
             """sigma^2_transfer per-hop damping: 1/p → 1/p + sigma^2_transfer."""
-            return 1.0 / (1.0 / p + s2t) if p > 0.0 else 0.0
+            return 1.0 / (1.0 / p + hop_logvar) if p > 0.0 else 0.0
 
         def _damp_v(p, v):
             """Add a log-variance to a precision. 1/p → 1/p + v ; v = inf ⇒ 0 (no claim)."""
@@ -678,17 +678,17 @@ class _HeadRelay:
             # elsewhere. The COMPOSITION-mismatch term is the combine's job: the scan has no destination
             # self-solve to measure a gap against, and its running belief is already fused with the
             # messages, so a gap here would be feedback and not evidence.
-            s2t = 0.0 if _gr else (logvar_l[i] + logvar_l[s])
+            hop_logvar = 0.0 if _gr else (logvar_l[i] + logvar_l[s])
             gp = spl_p_l[s] if _gr else 0.0
             gn = spl_n_l[s] if _gr else 0.0
-            # ⭐⭐ THE gDNA SCALE. ``_lend``: may this source lend a COMPOSITION? Two conditions, and they
+            # ⭐⭐ THE gDNA SCALE. ``_may_share``: may this source may_share_composition a COMPOSITION? Two conditions, and they
             # are different questions about the same step — SUPPLY (did the source state both components
             # of the pair from its OWN crossing population? "supplied" is a statement about PRECISION,
             # not about a density's value) and POPULATION (is the source measuring the same RNA population
-            # as the destination?). Where either fails the gDNA LEVEL crosses UNSCALED and the pin is off
+            # as the destination?). Where either fails the gDNA LEVEL crosses UNSCALED and the rescale is off
             # with it.
-            _lend = pop[i] and pg[s] > 0.0 and (pp[s] + pn[s]) > 0.0
-            r_g = r if (_lend or not sw.gdna_level_scale) else 1.0
+            _may_share = pop[i] and pg[s] > 0.0 and (pp[s] + pn[s]) > 0.0
+            r_g = r if (_may_share or not sw.gdna_level_scale) else 1.0
             # ⭐ the PER-STRAND three-case rule — the scalar twin of ``_transport``'s (owner, 2026-08-18):
             # both populations intact ⇒ r; this one intact, the other changed ⇒ 1 (density transfer);
             # this one changed ⇒ NO CLAIM (value and precisions zeroed below, the fp/fn pattern).
@@ -699,9 +699,9 @@ class _HeadRelay:
             else:
                 tp, tn = (rp[s] + gp) * r, (rn[s] + gn) * r
             tg = rg[s] * r_g
-            tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
-            tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
-            ttau = _damp(tau[s], s2t)  # composition
+            tpg, tpp, tpn = _damp(pg[s], hop_logvar), _damp(pp[s], hop_logvar), _damp(pn[s], hop_logvar)  # full (mode)
+            tmg, tmp, tmn = _damp(mg[s], hop_logvar), _damp(mp[s], hop_logvar), _damp(mn[s], hop_logvar)  # measurement
+            ttau = _damp(tau[s], hop_logvar)  # composition
             # The spliced-in sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
             # data and would otherwise drop the SPLICE IN on the floor. It enters BOTH the mode fusion and the
@@ -710,7 +710,7 @@ class _HeadRelay:
                 # the-splice-in-frame-variance: the spliced-in spliced density is measured in the DESTINATION exon's frame, so it has no
                 # matched gDNA partner to cancel ``r`` against and the-reframe-scale-variance's SPLICE IN-zero does not cover it.
                 # Charge the frame step it is implicitly mis-lifted by. Identically 0 at r = 1.
-                _s2f = s2t + (splice_in_frame_logvar_scalar(r) if sw.splice_in_frame_var else 0.0)
+                _s2f = hop_logvar + (splice_in_frame_logvar_scalar(r) if sw.splice_in_frame_var else 0.0)
                 _sps = SP_l[s]
                 _spc = _sps / (1.0 + _sps * _s2f) if _sps > _EPS else 0.0
                 _sns = SN_l[s]
@@ -726,7 +726,7 @@ class _HeadRelay:
                 # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
                 # ⛔ AFTER the SPLICE IN block, so the sj precision goes with the sj density it certified.
                 # Zeroing before it delivered "+ RNA = 0 @ the sj count's precision" — a confident
-                # nothing — which the next hop's mass pin turned into "all gDNA" (measured: an empty exon
+                # nothing — which the next hop's mass rescale turned into "all gDNA" (measured: an empty exon
                 # at n = 0 @ pn = 280, then M/E_g at the boundary beyond it; the 2026-08-18 zero-control
                 # gap). The SPLICE IN is a claim about THIS strand, and ψ reads the RNA channel as a LEVEL, so
                 # a refused arm delivers nothing, SPLICE IN included — not the sj density alone as a level.
@@ -746,23 +746,23 @@ class _HeadRelay:
                 tn, tpn, tmn = 0.0, 0.0, 0.0
             # ── PIN THE CONTEXT TO THIS SLOT'S OBSERVED MASS, WHERE NO BELIEF ENTERS THE BUDGET ────────
             # ``Sigma_c rho_c E_c = M`` is an IDENTITY under the imputation premise, not an approximation.
-            # The pin restores it with a common factor ``k = M/S``, and the budget ``S`` fills every
+            # The rescale restores it with a common factor ``k = M/S``, and the budget ``S`` fills every
             # component the context does NOT supply from the destination's own density — which is what
             # keeps a partial claim partial, and also what can make the delivered value a function of the
             # destination's own BELIEF. So it is licensed in exactly the two states where no belief reaches
             # ``S``:
-            #   (i)  ``_lend`` — the context SUPPLIED the composition, so the premise is granted and the
+            #   (i)  ``_may_share`` — the context SUPPLIED the composition, so the premise is granted and the
             #        identity is implied. This is the reframe's own predicate: one licence, one place.
             #   (ii) ``g1_l[i]`` — the destination is a structurally pure-gDNA object, so there is no
             #        unsupplied component to fill in. ``f_g = 1`` there is STRUCTURE, not a belief, and
-            #        ``S = rho_g E_g`` makes the pin hand the object its OWN MEASURED density. ⭐ That is
+            #        ``S = rho_g E_g`` makes the rescale hand the object its OWN MEASURED density. ⭐ That is
             #        the operator the capture landscape travels on.
             # ⛔ ANYWHERE ELSE IT WAS TRAPS: a-message-from-the-destinations-belief AT FULL STRENGTH: the closed form ``k = 1/(phi_msg + R_own)`` is a
             # saturating map whose fixed point is ``(1-R_own) rho_tot`` with ``R_own`` the RNA share of the
             # destination's OWN self-solve — EXACTLY 1/2 at a slot with no composition evidence. ⚠ It hid
             # because the running product of the rescales TELESCOPES back to 1 at the far end of a gene,
             # so no aggregate, endpoint or conservation check could see it.
-            if sw.mass_pin and (_lend or g1_l[i]):
+            if sw.mass_rescale and (_may_share or g1_l[i]):
                 _sg = tg if tpg > 0.0 else og_l[i]
                 _sp = tp if tpp > 0.0 else op_l[i]
                 _sn = tn if tpn > 0.0 else on_l[i]
@@ -817,8 +817,8 @@ class _HeadRelay:
         splice_in = (ex_a & is_bnd_a[src] & valid) if sw.splice_in else np.zeros_like(valid)
         gp = np.where(splice_in, spl_p[src], 0.0)
         gn = np.where(splice_in, spl_n[src], 0.0)
-        # ⭐⭐ THE gDNA SCALE — ``lend`` asks two things of the step: the lambda-emission gate's predicate
-        # of the SOURCE (it may lend a composition only if it SUPPLIED both components of the pair) and,
+        # ⭐⭐ THE gDNA SCALE — ``may_share_composition`` asks two things of the step: the lambda-emission gate's predicate
+        # of the SOURCE (it may may_share_composition a composition only if it SUPPLIED both components of the pair) and,
         # of the PAIR, whether the two objects measure the same RNA POPULATION. Where either fails the
         # reframe is a false premise and the gDNA LEVEL crosses UNSCALED.
         #
@@ -833,8 +833,8 @@ class _HeadRelay:
         # recorded because a perturbation dropping it fires no gate, and that is a fact about the solver
         # rather than a hole. ``pg[src] == 0`` with RNA precision live requires the source's own gDNA
         # density to be 0, and then ``rg[src]*r_g`` is 0 whatever the scale.
-        lend = pop & (pg > 0.0) & ((pp + pn) > 0.0)
-        r_g = np.where(lend, r, np.where(valid, 1.0, 0.0)) if sw.gdna_level_scale else r
+        may_share_composition = pop & (pg > 0.0) & ((pp + pn) > 0.0)
+        r_g = np.where(may_share_composition, r, np.where(valid, 1.0, 0.0)) if sw.gdna_level_scale else r
         # ⭐⭐⭐ the PER-STRAND rule (owner, 2026-08-18) — one decision per arm, three cases:
         #   · both strand populations unchanged  ⇒ reframe by ``r`` (the composition sharing the relay
         #     is designed around — the total ratio is meaningful);
@@ -856,21 +856,21 @@ class _HeadRelay:
         else:
             tp, tn = (rp + gp) * r, (rn + gn) * r
         tg = rg * r_g
-        s2t = transfer_logvar(logvar_tot, logvar_tot[src], splice_in)
+        hop_logvar = transfer_logvar(logvar_tot, logvar_tot[src], splice_in)
 
-        def _dv(p, s2=s2t):
+        def _dv(p, s2=hop_logvar):
             return np.where(valid & (p > 0.0), 1.0 / (1.0 / np.maximum(p, _EPS) + s2), 0.0)
 
         tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
         tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
-        ttau = _dv(tau, s2t)  # composition (tau) → the lambda-message
+        ttau = _dv(tau, hop_logvar)  # composition (tau) → the lambda-message
         # the SPLICE IN's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a SPLICE IN
-        # boundary, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
-        # entries (a zero-count slot has logvar_tot = +inf ⇒ s2t = inf, and ``0*inf`` would nan the masked
+        # boundary, where hop_logvar is identically 0, so the inf→0 substitution below touches only already-masked
+        # entries (a zero-count slot has logvar_tot = +inf ⇒ hop_logvar = inf, and ``0*inf`` would nan the masked
         # branch ``np.where`` evaluates).
         _sp = np.where(splice_in, SPL[:, 0][src], 0.0)
         _sn = np.where(splice_in, SPL[:, 1][src], 0.0)
-        _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
+        _s2t_spl = np.where(np.isfinite(hop_logvar), hop_logvar, 0.0)
         if sw.splice_in_frame_var:
             _s2t_spl = _s2t_spl + np.where(splice_in, splice_in_frame_logvar(r), 0.0)
         _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
@@ -906,11 +906,11 @@ class _HeadRelay:
         tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
         tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
         if cap is not None:  # inert: the PRE-PIN state
-            cap.setdefault("_pin", []).append(
+            cap.setdefault("_rescale", []).append(
                 {
                     "src": np.asarray(src).copy(),
                     "valid": np.asarray(valid).copy(),
-                    "lend": np.asarray(lend).copy(),
+                    "may_share_composition": np.asarray(may_share_composition).copy(),
                     "r": r.copy(),
                     "r_g": np.asarray(r_g).copy(),
                     "tg": tg.copy(),
@@ -919,7 +919,7 @@ class _HeadRelay:
                     "tpg": tpg.copy(),
                     "tpp": tpp.copy(),
                     "tpn": tpn.copy(),
-                    "s2t": np.where(np.isfinite(s2t), s2t, 0.0),
+                    "hop_logvar": np.where(np.isfinite(hop_logvar), hop_logvar, 0.0),
                     "n_src": np.asarray(_n_region)[src].copy(),
                     "spl_p": _sp.copy(),
                     "spl_n": _sn.copy(),
@@ -929,7 +929,7 @@ class _HeadRelay:
             )
         # ── P1e: the conservation SURPRISE as a DerSimonian-Laird damping term ─────────────────────────
         # The claim asserts ``S = Sigma_c rho_c E_c`` fragments; the slot observed ``M``. That is an
-        # IDENTITY, and the pin restores it by fiat and DISCARDS the residual. Price the residual instead.
+        # IDENTITY, and the rescale restores it by fiat and DISCARDS the residual. Price the residual instead.
         # ⚠⚠ **PARTLY A DEBT — THIS PRICES A BIAS AS A VARIANCE.** On a large share of its firing mass
         # ``delta`` is systematic, and a variance cannot move a mode toward truth. It is landed because it
         # is the only change measured to improve ACCURACY and honest PRECISION together, not because the
@@ -942,7 +942,7 @@ class _HeadRelay:
         _okc = valid & (_S > _EPS) & (M > _EPS)
         _al = _mc / np.maximum(_S, _EPS)[..., None]
         _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
-        _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_region[src], _EPS))[
+        _s2c = (np.where(np.isfinite(hop_logvar), hop_logvar, 0.0) + 1.0 / np.maximum(_n_region[src], _EPS))[
             ..., None
         ]
         _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
@@ -972,8 +972,8 @@ class _HeadRelay:
         # the source measured and the reframe delivered them: a component's LEVEL is an absolute rate, and
         # re-normalising it against a budget built from the destination's own belief is what made the
         # message self-confirming. The other two claims are unaffected either way — the lambda and tilt
-        # claims are scale-free, so the pin's common factor cancels from them identically.
-        pin_g, pin_p, pin_n = self._pin_v(tg, tp, tn, tpg, tpp, tpn)
+        # claims are scale-free, so the rescale's common factor cancels from them identically.
+        pin_g, pin_p, pin_n = self._rescale_v(tg, tp, tn, tpg, tpp, tpn)
         # ── THE lambda-EMISSION GATE (structural, and PRIOR to any damping question) ───────────────────
         # A composition message is a claim about the SPLIT. A source carrying only ONE component has no
         # such claim to make — lambda is not "large" for it, it is UNDEFINED. The canonical case is exactly
@@ -1047,7 +1047,7 @@ class _HeadRelay:
         )
         return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau, tlam, tth
 
-    def _pin_v(self, g, p, n, pg_, pp_, pn_):
+    def _rescale_v(self, g, p, n, pg_, pp_, pn_):
         """The message's densities re-expressed in the destination's MASS FRAME.
 
         ⚠⚠ **THE RESULT IS A COMPARISON FRAME FOR THE MISMATCH TEST — IT IS NOT THE MESSAGE.** It used to
@@ -1056,7 +1056,7 @@ class _HeadRelay:
         delivered claim became a function of the destination's own self-solve. Measured: with an RNA-only
         message and ``E_g = E_r`` the delivered RNA fraction was **exactly ``1/(1 + f_g_own)``** (verified
         to 2.1e-16) — the slot confirming itself. On unstranded data ``f_g_own`` is the uninformative 1/2,
-        so the pin reserved **33.6 %** of the budget for gDNA the message never claimed and a zero-gDNA
+        so the rescale reserved **33.6 %** of the budget for gDNA the message never claimed and a zero-gDNA
         library read back **29.3 %** gDNA. The reservation WAS the false-positive rate.
 
         Feeding the DL mismatch test is what it is legitimately for: that test is a two-study random-effects

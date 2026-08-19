@@ -451,7 +451,7 @@ def report(m, a: dict, config=None) -> None:
 #: everything below it, and fixing anything lower before it is wasted work.
 #:
 #: 1. ``region/intergenic`` — structurally pure gDNA. If these are wrong, nothing else can be right.
-#: 2. ``region/intron``     — the DENSITY PEEL: intron density against the intergenic background. On an
+#: 2. ``region/intron``     — the DENSITY DECONVOLUTION: intron density against the intergenic background. On an
 #:                          unstranded library this is the ONLY own-evidence channel there is.
 #: 3. ``boundary/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron region.
 #: 4. ``boundary/intergenic|exon``  — must impute from the resolved intergenic region.
@@ -474,7 +474,7 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
 
     ⭐ The boundary pair is the axis the debug chain turns on. An ``intron|exon`` boundary and an
     ``intergenic|exon`` boundary are the same kind of object to the solver and completely different
-    problems: the first must inherit its answer from an intron region the density peel resolved, the
+    problems: the first must inherit its answer from an intron region the density deconvolve resolved, the
     second from a structurally-locked intergenic region. Lumping them as "boundaries" hides which
     propagation path is broken.
 

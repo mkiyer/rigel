@@ -265,10 +265,10 @@ class TestNrnaDoubleCounting:
             #
             # The mid-SS branch was widened (40 → 100) by the pass-0 gDNA-rate NPMLE prior
             # We now start every region at f_g=1 (total density) with an
-            # extremely-weak prior and peel RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
-            # imperfect strand cannot peel the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
+            # extremely-weak prior and deconvolve RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
+            # imperfect strand cannot deconvolve the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
             # phantom, now surfaced by the total-density start. Perfect-SS (>= 0.99) is unaffected (tol 20).
-            # The residual shrinks with the planned peeling/refit work (the unstranded-nascent over-call).
+            # The residual shrinks with the planned deconvolving/refit work (the unstranded-nascent over-call).
             tol = 20 if ss >= 0.99 else (100 if ss >= 0.85 else 250)
             assert_transcript_accuracy(bench, max_abs_diff=tol)
 

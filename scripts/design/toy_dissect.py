@@ -77,7 +77,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path, messag
               rna_fl_pmf=donor.rna_fl_pmf, config=cfg, injected_priors=donor.priors, _debug=dbg,
               **index_derived_inputs(sub.index))
     cap, chain = dbg["capture"], dbg["chain"]
-    # ⛔ `_uni` is written ONLY by `messages/head.py`, i.e. only under `HeadPolicy`. Read the artifact
+    # ⛔ `_uni` is written ONLY by `messages/relay.py`, i.e. only under `RelayPolicy`. Read the artifact
     # rather than the flag, and degrade the channel tables when the relay is muted — this file used to
     # die here with `KeyError: '_uni'` the moment `message_propagation` shipped as False.
     uni = TH.relay_channels(cap)

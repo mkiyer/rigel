@@ -119,7 +119,7 @@ def test_Z5_the_composition_identity_is_EXACT_so_the_location_may_not_gain_the_h
     and what makes three relayed densities a composition rather than three unrelated numbers.
 
     Giving each component the ``Gamma(a+½, E)`` posterior MEAN breaks it by exactly ``3/2``: correct for
-    one rate in isolation, wrong for a share of a total. ``test_relay_mass_pin`` caught it as
+    one rate in isolation, wrong for a share of a total. ``test_relay_mass_rescale`` caught it as
     ``R_own = 0.5 + 1/M = 0.5000082``. ⭐ The half belongs to the rate's VARIANCE (`count_logvar`); the
     relay fuses in LINEAR density space, so ``ρ = 0`` was always expressible and only its precision was
     broken."""

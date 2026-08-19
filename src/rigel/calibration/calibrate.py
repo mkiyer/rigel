@@ -51,7 +51,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .background_reference import BackgroundReference, measure_background
-from .messages.head import HeadPolicy
+from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .region_chain import BOUNDARY, REGION
 from .region_geometry import (
@@ -166,7 +166,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     ZERO on every other slot (a no-op there). Returns ``None`` when the factory is disabled, the
     background pool is uninformative, or there are no intron regions — in which case the sweep is
     byte-identical to the pre-factory path. gDNA is strand-symmetric, so this factor lives purely on
-    ``λ`` (peels gDNA; the residual RNA's tilt is left to the solver), and is consumed identically by the
+    ``λ`` (deconvolves gDNA; the residual RNA's tilt is left to the solver), and is consumed identically by the
     single-strand and AMBIG per-region solves.
 
     ⚠ **BOUNDARY slots are zero, structurally.** The factor scores a CONTAINED count against a CONTAINED
@@ -174,7 +174,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     NegBinom there would be scoring one frame's evidence against another frame's support.
 
     ``bg`` (an injected population :class:`GdnaBackground`) overrides the internal fit — a tiny toy's own
-    intergenic pool is too sparse to fit the background the introns are peeled against."""
+    intergenic pool is too sparse to fit the background the introns are deconvolved against."""
     if bg is None:
         bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
     if not bg.informative:
@@ -191,7 +191,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     _, fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
     prior = np.zeros((kind.shape[0], fg.shape[0]), dtype=np.float64)
     ridx = idx[is_intron]
-    # ⚠ GENOME-strand columns summed: gDNA is strand-symmetric, so the peel is against a total rate.
+    # ⚠ GENOME-strand columns summed: gDNA is strand-symmetric, so the deconvolution is against a total rate.
     count = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)[ridx]
     eff_g = np.asarray(region_eff_len, dtype=np.float64)[ridx]
     prior[is_intron] = density_lambda_factor(bg, count, eff_g, fg)
@@ -206,7 +206,7 @@ def _fit_gdna_hyperprior(
     chain, belief, statics, region_arrays, mass_global, eff_global, *, strength
 ):
     """Select the training substrate from the chain and fit the :class:`DensityLandscape` on the initial solve's
-    peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
+    deconvolved gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
     **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions
     in ``sweep.solve_chain`` are a separate mechanism and are untouched).
@@ -444,7 +444,7 @@ def calibrate(
         )
 
     belief = _init_belief()
-    # The gDNA INTRON FACTORY λ-factor: peel confident gDNA
+    # The gDNA INTRON FACTORY λ-factor: deconvolve confident gDNA
     # from intron regions against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
     # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
     # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
@@ -565,9 +565,9 @@ def calibrate(
             # on the drained arm and DELETED (2026-08-10): its answer is not a function of the length gap
             # at all. `TRAPS.md` carries the mechanism.
             #
-            # ⛔ Switching back is ONE WORD, `HeadPolicy()`, and every operator is still there behind its
+            # ⛔ Switching back is ONE WORD, `RelayPolicy()`, and every operator is still there behind its
             # own named switch, so this is reversible and each operator stays individually priceable.
-            policy=HeadPolicy() if config.message_propagation else SilentPolicy(),
+            policy=RelayPolicy() if config.message_propagation else SilentPolicy(),
             _capture=capture,
         )
         if capture is not None:
@@ -595,7 +595,7 @@ def calibrate(
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
     # Single-strand regions self-solve from strand; unstranded
     # AMBIG regions are grounded only by the messages here (the two-root DNA ambiguity,
-    # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
+    # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's deconvolved DNA, then a refit).
     belief = _sweep(None)
     belief_pass0 = (
         belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
@@ -606,7 +606,7 @@ def calibrate(
     )
 
     # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit the gDNA-rate NPMLE on
-    # the initial solve's peeled gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
+    # the initial solve's deconvolved gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG regions. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —
     # belief-free) is the refit floor; ``None`` when disabled.

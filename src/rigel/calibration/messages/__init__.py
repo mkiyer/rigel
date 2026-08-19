@@ -10,7 +10,7 @@ Three policies ship:
 
 * :class:`~.silent.SilentPolicy` — sends nothing. ⭐ **THE DEFAULT**, and five boundaries long. A reader who
   holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.head.HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch, so
+* :class:`~.head.RelayPolicy` — every operator the evolved solver carried, each behind a NAMED switch, so
   ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
 * :mod:`~.variance` — the shared variance arithmetic both of the above draw on. Not a policy; a toolbox.
 
@@ -148,7 +148,7 @@ class StepContext:
     """
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
-    mass: np.ndarray  # per-slot gDNA-support mass (the pin's and the share's denominator)
+    mass: np.ndarray  # per-slot gDNA-support mass (the rescale's and the share's denominator)
     eff_gdna_global: np.ndarray  # the matching gDNA opportunity
     eff_rna: np.ndarray  # per-slot RNA effective length
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)

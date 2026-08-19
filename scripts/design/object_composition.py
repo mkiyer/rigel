@@ -563,26 +563,26 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         "pooled": m_pooled,
         "flux+fallbk": prior_mean(rho_g_per_object, gated(rho_r_fallback)),
         "flux+shrunk": prior_mean(rho_g_per_object, gated(rho_r_shrunk)),
-        # ⭐⭐⭐ THE PEEL: `f_g = rho_g * E_g / M`, RNA as the RESIDUAL and never predicted.
+        # ⭐⭐⭐ THE DECONVOLUTION: `f_g = rho_g * E_g / M`, RNA as the RESIDUAL and never predicted.
         #   ⛔ This is not a new idea — it is the PEAK of the shipped `density_lambda_factor`, whose own
         #   docstring reads "peaked at f_g = rho_bg/rho_obs". With `rho_obs = M/E_g` that is exactly this
         #   expression, so the arm measures the LOCATION the shipped NegBinom factor already carries at
         #   the one stratum it is switched on for.
         #   ⭐ It needs NO RNA density, which is the whole asymmetry: gDNA is near-uniform and
         #   predictable pre-solve; RNA spans six decades with no genomic autocorrelation and is never
-        #   predicted — it is whatever mass the gDNA peel leaves behind.
-        "peel": np.clip(rho_g_per_object * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0),
-        # ⭐⭐⭐ THE HYBRID: pin where the annotation DETERMINES the answer, peel where it does not.
+        #   predicted — it is whatever mass the gDNA deconvolve leaves behind.
+        "deconvolve": np.clip(rho_g_per_object * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0),
+        # ⭐⭐⭐ THE HYBRID: pin where the annotation DETERMINES the answer, deconvolve where it does not.
         #   The structural strata are exactly ``~mature_here`` — mature RNA cannot be there — and the
-        #   peel's use of the observed ``M`` makes it strictly worse on them (a downward Poisson
-        #   fluctuation reads as RNA). Everywhere else the annotation is silent and the peel is the only
+        #   deconvolve's use of the observed ``M`` makes it strictly worse on them (a downward Poisson
+        #   fluctuation reads as RNA). Everywhere else the annotation is silent and the deconvolution is the only
         #   honest statement.
-        "pin+peel": np.where(
+        "pin+deconvolve": np.where(
             mature_here,
             np.clip(rho_g_per_object * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0),
             1.0,
         ),
-        "peel, 1 rho_g": np.clip(
+        "deconvolve, 1 rho_g": np.clip(
             rho_g_off * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0
         ),
     }

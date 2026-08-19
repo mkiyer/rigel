@@ -776,5 +776,5 @@ def _region_region_type(chain, region_arrays):
 # capture**, and 1.2 % of one class on one capture-ON condition (``region/exon`` mwae 0.2719 → 0.2686).
 # That does not pay for five constants, a helper and two gates.
 #
-# ⭐ The rule that remains is therefore one boundary and is in `messages.head`: a gDNA LEVEL crosses a
+# ⭐ The rule that remains is therefore one boundary and is in `messages.relay`: a gDNA LEVEL crosses a
 # composition-unlicensed hop **unscaled**. Capture-OFF is not a case — it is the same expression.

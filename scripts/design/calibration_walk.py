@@ -19,7 +19,7 @@ walk against an uncertified truth debugs the wrong thing. The table's ``field_ce
 printed with every run: ``true_f_g`` is composition-certified either way; densities are only comparable
 when the field gate passed.
 
-⛔ Every arm asserts what ran: ``_uni`` is written only under ``HeadPolicy``, and a muted arm must
+⛔ Every arm asserts what ran: ``_uni`` is written only under ``RelayPolicy``, and a muted arm must
 reproduce ``f_g == fg_loc`` bit for bit (TRAPS: an-ablation-that-never-ran).
 
 Errors are ``Sum |f_g - true_f_g| * mass`` in FRAGMENTS, total and per stratum, never pooled across

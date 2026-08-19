@@ -30,14 +30,14 @@ must give the **same** flank answer, while the TSS bit alone points at the oppos
 spelled "is there a TSS here" passes on one index and fails on its mirror.
 
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population — RNA splices out or in — but
-there the flux is MEASURED (``sj_count``) and the SPLICE IN and the peel exist to route it. A terminus
+there the flux is MEASURED (``sj_count``) and the SPLICE IN and the deconvolution exist to route it. A terminus
 has no flux to measure: a transcript simply begins. That is the derived boundary between the two
 treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1.1 **the-cancelling-pair**).
 
 ⭐ Measured on `toy_harness.py --spec nested_exons`, where every BOUNDARY carries a terminus: the gene's
 mass-weighted ``|Δf_g|`` goes **0.2264 → 0.0541**, and its strand mirror ``nested_exons_neg``
-**0.2145 → 0.0535**. ⚠ Both are BELOW the 0.0760 that deleting the relay's mass pin outright reaches, so
-this is not a slower route to the same place: withholding the licence stops the reframe as well as the pin.
+**0.2145 → 0.0535**. ⚠ Both are BELOW the 0.0760 that deleting the relay's mass rescale outright reaches, so
+this is not a slower route to the same place: withholding the licence stops the reframe as well as the rescale.
 
 ⚠ **Perturbation-verified** (`scratchpad/perturb_b.sh`), and one of these found a real hole:
 
@@ -217,7 +217,7 @@ def test_a_flagless_boundary_breaks_no_population():
 def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     """⛔ **THE SCOPE, pinned so it cannot be widened by accident.** A DONOR/ACCEPTOR BOUNDARY does change the
     RNA population — a transcript splices out or in — but there the flux is MEASURED (``sj_count``)
-    and the SPLICE IN and the peel exist to route it, so routing it a second time as a withheld licence would
+    and the SPLICE IN and the deconvolution exist to route it, so routing it a second time as a withheld licence would
     double-count. This predicate must therefore read the four TERMINUS bits and nothing else.
 
     ⚠ Extending it to splice sites is a separate experiment with its own measurement: deleting the
@@ -235,7 +235,7 @@ def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     right_gains, left_gains = terminus_flank_gain(splice_only)
     assert not right_gains.any() and not left_gains.any(), (
         "a splice site is breaking a population in this predicate; DONOR/ACCEPTOR are out of scope and "
-        "belong to the SPLICE IN and the peel"
+        "belong to the SPLICE IN and the deconvolution"
     )
     # …and a terminus sharing the position with a splice site is still seen (the measured 0.99 % case).
     both = np.array([FLAG_TSS_POS | FLAG_DONOR_POS], np.uint16)
@@ -258,7 +258,7 @@ def _flagged_chain(flags_by_boundary):
     """The `nested_exons` chain as a synthetic payload, with ``boundary_flags`` injected per BOUNDARY.
 
     ⭐ STRANDED (κ = 0.95 at the solve), because the population test only *decides* anything where the
-    source could otherwise lend a composition: on an unstranded chain with no sj nothing is
+    source could otherwise may_share_composition a composition: on an unstranded chain with no sj nothing is
     licensed to begin with and the new conjunct is inert by construction.
     """
     from rigel.calibration.signature import BIT_EXON_POS
@@ -282,17 +282,17 @@ def _flagged_chain(flags_by_boundary):
 def _hop_licence(parts):
     """Every (destination slot, source slot) hop the COMBINE transports, with its licence.
 
-    Reads ``_capture['_pin']``, which publishes the gDNA scale rule per hop — ``lend``, ``r`` and the
+    Reads ``_capture['_rescale']``, which publishes the gDNA scale rule per hop — ``may_share_composition``, ``r`` and the
     scale ``r_g`` actually applied — so the gate reads the rule off a real solve rather than re-deriving
     it. The two appended entries are the left-source and right-source messages, in that order.
     """
     # ⚠ this gate exercises a HEADPOLICY operator (the population half of the composition licence), so
     # the policy is named explicitly — `solve_chain` defaults to SilentPolicy and the gate would be
     # vacuous (TRAPS: could-the-arm-have-fired).
-    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.messages.relay import RelayPolicy
     from rigel.calibration.sweep import solve_chain
 
-    region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+    region_sweep = functools.partial(solve_chain, policy=RelayPolicy())
 
     cap = {}
     region_sweep(
@@ -308,16 +308,16 @@ def _hop_licence(parts):
         _capture=cap,
     )
     out = []
-    for d in cap["_pin"]:
+    for d in cap["_rescale"]:
         src, valid = np.asarray(d["src"], np.int64), np.asarray(d["valid"], bool)
-        lend, r, r_g = (np.asarray(d[k]) for k in ("lend", "r", "r_g"))
+        may_share_composition, r, r_g = (np.asarray(d[k]) for k in ("may_share_composition", "r", "r_g"))
         for dst in range(src.shape[0]):
             if valid[dst]:
                 out.append(
                     {
                         "dst": dst,
                         "src": int(src[dst]),
-                        "lend": bool(lend[dst]),
+                        "may_share_composition": bool(may_share_composition[dst]),
                         "r": float(r[dst]),
                         "r_g": float(r_g[dst]),
                     }
@@ -365,12 +365,12 @@ def test_a_terminus_UNLICENSES_the_step_into_the_flank_that_gains_rna():
 
     for dst, src in broken:
         h = licence[(dst, src)]
-        assert not h["lend"], (
+        assert not h["may_share_composition"], (
             f"step {src} → {dst} crosses a transcript terminus into the flank that gains RNA, yet it is "
-            f"still licensed to lend a composition (r_g {h['r_g']:.4g}, r {h['r']:.4g})"
+            f"still licensed to may_share_composition a composition (r_g {h['r_g']:.4g}, r {h['r']:.4g})"
         )
         assert h["r_g"] == 1.0, f"step {src} → {dst}: the gDNA level was scaled by {h['r_g']:.6g}"
-    assert any(licence[p]["lend"] for p in intact), (
+    assert any(licence[p]["may_share_composition"] for p in intact), (
         "no step survives the population test — the conjunct has become a blanket refusal, and this "
         "chain has an intact pair at every BOUNDARY"
     )
@@ -384,7 +384,7 @@ def _ambig_chain(flags_by_boundary):
     — and on a stranded chain every single-strand genic slot earns some. An **AMBIG** exon is the
     exception: both strands are admissible, so it is TRAPS: converge-and-delete, holds ``{0,0,1}`` at MAX variance, and has
     precision 0 while NOT being structurally pure gDNA. Its flanking BOUNDARY is single-strand (the ``+``
-    neighbour has no ``−`` transcript), so the BOUNDARY does earn evidence and can lend a composition.
+    neighbour has no ``−`` transcript), so the BOUNDARY does earn evidence and can may_share_composition a composition.
     """
     from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS
 
@@ -409,10 +409,10 @@ def _relay_levels(parts, *, policy=None):
     # ⚠ this gate exercises a HEADPOLICY operator (the population half of the composition licence), so
     # the policy is named explicitly — `solve_chain` defaults to SilentPolicy and the gate would be
     # vacuous (TRAPS: could-the-arm-have-fired).
-    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.messages.relay import RelayPolicy
     from rigel.calibration.sweep import solve_chain
 
-    region_sweep = functools.partial(solve_chain, policy=policy or HeadPolicy())
+    region_sweep = functools.partial(solve_chain, policy=policy or RelayPolicy())
 
     cap = {}
     region_sweep(
@@ -434,8 +434,8 @@ def _relay_levels(parts, *, policy=None):
 def test_the_RELAY_honours_the_population_test_TOO():
     """⭐⭐⭐ **THE TWIN-DRIFT GATE, and it is not decoration: without it, deleting the population test
     from ``_relay`` alone fires NOTHING in the whole calibration suite (measured).** ``_relay`` and
-    ``_transport`` are two hand-maintained copies of one transform — the twin note on ``messages.head``'s ``scan``
-    exists for exactly this — and every other gate in this file reads ``_capture['_pin']``, which is the
+    ``_transport`` are two hand-maintained copies of one transform — the twin note on ``messages.relay``'s ``scan``
+    exists for exactly this — and every other gate in this file reads ``_capture['_rescale']``, which is the
     COMBINE's. This one reads ``fwd_g``, the relay's running level, which the combine has not yet touched.
 
     The chain is ``intergenic | exon+ | exon AMBIG | exon+ | intergenic`` with a genomic LOW end on the
@@ -450,7 +450,7 @@ def test_the_RELAY_honours_the_population_test_TOO():
     boundary into an AMBIG region — unlicensed by the STRAND flip alone, flags or no flags. With both
     predicates live the control could no longer isolate the FLAGS mechanism, which is the twin-drift this
     gate exists to catch; switching the strand half off restores a control where only the flags decide."""
-    from rigel.calibration.messages.head import HeadPolicy, HeadSwitches
+    from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches
 
     boundary, dst = 3, 4  # chain N E N E N E N E N → BOUNDARY 1 is slot 3, its RIGHT flank is slot 4
     flags = [
@@ -462,7 +462,7 @@ def test_the_RELAY_honours_the_population_test_TOO():
     own_f, lvl_f = _relay_levels(_ambig_chain(flags))
     own_p, lvl_p = _relay_levels(
         _ambig_chain(_NO_FLAGS[:4]),
-        policy=HeadPolicy(HeadSwitches(strand_population=False)),
+        policy=RelayPolicy(RelaySwitches(strand_population=False)),
     )
     assert own_f[dst] == 0.0 and own_p[dst] == 0.0, (
         f"slot {dst} has own gDNA precision ({own_f[dst]:.4g}), so the relayed claim is not readable "
@@ -480,15 +480,15 @@ def test_the_RELAY_honours_the_population_test_TOO():
 
 def test_the_conjunct_is_INERT_when_no_boundary_carries_a_terminus():
     """⭐ **THE OTHER SIDE: with the flags all zero the licence must be exactly what it was.** Same
-    chain, same numbers, ``boundary_flags = 0`` — so every hop's ``lend`` is decided by the supply test
+    chain, same numbers, ``boundary_flags = 0`` — so every hop's ``may_share_composition`` is decided by the supply test
     alone. This is what says the new conjunct adds a restriction rather than changing the old one, and it
     is also the state a caller that supplies no graph gets."""
     flagged = {(h["dst"], h["src"]): h for h in _hop_licence(_flagged_chain(_NESTED_FLAGS))}
     plain = {(h["dst"], h["src"]): h for h in _hop_licence(_flagged_chain(_NO_FLAGS))}
     assert set(flagged) == set(plain)
-    assert any(plain[p]["lend"] and not flagged[p]["lend"] for p in plain), (
+    assert any(plain[p]["may_share_composition"] and not flagged[p]["may_share_composition"] for p in plain), (
         "the flags changed no hop's licence, so this fixture cannot see the conjunct at all"
     )
-    assert all(plain[p]["lend"] or not flagged[p]["lend"] for p in plain), (
+    assert all(plain[p]["may_share_composition"] or not flagged[p]["may_share_composition"] for p in plain), (
         "a hop became licensed BECAUSE of a terminus flag — the conjunct is meant to remove licences"
     )

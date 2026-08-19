@@ -119,8 +119,8 @@ def _sibling(name: str):
 # ⭐⭐⭐ THE RELAY'S DIAGNOSTIC BANKS — AND WHETHER THIS RUN HAS ANY
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 #
-# ⛔⛔ **`_uni` HAS EXACTLY ONE WRITER AND IT IS BEHIND A CONFIG FLAG.** `messages/head.py` appends it,
-# so it exists only under `HeadPolicy`; the shipped `CalibrationConfig.message_propagation` is `False`,
+# ⛔⛔ **`_uni` HAS EXACTLY ONE WRITER AND IT IS BEHIND A CONFIG FLAG.** `messages/relay.py` appends it,
+# so it exists only under `RelayPolicy`; the shipped `CalibrationConfig.message_propagation` is `False`,
 # which installs `SilentPolicy`. Five instruments read `capture["_uni"]` unconditionally and therefore
 # died with `KeyError: '_uni'` the day that default flipped, while the SUITE stayed green because the
 # test readers install the policy themselves. That is `TRAPS: a-green-suite-hid-five-dead-instruments`
@@ -174,7 +174,7 @@ def messages_on(args) -> bool:
 
 def with_messages(config: CalibrationConfig, messages: bool) -> CalibrationConfig:
     """The same config with the relay switched. ⭐ No monkeypatching: `calibrate` selects
-    `HeadPolicy` vs `SilentPolicy` off this one field."""
+    `RelayPolicy` vs `SilentPolicy` off this one field."""
     return dataclasses.replace(config, message_propagation=bool(messages))
 
 
@@ -183,11 +183,11 @@ def messages_stamp(messages: bool) -> str:
     configuration produced the numbers below it."""
     if messages:
         note = (
-            "  ⛔ NOT the shipped config (shipped is OFF) — HeadPolicy installed"
+            "  ⛔ NOT the shipped config (shipped is OFF) — RelayPolicy installed"
             if not MESSAGES_SHIPPED
             else "  (the shipped config)"
         )
-        return f"   messages = ON   ·   policy = HeadPolicy{note}"
+        return f"   messages = ON   ·   policy = RelayPolicy{note}"
     note = (
         "  (the shipped config)"
         if not MESSAGES_SHIPPED

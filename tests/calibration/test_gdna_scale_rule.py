@@ -10,7 +10,7 @@ confirming the destination.
 The rule under test: a COMPOSITION crosses by ``r``, licensed by the λ-emission gate's own predicate
 (the source must have SUPPLIED both components of the pair); a gDNA LEVEL crosses UNSCALED, because gDNA
 is uniform along the genome before capture. Capture needs no branch and no scale factor: it is carried by
-the pure-gDNA population's OWN measurements, which the relay's mass pin restores at every such object,
+the pure-gDNA population's OWN measurements, which the relay's mass rescale restores at every such object,
 so the level an exon receives is its flanking BOUNDARY's enriched measurement rather than the off-target floor.
 
 ⭐ Six gates. The base fixture is the owner's ``TA_single_exon`` geometry in unit-test form:
@@ -23,8 +23,8 @@ rule fires 7 of 8, reverting it in EITHER twin alone fires at least gate 5, lice
 licensing none fires gate 6, and testing only the gDNA half of the licence fires 7. ⛔ **One perturbation
 fires NOTHING and that is recorded rather than papered over**: dropping the gDNA conjunct from the licence
 (testing RNA alone) is inert, because ``pg[src] == 0`` with RNA precision live implies the source's own
-gDNA density is 0 and the delivered level is then 0 at any scale. See the note beside ``lend`` in
-`messages.head`.
+gDNA density is 0 and the delivered level is then 0 at any scale. See the note beside ``may_share_composition`` in
+`messages.relay`.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import functools
 import numpy as np
 import pytest
 
-from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.messages.relay import RelayPolicy
 from rigel.calibration.sweep import solve_chain
 
 from rigel.calibration.effective_length import (
@@ -51,7 +51,7 @@ from _synthetic import make_chain_parts
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=RelayPolicy())
 
 #: the chain is ``N E N E N``: intergenic(0) BOUNDARY(1) EXON(2) BOUNDARY(3) intergenic(4)
 IG_LEFT, BOUNDARY_LEFT, EXON, BOUNDARY_RIGHT, IG_RIGHT = 0, 1, 2, 3, 4
@@ -230,8 +230,8 @@ def test_capture_step_is_carried_and_the_off_probe_floor_is_not(step):
 
 def test_level_survives_two_hops_through_an_rna_rich_exon():
     """⭐⭐ **GATE 5 — the RELAY's half of the rule, and the INTERIOR exon.** Gates 1–4 all read the
-    COMBINE (`_pin`/`_uni`), and on a five-slot chain every message crosses one step, so the sequential
-    relay is never exercised. That is the twin-drift hole the twin note on ``messages.head``'s ``scan`` exists for:
+    COMBINE (`_rescale`/`_uni`), and on a five-slot chain every message crosses one step, so the sequential
+    relay is never exercised. That is the twin-drift hole the twin note on ``messages.relay``'s ``scan`` exists for:
     ``_relay`` and ``_transport`` are two hand-maintained copies of one transform, and a change landed in
     only one of them must fail something.
 
@@ -241,18 +241,18 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     relaying THROUGH an RNA-rich object. If any step re-imputes the destination's total on the way, the
     middle exon inherits its neighbours' crowding instead of the gDNA field.
 
-    ⭐⭐ **THE BOUND IS EXACT, AND IT ONLY BECAME EXACT WHEN THE MASS PIN WAS LICENSED TOO.** It used to
-    be 1.5x, because a second D4-family mechanism sat on this fixture: the relay's mass pin filled every
+    ⭐⭐ **THE BOUND IS EXACT, AND IT ONLY BECAME EXACT WHEN THE MASS RESCALE WAS LICENSED TOO.** It used to
+    be 1.5x, because a second D4-family mechanism sat on this fixture: the relay's mass rescale filled every
     component a message did NOT supply from the destination's OWN density, which at an evidence-free
     object is ψ's uninformative ``fg_loc ~ 1/2``. It therefore reserved about half the budget for RNA no
     message claimed — the running level inflated 1.96x at the RNA-rich exon and deflated again at the next
-    evidence-free boundary, a multiplicative random walk landing at 0.80 against a field of 1.0. The pin is
-    now gated by the same licence (`test_relay_mass_pin`), so nothing rescales the level on this chain and
+    evidence-free boundary, a multiplicative random walk landing at 0.80 against a field of 1.0. The rescale is
+    now gated by the same licence (`test_relay_mass_rescale`), so nothing rescales the level on this chain and
     it arrives as the field, exactly.
 
-    ⚠ ``f_g`` at the interior exon is 0.914 and not 1.000, and that residual is NOT this rule or the pin:
+    ⚠ ``f_g`` at the interior exon is 0.914 and not 1.000, and that residual is NOT this rule or the rescale:
     it is ψ's uninformative reference holding an evidence-free region off the vertex by ~0.08, pinned as a
-    strict xfail against the TRUTH in `test_relay_mass_pin`. The bound here is short of it deliberately.
+    strict xfail against the TRUTH in `test_relay_mass_rescale`. The bound here is short of it deliberately.
 
     ⭐ **Every variant that re-imputes a total fails this gate**, and did so even at the old loose bound:
 
@@ -267,7 +267,7 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     ====================================  ==========  ==========
 
     ⚠ And under the reverted arms the relay's running level reaches **56.4x** the field at the RNA-rich
-    exon before the pin drags it back — the TRAPS: a-message-from-the-destinations-belief re-imputation, visible in flight."""
+    exon before the rescale drags it back — the TRAPS: a-message-from-the-destinations-belief re-imputation, visible in flight."""
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     rho, bp_ = 1.0, 1_000.0
     region_eff = contained_eff_length(np.full(5, bp_), gdna_fl)
@@ -301,7 +301,7 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
     gDNA arm must use it, unchanged and bit-identical. Where the source supplies one, it must not.
 
     The fixture is a STRANDED chain (κ = 0.95, library sample sizes large enough to open the strand
-    deadband), so the exon and intron regions earn real composition evidence and can lend a composition,
+    deadband), so the exon and intron regions earn real composition evidence and can may_share_composition a composition,
     while the two gene-boundary BOUNDARIES and the intergenic flanks still cannot.
 
     ⚠ **Both populations must be non-empty**, and that is what makes the gate two-sided: forcing the
@@ -330,18 +330,18 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
         n_grid=_N_GRID,
         _capture=cap,
     )
-    lend = np.concatenate([np.asarray(d["lend"], bool) for d in cap["_pin"]])
-    r = np.concatenate([np.asarray(d["r"], float) for d in cap["_pin"]])
-    r_g = np.concatenate([np.asarray(d["r_g"], float) for d in cap["_pin"]])
-    valid = np.concatenate([np.asarray(d["valid"], bool) for d in cap["_pin"]])
+    may_share_composition = np.concatenate([np.asarray(d["may_share_composition"], bool) for d in cap["_rescale"]])
+    r = np.concatenate([np.asarray(d["r"], float) for d in cap["_rescale"]])
+    r_g = np.concatenate([np.asarray(d["r_g"], float) for d in cap["_rescale"]])
+    valid = np.concatenate([np.asarray(d["valid"], bool) for d in cap["_rescale"]])
 
-    assert (lend & valid).any(), "no step is licensed — the rule has become a blanket replacement"
-    assert (~lend & valid).any(), "every step is licensed — the licence is not being applied at all"
-    shared = lend & valid
+    assert (may_share_composition & valid).any(), "no step is licensed — the rule has become a blanket replacement"
+    assert (~may_share_composition & valid).any(), "every step is licensed — the licence is not being applied at all"
+    shared = may_share_composition & valid
     assert np.array_equal(r_g[shared], r[shared]), (
         f"a composition-shared step changed scale: r_g {r_g[shared]} vs r {r[shared]}"
     )
-    un = ~lend & valid
+    un = ~may_share_composition & valid
     assert np.all(r_g[un] == 1.0), f"an unlicensed step scaled the gDNA level: {r_g[un]}"
     # …and it must be a real test: `r` has to be far from 1 on some of those steps, or the two branches
     # agree by accident and the fixture proves nothing.
@@ -406,7 +406,7 @@ def _transport_fixture(pop_pair: bool, pop_p: bool, pop_n: bool):
         eff_sj_hi=np.full((n, 2), 200.0),
     )
     ctx = dataclasses.replace(ctx, own=own, geometry=geom)
-    relay = HeadPolicy().prepare(ctx)
+    relay = RelayPolicy().prepare(ctx)
     src = np.arange(n) - 1
     valid = src >= 0
     src = np.clip(src, 0, n - 1)
@@ -467,7 +467,7 @@ def test_a_clean_hop_still_reframes_every_arm():
 # ── ⭐⭐⭐ THE SPLICE IN AT A NO-CLAIM HOP — found by the zero-control dissection (2026-08-18, session 2) ────
 #
 # `g00 ss0.50 nrna_mid capture_on` (62 k → 228 k under the per-strand licence) walked to its mechanism:
-# a zero RNA claim WITH LIVE PRECISION, relayed one hop, where the mass pin's licence (`_lend`: both
+# a zero RNA claim WITH LIVE PRECISION, relayed one hop, where the mass rescale's licence (`_may_share`: both
 # components supplied) then rescales the whole budget onto gDNA — ``k = M/(tg·E_g)`` — and delivers
 # ``M/E_g``, "all your mass is gDNA", into a 26 k-fragment exon (slot 3568: true 0.000 → 0.9037). One of
 # its two feeders is the SPLICE IN: at a hop the per-strand rule refuses, the arm's VALUE (which had the sj
@@ -525,7 +525,7 @@ def _splice_in_transport_fixture(pop_p: bool):
         eff_sj_hi=np.full((n, 2), 200.0),
     )
     ctx = dataclasses.replace(ctx, own=own, geometry=geom)
-    relay = HeadPolicy().prepare(ctx)
+    relay = RelayPolicy().prepare(ctx)
     src = np.arange(n) - 1
     valid = src >= 0
     src = np.clip(src, 0, n - 1)
@@ -614,7 +614,7 @@ def _splice_in_scan_fixture(refuse: bool):
     ctx = dataclasses.replace(
         ctx, is_exon_region=~is_bnd, sj_count=sj, boundary_flags=flags, own=own, geometry=geom
     )
-    relay = HeadPolicy().prepare(ctx)
+    relay = RelayPolicy().prepare(ctx)
     step, publish = relay.scan(backward=False)
     for i in range(1, n):
         step(i - 1, i)

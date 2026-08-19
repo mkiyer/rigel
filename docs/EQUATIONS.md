@@ -1292,7 +1292,7 @@ and the only remaining source is the objects either side of it along the chain:
 ⛔⛔⛔ **IMPUTING A QUANTITY AT ONE OBJECT FROM ITS NEIGHBOURS ALONG A CHAIN IS MESSAGE PASSING, AND THERE
 IS NO SECOND MECHANISM.** Any scheme that gives an exon a gDNA level from the objects around it *is* a
 message, whatever it is called; re-deriving it under a new name is this project's most repeated wasted
-turn. ⭐ **The mechanism is already BUILT**: `messages/head.py`'s SPLICE IN is exactly the
+turn. ⭐ **The mechanism is already BUILT**: `messages/relay.py`'s SPLICE IN is exactly the
 BOUNDARY → EXON hop — only an EXON receives it; what it carries is a MEASUREMENT (a COUNT) and not an
 imputation; it carries its own precision; its transfer variance is 0; and it is deliberately not `τ`-gated, so it
 survives unstranded data where the strand channel is dead (§5.2). It sits behind

@@ -47,7 +47,7 @@ predicts** — a change made in three places, gated in one.
 | 3 | key the split on the sj's STRAND, not its genomic end | ⭐⭐⭐ **the `−`-strand gate ALONE.** This is the sign error `EQUATIONS.md` §3.5b warns about, and exactly one gate in the file can see it — which is why it is written as an equality between the two strand arms rather than as a property of either |
 | 4 | pair the FORWARD relay's arrays the wrong way round | ⭐⭐ the relay mirror gate |
 | 5 | pair the BACKWARD relay's arrays the wrong way round | ⭐⭐ the relay mirror gate |
-| 6 | pair the COMBINE's arrays the wrong way round | the combine gate, via ``_capture['_pin']['r']`` |
+| 6 | pair the COMBINE's arrays the wrong way round | the combine gate, via ``_capture['_rescale']['r']`` |
 | 7 | pair ``_flank_dom``'s LEFT (or RIGHT) lift the wrong way round | ⭐ the boundary-pair gate — and NOTHING else |
 | 8 | drop the split, unspliced-only everywhere | 5: the placement, both-ends, the frame pair, and both the relay and combine gates. ⚠ This is the version `EQUATIONS.md` §3.6c records as already measured WORSE, because at an BOUNDARY→EXON step the exon genuinely contains the spliced population |
 
@@ -69,7 +69,7 @@ import functools
 import numpy as np
 import pytest
 
-from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.messages.relay import RelayPolicy
 from rigel.calibration.sweep import solve_chain
 
 from rigel.calibration.region_chain import BOUNDARY, REGION
@@ -88,7 +88,7 @@ from _synthetic import make_chain_parts
 #: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
 #: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
-region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
+region_sweep = functools.partial(solve_chain, policy=RelayPolicy())
 
 _N_GRID = 41
 
@@ -441,7 +441,7 @@ def test_THE_BOUNDARY_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_C
 
 
 def test_THE_COMBINE_pairs_the_frames_the_same_way():
-    """The other twin. ``_capture['_pin']`` publishes each hop's ``r`` as ``_transport`` computed it, and
+    """The other twin. ``_capture['_rescale']`` publishes each hop's ``r`` as ``_transport`` computed it, and
     the left-hand message's source is the genomic-LOW neighbour — so the same pairing must appear.
     ⚠ Two entries are published, one per direction; the left-hand one is the first."""
     parts = _gene_parts(flux=400.0)
@@ -449,7 +449,7 @@ def test_THE_COMBINE_pairs_the_frames_the_same_way():
     st = cap["_uni_static"]
     rho_lo = np.asarray(st["rho_lo"], float)
     rho_hi = np.asarray(st["rho_hi"], float)
-    pins = cap["_pin"]
+    pins = cap["_rescale"]
     assert len(pins) >= 2, "both directions must publish"
     lo_boundary, hi_boundary = _low_high_boundaries(parts.chain)
     left = np.asarray(parts.chain.left, np.int64)
@@ -481,7 +481,7 @@ def test_a_sj_free_chain_SOLVES_IDENTICALLY_under_both_pairings():
     cap = _sweep(parts)
     st = cap["_uni_static"]
     np.testing.assert_array_equal(np.asarray(st["rho_lo"], float), np.asarray(st["rho_hi"], float))
-    pins = cap["_pin"]
+    pins = cap["_rescale"]
     rho = np.asarray(st["rho_lo"], float)
     left = np.asarray(parts.chain.left, np.int64)
     r = np.asarray(pins[0]["r"], float)

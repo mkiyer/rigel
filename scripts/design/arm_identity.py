@@ -25,7 +25,7 @@ refuse that.
 
 Usage
 -----
-    python scripts/design/arm_identity.py base backbone_head       # names under $RIGEL_ARMS
+    python scripts/design/arm_identity.py base backbone_relay       # names under $RIGEL_ARMS
     python scripts/design/arm_identity.py a.jsonl b.jsonl          # or explicit paths
 
 Exit status is 0 only if every field of every row is identical, so it composes into a shell gate.

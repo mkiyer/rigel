@@ -32,7 +32,7 @@ so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-ob
 | ⭐ ``ref_loc=struct`` | ψ's reference MEAN pinned near 1 wherever mature RNA cannot be | **the candidate.** Final err-sum per stratum 0.381 / 0.659 / 0.363 / 0.800, control 1.000 |
 | ``ref_loc=struct_grid`` | the same, capped at the highest grid point ``sigma(L)`` | ⭐⭐ the DERIVED strength — exactly ``L`` nats, no constant. Reproduces ``struct`` to 3 dp (0.384 / 0.660 / 0.366 / 0.800) |
 | ``ref_loc=struct_soft`` | the same, floored at one pseudo-fragment AT THE OBJECT | ⛔ REFUSED — worse on every stratum (0.609 / 1.045 / 0.580 / 1.000) |
-| ⛔ ``ref_loc={pooled,local}`` | the peel ``rho_g*E_g/M`` on the non-structural slots too | ⛔ REFUSED — **5.3x WORSE** on stranded × capture-ON, because the on-target gDNA density is under-read 2.6-3.6x pre-solve |
+| ⛔ ``ref_loc={pooled,local}`` | the deconvolution ``rho_g*E_g/M`` on the non-structural slots too | ⛔ REFUSED — **5.3x WORSE** on stranded × capture-ON, because the on-target gDNA density is under-read 2.6-3.6x pre-solve |
 | ⭐⭐⭐ ``config_struct`` | ``CalibrationConfig(structural_reference=True)`` and **NO monkeypatch at all** | the same claim THROUGH ``calibrate``. ⛔ It is not a duplicate of ``ref_loc=struct_grid`` — that one injects at ψ's construction site and cannot reach `region_init`'s ``tau_lam``, which the shipped path now feeds too, so the two are DIFFERENT MEASUREMENTS and only this one is the deliverable |
 
 ⚠ ``vertex_free``'s "no own evidence" test is ``tau_lam <= 1e-4``, and that is a CLASSIFICATION FOR A
@@ -333,12 +333,12 @@ def _location_estimate(chain, statics, geometry, region_arrays, variant: str):
 
         return np.where(mature, 0.5, float(_expit(_CTX["logodds_window"])))
     if variant in ("pooled", "local"):
-        # the peel elsewhere: RNA is the RESIDUAL and is never predicted. ⚠ `pooled`/`local` carry the
+        # the deconvolution elsewhere: RNA is the RESIDUAL and is never predicted. ⚠ `pooled`/`local` carry the
         # SOFT floor on the structural slots, which is what their panel rows were measured with.
         m = np.clip(rho * eff_g / np.maximum(M, 1e-12), 0.0, 1.0)
         return np.where(mature, m, expected_g / (expected_g + 1.0))
     # ⛔ UNREACHABLE while `_install_reference_location` validates, and kept because the fall-through it
-    #   replaces was SILENT: `--arm ref_loc=strcut` ran the `pooled` peel and reported it under the typo's
+    #   replaces was SILENT: `--arm ref_loc=strcut` ran the `pooled` deconvolve and reported it under the typo's
     #   name, which is a publishable wrong number (TRAPS: an-ablation-that-never-ran's shape).
     raise SystemExit(f"⛔ unknown ref_loc variant {variant!r} — one of {', '.join(_REF_LOC_VARIANTS)}")
 
@@ -389,7 +389,7 @@ def _install_reference_location(variant: str):
     regridding paths stay the shipped ones.
 
     ⛔ The variant is validated HERE, before any condition is read, because the alternative was a silent
-    fall-through: an unrecognised name ran the ``pooled`` peel and every row was stamped with the name the
+    fall-through: an unrecognised name ran the ``pooled`` deconvolve and every row was stamped with the name the
     user typed."""
     if variant not in _REF_LOC_VARIANTS:
         raise SystemExit(
@@ -829,7 +829,7 @@ def self_test() -> int:
                    isinstance(built, SL.CompositionPriors)
                    and np.array_equal(np.asarray(built.location), np.arange(3.0))))
     restore()
-    # ⛔ PERTURBATION: an unrecognised variant used to run the `pooled` peel and stamp the typo's name on
+    # ⛔ PERTURBATION: an unrecognised variant used to run the `pooled` deconvolve and stamp the typo's name on
     #   every row. It must now refuse BEFORE any condition is read.
     typo_refused = False
     try:

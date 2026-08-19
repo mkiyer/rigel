@@ -8,7 +8,7 @@ sources below:
 1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon regions are structurally pure
    gDNA (``f_g = 1``, composition CERTAIN); their gDNA density carries only the count precision ``1/n`` (so
    the own precision is the raw count ``n``). This is the anchor the whole prior-free pass leans on.
-2. **DENSITY DECONVOLUTION** — a region's gDNA is peeled against a gDNA density prior via NegBinom
+2. **DENSITY DECONVOLUTION** — a region's gDNA is deconvolved against a gDNA density prior via NegBinom
    (`density_deconv`); the curvature of that per-region ``λ``-factor is honest, count-derived composition
    evidence, registered here as ``τ_λ`` (`density_factor_precision`). The **intron factory** is its special
    case (the gDNA prior = the intergenic region distribution).
@@ -347,7 +347,7 @@ def build_region_init(
     #    and still-true claim: it pairs ``f_g`` with ``1 − f_g``, which close by construction — which is
     #    also why the published masses (`sweep`'s ``f_g*count`` / ``(1-f_g)*count``) conserved fragments
     #    exactly and the defect never reached them, NOR the EM prior, NOR `derive`.
-    #    ⚠ ``rho_pos``/``rho_neg`` still have exactly one production consumer, `messages/head.py`, and
+    #    ⚠ ``rho_pos``/``rho_neg`` still have exactly one production consumer, `messages/relay.py`, and
     #    `message_propagation` is OFF, so that pair is dormant today either way.
     #    ⚠ What the relay's mass pin enforces is a different frame (`region_total_density`); and the
     #    relay fuses in LINEAR density space
@@ -355,7 +355,7 @@ def build_region_init(
     #    problem — an INFINITE precision on it was (TRAPS: a-zero-count-is-a-measurement).
     #    ⛔ A first version of this fix also moved the location to the ``Gamma(a+½, E)`` posterior mean
     #    ``(a+½)/E``. That is right for one rate in isolation and WRONG here: three components each
-    #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2, which `test_relay_mass_pin` caught
+    #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2, which `test_relay_mass_rescale` caught
     #    as ``R_own = 0.5 + 1/M``. The half belongs to the rate's VARIANCE, not to a share of a total.
     #
     # ⛔ What DID change is the ``live`` predicate: STRUCTURAL (opportunity, strand admissibility), never

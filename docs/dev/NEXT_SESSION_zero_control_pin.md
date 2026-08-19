@@ -24,7 +24,7 @@
 ## THE MECHANISM (so it is not re-derived)
 
 One shape: **a zero RNA claim with LIVE PRECISION, relayed one hop, into the mass pin.** The pin's licence
-`_lend = pop & pg[s] > 0 & (pp[s]+pn[s]) > 0` reads the arm as SUPPLIED, restores `Σρ_c E_c = M` with a
+`_may_share = pop & pg[s] > 0 & (pp[s]+pn[s]) > 0` reads the arm as SUPPLIED, restores `Σρ_c E_c = M` with a
 common factor `k = M/(tg·E_g + 0·E_r)`, and delivers `tg = M/E_g` — "all your mass is gDNA" — at the gDNA
 arm's unchanged precision. Walk it yourself: `slot 3565 (TES−) → 3566 (EMPTY exon, M = 0, E_r = 0.018) →
 3567 (ACC−, M = 2,160) → 3568 (exon, M = 26,296, true 0.000 → 0.9037)`.
@@ -40,7 +40,7 @@ arm's unchanged precision. Walk it yourself: `slot 3565 (TES−) → 3566 (EMPTY
 | arm | in-scope contaminated (unstr×OFF / str×OFF / str×ON) | `g00` (8) | deferred | the loss, NAMED |
 |---|---|---|---|---|
 | `g1` — `struct_lock = g1_locked ∧ REGION`, own precisions recomputed | 1.025 / 1.021 / 1.005 | **0.71×** (232 k) | 1.17 | the four `nrna_none` zero controls go **1.8–15×** worse: at AMBIG `exon\|exon` boundaries in an RNA-only library ψ was held at `f_g ≈ 0` by the empty exons' "gDNA = 0 @ 0.2026" (a zero count over ~0.05 placements — right at `g00` for ANY reason). Without it, an RNA+ level claim (0.56 @ 72) with NO RNA− claim drifts ψ to **0.38** at slot 44476 (`g00 ss0.50 nrna_none off`). ψ-side question |
-| `pinM` — `_lend` additionally requires `M[src] > 0` (a source with no mass has no composition) | 0.999 / 1.004 / **1.032** | **0.41×** (134 k — 0.31× the licence tree, better than the pre-licence relay's 154 k) | 1.137 | capture-ON only, six of six stranded × ON rows worse (1.02–1.13): under capture the empty slots between probe-covered stretches are the CONDUITS a RELAYED composition travels through (`TRAPS: the-divergence-was-a-barrier`) and the pin at those hops is load-bearing |
+| `pinM` — `_may_share` additionally requires `M[src] > 0` (a source with no mass has no composition) | 0.999 / 1.004 / **1.032** | **0.41×** (134 k — 0.31× the licence tree, better than the pre-licence relay's 154 k) | 1.137 | capture-ON only, six of six stranded × ON rows worse (1.02–1.13): under capture the empty slots between probe-covered stretches are the CONDUITS a RELAYED composition travels through (`TRAPS: the-divergence-was-a-barrier`) and the pin at those hops is load-bearing |
 
 ⭐ **The sharp predicate is neither.** Refuse the pin for a source's OWN zero-count RNA artefact (feeder ②)
 and KEEP it for a relayed composition passing through an empty slot. Structurally that is what `g1` does
@@ -71,16 +71,16 @@ the thing to open next, and it is on the ψ side, not in the relay.
 
 Everything used this session is a thin composition of three things already in the tree:
 * the COUNTING arm — `relay_pool_ab.py::arm` (assert `_uni` present, assert the policy was built): patch
-  `rigel.calibration.calibrate.HeadPolicy` (the MODULE attribute, reached via `importlib.import_module` —
+  `rigel.calibration.calibrate.RelayPolicy` (the MODULE attribute, reached via `importlib.import_module` —
   `rigel.calibration.calibrate` the NAME is the FUNCTION) with a factory that counts constructions and returns
-  `HeadPolicy(HeadSwitches(...))`; `pre` = `rna_level_scale=False`, `nopin` = `mass_pin=False`;
+  `RelayPolicy(RelaySwitches(...))`; `pre` = `rna_level_scale=False`, `nopin` = `mass_rescale=False`;
 * the `g1` arm — `ladder_arm_ab.py::_install_zc_struct_lock_g1`, verbatim (wraps `build_region_init` in BOTH
   `region_init` and `sweep`, rescopes `struct_lock`, recomputes the three own precisions, counts firings);
 * the SCORER — `calibration_walk.py`'s: `slot_truth.npz` (certified) → `Σ|f_g − true|·mass` over `live`, per
   `stratum`; per condition, per arm, one JSON row with the tree stamp (`git rev-parse` + dirty flag), sharded
   by condition across processes; report per stratum (`ss_0.50`/`ss_0.99` × `capture_off`/`on`, contaminated
   rungs vs `g00`) and per condition, arm ÷ base. `pinM` was a TEMPORARY src edit (`and M_l[s] > 0.0` on
-  `_lend` in `scan`, `& (M[src] > 0.0)` on `lend` in `_transport`), never landed.
+  `_may_share` in `scan`, `& (M[src] > 0.0)` on `lend` in `_transport`), never landed.
 The hop walk reads `_uni_static`'s `fwd_*`/`bwd_*` (the raw running state, published by the backbone),
 `_pin[-2:]` (the final sweep's two transports) and `_uni[-1]` (the delivered packet), with the per-strand
 licences recomputed from `boundary_flags` exactly as `head.py`'s `__init__` does.
@@ -91,7 +91,7 @@ licences recomputed from `boundary_flags` exactly as `head.py`'s `__init__` does
 * the 2.5 % boundary-crossing deficit (owner: priority, not highest).
 * `strand_population` keep-or-cut (measured inert; owner call).
 * `npmle.py` retirement scope (still LIVE at `calibrate.py:591`; owner sign-off).
-* the VOCABULARY RENAME (`splice_in`/`peel`/`pin`; dedicated effort; do not rename piecemeal).
+* the VOCABULARY RENAME (`splice_in`/`deconvolve`/`pin`; dedicated effort; do not rename piecemeal).
 
 ## THE DISCIPLINE THAT PAID (keep doing exactly this)
 

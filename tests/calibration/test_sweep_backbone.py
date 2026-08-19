@@ -8,7 +8,7 @@ refuses it. A gate with no firing perturbation has not been written yet — it h
 ⭐ The per-condition byte-identity of the restructure against the shipped solver is NOT gated here, because
 it needs a real 70,176-slot chain and a BAM. It is
 ``scripts/design/backbone_parity.py`` (421,056 output elements and 18,245,830 diagnostic elements, zero
-differences) and ``ladder_arm_ab.py --arm backbone_head`` / ``--arm backbone`` on the 36-condition panel.
+differences) and ``ladder_arm_ab.py --arm backbone_relay`` / ``--arm backbone`` on the 36-condition panel.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import pytest
 
 from rigel.calibration import sweep as SW
 from rigel.calibration.messages import NeighbourState, PsiMessage, StepContext
-from rigel.calibration.messages.head import HeadPolicy, HeadSwitches
+from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.simplex_logodds import _logodds_grid, _tilt_grid
 
@@ -295,7 +295,7 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
         "calibrate no longer reads the switch — whichever policy it now hard-codes, the config option is "
         "lying to anyone who sets it."
     )
-    assert "HeadPolicy()" in src and "SilentPolicy()" in src, (
+    assert "RelayPolicy()" in src and "SilentPolicy()" in src, (
         "both arms must be reachable from the one call site; a switch with one arm is not a switch."
     )
 
@@ -316,15 +316,15 @@ def test_every_head_operator_is_an_independently_named_switch():
     TIME. TRAPS: all-small-singly-large-jointly is why: removing them as a block is already measured, and when every single
     ablation is small while the joint one is large you go one stage upstream — you do not keep ablating the
     block."""
-    sw = HeadSwitches()
+    sw = RelaySwitches()
     assert sw.off() == (), "the default must be the shipped answer: every switch ON"
     names = sw.names()
     assert len(names) == len(set(names)) >= 15
     assert not any(c.isupper() for n in names for c in n), "snake_case, and no Greek in identifiers"
     for n in names:
-        one_off = HeadSwitches(**{n: False})
+        one_off = RelaySwitches(**{n: False})
         assert one_off.off() == (n,)
-        assert HeadPolicy(one_off).name.endswith(f"no_{n}"), "an arm must label itself"
+        assert RelayPolicy(one_off).name.endswith(f"no_{n}"), "an arm must label itself"
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():

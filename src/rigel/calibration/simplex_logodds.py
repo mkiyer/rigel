@@ -255,7 +255,7 @@ def _posterior_median_fg(post, lam, fg):
     * at ``κ = ½`` the strand term is bit-flat, so EVERY slot is in that state and the snap was a constant
       ±0.0423 (``n_grid`` 60) that did not shrink with depth — it was the whole closure defect there;
     * and it propagates: `_compose` builds the RNA fractions from ``1 − f_g``, so a snapped ``f_g`` snaps
-      the whole composition. `test_relay_mass_pin`'s ``R_own = 0.5`` is what caught it.
+      the whole composition. `test_relay_mass_rescale`'s ``R_own = 0.5`` is what caught it.
 
     ⚠ **NOT the "sub-grid MODE" this docstring used to refuse**, and the distinction is the point: a mode
     is an argmax and can chase a single spike, which is what would under-call a skewed or vertex-near
@@ -521,7 +521,7 @@ def _location_term(lam, location):
        introduced anywhere in this function.**
     4. ⭐ ``median(f_g) = m`` in CLOSED FORM: ``u = f/(f + r(1−f)) ~ Beta(a,b)``, symmetric at ``a = b``,
        so the median sits where ``u = ½``, which is ``f = m``. That is what re-derives
-       ``test_relay_mass_pin``'s hard-coded ``R_own = 0.5`` instead of widening it.
+       ``test_relay_mass_rescale``'s hard-coded ``R_own = 0.5`` instead of widening it.
 
     ⭐⭐ **AND IT DOES NOT COMPETE WITH THE FITTED ARMS OR THE MESSAGES.** The reference is worth
     ``a + b = 1`` pseudo-fragment; ``density_lambda_factor``'s NegBinom precision scales with the counts,
@@ -772,7 +772,7 @@ def _local_loglik_logodds(
     # ── the gDNA INTRON FACTORY λ-factor: a per-region (m,K) log-likelihood on
     #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED as its own term rather than folded into
     #    the gDNA arm — it is a per-region LIKELIHOOD, not a population density, so it does not belong inside
-    #    a term whose units are `log P(log ρ)`. It peels confident gDNA from
+    #    a term whose units are `log P(log ρ)`. It deconvolves confident gDNA from
     #    introns against the intergenic background; zero on non-intron regions ⇒ a no-op there. ──
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)

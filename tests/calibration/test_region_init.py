@@ -284,7 +284,7 @@ def test_density_factor_precision_flat_carries_no_evidence():
 
 
 def test_density_factor_precision_tracks_curvature_and_count():
-    """A sharper factor carries more evidence, and (via NegBinom Var(g)=μ+μ²/α_eff) a high-count intron peels
+    """A sharper factor carries more evidence, and (via NegBinom Var(g)=μ+μ²/α_eff) a high-count intron deconvolves
     more sharply than a low-count one — the self-limiting precision (migrated from `_lambda_factor_precision`)."""
     lam, fg = _logodds_grid(60, 10.0)
     sharp = -0.5 * ((lam - 1.0) ** 2) / 0.05
@@ -314,7 +314,7 @@ def test_density_factor_precision_flows_into_region_init():
     chain, statics, geometry, belief, region_arrays = _scenario(
         kappa=0.5
     )  # unstranded ⇒ strand τ=0
-    # a sharp λ-factor on the AMBIG region (id 5) — stand in for a confident intron peel
+    # a sharp λ-factor on the AMBIG region (id 5) — stand in for a confident intron deconvolve
     lam, _ = _logodds_grid(60, 10.0)
     prior = np.zeros((chain.n_slots, lam.shape[0]))
     prior[4] = -0.5 * ((lam - 2.0) ** 2) / 0.05

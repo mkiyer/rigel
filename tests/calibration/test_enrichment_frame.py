@@ -523,7 +523,7 @@ def test_splice_in_premise_logvar_pooled_is_the_load_bearing_return():
 
 
 # ── THE SCALAR TWINS ───────────────────────────────────────────────────────────────────────────────────
-# ``messages.head``'s scan kernel is sequential and IN PLACE (not iterative — TRAPS: a-comment-quoted-as-a-finding), so it calls these
+# ``messages.relay``'s scan kernel is sequential and IN PLACE (not iterative — TRAPS: a-comment-quoted-as-a-finding), so it calls these
 # primitives once per slot with a
 # SCALAR — where the array form's ~50 numpy ops on 0-d arrays cost ~25x the equivalent float expression.
 # The scalar twins earn that back only if they are the SAME FUNCTION: a performance twin that is merely

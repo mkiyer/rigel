@@ -10,7 +10,7 @@
 |---|---|
 | the derivation: ψ's reference is Beta(a,b), its mean is a missing THIRD term, and the floor is one pseudo-fragment AT THE OBJECT | `EQUATIONS.md` §9c |
 | the rulings: the reference is per-object · RNA is the RESIDUAL and never predicted · the boundary axis splits on mature-RNA crossability · the reference and the landscape PARTITION the object universe · capture needs no detection step | `DESIGN.md` §6b |
-| the lessons | `TRAPS.md`: `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-peel-is-as-good-as-the-density-it-is-handed` |
+| the lessons | `TRAPS.md`: `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` |
 | ⛔ the FIVE refused mechanisms — a fitted `logP_r` · a library-wide Beta mean · the object-weighted mean · a stratified assertion · a pooled RNA density; plus the false `f_g ≤ 1 − S/M` bound | `ROADMAP.md` §4.2 — **do not rebuild these** |
 | where the tool IS, and what to do next | `ROADMAP.md` §1 rank 2 |
 | the instrument | `CLAUDE.md`'s row for `design/object_composition.py` |
@@ -340,7 +340,7 @@ Both halves are pinned as gates (`test_evidence_swamps_the_location_where_eviden
 * ⭐ `m = ½` makes the bracket the constant ½ ⇒ the term is constant and cancels. **A strict
   generalisation agreeing with the shipped constant exactly where its assumption is true.**
 * ⭐⭐ **The prior median is `m` in closed form** — measured error **4e-6 … 5e-5** on the untruncated
-  prior. This is what re-derives `test_relay_mass_pin`'s hard-coded `R_own = 0.5` instead of widening it.
+  prior. This is what re-derives `test_relay_mass_rescale`'s hard-coded `R_own = 0.5` instead of widening it.
   ⚠ Inside the shipped `L = 10` window the median is displaced by up to **0.0019**, which is a property
   of the window and two orders below the effect.
 * ⭐⭐⭐ **The tail slope stays at the Jeffreys exponent for every `m`** — only the LOCATION moves — so
@@ -385,14 +385,14 @@ session. ⭐ **`noop` traverses the whole new path and takes no location: BYTE-I
 **0.018** / 1.111 / **0.001** for `pooled`.
 
 ⭐⭐ **The zero control falls to 0.001 — a 1,000× reduction — on both pass-0 and the deliverable**, and it
-needs no assumption at all: the anchors are empty there, so the peel reads `rho_g = 0` and every object
+needs no assumption at all: the anchors are empty there, so the deconvolution reads `rho_g = 0` and every object
 correctly claims no gDNA. ⭐ Unstranded × capture-OFF pass-0 reads **0.018**, a 55× reduction, which is
 the stratum where `kappa = ½` leaves ψ nothing but the reference — so a correct reference is the whole
 answer there, exactly as the mechanism predicts.
 
 ⛔⛔ **AND STRANDED × CAPTURE-ON IS 5.3× WORSE — A HARD STOP FOR `pooled`/`local`.** This is the failure
-the prior metric already predicted: `object_composition.py` table ④ read the peel at **1.091** under
-capture, because the on-target gDNA density is under-read **2.6–3.6×**. **The peel is exactly as good as
+the prior metric already predicted: `object_composition.py` table ④ read the deconvolution at **1.091** under
+capture, because the on-target gDNA density is under-read **2.6–3.6×**. **The deconvolve is exactly as good as
 the density it is handed**, and pre-solve we do not have that density under capture. ⚠ `local` did not
 rescue it (4.761), so the flanking-boundary density that measured 0.04–0.21 on the *imputable exon*
 population does not carry the whole slot set — the gap between "works on the population it was measured
