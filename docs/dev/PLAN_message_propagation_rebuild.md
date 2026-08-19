@@ -49,7 +49,10 @@ of the last two sessions repaired a currency CHOICE instead of changing it.
 population is whatever physically enters the destination — evaluated in the two directions.** That is the
 whole justification for both, and it is why the pair must exist.
 
-⛔ **It also says my §2c oracle row is mis-measured rather than contradicting the synopsis** (§2c caveat 2).
+✅ **Measured as stated (2026-08-19, §2c)**: with the SPLICE-IN population — unspliced + contiguous spliced +
+the sj flux on the exon's side — the composition into an exon from a splice site is at its noise floor off
+capture and the clear winner on it; the prototype's "mis-measured row" was this population defect PLUS the
+terminus/splice-site conflation §2b names.
 
 ### 1b. ORDERING — forward-backward stays (owner, 2026-08-18)
 
@@ -65,77 +68,48 @@ side only. Forward-backward is what guarantees both arrive.
 the strand channel, which is the primary intron deconvolution on stranded data. ⛔ Asking the question at
 all was a failure to apply AXIOM 0; it is recorded here so the next session does not re-ask it.
 
-## 2. WHAT THE MEASUREMENTS SAY
+## 2. WHAT THE MEASUREMENTS SAY — ✅ STAGE 2 RAN 2026-08-19 ON THE REBUILT CACHES
 
-⛔⛔ **EVERY NUMBER IN THIS SECTION IS STALE BY CONSTRUCTION, AND STAGE 2 EXISTS TO REPLACE IT.** All of it
-was measured on 2026-08-18/19 against the PRE-FIX caches — before the chimera repair moved boundary
-crossings by **2.4 %** and before the panel was rebuilt (FIELD certification 24/32 → 32/32). The deficit
-fell precisely on the CROSSING axis, which is exactly what the hop census and the currency oracle read.
-⭐ **So treat what follows as the SHAPE to expect and the method to reuse — never as a result to cite.**
-⚠ Two rows are additionally known-wrong on their own terms; see §2c's caveats.
+⭐ **This section used to carry pre-fix numbers and said so; it now carries the MEASURED map, and the
+numbers themselves live in `ROADMAP.md` §0's "HOP CURRENCY MAP" row (moved, not copied).** The instrument
+is `scripts/design/hop_currency.py` (all 32 conditions in ~18 s; `--out` writes every condition × hop-type
+row; `--self-test` 36/36, falsified by perturbation). Read its docstring for the full table.
 
-### 2a. Imputed stretches are DEEP, so the chain stays
+### 2a. Imputed stretches are DEEP, so the chain stays — CONFIRMED
 
-Depth = chain hops from an IMPUTED slot to the nearest gDNA-MEASURING slot. `g50 ss0.50 nrna_none`:
+Capture-OFF: 27–29 % of imputed mass is ≥ 9 hops from any measured gDNA (g05/g50; 14 % at g98) and
+depth 1 reaches only 28–34 %. Capture-ON inverts the measured/imputed ratio (62 % → 18 % measured at g50)
+with 40–43 % at depth 1 and 10–15 % at ≥ 9. Forward-backward over the chain stays (§1b).
 
-| | capture-OFF | capture-ON |
+### 2b. ⛔⛔ THE HOP TYPES ARE NOT THE SEVEN STRATA — the data named the key
+
+Classified by object class alone, `R exon <- B exon|intron` read COMPOSITION 221 k vs LEVEL 27 k on one
+capture-OFF condition — as if the SPLICE-IN population fix had failed. Split by the boundary's structural
+flags (`is_terminus` / `is_splice_site`, either strand) **all of it sits on the TERMINUS boundaries** — a
+TSS/TES lying inside another transcript's intron (3,867 `[term]` vs 15,480 `[sj]` exon|intron boundaries;
+`B exon|exon` splits 7,850 `[term]` vs 4,838 `[sj]`). **The hop-type key is `object class × {sj, term, sj+term}`**
+(`TRAPS: an-object-class-does-not-see-a-terminus`), and the static table Stage 3 builds in `prepare()`
+keys on it. So "six hop types" becomes ~22 ordered types, of which the policy needs about five RULES.
+
+### 2c. The currency oracle — the principle held, and it named one residual
+
+Every error beside its Monte-Carlo noise floor (`TRAPS: the-floor-must-reproduce-the-selection`), in
+fragments, per condition:
+
+| hop | currency | evidence |
 |---|---|---|
-| gDNA-measuring mass | 4,839,750 (54.3 %) | 1,578,748 (15.3 %) |
-| imputed mass | 4,075,084 (45.7 %) | 8,717,307 (84.7 %) |
-| imputed mass at depth 1 | 29.0 % | 41.3 % |
-| **imputed mass at depth ≥ 9** | **28.4 %** | 12.4 % |
+| exon ← SPLICE-SITE boundary (SPLICE IN) | **COMPOSITION** of what ENTERS (unspliced + spliced + sj flux on the exon's side) | both at floor off capture; under capture COMP 1.2–1.5 % at g05/g98, 3.7–6.5 % at g50, against LEVEL 3 → 30 → 58 % |
+| exon ← TERMINUS boundary (gene edge, or a TSS/TES inside a gene) | **LEVEL** off capture; ⛔ **NEITHER on capture** | COMP 40–98 % off capture (the RNA originates there); on capture LEVEL dies by the enrichment (3 / 34–37 / 62–64 %) and COMP by the population (92 / 44 / 1.4 %) |
+| boundary ← EXON (SPLICE OUT direction), any class | **LEVEL** | 0.0 % on every arm; COMP 3–70 % (the exon's RNA ends or splices out); under capture the claim is CLIPPED to "all gDNA", which is true of the boundary |
+| exon\|intron / gene edge ← its own intron / intergenic | **COMPOSITION** | exact on `nrna_none` where LEVEL is off by 78–98 % of the destination under capture — the synopsis's central claim, to the fragment. ⚠ 5–37 % on `nrna_mid × capture-ON` is the PANEL (`TRAPS: the-panel-enriches-nascent-by-its-own-probes`), not the rule |
+| intron / intergenic ← its boundary | either | the region solves itself |
 
-⛔ A one-hop local imputation reaches 29 % of imputed mass and no more — the relay is required, exactly as
-the owner said. ⭐ Capture INVERTS the ratio (54 % → 15 %): far less measured gDNA to propagate from, which
-is why capture-ON is the hard regime.
-
-### 2b. SIX hop types carry the whole problem
-
-Ordered hops into an IMPUTED slot, by destination mass, `g50 ss0.50 nrna_none capture_off`:
-
-| dst ← src | hops | dst mass |
-|---|---|---|
-| `B exon\|exon` ← `R exon` | 25,622 | 3,249,058 |
-| `R exon` ← `B exon\|exon` | 10,483 | 3,244,078 |
-| `R exon` ← `B exon\|intron` | 10,766 | 1,094,494 |
-| `R exon` ← `B gene edge` | 1,597 | 524,608 |
-
-plus the two the synopsis names among gDNA-measuring objects (`B exon|intron` ← `R intron`,
-`B gene edge` ← `R intergenic`). **Six.** Against nineteen switches.
-
-### 2c. The currency oracle — the principle tested against certified truth
-
-Transport the source's TRUE value both ways; score both at the destination in the same units
-(`Σ|f_hat − true_f_g|·M`, fragments). The source is perfect, so what remains is the RULE's error.
-`g50 ss0.50 nrna_none capture_on`:
-
-| dst ← src | dst mass | LEVEL err | COMP err | winner |
-|---|---|---|---|---|
-| `B exon\|intron` ← `R intron` | 861,057 | 854,338 | **0** | **COMP** ⭐ |
-| `B gene edge` ← `R intergenic` | 156,156 | 155,286 | **0** | **COMP** ⭐ |
-| `R intron` ← `B exon\|intron` | 107,030 | 203 | **0** | COMP ⭐ |
-| `B gene edge` ← `R exon` | 125,065 | **480** | 20,910 | LEVEL ⭐ |
-| `B exon\|intron` ← `R exon` | 885,239 | **35,024** | 194,511 | LEVEL |
-| `R exon` ← `B exon\|exon` | 5,577,039 | **560,426** | 636,431 | LEVEL |
-| `B exon\|exon` ← `R exon` | 3,818,045 | 506,398 | 494,196 | tie |
-| `R exon` ← `B exon\|intron` | 3,173,458 | 1,152,716 | 1,353,964 | ⛔ both 36–43 % |
-| `R exon` ← `B gene edge` | 1,925,819 | 676,760 | 918,261 | ⛔ both 35–48 % |
-
-⭐ The principle predicts the winner on every row that has one, and the synopsis's central claim —
-COMPOSITION, not level, from an intron into its `exon|intron` boundary — is exact to the fragment where the
-level is off by 854,338.
-
-⛔⛔ **Two caveats travel with this table.**
-1. `nrna_none` makes every gDNA-measuring object pure gDNA on both sides, so `f_g = 1 = 1` and those COMP
-   zeros are partly `nrna = 0` restated. **Re-run on `nrna_mid` before treating them as measurements.**
-2. ⚠ **The `R exon ← B exon|intron` row is MIS-MEASURED, and §1a says exactly how.** That direction is
-   SPLICE IN, so the source population must be *unspliced crossings + the spliced fragments that splice in*.
-   The oracle used the boundary's `slot_truth` composition, which is neither. **Re-derive it as the
-   splice-in composition before drawing any conclusion from that row.**
-
-⭐ **Not a caveat: at capture-ON both currencies fail into an exon (35–43 %).** That is the capture problem
-— a partially-enriched boundary feeding a fully-enriched exon — and no currency choice fixes it. It is
-`ROADMAP.md` §1 rank 3 (spike-and-slab): a third MECHANISM, not a third currency.
+⛔ **The residual census is one thing: a TERMINUS into an EXON UNDER CAPTURE** — 0.57–0.65 M fragments per
+hop type at g50 (gene edge, exon|intron[term], and 0.24–0.27 M at exon|exon[term]), every strand, every
+nascent level. The enrichment changes AND the population changes, so no currency survives; that is
+`ROADMAP.md` §1 rank 3's spike-and-slab — a third MECHANISM, re-established here rather than inherited.
+⚠ A g98 COMP "win" at those hops (1.1–1.5 %) is `f_g = 1` restated, the mirror of `nrna = 0` at the
+controls; read the row across the three gDNA levels, never one cell.
 
 ### 2d. ✅ THE SEQUENCING BLOCKER IS CLEARED (2026-08-19)
 
@@ -160,14 +134,21 @@ unblocked on the capture-OFF strata**, which was the whole point of Stage 1.
 |---|---|---|
 | **0 · VOCABULARY** | §5's review, ruled by the owner, then ONE rename (never piecemeal), gated by `rename_identity.py` byte-identity | every stage proven a numeric NO-OP; suite green; `DESIGN.md` §0 carries the ruling |
 | **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — a silent chimera drop (§2d); panel fully rebuilt | ✅ the field gate on the conditions where it RUNS: **8/16 → 16/16 capture-OFF**, zero class-bias flags (the 16 capture-ON rows are vacuous by design) |
-| **2 · THE MAP** (no `src/`) | ⭐ **NEXT SESSION STARTS HERE.** Build ONE instrument and run it on all 32 — full spec in §3a | a measured currency table with a WINNER per hop type, and every place where BOTH currencies fail named before any mechanism is proposed |
-| **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
+| **2 · THE MAP** (no `src/`) | ✅ **DONE 2026-08-19** — `hop_currency.py`, all 32, §2 above | ✅ the currency per hop type is MEASURED (§2c), the hop-type key is `object class × {sj, term, sj+term}` (§2b), and the one place both currencies fail is NAMED: a terminus into an exon under capture |
+| **2b · THE MAP PER ARM** (no `src/`) | ⛔ **OWNER-RULED ESSENTIAL 2026-08-19**: extend `hop_currency.py` to `{gDNA, RNA+, RNA−}` — the 2026-08-19 map pooled the RNA strands | three currencies per hop type, re-run on the re-simulated caches (step 4 below) |
+| **2c · THE SIMULATOR** (owner's step 2) | ✅ **DONE 2026-08-19** — index-backed transcriptome incl. nascent entities, one RNA multinomial, capture by genomic overlap (`ROADMAP.md` §0) | ✅ gDNA 1162× / nascent 1003× under one probe; four perturbations fire; suite 3,538 passed |
+| **2d · THE TOY HARNESS** (owner's step 3) | build/revive `toy_harness.py` on the index-based simulator so a toy is solved in seconds with the FL / capture / strand behaviour harvested from a cached full scenario | `TA+` single exon solves; then `TB+` multi-exon beside it |
+| **2e · RE-SIMULATE** (owner's step 4) | all 32 conditions, caches and certification rebuilt (`panel.py`, `calibration_oracle.py`), the per-arm map re-run | 32/32 certified; the map re-measured |
+| **3 · THE POLICY** (owner's step 5) | ⭐ **TOY-FIRST, ONE TRANSCRIPT AT A TIME** — a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone, its arithmetic `EQUATIONS.md` §3.5e (three densities; rescale-by-totals at a compatible hop with SPLICE OUT / SPLICE IN; level only across a terminus, `sj+term` a terminus) | each added transcript solved exactly, everything before it still solved, both zero controls; the cached full scenarios as the benchmark whenever wanted |
 | **4 · THE PANEL** | all 32, three policies, RAW COUNTS (est / true / misplaced fragments), bar written first | never a bare ratio — the ratio framing hid a 1,978,148-fragment win for eleven days |
 | **5 · RETIRE** | delete `RelayPolicy` and everything the panel proves dead | §3's predictions, checked not assumed |
 
-### 3a. ⭐⭐⭐ STAGE 2 IN FULL — this is what the next session does
+### 3a. ✅ STAGE 2 IN FULL — EXECUTED 2026-08-19; kept as the record of the spec the instrument meets
 
 ⛔ **NO `src/` CHANGE. NO SOLVER RUNS.** Everything here reads the certified caches and the annotation.
+✅ Built as specified, with two additions the data forced: the hop-type key carries the boundary's
+structural class (§2b), and every error is printed beside a noise floor that reproduces the scorer's own
+selection (§2c). Both defects named below were fixed as written.
 
 **Build ONE instrument**, `scripts/design/hop_currency.py`, to the repo's standard: a docstring that opens
 with what it is FOR and its verdict, and a `--self-test` falsified by perturbation with no I/O. It is
@@ -221,8 +202,12 @@ population rule (§1a), and ASSERT the classification partitions the hops — th
 `object_composition.strata` already applies to slots. Capture it so an instrument can census it and so
 `TRAPS: an-ablation-that-never-ran` cannot recur.
 
-**The rungs.** Each is a toy spec, seconds to solve, scored per object against truth; each must pass BOTH
-zero controls (zero-RNA ⇒ `f_g = 1` everywhere; zero-gDNA ⇒ `f_g = 0`) before the next begins.
+**The rungs.** ⭐ **Owner's framing (2026-08-19): start with ONE single-exon transcript `TA+ (1000, 2000)`
+and develop the policy around it; add a multi-exon `TB+ (5000, 6000), (10000, 11000)` and make sure `TA+`
+still solves; keep adding transcripts and let the policy and the map evolve with each addition.** The
+table below is the shape that ladder takes; each rung is a toy spec, seconds to solve, scored per object
+against truth, and each must pass BOTH zero controls (zero-RNA ⇒ `f_g = 1` everywhere; zero-gDNA ⇒
+`f_g = 0`) before the next begins.
 
 | rung | spec | what it proves |
 |---|---|---|

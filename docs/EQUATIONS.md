@@ -289,6 +289,61 @@ shape §3.6 already uses for its two closures and the-residual-level for the lev
 a threshold here has been refused three times (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace). ⚠ Unbuilt and unpriced: the
 ceiling to measure first is what a PERFECT per-component `r_g` at every hop is worth, re-solved.
 
+**3.5e ⭐⭐⭐ THE TWO OPERATORS AND THE TERMINUS, WORKED IN NUMBERS — owner's derivation, 2026-08-19.**
+(The ruling is `DESIGN.md` §0c.0; this is the arithmetic the third policy is built against, and the
+toy rungs are checked against it. A message is the three DENSITIES `{gDNA, RNA+, RNA−}`, always.)
+
+⭐ **(i) SPLICE OUT — exon REGION → `exon|intron` BOUNDARY.** Single-stranded, + strand. The exon's
+contained belief is `{gDNA = 10, RNA+ = 90, RNA− = 0}`; the boundary has a measured sj flux `SJ+ = 17`
+and an unspliced belief `{gDNA = 2, RNA+ = 1, RNA− = 0}`.
+
+    1. the exon sends {10, 90, 0} — its densities, as they are
+    2. the boundary has a + strand sj, so it knows it must SPLICE OUT
+    3. the boundary's total INCLUDING the sj is 2 + (1 + 17) + 0 = 20; the exon's is 100; so the
+       boundary RESCALES itself by 100/20 = 5:  {2, 18, 0} -> {10, 90, 0}, and SJ+ 17 -> 85
+    4. now it SUBTRACTS the sj density: RNA+ 90 − 85 = 5 unspliced, still at the exon's scale: {10, 5, 0}
+    5. with the sj removed it UNDOES the rescale: {10/5, 5/5, 0} = {2, 1, 0}
+    6. that is the unspliced message the boundary compares with its own {2, 1, 0}
+
+The rescale is by the **ratio of totals with the sj flux counted in the boundary's total** (§3.6c's
+per-flank total), the sj is removed at the exon's scale, and the rescale is undone. ⭐ The exon and the
+boundary are *composition-compatible* — the same transcript population, RNA+ partly leaving by the sj —
+and the rescale factor absorbs whatever common-mode difference in opportunity or enrichment the two
+totals carry. ⛔ Nothing about it branches on capture.
+
+⭐ **(ii) SPLICE IN — intron REGION → `intron|exon` BOUNDARY → exon REGION.** The inverse.
+
+    1. the boundary sends its densities INCLUDING the spliced-in flux, because those fragments continue
+       contiguously into the adjacent exon:  {gDNA, unspliced RNA+ + SJ, RNA−}
+    2. the exon sees a message of total `rho_tot_src` and has its own total `rho_tot_dst`; the rescale
+       factor is `rho_tot_dst / rho_tot_src`
+    3. the exon rescales the message (they are compatible) and compares it with its own belief
+       {gDNA, RNA+, RNA−}
+
+⛔⛔ **(iii) THE TERMINUS — where the arithmetic above is NOT licensed.** `TA+` exons (1000, 5000) and
+`TB+` exons (2000, 5000); the boundary at 2000 is `TB`'s TSS and, by flank, `exon|exon`. An unspliced
+fragment crossing 2000 is compatible with `TA+` and with gDNA, **not with `TB+`**. So the boundary at 2000
+does not measure `TB+`, and the transcript population in the REGION (2000, 5000) is **not** the population
+at the boundary or in (1000, 2000). That is what the terminus bit says: **the population changed, the
+rescale arithmetic of (i)/(ii) cannot account for a transcript that ORIGINATES after the boundary, and
+only the LEVEL can be propagated** from the boundary at 2000 into (2000, 5000). ⛔ **A terminus that sits
+AT a splice junction is still a terminus** (owner, 2026-08-19): the population still changes across it
+and the rescale is still incorrect — `sj+term` is ruled with `term`, never with `sj`.
+
+⚠ **Capture, in the same example.** The probes could be anywhere along (1000, 5000): one at (1100, 1220)
+enriches `TA+` and not `TB+`; one at (3000, 3120) enriches both — and the gDNA NEAR it, while the gDNA
+crossing position 2000 is not enriched by it. So the LEVEL that crosses a terminus under capture is the
+boundary's level, and the region's may differ from it by a per-exon enrichment nobody has measured.
+⭐ Measured on the rebuilt panel (`hop_currency.py`, 2026-08-19, strands pooled): the LEVEL from a
+gene-edge or `exon|intron` terminus under-reads an exon's gDNA by 34–37 % of the exon's mass at `g50`
+capture-ON, from an `exon|exon` terminus by 7–9 %, and by ≤ 1 % off capture. §9d.3's two bounds (the
+flank's level as a floor, the total minus the sj-measured RNA as a ceiling) are what bracket that level.
+⛔ Nothing here is built; the toy rungs meet this case at capture-ON, with ground truth.
+
+⭐⭐ **(iv) THE THREE ARMS ARE NOT OPTIONAL** (owner, 2026-08-19): every one of the steps above is
+written in `{gDNA, RNA+, RNA−}`; a map or an operator that pools the two RNA arms has not measured the
+thing the policy carries.
+
 **3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` BOUNDARY — component-set matching, derived and verified.**
 (Owner, 2026-08-04. Verified against oracle truth on `toy_harness --spec spliced_exons`.)
 

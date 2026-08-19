@@ -48,11 +48,12 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **138 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **144 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-18 AND THE INDEX IS COMPLETE: 138 entries, 138 bodies, and BOTH set differences
-print empty.** (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
+⭐⭐ **RE-DERIVED 2026-08-19 AND THE INDEX IS COMPLETE: 144 entries, 144 bodies, and BOTH set differences
+print empty.** (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
+the header had read 138 while the file held 141, the drift this line exists to catch.) (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
 simplex-closure work added three more; 132/132 before the doc audit below added one; 133/133 before the
 message-passing lock-down added four — two to §D and two to §A.)
 ⛔⛔ **AND THE +1 IS ITS OWN LESSON: `a-green-suite-hid-five-dead-instruments` HAD A NAME, FOUR CITATIONS
@@ -165,6 +166,8 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `a-truth-table-of-aggregates` — A TRUTH TABLE'S LABEL COLUMN MAY HOLD NESTED AGGREGATES, AND SUMMING IT DOUBLE-COUNTS.
 - `a-moment-match-is-not-sufficient` — MATCHING THE MODEL'S MOMENTS TO THE POPULATION'S CAN MAKE THE ANSWER WORSE.
 - `a-single-level-panel-cannot-see-a-constant` — A PANEL THAT HOLDS THE ANSWER FIXED CANNOT TELL A GOOD ESTIMATOR FROM A CONSTANT.
+- `the-floor-must-reproduce-the-selection` — A NOISE FLOOR DRAWN UNCONDITIONALLY UNDER A SCORER THAT CONDITIONS
+  (on a non-empty destination) READS THE TRUNCATION AS A RULE ERROR — 10 % at ~1 expected count per object.
 
 **Pools, selections and divisors**
 
@@ -245,6 +248,9 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `checkout-deletes-uncommitted-work` — git checkout -- <file> does not undo a perturbation when the work is uncommitted — it deletes th
 - `two-masks-one-name` — TWO DIFFERENT MASKS SHARED THE WORD struct_lock, AND BOTH WERE RIGHT.
 - `two-docstrings-one-quantity` — The prose next to the code said "the AVERAGE" and the code followed the prose, while a sibling
+- `an-object-class-does-not-see-a-terminus` — THE OBJECT CLASSES CLASSIFY A BOUNDARY BY ITS FLANKS' EXON-NESS, AND A
+  TSS/TES LYING INSIDE A GENE LOOKS EXACTLY LIKE A SPLICE SITE. A hop type is keyed on the boundary's structural
+  flags, or the whole composition error into exons lands on one un-named sub-class.
 
 **Domain facts that read like defects**
 
@@ -263,6 +269,9 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `configured-lengths-are-not-realised` — EQUAL CONFIGURED FRAGMENT LENGTHS DO NOT GIVE EQUAL REALISED ONES.
 - `mature-rna-never-crosses-a-boundary` — Mature RNA never crosses an exon↔intron boundary (0 of 1,146 boundaries, 7/7 conditions).
 - `a-boundary-with-rna-is-not-an-sj` — But a boundary with RNA crossing it need not be a sj.
+- `the-panel-enriches-nascent-by-its-own-probes` — A SIMULATOR THAT MODELS A POPULATION IN ITS OWN PRIVATE
+  SPACE GIVES IT ITS OWN PRIVATE PHYSICS. Nascent RNA had a per-transcript pre-mRNA space, so a probe on
+  another transcript's exon enriched the gDNA there and not the nascent. FOUND and REPAIRED 2026-08-19.
 
 **Process**
 
@@ -1126,6 +1135,21 @@ not thereby right about the next one.
 
 ---
 
+**the-floor-must-reproduce-the-selection. ⛔⛔ A NOISE FLOOR DRAWN UNCONDITIONALLY UNDER A SCORER THAT
+CONDITIONS READS THE CONDITIONING AS A RULE ERROR.** Measured 2026-08-19 in `hop_currency.py`. A hop is
+scored only if its destination holds mass; at capture-OFF `g05` a boundary expects ~1.2 gDNA crossings,
+so the scored destinations are a ZERO-TRUNCATED Poisson — realised mean 1.64, variance 0.71 — while a
+perfect LEVEL rule claims the untruncated 1.17. The realised error was 972 fragments against a floor of
+708 drawn with an unconditional redraw, and the 37 % gap printed as a 10-14 % "rule error" into every
+small-boundary class at `g05`. The rule was exact; the null was wrong.
+⭐ *The rule:* whatever selection the scorer applies to the data, the null must apply to its draws — here a
+pure-gDNA destination is redrawn conditional on `n >= 1` (inverse CDF), and the same three classes read
+"either" at their floors (972 vs 1,011). A floor that cannot be falsified by turning the conditioning off
+is not a floor; `hop_currency.py --self-test` carries both arms.
+*Sibling:* `a-ratio-needs-a-population-that-can-supply-its-numerator` (a selection on the denominator),
+`excluding-a-population-hides-it`.
+
+
 ## C. Pools, selections and divisors
 
 **two-divisors-opposite-sign. ⭐⭐ TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.**
@@ -1831,6 +1855,25 @@ blacklist promotes the fragment to `SPLICE_ARTIFACT`, which also deposits nothin
 simulated panel (no blacklist artefact in the index, `sj_blacklist_size = 0`) and would fire only on real
 data — which is how it has stayed unmeasured.
 
+**an-object-class-does-not-see-a-terminus. ⛔⛔ THE SEVEN OBJECT STRATA CLASSIFY A BOUNDARY BY THE EXON-NESS OF
+ITS TWO FLANKS, AND A TSS/TES LYING INSIDE ANOTHER TRANSCRIPT'S INTRON OR EXON IS INDISTINGUISHABLE FROM A
+SPLICE SITE THERE.** Measured 2026-08-19 (`hop_currency.py`, Stage 2 of the message-propagation rebuild).
+Classified by object class alone, `R exon <- B exon|intron` read COMPOSITION 221 k fragments against LEVEL 27 k
+on `g50 ss0.50 nrna_mid capture_off` — the SPLICE-IN population fix had apparently not rescued the
+composition into exons. Split by the splice graph's flags (`is_terminus` / `is_splice_site`, either
+strand), **209 k of it sat on the 3,867 TERMINUS boundaries** (COMP 209 k vs LEVEL 12 k on 327 k) and the
+15,480 SPLICE-SITE boundaries were near-exact both ways (11.7 k vs 15.0 k on 605 k). A `B exon|exon` splits
+the same way: 4,838 `[sj]`, 7,850 `[term]`, 123 `[sj+term]`. The two sub-classes have OPPOSITE currencies —
+at a terminus the RNA ORIGINATES and a composition cannot cross; at a splice site it ENTERS by the sj and
+the composition does — so a table keyed on the class averaged a 64 % failure with a 2 % success and
+named neither.
+⭐ *The rule:* a hop type is `object class x {sj, term, sj+term}`, read off `RegionStatics.boundary_flags`; any
+static hop table a policy builds in `prepare()` must key on it. ⚠ The classes themselves are right for what
+they were built for (ψ's reference, `object_composition.py`) — a terminus boundary IS `exon|intron` by
+flank; it is the HOP that needs the second bit.
+*Sibling:* `two-masks-one-name`, `a-boundary-with-rna-is-not-an-sj`.
+
+
 ## F. Domain facts that read like defects
 
 **specificity-and-sense-are-complements. Strand specificity is TWO different quantities and they are complements.** A simulator's
@@ -1989,6 +2032,32 @@ objects — and it is what makes the two exon-crossing gDNA pools pure.
 **a-boundary-with-rna-is-not-an-sj. But a boundary with RNA crossing it need not be a sj.** One position can be a splice donor for
 transcript A and plain contiguous exon for transcript B; zero-gDNA libraries show boundaries with 44–55 k
 unspliced fragments that are 100 % RNA.
+
+**the-panel-enriches-nascent-by-its-own-probes. ⛔⛔ A SIMULATOR THAT MODELS A POPULATION IN ITS OWN
+PRIVATE SPACE WILL GIVE IT ITS OWN PRIVATE PHYSICS — and the tool is then debugged against a library that
+does not exist.** ⭐ **FOUND 2026-08-19 (`hop_currency.py`), REPAIRED THE SAME DAY.** Nascent RNA was a
+parallel per-transcript "pre-mRNA space" beside the transcriptome, and hybrid capture was applied inside
+each space separately: `sim/capture/sampler.py` gave a pre-mRNA only the probes declared on ITS OWN
+transcript (`_add_transcript_probe` → `_add_nrna_blocks(t_idx, …)`; `_add_bed12_probe` skipped a
+transcript the probe did not project onto, and filtered by strand). So nascent RNA spanning ANOTHER
+transcript's probed exon — a nested or overlapping gene, an unprobed sibling isoform (360 of the 4,154
+transcripts in the ladder's probed genes) — was NOT enriched while the gDNA at the same position WAS:
+observed nascent at those boundaries **0.16x** of "enriched alike", and an 18 % composition residual on
+the `nrna_mid x capture-ON` intron→boundary hops that is not the estimator's.
+⭐ *The physics it violated:* at capture time every library molecule is ds-cDNA, so a probe binds anything
+carrying its sequence — mature, nascent and gDNA alike, either strand.
+⭐ *The repair (owner's ruling):* the simulator takes its transcriptome from a **rigel index**, so nascent
+RNA is not a space at all — it is the index's own single-exon nascent ENTITY (`create_nrna_transcripts`,
+TSS/TES clustered within `NRNA_MERGE_TOLERANCE`), an ordinary transcript in ONE multinomial with the
+mature rows, and a probe maps by GENOMIC OVERLAP to gDNA and to every transcript whose exons it touches.
+Measured after: gDNA and nascent under one probe are enriched **1162x and 1003x** — the same rate.
+⛔ *The general rule:* a simulated population must be a first-class member of the same object set as the
+others, weighted the same way and reached by the same mechanisms. A private space is where a private
+physics hides, and the tool then inherits the error as if it were its own.
+⚠ *And the reason it took a currency measurement to find it*: every gate the simulator had was WITHIN a
+space (nascent totals, nascent lengths) and none compared ACROSS them at one genomic position.
+*Sibling:* `real-data-is-a-test-input`, `a-single-level-panel-cannot-see-a-constant`, `prove-the-substrate`.
+
 
 ---
 

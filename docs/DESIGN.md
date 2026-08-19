@@ -295,6 +295,37 @@ question: what crosses INTO this region?"*
 population is whatever physically enters the destination — evaluated in the two directions.** That is the
 whole justification for the pair, and it is why both must exist.
 
+⭐ **MEASURED, 2026-08-19 — the principle held on all 32 conditions, and the data named ONE thing the
+synopsis did not** (`scripts/design/hop_currency.py`, Stage 2 of the rebuild; the numbers are
+`ROADMAP.md` §0). A terminus — a TSS/TES, whether at a gene edge or lying inside another transcript's
+intron or exon — is a POPULATION change and carries a LEVEL; a splice site into an exon carries the
+SPLICE-IN COMPOSITION; an intron into its own boundary carries a COMPOSITION (exact to the fragment where
+a LEVEL is off by 78–98 % under capture); and a hop OUT of an exon carries a LEVEL on every arm. ⛔ **So a
+hop type is `object class × {splice site, terminus, both}` read off the boundary flags — the class alone
+conflates a TSS/TES inside a gene with a splice site, and the two have OPPOSITE currencies**
+(`TRAPS: an-object-class-does-not-see-a-terminus`). ⛔ And at a TERMINUS INTO AN EXON UNDER CAPTURE
+neither currency survives — the enrichment changes AND the population changes — which is the residual
+§0c.3's spike-and-slab exists for, now re-established on the rebuilt panel rather than inherited.
+
+⭐⭐ **OWNER RULINGS, 2026-08-19, ON THE MAP AND HOW THE POLICY IS BUILT** (the arithmetic is
+`EQUATIONS.md` §3.5e, worked in numbers):
+* **the map MUST be per ARM — `{gDNA, RNA+, RNA−}`, three currencies measured, not one gDNA share with
+  the strands pooled.** The 2026-08-19 map is the pooled-strand first pass and is to be extended before
+  it is used.
+* **a message is the three DENSITIES; a compatible hop RESCALES by the ratio of totals** (the sj flux
+  counted in the boundary's total, removed at the source's scale, the rescale undone — SPLICE OUT; the
+  inverse — SPLICE IN). **A terminus is where the rescale is not licensed** and only the level crosses;
+  ⛔ a terminus AT a splice junction is still a terminus (`sj+term` rules with `term`, never with `sj`).
+* ⛔ **messages DO flow into gDNA-measuring objects** — an exon sends its densities into its
+  `exon|intron` boundary and the boundary does the SPLICE OUT arithmetic; "measuring objects are sources
+  only" was proposed and is REFUSED.
+* **the policy is built TOY-FIRST, one transcript at a time** (`docs/TESTING.md` §0b): a single-exon
+  `TA+`, then a multi-exon `TB+` beside it, then more, the policy and the map evolving with each
+  addition and the cached full scenarios run as the benchmark whenever wanted. ⛔ Not built straight
+  from the map: the owner's judgement is that the logical complexity is not yet held firmly enough for
+  that, and the record of this project says solving one thing while breaking another is the failure
+  mode.
+
 ⛔ **THREE THINGS ARE SETTLED AND MUST NOT BE RE-ASKED**: forward-backward STAYS (an object may need a
 message from BOTH neighbours; an ordered single pass delivers from one side only); the three arms
 `{gDNA, RNA+, RNA−}` are carried NATIVELY (AXIOM 0 — collapsing the RNA pair would destroy the strand

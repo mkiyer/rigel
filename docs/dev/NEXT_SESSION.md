@@ -1,88 +1,90 @@
-# NEXT SESSION — Stage 2, "THE MAP": measure the currency per hop type
+# NEXT SESSION — develop the message-propagation policy on the test chromosome
 
     ⚠ **A DEV DOC. Nothing may cite it, and it is NOT the state.** The state is `ROADMAP.md` §0/§1, the
-    rulings `DESIGN.md`, the lessons `TRAPS.md`. ⛔ Delete this file when the plan it points at is executed.
+    rulings `DESIGN.md`, the lessons `TRAPS.md`, the substrate `TESTING.md` §0a/§0b.
+    ⛔ Delete this file when the plan it points at is executed.
 
-    Written 2026-08-19, replacing `NEXT_SESSION_zero_control_pin.md` — which is SUPERSEDED, not lost: it
-    queued a per-bug dissection of `RelayPolicy`, and the owner has since ruled that the relay is REBUILT
-    rather than repaired. Its durable content was MOVED before deletion (see "what moved where", below).
+    Written 2026-08-19 at the end of a long session, for the migration the owner announced.
 
-## THE TREE
+## ⭐⭐⭐ FIRST COMMAND OF THE SESSION — prove you can run and regenerate everything
 
-Clean, four commits ahead of where the day started. Suite **0 failed / 3,532 passed / 0 skipped /
-9 xfailed, 3,541 collected**. `message_propagation = True`.
+    python scripts/design/preflight.py          # ~2 min, or --fast to skip the instrument sweep
+    python -m pytest tests/ -q                  # 0 failed / 3,554 passed / 9 xfailed, 3,563 collected
 
-⭐ **The panel is fully rebuilt and certified**: 32/32 scan caches, 32/32 oracle caches, all 32
-`slot_truth.npz` stamped **COMPOSITION + FIELD**, zero class-bias flags.
-⚠ **Read that honestly**: the uniformity gate is VACUOUS on the 16 capture-ON conditions by design, so the
-real verification is **16/16 capture-OFF, up from 8/16** — all eight failures were capture-OFF, so the win
-is the same size, but "32/32" is a stamp count and not 32 verifications.
-⚠ `panel.py status` still prints `oracle cache 11/32`; that is the DOCUMENTED quirk (it counts a fourth
-part `_main`, written only for conditions `pass0_vs_oracle` SCORES, and redundant with `scan_cache`).
+⛔ **Do not start work on a ✘.** Preflight checks the toolchain, both references, both panels (five
+oracle partitions and a certified `slot_truth` each) and every instrument, and for anything missing it
+prints the command that regenerates it — a missing DERIVED artifact is a command you have not run, not
+damage. ⭐ Its first run caught the 8 test-chromosome scenarios sitting uncertified.
+
+## WHERE THINGS STAND
+
+✅ **Simulator** — takes its transcriptome from a rigel INDEX, so nascent RNA is the index's own
+single-exon ENTITY and capture binds by genomic overlap, strand-agnostically (`TESTING.md` §0).
+✅ **Panel** — 16 conditions, rebuilt in 24.5 min, **nascent ON in every one**, so no row is
+`nrna = 0` restated. 6/6 simulator gates; 16/16 COMPOSITION + FIELD certified (12 real per-reference
+field verifications — the capture-ON and zero-gDNA rows are VACUOUS by design).
+✅ **Per-arm truth** — the oracle cache carries five partitions: the three `ORIGINS` plus
+`rna_pos`/`rna_neg` (RNA by TRANSCRIPT strand), gated `n_rna_pos + n_rna_neg == n_mrna + n_nrna` at
+every slot, max gap **0**.
+✅ **The hop-currency MAP, per arm** (`hop_currency.py`, 16 conditions in 23 s) — Stage 2 of the
+rebuild is DONE. The arms genuinely disagree; the map is `ROADMAP.md` §0.
+✅ **The standing BENCHMARK** — `relay_pool_ab.py --out` + `benchmark_report.py` (HTML). Artifacts:
+`<ladder>/benchmark/baseline_2026-08-19_shipped.{log,tsv}` and `benchmark_ladder.html`.
+✅ **The method-development TEST CHROMOSOME** — 8 transcripts over two stages, `TESTING.md` §0a.
 
 ## WHAT THE NEXT SESSION DOES
 
-⭐⭐⭐ **`PLAN_message_propagation_rebuild.md` §3a, in full. It is written to be executed.** In one line:
-build `scripts/design/hop_currency.py` and run it on all 32 conditions, so the CURRENCY of each of the six
-hop types is MEASURED before any policy code is written.
+⭐⭐⭐ **STAGE 3 — the THIRD POLICY, developed on the test chromosome, one transcript at a time.**
+The arithmetic it must implement is `EQUATIONS.md` §3.5e (the owner's worked SPLICE OUT / SPLICE IN and
+the terminus case); the rulings are `DESIGN.md` §0c.0; the hop table is keyed on
+`object class × {sj, term, sj+term}` (`TRAPS: an-object-class-does-not-see-a-terminus`).
 
-⛔ **What NOT to do, and this is the whole reason the previous handoff was replaced**: do not open a
-per-bug dissection of `RelayPolicy`. Its zero-control gap is real, named and open — and its policy is
-scheduled for deletion, so fixing it is work with no destination. The mechanism survives as a CONSTRAINT
-the new policy must satisfy (`TRAPS: zero-the-precision-with-the-value`).
+**The loop, and it is seconds long:**
 
-## WHY THIS IS THE NEXT STEP AND NOT SOMETHING ELSE
+    python scripts/sim/build_test_reference.py                     # after editing the GTF/abundances
+    rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability --no-tsv -o <T>/idx
+    python scripts/sim/simulate_reads.py --config scripts/sim/configs/test_reference.yaml -j 8
+    python scripts/design/build_scan_cache.py --index <T>/idx --suite <T>/scenarios
+    # the 4 g00 rows need the per-condition path — `pass0_vs_oracle.py` holds zero-gDNA rows out:
+    python scripts/design/pass0_vs_oracle.py --suite <T>/scenarios --index <T>/idx \
+        --oracle-cache <T>/scenarios/oracle_cache --_prewarm <condition>
+    python scripts/design/relay_pool_ab.py --suite <T>/scenarios --index <T>/idx \
+        --oracle-cache <T>/scenarios/oracle_cache --out rows.tsv
+    python scripts/design/benchmark_report.py rows.tsv --transcripts <T>/scenarios -o page.html
 
-The owner's ruling (2026-08-18): *"the whole method from the top down is not simple, and it is not
-elegant … it can be simple and elegant"*. `RelayPolicy` carries **19 switches**; the panel says the problem
-has **six hop types**. `DESIGN.md` §0c.0 is the ruling that replaces the switch pile — a hop carries a
-**LEVEL** or a **COMPOSITION**, and the two invariances are complementary, so the licence question IS the
-currency question asked once per hop type.
+with `<T> = ~/Downloads/rigel_runs/test_reference`. Simulation of all 8 scenarios is **~18 s**.
 
-⭐ Stage 2 is the step that makes that testable rather than argued. It costs no `src/` change and it
-cannot break anything.
+⛔ **REPORT EVERY SCENARIO. DO NOT POOL** (owner, 2026-08-19: *"DON'T POOL SCENARIOS. WE NEED TO SEE
+EVERY SCENARIO. ONLY POOL AT THE END."*). `benchmark_report.py` enforces the shape.
 
-## THE ONE THING THAT WOULD OTHERWISE BE LOST
+## THE MEASUREMENT THAT SHOULD DRIVE THE DESIGN
 
-⛔⛔ **Every measurement in the plan's §2 is STALE and the plan now says so at the top of the section.**
-It was taken against the PRE-FIX caches; the chimera repair moved boundary crossings by **2.4 %**, on
-exactly the axis the currency oracle reads. Use §2 for the SHAPE and the METHOD, never as a result.
-⚠ Two rows are additionally wrong on their own terms — the SPLICE IN row used the wrong source population,
-and the `nrna_none` rows make a COMPOSITION "win" that is `nrna = 0` restated. §3a says how to fix both.
+On the test chromosome the relay HELPS on all 8 scenarios; on the 16-condition ladder it COSTS the
+three in-scope strata **1.4–1.7×** while winning the control (0.124×) and the deferred stratum (0.324×).
+⭐ **That gap is the most useful thing on the table**: whatever `RelayPolicy` gets wrong on the real
+panel is NOT yet represented on the test chromosome. The next structures to add are the ones that would
+close it — overlapping genes on opposite strands, alternate TSS/TES, a long multi-exon gene whose exons
+are many hops apart (the ladder puts 23–29 % of imputed mass ≥ 9 hops from any measured gDNA).
 
-## WHAT MOVED WHERE (so nothing is hunted for)
+## THE TRAPS THIS SESSION PAID FOR
 
-| what | now lives in |
-|---|---|
-| the two-currency principle, the direction rule, the three settled points (forward-backward, three arms, no analogy) | `DESIGN.md` §0c.0 |
-| compatibility-before-chimera | `DESIGN.md` §3.1b-ii |
-| a refused claim must lose its precision with its value | `TRAPS: zero-the-precision-with-the-value` |
-| a transcript predicate must not silently drop a molecule; make the fragment ledger CLOSE | `TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule` |
-| a class ratio needs a population that can supply its numerator | `TRAPS: a-ratio-needs-a-population-that-can-supply-its-numerator` |
-| the state, the numbers, the ranked list | `ROADMAP.md` §0 and §1 ranks 1–2 |
-| the two refused zero-control mechanisms (`struct_lock = g1_locked ∧ REGION`, the zero-mass rescale guard) | `ROADMAP.md` §4.1, the GRAVEYARD — with their named losses, so they are not rebuilt |
+* ⛔ **A donor's LIBRARY-level priors must match the condition's strand/capture axes.** A `ss_0.99`
+  donor injected into `ss_0.50` reported **82,581** false positives where a matching donor reports 0.
+  `relay_pool_ab.py --donor` now refuses a mismatch. ⚠ Stage 2 removed the need entirely — with real
+  splice junctions κ fits from the data.
+* ⛔ **A test fixture that builds its subject with `__new__` tests the rebuild, not the subject.** One
+  bypassed `__init__` and 242 tests failed on a new attribute while production was fine.
+* ⛔ **A duplicate key in a dict literal is a LOST EDIT, not an error.** A jargon-gate allowance silently
+  did nothing because the key already existed later in the same dict.
+* ⛔ **`--collect-only` every count, never adjust one.** Every suite move this session was accounted.
 
-## THE QUEUE BEHIND STAGE 2
+## STILL OPEN
 
-* Stage 3 — the third policy, rung by rung on toys, ending at the owner's TA–TF locus; Stage 4 — the panel
-  in RAW COUNTS; Stage 5 — retire `RelayPolicy`.
-* `arm` → `component`, the one token the vocabulary pass deliberately deferred: **THREE** senses, one of
-  them `__ARM_NEON` in the C++ scanner, 1,358 sites. It needs its own `--sense` pass.
-* The sj artifact BLACKLIST drops a whole fragment (`SPLICE_ARTIFACT` deposits nothing) — the chimera
-  bug's twin, inert on the simulated panel (`sj_blacklist_size = 0`) and live only on real data. An owner
-  decision, and the owner's chimera ruling arguably already answers it.
-* `ROADMAP.md` §1 ranks 3+ are unchanged and independent of the rebuild.
-
-## THE DISCIPLINE THAT PAID, AND THAT COST WHEN SKIPPED
-
-* ⭐ **Run `rename_census.py --sense <token>` BEFORE renaming anything.** Skipping it corrupted the second
-  sense of one token in ~50 places; the whole stage was reverted and redone scoped.
-* ⭐ **A falsification test first, verified failing — then break the fix and watch each gate fire.** That
-  second half found a hole: breaking the C++ to measure a GAP instead of a SPAN fired no native gate until
-  one was written for it.
-* ⭐ **Make the ledger close.** `n_fragments == deposited + Σ accounted drops` is what named the chimera bug
-  after eleven other candidates had been eliminated.
-* ⭐ **Score per gDNA-bearing reference, in FRAGMENTS.** Pooling references manufactured a 2 % deficit that
-  was reported as a second bug before it was caught.
-* ⭐ **Read `memory_pressure`, not RSS.** A condition's 45 GB RSS is reclaimable page cache; believing it
-  would have forfeited a 6× rebuild speedup.
+* The `ROADMAP.md` §1 rank 3 spike-and-slab: at a TERMINUS into an EXON under capture NEITHER currency
+  works (~10 % excess on every arm) — the residual the map names and no policy choice fixes.
+* `relay_pool_ab.py`'s docstring promises a `--table pipeline` (the EM-level nascent/annotated split)
+  that does not exist. Build it or remove the promise.
+* Prose in ~18 instruments still describes the retired 36-condition ladder and the deleted
+  `pilot`/`flgap` panels. ⚠ Historical measurement stamps are PROVENANCE and must stay; what is worth
+  fixing is any prose that presents a retired panel as current. All LIVE CODE and usage examples were
+  repointed on 2026-08-19 (24 substitutions, verified by an AST scan that now returns empty).

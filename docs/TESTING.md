@@ -155,6 +155,110 @@ function of the calibration code that fit it, so caching it would serve a stale 
 
 ---
 
+## 0a. ⭐⭐⭐ THE METHOD-DEVELOPMENT TEST REFERENCE — one 100 kb chromosome that GROWS (owner, 2026-08-19)
+
+⭐⭐⭐ **THE BENCHMARK THE MESSAGE-PROPAGATION POLICY IS DEVELOPED AGAINST.** Owner: *"over the course of
+this method development, we will add transcripts to a 'test chromosome' … collectively, the test
+reference chromosome, test transcript GTF, and test abundances comprise a critical method development
+benchmark. We start with ZERO transcripts."* Every addition is a deliberate step, and the policy must
+solve the new structure **and everything already there**.
+
+| piece | |
+|---|---|
+| `scripts/sim/test_reference/test_chr.gtf` | ⭐ **HAND-EDITED** — one `exon` line per exon. This is where a transcript is added |
+| `scripts/sim/test_reference/test_abundances.tsv` | ⭐ **HAND-EDITED** — `transcript_id / mrna_abundance / nrna_abundance`, relative molecular sampling weights |
+| the FASTA and the index | ⛔ **DERIVED** by `scripts/sim/build_test_reference.py`, never hand-edited |
+
+⛔ **WHY THE FASTA IS DERIVED.** A spliced transcript needs a GT..AG at every intron or the aligner and
+the simulator disagree with the annotation. Generating the chromosome from a fixed seed (100,000 bp,
+`test_chr`) and injecting a motif at every intron the GTF declares makes that impossible to get wrong; a
+versioned FASTA would need a hand edit on every addition and the first missed one is a silent failure.
+⚠ Verified on the round trip: the GTF's intron gets `GT`/`AG` at exactly its endpoints and an unedited
+control position is untouched.
+
+⭐⭐ **NASCENT RNA NEEDS NO DECLARATION** — `rigel index` creates a single-exon nascent ENTITY spanning
+each multi-exon transcript, which is exactly the owner's *"just add a single-exon transcript spanning the
+multi-exon transcripts"*. Give it abundance through its CONTRIBUTOR's `nrna_abundance`; the simulator
+pools it onto the entity. ⚠ An ANNOTATED single-exon transcript is already its own nascent equivalent
+(`is_nrna = True`, no synthetic made) — verified on the round trip.
+
+⛔ The builder REFUSES a reference it cannot simulate and reports every problem at once: an exon off the
+end, overlapping exons, an intron under 4 bp (too short for a motif), a duplicate id, a transcript with
+no abundance row, an abundance for a transcript that is not in the GTF, the wrong reference name.
+`--self-test` 16/16, each check perturbed.
+
+### ⭐⭐ STAGE 1 OF THE TEST REFERENCE — five single-exon transcripts (owner, 2026-08-19)
+
+| transcript | gene | exon | note |
+|---|---|---|---|
+| `T1p_SE_1KB` | `G1` | 10,000–11,000 | fragments land here; NO probe |
+| `T1p_cap_SE_1KB` | `G1cap` | 5,000–6,000 | probes 5,000–5,120 and 5,800–5,920 |
+| `T2p_SE_50BP` | `G2` | 15,000–15,050 | too small for a fragment; no probe |
+| `T3_1p_SE_4BP` | `G3` | 20,000–25,000 | NESTED pair, one gene, one shared probe |
+| `T3_2p_SE_4BP` | `G3` | 22,000–24,000 | 22,000–22,120 falls inside BOTH |
+
+⚠ **The `4BP` suffix matches neither**: `T3_1p_SE_4BP` is 5,000 bp and `T3_2p_SE_4BP` is 2,000 bp. The
+names are the owner's and are kept verbatim because they are how the transcripts are referred to.
+
+⭐ **Measured, 8 scenarios in 21 s** (`configs/test_reference.yaml`; g00/g50 × ss 0.50/0.99 × capture
+off/on): off capture the two 1 kb transcripts land within 0.2 % of each other and the nested pair sits at
+2.70×, their length ratio; `T2p_SE_50BP` gets **exactly 0** fragments at every setting. Under capture
+`T1p_cap_SE_1KB` rises **4.2×** while the unprobed `T1p_SE_1KB` collapses **80×** — capture is a
+competition for one budget — and the shared probe holds both nested transcripts up.
+
+⛔ **WHAT A SINGLE-EXON-ONLY TRANSCRIPTOME BLOCKS IS THE STRAND-MODEL *FIT*, NOT CALIBRATION** (owner's
+correction, 2026-08-19; an earlier version of this section over-claimed). `calibrate` raises
+`CalibrationStrandError` on a library with zero spliced unique mappers because **κ is fitted from spliced
+reads** and there are none — not because the library cannot be deconvolved. ⭐ Given κ, stranded data
+calibrates fine on single exons; **unstranded** data needs the gDNA LANDSCAPE prior, which is built after
+pass-0. So the missing ingredient is per-stratum, and it is a LIBRARY-level parameter either way:
+`relay_pool_ab.py --donor` harvests κ and the rest from a cached condition and injects them, which is the
+contract the toy harness already runs under.
+⛔⛔ **THE DONOR MUST MATCH THE CONDITION'S STRAND AND CAPTURE AXES AND A MISMATCH IS SILENT** — a
+`ss_0.99` donor injected into the `ss_0.50` conditions reported **82,581** false-positive gDNA fragments
+at the zero control where a matching donor reports **0**. It is refused now rather than trusted.
+⭐ **STAGE 2 removes the need entirely**: the first spliced transcripts give the library real splice
+junctions, κ fits from the data, and every scenario calibrates with no donor at all.
+
+⭐⭐ **AND STAGE 1 ALREADY SEPARATES THE POLICIES**, which is what it is for. Unstranded × capture-OFF,
+gDNA counts against truth: at the `g00` control `SilentPolicy` reports **82,581** false positives and
+`RelayPolicy` **0**; at `g50` the absolute error is **23,319** against **114**. Under capture it
+inverts (13,529 against 9,044). Stranded is near-perfect either way (net +53 on 100 k at `g50`).
+
+### ⭐⭐ STAGE 2 — the first SPLICED transcripts, minus strand (owner, 2026-08-19)
+
+| transcript | gene | exons | probes |
+|---|---|---|---|
+| `T4_cap_2exon_2KB` | `G4` | 30,000–31,000 · 34,000–35,000 | 30,800–31,000 and 34,000–34,120 |
+| `T5_nocap_2exon_2KB` | `G5` | 36,000–37,000 · 39,000–40,000 | none |
+| `T6_3exon_3KB` | `G6` | 45,000–46,000 · 48,000–48,500 · 51,000–52,500 | one per exon, at each exon's 5' 120 bp |
+
+⭐ These are the chromosome's first introns, so its first SPLICE JUNCTIONS — the first **certified RNA**
+(a spliced fragment cannot be gDNA) — and the first three **synthetic nascent entities**, one single-exon
+transcript spanning each. ⚠ Three names were corrected on the owner's instruction because they
+misdescribed their own size: `T3_1p_SE_4BP` → `T3_1p_SE_5KB`, `T3_2p_SE_4BP` → `T3_2p_SE_2KB`,
+`T6_3exon_2kb` → `T6_3exon_3KB` (1,000 + 500 + 1,500 = 3,000 bp).
+
+⭐⭐ **AND STAGE 2 SEPARATES THE POLICIES ON EVERY SCENARIO** — gDNA absolute error in fragments,
+`SilentPolicy` → `RelayPolicy`, all 8 shown because pooling is what hides a sign flip
+(`TRAPS: never-pool-the-strata`):
+
+| scenario | Silent | Relay | |
+|---|---|---|---|
+| `g00 ss0.50 capture_off` | 97,940 | **0** | 0.000× |
+| `g00 ss0.50 capture_on` | 67,385 | **1,255** | 0.019× |
+| `g00 ss0.99 capture_off` | 668 | **0** | 0.000× |
+| `g00 ss0.99 capture_on` | 323 | **197** | 0.610× |
+| `g50 ss0.50 capture_off` | 1,456 | **264** | 0.181× |
+| `g50 ss0.50 capture_on` | 52,517 | **23,900** | 0.455× |
+| `g50 ss0.99 capture_off` | 164 | 155 | 0.942× |
+| `g50 ss0.99 capture_on` | 1,033 | 936 | 0.906× |
+
+⛔ **The relay HELPS on all eight here, where on the 16-condition ladder it COSTS the three in-scope
+strata 1.4–1.7×** (`ROADMAP.md` §0). That gap is the point of having both: the test chromosome is 8
+transcripts with generous intergenic space and one nested pair, so whatever the relay does wrong on the
+real panel is not yet represented here. ⭐ The next structures to add are the ones that would close it.
+
 ## 0b. ⭐⭐ THE TOY HARNESS — a mini chromosome you define, calibrated in under a second
 
 `scripts/design/toy_harness.py`. ⭐ **This is the third substrate and the one to reach for FIRST when a
@@ -528,6 +632,47 @@ length, so the simulator draws the length marginal proportional to the capture-w
 on disk hands **both** origins the RNA pool's parameters, because a gDNA-vs-RNA length gap lets the EM
 split the origins on **length alone**, bypass calibration and mask its bugs — §0's *why the ladder gives
 gDNA and RNA equal fragment lengths*.
+
+### ⭐⭐⭐ THE SIMULATOR'S TRANSCRIPTOME IS A RIGEL INDEX — including the NASCENT ENTITIES (owner, 2026-08-19)
+
+⛔ **`rigel sim` does not read the GTF into transcripts any more. It builds (or is given) a rigel index and
+simulates the index's transcript list**, so what is simulated is exactly what `rigel quant` will read:
+annotated transcripts PLUS the **synthetic nascent-RNA entities** `index.create_nrna_transcripts` makes —
+one single-exon transcript over each multi-exon span, TSS/TES clustered within `NRNA_MERGE_TOLERANCE`
+(20 bp), an annotated single-exon transcript adopted where one already covers the span, gene-neutral.
+Config key: `index:` (absent ⇒ built into `<outdir>/rigel_index`).
+
+⭐ **Three consequences, and each removes a divergence between the simulator and the tool:**
+
+| | |
+|---|---|
+| **nascent RNA is a TRANSCRIPT, not a parallel space** | its molecules are `entity.nrna_abundance` = Σ over contributors of `abundance × nrna_ratio`; it is sampled on its own single-exon template, and its reads keep the `nrna_` origin tag so the oracle's origin split is unchanged |
+| **ONE multinomial over every RNA row** | mature rows and entity rows together, `prob ∝ abundance × capture-aware effective length`. ⛔ The mature/nascent FRAGMENT split is no longer imposed as two pools — it follows from molecules and lengths, and is read off the realised origin counts. ⚠ So a nascent-on condition and its nascent-off twin no longer share a bit-identical mature stream: turning nascent on re-allocates the RNA budget, as it physically must |
+| **capture binds by GENOMIC OVERLAP** | every probe → genomic blocks → gDNA, and projected onto EVERY transcript whose exons it touches, any gene, any isoform, **either strand** (the library is ds-cDNA at capture). Pieces separated by an intron take `gdna_split_penalty`, as gDNA does. ⭐ Measured after the change: under one probe, gDNA and nascent are enriched **1162× and 1003×** — the same rate, which is the physics (`TRAPS: the-panel-enriches-nascent-by-its-own-probes` records the defect this replaced) |
+
+⭐⭐⭐ **TWO CONSEQUENCES, BOTH MEASURED AND BOTH RULED CORRECT BY THE OWNER (2026-08-19).**
+
+1. ⭐ **CAPTURE DEPLETES NASCENT RNA ~9x, AND THAT IS THE RIGHT BEHAVIOUR** — nascent is **20.01 %** of
+   RNA fragments off capture (exactly the knob) and **2.13 %** under it, measured at `g50 ss0.99`.
+   Probes tile EXONS: a mature molecule is entirely probe-covered, a pre-mRNA is mostly intron, and
+   there are ~100x more mature molecules. ⭐ Owner: *"capture should consolidate the evidence of nascent
+   RNA to the intron|exon boundaries where fragments can partially overlap probes within exons. The
+   introns should be depleted."* ⚠ Investigators who want to profile nascent RNA under capture design
+   probes INTO INTRONS; this panel deliberately does not. ⛔⛔ **AND THE REFUSED ALTERNATIVE IS RECORDED
+   SO IT IS NOT REBUILT: adding nascent RNA AFTER the capture simulation — i.e. stating the share
+   post-capture — is WRONG** (owner, 2026-08-19). Molecules exist first; capture acts on them.
+2. ⭐ **THE POST-CAPTURE FL DISTRIBUTION AND ABUNDANCES ARE THE GROUND TRUTH, NOT THE PRE-CAPTURE ONES**
+   (owner, 2026-08-19): *"hybrid capture rescales everything, and the post-capture abundances and FL
+   distributions are our ground truth baseline."* The truth files already are post-capture
+   (`truth_kind: post_capture_empirical`). ⛔ What this ruling KILLED is `simulator_gates.py`'s old
+   G-S5, which pooled mature and nascent into one `mu_rna` and asserted the gDNA gap NARROWS under
+   capture: that verdict tracked the nascent MIXTURE, and it passed 12/12 only because the old
+   simulator imposed 20 % nascent in every condition. ⭐ G-S5 now asserts the LAW — capture lengthens
+   **each** RNA population (mature 211.8 → 229.0, nascent 216.7 → 238.2, beside gDNA 216.5 → 240.2) —
+   and cannot be moved by a mixture. 6/6 gates pass.
+
+⚠ **`transcript_filter` is refused** when the transcriptome comes from an index: the index IS the transcript
+set, so filter the GTF before building it.
 
 ### ⚠ What the simulator still does NOT do
 
