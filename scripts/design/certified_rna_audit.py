@@ -158,7 +158,7 @@ def _spec(base, ta: float, tb: float):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--spec", default="tes_readthrough")
-    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_none_capture_off")
+    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_mid_capture_off")
     ap.add_argument("--ta", nargs="*", type=float, default=[0.0, 30.0, 300.0, 3000.0])
     ap.add_argument("--tb", nargs="*", type=float, default=[0.0, 30.0, 300.0, 3000.0])
     ap.add_argument("--n-rna", type=int, default=200_000)

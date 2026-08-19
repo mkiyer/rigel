@@ -70,7 +70,7 @@ def run(spec, donor, work_dir, tag):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--spec", default="spliced_exons")
-    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_none_capture_on")
+    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_mid_capture_on")
     ap.add_argument("--n-rna", type=int, default=40000)
     ap.add_argument("--genome-length", type=int, default=120000)
     ap.add_argument("--gdna-rate", type=float, default=None,

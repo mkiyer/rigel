@@ -1100,8 +1100,8 @@ _ARM_CHOICES = (
 #: contaminated condition has ~122, so a one-condition self-test could read an arm as inert for want of a
 #: population rather than for want of a mechanism (TRAPS: could-the-arm-have-fired).
 _SELFTEST_CONDITIONS = (
-    "gdna_g50_ss_0.50_nrna_none_capture_on",  # the blind stratum — unstranded x capture-ON
-    "gdna_g00_ss_0.50_nrna_none_capture_on",  # the zero-gDNA control
+    "gdna_g50_ss_0.50_nrna_mid_capture_on",  # the blind stratum — unstranded x capture-ON
+    "gdna_g00_ss_0.50_nrna_mid_capture_on",  # the zero-gDNA control
 )
 
 

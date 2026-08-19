@@ -56,7 +56,7 @@ only way the ∅ zero rate can be read as data rather than as the artefact.
 Usage::
 
     python scripts/design/held_flux_census.py [--index DIR] [--scan-cache DIR] [--json out.json]
-    python scripts/design/held_flux_census.py --conditions gdna_g50_ss_0.99_nrna_none_capture_off
+    python scripts/design/held_flux_census.py --conditions gdna_g50_ss_0.99_nrna_mid_capture_off
 """
 
 from __future__ import annotations

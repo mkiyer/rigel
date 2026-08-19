@@ -89,7 +89,7 @@ on, and it needs its own brute-force enumeration gate.
 Usage::
 
     python scripts/design/certified_q_census.py                 # the whole ladder
-    python scripts/design/certified_q_census.py --conditions gdna_g50_ss_0.50_nrna_none_capture_on
+    python scripts/design/certified_q_census.py --conditions gdna_g50_ss_0.50_nrna_mid_capture_on
 """
 
 from __future__ import annotations
@@ -219,8 +219,8 @@ def main() -> int:
     # ⭐ IS q A PROPERTY OF THE RNA GEOMETRY RATHER THAN OF THE COMPOSITION? Two conditions differing
     #   ONLY in gDNA share the same transcripts, so a q that moves with gDNA would mean q is not
     #   geometry — and then no annotation-derived divisor could ever recover it.
-    pair = [t for t in ("gdna_g00_ss_0.50_nrna_none_capture_off",
-                        "gdna_g50_ss_0.50_nrna_none_capture_off") if t in per_boundary]
+    pair = [t for t in ("gdna_g00_ss_0.50_nrna_mid_capture_off",
+                        "gdna_g50_ss_0.50_nrna_mid_capture_off") if t in per_boundary]
     if len(pair) == 2:
         (la, qa), (lb, qb) = per_boundary[pair[0]], per_boundary[pair[1]]
         both = la & lb

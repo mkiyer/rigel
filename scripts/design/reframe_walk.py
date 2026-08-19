@@ -79,9 +79,9 @@ ARMS = {
     # ⚠ `high` was `g75` until 2026-08-13. The ladder was rebuilt with four rungs (g00/g05/g50/g98)
     # and `g75` no longer exists, so this is the surviving middle — three DISTINCT gDNA levels is
     # what the three arms need, and 0 / 50 / 98 % still spans the range.
-    "zero": "gdna_g00_ss_0.50_nrna_none_capture_off",
-    "high": "gdna_g50_ss_0.50_nrna_none_capture_off",
-    "veryhigh": "gdna_g98_ss_0.50_nrna_none_capture_off",
+    "zero": "gdna_g00_ss_0.50_nrna_mid_capture_off",
+    "high": "gdna_g50_ss_0.50_nrna_mid_capture_off",
+    "veryhigh": "gdna_g98_ss_0.50_nrna_mid_capture_off",
 }
 
 

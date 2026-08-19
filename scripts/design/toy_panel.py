@@ -27,7 +27,7 @@ is ~20 min single-process. Shard it with ``--conditions``.
 Usage::
 
     python scripts/design/toy_panel.py --spec spliced_exons
-    python scripts/design/toy_panel.py --spec spliced_exons --conditions gdna_g50_ss_0.50_nrna_none_capture_off
+    python scripts/design/toy_panel.py --spec spliced_exons --conditions gdna_g50_ss_0.50_nrna_mid_capture_off
     python scripts/design/toy_panel.py --report rows.jsonl        # re-aggregate, no re-measurement
 """
 

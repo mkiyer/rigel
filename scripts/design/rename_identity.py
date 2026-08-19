@@ -59,7 +59,7 @@ from rigel.pipeline import _native_detect_sj_tag, run_pipeline  # noqa: E402
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
-DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_none_capture_off"
+DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
 REFERENCE = _RUNS / "arms" / "rename_identity_reference.json"
 
 #: ⛔ EVERY source of run-to-run variation, pinned. Removing any one makes "bit-identical" unprovable.

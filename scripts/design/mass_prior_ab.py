@@ -66,8 +66,8 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: to get wrong) and not ``g98`` (no RNA left). ⭐ STRANDED, because the ``O`` arm is fed oracle masses
 #: and is therefore calibration-independent — nothing is bought by running it on the blind stratum.
 DEFAULT_CONDITIONS = (
-    "gdna_g50_ss_0.99_nrna_none_capture_on",
-    "gdna_g50_ss_0.99_nrna_none_capture_off",
+    "gdna_g50_ss_0.99_nrna_mid_capture_on",
+    "gdna_g50_ss_0.99_nrna_mid_capture_off",
 )
 
 

@@ -118,8 +118,8 @@ Usage::
     python scripts/design/vertex_ceiling.py --self-test
 
     # one condition first, to check the levers are connected
-    python scripts/design/vertex_ceiling.py --arm base       --conditions gdna_g50_ss_0.50_nrna_none_capture_off --out /tmp/v_base.jsonl
-    python scripts/design/vertex_ceiling.py --arm vertex_free --conditions gdna_g50_ss_0.50_nrna_none_capture_off --out /tmp/v_free.jsonl
+    python scripts/design/vertex_ceiling.py --arm base       --conditions gdna_g50_ss_0.50_nrna_mid_capture_off --out /tmp/v_base.jsonl
+    python scripts/design/vertex_ceiling.py --arm vertex_free --conditions gdna_g50_ss_0.50_nrna_mid_capture_off --out /tmp/v_free.jsonl
     # the whole ladder, with the oracle cache
     python scripts/design/vertex_ceiling.py --arm vertex_free \
         --oracle-cache ~/Downloads/rigel_runs/suite/ladder/oracle_cache --out /tmp/v_free.jsonl

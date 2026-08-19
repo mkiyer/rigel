@@ -808,7 +808,7 @@ def gate_invariants(payload, tt, frags):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--spec", default="spliced_exons")
-    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_none_capture_off")
+    ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_mid_capture_off")
     ap.add_argument("--n-rna", type=int, default=None)
     ap.add_argument("--nrna", type=float, default=None)
     ap.add_argument("--genome-length", type=int, default=0)

@@ -164,7 +164,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--suite", type=Path, required=True)
     ap.add_argument("--index", type=Path, required=True)
-    ap.add_argument("--condition", default="gdna_g50_ss_0.50_nrna_none_capture_on")
+    ap.add_argument("--condition", default="gdna_g50_ss_0.50_nrna_mid_capture_on")
     ap.add_argument("--oracle-cache", type=Path, default=None)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_backbone_parity"))
     ap.add_argument("--arm-a", default="head", help="'head', 'silent', or 'no_<switch>'")

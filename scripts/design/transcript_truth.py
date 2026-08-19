@@ -8,7 +8,7 @@ were spliced?"* — which is what a per-transcript prior claims to know before t
 
 Usage::
 
-    python scripts/design/transcript_truth.py --condition gdna_g00_ss_0.99_nrna_none_capture_off
+    python scripts/design/transcript_truth.py --condition gdna_g00_ss_0.99_nrna_mid_capture_off
     python scripts/design/transcript_truth.py --all --out truth_by_transcript.tsv
 
 ⛔⛔ **SPLICEDNESS IS DERIVED FROM THE READ NAME, NEVER FROM THE CIGAR.** The simulator writes
@@ -263,7 +263,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
-    ap.add_argument("--condition", default="gdna_g00_ss_0.99_nrna_none_capture_off")
+    ap.add_argument("--condition", default="gdna_g00_ss_0.99_nrna_mid_capture_off")
     ap.add_argument("--limit", type=int, default=None, help="stop after N read-1 records (a smoke run)")
     ap.add_argument("--gtf", type=Path, default=None,
                     help="the annotation the SIMULATOR sampled from, for the exact-duplicate map. "

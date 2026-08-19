@@ -92,8 +92,8 @@ INDEX = RUNS / "suite" / "rigel_index"
 #: (`TRAPS: configured-lengths-are-not-realised`). ⛔ Both are REQUIRED: Ⓖ3 and Ⓖ4 below each fail when
 #: their own arm is absent, because neither alone is a run of this instrument.
 _DEFAULT = (
-    ("ladder", "gdna_g50_ss_0.50_nrna_none_capture_off"),
-    ("ladder", "gdna_g50_ss_0.50_nrna_none_capture_on"),
+    ("ladder", "gdna_g50_ss_0.50_nrna_mid_capture_off"),
+    ("ladder", "gdna_g50_ss_0.50_nrna_mid_capture_on"),
 )
 
 _FAILED: list[str] = []

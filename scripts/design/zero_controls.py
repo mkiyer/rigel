@@ -78,8 +78,8 @@ INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
 # ⚠ `g75` until 2026-08-13, retired when the ladder was rebuilt to four rungs. `g98` is the surviving
 # rung with the MOST gDNA (9.8 M fragments against g75's 7.5 M), which is what "plenty" asks for; the
 # arm silences RNA by construction, so g98's thin RNA side costs this control nothing.
-DONOR_GDNA = "gdna_g98_ss_0.50_nrna_none_capture_off"  # plenty of gDNA — the ZERO-RNA arm's substrate
-DONOR_NONE = "gdna_g00_ss_0.50_nrna_none_capture_off"  # zero gDNA — the ZERO-gDNA arm's substrate
+DONOR_GDNA = "gdna_g98_ss_0.50_nrna_mid_capture_off"  # plenty of gDNA — the ZERO-RNA arm's substrate
+DONOR_NONE = "gdna_g00_ss_0.50_nrna_mid_capture_off"  # zero gDNA — the ZERO-gDNA arm's substrate
 
 FAIL: list[str] = []
 

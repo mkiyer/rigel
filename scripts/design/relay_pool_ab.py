@@ -101,11 +101,22 @@ def pool_truth(parts, region_arrays, chain) -> dict[str, np.ndarray]:
     return {k: OC.slot_counts(parts[k], region_arrays, chain) for k in POOLS}
 
 
-def arm(payload, kw, *, messages: bool) -> np.ndarray:
-    """One arm's per-slot ``f_g``. ⛔ Returns the FINAL belief, which is what `assemble_priors` reads."""
+def arm(payload, kw, *, messages: bool, injected_priors=None) -> np.ndarray:
+    """One arm's per-slot ``f_g``. ⛔ Returns the FINAL belief, which is what `assemble_priors` reads.
+
+    ⭐ ``injected_priors`` is for a TOY reference — a chromosome small enough to have no library-level
+    statistics of its own. `calibrate` REFUSES a library with zero spliced unique mappers (*"a real
+    RNA-seq library always carries spliced reads"*), which is right about real data and is exactly the
+    state of the method-development test chromosome while every transcript on it is single-exon
+    (`docs/TESTING.md` §0a). Harvest them from a cached donor condition — `toy_harness.harvest` — and
+    the toy is measured against ITS OWN truth with the library's parameters supplied, which is the
+    contract the toy harness already runs under.
+    """
     cfg = dataclasses.replace(CalibrationConfig(), message_propagation=messages)
     debug: dict = {}
     call = {k: v for k, v in kw.items() if k != "payload"}
+    if injected_priors is not None:
+        call["injected_priors"] = injected_priors
     calibrate(payload=payload, config=cfg, _debug=debug, **call)
     cap = debug["capture"]
     # ⛔ THE ARM RAN, AND BOTH DIRECTIONS ARE CHECKED. `_uni` is written only at messages/relay.py,
@@ -150,7 +161,8 @@ def score(f_g: np.ndarray, truth: dict[str, np.ndarray], sel: np.ndarray) -> dic
     return out
 
 
-def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: str) -> list[dict]:
+def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: str,
+            injected_priors=None) -> list[dict]:
     """One condition, both arms, three axes. ⛔ ONE cached payload, so the arms differ by one flag."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     kw = calibration_inputs(cache, index)
@@ -172,7 +184,7 @@ def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: st
     }
     rows = []
     for messages in (False, True):
-        f_g = arm(cache.payload, kw, messages=messages)
+        f_g = arm(cache.payload, kw, messages=messages, injected_priors=injected_priors)
         for axis, sel in axes.items():
             row = {"condition": condition, "arm": "on" if messages else "off", "axis": axis}
             row.update(score(f_g, truth, sel))
@@ -295,6 +307,14 @@ def main() -> int:
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--oracle-cache", type=Path, default=None)
     ap.add_argument("--conditions", nargs="*", default=None)
+    ap.add_argument("--donor", type=Path, default=None,
+                    help="a cached condition dir whose LIBRARY-LEVEL priors are injected — required "
+                         "for a toy reference with no spliced reads of its own (docs/TESTING.md §0a)")
+    ap.add_argument("--donor-index", type=Path, default=None,
+                    help="the donor's index, when it differs from --index (a toy has its own)")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="write every (condition x arm x axis) row as TSV — the machine-readable form "
+                         "of the standing benchmark, and what `benchmark_report.py` renders")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -307,16 +327,48 @@ def main() -> int:
     region_arrays = RegionArrays.from_index(index)
     oracle = args.oracle_cache or (args.suite / "oracle_cache")
     conds = args.conditions or sorted(p.name for p in (args.suite / "scan_cache").iterdir())
+    injected = None
+    if args.donor is not None:
+        TH = _sibling("toy_harness.py")
+        donor_index = TranscriptIndex.load(str(args.donor_index or args.index))
+        injected = TH.harvest(args.donor, donor_index).priors
+        print(f"⭐ library-level priors injected from the donor {args.donor.name} "
+              f"(kappa={injected.rna_sense_frac:.6f}) — the toy cannot fit them for itself")
+        # ⛔⛔ **THE DONOR MUST MATCH THE CONDITION'S AXES, AND A MISMATCH IS SILENT** — it produced a
+        #    spurious catastrophe the first time this ran (2026-08-19): a `ss_0.99` donor injected into
+        #    the `ss_0.50` conditions told the solver the library was stranded, and the zero control
+        #    reported **82,581** false-positive gDNA fragments that a matching donor puts at **0**.
+        #    Nothing in the output says "wrong donor", so it is refused here instead.
+        def _axes(name: str) -> tuple[str, str]:
+            return ("ss_0.99" if "ss_0.99" in name else "ss_0.50",
+                    "capture_on" if "capture_on" in name else "capture_off")
+        d_axes = _axes(args.donor.name)
+        bad = [c for c in conds if _axes(c) != d_axes]
+        if bad:
+            raise SystemExit(
+                f"⛔ the donor {args.donor.name} is {d_axes[0]} / {d_axes[1]}, but {len(bad)} of the "
+                f"requested conditions are not — e.g. {bad[0]}. The injected priors are LIBRARY-level "
+                "(kappa above all), so a mismatched donor silently answers a different library: run "
+                "one donor per stratum, or pass --conditions for this donor's stratum only."
+            )
+        print()
 
     rows: list[dict] = []
     for c in conds:
         try:
-            rows.extend(measure(index, region_arrays, args.suite, oracle, c))
+            rows.extend(measure(index, region_arrays, args.suite, oracle, c, injected))
             print(f"   ✔ {c}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"   ⛔ {c}: {type(exc).__name__}: {exc}", flush=True)
     for axis in ("REGION", "BOUNDARY", "ALL"):
         report(rows, axis)
+    if args.out is not None and rows:
+        cols = list(dict.fromkeys(k for r in rows for k in r))
+        with open(args.out, "w") as fh:
+            fh.write("\t".join(cols) + "\n")
+            for r in rows:
+                fh.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
+        print(f"\n→ {args.out}  ({len(rows)} rows: condition x arm x axis)")
     return 0
 
 

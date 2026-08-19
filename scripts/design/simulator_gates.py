@@ -15,7 +15,7 @@ imply.
 | G-S2 | genomic references carrying gDNA | count, must be >= 2, each non-zero |
 | G-S3 | gDNA mean length, capture on vs off | strictly greater under capture |
 | G-S4 | gDNA mean length, on-target vs off-target | on-target strictly longer |
-| G-S5 | \|mu_gdna - mu_rna\|, capture on vs off | strictly narrower under capture |
+| G-S5 | mean length of EACH RNA population, capture on vs off | strictly greater under capture |
 | G-S6 | gDNA fragments longer than their own reference | absolute count, must be 0 |
 
 ⚠ **G-S4 is scored on PROBE OVERLAP, not on the start's territory, and the difference is not cosmetic**
@@ -32,7 +32,17 @@ discarded. G-S3 is the gate that falsifies.
 
 ⚠ **G-S3 and G-S5 read `truth_fragment_lengths.tsv`**, the panel's own post-capture empirical truth,
 and never the configured `frag_mean`. The configured value describes a library that was never
-sequenced; post-capture is the baseline (`docs/TRAPS.md` capture-selects-for-length).
+sequenced; post-capture is the baseline (`docs/TRAPS.md` capture-selects-for-length) — owner, 2026-08-19:
+*"the post-capture FL distribution (and post-capture transcript abundances) become our ground truth"*.
+
+⛔⛔ **G-S5 USED TO POOL MATURE AND NASCENT INTO ONE `mu_rna` AND ASSERT THE gDNA GAP NARROWED — AND
+THAT VERDICT TRACKED THE NASCENT MIXTURE RATHER THAN ANY LAW.** It passed 12/12 only because the old
+simulator IMPOSED a 20 % nascent fragment count in every condition, capture included. Once nascent
+became a transcript in one multinomial, hybrid capture depleted it (20.01 % → 2.13 %, which is correct:
+probes tile exons), the pooled RNA mean stopped rising with gDNA, and the gate failed — with every
+per-population number directional and sensible (mature 211.8 → 229.0, nascent 216.7 → 238.2, gDNA
+216.5 → 240.2). ⭐ **The law is per POPULATION: capture selects for length in each of them.** That is
+what G-S5 now asserts, and it cannot be moved by a mixture (`TRAPS: never-pool-the-strata`).
 
     python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/ladder \\
         --reference ~/Downloads/rigel_runs/suite/reference [--genomic-refs chr21 chr22]
@@ -402,9 +412,12 @@ def main() -> int:
         label = f"{key[0]} ss{key[1]:.2f}"
         if census[arms["on"]]["n_total"] and census[arms["off"]]["n_total"]:
             g3_rows.append((label, off["gdna"]["mean"], on["gdna"]["mean"]))
-            gap_off = abs(off["gdna"]["mean"] - off["rna"]["mean"])
-            gap_on = abs(on["gdna"]["mean"] - on["rna"]["mean"])
-            g5_rows.append((label, gap_off, gap_on))
+            for pool in ("mrna", "nrna"):
+                m_off = off.get(pool, {}).get("mean")
+                m_on = on.get(pool, {}).get("mean")
+                # ⛔ a pool with no fragments in either arm is VACUOUS, never a pass
+                if m_off and m_on:
+                    g5_rows.append((f"{label} {pool}", float(m_off), float(m_on)))
 
     print("\n══ G-S3  gDNA mean length, capture off -> on ══")
     for label, off_mean, on_mean in g3_rows:
@@ -415,13 +428,13 @@ def main() -> int:
         f"{sum(1 for _, off, on in g3_rows if on > off)}/{len(g3_rows)} conditions strictly greater",
     )
 
-    print("\n══ G-S5  |mu_gdna - mu_rna|, capture off -> on ══")
-    for label, gap_off, gap_on in g5_rows:
-        print(f"  {label:<24} {gap_off:7.2f} -> {gap_on:7.2f}   {gap_on - gap_off:+7.2f} bp")
+    print("\n══ G-S5  mean length of each RNA population, capture off -> on ══")
+    for label, m_off, m_on in g5_rows:
+        print(f"  {label:<29} {m_off:7.2f} -> {m_on:7.2f}   {m_on - m_off:+7.2f} bp")
     report.gate(
-        "G-S5 the gDNA<->RNA length gap narrows under capture",
-        bool(g5_rows) and all(gap_on < gap_off for _, gap_off, gap_on in g5_rows),
-        f"{sum(1 for _, off, on in g5_rows if on < off)}/{len(g5_rows)} conditions strictly narrower",
+        "G-S5 capture lengthens EVERY RNA population",
+        bool(g5_rows) and all(m_on > m_off for _, m_off, m_on in g5_rows),
+        f"{sum(1 for _, off, on in g5_rows if on > off)}/{len(g5_rows)} (condition x pool) strictly greater",
     )
 
     # ── G-S4 ────────────────────────────────────────────────────────────────────────────────────

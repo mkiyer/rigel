@@ -73,7 +73,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: ⭐ The zero-gDNA stranded condition is the falsification condition: every fragment is RNA, so a held
 #: fragment's true `L` is its transcript-space length with no gDNA population to confuse the scoring.
 #: ⚠ `g00`, not `none` — the rebuilt ladder spells its zero rung with the same `gNN` grammar as the rest.
-DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_none_capture_off"
+DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
 
 
 def truth_by_extent(bam_path: Path) -> tuple[dict[tuple[int, int, int], int], int]:

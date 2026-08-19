@@ -127,7 +127,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     # ⚠ `g01` until 2026-08-13; the rebuilt ladder's low-gDNA rung is `g05` (the one that satisfies
     # `suite_resolves.py`'s requirement (f), 0 < rate <= 0.10).
-    ap.add_argument("--condition", default="gdna_g05_ss_0.50_nrna_none_capture_on")
+    ap.add_argument("--condition", default="gdna_g05_ss_0.50_nrna_mid_capture_on")
     ap.add_argument("--suite", type=Path, default=SUITE)
     ap.add_argument("--index", type=Path, default=INDEX)
     ap.add_argument("--oracle-cache", type=Path, default=CACHE)
