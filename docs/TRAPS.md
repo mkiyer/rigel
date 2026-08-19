@@ -614,12 +614,12 @@ composition CERTAIN. ⚠ It was INERT until 2026-08-06 because ``own_precision``
 every zero-count slot; removing that gate un-masked it. ⛔⛔ **And scoping it correctly is
 PANEL-NEGATIVE**: the target row moved −1.2 %, ``g98`` went +0.4 % (worse), and the zero-gDNA control went
 **+3,207 %** — the mis-scoped mask is what carries the zero-gDNA win. ⚠ **RE-PRICED 2026-08-18 on the
-32-condition ladder with the per-strand licence + graft fix live, and the sign on the control has
-FLIPPED but the verdict has not**: on top of the graft fix, `g1_locked ∧ REGION` takes the eight `g00` rows
+32-condition ladder with the per-strand licence + SPLICE IN fix live, and the sign on the control has
+FLIPPED but the verdict has not**: on top of the SPLICE IN fix, `g1_locked ∧ REGION` takes the eight `g00` rows
 **324 k → 232 k (0.71×)** — because the empty exons' own "RNA = 0 @ 0.2026" is one of the two feeders of the
 pin's "all gDNA" (TRAPS: zero-the-precision-with-the-value) — while REGRESSING the four `nrna_none` zero
 controls **1.8–15×** and the in-scope contaminated strata **+2.5 / +2.1 / +0.5 %** (deferred +17 %) — every
-ratio here is against the graft-fix tree. The
+ratio here is against the SPLICE IN-fix tree. The
 loss mechanism is named: at AMBIG `exon|exon` boundaries in an RNA-only library ψ was held at `f_g ≈ 0` by
 the empty exons' "gDNA = 0 @ 0.2026" — a zero count over ~0.05 placements, right at `g00` for any reason —
 and without it an RNA+ level claim with no RNA− claim drifts ψ to 0.38. Still half of a pair; the pair
@@ -1379,7 +1379,7 @@ one line:
   pure-gDNA claim is relayed across a population change. It is a strict xfail in
   `tests/calibration/test_structural_reference.py`. ⛔ **Re-price, never inherit**
   (`TRAPS: re-record-the-baseline`).
-- *"the mechanism does not exist yet"* — it is BUILT and switched off. `messages/head.py`'s GRAFT
+- *"the mechanism does not exist yet"* — it is BUILT and switched off. `messages/head.py`'s SPLICE IN
   (BOUNDARY → EXON) is exactly the sj-flux hop: only an EXON receives it, it carries a COUNT rather than
   an imputed belief, it has its own precision, and it is deliberately NOT tau-gated, so it survives
   unstranded data where the strand channel is dead. The switch is
@@ -1411,7 +1411,7 @@ the sentence justifying it begins *"this isn't really the relay, because…"*.
 switch.** It is a second home for one mechanism, with none of the framework's licences, precisions, damping
 or gates, and `TRAPS: converge-and-delete` forbids it. **The honest move is to fix the framework's KNOWN bug
 and RE-PRICE it** — named in `TRAPS: we-keep-re-deriving-message-passing` above. ⚠ It is also the cheaper
-move: the hop being reached for is usually already implemented (the GRAFT), so the private copy is a
+move: the hop being reached for is usually already implemented (the SPLICE IN), so the private copy is a
 re-implementation rather than a new capability.
 
 **a-variance-cannot-fix-a-bias. You cannot fix a biased mode with a variance.** Established three times independently. Under
@@ -1454,22 +1454,22 @@ source and tests, so the labels are kept; the investigations that produced them 
 VALUE — a value zeroed at one line and a precision added back at a later one is not "no claim", it is the
 CONFIDENT ZERO the licence exists to forbid, and the relay's mass pin then converts it into its opposite.**
 Found by the 2026-08-18 zero-control dissection (`g00 ss0.50 nrna_mid capture_on`, 62 k → 228 k under the
-per-strand licence). The per-strand rule zeroed a refused RNA arm's value (with the sj graft ``gp`` already
-folded in) and its precisions, and the GRAFT block eleven lines later added the sj COUNT's precision back:
+per-strand licence). The per-strand rule zeroed a refused RNA arm's value (with the sj SPLICE IN ``gp`` already
+folded in) and its precisions, and the SPLICE IN block eleven lines later added the sj COUNT's precision back:
 measured ``n = 0 @ pn = 280`` delivered into an empty exon. One hop on, the pin's licence read both arms as
 SUPPLIED (``pg > 0``, ``pn > 0``), rescaled the budget onto the only non-zero component —
 ``k = M/(tg·E_g) = 467,000×`` — and delivered ``tg = M/E_g``, "all your mass is gDNA", at the gDNA arm's
 unchanged precision, into a 26 k-fragment exon (true 0.000 → 0.9037). ⭐ *The rule:* an operator that
-grants a precision (graft, premise variance, conservation term) must run BEFORE the licence's zeroing, so
+grants a precision (SPLICE IN, premise variance, conservation term) must run BEFORE the licence's zeroing, so
 the zeroing is the last word — both twins, and the falsification fixture must carry the operator's input
-(the first three-case gate had no sj, so its "precision zero" assertion passed on the graft path it never
+(the first three-case gate had no sj, so its "precision zero" assertion passed on the SPLICE IN path it never
 exercised). ⚠ *The same shape, from the other feeder:* an EMPTY exon whose ``struct_lock`` is the mis-scoped
 ``~solvable`` (TRAPS: predicate-contradicts-its-docstring) owns "RNA = 0 @ 1/trigamma(½)" on every arm, and once the
 licence isolates that arm the same pin turns it into "all gDNA". ⛔ The scorer lesson beside it: a census
 of the signature AT THE DELIVERED DESTINATION read 2.6 % of the error, because the damage lands one hop
 past the confident zero — score the mechanism where it LANDS, not where it is written
 (TRAPS: a-scorer-scoped-to-the-mechanisms-targets, second form).
-*Repair landed:* the zeroing moved after the graft in both twins (`test_gdna_scale_rule.py`, VECTORISED +
+*Repair landed:* the zeroing moved after the SPLICE IN in both twins (`test_gdna_scale_rule.py`, VECTORISED +
 SCALAR gates, each fired by breaking its own twin). Panel: in-scope **0.931 / 0.999 / 1.000**, and
 `g00` **0.753×** with all 8 zero-control rows improving, deferred 1.000 / 0.827.
 *Sibling:* `a-licence-with-no-floor` (a boolean licence on a precision — here the pin's ``_lend``).

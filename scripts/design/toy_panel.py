@@ -112,7 +112,7 @@ def measure(spec_name: str, conditions: list[str], *, suite: Path, index_path: P
 
 #: ⭐ The chain slot's identity for aggregation: its object class plus, for a repeated class, WHICH one.
 #: `intron|exon` appears twice on a two-exon gene and they are NOT interchangeable — one is the donor side
-#: and one the acceptor side — so collapsing them would average away the asymmetry the graft creates.
+#: and one the acceptor side — so collapsing them would average away the asymmetry the SPLICE IN creates.
 def _key(row) -> str:
     return f"{row['type']}@{row['where']}"
 

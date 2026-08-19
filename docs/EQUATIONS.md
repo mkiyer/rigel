@@ -202,7 +202,7 @@ it:
     the LEFT  flank gains RNA at a BOUNDARY  ⟺  a transcript's genomic HIGH end is there  ⟺  TES₊ or TSS₋
 
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population, but there the flux is **measured**
-(`junction_count`) and the graft and the peel exist to route it. A terminus has no flux to measure: a
+(`junction_count`) and the SPLICE IN and the SPLICE OUT exist to route it. A terminus has no flux to measure: a
 transcript simply begins. That is the derived boundary between the two treatments.
 
 **3.5c ⭐⭐ THE MASS PIN CARRIES THE SAME LICENCE, PLUS ONE STRUCTURAL CASE.** `Σ_c ρ_c·E_c = M` is an
@@ -463,12 +463,12 @@ Computed exactly from the pmf, `k = 1.000000` at every transcript length. ⛔ Th
 length-model mismatch, with no geometric component. TRAPS: two-divisors-opposite-sign.
 
 ✅ **This WITHDRAWS the sign correction this section used to carry.** `calibration/messages/variance.py`'s
-`graft_premise_logvar` (P1d) asserts
+`splice_in_premise_logvar` (P1d) asserts
 `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, a LOWER bound, and that is **right**: the measured ratio of
 **1.103** (no nascent) and **1.049** (with) is `1 + (1−s)(k−1)` with `k` the frame gap above and `s` the
 nascent share of the exon's RNA — the nascent arm is measured in the exon's own frame and dilutes it,
 which is precisely what identifies the inflation as `rho_mat`'s rather than the bound's. ⚠ What does
-survive is that `graft_premise_logvar` is fitted on fluxes carrying the same inflation, so it inherits it.
+survive is that `splice_in_premise_logvar` is fitted on fluxes carrying the same inflation, so it inherits it.
 
 ---
 
@@ -1292,7 +1292,7 @@ and the only remaining source is the objects either side of it along the chain:
 ⛔⛔⛔ **IMPUTING A QUANTITY AT ONE OBJECT FROM ITS NEIGHBOURS ALONG A CHAIN IS MESSAGE PASSING, AND THERE
 IS NO SECOND MECHANISM.** Any scheme that gives an exon a gDNA level from the objects around it *is* a
 message, whatever it is called; re-deriving it under a new name is this project's most repeated wasted
-turn. ⭐ **The mechanism is already BUILT**: `messages/head.py`'s GRAFT is exactly the
+turn. ⭐ **The mechanism is already BUILT**: `messages/head.py`'s SPLICE IN is exactly the
 BOUNDARY → EXON hop — only an EXON receives it; what it carries is a MEASUREMENT (a COUNT) and not an
 imputation; it carries its own precision; its transfer variance is 0; and it is deliberately not `τ`-gated, so it
 survives unstranded data where the strand channel is dead (§5.2). It sits behind

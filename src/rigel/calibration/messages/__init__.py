@@ -164,7 +164,7 @@ class StepContext:
     left: np.ndarray  # adjacent slot of the other kind, -1 at a reference start
     right: np.ndarray
     is_boundary: np.ndarray  # ~is_region; the chain strictly alternates N E N E … N
-    is_exon_region: np.ndarray  # a REGION whose region signature is EXON — the graft's destination
+    is_exon_region: np.ndarray  # a REGION whose region signature is EXON — the SPLICE IN's destination
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
     g1_locked: np.ndarray  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)

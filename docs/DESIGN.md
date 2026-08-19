@@ -26,8 +26,8 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
 | **crossing fragment** | ⭐ a **fragment** that spans a BOUNDARY. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are REGIONs and BOUNDARIES, never "crossings" |
 | **switched off** | an A/B in which one code path is disabled and the run repeated, to establish that it is the cause | `ablated` |
-| **splice-out** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA departs** through the sj there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `peel` |
-| **splice-in** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA arrives** through the sj there — the spliced flux joins the destination's population | ⛔ `graft` |
+| **splice-out** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA departs** through the sj there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `splice_out` |
+| **splice-in** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA arrives** through the sj there — the spliced flux joins the destination's population | ⛔ `splice_in` |
 
 ⚠ **THE TWO BOUNDARY ROWS OF THE TABLE ABOVE WERE CORRUPTED BY THE RENAME THIS TABLE ORDERED, AND THAT
 IS `TRAPS: the-rename-that-corrupted-a-diagram` MET INSIDE THE RULING ITSELF** (repaired 2026-08-17). The BOUNDARY
@@ -53,9 +53,16 @@ decide the sign of a whole scenario.
 
 ⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Peel"
 and "graft" named two operators; the same BOUNDARY is a splice-out for a message travelling one way and a
-splice-in for a message travelling the other, so the pair names one thing seen from two sides. ⚠ The old
-words are everywhere in `src/` (`_peel_share`, `graft_frame_logvar`, `graft_premise_logvar`, `_gr`) and
-are converged as each area is touched, per this section's standing policy — not in one sweep.
+splice-in for a message travelling the other, so the pair names one thing seen from two sides.
+⭐⭐⭐ **LANDED 2026-08-18 (owner: vocabulary is the highest priority).** `graft` → `splice_in` tree-wide
+(verified unambiguous); `peel` → `splice_out` **SENSE-SCOPED**, because `peel` also names the DECONVOLUTION
+verb — *"peel the gDNA off, RNA is the residual"* — in `density_deconv`, `calibrate`, `object_composition`
+and in the named rule `TRAPS: the-peel-is-as-good-as-the-density-it-is-handed`. ⛔ That second sense is
+DELIBERATELY UNCHANGED: a global replace corrupts it, which is `TRAPS: two-masks-one-name` and is exactly
+what `rename_census.py --sense` exists to catch. ⚠ The deconvolution sense has NOT been ruled on and still
+carries a retired word — an owner call, and the next naming decision.
+⭐ The rename was gated as a numeric NO-OP: full suite green, **no `tests/golden/` file moved**, and the
+diff exactly 290 insertions / 290 deletions.
 
 ⭐⭐⭐ **AND THE DERIVATION SHARPENED THAT INTO A RULING (2026-08-05, `EQUATIONS.md` §3.6c).** The two words
 name the SEMANTICS of a step and **not** its arithmetic. An BOUNDARY presents one total to its genomic-LOW
@@ -258,27 +265,27 @@ neighbours is message passing.
 ### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT, AND IT IS SWITCHED OFF — do not build it again
 
 ⛔⛔ **The hop the derivation above asks for EXISTS IN `src/`, is individually switchable, and is behind
-one config flag.** It is the **GRAFT** — `messages/head.py`, switch `graft` on `HeadPolicy`:
+one config flag.** It is the **SPLICE IN** — `messages/head.py`, switch `splice_in` on `HeadPolicy`:
 
-> **GRAFT (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE**, which joins the
+> **SPLICE IN (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE**, which joins the
 > RNA claim entering the destination EXON.
 
 ⭐⭐ **Four properties, and each one is precisely what the exon problem needs:**
 
-| the graft | and why that is the property required |
+| the SPLICE IN | and why that is the property required |
 |---|---|
-| **only an EXON receives it** | an intron carries no sj flux, so there is nothing to graft there — the operator is already scoped to the one slot class that has no observation of its own |
+| **only an EXON receives it** | an intron carries no sj flux, so there is nothing to SPLICE IN there — the operator is already scoped to the one slot class that has no observation of its own |
 | **it is a MEASUREMENT (a COUNT), not an imputation** | so it carries **its own precision**, rather than inheriting the source's belief. This is the difference between an upper bound with a variance and a guess |
-| **its transfer variance `s2t` is identically 0** | on a matched-set graft the reframe ratio `r` is common-mode and cancels, so the hop adds no scale-sampling variance of its own |
-| ⭐⭐ **it is explicitly NOT tau-gated** | the source's PREDICTION precision is 0 on unstranded data, and a tau gate would drop the graft on the floor there. ⛔ So the graft **survives exactly the stratum where the strand channel is dead** — which is the stratum the exon problem is hardest on |
+| **its transfer variance `s2t` is identically 0** | on a matched-set SPLICE IN the reframe ratio `r` is common-mode and cancels, so the hop adds no scale-sampling variance of its own |
+| ⭐⭐ **it is explicitly NOT tau-gated** | the source's PREDICTION precision is 0 on unstranded data, and a tau gate would drop the SPLICE IN on the floor there. ⛔ So the SPLICE IN **survives exactly the stratum where the strand channel is dead** — which is the stratum the exon problem is hardest on |
 
-⚠ **VOCABULARY.** §0 names this operator **SPLICE-IN**; `graft` is the pre-ruling identifier, still
-everywhere in `src/` (`graft_frame_logvar`, `graft_premise_logvar`, `_gr`) and converged as each area is
-touched. This ruling names both on purpose, so that a grep for either finds it.
+⚠ **VOCABULARY.** §0 names this operator **SPLICE IN**, and `src/` now spells it that way
+(`splice_in`, `splice_in_frame_logvar`, `splice_in_premise_logvar`). ⚠ `graft` was the pre-ruling identifier
+and survives only in commit messages and in the history recorded here — a grep for it finds this note.
 
 ⛔ **Where it is switched off:** `CalibrationConfig.message_propagation = False` installs
 `messages/silent.py`'s `SilentPolicy`, which sends nothing (§6.1). Turning the relay on is one flag; every
-operator inside `HeadPolicy` remains behind its own named switch, so the graft can be priced alone.
+operator inside `HeadPolicy` remains behind its own named switch, so the SPLICE IN can be priced alone.
 
 ### 0c.2 ⭐⭐⭐ WHY IT IS OFF — a NAMED, CONFIRMED BUG, and NOT a verdict on the mechanism
 
@@ -762,7 +769,7 @@ the fragments it counts are the same population" stays absolute. Pass one's numb
 
 | | |
 |---|---|
-| ⭐⭐ **a composition may be imputed across a step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, you cannot tell enrichment from a population difference. Derivation + the genomic form of the predicate: `EQUATIONS.md` §3.5b. ⛔ **Termini only** — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the graft and the peel route it |
+| ⭐⭐ **a composition may be imputed across a step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, you cannot tell enrichment from a population difference. Derivation + the genomic form of the predicate: `EQUATIONS.md` §3.5b. ⛔ **Termini only** — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the SPLICE IN and the peel route it |
 | ⭐ **the population test is written in GENOMIC terms, never TSS/TES** | the strand flips which flank a terminus implicates; `region_geometry.terminus_flank_gain` is the one home, gated on two mirror-image annotations (TRAPS: substitute-the-definitions-first family) |
 | ⭐ **the mass pin carries the same licence, plus the structural case** | it fires iff no BELIEF can reach its budget: the composition was supplied, **or** the destination is a structurally pure-gDNA object whose `f_g = 1` is structure and whose `M/E_g` is therefore an observation. `EQUATIONS.md` §3.5c, TRAPS: the-pin-had-a-fixed-point/TRAPS: no-belief-not-no-numbers |
 | gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5.3) |
@@ -828,13 +835,13 @@ argument about what a message should say were interleaved. It is now two things,
 
 | | | |
 |---|---|---|
-| `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, grafts, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
+| `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, splices in, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
 | `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five lines. | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/head.py` | `HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
 | `messages/variance.py` | was `enrichment_frame.py` — the policy's variance toolbox | ⚠ `count_logvar` is also imported by `region_init`; it has ONE home and this is it |
 
 ⛔⛔ **`SilentPolicy` BEING THE DEFAULT IS NOT A STATEMENT THAT MESSAGE PASSING IS UNNECESSARY — §0c
-proves the opposite, and `HeadPolicy` ALREADY CONTAINS THE OPERATOR THE EXON NEEDS** (the GRAFT / SPLICE-IN,
+proves the opposite, and `HeadPolicy` ALREADY CONTAINS THE OPERATOR THE EXON NEEDS** (the SPLICE IN / SPLICE-IN,
 §0c.1). Read §0c.2 before quoting the price of turning the flag back on.
 
 ⭐⭐⭐ **HOW IT WAS ACCEPTED, and this is the part that generalises: a restructure is gated, a rewrite is

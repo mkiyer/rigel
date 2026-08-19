@@ -143,8 +143,8 @@ class RegionGeometry:
     #: molecule did elsewhere — so it needs no effective length of its own.
     spliced_count: np.ndarray
     #: float64[n_slots, 2] — ``sj_count``, gathered onto the two boundaries each sj leaves and enters,
-    #: by TRANSCRIPT strand. The flux that **changes template** here: what the graft hands an exon, and
-    #: what the peel measures the continuing share against.
+    #: by TRANSCRIPT strand. The flux that **changes template** here: what the SPLICE IN hands an exon, and
+    #: what the SPLICE OUT measures the continuing share against.
     sj_count: np.ndarray
     #: float64[n_slots, 2] — the SUMMED sj divisor, same keying. Several sj on one boundary are
     #: several estimates of one rate, so the pooled statement is ``Σcount / ΣE`` — the ratio of sums, never
@@ -158,7 +158,7 @@ class RegionGeometry:
     #: side if this is its high end — and it never enters the other flank at all. So the total this BOUNDARY
     #: presents to its low neighbour must count ``_lo`` and not ``_hi``, and vice versa
     #: (:func:`region_total_density`). Summing them, as ``sj_count`` above does, is right for the
-    #: GRAFT — which is about the whole flux leaving this boundary — and wrong for the reframe.
+    #: SPLICE IN — which is about the whole flux leaving this boundary — and wrong for the reframe.
     #: ⚠ Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
@@ -504,8 +504,8 @@ def terminus_flank_gain(boundary_flags) -> tuple[np.ndarray, np.ndarray]:
     then neither flank matches. ``0`` (no graph supplied) means no terminus and so both flanks match.
 
     ⛔ **TERMINI ONLY: DONOR/ACCEPTOR are excluded on purpose.** A splice site also changes the population
-    — RNA splices out or in — but there the flux is MEASURED (``sj_count``) and the graft and the
-    peel exist to route it. A terminus has no flux to measure: a transcript simply begins. That is the
+    — RNA splices out or in — but there the flux is MEASURED (``sj_count``) and the SPLICE IN and the
+    SPLICE OUT exist to route it. A terminus has no flux to measure: a transcript simply begins. That is the
     boundary between the two treatments.
 
     ``boundary_flags`` may be on either axis — the per-contiguous-boundary array from

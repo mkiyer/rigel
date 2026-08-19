@@ -12,7 +12,7 @@
 > *"We MUST fix our vocabulary and terminology. This is THE HIGHEST PRIORITY … I would review our naming
 > conventions and clean them up as the first step in the plan."*
 
-RULED: **SPLICE IN** replaces `graft`. **SPLICE OUT** replaces `peel`. The land/sea analogy the owner used
+RULED: **SPLICE IN** replaces `splice_in`. **SPLICE OUT** replaces `peel`. The land/sea analogy the owner used
 to explain the geometry is **for understanding only and must not enter code or docs** — this file uses the
 predicate instead: an object is **gDNA-MEASURING** where no mature transcript crosses it (the solver's own
 `¬mrna_active`) and **IMPUTED** where one does. §5 is the naming review this ruling asks for.
@@ -183,7 +183,7 @@ zero controls (zero-RNA ⇒ `f_g = 1` everywhere; zero-gDNA ⇒ `f_g = 0`) befor
 | `terminus_population`, `strand_population`, `gdna_level_scale`, `rna_level_scale` | these four ARE the hop-type table, badly factored — one lookup replaces them |
 | `mass_pin` | see §5's entry: it forces a message's three densities to add up to the destination's observed count. Under either currency the claim already accounts for `M` by construction, so there is nothing to restore |
 | `conservation_var` | prices the residual `mass_pin` discards; dies with it |
-| `flank_pair`, `transfer_var`, `graft_frame_var` | all are properties of `r`, so they survive only on COMPOSITION hops and may be far smaller scoped there |
+| `flank_pair`, `transfer_var`, `splice_in_frame_var` | all are properties of `r`, so they survive only on COMPOSITION hops and may be far smaller scoped there |
 | `lam_emission_gate` | "this source has no composition to lend" is a hop-type fact, i.e. the table |
 | **SURVIVES** | SPLICE IN (the sj-flux RNA level — the operator `DESIGN.md` §0c says the exon needs), SPLICE OUT, the intron deconvolution, ψ's four channels, every precision |
 
@@ -203,7 +203,7 @@ Occurrences across `src/` · `tests/` · `scripts/` · `docs/` · memory, and ho
 
 | name | total | code ids | what it actually does | proposal |
 |---|---:|---:|---|---|
-| `graft` | 163 | 30 | a flanking BOUNDARY's measured sj flux joins the RNA claim entering an EXON | ✅ **RULED → SPLICE IN** (`splice_in`) |
+| `splice_in` | 163 | 30 | a flanking BOUNDARY's measured sj flux joins the RNA claim entering an EXON | ✅ **RULED → SPLICE IN** (`splice_in`) |
 | `peel` | 96 | 7 | an EXON's RNA leaving into a BOUNDARY is scaled by the continuing share | ✅ **RULED → SPLICE OUT** (`splice_out`) |
 | `pin` / `mass_pin` | 207 | 19 | rescales a message's three densities by a common factor so they exactly account for the destination's OBSERVED fragment count | ⛔ **NEEDS A RULING.** Proposal: `budget_rescale`, or delete it (§3 predicts it is unnecessary) |
 | `head` / `HeadPolicy` | 145 | 22 | the name of the shipped policy. Carries no meaning at all | ⛔ **NEEDS A RULING.** It is being retired; the NEW policy should be named for what it does, e.g. `ChainPolicy` |

@@ -45,12 +45,12 @@ from scipy.special import log_ndtr, polygamma, zeta
 __all__ = [
     "composition_logvar",
     # ── the pass-0 message-VARIANCE laws ──
-    "graft_frame_logvar",
-    "graft_frame_logvar_scalar",
-    "peel_rna_logvar",
-    "peel_continue_share",
-    "peel_continue_share_scalar",
-    "peel_share_logvar",
+    "splice_in_frame_logvar",
+    "splice_in_frame_logvar_scalar",
+    "splice_out_rna_logvar",
+    "splice_out_continue_share",
+    "splice_out_continue_share_scalar",
+    "splice_out_share_logvar",
     "residual_level",
     "residual_level_scalar",
     "transfer_logvar",
@@ -165,12 +165,12 @@ def composition_logvar(f_g, E_g, E_r, var_fg, n):
     return count_logvar(nn) + comp
 
 
-def graft_frame_logvar(r):
-    """the-graft-frame-variance — the GRAFT's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
+def splice_in_frame_logvar(r):
+    """the-splice-in-frame-variance — the SPLICE IN's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
 
-    the-reframe-scale-variance sets ``σ²_transfer = 0`` on a graft boundary because ``r`` is common-mode across the matched set ``{g, R}``
+    the-reframe-scale-variance sets ``σ²_transfer = 0`` on a SPLICE IN boundary because ``r`` is common-mode across the matched set ``{g, R}``
     and cancels in the composition. That is true of the IMPUTED continue ``ρ_ν``, which travels with ``ρ_g``
-    from the same source — but it is **false of the grafted ``ρ_μ``**. The delivered share is
+    from the same source — but it is **false of the spliced-in ``ρ_μ``**. The delivered share is
 
         f_g : f_R  =  ρ_g^src·E_g^dst : (ρ_ν^src + ρ_μ)·E_r^dst
 
@@ -182,7 +182,7 @@ def graft_frame_logvar(r):
     ``ρ_R(exon)/ρ_spl(bnd)`` = 1.02–1.86 and is capture-INVARIANT, while the exon↔boundary gDNA step goes
     1.03 → 6.1–6.8 under capture.
 
-    So the grafted component has **no matched gDNA partner to cancel ``r`` against** — exactly the-reframe-scale-variance's peel /
+    So the spliced-in component has **no matched gDNA partner to cancel ``r`` against** — exactly the-reframe-scale-variance's SPLICE OUT /
     partial-anchor case, where ``σ²_transfer`` is load-bearing. The un-modelled frame step is what the message
     gets wrong, its magnitude is the step itself, and the model's own estimate of that step is ``r``; charging
     ``(log r)²`` is the method-of-moments second moment of a single observation of it — the same logic as the-mismatch-deflation's
@@ -196,36 +196,36 @@ def graft_frame_logvar(r):
 
     Applied to the spliced measurement's OWN precision (``1/n_spl ⊕ (log r)²``), so the-composition-variance's share weighting
     ``w_μ²`` arises implicitly from the inverse-variance fusion with the correctly-framed ``ρ_ν`` arm — a
-    graft that is a minority of the RNA is damped proportionately less.
+    SPLICE IN that is a minority of the RNA is damped proportionately less.
 
-    Calibration (delivered ``λ`` vs oracle, graft boundaries into exons): ``z2 = E[Δ²]/E[v]`` 58–310 → **2.1–3.8**,
+    Calibration (delivered ``λ`` vs oracle, SPLICE IN boundaries into exons): ``z2 = E[Δ²]/E[v]`` 58–310 → **2.1–3.8**,
     consistently across capture off and on."""
     rr = _f(r)
     lr = np.log(np.where(rr > _EPS, rr, 1.0))
     return lr * lr
 
 
-def graft_frame_logvar_scalar(r):
-    """Scalar twin of :func:`graft_frame_logvar` — see that docstring for the model.
+def splice_in_frame_logvar_scalar(r):
+    """Scalar twin of :func:`splice_in_frame_logvar` — see that docstring for the model.
 
     ⚠ TWIN: mirror any change into both. Pinned bit-for-bit by ``test_enrichment_frame.py``."""
     lr = _log(r) if r > _EPS else 0.0  # r ≤ _EPS (or nan) ⇒ no frame step ⇒ log 1 = 0
     return lr * lr
 
 
-def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
-    """the-peel-share-variance — the PEEL (exon→boundary) RNA-continue message log-variance. The boundary receives only what
+def splice_out_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
+    """the-splice-out-share-variance — the SPLICE OUT (exon→boundary) RNA-continue message log-variance. The boundary receives only what
     CONTINUES: ``ρ_ν = ρ_R(x)/r − ρ_μ`` — a **difference** (an absolute measured density is subtracted, so
     enrichment does NOT cancel). The delta method gives u-weighted (≥1) terms::
 
         Var(log ρ_ν) = u²·Var(log T) + (u−1)²·v_μ ,   Var(log T) = Var(log ρ_R(x)) + σ²_transfer ,
         u = T/ρ_ν = 1/(fraction that continues) ≥ 1
 
-    A difference DESTROYS precision (subtracting near-equal numbers) — the mirror of the graft's convex weights;
+    A difference DESTROYS precision (subtracting near-equal numbers) — the mirror of the SPLICE IN's convex weights;
     ``σ²_transfer`` is LOAD-BEARING here (~85–92% of the variance).
 
     ⚠ The linearization is valid only for ``ε = √(fraction continuing) ≲ 0.15`` (``u ≲ 3``); beyond it (>p75 of
-    real sj) it UNDER-states the variance (over-confident 27–40%). ``u`` MUST therefore gate the peel's
+    real sj) it UNDER-states the variance (over-confident 27–40%). ``u`` MUST therefore gate the SPLICE OUT's
     precision as a per-sj weight, and ``ρ_ν < 0`` is a PRIOR truncation, not an emission gate (handoff §6).
     MC 1–3% in-regime."""
     uu = np.asarray(u, np.float64)
@@ -233,15 +233,15 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
     return uu * uu * vT + (uu - 1.0) ** 2 * np.asarray(v_mu, np.float64)
 
 
-def peel_continue_share(rho_nu, rho_mu):
+def splice_out_continue_share(rho_nu, rho_mu):
     """the-continuing-share — the fraction of a boundary's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
 
-    This is the object that retires the peel's SUBTRACTION. What continues past a sj is a *share* of the
+    This is the object that retires the SPLICE OUT's SUBTRACTION. What continues past a sj is a *share* of the
     RNA at the boundary, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
     channels alike (``ρ_ν = e·c_ν``, ``ρ_μ = e·c_μ``), so ``e`` cancels identically inside ``w``. Both inputs
     are taken in the BOUNDARY's own frame — its solved unspliced-RNA density and its measured spliced density.
 
-    **Why a share and not a difference.** The old peel formed ``ρ_ν = ρ_R(x)·r − ρ_μ``, a difference of two
+    **Why a share and not a difference.** The old SPLICE OUT formed ``ρ_ν = ρ_R(x)·r − ρ_μ``, a difference of two
     absolute densities, and a difference does not commute with a scale error. With ``u = A/ρ_ν ≥ 1`` (the
     reciprocal of the continuing fraction), a systematic log-scale error ``δ`` in the reframed source arrives
     as ``log(u·e^δ − (u−1))`` — which is ``u·δ`` in the small-``δ`` limit and is measured at 1.77× / 2.39× /
@@ -252,24 +252,24 @@ def peel_continue_share(rho_nu, rho_mu):
     ``u``'s p75 on real sj is ≈ 3. MC: `message_variance_mc.py` the-continuing-share, exact to 1e-12.
 
     Degenerate limits, both structural: no spliced flux (``ρ_μ = 0``) ⇒ ``w = 1``, nothing splices away and
-    nothing is peeled; no RNA at the boundary at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
-    apportion and the caller's own gates decide. ``w`` is always in ``[0, 1]`` — the peel can no longer go
-    negative, which retires the zero-truncation defect (a fully-consumed peel used to emit ``ρ_ν = 0``, "no
+    nothing is spliced-out; no RNA at the boundary at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
+    apportion and the caller's own gates decide. ``w`` is always in ``[0, 1]`` — the SPLICE OUT can no longer go
+    negative, which retires the zero-truncation defect (a fully-consumed SPLICE OUT used to emit ``ρ_ν = 0``, "no
     RNA continues past here", at a live precision)."""
     nu, mu = _f(rho_nu), _f(rho_mu)
     tot = nu + mu
     return np.where(tot > _EPS, nu / np.maximum(tot, _EPS), 1.0)
 
 
-def peel_continue_share_scalar(rho_nu, rho_mu):
-    """Scalar twin of :func:`peel_continue_share` — see that docstring for the model.
+def splice_out_continue_share_scalar(rho_nu, rho_mu):
+    """Scalar twin of :func:`splice_out_continue_share` — see that docstring for the model.
 
     ⚠ TWIN: mirror any change into both. Pinned bit-for-bit by ``test_enrichment_frame.py``."""
     tot = rho_nu + rho_mu
     return rho_nu / tot if tot > _EPS else 1.0
 
 
-def peel_share_logvar(w_mu, v_nu, v_mu):
+def splice_out_share_logvar(w_mu, v_nu, v_mu):
     """the-continuing-share — the log-variance the continuing SHARE contributes: ``w_μ²·(v_ν + v_μ)``.
 
     Delta method on ``log w = log ρ_ν − log(ρ_ν + ρ_μ)``: both partials are ``±w_μ``, the SPLICED share
@@ -278,8 +278,8 @@ def peel_share_logvar(w_mu, v_nu, v_mu):
         Var(log w) = w_μ²·( Var(log ρ_ν^B) + Var(log ρ_μ^B) ) ,   v_μ = 1/n_spl (measured, count-only)
 
     and the delivered message variance is ``Var(log ρ_R(x)) + σ²_transfer + Var(log w)``. The weights are
-    **CONVEX** (``w_μ ≤ 1``) — the exact mirror of the-composition-variance's graft SUM — where the-peel-share-variance's difference carried ``u ≥ 1`` and
-    amplified. So this move takes the peel out of the ill-conditioned regime entirely; there is no ``ε``/``u``
+    **CONVEX** (``w_μ ≤ 1``) — the exact mirror of the-composition-variance's SPLICE IN SUM — where the-splice-out-share-variance's difference carried ``u ≥ 1`` and
+    amplified. So this move takes the SPLICE OUT out of the ill-conditioned regime entirely; there is no ``ε``/``u``
     validity limit to respect and no over-confidence tail. MC: `message_variance_mc.py` the-continuing-share, rel 0.2–1.0 %."""
     wm = _f(w_mu)
     return wm * wm * (_f(v_nu) + _f(v_mu))
@@ -342,7 +342,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     limit of the truncation, not a floor.
 
     The three operating limits, and they are the reason this exists:
-    * **``ρ_g E_g ≪ M``** (a low-gDNA library — where RNA is the entire signal and the peel's old
+    * **``ρ_g E_g ≪ M``** (a low-gDNA library — where RNA is the entire signal and the SPLICE OUT's old
       no-evidence default silenced the channel outright): ``ρ_ν → M/E_r`` at ``Var → 1/n``. A MEASUREMENT.
     * **``ρ_g E_g → M`` with a precise gDNA claim** (an RNA-free boundary): ``ρ_ν → 0``, and the log-variance
       grows without bound — but the LINEAR statement stays tight (``sd(ρ_ν) ∝ M/(E_r√n)``, i.e. *"below a few
@@ -488,13 +488,13 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
     return rho, v_log, rho * rho * v_log
 
 
-def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
+def transfer_logvar(logvar_tot_dst, logvar_tot_src, splice_in):
     """the-reframe-scale-variance — ``σ²_transfer = Var(log r)``, the enrichment-ratio uncertainty that damps a message across a capture
     cliff: ``Var(log r) = Var(log ρ_tot^dst) + Var(log ρ_tot^src)`` (each from :func:`composition_logvar`).
 
-    DIRECTION-dependent: on the **graft** the reframe ``r`` is common-mode across the matched component set and
+    DIRECTION-dependent: on the **SPLICE IN** the reframe ``r`` is common-mode across the matched component set and
     CANCELS in the composition (return 0 — applying it there is the double-count the density-uniformity proxy
-    committed); on the **peel** / partial-anchor message it is LOAD-BEARING. This one law replaces the retired
+    committed); on the **SPLICE OUT** / partial-anchor message it is LOAD-BEARING. This one law replaces the retired
     ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²`` proxy and covers BOTH the relay and the combine. MC 0.02–0.27%.
 
     ⭐⭐ **``s`` CAN NO LONGER BE ``+∞``, and that is why there is no second case here.** It used to be,
@@ -503,7 +503,7 @@ def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
     stream, which never multiplies by ``r`` at all. That was one bug in two places, and it is fixed at the
     source: :func:`count_logvar`. ⛔ An ``~isfinite`` guard was briefly added HERE instead and is deleted —
     it treated the symptom, and it silently made every genuinely-unscaled hop free. TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero."""
-    g = np.asarray(graft, bool)
+    g = np.asarray(splice_in, bool)
     s = np.asarray(logvar_tot_dst, np.float64) + np.asarray(logvar_tot_src, np.float64)
     return np.where(g, 0.0, s)
 
@@ -562,16 +562,16 @@ def mismatch_deflate(precision, gap, contradicted, var_own):
     return np.where(np.asarray(contradicted, bool) & known, 0.0, out)
 
 
-def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
-    """⭐ P1d — the GRAFT's PREMISE log-variance, measured from an exon's two flanking boundaries.
+def splice_in_premise_logvar(flux_a, flux_b, var_a, var_b):
+    """⭐ P1d — the SPLICE IN's PREMISE log-variance, measured from an exon's two flanking boundaries.
 
-    **The event it prices.** The graft hands an exon the RNA at one boundary — ``ρ_ν + ρ_μ`` — as *the* exon's
+    **The event it prices.** The SPLICE IN hands an exon the RNA at one boundary — ``ρ_ν + ρ_μ`` — as *the* exon's
     RNA density. Every molecule counted there is in the exon, but the exon may also hold molecules that
     never touch that boundary: ones that reach it by the other flank, or that start or end inside it. So what
-    the graft knows is an **inequality**, ``ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)``, and it uses it as an equality.
-    Nothing else in the ledger prices that. **the-graft-frame-variance comes closest and does not cover it**: the-graft-frame-variance charges
+    the SPLICE IN knows is an **inequality**, ``ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)``, and it uses it as an equality.
+    Nothing else in the ledger prices that. **the-splice-in-frame-variance comes closest and does not cover it**: the-splice-in-frame-variance charges
     ``(log r)²``, i.e. it assumes the only reason a boundary and an exon differ is the capture step between
-    them — so off-capture ``r = 1`` and the-graft-frame-variance charges exactly zero, while a boundary and a region still differ.
+    them — so off-capture ``r = 1`` and the-splice-in-frame-variance charges exactly zero, while a boundary and a region still differ.
     ``1/n_spl`` does not cover it either, and never will however large it grows: a count says *how many I
     counted*, this says *whether what I counted speaks for the exon*.
 
@@ -588,7 +588,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     ``/2`` is the measured independence and the truncation at 0 is the method's own ("no detectable
     premise error"). Returns ``(per_boundary, pooled)``.
 
-    ⚠⚠ **`ω_graft` IS A DEBT, NOT A MODEL.** It partially compensates for a FAILURE IN THE STRUCTURAL
+    ⚠⚠ **`ω_splice_in` IS A DEBT, NOT A MODEL.** It partially compensates for a FAILURE IN THE STRUCTURAL
     REPRESENTATION: the region/boundary map has no TSS/TES, so the solver cannot tell a splice junction from
     a transcript terminus — and that distinction is the whole of the effect this term prices (`ω̂` 1.7–1.9 at
     terminus boundaries vs 0.04–0.06 at sj-only ones, a ≥30× split, with 20.8 % of boundaries carrying
@@ -644,7 +644,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
 
     **What the term does NOT claim.** It does not claim the second boundary is a good proxy for the exon's RNA on
     any individual exon. It uses the boundary pairs only to estimate ONE library-level number — the typical size
-    of the graft's premise failure — because that failure is an UNDER-claim, and an under-claim has **no
+    of the SPLICE IN's premise failure — because that failure is an UNDER-claim, and an under-claim has **no
     local signature**: a boundary accounting for less mass than the exon holds is indistinguishable from an exon
     with more gDNA, which is count-zero-information exactly. The over-claim direction *is* locally visible
     (``claim/obs``) and belongs to P1e.

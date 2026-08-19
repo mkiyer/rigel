@@ -350,7 +350,7 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
             v = getattr(region, attr, None)
             if isinstance(v, str):
                 ident.add(v.lower())
-    banned = ("graft", "reframe", "pin", "enrichment", "peel", "flank", "damp", "mismatch")
+    banned = ("SPLICE IN", "reframe", "pin", "enrichment", "SPLICE OUT", "flank", "damp", "mismatch")
     leaked = {w: sorted(i for i in ident if w in i) for w in banned}
     assert not any(leaked.values()), (
         f"policy concepts leaked into the backbone's identifiers: {leaked}"

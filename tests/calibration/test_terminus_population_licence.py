@@ -30,7 +30,7 @@ must give the **same** flank answer, while the TSS bit alone points at the oppos
 spelled "is there a TSS here" passes on one index and fails on its mirror.
 
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population — RNA splices out or in — but
-there the flux is MEASURED (``sj_count``) and the graft and the peel exist to route it. A terminus
+there the flux is MEASURED (``sj_count``) and the SPLICE IN and the peel exist to route it. A terminus
 has no flux to measure: a transcript simply begins. That is the derived boundary between the two
 treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1.1 **the-cancelling-pair**).
 
@@ -217,7 +217,7 @@ def test_a_flagless_boundary_breaks_no_population():
 def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     """⛔ **THE SCOPE, pinned so it cannot be widened by accident.** A DONOR/ACCEPTOR BOUNDARY does change the
     RNA population — a transcript splices out or in — but there the flux is MEASURED (``sj_count``)
-    and the graft and the peel exist to route it, so routing it a second time as a withheld licence would
+    and the SPLICE IN and the peel exist to route it, so routing it a second time as a withheld licence would
     double-count. This predicate must therefore read the four TERMINUS bits and nothing else.
 
     ⚠ Extending it to splice sites is a separate experiment with its own measurement: deleting the
@@ -235,7 +235,7 @@ def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     right_gains, left_gains = terminus_flank_gain(splice_only)
     assert not right_gains.any() and not left_gains.any(), (
         "a splice site is breaking a population in this predicate; DONOR/ACCEPTOR are out of scope and "
-        "belong to the graft and the peel"
+        "belong to the SPLICE IN and the peel"
     )
     # …and a terminus sharing the position with a splice site is still seen (the measured 0.99 % case).
     both = np.array([FLAG_TSS_POS | FLAG_DONOR_POS], np.uint16)

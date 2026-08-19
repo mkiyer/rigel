@@ -499,7 +499,7 @@ def fit_rna_strand_from_sj_table(
 
 
     ⚠ The accumulator's spliced MASS channel is deliberately untouched: it legitimately wants
-    implicit and novel RNA for the peel, the graft and the mature-RNA floor. This fix belongs in the
+    implicit and novel RNA for the SPLICE OUT, the SPLICE IN and the mature-RNA floor. This fix belongs in the
     strand model, not in the deposit predicate.
 
     A sj with one fragment contributes no pair to correlate and so no information; the

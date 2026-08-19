@@ -53,7 +53,7 @@ Usage
     python scripts/design/backbone_parity.py --suite .../ladder --index .../rigel_index
 
     # what ONE operator does, per slot
-    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b no_peel
+    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b no_splice_out
 
 ⚠ Both arms run in ONE process against ONE set of inputs, which is what makes this an identity test rather
 than a reproducibility test.

@@ -39,14 +39,14 @@ from . import NeighbourState, PsiMessage, StepContext
 from .variance import (
     _fmax,
     composition_logvar,
-    graft_frame_logvar,
-    graft_frame_logvar_scalar,
-    graft_premise_logvar,
+    splice_in_frame_logvar,
+    splice_in_frame_logvar_scalar,
+    splice_in_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
-    peel_continue_share,
-    peel_continue_share_scalar,
-    peel_share_logvar,
+    splice_out_continue_share,
+    splice_out_continue_share_scalar,
+    splice_out_share_logvar,
     residual_level,
     residual_level_scalar,
     transfer_logvar,
@@ -95,16 +95,16 @@ class HeadSwitches:
     #: the relay's mass pin ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
     #: ceiling says deleting it outright cost the panel **+0.0002** — it landed on the derivation.
     mass_pin: bool = True
-    #: GRAFT: a flanking BOUNDARY's measured sj density joins the RNA claim entering an EXON.
-    graft: bool = True
-    #: the-graft-frame-variance — the graft's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
-    graft_frame_var: bool = True
-    #: P1d — the graft's PREMISE variance, ONE library-level scalar fitted from flanking boundary pairs.
+    #: SPLICE IN: a flanking BOUNDARY's measured sj density joins the RNA claim entering an EXON.
+    splice_in: bool = True
+    #: the-splice-in-frame-variance — the SPLICE IN's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
+    splice_in_frame_var: bool = True
+    #: P1d — the SPLICE IN's PREMISE variance, ONE library-level scalar fitted from flanking boundary pairs.
     #: ⚠ Ledger: REGION_BOUND from the backbone — re-derive per class when TSS/TES land.
-    graft_premise_var: bool = True
-    #: PEEL: an EXON's RNA leaving into an BOUNDARY is scaled by the CONTINUING share ``w`` (the-continuing-share).
-    peel: bool = True
-    #: sigma^2_transfer = Var(log r) (the-reframe-scale-variance) — the reframe's own scale sampling, 0 on the matched graft.
+    splice_in_premise_var: bool = True
+    #: SPLICE OUT: an EXON's RNA leaving into an BOUNDARY is scaled by the CONTINUING share ``w`` (the-continuing-share).
+    splice_out: bool = True
+    #: sigma^2_transfer = Var(log r) (the-reframe-scale-variance) — the reframe's own scale sampling, 0 on the matched SPLICE IN.
     transfer_var: bool = True
     #: the DerSimonian-Laird composition-mismatch deflation (the-mismatch-deflation). Silent where the destination has no
     #: self-solve, i.e. never on unstranded data.
@@ -210,7 +210,7 @@ class _HeadRelay:
         # measure the same population, a density discrepancy is not attributable to capture enrichment —
         # the two are indistinguishable — so the composition may not be imputed and the level crosses
         # unscaled. ⛔ TERMINI ONLY: a DONOR/ACCEPTOR BOUNDARY also changes the population, but there the flux
-        # is MEASURED and the graft and the peel exist to route it.
+        # is MEASURED and the SPLICE IN and the SPLICE OUT exist to route it.
         # THE PAIR ALGEBRA: the chain strictly alternates, so exactly one slot of an adjacent pair is an
         # BOUNDARY and the pair ``(i, left[i])`` IS the pair ``(left[i], right[left[i]])`` — so one array
         # answers it for the left-hand step of every slot and the other is that array read through
@@ -271,7 +271,7 @@ class _HeadRelay:
         # ── THREE-STREAM precision seeds (the single-lambda combine) ───────────────────────────────────
         #   * tau (COMPOSITION): the Schur lambda-precision; 0 at anchors + unstranded non-factory slots.
         #   * mg/mp/mn (MEASUREMENT): the anchor gDNA count (own, struct_lock only) + the spliced RNA
-        #     count (added at the graft). A density-level bound, NOT a composition vote.
+        #     count (added at the SPLICE IN). A density-level bound, NOT a composition vote.
         _struct = np.asarray(ni.struct_lock, bool)
         tau_own = np.asarray(ni.tau_lam, np.float64)
         mg_own = np.where(_struct, np.asarray(pg_own, np.float64), 0.0)
@@ -315,9 +315,9 @@ class _HeadRelay:
             rho_lo, rho_hi = _one, _one
         self._rho_lo, self._rho_hi = rho_lo, rho_hi
 
-        # ── the graft's PREMISE variance: ONE library-level scalar, fitted by method of moments ─────────
+        # ── the SPLICE IN's PREMISE variance: ONE library-level scalar, fitted by method of moments ─────────
         vgp_prem, vgn_prem = self._boundary_pair(rho_lo, rho_hi)
-        if not sw.graft_premise_var:
+        if not sw.splice_in_premise_var:
             vgp_prem, vgn_prem = np.zeros_like(vgp_prem), np.zeros_like(vgn_prem)
         self._vgp_prem, self._vgn_prem = vgp_prem, vgn_prem
 
@@ -409,7 +409,7 @@ class _HeadRelay:
                 fn=fn_a,
             )
 
-    # ── the graft's premise variance ───────────────────────────────────────────────────────────────────
+    # ── the SPLICE IN's premise variance ───────────────────────────────────────────────────────────────────
     def _flank_dom(self, rho_lo_a, rho_hi_a, spf):
         """Per slot: the flux each of its two flanking BOUNDARIES sends it, ALREADY lifted into this slot's
         frame, per strand.
@@ -435,14 +435,14 @@ class _HeadRelay:
         )
 
     def _boundary_pair(self, rho_lo_a, rho_hi_a):
-        """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
+        """Per strand: the SPLICE IN's premise log-variance — ONE library-level scalar, fitted by method of
         moments from the destination-frame disagreement of exons' flanking boundary PAIRS, and applied to every
-        graft boundary.
+        SPLICE IN boundary.
 
         ⚠⚠ **A DEBT, not a model.** The one scalar stands in for a quantity that splits >=30x on whether
         the boundary carries a transcript TERMINUS — a bit the region map does not have.
 
-        ⭐ The POOLED fit is applied to EVERY graft boundary and the per-boundary value is NOT used. ``d^2`` from
+        ⭐ The POOLED fit is applied to EVERY SPLICE IN boundary and the per-boundary value is NOT used. ``d^2`` from
         ONE pair is a single draw of a scaled chi^2_1, so its own coefficient of variation is sqrt(2) — a
         per-boundary "measurement" of a variance is mostly noise, and the UNDER-charging half does the damage
         because it REPLACES the population value on the ~48 % of boundaries where it fires. It also removes a
@@ -458,7 +458,7 @@ class _HeadRelay:
             # each boundary's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling (the-reframe-scale-variance's
             # source leg; the destination's leg is common to both lifts and cancels in ``d``).
             _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
-            per, pooled = graft_premise_logvar(
+            per, pooled = splice_in_premise_logvar(
                 fl,
                 fr,
                 np.where(vl, self._v_mu_s[vmu][sl] + _lv[sl], np.inf),
@@ -485,8 +485,8 @@ class _HeadRelay:
             out.append(np.full_like(per, pooled))
         return out[0], out[1]
 
-    # ── the peel share, both twins ─────────────────────────────────────────────────────────────────────
-    def _peel_share(self, tg, tpg, tp, tn):
+    # ── the SPLICE OUT share, both twins ─────────────────────────────────────────────────────────────────────
+    def _splice_out_share(self, tg, tpg, tp, tn):
         """The continuing share ``w`` and ``Var(log w)`` per strand, at every slot, for a message whose
         gDNA claim is ``(tg, tpg)`` and whose RNA claim is ``(tp, tn)``. Returns
         ``((w_p, vw_p), (w_n, vw_n))``; ``Var(log w) = +inf`` (⇒ zero precision, an inert message) only
@@ -498,7 +498,7 @@ class _HeadRelay:
         ``e`` cancels identically inside the ratio — and a scaling COMMUTES with the scale error the
         reframe carries where a difference AMPLIFIES it by ``u = 1/w``.
 
-        ⚠ TWIN of :meth:`_peel_share_scalar` — mirror any change into both."""
+        ⚠ TWIN of :meth:`_splice_out_share_scalar` — mirror any change into both."""
         cap = self.ctx.capture
         M, _n_region, E_g, E_r = self._M, self._n_region, self._E_g, self._E_r
         _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
@@ -528,7 +528,7 @@ class _HeadRelay:
             # variance and not a count, so the same floor became a hard CEILING of ``psi'(1) = pi^2/6``,
             # over-stating confidence 6x on exactly the boundaries where the level is least determined.
             _v_nu = np.where(_live, _vlog_m, np.inf)
-            _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
+            _w = np.where(_live, splice_out_continue_share(_nu, _mu), 0.0)
             if cap is not None:
                 cap.setdefault("_lvl", []).append(  # inert: the level's provenance, per slot
                     {
@@ -550,7 +550,7 @@ class _HeadRelay:
                     _w,
                     np.where(
                         _ok,
-                        peel_share_logvar(
+                        splice_out_share_logvar(
                             1.0 - _w,
                             np.where(_live, _v_nu, 0.0),
                             np.where(np.isfinite(_vmu), _vmu, 0.0),
@@ -561,8 +561,8 @@ class _HeadRelay:
             )
         return out
 
-    def _peel_share_scalar(self, i, tg, tpg, tp, tn):
-        """The SCALAR twin of :meth:`_peel_share`, for one slot ``i`` — see that docstring for the model.
+    def _splice_out_share_scalar(self, i, tg, tpg, tp, tn):
+        """The SCALAR twin of :meth:`_splice_out_share`, for one slot ``i`` — see that docstring for the model.
 
         ⚠ TWIN: mirror any change into both. It exists because the scan is sequential and calls this once
         per slot per direction, so the array form runs ~50 numpy ops on 0-d arrays per call — 0.5-0.7 us
@@ -595,7 +595,7 @@ class _HeadRelay:
             # attributable.
             _nu = (_pm * _nu_ms) / _pm
             _v_nu = _vlog_m  # the-residual-level's own log-variance — see the twin
-            _w = peel_continue_share_scalar(_nu, _mu)
+            _w = splice_out_continue_share_scalar(_nu, _mu)
             _wm = 1.0 - _w
             _ok = math.isfinite(_vmu) or not _mu > _EPS
             out.append(
@@ -619,7 +619,7 @@ class _HeadRelay:
         ⚠ **This is the SCALAR twin of :meth:`deliver`, and the two differ deliberately in three boundary
         cases which are NOT bugs to unify:** (1) the scan skips invalid boundaries with an early return while
         the combine masks them to ``r = 0``; (2) ``_damp`` here uses the raw ``p`` where the combine uses
-        ``max(p, _EPS)``, which differ only for ``0 < p < _EPS``; (3) the scan short-circuits the graft
+        ``max(p, _EPS)``, which differ only for ``0 < p < _EPS``; (3) the scan short-circuits the SPLICE IN
         block under ``if _gr`` while the combine evaluates the frame variance on every boundary and masks.
         """
         sw = self.sw
@@ -640,7 +640,7 @@ class _HeadRelay:
         ex_l, bnd_l, fp_l, fn_l, g1_l = self._ex_l, self._bnd_l, self._fp_l, self._fn_l, self._g1_l
         spl_p_l, spl_n_l, SP_l, SN_l = self._spl_p_l, self._spl_n_l, self._SP_l, self._SN_l
         vgp_l, vgn_l = self._vgp_l, self._vgn_l
-        peel_share_scalar = self._peel_share_scalar
+        splice_out_share_scalar = self._splice_out_share_scalar
 
         # the running state: each slot's context belief IN ITS OWN FRAME
         rg, rp, rn = og_l.copy(), op_l.copy(), on_l.copy()
@@ -669,11 +669,11 @@ class _HeadRelay:
                 r = (rho_dst_i / rho_src) if (rho_src > _EPS and rho_dst_i > _EPS) else 1.0
             else:
                 r = 1.0  # no frame ⇒ pass-through
-            # GRAFT (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE, so it
-            # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
-            # applied after. Only an EXON receives the graft — an intron carries no sj flux.
-            _gr = sw.graft and ex_l[i] and bnd_l[s]
-            # sigma^2_transfer = Var(log r) (the-reframe-scale-variance): 0 on the matched-set GRAFT (r is common-mode across
+            # SPLICE IN (BOUNDARY → EXON): the BOUNDARY's measured sj flux is a density AT THE SOURCE, so it
+            # joins the source's RNA BEFORE the reframe; the SPLICE OUT is measured at the destination and so is
+            # applied after. Only an EXON receives the SPLICE IN — an intron carries no sj flux.
+            _gr = sw.splice_in and ex_l[i] and bnd_l[s]
+            # sigma^2_transfer = Var(log r) (the-reframe-scale-variance): 0 on the matched-set SPLICE IN (r is common-mode across
             # {g,R} and cancels in the composition — charging it there is a double-count), Var(log r)
             # elsewhere. The COMPOSITION-mismatch term is the combine's job: the scan has no destination
             # self-solve to measure a gap against, and its running belief is already fused with the
@@ -702,15 +702,15 @@ class _HeadRelay:
             tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
             tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
             ttau = _damp(tau[s], s2t)  # composition
-            # The grafted sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
+            # The spliced-in sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
-            # data and would otherwise drop the graft on the floor. It enters BOTH the mode fusion and the
+            # data and would otherwise drop the SPLICE IN on the floor. It enters BOTH the mode fusion and the
             # MEASUREMENT stream, never the composition tau: a count is not a composition vote.
             if _gr:
-                # the-graft-frame-variance: the grafted spliced density is measured in the DESTINATION exon's frame, so it has no
-                # matched gDNA partner to cancel ``r`` against and the-reframe-scale-variance's graft-zero does not cover it.
+                # the-splice-in-frame-variance: the spliced-in spliced density is measured in the DESTINATION exon's frame, so it has no
+                # matched gDNA partner to cancel ``r`` against and the-reframe-scale-variance's SPLICE IN-zero does not cover it.
                 # Charge the frame step it is implicitly mis-lifted by. Identically 0 at r = 1.
-                _s2f = s2t + (graft_frame_logvar_scalar(r) if sw.graft_frame_var else 0.0)
+                _s2f = s2t + (splice_in_frame_logvar_scalar(r) if sw.splice_in_frame_var else 0.0)
                 _sps = SP_l[s]
                 _spc = _sps / (1.0 + _sps * _s2f) if _sps > _EPS else 0.0
                 _sns = SN_l[s]
@@ -724,19 +724,19 @@ class _HeadRelay:
                 tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
             if sw.rna_level_scale:
                 # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
-                # ⛔ AFTER the graft block, so the sj precision goes with the sj density it certified.
+                # ⛔ AFTER the SPLICE IN block, so the sj precision goes with the sj density it certified.
                 # Zeroing before it delivered "+ RNA = 0 @ the sj count's precision" — a confident
                 # nothing — which the next hop's mass pin turned into "all gDNA" (measured: an empty exon
                 # at n = 0 @ pn = 280, then M/E_g at the boundary beyond it; the 2026-08-18 zero-control
-                # gap). The graft is a claim about THIS strand, and ψ reads the RNA channel as a LEVEL, so
-                # a refused arm delivers nothing, graft included — not the sj density alone as a level.
+                # gap). The SPLICE IN is a claim about THIS strand, and ψ reads the RNA channel as a LEVEL, so
+                # a refused arm delivers nothing, SPLICE IN included — not the sj density alone as a level.
                 if not pop_p[i]:
                     tpp, tmp = 0.0, 0.0
                 if not pop_n[i]:
                     tpn, tmn = 0.0, 0.0
 
-            if sw.peel and bnd_l[i] and ex_l[s]:  # EXON → BOUNDARY: PEEL by COMPOSITION
-                (_wp, _vwp), (_wn, _vwn) = peel_share_scalar(i, tg, tpg, tp, tn)
+            if sw.splice_out and bnd_l[i] and ex_l[s]:  # EXON → BOUNDARY: SPLICE OUT by COMPOSITION
+                (_wp, _vwp), (_wn, _vwn) = splice_out_share_scalar(i, tg, tpg, tp, tn)
                 tp, tn = tp * _wp, tn * _wn
                 tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
                 tpn, tmn = _damp_v(tpn, _vwn), _damp_v(tmn, _vwn)
@@ -813,17 +813,17 @@ class _HeadRelay:
             )
         else:
             r = np.where(valid, 1.0, 0.0)
-        # GRAFT before the reframe (a density measured AT the source); PEEL after (measured at the dst).
-        graft = (ex_a & is_bnd_a[src] & valid) if sw.graft else np.zeros_like(valid)
-        gp = np.where(graft, spl_p[src], 0.0)
-        gn = np.where(graft, spl_n[src], 0.0)
+        # SPLICE IN before the reframe (a density measured AT the source); SPLICE OUT after (measured at the dst).
+        splice_in = (ex_a & is_bnd_a[src] & valid) if sw.splice_in else np.zeros_like(valid)
+        gp = np.where(splice_in, spl_p[src], 0.0)
+        gn = np.where(splice_in, spl_n[src], 0.0)
         # ⭐⭐ THE gDNA SCALE — ``lend`` asks two things of the step: the lambda-emission gate's predicate
         # of the SOURCE (it may lend a composition only if it SUPPLIED both components of the pair) and,
         # of the PAIR, whether the two objects measure the same RNA POPULATION. Where either fails the
         # reframe is a false premise and the gDNA LEVEL crosses UNSCALED.
         #
-        # ⚠ **A GRAFT boundary does NOT license it, and that is a deliberate divergence from the lambda gate**,
-        # which counts the grafted sj precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-boundary: mature RNA does not
+        # ⚠ **A SPLICE IN boundary does NOT license it, and that is a deliberate divergence from the lambda gate**,
+        # which counts the spliced-in sj precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-boundary: mature RNA does not
         # cross an intron<->exon BOUNDARY contiguously, so that BOUNDARY's OWN spanning population is gDNA and
         # unspliced RNA, and the sj flux is a measurement of RNA that lives in the DESTINATION — the
         # routing operator exists precisely because that component cannot cross by imputation. Using it to
@@ -856,7 +856,7 @@ class _HeadRelay:
         else:
             tp, tn = (rp + gp) * r, (rn + gn) * r
         tg = rg * r_g
-        s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
+        s2t = transfer_logvar(logvar_tot, logvar_tot[src], splice_in)
 
         def _dv(p, s2=s2t):
             return np.where(valid & (p > 0.0), 1.0 / (1.0 / np.maximum(p, _EPS) + s2), 0.0)
@@ -864,42 +864,42 @@ class _HeadRelay:
         tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
         tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
         ttau = _dv(tau, s2t)  # composition (tau) → the lambda-message
-        # the graft's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a GRAFT
+        # the SPLICE IN's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a SPLICE IN
         # boundary, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
         # entries (a zero-count slot has logvar_tot = +inf ⇒ s2t = inf, and ``0*inf`` would nan the masked
         # branch ``np.where`` evaluates).
-        _sp = np.where(graft, SPL[:, 0][src], 0.0)
-        _sn = np.where(graft, SPL[:, 1][src], 0.0)
+        _sp = np.where(splice_in, SPL[:, 0][src], 0.0)
+        _sn = np.where(splice_in, SPL[:, 1][src], 0.0)
         _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
-        if sw.graft_frame_var:
-            _s2t_spl = _s2t_spl + np.where(graft, graft_frame_logvar(r), 0.0)
+        if sw.splice_in_frame_var:
+            _s2t_spl = _s2t_spl + np.where(splice_in, splice_in_frame_logvar(r), 0.0)
         _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
         _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
         tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
         tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never tau)
-        # ⭐ P1d — the graft's PREMISE variance, applied to the WHOLE RNA claim after the spliced arm is
+        # ⭐ P1d — the SPLICE IN's PREMISE variance, applied to the WHOLE RNA claim after the spliced arm is
         # folded in, because the premise is about the SUM: measured FLAT in the spliced share, so charging
         # the spliced arm alone would reach only 10-93 % of the delivered confidence while the error
         # contaminates 63-95 % of the delivered density.
-        _vgp = np.where(graft, self._vgp_prem, 0.0)
-        _vgn = np.where(graft, self._vgn_prem, 0.0)
+        _vgp = np.where(splice_in, self._vgp_prem, 0.0)
+        _vgn = np.where(splice_in, self._vgn_prem, 0.0)
         tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
         tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
         if sw.rna_level_scale:
             # a denied arm delivers NO CLAIM: its precisions go with its value (the fp/fn pattern).
-            # ⛔ AFTER the graft, for the reason the scalar twin gives: the sj precision must go with the
+            # ⛔ AFTER the SPLICE IN, for the reason the scalar twin gives: the sj precision must go with the
             # sj density it certified, or a refused arm delivers a confident zero.
             tpp, tmp = np.where(pop_p, tpp, 0.0), np.where(pop_p, tmp, 0.0)
             tpn, tmn = np.where(pop_n, tpn, 0.0), np.where(pop_n, tmn, 0.0)
 
-        peel = (is_bnd_a & ex_a[src] & valid) if sw.peel else np.zeros_like(valid)
-        (_wp, _vwp), (_wn, _vwn) = self._peel_share(tg, tpg, tp, tn)
-        tp = np.where(peel, tp * _wp, tp)
-        tn = np.where(peel, tn * _wn, tn)
+        splice_out = (is_bnd_a & ex_a[src] & valid) if sw.splice_out else np.zeros_like(valid)
+        (_wp, _vwp), (_wn, _vwn) = self._splice_out_share(tg, tpg, tp, tn)
+        tp = np.where(splice_out, tp * _wp, tp)
+        tn = np.where(splice_out, tn * _wn, tn)
 
         def _dv_arr(pr, vv):
             _f = np.isfinite(vv)
-            return np.where(peel, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr)
+            return np.where(splice_out, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr)
 
         tpp, tmp = _dv_arr(tpp, _vwp), _dv_arr(tmp, _vwp)
         tpn, tmn = _dv_arr(tpn, _vwn), _dv_arr(tmn, _vwn)
@@ -924,7 +924,7 @@ class _HeadRelay:
                     "spl_p": _sp.copy(),
                     "spl_n": _sn.copy(),
                     "spl_prec": (_spc + _snc).copy(),
-                    "graft": np.asarray(graft).copy(),
+                    "SPLICE IN": np.asarray(splice_in).copy(),
                 }
             )
         # ── P1e: the conservation SURPRISE as a DerSimonian-Laird damping term ─────────────────────────

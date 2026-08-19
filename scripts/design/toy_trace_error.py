@@ -203,7 +203,7 @@ def main() -> int:
         val = np.asarray(pin["valid"], bool)
         print(f"\n   {name}")
         print(f"      {'dst slot':<28} {'← src':<28} {'r':>8} {'lend':>6} {'tg delivered':>13} "
-              f"{'tpg':>9} {'graft J':>8} {'spl_prec':>9}")
+              f"{'tpg':>9} {'SPLICE IN J':>8} {'spl_prec':>9}")
         for s in range(n_slots):
             if not val[s]:
                 continue

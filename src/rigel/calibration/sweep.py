@@ -6,7 +6,7 @@ Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f
 antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), by ONE forward pass and ONE backward
 pass. The chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
 
-⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, GRAFTS, REFRAMES, PINS OR ENRICHMENT — those words do not
+⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, SPLICE IN, REFRAMES, PINS OR ENRICHMENT — those words do not
 appear in it, and that is the design rather than a tidiness.** Everything about *what a message says* is a
 :mod:`~.messages` policy. What is left here is the shape of the solve and the five invariants no policy may
 break:
@@ -117,7 +117,7 @@ _KNOWN_VIOLATIONS: dict[str, str] = {
         "with no upper bound, and the certified-RNA arm is a LOWER BOUND used as an equality, which is "
         "exactly what the one-sided term corrects. Landing that term ALONE is refused by the panel: TRAPS: a-cancelling-defect-pair, it "
         "and the missing gDNA level channel are a CANCELLING pair and must be priced in ONE arm. "
-        "⭐ And the peel is currently SUPPRESSING it — switching the peel off takes the rate to 41.7 %."
+        "⭐ And the SPLICE OUT is currently SUPPRESSING it — switching the SPLICE OUT off takes the rate to 41.7 %."
     ),
 }
 
@@ -420,7 +420,7 @@ def solve_chain(
     # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
     # it. The scans are sequential, so iterate as a Python list of ints.
     order_list = list(range(int(chain.n_slots)))
-    # per-slot EXON-region flag — the graft's destination class, and a policy input rather than a gate.
+    # per-slot EXON-region flag — the SPLICE IN's destination class, and a policy input rather than a gate.
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_region = (np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)

@@ -12,8 +12,8 @@
 ## WHERE THE TREE IS
 
 * `message_propagation = True`; the per-strand licence (`rna_level_scale`) is landed; and as of this
-  session **the licence's zeroing runs AFTER the graft block in both twins**, so a refused RNA arm delivers
-  neither value nor precision (`test_gdna_scale_rule.py::test_the_graft_delivers_no_precision_on_a_refused_arm_*`,
+  session **the licence's zeroing runs AFTER the SPLICE IN block in both twins**, so a refused RNA arm delivers
+  neither value nor precision (`test_gdna_scale_rule.py::test_the_splice_in_delivers_no_precision_on_a_refused_arm_*`,
   each fired by breaking its own twin).
 * Panel (all 32, certified truth, Σ|f_g − true|·mass over ALL live slots): in-scope contaminated
   **0.931 / 0.999 / 1.000** vs the licence tree; `g00` **430,871 → 324,377**, all 8 rows better;
@@ -29,7 +29,7 @@ common factor `k = M/(tg·E_g + 0·E_r)`, and delivers `tg = M/E_g` — "all you
 arm's unchanged precision. Walk it yourself: `slot 3565 (TES−) → 3566 (EMPTY exon, M = 0, E_r = 0.018) →
 3567 (ACC−, M = 2,160) → 3568 (exon, M = 26,296, true 0.000 → 0.9037)`.
 
-* Feeder ① (FIXED): the graft added the sj COUNT's precision back onto a zeroed arm (`n = 0 @ pn = 280`).
+* Feeder ① (FIXED): the SPLICE IN added the sj COUNT's precision back onto a zeroed arm (`n = 0 @ pn = 280`).
 * Feeder ② (OPEN): `struct_lock = ~solvable ∧ REGION` (the strict xfail in `test_region_init.py`) makes an
   EMPTY exon composition-CERTAIN, so `own_precision` gives it `1/trigamma(½) = 0.2026` on EVERY arm at
   density 0. Before the licence the neighbours' relayed RNA level overwrote that zero (12.6 ≫ 0.2); at a
@@ -91,12 +91,12 @@ licences recomputed from `boundary_flags` exactly as `head.py`'s `__init__` does
 * the 2.5 % boundary-crossing deficit (owner: priority, not highest).
 * `strand_population` keep-or-cut (measured inert; owner call).
 * `npmle.py` retirement scope (still LIVE at `calibrate.py:591`; owner sign-off).
-* the VOCABULARY RENAME (`graft`/`peel`/`pin`; dedicated effort; do not rename piecemeal).
+* the VOCABULARY RENAME (`splice_in`/`peel`/`pin`; dedicated effort; do not rename piecemeal).
 
 ## THE DISCIPLINE THAT PAID (keep doing exactly this)
 
 * The loop: worst condition → rank by error MASS → concentration → flags → channel bisect → HOP WALK →
-  READ the code line. The hop walk is what named the pin; the flags alone pointed at the graft.
+  READ the code line. The hop walk is what named the pin; the flags alone pointed at the SPLICE IN.
 * Score the mechanism where it LANDS, not where it is written — the signature census at the delivered
   destination read 2.6 % of the error (`TRAPS: a-scorer-scoped-to-the-mechanisms-targets`, second form).
 * `TRAPS: panel-before-src` fired a sixth time: `pinM` closes the zero-control gap outright and costs

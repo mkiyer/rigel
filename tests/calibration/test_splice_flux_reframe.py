@@ -386,7 +386,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
 def test_THE_BOUNDARY_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_CHAIN():
     """⭐ The THIRD consumer of the frame, and it needed its own gate for the reason TRAPS: name-the-observable-per-site gives.
 
-    ``_boundary_pair`` fits ``graft_premise_logvar`` from the two flanking BOUNDARIES' fluxes lifted into the
+    ``_boundary_pair`` fits ``splice_in_premise_logvar`` from the two flanking BOUNDARIES' fluxes lifted into the
     exon's frame, and the lift is the same reframe ``r`` — so it takes the same flank pair with the same
     role pairing. ⛔ Swapping ITS pairing fires none of the gates above: on the palindromic fixture the
     swap just exchanges the two flanks of every pair, and the pooled fit is symmetric in them, so it is

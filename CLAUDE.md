@@ -207,7 +207,7 @@ transfer a DENSITY, never a composition.
 2): the per-strand licence's `g00` regression (154 k → 431 k) walked to ONE shape — a zero RNA claim WITH
 LIVE PRECISION, relayed one hop, where the mass pin's licence reads both arms as supplied and rescales
 the whole budget onto gDNA (`k = M/(tg·E_g)`, 467,000×) — "all your mass is gDNA" into a 26 k-fragment
-exon. Two feeders: ① the GRAFT added the sj count's precision back onto an arm the licence had just
+exon. Two feeders: ① the SPLICE IN added the sj count's precision back onto an arm the licence had just
 zeroed — **FIXED, both twins, gated** (`TRAPS: zero-the-precision-with-the-value`): in-scope
 **0.931 / 0.999 / 1.000**, `g00` **431 k → 324 k**, all 8 zero-control rows improve, deferred 1.000;
 ② the mis-scoped `struct_lock` (`~solvable`, the strict xfail) gives an EMPTY exon "RNA = 0 @ 0.2026"
@@ -218,8 +218,18 @@ through an empty slot (capture's conduits). ⚠ `g00` is ONE-SIDED: any RNA-favo
 "right" there, and the empty exons' "gDNA = 0 @ 0.2026" is such a coincidence — the graveyard's pattern.
 `docs/dev/NEXT_SESSION_zero_control_pin.md` is the handoff.
 
-⚠ The owner intends a VOCABULARY RENAME of the message layer (`graft`/`peel`/`pin` are obscure) as a
-dedicated future effort — keep the current names until it runs (`TRAPS: two-masks-one-name`).
+⭐⭐ **THE VOCABULARY RENAME IS RUNNING, AND IT IS THE OWNER'S HIGHEST PRIORITY (2026-08-18).** Landed:
+`graft` → **SPLICE IN** (`splice_in`, tree-wide — verified unambiguous) and `peel` → **SPLICE OUT**
+(`splice_out`, **SENSE-SCOPED to the message operator**). ⛔ `peel` also names the DECONVOLUTION verb
+("peel the gDNA off, RNA is the residual") in `density_deconv` / `calibrate` / `object_composition` and in
+`TRAPS: the-peel-is-as-good-as-the-density-it-is-handed`; that sense is UNCHANGED and unruled
+(`TRAPS: two-masks-one-name` — run `rename_census.py --sense <token>` BEFORE renaming anything).
+⚠ **STILL TO RENAME, each ruled by the owner and each needing its own sense check first**: `mass_pin` →
+`rescale`; `HeadPolicy`/`head.py` → `RelayPolicy`/`relay.py`; `arm` → `component` for the
+{gDNA, RNA+, RNA−} sense ONLY (1,358 sites, two senses — the experiment-arm sense keeps `arm`); `lend`,
+`s2t`. ⛔ The land/sea analogy is an EXPLANATION and must never enter code or docs (owner, 2026-08-18) —
+it is at zero occurrences and must stay there. `docs/dev/PLAN_message_propagation_rebuild.md` §5 is the
+review; `rename_identity.py` is the gate.
 ## ⛔⛔ CITE A RULE BY ITS NAME. NUMBERED LABELS ARE BANNED
 
 `TRAPS.md`'s rules used to be `A16`, `D4j`, `C0b`. They are **named**: cite them as
@@ -284,9 +294,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format 
 ```
 
 ⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,523 passing, 0 SKIPPED, 9 xfail, 3,532 collected**
-(re-derived 2026-08-18, third commit: the graft keeps its precision WITH its value at a refused hop).
-⚠ The `+2` over 3,530 is the two graft gates (VECTORISED + SCALAR) in `test_gdna_scale_rule.py`, an
-EXISTING file so no meta-test drift, re-derived with `pytest --collect-only -q | grep graft_delivers`;
+(re-derived 2026-08-18, third commit: the SPLICE IN keeps its precision WITH its value at a refused hop).
+⚠ The `+2` over 3,530 is the two SPLICE IN gates (VECTORISED + SCALAR) in `test_gdna_scale_rule.py`, an
+EXISTING file so no meta-test drift, re-derived with `pytest --collect-only -q | grep splice_in_delivers`;
 that fix moved NO golden. **Any failure at all is a regression** — a stronger and cheaper rule than
 counting expected ones.
 

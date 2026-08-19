@@ -23,15 +23,15 @@ from scipy.special import polygamma, zeta
 from rigel.calibration.messages.variance import (
     count_logvar,
     composition_logvar,
-    graft_frame_logvar,
-    graft_frame_logvar_scalar,
-    graft_premise_logvar,
+    splice_in_frame_logvar,
+    splice_in_frame_logvar_scalar,
+    splice_in_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
-    peel_continue_share,
-    peel_continue_share_scalar,
-    peel_rna_logvar,
-    peel_share_logvar,
+    splice_out_continue_share,
+    splice_out_continue_share_scalar,
+    splice_out_rna_logvar,
+    splice_out_share_logvar,
     residual_level,
     residual_level_scalar,
     transfer_logvar,
@@ -136,22 +136,22 @@ def _beta_mc(mean, var, size):
 # ── the-count-variance transport seed ──
 
 
-# ── the-composition-variance graft (SUM, share-weighted) ──
+# ── the-composition-variance SPLICE IN (SUM, share-weighted) ──
 
 
-# ── the-peel-share-variance peel (DIFFERENCE, u-weighted) ──
+# ── the-splice-out-share-variance SPLICE OUT (DIFFERENCE, u-weighted) ──
 
 
-def test_peel_rna_is_u_weighted_difference():
-    """the-peel-share-variance: Var(log ρ_ν) = u²·(Var(log ρ_R)+σ²_t) + (u−1)²·v_μ. u=1 (all continues) ⇒ just Var(log T)."""
-    assert float(peel_rna_logvar(0.005, 0.01, 0.002, 1.0)) == pytest.approx(0.015, rel=1e-14)
+def test_splice_out_rna_is_u_weighted_difference():
+    """the-splice-out-share-variance: Var(log ρ_ν) = u²·(Var(log ρ_R)+σ²_t) + (u−1)²·v_μ. u=1 (all continues) ⇒ just Var(log T)."""
+    assert float(splice_out_rna_logvar(0.005, 0.01, 0.002, 1.0)) == pytest.approx(0.015, rel=1e-14)
     # u=3: 9·(0.005+0.01) + 4·0.002
-    assert float(peel_rna_logvar(0.005, 0.01, 0.002, 3.0)) == pytest.approx(
+    assert float(splice_out_rna_logvar(0.005, 0.01, 0.002, 3.0)) == pytest.approx(
         9.0 * 0.015 + 4.0 * 0.002, rel=1e-14
     )
 
 
-def test_peel_rna_matches_mc_in_regime():
+def test_splice_out_rna_matches_mc_in_regime():
     """The u-weighted DIFFERENCE equals the empirical Var(log ρ_ν) at low u (ε≲0.15, the valid regime);
     σ²_transfer is load-bearing."""
     rho_R_x, var_log_rhoR, r, var_log_r, rho_mu, n_s = 40.0, 1.0 / 5000, 200.0, 0.004, 0.10, 1500.0
@@ -163,20 +163,20 @@ def test_peel_rna_matches_mc_in_regime():
     emp = float(np.var(np.log(nu[keep])))
     T0 = rho_R_x / r
     u = T0 / (T0 - rho_mu)
-    pred = float(peel_rna_logvar(var_log_rhoR, var_log_r, 1.0 / n_s, u))
+    pred = float(splice_out_rna_logvar(var_log_rhoR, var_log_r, 1.0 / n_s, u))
     assert pred == pytest.approx(emp, rel=0.12)
 
 
 # ── the-reframe-scale-variance transfer variance (direction-dependent) ──
 
 
-def test_transfer_logvar_cancels_on_graft_and_adds_on_peel():
-    """the-reframe-scale-variance: σ²_transfer = 0 on the GRAFT (r common-mode, cancels), = Var(log ρ_tot^dst)+Var(log ρ_tot^src) on
-    the PEEL. Vectorized over a mixed direction mask."""
+def test_transfer_logvar_cancels_on_splice_in_and_adds_on_splice_out():
+    """the-reframe-scale-variance: σ²_transfer = 0 on the SPLICE IN (r common-mode, cancels), = Var(log ρ_tot^dst)+Var(log ρ_tot^src) on
+    the SPLICE OUT. Vectorized over a mixed direction mask."""
     dst = np.array([0.1, 0.1, 0.1])
     src = np.array([0.3, 0.3, 0.3])
-    graft = np.array([True, False, True])
-    out = transfer_logvar(dst, src, graft)
+    splice_in = np.array([True, False, True])
+    out = transfer_logvar(dst, src, splice_in)
     assert list(out) == [0.0, 0.4, 0.0]
 
 
@@ -185,33 +185,33 @@ def test_transfer_logvar_feeds_off_composition_logvar():
     total-density variance (no new derivation)."""
     vd = float(composition_logvar(0.6, EG_BND, ER_BND, var_fg=0.01, n=100.0))
     vs = float(composition_logvar(0.9, EG_REG, ER_REG, var_fg=0.005, n=50.0))
-    assert float(transfer_logvar(vd, vs, graft=False)) == pytest.approx(vd + vs, rel=1e-14)
+    assert float(transfer_logvar(vd, vs, splice_in=False)) == pytest.approx(vd + vs, rel=1e-14)
 
 
-# ── the-graft-frame-variance the graft's frame-mislift variance ──
+# ── the-splice-in-frame-variance the SPLICE IN's frame-mislift variance ──
 
 
-def test_graft_frame_logvar_is_zero_without_a_frame_change():
-    """the-graft-frame-variance's defining limit: no frame step ⇒ no mislift. This is what makes the term inert off-capture, where
-    the shipped graft is measured to be EXACT (required correction log c = +0.009/−0.008/+0.054)."""
-    assert float(graft_frame_logvar(1.0)) == 0.0
-    assert list(graft_frame_logvar(np.array([1.0, 1.0]))) == [0.0, 0.0]
+def test_splice_in_frame_logvar_is_zero_without_a_frame_change():
+    """the-splice-in-frame-variance's defining limit: no frame step ⇒ no mislift. This is what makes the term inert off-capture, where
+    the shipped SPLICE IN is measured to be EXACT (required correction log c = +0.009/−0.008/+0.054)."""
+    assert float(splice_in_frame_logvar(1.0)) == 0.0
+    assert list(splice_in_frame_logvar(np.array([1.0, 1.0]))) == [0.0, 0.0]
 
 
-def test_graft_frame_logvar_is_the_squared_log_step_and_direction_free():
+def test_splice_in_frame_logvar_is_the_squared_log_step_and_direction_free():
     """``(log r)²`` — the method-of-moments second moment of a single observation of the un-cancelled frame
     step. Symmetric in r ↔ 1/r: a depletion mislifts exactly as badly as an equal enrichment."""
-    assert float(graft_frame_logvar(np.e)) == pytest.approx(1.0, rel=1e-14)
-    assert float(graft_frame_logvar(6.1)) == pytest.approx(np.log(6.1) ** 2, rel=1e-14)
-    assert float(graft_frame_logvar(4.0)) == pytest.approx(
-        float(graft_frame_logvar(0.25)), rel=1e-14
+    assert float(splice_in_frame_logvar(np.e)) == pytest.approx(1.0, rel=1e-14)
+    assert float(splice_in_frame_logvar(6.1)) == pytest.approx(np.log(6.1) ** 2, rel=1e-14)
+    assert float(splice_in_frame_logvar(4.0)) == pytest.approx(
+        float(splice_in_frame_logvar(0.25)), rel=1e-14
     )
 
 
-def test_graft_frame_logvar_guards_a_degenerate_ratio():
+def test_splice_in_frame_logvar_guards_a_degenerate_ratio():
     """A region with no frame (r ≤ 0 — no mass, no ρ_tot) must give 0, not a nan: the relay passes such a
     message through at r = 1, so there is no mislift to charge."""
-    out = graft_frame_logvar(np.array([0.0, -1.0, 2.0]))
+    out = splice_in_frame_logvar(np.array([0.0, -1.0, 2.0]))
     assert np.all(np.isfinite(out))
     assert list(out[:2]) == [0.0, 0.0]
 
@@ -306,48 +306,48 @@ def test_mismatch_deflate_is_finite_over_every_degenerate_input():
     assert np.all(np.isfinite(out)) and np.all(out >= 0.0) and np.all(out <= p + 1e-12)
 
 
-# ── the-continuing-share the peel as a composition (a share), not a subtraction ──
+# ── the-continuing-share the SPLICE OUT as a composition (a share), not a subtraction ──
 
 
-def test_peel_continue_share_is_enrichment_free():
+def test_splice_out_continue_share_is_enrichment_free():
     """the-continuing-share's defining property: the continuing SHARE is invariant under a common capture factor, because
-    capture multiplies the continuing and the splicing channels alike. This is the whole reason the peel
+    capture multiplies the continuing and the splicing channels alike. This is the whole reason the SPLICE OUT
     becomes a scaling — a scaling commutes with the reframe, a subtraction does not."""
     nu, mu = 3.0, 7.0
-    base = float(peel_continue_share(nu, mu))
+    base = float(splice_out_continue_share(nu, mu))
     for e in (1e-3, 0.5, 1.0, 40.0, 1e4):
-        assert float(peel_continue_share(nu * e, mu * e)) == pytest.approx(base, rel=1e-14)
+        assert float(splice_out_continue_share(nu * e, mu * e)) == pytest.approx(base, rel=1e-14)
     assert base == pytest.approx(0.3, rel=1e-14)
 
 
-def test_peel_continue_share_structural_limits():
-    """No spliced flux ⇒ nothing is peeled (w = 1). No RNA at the boundary at all ⇒ nothing to apportion (w = 1),
-    the caller's own gates decide. And w never leaves [0, 1] — which is what retires the old peel's
+def test_splice_out_continue_share_structural_limits():
+    """No spliced flux ⇒ nothing is spliced-out (w = 1). No RNA at the boundary at all ⇒ nothing to apportion (w = 1),
+    the caller's own gates decide. And w never leaves [0, 1] — which is what retires the old SPLICE OUT's
     zero-truncation (a fully-consumed subtraction emitted ρ_ν = 0 at a LIVE precision)."""
-    assert float(peel_continue_share(5.0, 0.0)) == 1.0
-    assert float(peel_continue_share(0.0, 0.0)) == 1.0
-    assert float(peel_continue_share(0.0, 5.0)) == 0.0
-    out = peel_continue_share(np.array([1.0, 0.0, 4.0, 0.0]), np.array([1.0, 3.0, 0.0, 0.0]))
+    assert float(splice_out_continue_share(5.0, 0.0)) == 1.0
+    assert float(splice_out_continue_share(0.0, 0.0)) == 1.0
+    assert float(splice_out_continue_share(0.0, 5.0)) == 0.0
+    out = splice_out_continue_share(np.array([1.0, 0.0, 4.0, 0.0]), np.array([1.0, 3.0, 0.0, 0.0]))
     assert np.all((out >= 0.0) & (out <= 1.0))
 
 
-def test_peel_share_logvar_is_convex_unlike_the_subtraction():
-    """the-continuing-share vs the-peel-share-variance. The share's delta-method weights are w_μ² ≤ 1 (convex — the mirror of the-composition-variance's graft SUM),
+def test_splice_out_share_logvar_is_convex_unlike_the_subtraction():
+    """the-continuing-share vs the-splice-out-share-variance. The share's delta-method weights are w_μ² ≤ 1 (convex — the mirror of the-composition-variance's SPLICE IN SUM),
     where the subtraction carried u² ≥ 1 and AMPLIFIED. At the same operating point the share must therefore
     cost strictly less than the difference it replaces."""
     v_nu, v_mu = 0.02, 1.0 / 4000.0
     for w in (0.5, 0.25, 0.1):
         w_mu = 1.0 - w
-        share = float(peel_share_logvar(w_mu, v_nu, v_mu))
+        share = float(splice_out_share_logvar(w_mu, v_nu, v_mu))
         assert share == pytest.approx(w_mu * w_mu * (v_nu + v_mu), rel=1e-14)
         assert share <= v_nu + v_mu  # convex: never worse than its own inputs
-        u = 1.0 / w  # the the-peel-share-variance difference at the same continuing fraction
-        assert share < float(peel_rna_logvar(v_nu, 0.0, v_mu, u))
+        u = 1.0 / w  # the the-splice-out-share-variance difference at the same continuing fraction
+        assert share < float(splice_out_rna_logvar(v_nu, 0.0, v_mu, u))
 
 
-def test_peel_share_logvar_vanishes_with_no_spliced():
+def test_splice_out_share_logvar_vanishes_with_no_spliced():
     """w_μ = 0 (nothing splices away) ⇒ the share contributes NO variance: the message passes through intact."""
-    assert float(peel_share_logvar(0.0, 0.5, 0.25)) == 0.0
+    assert float(splice_out_share_logvar(0.0, 0.5, 0.25)) == 0.0
 
 
 # ── the-residual-level: the LEVEL from the region's own mass + an imputed gDNA density ────────────────────────────────────
@@ -437,41 +437,41 @@ def _cr_total(rho):
     return (rho * _CR_EFF).sum(axis=1)
 
 
-# ── P1d: graft_premise_logvar — the two-boundary method-of-moments premise variance ──────────────────────
+# ── P1d: splice_in_premise_logvar — the two-boundary method-of-moments premise variance ──────────────────────
 # ⚠ The SOLVER uses only the pooled (second) return value; the per-boundary array is a diagnostic. A variance
 # estimated from a single pair is a χ²₁ (CV = √2), so per-boundary is mostly noise — see the docstring.
 
 
-def test_graft_premise_logvar_agreeing_boundaries_charge_nothing():
+def test_splice_in_premise_logvar_agreeing_boundaries_charge_nothing():
     """Two boundaries that agree carry no detectable premise error — the truncation is the method's own."""
-    per, pooled = graft_premise_logvar(
+    per, pooled = splice_in_premise_logvar(
         np.array([3.0, 7.0]), np.array([3.0, 7.0]), np.array([0.01, 0.01]), np.array([0.01, 0.01])
     )
     assert list(per) == [0.0, 0.0]
     assert pooled == 0.0
 
 
-def test_graft_premise_logvar_is_the_mom_second_moment_halved():
+def test_splice_in_premise_logvar_is_the_mom_second_moment_halved():
     """``max(0, d² − noise)/2`` exactly, with no coefficient to choose."""
     fa, fb = np.array([np.e**2]), np.array([1.0])  # d = 2 exactly
     va = vb = np.array([0.25])
-    per, _ = graft_premise_logvar(fa, fb, va, vb)
+    per, _ = splice_in_premise_logvar(fa, fb, va, vb)
     assert float(per[0]) == pytest.approx((4.0 - 0.5) / 2.0, rel=1e-12)
 
 
-def test_graft_premise_logvar_subtracts_noise_and_is_direction_free():
+def test_splice_in_premise_logvar_subtracts_noise_and_is_direction_free():
     """A gap fully explained by the boundaries' own noise leaves nothing; a↔b swap cannot change the answer."""
     fa, fb = np.array([np.e]), np.array([1.0])  # d = 1
-    per, _ = graft_premise_logvar(fa, fb, np.array([0.6]), np.array([0.6]))  # noise 1.2 > d² = 1
+    per, _ = splice_in_premise_logvar(fa, fb, np.array([0.6]), np.array([0.6]))  # noise 1.2 > d² = 1
     assert float(per[0]) == 0.0
-    p1, _ = graft_premise_logvar(fa, fb, np.array([0.1]), np.array([0.2]))
-    p2, _ = graft_premise_logvar(fb, fa, np.array([0.2]), np.array([0.1]))
+    p1, _ = splice_in_premise_logvar(fa, fb, np.array([0.1]), np.array([0.2]))
+    p2, _ = splice_in_premise_logvar(fb, fa, np.array([0.2]), np.array([0.1]))
     assert float(p1[0]) == pytest.approx(float(p2[0]), rel=1e-14)
 
 
-def test_graft_premise_logvar_needs_two_live_boundaries():
+def test_splice_in_premise_logvar_needs_two_live_boundaries():
     """One live boundary ⇒ no second study ⇒ per-boundary 0, and the pooled fit ignores that boundary entirely."""
-    per, pooled = graft_premise_logvar(
+    per, pooled = splice_in_premise_logvar(
         np.array([5.0, np.e**2]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), np.array([0.0, 0.0])
     )
     assert float(per[0]) == 0.0
@@ -479,44 +479,44 @@ def test_graft_premise_logvar_needs_two_live_boundaries():
     assert pooled == pytest.approx(2.0, rel=1e-12)  # fitted on the ONE boundary that has a pair
 
 
-def test_graft_premise_logvar_pooled_is_the_population_second_moment():
+def test_splice_in_premise_logvar_pooled_is_the_population_second_moment():
     """The pooled fit is the same estimator over the population — NOT the mean of the per-boundary values,
     which would truncate each boundary separately and bias the fit upward."""
     fa = np.exp(np.array([2.0, 0.0, 0.0]))  # d² = 4, 0, 0 against a per-boundary noise of 0.5+0.5
     fb = np.ones(3)
     v = np.full(3, 0.5)
-    per, pooled = graft_premise_logvar(fa, fb, v, v)
+    per, pooled = splice_in_premise_logvar(fa, fb, v, v)
     d2 = np.array([4.0, 0.0, 0.0])
     assert list(per) == pytest.approx([1.5, 0.0, 0.0], rel=1e-12)
     assert pooled == pytest.approx(max(0.0, d2.mean() - 1.0) / 2.0, rel=1e-12)
     assert pooled < float(np.mean(per))  # the per-boundary truncation really does bias upward
 
 
-def test_graft_premise_logvar_infinite_noise_is_ignored_not_propagated():
+def test_splice_in_premise_logvar_infinite_noise_is_ignored_not_propagated():
     """A boundary with no count (var = inf) must not nan the estimate — it contributes no subtraction."""
-    per, pooled = graft_premise_logvar(
+    per, pooled = splice_in_premise_logvar(
         np.array([np.e**2]), np.array([1.0]), np.array([np.inf]), np.array([0.0])
     )
     assert np.isfinite(per).all() and np.isfinite(pooled)
     assert float(per[0]) == pytest.approx(2.0, rel=1e-12)
 
 
-def test_graft_premise_logvar_never_negative_and_finite():
+def test_splice_in_premise_logvar_never_negative_and_finite():
     rng = np.random.default_rng(11)
     fa, fb = rng.lognormal(0.0, 1.5, 400), rng.lognormal(0.0, 1.5, 400)
     va, vb = rng.gamma(2.0, 0.3, 400), rng.gamma(2.0, 0.3, 400)
-    per, pooled = graft_premise_logvar(fa, fb, va, vb)
+    per, pooled = splice_in_premise_logvar(fa, fb, va, vb)
     assert np.isfinite(per).all() and (per >= 0.0).all()
     assert np.isfinite(pooled) and pooled >= 0.0
 
 
-def test_graft_premise_logvar_pooled_is_the_load_bearing_return():
+def test_splice_in_premise_logvar_pooled_is_the_load_bearing_return():
     """The solver applies the POOLED scalar to every boundary. It must therefore exist and be finite even when
     most boundaries have no pair at all — the terminal-exon / exon↔exon-boundary case the owner flagged."""
     fa = np.array([np.e, 0.0, 0.0, 0.0, 0.0])  # one pair, four boundaries with no partner
     fb = np.array([1.0, 0.0, 0.0, 0.0, 0.0])
     v = np.zeros(5)
-    per, pooled = graft_premise_logvar(fa, fb, v, v)
+    per, pooled = splice_in_premise_logvar(fa, fb, v, v)
     assert list(per[1:]) == [0.0, 0.0, 0.0, 0.0]
     assert pooled == pytest.approx(0.5, rel=1e-12)  # d² = 1, no noise, halved
     assert np.isfinite(pooled)
@@ -581,22 +581,22 @@ def test_residual_level_scalar_is_bit_identical_to_the_array_form():
             assert all(_same_bits(arr[c][i], sca[c]) for c in range(3)), i
 
 
-def test_peel_continue_share_scalar_is_bit_identical_to_the_array_form():
+def test_splice_out_continue_share_scalar_is_bit_identical_to_the_array_form():
     vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 1e6, np.inf, -np.inf, np.nan, -1.0]
     with np.errstate(all="ignore"):  # `inf + -inf` and `0/0` are the corners under test
         for x, y in itertools.product(vals, vals):
-            assert _same_bits(peel_continue_share(x, y), peel_continue_share_scalar(x, y)), (x, y)
+            assert _same_bits(splice_out_continue_share(x, y), splice_out_continue_share_scalar(x, y)), (x, y)
     rng = np.random.default_rng(5)
     u, v = np.exp(rng.uniform(-20, 12, 4000)), np.exp(rng.uniform(-20, 12, 4000))
-    ref = peel_continue_share(u, v)
+    ref = splice_out_continue_share(u, v)
     for i in range(u.size):
-        assert _same_bits(ref[i], peel_continue_share_scalar(float(u[i]), float(v[i])))
+        assert _same_bits(ref[i], splice_out_continue_share_scalar(float(u[i]), float(v[i])))
 
 
-def test_graft_frame_logvar_scalar_is_bit_identical_to_the_array_form():
+def test_splice_in_frame_logvar_scalar_is_bit_identical_to_the_array_form():
     vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 2.6, 6.1, 1e6, np.inf, -np.inf, np.nan, -1.0]
     rng = np.random.default_rng(9)
     draws = np.exp(rng.uniform(-20, 20, 3000))
     with np.errstate(all="ignore"):
         for r in [*vals, *draws.tolist()]:
-            assert _same_bits(graft_frame_logvar(r), graft_frame_logvar_scalar(r)), r
+            assert _same_bits(splice_in_frame_logvar(r), splice_in_frame_logvar_scalar(r)), r

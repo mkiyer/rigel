@@ -484,7 +484,7 @@ def _discrepancy_logshift(phi_g, phi_r):
     ⛔ Returns a SHIFT and a VARIANCE, never a replacement, so the caller composes rather than overwrites.
 
     ⚠ ``head`` uses ``1 − phi_r``, not ``1``: the RNA arms may already account for part of the mass — notably
-    a grafted spliced count, which is a MEASUREMENT in the destination's own frame and is not subject to
+    a spliced-in spliced count, which is a MEASUREMENT in the destination's own frame and is not subject to
     ``γ``. Using ``1`` would hand gDNA room that is already spoken for."""
     pg = np.asarray(phi_g, np.float64)
     pr = np.asarray(phi_r, np.float64)
@@ -827,7 +827,7 @@ def _wrap_region_sweep():
 def _install_onesided_rna():
     """⭐⭐⭐ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND. DELIVER IT AS ONE.**
 
-    ``messages/head.py``'s peel-share docstring states the premise in the source's own words: *"what the graft actually knows
+    ``messages/head.py``'s SPLICE OUT-share docstring states the premise in the source's own words: *"what the SPLICE IN actually knows
     is an INEQUALITY, ``rho_R(exon) >= rho_nu(B) + rho_mu(B)`` … and it uses it as an equality."* ψ then
     applies ``-1/2 p (log f_active - mo_p)^2`` in BOTH code paths — symmetric in the residual, no hinge
     anywhere in the file — so a destination holding MORE RNA than the bound, which the inequality
