@@ -96,7 +96,13 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibration"))
 
-from _oracle import ORIGINS, OracleTruth, _split_bam  # noqa: E402
+from _oracle import (  # noqa: E402
+    ORIGINS,
+    RNA_STRAND_ORIGINS,
+    OracleTruth,
+    _split_bam,
+    split_rna_by_transcript_strand,
+)
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.effective_length import build_slot_moments  # noqa: E402
@@ -439,9 +445,14 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
     try:
         parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
-        return OracleTruth.from_parts(full_payload, parts)
+        truth = OracleTruth.from_parts(full_payload, parts)
     except (FileNotFoundError, KeyError, ScanCacheKeyError):
         pass  # no cache, or it does not describe this index/scan — rebuild it below
+    else:
+        # ⚠ the three-way cache can be complete while the per-strand one is not (it is newer), so it
+        # is ensured on the HIT path too rather than only when the three are rebuilt
+        ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
+        return truth
 
     paths, read_counts = _split_bam(bam, Path(work_dir), tag)
     parts = {}
@@ -450,7 +461,34 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
         parts[origin] = payload
         write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
                          bam=paths[origin], scan_config=scan)
+    ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
     return OracleTruth.from_parts(full_payload, parts, read_counts)
+
+
+def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool:
+    """⭐ Cache the RNA reads split by TRANSCRIPT strand — ``rna_pos`` / ``rna_neg`` beside the three
+    ``ORIGINS`` partitions — which is what a per-ARM measurement of the message layer needs
+    (`_oracle.RNA_STRAND_ORIGINS` says why the payload's genome-strand columns cannot serve).
+
+    ⚠ ADDITIVE: nothing that reads ``ORIGINS`` changes, and the two partitions describe the same reads
+    as ``mrna`` + ``nrna``, so ``calibration_oracle.py`` can gate them against each other. Skips the
+    work when both caches already load. Returns True if it built them.
+    """
+    if cache_root is None:
+        return False
+    dirs = {k: Path(cache_root) / tag / k for k in RNA_STRAND_ORIGINS}
+    try:
+        for k in RNA_STRAND_ORIGINS:
+            read_scan_cache(dirs[k], index, scan)
+        return False
+    except (FileNotFoundError, KeyError, ScanCacheKeyError):
+        pass
+    paths, _counts = split_rna_by_transcript_strand(bam, Path(work_dir), tag)
+    for key in RNA_STRAND_ORIGINS:
+        _stats, strand_model, _buf, payload = scan_and_buffer(paths[key], index, scan)
+        write_scan_cache(dirs[key], payload=payload, strand_model=strand_model, index=index,
+                         bam=paths[key], scan_config=scan)
+    return True
 
 
 @dataclass

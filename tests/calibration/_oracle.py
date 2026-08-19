@@ -49,6 +49,18 @@ from rigel.sim.read_name import parse_origin
 
 ORIGINS = ("gdna", "mrna", "nrna")
 
+#: ⭐⭐ **THE RNA READS AGAIN, SPLIT BY *TRANSCRIPT* STRAND — an ADDITIONAL partition, never a
+#: replacement for :data:`ORIGINS`** (2026-08-19). The three-arm message layer carries
+#: ``{gDNA, RNA+, RNA−}`` (AXIOM 0), so a per-arm measurement needs per-slot RNA truth keyed by the
+#: strand of the TRANSCRIPT the fragment came from. ⛔ The payload's own two columns are GENOME strand,
+#: which equals transcript strand only at ``ss 0.99`` — i.e. it is wrong on exactly the unstranded half
+#: the arms exist for. ⭐ The information is already in the read name: the simulator writes the
+#: TRANSCRIPT's ``f``/``r`` (`wgs_engine._t_strand_chars`), so this needs no new simulation.
+#: ⚠ ``ORIGINS`` is left alone deliberately — seven instruments iterate it as the accumulator's
+#: three-way axis, and both partitions describe the same reads, which is what makes the closure gate
+#: ``rna_pos + rna_neg == mrna + nrna`` a real falsification rather than a restatement.
+RNA_STRAND_ORIGINS = ("rna_pos", "rna_neg")
+
 #: Every per-object bank on the payload. Sum-to-full is asserted over ALL of them: a bank left out of
 #: this tuple is a bank the oracle would silently stop validating.
 _BANKS = (
@@ -192,6 +204,42 @@ def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[
             x.close()
     if sum(counts.values()) != n_in:
         raise AssertionError(f"oracle split dropped reads: in={n_in} out={sum(counts.values())}")
+    return paths, counts
+
+
+def split_rna_by_transcript_strand(bam: str, out_dir, tag: str):
+    """Split a name-sorted sim BAM's RNA reads into ``rna_pos`` / ``rna_neg`` by TRANSCRIPT strand.
+
+    gDNA reads are excluded (they have no transcript), and every RNA read lands in exactly one
+    partition — an unclassifiable strand raises rather than being dropped, the same rule
+    :func:`_split_bam` follows. Returns ``(paths, counts)``.
+    """
+    from pathlib import Path as _Path
+
+    out_dir = _Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {k: str(out_dir / f"{tag}.{k}.bam") for k in RNA_STRAND_ORIGINS}
+    counts = {k: 0 for k in RNA_STRAND_ORIGINS}
+    n_rna = 0
+    with pysam.AlignmentFile(bam, "rb") as fin:
+        writers = {k: pysam.AlignmentFile(paths[k], "wb", template=fin) for k in RNA_STRAND_ORIGINS}
+        for record in fin:
+            origin = parse_origin(record.query_name)
+            if origin.kind == "gdna":
+                continue
+            if origin.strand not in ("f", "r"):
+                raise AssertionError(
+                    f"RNA read {record.query_name!r} carries strand {origin.strand!r}; the simulator "
+                    "writes the TRANSCRIPT's 'f'/'r' and a per-arm truth cannot be built without it"
+                )
+            key = "rna_pos" if origin.strand == "f" else "rna_neg"
+            writers[key].write(record)
+            counts[key] += 1
+            n_rna += 1
+        for writer in writers.values():
+            writer.close()
+    if sum(counts.values()) != n_rna:
+        raise AssertionError("the RNA strand split dropped reads")
     return paths, counts
 
 

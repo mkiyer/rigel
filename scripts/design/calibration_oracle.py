@@ -36,6 +36,11 @@ numbered** (`tests/test_no_jargon_labels.py`):
 **nascent-in-annotation**       ``n_nrna > 0`` only where a transcript span admits RNA
                                 (``free_pos | free_neg``); nascent in intergenic space is a split or
                                 projection bug
+**rna-strands-close**           ⭐ the RNA reads partitioned by TRANSCRIPT strand
+                                (``rna_pos``/``rna_neg``) must sum, AT EVERY SLOT, to the same total as
+                                the ``mrna`` + ``nrna`` partition. Two different partitions of the same
+                                reads, so any disagreement is a split bug — and this is what makes the
+                                per-ARM truth (``{gDNA, RNA+, RNA−}``, AXIOM 0) usable
 ==============================  ======================================================================
 
 ⚠ **WHAT IS *NOT* YET CERTIFIED, SAID PLAINLY RATHER THAN IMPLIED:** the per-object ANALYTIC RNA
@@ -90,7 +95,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
+from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth  # noqa: E402
 
 DEFAULT_SUITE = OC.DEFAULT_SUITE
 DEFAULT_INDEX = OC.DEFAULT_INDEX
@@ -154,6 +159,16 @@ def gate_zero(n: np.ndarray, select: np.ndarray, what: str) -> dict:
     return {"gate": f"gate exact-zeros:{what}", "ok": bool(bad == 0.0), "vacuous": False, "mass": bad}
 
 
+def gate_rna_strands_close(n_pos: np.ndarray, n_neg: np.ndarray, n_m: np.ndarray,
+                           n_n: np.ndarray, atol: float = 1e-6) -> dict:
+    """**rna-strands-close** — the transcript-strand split and the mature/nascent split are two
+    partitions of the SAME RNA reads, so they must agree at every slot."""
+    gap = np.abs((n_pos + n_neg) - (n_m + n_n))
+    worst = float(gap.max()) if gap.size else 0.0
+    return {"gate": "gate rna-strands-close", "ok": bool(worst <= atol), "worst_gap": worst,
+            "n_bad": int((gap > atol).sum())}
+
+
 def gate_nascent_scope(n_n: np.ndarray, rna_admissible: np.ndarray) -> dict:
     """**nascent-in-annotation** — nascent RNA may exist only where the annotation admits ANY RNA."""
     bad = float(n_n[~rna_admissible].sum())
@@ -186,6 +201,18 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     n_g = OC.slot_counts(parts["gdna"], region_arrays, chain)
     n_n = OC.slot_counts(parts["nrna"], region_arrays, chain)
     n_m = OC.slot_counts(parts["mrna"], region_arrays, chain)
+    # ⭐ the same RNA reads again, keyed by TRANSCRIPT strand — the per-ARM truth. REFUSED rather than
+    # skipped if absent: an instrument that silently drops to two arms would measure a different thing.
+    try:
+        strand_parts = {k: read_scan_cache(root / k, index).payload for k in RNA_STRAND_ORIGINS}
+    except Exception as exc:  # noqa: BLE001
+        raise FileNotFoundError(
+            f"{root} has no {list(RNA_STRAND_ORIGINS)} partitions ({type(exc).__name__}). They are "
+            "built by `pass0_vs_oracle.py` (via `panel.py cache`) alongside the three ORIGINS ones; "
+            "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
+        ) from exc
+    n_rp = OC.slot_counts(strand_parts["rna_pos"], region_arrays, chain)
+    n_rn = OC.slot_counts(strand_parts["rna_neg"], region_arrays, chain)
 
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -201,7 +228,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     capture_on = condition.endswith("_capture_on")
     gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
 
-    verdicts = [gate_partition(count, n_g, n_n, n_m)]
+    verdicts = [gate_partition(count, n_g, n_n, n_m), gate_rna_strands_close(n_rp, n_rn, n_m, n_n)]
     if capture_on:
         verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
                          "note": "capture-ON: the field is deliberately non-uniform; gate not applicable"})
@@ -222,6 +249,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
         "condition": condition, "kind": kind, "obj": obj, "stratum": label.astype(str),
         "ref": ref, "eff_g": eff_g, "eff_r": np.asarray(geom.eff_rna, np.float64),
         "count": count, "n_gdna": n_g, "n_nrna": n_n, "n_mrna": n_m,
+        "n_rna_pos": n_rp, "n_rna_neg": n_rn,
         "true_f_g": np.where(mass > 0, n_g / np.maximum(mass, _EPS), 0.0),
         "live": mass > 0,
     }
@@ -311,6 +339,11 @@ def self_test() -> int:
 
     admissible = np.arange(n) % 3 != 0
     n_n2 = np.where(admissible, n_n, 0.0)
+    check("rna-strand closure passes when the two partitions agree",
+          gate_rna_strands_close(n_m * 0.4, n_m * 0.6 + n_n, n_m, n_n)["ok"])
+    check("one fragment on the wrong strand partition fires the closure gate",
+          not gate_rna_strands_close(n_m * 0.4, n_m * 0.6 + n_n - (np.arange(n) == 5), n_m, n_n)["ok"])
+
     check("nascent-scope passes when confined", gate_nascent_scope(n_n2, admissible)["ok"])
     leak = n_n2.copy()
     leak[0] = 1.0  # slot 0 is inadmissible

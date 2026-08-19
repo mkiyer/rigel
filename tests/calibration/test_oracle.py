@@ -46,11 +46,15 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc"
     )
 
-    # ⭐ EVERY bank on all three axes sums to full EXACTLY — no tolerance anywhere, because every bank
-    # is an integer count. The predecessor could only be exact on two of its four arrays.
+    # ⭐ EVERY bank on all three axes sums to full EXACTLY. Every bank is integer-VALUED; six of them
+    # are float64 since the one-numeric-convention ruling, and float addition across scanner threads
+    # lands at 112.99999999999999 on one run and 113.0 on the next (measured 7e-15 here, 2026-08-19) —
+    # so ROUND before the integer cast. A real one-fragment loss survives rounding; 1e-14 does not.
     for bank in _BANKS:
-        full = np.asarray(getattr(orc.full, bank), np.int64)
-        parts = sum(np.asarray(getattr(orc.parts[k], bank), np.int64) for k in ORIGINS)
+        full = np.rint(np.asarray(getattr(orc.full, bank), np.float64)).astype(np.int64)
+        parts = np.rint(
+            sum(np.asarray(getattr(orc.parts[k], bank), np.float64) for k in ORIGINS)
+        ).astype(np.int64)
         np.testing.assert_array_equal(parts, full, err_msg=f"{bank} does not sum to full")
 
     # gDNA is never spliced — on the contiguous-boundary spliced bank AND on the sj axis.
