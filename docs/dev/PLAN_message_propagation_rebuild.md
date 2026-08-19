@@ -130,23 +130,25 @@ level is off by 854,338.
 — a partially-enriched boundary feeding a fully-enriched exon — and no currency choice fixes it. It is
 `ROADMAP.md` §1 rank 3 (spike-and-slab): a third MECHANISM, not a third currency.
 
-### 2d. ⛔ THE SEQUENCING BLOCKER — the 2.5 % accumulator deficit gates the design measurement
+### 2d. ✅ THE SEQUENCING BLOCKER IS CLEARED (2026-08-19)
 
-`calibration_oracle.py`'s FIELD certification passes on **24 of 32** conditions. The 8 that FAIL are
-**exactly the dense capture-OFF ones** (`g50`/`g98` × both strand settings × both nascent levels ×
-capture_off) — the same 8/8 rows the 2.5 % boundary-crossing deficit was measured on.
+`calibration_oracle.py`'s FIELD certification passed on only **24 of 32** conditions — the 8 that failed
+were exactly the dense capture-OFF ones, i.e. where unstranded × capture-OFF carries its gDNA mass, so the
+currency oracle could not run where it matters most.
 
-⛔ So the currency oracle cannot run where unstranded × capture-OFF carries its gDNA mass. The owner ruled
-the deficit "probably independent, worth a dedicated session": independent as a CAUSE, **not** independent
-as a DEPENDENCY — it gates the truth this design is measured against, on the stratum that must certainly
-work.
+⭐ **Cause found and repaired**: a transcript-level chimera predicate silently dropped 4,087 gDNA fragments
+per condition — the heaviest multi-boundary crossers. The ruling is `DESIGN.md` §3.1b-ii
+(compatibility before chimera), the lesson is
+`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`, and the numbers are `ROADMAP.md` §0.
+⚠ **What remains is bookkeeping**: rebuild the scan and oracle caches and re-stamp `slot_truth.npz`, after
+which FIELD certification should read 32/32 and §2's currency oracle is unblocked on capture-OFF.
 
 ## 3. THE PLAN
 
 | stage | what | acceptance |
 |---|---|---|
 | **0 · VOCABULARY** | §5's review, ruled by the owner, then ONE rename (never piecemeal), gated by `rename_identity.py` byte-identity | every stage proven a numeric NO-OP; suite green; `DESIGN.md` §0 carries the ruling |
-| **1 · UNBLOCK** | the 2.5 % boundary-crossing deficit, dedicated session | FIELD certification **24/32 → 32/32** |
+| **1 · UNBLOCK** | ✅ **DONE 2026-08-19** — the deficit was a silent chimera drop (§2d) | FIELD certification 24/32 → 32/32, pending the cache rebuild |
 | **2 · THE MAP** (no `src/`) | (a) depth + hop census, all 32, per stratum; (b) currency oracle, all 32, with §2c caveat 2's splice-in fix, per hop type × stratum × nascent level; (c) the residual census — hop types where `min(LEVEL, COMP)` is still large | one measured currency table; every place a third mechanism is REQUIRED is named before one is built |
 | **3 · THE POLICY** | a THIRD policy beside `SilentPolicy` and `RelayPolicy` on the same gated backbone | the toy rungs below, each exact, both zero controls, before the next starts |
 | **4 · THE PANEL** | all 32, three policies, RAW COUNTS (est / true / misplaced fragments), bar written first | never a bare ratio — the ratio framing hid a 1,978,148-fragment win for eleven days |

@@ -34,12 +34,22 @@ from rigel.types import (
 def _detect_intrachromosomal_chimera(
     exon_blocks: tuple,
     exon_t_sets: list[frozenset[int]],
+    max_fragment_length: int,
 ) -> tuple[ChimeraType, int] | None:
     """Detect intrachromosomal chimeras via transcript-set disjointness.
 
     Two exon blocks are "connected" if their transcript sets share at
     least one transcript index.  If the non-empty sets form more than
-    one connected component, the fragment is chimeric.
+    one connected component, the fragment is a chimera CANDIDATE.
+
+    ⭐⭐⭐ COMPATIBILITY IS CHECKED FIRST (owner, 2026-08-19).  Disjoint
+    transcript sets are not evidence of a rearrangement: a genomic
+    molecule is contiguous and routinely spans two transcripts that
+    share nothing.  A candidate is only a chimera if the mates are
+    genomically INCOMPATIBLE — an orientation that is not facing inward
+    (the two components carry different reference strands), or an
+    implied fragment length beyond ``max_fragment_length``.  Otherwise
+    it is an ordinary molecule and this returns ``None``.
 
     Parameters
     ----------
@@ -47,6 +57,11 @@ def _detect_intrachromosomal_chimera(
         The fragment's exon blocks (all on the same reference).
     exon_t_sets : list of frozenset[int]
         Per-block transcript index sets (parallel to *exon_blocks*).
+    max_fragment_length : int
+        The library's fragment-length limit (``BamScanConfig.max_frag_length``).
+        A candidate whose implied fragment length — outermost start to
+        outermost end, NOT the gap between blocks — is within this is a
+        compatible molecule rather than a chimera.
 
     Returns
     -------
@@ -104,6 +119,16 @@ def _detect_intrachromosomal_chimera(
         chimera_type = ChimeraType.CIS_STRAND_SAME
     else:
         chimera_type = ChimeraType.CIS_STRAND_DIFF
+
+    # ⭐⭐⭐ COMPATIBILITY BEFORE CHIMERA.  One reference is already given (the caller
+    # gates on `is_interchromosomal`); facing inward is exactly `len(unique_strands) == 1`,
+    # because `build_fragment` keys blocks by (ref, ref_strand) with R2's orientation
+    # flipped, so an inward-facing pair lands both mates on ONE strand.  What remains is
+    # whether a molecule of the implied length could exist in this library.
+    if chimera_type == ChimeraType.CIS_STRAND_SAME:
+        span = max(b.end for b, _ in items) - min(b.start for b, _ in items)
+        if span <= max_fragment_length:
+            return None
 
     # --- Compute minimum gap between components ---
     comp_list = list(components.values())

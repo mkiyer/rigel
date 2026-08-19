@@ -256,6 +256,9 @@ def scan_and_buffer(
     # The fractional calibration accumulator records raw compartment mass
     # directly and does not consume this tolerance.
     resolve_ctx.set_splicing_anchor_tolerance(int(scan.splicing_anchor_tolerance))
+    # ⭐ `detect_chimera` needs the library's fragment-length limit to tell an ordinary genomic
+    # molecule (contiguous, spanning whatever transcripts lie under it) from a real rearrangement.
+    resolve_ctx.set_max_fragment_length(int(scan.max_frag_length))
 
     # nRNA parent-index wiring (set_nrna_parent_index) is performed by
     # TranscriptIndex.load() at index-load time, so no need to repeat

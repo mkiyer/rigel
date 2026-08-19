@@ -133,6 +133,12 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 - `zero-the-precision-with-the-value` — A REFUSED CLAIM MUST LOSE ITS PRECISION IN THE SAME STATEMENT THAT ZEROES ITS
   VALUE, or a later operator hands the precision back and the "no claim" becomes a confident ZERO — which the
   mass pin then rescales into "all gDNA".
+- `a-transcript-predicate-must-not-silently-drop-a-molecule` — A FRAGMENT REJECTED BY A TRANSCRIPT-LEVEL
+  PREDICATE DEPOSITS NOTHING INTO CALIBRATION, AND THE REJECTED POPULATION IS NEVER RANDOM. Make the
+  fragment ledger CLOSE.
+- `a-ratio-needs-a-population-that-can-supply-its-numerator` — ADDING OPPORTUNITY THAT STRUCTURALLY CANNOT
+  CARRY COUNTS MANUFACTURES A DEFICIT OF EXACTLY ITS OWN SHARE. Score over the population that can supply
+  the numerator, which is why the field gate splits by reference.
 - `a-threshold-on-a-fitted-residue` — A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
 - `excluding-a-population-hides-it` — EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
 - `name-the-observable-per-site` — IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
@@ -1342,6 +1348,21 @@ conversion was *untested* until a perturbation said so (`TRAPS: perturb-every-ga
 
 ---
 
+**a-ratio-needs-a-population-that-can-supply-its-numerator. ⛔⛔ ADDING OPPORTUNITY THAT STRUCTURALLY CANNOT
+CARRY COUNTS MANUFACTURES A DEFICIT OF EXACTLY ITS OWN SHARE — and it reads as a defect in the estimator.**
+Measured 2026-08-19, and it cost a false finding that was reported before it was caught. An ad-hoc A/B of
+`calibration_oracle`'s field gate pooled every reference; the shipped gate calls `gate_uniformity` ONCE PER
+gDNA-BEARING REFERENCE (`gdna_refs = {r : n_g > 0}`). Pooling folded the panel's **92 ERCC exon regions** —
+real `eff_gdna`, structurally ZERO gDNA — into the `R exon` class: **2.03 %** of that class's opportunity
+carrying **0** counts, which is precisely the "~2 % `R exon` deficit" that was written up as a second bug.
+Scored per reference the class was never off (z **+0.63 / −0.14**).
+⭐ *The rule:* a class ratio `n / (rho·E)` is meaningful only over objects that COULD supply the numerator.
+Before reading one, ask what fraction of `E` sits on a population the numerator cannot reach — and if a
+shipped gate stratifies, an A/B of that gate must stratify the same way or it is measuring something else.
+⚠ This is `TRAPS: excluding-a-population-hides-it` run backwards: that one drops a population from the
+denominator, this one adds one that cannot pay into the numerator.
+*Sibling:* `never-pool-the-strata`, `a-scorer-scoped-to-the-mechanisms-targets`.
+
 ## D. Estimation and solver design
 
 **we-keep-re-deriving-message-passing. ⭐⭐⭐ THREE OR FOUR SEPARATE SESSIONS HAVE INDEPENDENTLY RE-DERIVED
@@ -1784,6 +1805,31 @@ module's docstring had the correct formula the whole time. Two docstrings disagr
 months and nobody diffed them.
 
 ---
+
+**a-transcript-predicate-must-not-silently-drop-a-molecule. ⛔⛔⛔ A FRAGMENT REJECTED BY A TRANSCRIPT-LEVEL
+PREDICATE DEPOSITS NOTHING INTO CALIBRATION — AND THE REJECTED POPULATION IS NEVER RANDOM, SO THE BIAS IS
+CONCENTRATED WHERE THE PREDICATE FIRES.** Found 2026-08-19 as the cause of the 2–3 % boundary-crossing
+deficit that failed FIELD certification on 8 of 32 conditions. `detect_chimera` joined a fragment's two
+mates iff their TRANSCRIPT SETS intersect, so a contiguous genomic molecule spanning two transcripts that
+share nothing was called `CHIMERA_CIS_STRAND_SAME` and dropped. Measured: **4,087 gDNA fragments per
+condition — 0.04 % of fragments carrying 2.4 % of every boundary crossing**, because the predicate fires
+exactly where transcripts are short and dense, which is exactly where a fragment crosses many boundaries
+(3.66 crossings lost each against 1.65 for an average crosser).
+⛔ **It hid because every dropped fragment was a CROSSER**, so `region_contained` matched the BAM's own truth
+EXACTLY on all 22,139 regions and the conserved-mass gate closed. Only the crossing axis moved.
+⭐ *The rule, owner-ruled:* **check genomic COMPATIBILITY before calling a fragment a chimera** — one
+reference, mates facing inward, implied fragment length within `max_frag_length`. gDNA is contiguous and
+routinely spans unrelated transcripts; that is what an annotation looks like, not a rearrangement, and such
+fragments carry no junction to infer one from.
+⭐⭐ *The general rule, and it is the transferable part:* **make the fragment ledger CLOSE.**
+`n_fragments == deposited + Σ accounted drops`. Before the fix the panel read `10,000,000 − 9,988,687 =
+11,313 = 7,226 deferred + 4,087 chimeric`, with the chimeric ones counted in NO qc field and absent from the
+census; after it, `n_chimeric = 0` and the residual is the deferred count exactly. ⛔ A drop with no counter
+is invisible to every downstream check.
+⚠ **The same shape is still live elsewhere and is an owner decision**: a CIGAR sj rejected by the artifact
+blacklist promotes the fragment to `SPLICE_ARTIFACT`, which also deposits nothing. It is inert on the
+simulated panel (no blacklist artefact in the index, `sj_blacklist_size = 0`) and would fire only on real
+data — which is how it has stayed unmeasured.
 
 ## F. Domain facts that read like defects
 

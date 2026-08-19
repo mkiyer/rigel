@@ -596,6 +596,9 @@ public:
 
     // --- SPLICED_IMPLICIT discriminant tolerance (bp) ---
     int32_t splicing_anchor_tolerance_ = 0;
+    //: the library's fragment-length limit; 0 ⇒ no molecule is compatible, so the compatibility
+    //: rescue in `detect_chimera` cannot fire and every disjoint candidate stays a chimera.
+    int32_t max_fragment_length_ = 0;
 
     // --- Reference name <-> ID ---
     std::unordered_map<std::string, int32_t> ref_to_id_;
@@ -784,6 +787,18 @@ public:
     /// Set the splicing-anchor tolerance K (bp) used for one-sided slack
     /// in the SPLICED_IMPLICIT per-intron whole-containment discriminant.
     /// K must be >= 0; default 0 (strict containment).
+    /// The library's fragment-length limit (`BamScanConfig.max_frag_length`), used by
+    /// `detect_chimera` to tell an ordinary genomic molecule from a rearrangement.
+    void set_max_fragment_length(int32_t L) {
+        if (L < 0) throw std::invalid_argument(
+            "set_max_fragment_length: must be >= 0, got " + std::to_string(L));
+        max_fragment_length_ = L;
+    }
+
+    int32_t max_fragment_length() const {
+        return max_fragment_length_;
+    }
+
     void set_splicing_anchor_tolerance(int32_t K) {
         if (K < 0) K = 0;
         splicing_anchor_tolerance_ = K;
@@ -1299,7 +1314,7 @@ public:
 
         // --- Intrachromosomal chimera detection ---
         if (!is_interchromosomal) {
-            auto cr_res = detect_chimera(exons, exon_t_sets);
+            auto cr_res = detect_chimera(exons, exon_t_sets, max_fragment_length_);
             if (cr_res.type != CHIMERA_NONE) {
                 cr.chimera_type = cr_res.type;
                 cr.chimera_gap = cr_res.gap;

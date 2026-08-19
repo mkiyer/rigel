@@ -351,10 +351,23 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
     return {{}, MC_EMPTY};
 }
 
-// Intrachromosomal chimera detection
+// Intrachromosomal chimera detection.
+//
+// ⭐⭐⭐ COMPATIBILITY IS CHECKED BEFORE A FRAGMENT IS CALLED A CHIMERA (owner, 2026-08-19).
+// Transcript-set disjointness ALONE is not evidence of a rearrangement: a genomic molecule is
+// contiguous and routinely spans two transcripts that share nothing -- that is what the annotation
+// looks like there. Such fragments carry no junction anywhere in them, so there is nothing to infer a
+// chimera FROM. A candidate is a chimera only if the mates are genomically INCOMPATIBLE: a different
+// reference (the caller gates on `is_interchromosomal`), an orientation that is not facing inward, or
+// an implied fragment length beyond the library's `max_fragment_length`.
+//
+// ⚠ Measured cost of the old predicate: 4,087 gDNA fragments dropped per ladder condition -- 0.04 % of
+// fragments carrying 2.4 % of every boundary crossing, because it fires exactly where transcripts are
+// short and dense, which is exactly where a fragment crosses many boundaries.
 inline ChimeraResult detect_chimera(
     const std::vector<ExonBlock>& exons,
-    const std::vector<std::vector<int32_t>>& exon_t_sets)
+    const std::vector<std::vector<int32_t>>& exon_t_sets,
+    int32_t max_fragment_length)
 {
     // Filter to blocks with non-empty transcript sets
     std::vector<int> item_idx;
@@ -412,6 +425,23 @@ inline ChimeraResult detect_chimera(
     sort_unique(unique_strands);
     int32_t chimera_type = (unique_strands.size() == 1)
         ? CHIMERA_CIS_STRAND_SAME : CHIMERA_CIS_STRAND_DIFF;
+
+    // ⭐⭐⭐ THE COMPATIBILITY CHECK. `unique_strands.size() == 1` IS "facing inward": `build_fragment`
+    // keys blocks by (ref_id, ref_strand) with R2's orientation flipped, so both mates of an
+    // inward-facing pair carry the same strand and an outward-facing pair does not. What remains is
+    // whether a molecule of the implied length could exist in this library.
+    // ⚠ The span is the implied FRAGMENT LENGTH -- outermost start to outermost end -- and NOT
+    // `min_gap` below: the two differ by the blocks' own lengths, and the gap would admit a molecule
+    // longer than the library can contain.
+    if (chimera_type == CHIMERA_CIS_STRAND_SAME) {
+        int32_t lo = exons[item_idx[0]].start;
+        int32_t hi = exons[item_idx[0]].end;
+        for (int i = 1; i < n; i++) {
+            lo = std::min(lo, exons[item_idx[i]].start);
+            hi = std::max(hi, exons[item_idx[i]].end);
+        }
+        if (hi - lo <= max_fragment_length) return {CHIMERA_NONE, -1};
+    }
 
     // Minimum gap between components
     int32_t min_gap = std::numeric_limits<int32_t>::max();

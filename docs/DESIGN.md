@@ -623,6 +623,34 @@ being a connected component of transcripts linked by shared fragments. ⛔ **A f
 locus's fragments is therefore NOT this quantity**: it drops every fragment that overlaps the locus but
 starts outside it.
 
+### 3.1b-ii ⭐⭐⭐ COMPATIBILITY IS CHECKED BEFORE A FRAGMENT IS CALLED A CHIMERA — owner, 2026-08-19
+
+> *"To be called a chimera, the paired reads would align to an incompatible orientation (not facing inward)
+> or the implied fragment length would be outside the max fragment length parameter. … gDNA should be
+> checked for compatibility before a fragment is called a chimera."*
+
+A fragment is a chimera **only if its mates are genomically INCOMPATIBLE**:
+
+    a different reference   OR   not facing inward   OR   implied fragment length > max_frag_length
+
+⛔ **Transcript-set disjointness alone is NOT evidence of a rearrangement.** gDNA is genomically contiguous
+and routinely spans two transcripts that share nothing — that is what the annotation looks like there. Such
+a fragment carries no junction anywhere in it, so there is nothing to infer a chimera FROM.
+
+⭐⭐ **THE ORIENTATION TEST NEEDED NO NEW PREDICATE, WHICH IS WHY THE RULE IS THREE LINES.** `build_fragment`
+keys blocks by `(ref_id, ref_strand)` with R2's orientation FLIPPED, so both mates of an inward-facing pair
+carry the SAME strand. `unique_strands.size() == 1` — the condition the code already called
+`CHIMERA_CIS_STRAND_SAME` — *is* "facing inward".
+
+⚠ **The length is the implied FRAGMENT LENGTH — outermost start to outermost end — and never `min_gap`.**
+They differ by the blocks' own lengths, and the gap would admit a molecule longer than the library can
+contain. Both twins gate that distinction (`test_resolution.py`), because breaking the C++ to use the gap
+fired no native gate until one was written for it.
+
+⛔ **What it cost while it was wrong** is `TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`:
+4,087 gDNA fragments per condition, 0.04 % of fragments carrying 2.4 % of every boundary crossing, invisible
+to `region_contained` (every dropped fragment was a crosser) and to the conserved-mass gate.
+
 ### 3.1c ⭐⭐⭐ THE PRIOR ARBITRATES THE UNSPLICED POOL, AND ITS STRENGTH HAS NO KNOB
 
 **Owner ruling, 2026-08-09/10.** Two statements, both settled, both measured.

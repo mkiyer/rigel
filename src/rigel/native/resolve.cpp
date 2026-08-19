@@ -134,6 +134,11 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("offsets"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("cumsum"), nb::arg("lengths"),
              "Build per-transcript exon CSR index for FL computation.")
+        .def("set_max_fragment_length",
+             &FragmentResolver::set_max_fragment_length,
+             nb::arg("max_fragment_length"),
+             "The library's fragment-length limit. A same-strand, same-reference pair whose implied "
+             "fragment length is within it is an ordinary genomic molecule, not a chimera.")
         .def("set_splicing_anchor_tolerance",
              &FragmentResolver::set_splicing_anchor_tolerance,
              nb::arg("K"),
