@@ -1030,3 +1030,35 @@ def test_a_deeper_imputation_arrives_WEAKER():
     assert far < 0.6 * near, (
         f"a three-hop imputation is barely weaker than a one-hop one: {near} -> {far}"
     )
+
+
+def test_the_premise_fit_is_not_dominated_by_the_sparsest_hops():
+    """⛔⛔⛔ **AN UNWEIGHTED MOMENT FIT IS DOMINATED BY THE NOISIEST HOPS, AND ON A REAL PANEL THAT
+    FLOORS THE PREMISE TO ZERO — switching off the very term that keeps an imputation weak.**
+
+    Measured 2026-08-20, and it is why the policy's test-chromosome result did not transfer: on the test
+    chromosome the median slot holds 354 fragments and the fit returns **0.992**; on the 16-condition
+    ladder the median slot holds **13**, a quarter of slots hold fewer than five and a fifth hold NONE,
+    so ``mean(v_r) = 2.07`` swamps ``Var(log r) = 0.76`` and the premise floors at **0.0**. The policy
+    then ran on the panel with no premise at all.
+
+    ⭐ The estimator must WEIGHT each hop by its own precision — a hop measured on two fragments says
+    almost nothing about how heterogeneous the chain is, and must not be allowed to say it loudly. The
+    weighted fit returns **0.294** and **0.324** on the two substrates: essentially the same number,
+    which is what a library-level property should do."""
+    from rigel.calibration.messages.currency import premise_logvar
+
+    # one real signal (spread ~1) plus a crowd of near-empty hops whose counting variance is enormous
+    real_lr = np.array([0.0, 1.0, -1.0, 0.9, -1.1, 1.05])
+    real_vr = np.full(real_lr.shape, 0.02)
+    noisy_lr = np.zeros(60)
+    noisy_vr = np.full(60, 4.93)  # trigamma(½): a slot with no fragments at all
+    lr = np.concatenate([real_lr, noisy_lr])
+    vr = np.concatenate([real_vr, noisy_vr])
+    fitted = premise_logvar(lr, vr)
+    assert fitted > 0.3, (
+        f"the sparse hops drowned the fit: {fitted} — this is the panel failure in miniature"
+    )
+    # ⭐ and the signal alone must give a comparable answer: adding noise-only hops may not MOVE the fit much
+    alone = premise_logvar(real_lr, real_vr)
+    assert 0.5 * alone < fitted < 2.0 * alone, f"{fitted} vs {alone}"

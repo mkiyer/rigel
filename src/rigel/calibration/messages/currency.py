@@ -277,7 +277,7 @@ def premise_logvar(log_r, v_r) -> float:
     over this chain's hops already contains the counting variance those ratios were measured with, so
     the premise is what is left over::
 
-        premise  =  max( 0,  Var(log r)  −  mean(v_r) )
+        premise  =  max( 0,  Var_w(log r)  −  mean_w(v_r) )     weighted by  w ∝ 1/v_r
 
     ⛔ Floored at 0 rather than clipped to something small: a substrate whose ratios vary no more than
     Poisson predicts has shown no heterogeneity, and a fit may not manufacture doubt the data do not
@@ -285,10 +285,26 @@ def premise_logvar(log_r, v_r) -> float:
     refinement and needs a substrate with enough hops per type to estimate on."""
     lr = np.asarray(log_r, np.float64)
     vr = np.asarray(v_r, np.float64)
-    live = np.isfinite(lr) & np.isfinite(vr)
+    live = np.isfinite(lr) & np.isfinite(vr) & (vr > 0.0)
     if int(np.count_nonzero(live)) < 2:
         return 0.0
-    return float(max(0.0, float(np.var(lr[live])) - float(np.mean(vr[live]))))
+    lr, vr = lr[live], vr[live]
+    # ⛔⛔⛔ **WEIGHTED BY EACH HOP'S OWN PRECISION, AND THE UNWEIGHTED FORM IS NOT A SIMPLIFICATION OF
+    # THIS — IT IS THE PANEL FAILURE.** A hop measured on two fragments says almost nothing about how
+    # heterogeneous the chain is, and an unweighted mean lets it say so loudly. Measured 2026-08-20: on
+    # the test chromosome the median slot holds 354 fragments and the unweighted fit returns 0.992; on
+    # the 16-condition ladder the median holds **13**, a quarter of slots hold under five and a FIFTH
+    # hold none, so `mean(v_r) = 2.07` swamps `Var(log r) = 0.76` and the fit floors at **0.0** — the
+    # policy ran the whole panel with no premise at all, which is why its toy result did not transfer
+    # (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`).
+    # ⭐ Weighted, the same two substrates return **0.294** and **0.324** — essentially one number, which
+    # is what a library-level property should do. The weights are the hops' own inverse variances, so
+    # nothing is introduced: it is the same moment identity read under the measure the data supply.
+    w = 1.0 / vr
+    w = w / float(w.sum())
+    mu = float(np.sum(w * lr))
+    var_w = float(np.sum(w * (lr - mu) ** 2))
+    return float(max(0.0, var_w - float(np.sum(w * vr))))
 
 
 def composition_rescale_factor(*, rho_g, rho_p, rho_n, E_g_dst, E_r_dst, M_dst):

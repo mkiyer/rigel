@@ -1,84 +1,109 @@
-# NEXT SESSION — characterise the residual, then evolve the baseline
+# NEXT SESSION — the dissection loop, on the worst IN-SCOPE scenario
 
     ⚠ **A DEV DOC. Nothing may cite it, and it is NOT the state.** The state is `ROADMAP.md` §0/§1, the
     rulings `DESIGN.md` §0c, the derivations `EQUATIONS.md` §3.5f–h, the lessons `TRAPS.md` §D, the
     substrate `TESTING.md` §0a/§0b. ⛔ Delete this file when the plan it points at is executed.
 
-    Rewritten 2026-08-20, when the third policy became the baseline.
+    Written 2026-08-20 at the end of the session that built the third policy.
 
-## ⭐⭐⭐ FIRST COMMAND OF THE SESSION — prove you can run and regenerate everything
+## ⭐⭐⭐ FIRST COMMAND OF THE SESSION
 
     python scripts/design/preflight.py          # ~2 min, or --fast to skip the instrument sweep
     python -m pytest tests/ -q                  # the baseline is in CLAUDE.md; ANY failure is a regression
 
 ⛔ **Do not start work on a ✘.** A missing DERIVED artifact is a command you have not run, not damage.
 
-## WHERE THINGS STAND — read `ROADMAP.md` §0 for the numbers, this for the shape
+## ⭐⭐⭐ THE GOAL, RESTATED SO IT IS NOT LOST IN THE MECHANISM
 
-⛔⛔⛔ **THE THIRD POLICY IS BUILT AND THE PANEL SAYS IT IS THE WORST ARM ON EVERY IN-SCOPE STRATUM.**
-`src/rigel/calibration/messages/currency.py` beat both shipped policies on all three in-scope strata **on
-the test chromosome** and is the worst of three **on the 16-condition ladder**, where `SilentPolicy` wins
-8 of 16 rows (`ROADMAP.md` §0 carries both tables). ⛔ The toy and the panel disagreed in RANK, not just
-in magnitude — `TRAPS: a-toy-and-a-panel-can-disagree-in-rank`.
+**Pass-0 must solve enough exons ACCURATELY that a gDNA LANDSCAPE can be trained on them. That trained
+landscape is then the PRIOR for the second solve, and every region and boundary is refit and re-solved
+with it.** Everything else — message propagation, the reference, the policies — is in service of that
+one loop, and calibration is circular precisely because the prior cannot exist until some exons are
+already solved (`DESIGN.md` §0c.0d). ⛔ So "which exons are solved, and what tells us so WITHOUT truth"
+is the question the tool's trustworthiness on real data rests on.
 
-⭐ **What that does NOT invalidate**, and it is most of the session's value: the four defects it found
-were real defects; the honest-precision result (an imputation must cost something every hop) is a
-statement about any message layer; the model-free enrichment ratio is a correctness fix for the tool as
-a whole; and **the reference finding was measured on the LADDER itself**, so it stands.
+## ⭐⭐⭐ THE METHOD — the owner's iterative protocol, and it is the whole plan
 
-⛔ **So the next step is not to polish this policy.** It is the characterisation the owner asked for —
-understand the residual well enough to know which exons are safe to train on — plus one specific
-question this result raises: **message propagation is net-harmful on every in-scope contaminated stratum
-for BOTH policies on this panel.** Its value is concentrated where the local solve is blind. That should
-be measured deliberately rather than inferred.
+Owner, 2026-08-20. Follow it in order and do not skip the dissection:
 
-## ⭐⭐⭐ WHAT THE NEXT SESSION DOES
+1. **RUN THE FULL PANEL.** `relay_pool_ab.py --arms off on currency --out <tsv>` over all 16 ladder
+   conditions, then `benchmark_report.py`. ⛔ Report every scenario; pool only at the end.
+2. **PICK THE WORST SCENARIO WITHIN THE THREE IN-SCOPE STRATA.** ⛔ Never the deferred
+   unstranded × capture-ON row, which is otherwise the worst every time.
+3. **DISSECT IT.** Find the REGIONS and BOUNDARIES carrying the highest error MASS
+   (`worst_objects.py`), then for a SAMPLE of them trace the error to its root cause: start at
+   INITIALIZATION and follow every change to that object's belief — every message it received, every
+   refit — comparing each step against the certified ground truth (`calibration_oracle.py`'s
+   `slot_truth.npz`). ⭐ Do this for several objects; one object is an anecdote, a sample is a mechanism.
+4. **DESIGN A FIX** for the root cause, gated first and falsified by perturbation.
+5. **ADD THE OFFENDING TRANSCRIPTS TO THE TEST CHROMOSOME** (`TESTING.md` §0a). ⭐⭐ This is what makes
+   the loop compound: the test chromosome becomes a repository of the difficult, complicated and
+   error-prone transcript combinations the tool actually fails on, and eventually stands on its own as
+   the benchmark for comparing calibration algorithms.
+6. **RE-RUN THE PANEL** and see how the fix behaves across all 16 — not just where it was designed.
+7. **REPEAT**, on the next highest source of error.
 
-**⓪ FIRST, AND IT IS CHEAP: does the policy help ONLY where the local solve is blind?** Split the
-ladder's error by whether the destination had its own composition evidence and read the two halves
-separately, per stratum (`TRAPS: an-imputation-must-cost-something-every-hop` has the recipe). If the
-whole of message propagation's value is the evidence-free half, then the shippable arrangement may be a
-policy that speaks ONLY there — and that is a measurement, not a switch.
+⛔ **AND THE TEST CHROMOSOME IS NOT A SUBSTITUTE FOR THE PANEL.** This session proved they can disagree
+in RANK, not just magnitude (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`). Use the toy to isolate a
+MECHANISM; use the panel to decide whether it is better.
 
-**① CHARACTERISE WHICH EXONS ARE SOLVED — by OBSERVABLE properties, never by truth.** This is the
-training substrate for the gDNA landscape, and the whole bootstrap (`DESIGN.md` §0c.0d) turns on it: the
-prior cannot be trained until enough exons are solved, and once it is trained it subsumes much of what
-message propagation does. ⛔ Report a CURVE or a distribution, never a tolerance — a threshold here is a
-magic number. Candidate observables, all available without truth: own composition evidence
-(`has_own_composition_evidence`), hops from the nearest structurally pure-gDNA slot, flanked by a splice
-site vs a terminus, one strand vs both, observed depth.
+## ⭐⭐ THREE POLICIES NOW EXIST, AND COMPARING THEM IS ITSELF A METHOD
 
-**② THEN EXPAND THE gDNA SPECTRUM — deliberately** (`ROADMAP.md` §1 rank 1b). Levels are informative
-where behaviour CHANGES; interpolation is free. ⛔ Do not multiply the full cross.
+`SilentPolicy` (no messages), `RelayPolicy` (the evolved one, 19 switches), `CurrencyPolicy` (this
+session's, `message_policy = "currency"`). They fail differently, and the owner's instruction is to use
+that: **contrast them to learn what a production policy must do.** What is measured so far — on the
+16-condition ladder, whole chain, gDNA absolute error in FRAGMENTS, contaminated rows per stratum:
 
-**③ AND KEEP GROWING THE TEST CHROMOSOME** — it is becoming a gold-standard regression set (owner). Add
-a case whenever a new stressing structure is conceived. Queued: a cassette (skipped) exon; a same-strand
-intron-retention isoform; divergent and convergent gene pairs; a probed exon shared by isoforms whose
-other exons are unprobed.
+| stratum | Silent | Relay | currency |
+|---|---|---|---|
+| unstranded × capture-OFF ⭐ | **357,580** | 496,226 | 758,085 |
+| stranded × capture-OFF ⭐ | **291,815** | 440,209 | 774,909 |
+| stranded × capture-ON ⭐ | **564,678** | 961,174 | 2,158,432 |
+| unstranded × capture-ON ⛔ deferred | 18,559,229 | **6,021,441** | 6,095,640 |
 
-**The loop is ~1 min end to end** (`docs/TESTING.md` §0a has the commands; `<T> = ~/Downloads/rigel_runs/test_reference`).
+⛔ **On this panel message propagation is net-harmful wherever the local solve has evidence, for BOTH
+policies**, and its value is concentrated where the local solve is blind (the deferred stratum and the
+capture-ON zero controls, where `currency` is the best arm). ⚠ **Those numbers predate the weighted
+premise fit below — RE-RUN THEM before quoting.**
 
-## ⛔ THE MEASUREMENT DISCIPLINE THAT FOUND EVERY DEFECT THIS SESSION
+## ⛔⛔ THE OPEN LEAD, AND IT IS THE FIRST THING TO FINISH
 
-**Split the error by whether the destination HAD ITS OWN composition evidence.** "The messages help" and
-"the messages trample a measurement" are different findings, and a pooled number cannot tell them apart —
-it is how an 8.09× degradation of the measured half of the chain was found hiding inside a modest total
-(`TRAPS: an-imputation-must-cost-something-every-hop`).
+**The policy's central mechanism was INERT on the panel.** The premise variance — the term that keeps an
+imputation weak — is fitted by method of moments, and the UNWEIGHTED fit is dominated by the sparsest
+hops: on the ladder the median slot holds **13** fragments, a quarter hold under five and a fifth hold
+NONE, so `mean(v_r) = 2.07` swamps `Var(log r) = 0.76` and the premise floors at **0.0**. On the test
+chromosome (median 354) it fits **0.992**. ⭐ A PRECISION-WEIGHTED fit returns **0.294** and **0.324** on
+the two substrates — one number, as a library-level property should be — and is now implemented and
+gated. ⛔ **The panel re-run with it was still in flight when this session ended: run it first, and
+correct `ROADMAP.md` §0 with what it says.**
 
-⚠ And verify that a perturbation LANDED before believing a green result. Three separate times this
-session an ablation silently did nothing: a `sed` that matched no line, a gate that read one slot past
-the stretch it meant to isolate, and — the expensive one — a patched module binding that
-`region_init` does not use, because it holds its own reference to the solver
-(`TRAPS: an-ablation-that-never-ran`).
+⚠ That single finding may or may not close the gap. If it does not, go to the dissection protocol above
+— the honest position is that the panel result is unexplained beyond this one mechanism.
+
+## THE MEASUREMENT DISCIPLINE THAT FOUND EVERY DEFECT THIS SESSION
+
+* **Split the error by whether the destination HAD ITS OWN composition evidence.** "The messages help"
+  and "the messages trample a measurement" are different findings and a pooled number cannot tell them
+  apart — it is how an 8.09× degradation of the measured half of a chain was found inside a modest
+  total (`TRAPS: an-imputation-must-cost-something-every-hop`).
+* **Verify a perturbation LANDED before believing a green result.** Four separate times this session an
+  ablation silently did nothing: a `sed` that matched no line; a gate that read one slot past the
+  stretch it meant to isolate; a patched module binding `region_init` does not use because it holds its
+  own reference to the solver; and a TRAPS rule whose uppercase name escaped the file's own counting
+  regex (`TRAPS: an-ablation-that-never-ran`).
+* **Name the SUBSTRATE in the same sentence as the number.**
 
 ## STILL OPEN
 
-* ⭐ **The capture-aware reference** (`ROADMAP.md` §1 rank 3 + the §0 reference row): a per-object mean
-  is measured to take both zero controls to exactly 0 and to improve every capture-OFF row on the
-  ladder, and to regress every stranded × capture-ON row by the documented anchor under-read. Rank 2 and
-  rank 3 are ONE piece of work.
-* `relay_pool_ab.py`'s docstring promises a `--table pipeline` that does not exist. Build it or remove
-  the promise.
-* Prose in ~18 instruments still describes the retired 36-condition ladder. Historical measurement
-  stamps are PROVENANCE and must stay; what is worth fixing is prose presenting a retired panel as
-  current.
+* ⭐ **The capture-aware reference** (`ROADMAP.md` §1 rank 3 + §0's reference row): a per-object mean
+  from the measured background takes both zero controls to EXACTLY 0 and improves every capture-OFF row
+  on the ladder, and regresses every stranded × capture-ON row by the documented anchor under-read.
+  Ranks 2 and 3 are ONE piece of work.
+* ⚠ `scripts/design/exon_solvability.py` is UNTRACKED and stamped UNDER REVIEW: its per-condition
+  columns reproduce, but its headline table is not produced by the instrument itself, one claim is
+  transposed, its independence claim is refuted by direct measurement, and one self-test check survives
+  a perturbation that breaks the property it guards. Repair or delete it — do not quote it.
+* ⛔ Whether spliced fragments are enriched depends on PROBE PLACEMENT (owner) — a junction-spanning
+  probe enriches them, a probe deep in an exon does not — so no fixed rule for the flux frame can be
+  right and it must be learned. `docs/dev/currency_policy_design.md` holds the statement.
+* `relay_pool_ab.py`'s docstring promises a `--table pipeline` that does not exist.
