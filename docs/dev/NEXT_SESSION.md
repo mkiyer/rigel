@@ -54,31 +54,35 @@ session's, `message_policy = "currency"`). They fail differently, and the owner'
 that: **contrast them to learn what a production policy must do.** What is measured so far — on the
 16-condition ladder, whole chain, gDNA absolute error in FRAGMENTS, contaminated rows per stratum:
 
-| stratum | Silent | Relay | currency |
+| stratum (contaminated rows summed) | Silent | Relay | currency |
 |---|---|---|---|
-| unstranded × capture-OFF ⭐ | **357,580** | 496,226 | 758,085 |
-| stranded × capture-OFF ⭐ | **291,815** | 440,209 | 774,909 |
-| stranded × capture-ON ⭐ | **564,678** | 961,174 | 2,158,432 |
-| unstranded × capture-ON ⛔ deferred | 18,559,229 | **6,021,441** | 6,095,640 |
+| unstranded × capture-OFF ⭐ | **357,580** | 496,226 | 583,028 |
+| stranded × capture-OFF ⭐ | **291,815** | 440,209 | 635,702 |
+| stranded × capture-ON ⭐ | **564,678** | 961,174 | 848,458 |
+| unstranded × capture-ON ⛔ deferred | 18,559,229 | **6,021,441** | 7,890,981 |
+| **the four ZERO CONTROLS** | 1,381,959 / 416,652 / 68,431 / 31,692 | 54,852 / 122,976 / 15,527 / 42,378 | ⭐ **46,137 / 15,624 / 6,441 / 3,624** — best on all four |
 
 ⛔ **On this panel message propagation is net-harmful wherever the local solve has evidence, for BOTH
 policies**, and its value is concentrated where the local solve is blind (the deferred stratum and the
-capture-ON zero controls, where `currency` is the best arm). ⚠ **Those numbers predate the weighted
-premise fit below — RE-RUN THEM before quoting.**
+capture-ON zero controls, where `currency` is the best arm). ⭐ These are the CURRENT numbers, with the weighted premise fit landed
+(`<ladder>/benchmark/ladder_weighted_premise.tsv`).
 
-## ⛔⛔ THE OPEN LEAD, AND IT IS THE FIRST THING TO FINISH
+## ⭐ THE OPEN LEAD IS CLOSED — measured, landed, and it did NOT close the gap
 
-**The policy's central mechanism was INERT on the panel.** The premise variance — the term that keeps an
-imputation weak — is fitted by method of moments, and the UNWEIGHTED fit is dominated by the sparsest
-hops: on the ladder the median slot holds **13** fragments, a quarter hold under five and a fifth hold
-NONE, so `mean(v_r) = 2.07` swamps `Var(log r) = 0.76` and the premise floors at **0.0**. On the test
-chromosome (median 354) it fits **0.992**. ⭐ A PRECISION-WEIGHTED fit returns **0.294** and **0.324** on
-the two substrates — one number, as a library-level property should be — and is now implemented and
-gated. ⛔ **The panel re-run with it was still in flight when this session ended: run it first, and
-correct `ROADMAP.md` §0 with what it says.**
+**The policy's premise variance was INERT on the panel.** The unweighted method-of-moments fit is
+dominated by the sparsest hops: the median ladder slot holds **13** fragments, a quarter hold under five
+and a fifth hold NONE, so `mean(v_r) = 2.07` swamped `Var(log r) = 0.76` and the premise floored at
+**0.0** — against **0.992** on the test chromosome (median slot 354). The term that keeps an imputation
+weak never fired on the panel and ran at full strength on the toy.
 
-⚠ That single finding may or may not close the gap. If it does not, go to the dissection protocol above
-— the honest position is that the panel result is unexplained beyond this one mechanism.
+⭐ **A PRECISION-WEIGHTED fit returns 0.294 / 0.324 on the two substrates** — one number, as a
+library-level property should be — and is landed and gated. The panel re-run moved **11 of 16 rows, up
+to 2.5×**, and made `currency` the **best arm at all four zero controls** (7.9× and 11.7× better than
+the relay on the two capture-ON ones).
+
+⛔⛔ **AND IT DID NOT CHANGE THE RANK ON THE THREE IN-SCOPE CONTAMINATED STRATA — `SilentPolicy` still
+wins all three.** So the gap is NOT one mechanism, and guessing at a second one is exactly what the
+dissection protocol above exists to replace. ⭐ **Start there, on the worst IN-SCOPE scenario.**
 
 ## THE MEASUREMENT DISCIPLINE THAT FOUND EVERY DEFECT THIS SESSION
 
