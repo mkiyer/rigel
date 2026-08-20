@@ -69,6 +69,7 @@ from .variance import count_logvar
 
 __all__ = [
     "CurrencyPolicy",
+    "premise_logvar",
     "HopStructure",
     "composition_sampling_logvar",
     "hop_structure",
@@ -258,6 +259,38 @@ def rescale_weight(*, log_ratio: float, var_ratio: float) -> float:
 #: cannot amplify a claim the source does not have, because it never reads the claim.
 
 
+def premise_logvar(log_r, v_r) -> float:
+    """⭐⭐⭐ **THE VARIANCE OF THE PREMISE EVERY HOP RESTS ON — one library-level scalar, FITTED.**
+
+    A message is an IMPUTATION, and an imputation is a weak predictor by definition: the strand model
+    MEASURES a slot's composition from that slot's own counts, while a message asserts that a
+    NEIGHBOUR's abundances apply here. That assertion has its own uncertainty, and — this is the part
+    the counting terms cannot supply — **it does not shrink as either slot is counted more deeply.**
+    Without it a transport between two deeply-counted slots is free: both counting terms vanish, the
+    knob absorbs the ratio, and the imputation arrives at full strength.
+
+    ⛔ **What that costs is measured:** the composition transport TRAMPLED slots the strand model had
+    already solved — 804 → 6,504 fragments at `g50 ss0.99 capture_on`, an 8.09x degradation of the
+    MEASURED half of the chain, where ablating the transport entirely reads 1.01x.
+
+    ⭐ **Fitted by METHOD OF MOMENTS, so no constant is introduced**: the observed spread of ``log r``
+    over this chain's hops already contains the counting variance those ratios were measured with, so
+    the premise is what is left over::
+
+        premise  =  max( 0,  Var(log r)  −  mean(v_r) )
+
+    ⛔ Floored at 0 rather than clipped to something small: a substrate whose ratios vary no more than
+    Poisson predicts has shown no heterogeneity, and a fit may not manufacture doubt the data do not
+    show. ⚠ It is deliberately ONE scalar for the whole chain — a per-hop-type fit is the obvious
+    refinement and needs a substrate with enough hops per type to estimate on."""
+    lr = np.asarray(log_r, np.float64)
+    vr = np.asarray(v_r, np.float64)
+    live = np.isfinite(lr) & np.isfinite(vr)
+    if int(np.count_nonzero(live)) < 2:
+        return 0.0
+    return float(max(0.0, float(np.var(lr[live])) - float(np.mean(vr[live]))))
+
+
 def composition_rescale_factor(*, rho_g, rho_p, rho_n, E_g_dst, E_r_dst, M_dst):
     """⛔ RETAINED ONLY AS THE FALSIFICATION of the note above: the mass-identity rescale, which the
     policy no longer uses. `test_the_mass_identity_rescale_amplifies_a_weak_claim` is what keeps the
@@ -420,6 +453,14 @@ class _CurrencyRelay:
         lam, _ = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
         dom = _log_fg(lam)
         self._dom_lo, self._dom_hi = float(dom[0]), float(dom[-1])
+        # ⭐⭐ THE PREMISE, fitted once from the hops this chain actually has (both directions pooled:
+        # a hop is the same pair either way, so its ratio is the same evidence read twice).
+        _lr = np.concatenate(
+            [t["log_r"][np.asarray(t["eq"], bool) | True] for t in self._tables.values()]
+        )
+        _vr = np.concatenate([t["v_r"] for t in self._tables.values()])
+        self.premise = premise_logvar(_lr, _vr)
+
         cap = ctx.capture
         if cap is not None:  # the census hook — an instrument can read the tables this sweep used
             cap.setdefault("_currency_static", {}).update(
@@ -481,6 +522,11 @@ class _CurrencyRelay:
             :func:`~.variance.splice_in_frame_logvar`, identically 0 where the two faces agree."""
             v = float(lr) * float(lr)
             return p / (1.0 + p * v) if (p > 0.0 and v > 0.0) else p
+
+        prem = self.premise
+
+        def _prem(p: float) -> float:
+            return p / (1.0 + p * prem) if p > 0.0 else 0.0
 
         def _damp_disagreement(p: float, lr: float, w: float) -> float:
             """The other half of the same statement (owner: *"the greater the disagreement, the less
@@ -560,6 +606,14 @@ class _CurrencyRelay:
                 tpg = _damp_disagreement(tpg, lr, w)
                 tpp = _damp_disagreement(tpp, lr, w)
                 tpn = _damp_disagreement(tpn, lr, w)
+            # ⭐⭐⭐ AND THE PREMISE — charged on EVERY hop, whichever strategy carried it, because it
+            # is the cost of the claim being an IMPUTATION at all. It does not shrink with counts, so
+            # it is what keeps a message weak beside a measurement and what makes a deep imputation
+            # arrive weaker than a shallow one.
+            if prem > 0.0:
+                tpg = _prem(tpg)
+                tpp = _prem(tpp)
+                tpn = _prem(tpn)
             # ⭐⭐⭐ THE SPLICE IN — a MEASUREMENT, not an imputation: a spliced fragment cannot be
             # gDNA, so the flux entering this exon is CERTIFIED RNA of its own strand, at its own
             # COUNT's precision. ⛔ It is added AFTER the transport AND after the disagreement damping,
@@ -657,6 +711,7 @@ class _CurrencyRelay:
             # NOT absorb (``((1−w)·log r)²``) — one continuum, both ends covered
             resid = (1.0 - w) * log_r
             add = w * v_r + resid * resid
+            add = add + self.premise  # the premise, on every hop — see the scalar twin's note
             out = np.where(add > 0.0, out / (1.0 + out * add), out)
             return np.where(dead, 0.0, out)
 

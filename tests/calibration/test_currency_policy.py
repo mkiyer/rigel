@@ -439,8 +439,11 @@ def test_a_composition_hop_rescales_by_the_measured_totals():
     # n_g = 0.1*200 = 20 of n_tot = 100 -> cap = 1/(trigamma(20.5) - trigamma(101.5)), below 500
     from rigel.calibration.messages.variance import count_logvar
 
+    # ⚠ the CAP is the ceiling; the delivered precision also pays the fitted PREMISE, so assert the
+    # bound rather than an equality — a gate that pins an exact precision has to be re-stated every
+    # time an honest variance is added, which is how a variance gets quietly dropped instead.
     cap = 1.0 / (count_logvar(20.0) - count_logvar(101.0))
-    np.testing.assert_allclose(np.asarray(msg.gdna_prec)[1], cap, rtol=1e-6)
+    assert 0.0 < np.asarray(msg.gdna_prec)[1] <= cap * (1.0 + 1e-6)
 
 
 def test_upsampling_adds_no_precision():
@@ -930,7 +933,9 @@ def test_a_flux_bound_that_is_already_satisfied_says_NOTHING():
     step(1, 2)
     vp, pp = publish()[1], publish()[4]
     assert vp[2] == 50.0, vp[2]
-    np.testing.assert_allclose(pp[2], 4.0, rtol=1e-9)
+    assert 0.0 < pp[2] <= 4.0 + 1e-9, pp[
+        2
+    ]  # the claim's own precision, less what the premise costs
 
 
 def test_the_flux_bound_pays_the_FRAME_step_between_the_sj_and_the_exon():
@@ -963,3 +968,65 @@ def test_the_flux_bound_pays_the_FRAME_step_between_the_sj_and_the_exon():
 
     np.testing.assert_allclose(same_frame, 1.0 / count_logvar(340.0), rtol=1e-9)
     assert shifted < 0.2 * same_frame, "a frame step must cost the bound its confidence"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# HONEST PRECISION — an imputation is a WEAK predictor BY DEFINITION and must never out-weigh a
+# measurement (owner, 2026-08-20). The strand model MEASURES a slot from its own counts; a message
+# IMPUTES it from a neighbour, on a PREMISE, and the premise's own uncertainty is what was missing.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_the_premise_variance_is_FITTED_from_the_data_not_chosen():
+    """⭐⭐⭐ **THE PREMISE OF EVERY HOP — "my neighbour's abundances apply here" — IS ITSELF UNCERTAIN,
+    and its uncertainty does NOT shrink with depth of counts.** Without it a transport between two
+    deeply-counted slots is free: the counting terms both vanish, the knob absorbs the ratio, and an
+    imputation arrives at full strength. Measured, that let the composition transport TRAMPLE slots the
+    strand model had already measured — 804 → 6,504 fragments at `g50 ss0.99 capture_on`, an 8.09x
+    degradation of the MEASURED half of the chain, while ablating the transport read 1.01x.
+
+    ⭐ It is fitted by METHOD OF MOMENTS and introduces no constant: the observed spread of ``log r``
+    across this chain's hops, minus the counting variance that spread already contains. A substrate
+    whose ratios vary no more than Poisson predicts fits a premise of exactly 0 and the term vanishes."""
+    from rigel.calibration.messages.currency import premise_logvar
+
+    # ratios that vary far more than their counting noise ⇒ a real premise
+    log_r = np.array([0.0, 1.4, -1.2, 0.9, -1.6, 1.1])
+    v_r = np.full(log_r.shape, 0.01)
+    fitted = premise_logvar(log_r, v_r)
+    assert 1.0 < fitted < 2.0, fitted
+    # ⛔ and where the spread is ENTIRELY counting noise the premise is exactly 0 — a fit may not
+    # manufacture doubt the data do not show
+    assert premise_logvar(np.array([0.0, 0.1, -0.1]), np.full(3, 10.0)) == 0.0
+
+
+def test_a_deeper_imputation_arrives_WEAKER():
+    """⭐ Honest precision means the premise is paid ONCE PER HOP, so a claim imputed across a long
+    chain of exon|exon boundaries — the case message propagation exists for — arrives weaker than one
+    imputed next door. ⛔ Without this a claim rides nine hops at full strength."""
+    rho = {"g": np.array([0.4, 0, 0, 0, 0, 0, 0, 0, 0])}
+    prec = {"g": np.array([8.0, 0, 0, 0, 0, 0, 0, 0, 0])}
+    # ⛔ THE FIXTURE ISOLATES THE PREMISE, and the first version of this gate did not: the FIRST FOUR
+    # slots have IDENTICAL abundances, so every hop the claim travels has ``log r = 0`` and the
+    # disagreement damping is identically zero along it — while the tail varies enough for the chain to
+    # fit a non-zero premise. Any decay measured over slots 1→4 is therefore the premise and nothing
+    # else. (With varying ratios all the way the disagreement term does the decaying and the gate passes
+    # with the premise deleted — measured, that perturbation slipped through.)
+    inv = np.array([1.0, 1.0, 1.0, 1.0, 6.0, 0.2, 5.0, 0.1, 4.0])
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(own=_own(rho, prec), inv_abundance=inv, boundary_flags=fl, n_slot=np.full(N, 1.0e9))
+    object.__setattr__(ctx, "geometry", _geom())
+    relay = CurrencyPolicy().prepare(ctx)
+    assert relay.premise > 0.0, "the fixture fitted no premise, so it cannot test one"
+    step, publish = relay.scan(backward=False)
+    for i in range(1, N):
+        step(i - 1, i)
+    pg = publish()[3]
+    # ⛔ BOTH READS MUST SIT INSIDE THE EQUAL-RATIO STRETCH. Reading slot 4 — one hop past it — let the
+    # perturbation through: the first varying hop damps the claim by the DISAGREEMENT term, which looks
+    # like the decay this gate is about and is not it.
+    near, far = pg[1], pg[3]
+    assert far < near, f"precision did not decay with depth: {near} -> {far}"
+    assert far < 0.6 * near, (
+        f"a three-hop imputation is barely weaker than a one-hop one: {near} -> {far}"
+    )
