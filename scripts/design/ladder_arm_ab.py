@@ -262,17 +262,24 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
     n_g = M if total_n else f_g * M
     prec_g = NI.own_precision(n_g, v_fg, live_g)
 
-    def _rna(rho, free_s):
+    def _rna(rho, f_c, free_s):
         admissible = np.asarray(free_s, bool)
         live = (
             admissible & (M > 0.0) & (rho > _EPS) if count_live else admissible & (E_r > 0.0)
         )
         out = np.where(live, rho, 0.0)
-        n_c = M if total_n else rho * E_r  # rho·E_r ≡ f_c·M, the component's own count
+        # ⛔ the count is ``f_c·M`` EXACTLY AS ``build_region_init._rna`` writes it — NOT ``rho·E_r``,
+        # which is the same number only up to one float round-trip (``(f·M/E)·E != f·M`` by an ULP).
+        # That ULP was invisible while the RNA precisions had no consumer (`SilentPolicy` shipped) and
+        # broke ``zc_noop``'s byte-identity the day ``message_propagation = True`` landed: the relay
+        # fuses by these precisions, so an ULP anywhere moves scored fields. Found by preflight's first
+        # full instrument sweep after the flip — the CONFIG-DEFAULT-FLIP trigger of
+        # TRAPS: a-green-suite-hid-five-dead-instruments, caught this time by the arm's own gate.
+        n_c = M if total_n else np.asarray(f_c, np.float64) * M
         return out, NI.own_precision(n_c, v_fr, live)
 
-    rho_pos, prec_pos = _rna(rho_p, statics.free_pos)
-    rho_neg, prec_neg = _rna(rho_n, statics.free_neg)
+    rho_pos, prec_pos = _rna(rho_p, ni.f_pos, statics.free_pos)
+    rho_neg, prec_neg = _rna(rho_n, ni.f_neg, statics.free_neg)
     return NI.RegionInit(
         f_g=ni.f_g, f_pos=ni.f_pos, f_neg=ni.f_neg,
         rho_g=rho_g, rho_pos=rho_pos, rho_neg=rho_neg,

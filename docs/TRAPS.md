@@ -506,6 +506,18 @@ keys exist at all. ⚠ Same family as `TRAPS: an-ablation-that-never-ran`'s thir
 of the arm's definition"*), one layer out: there a live arm could not move a number, here a whole
 instrument cannot start.
 
+⛔ **A THIRD MECHANISM, SAME TRIGGER, 2026-08-19 — the flip went the OTHER way and broke a BYTE-IDENTITY
+arm instead of killing an instrument.** `ladder_arm_ab.py`'s `zc_noop` re-derived the RNA components'
+Poisson count as `rho·E_r` where `region_init._rna` writes `f_c·M` — the same number **up to one float
+round-trip** (`(f·M/E)·E ≠ f·M` by an ULP). Under the shipped `SilentPolicy` those precisions had NO
+consumer, so the ULP reached no scored field and the identity gate passed; the day
+`message_propagation = True` landed, `RelayPolicy` fused by exactly those precisions and `zc_noop` MOVED
+under `--messages on`. Found by `preflight.py`'s first full instrument sweep after the flip — the arm's
+own falsification caught its own staleness. ⭐ *The corollary:* **an identity arm is an identity only in
+the fields something CONSUMES — re-run every byte-identity gate after a default flip, because the flip
+changes which fields are load-bearing.** Re-derive a rebuilt quantity by the producer's own EXPRESSION,
+never by an algebraic equivalent.
+
 **compatibility-is-geometry-not-composition. ⛔⛔ A PREDICATE BUILT FROM WHAT A FRAGMENT IS COMPATIBLE
 WITH CANNOT SEPARATE RNA FROM gDNA — BECAUSE COMPATIBILITY IS GEOMETRY, AND gDNA IS COMPATIBLE WITH
 EVERYTHING UNSPLICED.** Designed and refuted the same day, 2026-08-11/12, and the refutation is the
