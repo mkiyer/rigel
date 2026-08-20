@@ -11,10 +11,10 @@
 # `test_reference/test_abundances.tsv`, both hand-edited; the FASTA and this sweep are derived.
 # `docs/TESTING.md` §0a.
 #
-# ⚠ NASCENT IS 0 AND THAT IS FORCED BY THE ANNOTATION, NOT A CHOICE. A synthetic nascent entity is
-# created for each MULTI-EXON transcript; stage 1 is single-exon only, so there is no nascent
-# opportunity at all and a nonzero share would be unreachable (the simulator raises rather than
-# silently producing none). The moment the first spliced transcript lands, set a share here.
+# ⚠ THE `nrna:` BLOCK BELOW IS DEAD BY DESIGN under `abundance.mode: file`: the TSV's
+# `nrna_abundance` column is the one source of nascent weight (stages 2/3 set it to 10 on every
+# multi-exon transcript, pooled onto the index's nascent entities), so the share sweep is skipped and
+# every condition is labelled `nrna_file`.
 #
 # ⚠ ABUNDANCE MODE IS `file`, so `test_abundances.tsv` is the ONE source of truth for both the mature
 # and the nascent weight of every transcript. That is why the nascent sweep is skipped and the label

@@ -149,6 +149,15 @@ ALLOWED: dict[str, tuple[str, ...]] = {
         "tests/calibration/test_vertex_reference.py",
         "docs/TESTING.md",
     ),
+    # the test chromosome's STAGE 3 gene ids (2026-08-19: the gap-closing structures, `TESTING.md`
+    # §0a) — genes, not rules, exactly as `G4`/`G5`/`G6` above. ⛔ Scoped to the doc that tables them;
+    # the GTF itself is data and is not scanned. ⚠ Declared ONCE each — see the duplicate-key lesson
+    # on `G4`/`G5` above before touching these.
+    "G9": ("docs/TESTING.md",),
+    "G10": ("docs/TESTING.md",),
+    "G11": ("docs/TESTING.md",),
+    "G12": ("docs/TESTING.md",),
+    "G13": ("docs/TESTING.md",),
     # this file, which must name the banned labels in order to ban them
     "*": ("tests/test_no_jargon_labels.py",),
 }

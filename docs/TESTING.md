@@ -155,7 +155,7 @@ function of the calibration code that fit it, so caching it would serve a stale 
 
 ---
 
-## 0a. ⭐⭐⭐ THE METHOD-DEVELOPMENT TEST REFERENCE — one 100 kb chromosome that GROWS (owner, 2026-08-19)
+## 0a. ⭐⭐⭐ THE METHOD-DEVELOPMENT TEST REFERENCE — one 1 Mb chromosome that GROWS (owner, 2026-08-19)
 
 ⭐⭐⭐ **THE BENCHMARK THE MESSAGE-PROPAGATION POLICY IS DEVELOPED AGAINST.** Owner: *"over the course of
 this method development, we will add transcripts to a 'test chromosome' … collectively, the test
@@ -170,7 +170,7 @@ solve the new structure **and everything already there**.
 | the FASTA and the index | ⛔ **DERIVED** by `scripts/sim/build_test_reference.py`, never hand-edited |
 
 ⛔ **WHY THE FASTA IS DERIVED.** A spliced transcript needs a GT..AG at every intron or the aligner and
-the simulator disagree with the annotation. Generating the chromosome from a fixed seed (100,000 bp,
+the simulator disagree with the annotation. Generating the chromosome from a fixed seed (1,000,000 bp,
 `test_chr`) and injecting a motif at every intron the GTF declares makes that impossible to get wrong; a
 versioned FASTA would need a hand edit on every addition and the first missed one is a silent failure.
 ⚠ Verified on the round trip: the GTF's intron gets `GT`/`AG` at exactly its endpoints and an unedited
@@ -194,11 +194,11 @@ no abundance row, an abundance for a transcript that is not in the GTF, the wron
 | `T1p_SE_1KB` | `G1` | 10,000–11,000 | fragments land here; NO probe |
 | `T1p_cap_SE_1KB` | `G1cap` | 5,000–6,000 | probes 5,000–5,120 and 5,800–5,920 |
 | `T2p_SE_50BP` | `G2` | 15,000–15,050 | too small for a fragment; no probe |
-| `T3_1p_SE_4BP` | `G3` | 20,000–25,000 | NESTED pair, one gene, one shared probe |
-| `T3_2p_SE_4BP` | `G3` | 22,000–24,000 | 22,000–22,120 falls inside BOTH |
+| `T3_1p_SE_5KB` | `G3` | 20,000–25,000 | NESTED pair, one gene, one shared probe |
+| `T3_2p_SE_2KB` | `G3` | 22,000–24,000 | 22,000–22,120 falls inside BOTH |
 
-⚠ **The `4BP` suffix matches neither**: `T3_1p_SE_4BP` is 5,000 bp and `T3_2p_SE_4BP` is 2,000 bp. The
-names are the owner's and are kept verbatim because they are how the transcripts are referred to.
+⚠ These two arrived named `_4BP`, which matched neither size; the owner had them renamed to carry their
+true spliced lengths (the correction note below Stage 2 records all three renames).
 
 ⭐ **Measured, 8 scenarios in 21 s** (`configs/test_reference.yaml`; g00/g50 × ss 0.50/0.99 × capture
 off/on): off capture the two 1 kb transcripts land within 0.2 % of each other and the nested pair sits at
@@ -254,10 +254,52 @@ misdescribed their own size: `T3_1p_SE_4BP` → `T3_1p_SE_5KB`, `T3_2p_SE_4BP` �
 | `g50 ss0.99 capture_off` | 164 | 155 | 0.942× |
 | `g50 ss0.99 capture_on` | 1,033 | 936 | 0.906× |
 
-⛔ **The relay HELPS on all eight here, where on the 16-condition ladder it COSTS the three in-scope
-strata 1.4–1.7×** (`ROADMAP.md` §0). That gap is the point of having both: the test chromosome is 8
-transcripts with generous intergenic space and one nested pair, so whatever the relay does wrong on the
-real panel is not yet represented here. ⭐ The next structures to add are the ones that would close it.
+⛔ **The relay HELPED on all eight of Stage 2's scenarios, where on the 16-condition ladder it COSTS the
+three in-scope strata 1.4–1.7×** (`ROADMAP.md` §0) — so whatever the relay does wrong on the real panel
+was not yet represented here. ⭐ Stage 3 added exactly the structures named to close that gap, and it
+closed (the table below).
+
+### ⭐⭐ STAGE 3 — the structures the ladder has and stages 1–2 lacked (2026-08-19)
+
+Twenty transcripts in four SEPARATED loci, so each structure stays individually diagnosable. The gap
+list they answer: overlapping genes on opposite strands, alternate TSS/TES, and exons many hops from
+any measured gDNA.
+
+| locus | transcripts | what it is |
+|---|---|---|
+| **S3a** 60,000–63,000 | `T7p_SE_2KB` (+), `T8n_SE_2KB` (−) | ANTISENSE OVERLAP — 1 kb both-strand exon between two single-strand flanks; each TES is a terminus crossed by the OTHER strand's RNA. The minimal per-strand population structure. No probes |
+| **S3b** 70,000–76,000 | `T9a_2exon_3KB`, `T9b_2exon_1500BP` (both +, gene `G9`) | ALTERNATE TSS/TES — T9b's TSS inside T9a's intron (`B exon\|intron[term]`, the hop type that carried 209 k of the ladder's composition error), a donor inside that intron, a SHARED acceptor, and T9b's TES inside T9a's exon 2 (`B exon\|exon[term]`). One probe on the shared exon |
+| **S3c** 80,000–101,000 | `T10_tile01_SE_3KB` … `T10_tile10_SE_3KB` (+, gene `G10`) | THE DEEP EXONIC CORRIDOR — 3 kb tiles every 2 kb: 21 kb of CONTINUOUS exon, 18 internal TSS/TES terminus boundaries, NO gDNA-measuring object inside; mid-corridor is ~18 hops from measured gDNA (the ladder puts 23–29 % of imputed mass ≥ 9 hops out). No probes |
+| **S3d** 111,000–135,000 | `TAp_3exon_5KB`, `TBp_2exon_3900BP`, `TCp_2exon_4KB`, `TFp_4exon_6KB` (+, `G11`); `TEn_SE_17500BP` (−, `G12`); `TDn_SE_1KB` (−, `G13`) | **THE OWNER'S LOCUS VERBATIM** (the owner's worked example, 2026-08-19, at offset +110,000) — overlapping opposite strands (TE− blankets the + introns, so no intron there measures gDNA), nested TD− inside TE−'s exon, TC/TF sharing a TSS inside TA's exon, TC's acceptor and TF's donor meeting at one boundary, TA/TB sharing exon 3 exactly. Probes on the shared exons |
+
+⭐ The chromosome is now **28 transcripts, 9 nascent entities, 74 regions, 84 boundaries**, and the
+whole loop (simulate → cache → prewarm → certify → benchmark) is ~1 min. All 8 scenarios certify
+**COMPOSITION + FIELD** (field-gate class z-scores ≤ 1.6 on the capture-OFF rows).
+
+⭐⭐ **AND THE GAP IS CLOSED: the relay now REPRODUCES the ladder's sign structure** — it wins both
+zero controls and the deferred stratum and COSTS all three in-scope contaminated strata. gDNA absolute
+error in fragments (axis ALL), `SilentPolicy` → `RelayPolicy`, all 8 shown
+(`TRAPS: never-pool-the-strata`); measured 2026-08-19 on the grown chromosome:
+
+| scenario | Silent | Relay | | ladder stratum analogue |
+|---|---|---|---|---|
+| `g00 ss0.50 capture_off` | 95,757 | **2** | 0.000× | zero control: 0.124× |
+| `g00 ss0.50 capture_on` | 46,241 | **1,770** | 0.038× | zero control |
+| `g00 ss0.99 capture_off` | 24,836 | **2** | 0.000× | zero control |
+| `g00 ss0.99 capture_on` | 31,288 | **99** | 0.003× | zero control |
+| `g50 ss0.50 capture_off` | **673** | 2,236 | ⛔ 3.320× | in-scope: 1.388× |
+| `g50 ss0.50 capture_on` | 65,707 | **36,158** | 0.550× | DEFERRED: 0.324× |
+| `g50 ss0.99 capture_off` | **619** | 1,940 | ⛔ 3.136× | in-scope: 1.509× |
+| `g50 ss0.99 capture_on` | **5,632** | 19,086 | ⛔ 3.389× | in-scope: 1.702× |
+
+⭐ **And the damage is CONCENTRATED and NAMED** (`worst_objects.py`, top 10 objects hold 82–99 % of
+Σ|err|), in the two shapes the rebuild targets: on stranded × capture-ON the probed, terminus-flanked
+AMBIG exons of S3d (true `f_g` 0.18–0.33; the message-free local solve reads 0.31–0.38; the relay
+drives them to a CONFIDENT **0.000–0.003** — the wrong vertex, ~1,700 fragments each); on
+unstranded × capture-OFF the intron⁺/exon⁻ overlap regions under TE− (`126,000–130,000`: true 0.075,
+relayed 0.349, +1,313 fragments — the per-strand population question). ⚠ In every one of these the
+message-free `fg_loc` is closer to truth than the relayed answer: the messages are the defect, which
+is precisely what the third policy exists to fix.
 
 ## 0b. ⭐⭐ THE TOY HARNESS — a mini chromosome you define, calibrated in under a second
 

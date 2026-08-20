@@ -30,7 +30,7 @@ every slot, max gap **0**.
 rebuild is DONE. The arms genuinely disagree; the map is `ROADMAP.md` §0.
 ✅ **The standing BENCHMARK** — `relay_pool_ab.py --out` + `benchmark_report.py` (HTML). Artifacts:
 `<ladder>/benchmark/baseline_2026-08-19_shipped.{log,tsv}` and `benchmark_ladder.html`.
-✅ **The method-development TEST CHROMOSOME** — 8 transcripts over two stages, `TESTING.md` §0a.
+✅ **The method-development TEST CHROMOSOME** — 28 transcripts over three stages (Stage 3 landed 2026-08-19: the gap-closing structures), `TESTING.md` §0a.
 
 ## WHAT THE NEXT SESSION DOES
 
@@ -57,14 +57,18 @@ with `<T> = ~/Downloads/rigel_runs/test_reference`. Simulation of all 8 scenario
 ⛔ **REPORT EVERY SCENARIO. DO NOT POOL** (owner, 2026-08-19: *"DON'T POOL SCENARIOS. WE NEED TO SEE
 EVERY SCENARIO. ONLY POOL AT THE END."*). `benchmark_report.py` enforces the shape.
 
-## THE MEASUREMENT THAT SHOULD DRIVE THE DESIGN
+## THE MEASUREMENT THAT SHOULD DRIVE THE DESIGN — ✅ THE GAP IS CLOSED (2026-08-19, Stage 3)
 
-On the test chromosome the relay HELPS on all 8 scenarios; on the 16-condition ladder it COSTS the
-three in-scope strata **1.4–1.7×** while winning the control (0.124×) and the deferred stratum (0.324×).
-⭐ **That gap is the most useful thing on the table**: whatever `RelayPolicy` gets wrong on the real
-panel is NOT yet represented on the test chromosome. The next structures to add are the ones that would
-close it — overlapping genes on opposite strands, alternate TSS/TES, a long multi-exon gene whose exons
-are many hops apart (the ladder puts 23–29 % of imputed mass ≥ 9 hops from any measured gDNA).
+The Stage-2 chromosome had the relay HELPING on all 8 scenarios while the ladder had it COSTING the
+three in-scope strata 1.4–1.7× — so the failure was not represented. **Stage 3 added the named
+structures (`TESTING.md` §0a: antisense overlap, alternate TSS/TES, the 10-tile deep exonic corridor,
+and the owner's TA–TF locus verbatim) and the grown chromosome now REPRODUCES the ladder's sign
+structure exactly**: relay wins all four zero controls (0.000–0.038×) and the deferred stratum
+(0.550×), and costs the three in-scope contaminated rows **3.1–3.4×**. The damage is concentrated and
+named (`worst_objects.py`): the probed terminus-flanked AMBIG exons of the owner's locus driven to a
+confident wrong vertex (`fg_loc` 0.31–0.38 → relayed 0.000–0.003 against truths 0.18–0.33), and the
+intron⁺/exon⁻ overlap regions under TE−. All 8 scenarios certify COMPOSITION + FIELD. ⭐ **So the
+policy rungs can now be scored against failures the substrate actually exhibits.**
 
 ## THE TRAPS THIS SESSION PAID FOR
 
