@@ -130,6 +130,53 @@ two-direction combine averaging two claims each of which satisfies the identity 
 admissibility zeroing applied AFTER the rescale; and the sj flux missing from the model-free total.
 ⛔ Next session starts here, with `worst_objects.py` on `gdna_g00_ss_0.99_nrna_file_capture_on`.
 
+## ⭐⭐⭐ WHERE THE ZERO-gDNA ERROR COMES FROM — MEASURED, and it is the REFERENCE'S MEAN
+
+The owner's hypothesis, tested and confirmed on the local solve with messages OFF, scored against the
+certified per-slot truth in FRAGMENTS. ⛔ The first run of this experiment read a NULL result because
+`region_init` holds its OWN module reference to the solver, so patching the sweep's binding left the
+local self-solve — the very thing under test — calling the original
+(`TRAPS: an-ablation-that-never-ran`; the tell was pass-0 coming back byte-identical).
+
+**① The Jeffreys ½ mean is the ENTIRE zero-gDNA local-solve error.** Setting the reference's mean per
+object from the MEASURED background — `m_i = rho_bg·E_g,i / M_i`, with `rho_bg` the pooled gDNA density
+of the structurally pure-gDNA slots, which are EMPTY at a zero-gDNA library — takes all four zero
+controls to **exactly 0**:
+
+| condition | shipped `m = ½` | anchor `m_i` |
+|---|---|---|
+| `g00 ss0.50 capture_off` | 95,757 | **0** |
+| `g00 ss0.50 capture_on` | 46,241 | **0** |
+| `g00 ss0.99 capture_off` | 24,836 | **0** |
+| `g00 ss0.99 capture_on` | 31,288 | **0** |
+| `g50 ss0.50 capture_off` | 673 | 711 |
+| `g50 ss0.99 capture_off` | 619 | **597** |
+| `g50 ss0.50 capture_on` | 65,707 | 65,917 |
+| ⛔ `g50 ss0.99 capture_on` | 5,632 | 18,805 |
+
+⭐ This reproduces `object_composition.py`'s verdict (a per-object `m` is worth 25x, "exactly 0.000 at
+both zero controls") **through the solver** rather than as a prior score, which is the step that was
+missing. And it needs NO new constant: `_location_term`'s own derivation already says `location` IS the
+object's prior expected composition and reduces to the shipped constant exactly at `m = ½`.
+
+**② The one loss is the DOCUMENTED capture limitation, not a new defect.** Off-target anchors under-read
+on-target gDNA by 2.6–3.6x under capture (`DESIGN.md` §0c's anchor ladder), so `m_i` is far too low at a
+probed exon and the reference then under-calls gDNA where there IS gDNA. That is exactly the gap
+`ROADMAP.md` §1 rank 3's spike-and-slab exists to close, reached from a new direction.
+
+**③ THE DAMAGE IS AMPLIFIED BY THE REFIT LOOP, WHICH IS WHY THE STRENGTH KNOB LOOKS BETTER THAN IT IS.**
+Weakening the reference's STRENGTH (`_JEFFREYS_REF` ½ → 0.05) makes pass-0 WORSE (99,115 → 107,991 at
+`g00 ss0.50 capture_off`) and the FINAL answer perfect (94,366 → 1) — because a weak reference lets the
+landscape learn the TRUE (zero) gDNA level, while the strong ½ teaches it "half gDNA" and the refits
+compound it. ⛔ It is not a candidate: it costs `g50 ss0.99 capture_on` **3.6x**, where the library
+genuinely IS ~half gDNA and the ½ mean is accidentally right. **The knob is the MEAN, not the strength.**
+
+⚠ **What this does NOT resolve, and the owner named it first**: whether spliced fragments are enriched
+depends on PROBE PLACEMENT — a probe spanning the junction enriches them, a probe deep in the exon
+depletes them relative to the exon body — so no fixed rule for the flux frame can be right everywhere,
+and it has to be learned. The policy's `(log r)²` frame damping is a "we do not know" treatment of
+exactly that, not a solution to it.
+
 ## THE CONCEPT LADDER (one at a time, benchmark after each, both zero controls every time)
 
 | concept | what lands | gate |
