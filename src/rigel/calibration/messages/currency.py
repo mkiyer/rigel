@@ -47,6 +47,7 @@ already gated on the owner's worked numbers and wire at C.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -134,7 +135,19 @@ def population_equal_from_left(ctx: StepContext) -> np.ndarray:
     is_b = np.asarray(ctx.is_boundary, bool)
     left = np.asarray(ctx.left, np.int64)
     sl = np.clip(left, 0, int(is_b.shape[0]) - 1)
-    return np.where(is_b, ~np.asarray(lgain, bool), ~np.asarray(rgain, bool)[sl]) & (left >= 0)
+    by_terminus = np.where(is_b, ~np.asarray(lgain, bool), ~np.asarray(rgain, bool)[sl])
+    # ⭐⭐ THE SECOND POPULATION PREDICATE (owner, 2026-08-18): **a strand ADMISSIBLE on one side of a
+    # hop and not the other is a different RNA population by construction.** The terminus flags cannot
+    # see it — a gene edge beside an intergenic region need carry no TSS/TES bit at all — so a table
+    # keyed on the flags alone licenses a composition across it. ⛔ What that costs is specific: a
+    # structurally pure-gDNA slot's composition is a legitimate ``f_g = 1`` and an EMPTY one's
+    # abundance is ~0, so transporting its COMPOSITION says "you are all gDNA" where transporting its
+    # ABUNDANCE says "there is almost no gDNA here". At a zero-gDNA library the second is true and the
+    # first is the whole error.
+    fp = np.asarray(ctx.free_pos, bool)
+    fn = np.asarray(ctx.free_neg, bool)
+    same_strands = (fp == fp[sl]) & (fn == fn[sl])
+    return by_terminus & same_strands & (left >= 0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -188,9 +201,19 @@ def enrichment_ratio(ctx: StepContext, *, backward: bool) -> np.ndarray:
 
     Returns 1.0 (perfect agreement — no evidence of enrichment) where either end reads nothing."""
     inv = np.asarray(ctx.inv_abundance, np.float64)
+    lo = inv + np.asarray(ctx.inv_sj_lo, np.float64).sum(axis=1)
+    hi = inv + np.asarray(ctx.inv_sj_hi, np.float64).sum(axis=1)
+    # ⭐⭐ ONE TOTAL PER FACE, and the sj flux is what makes it a total (`EQUATIONS.md` §3.6c's flank
+    # pair, in model-free units). Mature RNA cannot cross an exon|intron boundary contiguously, so the
+    # exon's mature fragments appear at the boundary as FLUX rather than as crossings; comparing the
+    # boundary's unspliced abundance against the exon's total reports a large "depletion" where there
+    # is no probe at all. ⛔ Measured: omitting it cost 30.8x at `g50 ss0.50 capture_off`.
+    # The pairing is the scan's: travelling low→high the destination presents its LOW face and the
+    # source its HIGH one; backward is the mirror. A REGION's two faces are equal (it carries no flux).
     nbr = np.asarray(ctx.right if backward else ctx.left, np.int64)
     src = np.clip(nbr, 0, inv.shape[0] - 1)
-    t_src, t_dst = inv[src], inv
+    t_dst = hi if backward else lo
+    t_src = (lo if backward else hi)[src]
     ok = (nbr >= 0) & (t_src > 0.0) & (t_dst > 0.0)
     return np.where(ok, t_dst / np.where(ok, t_src, 1.0), 1.0)
 
@@ -221,27 +244,24 @@ def rescale_weight(*, log_ratio: float, var_ratio: float) -> float:
     return lr2 / (lr2 + v) if v > 0.0 else 1.0
 
 
+#: ⛔⛔ **THE MASS-IDENTITY RESCALE WAS BUILT HERE AND IS DELETED — the record, so it is not rebuilt.**
+#: ``k = M_dst / Sigma_c rho_c,src · E_c,dst`` is exact under the premise and free of the destination's
+#: belief, and it reproduced §3.5e's worked numbers. ⛔ It is nevertheless WRONG AS A TRANSPORT, and the
+#: reason is structural rather than a tuning failure: it rests on the SOURCE's belief being right, so a
+#: source whose claim is small returns a huge ``k``. Measured on the test chromosome: a source holding
+#: gDNA 3.9e-4 and RNA exactly 0 was rescaled by **235,800x** to account for a 23,889-fragment exon, and
+#: since the only non-zero component was gDNA the exon was handed "all your mass is gDNA" — ``f_g``
+#: 1.000 against a truth of 0.000 at a ZERO-gDNA library. That is the relay's own mass-rescale
+#: pathology re-entering through a different door.
+#: ⭐ The transport is the MEASURED enrichment ratio instead (:func:`enrichment_ratio`): it agrees with
+#: ``k`` exactly where the source's belief is right — which is what the worked numbers check — and it
+#: cannot amplify a claim the source does not have, because it never reads the claim.
+
+
 def composition_rescale_factor(*, rho_g, rho_p, rho_n, E_g_dst, E_r_dst, M_dst):
-    """The COMPOSITION strategy's rescale ``k``, EXACT under the premise and free of the DESTINATION's
-    belief — which is what makes it admissible where the relay's mass rescale was not.
-
-    Under the premise the two slots share a population and differ by ONE common enrichment factor
-    ``k``: ``rho_c,dst = k · rho_c,src`` for every component. Laying the SOURCE's abundances down in
-    the DESTINATION's geometry and requiring them to account for the destination's OBSERVED mass
-    determines it::
-
-        S  =  rho_g,src · E_g,dst  +  (rho_+,src + rho_-,src) · E_r,dst
-        k  =  M_dst / S
-
-    ⭐ **Only the source's BELIEF and the destination's OBSERVATIONS + CONSTANTS enter** — `StepContext`
-    permits exactly that, and the destination's own belief never touches it
-    (``TRAPS: a-message-from-the-destinations-belief``). ⛔ It is NOT the relay's mass rescale, which
-    filled the components the source did not supply from the DESTINATION's belief and thereby turned a
-    refused claim into "all your mass is gDNA".
-    ⭐ It reproduces `EQUATIONS.md` §3.5e's worked numbers exactly in both directions, and unlike a
-    ratio of ``M/E_g`` totals it is correct per arm when the two components' opportunities differ —
-    which between a REGION and a BOUNDARY they always do.
-    Returns ``None`` where the premise cannot be evaluated (no mass, or a source claiming nothing)."""
+    """⛔ RETAINED ONLY AS THE FALSIFICATION of the note above: the mass-identity rescale, which the
+    policy no longer uses. `test_the_mass_identity_rescale_amplifies_a_weak_claim` is what keeps the
+    reason measured rather than remembered."""
     S = float(rho_g) * float(E_g_dst) + (float(rho_p) + float(rho_n)) * float(E_r_dst)
     if S <= 0.0 or float(M_dst) <= 0.0:
         return None
@@ -286,6 +306,30 @@ class _CurrencyRelay:
         )
         self._fp = np.asarray(ctx.free_pos, bool)
         self._fn = np.asarray(ctx.free_neg, bool)
+        # ⭐⭐⭐ A COMPOSITION CLAIM REQUIRES COMPOSITION EVIDENCE, and a structural lock is evidence
+        # only where the STRUCTURE determines the composition — i.e. where no RNA strand is admissible
+        # (``g1_locked``). A slot that admits an RNA strand and still reports certainty is reporting a
+        # DEFAULT (``f_g = 1``, "all gDNA") rather than a measurement, and believed as a composition it
+        # is catastrophic: transported into a 23,889-fragment exon at a ZERO-gDNA library it delivered a
+        # gDNA share of 1.0000 and ψ solved ``f_g = 1.000`` against a truth of 0.000 (measured, and it
+        # was 75,963 false-positive fragments on that condition alone).
+        # ⛔ The RNA arms of such a slot therefore make NO CLAIM — value and precision zeroed in ONE
+        # statement (``TRAPS: zero-the-precision-with-the-value``) — which also withdraws the SUPPLY the
+        # composition licence needs, so the slot can still transport an ABUNDANCE and never a
+        # composition. ⭐ Its gDNA claim SURVIVES: "no fragments over this much opportunity" is a real
+        # observation and it is what the zero controls run on.
+        _lock = np.asarray(getattr(own, "struct_lock", np.zeros(len(self._fp), bool)), bool)
+        _mis_lock = _lock & (self._fp | self._fn)
+        if np.any(_mis_lock):
+            v_p, v_n = self._val0[1].copy(), self._val0[2].copy()
+            p_p, p_n = self._prec0[1].copy(), self._prec0[2].copy()
+            v_p[_mis_lock] = 0.0
+            v_n[_mis_lock] = 0.0
+            p_p[_mis_lock] = 0.0
+            p_n[_mis_lock] = 0.0
+            self._val0 = (self._val0[0], v_p, v_n)
+            self._prec0 = (self._prec0[0], p_p, p_n)
+        self._mis_lock = _mis_lock
         # ── the static tables ────────────────────────────────────────────────────────────────────────
         self.structure = hop_structure(ctx.is_boundary, ctx.boundary_flags)
         eq_l = population_equal_from_left(ctx)
@@ -322,6 +366,18 @@ class _CurrencyRelay:
             z = np.zeros(int(self._M.shape[0]))
             self._flux_lo = (z, z.copy())
             self._flux_hi = (z.copy(), z.copy())
+        # the flux banks, per FACE and per TRANSCRIPT strand: the model-free abundance and the raw
+        # count that gives it its precision
+        self._inv_sj_lo = np.asarray(ctx.inv_sj_lo, np.float64)
+        self._inv_sj_hi = np.asarray(ctx.inv_sj_hi, np.float64)
+        _z2 = np.zeros_like(self._inv_sj_lo)
+        self._sj_lo = (
+            np.asarray(getattr(g, "sj_count_lo", _z2), np.float64) if g is not None else _z2
+        )
+        self._sj_hi = (
+            np.asarray(getattr(g, "sj_count_hi", _z2), np.float64) if g is not None else _z2.copy()
+        )
+
         # ── the PER-HOP TABLES, both directions, indexed by the DESTINATION slot ─────────────────────
         # ⭐ ONE derivation read by BOTH twins (the sequential scan and the vectorised deliver) — the
         # relay's scalar/vector twin drift is what this precomputation exists to prevent.
@@ -339,7 +395,20 @@ class _CurrencyRelay:
             # NO constant of its own: it is entirely trigamma of observed counts.
             r_enr = enrichment_ratio(ctx, backward=backward)
             n_obs = np.asarray(ctx.n_slot, np.float64)
+            # ⭐⭐⭐ THE SPLICE IN's CERTIFIED-RNA MEASUREMENT, per strand: the flux whose bodies lie on
+            # the DESTINATION's side enters the exon as RNA that cannot be gDNA. Its abundance is the
+            # model-free bank and its precision is its own COUNT's — it is a measurement, so it is
+            # neither licensed nor rescaled.
+            # ⚠ the SAME face pairing the ratio uses: travelling low→high the SOURCE presents its HIGH
+            # face, so the flux entering the destination is the source's HIGH-end flux; backward is the
+            # mirror. Getting this backwards makes the operator silently inert (measured: it did).
+            f_in = self._inv_sj_lo if backward else self._inv_sj_hi
+            c_in = self._sj_lo if backward else self._sj_hi
             self._tables[backward] = {
+                "splice_in_rho": f_in[sn],
+                "splice_in_prec": np.where(
+                    c_in[sn] > 0.0, 1.0 / count_logvar(np.maximum(c_in[sn], 0.0)), 0.0
+                ),
                 "log_r": np.log(np.maximum(r_enr, _EPS)),
                 "v_r": count_logvar(n_obs) + count_logvar(n_obs[sn]),
                 "eq": self._eq_r if backward else self._eq_l,
@@ -378,10 +447,12 @@ class _CurrencyRelay:
         log_r_l = tab["log_r"].tolist()
         v_r_l = tab["v_r"].tolist()
         eq = tab["eq"].tolist()
+        si_rho = tab["splice_in_rho"].tolist()
+        si_prec = tab["splice_in_prec"].tolist()
         fx_p = tab["fx_p"].tolist()
         fx_n = tab["fx_n"].tolist()
         dst_is_b = tab["dst_is_b"].tolist()
-        E_g_l, E_r_l, M_l = self._E_g.tolist(), self._E_r.tolist(), self._M.tolist()
+        E_g_l, E_r_l = self._E_g.tolist(), self._E_r.tolist()
         # the RUNNING state (mutated in place) and the OWN beliefs (read-only), as Python lists
         vg, vp, vn = (a.tolist() for a in self._val0)
         pg, pp, pn = (a.tolist() for a in self._prec0)
@@ -404,6 +475,12 @@ class _CurrencyRelay:
                 p = min(p, 1.0 / v)
             add = float(w) * float(v_r)
             return p / (1.0 + p * add) if add > 0.0 else p
+
+        def _frame(p: float, lr: float) -> float:
+            """The SPLICE-IN bound's frame variance — ``(log r)²``, the tree's own
+            :func:`~.variance.splice_in_frame_logvar`, identically 0 where the two faces agree."""
+            v = float(lr) * float(lr)
+            return p / (1.0 + p * v) if (p > 0.0 and v > 0.0) else p
 
         def _damp_disagreement(p: float, lr: float, w: float) -> float:
             """The other half of the same statement (owner: *"the greater the disagreement, the less
@@ -443,30 +520,23 @@ class _CurrencyRelay:
                 # flux with it (those fragments continue contiguously into the exon); a SPLICE OUT
                 # does not (they splice out and land elsewhere) and the flux is removed AFTER the
                 # rescale, at the destination's own scale.
-                in_p = tp_ + (0.0 if dst_is_b[i] else fx_p[i])
-                in_n = tn_ + (0.0 if dst_is_b[i] else fx_n[i])
-                # ⭐ the destination's OBSERVED mass for THIS hop's population: at a SPLICE OUT the
-                # fragments that splice out here ARE observed at the boundary, as its sj flux, so the
-                # face's mass is flux-inclusive (`EQUATIONS.md` §3.6c's per-flank total). At a SPLICE
-                # IN the flux is already inside the message and the region's own mass is the total.
-                m_face = M_l[i] + (fx_p[i] + fx_n[i] if dst_is_b[i] else 0.0)
-                kk_full = composition_rescale_factor(
-                    rho_g=tg,
-                    rho_p=in_p,
-                    rho_n=in_n,
-                    E_g_dst=E_g_l[i],
-                    E_r_dst=E_r_l[i],
-                    M_dst=m_face,
-                )
-                # ⭐ the knob applied: ``k^w`` interpolates in LOG SPACE between no rescale (w = 0) and
-                # the full mass-identity rescale (w = 1). The exponent is the data's answer, not a flag.
-                kk = None if kk_full is None else kk_full**w
-                if kk is None:
-                    tpg = tpp = tpn = (
-                        0.0  # the premise cannot be evaluated — no claim, one statement
-                    )
-                    tg = tp_ = tn_ = 0.0
-                else:
+                # ⛔⛔ **THE FLUX IS NOT IN THE TRANSPORTED POPULATION, AND THIS IS A DELIBERATE
+                # DEVIATION FROM `EQUATIONS.md` §3.5e(ii)'s WORKED ARITHMETIC — recorded, not slipped
+                # in.** §3.5e adds the spliced-in flux to the message and rescales the whole thing; that
+                # is self-consistent in one frame, which is the frame the worked example is in. Under
+                # CAPTURE it is not: those fragments' BODIES lie in the destination exon, so they were
+                # enriched by the EXON's probes, and multiplying them by a boundary→exon enrichment
+                # ratio enriches them twice. ⭐ They enter once, below, as a MEASUREMENT of the exon's
+                # RNA at their own count's precision (`DESIGN.md` §0c.1's four properties), which is
+                # also what stops them being damped by a transport they never made.
+                in_p = tp_
+                in_n = tn_
+                # ⭐⭐ the transport is the MEASURED enrichment ratio, raised to the knob: ``r^w``
+                # interpolates in LOG SPACE between no rescale (w = 0) and believing the ratio in full
+                # (w = 1). ⛔ NOT the mass-identity ``k`` — see the note on
+                # :func:`composition_rescale_factor` for the 235,800x amplification that cost.
+                kk = math.exp(w * lr)
+                if True:
                     tg = tg * kk
                     if dst_is_b[i]:  # SPLICE OUT: the sj flux leaves at the destination's scale
                         tp_ = max(in_p * kk - fx_p[i], 0.0)
@@ -490,6 +560,42 @@ class _CurrencyRelay:
                 tpg = _damp_disagreement(tpg, lr, w)
                 tpp = _damp_disagreement(tpp, lr, w)
                 tpn = _damp_disagreement(tpn, lr, w)
+            # ⭐⭐⭐ THE SPLICE IN — a MEASUREMENT, not an imputation: a spliced fragment cannot be
+            # gDNA, so the flux entering this exon is CERTIFIED RNA of its own strand, at its own
+            # COUNT's precision. ⛔ It is added AFTER the transport AND after the disagreement damping,
+            # because it did not travel as an imputation and must not inherit the hop's distrust — that
+            # is what "it carries its own precision" means. ⛔ And BEFORE the admissibility refusal
+            # below, so a refused arm's zeroing stays the last word
+            # (``TRAPS: zero-the-precision-with-the-value``: an operator that GRANTS a precision must
+            # run before the zeroing, never after).
+            if not dst_is_b[i]:
+                # ⛔⛔ **THE CERTIFIED FLUX IS A LOWER BOUND, NOT AN ESTIMATE, and treating it as an
+                # equality is measurably worse.** It counts MATURE fragments only; the exon's RNA is
+                # mature PLUS nascent, so an equality under-states every exon with unspliced RNA in it
+                # and ψ books the shortfall as gDNA. Measured on the test chromosome: as an equality it
+                # won the capture-ON zero controls (33,281 → 18,699) and LOST four other rows, worst
+                # 666 → 4,172 at `g50 ss0.99 capture_off` — a condition with no probes at all.
+                # ⭐ So it is applied ONE-SIDED: it may RAISE an RNA claim and may never lower one, and
+                # a bound already satisfied says nothing and adds no precision — that is the whole
+                # difference between a bound and a measurement.
+                # ⭐⭐ And where it DOES bind it fuses by precision rather than replacing the claim: the
+                # flux is measured in the sj's own frame and over-states an exon's contained density
+                # (`EQUATIONS.md` §3.6b's two divisors of opposite sign), so jumping the claim to it
+                # over-corrects — measured, replacement under-called gDNA by 20,752 fragments at
+                # `g50 ss0.50 capture_on`. A fusion raises the claim as far as the two precisions
+                # justify and no further.
+                gp, gpp = si_rho[i][0], si_prec[i][0]
+                gn, gpn = si_rho[i][1], si_prec[i][1]
+                # ⚠ the bound is measured in the sj's OWN frame — its fragments span the junction and
+                # sample a different position distribution from the exon's contained ones, which under
+                # capture is a different enrichment. That frame step is charged as a variance, and it is
+                # the tree's existing derivation for this very operator (`splice_in_frame_logvar`,
+                # ``(log r)²``), so the bound is believed in proportion to how comparable the two
+                # frames are rather than absolutely.
+                if gpp > 0.0 and gp > tp_:
+                    tp_, tpp = gp, tpp + _frame(gpp, lr)
+                if gpn > 0.0 and gn > tn_:
+                    tn_, tpn = gn, tpn + _frame(gpn, lr)
             # an inadmissible strand at the destination: no claim — value and precision together
             if not fp_l[i]:
                 tp_, tpp = 0.0, 0.0
@@ -526,15 +632,11 @@ class _CurrencyRelay:
         fx_p, fx_n = tab["fx_p"], tab["fx_n"]
         dst_is_b = np.asarray(tab["dst_is_b"], bool)
         # the population ENTERING the destination — direction-dependent (a SPLICE IN carries the flux)
-        in_p = vp + np.where(dst_is_b, 0.0, fx_p)
-        in_n = vn + np.where(dst_is_b, 0.0, fx_n)
+        in_p, in_n = vp, vn  # the flux enters as a MEASUREMENT below, never in the transport
         # the k-form: the source's claim laid down in the destination's geometry must account for the
         # destination's OBSERVED mass. Exact under the premise, free of the destination's BELIEF.
-        S = vg * self._E_g + (in_p + in_n) * self._E_r
-        m_face = self._M + np.where(dst_is_b, fx_p + fx_n, 0.0)
-        ok = eq & (S > 0.0) & (m_face > 0.0) & (w > 0.0)
-        k_full = np.where(ok, m_face / np.where(S > 0.0, S, 1.0), 1.0)
-        k = np.where(ok, k_full**w, 1.0)  # ``k^w`` — the knob, in log space
+        ok = eq & (w > 0.0)
+        k = np.where(ok, np.exp(w * log_r), 1.0)  # ``r^w`` — the MEASURED ratio, at the knob
         out_g = np.where(ok, vg * k, vg)
         out_p = np.where(ok, np.where(dst_is_b, np.maximum(in_p * k - fx_p, 0.0), in_p * k), vp)
         out_n = np.where(ok, np.where(dst_is_b, np.maximum(in_n * k - fx_n, 0.0), in_n * k), vn)
@@ -558,6 +660,24 @@ class _CurrencyRelay:
             out = np.where(add > 0.0, out / (1.0 + out * add), out)
             return np.where(dead, 0.0, out)
 
+        # ⭐ the SPLICE IN's certified-RNA measurement, vectorised — same table, same rule
+        si_r = np.asarray(tab["splice_in_rho"], np.float64)
+        si_p = np.asarray(tab["splice_in_prec"], np.float64)
+        into_region = ~dst_is_b
+        for arm in (0, 1):
+            add_v = np.where(into_region, si_r[:, arm], 0.0)
+            add_p = np.where(into_region, si_p[:, arm], 0.0)
+            base_v, base_p = (out_p, pp) if arm == 0 else (out_n, pn)
+            # ONE-SIDED: the bound may raise the claim, never lower it — see the scalar twin's note
+            binds = (add_p > 0.0) & (add_v > base_v)
+            fr = log_r * log_r  # the frame step between the sj's own frame and the exon's
+            add_p = np.where(fr > 0.0, add_p / (1.0 + add_p * fr), add_p)
+            v = np.where(binds, add_v, base_v)
+            p = np.where(binds, base_p + add_p, base_p)
+            if arm == 0:
+                out_p, pp = v, p
+            else:
+                out_n, pn = v, p
         out_g = np.where(dead, 0.0, out_g)
         out_p = np.where(dead, 0.0, out_p)
         out_n = np.where(dead, 0.0, out_n)

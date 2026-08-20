@@ -34,6 +34,8 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
     return StepContext(
         mass=ones * 100.0,
         inv_abundance=ones * 0.5,
+        inv_sj_lo=np.zeros((N, 2)),
+        inv_sj_hi=np.zeros((N, 2)),
         eff_gdna_global=ones * 200.0,
         eff_rna=ones * 200.0,
         eff_gdna=ones * 200.0,

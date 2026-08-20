@@ -175,6 +175,19 @@ class RegionGeometry:
     #: ⚠ Deposited at ACCUMULATOR time and carried unread until 2026-08-20; enrichment ratios are what
     #: needed it (`messages/currency.py`).
     inv_abundance: np.ndarray
+    #: ⭐⭐ the SJ FLUX's own model-free abundance ``[n, 2]`` BY TRANSCRIPT STRAND, split by which
+    #: genomic END of its sj this BOUNDARY is — the same reciprocal-opportunity deposit
+    #: (`sj_inv_length_sum`), so it is in the SAME units as :attr:`inv_abundance`: sum the strands and
+    #: add for a FACE's total, or read one column for that strand's CERTIFIED-RNA measurement (a
+    #: spliced fragment cannot be gDNA, so this arm needs no deconvolution).
+    #: ⛔⛔ **Without it a face's total is not a total, and the consequence is not subtle**: mature RNA
+    #: cannot cross an exon|intron boundary contiguously, so an exon and its boundary hold genuinely
+    #: different fragment populations and their unspliced totals differ by the whole sj flux — with NO
+    #: enrichment involved. A transport that reads that difference as enrichment scales gDNA by it;
+    #: measured on the test chromosome, that cost **30.8x** at `g50 ss0.50 capture_off`, a condition with
+    #: no probes at all.
+    inv_sj_lo: np.ndarray
+    inv_sj_hi: np.ndarray
     sj_count_lo: np.ndarray
     sj_count_hi: np.ndarray
     #: float64[n_slots, 2] — the matching divisors, split the same way.
@@ -291,6 +304,9 @@ def build_region_geometry(
     #: the same flux kept apart by which genomic END of its sj the boundary is — see the dataclass.
     jc_lo = np.zeros((n, 2), dtype=np.float64)
     jc_hi = np.zeros((n, 2), dtype=np.float64)
+    #: the flux's MODEL-FREE abundance per face — summed over the sj attached at that end, no divisor
+    inv_sj_lo = np.zeros((n, 2), dtype=np.float64)
+    inv_sj_hi = np.zeros((n, 2), dtype=np.float64)
     ej_lo = np.zeros((n, 2), dtype=np.float64)
     ej_hi = np.zeros((n, 2), dtype=np.float64)
     if sj.n_sj:
@@ -313,16 +329,34 @@ def build_region_geometry(
         # ⚠ ``donor`` is the boundary at the sj's genomic-LOW end and ``acceptor`` the genomic-HIGH
         # one — for BOTH strands, because ``chain.right``/``chain.left`` are genomic and boundaries run
         # ``src < dst`` (`splice_graph`, DESIGN §2). The names are the index's; the meaning is genomic.
-        for boundary, jc, ej in ((donor, jc_lo, ej_lo), (acceptor, jc_hi, ej_hi)):
+        _sj_inv = getattr(substrate.sj, "inv_length_sum", None)
+        _sj_inv = None if _sj_inv is None else np.asarray(_sj_inv, np.float64)
+        # ⛔ ONE column per sj — the executable specification's shape. Asserted rather than reshaped:
+        # a 2-column array here would broadcast into the face totals and silently double them.
+        if _sj_inv is not None and _sj_inv.shape != (int(sj.n_sj),):
+            raise ValueError(
+                f"sj inv_length_sum has shape {_sj_inv.shape}, expected ({int(sj.n_sj)},) — one "
+                "reciprocal-opportunity column per sj (tests/native/_accumulator_reference.py)"
+            )
+        for boundary, jc, ej, inv_face in (
+            (donor, jc_lo, ej_lo, inv_sj_lo),
+            (acceptor, jc_hi, ej_hi, inv_sj_hi),
+        ):
             np.add.at(sj_count, (boundary, column), flux)
             np.add.at(eff_sj, (boundary, column), eff)
             np.add.at(jc, (boundary, column), flux)
             np.add.at(ej, (boundary, column), eff)
+            if _sj_inv is not None:
+                # ⭐ filed under the sj's TRANSCRIPT strand, exactly as its count is — the flux is
+                # CERTIFIED RNA of that strand, so a policy can read it as a per-arm measurement.
+                np.add.at(inv_face, (boundary, column), _sj_inv)
 
     return RegionGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
         inv_abundance=inv_abundance,
+        inv_sj_lo=inv_sj_lo,
+        inv_sj_hi=inv_sj_hi,
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,

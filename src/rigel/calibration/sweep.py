@@ -448,6 +448,8 @@ def solve_chain(
         # observations
         mass=mass_global,
         inv_abundance=np.asarray(geometry.inv_abundance, np.float64),
+        inv_sj_lo=np.asarray(geometry.inv_sj_lo, np.float64),
+        inv_sj_hi=np.asarray(geometry.inv_sj_hi, np.float64),
         eff_gdna_global=eff_global,
         eff_rna=ER,
         eff_gdna=EG,

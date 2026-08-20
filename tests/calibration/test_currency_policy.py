@@ -23,6 +23,8 @@ The architecture under test is the owner's (2026-08-19, second ruling pass):
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -77,6 +79,8 @@ def _ctx(
     eff=None,
     eff_rna=None,
     inv_abundance=None,
+    inv_sj_lo=None,
+    inv_sj_hi=None,
     n_slot=None,
     boundary_flags=None,
     free_pos=None,
@@ -107,6 +111,9 @@ def _ctx(
         inv_abundance=m / np.where(e > 0, e, 1.0)
         if inv_abundance is None
         else np.asarray(inv_abundance, np.float64),
+        # the sj flux's own model-free abundance per face — a fixture states it only when it has sj
+        inv_sj_lo=np.zeros((N, 2)) if inv_sj_lo is None else np.asarray(inv_sj_lo, np.float64),
+        inv_sj_hi=np.zeros((N, 2)) if inv_sj_hi is None else np.asarray(inv_sj_hi, np.float64),
         eff_gdna_global=e,
         eff_rna=e_r,
         eff_gdna=e,
@@ -401,7 +408,7 @@ def test_a_composition_hop_rescales_by_the_measured_totals():
     doubles — the rescale is the MEASURED total ratio, no belief anywhere in it (owner ruling)."""
     # the source supplies BOTH live components (the licence's SUPPLY half); one frame, E = 200
     eff = np.full(N, 200.0)
-    mass = np.array([100.0, 40.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
+    mass = np.array([100.0, 200.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
     rho = {
         "g": np.array([0.1, 0, 0, 0, 0, 0, 0, 0, 0]),
         "p": np.array([0.4, 0, 0, 0, 0, 0, 0, 0, 0]),
@@ -424,9 +431,10 @@ def test_a_composition_hop_rescales_by_the_measured_totals():
     )
     object.__setattr__(ctx, "geometry", _geom())
     msg = _deliver(ctx)
-    # k = M_dst / S with S = (0.1 + 0.4)*200 = 100 and M_dst = 40 -> k = 0.4; the gDNA claim becomes
-    # 0.04, i.e. a share of 0.04*200/40 = 0.2 at the destination
-    np.testing.assert_allclose(np.exp(np.asarray(msg.gdna_mode)[1]), 0.2, rtol=1e-8)
+    # ⭐ the transport is the MEASURED enrichment ratio: the boundary's total abundance is 2x the
+    # region's, so the claim doubles — 0.1 -> 0.2 — and the delivered share is 0.2*200/200 = 0.2.
+    # ⛔ NOT the mass-identity k, which would have read the SOURCE's belief and scaled to fill M.
+    np.testing.assert_allclose(np.exp(np.asarray(msg.gdna_mode)[1]), 0.2, rtol=1e-7)
     # and the precision is CAPPED at what the source counts support ("still based on 2 fragments"):
     # n_g = 0.1*200 = 20 of n_tot = 100 -> cap = 1/(trigamma(20.5) - trigamma(101.5)), below 500
     from rigel.calibration.messages.variance import count_logvar
@@ -495,9 +503,16 @@ def test_the_splice_flux_arithmetic_matches_the_worked_numbers_end_to_end():
     np.testing.assert_allclose(vp[1], 1.0, rtol=1e-7)
 
 
-def test_the_splice_in_flux_joins_the_message_out_of_a_boundary():
-    """§3.5e(ii) wired: a boundary's claim entering its exon carries the flux WITH it, then rescales —
-    {2, 1, 0} + flux 17 at totals 20 -> 100 becomes {10, 90, 0}."""
+def test_the_splice_in_flux_reaches_the_exon_WITHOUT_being_rescaled():
+    """⚠ **A DELIBERATE DEVIATION FROM `EQUATIONS.md` §3.5e(ii), and the reason is capture.** The
+    worked arithmetic adds the spliced-in flux to the message and rescales the whole thing, which is
+    self-consistent in ONE frame — the frame the example is written in. Under capture it is not: those
+    fragments' BODIES lie in the destination exon, so they were enriched by the EXON's probes, and
+    multiplying them by a boundary→exon enrichment ratio enriches them twice.
+
+    ⭐ So the unspliced claim transports (and rescales), and the flux arrives separately as a
+    MEASUREMENT of the exon's RNA at its own count's precision. Here the unspliced {2, 1, 0} rescales
+    by 100/20 = 5 to {10, 5, 0} and the flux adds its measured 17 on the RNA arm."""
     mass = np.array([1.0, 3.0, 100.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     eff = np.ones(N)
     rho = {
@@ -512,6 +527,9 @@ def test_the_splice_in_flux_joins_the_message_out_of_a_boundary():
     # the boundary's HI face carries the flux (the hop into the RIGHT region is the splice-in)
     flux_hi = np.zeros((N, 2))
     flux_hi[1, 0] = 17.0
+    inv_hi = np.zeros((N, 2))
+    inv_hi[1, 0] = 17.0  # ⚠ the SAME fragments: a fixture that states a count and no abundance is
+    # stating that 17 spliced fragments have zero density, which no substrate can produce
     inv = np.full(N, 20.0)
     inv[2] = 100.0
     ctx = _ctx(
@@ -520,6 +538,7 @@ def test_the_splice_in_flux_joins_the_message_out_of_a_boundary():
         eff=eff,
         boundary_flags=fl,
         inv_abundance=inv,
+        inv_sj_hi=inv_hi,
         n_slot=np.full(N, 1.0e9),
     )
     object.__setattr__(ctx, "geometry", _geom(flux_hi=flux_hi))
@@ -528,8 +547,14 @@ def test_the_splice_in_flux_joins_the_message_out_of_a_boundary():
     step(0, 1)  # beliefless region 0 into the boundary: nothing arrives (prec 0 either side)
     step(1, 2)  # the boundary's own belief splices IN to region 2
     vg, vp, vn, pg, pp, pn = publish()
-    np.testing.assert_allclose(vg[2], 10.0, rtol=1e-7)
-    np.testing.assert_allclose(vp[2], 90.0, rtol=1e-7)
+    # ⭐ the face totals are 100 (the exon) against 20 + 17 of flux (the boundary), so the enrichment
+    # ratio is 100/37 — NOT 100/20. Counting the flux is what makes the two faces comparable at all.
+    np.testing.assert_allclose(vg[2], 2.0 * (100.0 / 37.0), rtol=1e-7)
+    # ⭐ the RNA arm takes the certified flux as a LOWER BOUND: the rescaled unspliced claim is
+    # 1 x 100/37 = 2.7 and the flux certifies 17, so the claim is RAISED to what is certainly there.
+    # ⛔ And never the §3.5e product (90), which would enrich the flux twice.
+    np.testing.assert_allclose(vp[2], 17.0, rtol=1e-9)
+    assert pp[2] > 0.0, "a BINDING bound must contribute precision, frame-damped"
 
 
 def test_a_population_unequal_hop_does_not_rescale():
@@ -661,3 +686,280 @@ def test_a_large_disagreement_damps_an_unsupplied_claim():
     agree = _prec_at_1(1.0)
     disagree = _prec_at_1(100.0)
     assert disagree < 0.5 * agree, "a 100x disagreement did not damp the claim"
+
+
+def test_the_mass_identity_rescale_amplifies_a_weak_claim():
+    """⛔ THE MEASUREMENT THAT RETIRED THE MASS-IDENTITY RESCALE, kept executable so the form is not
+    rebuilt. ``k = M_dst / Σ ρ_c,src·E_c,dst`` is exact under the premise — and unbounded when the
+    SOURCE's belief is weak, because the source's claim is the denominator. The real case: a source
+    holding gDNA 3.9e-4 and RNA exactly 0 (an empty ``struct_lock`` slot's confident zero) against a
+    23,889-fragment exon returns k ≈ 2.4e5, and since the only non-zero component is gDNA the exon is
+    handed "all your mass is gDNA" at a ZERO-gDNA library.
+
+    ⭐ The MEASURED enrichment ratio cannot do this: it never reads the claim, so a source with almost
+    nothing transports almost nothing."""
+    from rigel.calibration.messages.currency import composition_rescale_factor
+
+    k = composition_rescale_factor(
+        rho_g=3.87e-4, rho_p=0.0, rho_n=0.0, E_g_dst=247.0, E_r_dst=233.0, M_dst=23889.0
+    )
+    assert k > 1.0e5, "the retired form's amplification is the whole reason it is retired"
+    # what the policy uses instead is bounded by the two slots' OBSERVED abundances
+    inv = np.full(N, 1.0)
+    inv[1] = 872.0
+    from rigel.calibration.messages.currency import enrichment_ratio
+
+    r = enrichment_ratio(_ctx(inv_abundance=inv), backward=False)
+    assert r[1] == 872.0 and r[1] < k / 100.0
+
+
+def test_the_enrichment_ratio_counts_the_sj_flux_on_the_face_it_belongs_to():
+    """⛔⛔ **A FACE'S TOTAL IS NOT A TOTAL WITHOUT ITS SJ FLUX, and the omission does not look like a
+    rounding error — it looks like enrichment.** Mature RNA cannot cross an exon|intron boundary
+    contiguously, so an exon and its boundary hold genuinely different fragment populations: the
+    exon's mature fragments appear at the boundary as SJ FLUX, not as crossings. Comparing the
+    boundary's UNSPLICED abundance against the exon's total therefore reports a large "depletion"
+    at a condition with no probes at all — measured 30.8x at `g50 ss0.50 capture_off` before the flux
+    was counted.
+
+    Here the exon (slot 0) reads 100 and the boundary (slot 1) reads 20 unspliced + 80 of flux on the
+    face the exon is on. The ratio into the boundary must be 1.0 — same population, no enrichment —
+    not 0.2."""
+    from rigel.calibration.messages.currency import enrichment_ratio
+
+    inv = np.full(N, 100.0)
+    inv[1] = 20.0
+    sj_lo = np.zeros((N, 2))
+    sj_lo[1, 0] = 80.0  # the flux whose bodies lie on the LOW side — the exon at slot 0
+    ctx = _ctx(inv_abundance=inv, inv_sj_lo=sj_lo)
+    r = enrichment_ratio(ctx, backward=False)
+    np.testing.assert_allclose(r[1], 1.0, rtol=1e-12)
+
+
+def test_the_flux_counts_on_ONE_face_only():
+    """The split is per FACE (`EQUATIONS.md` §3.6c): a sj's body lies on exactly one side of its
+    boundary, so its abundance joins the total presented to THAT neighbour and not the other. A
+    boundary that pooled both faces would over-count itself against both flanks."""
+    from rigel.calibration.messages.currency import enrichment_ratio
+
+    inv = np.full(N, 100.0)
+    inv[1] = 20.0
+    sj_hi = np.zeros((N, 2))
+    sj_hi[1, 0] = 80.0  # the flux belongs to the HIGH side, so the LOW-side hop must NOT see it
+    ctx = _ctx(inv_abundance=inv, inv_sj_hi=sj_hi)
+    r_fwd = enrichment_ratio(ctx, backward=False)
+    np.testing.assert_allclose(r_fwd[1], 0.2, rtol=1e-12)
+
+
+def test_a_structural_lock_is_composition_evidence_ONLY_where_the_structure_determines_it():
+    """⛔⛔ **A COMPOSITION CLAIM REQUIRES COMPOSITION EVIDENCE, and a structural lock is evidence only
+    where the STRUCTURE actually determines the composition — i.e. where no RNA strand is admissible.**
+
+    A slot that admits an RNA strand and yet reports composition CERTAINTY is reporting a structural
+    DEFAULT (`f_g = 1`, "all gDNA"), not a measurement: the empty-slot artefact this repo already
+    records (`struct_lock` scoped `~solvable` rather than `g1_locked`, `f_g = 1` at
+    `1/trigamma(½) = 0.2026` on every arm). ⛔ Believed as a composition it is catastrophic and the
+    damage lands one hop away: transported into a 23,889-fragment exon at a ZERO-gDNA library it
+    delivers a gDNA share of 1.0000 and ψ solves `f_g = 1.000` against a truth of 0.000.
+
+    ⭐ The policy therefore takes the lock as composition evidence only where it is structural. The
+    slot's gDNA ABUNDANCE claim survives — "no fragments over this much opportunity" is a real
+    observation, and it is what the zero controls run on."""
+    own = _own(
+        {"g": np.array([0.0, 0, 0, 0, 0, 0, 0, 0, 0]), "p": np.zeros(N)},
+        {
+            "g": np.array([0.2026, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "p": np.array([0.2026, 0, 0, 0, 0, 0, 0, 0, 0]),
+        },
+    )
+    # slot 0 admits + RNA and yet claims certainty — the mis-scoped lock
+    lock = np.zeros(N, bool)
+    lock[0] = True
+    own = dataclasses.replace(own, struct_lock=lock)
+    inv = np.full(N, 1.0)
+    inv[1] = 872.0  # the dense neighbour: a huge apparent enrichment
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(own=own, inv_abundance=inv, boundary_flags=fl, free_pos=np.ones(N, bool))
+    object.__setattr__(ctx, "geometry", _geom())
+    relay = CurrencyPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    step(0, 1)
+    vg, vp, vn, pg, pp, pn = publish()
+    # the RNA arm makes NO claim — value and precision together, one statement
+    assert vp[1] == 0.0 and pp[1] == 0.0
+    # and the gDNA abundance crosses UNSCALED: with the RNA arm silent the composition is unlicensed,
+    # so the empty slot's "≈ no gDNA here" arrives as an abundance rather than as "you are all gDNA"
+    assert vg[1] == 0.0 and pg[1] > 0.0
+
+
+def test_a_strand_admissible_on_only_one_side_is_a_POPULATION_CHANGE():
+    """⛔⛔ **THE SECOND POPULATION PREDICATE (owner, 2026-08-18): a strand ADMISSIBLE on one side of a
+    hop and not the other is a different RNA population BY CONSTRUCTION.** The terminus flags do not
+    see it — a gene edge beside an intergenic region need carry no TSS/TES bit at all — so a table
+    keyed on the flags alone licenses a composition across it.
+
+    ⛔ What that costs is specific: a structurally pure-gDNA slot's composition is a legitimate
+    ``f_g = 1``, and an EMPTY one's abundance is ~0. Transporting its COMPOSITION says "you are all
+    gDNA"; transporting its ABUNDANCE says "there is almost no gDNA here". At a zero-gDNA library the
+    second is true and the first is the whole error."""
+    fp = np.array([False, False, True, True, True, True, True, True, True])
+    fn = np.zeros(N, bool)
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    eq = population_equal_from_left(_ctx(free_pos=fp, free_neg=fn, boundary_flags=fl))
+    # slot 2 GAINS the + strand its source (slot 1) cannot hold — not the same population
+    assert not eq[2], (
+        "a strand admissible at the destination and not the source is a population change"
+    )
+    # and where admissibility is unchanged the hop is still licensed
+    assert eq[4] and eq[6]
+
+
+def test_a_pure_gdna_slot_transports_its_ABUNDANCE_not_its_certainty():
+    """The end-to-end form of the same rule, and the one the zero controls run on: an empty
+    structurally-pure-gDNA slot says "almost no gDNA here" (an observation) and must NOT say "you are
+    all gDNA" (its own structural composition, true of itself and of nothing else)."""
+    own = _own(
+        {"g": np.array([0.0, 0, 0, 0, 0, 0, 0, 0, 0])},
+        {"g": np.array([0.2026, 0, 0, 0, 0, 0, 0, 0, 0])},
+    )
+    fp = np.array([False, False, True, True, True, True, True, True, True])
+    inv = np.full(N, 500.0)
+    inv[0] = 0.001  # the empty pure-gDNA slot
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(
+        own=own, free_pos=fp, free_neg=np.zeros(N, bool), inv_abundance=inv, boundary_flags=fl
+    )
+    object.__setattr__(ctx, "geometry", _geom())
+    relay = CurrencyPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    step(0, 1)
+    step(1, 2)
+    vg = publish()[0]
+    # the claim reaches slot 2 as an ABUNDANCE of ~0, never rescaled up to fill the dense slot
+    assert vg[2] < 1.0e-6, (
+        f"the pure-gDNA slot's certainty was transported as a composition: {vg[2]}"
+    )
+
+
+def test_the_sj_flux_enters_an_exon_as_a_MEASUREMENT_of_rna():
+    """⭐⭐⭐ **THE SPLICE IN IS A MEASUREMENT, NOT AN IMPUTATION — a spliced fragment CANNOT be gDNA,
+    so the flux entering an exon is certified RNA and needs no deconvolution and no licence.**
+
+    ⛔ Carrying it only inside the composition rescale (where it rescales, and only where the licence
+    is granted) leaves an exon with NOTHING opposing a gDNA claim: measured on the test chromosome at
+    a ZERO-gDNA capture-ON control, every RNA precision reaching the dense exons was 0 while a gDNA
+    claim rode the chain unopposed, and ψ solved f_g = 0.53–0.57 against a truth of 0.000.
+
+    So the flux joins the RNA arm of the destination EXON on its own count's precision, on every hop
+    into an exon, whatever the composition licence says."""
+    # ⚠ equal FACE totals (5 + 12 of flux at the boundary against 17 at the exon), so the frame step is
+    # zero and this gate isolates the operator rather than the frame variance
+    inv = np.full(N, 5.0)
+    inv[2] = 17.0
+    sj_hi = np.zeros((N, 2))
+    sj_hi[1, 0] = 12.0  # the + flux whose bodies lie on the HIGH side — the exon at slot 2
+    sjc = np.zeros((N, 2))
+    sjc[1, 0] = 340.0  # ... measured on 340 spliced fragments
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(inv_abundance=inv, inv_sj_hi=sj_hi, boundary_flags=fl)
+    object.__setattr__(ctx, "geometry", _geom(flux_hi=sjc))
+    relay = CurrencyPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    step(0, 1)
+    step(1, 2)  # the boundary -> exon hop: the SPLICE IN
+    vg, vp, vn, pg, pp, pn = publish()
+    from rigel.calibration.messages.variance import count_logvar
+
+    np.testing.assert_allclose(vp[2], 12.0, rtol=1e-9)
+    np.testing.assert_allclose(pp[2], 1.0 / count_logvar(340.0), rtol=1e-9)
+    # ⛔ and it is CERTIFIED RNA — it may never appear on the gDNA arm
+    assert vg[2] == 0.0 and pg[2] == 0.0
+
+
+def test_the_sj_flux_does_NOT_enter_a_boundary_from_an_exon():
+    """The direction rule (owner): fragments that splice OUT of an exon land elsewhere, so they are not
+    part of what crosses INTO the boundary. Only the SPLICE-IN direction carries the flux."""
+    inv = np.full(N, 5.0)
+    inv[2] = 17.0
+    sj_lo = np.zeros((N, 2))
+    sj_lo[1, 0] = 12.0
+    sjc = np.zeros((N, 2))
+    sjc[1, 0] = 340.0
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(inv_abundance=inv, inv_sj_lo=sj_lo, boundary_flags=fl)
+    object.__setattr__(ctx, "geometry", _geom(flux_lo=sjc))
+    relay = CurrencyPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    step(0, 1)  # exon -> boundary: the SPLICE OUT direction
+    vp, pp = publish()[1], publish()[4]
+    assert vp[1] == 0.0 and pp[1] == 0.0
+
+
+def test_a_flux_bound_that_is_already_satisfied_says_NOTHING():
+    """The other half of one-sidedness, and it is what makes this a BOUND rather than a measurement: an
+    exon whose RNA claim already exceeds the certified flux has learned nothing from it, so the bound
+    adds no value and — the part that matters — no PRECISION. A bound that stiffens a claim it did not
+    move is a confidence with no evidence behind it."""
+    # ⚠ the face totals must MATCH, or the transport rescales and this gate stops being about the
+    # bound at all: the boundary presents 5 + 2 of flux, so the exon must read 7 for r = 1.
+    inv = np.full(N, 5.0)
+    inv[2] = 7.0
+    sj_hi = np.zeros((N, 2))
+    sj_hi[1, 0] = 2.0  # a small flux against a much larger RNA claim
+    sjc = np.zeros((N, 2))
+    sjc[1, 0] = 40.0
+    rho = {
+        "g": np.array([0, 1.0, 0, 0, 0, 0, 0, 0, 0]),
+        "p": np.array([0, 50.0, 0, 0, 0, 0, 0, 0, 0]),
+    }
+    prec = {
+        "g": np.array([0, 4.0, 0, 0, 0, 0, 0, 0, 0]),
+        "p": np.array([0, 4.0, 0, 0, 0, 0, 0, 0, 0]),
+    }
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+    ctx = _ctx(
+        own=_own(rho, prec),
+        inv_abundance=inv,
+        inv_sj_hi=sj_hi,
+        boundary_flags=fl,
+        n_slot=np.full(N, 1.0e9),
+    )
+    object.__setattr__(ctx, "geometry", _geom(flux_hi=sjc))
+    relay = CurrencyPolicy().prepare(ctx)
+    step, publish = relay.scan(backward=False)
+    step(1, 2)
+    vp, pp = publish()[1], publish()[4]
+    assert vp[2] == 50.0, vp[2]
+    np.testing.assert_allclose(pp[2], 4.0, rtol=1e-9)
+
+
+def test_the_flux_bound_pays_the_FRAME_step_between_the_sj_and_the_exon():
+    """⭐ The bound is measured in the sj's OWN frame: its fragments span the junction and sample a
+    different position distribution from the exon's contained ones, which under capture is a different
+    ENRICHMENT. Charging that step as a variance is what keeps the bound from over-powering a slot that
+    already has evidence — measured, without it the policy UNDER-called gDNA by 20,752 fragments at
+    `g50 ss0.50 capture_on`, and with it that row reads 93,372 against a truth of 100,005.
+
+    Identically zero where the two faces agree, so a bound that never changed frame pays nothing."""
+    sjc = np.zeros((N, 2))
+    sjc[1, 0] = 340.0
+    sj_hi = np.zeros((N, 2))
+    sj_hi[1, 0] = 12.0
+    fl = np.where(np.arange(N) % 2 == 1, FLAG_DONOR_POS, 0).astype(np.uint16)
+
+    def _prec(exon_total):
+        inv = np.full(N, 5.0)
+        inv[2] = exon_total
+        ctx = _ctx(inv_abundance=inv, inv_sj_hi=sj_hi, boundary_flags=fl)
+        object.__setattr__(ctx, "geometry", _geom(flux_hi=sjc))
+        relay = CurrencyPolicy().prepare(ctx)
+        step, publish = relay.scan(backward=False)
+        step(1, 2)
+        return publish()[4][2]
+
+    same_frame = _prec(17.0)  # the faces agree: 5 + 12 against 17
+    shifted = _prec(170.0)  # a 10x frame step
+    from rigel.calibration.messages.variance import count_logvar
+
+    np.testing.assert_allclose(same_frame, 1.0 / count_logvar(340.0), rtol=1e-9)
+    assert shifted < 0.2 * same_frame, "a frame step must cost the bound its confidence"

@@ -406,7 +406,9 @@ def test_several_sj_on_one_boundary_POOL_their_counts_AND_their_divisors(parts):
     payload2 = dataclasses.replace(
         payload,
         sj_count=np.array([[9, 4], [5, 1]], dtype=np.uint32),
-        sj_inv_length_sum=np.zeros((2, 2), dtype=np.uint64),
+        # ⚠ ONE column per sj, not the count's (n_sj, 2): `sj_inv_length_sum` is 1-D in the
+        # executable specification (`tests/native/_accumulator_reference.py`), which wins.
+        sj_inv_length_sum=np.zeros(2, dtype=np.uint64),
         sj_mass=np.zeros(2, dtype=np.uint64),
         ref_sj_offsets=np.array([0, 2], dtype=np.int64),
     )

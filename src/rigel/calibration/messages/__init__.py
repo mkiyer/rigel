@@ -155,6 +155,13 @@ class StepContext:
     #: function of the composition being solved for, so a "total abundance" built from it is circular
     #: and swings with the gDNA-vs-RNA length gap (`region_geometry.RegionGeometry.inv_abundance`).
     inv_abundance: np.ndarray
+    #: the sj flux's model-free abundance per FACE, ``[n, 2]`` BY TRANSCRIPT STRAND — sum the strands
+    #: and add to ``inv_abundance`` for a face's TOTAL, or read one column for that strand's
+    #: CERTIFIED-RNA measurement (a spliced fragment cannot be gDNA).
+    #: ⛔ A face total without it compares an exon (which holds mature RNA) against a boundary (which
+    #: cannot) and reads the difference as enrichment.
+    inv_sj_lo: np.ndarray
+    inv_sj_hi: np.ndarray
     eff_gdna_global: np.ndarray  # the matching gDNA opportunity
     eff_rna: np.ndarray  # per-slot RNA effective length
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)

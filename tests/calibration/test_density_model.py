@@ -100,6 +100,8 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
         # ⚠ the MODEL-FREE abundance bank: this fixture states counts and divisors directly, so it
         # makes no reciprocal-opportunity statement — zeros, which is "no abundance observed here".
         inv_abundance=np.zeros(n_slots),
+        inv_sj_lo=np.zeros((n_slots, 2)),
+        inv_sj_hi=np.zeros((n_slots, 2)),
         eff_gdna=eff,
         eff_rna=eff,
         sj_count=np.zeros((n_slots, 2)),
