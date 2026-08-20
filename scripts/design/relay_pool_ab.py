@@ -101,7 +101,7 @@ def pool_truth(parts, region_arrays, chain) -> dict[str, np.ndarray]:
     return {k: OC.slot_counts(parts[k], region_arrays, chain) for k in POOLS}
 
 
-def arm(payload, kw, *, messages: bool, injected_priors=None) -> np.ndarray:
+def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=None) -> np.ndarray:
     """One arm's per-slot ``f_g``. ⛔ Returns the FINAL belief, which is what `assemble_priors` reads.
 
     ⭐ ``injected_priors`` is for a TOY reference — a chromosome small enough to have no library-level
@@ -112,7 +112,9 @@ def arm(payload, kw, *, messages: bool, injected_priors=None) -> np.ndarray:
     the toy is measured against ITS OWN truth with the library's parameters supplied, which is the
     contract the toy harness already runs under.
     """
-    cfg = dataclasses.replace(CalibrationConfig(), message_propagation=messages)
+    cfg = dataclasses.replace(
+        CalibrationConfig(), message_propagation=messages, message_policy=policy
+    )
     debug: dict = {}
     call = {k: v for k, v in kw.items() if k != "payload"}
     if injected_priors is not None:
@@ -123,10 +125,17 @@ def arm(payload, kw, *, messages: bool, injected_priors=None) -> np.ndarray:
     #    i.e. only under RelayPolicy; and muted, ψ carries each slot's own evidence alone, so the
     #    final belief must BE the message-free local solve, bit for bit.
     relay_ran = "_uni" in cap
-    if relay_ran != messages:
+    currency_ran = "_currency" in cap
+    if relay_ran != (messages and policy == "relay"):
         raise AssertionError(
-            f"messages={messages} but the relay {'ran' if relay_ran else 'did not run'} — this arm is "
-            "not the arm it claims to be (`_uni` is written only under RelayPolicy)."
+            f"messages={messages} policy={policy} but the relay {'ran' if relay_ran else 'did not run'} "
+            "— this arm is not the arm it claims to be (`_uni` is written only under RelayPolicy)."
+        )
+    if currency_ran != (messages and policy == "currency"):
+        raise AssertionError(
+            f"messages={messages} policy={policy} but the currency policy "
+            f"{'ran' if currency_ran else 'did not run'} — this arm is not the arm it claims to be "
+            "(`_currency` is written only under CurrencyPolicy)."
         )
     f_g = np.asarray(cap["f_g"], np.float64)
     if not messages:
@@ -161,9 +170,20 @@ def score(f_g: np.ndarray, truth: dict[str, np.ndarray], sel: np.ndarray) -> dic
     return out
 
 
+#: label -> (message_propagation, message_policy). ⭐ "off"/"on" are the standing benchmark's two
+#: arms; "currency" is the Stage-3 policy under development, opt-in via --arms so every existing
+#: caller and artifact keeps its exact shape.
+ARMS: dict[str, tuple[bool, str]] = {
+    "off": (False, "relay"),
+    "on": (True, "relay"),
+    "currency": (True, "currency"),
+}
+
+
 def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: str,
-            injected_priors=None) -> list[dict]:
-    """One condition, both arms, three axes. ⛔ ONE cached payload, so the arms differ by one flag."""
+            injected_priors=None, arms: tuple[str, ...] = ("off", "on")) -> list[dict]:
+    """One condition, the requested arms, three axes. ⛔ ONE cached payload, so the arms differ by
+    exactly the config values `ARMS` names."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     kw = calibration_inputs(cache, index)
     chain = build_region_chain(
@@ -183,10 +203,12 @@ def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: st
         "ALL": np.ones(int(chain.n_slots), bool),
     }
     rows = []
-    for messages in (False, True):
-        f_g = arm(cache.payload, kw, messages=messages, injected_priors=injected_priors)
+    for label in arms:
+        messages, policy = ARMS[label]
+        f_g = arm(cache.payload, kw, messages=messages, policy=policy,
+                  injected_priors=injected_priors)
         for axis, sel in axes.items():
-            row = {"condition": condition, "arm": "on" if messages else "off", "axis": axis}
+            row = {"condition": condition, "arm": label, "axis": axis}
             row.update(score(f_g, truth, sel))
             for k in POOLS:
                 row[f"true_{k}"] = float(truth[k][sel].sum())
@@ -226,13 +248,6 @@ def report(rows: list[dict], axis: str) -> None:
                 f"{_f(r['rna_net'])} {_f(r['rna_abs'])} {_f(r['true_nrna'])} {_f(r['true_mrna'])}"
             )
         off = next(r for r in pair if r["arm"] == "off")
-        on = next(r for r in pair if r["arm"] == "on")
-        marks = []
-        for p in ("gdna", "rna"):
-            base = off[f"{p}_abs"]
-            ratio = on[f"{p}_abs"] / base if base > 0 else float("nan")
-            verdict = "RELAY HELPS" if ratio < 0.98 else ("RELAY HURTS" if ratio > 1.02 else "flat")
-            marks.append(f"{p} {ratio:6.3f}x {verdict}")
         # ⚠ the nascent stamp: an empty pool is not a measured pool
         nas = off["true_nrna"]
         stamp = (
@@ -240,7 +255,17 @@ def report(rows: list[dict], axis: str) -> None:
             if nas <= 0.0
             else f"   nascent truth {nas:,.0f} fragments"
         )
-        print(f"   {'':<40} {'->':<4} abs-error ratio ON/OFF:  " + "   ".join(marks) + stamp)
+        for other in sorted((r for r in pair if r["arm"] != "off"), key=lambda r: r["arm"]):
+            marks = []
+            for p in ("gdna", "rna"):
+                base = off[f"{p}_abs"]
+                ratio = other[f"{p}_abs"] / base if base > 0 else float("nan")
+                verdict = "HELPS" if ratio < 0.98 else ("HURTS" if ratio > 1.02 else "flat")
+                marks.append(f"{p} {ratio:6.3f}x {verdict}")
+            print(
+                f"   {'':<40} {'->':<4} abs-error ratio {other['arm']}/off:  "
+                + "   ".join(marks) + stamp
+            )
     print()
 
 
@@ -315,6 +340,9 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None,
                     help="write every (condition x arm x axis) row as TSV — the machine-readable form "
                          "of the standing benchmark, and what `benchmark_report.py` renders")
+    ap.add_argument("--arms", nargs="+", default=["off", "on"], choices=sorted(ARMS),
+                    help="which arms to run — 'off'/'on' are the standing benchmark; 'currency' is "
+                         "the Stage-3 policy under development (an 'off' baseline is required)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -356,7 +384,8 @@ def main() -> int:
     rows: list[dict] = []
     for c in conds:
         try:
-            rows.extend(measure(index, region_arrays, args.suite, oracle, c, injected))
+            rows.extend(measure(index, region_arrays, args.suite, oracle, c, injected,
+                                 arms=tuple(args.arms)))
             print(f"   ✔ {c}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"   ⛔ {c}: {type(exc).__name__}: {exc}", flush=True)

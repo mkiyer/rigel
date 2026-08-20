@@ -33,6 +33,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
     lam, grid = _logodds_grid(n_grid, 10.0)
     return StepContext(
         mass=ones * 100.0,
+        inv_abundance=ones * 0.5,
         eff_gdna_global=ones * 200.0,
         eff_rna=ones * 200.0,
         eff_gdna=ones * 200.0,

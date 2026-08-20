@@ -97,6 +97,9 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
         # the length channels are irrelevant to region_gdna_density (it reads count and eff only);
         # shape-correct zeros say "this fixture makes no statement about fragment lengths".
         spliced_count=np.zeros((n_slots, 2)),
+        # ⚠ the MODEL-FREE abundance bank: this fixture states counts and divisors directly, so it
+        # makes no reciprocal-opportunity statement — zeros, which is "no abundance observed here".
+        inv_abundance=np.zeros(n_slots),
         eff_gdna=eff,
         eff_rna=eff,
         sj_count=np.zeros((n_slots, 2)),

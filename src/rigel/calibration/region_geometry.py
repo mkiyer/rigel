@@ -163,6 +163,18 @@ class RegionGeometry:
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
     #: (`test_splice_flux_reframe`).
+    #: ⭐⭐⭐ **THE MODEL-FREE TOTAL ABUNDANCE — counts/bp, with NO composition and NO fragment-length
+    #: model in it.** The accumulator deposits the RECIPROCAL OPPORTUNITY per fragment (``1/(w−1)`` at a
+    #: BOUNDARY, ``1/(ell−w+1)`` in a REGION), so ``E[sum] = rho`` EXACTLY, for ANY length distribution
+    #: (`tests/native/_accumulator_reference.py`, and `EQUATIONS.md`'s reciprocal-opportunity theorem).
+    #: ⛔ **This is why a total abundance must NEVER be formed as ``mass / effective_length``**: that
+    #: divisor depends on which component the fragments came from — gDNA and RNA have different length
+    #: distributions — so the "total abundance" would be a function of the composition being solved for,
+    #: which is circular. 100 counts in a 500 bp region reads 0.25 as pure gDNA and 0.33 as pure RNA at
+    #: mean lengths 100/200; the reciprocal-opportunity bank reads the same number either way.
+    #: ⚠ Deposited at ACCUMULATOR time and carried unread until 2026-08-20; enrichment ratios are what
+    #: needed it (`messages/currency.py`).
+    inv_abundance: np.ndarray
     sj_count_lo: np.ndarray
     sj_count_hi: np.ndarray
     #: float64[n_slots, 2] — the matching divisors, split the same way.
@@ -215,12 +227,18 @@ def build_region_geometry(
 
     # ── the two CONTIGUOUS populations: the mixture, and the certified-RNA floor beside it ───────
     unspliced_count = np.zeros((n, 2), dtype=np.float64)
-    unspliced_count[is_region] = np.asarray(substrate.region_contained.count, np.float64)[obj[is_region]]
-    unspliced_count[is_boundary] = np.asarray(substrate.boundary_unspliced.count, np.float64)[obj[is_boundary]]
+    unspliced_count[is_region] = np.asarray(substrate.region_contained.count, np.float64)[
+        obj[is_region]
+    ]
+    unspliced_count[is_boundary] = np.asarray(substrate.boundary_unspliced.count, np.float64)[
+        obj[is_boundary]
+    ]
     # ⚠ REGION slots stay 0, and that is structural rather than a shortcut: a contained fragment used no
     # sj, so a region's contained population cannot hold a spliced molecule.
     spliced_count = np.zeros((n, 2), dtype=np.float64)
-    spliced_count[is_boundary] = np.asarray(substrate.boundary_spliced.count, np.float64)[obj[is_boundary]]
+    spliced_count[is_boundary] = np.asarray(substrate.boundary_spliced.count, np.float64)[
+        obj[is_boundary]
+    ]
 
     # ── the two per-component divisors ───────────────────────────────────────────────────────────
     region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
@@ -237,7 +255,9 @@ def build_region_geometry(
         contained = contained_eff_length(region_len, pmf) if n_regions else np.zeros(0)
         n_boundaries = max(int(chain.n_boundaries_total), 1)
         if boundary_reach is None:
-            crossing = np.full(n_boundaries, float(crossing_eff_length(pmf, unbounded, unbounded)[0]))
+            crossing = np.full(
+                n_boundaries, float(crossing_eff_length(pmf, unbounded, unbounded)[0])
+            )
         else:
             crossing = crossing_eff_length(pmf, boundary_reach[0], boundary_reach[1])
         out = np.zeros(n, dtype=np.float64)
@@ -251,6 +271,19 @@ def build_region_geometry(
     # physics, not the TRAPS: prove-the-substrate ruling — the ruling is only about the RNA component.
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf, boundary_rna_reach)
+
+    # ── the MODEL-FREE total abundance, straight off the reciprocal-opportunity banks ──────────────
+    # ⛔ No divisor is applied here and none may be: the bank IS the density. A REGION carries
+    # ``region_contained``'s inv-opportunity sum and a BOUNDARY ``boundary_unspliced``'s inv-length sum,
+    # each already ``E[sum] = rho`` for any length distribution.
+    inv_abundance = np.zeros(n, dtype=np.float64)
+    _r_inv = getattr(substrate.region_contained, "inv_length_sum", None)
+    _b_inv = getattr(substrate.boundary_unspliced, "inv_length_sum", None)
+    if _r_inv is not None and n_regions:
+        inv_abundance[is_region] = np.asarray(_r_inv, np.float64)[obj[is_region]]
+    if _b_inv is not None and is_boundary.any():
+        _bi = np.asarray(_b_inv, np.float64)
+        inv_abundance[is_boundary] = _bi[np.clip(obj[is_boundary], 0, _bi.shape[0] - 1)]
 
     # ── the JUMPING population: a sj boundary is a FACTOR on the boundaries it leaves and enters ───
     sj_count = np.zeros((n, 2), dtype=np.float64)
@@ -289,6 +322,7 @@ def build_region_geometry(
     return RegionGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
+        inv_abundance=inv_abundance,
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,
@@ -650,7 +684,9 @@ def build_region_statics(
     sig_l = np.where(is_boundary, slot_sig[left], 0)
     sig_r = np.where(is_boundary, slot_sig[right], 0)
 
-    ts = np.where(is_region, np.asarray(region_arrays.strand_class)[region_idx] if n_regions else 0, -1)
+    ts = np.where(
+        is_region, np.asarray(region_arrays.strand_class)[region_idx] if n_regions else 0, -1
+    )
     nrp_l, nrn_l = nrna_active_strands(sig_l)
     nrp_r, nrn_r = nrna_active_strands(sig_r)
     mrp_l, mrn_l = mrna_active_strands(sig_l)
@@ -670,9 +706,9 @@ def build_region_statics(
         free_neg=free_neg,
         mrna_active_pos=np.where(is_region, mr_self_p, mrp_l & mrp_r),
         mrna_active_neg=np.where(is_region, mr_self_n, mrn_l & mrn_r),
-        boundary_flags=np.where(is_boundary, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0).astype(
-            np.uint16
-        ),
+        boundary_flags=np.where(
+            is_boundary, flags[np.clip(obj, 0, max(flags.shape[0] - 1, 0))], 0
+        ).astype(np.uint16),
     )
 
 

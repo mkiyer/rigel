@@ -302,7 +302,6 @@ class CalibrationConfig:
     #: (1.0147× / 1.0046× / 1.0036×), so the effect is the BRACKET and not the lattice.
     sweep_logodds_window: float = 10.0
 
-
     #: **ψ's composition reference takes its MEAN from the ANNOTATION** — ``m → 0.75`` wherever no annotated
     #: MATURE transcript is continuous across the position (``¬mrna_active``), and the shipped neutral ½
     #: everywhere else (`calibration.simplex_logodds.structural_reference_location`).
@@ -439,6 +438,16 @@ class CalibrationConfig:
     #: dead while the suite stayed green, because the TEST readers install the policy themselves. Run the
     #: instruments, not just the suite (`TRAPS: a-green-suite-hid-five-dead-instruments`).
     message_propagation: bool = True
+
+    #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
+    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own switch) or
+    #: `"currency"` (the Stage-3 rebuild, :class:`~rigel.calibration.messages.currency.CurrencyPolicy`,
+    #: UNDER DEVELOPMENT — rung by rung on the test chromosome, `docs` carry the plan). Consulted only
+    #: when `message_propagation` is True; the shipped default is byte-identical to the tree before the
+    #: field existed. ⚠ The A/B between the two policies is THIS one value, which is what keeps the
+    #: rebuild from touching the relay (`RelayPolicy` is not modified by the rebuild, so nothing that
+    #: works can break).
+    message_policy: str = "relay"
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA

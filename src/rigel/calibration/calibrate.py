@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .background_reference import BackgroundReference, measure_background
+from .messages.currency import CurrencyPolicy
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .region_chain import BOUNDARY, REGION
@@ -154,8 +155,6 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     region_eff[obj[is_region]] = eff[is_region]
     boundary_eff[obj[is_boundary]] = eff[is_boundary]
     return region_eff, boundary_eff
-
-
 
 
 def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
@@ -412,7 +411,11 @@ def calibrate(
             rna_sense_frac=rna_sense_frac,
         )
         rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
-        _rna_seed = (rna_strand.n_seed_regions, rna_strand.n_seed_fragments, rna_strand.fallback_used)
+        _rna_seed = (
+            rna_strand.n_seed_regions,
+            rna_strand.n_seed_fragments,
+            rna_strand.fallback_used,
+        )
 
     # Strand-Fisher noise-floor SAMPLE SIZES (the sweep's τ seed): N_gdna (gDNA-eligible unspliced fragments in
     # the structurally pure-gDNA intergenic regions, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was
@@ -472,9 +475,7 @@ def calibrate(
     # `_regrid_global`, which is the honest failure: the array simply was not the shape the solve
     # claimed. ⭐ Memoised, because only two brackets ever occur in one call (the configured one and the
     # derived one) and `_build_intron_prior` is a per-slot NegBinom over the whole grid.
-    _intron_priors = {
-        (int(config.sweep_n_grid), float(config.sweep_logodds_window)): intron_prior
-    }
+    _intron_priors = {(int(config.sweep_n_grid), float(config.sweep_logodds_window)): intron_prior}
 
     def _intron_prior_at(n_grid: int, window: float):
         key = (int(n_grid), float(window))
@@ -484,12 +485,11 @@ def calibrate(
                 substrate,
                 region_arrays,
                 region_eff_gdna,
-                replace(
-                    config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)
-                ),
+                replace(config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)),
                 bg=intron_background,
             )
         return _intron_priors[key]
+
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
@@ -514,7 +514,9 @@ def calibrate(
         # stays at the configured resolution; that is what keeps the AMBIG cube ~2.3× rather than ~5.2×.
         window = float(config.sweep_logodds_window)
         n_grid, n_grid_ss = int(config.sweep_n_grid), int(config.sweep_n_grid_single_strand)
-        n_tilt = config.sweep_n_tilt if config.sweep_n_tilt is not None else int(config.sweep_n_grid)
+        n_tilt = (
+            config.sweep_n_tilt if config.sweep_n_tilt is not None else int(config.sweep_n_grid)
+        )
         if prior is not None:
             required = prior.required_logodds_window(mass_global, eff_global)
             if required > window:
@@ -523,7 +525,11 @@ def calibrate(
                 window = required
                 logger.debug(
                     "calibration: λ bracket %.4f (the landscape's support), n_grid %d, n_grid_ss %d, "
-                    "n_tilt %d (unscaled)", window, n_grid, n_grid_ss, n_tilt,
+                    "n_tilt %d (unscaled)",
+                    window,
+                    n_grid,
+                    n_grid_ss,
+                    n_tilt,
                 )
         lam_factor = _intron_prior_at(n_grid, window)
         out = solve_chain(
@@ -567,7 +573,13 @@ def calibrate(
             #
             # ⛔ Switching back is ONE WORD, `RelayPolicy()`, and every operator is still there behind its
             # own named switch, so this is reversible and each operator stays individually priceable.
-            policy=RelayPolicy() if config.message_propagation else SilentPolicy(),
+            # ⭐ `message_policy` picks WHICH policy the flag installs: the shipped relay, or the
+            # Stage-3 CurrencyPolicy under development. One config value IS the A/B.
+            policy=(
+                (CurrencyPolicy() if config.message_policy == "currency" else RelayPolicy())
+                if config.message_propagation
+                else SilentPolicy()
+            ),
             _capture=capture,
         )
         if capture is not None:
@@ -700,7 +712,9 @@ def calibrate(
     #
     # ⚠ There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
     # fragment used no sj, so a region's contained population cannot hold a spliced molecule.
-    mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
+    mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(
+        axis=1
+    )
     # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this boundary carries.
     # ``assemble_priors`` needs it to turn a per-boundary object-incidence total into a fragment count.
     boundary_mass_per_crossing = substrate.boundary_unspliced.mass_per_crossing

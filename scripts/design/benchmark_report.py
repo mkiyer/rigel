@@ -170,7 +170,9 @@ def render(rows: list[dict], per_transcript: dict, axis: str = "ALL") -> str:
         if not arm_rows:
             continue
         label = {"off": "SilentPolicy (no message propagation)",
-                 "on": "RelayPolicy (message propagation)"}.get(arm, arm or "single arm")
+                 "on": "RelayPolicy (message propagation)",
+                 "currency": "CurrencyPolicy (the Stage-3 rebuild, under development)",
+                 }.get(arm, arm or "single arm")
         parts.append(f"<h2>{html.escape(label)}</h2>")
         parts.append('<div class="scroll">'
                      + _table(sorted(arm_rows, key=lambda r: r["condition"]), cols,

@@ -447,6 +447,7 @@ def solve_chain(
     ctx = StepContext(
         # observations
         mass=mass_global,
+        inv_abundance=np.asarray(geometry.inv_abundance, np.float64),
         eff_gdna_global=eff_global,
         eff_rna=ER,
         eff_gdna=EG,

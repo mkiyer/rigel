@@ -149,6 +149,12 @@ class StepContext:
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
     mass: np.ndarray  # per-slot gDNA-support mass (the rescale's and the share's denominator)
+    #: ⭐⭐⭐ the MODEL-FREE TOTAL ABUNDANCE (counts/bp) — the reciprocal-opportunity bank, whose
+    #: expectation is the density EXACTLY for any fragment-length distribution and ANY composition.
+    #: ⛔ Use THIS for an enrichment ratio, never ``mass / effective_length``: that divisor is a
+    #: function of the composition being solved for, so a "total abundance" built from it is circular
+    #: and swings with the gDNA-vs-RNA length gap (`region_geometry.RegionGeometry.inv_abundance`).
+    inv_abundance: np.ndarray
     eff_gdna_global: np.ndarray  # the matching gDNA opportunity
     eff_rna: np.ndarray  # per-slot RNA effective length
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)
@@ -164,10 +170,14 @@ class StepContext:
     left: np.ndarray  # adjacent slot of the other kind, -1 at a reference start
     right: np.ndarray
     is_boundary: np.ndarray  # ~is_region; the chain strictly alternates N E N E … N
-    is_exon_region: np.ndarray  # a REGION whose region signature is EXON — the SPLICE IN's destination
+    is_exon_region: (
+        np.ndarray
+    )  # a REGION whose region signature is EXON — the SPLICE IN's destination
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
-    g1_locked: np.ndarray  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)
+    g1_locked: (
+        np.ndarray
+    )  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
     geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
     order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
@@ -175,7 +185,9 @@ class StepContext:
     right_list: list
 
     # ── BELIEFS — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief) ──────────────────────────────────────────────────────────────
-    own: object  # RegionInit: the message-free self-solve — rho_*, prec_*, tau_lam, struct_lock, f_*
+    own: (
+        object  # RegionInit: the message-free self-solve — rho_*, prec_*, tau_lam, struct_lock, f_*
+    )
     belief_fg: (
         np.ndarray
     )  # the INCOMING belief. ⚠ the frame pair reads it at BOTH ends — the debt above
