@@ -154,6 +154,28 @@ controls to **exactly 0**:
 | `g50 ss0.50 capture_on` | 65,707 | 65,917 |
 | ⛔ `g50 ss0.99 capture_on` | 5,632 | 18,805 |
 
+**⭐⭐⭐ AND THE 16-CONDITION LADDER AGREES, WITH A SHARPER SPLIT THAN THE TEST CHROMOSOME SHOWED**
+(local solve, messages OFF, `nrna_mid` on every row so the nascent risk is genuinely exercised):
+
+| stratum (0.8.0 scope) | rows | anchor `m_i` vs shipped ½ |
+|---|---|---|
+| both ZERO CONTROLS, capture-OFF **and** capture-ON | 4 | ⭐ **1,381,959 / 416,652 / 68,431 / 31,692 → EXACTLY 0** |
+| unstranded × capture-OFF ⭐ IN SCOPE | 3 | **0.952 / 0.960 / 0.748** — every row better |
+| stranded × capture-OFF ⭐ IN SCOPE | 3 | **0.956 / 0.987 / 0.756** — every row better |
+| ⛔ stranded × capture-ON ⭐ IN SCOPE | 3 | **5.702 / 6.507 / 7.787** — every row worse |
+| unstranded × capture-ON ⛔ DEFERRED | 3 | 1.000 / 0.999 / 1.441 — flat, then one loss at `g05` |
+
+⭐ **Two of the three IN-SCOPE strata improve on EVERY row and both zero controls go to exactly zero;
+the third regresses badly, and it is the one where the anchors are known to under-read.** ⛔ So this is
+not a candidate to land as it stands — it is the measurement that says the reference's mean must be
+per-object AND capture-aware, i.e. `ROADMAP.md` §1 rank 3, and that the two are one piece of work rather
+than two.
+
+⚠ **IT ALSO REFINES A RECORDED BLOCKER.** `ROADMAP.md` §1 rank 2 says *"`g05` REGRESSES 1.43x on both
+strand settings"* — measured for a LIBRARY-WIDE mean. With a PER-OBJECT anchor mean, `g05` capture-OFF
+**improves** (0.960 / 0.987) and only capture-ON regresses (1.441 / 6.507). The `g05` blocker is a
+CAPTURE blocker, not a `g05` blocker.
+
 ⭐ This reproduces `object_composition.py`'s verdict (a per-object `m` is worth 25x, "exactly 0.000 at
 both zero controls") **through the solver** rather than as a prior score, which is the step that was
 missing. And it needs NO new constant: `_location_term`'s own derivation already says `location` IS the
