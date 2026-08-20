@@ -15,17 +15,30 @@
 
 ## WHERE THINGS STAND — read `ROADMAP.md` §0 for the numbers, this for the shape
 
-⭐⭐⭐ **THERE IS A BASELINE THAT BEATS BOTH SHIPPED POLICIES ON EVERY IN-SCOPE CONTAMINATED STRATUM**
-(owner, 2026-08-20: *"for the first time … we have a baseline that is beating all of the prior existing
-implementations. This is a win … This is the beginning, not the end."*). It is
-`src/rigel/calibration/messages/currency.py`, selected by `CalibrationConfig.message_policy`, with
-`RelayPolicy` untouched beside it.
+⛔⛔⛔ **THE THIRD POLICY IS BUILT AND THE PANEL SAYS IT IS THE WORST ARM ON EVERY IN-SCOPE STRATUM.**
+`src/rigel/calibration/messages/currency.py` beat both shipped policies on all three in-scope strata **on
+the test chromosome** and is the worst of three **on the 16-condition ladder**, where `SilentPolicy` wins
+8 of 16 rows (`ROADMAP.md` §0 carries both tables). ⛔ The toy and the panel disagreed in RANK, not just
+in magnitude — `TRAPS: a-toy-and-a-panel-can-disagree-in-rank`.
 
-⛔ **It is a baseline to EVOLVE, not a finish.** The owner's framing for what comes next is
-characterisation: understand the residual well enough to know **which exons are safe to train on**, so
-the tool can be trusted on real data where there is no ground truth.
+⭐ **What that does NOT invalidate**, and it is most of the session's value: the four defects it found
+were real defects; the honest-precision result (an imputation must cost something every hop) is a
+statement about any message layer; the model-free enrichment ratio is a correctness fix for the tool as
+a whole; and **the reference finding was measured on the LADDER itself**, so it stands.
+
+⛔ **So the next step is not to polish this policy.** It is the characterisation the owner asked for —
+understand the residual well enough to know which exons are safe to train on — plus one specific
+question this result raises: **message propagation is net-harmful on every in-scope contaminated stratum
+for BOTH policies on this panel.** Its value is concentrated where the local solve is blind. That should
+be measured deliberately rather than inferred.
 
 ## ⭐⭐⭐ WHAT THE NEXT SESSION DOES
+
+**⓪ FIRST, AND IT IS CHEAP: does the policy help ONLY where the local solve is blind?** Split the
+ladder's error by whether the destination had its own composition evidence and read the two halves
+separately, per stratum (`TRAPS: an-imputation-must-cost-something-every-hop` has the recipe). If the
+whole of message propagation's value is the evidence-free half, then the shippable arrangement may be a
+policy that speaks ONLY there — and that is a measurement, not a switch.
 
 **① CHARACTERISE WHICH EXONS ARE SOLVED — by OBSERVABLE properties, never by truth.** This is the
 training substrate for the gDNA landscape, and the whole bootstrap (`DESIGN.md` §0c.0d) turns on it: the

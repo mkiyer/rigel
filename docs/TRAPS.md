@@ -48,10 +48,10 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **148 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **149 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 148 entries, 148 bodies, and BOTH set
+⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 149 entries, 149 bodies, and BOTH set
 differences print empty.** (144/144 before the Stage-3 policy added four to §D — the transport, the face
 total, the structural lock and the premise.) (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
 the header had read 138 while the file held 141, the drift this line exists to catch.) (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
@@ -195,6 +195,8 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 
 **Estimation and solver design**
 
+- `a-toy-and-a-panel-can-disagree-in-rank` — THE BEST ARM ON THE TOY WAS THE WORST ARM ON THE
+  PANEL, same metric and same strata; a toy is a MECHANISM check, never a RANKING
 - `a-rescale-that-reads-the-source-belief-is-unbounded` — A TRANSPORT WHOSE FACTOR COMES FROM THE
   SOURCE'S OWN CLAIM AMPLIFIES A WEAK CLAIM WITHOUT LIMIT (measured: 235,800x, "all your mass is gDNA")
 - `a-face-total-is-not-a-total-without-its-flux` — COMPARING TOTALS WHERE ONE OBJECT CANNOT HOLD PART OF
@@ -1726,6 +1728,29 @@ landscape is fitted to serve. ⭐ *The rule:* where a term is documented as vani
 value rather than computing something that equals it; and gate the reduction on the ANSWER
 (`solve(neutral) == solve(None)`, bit-for-bit), not on `allclose` of the term. ⚠ An `atol = 1e-15`
 closeness gate on the term itself passed throughout.
+
+**a-toy-and-a-panel-can-disagree-in-rank. ⛔⛔⛔ A CHANGE MEASURED ON A TOY CAN NOT ONLY SHRINK ON THE
+PANEL BUT INVERT ITS ORDER — THE BEST ARM ON THE TOY WAS THE WORST ARM ON THE PANEL, ON THE SAME METRIC,
+THE SAME SCORER AND THE SAME THREE STRATA.** Measured 2026-08-20 on the Stage-3 policy. Test chromosome
+(8 scenarios, 200 k fragments, 28 transcripts), gDNA absolute error in FRAGMENTS, Silent / Relay / new:
+`673 / 2,236 / 662`, `619 / 1,940 / 617`, `5,632 / 19,086 / 4,570` — best of three on all three IN-SCOPE
+strata. The 16-condition ladder (10 M fragments, human-derived backbone), same instrument, same axis:
+`357,580 / 496,226 / 758,085`, `291,815 / 440,209 / 774,909`, `564,678 / 961,174 / 2,158,432` — **worst
+of three on all three**, with `SilentPolicy` winning 8 of 16 rows.
+
+⭐ *Why it inverted, which is the part worth carrying:* the toy is small and generously spaced, so most
+of its objects have LITTLE OR NO own evidence and a message is nearly free information; the panel's mass
+sits on objects that CAN already answer for themselves, where the same message is a competitor to a
+measurement. A mechanism that trades accuracy from evidence-bearing objects to evidence-free ones
+therefore reads as a win on the toy and a loss on the panel **by construction**, not by chance.
+
+⭐ *The rule:* a toy result is a MECHANISM check, never a RANKING. Before any claim of the form "this
+beats that", run the panel — and when reporting, **name the substrate in the same sentence as the
+number**. ⚠ *And the diagnostic that predicts the inversion before the panel run is cheap*: split the
+error by whether the destination had its own evidence
+(`an-imputation-must-cost-something-every-hop`). If a change's gain is concentrated on the evidence-free
+half, expect the panel to rank it lower than the toy does.
+*Sibling:* `panel-before-src` (this is its fifth recorded instance), `toys-rank-hotspots-backwards`.
 
 **a-rescale-that-reads-the-source-belief-is-unbounded. ⛔⛔⛔ A TRANSPORT WHOSE FACTOR IS DERIVED FROM
 THE SOURCE'S OWN CLAIM AMPLIFIES A WEAK CLAIM WITHOUT LIMIT, AND THE WEAKER THE SOURCE THE LARGER THE
