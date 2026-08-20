@@ -48,11 +48,12 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **144 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **148 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-19 AND THE INDEX IS COMPLETE: 144 entries, 144 bodies, and BOTH set differences
-print empty.** (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
+⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 148 entries, 148 bodies, and BOTH set
+differences print empty.** (144/144 before the Stage-3 policy added four to §D — the transport, the face
+total, the structural lock and the premise.) (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
 the header had read 138 while the file held 141, the drift this line exists to catch.) (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
 simplex-closure work added three more; 132/132 before the doc audit below added one; 133/133 before the
 message-passing lock-down added four — two to §D and two to §A.)
@@ -194,6 +195,14 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 
 **Estimation and solver design**
 
+- `a-rescale-that-reads-the-source-belief-is-unbounded` — A TRANSPORT WHOSE FACTOR COMES FROM THE
+  SOURCE'S OWN CLAIM AMPLIFIES A WEAK CLAIM WITHOUT LIMIT (measured: 235,800x, "all your mass is gDNA")
+- `a-face-total-is-not-a-total-without-its-flux` — COMPARING TOTALS WHERE ONE OBJECT CANNOT HOLD PART OF
+  THE POPULATION REPORTS STRUCTURE AS ENRICHMENT (30.8x at a condition with no probes)
+- `a-structural-lock-is-evidence-only-where-the-structure-decides` — CERTAINTY REPORTED WHERE AN RNA
+  STRAND IS ADMISSIBLE IS A DEFAULT, NOT A MEASUREMENT (75,963 false positives on one condition)
+- `an-imputation-must-cost-something-every-hop` — IF EVERY VARIANCE SHRINKS WITH COUNTS, AN IMPUTATION
+  CROSSES FREE AND TRAMPLES A MEASUREMENT (8.09x → 0.81x with a fitted premise)
 - `we-keep-re-deriving-message-passing` — ⭐⭐⭐ **READ THIS ONE FIRST.** THREE OR FOUR sessions have
   re-derived message passing from scratch. *The tell:* you are reasoning about how an EXON gets its gDNA level and
   have not yet said the words. An exon's level cannot be measured — only imputed from neighbours — and
@@ -1717,6 +1726,60 @@ landscape is fitted to serve. ⭐ *The rule:* where a term is documented as vani
 value rather than computing something that equals it; and gate the reduction on the ANSWER
 (`solve(neutral) == solve(None)`, bit-for-bit), not on `allclose` of the term. ⚠ An `atol = 1e-15`
 closeness gate on the term itself passed throughout.
+
+**a-rescale-that-reads-the-source-belief-is-unbounded. ⛔⛔⛔ A TRANSPORT WHOSE FACTOR IS DERIVED FROM
+THE SOURCE'S OWN CLAIM AMPLIFIES A WEAK CLAIM WITHOUT LIMIT, AND THE WEAKER THE SOURCE THE LARGER THE
+FACTOR.** Built and deleted 2026-08-20 in the Stage-3 policy. The mass-identity rescale
+`k = M_dst / Σ_c ρ_c,src·E_c,dst` is EXACT under its premise, reproduces `EQUATIONS.md` §3.5e's worked
+numbers, and never touches the destination's belief — every property one would check. It is still wrong
+as a transport, because the source's claim is its DENOMINATOR: a source holding gDNA 3.9e-4 and RNA
+exactly 0 returned **k = 235,800** and handed a 23,889-fragment exon "all your mass is gDNA" at a
+ZERO-gDNA library. ⭐ *The rule:* transport by a quantity that is MEASURED at both ends — here the
+model-free abundance ratio — never by one the source's belief appears inside. The two agree exactly
+where the belief is right, which is what the worked numbers check, and they diverge exactly where it is
+not, which is where it matters. *Sibling:* `zero-the-precision-with-the-value` (the same "all gDNA"
+delivered by a different door), `an-upper-bound-is-not-an-estimate`.
+
+**a-face-total-is-not-a-total-without-its-flux. ⛔⛔ COMPARING TWO OBJECTS' TOTALS WHEN ONE OF THEM
+CANNOT HOLD PART OF THE POPULATION REPORTS A DIFFERENCE THAT IS STRUCTURE, NOT ENRICHMENT.** Mature RNA
+cannot cross an `exon|intron` boundary contiguously (`mature-rna-never-crosses-a-boundary`), so an exon's
+mature fragments appear at its boundary as SJ FLUX rather than as crossings. An enrichment ratio built
+from the boundary's UNSPLICED abundance against the exon's total therefore reports a large "depletion" —
+measured **30.8x** worse at `g50 ss0.50 capture_off`, a condition with no probes in it at all. ⭐ *The
+rule:* a face's total is its contained/crossing abundance PLUS the sj flux whose bodies lie on that side
+(`EQUATIONS.md` §3.6c's flank pair). ⚠ And the flux belongs to ONE face: pooling both over-counts the
+boundary against both flanks.
+
+**a-structural-lock-is-evidence-only-where-the-structure-decides. ⛔⛔ A SLOT THAT REPORTS COMPOSITION
+CERTAINTY WHILE THE ANNOTATION ADMITS AN RNA STRAND IS REPORTING A DEFAULT, NOT A MEASUREMENT — AND A
+POLICY THAT BELIEVES IT PROPAGATES `f_g = 1` INTO EVERYTHING DOWNSTREAM.** The empty-slot artefact this
+repo already carries as a strict xfail (`struct_lock` scoped `~solvable` rather than `g1_locked`) hands
+out "RNA = 0 @ `1/trigamma(½)` = 0.2026" on an admissible strand. Believed as a composition it was
+**75,963 false-positive fragments on one condition**. ⭐ *The rule:* take a structural lock as composition
+evidence only where the structure actually determines the composition — no admissible RNA strand. The
+slot's gDNA ABUNDANCE claim survives and should: "no fragments over this much opportunity" is a real
+observation, and it is what the zero controls run on. ⚠ A consumer can apply the correct predicate
+itself without waiting for the producer to be re-scoped, which is what keeps the blast radius to one
+policy.
+
+**an-imputation-must-cost-something-every-hop. ⛔⛔⛔ IF EVERY VARIANCE IN A MESSAGE LAYER SHRINKS WITH
+COUNTS, THEN BETWEEN TWO DEEPLY-COUNTED SLOTS AN IMPUTATION CROSSES FOR FREE AND ARRIVES AT FULL STRENGTH
+BESIDE A REAL MEASUREMENT.** Owner, 2026-08-20: *"message propagation is a weak predictor by definition.
+It's an imputation, not a measurement. The strand model is a measurement … so message propagation needs
+to be weak."* Measured by splitting each condition's error on whether the destination had its OWN
+composition evidence: the Stage-3 policy was degrading the MEASURED half of the chain by **8.09x** at
+`g50 ss0.99 capture_on` (804 → 6,504 fragments) while leaving the imputed half neutral at 0.98x —
+ablating the transport read 1.01x, which named the operator. ⭐ *The rule:* the PREMISE of a hop — "my
+neighbour's values apply here" — has a variance of its own that does NOT shrink with depth of counts, and
+it must be charged on every hop under every strategy. Fit it by method of moments so no constant enters:
+`premise = max(0, Var(log r) − mean(v_r))`, the observed spread of the hop ratios less the counting
+variance that spread already contains; a substrate whose ratios vary no more than Poisson predicts fits
+exactly 0 and the term vanishes. After it: 8.09x → **0.81x**, the messages helping the half they had been
+destroying. ⚠ *The honest cost, and it is evidence the fix is real rather than a wash:* the one stratum
+with NO strand channel (unstranded × capture-ON) gets worse, because weakening the imputation weakens the
+only information it has. ⭐ *And the diagnostic generalises:* **split any message layer's error by whether
+the destination could already answer for itself.** "The messages help" and "the messages trample a
+measurement" are different findings and a pooled number cannot tell them apart.
 
 ## E. Structure, indexes and plumbing
 

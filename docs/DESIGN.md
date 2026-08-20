@@ -332,6 +332,65 @@ message from BOTH neighbours; an ordered single pass delivers from one side only
 channel, which is the primary intron deconvolution on stranded data); and the land/sea analogy the owner
 used to explain the geometry is an EXPLANATION and never enters code or docs.
 
+### 0c.0b ⭐⭐⭐ THE TWO STRATEGIES ARE ONE CONTINUUM, AND THE POINT ON IT IS FITTED — owner, 2026-08-20
+
+⛔ **§0c.0's table is a statement about INVARIANCES, not an instruction to pick one of two mechanisms**,
+and reading it as the latter produced a policy with a strategy SWITCH whose measurement immediately
+refuted the shape: the composition rescale helped under capture (0.61x) and hurt off it (**8.7x**
+stranded), both correctly. ⭐ **The owner's reading, and it is the settled one:** *"absolute abundance
+transfer and composition transfer are on two ends of a spectrum … there is actually a knob that connects
+them. Absolute abundance transfer is possible when total abundance is uniform … composition transfer is
+required when total abundance is non-uniform."*
+
+⭐⭐ **THE KNOB IS DERIVED, NOT TUNED, AND IT HAS NO CONSTANT.** ABUNDANCE says the enrichment is 1;
+COMPOSITION says it is exactly what the totals report. Those are two point hypotheses about ONE unknown,
+the log enrichment. Fusing them by inverse variance — the observed `log r` with its counting variance `v`
+against the no-enrichment premise, whose error if wrong is `log r` itself — is a shrinkage estimator:
+
+    w = (log r)² / ((log r)² + v)        the claim crosses as   rho · r^w
+
+so a disagreement indistinguishable from counting noise is shrunk away (the capture-OFF end) and one that
+dwarfs it is believed in full (the capture-ON end), **per hop, chosen by the data**. ⭐ The residual
+`(1 − w)·log r` is the abundance strategy's own transfer variance `((1−w)·log r)²`, which vanishes at the
+composition end — so ONE expression spans the continuum and there is no switch to set.
+The derivation is `EQUATIONS.md` §3.5f.
+
+### 0c.0c ⭐⭐⭐ AN IMPUTATION IS A WEAK PREDICTOR BY DEFINITION, AND ITS PRECISION MUST SAY SO
+
+⭐ **Owner's ruling, 2026-08-20**: *"message propagation … is a weak predictor by definition. It's an
+imputation, not a measurement. The strand model is a measurement — we're using the counts at that object
+to measure it … so message propagation needs to be weak."* ⛔ **The consequence is a design constraint,
+not a preference: a regression on strand-specific data is a PRECISION defect until proven otherwise.**
+
+⛔⛔ **AND THE GOAL IS NOT A SWITCH.** Strand specificity is a SPECTRUM — a library may be weakly or
+strongly stranded — so the tool must not have cliff behaviour at some specificity threshold, and the
+answer is never "turn message propagation off when stranded". The answer is honest precision, so that an
+excellent stranded dataset drives pass-0 and is not weakened by imputation, and a poor one is still
+carried. ⚠ The ladder simulates specificity as a BINARY (0.50 / 0.99) and gDNA at a handful of levels;
+both are conveniences, and a mechanism that works only because the panel is coarse is not a mechanism.
+
+⭐ The measurement that makes this checkable is a SPLIT, and it belongs on every message-layer
+experiment: score the error separately over destinations that HAVE their own composition evidence and
+those that do not. "The messages help" and "the messages trample a measurement" are different findings
+that a pooled number cannot distinguish (`TRAPS: an-imputation-must-cost-something-every-hop`).
+
+### 0c.0d ⭐⭐ WHAT PASS-0 IS ACTUALLY FOR — the circular bootstrap, stated so it is not re-litigated
+
+⭐ **Owner, 2026-08-20.** Calibration is circular from the beginning: the tool does not know whether the
+library is capture-enriched, nor how much gDNA it holds, and the reference prior is standing in for a
+real prior it does not have yet. ⛔ **So "fix the reference prior" is NOT the goal, and treating it as
+one forgets what pass-0 is for.** The goal is to solve or impute ENOUGH exons — not all of them — that
+the gDNA landscape can be TRAINED on them; once trained, that per-object prior does the work, and it
+subsumes much of what message propagation is doing.
+
+⭐ Two things follow, and both are rulings rather than options:
+* **Set the reference from the data wherever the data allow it** — intergenic space is pure gDNA and a
+  reference of ½ there is simply wrong (`structural_reference` already does this at ¬`mrna_active`).
+  ⛔ But do not extend that to objects whose composition the annotation does not determine.
+* **Message propagation's irreducible job is the deep chain**: long runs of `exon|exon` boundaries where
+  imputation is the only source of information there is. Strand specificity would solve those, and often
+  is not available — which is exactly why the next best thing has to work, and has to be weak.
+
 ### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT AND IS NOW ON — do not build it again
 
 ⛔⛔ **The hop the derivation above asks for EXISTS IN `src/`, is individually switchable, and is behind

@@ -344,6 +344,80 @@ flank's level as a floor, the total minus the sj-measured RNA as a ceiling) are 
 written in `{gDNA, RNA+, RNA−}`; a map or an operator that pools the two RNA arms has not measured the
 thing the policy carries.
 
+**3.5f ⭐⭐⭐ THE TRANSPORT KNOB — the two strategies as ONE shrinkage estimator, with no constant.**
+(The ruling is `DESIGN.md` §0c.0b. Derived and gated 2026-08-20.)
+
+A hop's two strategies are two point hypotheses about ONE unknown, the log enrichment `eta` between the
+two objects:
+
+    ABUNDANCE     eta = 0                 transport the abundances as they are
+    COMPOSITION   eta = log r             transport them rescaled by the observed ratio of totals
+
+Neither is a mechanism to select; both are estimates of `eta`, and they fuse. The observed `log r` carries
+the counting variance `v` of the two abundance observations; the no-enrichment premise, if it is wrong, is
+wrong by `log r` itself, so its own squared error is `(log r)²`. Inverse-variance fusion of the two gives
+
+    w      =  (log r)² / ( (log r)² + v )
+    eta^   =  w · log r                       Var(eta^)  =  w · v
+    claim  =  rho · r^w
+
+⭐ **Every quantity is measured**: `r` from the model-free reciprocal-opportunity banks (§3.5g) and `v` from
+`count_logvar` of the two slots' counts. **No constant is introduced**, and the two ends are recovered
+exactly — `w → 0` where the disagreement is indistinguishable from counting noise, `w → 1` where it dwarfs
+it. ⭐ The unabsorbed residual `(1 − w)·log r` is the ABUNDANCE strategy's transfer variance
+`((1−w)·log r)²`, which is the full squared disagreement at `w = 0` and vanishes at `w = 1`: one expression
+covers the continuum, which is what makes this a derivation rather than a switch.
+
+⛔⛔ **AND THE FACTOR MAY NOT BE DERIVED FROM THE SOURCE'S OWN CLAIM.** The mass-identity form
+`k = M_dst / Σ_c ρ_c,src·E_c,dst` is exact under the premise and reproduces §3.5e's worked numbers in both
+directions — and is unbounded, because the source's claim is its denominator: measured, a source holding
+`ρ_g = 3.9e-4` with no RNA returned `k = 235,800` (`TRAPS: a-rescale-that-reads-the-source-belief-is-unbounded`).
+The measured ratio agrees with `k` wherever the source's belief is right and cannot amplify a claim the
+source does not have.
+
+**3.5g ⭐⭐⭐ A TOTAL ABUNDANCE MUST NOT BE `mass / effective_length` — the accumulator already deposits
+the composition-free quantity.** (Owner's question, 2026-08-20: *"how are we trusting our enrichment
+ratios now?"*)
+
+An effective length is a function of the FRAGMENT-LENGTH distribution, and gDNA and RNA have different
+ones — so `mass / E` is a function of the composition being solved for and any enrichment ratio built from
+it is circular. The owner's own arithmetic: 100 counts in a 500 bp region reads `100/(500−100) = 0.25` as
+pure gDNA and `100/(500−200) = 0.33` as pure RNA.
+
+⭐⭐ **The accumulator deposits the RECIPROCAL OPPORTUNITY per fragment** — `1/(w−1)` crossing a BOUNDARY,
+`1/(ℓ−w+1)` contained in a REGION — whose expectation is the density EXACTLY, **for any length
+distribution and any composition**:
+
+    E[ Σ 1/(w−1) ]      =  rho          at a BOUNDARY
+    E[ Σ 1/(ℓ−w+1) ]    =  rho          in a REGION of length ℓ
+
+(the reciprocal-opportunity theorem, `tests/native/_accumulator_reference.py`; the region form is why
+`1/L` was wrong there and `1/(L−1)` right at a boundary). ⭐ A FACE's total adds the sj flux whose bodies
+lie on that side, in the same units, from the sj bank's own reciprocal-opportunity column — without it the
+comparison is between an object that can hold mature RNA and one that cannot
+(`TRAPS: a-face-total-is-not-a-total-without-its-flux`).
+
+⚠ **What is still model-dependent, stated so it is not assumed away**: the per-component divisors `E_g`
+and `E_r` remain fragment-length models, so any statement about a COMPONENT's density still uses one. What
+§3.5g buys is that the TOTAL — and therefore every enrichment ratio — does not.
+
+**3.5h ⭐⭐⭐ THE PREMISE VARIANCE — why an imputation must cost something on every hop.**
+(The ruling is `DESIGN.md` §0c.0c.)
+
+Every variance that scales with counts vanishes between two deeply-counted slots, so a message layer built
+only from counting terms transports an imputation for FREE and delivers it at full strength beside a
+measurement. The premise of a hop — *"my neighbour's values apply here"* — is not a counting statement and
+does not shrink with depth. It is estimable from the chain itself by METHOD OF MOMENTS, which is what keeps
+it constant-free:
+
+    Var_obs( log r )  =  premise  +  E[ v_r ]        ⇒     premise  =  max( 0,  Var(log r) − mean(v_r) )
+
+⛔ Floored at 0 rather than at something small: a substrate whose ratios vary no more than Poisson predicts
+has exhibited no heterogeneity, and a fit may not manufacture doubt the data do not show. Charged once per
+hop, under either strategy, it makes a deep imputation arrive weaker than a shallow one and a measurement
+outweigh both. ⚠ ONE library-level scalar is the first form; a per-hop-type fit is the obvious refinement
+and needs a substrate with enough hops per type to estimate on.
+
 **3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` BOUNDARY — component-set matching, derived and verified.**
 (Owner, 2026-08-04. Verified against oracle truth on `toy_harness --spec spliced_exons`.)
 

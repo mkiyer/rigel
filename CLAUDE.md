@@ -183,7 +183,34 @@ sibling with no import boundary**: 14 were measured on 2026-08-07 and **6 were g
 claiming four consumers that had one. A layer is *not* a claim that its modules are the right SIZE — layer 4
 is five modules for one concept — and that question is deliberately still open.
 
-## ⭐⭐⭐ MESSAGE PROPAGATION IS ON — AND IT IS BEING REBUILT AS A NEW POLICY, NOT PATCHED FURTHER
+## ⭐⭐⭐ THE THIRD POLICY IS BUILT AND IS THE BASELINE — evolve it, do not rebuild it
+
+⭐⭐⭐ **`src/rigel/calibration/messages/currency.py` beats BOTH shipped policies on all three IN-SCOPE
+contaminated strata** (2026-08-20; the numbers are `ROADMAP.md` §0). It sits beside `SilentPolicy` and
+`RelayPolicy` on the same gated backbone and the A/B is one config value,
+`CalibrationConfig.message_policy`. ⛔ **`RelayPolicy` is untouched and stays until the panel says it is
+dead.**
+
+⛔ **IT IS A BASELINE TO EVOLVE, NOT A FINISH** (owner, 2026-08-20: *"This is the beginning, not the
+end"*). ⭐ **What comes next is CHARACTERISATION, not construction**: which exons are solved accurately,
+by properties observable WITHOUT truth — that set is the training substrate the gDNA landscape needs, and
+the whole circular bootstrap turns on it (`DESIGN.md` §0c.0d). The handoff is `docs/dev/NEXT_SESSION.md`.
+
+⭐⭐ **THE FOUR RULINGS BEHIND IT, so they are not re-litigated** — `DESIGN.md` §0c.0b–d and
+`EQUATIONS.md` §3.5f–h: ① the ABUNDANCE and COMPOSITION strategies are **one continuum**, and the point
+on it is a FITTED shrinkage (`w = (log r)²/((log r)² + v)`), never a switch; ② the **recipient** decides,
+from a static population table keyed per (boundary, side) — a boundary carrying another transcript's TSS
+is still population-equal with the flank that gains nothing; ③ **an imputation is a weak predictor by
+definition** and pays a fitted PREMISE on every hop, because a message layer whose every variance shrinks
+with counts transports for free and tramples a measurement; ④ an enrichment ratio is **model-free** — it
+comes from the accumulator's reciprocal-opportunity banks, never from `mass / effective_length`.
+
+⛔⛔ **AND THE MEASUREMENT DISCIPLINE IS PART OF THE RULING: split any message-layer error by whether the
+destination HAD ITS OWN COMPOSITION EVIDENCE.** "The messages help" and "the messages trample a
+measurement" are different findings and a pooled number cannot tell them apart — it is how an 8.09×
+degradation of the measured half of a chain was found inside a modest total.
+
+## ⚠ HISTORY — the rebuild plan that produced the policy above. Read as PROVENANCE, not as a queue.
 
 ⛔⛔⛔ **READ THIS BEFORE FIXING ANYTHING IN `messages/relay.py`. THE OWNER RULED (2026-08-18) THAT THE
 RELAY IS REBUILT, NOT REPAIRED BUG BY BUG** — *"the whole method from the top down is not simple, and it

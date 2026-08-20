@@ -1,94 +1,71 @@
-# NEXT SESSION — develop the message-propagation policy on the test chromosome
+# NEXT SESSION — characterise the residual, then evolve the baseline
 
     ⚠ **A DEV DOC. Nothing may cite it, and it is NOT the state.** The state is `ROADMAP.md` §0/§1, the
-    rulings `DESIGN.md`, the lessons `TRAPS.md`, the substrate `TESTING.md` §0a/§0b.
-    ⛔ Delete this file when the plan it points at is executed.
+    rulings `DESIGN.md` §0c, the derivations `EQUATIONS.md` §3.5f–h, the lessons `TRAPS.md` §D, the
+    substrate `TESTING.md` §0a/§0b. ⛔ Delete this file when the plan it points at is executed.
 
-    Written 2026-08-19 at the end of a long session, for the migration the owner announced.
+    Rewritten 2026-08-20, when the third policy became the baseline.
 
 ## ⭐⭐⭐ FIRST COMMAND OF THE SESSION — prove you can run and regenerate everything
 
     python scripts/design/preflight.py          # ~2 min, or --fast to skip the instrument sweep
-    python -m pytest tests/ -q                  # 0 failed / 3,554 passed / 9 xfailed, 3,563 collected
+    python -m pytest tests/ -q                  # the baseline is in CLAUDE.md; ANY failure is a regression
 
-⛔ **Do not start work on a ✘.** Preflight checks the toolchain, both references, both panels (five
-oracle partitions and a certified `slot_truth` each) and every instrument, and for anything missing it
-prints the command that regenerates it — a missing DERIVED artifact is a command you have not run, not
-damage. ⭐ Its first run caught the 8 test-chromosome scenarios sitting uncertified.
+⛔ **Do not start work on a ✘.** A missing DERIVED artifact is a command you have not run, not damage.
 
-## WHERE THINGS STAND
+## WHERE THINGS STAND — read `ROADMAP.md` §0 for the numbers, this for the shape
 
-✅ **Simulator** — takes its transcriptome from a rigel INDEX, so nascent RNA is the index's own
-single-exon ENTITY and capture binds by genomic overlap, strand-agnostically (`TESTING.md` §0).
-✅ **Panel** — 16 conditions, rebuilt in 24.5 min, **nascent ON in every one**, so no row is
-`nrna = 0` restated. 6/6 simulator gates; 16/16 COMPOSITION + FIELD certified (12 real per-reference
-field verifications — the capture-ON and zero-gDNA rows are VACUOUS by design).
-✅ **Per-arm truth** — the oracle cache carries five partitions: the three `ORIGINS` plus
-`rna_pos`/`rna_neg` (RNA by TRANSCRIPT strand), gated `n_rna_pos + n_rna_neg == n_mrna + n_nrna` at
-every slot, max gap **0**.
-✅ **The hop-currency MAP, per arm** (`hop_currency.py`, 16 conditions in 23 s) — Stage 2 of the
-rebuild is DONE. The arms genuinely disagree; the map is `ROADMAP.md` §0.
-✅ **The standing BENCHMARK** — `relay_pool_ab.py --out` + `benchmark_report.py` (HTML). Artifacts:
-`<ladder>/benchmark/baseline_2026-08-19_shipped.{log,tsv}` and `benchmark_ladder.html`.
-✅ **The method-development TEST CHROMOSOME** — 28 transcripts over three stages (Stage 3 landed 2026-08-19: the gap-closing structures), `TESTING.md` §0a.
+⭐⭐⭐ **THERE IS A BASELINE THAT BEATS BOTH SHIPPED POLICIES ON EVERY IN-SCOPE CONTAMINATED STRATUM**
+(owner, 2026-08-20: *"for the first time … we have a baseline that is beating all of the prior existing
+implementations. This is a win … This is the beginning, not the end."*). It is
+`src/rigel/calibration/messages/currency.py`, selected by `CalibrationConfig.message_policy`, with
+`RelayPolicy` untouched beside it.
 
-## WHAT THE NEXT SESSION DOES
+⛔ **It is a baseline to EVOLVE, not a finish.** The owner's framing for what comes next is
+characterisation: understand the residual well enough to know **which exons are safe to train on**, so
+the tool can be trusted on real data where there is no ground truth.
 
-⭐⭐⭐ **STAGE 3 — the THIRD POLICY, developed on the test chromosome, one transcript at a time.**
-The arithmetic it must implement is `EQUATIONS.md` §3.5e (the owner's worked SPLICE OUT / SPLICE IN and
-the terminus case); the rulings are `DESIGN.md` §0c.0; the hop table is keyed on
-`object class × {sj, term, sj+term}` (`TRAPS: an-object-class-does-not-see-a-terminus`).
+## ⭐⭐⭐ WHAT THE NEXT SESSION DOES
 
-**The loop, and it is seconds long:**
+**① CHARACTERISE WHICH EXONS ARE SOLVED — by OBSERVABLE properties, never by truth.** This is the
+training substrate for the gDNA landscape, and the whole bootstrap (`DESIGN.md` §0c.0d) turns on it: the
+prior cannot be trained until enough exons are solved, and once it is trained it subsumes much of what
+message propagation does. ⛔ Report a CURVE or a distribution, never a tolerance — a threshold here is a
+magic number. Candidate observables, all available without truth: own composition evidence
+(`has_own_composition_evidence`), hops from the nearest structurally pure-gDNA slot, flanked by a splice
+site vs a terminus, one strand vs both, observed depth.
 
-    python scripts/sim/build_test_reference.py                     # after editing the GTF/abundances
-    rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability --no-tsv -o <T>/idx
-    python scripts/sim/simulate_reads.py --config scripts/sim/configs/test_reference.yaml -j 8
-    python scripts/design/build_scan_cache.py --index <T>/idx --suite <T>/scenarios
-    # the 4 g00 rows need the per-condition path — `pass0_vs_oracle.py` holds zero-gDNA rows out:
-    python scripts/design/pass0_vs_oracle.py --suite <T>/scenarios --index <T>/idx \
-        --oracle-cache <T>/scenarios/oracle_cache --_prewarm <condition>
-    python scripts/design/relay_pool_ab.py --suite <T>/scenarios --index <T>/idx \
-        --oracle-cache <T>/scenarios/oracle_cache --out rows.tsv
-    python scripts/design/benchmark_report.py rows.tsv --transcripts <T>/scenarios -o page.html
+**② THEN EXPAND THE gDNA SPECTRUM — deliberately** (`ROADMAP.md` §1 rank 1b). Levels are informative
+where behaviour CHANGES; interpolation is free. ⛔ Do not multiply the full cross.
 
-with `<T> = ~/Downloads/rigel_runs/test_reference`. Simulation of all 8 scenarios is **~18 s**.
+**③ AND KEEP GROWING THE TEST CHROMOSOME** — it is becoming a gold-standard regression set (owner). Add
+a case whenever a new stressing structure is conceived. Queued: a cassette (skipped) exon; a same-strand
+intron-retention isoform; divergent and convergent gene pairs; a probed exon shared by isoforms whose
+other exons are unprobed.
 
-⛔ **REPORT EVERY SCENARIO. DO NOT POOL** (owner, 2026-08-19: *"DON'T POOL SCENARIOS. WE NEED TO SEE
-EVERY SCENARIO. ONLY POOL AT THE END."*). `benchmark_report.py` enforces the shape.
+**The loop is ~1 min end to end** (`docs/TESTING.md` §0a has the commands; `<T> = ~/Downloads/rigel_runs/test_reference`).
 
-## THE MEASUREMENT THAT SHOULD DRIVE THE DESIGN — ✅ THE GAP IS CLOSED (2026-08-19, Stage 3)
+## ⛔ THE MEASUREMENT DISCIPLINE THAT FOUND EVERY DEFECT THIS SESSION
 
-The Stage-2 chromosome had the relay HELPING on all 8 scenarios while the ladder had it COSTING the
-three in-scope strata 1.4–1.7× — so the failure was not represented. **Stage 3 added the named
-structures (`TESTING.md` §0a: antisense overlap, alternate TSS/TES, the 10-tile deep exonic corridor,
-and the owner's TA–TF locus verbatim) and the grown chromosome now REPRODUCES the ladder's sign
-structure exactly**: relay wins all four zero controls (0.000–0.038×) and the deferred stratum
-(0.550×), and costs the three in-scope contaminated rows **3.1–3.4×**. The damage is concentrated and
-named (`worst_objects.py`): the probed terminus-flanked AMBIG exons of the owner's locus driven to a
-confident wrong vertex (`fg_loc` 0.31–0.38 → relayed 0.000–0.003 against truths 0.18–0.33), and the
-intron⁺/exon⁻ overlap regions under TE−. All 8 scenarios certify COMPOSITION + FIELD. ⭐ **So the
-policy rungs can now be scored against failures the substrate actually exhibits.**
+**Split the error by whether the destination HAD ITS OWN composition evidence.** "The messages help" and
+"the messages trample a measurement" are different findings, and a pooled number cannot tell them apart —
+it is how an 8.09× degradation of the measured half of the chain was found hiding inside a modest total
+(`TRAPS: an-imputation-must-cost-something-every-hop`).
 
-## THE TRAPS THIS SESSION PAID FOR
-
-* ⛔ **A donor's LIBRARY-level priors must match the condition's strand/capture axes.** A `ss_0.99`
-  donor injected into `ss_0.50` reported **82,581** false positives where a matching donor reports 0.
-  `relay_pool_ab.py --donor` now refuses a mismatch. ⚠ Stage 2 removed the need entirely — with real
-  splice junctions κ fits from the data.
-* ⛔ **A test fixture that builds its subject with `__new__` tests the rebuild, not the subject.** One
-  bypassed `__init__` and 242 tests failed on a new attribute while production was fine.
-* ⛔ **A duplicate key in a dict literal is a LOST EDIT, not an error.** A jargon-gate allowance silently
-  did nothing because the key already existed later in the same dict.
-* ⛔ **`--collect-only` every count, never adjust one.** Every suite move this session was accounted.
+⚠ And verify that a perturbation LANDED before believing a green result. Three separate times this
+session an ablation silently did nothing: a `sed` that matched no line, a gate that read one slot past
+the stretch it meant to isolate, and — the expensive one — a patched module binding that
+`region_init` does not use, because it holds its own reference to the solver
+(`TRAPS: an-ablation-that-never-ran`).
 
 ## STILL OPEN
 
-* The `ROADMAP.md` §1 rank 3 spike-and-slab: at a TERMINUS into an EXON under capture NEITHER currency
-  works (~10 % excess on every arm) — the residual the map names and no policy choice fixes.
-* `relay_pool_ab.py`'s docstring promises a `--table pipeline` (the EM-level nascent/annotated split)
-  that does not exist. Build it or remove the promise.
-* Prose in ~18 instruments still describes the retired 36-condition ladder and the deleted
-  `pilot`/`flgap` panels. ⚠ Historical measurement stamps are PROVENANCE and must stay; what is worth
-  fixing is any prose that presents a retired panel as current. All LIVE CODE and usage examples were
-  repointed on 2026-08-19 (24 substitutions, verified by an AST scan that now returns empty).
+* ⭐ **The capture-aware reference** (`ROADMAP.md` §1 rank 3 + the §0 reference row): a per-object mean
+  is measured to take both zero controls to exactly 0 and to improve every capture-OFF row on the
+  ladder, and to regress every stranded × capture-ON row by the documented anchor under-read. Rank 2 and
+  rank 3 are ONE piece of work.
+* `relay_pool_ab.py`'s docstring promises a `--table pipeline` that does not exist. Build it or remove
+  the promise.
+* Prose in ~18 instruments still describes the retired 36-condition ladder. Historical measurement
+  stamps are PROVENANCE and must stay; what is worth fixing is prose presenting a retired panel as
+  current.
