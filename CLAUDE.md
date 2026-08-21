@@ -366,8 +366,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,609 passing, 0 SKIPPED, 9 xfail, 3,618 collected**
-(re-derived 2026-08-20, end of the abundance/cleanup day). ⚠ The `+10` over 3,608 is ACCOUNTED:
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,615 passing, 0 SKIPPED, 9 xfail, 3,624 collected**
+(re-derived 2026-08-21, after the START/END/SPAN accumulator banks landed). ⚠ The `+6` over 3,618 is
+the six new gates in `tests/native/test_accumulator_spec.py` (an existing file, so no meta drift),
+each verified failing first; the C++ was additionally perturbed once (END deposited at the start
+region) and the byte-identity parity gate fired, proving the new banks are inside it.
+⚠ It read **3,609 passing / 3,618 collected** before that (end of the abundance/cleanup day). ⚠ The `+10` over 3,608 is ACCOUNTED:
 `+4` meta for `exon_solvability.py` becoming tracked and `+1` for the weighted-premise gate (both
 landed in `f295a313`, whose commit did not carry the number back here); `+2` dev docs (the dissection
 session record and the spike-and-slab primer) `−1` (`NEXT_SESSION.md` deleted per its own

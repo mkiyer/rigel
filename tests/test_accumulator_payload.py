@@ -102,7 +102,9 @@ def _calibration_dict(**overrides) -> dict:
         "ref_sj_offsets": ref_sj_offsets,
         "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
         "region_contained_inv_opportunity_sum": np.arange(n_regions, dtype=np.float64) * 7,
-        "region_start_count": np.arange(n_regions, dtype=np.uint32),
+        "region_start_count": np.arange(n_regions * 2, dtype=np.uint32),
+        "region_end_count": np.arange(n_regions * 2, dtype=np.uint32) * 3,
+        "region_span_count": np.arange(n_regions * 2, dtype=np.uint32) * 5,
         "boundary_unspliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
         "boundary_unspliced_inv_length_sum": np.arange(n_boundaries, dtype=np.float64),
         "boundary_spliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
@@ -185,7 +187,9 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
         ("sj_inv_length_sum", n_sj),
     ):
         assert getattr(payload, name).shape == (rows,), name
-    assert payload.region_start_count.shape == (n_regions,)
+    assert payload.region_start_count.shape == (n_regions, 2)
+    assert payload.region_end_count.shape == (n_regions, 2)
+    assert payload.region_span_count.shape == (n_regions, 2)
     assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
 
 
@@ -391,10 +395,15 @@ def test_the_start_count_invariant_is_checkable_from_the_payload_alone():
     crossings were junk. This one is checkable against a number the deposit counted independently, and
     the payload must carry both halves of it.
     """
-    counts = np.zeros(5, np.uint32)
+    counts = np.zeros(10, np.uint32)  # 5 regions x 2 strand columns, flat as the C++ emits it
     counts[:3] = [10, 20, 11]
     payload = _payload(region_start_count=counts, qc=dict(_calibration_dict()["calibration"]["qc"]))
     assert int(payload.region_start_count.sum()) == payload.qc.deposited
+    # ⭐ the ledger closes TWICE over since 2026-08-21: the END bank is its mirror
+    ends = np.zeros(10, np.uint32)
+    ends[2:6] = [5, 6, 7, 23]
+    payload = _payload(region_end_count=ends, qc=dict(_calibration_dict()["calibration"]["qc"]))
+    assert int(payload.region_end_count.sum()) == payload.qc.deposited
 
 
 # ---------------------------------------------------------------------------

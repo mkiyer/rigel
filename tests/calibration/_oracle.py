@@ -69,6 +69,8 @@ _BANKS = (
     "boundary_spliced_count",
     "sj_count",
     "region_start_count",
+    "region_end_count",
+    "region_span_count",
     # ⭐ The three CONSERVED MASS banks. Two of them were outside this tuple when they landed, which
     # meant the origin split was never validated on them — and they are exactly what `component_shares`
     # reads. Integer fixed point, so sum-to-full is byte-exact here like every other bank.

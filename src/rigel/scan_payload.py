@@ -275,6 +275,12 @@ class DrainQC:
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("region_contained_count", "region", np.uint32),
+    # ⭐ the START/END/SPAN banks (2026-08-21): the path's first/last covered base and the regions it
+    # strictly spans, by align strand. START and END each sum (over both columns) to qc.deposited —
+    # the ledger, twice over. SPAN's opportunity is (w−ℓ−1)₊, a pmf functional per component BY DESIGN.
+    ("region_start_count", "region", np.uint32),
+    ("region_end_count", "region", np.uint32),
+    ("region_span_count", "region", np.uint32),
     ("boundary_unspliced_count", "boundary", np.uint32),
     ("boundary_spliced_count", "boundary", np.uint32),
     ("sj_count", "sj", np.uint32),
@@ -314,7 +320,6 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
 ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
     *((name, axis) for name, axis, _dtype in BANK_AXES),
     *((name, axis) for name, axis, _dtype in SINGLE_COLUMN_AXES),
-    ("region_start_count", "region"),
     ("pool_lengths", "library"),
     ("deposited_lengths", "library"),
 )
@@ -511,7 +516,18 @@ class AccumulatorPayload:
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
     region_contained_inv_opportunity_sum: np.ndarray
-    region_start_count: np.ndarray  # uint32[n_regions] — THE invariant; sums to qc.deposited
+    #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand. THE ledger invariant:
+    #: Σ over both columns == qc.deposited. Opportunity ℓ for every fragment length; wall-blind only
+    #: at the template's DOWNSTREAM end (side-select against region_end_count).
+    region_start_count: np.ndarray
+    #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base. Σ == qc.deposited; wall-blind
+    #: only at the template's UPSTREAM end.
+    region_end_count: np.ndarray
+    #: uint32[n_regions, 2] — regions STRICTLY spanned (every base covered by one segment, neither
+    #: path endpoint inside; a jumped region books nothing). Opportunity (w−ℓ−1)₊ — a per-component
+    #: pmf functional BY DESIGN; consumer-gated (the parked length-solve channel). Invariants:
+    #: contained ≤ min(start, end) per region; span ≡ 0 wherever ℓ ≥ w_max − 1.
+    region_span_count: np.ndarray
 
     # -- contiguous boundaries: the 0-bp boundary between two adjacent regions --
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
@@ -763,11 +779,6 @@ class AccumulatorPayload:
         for name, axis, dtype in SINGLE_COLUMN_AXES:
             banks[name] = _single_column_bank(cal, name, rows_on[axis], dtype)
 
-        region_start_count = np.ascontiguousarray(cal["region_start_count"], dtype=np.uint32)
-        if region_start_count.shape != (n_regions,):
-            raise ValueError(
-                f"region_start_count has shape {region_start_count.shape}, expected ({n_regions},)"
-            )
         pool_lengths = np.ascontiguousarray(cal["pool_lengths"], dtype=np.int64)
         if pool_lengths.size != N_FRAGMENT_POOLS * (max_length + 1):
             raise ValueError(
@@ -816,7 +827,7 @@ class AccumulatorPayload:
             region_bounds=region_bounds,
             **offsets,
             **banks,
-            region_start_count=region_start_count,
+
             pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
             deposited_lengths=deposited_lengths,
             deferred=deferred,

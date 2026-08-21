@@ -263,7 +263,9 @@ Accumulator::Accumulator(std::vector<std::int64_t> region_bounds,
     const std::size_t n_boundaries = region_bounds_.size() >= 2 ? region_bounds_.size() - 2 : 0;
     regions_.assign(n_regions, Region{});
     boundaries_.assign(n_boundaries, Boundary{});
-    region_start_count_.assign(n_regions, 0u);
+    region_start_count_.assign(n_regions * kNStrandColumns, 0u);
+    region_end_count_.assign(n_regions * kNStrandColumns, 0u);
+    region_span_count_.assign(n_regions * kNStrandColumns, 0u);
 
     // ⚠ REQUIRED whenever this reference owns a region, and it throws rather than quietly skipping the
     // length pools. The shipped accumulator disabled pooling silently on an empty type array, which is a
@@ -603,7 +605,11 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     const std::int64_t last_base  = scratch.segments.back().second - 1;
 
     const std::int64_t first_region = region_of_pos(first_base);
-    region_start_count_[static_cast<std::size_t>(first_region)] += 1u;
+    const std::int64_t last_region  = region_of_pos(last_base);
+    region_start_count_[static_cast<std::size_t>(first_region) * kNStrandColumns +
+                        static_cast<std::size_t>(column)] += 1u;
+    region_end_count_[static_cast<std::size_t>(last_region) * kNStrandColumns +
+                      static_cast<std::size_t>(column)] += 1u;
     // ⭐ TRAPS: a-purity-filter-is-a-length-filter — incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
     // describe one population by construction rather than by agreement. `length` is already clipped to
     // the reference and gated by the length limit above.
@@ -641,6 +647,22 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             } else {
                 boundary.unspliced_count[col] += 1u;
                 boundary.unspliced_inv_length_sum += inv_boundary;
+            }
+        }
+        // ── STRICT SPAN: regions this segment covers whole, excluding the path's own endpoint
+        // regions. ⚠ lower/upper_bound rather than the crossing loop's window: a NON-FIRST segment
+        // starts exactly ON a region_bound (its acceptor), and the region beginning there IS fully
+        // covered — the crossing window would miss it.
+        {
+            const std::int64_t f2 =
+                std::lower_bound(region_bounds_.begin(), region_bounds_.end(), seg_start) -
+                region_bounds_.begin();
+            const std::int64_t l2 =
+                (std::upper_bound(region_bounds_.begin(), region_bounds_.end(), seg_end) -
+                 region_bounds_.begin()) - 1;
+            for (std::int64_t r = f2; r < l2; ++r) {
+                if (r == first_region || r == last_region) continue;
+                region_span_count_[static_cast<std::size_t>(r) * kNStrandColumns + col] += 1u;
             }
         }
         // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
@@ -716,7 +738,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // leaving a fragment that crosses nothing yet straddles two regions. Such a fragment deposits on NO
     // object but still increments region_start_count, so the loss is visible rather than silent.
     std::int64_t contained_region = -1;
-    if (sj_ids.empty() && first_region == region_of_pos(last_base)) {
+    if (sj_ids.empty() && first_region == last_region) {
         contained_region = first_region;
         Region& region = regions_[static_cast<std::size_t>(contained_region)];
         // ⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of
@@ -866,7 +888,12 @@ void Accumulator::merge_from(const Accumulator& other) {
         }
         // ⚠ Outside the column loop — these have ONE value per region, not one per strand.
         regions_[i].contained_inv_opportunity_sum += other.regions_[i].contained_inv_opportunity_sum;
+
+    }
+    for (std::size_t i = 0; i < region_start_count_.size(); ++i) {
         region_start_count_[i] += other.region_start_count_[i];
+        region_end_count_[i] += other.region_end_count_[i];
+        region_span_count_[i] += other.region_span_count_[i];
     }
     for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
         deposited_lengths_[i] += other.deposited_lengths_[i];

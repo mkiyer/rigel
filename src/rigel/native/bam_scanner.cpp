@@ -2117,7 +2117,9 @@ private:
 
             std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
             std::vector<double> region_contained_inv_opportunity_sum(n_regions, 0.0);
-            std::vector<uint32_t> region_start_count(n_regions, 0u);
+            std::vector<uint32_t> region_start_count(n_regions * kNStrandColumns, 0u);
+            std::vector<uint32_t> region_end_count(n_regions * kNStrandColumns, 0u);
+            std::vector<uint32_t> region_span_count(n_regions * kNStrandColumns, 0u);
             std::vector<uint32_t> boundary_unspliced_count(n_boundaries * kNStrandColumns, 0u);
             std::vector<double> boundary_unspliced_inv_length_sum(n_boundaries, 0.0);
             std::vector<uint32_t> boundary_spliced_count(n_boundaries * kNStrandColumns, 0u);
@@ -2151,12 +2153,18 @@ private:
                 const Boundary* boundaries = a.boundaries_data();
                 const SpliceJunction* sj = a.sj_data();
                 const uint32_t* starts = a.region_start_count_data();
+                const uint32_t* ends   = a.region_end_count_data();
+                const uint32_t* spans  = a.region_span_count_data();
                 const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
                 const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
                 const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
 
                 for (std::size_t i = 0; i < a.n_regions(); ++i) {
-                    region_start_count[region_base + i] = starts[i];
+                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                        region_start_count[(region_base + i) * kNStrandColumns + c] = starts[i * kNStrandColumns + c];
+                        region_end_count[(region_base + i) * kNStrandColumns + c]   = ends[i * kNStrandColumns + c];
+                        region_span_count[(region_base + i) * kNStrandColumns + c]  = spans[i * kNStrandColumns + c];
+                    }
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (region_base + i) * kNStrandColumns + c;
                         region_contained_count[o]   = regions[i].contained_count[c];
@@ -2222,6 +2230,8 @@ private:
             cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
             cal["region_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(region_contained_inv_opportunity_sum));
             cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
+            cal["region_end_count"]         = vec_to_ndarray(std::move(region_end_count));
+            cal["region_span_count"]        = vec_to_ndarray(std::move(region_span_count));
             cal["boundary_unspliced_count"]   = vec_to_ndarray(std::move(boundary_unspliced_count));
             cal["boundary_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(boundary_unspliced_inv_length_sum));
             cal["boundary_spliced_count"]     = vec_to_ndarray(std::move(boundary_spliced_count));
@@ -2909,8 +2919,18 @@ NB_MODULE(_bam_impl, m) {
             })
             .def_prop_ro("region_start_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<1>>(
-                    a.region_start_count_data(), {a.n_regions()}, h).cast();
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    a.region_start_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
+            })
+            .def_prop_ro("region_end_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    a.region_end_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
+            })
+            .def_prop_ro("region_span_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    a.region_span_count_data(), {a.n_regions(), kNStrandColumns}, h).cast();
             })
 
             // ── contiguous boundaries ─────────────────────────────────────────────────────────────────────

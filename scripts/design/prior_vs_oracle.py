@@ -599,7 +599,10 @@ def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     region overlaps no locus — intergenic, correctly outside every prior, and reported so that
     ``Σ F + dropped == the library total`` is checkable rather than assumed.
     """
-    parts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64) for k in ORIGINS}
+    # ⭐ strand-summed: the bank went per genome strand on 2026-08-21, and the locus projection
+    # is a strand-agnostic total.
+    parts = {k: np.asarray(oracle.parts[k].region_start_count, np.float64).sum(axis=1)
+             for k in ORIGINS}
     g = parts["gdna"]
     r = parts["mrna"] + parts["nrna"]
     proj = PRIORS._project_regions_to_loci(

@@ -632,9 +632,22 @@ byte-identity to it; where it and a document disagree, the reference wins.
 The populations therefore do NOT all carry the same channels, and that asymmetry is the design:
 
     region_contained    count  inv_opportunity_sum
+    region (per path)   start_count[2]  end_count[2]  span_count[2]   ← 2026-08-21, see below
     boundary_unspliced  count  inv_length_sum       mass
     boundary_spliced    count                       mass      certified RNA — nothing deconvolves it
     sj                  count  inv_length_sum       mass[2]   inv_length_sum is LIVE in second_pass
+
+⭐⭐ **THE START/END/SPAN REGION BANKS (owner's taxonomy, 2026-08-21).** Every accepted path books its
+FIRST covered base (`region_start_count`), its LAST (`region_end_count`), and every region it STRICTLY
+spans (`region_span_count` — every base covered by one segment, neither endpoint inside; a region a
+spliced path JUMPS over books nothing), each by genome strand. START and END have opportunity `ℓ` for
+EVERY fragment length — the composition-free TOTAL at a REGION — and are wall-blind only at the
+template's downstream/upstream end respectively, so a consumer side-selects ("use the side whose wall
+does not bind"). SPAN's opportunity is `(w−ℓ−1)₊`, a per-component pmf functional BY DESIGN — it is
+consumer-gated (the parked length-solve channel). ⭐ The ledger closes TWICE over:
+`ΣS = ΣE = qc.deposited`; per region `contained ≤ min(S, E)`; `span ≡ 0` wherever `ℓ ≥ w_max − 1`.
+⚠ `region_span_count` is NOT the removed `region_spanning_*` family: those carried the mis-weighted
+`1/L` deposit; this is an integer count whose divisor lives with its (gated, future) consumer.
 
 | | | |
 |---|---|---|

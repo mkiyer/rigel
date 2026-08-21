@@ -473,11 +473,13 @@ public:
 
     /// One uint32 per region counting fragments whose FIRST COVERED BASE lies in it.
     ///
-    /// ⭐ This is the accumulator's one real invariant: `sum(region_start_count) == deposited`, checkable
+    /// ⭐ The accumulator's ledger invariant, now TWICE over: `sum(region_start_count) == sum(region_end_count) == deposited` (both strand columns), checkable
     /// against a number the scanner knows independently. The three "conservation identities" it replaced
     /// were tautologies -- each right-hand side could only be evaluated by re-running the deposit, so a
     /// deliberately broken replay satisfied all three while 91 % of the crossings were junk.
     const std::uint32_t* region_start_count_data() const noexcept { return region_start_count_.data(); }
+    const std::uint32_t* region_end_count_data() const noexcept { return region_end_count_.data(); }
+    const std::uint32_t* region_span_count_data() const noexcept { return region_span_count_.data(); }
 
     /// Length histograms, pool-major: pool p occupies [p*(max_length+1), (p+1)*(max_length+1)), binned
     /// at L. Empty when this reference has no region types.
@@ -578,7 +580,14 @@ private:
     std::vector<Region>          regions_;             // n_region_bounds - 1
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
-    std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region keeps its static_assert'd 16 B
+    // ⭐ The START/END/SPAN region banks (2026-08-21) — flat [n_regions * kNStrandColumns], their own
+    // arrays so Region keeps its static_assert'd 16 B. START/END: the path's first/last COVERED base,
+    // by align strand — opportunity ℓ for every fragment length, wall-blind only at the template's
+    // downstream/upstream end respectively. SPAN: regions STRICTLY covered by one segment, neither
+    // path endpoint inside — opportunity (w−ℓ−1)₊, a pmf functional per component BY DESIGN.
+    std::vector<std::uint32_t> region_start_count_;
+    std::vector<std::uint32_t> region_end_count_;
+    std::vector<std::uint32_t> region_span_count_;
 
     std::vector<std::int32_t>  sj_offsets_;        // n_region_bounds + 1, CSR over the donor region_bound index
     std::vector<std::int32_t>  sj_boundary_right_;   // n_sj

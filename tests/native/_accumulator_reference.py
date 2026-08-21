@@ -508,7 +508,21 @@ class Tally:
     #: ⭐ float64[n_regions] — ONE column. See :meth:`Tally.zeros`: the length moments are
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
     region_contained_inv_opportunity_sum: np.ndarray
-    region_start_count: np.ndarray  # uint32[n_regions] — one per accepted fragment; THE invariant
+    #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand; one per accepted
+    #: fragment, so ``Σ (both columns) == qc.deposited`` — THE ledger invariant. ⭐ Opportunity ``ℓ``
+    #: for every fragment length; wall-blind only at the template's DOWNSTREAM end (the consumer
+    #: side-selects against ``region_end_count``, whose wall is the opposite one).
+    region_start_count: np.ndarray
+    #: uint32[n_regions, 2] — the MIRROR: the path's LAST covered base, by align strand. Its own
+    #: ledger: ``Σ == qc.deposited``. Wall-blind only at the template's UPSTREAM end.
+    region_end_count: np.ndarray
+    #: uint32[n_regions, 2] — regions STRICTLY SPANNED: every base covered by ONE segment and
+    #: neither path endpoint inside. ⚠ Opportunity ``(w − ℓ − 1)₊`` — a pmf functional per component
+    #: BY DESIGN (the length-solve channel's input; TRAPS: a-cancellation-is-conditional-on-its-support
+    #: applies to it as it does to `contained`). A region a spliced path JUMPS over is not covered and
+    #: books nothing. A CONTAINED fragment books start and end in one region and never span, so
+    #: ``contained ≤ min(start, end)`` per region, and ``span ≡ 0`` wherever ``ℓ ≥ w_max − 1``.
+    region_span_count: np.ndarray
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2]
     boundary_unspliced_inv_length_sum: np.ndarray  # float64[n_boundaries] — ONE column
     #: ⭐⭐ float64[n_boundaries] — **THE CONSERVED MASS**. See :meth:`Accumulator.deposit`.
@@ -627,7 +641,9 @@ class Tally:
         return cls(
             region_contained_count=counts(n_regions),
             region_contained_inv_opportunity_sum=fraction(n_regions),
-            region_start_count=np.zeros(n_regions, np.uint32),
+            region_start_count=counts(n_regions),
+            region_end_count=counts(n_regions),
+            region_span_count=counts(n_regions),
             boundary_unspliced_count=counts(n_boundaries),
             boundary_unspliced_inv_length_sum=fraction(n_boundaries),
             boundary_unspliced_mass=fraction(n_boundaries),
@@ -902,7 +918,10 @@ class Accumulator:
 
         t = self.tally
         region_base, boundary_base = int(p.ref_region_offsets[ref]), int(p.ref_boundary_offsets[ref])
-        t.region_start_count[region_base + self._local_region(region_bounds, first_base)] += 1
+        r_first = self._local_region(region_bounds, first_base)
+        r_last = self._local_region(region_bounds, last_base)
+        t.region_start_count[region_base + r_first, column] += 1
+        t.region_end_count[region_base + r_last, column] += 1
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
         # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
@@ -930,6 +949,17 @@ class Accumulator:
                 boundary_count[boundary_base + boundary - 1, column] += 1
                 if not spliced:
                     t.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1] += inv_boundary
+            # ── STRICT SPAN: regions this segment covers whole, excluding the path's own endpoint
+            # regions. ⚠ `side="left"`/`- 1` rather than the crossing loop's bounds: a NON-FIRST
+            # segment starts exactly ON a region_bound (its acceptor), and the region beginning there
+            # IS fully covered — the crossing window would miss it (TRAPS: could-the-arm-have-fired's
+            # shape, caught at design time by the three-intron worked example).
+            f2 = int(np.searchsorted(region_bounds, seg_start, side="left"))
+            l2 = int(np.searchsorted(region_bounds, seg_end, side="right")) - 1
+            for r_loc in range(f2, l2):
+                if r_loc == r_first or r_loc == r_last:
+                    continue
+                t.region_span_count[region_base + r_loc, column] += 1
             # ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ─────────────────────────
             # The crossed region_bounds split this block into `last - first + 1` slices. Each slice's
             # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded

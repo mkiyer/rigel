@@ -67,7 +67,9 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
         region_contained_inv_opportunity_sum=(
             contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)
         ),
-        region_start_count=contained.sum(axis=1).astype(np.uint32),
+        region_start_count=contained.astype(np.uint32),
+        region_end_count=contained.astype(np.uint32),
+        region_span_count=region_zeros(np.uint32),
         boundary_unspliced_count=boundary_zeros(np.uint32),
         boundary_unspliced_inv_length_sum=flat(n_boundaries, np.float64),
         # ⚠ ONE value per boundary — the conserved mass has no strand axis. Zero here is a real state and

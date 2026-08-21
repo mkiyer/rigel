@@ -163,7 +163,17 @@ class CalibrationSubstrate:
     n_sj: int
 
     strand_class: np.ndarray  # int8[n_regions] — the region's transcript-strand class
-    region_start_count: np.ndarray  # int64[n_regions] — one per accepted fragment; THE invariant
+    #: int64[n_regions, 2] — the path's FIRST covered base, by genome strand; Σ == qc.deposited (THE
+    #: ledger). ⭐ Opportunity ℓ for every fragment length — the REGION half of the composition-free
+    #: TOTAL — wall-blind only at the template's DOWNSTREAM end (side-select against the mirror).
+    region_start_count: np.ndarray
+    #: int64[n_regions, 2] — the MIRROR: the path's LAST covered base. Σ == qc.deposited. Wall-blind
+    #: only at the template's UPSTREAM end.
+    region_end_count: np.ndarray
+    #: int64[n_regions, 2] — regions STRICTLY spanned (opportunity (w−ℓ−1)₊, a per-component pmf
+    #: functional BY DESIGN — consumer-gated until the length-solve ruling; its interim consumers are
+    #: the ledger invariants: contained ≤ min(start, end); span ≡ 0 wherever ℓ ≥ w_max − 1).
+    region_span_count: np.ndarray
 
     #: ⭐⭐ FOUR populations, and they do NOT carry the same channels. A channel is stored where a named
     #: consumer reads it and nowhere else::
@@ -218,6 +228,8 @@ class CalibrationSubstrate:
             n_sj=payload.n_sj,
             strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
             region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
+            region_end_count=np.asarray(payload.region_end_count, dtype=np.int64),
+            region_span_count=np.asarray(payload.region_span_count, dtype=np.int64),
             region_contained=view(
                 "region_contained",
                 payload.region_contained_count,

@@ -9,14 +9,16 @@ THE RULE UNDER TEST, in five boundaries. The genome is a graph: REGIONS are half
 reference, and the 0-bp BOUNDARIES between adjacent regions are CONTIGUOUS boundaries. A SJ boundary is a directed
 donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
 gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; boundaries
-count fragments CROSSING. Each population stores only the channels something READS — an integer count, a
-fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a region and ``L − 1`` at an boundary, a
-``Σ L``, and on the contiguous boundaries the CONSERVED MASS, which sums to one per fragment.
+count fragments CROSSING; and every path books its FIRST/LAST covered base and the regions it STRICTLY
+spans (the start/end/span banks, 2026-08-21). Each population stores only the channels something READS —
+an integer count, a float64 reciprocal-opportunity sum ``Σ 1/A(w)`` (no fixed point anywhere, and no
+``Σ L`` — deleted 2026-08-13), and on the contiguous boundaries the CONSERVED MASS, which sums to one
+per fragment.
 
 ⚠ **No partitioning.** Every crossed boundary receives the FULL weight. The chance that a length-``L``
-fragment crosses a given boundary is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
-every fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys
-that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**.
+fragment crosses a given boundary is proportional to ``L − 1`` and the deposit is ``1/(L − 1)``, so the two
+cancel and every fragment length contributes equally to each boundary. Dividing by the number of boundaries
+crossed destroys that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**.
 """
 
 from __future__ import annotations
@@ -498,8 +500,8 @@ def test_the_per_reference_offsets_do_not_bleed():
     t = acc.tally
     assert [int(t.boundary_unspliced_count[e, 0]) for e in range(acc.n_boundaries)] == [0, 1, 1, 0, 0, 1]
     assert int(t.boundary_unspliced_count.sum()) == 3
-    assert int(t.region_start_count[_region(0, 1)]) == 1
-    assert int(t.region_start_count[_region(1, 0)]) == 1
+    assert int(t.region_start_count[_region(0, 1)].sum()) == 1
+    assert int(t.region_start_count[_region(1, 0)].sum()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -710,8 +712,8 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     acc = _acc(max_fragment_length=10_000)
     acc.deposit(0, 150, 500, observed_introns=[(150, 480)])  # the path is only [480,500), inside n4
     t = acc.tally
-    assert int(t.region_start_count[_region(0, 4)]) == 1, "n4, where the path actually starts"
-    assert int(t.region_start_count[_region(0, 1)]) == 0, "not n1, where the extent begins"
+    assert int(t.region_start_count[_region(0, 4)].sum()) == 1, "n4, where the path actually starts"
+    assert int(t.region_start_count[_region(0, 1)].sum()) == 0, "not n1, where the extent begins"
     assert int(t.region_contained_count[_region(0, 4), 0]) == 1
     assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 4)]), _contained_quantum(0, 4, 20), 1)
 
@@ -1101,3 +1103,100 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
     stale = [name for name in t.__slots__ if name.endswith("_density")]
     assert stale == []
     assert {"region_contained_inv_opportunity_sum"} <= set(t.__slots__)
+
+
+# ---------------------------------------------------------------------------
+# the START / END / SPAN region banks (2026-08-21) — the total-abundance carriers
+# ---------------------------------------------------------------------------
+# S and E have opportunity ℓ for EVERY fragment length (the walls are at template ends and are the
+# CONSUMER's problem, side-selected there); V is a pmf functional per component BY DESIGN. A
+# contained fragment is START ∧ END in one region and never SPAN. The ledger now closes twice over.
+
+
+def test_every_deposited_fragment_has_exactly_one_START_and_one_END():
+    """⭐ THE LEDGER, TWICE OVER: ΣS == ΣE == deposited — summed over BOTH strand columns, across a
+    mixed population (contained, crossing, spliced) on two references."""
+    acc = _acc(sj=[SJ])
+    assert acc.deposit(0, 120, 180) is DepositOutcome.DEPOSITED  # contained in r0
+    assert acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS) \
+        is DepositOutcome.DEPOSITED  # spliced
+    assert acc.deposit(0, 150, 260, align_strand=Strand.NEG) is DepositOutcome.DEPOSITED  # crossing
+    assert acc.deposit(1, 20, 60) is DepositOutcome.DEPOSITED  # second reference
+    t = acc.tally
+    deposited = t.qc[DepositOutcome.DEPOSITED.value]
+    assert int(t.region_start_count.sum()) == deposited
+    assert int(t.region_end_count.sum()) == deposited
+
+
+def test_START_and_END_are_the_PATHS_covered_bases_never_the_extent():
+    """⚠ A leading intron means the molecule does not begin at ``start`` — the covered-base rule the
+    start bank already keeps must hold for the END bank symmetrically (trailing intron)."""
+    acc = _acc(sj=[SJ])
+    # extent [150, 950) but the intron (201, 900) makes the path [150,201)+[900,950):
+    # START in the region of base 150, END in the region of base 949 — never the extent's midpoints.
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
+    t = acc.tally
+    rb = np.asarray(CHR1_REGION_BOUNDS)
+    r_start = int(np.searchsorted(rb, 150, side="right")) - 1
+    r_end = int(np.searchsorted(rb, 949, side="right")) - 1
+    assert t.region_start_count[r_start].sum() == 1
+    assert t.region_end_count[r_end].sum() == 1
+    assert t.region_end_count[r_start].sum() == 0, "END booked at the extent's start region"
+
+
+def test_a_CONTAINED_fragment_increments_START_and_END_in_its_own_region_and_never_SPAN():
+    acc = _acc()
+    acc.deposit(0, 120, 180)  # wholly inside r0 = [100, 200) per CHR1_REGION_BOUNDS
+    t = acc.tally
+    r = int(np.argmax(t.region_contained_count.sum(axis=1)))
+    assert t.region_start_count[r].sum() == 1
+    assert t.region_end_count[r].sum() == 1
+    assert t.region_span_count.sum() == 0, "a contained fragment spans nothing"
+    assert (t.region_contained_count.sum(axis=1) <= np.minimum(
+        t.region_start_count.sum(axis=1), t.region_end_count.sum(axis=1))).all()
+
+
+def test_SPAN_counts_regions_STRICTLY_covered_and_a_JUMPED_region_gets_NOTHING():
+    """⭐ span = every base covered by ONE segment, neither path endpoint inside. A region the path
+    JUMPS over (intron exactly = the region) is not covered and must read 0 on every bank."""
+    bounds = [0, 100, 200, 300, 600]
+    part = Partition.from_region_bounds([bounds], sj=[(0, 200, 300, Strand.POS)])
+    acc = Accumulator(part, max_fragment_length=10_000)
+    # unspliced [50, 350): starts r0, ends r3, strictly covers r1 [100,200) and r2 [200,300)
+    assert acc.deposit(0, 50, 350) is DepositOutcome.DEPOSITED
+    t = acc.tally
+    assert t.region_span_count[1].sum() == 1 and t.region_span_count[2].sum() == 1
+    assert t.region_span_count[0].sum() == 0 and t.region_span_count[3].sum() == 0
+    # spliced [150, 350) with intron exactly r2 = [200, 300): r2 is JUMPED — no span, no start, no end
+    acc2 = Accumulator(part, max_fragment_length=10_000)
+    assert acc2.deposit(0, 150, 350, observed_introns=[(200, 300)], sj_strand=Strand.POS) \
+        is DepositOutcome.DEPOSITED
+    t2 = acc2.tally
+    assert t2.region_span_count[2].sum() == 0, "a jumped region was counted as spanned"
+    assert t2.region_start_count[1].sum() == 1 and t2.region_end_count[3].sum() == 1
+
+
+def test_the_START_and_END_banks_carry_the_ALIGN_STRAND_column():
+    """⛔ perturb-able: a NEG deposit must land column 1 on BOTH banks — a bank that sums the strands
+    or fixes column 0 cannot pass."""
+    acc = _acc()
+    acc.deposit(0, 120, 180, align_strand=Strand.NEG)
+    t = acc.tally
+    assert t.region_start_count[:, STRAND_COLUMNS[Strand.NEG]].sum() == 1
+    assert t.region_start_count[:, STRAND_COLUMNS[Strand.POS]].sum() == 0
+    assert t.region_end_count[:, STRAND_COLUMNS[Strand.NEG]].sum() == 1
+    assert t.region_end_count[:, STRAND_COLUMNS[Strand.POS]].sum() == 0
+
+
+def test_SPAN_matches_the_strict_span_opportunity_ABSOLUTELY_on_a_uniform_field():
+    """⭐ one fragment at every admissible start (rho = 1 per length): the interior region r1 of
+    length ℓ = 100 must read V = (w − ℓ − 1)₊ EXACTLY — 0 at w = ℓ+1, w−101 above."""
+    bounds = [0, 1000, 1100, 2100]
+    part = Partition.from_region_bounds([bounds])
+    ell = 100
+    for w, want in ((ell, 0), (ell + 1, 0), (ell + 2, 1), (ell + 50, 49), (300, 199)):
+        acc = Accumulator(part, max_fragment_length=10_000)
+        for s in range(0, 2100 - w + 1):
+            acc.deposit(0, s, s + w)
+        got = int(acc.tally.region_span_count[1].sum())
+        assert got == want, f"w={w}: V_r1 = {got}, want (w-ell-1)+ = {want}"

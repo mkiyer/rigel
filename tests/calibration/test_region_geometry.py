@@ -493,7 +493,9 @@ def two_reference_parts(payload):
         region_contained_inv_opportunity_sum=np.concatenate(
             [payload.region_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
-        region_start_count=np.concatenate([payload.region_start_count, np.zeros(2, np.uint32)]),
+        region_start_count=np.concatenate([payload.region_start_count, np.zeros((2, 2), np.uint32)]),
+        region_end_count=np.concatenate([payload.region_end_count, np.zeros((2, 2), np.uint32)]),
+        region_span_count=np.concatenate([payload.region_span_count, np.zeros((2, 2), np.uint32)]),
         boundary_unspliced_count=np.vstack(
             [payload.boundary_unspliced_count, np.array([[3, 3]], np.uint32)]
         ),

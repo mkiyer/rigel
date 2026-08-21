@@ -71,7 +71,44 @@ plan, and none may be added without its own falsification.
 
 ---
 
-## PART B — THE ACCUMULATOR RECIPE (implementation session 1)
+## PART B — ✅ EXECUTED 2026-08-21, code AND re-scan; both suites re-certified 16/16 + 16/16
+
+Landed: `region_start_count` widened to genome-strand columns; `region_end_count` and
+`region_span_count` added (spec first — six gates verified failing, then green — then C++, gated by
+the auto-extending parity gate, FIRED once by a deliberate C++ perturbation); export, payload
+(`BANK_AXES`), substrate, and the oracle's sum-to-full bank list carry all three; the F-arm's locus
+projection strand-sums. `DESIGN.md` §3.1 documents the banks and their ledger.
+
+⭐⭐ **THE RE-SCAN'S THREE INCIDENTS, recorded so the next schema change does not rediscover them:**
+
+1. **A WIDENED bank is a CHANGED bank, not an added one.** `rescan_panels` correctly REFUSED the
+   first pass (shape `(n,) → (n,2)` fails byte-identity); the designed remedy is
+   `--expect-changed region_start_count`, which keeps the gate's teeth on every other bank. ⚠ The
+   refused first pass had already written some payloads before the cross-condition check fired, so
+   the second pass reported four `g00 _main`s as "expected-changed did NOT move" — a re-run over
+   already-converted payloads, not a data problem; the CERTIFIER is the validity authority, not the
+   rescan report.
+2. **The g00 HOLD-OUT has two arms.** `panel.py cache` (via `pass0_vs_oracle`'s prewarm) holds
+   zero-gDNA conditions out ENTIRELY: after a from-scratch oracle rebuild the four `g00` dirs simply
+   do not exist, and after a partition deletion their `rna_pos`/`rna_neg` are never rebuilt. The
+   remedy: `rescan_panels --conditions <the four g00s>` (it does NOT hold g00 out) plus a direct
+   `pass0_vs_oracle.ensure_rna_strand_cache(...)` call per g00 condition. Worth wiring into
+   `panel.py cache` properly — an owner-visible hygiene item.
+3. **`RIGEL_SCRATCH` must be EXPORTED or the instruments overflow `/tmp`.** The rebuild left ~22 GB
+   of per-condition prewarm splits in `/tmp/rigel_pass0_oracle` before the variable was exported
+   (regenerable; flagged to the owner, not deleted). ⚠ Separately discovered: a PRIOR session's
+   instrument self-test left **73 GB** in `/tmp/rigel_ladder_ceiling/_self_test` — a named defect
+   (a self-test must clean its work-dir) awaiting an owner-approved cleanup.
+
+## PART B (the original recipe, for the record)
+
+Landed: `region_start_count` widened to genome-strand columns; `region_end_count` and
+`region_span_count` added (spec first — six gates verified failing, then green 66/66 — then C++,
+gated by the auto-extending parity gate, which was FIRED once by a deliberate C++ perturbation);
+export, payload (`BANK_AXES`), substrate, and the oracle's sum-to-full bank list all carry the three;
+the F-arm's locus projection strand-sums. `DESIGN.md` §3.1 documents the banks and their ledger.
+
+## PART B (the original recipe, for the record)
 
 **One schema change, one re-scan (~1 h), three banks — bundled so no later ruling needs another
 re-scan.**
