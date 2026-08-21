@@ -541,7 +541,11 @@ permanent doc describe code that does not exist — and §9.1's last row says so
 ⚠ Two of the §9 items are TEST defects, not prose, and one of them is a dead gate — fix that one with a
 perturbation, per `TRAPS: could-the-arm-have-fired`.
 
-### RANK 2 — ✅ EXECUTED 2026-08-20, AND THE VERDICT IS A MEASURED NEGATIVE
+### RANK 2 — ✅ EXECUTED 2026-08-20, VERDICT NEGATIVE, KNOB DELETED (converge-and-delete)
+
+⛔ **The code is GONE from the tree** — `ROADMAP.md` §4.3 is the permanent refusal record and the
+implementation survives at commit `a2b81b34` (one commit before its deletion). The verdict table
+below is the measurement record.
 
 The A/B is landed as `CalibrationConfig.region_abundance_bank` ("contained" shipped / "start"),
 threaded `calibrate → build_region_geometry`, gated by an ABSOLUTE-truth fill gate written first,

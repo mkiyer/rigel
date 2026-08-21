@@ -206,8 +206,6 @@ def build_region_geometry(
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
     boundary_rna_reach=None,
-    *,
-    region_abundance_bank: str = "contained",
 ) -> RegionGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
@@ -298,21 +296,11 @@ def build_region_geometry(
     # every REGION<->BOUNDARY ratio downstream carries that factor. ⛔ Record the bias; do NOT divide it
     # out here — the pooled ``P_hat(w <= ell)`` resurrects none of the zero banks and re-imports the
     # per-component pmf the channel exists to avoid.
-    # ⭐ ``region_abundance_bank`` is the A/B's ONE config value (the ``message_policy`` precedent):
-    # "contained" is the shipped truncated bank; "start" is ``region_start_count / ell`` — the
-    # STARTS-IN relation, opportunity ``ell`` for every ``w``, no fragment length in the weight, but
-    # spliced-INCLUSIVE (a population change, and exposed to the template wall — the A/B is what
-    # prices both). ⛔ An unknown name is REFUSED, never a silent fall-through
-    # (TRAPS: an-ablation-that-never-ran).
-    if region_abundance_bank not in ("contained", "start"):
-        raise ValueError(
-            f"region_abundance_bank must be 'contained' or 'start', got {region_abundance_bank!r}"
-        )
+    # ⛔ A truncation-free "start" bank (`region_start_count / ell`) was A/B'd here on 2026-08-20 and
+    # REFUSED on the panel: it improves the currency arm's pass-0 exons and regresses its deliverable
+    # (zero controls 2.18x). `ROADMAP.md` §4.1 carries the row; the code is one commit back.
     inv_abundance = np.zeros(n, dtype=np.float64)
-    if region_abundance_bank == "start":
-        _r_inv = np.asarray(substrate.region_start_count, np.float64) / np.maximum(region_len, 1.0)
-    else:
-        _r_inv = getattr(substrate.region_contained, "inv_opportunity_sum", None)
+    _r_inv = getattr(substrate.region_contained, "inv_opportunity_sum", None)
     _b_inv = getattr(substrate.boundary_unspliced, "inv_length_sum", None)
     if _r_inv is not None and n_regions:
         inv_abundance[is_region] = np.asarray(_r_inv, np.float64)[obj[is_region]]

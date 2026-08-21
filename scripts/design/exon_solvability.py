@@ -378,8 +378,7 @@ def bucket_rows(labels, err, mass, order=None) -> list[dict]:
     return rows
 
 
-def run_arm(payload, kw, arm: str, refits: int | None = None,
-            region_bank: str | None = None) -> dict:
+def run_arm(payload, kw, arm: str, refits: int | None = None) -> dict:
     """One ``calibrate`` under one policy, with the ran/did-not-run assertion the repo requires: an
     arm that could not express its own policy scores byte-identically to another and looks like a
     finding (`TRAPS: an-ablation-that-never-ran`).
@@ -391,8 +390,6 @@ def run_arm(payload, kw, arm: str, refits: int | None = None,
     """
     overrides, key = ARMS[arm]
     cfg = dataclasses.replace(CalibrationConfig(), **overrides)
-    if region_bank is not None:
-        cfg = dataclasses.replace(cfg, region_abundance_bank=region_bank)
     if refits is not None:
         cfg = dataclasses.replace(cfg, calib_refit_iters=int(refits))
     debug: dict = {}
@@ -420,7 +417,7 @@ def assert_arm_ran(cap: dict, arm: str) -> None:
 
 
 def load_condition(index, region_arrays, bflags, suite: Path, condition: str, arms,
-                   refits: int | None = None, region_bank: str | None = None) -> dict:
+                   refits: int | None = None) -> dict:
     """Everything one condition needs. REFUSES a condition without a certified ``slot_truth.npz`` —
     this instrument derives no truth of its own, on purpose."""
     truth_path = Path(suite) / "oracle_cache" / condition / "slot_truth.npz"
@@ -447,7 +444,7 @@ def load_condition(index, region_arrays, bflags, suite: Path, condition: str, ar
         raise AssertionError(f"a {EXON!r} slot is not a REGION — the certified table and this chain "
                              "describe different scans")
 
-    caps = {a: run_arm(cache.payload, kw, a, refits, region_bank=region_bank) for a in arms}
+    caps = {a: run_arm(cache.payload, kw, a, refits) for a in arms}
     any_cap = caps[arms[0]]
     obs = np.asarray(any_cap["count"], np.float64).sum(axis=1)
     n_bad = int(np.sum(obs != mass))
@@ -806,9 +803,6 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=None, help="write every row as TSV, in FRAGMENTS")
     ap.add_argument("--verbose", action="store_true",
                     help="print the joint flank x strand table and degenerate predictors in full")
-    ap.add_argument("--region-bank", default=None, choices=("contained", "start"),
-                    help="override CalibrationConfig.region_abundance_bank for every arm (None = "
-                         "the shipped default). Only the currency arm can read it.")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -821,8 +815,7 @@ def main() -> int:
              else sorted(p.name for p in (args.suite / "scan_cache").iterdir() if p.is_dir()))
     results, bad = [], 0
     for c in conds:
-        d = load_condition(index, region_arrays, bflags, args.suite, c, args.arms, args.refits,
-                           region_bank=args.region_bank)
+        d = load_condition(index, region_arrays, bflags, args.suite, c, args.arms, args.refits)
         m = measure(d)
         report_condition(d, m, args.verbose)
         bad += sum(not g["ok"] for g in d["gates"])

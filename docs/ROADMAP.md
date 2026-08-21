@@ -844,6 +844,27 @@ certified RNA. `boundary_spliced` is a SEPARATE bank from `boundary_unspliced`, 
 is simply false — the truth violated it by **302**. The correct statement is the identity
 `ρ_r·E_r = unspliced_RNA + S`, i.e. S SUBTRACTS.
 
+### §4.3 ⛔⛔ THE TRUNCATION-FREE REGION BANK INSIDE THE CURRENCY CHANNEL — BUILT, PRICED, REFUSED (2026-08-20). DO NOT REBUILD IT AS A DROP-IN.
+
+The shipped REGION bank reads `rho·P(w<=ell)` (`TRAPS: a-cancellation-is-conditional-on-its-support`),
+and the truncation-free repair — `region_start_count / ell`, the STARTS-IN relation, no fragment length
+in the weight — was built behind `CalibrationConfig.region_abundance_bank`, gated by an absolute fill
+gate fired three ways, proven inert outside the currency arm (16/16), and priced on all 16 conditions.
+⛔ **REFUSED: it improves the currency arm's pass-0 exon solve (no-evidence ≤0.05 mass coverage
+45.8 % → 66.1 % at `g98 ss0.99 ON`) and regresses its DELIVERABLE — the four zero controls 2.18×
+(each 2.0–3.3×), the deferred stratum 1.84×, stranded × ON 1.20×; the only stratum win is 0.843× on
+stranded × OFF.** ⭐ The named suspect (one leg measured): under the shipped bank **58.6 % of live exon
+hops carry a REGION bank of exactly 0** and `enrichment_ratio` returns its 1.0 default — an ACCIDENTAL
+MUTE the currency arm's standing partly rested on; the live bank un-mutes them and the policy's
+machinery converts a better input into a worse answer
+(`TRAPS: the-intermediate-is-not-the-deliverable`, measured inside one arm). ⭐ What survives: the
+truncation algebra (`EQUATIONS.md` §2), the fill gate, the two-names rename, and the wall-exposure
+numbers (FLUSH 3.7–9.1 % / BINDING 7.4–22.6 % of exonic starts by template population, spliced
+coordinates, MAX collapse; the full table stays in the dev sandbox until a consumer lands).
+⛔ The knob was DELETED after pricing (converge-and-delete); the full implementation is one commit
+before the deletion (`a2b81b34`). Re-opening this requires a policy whose DELIVERABLE improves under a
+better level channel — none exists today.
+
 ### §4.1 ⛔⛔⛔ THE GRAVEYARD — ELEVEN MECHANISMS PRICED, ELEVEN REFUSED. DO NOT REBUILD THESE.
 
 ⭐ Promoted from a working doc when it was deleted (2026-08-07). Every row is a

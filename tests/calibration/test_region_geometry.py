@@ -325,55 +325,41 @@ def test_the_divisors_differ_between_the_two_COMPONENTS(geometry, parts):
     assert not np.allclose(geometry.eff_gdna[region_slots], geometry.eff_rna[region_slots])
 
 
-def test_inv_abundance_is_FILLED_from_the_CONFIGURED_bank_and_the_values_are_ABSOLUTE(parts):
+def test_inv_abundance_is_FILLED_from_the_substrate_banks_and_the_values_are_ABSOLUTE(parts):
     """⭐⭐ **THE FILL GATE — no test gated how ``inv_abundance`` was filled until 2026-08-20.**
 
     Every other occurrence of ``inv_abundance`` in the suite constructs it synthetically, so the one
-    line that fills it from the substrate was ungated. The fixture's banks are DISTINCT per region
-    (contained ``[0.24, 0.42, 0.30]``, start/ℓ ``[0.11, 0.12, 0.13]``), so a fill that reads the wrong
-    bank, divides by the wrong length, or forgets the divisor cannot pass.
+    line that fills it from the substrate was ungated. The fixture's banks are DISTINCT per object
+    (region contained ``[0.24, 0.42, 0.30]``, boundary unspliced ``[0.20, 0.20]``), so a fill that
+    reads the wrong bank or the wrong axis cannot pass.
 
-    ⭐ **ABSOLUTE values, hard-coded — never flatness or a reconstruction**: a perturbation study on the
-    sibling deposit gates found an accuracy assertion catches 14/14 planted off-by-ones where a
+    ⭐ **ABSOLUTE values, hard-coded — never flatness or a reconstruction**: a perturbation study on
+    the sibling deposit gates found an accuracy assertion catches 14/14 planted off-by-ones where a
     flatness one catches 10/14, missing every pure scale error.
 
-    ``region_abundance_bank`` is the A/B's ONE config value (the ``message_policy`` precedent):
-    ``"contained"`` (shipped) fills REGION slots from ``region_contained_inv_opportunity_sum``
-    (expectation ``rho·P(w<=ell)`` — TRAPS: a-cancellation-is-conditional-on-its-support);
-    ``"start"`` fills them from ``region_start_count / ell`` (opportunity ``ell`` for every ``w``).
-    BOUNDARY slots are identical under both. An unknown name is REFUSED — a silent fall-through once
-    ran the wrong arm under the name the user typed (TRAPS: an-ablation-that-never-ran's shape).
+    ⚠ A REGION slot carries the CONTAINED bank, whose expectation is ``rho·P(w<=ell)`` — a truncated
+    density SHAPE (TRAPS: a-cancellation-is-conditional-on-its-support). A truncation-free "start"
+    bank was A/B'd through this fill on 2026-08-20 and REFUSED on the panel (`ROADMAP.md` §4.1).
     """
     payload, region_arrays, substrate, chain, sj = parts
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     r = kind == REGION
 
-    g_contained = build_region_geometry(chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF)
+    g = build_region_geometry(chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF)
     np.testing.assert_allclose(
-        g_contained.inv_abundance[r],
+        g.inv_abundance[r],
         np.array([0.24, 0.42, 0.30])[obj[r]],
         rtol=0,
         atol=0,
     )
-
-    g_start = build_region_geometry(
-        chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF, region_abundance_bank="start"
-    )
+    b = kind == BOUNDARY
     np.testing.assert_allclose(
-        g_start.inv_abundance[r],
-        np.array([0.11, 0.12, 0.13])[obj[r]],
+        g.inv_abundance[b],
+        np.array([0.20, 0.20])[np.clip(obj[b], 0, 1)],
         rtol=0,
         atol=0,
     )
-
-    b = kind == BOUNDARY
-    np.testing.assert_array_equal(g_contained.inv_abundance[b], g_start.inv_abundance[b])
-
-    with pytest.raises(ValueError, match="region_abundance_bank"):
-        build_region_geometry(
-            chain, substrate, region_arrays, sj, GDNA_PMF, RNA_PMF, region_abundance_bank="strat"
-        )
 
 
 def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):

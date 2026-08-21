@@ -101,8 +101,7 @@ def pool_truth(parts, region_arrays, chain) -> dict[str, np.ndarray]:
     return {k: OC.slot_counts(parts[k], region_arrays, chain) for k in POOLS}
 
 
-def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=None,
-        region_bank: str = "contained") -> np.ndarray:
+def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=None) -> np.ndarray:
     """One arm's per-slot ``f_g``. ⛔ Returns the FINAL belief, which is what `assemble_priors` reads.
 
     ⭐ ``injected_priors`` is for a TOY reference — a chromosome small enough to have no library-level
@@ -114,8 +113,7 @@ def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=N
     contract the toy harness already runs under.
     """
     cfg = dataclasses.replace(
-        CalibrationConfig(), message_propagation=messages, message_policy=policy,
-        region_abundance_bank=region_bank,
+        CalibrationConfig(), message_propagation=messages, message_policy=policy
     )
     debug: dict = {}
     call = {k: v for k, v in kw.items() if k != "payload"}
@@ -183,8 +181,7 @@ ARMS: dict[str, tuple[bool, str]] = {
 
 
 def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: str,
-            injected_priors=None, arms: tuple[str, ...] = ("off", "on"),
-            region_bank: str = "contained") -> list[dict]:
+            injected_priors=None, arms: tuple[str, ...] = ("off", "on")) -> list[dict]:
     """One condition, the requested arms, three axes. ⛔ ONE cached payload, so the arms differ by
     exactly the config values `ARMS` names."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
@@ -209,11 +206,9 @@ def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: st
     for label in arms:
         messages, policy = ARMS[label]
         f_g = arm(cache.payload, kw, messages=messages, policy=policy,
-                  injected_priors=injected_priors, region_bank=region_bank)
+                  injected_priors=injected_priors)
         for axis, sel in axes.items():
-            # ⛔ the bank is PART OF THE ARM and is stamped into every row (the `messages` precedent):
-            # an arm file that cannot say which REGION bank filled `inv_abundance` is not comparable.
-            row = {"condition": condition, "arm": label, "axis": axis, "region_bank": region_bank}
+            row = {"condition": condition, "arm": label, "axis": axis}
             row.update(score(f_g, truth, sel))
             for k in POOLS:
                 row[f"true_{k}"] = float(truth[k][sel].sum())
@@ -348,11 +343,6 @@ def main() -> int:
     ap.add_argument("--arms", nargs="+", default=["off", "on"], choices=sorted(ARMS),
                     help="which arms to run — 'off'/'on' are the standing benchmark; 'currency' is "
                          "the Stage-3 policy under development (an 'off' baseline is required)")
-    ap.add_argument("--region-bank", default="contained", choices=("contained", "start"),
-                    help="which reciprocal bank fills a REGION slot of inv_abundance — the currency "
-                         "policy's enrichment channel. 'contained' is shipped; 'start' is "
-                         "region_start_count/ell. ⚠ Only the currency arm reads it; off/on are inert "
-                         "to this flag by construction and their rows are stamped with it anyway.")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
@@ -395,7 +385,7 @@ def main() -> int:
     for c in conds:
         try:
             rows.extend(measure(index, region_arrays, args.suite, oracle, c, injected,
-                                 arms=tuple(args.arms), region_bank=args.region_bank))
+                                 arms=tuple(args.arms)))
             print(f"   ✔ {c}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"   ⛔ {c}: {type(exc).__name__}: {exc}", flush=True)
