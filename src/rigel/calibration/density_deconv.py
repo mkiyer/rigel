@@ -113,7 +113,12 @@ def fit_gdna_background(g_counts, eff_g) -> GdnaBackground:
 
 
 def fit_intron_background(
-    substrate, region_arrays, region_eff_g, *, include_introns: bool = False
+    substrate,
+    region_arrays,
+    region_eff_g,
+    *,
+    include_introns: bool = False,
+    counts_exposure: "tuple[np.ndarray, np.ndarray] | None" = None,
 ) -> GdnaBackground:
     """The INTRON special case of :func:`fit_gdna_background`: the gDNA prior IS the intergenic region
     distribution (introns are off-target at the same capture depletion as intergenic —
@@ -121,18 +126,32 @@ def fit_intron_background(
 
     ``include_introns=False`` (default) pools **intergenic only** — the clean, non-circular reference (introns
     are what we deconvolve). The real-data path may add RNA-free introns for resolution
-    (`background_reference` docstring), traded for a little circularity. Delegates the fit to
+    traded for a little circularity. Delegates the fit to
     :func:`fit_gdna_background`; the whole of this function's own job is selecting the pool.
 
     ``region_eff_g`` is the gDNA CONTAINED effective length per region
-    (:func:`effective_length.contained_eff_length`) — the support the pooled counts are a rate over."""
+    (:func:`effective_length.contained_eff_length`) — the support the pooled counts are a rate over.
+
+    ⭐⭐ ``counts_exposure`` REPLACES the ``(contained count, contained effective length)`` pair with any
+    other per-region ``(counts, exposure)`` — today the MEASURED TOTAL's side-selected START/END banks
+    over the region's own length (`total_abundance.region_counts_and_exposure`), selected by
+    ``CalibrationConfig.background_abundance``. ⛔ **It changes the PAIR, never the estimator**: the
+    pool predicate, the Gamma conjugacy and the method-of-moments ``α`` are all untouched, and a zero
+    exposure drops a region from the pool exactly as a zero effective length already does — which is
+    how a double-walled region excludes itself without a second predicate. ⭐ The pmf leaves the divisor
+    entirely: ``E[S] = ρ·ℓ`` for every fragment length, where ``E[count] = ρ·E_contained`` needs the
+    length model that capture distorts (measured 1.8–4.3× under capture; `config.py` carries the
+    table)."""
     sig = np.asarray(region_arrays.signature)
-    eff = np.asarray(region_eff_g, dtype=np.float64)
+    if counts_exposure is None:
+        eff = np.asarray(region_eff_g, dtype=np.float64)
+        # ⚠ GENOME-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
+        counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
+    else:
+        counts, eff = (np.asarray(a, dtype=np.float64) for a in counts_exposure)
     ctype = coarse_type_array(sig)  # 0 intergenic / 1 intron / 2 exon
     # the pure-gDNA pool: intergenic only, or non-exonic when ``include_introns``.
     pool = ((ctype != 2) if include_introns else (ctype == 0)) & (eff > _EPS)
-    # ⚠ GENOME-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
-    counts = np.asarray(substrate.region_contained.count, dtype=np.float64).sum(axis=1)
     return fit_gdna_background(counts[pool], eff[pool])
 
 

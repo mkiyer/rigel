@@ -13,7 +13,7 @@ latent rate ``ρ ~ P(ρ)``; :meth:`~DensityNPMLE.fit` estimates the population `
 
 2. **gDNA hyperprior → ψ** (:meth:`~DensityNPMLE.logprior`). Fit AFTER the pass-0 solve on the **DECONVOLVED
    gDNA** density (``g_hat = f_g·count`` at belief width ``τ = √Var(log f_g)``) at the solvable regions, with the
-   aggregate background ``ρ_bg`` pinned as a smooth low-density component. Its projection onto each region's
+   low-density support. Its projection onto each region's
    ``f_g`` axis is the composition (gDNA) arm of ψ for the REFIT solve. ANCHORED, EXTREMELY WEAK
    (``n_eff ≈ 0.15`` pseudo-obs — the strand likelihood + messages dominate). (`calibrate.gdna_prior`.)
 
@@ -40,7 +40,6 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
-from .background_reference import BackgroundReference
 
 __all__ = ["DensityNPMLE"]
 
@@ -135,7 +134,7 @@ def _kde_density(log_rho, a_cells, w_cells, h, *, a_floor=-np.inf, w_floor=0.0, 
     estimate ``a_c``, weighted by OCCUPANCY ``w_c`` (region count) — there is NO EM competition, so a minority
     (e.g. capture-enriched) population can never be competed away, and with a COMMON bandwidth occupancy equals
     height (no per-region τ discounting). The **weak floor** is one pseudo-observation (``w_floor``) at the derived
-    background level ``a_floor`` — the anchor a sub-resolution / zero-gDNA region lands on, never an ``n_regions``
+    floor level ``a_floor`` — the anchor a sub-resolution / zero-gDNA region lands on, never an ``n_regions``
     tower. ``h_floor`` defaults to ``h`` (used when ``σ_bg`` is infinite, i.e. Σg=0)."""
     inv = 1.0 / (h * np.sqrt(2.0 * np.pi))
     z = (log_rho[:, None] - a_cells[None, :]) / h  # (G, n_cell)
@@ -162,13 +161,6 @@ class DensityNPMLE:
     )  #: (G,) mixture component weights w_j (Σ w_j·N(μ_j, h²)) — for :meth:`project`
     bandwidth: float  #: h (decades), the kernel width
     n_cells: int  #: collapsed-cell count (diagnostic)
-    #: The aggregate DNA-background reference (`background_reference.measure_background`) — the ONE-SIDED
-    #: log-floor `:meth:`logprior`` applies. ``-inf``/``+inf`` (the default) ⇒ dormant, so an unmeasured
-    #: background leaves the prior EXACTLY as before (safe default; the A/B gate + the wire-in are separate).
-    log_rho_bg: float = (
-        -np.inf
-    )  #: natural-log background rate; `-inf` ⇒ no floor (DNA-free / fully depleted)
-    sigma_bg: float = np.inf  #: Poisson softness of the floor (√Var(log ρ_bg)); `+inf` ⇒ no floor
 
     @classmethod
     def fit(
@@ -177,7 +169,6 @@ class DensityNPMLE:
         eff: np.ndarray,
         var_g: np.ndarray | None = None,
         *,
-        background: BackgroundReference | None = None,
         bandwidth: float = 0.15,
         n_grid: int = 200,
         em_iters: int = 150,
@@ -199,7 +190,7 @@ class DensityNPMLE:
         ``additive=True`` builds the **Role-B representation** instead of the
         EM mixture: an **occupancy-weighted, fixed-bandwidth KDE** on the deconvolved-gDNA point estimates
         (each cell one kernel, weighted by region count — no EM competition, occupancy=height) plus a **weak
-        1-pseudo-observation floor** at ``background.log_rho_floor`` (NOT the ``n_regions`` aggregate cell).
+        1-pseudo-observation floor** at ``rho_floor`` (NOT an ``n_regions`` aggregate cell).
         The output object (``log_rho``/``logP``/``weights``/``project``/``logprior``) is interface-identical;
         ``weights`` carries the per-grid density mass so ``project``'s fallback stays defined. ``additive=False``
         (default) is the EM NPMLE, **byte-identical** to before — Role A (σ²_transfer) uses it unchanged."""
@@ -221,20 +212,12 @@ class DensityNPMLE:
         hi = (
             float(np.max(ld)) + 2.0 * h
         )  # ≥ max density ⇒ no upward extrapolation in the projection
-        # THE AGGREGATE BACKGROUND CELL — the pooled intergenic[/intron] regions injected as ONE Poisson
-        # observation at the DERIVED floor density ``ρ_floor`` (``background.log_rho_floor``) over the genome-scale
-        # ΣE. This is the hybrid the design calls for (B; gdna_background_floor_derivation
-        # md): the pooled rate ``Σg/ΣE`` Fisher-blended with the per-region resolution wall ``1/harmmean(E_zero)``
-        # — NOT the old ``e^{−ρΣE}`` which drove ρ to ``1/ΣE`` (~3 logs too low, the confident-FP seed). The cell's
-        # huge ΣE makes it a SHARP low mode AT ρ_floor; it carries the population weight (``n_regions``). The pooled
-        # regions are excluded from ``g_hat`` by the caller, so nothing is double-counted.
-        use_bg = background is not None and background.eff_total > _EPS and background.n_regions > 0
-        # Grid bottom = the derived floor (bounded, honest) − 3h of kernel room; the aggregate cell anchors the
-        # zero / sub-floor background there. (Old fallback ran to 1/ΣE — the ~3-log collapse.)
+        # ⚠ An "aggregate background cell" used to be injectable here — the pooled intergenic regions as
+        # ONE Poisson observation at a derived floor density. DELETED 2026-08-21: it was never wired (no
+        # caller ever passed it), and the intergenic background that reaches ψ is `fit_intron_background`'s
+        # on the same pool. `rho_floor` below is the explicit, caller-supplied form and is untouched.
         if rho_floor is not None and rho_floor > 0.0:
             lo = float(np.log(rho_floor))
-        elif use_bg and np.isfinite(background.log_rho_floor):
-            lo = min(lo, float(background.log_rho_floor) - 3.0 * h)
         log_rho = np.linspace(lo, hi, int(n_grid))
 
         gc, ec, tc, wc = _collapse(g_hat, eff, var_g, dlog=log_dlog, dt=tau_dt)
@@ -242,15 +225,9 @@ class DensityNPMLE:
             # ── THE ROLE-B ADDITIVE KDE — occupancy kernels + a weak floor, NO EM. ──
             # Each cell's point estimate is its deconvolved-gDNA density, floored at the 1-count resolution wall
             # (a zero-ĝ / pure-RNA region reads "gDNA ≤ 1/E", not −∞). Occupancy ``wc`` is the weight; the
-            # background is a SEPARATE 1-pseudo-observation floor at ρ_floor — never the ``n_regions`` cell.
+            # the floor is a SEPARATE 1-pseudo-observation at ρ_floor — never an ``n_regions`` cell.
             a_cells = np.log(np.maximum(gc, 1.0)) - np.log(ec)
-            if use_bg and np.isfinite(background.log_rho_floor):
-                a_floor = float(background.log_rho_floor)
-                sig = float(background.sigma_bg)
-                h_floor = h if not np.isfinite(sig) else max(sig, h)
-                w_floor = 1.0  # ONE pseudo-observation (the KDE cap) — weak vs Σ wc = |T|
-            else:
-                a_floor, h_floor, w_floor = -np.inf, h, 0.0
+            a_floor, h_floor, w_floor = -np.inf, h, 0.0
             # THE GRID MUST SPAN THE FLOORED KERNEL CENTRES (spec §1: hi=max(â)+2h), NOT the raw density ld.
             # When every deconvolved count gc<1 (the common mostly-RNA case: ĝ=f_g·M) the floored centres sit
             # at 1/E — far ABOVE the raw-density grid — so a raw-ld grid would leave every kernel off-grid,
@@ -266,18 +243,6 @@ class DensityNPMLE:
             )
             w = dens_grid  # per-grid mass — keeps ``project``'s fallback well-defined (OI-9)
         else:
-            if use_bg:
-                # the aggregate cell's count places its density at ρ_floor exactly: gc/ec = exp(log_rho_floor).
-                # (n0=0 ⇒ log_rho_floor = log(Σg/ΣE) ⇒ gc = Σg = n_counts, byte-identical to the old case.)
-                bg_count = (
-                    float(np.exp(background.log_rho_floor) * background.eff_total)
-                    if np.isfinite(background.log_rho_floor)
-                    else float(background.n_counts)
-                )
-                gc = np.append(gc, bg_count)
-                ec = np.append(ec, float(background.eff_total))
-                tc = np.append(tc, 0.0)
-                wc = np.append(wc, float(background.n_regions))
             logL = _cell_loglik(gc, ec, tc, log_rho, n_gh=int(n_gh))
             kk = _kernel_matrix(log_rho, h)
             # convolve each cell likelihood with the fixed kernel, EM the weights, render the mixture density.
@@ -307,8 +272,6 @@ class DensityNPMLE:
             weights=w,
             bandwidth=float(bandwidth),
             n_cells=int(gc.shape[0]),
-            log_rho_bg=(-np.inf if background is None else float(background.log_rho_bg)),
-            sigma_bg=(np.inf if background is None else float(background.sigma_bg)),
         )
 
     def logprior(self, fg_grid, mass, eff):
@@ -330,12 +293,11 @@ class DensityNPMLE:
         The grid top is the max density, so ``ρ_g = f_g·M/E ≤ M/E`` never extrapolates above it; the low
         side clamps to the depleted level.
 
-        **The background enters SMOOTHLY, never as a clamp** (B). When this prior was
-        fit with a background, the aggregate ``ρ_bg`` is a **pinned Gaussian component of the mixture** (see
-        :meth:`fit`) — it fills the ``[0, 1/E]`` low-density vacuum the NPMLE cannot resolve, as ordinary
-        (already-normalized) prior mass in ``logP``. There is **no** one-sided floor / half-Gaussian wall: a
-        clamp is a cliff, and a Bayesian prior must be smooth with honest strength (so enriched / CNV-amplified
-        DNA can overcome it) — the retired floor is in the archive."""
+        ⚠ An injectable aggregate-background component was DELETED 2026-08-21 (never wired; the
+        intergenic background that reaches ψ is `fit_intron_background`'s). The principle it recorded is
+        kept because it governs anything that replaces it: such a term must enter SMOOTHLY as ordinary
+        prior mass, never as a one-sided floor — a clamp is a cliff, and a prior must be overcomable by
+        enriched / CNV-amplified DNA."""
         eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
         mass = np.maximum(np.asarray(mass, dtype=np.float64), _EPS)
         fg = np.minimum(np.maximum(np.asarray(fg_grid, dtype=np.float64), _EPS), 1.0 - _EPS)  # (K,)

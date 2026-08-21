@@ -306,8 +306,11 @@ class DonorGlobals:
             f"read {self.read_length}\n"
             f"  strand_specificity={self.strand_specificity:.4g}  capture={'ON' if self.capture_on else 'off'}\n"
             f"  enrichment_prior={'yes' if self.priors.enrichment_prior is not None else 'NONE'}  "
-            f"intron_background={'yes' if self.priors.intron_background is not None else 'NONE'}  "
-            f"background={'yes' if self.priors.background is not None else 'NONE'}"
+            # ⚠ the aggregate `background` field was converge-and-deleted 2026-08-21 (a duplicate of
+            # the intron background's own pool that no caller consumed); this line read it and was the
+            # one live breakage the deletion left — found by the retirement census, not by the suite
+            # (`TRAPS: a-green-suite-hid-five-dead-instruments`, the instrument form).
+            f"intron_background={'yes' if self.priors.intron_background is not None else 'NONE'}"
         )
 
 

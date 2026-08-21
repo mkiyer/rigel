@@ -920,6 +920,8 @@ def run_pipeline(
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
         build_boundary_flags_array,
+        build_contiguous_boundary_reach_arrays,
+        build_mature_wall_distances,
         build_sj_geometry_arrays,
     )
 
@@ -936,6 +938,12 @@ def run_pipeline(
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
+    # ⭐ The two annotation-only WALL inputs, beside the other index-derived arrays. They are consulted
+    # only when `CalibrationConfig.background_abundance == "measured_total"`, and building them
+    # unconditionally keeps production and `scan_cache.index_derived_inputs` on ONE code path — the
+    # alternative is a flag-shaped branch here that the instruments do not take.
+    mature_walls = build_mature_wall_distances(index, region_arrays)
+    boundary_reach = build_contiguous_boundary_reach_arrays(index)
     # The sj axis, in the accumulator's own sj slot order: where each sj attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
     # its two endpoint regions — never as a message channel, since every sj closes an undirected
@@ -992,6 +1000,8 @@ def run_pipeline(
         sj=sj,
         diagnostics_out=_calib_diag,
         boundary_flags=boundary_flags,
+        mature_walls=mature_walls,
+        boundary_reach=boundary_reach,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from rigel.calibration.background_reference import BackgroundReference
 from rigel.calibration.npmle import DensityNPMLE
 
 
@@ -165,79 +164,6 @@ def test_projection_deterministic():
 # ---- the aggregate background CELL in the fit (the pooled scalar as one genome-length Poisson observation) ----
 
 
-def test_aggregate_cell_concentrates_mass_at_background():
-    """A present aggregate (count Σg over a genome-scale ΣE) injected as a Poisson cell concentrates prior mass
-    at ``log ρ_bg = log(Σg/ΣE)`` — the smooth low-density anchor, sharp by construction (the huge ΣE)."""
-    rng = np.random.default_rng(1)
-    eff = rng.uniform(1000.0, 3000.0, 5000)
-    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual regions at ρ ≈ 1e-2
-    target = float(np.log(1e-3))  # the background sits a decade BELOW the individual regions
-    bg = BackgroundReference(
-        log_rho_bg=target,
-        sigma_bg=0.001,
-        n_counts=float(1e-3 * 6.0e6),
-        eff_total=6.0e6,
-        n_regions=2000,
-    )
-    pr_bg = DensityNPMLE.fit(count, eff, background=bg)
-    pr_0 = DensityNPMLE.fit(count, eff)
-    assert np.isfinite(pr_bg.logP).all()
-    assert np.array_equal(
-        pr_bg.logP, DensityNPMLE.fit(count, eff, background=bg).logP
-    )  # deterministic
-    near = np.abs(pr_bg.log_rho - target) < (
-        1.5 * 0.15 * np.log(10.0)
-    )  # within ~1 bandwidth of ρ_bg
-    m_bg = float(np.exp(pr_bg.logP)[near].sum() / np.exp(pr_bg.logP).sum())
-    # the plain fit's grid may not even reach ρ_bg — the aggregate both EXTENDS the grid there and puts mass on it
-    m_0 = float(
-        np.exp(pr_0.logP)[np.abs(pr_0.log_rho - target) < (1.5 * 0.15 * np.log(10.0))].sum()
-        / np.exp(pr_0.logP).sum()
-    )
-    assert m_bg > m_0
-
-
-def test_aggregate_cell_zero_counts_anchors_the_derived_floor():
-    """The critical zero-DNA case: an aggregate with Σg=0 must anchor prior mass at the DERIVED resolution floor
-    ``log_rho_floor`` — the per-region resolution wall ``ρ_res = 1/harmmean(E of zero-count regions)`` — NOT the
-    old ``1/ΣE`` (which pools the genome as one region ⇒ ~3 logs too low = the confident-FP seed). No single
-    region can resolve below its own ``1/E``; the honest floor is where a TYPICAL region still reads ~zero.
-    (.)"""
-    rng = np.random.default_rng(2)
-    eff = rng.uniform(1000.0, 3000.0, 3000)
-    count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual regions
-    rho_res = float(np.mean(1.0 / eff))  # mean(1/E_i) = 1/harmmean(E) — the resolution wall
-    lrf = float(np.log(rho_res))
-    bg0 = BackgroundReference(
-        log_rho_bg=-np.inf,
-        sigma_bg=np.inf,
-        log_rho_floor=lrf,
-        n_counts=0.0,
-        eff_total=6.0e6,
-        n_regions=3000,
-    )
-    pr = DensityNPMLE.fit(count, eff, background=bg0)
-    assert np.isfinite(pr.logP).all()
-    assert pr.log_rho[0] <= lrf + 3.0 * 0.15 * np.log(
-        10.0
-    )  # the grid reached down to the DERIVED floor
-    p = np.exp(pr.logP - pr.logP.max())
-    lowmass = float(p[pr.log_rho < lrf + 0.15 * np.log(10.0)].sum() / p.sum())
-    assert (
-        lowmass > 0.10
-    )  # real prior mass sits at the derived floor (not all at the enriched individuals)
-    # …and the derived floor is well ABOVE the old 1/ΣE collapse (the whole point of the fix):
-    assert lrf > np.log(1.0 / 6.0e6) + 3.0  # >3 nats above 1/ΣE
-
-
-def test_background_none_is_byte_identical():
-    """``background=None`` must leave the fit EXACTLY as before the aggregate cell existed (safe default)."""
-    count, eff = _bimodal_counts()
-    a = DensityNPMLE.fit(count, eff)
-    b = DensityNPMLE.fit(count, eff, background=None)
-    assert np.array_equal(a.logP, b.logP) and np.array_equal(a.weights, b.weights)
-
-
 def test_projection_is_continuous_across_the_valley():
     """Regression guard for the external reviewer's Risk 1 (step-function discontinuities → refit oscillation).
 
@@ -313,22 +239,6 @@ def test_additive_occupancy_equals_height_despite_imprecision():
     assert 0.18 < ratio < 0.33  # ≈ the 100/400 = 0.25 occupancy ceiling (not τ-discounted toward 0)
 
 
-def test_additive_weak_floor_cannot_dominate_the_flood():
-    """TRAPS: self-checking-validator: the background floor is ONE pseudo-observation regardless of ``n_regions`` — a 100k-region intergenic
-    flood must NOT crush the enriched mode (the exact real-data failure the EM aggregate cell would cause)."""
-    g_hat, eff, var_g = _two_pop()
-    bg = BackgroundReference(
-        log_rho_bg=float(np.log(1e-3)),
-        sigma_bg=float(1 / np.sqrt(50.0)),
-        n_counts=50.0,
-        eff_total=5e4,
-        n_regions=100_000,
-        log_rho_floor=float(np.log(1e-3)),
-    )
-    kde = DensityNPMLE.fit(g_hat, eff, var_g=var_g, bandwidth=0.15, additive=True, background=bg)
-    assert _height(kde, -2.0) > 0.15  # enriched mode still present under a 100k-region flood
-
-
 def test_additive_pure_rna_concentrates_low_no_phantom_mode():
     """FP safety: pure-RNA regions (ĝ≈0) read as gDNA ≤ 1/E ⇒ the density concentrates at the low resolution
     wall, with no manufactured high-gDNA mode."""
@@ -364,19 +274,3 @@ def test_additive_sub_one_counts_normalize_and_stay_low():
         )  # mode LOW (≈ 1/E resolution wall), not a phantom high-gDNA mode
 
 
-def test_additive_sub_one_counts_with_resolution_wall_floor():
-    """The Σg=0 / gdna_none background (floor at the resolution wall, sigma_bg=∞) must also handle sub-1 ĝ
-    without crashing — the floor location must land on the grid and h_floor must be finite."""
-    bg = BackgroundReference(
-        log_rho_bg=-np.inf,
-        sigma_bg=np.inf,
-        n_counts=0.0,
-        eff_total=1e6,
-        n_regions=5000,
-        log_rho_floor=float(np.log(1.0 / 3000.0)),  # the resolution wall
-    )
-    kde = DensityNPMLE.fit(
-        np.full(300, 0.001), np.full(300, 1000.0), bandwidth=0.15, additive=True, background=bg
-    )
-    assert abs(float(kde.weights.sum()) - 1.0) < 1e-9
-    assert np.isfinite(kde.logP).all()

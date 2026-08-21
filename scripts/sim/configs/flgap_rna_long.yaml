@@ -1,0 +1,154 @@
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE fl-GAP SIDE PANEL, ARM 1 — gDNA SHORT (75 bp), RNA LONG (250 bp)
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# ⛔⛔⛔ THIS IS A SIDE PANEL AND IT IS NEVER A LADDER RUNG. `gdna_ladder.yaml` gives both origins the
+# SAME fragment-length distribution on purpose, and that is a forcing function rather than tidiness:
+# THE EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION (`scoring.cpp` carries `fl_log_prob_` for RNA
+# and `gdna_fl_log_prob_` for gDNA), so a large gap lets the EM split the two origins on LENGTH ALONE,
+# bypassing calibration and MASKING its bugs. ⛔ **Therefore the TRANSCRIPT-LEVEL number on this panel
+# is NOT interpretable as a calibration result** — `quant_accuracy.py`'s table, and anything else
+# downstream of the EM, is being handed the answer by the length gap.
+# ⭐ **WHAT IS STILL VALID HERE, and the distinction matters or the caveat gets over-applied:** every
+# instrument that stops BEFORE the EM. `total_abundance_audit.py` reads banks only; and
+# `calibration_vs_oracle.py` scores a `CalibrationResult` against an oracle-composition
+# `CalibrationResult` — it runs `calibrate`, never the EM — so it is interpretable on this panel and is
+# the right end-to-end reading for it.
+#
+# ⭐⭐ WHAT IT IS FOR, precisely. `CalibrationConfig.background_abundance` swaps the pooled gDNA
+# background from `count / E_contained(ell, pmf)` to the pmf-free START/END pair. On the equal-length
+# ladder that swap is a TIE off capture, because the two estimators differ by exactly
+#
+#     rho_r * (E_r/E_g - 1)
+#
+# — the RNA share of a MIXED pool times a factor the ladder pins at 1. Measured on the ladder's own
+# pmfs (gap -12.4 bp) that factor is +0.02 % ... +1.6 %; re-priced at a realistic gap it is
+# -0.2 % ... -78 %. This panel is what exerts it, so the swap can be judged instead of argued about.
+#
+# ⭐ TWO ARMS, OPPOSITE SIGNS, and the second is not optional: `TRAPS`/memory both record that RNA is
+# NOT reliably longer than gDNA — true for cfRNA, false elsewhere — so a one-sided panel would let the
+# tool overfit to one library type. Arm 2 is `flgap_rna_short.yaml` (gDNA 250, RNA 75).
+#
+# ⚠ THE STD MOVES WITH THE MEAN, AND THAT IS FORCED RATHER THAN CHOSEN. The sampler is a rejection
+# draw from Normal(mean, std) truncated to [frag_min, frag_max] (`sim/sampling.py`), so with
+# `frag_min = 50` a configured mean of 75 at the ladder's std of 98 REALISES at 137.65 bp — truncation
+# dominates and the arm would not be the arm. Measured over 400 k draws:
+#
+#     cfg (75, 98)  -> realised 137.65    <- NOT a 75 bp arm
+#     cfg (75, 20)  -> realised  78.54    <- this file
+#     cfg (250, 60) -> realised 249.64    <- this file
+#
+# ⛔ So "75 / 250" is a CONFIGURATION and the realised gap is a MEASUREMENT. ⭐ MEASURED after
+# simulating, count-weighted off each condition's own `truth_fragment_lengths.tsv` (capture OFF):
+#
+#     gDNA **78.58**   RNA **247.62**   GAP **+169.04** bp
+#
+# ⚠ The RNA side lands a little SHORT of its configuration because an mRNA fragment must fit inside its
+# transcript while gDNA need not — the same transcript-length truncation `gdna_ladder.yaml` records for
+# its equal arms. Capture shifts both up ~3 bp. The two arms are near mirror-symmetric (+169.04 vs
+# -171.15), which is what makes the sign-flip test clean.
+# ⚠ And there are TWO quotable gaps: this one (the raw deposit histograms = the LIBRARY) and the fitted
+# de-tilted EB-shrunk fl pmfs (= what the TOOL believes), which read -12.38 bp on the ladder against the
+# histograms' -4.02. Say which you mean.
+#
+# ⚠ Reads are capped at the fragment length by the simulator (`wgs_engine.py:665,903`,
+# `read_len = min(read_length, frag_len)`), so a 100 bp read_length is safe against a 78 bp mean: no
+# adapter run-off, no mis-alignment artefact. 88 % of this arm's gDNA fragments are under 100 bp.
+#
+# ⭐ ONE gDNA LEVEL (g50) BY DESIGN, and the usual trap does not apply. `TRAPS:
+# a-single-level-panel-cannot-see-a-constant` is about a panel used to RANK a mechanism; this one
+# probes a single named mechanism whose size is set by the fl gap, not by the gDNA level, and the
+# ladder remains the ranking panel. g50 is chosen because a 50/50 mix maximises the RNA share of the
+# intron pool where the mechanism bites.
+#
+# ⭐⭐⭐ THE VERDICT, MEASURED 2026-08-21 — AND THE PREDICTION BELOW WAS HALF WRONG, WHICH IS RECORDED
+# RATHER THAN QUIETLY FIXED. The background pools DID NOT MOVE: intergenic shipped/truth 1.0007 (arm 1) /
+# 1.0000 (ladder) / 0.9994 (arm 2), and intergenic+intron 1.1817 / 1.1821 / 1.1847 — flat across a 340 bp
+# swing in the gap, in BOTH directions. ⛔ The reason is the POOLING, not the gap: a pooled rate is a
+# ratio of sums, so `SumE_r/SumE_g` is 0.9966 (intergenic) and 0.9849 (intergenic+intron) because their
+# exposure is megabase-scale even at a 169 bp gap. Only EXONS are short enough (0.7294, median ell 143 bp)
+# and the exon row moves exactly as the factor predicts: 0.2624 / 0.3439 / 0.8327, ordered by RNA length
+# because exons are RNA-dominated. `TRAPS: a-pooled-rate-cannot-see-a-short-object-factor`.
+# ⭐⭐ WHAT THE PANEL FOUND THAT IT WAS NOT BUILT FOR, and both are worth more than the thing it was:
+#   1. The shipped estimator's capture-ON error is a LONG-gDNA-FRAGMENT effect, monotone across three
+#      panels: intergenic shipped/truth 0.9643 at gDNA 79 bp, 0.5627 at 216, 0.5032 at 250, while the
+#      pmf-free form holds at 1.006 / 1.083 / 1.090. So that repair belongs to libraries with long gDNA.
+#   2. The CONTAINED-OPPORTUNITY MODEL has a fragment-length-dependent bias at introns whose SIGN FLIPS:
+#      `R intron` n/expected 1.0128 (z +13.01) at 79 bp and 0.9891 (z -11.04) at 250 bp, while the ladder
+#      at 216 bp passes — the bias crosses zero near the ladder's own length, which is exactly why an
+#      equal-length panel cannot see it. Densities are therefore NOT certified on the capture-OFF arms
+#      (COMPOSITION is, on all 8). It does not affect the arm-f numbers, whose truth is the START bank
+#      over region length and uses no opportunity model.
+#
+# ⛔ WHERE THE MECHANISM CAN AND CANNOT BITE — the prediction as written BEFORE measuring, kept so the
+# refutation above has something to refute. The bias needs a MIXED pool.
+# `fit_intron_background`'s pool is INTERGENIC-ONLY, which is RNA-free by construction in this
+# simulator, so that consumer is predicted UNCHANGED here. The intron-inclusive pools — the
+# `density_model` count-observable set, the landscape's substrate, and exons — are where it should
+# appear. A result that moves the intergenic row would falsify that reasoning.
+#
+# Run:  python scripts/sim/panel.py status --config scripts/sim/configs/flgap_rna_long.yaml
+
+genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
+gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+# ⭐ The SAME reference and index as the ladder — only the fragment-length parameters differ, so the
+# annotation, the probes and the synthetic nascent entities are identical and the fl gap is the one
+# thing that changed.
+index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
+outdir: /Users/mkiyer/Downloads/rigel_runs/suite/flgap_rna_long
+transcript_filter: all
+
+# ── Read simulation — the RNA arm: LONG ─────────────────────────────────────────────────────────
+simulation:
+  n_total_fragments: 10000000
+  n_rna_fragments: 10000000
+  sim_seed: 42
+  frag_mean: 250
+  frag_std: 60
+  frag_min: 50
+  frag_max: 500
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 8
+
+# ── Abundance — identical to the ladder ─────────────────────────────────────────────────────────
+abundance:
+  mode: random
+  seed: 42
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# ── gDNA — the gDNA arm: SHORT ──────────────────────────────────────────────────────────────────
+gdna:
+  rates:       [1.0]
+  rate_labels: [g50]
+  genomic_refs: [chr21, chr22]
+  frag_mean: 75
+  frag_std: 20
+  frag_min: 50
+  frag_max: 500
+
+# ── Strand — both of the owner's named common cases ─────────────────────────────────────────────
+strand_specificities: [0.50, 0.99]
+
+# ── Nascent — ON, as on the ladder: the intron pool must carry RNA or the mechanism has nothing to
+# bite on (a reading on an `nrna = 0` row is `nrna = 0` restated).
+nrna:
+  mode: fragment_share
+  shares:       [0.20]
+  ratio_labels: [mid]
+
+# ── Capture — both, so the clean read (OFF) and the realistic one (ON) are both available ────────
+capture:
+  probe_format: transcript
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/suite/reference/capture_panel.tsv}
+
+oracle_bam: true
+verbose: true

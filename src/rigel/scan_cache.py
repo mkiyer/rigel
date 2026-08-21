@@ -567,12 +567,23 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
         build_boundary_flags_array,
+        build_contiguous_boundary_reach_arrays,
+        build_mature_wall_distances,
         build_sj_geometry_arrays,
     )
 
+    region_arrays = RegionArrays.from_index(index)
     return {
-        "region_arrays": RegionArrays.from_index(index),
+        "region_arrays": region_arrays,
         "boundary_flags": build_boundary_flags_array(index),
+        # ⭐ The two WALL inputs the measured-total exposure needs: how far a MATURE template continues
+        # past each region bound (spliced bases, MAX over covering isoforms) and the NASCENT genomic
+        # reach at each contiguous boundary. Both are annotation-only and sample-independent.
+        # ⚠ `build_mature_wall_distances` measured 0.42 s at panel scale (35,135 regions, 24,018
+        # mature-covered) against an index load of ~0.5 s, so this function is ~0.6 s rather than the
+        # 0.15 s the note above records — re-time before quoting either number.
+        "mature_walls": build_mature_wall_distances(index, region_arrays),
+        "boundary_reach": build_contiguous_boundary_reach_arrays(index),
         # ⚠ The SJ axis is index-derived too, and it is not optional: `calibrate` refuses an axis
         # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
         # would place every splice on the wrong boundary. Omitting it here was an S5.f miss that only the

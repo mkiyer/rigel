@@ -1011,6 +1011,13 @@ def main() -> int:
                     default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_cal_vs_oracle")
     ap.add_argument("--json", type=Path, default=None, help="write the per-condition rows and exit")
     ap.add_argument("--jobs", type=int, default=1)
+    ap.add_argument(
+        "--background-abundance",
+        choices=("contained", "measured_total"),
+        default=None,
+        help="override CalibrationConfig.background_abundance for BOTH arms (P and O), so the run "
+        "prices that estimator swap against oracle calibration. Default: the shipped config.",
+    )
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no I/O")
     args = ap.parse_args()
 
@@ -1053,6 +1060,17 @@ def main() -> int:
     index = TranscriptIndex.load(str(args.index))
     region_arrays = RegionArrays.from_index(index)
     pipeline_config = PipelineConfig()
+    if args.background_abundance is not None:
+        # ⛔ Applied to BOTH arms: P and O share one payload and differ only in the six deconvolved
+        # arrays, so an override on one arm alone would compare two different tools rather than two
+        # estimators.
+        pipeline_config = dataclasses.replace(
+            pipeline_config,
+            calibration=dataclasses.replace(
+                pipeline_config.calibration, background_abundance=args.background_abundance
+            ),
+        )
+        print(f"⭐ background_abundance = {args.background_abundance!r} on BOTH arms")
     if args.json is None:
         print(f"index + region arrays loaded in {time.perf_counter() - t0:.2f} s", flush=True)
 

@@ -81,7 +81,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # ⚠ `simplex_logodds` is ψ and was 784 boundaries when this file landed (2026-08-07); it is the
         # single densest thing in the package. ⛔ Like every other count once quoted here that number has
         # DRIFTED and is not maintained by hand — the census re-derives it.
-        ("region_geometry", "simplex_logodds"),
+        # `total_abundance` is the composition-FREE per-slot total (the START/END banks side-selected
+        # by the wall rule, plus the exact boundary banks) — geometry work, and it reads the geometry.
+        ("region_geometry", "simplex_logodds", "total_abundance"),
     ),
     (
         4,
@@ -99,16 +101,19 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         5,
         "density and prior",
-        # How dense a component is, and every fitted population prior. ⚠ SIX modules; 1,858 boundaries when
-        # this file landed (2026-08-07) — the same drifted count the module docstring above records, kept
-        # here with its date rather than restated as current. The census prints it live.
+        # How dense a component is, and every fitted population prior. ⚠ It was SIX modules until
+        # 2026-08-21, when `background_reference` was converge-and-deleted: it computed a second pooled
+        # intergenic background on the SAME pool as `density_deconv.fit_intron_background` (measured
+        # identical, n = 1,298) and no caller ever consumed it. The census prints the live count.
         (
             "run_fill",
             "density_model",
             "density_deconv",
             "npmle",
             "landscape",
-            "background_reference",
+            # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
+            # `landscape`'s estimator SIDEWAYS and reads `total_abundance` (layer 3) DOWN.
+            "abundance_landscape",
         ),
     ),
     (

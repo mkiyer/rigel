@@ -50,7 +50,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .background_reference import BackgroundReference, measure_background
 from .messages.currency import CurrencyPolicy
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
@@ -67,6 +66,12 @@ from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .npmle import DensityNPMLE
 from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
+from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
+from .total_abundance import (
+    build_region_wall_mask,
+    region_counts_and_exposure,
+    w_max_from_deposited_lengths,
+)
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_sj_table,
@@ -95,7 +100,7 @@ class InjectedCalibrationPriors:
     """Population-scale calibration priors — the objects that require genome-scale (or many-gene) data to fit and
     are physically **directly observable** (no deconvolution / no solving): the RNA strand balance, the strand
     Beta-Binomial overdispersions, the strand-Fisher noise-floor sample sizes, the enrichment-density NPMLE (the
-    σ²_transfer landscape), the intergenic intron-factory background, and the aggregate ρ_bg background.
+    σ²_transfer landscape) and the intergenic intron-factory background.
 
     A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
     population scenario and injects them, letting the toy provide only the controlled per-region GEOMETRY. Every
@@ -110,7 +115,10 @@ class InjectedCalibrationPriors:
     rna_strand_overdispersion: float | None = None
     enrichment_prior: DensityNPMLE | None = None
     intron_background: GdnaBackground | None = None
-    background: BackgroundReference | None = None
+    #: the pre-pass-0 TOTAL-density field + mode census — population-scale (a toy cannot fit a
+    #: landscape from a handful of regions), injectable exactly like the enrichment prior it is
+    #: planned to replace. ``None`` ⇒ fit internally when the config asks, else absent.
+    abundance_landscape: AbundanceLandscape | None = None
 
 
 def _empty_sj_geometry() -> "SpliceJunctionGeometry":
@@ -300,6 +308,8 @@ def calibrate(
     diagnostics_out: dict | None = None,
     injected_priors: "InjectedCalibrationPriors | None" = None,
     boundary_flags: "np.ndarray | None" = None,
+    mature_walls=None,
+    boundary_reach=None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per object, then derive gdna_density_global.
 
@@ -317,6 +327,13 @@ def calibrate(
     ``boundary_flags`` is the splice graph's per-contiguous-boundary structural bits
     (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
     ``RegionStatics.boundary_flags``. ``None`` (the default) leaves them zero.
+
+    ``mature_walls`` / ``boundary_reach`` are the two annotation-only WALL inputs the MEASURED-TOTAL
+    exposure needs (:func:`~rigel.calibration.splice_graph.build_mature_wall_distances` and
+    :func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`). ⛔ They are
+    consulted ONLY when ``config.background_abundance == "measured_total"``, and that setting REFUSES
+    to run without them rather than silently falling back — a background rate that quietly changed
+    estimator would be the worst of both.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
@@ -343,6 +360,57 @@ def calibrate(
     # `priors` divides by is byte-identically the one the solver divided by. Two implementations
     # of one quantity is how they come to disagree.
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
+
+    # ⭐⭐ THE MEASURED-TOTAL (counts, exposure) PAIR for the pooled gDNA background estimators, built
+    # ONCE here and handed to both. ``None`` under the shipped default, and then every consumer takes
+    # its own contained pair exactly as before — bit-identical.
+    # ⛔ It REFUSES rather than falling back: a background rate that silently changed estimator because
+    # an argument was missing is worse than either estimator.
+    background_pair = None
+    if config.background_abundance == "measured_total":
+        if mature_walls is None or boundary_reach is None:
+            raise ValueError(
+                "CalibrationConfig.background_abundance = 'measured_total' needs the wall inputs: "
+                "pass mature_walls=build_mature_wall_distances(index, region_arrays) and "
+                "boundary_reach=build_contiguous_boundary_reach_arrays(index) (both are in "
+                "scan_cache.index_derived_inputs). Refusing rather than falling back to the contained "
+                "pair, which would change the background rate without saying so."
+            )
+        _wall_mask = build_region_wall_mask(
+            region_arrays,
+            mature_walls,
+            boundary_reach[0],
+            boundary_reach[1],
+            w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
+        )
+        _bg_counts, _bg_exposure, _ = region_counts_and_exposure(
+            substrate, region_arrays, _wall_mask
+        )
+        background_pair = (_bg_counts, _bg_exposure)
+
+    # ⭐ THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT
+    # from counts and lengths only (no circularity with anything solved below). QC/injection surface
+    # this session; the measured pass-0 reference is its planned consumer, behind its own gate.
+    abundance_landscape = None
+    if config.abundance_landscape:
+        if inj is not None and inj.abundance_landscape is not None:
+            abundance_landscape = inj.abundance_landscape
+        else:
+            if mature_walls is None or boundary_reach is None:
+                raise ValueError(
+                    "CalibrationConfig.abundance_landscape = True needs the wall inputs: pass "
+                    "mature_walls and boundary_reach (both are in scan_cache.index_derived_inputs). "
+                    "Refusing rather than fitting on unmasked totals, which would carry the wall "
+                    "bias the mask exists to exclude."
+                )
+            _al_mask = build_region_wall_mask(
+                region_arrays,
+                mature_walls,
+                boundary_reach[0],
+                boundary_reach[1],
+                w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
+            )
+            abundance_landscape = fit_abundance_landscape(substrate, region_arrays, _al_mask)
     # ⭐ And the RNA twin, on the same two axes — the RNA population's own opportunity per object.
     # ⛔ It USED to be what turned ``mass_rna_*`` into a density in ``assemble_priors``. That consumer
     # is gone: the prior became a conserved FRAGMENT COUNT and divides by nothing on the mass path
@@ -456,7 +524,13 @@ def calibrate(
         inj.intron_background
         if (inj is not None and inj.intron_background is not None)
         else (
-            fit_intron_background(substrate, region_arrays, region_eff_gdna, include_introns=False)
+            fit_intron_background(
+                substrate,
+                region_arrays,
+                region_eff_gdna,
+                include_introns=False,
+                counts_exposure=background_pair,
+            )
             if config.intron_factory
             else None
         )
@@ -620,22 +694,12 @@ def calibrate(
     # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit the gDNA-rate NPMLE on
     # the initial solve's deconvolved gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG regions. Repeated ``calib_refit_iters`` times.
-    # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —
-    # belief-free) is the refit floor; ``None`` when disabled.
-    if inj is not None and inj.background is not None:
-        background = (
-            inj.background
-        )  # INJECTED aggregate ρ_bg (pooled pure intergenic/intron — population-scale)
-    elif config.background_floor:
-        background = measure_background(
-            substrate,
-            region_arrays,
-            region_eff_gdna,
-            include_introns=config.background_include_introns,
-            robust_trim_mad=config.background_robust_trim_mad,
-        )
-    else:
-        background = None
+    # ANCHORED, EXTREMELY WEAK. ⚠ The prose here used to name an "aggregate DNA-background reference
+    # (`ρ_bg`) … the refit floor". That channel was DELETED 2026-08-21: it was never wired into the fit
+    # (`npmle`'s own comment said the wire-in was a separate step that never came), its would-be
+    # consumer is off the solve path anyway, and the intergenic background that DOES reach ψ is
+    # `fit_intron_background`'s — the same pool, measured identical. `fit_landscape`'s own `anchor`
+    # argument is what grounds this refit.
     gdna_hyperprior: DensityLandscape | None = None
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
@@ -689,9 +753,10 @@ def calibrate(
                 rna_strand_overdispersion=rna_strand_overdispersion,
                 enrichment_prior=enrichment_prior,
                 intron_background=intron_background,
-                background=background,
+                abundance_landscape=abundance_landscape,
             ),
         )
+        _debug["abundance_landscape"] = abundance_landscape
 
     # Report-facing diagnostics: the fitted gDNA hyperprior P(ρ) (bimodal ⇒ capture enrichment). Consumed by
     # the QC report, never by the EM.

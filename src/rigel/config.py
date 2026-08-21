@@ -342,21 +342,57 @@ class CalibrationConfig:
     #: left at the fitter's defaults.
     npmle_bandwidth: float = 0.15
 
-    #: **Aggregate DNA-background floor** (`calibration.background_reference`,
-    # Measure the genome-wide DNA background as a
-    #: pooled scalar ``(log ρ_bg, σ_bg)`` and apply it as a ONE-SIDED log-floor in the gDNA prior — data-driven
-    #: crush protection that is DORMANT for a DNA-free / fully-depleted library (never manufactures gDNA) and
-    #: never a scale/denominator. ``False`` ⇒ no floor (the pre-background behaviour).
-    background_floor: bool = True
+
+    #: **WHICH (counts, exposure) PAIR THE POOLED gDNA BACKGROUND ESTIMATORS TAKE.**
+    #: ``"contained"`` (the default, and bit-identical to the tree before this field existed) pools the
+    #: CONTAINED count over the gDNA contained effective length — unbiased, since
+    #: ``E[count] = rho·E_contained``, but the fragment-length pmf enters the DIVISOR.
+    #: ``"measured_total"`` pools the START/END banks over the region's own LENGTH
+    #: (`calibration.total_abundance.region_counts_and_exposure`) — ``E[S] = rho·ell`` for EVERY
+    #: fragment length, so no pmf enters at all, and double-walled regions are excluded as honestly not
+    #: model-free. Both are pooled as a ratio of SUMS and both feed the SAME conjugate
+    #: ``Gamma(Σcounts + ½, Σexposure)``, so this swaps the pair and not the estimator.
+    #:
+    #: ⭐⭐ **MEASURED on the 16-condition ladder against the `gdna` origin partition's own start rate,
+    #: per stratum (`total_abundance_audit.py` arm ⓕ). The verdict is that it is a TIE off capture and a
+    #: 1.8–4.3× repair under it:**
+    #:
+    #: ===============================  ==================  ==============
+    #: pool                             shipped / truth     new / truth
+    #: ===============================  ==================  ==============
+    #: intergenic, capture-OFF          1.0000 / 1.0001     1.0000
+    #: intergenic, capture-ON           **0.5627–0.5644**   **1.0818–1.0830**
+    #: +introns, capture-OFF            1.1821–1.1823       1.2055–1.2058
+    #: +introns, capture-ON             **0.2344–0.2348**   **1.0649–1.0654**
+    #: ===============================  ==================  ==============
+    #:
+    #: ⭐ The capture-ON repair is the point: the gDNA pmf is itself capture-distorted, so the divisor is
+    #: mis-estimated and the shipped pair under-reads the true gDNA rate by 1.8× (intergenic) to 4.3×
+    #: (+introns), while a pmf-free exposure is immune. ⛔ The +introns rows show the ONE cost, and it is
+    #: not the estimator's: those pools carry nascent RNA, both forms over-read, and the START form takes
+    #: ~2 pp MORE of it because a fragment starting in an intron and reaching into an exon books a START
+    #: there. Where the pool is clean (intergenic) that term is absent.
+    #: ⛔ ``"measured_total"`` REFUSES to run unless ``calibrate`` is given ``mature_walls`` and
+    #: ``boundary_reach`` — a background rate that silently changed estimator is worse than either.
+    background_abundance: str = "contained"
+
+    #: **FIT THE `AbundanceLandscape` AT CALIBRATION INIT** — the pre-pass-0 TOTAL-density field and
+    #: its mode census (`calibration.abundance_landscape`). Its inputs are counts and lengths only
+    #: (the wall-exact measured totals), so there is NO circularity with the solve; under capture it
+    #: is bimodal and supplies `rho_0` (the depleted mode), the span `R` (the mode ratio) and a
+    #: per-region enrichment responsibility `w_i` — the three quantities the measured pass-0
+    #: reference consumes.
+    #: ⛔ ``False`` (the default) fits NOTHING and every path is bit-identical. ``True`` fits it and
+    #: exposes it via ``_debug["abundance_landscape"]`` and the injectable priors bundle; ⛔ nothing
+    #: in the SOLVE reads it yet — it is priced as a QC/injection object first, exactly as the
+    #: enrichment npmle it is planned to replace was, so the eventual flip is an A/B and not a leap.
+    #: ⛔ ``True`` REFUSES to run unless `calibrate` is given the wall inputs (`mature_walls`,
+    #: `boundary_reach`) — a landscape that silently fit on unmasked totals would carry the wall bias
+    #: rung 1 exists to exclude.
+    abundance_landscape: bool = False
 
     #: Background region set: intergenic-only (``False``, sim-safe — the sim's unrealistically abundant nascent
     #: contaminates introns) vs intergenic + intron (``True``, the real-data path — reclaims the introns' huge
-    #: aggregate span for resolution; real nascent is sparse). Explore ``True`` on real data.
-    background_include_introns: bool = False
-
-    #: Optional upper MAD fence (in log-density) that drops nascent-contaminated intron outliers from the
-    #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
-    background_robust_trim_mad: float | None = None
 
     # **gDNA intron factory**. ``True`` ⇒ deconvolve confident gDNA
     #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
@@ -480,6 +516,11 @@ class CalibrationConfig:
             raise ValueError(
                 f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."
             )
+        if self.background_abundance not in ("contained", "measured_total"):
+            raise ValueError(
+                "CalibrationConfig.background_abundance must be 'contained' or 'measured_total'; "
+                f"got {self.background_abundance!r}."
+            )
         if not (0.0 < float(self.npmle_bandwidth) < 5.0):
             raise ValueError(
                 "CalibrationConfig.npmle_bandwidth must be in (0, 5) decades; "
@@ -489,14 +530,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.gdna_prior_strength must be >= 0 (0 disables the prior term); "
                 f"got {self.gdna_prior_strength}."
-            )
-        if (
-            self.background_robust_trim_mad is not None
-            and float(self.background_robust_trim_mad) <= 0.0
-        ):
-            raise ValueError(
-                "CalibrationConfig.background_robust_trim_mad must be > 0 (or None); "
-                f"got {self.background_robust_trim_mad}."
             )
         if self.sweep_n_grid < 2:
             raise ValueError(
