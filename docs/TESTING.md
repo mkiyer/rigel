@@ -28,6 +28,47 @@ toy says WHY.** Localise on the panel, isolate on a toy, re-measure on the panel
 | depth | 10 M RNA, gDNA **added on top** (so 10–20 M total) | ⭐ **10 M TOTAL, fixed**; the rate decides only the SPLIT |
 | config | `scripts/sim/configs/pilot.yaml` | `scripts/sim/configs/gdna_ladder.yaml` |
 
+### ⭐⭐ The fl-GAP SIDE PANEL — two arms, opposite signs (added 2026-08-21)
+
+⛔⛔ **A SIDE PANEL, NEVER A LADDER RUNG.** The ladder equalises fragment lengths deliberately (the row
+above says why), so it is a NULL for anything whose mechanism is a gDNA-vs-RNA length difference. This
+panel exists to exert exactly that one mechanism, and it does not replace the ladder for ranking
+anything.
+
+| | `flgap_rna_long/` | `flgap_rna_short/` |
+|---|---|---|
+| config | `scripts/sim/configs/flgap_rna_long.yaml` | `scripts/sim/configs/flgap_rna_short.yaml` |
+| gDNA fl configured | **75 ± 20** | **250 ± 60** |
+| RNA fl configured | **250 ± 60** | **75 ± 20** |
+| ⭐ gDNA / RNA **MEASURED** | **78.58 / 247.62** | **249.59 / 78.43** |
+| ⭐ **realised GAP** | **+169.04 bp** | **−171.15 bp** |
+| conditions | `g50` × ss {0.50, 0.99} × capture {off, on} — 4 | the same 4 |
+
+⭐ **WHY BOTH DIRECTIONS.** RNA is **not** reliably longer than gDNA — true for cfRNA, false elsewhere —
+so a one-sided panel lets the tool overfit to one library type. And the quantity under test,
+`E_r/E_g − 1`, **flips sign between the arms**, so a real repair must move the two in OPPOSITE
+directions; one that merely trades one bias for another will not.
+
+⚠ **THE STD MOVES WITH THE MEAN, AND THAT IS FORCED.** The sampler is a rejection draw from
+`Normal(mean, std)` truncated to `[frag_min, frag_max]`, so a configured mean of 75 at the ladder's std
+of 98 **realises at 137.65 bp** — truncation dominates and the arm is not the arm. ⛔ So the configured
+"75 / 250" is a CONFIGURATION and the gap is a MEASUREMENT: read it off the partitions' own deposit
+histograms, which `total_abundance_audit.py` prints on every row. ⚠ The RNA side lands SHORT of its
+configuration (247.62 against 250, and 78.43 against 75 in the other arm) because an mRNA fragment must
+fit inside its transcript while gDNA need not — the same truncation the ladder records for its equal
+arms. ⭐ The two arms come out near mirror-symmetric, which is what makes the sign-flip test clean. ⚠ Two different "gaps" are quotable
+and they differ — the raw deposit histograms give the ladder **−6.79 bp** while the fitted (de-tilted,
+EB-shrunk) fl pmfs give **−12.38 bp**. The histogram describes the LIBRARY; the pmf describes what the
+tool BELIEVES. Say which one you mean.
+
+⚠ Reads are capped at the fragment length by the simulator, so a 100 bp `read_length` against a 78 bp
+mean is safe (no adapter run-off); 88 % of the short arm is under 100 bp.
+
+⛔ **WHAT MAY AND MAY NOT BE READ OFF IT.** The TRANSCRIPT-level number is not a calibration result here
+— the EM reads the fl distribution and a gap hands it the answer. Everything that stops BEFORE the EM is
+valid: `total_abundance_audit.py` (banks only) and `calibration_vs_oracle.py` (it runs `calibrate`, never
+the EM).
+
 ### The gDNA ladder, in detail
 
 `f_gdna = rate/(1+rate)`, and the RNA share thins as gDNA rises because the **total** is held:
@@ -739,7 +780,7 @@ every scorer refused. `scripts/sim/panel.py` is the whole loop (2026-08-11).
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-CFG=scripts/sim/configs/gdna_ladder.yaml       # the only panel on disk since 2026-08-13
+CFG=scripts/sim/configs/gdna_ladder.yaml       # the panel the tool is RANKED on
 
 python scripts/sim/panel.py status   --config $CFG              # ⭐ ALWAYS FIRST
 python scripts/sim/panel.py build    --config $CFG              # index + capture probes

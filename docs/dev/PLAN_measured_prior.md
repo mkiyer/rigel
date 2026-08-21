@@ -185,26 +185,164 @@ two-condition fl-gap SIDE PANEL** (config-only: `gdna_ladder.yaml` carries indep
 `simulation.frag_*` and `gdna.frag_*` blocks, deliberately identical today; ⛔ a SIDE panel, never a
 ladder rung — equal lengths are the ladder's forcing function). Build it when ② needs its verdict.
 
-1. **Rung 1 — `total_abundance` assembly + wall-side selection (the VALIDATION rung, priority ①).**
-   Per slot: BOUNDARY = shipped banks (+ certified spliced, INCIDENCE `count/(mu_r−1)`); REGION =
-   side-selected `S/ℓ`, `E/ℓ` (precision-weighted where both exact — two counts of one rate).
-   ⭐ BOTH banks are LANDED (Part B), so side-selection is fully live from day one. Wall rule
-   DERIVED: a side is exact iff its template distance `≥ w_max − 1`, `w_max` read from
-   `deposited_lengths`, distances from the reach machinery at the component MINIMUM. Double-walled
-   slots flagged not-model-free. ⭐⭐ **The validation bar**: unit gates on hand-built fixtures
-   perturbed three ways; the certified-divisor rule asserted; the wall mask against the RANK-3
-   enumeration; and the DECISIVE one — `total_abundance` against the certified oracle's own
-   per-slot totals on all 32 conditions, per stratum, absolute, the four `g00` rows and the
-   deep-capture rows read separately. Only a clean 32/32 admits rung ②-and-beyond.
-2. **Rung 2 — `fit_total_landscape`** (reuse `DensityLandscape` on wall-exact totals, pre-pass-0):
-   mode census `(rho_0, R, widths)` + per-slot `w_i`. Gates: synthetic bimodal/unimodal; the
-   `rho_0`-vs-anchor CONSISTENCY gate (two independent estimators must agree); capture-OFF
-   unimodality on a real cached condition.
-3. **Rung 3 — the two-atom mixture** through `CompositionPriors`/`_location_term` (per-slot scalars
-   `m_lo, m_hi, w`; `None` ⇒ bit-identical), behind `composition_reference` default `"structural"`.
-   Gates: properness, matched tails, exact-zero degeneracy, regrid immunity, bit-identity under the
-   default, flag-fires-when-flipped.
-4. **Rung 4 — price on all 16**: per stratum, both zero controls, shuffle control (permute `w_i`),
+1. ✅ **Rung 1 — DONE AND VALIDATED 2026-08-21. Its content has MOVED and is deleted from here:** the
+   ruling to `DESIGN.md` §3.1a-ii (the four settled points, and why this module is NOT §4.3's refused
+   drop-in), the derivation to `EQUATIONS.md` §2.3b (`A_start(w|d)`, the exactness condition, the
+   field-free pair), the two lessons to `TRAPS.md`
+   (`two-estimators-of-one-rate-weight-the-field-differently`,
+   `state-the-population-rule-do-not-inherit-it-from-a-table`), and the numbers to `ROADMAP.md` §1
+   rank 3. Built: `rigel.calibration.total_abundance` (layer 3, no consumer) +
+   `splice_graph.build_mature_wall_distances`; gated by `tests/calibration/test_total_abundance.py`
+   (23 cases, 16 perturbations all fired) and `scripts/design/total_abundance_audit.py` (15/15).
+2. ⏳ **Rung 2 — REPLACE PER CONSUMER: ENUMERATED, TWO CONSUMERS LANDED AND PRICED, the rest ranked.**
+   ⛔ **A prior session called this rung BLOCKED by `ROADMAP.md` §4.3 and the owner corrected it. The
+   error is worth keeping**: §4.3 is scoped to ONE consumer (the currency channel's `enrichment_ratio`,
+   substituted UNMASKED and without side selection, judged on that policy's deliverable), and
+   "readers of `inv_abundance`" is not "places total abundance is used" — one member versus 240.
+   * The census is `docs/dev/CENSUS_total_abundance_consumers.md` (240 sites; 8 SWAP / 20
+     NEEDS-MEASUREMENT in `src/`), with the four FORMS and the rule that only a TOTAL-wanting site (or
+     a gDNA level at a structurally pure-gDNA object, where total ≡ gDNA) is a candidate at all.
+   * LANDED behind `CalibrationConfig.background_abundance` (`"contained"` default ⇒ bit-identical):
+     `fit_intron_background` (→ ψ) and `measure_background` (→ the refit floor). The PAIR changes, not
+     the estimator.
+   * PRICED at the estimator level on all 32: a tie off capture, a 1.8–4.3× repair under it, and a
+     ~2 pp nascent-contamination cost on RNA-bearing pools. `ROADMAP.md` §1 rank 3 carries the table.
+   * ⭐⭐⭐ NEXT, and it is rung ③'s work rather than rung ②'s: `capture_eff_length.py:194` +
+     `priors.py:353` — the expression that produces the 0.0951. A composition-free total can supply
+     that reference, but only through the LANDSCAPE's enriched mode; a pooled-anchor drop-in is right
+     at `g00`/capture-OFF and wrong under capture, which is rank 2's already-recorded shape.
+
+3. ⭐⭐⭐ **Rung 3 — THE `AbundanceLandscape` — DESIGNED 2026-08-21 (the four plans below), building now.**
+
+   ### 3a. The fit — `fit_abundance_landscape`, and every design decision with its reason
+
+   New module `src/rigel/calibration/abundance_landscape.py`, **layer 5** (imports `landscape` SIDEWAYS,
+   `total_abundance` layer 3 DOWN, `signature` layer 0). ⭐ **It reuses `fit_landscape` verbatim** —
+   that estimator is deliberately component-agnostic (its own docstring: "nothing here knows which
+   component it is fitting"), and every hard-won decision in it transfers: zero-native Poisson kernels,
+   knn population resolution, the Laplace one-pseudo-region floor, the derived grid.
+
+   The call, and why each argument is what it is:
+   * `count, exposure, model_free = total_abundance.region_counts_and_exposure(...)` — **REGIONs
+     only.** Boundaries are excluded for the SAME reason the gDNA hyperprior excludes them (owner,
+     2026-07-27): they cross rather than contain, and a landscape describes the field over the genome,
+     which regions tile and zero-width boundaries do not.
+   * `count = counts`, `eff = exposure` — the VALIDATED pair (rung 1, 32/32), Poisson-native.
+   * `mass = counts` — `_grid`'s top is `max log10(mass/eff)`; for a TOTAL the observed density IS the
+     ceiling (nothing sits above what was measured), so mass ≡ count and the grid derives itself.
+   * `var = zeros` — ⭐ **a DIRECT measurement has no deconvolution ambiguity**, so `_reliability`
+     returns 1 everywhere and the weights are honestly flat. This is not a shortcut: the gDNA
+     hyperprior's `Var(log f_g)` weight exists because ITS training data came out of a solve; ours
+     did not.
+   * `anchor = (count == 0)` among the selected — semantic parity with the hyperprior's zero-count
+     anchor (weight already 1; the flag is documentation).
+   * SELECTION: `model_free & (exposure > 0)`. ⛔ Double-walled regions are excluded by the mask
+     itself, which is what rung 1 built the mask FOR.
+   * ⚠ `_KNN_SCALE`/`_S0` are inherited and **have only ever been validated on gDNA-shaped data** —
+     `landscape.py`'s own warning. Every result this landscape reports must carry that caveat until
+     rung 5 prices it.
+
+   ### 3b. The MODE CENSUS — no threshold anywhere, and the precedent it follows
+
+   `CalibrationDiagnostics.from_prior` already finds modes as "local maxima of the fitted log-density
+   curve, tallest first" — the precedent. The census extends it with BASINS and refuses thresholds:
+   * Every interior local maximum is a mode; the grid is PARTITIONED into basins at the interior
+     minima between adjacent maxima; each mode carries `(log_rho, basin_mass, width, lo, hi)` with
+     width = the mass-weighted std WITHIN the basin (derived, no constant).
+   * **DEPLETED** = the basin CONTAINING the pooled anchor rate
+     `log(Σcount/Σexposure over intergenic model-free regions)` — the same composition-free pool
+     `fit_intron_background` uses; fallback (no anchors, a toy) = the largest-mass basin.
+   * **ENRICHED** = the largest-mass basin strictly ABOVE the depleted one; `None` ⇒ unimodal.
+   * `rho_0 = exp(depleted.log_rho)`; `span_R = exp(enriched − depleted)` (1.0 when unimodal).
+   * ⭐ **WHY NO SIGNIFICANCE THRESHOLD IS NEEDED**: the knn smoothing already suppresses combing (its
+     whole job), and a phantom maximum above the bulk carries ~zero basin mass, so it yields
+     `w_i ≈ 0` and a near-1 depleted share — HARMLESS, and the capture-OFF gate MEASURES that instead
+     of a constant asserting it. Masses carry the verdict continuously.
+   * **`w_i`** (per model-free REGION): the slot's own Poisson kernel times the fitted density,
+     normalised on the grid, integrated over the ENRICHED basin — an honest posterior responsibility,
+     `≡ 0` when unimodal, `NaN` where not model-free.
+   * **ANCHOR CONSISTENCY** (the rung's named gate): `|depleted.log_rho − anchor_log_rho|` must sit
+     within the depleted mode's own fitted width — two independent estimators of one level, and the
+     tolerance is the density's own statement of its resolution rather than a chosen number. The gap
+     is reported in nats either way.
+
+   Gates (FIRST, verified failing, ≥3 perturbations): synthetic bimodal (two Poisson populations,
+   decisive separation → 2 modes, rho_0/R within grid resolution, `w_i` separates the populations,
+   bracketed); synthetic unimodal (enriched None, span_R exactly 1, w ≡ 0); anchor-consistency flip
+   (pool the anchors 3 decades off → the flag must flip); the mask respected (a not-model-free region
+   must contribute nothing); basins PARTITION (Σ basin_mass = 1); determinism; `None` under 2 training
+   regions.
+
+   ⛔⛔ **THE FIRST REAL FIT CORRECTED ONE GATE'S WORDING, 2026-08-21 — record it before it misleads.**
+   The rung's spec said "capture-OFF unimodality on a real cached condition". The real capture-OFF
+   total is BIMODAL (R ≈ 96 at `g50 ss0.99`): expressed exons sit decades above the gDNA background in
+   any TOTAL, capture or no capture — the T-conflates-expression confound arriving exactly where §A.0
+   predicted. ⭐ **The invariant that actually holds, exactly, is the NON-EXON one: capture-OFF
+   `w[intergenic] = w[intron] = 0.0000` (both, to four decimals) while the anchor gap reads 0.003
+   nats (`rho_0` 0.0511 vs the known 0.051).** Under capture the intron class lifts to only 0.0019
+   while exons take 0.35 (exposure-weighted). So the census DOES cleanly separate the classes on both
+   settings — but "unimodal off capture" was the wrong words for it. ⭐⭐ **Consequence for rung 4,
+   settled now**: the landscape ALONE cannot distinguish expression-bimodality from
+   capture-bimodality, so the two-atom gDNA prior must consume the landscape's `(rho_0, w_i)` TOGETHER
+   with the already-measured enrichment detector (`DESIGN.md` §6b.1's anchor ratio: 0.98 without
+   probes, 113–114 with) — off capture the mixture must degenerate to the spike per §9d.4 limit ①
+   REGARDLESS of what the total's upper modes are doing, because those modes are RNA. ⚠ Also seen and
+   harmless: a tiny mode AT the grid's resolution wall (log_rho ≈ −16, mass ≤ 0.008) — the zero-count
+   population's own kernels; the anchor-containing rule never selects it.
+
+   ### 3c. Integration at calibration INIT — this session, default byte-identical
+
+   In `calibrate()`, immediately after the wall-mask block that `background_abundance="measured_total"`
+   already builds: fit the `AbundanceLandscape` when `CalibrationConfig.abundance_landscape = True`
+   (default **False** ⇒ nothing runs ⇒ bit-identical). It REFUSES without the wall inputs exactly as
+   `measured_total` does — no silent fallback. Its outputs this session: `_debug["abundance_landscape"]`
+   and a new `InjectedCalibrationPriors.abundance_landscape` field (default None, so every toy path is
+   untouched). ⛔ NOTHING reads it in the solve this session — the fit is priced as a QC/injection
+   object first, exactly as the npmle was, so the flag flip below is an A/B and not a leap.
+
+   ### 3d. The NPMLE retirement — its own converge-and-delete change, exactly scoped
+
+   The complete surface (re-derived 2026-08-21): ONE production fit (`calibrate.py:648`,
+   `DensityNPMLE.fit(mass_global, eff_global)` — ⛔ literally the forbidden `mass/eff_gdna` form,
+   surviving because its consumers never touch the solve); consumers = `_debug["gdna_prior"]`,
+   `InjectedCalibrationPriors.enrichment_prior` (toy injection), and
+   `CalibrationDiagnostics.from_prior` → the QC report (`test_report.py`). Plus `config.npmle_bandwidth`,
+   `test_npmle.py` (16 cases), and docstring references in `region_geometry`/`landscape`.
+   The change, in order:
+   1. `CalibrationDiagnostics.from_abundance_landscape(al)` — kde curve from `al.landscape`,
+      modes/separation from the CENSUS (basin-based — strictly better than the top-2-maxima it
+      replaces), a REAL rug from the training centres (the npmle had none). `test_report.py` gates the
+      render.
+   2. Flip: `abundance_landscape=True` becomes the default, the npmle fit is deleted from `calibrate`,
+      `_debug["gdna_prior"]` and `enrichment_prior` are replaced by the landscape (toy harvest/inject
+      carries the new field).
+   3. DELETE `npmle.py` + `test_npmle.py` + `config.npmle_bandwidth` (its validator with it);
+      `additive=`/`rho_floor=` die unshipped (passed by nobody — verified). Account the collected
+      delta; re-run instruments (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+   4. THE gate for the whole change: **the deliverable is bit-identical** — the npmle never touched
+      the solve, so replacing it must move nothing but the QC page and the debug bundle.
+
+   ### 3e. The pass-0 REFERENCE — rung 4's design, so it is not re-derived
+
+   The two-atom mixture (`EQUATIONS.md` §9d.4) through the LOCATION DOOR:
+   * per slot: `m_lo = clip(rho_0·E_g,i/M_i)`, `m_hi = clip(rho_0·R·E_g,i/M_i, ≤ the slot's own §9d.3
+     cap)`, `w_i` from the landscape (REGION slots: own responsibility; BOUNDARY slots: to be ruled —
+     the flanks' `w` or their own exact banks);
+   * the door widens: `CompositionPriors.location` accepts `(m, 3)` — `(m_lo, m_hi, w)` — and
+     `_location_term` becomes `−log[(1−w)·((1−m_lo)·f + m_lo·(1−f)) + w·((1−m_hi)·f + m_hi·(1−f))]`,
+     which degenerates EXACTLY to the shipped scalar at `w ∈ {0,1}` or `m_lo = m_hi`, and to zero at
+     `m = ½` — the same neutral-row property the scalar term has;
+   * strength is §9c.1's and does NOT change (one pseudo-observation; the location never enters τ_λ);
+   * config: `composition_reference: str = "structural"` ABSORBS the `structural_reference` bool
+     (`"none" | "structural" | "measured"`), default bit-identical;
+   * `g00`: anchors → `rho_0 = 0` → the §9c.1 closed-end clamp carries (the coordinate note in §9d.4's
+     limit ②);
+   * gates: properness, matched tails, exact-zero degeneracy, regrid immunity, bit-identity under the
+     default, flag-fires-when-flipped — then rung 5's pricing.
+
+4. **Rung 4 — the two-atom mixture** — design above (3e); build after the landscape census is read on
+   real conditions.
+5. **Rung 5 — price on all 16**: per stratum, both zero controls, shuffle control (permute `w_i`),
    the evidence split, the refuted single-mode arms beside it, the truth-hot-unprobed CONFOUND read
    (T conflates enrichment with expression; the failure direction is PERMISSIVE — measure it), and
    the refit-1 gDNA-landscape mode census. Then the owner rules on the default, and the

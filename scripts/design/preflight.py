@@ -240,7 +240,7 @@ def main() -> int:
         print("⭐ everything present and working: the toolchain, both references, both panels "
               "(five oracle partitions each), and every instrument.")
     print("\n⚠ This checks PRESENCE and IMPORTABILITY. It does not run the suite — do that too:")
-    print("   python -m pytest tests/ -q   (baseline: 0 failed / 3,554 passed / 9 xfailed)")
+    print("   python -m pytest tests/ -q   (baseline: 0 failed / 3,661 passed / 9 xfailed)")
     return 1 if bad else 0
 
 
