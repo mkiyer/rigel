@@ -366,8 +366,18 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,599 passing, 0 SKIPPED, 9 xfail, 3,608 collected**
-(re-derived 2026-08-20, after the third policy landed). ⚠ **The `+45` over 3,563 collected is ACCOUNTED, not
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,609 passing, 0 SKIPPED, 9 xfail, 3,618 collected**
+(re-derived 2026-08-20, end of the abundance/cleanup day). ⚠ The `+10` over 3,608 is ACCOUNTED:
+`+4` meta for `exon_solvability.py` becoming tracked and `+1` for the weighted-premise gate (both
+landed in `f295a313`, whose commit did not carry the number back here); `+2` dev docs (the dissection
+session record and the spike-and-slab primer) `−1` (`NEXT_SESSION.md` deleted per its own
+instruction); `+1` the truncation gate in `test_fragment_length_proof.py` (fragments OUTSIDE the
+support read `rho·P(w<=ell)`, never `rho`); `+1` the `inv_abundance` fill gate in
+`test_region_geometry.py`; `+2` more dev docs (the model-free-abundance plan and the spike-and-slab
+plan). ⛔ Commits `a2b81b34` and `1ada4a3c` each RECORDED "3,618 collected" while their trees collect
+**3,617** — an arithmetic slip (3,608+9), corrected here rather than by rewriting history
+(`TRAPS: re-record-the-baseline`).
+⚠ It read **3,599 passing / 3,608 collected** before that (the third policy's landing). ⚠ **The `+45` over 3,563 collected is ACCOUNTED, not
 adjusted: `39 own + 6 meta`, from the THREE files this work added.** The 39 are
 `tests/calibration/test_currency_policy.py`'s own cases — the policy is gated concept by concept and
 every gate was fired by perturbation. The 6 are **jargon ×3** (the test file, `messages/currency.py`,
