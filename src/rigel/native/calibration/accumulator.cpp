@@ -719,13 +719,17 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     if (sj_ids.empty() && first_region == region_of_pos(last_base)) {
         contained_region = first_region;
         Region& region = regions_[static_cast<std::size_t>(contained_region)];
-        // ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT -- what makes this channel a DENSITY. A length-`w`
-        // fragment contained in a region of length `ell` had `ell - w + 1` admissible start positions, so
-        // `1/(ell - w + 1)` cancels the opportunity identically and E[SUM] = rho for ANY length
-        // distribution. `1/L` does NOT cancel it: measured, that channel read 25.67 density units for
-        // short fragments and 1.60 for long ones at the same true density. An BOUNDARY is the `ell -> 0`
-        // limit, which is why `1/(L-1)` is right there and was wrong here.
-        // ⚠ `A >= 1` is structural: the fragment IS contained, so `w <= ell`.
+        // ⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of
+        // length `ell` had `ell - w + 1` admissible start positions, so `1/(ell - w + 1)` cancels the
+        // opportunity ON ITS OWN SUPPORT: E[SUM] = rho * P(w <= ell), NOT rho -- a fragment with
+        // w > ell deposits NOTHING here, and P(w <= ell) is a per-component pmf functional
+        // (TRAPS: a-cancellation-is-conditional-on-its-support). `1/L` does not cancel it at all:
+        // measured, that channel read 25.67 density units for short fragments and 1.60 for long ones
+        // at the same true density. ⛔ The BOUNDARY rule `1/(L-1)` is NOT this rule's `ell -> 0` limit
+        // (that limit is 0 for every w >= 2); it is a DIFFERENT relation -- crossing a designated
+        // point, A = w - 1 at every ell -- whose support factor P(w >= 2) is 1 for any real library.
+        // ⚠ `A >= 1` here is the support restated: the fragment IS contained, so `w <= ell` -- which is
+        // exactly why E[SUM] = rho * P(w <= ell) and not rho.
         const std::int64_t region_len =
             region_bounds_[static_cast<std::size_t>(contained_region) + 1] -
             region_bounds_[static_cast<std::size_t>(contained_region)];

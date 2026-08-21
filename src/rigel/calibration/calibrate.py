@@ -335,7 +335,14 @@ def calibrate(
     # BOUNDARY slot, one rule, one array. Nothing below computes a second length model.
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(
-        chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
+        chain,
+        substrate,
+        region_arrays,
+        sj,
+        gdna_fl_pmf,
+        rna_fl_pmf,
+        boundary_rna_reach,
+        region_abundance_bank=config.region_abundance_bank,
     )
     statics = build_region_statics(chain, region_arrays, boundary_flags)
 

@@ -449,6 +449,16 @@ class CalibrationConfig:
     #: works can break).
     message_policy: str = "relay"
 
+    #: **Which reciprocal bank fills a REGION slot of ``RegionGeometry.inv_abundance``** — the enrichment
+    #: channel's REGION face. `"contained"` (shipped): `region_contained_inv_opportunity_sum`, whose
+    #: expectation is `rho * P(w <= ell)` — truncated by a per-component pmf functional
+    #: (TRAPS: a-cancellation-is-conditional-on-its-support). `"start"`: `region_start_count / ell` —
+    #: opportunity `ell` for every `w`, no fragment length in the weight, but spliced-INCLUSIVE (a
+    #: population change) and exposed to the template wall at a flush transcript end. ⚠ The one consumer
+    #: is `messages/currency.py`'s `enrichment_ratio`, so under the shipped `message_policy = "relay"`
+    #: this value cannot move the tool at all — it is an A/B knob for the currency arm.
+    region_abundance_bank: str = "contained"
+
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA
     #: densities + belief widths, then **fully resets the belief** and re-solves with it. So nothing but the

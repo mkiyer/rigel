@@ -17,23 +17,24 @@
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
  *   Regions count fragments CONTAINED (the whole path fits inside one region); boundaries count fragments
- *   CROSSING. Each population stores only the channels something READS, and they differ: count,
- *   inv_length_sum (fixed point), length_sum, and -- on the contiguous boundaries -- the conserved mass.
+ *   CROSSING. Each population stores only the channels something READS, and they differ: count (integer),
+ *   the reciprocal-opportunity sum (float64), and -- on the contiguous boundaries -- the conserved mass
+ *   (float64). There is no fixed point anywhere (removed 2026-08-11) and no `length_sum` (deleted
+ *   2026-08-13, retraction in scan_payload.py's docstring).
  *
  * WHY MORE THAN ONE SUM
- *   With `placements` the number of admissible start positions -- L at a region, L-1 at a 0-bp boundary:
+ *   With `A(w)` the number of admissible start positions -- (ell - w + 1)+ contained in a region,
+ *   w - 1 crossing a 0-bp boundary -- and the deposit 1/A(w):
  *
- *       E[count]   = rho * E[placements]
- *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an BOUNDARY, exactly
- *       E[length_sum]     = rho * E[placements * L]
+ *       E[count]      = rho * E_f[A(w)]
+ *       E[sum 1/A]    = rho * P(A > 0)     <- the cancellation is conditional on its own support
+ *                     = rho                 at a BOUNDARY (P(w >= 2) = 1 for any real library)
+ *                     = rho * P(w <= ell)   at a REGION -- a per-component pmf functional, NOT rho
+ *                                             (TRAPS: a-cancellation-is-conditional-on-its-support)
  *
- * `inv_length_sum` is deliberately NOT called `density`: it is one at an boundary, exactly, and is NOT one
- * at a region, where the opportunity (region - L + 1)+ does not cancel. `length_sum` is the second tilt, and
- * without it the (count, inv_length_sum) pair has determinant mu_g - mu_r and so carries NO information
- * about the gDNA/RNA split whenever the two components share a mean length. See
- *
- *   The opportunity factor cancels identically at an boundary for ANY length distribution, which is why no
- *   divisor and no length model appear there. It does not cancel at a region.
+ * The two rules carry two names -- `unspliced_inv_length_sum` / `sj.inv_length_sum` for the boundary
+ * form, `contained_inv_opportunity_sum` for the region form -- and neither is called `density`: the
+ * boundary form IS one, exactly; the region form is a density SHAPE truncated by its support.
  *
  * TWO STRANDS, AND THEY ARE INDEPENDENT
  *   align_strand   the genomic strand the read ALIGNED to. Every read has one. Selects the column.
@@ -577,7 +578,7 @@ private:
     std::vector<Region>          regions_;             // n_region_bounds - 1
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
-    std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
+    std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region keeps its static_assert'd 16 B
 
     std::vector<std::int32_t>  sj_offsets_;        // n_region_bounds + 1, CSR over the donor region_bound index
     std::vector<std::int32_t>  sj_boundary_right_;   // n_sj

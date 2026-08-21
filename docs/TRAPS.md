@@ -48,11 +48,12 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **149 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **150 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 149 entries, 149 bodies, and BOTH set
-differences print empty.** (144/144 before the Stage-3 policy added four to §D — the transport, the face
+⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 150 entries, 150 bodies, and BOTH set
+differences print empty.** (149/149 before the model-free-abundance thread added
+`a-cancellation-is-conditional-on-its-support` to §C.) (144/144 before the Stage-3 policy added four to §D — the transport, the face
 total, the structural lock and the premise.) (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
 the header had read 138 while the file held 141, the drift this line exists to catch.) (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
 simplex-closure work added three more; 132/132 before the doc audit below added one; 133/133 before the
@@ -172,6 +173,7 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 
 **Pools, selections and divisors**
 
+- `a-cancellation-is-conditional-on-its-support` — A RECIPROCAL-OPPORTUNITY DEPOSIT CANCELS ITS OPPORTUNITY ONLY WHERE THE OPPORTUNITY IS NON-ZERO.
 - `two-divisors-opposite-sign` — TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.
 - `frame-free-is-not-assumption-free` — A TERM THAT IS FRAME-FREE IS NOT THEREFORE ASSUMPTION-FREE — LOOK AT THE NUISANCE YOU
 - `a-purity-filter-is-a-length-filter` — A PURITY FILTER ON A LENGTH POOL IS A LENGTH FILTER.
@@ -1174,6 +1176,20 @@ is not a floor; `hop_currency.py --self-test` carries both arms.
 
 
 ## C. Pools, selections and divisors
+
+**a-cancellation-is-conditional-on-its-support. ⭐⭐⭐ A RECIPROCAL-OPPORTUNITY DEPOSIT CANCELS ITS
+OPPORTUNITY ONLY WHERE THE OPPORTUNITY IS NON-ZERO.** Where `A(w) = 0` the fragment does not deposit a
+small number, it deposits **nothing** — so `E[Σ 1/A] = ρ · P(A > 0)`, and `P(A > 0)` is a functional of
+exactly the distribution the channel claims independence from, per component. Measured on the shipped
+REGION bank (`1/(ℓ−w+1)`, ladder lengths): an **11.6× under-read at a 98 bp exon** — the panel's median
+exon — and identically ZERO for the 7,123 of 24,018 exon REGIONs shorter than `frag_min`, at any depth.
+The BOUNDARY form (`1/(w−1)`) has the same structure and escapes it only because `P(w ≥ 2) = 1` for every
+real library. ⛔ **The tell is a comment that states the support as a REASSURANCE rather than as a
+factor** — *"`A ≥ 1` is structural: the fragment IS contained, so `w ≤ ell`"* is precisely the sentence
+that hid `E[Σ] = ρ·P(w ≤ ℓ)` for ten days while three doc homes and two gates asserted `= ρ`. ⭐ Write the
+expectation WITH its support factor everywhere, and let a gate place fragments OUTSIDE the support and
+assert the truncated absolute value (`region_density_derivation.py` T2;
+`tests/native/test_fragment_length_proof.py`). `EQUATIONS.md` §2 carries the corrected algebra.
 
 **two-divisors-opposite-sign. ⭐⭐ TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.**
 `E_J = E[w]−1` RISES with the mean fragment length while `E_r = e−E[w]+1` FALLS, so a length-model error

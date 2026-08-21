@@ -46,14 +46,16 @@ regions are **boundaries** (contiguous boundaries). `ell` is a region length.
 gap counts toward `L`; an intron does not. Whatever counts toward `L` must also count as coverage for
 crossing, or the estimator is biased.
 
-**1.2 Crossing count — the core identity.** A fragment `[s, s+w)` spans a point `p` iff
-`s ∈ [p−w, p−1]` — exactly `w` start positions. So
+**1.2 Crossing count — the core identity.** A fragment `[s, s+w)` crosses an inter-base point `p` iff
+`s < p < s+w`, i.e. `s ∈ [p−w+1, p−1]` — exactly `w − 1` start positions (the shipped rule,
+`accumulator.cpp`'s `1/(length−1)` deposit is its reciprocal). So
 
-    E[count at p]  =  ρ · Σ_w f(w)·w  =  ρ · mean_FL
+    E[count at p]  =  ρ · Σ_w f(w)·(w−1)  =  ρ · (mean_FL − 1)
 
 exactly, for any fragment-length distribution, and **independent of both flanking region sizes**. This is
 why the partitioning problem dissolves: a count at a 0-bp boundary depends on nothing but the density and the
-length distribution.
+length distribution. ⚠ §1.4's formula and §3c already carry the `w − 1` form; this section was the odd
+one out (corrected 2026-08-20 — the `w`-position version was never true of shipped code).
 
 **1.3 Contained opportunity.** The starts at which a length-`w` fragment fits wholly inside a region of
 length `ell`:
@@ -97,16 +99,42 @@ topological order** and there is no graph traversal anywhere.
 
 ---
 
-## 2. Reciprocal length, and where it is model-free
+## 2. Reciprocal opportunity, and where it is model-free
 
-**2.1 At a BOUNDARY it is exactly model-free.**
+⭐ **The general rule (shipped 2026-08-10, `69a85be2`): deposit `1/A(w)` where `A(w)` is that
+population's own OPPORTUNITY** — the number of admissible start positions for a length-`w` fragment at
+that object. Then, by linearity alone,
 
-    E[Σ 1/L]  =  Σ_c Σ_w ρ_c·w·f_c(w)·(1/w)  =  Σ_c ρ_c
+    E[Σ 1/A]  =  Σ_c ρ_c · P_c(A > 0)
 
-the opportunity factor `w` cancels identically, across a mixture with different component lengths.
+⛔⛔ **THE CANCELLATION IS CONDITIONAL ON ITS OWN SUPPORT** (`TRAPS:
+a-cancellation-is-conditional-on-its-support`): a fragment with `A(w) = 0` does not deposit a small
+number, it deposits **nothing**, so the factor `P(A > 0)` survives — and it is a functional of exactly
+the fragment-length pmf the channel claims independence from, per component. The executable statement is
+`scripts/design/region_density_derivation.py`'s T2, perturbed.
 
-**2.2 At a REGION it is not.** There the opportunity is `(ell − w + 1)₊`, which `1/w` does not cancel;
-`Σ1/L` is then only a better-conditioned second moment. ⛔ **Do not claim region-level model-freeness.**
+**2.1 At a BOUNDARY it is model-free for every real library.** The crossing opportunity is
+`A(w) = (w−1)₊` (§1.2), the shipped deposit `1/(L−1)`:
+
+    E[Σ 1/(w−1)]  =  Σ_c ρ_c · P_c(w ≥ 2)  =  Σ_c ρ_c      whenever frag_min ≥ 2
+
+so the support factor is exactly 1 for any library whose fragments are at least 2 bp — unconditionally
+robust in practice, across a mixture with different component lengths. The same holds for the sj bank,
+which takes the identical deposit.
+
+**2.2 At a REGION it is model-free only WITHIN its support — a density SHAPE, not a TOTAL.** The
+contained opportunity is `A(w) = (ell − w + 1)₊`, the shipped deposit `1/(ell − w + 1)`
+(`region_contained_inv_opportunity_sum`), and
+
+    E[Σ 1/A]  =  ρ · P(w ≤ ell)          ← NOT ρ
+
+`P(w ≤ ell)` is a pmf functional and **differs per component**, so at REGION scale the gDNA-vs-RNA
+circularity this channel exists to remove moves out of the divisor and into the support. Measured on the
+ladder's own lengths: an **11.6× under-read at a 98 bp exon** (the panel's median exon), exactly **zero
+at any depth** below `ell < frag_min = 50` (7,123 of 24,018 exon REGIONs). ⛔ **Do not read the REGION
+bank as a model-free TOTAL**; within a fixed `ell` band it is a valid density SHAPE, and the truncation
+law `Σ(contained_inv) / Σ(start_count/ell) ≈ P(w ≤ ell)` is confirmed on the shipped banks (0.93–1.03 on
+11 of 12 live capture-OFF bins, `g98 ss0.99`).
 
 **2.3 And it fails at a terminus, exactly.** `E[Σ1/L] = ρ · E_f[placements(w)/w]`, which equals `ρ` only
 where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for **every** `w > 51`,
@@ -385,21 +413,28 @@ it is circular. The owner's own arithmetic: 100 counts in a 500 bp region reads 
 pure gDNA and `100/(500−200) = 0.33` as pure RNA.
 
 ⭐⭐ **The accumulator deposits the RECIPROCAL OPPORTUNITY per fragment** — `1/(w−1)` crossing a BOUNDARY,
-`1/(ℓ−w+1)` contained in a REGION — whose expectation is the density EXACTLY, **for any length
-distribution and any composition**:
+`1/(ℓ−w+1)` contained in a REGION — whose expectation cancels the opportunity **on the deposit's own
+support** (§2, corrected 2026-08-20):
 
-    E[ Σ 1/(w−1) ]      =  rho          at a BOUNDARY
-    E[ Σ 1/(ℓ−w+1) ]    =  rho          in a REGION of length ℓ
+    E[ Σ 1/(w−1) ]      =  rho · P(w ≥ 2)   =  rho   at a BOUNDARY (frag_min ≥ 2, any pmf, any composition)
+    E[ Σ 1/(ℓ−w+1) ]    =  rho · P(w ≤ ℓ)            in a REGION of length ℓ — NOT rho
 
-(the reciprocal-opportunity theorem, `tests/native/_accumulator_reference.py`; the region form is why
-`1/L` was wrong there and `1/(L−1)` right at a boundary). ⭐ A FACE's total adds the sj flux whose bodies
+(`tests/native/_accumulator_reference.py`; the region form is why `1/L` was wrong there and `1/(L−1)`
+right at a boundary). ⛔⛔ **So the BOUNDARY form is a model-free TOTAL and the REGION form is only a
+model-free density SHAPE**: `P(w ≤ ℓ)` is a pmf functional that differs per component — 11.6× at a 98 bp
+exon on the ladder's own lengths, exactly zero below `ℓ < frag_min` — which is the same gDNA-vs-RNA
+circularity this section removes from the divisor, surviving in the support
+(`TRAPS: a-cancellation-is-conditional-on-its-support`). ⭐ A FACE's total adds the sj flux whose bodies
 lie on that side, in the same units, from the sj bank's own reciprocal-opportunity column — without it the
 comparison is between an object that can hold mature RNA and one that cannot
 (`TRAPS: a-face-total-is-not-a-total-without-its-flux`).
 
 ⚠ **What is still model-dependent, stated so it is not assumed away**: the per-component divisors `E_g`
 and `E_r` remain fragment-length models, so any statement about a COMPONENT's density still uses one. What
-§3.5g buys is that the TOTAL — and therefore every enrichment ratio — does not.
+§3.5g buys is that the TOTAL at a **BOUNDARY** — and any enrichment ratio built between boundaries — does
+not. ⛔ At a REGION the shipped bank's `P(w ≤ ℓ)` factor means every REGION↔BOUNDARY ratio still carries a
+pmf functional with no enrichment in it (the chain alternates REGION/BOUNDARY, so under the currency
+policy that is every hop).
 
 **3.5h ⭐⭐⭐ THE PREMISE VARIANCE — why an imputation must cost something on every hop.**
 (The ruling is `DESIGN.md` §0c.0c.)

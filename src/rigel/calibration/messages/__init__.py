@@ -149,11 +149,13 @@ class StepContext:
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
     mass: np.ndarray  # per-slot gDNA-support mass (the rescale's and the share's denominator)
-    #: ⭐⭐⭐ the MODEL-FREE TOTAL ABUNDANCE (counts/bp) — the reciprocal-opportunity bank, whose
-    #: expectation is the density EXACTLY for any fragment-length distribution and ANY composition.
-    #: ⛔ Use THIS for an enrichment ratio, never ``mass / effective_length``: that divisor is a
-    #: function of the composition being solved for, so a "total abundance" built from it is circular
-    #: and swings with the gDNA-vs-RNA length gap (`region_geometry.RegionGeometry.inv_abundance`).
+    #: ⭐⭐ the RECIPROCAL-OPPORTUNITY TOTAL (counts/bp). At a BOUNDARY slot its expectation is the
+    #: density EXACTLY for any fragment-length distribution and ANY composition; ⛔ at a REGION slot it
+    #: is ``rho * P(w <= ell)`` — truncated by a per-component pmf functional
+    #: (TRAPS: a-cancellation-is-conditional-on-its-support), so a REGION↔BOUNDARY ratio carries that
+    #: factor. ⛔ Still never ``mass / effective_length``: that divisor is a function of the composition
+    #: being solved for, so a "total abundance" built from it is circular and swings with the
+    #: gDNA-vs-RNA length gap (`region_geometry.RegionGeometry.inv_abundance`).
     inv_abundance: np.ndarray
     #: the sj flux's model-free abundance per FACE, ``[n, 2]`` BY TRANSCRIPT STRAND — sum the strands
     #: and add to ``inv_abundance`` for a face's TOTAL, or read one column for that strand's

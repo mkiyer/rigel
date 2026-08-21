@@ -26,7 +26,9 @@ WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a
 There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
-    inv_length_sum  Sum 1/placements         float64   placements = L at a region, L−1 at a 0-bp boundary
+    inv_*_sum       Sum 1/A(w)               float64   A = ell−w+1 contained in a region (the
+                                                       `inv_opportunity_sum` rule), w−1 crossing a
+                                                       0-bp boundary or sj (`inv_length_sum`)
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
 ⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
@@ -36,10 +38,13 @@ answer by 7.0e-10 … 2.0e-07 while float64 misses by 5.8e-15 … 2.8e-13 — 1e
 integer banks still reproduce exactly, the float ones agree to ~1e-15. Owner ruling 2026-08-11 — tests
 validate the float banks within a DERIVED tolerance. `TRAPS: integer-channels-reproduce`.
 
-⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
-boundary — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
-at a region, where the opportunity is ``(region − L + 1)₊`` and nothing cancels. One word for two concepts is
-the defect this naming avoids.
+⚠ **The reciprocal banks are NOT called ``density`` on purpose, and the two rules carry two names.**
+At a boundary the opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor
+``P(w ≥ 2) = 1`` — an exact, model-free density (``inv_length_sum``). At a region the deposit
+``1/(ell−w+1)`` cancels its opportunity only ON its support, so ``E[Σ] = ρ·P(w ≤ ell)`` — a per-component
+truncation, a density SHAPE and not a level (``inv_opportunity_sum``;
+TRAPS: a-cancellation-is-conditional-on-its-support). One word for two rules is the defect this naming
+avoids (TRAPS: two-masks-one-name).
 
 ⛔⛔ **RETRACTED, AND DELETED WITH ITS BANKS (2026-08-13).** This paragraph read: *"``length_sum`` exists
 because the other two are blind to one real case. At an boundary the count row is ``(mu_g − 1, mu_r − 1)``

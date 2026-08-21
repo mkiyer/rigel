@@ -1,6 +1,7 @@
 """The reciprocal-opportunity deposit: one density rule for every object, region or boundary.
 
-    Write-up: · /§10.1
+    Provenance: the original write-up survives only by git ref — `git show
+    8c673324:docs/NODE_DENSITY_DERIVATION.md` (its doc tree was deleted at c6b2ea89).
 
 THE CLAIM UNDER TEST
     At an boundary the accumulator deposits ``1/(L-1)`` and the result is an exactly model-free estimate of
@@ -20,10 +21,13 @@ WHAT THIS SCRIPT VERIFIES
     T2  E[sum h] = rho * P(A > 0). Model-free up to the population's own support truncation.
     T3  contained + spanning together estimate rho * (1 - f(l+1)) -- the two truncations are
         complementary and close to exactly, the single missing length being w = l + 1.
+        ⚠ ANALYTICAL ONLY: the `region_spanning_*` banks were REMOVED (5591cc01), so T3 scores a
+        pair that has never been in the tree together; it bounds what re-adding one could buy.
     T4  The two limits the owner predicted:
           l = 0        -> the region rule degenerates to the boundary rule EXACTLY
           l >> E[L]    -> the deposit tends to 1/l, i.e. count / region_length
-    T5  The shipped region weight ``1/L`` does NOT have property T2, and the size of its bias.
+    T5  The RETIRED region weight ``1/L`` (replaced by ``1/(l-w+1)`` at 69a85be2, 2026-08-10) does
+        NOT have property T2, and the size of its bias.
     T6  ``count / l`` (the naive density) is biased by (l - mu + 1)/l; the reciprocal deposit removes
         that bias with NO fragment-length model.
 

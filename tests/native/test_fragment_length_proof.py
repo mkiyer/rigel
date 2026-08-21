@@ -405,21 +405,31 @@ def _one_region_acc(region_len: int, max_fragment_length: int = 10_000) -> Accum
 
 @pytest.mark.parametrize("region_len", [151, 400, 1000])
 def test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_FREE(region_len):
-    """⭐⭐⭐ **A REGION'S DENSITY CHANNEL MUST NOT DEPEND ON THE FRAGMENT-LENGTH DISTRIBUTION.**
+    """⭐⭐⭐ **A REGION'S DENSITY CHANNEL MUST NOT DEPEND ON THE FRAGMENT-LENGTH DISTRIBUTION —
+    WITHIN ITS OWN SUPPORT.**
 
     The opportunity for a length-``w`` fragment inside a region of length ``ell`` is ``ell − w + 1`` start
-    positions. Deposit ``1/A`` and the two cancel identically::
+    positions. Deposit ``1/A`` and the two cancel ON the support ``{A > 0}``::
 
-        E[SUM 1/A]  =  SUM_w rho * A(w) * f(w) * (1/A(w))  =  rho      for ANY f
+        E[SUM 1/A]  =  SUM_{w <= ell} rho * A(w) * f(w) * (1/A(w))  =  rho * P(w <= ell)
 
-    ⭐ **The brute-force configuration below IS that identity with no expectation in it.** Placing one
-    fragment at EVERY admissible start of EVERY length is exactly the uniform field ``rho = 1``, so each
-    length must contribute exactly ``1`` regardless of which lengths were chosen — and the total must not
-    move when the length SET changes. That is model-freeness stated as an equality.
+    ⛔ **The cancellation is CONDITIONAL on the support** (TRAPS:
+    a-cancellation-is-conditional-on-its-support): ``A(w) * (1/A(w)) = 1`` only where ``A > 0``; a
+    fragment with ``w > ell`` deposits NOTHING, and ``P(w <= ell)`` is a per-component pmf functional.
+    An earlier docstring here wrote ``= rho for ANY f``, which is the upstream source of the same claim
+    in three doc homes — all corrected 2026-08-20.
+
+    ⭐ **The brute-force configuration below IS the CONDITIONAL identity with no expectation in it.**
+    Placing one fragment at EVERY admissible start of EVERY length is the uniform field ``rho = 1``,
+    so each length must contribute exactly ``1``. ⚠ **The length filter on the next line restricts
+    this gate to the support by construction** — it proves ``E[SUM 1/A | A > 0] = rho`` and can never
+    see the ``P(A > 0)`` factor; the companion gate below
+    (`test_a_fragment_longer_than_the_region_deposits_NOTHING_so_the_channel_reads_rho_times_P`)
+    is the one that does.
 
     ⛔ **This test FAILS on a ``1/L`` deposit**, which is what shipped until 2026-08-10: there each length
     contributes ``(ell − w + 1)/w``, so the total is a function of the lengths and the channel is not a
-    density (`EQUATIONS.md` §2.2). Verified failing before the fix was written.
+    density. Verified failing before the fix was written.
     """
     lengths = [w for w in (20, 51, 97, 150, 233, 400, 999) if w <= region_len]
     assert len(lengths) >= 3, "the parametrisation must leave a non-degenerate length SET"
@@ -452,24 +462,78 @@ def test_the_region_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL
     )
 
 
+def test_a_fragment_longer_than_the_region_deposits_NOTHING_so_the_channel_reads_rho_times_P():
+    """⭐⭐⭐ **THE MISSING CASE — fragments OUTSIDE the support, asserted ABSOLUTELY.**
+
+    A two-region reference ``[0, 100) | [100, 1100)`` under a uniform two-length field (one fragment at
+    every admissible start of ``w = 60`` and ``w = 150`` — ``rho = 1`` per length by construction).
+    ``w = 60`` fits region 0 and contributes exactly ``1`` density unit; ``w = 150 > ell = 100`` can
+    NEVER be contained there — those fragments deposit nothing on this bank — so the region reads
+    ``rho * P(w <= ell) = 1.0``, **not** the ``2.0`` the unconditional claim promises. The gate asserts
+    the truncated ABSOLUTE value (a flatness or conditional gate cannot see this factor —
+    TRAPS: a-cancellation-is-conditional-on-its-support).
+    """
+    part = Partition.from_region_bounds([[0, 100, 1100]])
+    acc = Accumulator(part, max_fragment_length=10_000)
+    ref_len, lengths = 1100, (60, 150)
+    deposits = 0
+    for w in lengths:
+        for start in range(0, ref_len - w + 1):
+            acc.deposit(0, start, start + w)
+            deposits += 1
+    got = float(acc.tally.region_contained_inv_opportunity_sum[0])
+    in_support = sum(1 for w in lengths if w <= 100)
+    assert in_support == 1 and len(lengths) == 2, "the fixture must straddle the support"
+    assert _close(got, float(in_support), deposits), (
+        f"region 0 (ell=100) reads {got:.12f} density units against rho*P(w<=ell) = {in_support}.0 — "
+        "either the truncation is not real (a fragment above ell deposited something) or the "
+        "cancellation broke inside the support"
+    )
+    assert got < float(len(lengths)) - 0.5, (
+        "region 0 reads the UNCONDITIONAL rho — the truncation this gate exists to pin has vanished; "
+        "if the deposit rule changed on purpose, rewrite this gate with the new rule's own target"
+    )
+
+
 def test_the_region_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
     """⛔ The falsification with the pmf VARIED — the property `1/L` cannot have.
 
     Two disjoint length sets over the same region, each placed at every admissible start. A model-free
-    density reads the same ``rho`` per length in both; a length-dependent one does not.
+    density reads exactly ``rho = 1`` per length in both; a length-dependent one does not.
+
+    ⛔⛔ **REPAIRED 2026-08-20 — this gate was DEAD and passed on the deposit its own docstring exists
+    to reject.** It divided the float64 bank by a ``1 << 32`` fixed-point unit removed on 2026-08-11,
+    so after a 4.3e9× shrink its absolute ``1e-6`` tolerance admitted the shipped rule, the ``1/L``
+    rule it names, and a nonsense ``1/ell`` rule alike — and ``int()`` truncated
+    ``2.999999999999888 → 2``, a 33 % error that still passed. The comparator now reads the bank as
+    the float64 it is.
+
+    ⭐⭐ **And it asserts the ABSOLUTE truth per arm, not only flatness across the two arms**: a pure
+    SCALE error (``1/(ell+1)`` with predicate ``s < ell+1``) is perfectly flat and perfectly wrong —
+    a perturbation study found an accuracy gate catches 14/14 planted off-by-ones where a flatness
+    gate catches 10/14, missing every pure scale error.
     """
-    unit = float(1 << 32)
     region_len = 1000
-    per_length = []
+    per_length, n_deposits = [], []
     for lengths in ((20, 51, 97), (233, 400, 999)):
         acc = _one_region_acc(region_len)
+        placements = 0
         for w in lengths:
             for start in range(0, region_len - w + 1):
                 acc.deposit(0, start, start + w)
-        per_length.append(int(acc.tally.region_contained_inv_opportunity_sum[0]) / unit / len(lengths))
+                placements += 1
+        per_length.append(
+            float(acc.tally.region_contained_inv_opportunity_sum[0]) / len(lengths)
+        )
+        n_deposits.append(placements)
     short, long_ = per_length
-    assert abs(short - long_) < 1e-6, (
-        f"density per length: short lengths {short:.9f}, long lengths {long_:.9f} — a model-free "
+    for got, deposits, label in zip(per_length, n_deposits, ("short", "long")):
+        assert _close(got, 1.0, deposits), (
+            f"{label} lengths read {got:.12f} density units per length against an exact truth of "
+            "1.0 — the opportunity did not cancel (or cancelled to the wrong scale)"
+        )
+    assert abs(short - long_) <= max(n_deposits) * EPS * 2, (
+        f"density per length: short lengths {short:.12f}, long lengths {long_:.12f} — a model-free "
         "channel reads the same rho for both; this one is a function of the fragment lengths"
     )
 

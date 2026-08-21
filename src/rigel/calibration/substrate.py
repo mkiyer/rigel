@@ -9,10 +9,17 @@ reads the payload.
 THE FOUR POPULATIONS, on three axes off by one from each other per reference — and ⭐ they do NOT all
 carry the same channels, because a channel is stored where a named consumer reads it::
 
-    regions             contained   count  inv_length_sum  length_sum
-    contiguous boundaries  unspliced   count  inv_length_sum  length_sum   the mixture being deconvolved
-                      spliced     count                               certified RNA -- gDNA cannot splice
-    sj boundaries    (one)       count  inv_length_sum               pure RNA by construction
+    regions             contained   count  inv_opportunity_sum            the 1/(ell-w+1) rule
+    contiguous boundaries  unspliced   count  inv_length_sum  mass        the mixture being deconvolved
+                      spliced     count                  mass        certified RNA -- gDNA cannot splice
+    sj boundaries    (one)       count  inv_length_sum  mass        pure RNA by construction
+
+⛔ **The two reciprocal banks carry TWO deposit rules with TWO targets, so they carry two names**
+(TRAPS: two-masks-one-name — one attribute for both is how the REGION truncation stayed invisible):
+``inv_length_sum`` is the BOUNDARY/sj crossing rule ``1/(w−1)``, expectation ``rho * P(w>=2) = rho`` on
+any real library; ``inv_opportunity_sum`` is the REGION contained rule ``1/(ell−w+1)``, expectation
+``rho * P(w<=ell)`` — truncated by a per-component pmf functional
+(TRAPS: a-cancellation-is-conditional-on-its-support).
 
 ⭐ **ONE type, and that is the change.** The predecessor had ``CalibrationSubstrate`` holding three
 per-region views (contained / left / right) and ``BoundarySubstrate`` holding the same numbers re-keyed
@@ -62,8 +69,13 @@ class PopulationView:
     """One population's sums. ``count`` is per **genome strand**; the length moments are not.
 
     They answer different questions and are never interchangeable: ``count`` carries the statistical
-    power (a Beta-Binomial needs an integer, per strand) and ``inv_length_sum`` carries the level — an
-    exact model-free density at an boundary, and *not* a density at a region.
+    power (a Beta-Binomial needs an integer, per strand) and the reciprocal bank carries the level —
+    under TWO different deposit rules with TWO different targets, so under TWO names
+    (TRAPS: two-masks-one-name): :attr:`inv_length_sum` is the BOUNDARY/sj crossing rule ``1/(w−1)``
+    (``E[sum] = rho * P(w>=2) = rho`` — an exact model-free density), :attr:`inv_opportunity_sum` the
+    REGION contained rule ``1/(ell−w+1)`` (``E[sum] = rho * P(w<=ell)`` — a density SHAPE truncated by
+    a per-component pmf functional, TRAPS: a-cancellation-is-conditional-on-its-support). A population
+    carries exactly one of them.
 
     ⛔ **A population carries only the channels a named consumer reads**, and that rule has teeth: the
     ``length_sum`` channel was deleted in 2026-08-13's schema change precisely because it had none. The
@@ -74,10 +86,13 @@ class PopulationView:
     #: which population it is turns "no mass here" into a traceback nobody can place.
     name: str
     count: np.ndarray  # int64[n, 2] — genome strand: POS then NEG
-    #: float64[n] — DECODED from the fixed point. ⛔ ``None`` where the population does not carry it.
-    #: ⭐ ONE column, while ``count`` has two: the length moments are strand-AGNOSTIC, and every consumer
-    #: summed the two columns before using them.
+    #: float64[n] — the BOUNDARY/sj crossing-rule bank ``1/(w−1)``. ⛔ ``None`` where the population
+    #: does not carry it. ⭐ ONE column, while ``count`` has two: the length moments are strand-AGNOSTIC,
+    #: and every consumer summed the two columns before using them.
     inv_length_sum: np.ndarray | None = None
+    #: float64[n] — the REGION contained-rule bank ``1/(ell−w+1)``
+    #: (payload ``region_contained_inv_opportunity_sum``). ⛔ ``None`` on every boundary/sj population.
+    inv_opportunity_sum: np.ndarray | None = None
     #: float64[n] — ⭐ **THE CONSERVED MASS**, strand-agnostic. Sums to ONE per fragment
     #: across the objects it touched, where ``count`` is ``+1`` on each of them. ⛔ ``None`` on the two
     #: region populations, which need no such channel: ``region_contained_count`` is already 1 per contained
@@ -112,8 +127,10 @@ class PopulationView:
 
     @property
     def total_inv_length_sum(self) -> np.ndarray:
-        """float64[n]. ⚠ Kept as a named property even though the channel is already strand-summed —
-        it is the name every consumer reads, and renaming it would touch them all to say nothing."""
+        """float64[n] — the BOUNDARY/sj crossing-rule bank, already strand-summed. ⚠ A previous
+        docstring claimed *"it is the name every consumer reads"* — false: a grep over ``src/`` returns
+        this definition and nothing else, and the one live consumer (`region_geometry`) reads the field
+        directly. Kept because deleting public surface is its own decision, not a doc fix."""
         return self._require("inv_length_sum")
 
     @property
@@ -151,10 +168,10 @@ class CalibrationSubstrate:
     #: ⭐⭐ FOUR populations, and they do NOT carry the same channels. A channel is stored where a named
     #: consumer reads it and nowhere else::
     #:
-    #:     region_contained   count  inv_length_sum  length_sum
-    #:     boundary_unspliced   count  inv_length_sum  length_sum  mass
-    #:     boundary_spliced     count                              mass   certified RNA — not deconvolved
-    #:     sj         count  inv_length_sum                     LIVE in second_pass
+    #:     region_contained   count  inv_opportunity_sum          the 1/(ell−w+1) rule
+    #:     boundary_unspliced   count  inv_length_sum        mass   the 1/(w−1) rule
+    #:     boundary_spliced     count                        mass   certified RNA — not deconvolved
+    #:     sj         count  inv_length_sum               LIVE in second_pass
     #:
     #: ⚠ A fifth, ``region_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
     #: touches the region axis at all** — a spliced fragment can never be *contained*, because both
@@ -170,7 +187,7 @@ class CalibrationSubstrate:
     ) -> "CalibrationSubstrate":
         cls._check_alignment(payload, region_arrays)
 
-        def view(name, count, inv=None, mass=None) -> PopulationView:
+        def view(name, count, inv=None, mass=None, inv_opp=None) -> PopulationView:
             # ⭐⭐ `mass` arrives one-column on two axes and TWO-column on the sj axis, and is
             # folded to one here. `PopulationView.mass` is strand-agnostic by contract — the mass exists
             # to turn an object-incidence total into a fragment count, a question with no strand in it —
@@ -187,6 +204,9 @@ class CalibrationSubstrate:
                 name=name,
                 count=np.asarray(count, dtype=np.int64),
                 inv_length_sum=None if inv is None else np.asarray(inv, dtype=np.float64),
+                inv_opportunity_sum=(
+                    None if inv_opp is None else np.asarray(inv_opp, dtype=np.float64)
+                ),
                 # ⭐ No decode: the accumulator deposits fractions as float64 directly. This module used
                 # to be "the one decoder"; under one numeric convention there is nothing to decode.
                 mass=m,
@@ -201,7 +221,7 @@ class CalibrationSubstrate:
             region_contained=view(
                 "region_contained",
                 payload.region_contained_count,
-                payload.region_contained_inv_opportunity_sum,
+                inv_opp=payload.region_contained_inv_opportunity_sum,
             ),
             boundary_unspliced=view(
                 "boundary_unspliced",

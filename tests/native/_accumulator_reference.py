@@ -21,9 +21,10 @@ THE MODEL
 
     Regions count fragments **contained** (they fit inside); boundaries count fragments **crossing**.
     ⭐ **Each population stores only the channels something reads**, and they differ: the two banks the
-    deconvolution consumes carry ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed
-    point) and ``length_sum`` = Sum L; the certified-RNA banks carry fewer, because nothing
-    deconvolves a fragment that is already known to be RNA.
+    deconvolution consumes carry ``count`` = Sum 1 (integer) and a reciprocal-opportunity sum
+    ``Sum 1/A(w)`` (float64 — there is no fixed point anywhere, and no ``length_sum``, deleted
+    2026-08-13); the certified-RNA banks carry fewer, because nothing deconvolves a fragment that is
+    already known to be RNA.
 
     ⚠ A ``spanning`` population — one segment covering a region whole — used to exist and was **deleted
     on evidence**: measured on the panel it reached **0 starved regions** the bounding boundaries did not
@@ -33,32 +34,33 @@ THE MODEL
     (a spliced fragment can never be *contained* — both endpoints of an annotated intron are region_bounds).
 
 WHAT EACH OBJECT'S NUMBERS MEAN
-    With ``placements`` the number of admissible start positions — ``L`` at a region, ``L − 1`` at a 0-bp
-    boundary — and a component of start-density ``rho`` and length distribution ``f``::
+    With ``A(w)`` the number of admissible start positions — ``(ell − w + 1)₊`` contained in a region,
+    ``w − 1`` crossing a 0-bp boundary — and a component of start-density ``rho`` and length
+    distribution ``f``, the deposit is ``1/A(w)`` and::
 
-        E[count]          =  rho * E_f[placements]
-        E[inv_length_sum]  =  rho * E_f[placements * (1/placements)]  =  rho   <- at an BOUNDARY, exactly
-        E[length_sum]      =  rho * E_f[placements * L]
+        E[count]      =  rho * E_f[A(w)]
+        E[sum 1/A]    =  rho * P_f(A > 0)          <- the cancellation is CONDITIONAL on its support
+                      =  rho                        at a BOUNDARY: P(w >= 2) = 1 for any real library
+                      =  rho * P_f(w <= ell)        at a REGION — NOT rho: a fragment with w > ell
+                                                    deposits NOTHING, and P(w <= ell) is a
+                                                    per-component pmf functional
+                                                    (TRAPS: a-cancellation-is-conditional-on-its-support)
 
-    The opportunity factor cancels identically at an boundary, for **any** length distribution, which is why
-    no divisor and no length model appear there. It does **not** cancel at a region, where the opportunity
-    is ``max(0, region − L + 1)``; there the term is a better-conditioned second moment and nothing more.
+    ⚠ **This is why the two rules carry two names and neither is called ``density``.**
+    ``inv_length_sum`` (boundary/sj) IS a density, exactly; ``inv_opportunity_sum`` (region) is a
+    density SHAPE truncated by its support. One name for the two rules is how the truncation stayed
+    invisible (TRAPS: two-masks-one-name).
 
-    ⚠ **This is why the channel is called ``inv_length_sum`` and NOT ``density``.** It IS a density at an
-    boundary, exactly; at a region it is not one. Naming it ``density`` put one word on two concepts and would
-    mislead every consumer that reads a region. The three names are three sums and are honest everywhere.
-
-    ⭐ **``length_sum`` is what separates two components that share a mean length.** At an boundary the count
-    row is ``(mu_g - 1, mu_r - 1)`` and the inv-length row is ``(1, 1)``, so the pair's determinant is
-    ``mu_g - mu_r`` and it carries ZERO information about the gDNA/RNA split when the two means agree --
-    at any depth. ``length_sum`` is a second, independent tilt and removes that blind spot.
-    See and ``scripts/design/observable_efficiency.py``.
+    ⚠ A ``length_sum`` channel used to be described here as "what separates two components that share a
+    mean length" — that argument was RETRACTED (at equal means its row is proportional to ``(1, 1)``
+    like the others, so it separates nothing) and the banks were deleted 2026-08-13;
+    ``scan_payload.py``'s docstring carries the retraction.
 
 ⚠ NO PARTITIONING. Every crossed boundary receives the FULL weight. The chance that a length-``L`` fragment
-crosses a given boundary is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and every
-fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys that
-cancellation and makes the answer depend on region spacing — measured up to **3.6× low**. An boundary count is
-not a share of a conserved total; there is no total. Density is intensive, not extensive.
+crosses a given boundary is proportional to ``L − 1`` and the deposit is ``1/(L − 1)``, so the two cancel and
+every fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys
+that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**. An boundary count
+is not a share of a conserved total; there is no total. Density is intensive, not extensive.
 """
 
 from __future__ import annotations
@@ -475,38 +477,41 @@ def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
 
 @dataclass(slots=True)
 class Tally:
-    """The accumulator's output — integer sums over the fragments that landed on each object.
+    """The accumulator's output — per-object sums over the fragments that landed on each object.
 
-    ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer);
-    ``inv_length_sum`` = ``Sum 1/placements`` carries the level, and is an exact model-free density at an
-    boundary but NOT at a region; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
-    components with the same mean fragment length be told apart at all; ``mass`` is the conserved
-    fragment count, and sums to ONE per fragment.
+    ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer); the
+    reciprocal-opportunity sums carry the level under TWO rules with TWO names —
+    ``inv_length_sum`` = ``Sum 1/(w−1)`` (boundary/sj: an exact model-free density,
+    ``E = rho·P(w≥2) = rho``) and ``inv_opportunity_sum`` = ``Sum 1/(ell−w+1)`` (region:
+    ``E = rho·P(w≤ell)``, truncated by its own support —
+    TRAPS: a-cancellation-is-conditional-on-its-support); ``mass`` is the conserved fragment count, and
+    sums to ONE per fragment.
 
     ⭐⭐ **THE POPULATIONS DO NOT ALL CARRY THE SAME CHANNELS, AND THAT IS THE DESIGN.** A channel is
     stored where something reads it and nowhere else::
 
-        region_contained    count  inv_length_sum  length_sum       the mixture, on the region axis
-        boundary_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the boundary axis
-        boundary_spliced      count                              mass certified RNA — nothing deconvolves it
-        sj          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
+        region_contained    count  inv_opportunity_sum          the mixture, on the region axis
+        boundary_unspliced    count  inv_length_sum        mass   the mixture, on the boundary axis
+        boundary_spliced      count                        mass   certified RNA — nothing deconvolves it
+        sj          count  inv_length_sum               inv_length_sum is LIVE in second_pass
 
     ⛔ Six banks were removed on that rule (three ``region_spanning_*``, the two spliced-boundary moments and
     ``sj_length_sum``). ⚠ A future channel is added the same way — because a named consumer needs it,
     not because the shape would be tidier.
 
-    All three are integers, so **no fractional quantity ever enters a likelihood** and a per-worker merge
-    is bit-identical at any thread count.
+    The COUNT banks are integers, so a per-worker merge of them is bit-identical at any thread count;
+    the reciprocal and mass banks are float64 (one numeric convention, 2026-08-11), reproducible within
+    a derived tolerance rather than by byte.
     """
 
     region_contained_count: np.ndarray  # uint32[n_regions, 2]
-    #: ⭐ uint64[n_regions] — ONE column. See :meth:`Tally.zeros`: the length moments are
+    #: ⭐ float64[n_regions] — ONE column. See :meth:`Tally.zeros`: the length moments are
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
     region_contained_inv_opportunity_sum: np.ndarray
     region_start_count: np.ndarray  # uint32[n_regions] — one per accepted fragment; THE invariant
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2]
-    boundary_unspliced_inv_length_sum: np.ndarray  # uint64[n_boundaries] — ONE column
-    #: ⭐⭐ uint64[n_boundaries] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
+    boundary_unspliced_inv_length_sum: np.ndarray  # float64[n_boundaries] — ONE column
+    #: ⭐⭐ float64[n_boundaries] — **THE CONSERVED MASS**. See :meth:`Accumulator.deposit`.
     #: A COUNT and a MASS are two different deposits and one number cannot be both: ``count`` is
     #: extensive and discrete (a Beta-Binomial needs integers) and is ``+1`` on every boundary a fragment
     #: crosses, so a fragment contributes ``max(K, 1)`` of them; this sums to ONE per fragment.
@@ -999,15 +1004,18 @@ class Accumulator:
         contained_region = -1
         if not sj_ids and first_region == self._local_region(region_bounds, last_base):
             contained_region = region_base + first_region
-            # ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT, and it is what makes this channel a DENSITY.
-            # A length-`w` fragment contained in a region of length `ell` had `ell − w + 1` admissible
-            # start positions, so depositing `1/(ell − w + 1)` cancels the opportunity identically and
-            # `E[SUM] = rho` for ANY length distribution. ⛔ The predecessor deposited `1/L`, which does
-            # NOT cancel `(ell − w + 1)` — measured, that channel read 25.67 density units for short
-            # fragments and 1.60 for long ones at the same true density, a 16x swing driven by nothing
-            # but the length SET. An BOUNDARY is the `ell -> 0` limit of this, which is why `1/(L−1)` is
-            # right there and was wrong here.
-            # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
+            # ⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT. A length-`w` fragment contained in a region of
+            # length `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels
+            # the opportunity ON ITS OWN SUPPORT: `E[SUM] = rho * P(w <= ell)`, NOT `rho` — a fragment
+            # with `w > ell` deposits NOTHING here, and `P(w <= ell)` is a per-component pmf functional
+            # (TRAPS: a-cancellation-is-conditional-on-its-support). ⛔ The predecessor deposited
+            # `1/L`, which does not cancel `(ell − w + 1)` at all — measured, that channel read 25.67
+            # density units for short fragments and 1.60 for long ones at the same true density.
+            # ⛔ The BOUNDARY rule `1/(L−1)` is NOT this rule's `ell -> 0` limit (that limit is 0 for
+            # every `w >= 2`); it is a DIFFERENT relation — crossing a designated point, `A = w − 1` at
+            # every `ell` — whose support factor `P(w >= 2)` is 1 for any real library.
+            # ⚠ `A >= 1` here is the support restated: the fragment IS contained, so `w <= ell` — which
+            # is exactly why `E[SUM] = rho * P(w <= ell)` and not `rho`.
             region_len = int(region_bounds[first_region + 1]) - int(region_bounds[first_region])
             t.region_contained_count[contained_region, column] += 1
             t.region_contained_inv_opportunity_sum[contained_region] += 1.0 / (

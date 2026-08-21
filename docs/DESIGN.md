@@ -639,7 +639,7 @@ The populations therefore do NOT all carry the same channels, and that asymmetry
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
-| `inv_length_sum` / `inv_opportunity_sum` | `Σ 1/placements` (float64) | an exact model-free density **at a boundary**, and *not* one at a region — which is why it is not called `density` |
+| `inv_length_sum` / `inv_opportunity_sum` | `Σ 1/A(w)` (float64) | ⭐ TWO deposit rules under two names, each cancelling its own opportunity **on its own support** (`E[Σ] = ρ·P(A>0)`, `EQUATIONS.md` §2): the BOUNDARY/sj form `1/(w−1)` has `P(w≥2) = 1` on any real library — an exact model-free density — while the REGION form `1/(ℓ−w+1)` reads `ρ·P(w≤ℓ)`, a density SHAPE truncated by a per-component pmf functional (`TRAPS: a-cancellation-is-conditional-on-its-support`). Not called `density` because at a REGION it is not one |
 | `mass` | `Σ (slice/L)/n_bounds` (float64) | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. ⭐⭐ A SJ BOUNDARY is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, sj included. `EQUATIONS.md` §3b |
 
 ⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `region_spanning_*`, the two
@@ -712,7 +712,7 @@ misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer. Memory is unchanged **by t
 further ~19 MB off that; the current sizes are `Region` **16 B**, `Boundary` **40 B**, `SpliceJunction`
 **32 B**, and the `static_assert`s beside them are the only place worth reading them from.
 
-⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `boundary_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at a boundary, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
+⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `boundary_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`). ⚠ It is NOT "the one channel whose opportunity and deposit cancel" — there are THREE reciprocal-opportunity channels (`sj_inv_length_sum` takes the identical `1/(w−1)` deposit at `accumulator.cpp:711`, and the REGION bank cancels within its own support) — but the two BOUNDARY-form ones are the UNCONDITIONALLY robust ones: `E[Σ] = rho·P(w≥2) = rho` for any real library, any length gap, where the REGION form reads `rho·P(w≤ℓ)` (`EQUATIONS.md` §2, §3c; `TRAPS: a-cancellation-is-conditional-on-its-support`).
 
 ⛔ **THE TALLY IS NOT BIT-REPRODUCIBLE ACROSS WORKER COUNTS, and the owner has signed that off**
 (2026-08-11). Integer addition is associative, so every COUNT bank still reproduces exactly — measured
@@ -892,7 +892,10 @@ of each length distribution rather than two.
 
 ### 3.7 The deposit weight is 1/opportunity
 
-Not `1/length`. `EQUATIONS.md` §2 has the derivation and the two places where it stops being model-free.
+Not `1/length`. `EQUATIONS.md` §2 has the derivation, including the support factor `P(A > 0)` that
+bounds where each form is model-free: the BOUNDARY/sj forms unconditionally (`P(w ≥ 2) = 1`), the REGION
+form only within `w ≤ ℓ` (`TRAPS: a-cancellation-is-conditional-on-its-support`), and §2.3 the terminus
+placement loss that a reach taper repairs.
 
 ---
 

@@ -41,7 +41,9 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     # consumer reads it. ``None`` means "this population does not measure that", which is a different
     # statement from "it measured it and got zero", and the view keeps them distinguishable.
     for view, n, channels in (
-        (sub.region_contained, payload.n_regions, ("inv_length_sum",)),
+        # ⛔ the REGION bank is the contained rule and carries its OWN name — two deposit rules under
+        # one attribute is TRAPS: two-masks-one-name, fixed 2026-08-20.
+        (sub.region_contained, payload.n_regions, ("inv_opportunity_sum",)),
         (sub.boundary_unspliced, payload.n_boundaries, ("inv_length_sum", "mass")),
         (sub.boundary_spliced, payload.n_boundaries, ("mass",)),
         (sub.sj, payload.n_sj, ("inv_length_sum", "mass")),
@@ -100,12 +102,16 @@ def test_a_FRACTION_arrives_as_float64_with_NO_decode(substrate):
     """
     sub, payload, _ = substrate
     np.testing.assert_allclose(
-        sub.region_contained.inv_length_sum,
+        sub.region_contained.inv_opportunity_sum,
         payload.region_contained_inv_opportunity_sum,
         rtol=0,
         atol=0,
     )
-    assert sub.region_contained.inv_length_sum.dtype == np.float64
+    assert sub.region_contained.inv_opportunity_sum.dtype == np.float64
+    # ⛔ TRAPS: two-masks-one-name — the REGION view must NOT also expose its bank under the
+    # boundary-rule name: the two deposits have different targets (rho*P(w<=ell) vs rho*P(w>=2)).
+    assert sub.region_contained.inv_length_sum is None
+    assert sub.boundary_unspliced.inv_opportunity_sum is None
 
 
 def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(substrate):
@@ -115,7 +121,7 @@ def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(subs
     counts = payload.region_contained_count.astype(np.float64).sum(axis=1)
     # ⚠ rtol above the fixed point's own quantisation, which the spec bounds at 6.9e-8 relative over
     # L in [40, 1000] — asserting tighter would be asserting the rounding, not the decode.
-    np.testing.assert_allclose(sub.region_contained.inv_length_sum, counts / 50.0, rtol=1e-7)
+    np.testing.assert_allclose(sub.region_contained.inv_opportunity_sum, counts / 50.0, rtol=1e-7)
 
 
 # ---------------------------------------------------------------------------

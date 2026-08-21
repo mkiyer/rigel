@@ -157,7 +157,8 @@ def population_equal_from_left(ctx: StepContext) -> np.ndarray:
 
 
 def splice_out_unspliced(*, src, dst_unspliced, sj):
-    """SPLICE OUT (`EQUATIONS.md` §3.5e(i)): the unspliced message an exon's abundances imply for its
+    """SPLICE OUT (gated on the owner's worked numbers, `tests/calibration/test_currency_policy.py`):
+    the unspliced message an exon's abundances imply for its
     boundary. ``src`` and ``dst_unspliced`` are ``(gDNA, RNA+, RNA-)`` abundances; ``sj`` is the
     boundary's measured flux ``(SJ+, SJ-)`` at the boundary's own scale.
 
@@ -178,7 +179,8 @@ def splice_out_unspliced(*, src, dst_unspliced, sj):
 
 
 def splice_in_densities(*, src_with_flux, rho_tot_dst, rho_tot_src):
-    """SPLICE IN (`EQUATIONS.md` §3.5e(ii)) — the inverse: the boundary sends its abundances INCLUDING
+    """SPLICE IN (gated beside its twin in `tests/calibration/test_currency_policy.py`) — the inverse:
+    the boundary sends its abundances INCLUDING
     the spliced-in flux (those fragments continue contiguously into the exon), and the exon rescales
     by ``rho_tot_dst / rho_tot_src``. Worked: {2, 18, 0} at totals 100/20 → {10, 90, 0} exactly.
     Returns ``None`` where either total is 0."""
@@ -189,22 +191,30 @@ def splice_in_densities(*, src_with_flux, rho_tot_dst, rho_tot_src):
 
 
 def enrichment_ratio(ctx: StepContext, *, backward: bool) -> np.ndarray:
-    """The per-hop ENRICHMENT RATIO ``T_dst / T_src``, from the MODEL-FREE total abundance.
+    """The per-hop ENRICHMENT RATIO ``T_dst / T_src``, from the reciprocal-opportunity totals.
 
     ⛔⛔ **NEVER ``mass / effective_length``.** That divisor is a function of the composition being
     solved for — gDNA and RNA carry different fragment-length distributions, so 100 counts in a 500 bp
     region reads 0.25 as pure gDNA and 0.33 as pure RNA — and an enrichment ratio built from it is
     circular. The accumulator already deposits the RECIPROCAL OPPORTUNITY per fragment (``1/(w−1)``
-    crossing a BOUNDARY, ``1/(ell−w+1)`` contained in a REGION), whose expectation is the density
-    EXACTLY, for any length distribution and any composition: ``ctx.inv_abundance``.
-    ⚠ An equal-fragment-length panel cannot see the difference, which is why this had to be reasoned
-    about rather than measured (owner, 2026-08-20).
+    crossing a BOUNDARY, ``1/(ell−w+1)`` contained in a REGION): ``ctx.inv_abundance``.
+
+    ⛔⛔ **KNOWN DEFECT (2026-08-20): the REGION half of that bank is NOT a model-free total.** Its
+    expectation is ``rho * P(w <= ell)`` — the cancellation is conditional on its own support
+    (TRAPS: a-cancellation-is-conditional-on-its-support) — and the chain alternates REGION/BOUNDARY,
+    so EVERY hop's ratio carries a factor ``1/P(w <= ell_region)`` with no enrichment in it (11.6x at a
+    98 bp exon on the ladder's lengths; the bank is exactly 0 below ``frag_min``, where this function
+    returns its 1.0 default). The in-situ distortion per hop is smaller than the raw factor because the
+    sj flux enters each face UNDIVIDED and dilutes the truncated term. The truncation half of this is
+    measurable on the equal-length ladder (confirmed on the shipped banks, 0.93–1.03 against
+    ``P(w<=ell)`` on 11 of 12 live capture-OFF bins); only the per-COMPONENT half needs a length-gap
+    substrate.
 
     Returns 1.0 (perfect agreement — no evidence of enrichment) where either end reads nothing."""
     inv = np.asarray(ctx.inv_abundance, np.float64)
     lo = inv + np.asarray(ctx.inv_sj_lo, np.float64).sum(axis=1)
     hi = inv + np.asarray(ctx.inv_sj_hi, np.float64).sum(axis=1)
-    # ⭐⭐ ONE TOTAL PER FACE, and the sj flux is what makes it a total (`EQUATIONS.md` §3.6c's flank
+    # ⭐⭐ ONE TOTAL PER FACE, and the sj flux is what makes it a total (the flank pair,
     # pair, in model-free units). Mature RNA cannot cross an exon|intron boundary contiguously, so the
     # exon's mature fragments appear at the boundary as FLUX rather than as crossings; comparing the
     # boundary's unspliced abundance against the exon's total reports a large "depletion" where there
@@ -583,7 +593,7 @@ class _CurrencyRelay:
                 # does not (they splice out and land elsewhere) and the flux is removed AFTER the
                 # rescale, at the destination's own scale.
                 # ⛔⛔ **THE FLUX IS NOT IN THE TRANSPORTED POPULATION, AND THIS IS A DELIBERATE
-                # DEVIATION FROM `EQUATIONS.md` §3.5e(ii)'s WORKED ARITHMETIC — recorded, not slipped
+                # DEVIATION FROM THE SPLICE-IN OPERATOR'S WORKED ARITHMETIC — recorded, not slipped
                 # in.** §3.5e adds the spliced-in flux to the message and rescales the whole thing; that
                 # is self-consistent in one frame, which is the frame the worked example is in. Under
                 # CAPTURE it is not: those fragments' BODIES lie in the destination exon, so they were
@@ -650,7 +660,7 @@ class _CurrencyRelay:
                 # difference between a bound and a measurement.
                 # ⭐⭐ And where it DOES bind it fuses by precision rather than replacing the claim: the
                 # flux is measured in the sj's own frame and over-states an exon's contained density
-                # (`EQUATIONS.md` §3.6b's two divisors of opposite sign), so jumping the claim to it
+                # (TRAPS: two-divisors-opposite-sign's pair), so jumping the claim to it
                 # over-corrects — measured, replacement under-called gDNA by 20,752 fragments at
                 # `g50 ss0.50 capture_on`. A fusion raises the claim as far as the two precisions
                 # justify and no further.

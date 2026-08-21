@@ -163,15 +163,18 @@ class RegionGeometry:
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
     #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
     #: (`test_splice_flux_reframe`).
-    #: ⭐⭐⭐ **THE MODEL-FREE TOTAL ABUNDANCE — counts/bp, with NO composition and NO fragment-length
-    #: model in it.** The accumulator deposits the RECIPROCAL OPPORTUNITY per fragment (``1/(w−1)`` at a
-    #: BOUNDARY, ``1/(ell−w+1)`` in a REGION), so ``E[sum] = rho`` EXACTLY, for ANY length distribution
-    #: (`tests/native/_accumulator_reference.py`, and `EQUATIONS.md`'s reciprocal-opportunity theorem).
-    #: ⛔ **This is why a total abundance must NEVER be formed as ``mass / effective_length``**: that
-    #: divisor depends on which component the fragments came from — gDNA and RNA have different length
-    #: distributions — so the "total abundance" would be a function of the composition being solved for,
-    #: which is circular. 100 counts in a 500 bp region reads 0.25 as pure gDNA and 0.33 as pure RNA at
-    #: mean lengths 100/200; the reciprocal-opportunity bank reads the same number either way.
+    #: ⭐⭐ **THE RECIPROCAL-OPPORTUNITY TOTAL, counts/bp — model-free AT A BOUNDARY, truncated AT A
+    #: REGION.** The accumulator deposits ``1/A(w)`` per fragment, so ``E[sum] = rho * P(A > 0)``
+    #: (`tests/native/_accumulator_reference.py`): at a BOUNDARY ``A = w−1`` and ``P(w ≥ 2) = 1`` on any
+    #: real library, so the boundary slots ARE the density, exactly, for any length distribution; at a
+    #: REGION ``A = (ell−w+1)₊`` and the slot reads ``rho * P(w ≤ ell)`` — a per-component pmf
+    #: functional (11.6x at a 98 bp exon on the ladder's lengths, exactly 0 below ``frag_min``) — a
+    #: density SHAPE, not a level (TRAPS: a-cancellation-is-conditional-on-its-support).
+    #: ⛔ **A total abundance must still NEVER be formed as ``mass / effective_length``**: that divisor
+    #: depends on which component the fragments came from — 100 counts in a 500 bp region reads 0.25 as
+    #: pure gDNA and 0.33 as pure RNA at mean lengths 100/200 — which is circular. The boundary-form
+    #: bank reads the same number either way; the REGION form moves the same circularity into its
+    #: SUPPORT rather than removing it.
     #: ⚠ Deposited at ACCUMULATOR time and carried unread until 2026-08-20; enrichment ratios are what
     #: needed it (`messages/currency.py`).
     inv_abundance: np.ndarray
@@ -203,6 +206,8 @@ def build_region_geometry(
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
     boundary_rna_reach=None,
+    *,
+    region_abundance_bank: str = "contained",
 ) -> RegionGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
@@ -285,12 +290,29 @@ def build_region_geometry(
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf, boundary_rna_reach)
 
-    # ── the MODEL-FREE total abundance, straight off the reciprocal-opportunity banks ──────────────
-    # ⛔ No divisor is applied here and none may be: the bank IS the density. A REGION carries
-    # ``region_contained``'s inv-opportunity sum and a BOUNDARY ``boundary_unspliced``'s inv-length sum,
-    # each already ``E[sum] = rho`` for any length distribution.
+    # ── the reciprocal-opportunity totals, straight off the banks ─────────────────────────────────
+    # ⛔ No divisor is applied here. A BOUNDARY slot carries ``boundary_unspliced``'s inv-length sum,
+    # whose expectation IS the density (``rho * P(w >= 2) = rho``). A REGION slot carries
+    # ``region_contained``'s inv-opportunity sum, whose expectation is ``rho * P(w <= ell)`` — a
+    # per-component truncation, NOT a level (TRAPS: a-cancellation-is-conditional-on-its-support), so
+    # every REGION<->BOUNDARY ratio downstream carries that factor. ⛔ Record the bias; do NOT divide it
+    # out here — the pooled ``P_hat(w <= ell)`` resurrects none of the zero banks and re-imports the
+    # per-component pmf the channel exists to avoid.
+    # ⭐ ``region_abundance_bank`` is the A/B's ONE config value (the ``message_policy`` precedent):
+    # "contained" is the shipped truncated bank; "start" is ``region_start_count / ell`` — the
+    # STARTS-IN relation, opportunity ``ell`` for every ``w``, no fragment length in the weight, but
+    # spliced-INCLUSIVE (a population change, and exposed to the template wall — the A/B is what
+    # prices both). ⛔ An unknown name is REFUSED, never a silent fall-through
+    # (TRAPS: an-ablation-that-never-ran).
+    if region_abundance_bank not in ("contained", "start"):
+        raise ValueError(
+            f"region_abundance_bank must be 'contained' or 'start', got {region_abundance_bank!r}"
+        )
     inv_abundance = np.zeros(n, dtype=np.float64)
-    _r_inv = getattr(substrate.region_contained, "inv_length_sum", None)
+    if region_abundance_bank == "start":
+        _r_inv = np.asarray(substrate.region_start_count, np.float64) / np.maximum(region_len, 1.0)
+    else:
+        _r_inv = getattr(substrate.region_contained, "inv_opportunity_sum", None)
     _b_inv = getattr(substrate.boundary_unspliced, "inv_length_sum", None)
     if _r_inv is not None and n_regions:
         inv_abundance[is_region] = np.asarray(_r_inv, np.float64)[obj[is_region]]
@@ -440,7 +462,7 @@ def region_total_density(geometry: RegionGeometry, f_g):
     mistake, and it was measured worse: at an BOUNDARY→EXON step the exon genuinely contains the spliced
     population and the term belongs.
 
-    ⭐ This is `EQUATIONS.md` §3.6's two faces, made per-step and per-sj rather than per-object: the
+    ⭐ This is the two-faces flank rule (gated by `test_splice_flux_reframe`), made per-step and per-sj rather than per-object: the
     INTRON face is whichever flank is not the exonic side of the sj, and the EXON face is the other.
 
     ⛔ Written in GENOMIC terms, never donor/acceptor or TSS/TES. The index's ``FLAG_DONOR_s`` marks the
