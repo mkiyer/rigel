@@ -167,15 +167,35 @@ changes; no consumer wiring (that is session 2); no `mass` changes.
 
 ---
 
-## PART C — THE CALIBRATION RECIPE (implementation session 2; rungs unchanged from v3, inputs now exact)
+## PART C — THE CALIBRATION RECIPE (implementation session 2) — REORDERED 2026-08-21 per the owner: VALIDATE FIRST, REPLACE SECOND, BUILD THIRD
 
-1. **Rung 1 — `total_abundance` assembly + wall mask.** Per slot: BOUNDARY = shipped banks (+
-   certified spliced, INCIDENCE `count/(mu_r−1)`); REGION = side-selected `S/ℓ`, `E/ℓ`
-   (precision-weighted where both exact — they are two counts of the same rate). Wall rule DERIVED:
-   a side is exact iff its template distance `≥ w_max − 1`, `w_max` read from `deposited_lengths`,
-   distances from the reach machinery at the component MINIMUM. Double-walled slots flagged
-   not-model-free. Unit gates: hand-built fixtures; the certified-divisor rule asserted; the mask
-   against the RANK-3 enumeration; perturb three ways.
+⭐⭐ **The owner's sequencing, adopted as the rung order**: ① validate the new `total_abundance`
+measure against certified truth until it is beyond doubt; ② replace the existing abundance readings
+with it where a consumer exists; ③ only then build the landscape and the prior on top.
+
+⭐ **Expectation-setting for ② on the CURRENT panels, stated before it is measured
+(`TRAPS: a-single-level-panel-cannot-see-a-constant`'s discipline):** both suites hold equal gDNA/RNA
+fragment-length distributions BY DESIGN, so the COMPOSITION-DEPENDENCE half of the abundance fix is
+a null here — do not expect it to move the 0.8.0 metric, and do not read "no change" as "no defect".
+What IS visible on equal lengths: the TRUNCATION half (`w` against `ℓ` — the 11.6× at 98 bp exons,
+the 58.6 % zero-bank exon hops) and the WALL half. ⚠ And the §4.3 record stands as a warning about
+②: a better level channel inside the wrong consumer measured WORSE (the accidental mute), so every
+replacement is priced per consumer, never assumed. **Fully exerting the composition half needs the
+two-condition fl-gap SIDE PANEL** (config-only: `gdna_ladder.yaml` carries independent
+`simulation.frag_*` and `gdna.frag_*` blocks, deliberately identical today; ⛔ a SIDE panel, never a
+ladder rung — equal lengths are the ladder's forcing function). Build it when ② needs its verdict.
+
+1. **Rung 1 — `total_abundance` assembly + wall-side selection (the VALIDATION rung, priority ①).**
+   Per slot: BOUNDARY = shipped banks (+ certified spliced, INCIDENCE `count/(mu_r−1)`); REGION =
+   side-selected `S/ℓ`, `E/ℓ` (precision-weighted where both exact — two counts of one rate).
+   ⭐ BOTH banks are LANDED (Part B), so side-selection is fully live from day one. Wall rule
+   DERIVED: a side is exact iff its template distance `≥ w_max − 1`, `w_max` read from
+   `deposited_lengths`, distances from the reach machinery at the component MINIMUM. Double-walled
+   slots flagged not-model-free. ⭐⭐ **The validation bar**: unit gates on hand-built fixtures
+   perturbed three ways; the certified-divisor rule asserted; the wall mask against the RANK-3
+   enumeration; and the DECISIVE one — `total_abundance` against the certified oracle's own
+   per-slot totals on all 32 conditions, per stratum, absolute, the four `g00` rows and the
+   deep-capture rows read separately. Only a clean 32/32 admits rung ②-and-beyond.
 2. **Rung 2 — `fit_total_landscape`** (reuse `DensityLandscape` on wall-exact totals, pre-pass-0):
    mode census `(rho_0, R, widths)` + per-slot `w_i`. Gates: synthetic bimodal/unimodal; the
    `rho_0`-vs-anchor CONSISTENCY gate (two independent estimators must agree); capture-OFF
@@ -199,9 +219,10 @@ else unchanged.
 
 ## PART D — OPEN RULINGS AND SEQUENCING
 
-* **Owner ruling 1 (before session 2's rung 4 defaults, not before session 1):** the small-exon
-  length-composition channel — lift the 0.8.0 retirement for the support-based REGION-only form, or
-  keep parked. Requires the fl-gap side panel either way.
+* **Owner ruling 1 — ✅ DECIDED 2026-08-21: the small-exon length-composition channel is
+  DEFERRED for Part C.** It stays parked with the 0.8.0 retirement; `region_span_count` sits dark
+  behind its ledger invariants until a post-0.8.0 revisit. No Part C rung may consume `V` or the
+  contained bank as a composition channel.
 * **Owner ruling 2 (settled by bundling):** `region_end_count` — RE-OPENED §4.3's condition is met
   (the total landscape is the consumer); included in Part B.
 * **Session sequence:** this session = this document. Session 4 = Part B verbatim. Session 5 =
