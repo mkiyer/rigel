@@ -649,6 +649,65 @@ consumer-gated (the parked length-solve channel). ⭐ The ledger closes TWICE ov
 ⚠ `region_span_count` is NOT the removed `region_spanning_*` family: those carried the mis-weighted
 `1/L` deposit; this is an integer count whose divisor lives with its (gated, future) consumer.
 
+#### 3.1a-i ⭐⭐⭐ THE FOUR FORMS AN ABUNDANCE CAN TAKE — the classification rule, ruled 2026-08-21
+
+A census of 240 sites found that the tree forms a density four ways, and **only two of them are
+defects**. This table is the rule that decides whether a given repair applies to a given site; it was
+written because a repair was proposed for a site the rule excludes.
+
+| form | expectation | verdict |
+|---|---|---|
+| the REGION contained reciprocal bank, `Σ 1/(ℓ−w+1)` | `ρ·P(w ≤ ℓ)` — **TRUNCATED** | model-free but biased; §2's defect. 11.6× at a 98 bp exon |
+| `count / E_contained(ℓ, pmf)` | `ρ` — **unbiased** | correct, but the fragment-length pmf enters the DIVISOR, so a distorted pmf distorts the level |
+| the BOUNDARY/sj reciprocal banks, `Σ 1/(w−1)` | `ρ` exactly, every library | ⭐ already model-free AND unbiased — leave them alone |
+| `mass / E_c` with numerator and divisor COMPONENT-MATCHED | `ρ_c` | ⛔ **NOT an abundance site at all.** A deconvolved gDNA mass over the gDNA opportunity is correct |
+
+⭐⭐ **AND THE SCOPE RULE THAT FOLLOWS (owner, 2026-08-21): a TOTAL abundance is a PRE-solve instrument.**
+It is needed in exactly three places — ① the density model (the gDNA background and the intron
+deconvolution), ② the total-abundance LANDSCAPE, ③ ENRICHMENT RATIOS, which are ratios of two totals.
+⛔ **Everything POST-calibration is out of scope by construction**: once beliefs exist, each component
+has its own fragment-length distribution and its own opportunity, so a per-component estimate is the
+right instrument and a total is the wrong one. ⚠ `capture_eff_length` and `priors` are the sites that
+tested this rule — they consume a solved `CalibrationResult`, so their `mass/E_g` is component-matched
+and a total does not belong there, however wrong their number may be for other reasons.
+
+#### 3.1a-ii ⭐⭐⭐ THE WALL RULE AND THE SIDE SELECTION — the consumer half, ruled 2026-08-21
+
+`rigel/calibration/total_abundance.py` turns those banks into a per-slot TOTAL, and four things about
+it are settled so they are not re-litigated.
+
+**① A side is EXACT iff its template distance clears `w_max − 1`, and `w_max` is READ.** The exact
+start opportunity is `A_start(w | d) = min(ℓ, (d + ℓ − w + 1)₊)`, which equals `ℓ` for every `w` iff
+the template continues `w_max − 1` bases past the region's genomic-HIGH bound; the END bank mirrors at
+the LOW bound. `w_max` comes from the support end of `deposited_lengths` — never a quantile, because a
+quantile lets a conservative-looking choice mark a binding wall exact. At `d = 0` the start rule
+degenerates into the CONTAINED rule while still depositing the flat `1/ℓ`, which is why the pair exists
+rather than a taper on the divisor.
+
+**② The distance is the COMPONENT MINIMUM over the populations AXIOM 0 admits at that slot.** gDNA is
+always admitted and its template is the contig; RNA on strand `s` only where `free_s`, taking the
+SPLICED distance where an exon covers the region and the genomic contiguous-boundary reach where none
+does. ⛔ The mature arm must be able to bind BELOW a long nascent reach — that is the measured
+component-differential wall, and a genomic distance at an exon marks a binding wall exact.
+
+**③ A DOUBLE-WALLED slot is honestly NOT MODEL-FREE and reads NaN.** No deposit rule is model-free
+where both sides bind; the mask says so and the total refuses to invent a number, rather than papering
+it over with an average of two depressed estimates. Measured coverage (`1 − double-walled`, START-mass
+weighted, 16-condition ladder): **94.7 %** at capture-OFF, **84.3 %** under capture.
+
+**④ The population for the MATURE distances EXCLUDES synthetic spans, and the filter is written.** A
+synthetic entity is a manufactured nascent template and a nascent molecule extends genomically, so it
+belongs to the reach arm. ⚠ On every shipped index the EXON rows happen to contain no synthetic
+transcript, so this was once true by accident and cost 57 diverging distances between two
+implementations (`TRAPS: state-the-population-rule-do-not-inherit-it-from-a-table`).
+
+⛔⛔ **AND THIS MODULE IS NOT `ROADMAP.md` §4.3's REFUSED DROP-IN — the distinction matters because the
+tokens look alike.** §4.3 refused `region_start_count / ℓ` substituted for `RegionGeometry.inv_abundance`
+INSIDE the currency channel, with no wall rule, no side selection and no model-free flag; the knob was
+deleted after pricing. This module is a separate per-slot quantity with all three, wired to NO consumer,
+and it does not touch `inv_abundance`. §4.3's bar still stands for any consumer swap: re-opening needs a
+policy whose DELIVERABLE improves under a better level channel.
+
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
@@ -989,7 +1048,7 @@ and **`messages/` (the POLICY: `silent` `head` `variance`)** · `region_chain` `
 `region_init` · `substrate` `region_arrays` `signature` · `effective_length` `capture_eff_length` `fl`
 `sj_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand` `strand_balance`
 `strand_deconv` `strand_summary` · `density_deconv` `density_model` `landscape` `npmle`
-`background_reference` · `simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
+`simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
 `diagnostics` `track` · `_layers` (the layering the imports already had).
 ⚠ **Re-derive this list rather than trusting it** — `scripts/design/module_census.py` reads it off the
 AST. It named `node_chain` / `node_geometry` / `node_init`, `junction_opportunity` and a `simplex` — five

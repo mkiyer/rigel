@@ -48,11 +48,15 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **150 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **154 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-20 AND THE INDEX IS COMPLETE: 150 entries, 150 bodies, and BOTH set
-differences print empty.** (149/149 before the model-free-abundance thread added
+⭐⭐ **RE-DERIVED 2026-08-21 AND THE INDEX IS COMPLETE: 154 entries, 154 bodies, and BOTH set
+differences print empty.** (153/153 before the fl-gap side panel added
+`a-pooled-rate-cannot-see-a-short-object-factor` to §C.) (152/152 before the consumer-swap pricing added
+`a-better-estimator-inside-a-weak-consumer-moves-nothing` to §C.) (150/150 before the measured total's validation rung added two to §C —
+`two-estimators-of-one-rate-weight-the-field-differently` and
+`state-the-population-rule-do-not-inherit-it-from-a-table`.) (149/149 before the model-free-abundance thread added
 `a-cancellation-is-conditional-on-its-support` to §C.) (144/144 before the Stage-3 policy added four to §D — the transport, the face
 total, the structural lock and the premise.) (141/141 before Stage 2 of the message-propagation rebuild added three — one each to §B, §E, §F;
 the header had read 138 while the file held 141, the drift this line exists to catch.) (137/137 before the relay-licence dissection added `a-scorer-scoped-to-the-mechanisms-targets`.) (124/124 before the composition-reference work added five to §D; 129/129 before ψ's
@@ -174,6 +178,14 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
 **Pools, selections and divisors**
 
 - `a-cancellation-is-conditional-on-its-support` — A RECIPROCAL-OPPORTUNITY DEPOSIT CANCELS ITS OPPORTUNITY ONLY WHERE THE OPPORTUNITY IS NON-ZERO.
+- `a-better-estimator-inside-a-weak-consumer-moves-nothing` — A 1.8–4.3× ESTIMATOR REPAIR CAN BE WORTH
+  ~1 % END TO END; PRICE THE CONSUMER'S SENSITIVITY BEFORE REPAIRING ITS INPUT.
+- `a-pooled-rate-cannot-see-a-short-object-factor` — A POOLED RATIO OF SUMS IS DOMINATED BY THE LARGEST
+  OBJECTS; A FACTOR THAT ONLY BITES AT SMALL ONES IS INVISIBLE IN IT. COMPUTE THE POOLED WEIGHT FIRST.
+- `two-estimators-of-one-rate-weight-the-field-differently` — TWO UNBIASED ESTIMATORS OF ONE SLOT'S RATE ARE
+  THE SAME NUMBER ONLY UNDER LOCAL UNIFORMITY; UNDER A PROBE-SHAPED FIELD THEY ARE DIFFERENT WEIGHTED AVERAGES OF IT.
+- `state-the-population-rule-do-not-inherit-it-from-a-table` — A POPULATION DEFINED BY WHICHEVER ROWS A FILE
+  HAPPENS TO CONTAIN IS NOT DEFINED, AND TWO IMPLEMENTATIONS WILL REACH IT BY DIFFERENT DOORS.
 - `two-divisors-opposite-sign` — TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.
 - `frame-free-is-not-assumption-free` — A TERM THAT IS FRAME-FREE IS NOT THEREFORE ASSUMPTION-FREE — LOOK AT THE NUISANCE YOU
 - `a-purity-filter-is-a-length-filter` — A PURITY FILTER ON A LENGTH POOL IS A LENGTH FILTER.
@@ -1190,6 +1202,80 @@ that hid `E[Σ] = ρ·P(w ≤ ℓ)` for ten days while three doc homes and two g
 expectation WITH its support factor everywhere, and let a gate place fragments OUTSIDE the support and
 assert the truncated absolute value (`region_density_derivation.py` T2;
 `tests/native/test_fragment_length_proof.py`). `EQUATIONS.md` §2 carries the corrected algebra.
+
+**a-better-estimator-inside-a-weak-consumer-moves-nothing. ⭐⭐ A 1.8–4.3× REPAIR TO AN ESTIMATOR CAN BE
+WORTH ~1 % END TO END, AND THE CONSUMER'S STRENGTH IS WHY.** The pooled gDNA background estimators were
+swapped from `count / E_contained` (unbiased, but the capture-distorted fl pmf sits in the divisor) to
+the pmf-free START/END pair. The ESTIMATOR improved by 1.8× on the intergenic pool and 4.3× on the
++introns pool under capture, measured against the origin partition's own start rate. The DELIVERABLE,
+scored against oracle calibration on 16 conditions in fragments, moved: stranded × capture-ON 0.9872,
+both zero controls 0.9987–0.9988, capture-OFF a wash, the deferred stratum's region axis 1.0078 WORSE.
+⭐ **The mechanism is the consumer, not the input**: a background that enters as a weak ONE-SIDED FLOOR
+and an intron λ-factor that enters as a mild prior cannot transmit a 2× better rate. ⛔ This is
+`TRAPS: the-intermediate-is-not-the-deliverable` confirmed a SECOND time on a SECOND consumer — the
+first was `ROADMAP.md` §4.3, where a better level channel inside the currency policy measured WORSE.
+⭐⭐ **The rule that follows is about SEQUENCING: price the CONSUMER's sensitivity before repairing its
+input.** A consumer whose output is a floor, a clamp, a `min`, or a weak pseudo-count will absorb any
+improvement you hand it; the value lives in whatever reads a level SHARPLY (here, the EM ruler's
+`min(m/ρ_ref, S)` contraction, which turns a wrong reference into a factor of 0.0951 against a truth of
+exactly 1.000). ⚠ And a ~1 % move is not a reason to revert: the swap removes a model dependence and is
+neutral-to-positive in scope, so it stays behind a default-off flag until an owner rules.
+
+**a-pooled-rate-cannot-see-a-short-object-factor. ⭐⭐⭐ A POOLED RATE IS A RATIO OF SUMS, SO IT IS
+DOMINATED BY THE LARGEST OBJECTS — AND A PER-OBJECT FACTOR THAT ONLY BITES AT SMALL ONES IS INVISIBLE
+IN IT, AT ANY SIZE.** Predicted, then refuted by measurement, then explained — in that order, which is
+why it is here. The shipped pooled gDNA background is `Σcount / ΣE_contained` and differs from the
+pmf-free form by `ρ_r·(E_r/E_g − 1)`; the per-object factor reaches **−99 %** at `ℓ = 250` under a large
+fragment-length gap, so a gap panel was built to exert it. ⛔ **The background pools did not move:
+`1.0007 / 1.0000 / 0.9994` across gaps of +169 / −4 / −171 bp, in BOTH directions.** The reason is the
+pooling: measured on those very pmfs, `ΣE_r/ΣE_g` is **0.9966** over intergenic regions and **0.9849**
+over the intergenic+intron set, because their exposure is dominated by megabase-scale regions
+(ℓ-weighted mean **3 Mbp**) even though the MEDIAN is 8 kb. Only the exon population is short enough to
+feel it — `ΣE_r/ΣE_g = 0.7294`, median ℓ **143 bp** — and the exon row moved exactly as the factor
+predicts (**0.2624 / 0.3439 / 0.8327**, ordered by RNA length because exons are RNA-dominated).
+⭐⭐ **THE RULE: before building a panel to exert a per-object mechanism, compute the POOLED WEIGHT of
+the objects it acts on.** A mechanism worth 99 % on 143 bp objects is worth 1.5 % to a consumer whose
+exposure is megabases, and no panel will change that. ⚠ The corollary is the useful half: it says WHICH
+consumer the mechanism belongs to. This one belongs to whatever reads EXONS — the density landscape and
+the enrichment ratios — and not to the background pools at all.
+
+**two-estimators-of-one-rate-weight-the-field-differently. ⭐⭐⭐ TWO UNBIASED ESTIMATORS OF ONE SLOT'S
+RATE ARE THE SAME NUMBER ONLY UNDER LOCAL UNIFORMITY. UNDER A PROBE-SHAPED FIELD THEY ARE DIFFERENT
+WEIGHTED AVERAGES OF IT — BOTH RIGHT, AND NOT INTERCHANGEABLE.** The START bank over `ℓ` and the
+CONTAINED reciprocal bank both estimate a REGION's total density, and their ratio must reproduce
+`P(w ≤ ℓ)` — measured **1.00025 / 1.00045** on the 16-condition ladder at capture-OFF over 14.4 M
+gDNA fragments, which is the cleanest confirmation of `EQUATIONS.md` §2's algebra on real data. ⛔ The
+SAME comparison under capture reads **0.906 pooled and 0.034–0.077 on intron/intergenic regions**, and
+that is not an estimator defect: a START is counted for a fragment beginning anywhere in the region
+(its body may lie in an enriched exon), while a CONTAINED fragment must lie wholly inside it, so the
+two average the region's positions with different weights and a non-uniform field separates them.
+⭐⭐ **THE CONSEQUENCE IS A RULE ABOUT CONSUMERS, WHICH IS WHY THIS IS A TRAP AND NOT A DERIVATION:
+swapping one for the other under capture CHANGES THE QUANTITY rather than removing a bias**, so it may
+never be priced as a drop-in (`ROADMAP.md` §4.3 refused exactly that swap, and
+`TRAPS: the-intermediate-is-not-the-deliverable` is what it measured). ⭐ **The escape is an estimator
+pair that shares the weighting**: START and END have the same opportunity `ℓ` and read the same field
+at the same slot, so their agreement is FIELD-FREE and valid under capture. Both-exact regions read
+a ratio of **1.0018–1.0057** on every ladder stratum, while a bound side reads **0.712–0.879** or
+else **1.242–1.428**, in the predicted direction (`total_abundance_audit.py` arm ⓔ). Build the
+field-free comparison; do not argue about the field-dependent one.
+⚠ **And keep a bold number off the START of a line in this file**: the rule-head regex reads
+`**<digits>.` as a rule NAME, so such a line becomes a rule called `1` and collides with the one the
+`1.76–2.20×` paragraph in §C already manufactures — which is how this entry twice broke
+`test_the_names_are_unique` before the sentence was rewrapped.
+
+**state-the-population-rule-do-not-inherit-it-from-a-table. ⭐⭐ A POPULATION DEFINED BY WHICHEVER ROWS A
+FILE HAPPENS TO CONTAIN IS NOT DEFINED — AND TWO IMPLEMENTATIONS WILL REACH IT BY DIFFERENT DOORS.**
+The mature wall distances were built from `intervals.feather`'s EXON rows, which on every shipped index
+carry no SYNTHETIC transcript, so the "real transcripts only" rule was true by accident and written
+nowhere. An independent enumeration reached the same transcripts through `index.get_exon_intervals`,
+which DOES return a synthetic span's own interval, and the two disagreed on **57 distances** the first
+time they were compared — 9 nascent spans read as mature templates. ⛔ **The tell is a filter you did
+not write**: if you cannot point at the line that excludes a population, you are relying on a file's
+contents, and the next reader will reach that population through a different accessor. ⭐ The repair is
+the filter plus the sentence saying why (a synthetic entity is a nascent template and a nascent
+molecule extends GENOMICALLY — that is the reach arm, not the spliced one), written in BOTH
+implementations. ⚠ And the divergence was only visible because the comparison existed: a second
+implementation is what converts an unstated rule into a failing gate.
 
 **two-divisors-opposite-sign. ⭐⭐ TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.**
 `E_J = E[w]−1` RISES with the mean fragment length while `E_r = e−E[w]+1` FALLS, so a length-model error

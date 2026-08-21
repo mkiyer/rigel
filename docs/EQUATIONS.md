@@ -141,6 +141,42 @@ where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for *
 independent of `w`. So `Σ1/L` fixes the length bias and a reach taper fixes the placement loss; **neither
 substitutes for the other.**
 
+**2.3b ⭐⭐⭐ THE START/END RELATION IS MODEL-FREE AT A REGION, AND THE WALL IS THE ONLY EXCEPTION.**
+A fragment's FIRST covered base falls in region `r` iff its start lies in `r`, so the opportunity is
+`ℓ` — the same number for every fragment length, which is exactly what the contained relation is not:
+
+    E[S_r]  =  ρ · ℓ            for every w        ⟸ no pmf functional, no support factor
+    E[C_r^inv]  =  ρ · P(w ≤ ℓ)                    ⟸ §2.2, truncated per component
+
+so `S_r/ℓ` is a TOTAL where the contained bank is a SHAPE. The one exception is the template WALL:
+within `d` of the template's genomic-HIGH end, only starts that still admit a length-`w` molecule
+count, so
+
+    A_start(w | d)  =  min( ℓ , (d + ℓ − w + 1)₊ )              ← w-dependent again
+    A_start(w | d)  =  ℓ    for every w    ⟺    d ≥ w_max − 1   ← the exactness condition
+
+and at `d = 0` this is `(ℓ − w + 1)₊`, the CONTAINED opportunity: **at a flush wall the start relation
+degenerates into the relation it replaces while still depositing the flat `1/ℓ`, and reads worse than
+it.** `E_r` is the mirror, exact iff `d_low ≥ w_max − 1`. ⭐ The two therefore fail at OPPOSITE ends,
+which is what makes the pair closed: **use the side whose wall does not bind; average where both are
+exact** (two counts of one rate at one opportunity, so the pooled rate IS the precision-weighted
+combination). Where both bind, no deposit rule is model-free and the honest output is a refusal.
+⭐ **The wall is COMPONENT-DIFFERENTIAL, and that is the substantive content**: gDNA's template is the
+chromosome and never binds, a nascent molecule's is its genomic span, a mature molecule's is its
+SPLICED length — so the distance must be taken at the component MINIMUM over the populations §0's
+`T(slot)` admits, and a genomic distance at an exon marks a binding mature wall exact.
+
+⭐⭐ **AND THE PAIR GIVES A FIELD-FREE TEST OF ALL OF THIS, which no comparison against the contained
+bank can.** `S_r/ℓ` and `E_r/ℓ` share their opportunity and read the same field at the same slot, so
+their ratio has an expectation of exactly 1 wherever both sides are exact — with no uniformity
+assumption and no fragment-length distribution entering. Where one side's wall binds, that side is
+depressed and the ratio moves in a KNOWN direction. Measured on the 16-condition ladder, every stratum
+and both zero controls: both-exact **1.0018–1.0057**, start-exact/end-bound **0.712–0.879** (`< 1`),
+end-exact/start-bound **1.242–1.428** (`> 1`) — capture-ON included, where every field-dependent
+comparison is vacuous. ⛔ A comparison against the contained bank is NOT field-free and must not be
+read as one: the two weight a region's positions differently, so a probe-shaped field separates them
+legitimately (`TRAPS: two-estimators-of-one-rate-weight-the-field-differently`).
+
 **2.4 Superadditivity.** Contained effective lengths are **superadditive**: over 118,195 splitting regions
 `Σ E(children)/E(whole)` = 0.7652, and 0.0917 for 305 bp → 145+160. So densities, effective lengths and
 variances **cannot be pooled across two partitions**; only truth pools additively

@@ -119,6 +119,9 @@ __all__ = [
     "build_boundary_flags_array",
     "build_sj_arrays",
     "build_contiguous_boundary_reach_arrays",
+    "MatureWallDistances",
+    "mature_wall_distances_kernel",
+    "build_mature_wall_distances",
     "build_sj_geometry_arrays",
     "build_transcript_path",
     "SpliceJunctionArrays",
@@ -1170,6 +1173,166 @@ class SpliceJunctionGeometry:
     @property
     def n_sj(self) -> int:
         return int(self.src_region.shape[0])
+
+
+@dataclass(frozen=True, slots=True)
+class MatureWallDistances:
+    """Per-REGION, per-strand SPLICED-template distance past each wall — the mature arm of the
+    wall rule for the START/END region banks.
+
+    ``d_low[r, s]`` is the spliced-template bases a strand-``s`` mature molecule has strictly BELOW
+    the region's genomic-low bound, ``d_high[r, s]`` the mirror above its genomic-high bound — each
+    the MAXIMUM over the transcripts whose exon covers the region, so the wall binds only if it
+    binds for every covering template (the same one-sided collapse the contiguous reach uses over
+    isoforms). Columns are genome strand: 0 POS, 1 NEG.
+
+    ⛔ SPLICED bases, never genomic: an intron does not exist on the mature template, so the genomic
+    distance to a transcript end overstates what remains and marks a binding wall exact
+    (``tests/calibration/test_total_abundance.py`` pins the distinction). Nascent molecules extend
+    genomically — that arm is the contiguous boundary reach, not this structure.
+
+    ``covered[r, s]`` says some strand-``s`` exon covers the region at all; where it is False the
+    distances are meaningless (left 0) and a flush template is ``covered ∧ d == 0`` — zero is a
+    distance, not an absence.
+    """
+
+    d_low: np.ndarray  # float64 (n_regions, 2)
+    d_high: np.ndarray  # float64 (n_regions, 2)
+    covered: np.ndarray  # bool (n_regions, 2)
+
+
+def mature_wall_distances_kernel(
+    exon_t_index: np.ndarray,
+    exon_ref_id: np.ndarray,
+    exon_start: np.ndarray,
+    exon_end: np.ndarray,
+    strand_of_transcript: np.ndarray,
+    region_arrays,
+) -> MatureWallDistances:
+    """The pure-array half of :func:`build_mature_wall_distances`, testable without an index.
+
+    ``exon_*`` are flat per-exon rows (one transcript's exons need not be adjacent — the kernel
+    sorts); ``strand_of_transcript`` is indexed by ``exon_t_index`` values and carries the
+    :class:`~rigel.types.Strand` encoding. ``exon_ref_id`` must be in ``region_arrays``' own ref-id
+    space.
+
+    ⛔ Region bounds sit at every exon endpoint on a real index; an exon whose endpoint is not a
+    region bound would make every distance silently wrong, so it is REFUSED, never absorbed —
+    the same stance :func:`build_transcript_path` takes on an unresolved sj.
+    """
+    t = np.asarray(exon_t_index, dtype=np.int64)
+    ref = np.asarray(exon_ref_id, dtype=np.int64)
+    a = np.asarray(exon_start, dtype=np.int64)
+    b = np.asarray(exon_end, dtype=np.int64)
+    strand_of = np.asarray(strand_of_transcript, dtype=np.int64)
+    starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
+    ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    n_regions = starts.shape[0]
+
+    d_low = np.zeros((n_regions, 2), dtype=np.float64)
+    d_high = np.zeros((n_regions, 2), dtype=np.float64)
+    covered = np.zeros((n_regions, 2), dtype=bool)
+    out = MatureWallDistances(d_low=d_low, d_high=d_high, covered=covered)
+    if t.size == 0:
+        return out
+
+    order = np.lexsort((a, t))
+    t, ref, a, b = t[order], ref[order], a[order], b[order]
+
+    # per-row cumulative exonic offsets, exactly as _Exons derives them
+    length = b - a
+    csum = np.cumsum(length)
+    first = np.flatnonzero(np.r_[True, t[1:] != t[:-1]])
+    last = np.r_[first[1:], t.size] - 1
+    base = np.repeat(np.r_[0, csum[last[:-1]]], np.diff(np.r_[first, t.size]))
+    before = csum - base - length
+    total = np.repeat(csum[last] - np.r_[0, csum[last[:-1]]], np.diff(np.r_[first, t.size]))
+
+    # the regions each exon covers: exon endpoints are region bounds, so the cover is exact
+    lo0, hi0 = ref_off[ref], ref_off[ref + 1]
+    lo = np.empty(t.size, dtype=np.int64)
+    hi = np.empty(t.size, dtype=np.int64)
+    for i in range(t.size):  # per-exon searchsorted inside one reference's slice
+        s0, s1 = int(lo0[i]), int(hi0[i])
+        lo[i] = s0 + int(np.searchsorted(ends[s0:s1], a[i], side="right"))
+        hi[i] = s0 + int(np.searchsorted(starts[s0:s1], b[i], side="left"))
+    bad = (hi <= lo) | (starts[np.minimum(lo, n_regions - 1)] != a) | (
+        ends[np.maximum(hi, 1) - 1] != b
+    )
+    if bad.any():
+        i = int(np.flatnonzero(bad)[0])
+        raise ValueError(
+            f"exon [{int(a[i])}, {int(b[i])}) of transcript {int(t[i])} is not tiled by region "
+            "bounds — the annotation and the partition disagree, and every wall distance derived "
+            "from it would be silently wrong."
+        )
+
+    counts = hi - lo
+    rep = np.repeat(np.arange(t.size), counts)
+    rr = np.repeat(lo, counts) + (np.arange(int(counts.sum())) - np.repeat(np.cumsum(counts) - counts, counts))
+
+    row_strand = strand_of[t]
+    known = (row_strand == int(Strand.POS)) | (row_strand == int(Strand.NEG))
+    if not known.all():
+        raise ValueError("a mature template carries no strand — it cannot be filed to a column.")
+
+    dl = (before[rep] + (starts[rr] - a[rep])).astype(np.float64)
+    dh = (total[rep] - before[rep] - (ends[rr] - a[rep])).astype(np.float64)
+    strand = row_strand[rep]
+    for s, col in ((int(Strand.POS), 0), (int(Strand.NEG), 1)):
+        m = strand == s
+        if not m.any():
+            continue
+        np.maximum.at(d_low[:, col], rr[m], dl[m])
+        np.maximum.at(d_high[:, col], rr[m], dh[m])
+        covered[rr[m], col] = True
+    # a covered region whose only template is flush keeps distance 0; an uncovered one holds 0 too,
+    # so the maxima above need re-zeroing nowhere — covered is the read gate.
+    return out
+
+
+def build_mature_wall_distances(index, region_arrays) -> MatureWallDistances:
+    """The mature wall distances on the accumulator's REGION axis, from the index annotation.
+
+    Reads the same interval table :func:`build_transcript_path` walks, restricted to EXON rows.
+
+    ⛔⛔ **THE POPULATION IS STATED HERE, NOT INHERITED FROM THE TABLE'S CONTENTS: a SYNTHETIC span is
+    EXCLUDED.** A synthetic entity is a manufactured nascent template, and a nascent molecule extends
+    GENOMICALLY — that arm is the contiguous boundary reach, not this one. On the shipped indexes the
+    EXON rows happen to carry no synthetic transcript at all, so the filter is a no-op there and is
+    written anyway: relying on the absence made two independent implementations of these distances
+    disagree on 57 of them (the other one reached the same transcripts through
+    ``get_exon_intervals``, which DOES return a synthetic span's own interval).
+    """
+    import os
+
+    from ..types import IntervalType
+
+    iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
+    ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
+
+    name_to_id = index.ref_name_to_id
+    ref_id = ex["ref"].map(lambda r: name_to_id.get(str(r), -1)).to_numpy(np.int64)
+    keep = ref_id >= 0
+    n_t = int(index.num_transcripts)
+    strand_of = np.zeros(n_t, dtype=np.int64)
+    tdf = index.t_df
+    if tdf is not None and "strand" in tdf.columns:
+        strand_of[tdf["t_index"].to_numpy(np.int64)] = tdf["strand"].to_numpy().astype(np.int64)
+    if tdf is not None and "is_synthetic" in tdf.columns:
+        synthetic = np.zeros(n_t, dtype=bool)
+        synthetic[tdf["t_index"].to_numpy(np.int64)] = tdf["is_synthetic"].to_numpy(dtype=bool)
+        keep &= ~synthetic[ex["t_index"].to_numpy(np.int64)]
+
+    return mature_wall_distances_kernel(
+        ex["t_index"].to_numpy(np.int64)[keep],
+        ref_id[keep],
+        ex["start"].to_numpy(np.int64)[keep],
+        ex["end"].to_numpy(np.int64)[keep],
+        strand_of,
+        region_arrays,
+    )
 
 
 def build_sj_geometry_arrays(index) -> SpliceJunctionGeometry:
