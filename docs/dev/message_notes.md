@@ -199,6 +199,52 @@ Yes, as we think of additional transcript cases, we should add them to the test 
 
 I have given you a lot of information in this turn. I want you to be meticulous in your considerations and in your design. Organize your thoughts carefully. Plan your implementation carefully. Test one new concept at a time. Be tenacious and methodical
 
+============================
+
+# Total density (total abundance)
+
+Knowing the total abundance (counts/bp) of each node is critical, because we compute enrichment ratios based on total abundance.
+
+If we store 'mass' (fractional counts), we must convert it to an abundance by dividing by the effective length. However, the effective length depends on the composition. gDNA and RNA have different FL distributions.
+
+If gDNA has mean frag len = 100 and RNA has mean frag len = 200, we have a big discrepancy. If we have 100 total counts in a 500bp region, then ROUGHLY:
+- If 100% gDNA, then 100 counts / (500-100) = 0.25
+- If 100% RNA, then 100 counts / (500-200) = 0.33
+
+This problem is greatest at boundaries, because boundary-crossing fragments directly depend on fragment length.
+
+
+## Goal: compute total abundance at accumulator time
+
+During the accumulator step, we deposit fragments with known length into regions and boundaries. We deposit a few values:
+- counts (incidence), used for statistical power
+- mass (conserved), when a fragment overlaps many boundaries, it deposits mass that sums to exactly 1.0
+- abundance!?
+
+We have gone through several iterations of depositing abundance. For the message propagation to work, we need to compute enrichment ratios using total abundance (gDNA and RNA combined).
+
+For (*most*) boundaries, given a fragment length 'w', the abundance (counts/bp) is `(1.0 / (w-1))`. There are some caveats, such as when a boundary is very near the end of a transcript, that constrain the start positions of a fragment with length 'w'. However, we already went through **MANY** iterations of trying to model this and proved that it is a circular problem -- depositing correct abundance for the corner cases (where the fragment length is constrained by transcript ends) REQUIRES knowing that the fragment is RNA (gDNA has no such constraints) and knowing which transcript isoform the RNA belongs to. That is the whole point of the tool. So depositing boundary abundance `1.0/(1-w)` is roughly correct with some known limitations.
+
+For regions with length `L`, the effective length for fragment deposition is `L - w`. There is a derivation (we derived this) for total abundance for depositing contained fragments in REGIONS. It may be useful to find this in the docs and perhaps the delete aspects of the git repo to find it, or re-derive it.
+
+My question to you is -- how are we trusting our enrichment ratios now? I believe our simulated scenarios have equal gDNA FL and RNA FL so this problem doesn't expose itself. IT's a major problem when FL is highly different!
+
+This might be something we have to address now.
+
+===========
+
+
+I like the idea of delivering both claims with honest variances. This is an elegant solution. It lets the data decide how to interpret messages. 
+
+Interestingly, I believe the absolute abundance transfer and the composition transfer are on two ends of a spectrum. The two strategies are deeply connected somehow, and my intuition tells me that there is actually a knob that connects them. Absolute abundance transfer is possible when *total* abundance is uniform and involves addition/subtraction. Composition transfer is required when *total* abundance is non-uniform (enrichment/depletion) and involves multiplication/division. I think, it may never be exactly one or the other, sometimes it is both. And you seem to be honing in on that idea as well. At least, your first idea is a 'switch' that chooses between two message propagation strategies. I wonder if the evolution of the idea will take us somewhere even more elegant.
+
+========================
+
+You question about 'total-abundance landscape built before pass-0'. Right now, I don't think we need the total abundance landscape because the local disagreement `σ² = (log(T_dst/T_src))²` is a reasonable place to start. The problem with local disagreement is that it has no grounding. There is no concept of "who is right? who is wrong?" Projecting onto a total density landscape projects an observed abundance at a single node onto the global landscape of abundances. The assumption is that there modes (enriched mode, depleted mode, etc) under hybrid capture and observed abundances are sampled from those modes. Projecting onto the global abundance landscape finds the nearest mode, so instead of computing variance from the local abundance disagreement, we compute variance based on the projections of the local abundances onto the global landscape. For example, if we have sparse counts and two observations are just sampled differently from the same mean, they may have high disagreement. Projecting onto global landscape helps us robustify the individual local observations.
+
+I'll reiterate, I don't think it's essential for the first iteration of the policy. You can implement and we can refine later.
+
+=============
 
 
 

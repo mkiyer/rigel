@@ -45,10 +45,16 @@ abundance:
   file: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_abundances.tsv
 
 gdna:
-  # ⭐ the zero control and a heavily contaminated rung. `g00`'s truth is exactly 0, so every gDNA
-  # fragment the tool reports there is a false positive with nothing to cancel it.
-  rates:       [0.0, 1.0]
-  rate_labels: [g00, g50]
+  # ⭐ the zero control and three contaminated rungs, matching the big ladder's spectrum. `g00`'s
+  # truth is exactly 0, so every gDNA fragment the tool reports there is a false positive with
+  # nothing to cancel it. ⭐ `g05` and `g98` were added 2026-08-20, each justified by a measured
+  # transition on the ladder that the g00/g50 grid could not represent: the near-vertex population
+  # (true f_g ≥ 0.999) exists only at g98 and carries ~60-65 % of the Silent frontier there, and
+  # the reference-mean blocker is measured at g05 (a truth-fed library-wide mean reads 2.65x WORSE
+  # at g05 stranded x capture-ON while melting g98's vertex population 0.029x — opposite ends,
+  # so interpolation from g50 sees neither).
+  rates:       [0.0, 0.052632, 1.0, 49.0]
+  rate_labels: [g00, g05,      g50, g98]
   genomic_refs: [test_chr]
   frag_mean: 206
   frag_std: 98
