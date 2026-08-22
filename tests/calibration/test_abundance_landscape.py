@@ -379,7 +379,52 @@ def _calibrate_parts():
     return payload, ra, make_strand_models(0.95, 40), make_gdna_fl_pmf(), make_synthetic_sj()
 
 
-def test_calibrate_REFUSES_the_flag_without_the_wall_inputs():
+def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_raises(caplog):
+    """⛔⛔ **THIS GATE WAS INVERTED ON 2026-08-21, DELIBERATELY, AND THE REASON MATTERS.** It used to
+    assert that ``abundance_landscape=True`` RAISES without the wall arrays. That was right while the
+    flag was opt-in and off by default; it is wrong now that the flag is ON by default, because the
+    landscape is the SOLE source of the QC report's density panel since the NPMLE was retired.
+
+    ⭐ The refusal's own stated reason was *"refusing rather than fitting on unmasked totals, which
+    would carry the wall bias the mask exists to exclude"* — and the alternative to refusing was never
+    "fit unmasked", it is "do not fit". Nothing here fits on unmasked totals either way. What changed
+    is only whether a caller with no wall arrays gets an exception or no panel.
+
+    ⛔ It is NOT a silent fallback: the skip is logged at WARNING, and the object is ``None`` rather
+    than a quietly-different estimate. ⚠ 65 test callers (toys and unit fixtures that never wanted a
+    QC panel) hit exactly this path — measured before the flip, which is why the flip could not land
+    as `PLAN_measured_prior.md` §3d wrote it.
+
+    ⛔⛔ **`background_abundance` KEEPS ITS REFUSAL and that asymmetry is the whole point**: that pair
+    feeds ψ, so a missing input there would silently change a number the solve consumes. This object
+    is read by the report and the debug bundle and by nothing in the solve. The next gate asserts that
+    refusal is still live, so the two cannot be conflated."""
+    import logging
+
+    from rigel.calibration import calibrate
+    from rigel.config import CalibrationConfig
+
+    payload, ra, sm, pmf, sj = _calibrate_parts()
+    d: dict = {}
+    with caplog.at_level(logging.WARNING):
+        calibrate(
+            payload=payload,
+            region_arrays=ra,
+            strand_model=sm,
+            gdna_fl_pmf=pmf,
+            rna_fl_pmf=pmf,
+            config=CalibrationConfig(abundance_landscape=True),
+            sj=sj,
+            _debug=d,
+        )
+    assert d["abundance_landscape"] is None
+    assert any("wall inputs" in r.message % r.args if r.args else "wall inputs" in r.message
+               for r in caplog.records), "the skip must be LOUD — no silent no-op"
+
+
+def test_the_background_pair_STILL_REFUSES_without_the_wall_inputs():
+    """The asymmetry, asserted so it cannot rot: `background_abundance="measured_total"` feeds ψ, so a
+    missing wall array there must still RAISE. Only the QC landscape degrades."""
     from rigel.calibration import calibrate
     from rigel.config import CalibrationConfig
 
@@ -391,7 +436,7 @@ def test_calibrate_REFUSES_the_flag_without_the_wall_inputs():
             strand_model=sm,
             gdna_fl_pmf=pmf,
             rna_fl_pmf=pmf,
-            config=CalibrationConfig(abundance_landscape=True),
+            config=CalibrationConfig(background_abundance="measured_total"),
             sj=sj,
         )
 
@@ -467,3 +512,59 @@ def test_an_INJECTED_landscape_is_taken_verbatim_and_nothing_is_refit():
         _debug=d,
     )
     assert d["abundance_landscape"] is donor
+
+
+# ---------------------------------------------------------------------------
+# the sweep handle and the exported basin-split rule
+# ---------------------------------------------------------------------------
+
+
+def test_knn_scale_passes_through_and_the_default_is_BIT_IDENTICAL():
+    """`knn_scale` exists so a bandwidth sweep can be priced without restating the fit. The default
+    must be bit-identical to omitting it (the shipped fit is not moved by the handle existing), and a
+    different scale must MOVE the curve (an inert handle would let a sweep silently score one arm
+    five times)."""
+    counts, lengths, sig, *_ = bimodal_parts()
+    sub, ra, mask = parts(counts, lengths, sig)
+    base = fit_abundance_landscape(sub, ra, mask)
+    explicit = fit_abundance_landscape(sub, ra, mask, knn_scale=0.5)
+    assert np.array_equal(base.landscape.logP, explicit.landscape.logP)
+    assert np.array_equal(base.landscape.log_rho, explicit.landscape.log_rho)
+
+    wide = fit_abundance_landscape(sub, ra, mask, knn_scale=4.0)
+    assert not np.array_equal(base.landscape.logP, wide.landscape.logP)
+
+
+def test_split_basins_is_the_shipped_rule_importable_on_its_own():
+    """The depleted/enriched selection is one rule with one home: `split_basins` must reproduce what
+    `fit_abundance_landscape` publishes (same objects, not similar ones), pick the anchor-containing
+    basin as depleted, and fall back to the largest-mass basin when the anchor is NaN — so an
+    instrument scoring ANOTHER estimator's curve can apply the identical rule instead of restating
+    it."""
+    from rigel.calibration.abundance_landscape import AbundanceMode, split_basins
+
+    counts, lengths, sig, *_ = bimodal_parts()
+    sub, ra, mask = parts(counts, lengths, sig)
+    al = fit_abundance_landscape(sub, ra, mask)
+    dep, enr = split_basins(al.modes, al.anchor_log_rho)
+    assert dep is al.depleted and enr is al.enriched
+
+    lo = AbundanceMode(log_rho=-4.0, basin_mass=0.6, width=0.3, lo=-6.0, hi=-2.0)
+    hi = AbundanceMode(log_rho=1.0, basin_mass=0.4, width=0.3, lo=-2.0, hi=3.0)
+    dep2, enr2 = split_basins((lo, hi), -4.5)
+    assert dep2 is lo and enr2 is hi
+    # anchor NaN -> the LARGEST basin is depleted; nothing sits above it here, so enriched is None
+    dep3, enr3 = split_basins((lo, hi), float("nan"))
+    assert dep3 is lo
+    assert enr3 is hi  # hi sits strictly above lo's basin, so it is still the enriched candidate
+    # an anchor INSIDE the upper basin makes IT depleted and leaves nothing above
+    dep4, enr4 = split_basins((lo, hi), 0.5)
+    assert dep4 is hi and enr4 is None
+    # TWO basins above with unequal masses: enriched must be the LARGER one. ⚠ This case exists
+    # because the self-consistency assertions above cannot see a rule change that applies to both
+    # sides at once — a min/max flip passed them (found by perturbation, 2026-08-21).
+    mid = AbundanceMode(log_rho=0.0, basin_mass=0.30, width=0.2, lo=-2.0, hi=1.5)
+    top = AbundanceMode(log_rho=2.5, basin_mass=0.10, width=0.2, lo=1.5, hi=4.0)
+    base = AbundanceMode(log_rho=-4.0, basin_mass=0.60, width=0.3, lo=-6.0, hi=-2.0)
+    dep5, enr5 = split_basins((base, mid, top), -4.5)
+    assert dep5 is base and enr5 is mid

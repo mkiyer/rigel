@@ -32,51 +32,62 @@ class CalibrationDiagnostics:
     enriched_mode: float | None  # log ρ_g of the higher-density dominant mode
     separation_nats: float | None  # enriched − depleted (0 if unimodal)
     enrichment_factor: float | None  # exp(separation_nats)
-    rug_log_rho: np.ndarray  # downsampled per-region training log-densities
+    rug_log_rho: np.ndarray  # per-region training log-densities — EVERY training region, not a sample
     rug_kind: np.ndarray  # int region-kind codes (0=intergenic,1=intron,2=exon,3=boundary)
+    # ⚠ ``rug_log_rho`` said "downsampled" until 2026-08-21, when it was always EMPTY (the npmle
+    # carried no training points). It is now the full training population — ~30.7 k rows at panel
+    # scale, which `rigel report` writes to `gdna_density_regions.feather` as a data export and no
+    # chart spec reads, so there is nothing to downsample FOR. Sample at the consumer if one ever
+    # plots it directly.
 
     @classmethod
-    def from_prior(cls, prior) -> "CalibrationDiagnostics":
-        """Build from a fitted :class:`~rigel.calibration.npmle.DensityNPMLE` enrichment landscape (Role A).
-        Modes are the local maxima of the fitted log-density curve (it carries no per-region training points,
-        so the rug is empty).
+    def from_abundance_landscape(cls, al) -> "CalibrationDiagnostics":
+        """Build from a fitted :class:`~rigel.calibration.abundance_landscape.AbundanceLandscape`.
 
-        ⛔ **It does NOT accept a**
-        :class:`~rigel.calibration.landscape.DensityLandscape` — that landscape has no ``bandwidth`` and no
-        ``n_cells``, so this raises ``AttributeError`` on one. This docstring claimed it did; the claim was
-        never exercised, because `calibrate` only ever calls this with the enrichment prior.
-        ⚠ **So the QC report's "bimodal ⇒ capture enrichment" caption is computed from the TOTAL-density
-        landscape, which is composition-vacuous** — it reads enrichment, never the gDNA split. Pointing it at
-        the gDNA hyperprior is a real change with a real audience and is left as an owner call, not smuggled
-        in behind a docstring."""
-        x = np.asarray(prior.log_rho, dtype=np.float64)
-        logp = np.asarray(prior.logP, dtype=np.float64)
-        # local maxima of the log-density curve, tallest first → the dominant depleted/enriched pair.
-        interior = np.where((logp[1:-1] > logp[:-2]) & (logp[1:-1] >= logp[2:]))[0] + 1
-        order = interior[np.argsort(logp[interior])[::-1]]
-        top_x = sorted(float(x[i]) for i in order[:2])
-        if len(top_x) >= 2:
-            depleted, enriched = top_x[0], top_x[1]
-            separation = enriched - depleted
-        elif len(top_x) == 1:
-            depleted = enriched = top_x[0]
-            separation = 0.0
-        else:
-            depleted = enriched = separation = None
-        enrichment = float(np.exp(separation)) if separation is not None else None
-        empty = np.zeros(0)
+        ⭐⭐ **Every number here is READ FROM THE CENSUS rather than re-derived from the curve, and that
+        is the improvement over the ``DensityNPMLE`` version this replaces.** That one took the two
+        TALLEST local maxima and called them depleted and enriched; this takes the census's basins, where
+        *depleted* is the basin containing the pooled intergenic ANCHOR rate — an independent
+        measurement of the same level — and *enriched* is the largest-mass basin strictly above it. So
+        the labels mean something a curve alone cannot say.
+
+        ⭐ **The rug is REAL.** The npmle carried no per-region training points, so the report's rug was
+        always empty and the CLI wrote a zero-row feather. The landscape publishes its training centres
+        and their classes, so the panel can show the population under the fit.
+
+        ⚠ **``bandwidth`` is the smoothing ACTUALLY IN FORCE — the grid step in decades — not a fitted
+        kernel width.** On the benchmark ~99 % of this estimator's kernels are clamped to one grid step,
+        so the per-region knn width is not the resolution and reporting it would mislead
+        (`TRAPS: a-floored-knob-is-not-the-bandwidth`). ``n_eff`` is the training-region count, a real
+        ``n`` where the npmle could only offer a collapsed-cell count.
+
+        ⚠ **``separation_nats`` is the census's mode ratio, and it is the one field here that is
+        RESOLUTION-SENSITIVE** (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`; the ruling is
+        `DESIGN.md` §3.1a-iii). It is displayed rather than consumed, and the depleted level beside it
+        is grid-robust — but a reader must not treat it as a calibrated enrichment factor.
+        ⚠ And the field this describes is a TOTAL density, so the panel reads ENRICHMENT and never the
+        gDNA split — composition-vacuous, exactly as the npmle version was."""
+        ls = al.landscape
+        x = np.asarray(ls.log_rho, dtype=np.float64)
+        logp = np.asarray(ls.logP, dtype=np.float64)
+        depleted = float(al.depleted.log_rho)
+        enriched = depleted if al.enriched is None else float(al.enriched.log_rho)
+        separation = enriched - depleted
+        # the grid step in DECADES — the resolution the curve is rendered at, which is the smoothing
+        # this estimator actually applies (see the docstring).
+        step_dec = float(x[1] - x[0]) / float(np.log(10.0)) if x.size > 1 else 0.0
         return cls(
             kde_x=x,
             kde_logp=logp,
-            bandwidth=float(prior.bandwidth),
-            n_eff=float(prior.n_cells),  # collapsed-cell count (the NPMLE has no Kish n_eff)
-            n_modes=int(interior.size),
+            bandwidth=step_dec,
+            n_eff=float(al.n_train),
+            n_modes=int(len(al.modes)),
             depleted_mode=depleted,
             enriched_mode=enriched,
             separation_nats=separation,
-            enrichment_factor=enrichment,
-            rug_log_rho=empty,
-            rug_kind=empty.astype(np.int64),
+            enrichment_factor=float(np.exp(separation)),
+            rug_log_rho=np.asarray(al.train_log_rho, dtype=np.float64),
+            rug_kind=np.asarray(al.train_class, dtype=np.int64),
         )
 
 

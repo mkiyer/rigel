@@ -300,27 +300,24 @@ ladder rung — equal lengths are the ladder's forcing function). Build it when 
    untouched). ⛔ NOTHING reads it in the solve this session — the fit is priced as a QC/injection
    object first, exactly as the npmle was, so the flag flip below is an A/B and not a leap.
 
-   ### 3d. The NPMLE retirement — its own converge-and-delete change, exactly scoped
+   ### 3d. ✅ THE NPMLE RETIREMENT — EXECUTED 2026-08-21. The recipe is deleted; its record MOVED.
 
-   The complete surface (re-derived 2026-08-21): ONE production fit (`calibrate.py:648`,
-   `DensityNPMLE.fit(mass_global, eff_global)` — ⛔ literally the forbidden `mass/eff_gdna` form,
-   surviving because its consumers never touch the solve); consumers = `_debug["gdna_prior"]`,
-   `InjectedCalibrationPriors.enrichment_prior` (toy injection), and
-   `CalibrationDiagnostics.from_prior` → the QC report (`test_report.py`). Plus `config.npmle_bandwidth`,
-   `test_npmle.py` (16 cases), and docstring references in `region_geometry`/`landscape`.
-   The change, in order:
-   1. `CalibrationDiagnostics.from_abundance_landscape(al)` — kde curve from `al.landscape`,
-      modes/separation from the CENSUS (basin-based — strictly better than the top-2-maxima it
-      replaces), a REAL rug from the training centres (the npmle had none). `test_report.py` gates the
-      render.
-   2. Flip: `abundance_landscape=True` becomes the default, the npmle fit is deleted from `calibrate`,
-      `_debug["gdna_prior"]` and `enrichment_prior` are replaced by the landscape (toy harvest/inject
-      carries the new field).
-   3. DELETE `npmle.py` + `test_npmle.py` + `config.npmle_bandwidth` (its validator with it);
-      `additive=`/`rho_floor=` die unshipped (passed by nobody — verified). Account the collected
-      delta; re-run instruments (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-   4. THE gate for the whole change: **the deliverable is bit-identical** — the npmle never touched
-      the solve, so replacing it must move nothing but the QC page and the debug bundle.
+   ⛔ The step-by-step recipe that stood here has been REMOVED rather than stamped, per the MOVE rule.
+   Where it went: the outcome and the measured justification to `ROADMAP.md` §1 rank 3 item ①b; the
+   lesson to `TRAPS: measure-a-default-flip-before-you-write-it`; the ruling on which landscape outputs
+   a consumer may read to `DESIGN.md` §3.1a-iii.
+
+   ⭐ **THE GATE PASSED**: `rename_identity.py --check` reads `✅ BIT-IDENTICAL — quant digest and every
+   array's content unchanged`, which is what had to be true, since nothing the npmle fed was ever read
+   by the solve.
+
+   ⛔⛔ **THE ONE PLACE THIS PLAN WAS WRONG, kept because it is the transferable part**: step 2 said
+   "flip the default". Flipping `abundance_landscape` to `True` against the flag's REFUSAL broke **65
+   callers** (24 failed + 41 errors) — unit and toy fixtures have no wall arrays and never wanted a QC
+   panel. The refusal's reason was *"rather than fitting on unmasked totals"*, and the alternative was
+   never to fit unmasked but NOT TO FIT, so the missing-walls case now skips with a WARNING and yields
+   `None`. `background_abundance` keeps its refusal (it feeds ψ) and a gate asserts the asymmetry.
+
 
    ### 3e. The pass-0 REFERENCE — rung 4's design, so it is not re-derived
 

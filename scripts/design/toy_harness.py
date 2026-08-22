@@ -305,11 +305,16 @@ class DonorGlobals:
             f"FL {self.frag_mean:.0f}+-{self.frag_std:.0f} [{self.frag_min},{self.frag_max}] "
             f"read {self.read_length}\n"
             f"  strand_specificity={self.strand_specificity:.4g}  capture={'ON' if self.capture_on else 'off'}\n"
-            f"  enrichment_prior={'yes' if self.priors.enrichment_prior is not None else 'NONE'}  "
-            # ⚠ the aggregate `background` field was converge-and-deleted 2026-08-21 (a duplicate of
-            # the intron background's own pool that no caller consumed); this line read it and was the
-            # one live breakage the deletion left — found by the retirement census, not by the suite
-            # (`TRAPS: a-green-suite-hid-five-dead-instruments`, the instrument form).
+            f"  abundance_landscape="
+            f"{'yes' if self.priors.abundance_landscape is not None else 'NONE'}  "
+            # ⛔⛔ **THIS ONE LINE HAS NOW BEEN BROKEN BY TWO SUCCESSIVE CONVERGE-AND-DELETES, AND THAT
+            # REPETITION IS THE LESSON** (`TRAPS: a-green-suite-hid-five-dead-instruments`, the
+            # instrument form). First the aggregate `background` field went (2026-08-21, a duplicate
+            # intergenic pool no caller consumed) and this line still read it; then
+            # `enrichment_prior` went with the NPMLE the same day and this line still read that. Both
+            # times the suite stayed GREEN and only a census/real run found it, because a `describe()`
+            # string is executed by nothing. ⭐ When a field leaves `InjectedCalibrationPriors`, grep
+            # THIS function before believing the deletion is complete.
             f"intron_background={'yes' if self.priors.intron_background is not None else 'NONE'}"
         )
 

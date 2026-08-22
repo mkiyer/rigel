@@ -64,7 +64,6 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .npmle import DensityNPMLE
 from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
 from .total_abundance import (
@@ -99,8 +98,8 @@ logger = logging.getLogger(__name__)
 class InjectedCalibrationPriors:
     """Population-scale calibration priors — the objects that require genome-scale (or many-gene) data to fit and
     are physically **directly observable** (no deconvolution / no solving): the RNA strand balance, the strand
-    Beta-Binomial overdispersions, the strand-Fisher noise-floor sample sizes, the enrichment-density NPMLE (the
-    σ²_transfer landscape) and the intergenic intron-factory background.
+    Beta-Binomial overdispersions, the strand-Fisher noise-floor sample sizes, the intergenic
+    intron-factory background, and the pre-solve TOTAL-density landscape.
 
     A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
     population scenario and injects them, letting the toy provide only the controlled per-region GEOMETRY. Every
@@ -113,7 +112,6 @@ class InjectedCalibrationPriors:
     n_gdna_obs: float | None = None
     gdna_strand_overdispersion: float | None = None
     rna_strand_overdispersion: float | None = None
-    enrichment_prior: DensityNPMLE | None = None
     intron_background: GdnaBackground | None = None
     #: the pre-pass-0 TOTAL-density field + mode census — population-scale (a toy cannot fit a
     #: landscape from a handful of regions), injectable exactly like the enrichment prior it is
@@ -395,14 +393,23 @@ def calibrate(
     if config.abundance_landscape:
         if inj is not None and inj.abundance_landscape is not None:
             abundance_landscape = inj.abundance_landscape
+        elif mature_walls is None or boundary_reach is None:
+            # ⛔⛔ **SKIPPED, LOUDLY — and this USED TO RAISE.** The refusal was right while the flag
+            # was opt-in and OFF by default; it is wrong now that it is ON by default, because this
+            # object is the SOLE source of the QC report's density panel since the enrichment NPMLE
+            # was retired, and 65 unit/toy callers legitimately have no wall arrays and never wanted a
+            # panel. ⭐ The refusal's own reason was "rather than fitting on unmasked totals" — and the
+            # alternative was never to fit unmasked, it is not to fit. Nothing fits unmasked either way.
+            # ⛔ NOT a silent fallback: the object is None (never a quietly-different estimate) and the
+            # skip is logged. ⛔⛔ `background_abundance` KEEPS its refusal, because that pair feeds ψ
+            # and this one is read by the report and the debug bundle and by nothing in the solve.
+            logger.warning(
+                "calibration: abundance_landscape is enabled but the wall inputs are missing "
+                "(mature_walls / boundary_reach, both in scan_cache.index_derived_inputs) — skipping "
+                "the total-density landscape, so the QC density panel will be omitted. Nothing in the "
+                "solve reads it, so no solved number changes."
+            )
         else:
-            if mature_walls is None or boundary_reach is None:
-                raise ValueError(
-                    "CalibrationConfig.abundance_landscape = True needs the wall inputs: pass "
-                    "mature_walls and boundary_reach (both are in scan_cache.index_derived_inputs). "
-                    "Refusing rather than fitting on unmasked totals, which would carry the wall "
-                    "bias the mask exists to exclude."
-                )
             _al_mask = build_region_wall_mask(
                 region_arrays,
                 mature_walls,
@@ -660,23 +667,22 @@ def calibrate(
             _debug["capture"] = capture
         return out
 
-    # THE ENRICHMENT NPMLE — fit ONCE on ALL regions' TOTAL unspliced density (belief-free). It models the
-    # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
-    # composition-vacuous (count-zero-information — /§5), so it is NEVER fed to the
-    # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
-    # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
-    # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
-    # substrate, so it is fit here and consumed below, never inside the sweep.
+    # ⛔⛔ **THE ENRICHMENT NPMLE WAS FIT HERE AND IS DELETED (2026-08-21) — converge-and-delete, and
+    # the record so it is not rebuilt.** It fit `DensityNPMLE` on ALL slots' TOTAL unspliced density as
+    # `mass / eff_gdna` — literally the forbidden pair, a total over ONE component's opportunity model —
+    # and it survived only because its consumers never touched the solve: the QC report's density panel,
+    # `_debug["gdna_prior"]`, and a toy-injection field. Its older second role (supplying the message
+    # σ²_transfer by projection) had already been retired: that was a density-uniformity proxy, invalid
+    # under capture, and the solver derives σ²_transfer itself (`messages.variance.transfer_logvar`).
+    # ⭐ **What replaced it is the `AbundanceLandscape` fitted above**, on the wall-exact measured totals
+    # over each region's own LENGTH — a geometry rather than a model in the divisor. Measured head to
+    # head on all 16 ladder conditions: the depleted level lands 4.8–21× closer to certified gDNA truth,
+    # and the npmle's axis carries an irreducible per-region offset spread (IQR 1.66 nats under capture)
+    # that no bandwidth removes. ⚠ On a generic held-out predictive likelihood the two TIE off capture —
+    # the npmle was not a bad density estimate, it was estimating the wrong quantity.
+    # ⛔ THE GATE for the deletion was that the DELIVERABLE is bit-identical, which it must be, because
+    # nothing it fed was ever read by the solve.
     mass_global, eff_global = region_gdna_geometry(geometry)
-    if inj is not None and inj.enrichment_prior is not None:
-        # INJECTED population enrichment landscape — a toy has too few regions to resolve enriched vs depleted
-        # modes. (Scale note: the toy's densities must be generated at the reference library's depth so its
-        # regions project onto the right cells of this absolute log-density landscape.)
-        enrichment_prior = inj.enrichment_prior
-    else:
-        enrichment_prior = DensityNPMLE.fit(
-            mass_global, eff_global, bandwidth=config.npmle_bandwidth
-        )
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
     # Single-strand regions self-solve from strand; unstranded
@@ -687,18 +693,19 @@ def calibrate(
         belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
     )
     logger.debug(
-        "calibration: PHASE 1 prior-free initial solve (enrichment NPMLE %d cells → QC only)",
-        enrichment_prior.n_cells,
+        "calibration: PHASE 1 prior-free initial solve (abundance landscape: %s)",
+        "none"
+        if abundance_landscape is None
+        else f"{abundance_landscape.n_train} training regions, {len(abundance_landscape.modes)} modes",
     )
 
-    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit the gDNA-rate NPMLE on
+    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit `landscape.DensityLandscape` on
     # the initial solve's deconvolved gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG regions. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. ⚠ The prose here used to name an "aggregate DNA-background reference
-    # (`ρ_bg`) … the refit floor". That channel was DELETED 2026-08-21: it was never wired into the fit
-    # (`npmle`'s own comment said the wire-in was a separate step that never came), its would-be
-    # consumer is off the solve path anyway, and the intergenic background that DOES reach ψ is
-    # `fit_intron_background`'s — the same pool, measured identical. `fit_landscape`'s own `anchor`
+    # (`ρ_bg`) … the refit floor". That channel was DELETED 2026-08-21: it was never wired into the fit,
+    # its would-be consumer is off the solve path anyway, and the intergenic background that DOES reach
+    # ψ is `fit_intron_background`'s — the same pool, measured identical. `fit_landscape`'s own `anchor`
     # argument is what grounds this refit.
     gdna_hyperprior: DensityLandscape | None = None
     for it in range(int(config.calib_refit_iters)):
@@ -739,7 +746,7 @@ def calibrate(
             substrate=substrate,
             sj=sj,
             region_arrays=region_arrays,
-            gdna_prior=enrichment_prior,  # the ENRICHMENT NPMLE (QC landscape / injection substrate)
+            gdna_prior=abundance_landscape,  # the TOTAL-density landscape (QC / injection substrate)
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
             rna_sense_frac=rna_sense_frac,
             region_eff_gdna=region_eff_gdna,
@@ -751,7 +758,6 @@ def calibrate(
                 n_gdna_obs=n_gdna_obs,
                 gdna_strand_overdispersion=gdna_strand_overdispersion,
                 rna_strand_overdispersion=rna_strand_overdispersion,
-                enrichment_prior=enrichment_prior,
                 intron_background=intron_background,
                 abundance_landscape=abundance_landscape,
             ),
@@ -763,7 +769,12 @@ def calibrate(
     if diagnostics_out is not None:
         from .diagnostics import CalibrationDiagnostics
 
-        diagnostics_out["calibration"] = CalibrationDiagnostics.from_prior(enrichment_prior)
+        # ⭐ The QC density panel now comes from the total-density landscape's CENSUS. ``None`` when the
+        # landscape was not fit (no wall inputs) — the report omits the panel, its pre-existing contract.
+        if abundance_landscape is not None:
+            diagnostics_out["calibration"] = CalibrationDiagnostics.from_abundance_landscape(
+                abundance_landscape
+            )
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(regions, boundaries, region_eff_gdna, boundary_eff_gdna)

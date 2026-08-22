@@ -109,7 +109,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "run_fill",
             "density_model",
             "density_deconv",
-            "npmle",
             "landscape",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
             # `landscape`'s estimator SIDEWAYS and reads `total_abundance` (layer 3) DOWN.

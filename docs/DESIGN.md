@@ -701,6 +701,32 @@ belongs to the reach arm. ⚠ On every shipped index the EXON rows happen to con
 transcript, so this was once true by accident and cost 57 diverging distances between two
 implementations (`TRAPS: state-the-population-rule-do-not-inherit-it-from-a-table`).
 
+#### 3.1a-iii ⭐⭐⭐ WHICH OF THE LANDSCAPE'S OUTPUTS A CONSUMER MAY READ — ruled 2026-08-21, from the grid sweep
+
+`abundance_landscape.AbundanceLandscape` publishes `rho_0`, `span_R`, `w_slot`, the mode list and an
+anchor verdict. ⛔ **They are NOT equally trustworthy, and the difference is measured rather than
+assumed** (`landscape_head_to_head.py --grid-sweep`, 16 conditions, `_N_GRID` swept over a 16× range):
+
+**① `rho_0` AND THE ANCHOR VERDICT ARE CONSUMABLE.** `rho_0` moves 8–25 % across that whole range and
+the anchor-consistency verdict holds **12/12 on every contaminated row at every grid**. Against certified
+gDNA truth (the `gdna` partition's pooled intergenic rate through the identical side selection) the
+depleted mode reads **0.0056 / 0.0264 nats** on the two capture-OFF strata.
+
+**② `span_R` IS NOT CONSUMABLE AS IT STANDS.** On `g50 ss0.99` capture-OFF it reads 58 → 77 → 95.6 →
+94.7 → **1.9** as the grid refines. `split_basins` selects the enriched mode by BASIN MASS, so
+over-resolution fragments the bulk into sub-bumps and a nearby sub-bump of a huge bulk outweighs the
+distant exon mode. ⭐ A consumer that needs the span must either pin the resolution or select the
+enriched mode by something other than mass — and `TRAPS: a-mode-count-is-not-a-well-posed-quantity` is
+why the mode COUNT may not be read at all.
+
+**③ THE ESTIMAND IS WHAT MAKES THIS LANDSCAPE BEAT THE NPMLE, NOT THE ESTIMATOR.** Both are the same
+family of fit; the NPMLE is fitted on `mass / eff_gdna` — a total over one component's OPPORTUNITY
+MODEL — so its axis carries the divisor's per-region spread, measured as an offset IQR of **0.12 nats
+off capture and 1.66 under it**, comparable to the mode separation itself and removable by no bandwidth.
+The landscape's divisor is a geometry. ⚠ On generic held-out predictive likelihood the two TIE off
+capture (−5.36 vs −5.35) and the landscape wins by 0.47 nats under it: the tie says the NPMLE is not a
+bad density estimate, and the nats column says it is the wrong quantity.
+
 ⛔⛔ **AND THIS MODULE IS NOT `ROADMAP.md` §4.3's REFUSED DROP-IN — the distinction matters because the
 tokens look alike.** §4.3 refused `region_start_count / ℓ` substituted for `RegionGeometry.inv_abundance`
 INSIDE the currency channel, with no wall rule, no side selection and no model-free flag; the knob was
@@ -1047,7 +1073,8 @@ to come through was deleted (`native.py` says so at its import).
 and **`messages/` (the POLICY: `silent` `head` `variance`)** · `region_chain` `region_geometry`
 `region_init` · `substrate` `region_arrays` `signature` · `effective_length` `capture_eff_length` `fl`
 `sj_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand` `strand_balance`
-`strand_deconv` `strand_summary` · `density_deconv` `density_model` `landscape` `npmle`
+`strand_deconv` `strand_summary` · `density_deconv` `density_model` `landscape`
+`abundance_landscape`
 `simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
 `diagnostics` `track` · `_layers` (the layering the imports already had).
 ⚠ **Re-derive this list rather than trusting it** — `scripts/design/module_census.py` reads it off the

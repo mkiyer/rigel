@@ -48,11 +48,14 @@ went on 2026-08-13, and their configs, their study cache and the two instruments
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **154 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
+⭐ **157 rules, and every one has exactly one body — RE-DERIVED, never carried: the header said 105 while
 the file held 115, the same way it once said 99 while the file held 101. Read the group that matches what
 you are about to do, then open only those.**
-⭐⭐ **RE-DERIVED 2026-08-21 AND THE INDEX IS COMPLETE: 154 entries, 154 bodies, and BOTH set
-differences print empty.** (153/153 before the fl-gap side panel added
+⭐⭐ **RE-DERIVED 2026-08-21 AND THE INDEX IS COMPLETE: 157 entries, 157 bodies, and BOTH set
+differences print empty.** (156/156 before the NPMLE retirement added
+`measure-a-default-flip-before-you-write-it` to §D.) (154/154 before the landscape head-to-head added two to §D —
+`a-floored-knob-is-not-the-bandwidth` and `a-mode-count-is-not-a-well-posed-quantity`.)
+(153/153 before the fl-gap side panel added
 `a-pooled-rate-cannot-see-a-short-object-factor` to §C.) (152/152 before the consumer-swap pricing added
 `a-better-estimator-inside-a-weak-consumer-moves-nothing` to §C.) (150/150 before the measured total's validation rung added two to §C —
 `two-estimators-of-one-rate-weight-the-field-differently` and
@@ -182,6 +185,12 @@ the pattern above and check BOTH directions print empty; do not adjust the numbe
   ~1 % END TO END; PRICE THE CONSUMER'S SENSITIVITY BEFORE REPAIRING ITS INPUT.
 - `a-pooled-rate-cannot-see-a-short-object-factor` — A POOLED RATIO OF SUMS IS DOMINATED BY THE LARGEST
   OBJECTS; A FACTOR THAT ONLY BITES AT SMALL ONES IS INVISIBLE IN IT. COMPUTE THE POOLED WEIGHT FIRST.
+- `a-floored-knob-is-not-the-bandwidth` — A SMOOTHING CONSTANT CLAMPED FOR 99 % OF THE DATA IS NOT
+  THE BANDWIDTH; measure the share of kernels at the floor before reading any bandwidth sweep
+- `a-mode-count-is-not-a-well-posed-quantity` — it tracks the render resolution and never converges;
+  `rho_0` and the anchor verdict are grid-robust, `span_R` is NOT
+- `measure-a-default-flip-before-you-write-it` — a default and a refusal are ONE design; flipping the
+  default can invalidate the refusal (65 callers), and the raise is usually narrower than it looks
 - `two-estimators-of-one-rate-weight-the-field-differently` — TWO UNBIASED ESTIMATORS OF ONE SLOT'S RATE ARE
   THE SAME NUMBER ONLY UNDER LOCAL UNIFORMITY; UNDER A PROBE-SHAPED FIELD THEY ARE DIFFERENT WEIGHTED AVERAGES OF IT.
 - `state-the-population-rule-do-not-inherit-it-from-a-table` — A POPULATION DEFINED BY WHICHEVER ROWS A FILE
@@ -1907,6 +1916,83 @@ with NO strand channel (unstranded × capture-ON) gets worse, because weakening 
 only information it has. ⭐ *And the diagnostic generalises:* **split any message layer's error by whether
 the destination could already answer for itself.** "The messages help" and "the messages trample a
 measurement" are different findings and a pooled number cannot tell them apart.
+
+**a-floored-knob-is-not-the-bandwidth. ⭐⭐⭐ A SMOOTHING CONSTANT THAT IS CLAMPED FOR 99 % OF THE DATA IS
+NOT THE BANDWIDTH, AND SWEEPING IT ANSWERS NOTHING** (measured 2026-08-21, `landscape_head_to_head.py`).
+`landscape.knn_widths` returns `max(scale · d_k, grid_step)`. On the 16-condition ladder — ~30,700 regions
+on a data-derived 8.7-decade axis — the √n-th-neighbour spacing is nearer than one grid cell for
+**98.9 % of regions at the shipped `_KNN_SCALE = 0.5`**, and still 92 % at scale 2.0. So `_KNN_SCALE` is
+very nearly INERT there, and the smoothing actually in force is the GRID STEP,
+`span/(_N_GRID − 1)` ≈ 0.034 decades — a constant whose own docstring calls it a computational budget,
+"discretization, not modelling".
+
+⭐ *The tell:* a sweep over a smoothing parameter returns the same score to three decimals at several
+adjacent settings. That is not a flat optimum, it is a disconnected knob. **Measure the share of kernels
+at the floor before reading any bandwidth sweep** — one line, and it says whether the axis you swept is
+the axis in force.
+
+⭐⭐ *Why it is not a bug in `knn_widths`:* the kernel is doing exactly its job. A dense sample supports
+resolution finer than the render can represent, so it asks for a narrower kernel than a grid cell and is
+correctly refused. The knob is inert because the DATA are dense, which is a property of the substrate —
+which is why the same constant is live on a toy (70 training regions) and dead on the panel.
+
+⛔ *And the constant that IS in force can be selected honestly.* Three independent criteria, swept over a
+16× range, all land on the shipped `_N_GRID = 260`: the held-out predictive likelihood's knee (65 → 260
+buys **1.37 nats**, 260 → 1040 buys **0.006**), the split-half mode reproducibility MAXIMUM (0.976,
+falling to 0.913 / 0.889 at 520 / 1040), and the anchor-gap collapse (**0.126 → 0.003 nats** from 130 to
+260). That is selection evidence a constant carrying none now has — obtained without introducing one.
+*Sibling:* `no-magic-numbers`, `an-ablation-that-never-ran`.
+
+**a-mode-count-is-not-a-well-posed-quantity. ⭐⭐⭐ HOW MANY MODES A FITTED DENSITY HAS IS A PROPERTY OF THE
+RENDER RESOLUTION, NOT OF THE FIELD — SO NO CONSUMER MAY DEPEND ON IT** (measured 2026-08-21, the same
+sweep). Across `_N_GRID` 65 → 1040 the `AbundanceLandscape`'s mode count goes **3.7 → 17.7** (capture-OFF)
+and **4.7 → 24.7** (capture-ON) and never converges: it tracks 1/step. It also buys nothing — the held-out
+likelihood is flat over that range — and the modes found reproduce **worse** across split halves as the
+count grows.
+
+⭐ *So "the fit looks spiky" is answered, and the answer is neither "signal" nor "wrong bandwidth":* the
+extra maxima are the axis's own resolution. The census is threshold-free by design and masses carry every
+verdict, so a wiggle owning ~no basin mass is harmless — which is exactly why the count must never be read
+as a finding.
+
+⛔⛔ *What IS grid-robust, and what is NOT — and the second one had a consumer planned.* `rho_0` moves
+8–25 % across a 16× grid range and the anchor-consistency verdict holds **12/12 on every contaminated row
+at every grid**. But **`span_R` is fragile**: on `g50 ss0.99 capture-OFF` it reads 58 → 77 → **95.6** →
+94.7 → **1.9**. The mechanism is `abundance_landscape.split_basins` choosing the enriched mode by BASIN
+MASS — over-resolution fragments the bulk into sub-bumps, and a nearby sub-bump of a huge bulk outweighs
+the distant exon mode. At the shipped grid it selects correctly; a 4× finer one does not.
+⭐ *The rule:* before a consumer reads a shape statistic off a fitted density, sweep the render resolution
+and keep only what does not move. A location and a containment verdict survived; a RATIO of two selected
+modes did not.
+*Sibling:* `a-floored-knob-is-not-the-bandwidth`, `an-upper-bound-is-not-an-estimate`.
+
+**measure-a-default-flip-before-you-write-it. ⭐⭐⭐ A CONFIG DEFAULT AND A REFUSAL ARE ONE DESIGN, AND
+FLIPPING THE FIRST CAN INVALIDATE THE SECOND** (measured 2026-08-21, the NPMLE retirement).
+`CalibrationConfig.abundance_landscape` was written opt-in and OFF, and — correctly for an opt-in flag —
+it REFUSED to run without the wall arrays rather than fitting on unmasked totals. The retirement plan
+said "flip the default". Flipping it broke **65 callers** (24 failed + 41 errors) on a single cause: unit
+and toy fixtures have no wall arrays and never wanted the object at all.
+
+⭐ *The tell:* you are about to change a default on a flag whose OTHER branch raises. The refusal was
+written for the population that opts IN; the default serves the population that never thought about it,
+and those are different populations with different correct answers.
+
+⭐⭐ *The resolution is to re-read what the refusal was protecting against, and it is usually narrower
+than the raise implies.* Here the reason was literally *"refusing rather than fitting on unmasked
+totals"* — and the alternative to refusing was never "fit unmasked", it is **not to fit**. Nothing fits
+unmasked either way, so the honest behaviour for a missing input is to skip, LOUDLY (a warning, and a
+`None` that a downstream reader already tolerates), which is not the silent fallback the refusal existed
+to prevent.
+
+⛔⛔ *And keep the asymmetry EXPLICIT, with a gate, because the next reader will see two flags with the
+same shape and assume one policy.* `background_abundance` keeps its refusal — that pair feeds ψ, so a
+missing input there silently changes a number the solve consumes — while the landscape is read only by
+the QC report and the debug bundle. Two flags, two policies, one gate each, and the gate for the second
+one asserts the FIRST still refuses.
+⚠ The inverted gate is worth writing as an inversion rather than a deletion: the test that asserted the
+raise now asserts the skip, and its docstring says what changed and why, so the flip cannot look like
+drift.
+*Sibling:* `an-ablation-that-never-ran`, `a-green-suite-hid-five-dead-instruments`.
 
 ## E. Structure, indexes and plumbing
 

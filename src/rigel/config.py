@@ -333,16 +333,6 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **NPMLE bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture NPMLE
-    #: (``calibration.npmle.DensityNPMLE``) — shared by both its uses (the enrichment fit for σ²_transfer and
-    #: the gDNA-hyperprior refit). ``P(log ρ)`` is a mixture of fixed-width Gaussian kernels on a log-rate grid,
-    #: fit by plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any
-    #: peak sharper than ``h`` (smooth, never a bed-of-nails) and the projected prior is extremely weak
-    #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
-    #: left at the fitter's defaults.
-    npmle_bandwidth: float = 0.15
-
-
     #: **WHICH (counts, exposure) PAIR THE POOLED gDNA BACKGROUND ESTIMATORS TAKE.**
     #: ``"contained"`` (the default, and bit-identical to the tree before this field existed) pools the
     #: CONTAINED count over the gDNA contained effective length — unbiased, since
@@ -382,14 +372,20 @@ class CalibrationConfig:
     #: is bimodal and supplies `rho_0` (the depleted mode), the span `R` (the mode ratio) and a
     #: per-region enrichment responsibility `w_i` — the three quantities the measured pass-0
     #: reference consumes.
-    #: ⛔ ``False`` (the default) fits NOTHING and every path is bit-identical. ``True`` fits it and
-    #: exposes it via ``_debug["abundance_landscape"]`` and the injectable priors bundle; ⛔ nothing
-    #: in the SOLVE reads it yet — it is priced as a QC/injection object first, exactly as the
-    #: enrichment npmle it is planned to replace was, so the eventual flip is an A/B and not a leap.
-    #: ⛔ ``True`` REFUSES to run unless `calibrate` is given the wall inputs (`mature_walls`,
-    #: `boundary_reach`) — a landscape that silently fit on unmasked totals would carry the wall bias
-    #: rung 1 exists to exclude.
-    abundance_landscape: bool = False
+    #: ⭐⭐ **``True`` IS THE DEFAULT SINCE 2026-08-21, when the enrichment NPMLE was retired**: this
+    #: object is now the SOLE source of the QC report's gDNA-density panel
+    #: (`CalibrationDiagnostics.from_abundance_landscape`), and it is strictly more informative than
+    #: what it replaced — basins from the mode census rather than the two tallest peaks of a curve, a
+    #: depleted mode picked by an INDEPENDENT anchor measurement, a real training count, and a real
+    #: rug (the npmle carried no training points, so the report's rug was always empty).
+    #: ⛔ **Nothing in the SOLVE reads it**, so enabling it moves no solved number — the retirement's
+    #: gate was a bit-identical deliverable.
+    #: ⚠ Without the wall inputs (`mature_walls`, `boundary_reach`) the fit is SKIPPED with a WARNING
+    #: and the object is ``None``, so the report simply omits the panel. ⛔ That is deliberately NOT
+    #: the same policy as ``background_abundance`` above, which still REFUSES: that pair feeds ψ, so a
+    #: missing input there would silently change a number the solve consumes, whereas this one is read
+    #: only by the report and the debug bundle.
+    abundance_landscape: bool = True
 
     #: Background region set: intergenic-only (``False``, sim-safe — the sim's unrealistically abundant nascent
     #: contaminates introns) vs intergenic + intron (``True``, the real-data path — reclaims the introns' huge
@@ -507,8 +503,8 @@ class CalibrationConfig:
     #: is, after all, fitted from *biased* pass-0 output, which is robustness rather than a fudge: it is what
     #: lets real data overcome a wrong prior, and it is the intended control for the one measured failure
     #: direction — on zero-gDNA and capture-OFF libraries the landscape places 0.2–2.4 % of its mass in the
-    #: enriched region where the truth has ~0.01–1 %. Affects ONLY the hyperprior refit (Role B), never the
-    #: enrichment NPMLE (Role A) and never the solve's gDNA messages.
+    #: enriched region where the truth has ~0.01–1 %. Affects ONLY the fitted hyperprior refit, never
+    #: the pre-solve total-density landscape (which votes on nothing) and never the solve's gDNA messages.
     gdna_prior_strength: float = 1.0
 
     def __post_init__(self) -> None:
@@ -520,11 +516,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.background_abundance must be 'contained' or 'measured_total'; "
                 f"got {self.background_abundance!r}."
-            )
-        if not (0.0 < float(self.npmle_bandwidth) < 5.0):
-            raise ValueError(
-                "CalibrationConfig.npmle_bandwidth must be in (0, 5) decades; "
-                f"got {self.npmle_bandwidth}."
             )
         if float(self.gdna_prior_strength) < 0.0:
             raise ValueError(

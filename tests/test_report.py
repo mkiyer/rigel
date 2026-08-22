@@ -236,19 +236,64 @@ def test_genome_track_spec_bins_per_ref():
     assert build_charts(empty) == {}
 
 
-def test_capture_diagnostics_from_prior_labels_modes():
-    # A bimodal density: depleted mode at x=-8, enriched at x=-2.
-    x = np.linspace(-10, 0, 256)
-    logp = np.log(
-        np.exp(-0.5 * ((x + 8) / 0.4) ** 2) + 0.6 * np.exp(-0.5 * ((x + 2) / 0.5) ** 2) + 1e-9
-    )
-    # the new DensityNPMLE exposes the fitted curve as (log_rho, logP); from_prior finds the modes from it.
-    prior = SimpleNamespace(log_rho=x, logP=logp, bandwidth=0.4, n_cells=1234)
-    diag = CalibrationDiagnostics.from_prior(prior)
+def test_capture_diagnostics_from_abundance_landscape_labels_modes():
+    """⭐ The QC panel is built from the `AbundanceLandscape`'s CENSUS, not from the top two maxima of
+    a curve. On the bimodal fixture the depleted mode must be the one the pooled intergenic ANCHOR
+    falls in — an independent measurement — and the separation must be the census's own mode ratio.
+
+    ⛔ This replaces `from_prior`, which read a `DensityNPMLE`. The census is strictly more
+    informative: basins rather than the two tallest peaks, a real `n_train`, and a REAL rug (the
+    npmle carried no training points at all, so the report's rug was always empty)."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
+    from test_abundance_landscape import bimodal_parts, parts
+
+    from rigel.calibration.abundance_landscape import fit_abundance_landscape
+
+    counts, lengths, sig, rho_lo, rho_hi = bimodal_parts()
+    sub, ra, mask = parts(counts, lengths, sig)
+    al = fit_abundance_landscape(sub, ra, mask)
+    assert al is not None and al.enriched is not None
+
+    diag = CalibrationDiagnostics.from_abundance_landscape(al)
     assert diag.depleted_mode < diag.enriched_mode
-    assert diag.separation_nats == pytest.approx(6.0, abs=0.1)  # grid resolution ~0.04
-    assert diag.enrichment_factor == pytest.approx(np.exp(diag.separation_nats), rel=1e-6)
-    assert diag.n_modes == 2
+    # the census's own numbers, not a re-derivation
+    assert diag.depleted_mode == pytest.approx(al.depleted.log_rho, rel=0, abs=0)
+    assert diag.enriched_mode == pytest.approx(al.enriched.log_rho, rel=0, abs=0)
+    assert diag.separation_nats == pytest.approx(np.log(al.span_R), rel=1e-12)
+    assert diag.enrichment_factor == pytest.approx(al.span_R, rel=1e-12)
+    assert diag.n_modes == len(al.modes)
+    # the true separation of the fixture's two populations, recovered
+    assert diag.separation_nats == pytest.approx(np.log(rho_hi / rho_lo), rel=0.25)
+    # ⭐ a REAL rug — the thing the npmle could never supply
+    assert diag.rug_log_rho.size > 0
+    assert diag.rug_log_rho.size == diag.rug_kind.size
+    assert set(np.unique(diag.rug_kind)) <= {0, 1, 2, 3}
+    assert {0, 2} <= set(np.unique(diag.rug_kind))  # the fixture has intergenic and exon regions
+    # n_eff is the training count, and the bandwidth is the smoothing ACTUALLY in force (the grid step)
+    assert diag.n_eff == float(al.n_train)
+    step = float(al.landscape.log_rho[1] - al.landscape.log_rho[0]) / np.log(10.0)
+    assert diag.bandwidth == pytest.approx(step, rel=1e-12)
+
+
+def test_capture_diagnostics_is_unimodal_safe():
+    """A unimodal field has no enriched mode: the separation is 0 and the factor exactly 1, never
+    None and never a crash — the report renders the panel with one labelled mode."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
+    from test_abundance_landscape import parts, unimodal_parts
+
+    from rigel.calibration.abundance_landscape import fit_abundance_landscape
+
+    c, ln, sg = unimodal_parts()
+    al = fit_abundance_landscape(*parts(c, ln, sg))
+    assert al.enriched is None
+    diag = CalibrationDiagnostics.from_abundance_landscape(al)
+    assert diag.separation_nats == 0.0
+    assert diag.enrichment_factor == 1.0
+    assert diag.depleted_mode == diag.enriched_mode == al.depleted.log_rho
 
 
 def test_capture_kde_from_track_mass_weighting_recovers_enrichment():

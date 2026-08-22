@@ -1,8 +1,9 @@
 """The population component-density hyperprior — the **landscape**.
 
 Fit `P(log ρ_c)` over the population from the previous solve's deconvolved mass for ONE component, then
-feed it to that component's ψ composition arm on the re-solve. It replaces the δ-pin `DensityNPMLE` in
-that role (which is retired, not deleted — see :mod:`.npmle`).
+feed it to that component's ψ composition arm on the re-solve. It replaced a δ-pin fixed-kernel Poisson
+mixture in that role, and that predecessor was DELETED 2026-08-21 once its last consumer (a QC landscape
+fitted on the forbidden `mass / eff_gdna` pair) was replaced by :mod:`.abundance_landscape`.
 
 ⭐⭐ **THE ESTIMATOR IS COMPONENT-AGNOSTIC, AND DELIBERATELY SO.** Every step below is arithmetic on
 ``(count, mass, eff)`` for whichever component the caller selected: :func:`_grid` is ``mass/eff``,

@@ -50,7 +50,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .landscape import DensityLandscape, _poisson_kernels, fit_landscape
+from .landscape import _KNN_SCALE, DensityLandscape, _poisson_kernels, fit_landscape
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 from .total_abundance import RegionWallMask, region_counts_and_exposure
 
@@ -62,6 +62,7 @@ __all__ = [
     "AbundanceLandscape",
     "AbundanceMode",
     "fit_abundance_landscape",
+    "split_basins",
 ]
 
 
@@ -96,6 +97,13 @@ class AbundanceLandscape:
     model-free regions (the same composition-free pool ``fit_intron_background`` uses) — and
     ``anchor_consistent`` says whether it falls within the depleted mode's own width. ``NaN`` (and a
     ``False``-free fallback to the largest basin) when no intergenic region exists, which is a toy.
+
+    ⭐ ``train_log_rho`` / ``train_class`` are the population this landscape was FITTED ON: one entry
+    per selected region, the kernel centre ``log(max(count,1)) − log(exposure)`` in natural log, and
+    its coarse class (``0`` intergenic / ``1`` intron / ``2`` exon — the report's own rug codes, where
+    ``3`` is a boundary and this substrate has none, being REGIONs only). They are published because a
+    consumer that plots the fit needs to plot what it was fitted on, and re-deriving the centres
+    elsewhere would be a second copy of the selection rule.
     """
 
     landscape: DensityLandscape
@@ -109,6 +117,8 @@ class AbundanceLandscape:
     anchor_consistent: bool
     w_slot: np.ndarray
     n_train: int
+    train_log_rho: np.ndarray
+    train_class: np.ndarray
 
 
 def _census(landscape: DensityLandscape) -> tuple[AbundanceMode, ...]:
@@ -152,8 +162,27 @@ def _census(landscape: DensityLandscape) -> tuple[AbundanceMode, ...]:
     return tuple(modes)
 
 
+def split_basins(
+    modes: tuple[AbundanceMode, ...], anchor_log_rho: float
+) -> tuple[AbundanceMode, AbundanceMode | None]:
+    """The depleted/enriched selection rule, on its own so a scorer can apply it to ANOTHER
+    estimator's census: depleted = the basin CONTAINING the anchor rate (nearest mode if the anchor
+    falls between basins; the largest-mass basin when the anchor is NaN — a toy); enriched = the
+    largest-mass basin strictly ABOVE the depleted one, ``None`` ⇒ unimodal."""
+    if np.isfinite(anchor_log_rho):
+        inside = [m for m in modes if m.lo <= anchor_log_rho <= m.hi]
+        depleted = (
+            inside[0] if inside else min(modes, key=lambda m: abs(m.log_rho - anchor_log_rho))
+        )
+    else:
+        depleted = max(modes, key=lambda m: m.basin_mass)
+    above = [m for m in modes if m.lo >= depleted.hi - _EPS and m is not depleted]
+    enriched = max(above, key=lambda m: m.basin_mass) if above else None
+    return depleted, enriched
+
+
 def fit_abundance_landscape(
-    substrate, region_arrays, wall_mask: RegionWallMask
+    substrate, region_arrays, wall_mask: RegionWallMask, *, knn_scale: float = _KNN_SCALE
 ) -> AbundanceLandscape | None:
     """Fit the total-density field on the wall-exact measured totals, and read the census off it.
 
@@ -174,6 +203,7 @@ def fit_abundance_landscape(
         np.zeros_like(c),  # a direct measurement has no deconvolution ambiguity
         anchor=(c == 0.0),
         strength=1.0,
+        knn_scale=knn_scale,
     )
     if landscape is None:
         return None
@@ -188,18 +218,8 @@ def fit_abundance_landscape(
     else:
         anchor_log_rho = float("nan")
 
-    # ── depleted = the basin CONTAINING the anchor rate; fallback (a toy): the largest basin
-    if np.isfinite(anchor_log_rho):
-        inside = [m for m in modes if m.lo <= anchor_log_rho <= m.hi]
-        depleted = (
-            inside[0] if inside else min(modes, key=lambda m: abs(m.log_rho - anchor_log_rho))
-        )
-    else:
-        depleted = max(modes, key=lambda m: m.basin_mass)
-
-    # ── enriched = the largest-mass basin strictly ABOVE the depleted one; None ⇒ unimodal
-    above = [m for m in modes if m.lo >= depleted.hi - _EPS and m is not depleted]
-    enriched = max(above, key=lambda m: m.basin_mass) if above else None
+    # ── depleted/enriched: one rule with one home — `split_basins`
+    depleted, enriched = split_basins(modes, anchor_log_rho)
 
     span_R = float(np.exp(enriched.log_rho - depleted.log_rho)) if enriched is not None else 1.0
     gap = abs(depleted.log_rho - anchor_log_rho) if np.isfinite(anchor_log_rho) else float("nan")
@@ -220,6 +240,17 @@ def fit_abundance_landscape(
     else:
         w_slot[sel] = 0.0
 
+    # ── the training population, published: the kernel centres this fit was built from, in natural
+    # log, with each region's coarse class. ⚠ The centre expression is `fit_landscape`'s own
+    # (`log10(max(count,1)) − log10(eff)`, then to nats) — the SAME floor, because a zero-count region
+    # sits at its resolution wall rather than at −inf.
+    train_log_rho = np.log(np.maximum(c, 1.0)) - np.log(e)
+    exon = (sig[sel] & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
+    intron = (sig[sel] & (BIT_INTRON_POS | BIT_INTRON_NEG)) != 0
+    # exon wins over intron, matching `signature.coarse_type_array`'s rule (imported semantics, not a
+    # second table): 0 intergenic, 1 intron, 2 exon.
+    train_class = np.where(exon, 2, np.where(intron, 1, 0)).astype(np.int64)
+
     return AbundanceLandscape(
         landscape=landscape,
         modes=modes,
@@ -232,4 +263,6 @@ def fit_abundance_landscape(
         anchor_consistent=consistent,
         w_slot=w_slot,
         n_train=int(landscape.n_train),
+        train_log_rho=train_log_rho,
+        train_class=train_class,
     )

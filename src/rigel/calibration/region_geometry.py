@@ -380,9 +380,12 @@ def build_region_geometry(
 
 
 def region_gdna_geometry(geometry: RegionGeometry):
-    """Per-slot gDNA support ``(unspliced count, eff_gdna)`` — the basis the enrichment NPMLE
-    (`DensityNPMLE`) is fit on and projected onto, shared by :func:`sweep.solve_chain` and ``calibrate``
-    so the fit and the projection use one definition.
+    """Per-slot gDNA support ``(unspliced count, eff_gdna)``, shared by :func:`sweep.solve_chain` and
+    ``calibrate`` so every consumer divides by ONE definition.
+
+    ⚠ It was also the basis a QC-only enrichment NPMLE was fit on, as ``mass / eff_gdna`` — a total over
+    ONE component's opportunity model, which is why that fit was deleted 2026-08-21 in favour of
+    :mod:`.abundance_landscape`'s measured totals. Nothing here changed; only that consumer went.
 
     ⛔ **It was called ``region_global_geometry`` and bound as ``eff_global`` until 2026-08-10, and the
     name was a lie in the one place it could do most harm.** It returns ``eff_gdna`` and nothing else,

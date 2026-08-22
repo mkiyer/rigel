@@ -246,7 +246,10 @@ I'll reiterate, I don't think it's essential for the first iteration of the poli
 
 =============
 
-
+A few things:
+1) I'd like to compare the NPMLE against the new abundance landscape. I want to see what the landscape plots look like head to head. Which is more accurate?
+2) I look at the abundance landsape plots. They are kind of "spiky" with more modes that I would expect. This is not necessarily wrong, but setting the bandwidth of the poisson kernel seems like a parameter worth investigating further. How do we know our bandwidth is optimal?
+3) What can we use our abundance landscape for in the pass-0 solve? Remember the role of the NPMLE --- the NPMLE was used in pass-0 to estimate the "transfer variance" for message propagation. Please audit this behavior. How does the transfer variance estimation work? How does it work with NPMLE versus with our new abundance landscape? Will this be better or more accurate?
 
 
 

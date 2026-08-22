@@ -365,7 +365,7 @@ controlled per-region **geometry**, which is the thing under study.
 | the donor supplies | so the toy never invents |
 |---|---|
 | κ, both strand overdispersions, the Fisher noise-floor sample sizes | the strand deadband behaves exactly as it does on real data |
-| the enrichment NPMLE, the intron background, ρ_bg | a handful of regions cannot fit these |
+| the intron background, and the pre-solve TOTAL-density landscape | a handful of regions cannot fit these. ⚠ The row used to name the *enrichment NPMLE* and *ρ_bg*: both were converge-and-deleted 2026-08-21, and the injectable field is now `abundance_landscape` |
 | both fragment-length pmfs | passed as `calibrate` kwargs, not part of the priors bundle |
 | capture on/off + its numeric knobs | reproduced in the toy's own **simulation**, with probes written from the spec |
 | frag mean/sd/min/max, read length, strand specificity | read from the donor's post-capture truth |
