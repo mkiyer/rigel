@@ -684,9 +684,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
 
     def test_an_impossible_span_is_still_a_chimera(self):
         """⛔ The length half of the rule: beyond ``max_frag_length`` no molecule explains the pair."""
-        result = _detect_intrachromosomal_chimera(
-            self.BLOCKS, self.T_SETS, max_fragment_length=500
-        )
+        result = _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=500)
         assert result is not None, "a 1,000 bp span passed a 500 bp limit"
         assert result[0] == ChimeraType.CIS_STRAND_SAME
 

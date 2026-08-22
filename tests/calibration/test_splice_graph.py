@@ -270,7 +270,9 @@ def test_G18_coincident_opposite_strand_sj():
 
 
 def _reach(boundaries, src, dst, kind, strand=None):
-    row = boundaries[(boundaries["src"] == src) & (boundaries["dst"] == dst) & (boundaries["kind"] == kind)]
+    row = boundaries[
+        (boundaries["src"] == src) & (boundaries["dst"] == dst) & (boundaries["kind"] == kind)
+    ]
     if strand is not None:
         row = row[row["strand"] == strand]
     assert len(row) == 1
@@ -348,8 +350,18 @@ def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
     ns = _regions(n)
     at_left_boundary = ns.index((500, 700))  # the boundary at 700, the intron's low end
     at_right_boundary = ns.index((700, 1200))  # the boundary at 1200, the intron's high end
-    assert _reach(e, at_left_boundary, at_left_boundary + 1, EDGE_KIND_CONTIGUOUS) == (200, 800, 0, 0)
-    assert _reach(e, at_right_boundary, at_right_boundary + 1, EDGE_KIND_CONTIGUOUS) == (700, 300, 0, 0)
+    assert _reach(e, at_left_boundary, at_left_boundary + 1, EDGE_KIND_CONTIGUOUS) == (
+        200,
+        800,
+        0,
+        0,
+    )
+    assert _reach(e, at_right_boundary, at_right_boundary + 1, EDGE_KIND_CONTIGUOUS) == (
+        700,
+        300,
+        0,
+        0,
+    )
 
 
 def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():

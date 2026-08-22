@@ -176,9 +176,7 @@ def _boundary_locus_shares(
         parts_e.append(np.repeat(np.flatnonzero(live).astype(np.int64), counts[live]))
         starts = region_off[flank][live]
         c = counts[live]
-        ramp = np.arange(int(c.sum()), dtype=np.int64) - np.repeat(
-            np.cumsum(c) - c, c
-        )
+        ramp = np.arange(int(c.sum()), dtype=np.int64) - np.repeat(np.cumsum(c) - c, c)
         parts_p.append(np.repeat(starts, c) + ramp)
     if not parts_e:
         return (np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0, np.float64))
@@ -231,8 +229,6 @@ def _project_regions_to_loci(
         if r_idx.size:
             np.add.at(out[name], l_idx, w * np.asarray(arr, dtype=np.float64)[r_idx])
     return out
-
-
 
 
 def _sum_by_locus(
@@ -338,7 +334,9 @@ def assemble_priors(
         )
         * q
     )
-    gdna_locus = np.maximum(by_region(calibration.mass_gdna_region) + by_boundary(gdna_boundary), 0.0)
+    gdna_locus = np.maximum(
+        by_region(calibration.mass_gdna_region) + by_boundary(gdna_boundary), 0.0
+    )
     rna_locus = np.maximum(by_region(calibration.mass_rna_region) + by_boundary(rna_boundary), 0.0)
 
     # gDNA effective length: every object contracted against the SHARED global ρ_ref, PER OBJECT, so the

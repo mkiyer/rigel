@@ -110,8 +110,7 @@ def load_splice_blacklist_from_records(
 
     if not refs:
         logger.info(
-            f"Splice blacklist: 0 sj retained "
-            f"({n_raw:,} raw, {n_below:,} below count={min_count})"
+            f"Splice blacklist: 0 sj retained ({n_raw:,} raw, {n_below:,} below count={min_count})"
         )
         return _empty_blacklist_df()
 
@@ -200,8 +199,7 @@ def load_splice_blacklist_from_zarr(
     df = df.loc[keep_mask]
     if df.empty:
         logger.info(
-            f"Splice blacklist: 0 sj retained "
-            f"({n_raw:,} raw, {n_below:,} below count={min_count})"
+            f"Splice blacklist: 0 sj retained ({n_raw:,} raw, {n_below:,} below count={min_count})"
         )
         return _empty_blacklist_df()
 

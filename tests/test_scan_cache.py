@@ -294,8 +294,14 @@ class TestTheKeyRefusesAMovedIndex:
         first = deposit_digest()
         assert first == deposit_digest()
         other = subprocess.run(
-            [sys.executable, "-c", "from rigel.scan_cache import deposit_digest;print(deposit_digest())"],
-            capture_output=True, text=True, check=True,
+            [
+                sys.executable,
+                "-c",
+                "from rigel.scan_cache import deposit_digest;print(deposit_digest())",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         assert other == first, f"digest differs across processes: {other} != {first}"
 

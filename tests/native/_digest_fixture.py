@@ -41,7 +41,9 @@ def reference_deposit_digest(accumulator_cls, partition_cls) -> str:
     """The digest over the specification, byte-compatible with ``scan_cache.deposit_digest``."""
     from rigel.scan_cache import _digest, _schema_names
 
-    partition = partition_cls.from_region_bounds([REGION_BOUNDS], region_types=[REGION_TYPES], sj=SJ)
+    partition = partition_cls.from_region_bounds(
+        [REGION_BOUNDS], region_types=[REGION_TYPES], sj=SJ
+    )
     accumulator = accumulator_cls(partition, max_fragment_length=1000)
     for start, end, introns in FRAGMENTS:
         accumulator.deposit(0, start, end, observed_introns=introns, sj_strand=1)

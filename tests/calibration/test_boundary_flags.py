@@ -158,8 +158,12 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
     statics = build_region_statics(chain, ra, flags)
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, np.int64)
-    assert not statics.boundary_flags[kind != BOUNDARY].any(), "a REGION slot carries boundary flags"
-    np.testing.assert_array_equal(statics.boundary_flags[kind == BOUNDARY], flags[idx[kind == BOUNDARY]])
+    assert not statics.boundary_flags[kind != BOUNDARY].any(), (
+        "a REGION slot carries boundary flags"
+    )
+    np.testing.assert_array_equal(
+        statics.boundary_flags[kind == BOUNDARY], flags[idx[kind == BOUNDARY]]
+    )
     assert statics.boundary_flags.any(), "the scenario must set SOME flag, or this asserts nothing"
     sc.cleanup()
 

@@ -318,7 +318,9 @@ class Partition:
     the pair registered?" — and if the start is not a region_bound, the table is never consulted.
     """
 
-    region_bounds: np.ndarray  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
+    region_bounds: (
+        np.ndarray
+    )  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
     ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     region_types: np.ndarray  # uint8[n_regions] — 0 intergenic / 1 intron / 2 exon
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
@@ -355,7 +357,9 @@ class Partition:
         n_refs = len(region_bounds_per_ref)
         for r, c in enumerate(region_bounds_per_ref):
             if c.size and (c.size < 2 or np.any(np.diff(c) <= 0)):
-                raise ValueError(f"reference {r}: region_bounds must strictly increase, got {c.tolist()}")
+                raise ValueError(
+                    f"reference {r}: region_bounds must strictly increase, got {c.tolist()}"
+                )
 
         region_bound_offsets = np.zeros(n_refs + 1, np.int64)
         region_offsets = np.zeros(n_refs + 1, np.int64)
@@ -393,7 +397,11 @@ class Partition:
         boundary_right = np.asarray(right_boundaries, np.int64)
         sj_strand = np.asarray(sj_strands, np.int8)
         order = np.lexsort((sj_strand, boundary_right, boundary_left))
-        boundary_left, boundary_right, sj_strand = boundary_left[order], boundary_right[order], sj_strand[order]
+        boundary_left, boundary_right, sj_strand = (
+            boundary_left[order],
+            boundary_right[order],
+            sj_strand[order],
+        )
 
         n_region_bounds = int(region_bound_offsets[-1])
         sj_offsets = np.zeros(n_region_bounds + 1, np.int64)
@@ -835,7 +843,10 @@ class Accumulator:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 
         p = self.partition
-        first_region_bound, last_region_bound = int(p.ref_region_bound_offsets[ref]), int(p.ref_region_bound_offsets[ref + 1])
+        first_region_bound, last_region_bound = (
+            int(p.ref_region_bound_offsets[ref]),
+            int(p.ref_region_bound_offsets[ref + 1]),
+        )
         if last_region_bound - first_region_bound < 2:
             return self._reject(DepositOutcome.EMPTY)
         region_bounds = p.region_bounds[first_region_bound:last_region_bound]
@@ -917,7 +928,10 @@ class Accumulator:
         first_base, last_base = segments[0][0], segments[-1][1] - 1
 
         t = self.tally
-        region_base, boundary_base = int(p.ref_region_offsets[ref]), int(p.ref_boundary_offsets[ref])
+        region_base, boundary_base = (
+            int(p.ref_region_offsets[ref]),
+            int(p.ref_boundary_offsets[ref]),
+        )
         r_first = self._local_region(region_bounds, first_base)
         r_last = self._local_region(region_bounds, last_base)
         t.region_start_count[region_base + r_first, column] += 1
@@ -948,7 +962,9 @@ class Accumulator:
             for boundary in range(first, last):
                 boundary_count[boundary_base + boundary - 1, column] += 1
                 if not spliced:
-                    t.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1] += inv_boundary
+                    t.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1] += (
+                        inv_boundary
+                    )
             # ── STRICT SPAN: regions this segment covers whole, excluding the path's own endpoint
             # regions. ⚠ `side="left"`/`- 1` rather than the crossing loop's bounds: a NON-FIRST
             # segment starts exactly ON a region_bound (its acceptor), and the region beginning there
@@ -1201,7 +1217,10 @@ class Accumulator:
     @staticmethod
     def _local_region(region_bounds: np.ndarray, position: int) -> int:
         """Index within this reference of the region containing ``position``."""
-        return min(max(int(np.searchsorted(region_bounds, position, side="right")) - 1, 0), region_bounds.size - 2)
+        return min(
+            max(int(np.searchsorted(region_bounds, position, side="right")) - 1, 0),
+            region_bounds.size - 2,
+        )
 
     def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
         """The sj-boundary id for this intron, or -1 if it is not annotated.
@@ -1259,6 +1278,9 @@ class Accumulator:
         if contained_region >= 0:
             return _CONTAINED_POOL.get(int(types[contained_region]))
         if sole_boundary >= 0:
-            flanks = (int(types[region_base + sole_boundary - 1]), int(types[region_base + sole_boundary]))
+            flanks = (
+                int(types[region_base + sole_boundary - 1]),
+                int(types[region_base + sole_boundary]),
+            )
             return _SPLASH_POOL.get(tuple(sorted(flanks)))
         return None

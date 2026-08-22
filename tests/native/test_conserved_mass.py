@@ -60,7 +60,9 @@ MAX_LENGTH = 1000
 
 
 def _partition(region_bounds=REGION_BOUNDS) -> Partition:
-    return Partition.from_region_bounds([region_bounds], region_types=[[0] * (len(region_bounds) - 1)])
+    return Partition.from_region_bounds(
+        [region_bounds], region_types=[[0] * (len(region_bounds) - 1)]
+    )
 
 
 def _mass_by_base(region_bounds, start: int, end: int) -> dict[int, Fraction]:
@@ -174,7 +176,9 @@ def test_a_CONTAINED_fragment_deposits_NO_mass_at_all():
     """⛔ Its whole fragment is already ``region_contained_count``; mass at a boundary as well would be it
     counted twice. This is the branch the law's ``contained`` term exists for."""
     partition = _partition()
-    total, contained = _exact_fragment_mass(partition, REGION_BOUNDS, 100, 160)  # well inside region 0
+    total, contained = _exact_fragment_mass(
+        partition, REGION_BOUNDS, 100, 160
+    )  # well inside region 0
     assert contained == 1
     assert total == 0
 
@@ -256,7 +260,11 @@ def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
     wide = [
         boundary
         for boundary in range(1, len(REGION_BOUNDS) - 1)
-        if min(REGION_BOUNDS[boundary] - REGION_BOUNDS[boundary - 1], REGION_BOUNDS[boundary + 1] - REGION_BOUNDS[boundary]) > max(LENGTHS)
+        if min(
+            REGION_BOUNDS[boundary] - REGION_BOUNDS[boundary - 1],
+            REGION_BOUNDS[boundary + 1] - REGION_BOUNDS[boundary],
+        )
+        > max(LENGTHS)
     ]
     narrow = [boundary for boundary in range(1, len(REGION_BOUNDS) - 1) if boundary not in wide]
     assert wide and narrow, "the fixture must contain both cases or this gate tests one of them"
@@ -495,9 +503,13 @@ def test_a_fragment_crossing_BOTH_sj_AND_boundaries_gives_EVERY_crossed_object_a
     )
     tally = accumulator.tally
 
-    crossed_boundaries = np.flatnonzero(np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1))
+    crossed_boundaries = np.flatnonzero(
+        np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1)
+    )
     crossed_sj = np.flatnonzero(np.asarray(tally.sj_count, np.int64).sum(axis=1))
-    assert crossed_boundaries.size == 2, "the fixture must cross two boundaries or it tests one case"
+    assert crossed_boundaries.size == 2, (
+        "the fixture must cross two boundaries or it tests one case"
+    )
     assert crossed_sj.size == 2, "the fixture must use both sj"
 
     boundary_mass = np.asarray(tally.boundary_spliced_mass, np.float64)
@@ -512,9 +524,7 @@ def test_a_fragment_crossing_BOTH_sj_AND_boundaries_gives_EVERY_crossed_object_a
 
     total = _total_deposited_mass(tally)
     deposits = int(len(crossed_boundaries) * 2 + len(crossed_sj) * 2)
-    assert abs(total - 1) <= budget(deposits), (
-        f"the fragment deposited {float(total)}, not one"
-    )
+    assert abs(total - 1) <= budget(deposits), f"the fragment deposited {float(total)}, not one"
 
 
 def test_a_sj_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_crossing():

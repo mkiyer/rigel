@@ -331,8 +331,14 @@ def test_a_locus_with_no_synthetic_component_is_BIT_IDENTICAL(mode):
     outs = []
     for index in (None, _StubIndex([False, False])):
         est = _estimator(2, mode=mode)
-        _run(est, _partition(n_units=100, log_liks=(0.0, -0.5), gdna_log_lik=-1.0), [0, 1],
-             index=index, rna_prior=50.0, gdna_prior=20.0)
+        _run(
+            est,
+            _partition(n_units=100, log_liks=(0.0, -0.5), gdna_log_lik=-1.0),
+            [0, 1],
+            index=index,
+            rna_prior=50.0,
+            gdna_prior=20.0,
+        )
         outs.append(est.em_counts.sum(axis=1).copy())
     np.testing.assert_array_equal(outs[0], outs[1])
 
@@ -361,8 +367,14 @@ def test_a_synthetic_entity_the_DATA_SUPPORTS_still_survives(mode):
     passes the zombie test above; only this one separates the two. The synthetic component is the
     strictly better explanation here, and it must keep the mass."""
     est = _estimator(2, mode=mode)
-    _run(est, _partition(n_units=200, log_liks=(-8.0, 0.0), gdna_log_lik=-8.0), [0, 1],
-         index=_StubIndex([False, True]), rna_prior=100.0, gdna_prior=10.0)
+    _run(
+        est,
+        _partition(n_units=200, log_liks=(-8.0, 0.0), gdna_log_lik=-8.0),
+        [0, 1],
+        index=_StubIndex([False, True]),
+        rna_prior=100.0,
+        gdna_prior=10.0,
+    )
     counts = est.em_counts.sum(axis=1)
     assert counts[1] > 0.9 * counts.sum(), (
         f"a synthetic entity with decisive likelihood support was suppressed anyway: {counts}"
@@ -378,8 +390,9 @@ def test_an_ALL_SYNTHETIC_locus_takes_NO_rna_prior(mode):
     res = {}
     for tag, rna_prior in (("no_prior", 0.0), ("big_prior", 500.0)):
         est = _estimator(2, mode=mode)
-        _total, _rna, gdna = _run(est, part, [0, 1], index=_StubIndex([True, True]),
-                                  rna_prior=rna_prior, gdna_prior=10.0)
+        _total, _rna, gdna = _run(
+            est, part, [0, 1], index=_StubIndex([True, True]), rna_prior=rna_prior, gdna_prior=10.0
+        )
         res[tag] = (est.em_counts.sum(axis=1).copy(), float(gdna[0]))
     np.testing.assert_allclose(res["no_prior"][0], res["big_prior"][0], rtol=1e-9, atol=1e-9)
     assert res["no_prior"][1] == pytest.approx(res["big_prior"][1], rel=1e-9), (
@@ -399,10 +412,12 @@ def test_is_synthetic_is_read_NOT_is_nrna():
 
     est = AbundanceEstimator(num_transcripts=2, em_config=EMConfig(mode="map"))
     np.testing.assert_array_equal(est._t_is_synthetic(_NrnaOnlyIndex(), 2), np.zeros(0, np.uint8))
-    np.testing.assert_array_equal(est._t_is_synthetic(_StubIndex([False, False]), 2),
-                                  np.zeros(0, np.uint8))
-    np.testing.assert_array_equal(est._t_is_synthetic(_StubIndex([False, True]), 2),
-                                  np.array([0, 1], np.uint8))
+    np.testing.assert_array_equal(
+        est._t_is_synthetic(_StubIndex([False, False]), 2), np.zeros(0, np.uint8)
+    )
+    np.testing.assert_array_equal(
+        est._t_is_synthetic(_StubIndex([False, True]), 2), np.array([0, 1], np.uint8)
+    )
 
 
 # ⛔⛔ THE ONE INVARIANT THIS DESIGN RESTS ON HAS NO TEST, AND CANNOT HAVE ONE FROM PYTHON TODAY.

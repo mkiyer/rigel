@@ -504,14 +504,18 @@ class AccumulatorPayload:
     """One BAM scan's tally. Views over C++-owned buffers; this object is the keep-alive."""
 
     # -- the partition, echoed back so a consumer can locate every object without reloading the index --
-    region_bounds: np.ndarray  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
+    region_bounds: (
+        np.ndarray
+    )  # int64[n_region_bounds] — flat, reference-major, ascending within a reference
     ref_region_bound_offsets: np.ndarray  # int64[n_refs + 1] — CSR over region_bounds
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
     ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
     ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — sj boundaries
 
     # -- regions: two disjoint populations, each two genome-strand columns --
-    region_contained_count: np.ndarray  # uint32[n_regions, 2] — the whole path lies inside the region
+    region_contained_count: (
+        np.ndarray
+    )  # uint32[n_regions, 2] — the whole path lies inside the region
     #: ⭐ float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
@@ -531,7 +535,9 @@ class AccumulatorPayload:
 
     # -- contiguous boundaries: the 0-bp boundary between two adjacent regions --
     boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
-    boundary_unspliced_inv_length_sum: np.ndarray  # float64[n_boundaries] — ONE column, strand-agnostic
+    boundary_unspliced_inv_length_sum: (
+        np.ndarray
+    )  # float64[n_boundaries] — ONE column, strand-agnostic
     #: ⭐⭐ float64[n_boundaries] — **THE CONSERVED MASS**. ⚠ This line said uint64 and named a fixed point
     #: at ``INV_LENGTH_SCALE`` until 2026-08-17; the fixed-point layer and that constant went with the ONE
     #: NUMERIC CONVENTION ruling (`94d283c0`) — a FRACTION is float64, and there is no scale to decode.
@@ -827,7 +833,6 @@ class AccumulatorPayload:
             region_bounds=region_bounds,
             **offsets,
             **banks,
-
             pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
             deposited_lengths=deposited_lengths,
             deferred=deferred,

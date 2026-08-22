@@ -146,7 +146,9 @@ def test_adjacent_regions_may_share_a_signature(alt_tss_index):
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_partition_hash_distinguishes_a_signature_invisible_region_bound(alt_tss_index, no_alt_tss_index):
+def test_partition_hash_distinguishes_a_signature_invisible_region_bound(
+    alt_tss_index, no_alt_tss_index
+):
     """⭐ Two annotations differing by exactly one signature-invisible region_bound must not share a cache key.
 
     Under the retired merged partition they produced identical arrays and hashed the SAME

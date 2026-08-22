@@ -351,9 +351,7 @@ def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
     before = CalibrationResult(**kw)
     kw["sj_mass_per_crossing"] = np.array([0.5, 0.25]) * 3.0
     after = CalibrationResult(**kw)
-    delta_property = float(
-        after.sj_conserved_mass.sum() - before.sj_conserved_mass.sum()
-    )
+    delta_property = float(after.sj_conserved_mass.sum() - before.sj_conserved_mass.sum())
     delta_library = after.library_rna_fragments - before.library_rna_fragments
     assert delta_property > 0.0, (
         "the perturbation did not move the property — the arm could not fire"

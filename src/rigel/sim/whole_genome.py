@@ -258,9 +258,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna = cfg.nrna
     nrna.mode = str(nrna_raw.get("mode", "additive_ratio"))
     if nrna.mode not in {"additive_ratio", "sparse", "fragment_share"}:
-        raise ValueError(
-            "nrna.mode must be 'additive_ratio', 'fragment_share' or 'sparse'"
-        )
+        raise ValueError("nrna.mode must be 'additive_ratio', 'fragment_share' or 'sparse'")
     raw_shares = nrna_raw.get("shares", None)
     if raw_shares is not None:
         nrna.shares = [float(x) for x in raw_shares]
@@ -453,7 +451,9 @@ def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
     n_syn = sum(1 for t in transcripts if t.is_synthetic)
     logger.info(
         "Loaded %d transcripts from index %s (%d synthetic nascent entities)",
-        len(transcripts), index_dir, n_syn,
+        len(transcripts),
+        index_dir,
+        n_syn,
     )
     return transcripts
 
@@ -471,10 +471,18 @@ def ensure_index(cfg: "WholeGenomeSimConfig") -> Path:
         return index_dir
     index_dir = Path(cfg.outdir) / "rigel_index"
     if not index_dir.is_dir():
-        logger.info("No index configured — building one from %s + %s into %s", cfg.genome, cfg.gtf, index_dir)
+        logger.info(
+            "No index configured — building one from %s + %s into %s",
+            cfg.genome,
+            cfg.gtf,
+            index_dir,
+        )
         TranscriptIndex.build(
-            cfg.genome, cfg.gtf, index_dir,
-            write_tsv=False, collapse_duplicate_transcripts=True,
+            cfg.genome,
+            cfg.gtf,
+            index_dir,
+            write_tsv=False,
+            collapse_duplicate_transcripts=True,
         )
     return index_dir
 
@@ -676,7 +684,11 @@ def apply_nrna_ratio(
     total_nrna = sum(t.nrna_abundance for t in transcripts)
     logger.info(
         "Set nRNA molecular ratio %.3g: %d contributors onto %d entities (mRNA=%.1f, nRNA=%.1f)",
-        ratio, n_contrib, n_entities, total_mrna, total_nrna,
+        ratio,
+        n_contrib,
+        n_entities,
+        total_mrna,
+        total_nrna,
     )
 
 
@@ -744,7 +756,10 @@ def apply_nrna_fragment_share(
     apply_nrna_ratio(transcripts, ratio)
     logger.info(
         "nRNA fragment share %.4g ⇒ molecular ratio %.6g (W_mature=%.4g, W_nascent@1=%.4g)",
-        share, ratio, w_mature, w_nascent_unit,
+        share,
+        ratio,
+        w_mature,
+        w_nascent_unit,
     )
     return ratio
 
@@ -830,7 +845,14 @@ def apply_sparse_nrna(
     logger.info(
         "Sparse nRNA: %d/%d gene spans ON (on_fraction=%.3g), level ~ logU(%.3g, %.3g), "
         "mRNA=%.1f, nRNA=%.1f, realised molar ratio=%.4g",
-        n_on, len(eligible), on_fraction, lo, hi, total_mrna, total_nrna, realized_ratio,
+        n_on,
+        len(eligible),
+        on_fraction,
+        lo,
+        hi,
+        total_mrna,
+        total_nrna,
+        realized_ratio,
     )
     return realized_ratio
 
@@ -876,8 +898,11 @@ def assign_file_abundances(
         else:
             t.abundance = 0.0
     if per_contributor.any():
-        direct = {i: transcripts[i].nrna_abundance for i in range(len(transcripts))
-                  if transcripts[i].nrna_abundance > 0}
+        direct = {
+            i: transcripts[i].nrna_abundance
+            for i in range(len(transcripts))
+            if transcripts[i].nrna_abundance > 0
+        }
         assign_nrna_to_entities(transcripts, per_contributor)
         for i, amount in direct.items():  # keep any nascent named on an entity row directly
             transcripts[i].nrna_abundance += amount
@@ -1202,13 +1227,20 @@ def main() -> int:
     if cfg.nrna.mode == "additive_ratio":
         print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
     elif cfg.nrna.mode == "fragment_share":
-        print(f"  nRNA frag shares: {cfg.nrna.shares} (molecular ratio SOLVED per share)", flush=True)
+        print(
+            f"  nRNA frag shares: {cfg.nrna.shares} (molecular ratio SOLVED per share)", flush=True
+        )
     elif cfg.nrna.mode == "sparse":
-        print(f"  nRNA ranges:      {cfg.nrna.abundance_ranges} (LOG-uniform, absolute)", flush=True)
+        print(
+            f"  nRNA ranges:      {cfg.nrna.abundance_ranges} (LOG-uniform, absolute)", flush=True
+        )
         print(f"  nRNA on_fraction: {cfg.nrna.on_fraction} of gene spans", flush=True)
     if cfg.abundance.mode == "file":
-        print("  nRNA:             the sweep above is SKIPPED if the abundance file supplies "
-              "nrna_abundance", flush=True)
+        print(
+            "  nRNA:             the sweep above is SKIPPED if the abundance file supplies "
+            "nrna_abundance",
+            flush=True,
+        )
     print(f"  Transcript filter:{cfg.transcript_filter}", flush=True)
     print(f"  Oracle BAM:       {cfg.oracle_bam}", flush=True)
 

@@ -303,7 +303,9 @@ def test_gdna_emits_across_tss_tes_boundary():
     )
     exon = 2  # the single-exon gene, flanked on both sides by TSS/TES boundaries (chain N E N E N)
     # THE FIX — the exon receives a gDNA relay across the boundary (incoming precision > 0). Pre-fix: 0 (no relay).
-    assert cap["prec_g"][exon] > 0.0, "single-exon gene got NO gDNA relay across the TSS/TES boundary"
+    assert cap["prec_g"][exon] > 0.0, (
+        "single-exon gene got NO gDNA relay across the TSS/TES boundary"
+    )
     # The intergenic flanks emit ZERO RNA authority: the exon receives no +/− RNA message from them.
     assert cap["prec_p"][exon] == 0.0 and cap["prec_n"][exon] == 0.0
     # State ⊥ messages: the intergenic regions stay locked all-gDNA (confident own-state, ignore all inputs).

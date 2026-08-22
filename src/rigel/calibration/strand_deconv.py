@@ -37,7 +37,9 @@ from .region_arrays import boundary_region_indices
 from .signature import TS_NEG, TS_NONE, TS_POS
 
 
-def boundary_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def boundary_strand_orientation(
+    ts_lo: np.ndarray, ts_hi: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
     """``(orient_neg, strand_observable)`` per contiguous boundary, from its two flanks' strand classes.
 
     A boundary is **strand-observable** iff its two flanks define a single consistent transcript sense:
@@ -70,7 +72,9 @@ def boundary_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[n
     return cons_neg, cons_pos | cons_neg
 
 
-def boundary_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def boundary_seeds(
+    substrate, region_arrays, region_density
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous boundary.
 
     The exon–intron / exon–intergenic boundary seeds for the gDNA strand-overdispersion fit

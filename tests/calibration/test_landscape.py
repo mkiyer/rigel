@@ -176,8 +176,6 @@ def test_declines_gracefully_on_degenerate_input():
         is None
     )
     assert (
-        fit_landscape(
-            np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0), anchor=np.zeros(0, bool)
-        )
+        fit_landscape(np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0), anchor=np.zeros(0, bool))
         is None
     )

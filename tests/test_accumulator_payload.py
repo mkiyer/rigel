@@ -44,7 +44,9 @@ _DEFERRED_REGION_BOUNDS = [0, 100, 200, 300, 400, 500, 600]
 
 def _deferred_bank(n_fragments: int = 4) -> dict[str, np.ndarray]:
     """``n_fragments`` deferred records, flattened exactly as ``Tally.deferred_arrays()`` specifies."""
-    partition = Partition.from_region_bounds([_DEFERRED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 1, 0]])
+    partition = Partition.from_region_bounds(
+        [_DEFERRED_REGION_BOUNDS], region_types=[[0, 2, 1, 2, 1, 0]]
+    )
     acc = Accumulator(partition, max_fragment_length=1000)
     for i in range(n_fragments):
         outcome = acc.deposit(
@@ -95,7 +97,9 @@ def _calibration_dict(**overrides) -> dict:
     ref_sj_offsets = np.asarray([0, 2, 3, 3], np.int64)
 
     cal = {
-        "region_bounds": np.asarray([c for region_bounds in REGION_BOUNDS_PER_REF for c in region_bounds], np.int64),
+        "region_bounds": np.asarray(
+            [c for region_bounds in REGION_BOUNDS_PER_REF for c in region_bounds], np.int64
+        ),
         "ref_region_bound_offsets": ref_region_bound_offsets,
         "ref_region_offsets": ref_region_offsets,
         "ref_boundary_offsets": ref_boundary_offsets,

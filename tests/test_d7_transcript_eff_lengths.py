@@ -103,9 +103,7 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     # this gate pass on the day production DROPPED the divisor.
     fl_models = build_fl_models(
         payload,
-        sj_opportunity=crossing_probability_from_index(
-            scenario.index, int(payload.max_length)
-        ),
+        sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
     )
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     exonic = scenario.index.t_df["length"].values.astype(np.int64)

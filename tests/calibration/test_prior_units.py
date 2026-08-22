@@ -86,8 +86,12 @@ def _enumerate(region_len, w):
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
     from native._accumulator_reference import Accumulator, Partition
 
-    region_bounds = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
-    partition = Partition.from_region_bounds([region_bounds.tolist()], region_types=[[0] * (len(region_bounds) - 1)])
+    region_bounds = np.concatenate(
+        [[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]
+    ).astype(int)
+    partition = Partition.from_region_bounds(
+        [region_bounds.tolist()], region_types=[[0] * (len(region_bounds) - 1)]
+    )
     acc = Accumulator(partition, max_fragment_length=10**6)
     n = 0
     for start in range(0, int(region_bounds[-1]) - int(w) + 1):
@@ -126,7 +130,9 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
         Partition,
     )
 
-    region_bounds = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
+    region_bounds = np.concatenate(
+        [[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]
+    ).astype(int)
     n_boundaries = max(len(region_bounds) - 2, 0)
     mass = np.zeros(n_boundaries, dtype=np.float64)
     count = np.zeros(n_boundaries, dtype=np.float64)
@@ -140,7 +146,9 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
             acc.deposit(0, start, start + w)
         t = acc.tally
         mass += rho * np.asarray(t.boundary_unspliced_mass, np.float64)
-        count += rho * np.asarray(t.boundary_unspliced_count, np.int64).sum(axis=1).astype(np.float64)
+        count += rho * np.asarray(t.boundary_unspliced_count, np.int64).sum(axis=1).astype(
+            np.float64
+        )
     out = np.ones(n_boundaries, dtype=np.float64)
     np.divide(mass, count, out=out, where=count > 0)
     return out

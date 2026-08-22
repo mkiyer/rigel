@@ -31,7 +31,6 @@ from .manifest import condition_manifest_map, load_manifest
 from .read_name import parse_origin
 
 
-
 _POOLS_3 = ("gdna", "nrna", "mrna")
 
 
@@ -646,7 +645,9 @@ def analyze_net_flow(
             boundaries.append("    (insufficient variation to rank covariates)")
 
     # ── Identifiability diagnostic: gross confusion vs net (expected-unrecoverable vs bias) ──
-    boundaries.append("\n  IDENTIFIABILITY — single-exon (gDNA-identical) vs multi-exon transcripts:")
+    boundaries.append(
+        "\n  IDENTIFIABILITY — single-exon (gDNA-identical) vs multi-exon transcripts:"
+    )
     if "single_exon" in contam.columns and not contam.empty:
         boundaries.append(
             f"    {'class':<12} {'n_tx':>6} {'mean|Δ|':>8} {'meanΔ':>8} {'mean net_from_gdna':>18}"

@@ -418,8 +418,10 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
             _debug=d,
         )
     assert d["abundance_landscape"] is None
-    assert any("wall inputs" in r.message % r.args if r.args else "wall inputs" in r.message
-               for r in caplog.records), "the skip must be LOUD — no silent no-op"
+    assert any(
+        "wall inputs" in r.message % r.args if r.args else "wall inputs" in r.message
+        for r in caplog.records
+    ), "the skip must be LOUD — no silent no-op"
 
 
 def test_the_background_pair_STILL_REFUSES_without_the_wall_inputs():

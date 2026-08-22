@@ -363,7 +363,10 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
         lo, hi = int(offsets[ref]), int(offsets[ref + 1])
         assert hi > lo, f"record {i} names reference {ref}, which has no region_bounds at all"
         assert (
-            int(region_bounds[lo]) <= int(deferred.start[i]) < int(deferred.end[i]) <= int(region_bounds[hi - 1])
+            int(region_bounds[lo])
+            <= int(deferred.start[i])
+            < int(deferred.end[i])
+            <= int(region_bounds[hi - 1])
         ), (
             f"record {i} spans [{int(deferred.start[i])},{int(deferred.end[i])}) but reference {ref} "
             f"covers [{int(region_bounds[lo])},{int(region_bounds[hi - 1])}) — the drain would replay it off the axis"

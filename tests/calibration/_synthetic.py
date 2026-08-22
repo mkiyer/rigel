@@ -273,9 +273,7 @@ def make_chain_parts(
         region_contained=SimpleNamespace(count=region_counts),
         boundary_unspliced=SimpleNamespace(count=boundary_counts),
         boundary_spliced=SimpleNamespace(count=pair(boundary_spliced, 0.0, n_boundaries)),
-        sj=SimpleNamespace(
-            count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)
-        ),
+        sj=SimpleNamespace(count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)),
     )
     region_arrays = SimpleNamespace(
         signature=sig,

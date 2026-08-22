@@ -56,8 +56,17 @@ def _estimator(n_t: int, *, warm_start: str = "coverage", mode: str = "vbem"):
     return est
 
 
-def _run(est, partition, t_idx, *, weight=None, rna_prior=0.0, gdna_prior=0.0, enable_gdna=1,
-         iterations=500):
+def _run(
+    est,
+    partition,
+    t_idx,
+    *,
+    weight=None,
+    rna_prior=0.0,
+    gdna_prior=0.0,
+    enable_gdna=1,
+    iterations=500,
+):
     # ⚠ `em_iterations` is an EXPLICIT argument of the estimator entry point, NOT read from
     # `em_config` — a helper that sets it on the config alone silently runs the default 1000.
     est.run_batch_locus_em_partitioned(
@@ -101,7 +110,9 @@ def test_the_WEIGHT_moves_the_converged_split_into_the_weights_ratio():
     flat = _run(_estimator(2), part, [0, 1], rna_prior=40.0)
     tilted = _run(_estimator(2), part, [0, 1], weight=[3.0, 1.0], rna_prior=40.0)
 
-    assert flat[0] == pytest.approx(flat[1], rel=1e-6), "flat likelihoods must split evenly with no weight"
+    assert flat[0] == pytest.approx(flat[1], rel=1e-6), (
+        "flat likelihoods must split evenly with no weight"
+    )
     assert tilted[0] / tilted[1] == pytest.approx(3.0, rel=0.05), (
         "the weight did not move the converged split into its own ratio"
     )

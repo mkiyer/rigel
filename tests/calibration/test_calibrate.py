@@ -103,7 +103,9 @@ def test_the_conserved_sj_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
     np.testing.assert_allclose(
         result.sj_conserved_mass, payload.sj_mass.sum(axis=1), rtol=0, atol=1e-12
     )
-    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], "the fixture cannot separate the fold rules"
+    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], (
+        "the fixture cannot separate the fold rules"
+    )
     # ⚠ Could this have failed? The incidence is 10× the mass here, so passing by accident is not
     # available (`TRAPS: could-the-arm-have-fired`).
     assert not np.allclose(payload.sj_mass.sum(axis=1), SJ_FLUX)

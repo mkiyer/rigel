@@ -269,9 +269,7 @@ def run_condition_grid(
                         "nrna_ratio": nrna_ratio,
                         "nrna_fragment_share": nrna_share,
                         "nrna_abundance_range": nrna_abundance_range,
-                        "nrna_on_fraction": (
-                            nrna.on_fraction if nrna_mode == "sparse" else None
-                        ),
+                        "nrna_on_fraction": (nrna.on_fraction if nrna_mode == "sparse" else None),
                         "capture_label": capture_scenario.label,
                         "capture_enabled": bool(capture_scenario.config.probes),
                         "capture_config": capture_scenario.config,

@@ -516,7 +516,9 @@ class OracleTruth:
         def total(sub, population):
             return np.asarray(getattr(sub, population).count, np.float64).sum(1)
 
-        rna_region = total(subs["mrna"], "region_contained") + total(subs["nrna"], "region_contained")
+        rna_region = total(subs["mrna"], "region_contained") + total(
+            subs["nrna"], "region_contained"
+        )
         rna_boundary_unspliced = total(subs["mrna"], "boundary_unspliced") + total(
             subs["nrna"], "boundary_unspliced"
         )

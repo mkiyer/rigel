@@ -105,7 +105,9 @@ def test_a_single_region_reference_owns_no_boundary():
 def test_the_two_directions_round_trip():
     lo, hi = boundary_region_indices(REF_ID)
     right = region_right_boundary(REF_ID)
-    np.testing.assert_array_equal(right[lo], np.arange(lo.size))  # boundary → its left region → itself
+    np.testing.assert_array_equal(
+        right[lo], np.arange(lo.size)
+    )  # boundary → its left region → itself
     has_boundary = right >= 0
     np.testing.assert_array_equal(lo[right[has_boundary]], np.flatnonzero(has_boundary))
 

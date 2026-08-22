@@ -184,8 +184,11 @@ def test_status_names_the_next_stage(tmp_path, capsys):
 def test_the_shipped_panel_configs_all_load(tmp_path):
     """⛔ A config the workflow cannot parse is a panel nobody can rebuild. ⚠ `example_*.yaml` are
     documentation templates and are deliberately excluded."""
-    cfgs = [c for c in (ROOT / "scripts" / "sim" / "configs").glob("*.yaml")
-            if not c.name.startswith("example_")]
+    cfgs = [
+        c
+        for c in (ROOT / "scripts" / "sim" / "configs").glob("*.yaml")
+        if not c.name.startswith("example_")
+    ]
     assert cfgs, "no panel configs found — this test would pass vacuously"
     for c in cfgs:
         p = PANEL.Panel(c)

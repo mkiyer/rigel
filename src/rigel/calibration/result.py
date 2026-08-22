@@ -395,7 +395,9 @@ class CalibrationResult:
         )
         return float(
             np.asarray(self.mass_rna_region, dtype=np.float64).sum()
-            + (unspliced_boundary * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)).sum()
+            + (
+                unspliced_boundary * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)
+            ).sum()
             + (
                 np.asarray(self.mass_rna_spliced_boundary, dtype=np.float64)
                 * np.asarray(self.boundary_spliced_mass_per_crossing, dtype=np.float64)

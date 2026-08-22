@@ -423,7 +423,10 @@ def test_a_STRUCTURALLY_LOCKED_BOUNDARY_is_as_DETERMINED_as_a_locked_region(audi
     # PERTURBATION: on the BOUNDARY axis those objects must carry mass, or excluding them cost nothing.
     boundary_audit = SA.audit(m, axis="boundary", config=cfg)
     assert boundary_audit["channels"]["locked"].sum() > 0, "no locked objects on the boundary axis"
-    assert boundary_audit["total"][boundary_audit["channels"]["locked"] & boundary_audit["live"]].sum() > 0, (
+    assert (
+        boundary_audit["total"][boundary_audit["channels"]["locked"] & boundary_audit["live"]].sum()
+        > 0
+    ), (
         "the locked boundaries carry no mass, so their misclassification cost nothing and this gate "
         "cannot demonstrate the defect"
     )

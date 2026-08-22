@@ -338,7 +338,9 @@ def test_the_lend_branch_of_the_licence_is_live():
     steps = [r for r in walk if r["pinned"] is not None]
     lend_only = [r for r in steps if r["may_share_composition"] and not r["g1"]]
     neither = [r for r in steps if not r["may_share_composition"] and not r["g1"]]
-    assert lend_only, "no step is licensed by composition alone — `may_share_composition` decides nothing here"
+    assert lend_only, (
+        "no step is licensed by composition alone — `may_share_composition` decides nothing here"
+    )
     assert neither, "every step carries some licence — the fixture proves no exclusion"
     assert [r for r in steps if r["g1"]], "no structurally pure-gDNA destination in the fixture"
 

@@ -462,7 +462,9 @@ def test_splice_in_premise_logvar_is_the_mom_second_moment_halved():
 def test_splice_in_premise_logvar_subtracts_noise_and_is_direction_free():
     """A gap fully explained by the boundaries' own noise leaves nothing; a↔b swap cannot change the answer."""
     fa, fb = np.array([np.e]), np.array([1.0])  # d = 1
-    per, _ = splice_in_premise_logvar(fa, fb, np.array([0.6]), np.array([0.6]))  # noise 1.2 > d² = 1
+    per, _ = splice_in_premise_logvar(
+        fa, fb, np.array([0.6]), np.array([0.6])
+    )  # noise 1.2 > d² = 1
     assert float(per[0]) == 0.0
     p1, _ = splice_in_premise_logvar(fa, fb, np.array([0.1]), np.array([0.2]))
     p2, _ = splice_in_premise_logvar(fb, fa, np.array([0.2]), np.array([0.1]))
@@ -585,7 +587,9 @@ def test_splice_out_continue_share_scalar_is_bit_identical_to_the_array_form():
     vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 1e6, np.inf, -np.inf, np.nan, -1.0]
     with np.errstate(all="ignore"):  # `inf + -inf` and `0/0` are the corners under test
         for x, y in itertools.product(vals, vals):
-            assert _same_bits(splice_out_continue_share(x, y), splice_out_continue_share_scalar(x, y)), (x, y)
+            assert _same_bits(
+                splice_out_continue_share(x, y), splice_out_continue_share_scalar(x, y)
+            ), (x, y)
     rng = np.random.default_rng(5)
     u, v = np.exp(rng.uniform(-20, 12, 4000)), np.exp(rng.uniform(-20, 12, 4000))
     ref = splice_out_continue_share(u, v)

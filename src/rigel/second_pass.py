@@ -320,7 +320,9 @@ class _Accumulators:
         region_lo = int(payload.ref_region_offsets[ref])
         n_regions = max(region_bound_hi - region_bound_lo - 1, 0)
         accumulator = NativeAccumulator(
-            region_bounds=np.ascontiguousarray(payload.region_bounds[region_bound_lo:region_bound_hi], dtype=np.int64),
+            region_bounds=np.ascontiguousarray(
+                payload.region_bounds[region_bound_lo:region_bound_hi], dtype=np.int64
+            ),
             region_types=np.ascontiguousarray(
                 self._region_types[region_lo : region_lo + n_regions], dtype=np.uint8
             ),
@@ -411,7 +413,10 @@ def score_held_fragments(
             for h in range(h0, h1)
         ]
         acc = accumulators[ref]
-        region_bound_lo, region_bound_hi = int(payload.ref_region_bound_offsets[ref]), int(payload.ref_region_bound_offsets[ref + 1])
+        region_bound_lo, region_bound_hi = (
+            int(payload.ref_region_bound_offsets[ref]),
+            int(payload.ref_region_bound_offsets[ref + 1]),
+        )
         boundary_base = int(payload.ref_boundary_offsets[ref])
         # ⭐ The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
         # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
@@ -454,10 +459,16 @@ def score_held_fragments(
                 # The genomic path's evidence is the unspliced crossing density where the others jump.
                 boundary_densities = []
                 for a, b in contested:
-                    first, last = _distinguishing_boundaries(region_bounds, region_bound_lo, region_bound_hi, a, b)
+                    first, last = _distinguishing_boundaries(
+                        region_bounds, region_bound_lo, region_bound_hi, a, b
+                    )
                     for boundary in range(first, last):
                         boundary_densities.append(
-                            float(payload.boundary_unspliced_inv_length_sum[boundary_base + boundary - 1])
+                            float(
+                                payload.boundary_unspliced_inv_length_sum[
+                                    boundary_base + boundary - 1
+                                ]
+                            )
                         )
                 density[slot] = _bottleneck(boundary_densities)
 

@@ -69,19 +69,28 @@ def _result(
     ne = max(n - 1, 0)
     ez = np.zeros(ne, dtype=np.float64)
     region_eff_arr = np.asarray(region_eff, dtype=np.float64)
-    boundary_eff_arr = ez.copy() if boundary_eff is None else np.asarray(boundary_eff, dtype=np.float64)
+    boundary_eff_arr = (
+        ez.copy() if boundary_eff is None else np.asarray(boundary_eff, dtype=np.float64)
+    )
     return CalibrationResult(
         mass_gdna_region=ng,
         mass_rna_region=np.asarray(region_r, dtype=np.float64),
-        mass_gdna_boundary=ez.copy() if boundary_g is None else np.asarray(boundary_g, dtype=np.float64),
-        mass_rna_boundary=ez.copy() if boundary_r is None else np.asarray(boundary_r, dtype=np.float64),
+        mass_gdna_boundary=ez.copy()
+        if boundary_g is None
+        else np.asarray(boundary_g, dtype=np.float64),
+        mass_rna_boundary=ez.copy()
+        if boundary_r is None
+        else np.asarray(boundary_r, dtype=np.float64),
         mass_rna_spliced_boundary=(
-            ez.copy() if boundary_spliced is None else np.asarray(boundary_spliced, dtype=np.float64)
+            ez.copy()
+            if boundary_spliced is None
+            else np.asarray(boundary_spliced, dtype=np.float64)
         ),
         # ⭐ GEOMETRY, not a split. 1.0 is the identity — a boundary whose flanks both exceed every
         # fragment length, where one crossing IS one fragment. A test exercising K-inflation overrides it.
         boundary_mass_per_crossing=(
-            np.ones_like(ez) if mass_per_crossing is None
+            np.ones_like(ez)
+            if mass_per_crossing is None
             else np.asarray(mass_per_crossing, dtype=np.float64)
         ),
         count_rna_sj=np.zeros(0, dtype=np.float64),
@@ -90,10 +99,14 @@ def _result(
         gdna_region_eff_len=region_eff_arr,
         gdna_boundary_eff_len=boundary_eff_arr,
         rna_region_eff_len=(
-            region_eff_arr if rna_region_eff is None else np.asarray(rna_region_eff, dtype=np.float64)
+            region_eff_arr
+            if rna_region_eff is None
+            else np.asarray(rna_region_eff, dtype=np.float64)
         ),
         rna_boundary_eff_len=(
-            boundary_eff_arr if rna_boundary_eff is None else np.asarray(rna_boundary_eff, dtype=np.float64)
+            boundary_eff_arr
+            if rna_boundary_eff is None
+            else np.asarray(rna_boundary_eff, dtype=np.float64)
         ),
         gdna_frac_region=np.zeros_like(ng),
         rna_pos_frac_region=np.zeros_like(ng),
@@ -182,7 +195,9 @@ def test_factor_one_under_uniform_gdna():
     # ⚠ It replaces `ρ · span_bp` = 8.0, the retired density rule: that reached fragment units by
     # dividing the mass by its own opportunity and re-integrating, and dropped the 4.8 of crossing
     # fragments entirely, because a 0-bp boundary contributes no genomic span to integrate over.
-    np.testing.assert_allclose(priors.gdna_prior_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9)
+    np.testing.assert_allclose(
+        priors.gdna_prior_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9
+    )
     assert not np.isclose(priors.gdna_prior_count[0], rho * 400.0)  # ⛔ not the retired ρ·span_bp
 
 
@@ -280,7 +295,9 @@ def test_gdna_mass_conservation_regions_plus_boundaries():
     # test CANNOT tell the two rules apart. The discrimination lives in the q ≠ 1 test below and in
     # `test_prior_units.py`; asserting 11.0 here would otherwise read as a ruling that it is a raw sum.
     np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
-    np.testing.assert_allclose(cal.boundary_mass_per_crossing, 1.0)  # ...the reason it coincides, pinned
+    np.testing.assert_allclose(
+        cal.boundary_mass_per_crossing, 1.0
+    )  # ...the reason it coincides, pinned
     np.testing.assert_allclose(
         priors.gdna_prior_count.sum(), cal.mass_gdna_region.sum() + cal.mass_gdna_boundary.sum()
     )
@@ -349,7 +366,9 @@ def test_the_sj_flux_does_NOT_enter_the_rna_prior():
     ⚠ The result carries the flux for QC (`test_calibrate`); ``assemble_priors`` must ignore it, and
     that is a deliberate asymmetry rather than an oversight.
     """
-    base = _result(region_g=[1.0, 1.0], region_r=[2.0, 2.0], region_eff=[100.0, 100.0], boundary_eff=[50.0])
+    base = _result(
+        region_g=[1.0, 1.0], region_r=[2.0, 2.0], region_eff=[100.0, 100.0], boundary_eff=[50.0]
+    )
     import dataclasses
 
     loud = dataclasses.replace(
@@ -525,8 +544,9 @@ def test_stray_mass_on_a_zero_opportunity_boundary_is_dropped_from_the_eff_len()
     ``stray = 5000``, where it pins against the 850 bp boundary ceiling. With the drop it does not move at
     all, and this test sweeps 250× of stray mass to say so.
     """
-    ra = _regions(list(range(0, 700, 100)), list(range(100, 800, 100)),
-                  signature=[0] + [BIT_EXON_POS] * 6)
+    ra = _regions(
+        list(range(0, 700, 100)), list(range(100, 800, 100)), signature=[0] + [BIT_EXON_POS] * 6
+    )
     ml = [_ml(0, [(0, 100, 700)])]  # the locus is regions 1-6; region 0 is intergenic and dropped
     quiet = assemble_priors(_stray_on_a_dead_boundary_cal(0.0), ra, ml).gdna_eff_len[0]
     for stray in (20.0, 5000.0):
@@ -580,9 +600,9 @@ def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
     ra = _six_region_ra()
     rho = 2.0
     cal = _uniform_field(np.full(6, 100.0), np.full(5, 50.0), rho)
-    assert _global_reference_density(cal.mass_gdna_region, cal.gdna_region_eff_len) == pytest.approx(
-        rho
-    )
+    assert _global_reference_density(
+        cal.mass_gdna_region, cal.gdna_region_eff_len
+    ) == pytest.approx(rho)
     span = 6 * 100.0 + 5 * 50.0  # 850
     np.testing.assert_allclose(
         assemble_priors(cal, ra, [_ml(0, [(0, 0, 600)])]).gdna_eff_len[0], span, rtol=1e-9

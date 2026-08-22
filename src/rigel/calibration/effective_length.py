@@ -153,6 +153,7 @@ def crossing_eff_length(
 #  channel and belongs here, beside the opportunities it is a functional of.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
+
 @dataclass(frozen=True, slots=True)
 class LandedMoments:
     """The five moments of the opportunity-tilted length distribution ``g_c`` at each object.
@@ -172,6 +173,7 @@ class LandedMoments:
     q2: np.ndarray
     q12: np.ndarray
     eff: np.ndarray
+
 
 def _pmf_cumulants(fl_pmf: np.ndarray):
     """Cumulative sums of ``f(w)·w^k`` for ``k ∈ {−2,−1,0,1,2,3}`` — the whole of the region frame.
@@ -194,6 +196,7 @@ def _pmf_cumulants(fl_pmf: np.ndarray):
         np.cumsum(p * w * w),  # S2  = Σ w² f
         np.cumsum(p * w * w * w),  # S3  = Σ w³ f
     )
+
 
 def contained_moments(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMoments:
     """Moments of the tilted pmf for the CONTAINED population: ``A(w) = (ell − w + 1)+``, ``u(w) = 1/w``.
@@ -228,6 +231,7 @@ def contained_moments(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> LandedMo
         a * S2[i] - S3[i],
         eff,  # E[A·u·w] == E[A] because u(w)·w == 1
     )
+
 
 def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
     """Moments for the CROSSING population at UNBOUNDED reach: ``A(w) = (w−1)+``, ``u(w) = 1/(w−1)``.
@@ -265,6 +269,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
         np.asarray(float((p * w)[ok].sum())),
     )
 
+
 def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
     """Divide the raw ``E[A··]`` moments by ``E[A]`` to get the tilted-pmf moments.
 
@@ -280,6 +285,7 @@ def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
         return np.divide(x, eff, out=np.zeros(eff.shape, dtype=np.float64), where=live)
 
     return LandedMoments(m1=d(e_u), m2=d(e_w), q1=d(e_uu), q2=d(e_ww), q12=d(e_uw), eff=eff)
+
 
 def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) -> LandedMoments:
     """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at BOUNDARY slots.

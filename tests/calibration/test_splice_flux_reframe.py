@@ -189,12 +189,8 @@ def test_a_NEG_sj_splits_IDENTICALLY_to_a_POS_one():
     pos = _gene_parts(strand=Strand.POS, flux=400.0).geometry
     neg = _gene_parts(strand=Strand.NEG, flux=400.0).geometry
     # the flux moves column (genome strand -> transcript strand keying) and NOT slot
-    np.testing.assert_allclose(
-        np.asarray(pos.sj_count_lo)[:, 0], np.asarray(neg.sj_count_lo)[:, 1]
-    )
-    np.testing.assert_allclose(
-        np.asarray(pos.sj_count_hi)[:, 0], np.asarray(neg.sj_count_hi)[:, 1]
-    )
+    np.testing.assert_allclose(np.asarray(pos.sj_count_lo)[:, 0], np.asarray(neg.sj_count_lo)[:, 1])
+    np.testing.assert_allclose(np.asarray(pos.sj_count_hi)[:, 0], np.asarray(neg.sj_count_hi)[:, 1])
     assert float(np.asarray(neg.sj_count_lo)[:, 0].sum()) == 0.0
     assert float(np.asarray(neg.sj_count_hi)[:, 0].sum()) == 0.0
     # ⛔ and the placement is NOT symmetric, so the equality above has teeth: swapping the two banks
@@ -329,7 +325,9 @@ def test_the_SOLVER_publishes_the_pair_and_they_differ_only_at_the_sj_BOUNDARIES
     assert differ == {lo_boundary, hi_boundary}, (
         f"only the two sj-bearing BOUNDARIES may differ between flanks; got {sorted(differ)}"
     )
-    assert rho_lo[lo_boundary] > rho_hi[lo_boundary], "the LOW flank of a sj's low end holds the flux"
+    assert rho_lo[lo_boundary] > rho_hi[lo_boundary], (
+        "the LOW flank of a sj's low end holds the flux"
+    )
     assert rho_hi[hi_boundary] > rho_lo[hi_boundary], "the HIGH flank of its high end holds it"
 
 

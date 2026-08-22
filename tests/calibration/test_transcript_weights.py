@@ -65,7 +65,9 @@ def _calibration(
         mass_gdna_region=z_n.copy(),
         mass_rna_region=np.asarray(region_mass, dtype=np.float64),
         mass_gdna_boundary=z_e.copy(),
-        mass_rna_boundary=z_e.copy() if boundary_mass is None else np.asarray(boundary_mass, dtype=np.float64),
+        mass_rna_boundary=z_e.copy()
+        if boundary_mass is None
+        else np.asarray(boundary_mass, dtype=np.float64),
         mass_rna_spliced_boundary=z_e.copy(),
         boundary_mass_per_crossing=np.ones(n_boundaries),
         count_rna_sj=z_j.copy(),
@@ -100,9 +102,7 @@ def _calibration(
 
 
 @pytest.mark.parametrize("mode", TW.MODES)
-def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
-    tmp_path, _patched_sj, mode
-):
+def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(tmp_path, _patched_sj, mode):
     """⭐⭐ **THE DERIVATION, END TO END.** One transcript, one 1,000 bp exon region_bound by the partition into
     two 500 bp regions plus the boundary between them — three objects of two different kinds and three
     different opportunities. Load each with exactly the mass ``A_t·ceff(o)/E_t`` the derivation predicts
@@ -143,9 +143,7 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
     assert w[0] == pytest.approx(abundance, rel=1e-9)
 
 
-def test_build_weights_ITSELF_weights_by_opportunity_not_by_object_count(
-    tmp_path, _patched_sj
-):
+def test_build_weights_ITSELF_weights_by_opportunity_not_by_object_count(tmp_path, _patched_sj):
     """⛔⛔ **THE HOLE THIS GATE WAS ADDED TO CLOSE.** The re-partition gates below call
     ``repartition_invariance`` → ``_power_mean`` directly, so replacing ``build_weights``' own
     ``opp[keep]`` with ``ones`` — the exact defect `TRAPS: a-mean-of-ratios-inherits-the-partition`

@@ -85,10 +85,16 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     #   ⚠ These keys are declared ONCE — `G4`/`G5`/`G6` appeared twice in this dict when the test
     #   chromosome was added and the LATER literal silently won, so the new scopes had no effect and
     #   the gate stayed red. A duplicate key in a dict literal is not an error; it is a lost edit.
-    "G4": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py",
-           "docs/TESTING.md"),
-    "G5": ("tests/test_implicit_splice.py", "tests/calibration/test_vertex_reference.py",
-           "docs/TESTING.md"),
+    "G4": (
+        "tests/test_implicit_splice.py",
+        "tests/calibration/test_vertex_reference.py",
+        "docs/TESTING.md",
+    ),
+    "G5": (
+        "tests/test_implicit_splice.py",
+        "tests/calibration/test_vertex_reference.py",
+        "docs/TESTING.md",
+    ),
     # moment variables in the opportunity-tilted length quadrature
     "C2": (
         "src/rigel/calibration/effective_length.py",

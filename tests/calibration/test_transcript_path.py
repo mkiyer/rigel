@@ -131,9 +131,7 @@ def _kinds(path, t):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_a_MULTI_EXON_transcript_takes_its_exons_and_a_sj_between_them(
-    tmp_path, _patched_sj
-):
+def test_a_MULTI_EXON_transcript_takes_its_exons_and_a_sj_between_them(tmp_path, _patched_sj):
     """⭐ The canonical path: region, splice junction, region. ⛔ The INTRON's region is absent — a mature
     molecule has no intronic bases — and the transcript's two OUTER boundaries are absent, because the
     molecule ends at them."""
@@ -160,9 +158,7 @@ def test_a_boundary_INTERIOR_to_an_exon_is_crossed_and_included(tmp_path, _patch
     assert _kinds(path, 0) == [(STEP_REGION, 1), (STEP_BOUNDARY, 1), (STEP_REGION, 2)]
 
 
-def test_a_SINGLE_EXON_span_keeps_every_region_it_covers_INTRONS_INCLUDED(
-    tmp_path, _patched_sj
-):
+def test_a_SINGLE_EXON_span_keeps_every_region_it_covers_INTRONS_INCLUDED(tmp_path, _patched_sj):
     """⭐ The synthetic shadow span the index manufactures for a gene: one interval, so every region
     under it is crossed contiguously — including the ones that are introns of its mature sibling."""
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
@@ -209,9 +205,7 @@ def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
     """
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     exons = [(1_000, 2_000), (9_000, 10_000)]
-    idx = _Index(
-        tmp_path, bounds, {0: exons, 1: exons}, strands=[Strand.POS, Strand.NEG]
-    )
+    idx = _Index(tmp_path, bounds, {0: exons, 1: exons}, strands=[Strand.POS, Strand.NEG])
     path = build_transcript_path(idx, _Regions(bounds))
 
     fwd = _kinds(path, 0)
@@ -225,9 +219,7 @@ def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
     # ⭐ and the two sj ids DIFFER, because strand is part of the sj key — two transcripts on
     # opposite strands splicing identical coordinates are two slots, which is the redundancy the key
     # keeps deliberately for error checking.
-    assert [o for k, o in fwd if k == STEP_SPLICE_SJ] != [
-        o for k, o in rev if k == STEP_SPLICE_SJ
-    ]
+    assert [o for k, o in fwd if k == STEP_SPLICE_SJ] != [o for k, o in rev if k == STEP_SPLICE_SJ]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -235,9 +227,7 @@ def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_two_transcripts_sharing_one_intron_resolve_to_the_SAME_sj_id(
-    tmp_path, _patched_sj
-):
+def test_two_transcripts_sharing_one_intron_resolve_to_the_SAME_sj_id(tmp_path, _patched_sj):
     """⭐ A sj is a property of the genome, not of a transcript: two isoforms splicing the same
     intron must land on one slot, because the accumulator tallied their fragments there together."""
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]

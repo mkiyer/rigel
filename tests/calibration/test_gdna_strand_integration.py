@@ -136,7 +136,9 @@ def test_calibrate_recovers_overdispersion(od_true):
 
 def test_calibrate_binomial_gdna_floors_to_zero():
     """Non-overdispersed (50/50) gDNA → the identifiability gate floors od to 0 (Binomial)."""
-    payload, ra = _intergenic_betabinom_payload(n_regions=400, depth=150, overdispersion=0.0, seed=7)
+    payload, ra = _intergenic_betabinom_payload(
+        n_regions=400, depth=150, overdispersion=0.0, seed=7
+    )
     assert _calibrate(payload, ra).gdna_strand_overdispersion < 0.02
 
 

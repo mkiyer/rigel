@@ -370,7 +370,9 @@ def build_splice_graph(
         pd.concat(n_rows, ignore_index=True) if n_rows else pd.DataFrame(columns=REGION_COLUMNS)
     )
     edges_df = (
-        pd.concat(e_rows, ignore_index=True) if e_rows else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
+        pd.concat(e_rows, ignore_index=True)
+        if e_rows
+        else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
     )
     if len(edges_df):
         # ⚠ sorted by (src, kind, dst, STRAND). The design doc says (src, kind, dst), but that is not a
@@ -693,7 +695,9 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
 
     # I8 — src < dst on EVERY boundary  ⇒ genomic order is a topological order
     if src.size and not np.all(src < dst):
-        raise ValueError("I8: an boundary has src >= dst; genomic order is not a topological order.")
+        raise ValueError(
+            "I8: an boundary has src >= dst; genomic order is not a topological order."
+        )
     if src.size and not np.all(ref[src] == ref[dst]):
         raise ValueError("I5: an boundary crosses references.")
     # I12 — row order is the id order
@@ -876,7 +880,9 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
         if rows.size:
             for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
                 hit = np.searchsorted(region_bounds, arr)
-                bad = (hit >= region_bounds.size) | (region_bounds[np.clip(hit, 0, region_bounds.size - 1)] != arr)
+                bad = (hit >= region_bounds.size) | (
+                    region_bounds[np.clip(hit, 0, region_bounds.size - 1)] != arr
+                )
                 if bad.any():
                     raise ValueError(
                         f"I11: reference {name!r} has {int(bad.sum())} exon {what}s that are not region "
@@ -991,7 +997,9 @@ class SpliceJunctionArrays:
     is known.
     """
 
-    offsets: np.ndarray  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
+    offsets: (
+        np.ndarray
+    )  # int64[P + 1] — CSR over the flat region_bound axis, P = region_bounds.size
     boundary_right: np.ndarray  # int64[J] — flat region_bound index of the intron's HIGH endpoint
     edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the sj-boundary id
     strand: np.ndarray  # int8[J]  — the sj's genomic strand (Strand POS/NEG)
@@ -1060,9 +1068,9 @@ def build_boundary_flags_array(index) -> np.ndarray:
     regions_df, edges_df = index.regions_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
     by_region = np.zeros(len(regions_df), dtype=np.uint16)
-    by_region[edges_df["src"].to_numpy(np.int64)[contiguous]] = edges_df["flags"].to_numpy(np.uint16)[
-        contiguous
-    ]
+    by_region[edges_df["src"].to_numpy(np.int64)[contiguous]] = edges_df["flags"].to_numpy(
+        np.uint16
+    )[contiguous]
 
     by_ref: dict[str, pd.DataFrame] = {
         ref: grp for ref, grp in regions_df.groupby("ref_name", sort=False)
@@ -1073,7 +1081,9 @@ def build_boundary_flags_array(index) -> np.ndarray:
         if grp is None or len(grp) == 0:
             continue
         ids = grp.index.to_numpy(np.int64)  # == region_id (I2), and contiguous within a reference
-        out.append(by_region[ids[:-1]])  # the k-1 interior boundaries; a 1-region reference contributes none
+        out.append(
+            by_region[ids[:-1]]
+        )  # the k-1 interior boundaries; a 1-region reference contributes none
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
 
 
@@ -1257,8 +1267,10 @@ def mature_wall_distances_kernel(
         s0, s1 = int(lo0[i]), int(hi0[i])
         lo[i] = s0 + int(np.searchsorted(ends[s0:s1], a[i], side="right"))
         hi[i] = s0 + int(np.searchsorted(starts[s0:s1], b[i], side="left"))
-    bad = (hi <= lo) | (starts[np.minimum(lo, n_regions - 1)] != a) | (
-        ends[np.maximum(hi, 1) - 1] != b
+    bad = (
+        (hi <= lo)
+        | (starts[np.minimum(lo, n_regions - 1)] != a)
+        | (ends[np.maximum(hi, 1) - 1] != b)
     )
     if bad.any():
         i = int(np.flatnonzero(bad)[0])
@@ -1270,7 +1282,9 @@ def mature_wall_distances_kernel(
 
     counts = hi - lo
     rep = np.repeat(np.arange(t.size), counts)
-    rr = np.repeat(lo, counts) + (np.arange(int(counts.sum())) - np.repeat(np.cumsum(counts) - counts, counts))
+    rr = np.repeat(lo, counts) + (
+        np.arange(int(counts.sum())) - np.repeat(np.cumsum(counts) - counts, counts)
+    )
 
     row_strand = strand_of[t]
     known = (row_strand == int(Strand.POS)) | (row_strand == int(Strand.NEG))

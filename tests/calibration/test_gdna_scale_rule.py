@@ -330,13 +330,19 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
         n_grid=_N_GRID,
         _capture=cap,
     )
-    may_share_composition = np.concatenate([np.asarray(d["may_share_composition"], bool) for d in cap["_rescale"]])
+    may_share_composition = np.concatenate(
+        [np.asarray(d["may_share_composition"], bool) for d in cap["_rescale"]]
+    )
     r = np.concatenate([np.asarray(d["r"], float) for d in cap["_rescale"]])
     r_g = np.concatenate([np.asarray(d["r_g"], float) for d in cap["_rescale"]])
     valid = np.concatenate([np.asarray(d["valid"], bool) for d in cap["_rescale"]])
 
-    assert (may_share_composition & valid).any(), "no step is licensed — the rule has become a blanket replacement"
-    assert (~may_share_composition & valid).any(), "every step is licensed — the licence is not being applied at all"
+    assert (may_share_composition & valid).any(), (
+        "no step is licensed — the rule has become a blanket replacement"
+    )
+    assert (~may_share_composition & valid).any(), (
+        "every step is licensed — the licence is not being applied at all"
+    )
     shared = may_share_composition & valid
     assert np.array_equal(r_g[shared], r[shared]), (
         f"a composition-shared step changed scale: r_g {r_g[shared]} vs r {r[shared]}"
@@ -626,7 +632,11 @@ def _splice_in_scan_fixture(refuse: bool):
 def test_the_splice_in_delivers_no_precision_on_a_refused_arm_SCALAR():
     """The scan twin of the gate above; the vectorised and scalar paths must agree."""
     exons, rp, pp, mp = _splice_in_scan_fixture(refuse=True)
-    assert np.all(pp[exons] == 0.0), f"scan: splice_in precision survived a refused + arm: {pp[exons]}"
+    assert np.all(pp[exons] == 0.0), (
+        f"scan: splice_in precision survived a refused + arm: {pp[exons]}"
+    )
     assert np.all(mp[exons] == 0.0), f"scan: splice_in MEASUREMENT precision survived: {mp[exons]}"
     exons, rp, pp, mp = _splice_in_scan_fixture(refuse=False)
-    assert np.all(pp[exons] > 0.0) and np.all(mp[exons] > 0.0), "the scan control's SPLICE IN is dead"
+    assert np.all(pp[exons] > 0.0) and np.all(mp[exons] > 0.0), (
+        "the scan control's SPLICE IN is dead"
+    )

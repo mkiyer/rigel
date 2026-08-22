@@ -91,6 +91,7 @@ PROFILING_DIR = SCRIPTS / "profiling"
 #: behaviour it was written for.
 BROKEN_ON_IMPORT: dict[str, str] = {}
 
+
 def _instruments(directory: pathlib.Path) -> list[pathlib.Path]:
     return [p for p in directory.glob("*.py") if p.name != "__init__.py"]
 
@@ -157,7 +158,9 @@ def test_every_instrument_still_imports(path):
         pass  # a script that argues with argv at import is still connected
     except Exception as exc:  # noqa: BLE001
         if expected and expected in str(exc):
-            pytest.xfail(f"{path.name}: known broken on `{expected}` — a DECISION is owed, see the dict")
+            pytest.xfail(
+                f"{path.name}: known broken on `{expected}` — a DECISION is owed, see the dict"
+            )
         raise AssertionError(
             f"{path.name} no longer imports: {type(exc).__name__}: {exc}\n"
             f"An instrument that cannot be imported cannot be run, and nothing else in this file "
@@ -205,7 +208,9 @@ def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
     # mention of `design/scan_profile.py` satisfy the row for a different instrument of the same name.
     listed = frozenset(re.findall(r"`profiling/([a-z0-9_]+\.py)`", readme))
     on_disk = frozenset(p.name for p in _instruments(PROFILING_DIR))
-    assert on_disk, "scripts/profiling/ is empty — delete the row and this gate, or restore the tree"
+    assert on_disk, (
+        "scripts/profiling/ is empty — delete the row and this gate, or restore the tree"
+    )
     missing = sorted(on_disk - listed)
     ghosts = sorted(listed - on_disk)
     assert not missing, (

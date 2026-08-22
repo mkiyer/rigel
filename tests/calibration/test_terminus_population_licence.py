@@ -310,7 +310,9 @@ def _hop_licence(parts):
     out = []
     for d in cap["_rescale"]:
         src, valid = np.asarray(d["src"], np.int64), np.asarray(d["valid"], bool)
-        may_share_composition, r, r_g = (np.asarray(d[k]) for k in ("may_share_composition", "r", "r_g"))
+        may_share_composition, r, r_g = (
+            np.asarray(d[k]) for k in ("may_share_composition", "r", "r_g")
+        )
         for dst in range(src.shape[0]):
             if valid[dst]:
                 out.append(
@@ -452,7 +454,10 @@ def test_the_RELAY_honours_the_population_test_TOO():
     gate exists to catch; switching the strand half off restores a control where only the flags decide."""
     from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches
 
-    boundary, dst = 3, 4  # chain N E N E N E N E N → BOUNDARY 1 is slot 3, its RIGHT flank is slot 4
+    boundary, dst = (
+        3,
+        4,
+    )  # chain N E N E N E N E N → BOUNDARY 1 is slot 3, its RIGHT flank is slot 4
     flags = [
         0,
         FLAG_TSS_POS,
@@ -486,9 +491,9 @@ def test_the_conjunct_is_INERT_when_no_boundary_carries_a_terminus():
     flagged = {(h["dst"], h["src"]): h for h in _hop_licence(_flagged_chain(_NESTED_FLAGS))}
     plain = {(h["dst"], h["src"]): h for h in _hop_licence(_flagged_chain(_NO_FLAGS))}
     assert set(flagged) == set(plain)
-    assert any(plain[p]["may_share_composition"] and not flagged[p]["may_share_composition"] for p in plain), (
-        "the flags changed no hop's licence, so this fixture cannot see the conjunct at all"
-    )
-    assert all(plain[p]["may_share_composition"] or not flagged[p]["may_share_composition"] for p in plain), (
-        "a hop became licensed BECAUSE of a terminus flag — the conjunct is meant to remove licences"
-    )
+    assert any(
+        plain[p]["may_share_composition"] and not flagged[p]["may_share_composition"] for p in plain
+    ), "the flags changed no hop's licence, so this fixture cannot see the conjunct at all"
+    assert all(
+        plain[p]["may_share_composition"] or not flagged[p]["may_share_composition"] for p in plain
+    ), "a hop became licensed BECAUSE of a terminus flag — the conjunct is meant to remove licences"

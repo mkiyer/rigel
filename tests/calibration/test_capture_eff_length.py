@@ -29,7 +29,11 @@ from rigel.calibration.capture_eff_length import (
     _transcript_region_incidence,
     transcript_capture_eff_lengths,
 )
-from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices, region_right_boundary
+from rigel.calibration.region_arrays import (
+    RegionArrays,
+    boundary_region_indices,
+    region_right_boundary,
+)
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 from conftest import build_test_index
@@ -102,7 +106,9 @@ def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationRe
     is 1 ⇒ ``eff_em == fl``, even for exon flanks shorter than one fragment."""
     size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     n_boundaries = boundary_region_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
-    return _cal(region_arrays, np.full(size.shape[0], rho), size, np.full(n_boundaries, _CROSSING_EFF))
+    return _cal(
+        region_arrays, np.full(size.shape[0], rho), size, np.full(n_boundaries, _CROSSING_EFF)
+    )
 
 
 # Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's
@@ -450,15 +456,12 @@ def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(m
 
 # --- the boundary axis is an BOUNDARY index, and only a MULTI-reference index can prove it -------------
 
-_TWO_REF_GTF = (
-    "".join(
-        f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
-        for s in (200, 800)
-    )
-    + "".join(
-        f'chrB\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "gb"; transcript_id "tb";\n'
-        for s in (200, 800)
-    )
+_TWO_REF_GTF = "".join(
+    f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
+    for s in (200, 800)
+) + "".join(
+    f'chrB\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "gb"; transcript_id "tb";\n'
+    for s in (200, 800)
 )
 
 

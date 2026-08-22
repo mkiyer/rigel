@@ -699,8 +699,16 @@ class _PreparedRelay:
             else:
                 tp, tn = (rp[s] + gp) * r, (rn[s] + gn) * r
             tg = rg[s] * r_g
-            tpg, tpp, tpn = _damp(pg[s], hop_logvar), _damp(pp[s], hop_logvar), _damp(pn[s], hop_logvar)  # full (mode)
-            tmg, tmp, tmn = _damp(mg[s], hop_logvar), _damp(mp[s], hop_logvar), _damp(mn[s], hop_logvar)  # measurement
+            tpg, tpp, tpn = (
+                _damp(pg[s], hop_logvar),
+                _damp(pp[s], hop_logvar),
+                _damp(pn[s], hop_logvar),
+            )  # full (mode)
+            tmg, tmp, tmn = (
+                _damp(mg[s], hop_logvar),
+                _damp(mp[s], hop_logvar),
+                _damp(mn[s], hop_logvar),
+            )  # measurement
             ttau = _damp(tau[s], hop_logvar)  # composition
             # The spliced-in sj flux is a MEASUREMENT (a COUNT), not an imputation, so it carries its
             # own precision and is NOT tau-gated — the source's PREDICTION precision is 0 on unstranded
@@ -710,7 +718,9 @@ class _PreparedRelay:
                 # the-splice-in-frame-variance: the spliced-in spliced density is measured in the DESTINATION exon's frame, so it has no
                 # matched gDNA partner to cancel ``r`` against and the-reframe-scale-variance's SPLICE IN-zero does not cover it.
                 # Charge the frame step it is implicitly mis-lifted by. Identically 0 at r = 1.
-                _s2f = hop_logvar + (splice_in_frame_logvar_scalar(r) if sw.splice_in_frame_var else 0.0)
+                _s2f = hop_logvar + (
+                    splice_in_frame_logvar_scalar(r) if sw.splice_in_frame_var else 0.0
+                )
                 _sps = SP_l[s]
                 _spc = _sps / (1.0 + _sps * _s2f) if _sps > _EPS else 0.0
                 _sns = SN_l[s]
@@ -834,7 +844,11 @@ class _PreparedRelay:
         # rather than a hole. ``pg[src] == 0`` with RNA precision live requires the source's own gDNA
         # density to be 0, and then ``rg[src]*r_g`` is 0 whatever the scale.
         may_share_composition = pop & (pg > 0.0) & ((pp + pn) > 0.0)
-        r_g = np.where(may_share_composition, r, np.where(valid, 1.0, 0.0)) if sw.gdna_level_scale else r
+        r_g = (
+            np.where(may_share_composition, r, np.where(valid, 1.0, 0.0))
+            if sw.gdna_level_scale
+            else r
+        )
         # ⭐⭐⭐ the PER-STRAND rule (owner, 2026-08-18) — one decision per arm, three cases:
         #   · both strand populations unchanged  ⇒ reframe by ``r`` (the composition sharing the relay
         #     is designed around — the total ratio is meaningful);
@@ -899,7 +913,9 @@ class _PreparedRelay:
 
         def _dv_arr(pr, vv):
             _f = np.isfinite(vv)
-            return np.where(splice_out, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr)
+            return np.where(
+                splice_out, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr
+            )
 
         tpp, tmp = _dv_arr(tpp, _vwp), _dv_arr(tmp, _vwp)
         tpn, tmn = _dv_arr(tpn, _vwn), _dv_arr(tmn, _vwn)
@@ -942,9 +958,10 @@ class _PreparedRelay:
         _okc = valid & (_S > _EPS) & (M > _EPS)
         _al = _mc / np.maximum(_S, _EPS)[..., None]
         _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
-        _s2c = (np.where(np.isfinite(hop_logvar), hop_logvar, 0.0) + 1.0 / np.maximum(_n_region[src], _EPS))[
-            ..., None
-        ]
+        _s2c = (
+            np.where(np.isfinite(hop_logvar), hop_logvar, 0.0)
+            + 1.0 / np.maximum(_n_region[src], _EPS)
+        )[..., None]
         _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
         _aSa = np.sum(_al * _sv, axis=-1)
         _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)

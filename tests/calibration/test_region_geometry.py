@@ -188,7 +188,8 @@ def test_a_REGION_slot_carries_region_contained_and_an_BOUNDARY_slot_carries_bou
         geometry.unspliced_count[region_slots], payload.region_contained_count.astype(np.float64)
     )
     np.testing.assert_array_equal(
-        geometry.unspliced_count[boundary_slots], payload.boundary_unspliced_count.astype(np.float64)
+        geometry.unspliced_count[boundary_slots],
+        payload.boundary_unspliced_count.astype(np.float64),
     )
 
 
@@ -236,7 +237,9 @@ def test_a_REGION_divisor_is_the_CONTAINED_placements_count(geometry, parts):
         assert geometry.eff_rna[slot] == pytest.approx(brute_contained(length, RNA_PMF))
 
 
-def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(geometry, parts):
+def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(
+    geometry, parts
+):
     """⭐ **TRAPS: prove-the-substrate, ruled 2026-07-30**: at a contiguous boundary BOTH components pass ``UNBOUNDED_REACH``, so
     both divisors collapse to ``mu - 1`` exactly. gDNA is unbounded by physics (its template is the
     chromosome, ``taper_g = 1``); RNA is unbounded **by the ruling**, which keeps S5.e varying exactly
@@ -493,7 +496,9 @@ def two_reference_parts(payload):
         region_contained_inv_opportunity_sum=np.concatenate(
             [payload.region_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
-        region_start_count=np.concatenate([payload.region_start_count, np.zeros((2, 2), np.uint32)]),
+        region_start_count=np.concatenate(
+            [payload.region_start_count, np.zeros((2, 2), np.uint32)]
+        ),
         region_end_count=np.concatenate([payload.region_end_count, np.zeros((2, 2), np.uint32)]),
         region_span_count=np.concatenate([payload.region_span_count, np.zeros((2, 2), np.uint32)]),
         boundary_unspliced_count=np.vstack(
@@ -502,7 +507,9 @@ def two_reference_parts(payload):
         boundary_unspliced_inv_length_sum=np.concatenate(
             [payload.boundary_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
         ),
-        boundary_spliced_count=np.vstack([payload.boundary_spliced_count, np.zeros((1, 2), np.uint32)]),
+        boundary_spliced_count=np.vstack(
+            [payload.boundary_spliced_count, np.zeros((1, 2), np.uint32)]
+        ),
         region_bounds=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),
         ref_region_bound_offsets=np.array([0, 4, 7], dtype=np.int64),
     )

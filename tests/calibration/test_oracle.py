@@ -103,9 +103,7 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
         + np.asarray(full.boundary_spliced.count, np.float64).sum(1),
     )
     # SJ axis: never deconvolved — the flux verbatim.
-    np.testing.assert_allclose(
-        ov["count_rna_sj"], np.asarray(full.sj.count, np.float64).sum(1)
-    )
+    np.testing.assert_allclose(ov["count_rna_sj"], np.asarray(full.sj.count, np.float64).sum(1))
 
 
 def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_path):

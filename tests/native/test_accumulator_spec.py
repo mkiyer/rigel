@@ -47,7 +47,6 @@ def close(got: float, want: float, deposits: int) -> bool:
     return abs(got - want) <= max(abs(want), 1.0) * deposits * EPS
 
 
-
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------
@@ -79,7 +78,6 @@ def _acc(sj=(), **kw):
 def _boundary(ref, boundary):
     """Global contiguous-boundary id of the boundary at local region_bound index ``boundary``."""
     return (0 if ref == 0 else len(CHR1_REGION_BOUNDS) - 2) + boundary - 1
-
 
 
 def _contained_quantum(ref, local, length):
@@ -127,7 +125,11 @@ def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
-    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 3)]), _contained_quantum(0, 3, 160), 1)
+    assert close(
+        float(t.region_contained_inv_opportunity_sum[_region(0, 3)]),
+        _contained_quantum(0, 3, 160),
+        1,
+    )
     assert t.region_contained_count.sum() == 1
     assert t.boundary_unspliced_count.sum() == 0
 
@@ -151,9 +153,18 @@ def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FU
     acc = _acc()
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> boundaries at 200, 201, 400
     t = acc.tally
-    assert [int(t.boundary_unspliced_count[_boundary(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
+    assert [int(t.boundary_unspliced_count[_boundary(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [
+        0,
+        1,
+        1,
+        1,
+        0,
+    ]
     quantum = 1.0 / (350 - 1)
-    assert all(close(float(t.boundary_unspliced_inv_length_sum[_boundary(0, j)]), quantum, 1) for j in (2, 3, 4))
+    assert all(
+        close(float(t.boundary_unspliced_inv_length_sum[_boundary(0, j)]), quantum, 1)
+        for j in (2, 3, 4)
+    )
     assert t.region_contained_count.sum() == 0
 
 
@@ -173,9 +184,7 @@ def test_a_fragment_covering_a_1bp_region_credits_BOTH_boundaries_and_conserves_
     assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 1
     assert int(t.region_contained_count[_region(0, 2), 0]) == 0
     mass = int(t.boundary_unspliced_mass.sum())
-    assert abs(mass - 1.0) <= 8 * EPS, (
-        f"the fragment deposited {mass} fragments, not 1"
-    )
+    assert abs(mass - 1.0) <= 8 * EPS, f"the fragment deposited {mass} fragments, not 1"
 
 
 def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_one_boundary():
@@ -212,7 +221,9 @@ def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     acc = _acc(sj=[SJ])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
-    assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, "block [150,201) crosses the boundary at 200"
+    assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, (
+        "block [150,201) crosses the boundary at 200"
+    )
     assert t.boundary_unspliced_count.sum() == 0
 
 
@@ -230,9 +241,7 @@ def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segme
     assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 1, "boundary 400, from segment 1"
     assert int(t.boundary_unspliced_count[_boundary(0, 5), 0]) == 1, "boundary 900, from segment 2"
     mass = int(t.boundary_unspliced_mass.sum())
-    assert abs(mass - 1.0) <= 8 * EPS, (
-        f"a two-segment fragment deposited {mass} fragments, not 1"
-    )
+    assert abs(mass - 1.0) <= 8 * EPS, f"a two-segment fragment deposited {mass} fragments, not 1"
 
 
 def test_an_UNANNOTATED_intron_credits_no_sj_and_nothing_across_the_gap():
@@ -271,7 +280,11 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
-    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 3)]), _contained_quantum(0, 3, 180 - 40), 1)
+    assert close(
+        float(t.region_contained_inv_opportunity_sum[_region(0, 3)]),
+        _contained_quantum(0, 3, 180 - 40),
+        1,
+    )
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -284,7 +297,9 @@ def test_opposite_strand_sj_at_the_same_coordinates_are_DISTINCT_boundaries():
     )
     t = acc.tally
     assert t.sj_count.sum() == 1
-    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG boundary (id 1), genome minus"
+    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, (
+        "the NEG boundary (id 1), genome minus"
+    )
 
 
 @pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
@@ -378,15 +393,23 @@ def test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION():
     clean = _acc(sj=[SJ])
     for _ in range(20):
         clean.deposit(
-            0, 150, 950, observed_introns=[(201, 900)],
-            align_strand=Strand.NEG, sj_strand=Strand.POS,
+            0,
+            150,
+            950,
+            observed_introns=[(201, 900)],
+            align_strand=Strand.NEG,
+            sj_strand=Strand.POS,
         )
     # an ARTIFACTUAL sj: the aligner emitted it from both strands
     artifact = _acc(sj=[SJ])
     for i in range(20):
         artifact.deposit(
-            0, 150, 950, observed_introns=[(201, 900)],
-            align_strand=Strand.NEG if i % 2 else Strand.POS, sj_strand=Strand.POS,
+            0,
+            150,
+            950,
+            observed_introns=[(201, 900)],
+            align_strand=Strand.NEG if i % 2 else Strand.POS,
+            sj_strand=Strand.POS,
         )
 
     clean_row = clean.tally.sj_count[0]
@@ -419,8 +442,9 @@ def test_the_sj_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_does():
 
     def one(align):
         acc = _acc(sj=[SJ])
-        acc.deposit(0, 150, 950, observed_introns=[(201, 900)], align_strand=align,
-                    sj_strand=Strand.POS)
+        acc.deposit(
+            0, 150, 950, observed_introns=[(201, 900)], align_strand=align, sj_strand=Strand.POS
+        )
         return acc.tally
 
     t_pos, t_neg = one(Strand.POS), one(Strand.NEG)
@@ -481,7 +505,11 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 5), 0]) == 1
-    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 5)]), _contained_quantum(0, 5, 50), 1)
+    assert close(
+        float(t.region_contained_inv_opportunity_sum[_region(0, 5)]),
+        _contained_quantum(0, 5, 50),
+        1,
+    )
 
 
 def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragment():
@@ -498,7 +526,14 @@ def test_the_per_reference_offsets_do_not_bleed():
     acc.deposit(0, 150, 300)  # crosses the boundaries at 200 AND 201
     acc.deposit(1, 400, 700)  # crosses chr2's boundary at 500
     t = acc.tally
-    assert [int(t.boundary_unspliced_count[e, 0]) for e in range(acc.n_boundaries)] == [0, 1, 1, 0, 0, 1]
+    assert [int(t.boundary_unspliced_count[e, 0]) for e in range(acc.n_boundaries)] == [
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+    ]
     assert int(t.boundary_unspliced_count.sum()) == 3
     assert int(t.region_start_count[_region(0, 1)].sum()) == 1
     assert int(t.region_start_count[_region(1, 0)].sum()) == 1
@@ -534,9 +569,7 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
     acc.deposit(0, 210, 390)  # contained in n3 — intronic
     acc.deposit(0, 380, 420)  # crosses the boundary at 400 only — flanks intron|exon
     acc.deposit(0, 950, 990)  # contained in n5 — intergenic
-    acc.deposit(
-        0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS
-    )  # annotated sj
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)  # annotated sj
     p = acc.tally.pool_lengths
     assert int(p[FragmentPool.DNA_INTERGENIC].sum()) == 2
     assert int(p[FragmentPool.DNA_INTRONIC].sum()) == 1
@@ -590,7 +623,10 @@ def _corpus(rng, n, ref_len):
 def _uniform_accumulator(region_bp, ref_len):
     region_bounds = list(range(0, ref_len + 1, region_bp))
     return Accumulator(
-        Partition.from_region_bounds([region_bounds], region_types=[[0] * (len(region_bounds) - 1)]), max_fragment_length=10_000
+        Partition.from_region_bounds(
+            [region_bounds], region_types=[[0] * (len(region_bounds) - 1)]
+        ),
+        max_fragment_length=10_000,
     )
 
 
@@ -610,9 +646,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(reg
     for s, e in zip(starts, ends):
         acc.deposit(0, int(s), int(e))
     interior = slice(5, acc.n_boundaries - 5)
-    estimate = (
-        acc.tally.boundary_unspliced_inv_length_sum[interior].sum() / (acc.n_boundaries - 10)
-    )
+    estimate = acc.tally.boundary_unspliced_inv_length_sum[interior].sum() / (acc.n_boundaries - 10)
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {region_bp} bp regions"
 
 
@@ -701,7 +735,9 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     crossings = int(t.boundary_unspliced_count.sum())
     assert crossings == expected_crossings
     assert close(
-        float(t.boundary_unspliced_inv_length_sum.sum()), crossings / (expected_length - 1), crossings
+        float(t.boundary_unspliced_inv_length_sum.sum()),
+        crossings / (expected_length - 1),
+        crossings,
     )
 
 
@@ -715,7 +751,11 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.region_start_count[_region(0, 4)].sum()) == 1, "n4, where the path actually starts"
     assert int(t.region_start_count[_region(0, 1)].sum()) == 0, "not n1, where the extent begins"
     assert int(t.region_contained_count[_region(0, 4), 0]) == 1
-    assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 4)]), _contained_quantum(0, 4, 20), 1)
+    assert close(
+        float(t.region_contained_inv_opportunity_sum[_region(0, 4)]),
+        _contained_quantum(0, 4, 20),
+        1,
+    )
 
 
 def test_a_duplicated_intron_credits_its_sj_ONCE():
@@ -787,7 +827,9 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     t = acc.tally
     # ⭐ ONE boundary, TWO banks, one column: the unspliced fragment and the spliced one both cross the
     # boundary at 200, and both are genome-minus. A sense-relative convention would split them.
-    assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, "genome minus"
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
+        "genome minus"
+    )
     assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
         "the spliced one is ANTISENSE to its + sj, and still books genome minus"
     )
@@ -1082,7 +1124,9 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.region_contained_count[region, STRAND_COLUMNS[Strand.NEG]]) == 1
     # ...and the moments pool them into the single slot
-    assert close(float(t.region_contained_inv_opportunity_sum[region]), 2 * _contained_quantum(0, 3, 160), 2)
+    assert close(
+        float(t.region_contained_inv_opportunity_sum[region]), 2 * _contained_quantum(0, 3, 160), 2
+    )
 
     boundary_acc = _acc()
     boundary_acc.deposit(0, 120, 320, align_strand=Strand.POS)
@@ -1118,8 +1162,10 @@ def test_every_deposited_fragment_has_exactly_one_START_and_one_END():
     mixed population (contained, crossing, spliced) on two references."""
     acc = _acc(sj=[SJ])
     assert acc.deposit(0, 120, 180) is DepositOutcome.DEPOSITED  # contained in r0
-    assert acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS) \
-        is DepositOutcome.DEPOSITED  # spliced
+    assert (
+        acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
+        is DepositOutcome.DEPOSITED
+    )  # spliced
     assert acc.deposit(0, 150, 260, align_strand=Strand.NEG) is DepositOutcome.DEPOSITED  # crossing
     assert acc.deposit(1, 20, 60) is DepositOutcome.DEPOSITED  # second reference
     t = acc.tally
@@ -1152,8 +1198,10 @@ def test_a_CONTAINED_fragment_increments_START_and_END_in_its_own_region_and_nev
     assert t.region_start_count[r].sum() == 1
     assert t.region_end_count[r].sum() == 1
     assert t.region_span_count.sum() == 0, "a contained fragment spans nothing"
-    assert (t.region_contained_count.sum(axis=1) <= np.minimum(
-        t.region_start_count.sum(axis=1), t.region_end_count.sum(axis=1))).all()
+    assert (
+        t.region_contained_count.sum(axis=1)
+        <= np.minimum(t.region_start_count.sum(axis=1), t.region_end_count.sum(axis=1))
+    ).all()
 
 
 def test_SPAN_counts_regions_STRICTLY_covered_and_a_JUMPED_region_gets_NOTHING():
@@ -1169,8 +1217,10 @@ def test_SPAN_counts_regions_STRICTLY_covered_and_a_JUMPED_region_gets_NOTHING()
     assert t.region_span_count[0].sum() == 0 and t.region_span_count[3].sum() == 0
     # spliced [150, 350) with intron exactly r2 = [200, 300): r2 is JUMPED — no span, no start, no end
     acc2 = Accumulator(part, max_fragment_length=10_000)
-    assert acc2.deposit(0, 150, 350, observed_introns=[(200, 300)], sj_strand=Strand.POS) \
+    assert (
+        acc2.deposit(0, 150, 350, observed_introns=[(200, 300)], sj_strand=Strand.POS)
         is DepositOutcome.DEPOSITED
+    )
     t2 = acc2.tally
     assert t2.region_span_count[2].sum() == 0, "a jumped region was counted as spanned"
     assert t2.region_start_count[1].sum() == 1 and t2.region_end_count[3].sum() == 1

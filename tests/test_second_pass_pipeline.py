@@ -183,9 +183,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
         # reproduction; it is the same array for both arms, so it cannot decide which one matches.
         fl = build_fl_models(
             payload,
-            sj_opportunity=crossing_probability_from_index(
-                scenario.index, int(payload.max_length)
-            ),
+            sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
         )
         expected = FragmentLengthModel.from_pmf(
             fl.rna_pmf, fl.max_size

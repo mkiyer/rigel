@@ -49,7 +49,9 @@ class RegionChain:
     """
 
     kind: np.ndarray  # int8[n_slots] — REGION or BOUNDARY
-    obj_idx: np.ndarray  # int64[n_slots] — index into the region axis, or the contiguous-boundary axis
+    obj_idx: (
+        np.ndarray
+    )  # int64[n_slots] — index into the region axis, or the contiguous-boundary axis
     left: np.ndarray  # int64[n_slots] — adjacent slot id, -1 at a reference start
     right: np.ndarray  # int64[n_slots] — adjacent slot id, -1 at a reference end
     n_regions_total: int
@@ -112,7 +114,9 @@ class RegionDeconv:
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
-def build_region_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.ndarray) -> RegionChain:
+def build_region_chain(
+    ref_region_offsets: np.ndarray, ref_boundary_offsets: np.ndarray
+) -> RegionChain:
     """Build the chain from the payload's two per-reference CSR offset arrays.
 
     Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries ``[reo[f], reo[f+1])``, with

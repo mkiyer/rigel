@@ -121,7 +121,9 @@ def test_a_probe_reaches_every_transcript_its_genomic_blocks_overlap(tmp_path):
     probes.write_text("transcript_id\tstart\tend\nT1\t20\t80\n")  # genomic [120, 180) of T1
     t1 = _transcript("T1", [(100, 200), (400, 500)])
     sibling = _transcript("T2", [(100, 200), (600, 700)])  # shares exon 1, not probed itself
-    antisense = _transcript("A", [(150, 300)], strand=Strand.NEG)  # another gene, other strand, under the probe
+    antisense = _transcript(
+        "A", [(150, 300)], strand=Strand.NEG
+    )  # another gene, other strand, under the probe
     entity = _transcript("N", [(100, 700)])  # a nascent entity spanning the lot
     far = _transcript("F", [(800, 900)])  # no overlap
     sampler = CaptureSampler.from_config(

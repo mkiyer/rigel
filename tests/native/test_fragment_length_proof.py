@@ -116,7 +116,10 @@ def oracle_deposits(region_bounds, ref_len: int, start: int, end: int, introns, 
     crossed = {i - 1 for i, p in enumerate(region_bounds) if (p - 1) in covered and p in covered}
 
     def region_of(pos):
-        return min(max(int(np.searchsorted(region_bounds, pos, side="right")) - 1, 0), len(region_bounds) - 2)
+        return min(
+            max(int(np.searchsorted(region_bounds, pos, side="right")) - 1, 0),
+            len(region_bounds) - 2,
+        )
 
     lo, hi = region_of(min(covered)), region_of(max(covered))
     contained = lo if (not spliced and lo == hi) else None
@@ -149,9 +152,17 @@ def _acc(max_fragment_length: int = 10_000) -> Accumulator:
 def _observed(acc: Accumulator):
     t = acc.tally
     return (
-        {i for i in range(t.boundary_unspliced_count.shape[0]) if t.boundary_unspliced_count[i].sum()},
+        {
+            i
+            for i in range(t.boundary_unspliced_count.shape[0])
+            if t.boundary_unspliced_count[i].sum()
+        },
         next(
-            (i for i in range(t.region_contained_count.shape[0]) if t.region_contained_count[i].sum()),
+            (
+                i
+                for i in range(t.region_contained_count.shape[0])
+                if t.region_contained_count[i].sum()
+            ),
             None,
         ),
     )
@@ -189,7 +200,9 @@ def _check_one(start: int, end: int, introns) -> None:
         region_len = int(_REGION_BOUNDS[contained + 1]) - int(_REGION_BOUNDS[contained])
         assert _close(
             float(t.region_contained_inv_opportunity_sum.sum()), 1.0 / (region_len - length + 1), 1
-        ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {region_len} bp region"
+        ), (
+            f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {region_len} bp region"
+        )
 
     assert got_crossed == crossed, f"{ctx}: crossed boundaries {got_crossed} != oracle {crossed}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
@@ -305,7 +318,9 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     acc2 = _acc()
     acc2.deposit(0, 1, 11, observed_introns=[(3, 9)])
     got2, _ = _observed(acc2)
-    assert got2 == set(), "an intron must not carry the molecule across the boundaries it splices over"
+    assert got2 == set(), (
+        "an intron must not carry the molecule across the boundaries it splices over"
+    )
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
 
 
@@ -522,9 +537,7 @@ def test_the_region_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
             for start in range(0, region_len - w + 1):
                 acc.deposit(0, start, start + w)
                 placements += 1
-        per_length.append(
-            float(acc.tally.region_contained_inv_opportunity_sum[0]) / len(lengths)
-        )
+        per_length.append(float(acc.tally.region_contained_inv_opportunity_sum[0]) / len(lengths))
         n_deposits.append(placements)
     short, long_ = per_length
     for got, deposits, label in zip(per_length, n_deposits, ("short", "long")):
@@ -536,6 +549,7 @@ def test_the_region_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
         f"density per length: short lengths {short:.12f}, long lengths {long_:.12f} — a model-free "
         "channel reads the same rho for both; this one is a function of the fragment lengths"
     )
+
 
 #: ⭐ ONE CONVENTION: fractions are float64. `n` round-to-nearest additions differ from the real answer
 #: by at most `n` ulp. ⛔ DERIVED from the machine, never fitted.

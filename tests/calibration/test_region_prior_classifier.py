@@ -28,7 +28,9 @@ def _substrate(n_regions, n_boundaries):
         return SimpleNamespace(count=np.zeros((n, 2)))
 
     return SimpleNamespace(
-        region_contained=view(n_regions), boundary_unspliced=view(n_boundaries), boundary_spliced=view(n_boundaries)
+        region_contained=view(n_regions),
+        boundary_unspliced=view(n_boundaries),
+        boundary_spliced=view(n_boundaries),
     )
 
 

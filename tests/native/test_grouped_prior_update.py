@@ -140,9 +140,7 @@ def test_the_gDNA_RNA_split_lands_exactly_where_the_two_pseudocounts_put_it(
     g_out, r_out = _split(out, 0)
     g_raw, r_raw = _split(raw, 0)
     assert g_out == pytest.approx(g_raw + gdna_prior, rel=1e-12, abs=1e-12)
-    assert r_out == pytest.approx(
-        r_raw + (rna_prior if eligible else 0.0), rel=1e-12, abs=1e-12
-    )
+    assert r_out == pytest.approx(r_raw + (rna_prior if eligible else 0.0), rel=1e-12, abs=1e-12)
 
 
 def test_a_SYNTHETIC_component_receives_none_of_the_rna_prior():
@@ -172,7 +170,9 @@ def test_an_ALL_SYNTHETIC_locus_takes_NO_rna_prior_and_the_split_still_holds():
     out = _update(raw, is_synthetic=[0, 1, 1], gdna_prior=9.0, rna_prior=500.0)
     g_out, r_out = _split(out, 0)
     assert g_out == pytest.approx(100.0 + 9.0, rel=1e-12)
-    assert r_out == pytest.approx(30.0 + 70.0, rel=1e-12), "an ineligible prior reached the RNA pool"
+    assert r_out == pytest.approx(30.0 + 70.0, rel=1e-12), (
+        "an ineligible prior reached the RNA pool"
+    )
 
 
 def test_the_carried_state_path_is_live_and_obeys_the_SAME_split():
@@ -240,8 +240,7 @@ def test_an_ALL_ANNOTATED_locus_is_BYTE_IDENTICAL_with_and_without_the_mask():
     np.testing.assert_array_equal(a, b)
 
 
-def test_the_mask_COULD_have_fired(
-):
+def test_the_mask_COULD_have_fired():
     """⛔ ``TRAPS: could-the-arm-have-fired``. The byte-identity test above is only a control if the mask
     is capable of changing the answer at all — so prove it does, on the same input."""
     rng = np.random.default_rng(0)
@@ -362,7 +361,9 @@ def test_a_SYNTHETIC_component_is_STILL_ineligible_under_the_weighted_branch():
     that a manufactured shadow span is absent until the data proves otherwise is untouched."""
     raw = np.array([100.0, 30.0, 70.0], dtype=np.float64)
     out = _update(raw, weight=[0.0, 1.0, 9.0], is_synthetic=[0, 0, 1], rna_prior=50.0)
-    assert out[2] == pytest.approx(70.0, rel=1e-12), "a synthetic component took weighted prior mass"
+    assert out[2] == pytest.approx(70.0, rel=1e-12), (
+        "a synthetic component took weighted prior mass"
+    )
     assert out[1] == pytest.approx(30.0 + 50.0, rel=1e-12), "its weight was not excluded"
 
 

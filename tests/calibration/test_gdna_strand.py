@@ -114,7 +114,10 @@ def test_thin_seed_fallback():
 def test_beta_concentration_roundtrip():
     """Model exposes the Beta(a, a) concentration consistent with a = ½(1−od)/od."""
     m = GdnaStrandModel(
-        gdna_strand_overdispersion=0.1, n_seed_regions=10, n_seed_fragments=1000, fallback_used=False
+        gdna_strand_overdispersion=0.1,
+        n_seed_regions=10,
+        n_seed_fragments=1000,
+        fallback_used=False,
     )
     assert m.beta_concentration() == pytest.approx(0.5 * (1.0 - 0.1) / 0.1)
 
@@ -310,7 +313,9 @@ def test_an_AMBIG_flank_cannot_seed():
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
     )
-    assert region_density.boundary_count_observable[0]  # count-observable — it fails on STRAND alone
+    assert region_density.boundary_count_observable[
+        0
+    ]  # count-observable — it fails on STRAND alone
     sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
     assert sense.shape == (0,)
 

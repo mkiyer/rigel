@@ -115,7 +115,9 @@ def _pair(max_length: int = MAX_LENGTH, sj=SJ):
     ``test_the_csr_slot_order_matches_the_reference_accumulator``. Feeding both sides one CSR isolates
     the thing this module is for — the deposit rule.
     """
-    partition = Partition.from_region_bounds(_REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, sj=sj)
+    partition = Partition.from_region_bounds(
+        _REGION_BOUNDS_PER_REF, region_types=_TYPES_PER_REF, sj=sj
+    )
     reference = ReferenceAccumulator(partition, max_fragment_length=max_length)
     native = NativeAccumulator(
         region_bounds=np.asarray(REGION_BOUNDS, dtype=np.int64),
@@ -205,9 +207,7 @@ LONG_SJ = GapHypothesis(((201, 900),), sj_strand=Strand.POS, supporting_t_inds=(
 SHORT_SJ = GapHypothesis(((100, 200),), sj_strand=Strand.POS, supporting_t_inds=(9, 11))
 NEG_SJ = GapHypothesis(((400, 900),), sj_strand=Strand.NEG, supporting_t_inds=(13,))
 INTRONIC_PATH = GapHypothesis(((201, 400),), sj_strand=Strand.POS)
-BOTH_SJ = GapHypothesis(
-    ((100, 200), (201, 900)), sj_strand=Strand.POS, supporting_t_inds=(7, 9)
-)
+BOTH_SJ = GapHypothesis(((100, 200), (201, 900)), sj_strand=Strand.POS, supporting_t_inds=(7, 9))
 
 #: ``(label, deposit kwargs)``. Ordered so that a fragment which changes state (the QC counters, the
 #: sj bank, the deferred queue) is followed by one that reads it, and every case names what it is FOR.
@@ -401,9 +401,7 @@ CASES: list[tuple[str, dict]] = [
     # strand rejection wins over the deferral, and the clipped-away fragment never reaches arbitration.
     (
         "STRAND-UNDEFINED beats the deferral: not held, and not counted as held",
-        dict(
-            start=50, end=950, align_strand=Strand.NONE, hypotheses=(LONG_SJ, SHORT_SJ)
-        ),
+        dict(start=50, end=950, align_strand=Strand.NONE, hypotheses=(LONG_SJ, SHORT_SJ)),
     ),
     (
         "EMPTY beats the deferral: clipped to nothing before there is anything to arbitrate",
@@ -485,7 +483,14 @@ def test_region_of_pos_agrees_everywhere_including_outside_the_reference():
     """
     reference, native = _pair()
     region_bounds = np.asarray(REGION_BOUNDS, dtype=np.int64)
-    for position in [-1000, -1, *REGION_BOUNDS, *[c - 1 for c in REGION_BOUNDS], *[c + 1 for c in REGION_BOUNDS], 5000]:
+    for position in [
+        -1000,
+        -1,
+        *REGION_BOUNDS,
+        *[c - 1 for c in REGION_BOUNDS],
+        *[c + 1 for c in REGION_BOUNDS],
+        5000,
+    ]:
         want = ReferenceAccumulator._local_region(region_bounds, position)
         assert native.region_of_pos(position) == want, f"region_of_pos({position})"
     assert reference is not None  # the pair is built for its side effects on the partition
@@ -639,7 +644,12 @@ def test_ten_thousand_random_fragments_are_byte_identical():
     """
     reference, native = _pair()
     rng = np.random.default_rng(0)
-    interesting = np.array(REGION_BOUNDS + [c - 1 for c in REGION_BOUNDS] + [c + 1 for c in REGION_BOUNDS] + [-50, 1500])
+    interesting = np.array(
+        REGION_BOUNDS
+        + [c - 1 for c in REGION_BOUNDS]
+        + [c + 1 for c in REGION_BOUNDS]
+        + [-50, 1500]
+    )
 
     for i in range(10_000):
         if rng.random() < 0.5:
@@ -724,8 +734,9 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
             # within the representation, because the merge re-associates their sums. See
             # `test_accumulator_worker_determinism.py`.
             if getattr(want, "dtype", None) == np.float64:
-                assert np.allclose(got, want, rtol=want.size * float(np.finfo(np.float64).eps),
-                                   atol=0.0), (
+                assert np.allclose(
+                    got, want, rtol=want.size * float(np.finfo(np.float64).eps), atol=0.0
+                ), (
                     f"{n_shards} shards: {field.name} differs by MORE than the float64 representation"
                 )
             else:

@@ -300,9 +300,9 @@ def test_the_deferred_queue_FLATTENS_to_a_CSR_that_round_trips():
     ]  # fmt: skip
     assert arrays["hypothesis_t"].tolist() == [11, 22]
     assert arrays["hypothesis_t_offsets"].tolist() == [0, 0, 0, 1, 2]
-    assert Accumulator(Partition.from_region_bounds([REGION_BOUNDS], region_types=[TYPES])).tally.deferred_arrays()[
-        "hypothesis_offsets"
-    ].tolist() == [0]
+    assert Accumulator(
+        Partition.from_region_bounds([REGION_BOUNDS], region_types=[TYPES])
+    ).tally.deferred_arrays()["hypothesis_offsets"].tolist() == [0]
 
 
 def test_the_FLATTENED_queue_DOES_NOT_DEPEND_ON_DEPOSIT_ORDER():

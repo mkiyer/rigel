@@ -124,7 +124,9 @@ def test_the_predecessors_TERMINAL_SLOT_SHAPE_is_GONE():
     """
     chain = _chain([4])
     assert chain.n_slots == 2 * 4 - 1, "k regions must give 2k-1 slots, never k + (k+1)"
-    assert chain.kind[0] == REGION and chain.kind[-1] == REGION, "the chain starts and ends with a REGION"
+    assert chain.kind[0] == REGION and chain.kind[-1] == REGION, (
+        "the chain starts and ends with a REGION"
+    )
     # ⭐ the invariant the predecessor could not state: every BOUNDARY has a region on BOTH sides.
     # ⚠ The constant is still spelled BOUNDARY until stage 3 of the rename; the SHAPE is what is pinned.
     for i in range(chain.n_slots):

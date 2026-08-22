@@ -973,9 +973,7 @@ def run_pipeline(
 
     fl_models = build_fl_models(
         calibration_payload,
-        sj_opportunity=crossing_probability_from_index(
-            index, int(calibration_payload.max_length)
-        ),
+        sj_opportunity=crossing_probability_from_index(index, int(calibration_payload.max_length)),
         gdna_opportunity=gdna_opportunity_from_index(index, int(calibration_payload.max_length)),
     )
     gdna_fl_pmf = fl_models.gdna_pmf

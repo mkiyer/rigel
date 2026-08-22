@@ -41,9 +41,7 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
         assert d.n_rna + d.n_gdna == TOTAL, f"rate {rate}: {d.n_rna} + {d.n_gdna} != {TOTAL}"
 
     legacy = _params(n_total_fragments=None)
-    totals = {
-        resolve_depths(legacy, gdna_rate=r).total for r in LADDER
-    }
+    totals = {resolve_depths(legacy, gdna_rate=r).total for r in LADDER}
     assert len(totals) > 1, "the legacy path already fixes the total; the new mode adds nothing"
 
 
@@ -89,24 +87,39 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
 
     genome = MutableGenome(4000, seed=3, name="chr1")
     builder = GeneBuilder(genome)
-    builder.add_gene("g1", "+", [{"t_id": "T1", "exons": [(500, 1000), (2000, 2500)], "abundance": 100.0}])
+    builder.add_gene(
+        "g1", "+", [{"t_id": "T1", "exons": [(500, 1000), (2000, 2500)], "abundance": 100.0}]
+    )
     fasta = genome.write_fasta(tmp_path)
     mature = builder.get_transcripts()[0]
     mature.t_index = 0
     mature.nrna_t_index = 1
-    entity = Transcript(ref="chr1", strand=Strand.POS, exons=[Interval(500, 2500)], t_id="N1",
-                        g_id="N1", t_index=1, is_nrna=True, is_synthetic=True, abundance=0.0)
+    entity = Transcript(
+        ref="chr1",
+        strand=Strand.POS,
+        exons=[Interval(500, 2500)],
+        t_id="N1",
+        g_id="N1",
+        t_index=1,
+        is_nrna=True,
+        is_synthetic=True,
+        abundance=0.0,
+    )
     entity.length = entity.compute_length()
 
     def draw(nascent_per_mature: float) -> tuple[int, int]:
         import numpy as np
+
         rows = [mature, entity]
         assign_nrna_to_entities(rows, np.array([100.0 * nascent_per_mature, 0.0]))
         sim = WholeGenomeSimulator(
-            fasta, rows,
-            SimulationParams(sim_seed=5, frag_mean=100, frag_std=1, frag_min=100, frag_max=100,
-                             read_length=50),
-            GDNASimConfig(), genomic_refs=["chr1"],
+            fasta,
+            rows,
+            SimulationParams(
+                sim_seed=5, frag_mean=100, frag_std=1, frag_min=100, frag_max=100, read_length=50
+            ),
+            GDNASimConfig(),
+            genomic_refs=["chr1"],
         )
         try:
             m, n = sim._accumulate_rna_counts(2000)

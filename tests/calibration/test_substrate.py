@@ -141,7 +141,9 @@ def test_the_SJ_mass_arrives_per_strand_and_is_FOLDED_here(substrate):
     sub, payload, _ = substrate
     assert payload.sj_mass.ndim == 2, "the payload bank is per strand"
     assert payload.sj_mass.shape[1] == 2
-    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], "the fixture cannot separate the fold rules"
+    assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], (
+        "the fixture cannot separate the fold rules"
+    )
     assert sub.sj.mass.ndim == 1, "PopulationView.mass is strand-agnostic"
     np.testing.assert_allclose(sub.sj.mass, payload.sj_mass.sum(axis=1))
 

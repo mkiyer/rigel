@@ -233,7 +233,9 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     rows = TH.object_rows(r)
     assert len(rows) == int(r.chain.n_slots), "object_rows does not cover every chain slot"
     kinds = {row["axis"] for row in rows}
-    assert kinds == {"region", "boundary"}, f"the toy has only {kinds}; it cannot exercise both axes"
+    assert kinds == {"region", "boundary"}, (
+        f"the toy has only {kinds}; it cannot exercise both axes"
+    )
     types = {row["type"] for row in rows}
     for expected in ("intergenic", "exon", "intron", "intron|exon", "intergenic|exon"):
         assert expected in types, f"the two-exon toy produced no {expected!r} object"

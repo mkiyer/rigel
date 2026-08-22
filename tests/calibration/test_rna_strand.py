@@ -95,7 +95,9 @@ def test_binomial_limit_recovers_near_zero():
 def test_fit_clamped_to_ceiling():
     """Extreme overdispersion is clamped to the Beta(2,2) ceiling (od ≤ 0.2)."""
     rng = np.random.default_rng(3)
-    sense, total = _beta_binom_regions(rng, n_regions=4000, depth=150, overdispersion=0.45, mean=0.85)
+    sense, total = _beta_binom_regions(
+        rng, n_regions=4000, depth=150, overdispersion=0.45, mean=0.85
+    )
     model = fit_rna_strand_overdispersion(
         sense, total, 0.85, prior_overdispersion=1 / 7, prior_weight=5.0
     )

@@ -367,9 +367,7 @@ def test_the_DEEP_sj_takes_the_larger_share(scored):
         f"narrow={shares[narrow]:.4f}. The two differ only in how many fragments were observed "
         f"crossing them."
     )
-    assert shares[wide] == max(shares.values()), (
-        f"the deep sj must be the winner; got {shares}"
-    )
+    assert shares[wide] == max(shares.values()), f"the deep sj must be the winner; got {shares}"
 
 
 def test_MOVING_the_depth_FLIPS_the_answer(scored):

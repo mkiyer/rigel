@@ -49,7 +49,9 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     # the SAME number at every boundary, which is why the crossing pool needs only a count of boundaries.
     boundary_eff = float(crossing_eff_length(gpmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
     sub = CalibrationSubstrate.from_payload(pl, ra)
-    region_obs, boundary_obs = count_observable_masks(np.asarray(ra.signature), np.asarray(ra.ref_id))
+    region_obs, boundary_obs = count_observable_masks(
+        np.asarray(ra.signature), np.asarray(ra.ref_id)
+    )
 
     live_regions = region_obs & (region_eff > 1.0)
     contained = np.asarray(sub.region_contained.count, np.float64).sum(1)
@@ -145,7 +147,9 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
             if e >= 0:
                 bounding[e] = True
     intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())
-    assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not region_bound)"
+    assert intron_unspliced == 0.0, (
+        f"intron carries unspliced mass {intron_unspliced} (not region_bound)"
+    )
 
 
 def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):

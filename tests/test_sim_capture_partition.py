@@ -325,7 +325,9 @@ class TestNoUnboundedCache:
                 f"{name} grew by {grown} entries across 300 fragment lengths. Anything that scales "
                 f"with fragment length here is the 38 GB coming back."
             )
-        assert len(sampler._partition_memo) == len(widths), "the memo holds exactly one entry per width"
+        assert len(sampler._partition_memo) == len(widths), (
+            "the memo holds exactly one entry per width"
+        )
 
         # ⭐ REPEATING the same sweep must add NOTHING — that is the difference from `_mass_cache`
         for frag_len in widths:

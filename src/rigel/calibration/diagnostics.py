@@ -32,7 +32,9 @@ class CalibrationDiagnostics:
     enriched_mode: float | None  # log ρ_g of the higher-density dominant mode
     separation_nats: float | None  # enriched − depleted (0 if unimodal)
     enrichment_factor: float | None  # exp(separation_nats)
-    rug_log_rho: np.ndarray  # per-region training log-densities — EVERY training region, not a sample
+    rug_log_rho: (
+        np.ndarray
+    )  # per-region training log-densities — EVERY training region, not a sample
     rug_kind: np.ndarray  # int region-kind codes (0=intergenic,1=intron,2=exon,3=boundary)
     # ⚠ ``rug_log_rho`` said "downsampled" until 2026-08-21, when it was always EMPTY (the npmle
     # carried no training points). It is now the full training population — ~30.7 k rows at panel

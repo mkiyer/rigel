@@ -153,7 +153,6 @@ class PopulationView:
         return out
 
 
-
 @dataclass(frozen=True, slots=True)
 class CalibrationSubstrate:
     """Every per-object statistic the calibrator reads, on the payload's own axes."""
@@ -242,11 +241,11 @@ class CalibrationSubstrate:
                 mass=payload.boundary_unspliced_mass,
             ),
             boundary_spliced=view(
-                "boundary_spliced", payload.boundary_spliced_count, mass=payload.boundary_spliced_mass
+                "boundary_spliced",
+                payload.boundary_spliced_count,
+                mass=payload.boundary_spliced_mass,
             ),
-            sj=view(
-                "sj", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass
-            ),
+            sj=view("sj", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass),
         )
 
     @staticmethod

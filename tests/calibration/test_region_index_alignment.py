@@ -33,7 +33,9 @@ def _payload(n_regions, ref_region_offsets):
     """The two fields the alignment guard reads. ⚠ Both are on the REGION axis: the payload's boundary and
     sj axes are sized from it (``E = N − n_refs``), so a region-axis mismatch is the one that has
     to be caught at the door."""
-    return SimpleNamespace(n_regions=n_regions, ref_region_offsets=np.asarray(ref_region_offsets, np.int64))
+    return SimpleNamespace(
+        n_regions=n_regions, ref_region_offsets=np.asarray(ref_region_offsets, np.int64)
+    )
 
 
 def test_alignment_guard_accepts_matching_payload(mini_index):

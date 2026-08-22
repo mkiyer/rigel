@@ -312,7 +312,9 @@ def build_total_abundance(
     r_idx = obj[is_region]
     with np.errstate(invalid="ignore", divide="ignore"):
         r_rate = np.where(
-            r_free[r_idx], counts[r_idx] / np.where(exposure[r_idx] > 0.0, exposure[r_idx], 1.0), np.nan
+            r_free[r_idx],
+            counts[r_idx] / np.where(exposure[r_idx] > 0.0, exposure[r_idx], 1.0),
+            np.nan,
         )
     total[is_region] = r_rate
     start_used[is_region] = s_ok_r[r_idx] & r_free[r_idx]

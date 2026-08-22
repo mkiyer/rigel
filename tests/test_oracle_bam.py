@@ -217,12 +217,30 @@ class TestWholeGenomeOracleBamOrientation:
         ]
         # nascent lives on single-exon ENTITIES over each span (one per strand here), as the index
         # makes them; the entities' reads carry the `nrna_` tag and contiguous genomic blocks
-        pos_entity = Transcript(ref="ref", strand=Strand.POS, exons=[Interval(200, 1000)], t_id="n_pos",
-                                g_id="n_pos", t_index=2, is_nrna=True, is_synthetic=True,
-                                abundance=0.0, nrna_abundance=100.0)
-        neg_entity = Transcript(ref="ref", strand=Strand.NEG, exons=[Interval(1400, 2200)], t_id="n_neg",
-                                g_id="n_neg", t_index=3, is_nrna=True, is_synthetic=True,
-                                abundance=0.0, nrna_abundance=100.0)
+        pos_entity = Transcript(
+            ref="ref",
+            strand=Strand.POS,
+            exons=[Interval(200, 1000)],
+            t_id="n_pos",
+            g_id="n_pos",
+            t_index=2,
+            is_nrna=True,
+            is_synthetic=True,
+            abundance=0.0,
+            nrna_abundance=100.0,
+        )
+        neg_entity = Transcript(
+            ref="ref",
+            strand=Strand.NEG,
+            exons=[Interval(1400, 2200)],
+            t_id="n_neg",
+            g_id="n_neg",
+            t_index=3,
+            is_nrna=True,
+            is_synthetic=True,
+            abundance=0.0,
+            nrna_abundance=100.0,
+        )
         for t in (pos_entity, neg_entity):
             t.length = t.compute_length()
         transcripts += [pos_entity, neg_entity]

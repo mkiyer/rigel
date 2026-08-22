@@ -173,7 +173,11 @@ def test_an_unannotated_intron_does_not_match(index):
     region_bounds, offsets, _ = build_region_partition_arrays(index)
     # 700 and 900 are both region_bounds on chr1, but [700,900) is an EXON, not an intron
     assert (
-        _lookup(arrays, _region_bound_index(region_bounds, offsets, 0, 700), _region_bound_index(region_bounds, offsets, 0, 900))
+        _lookup(
+            arrays,
+            _region_bound_index(region_bounds, offsets, 0, 700),
+            _region_bound_index(region_bounds, offsets, 0, 900),
+        )
         is None
     )
     # and a position that is not a region_bound at all
@@ -188,7 +192,12 @@ def test_the_csr_round_trips_to_the_boundary_table(index):
     region_bounds, offsets, _ = build_region_partition_arrays(index)
     donor = np.repeat(np.arange(region_bounds.shape[0]), np.diff(arrays.offsets))
     from_csr = np.stack(
-        [region_bounds[donor], region_bounds[arrays.boundary_right], arrays.strand.astype(np.int64)], axis=1
+        [
+            region_bounds[donor],
+            region_bounds[arrays.boundary_right],
+            arrays.strand.astype(np.int64),
+        ],
+        axis=1,
     )
 
     boundaries = index.edges_df
@@ -221,7 +230,10 @@ def _reference_partition(index):
     src = boundaries["src"].to_numpy(np.int64)[sj]
     dst = boundaries["dst"].to_numpy(np.int64)[sj]
     strand = boundaries["strand"].to_numpy(np.int8)[sj]
-    region_end, region_start = regions["end"].to_numpy(np.int64), regions["start"].to_numpy(np.int64)
+    region_end, region_start = (
+        regions["end"].to_numpy(np.int64),
+        regions["start"].to_numpy(np.int64),
+    )
     ref_of_region = regions["ref_name"].to_numpy()
     ref_id = {name: i for i, name in enumerate(index.ref_names)}
 
@@ -232,10 +244,14 @@ def _reference_partition(index):
     ]
     n_refs = len(index.ref_names)
     return Partition.from_region_bounds(
-        [region_bounds[region_bound_offsets[r] : region_bound_offsets[r + 1]] for r in range(n_refs)],
+        [
+            region_bounds[region_bound_offsets[r] : region_bound_offsets[r + 1]]
+            for r in range(n_refs)
+        ],
         # a reference contributing c region_bounds owns c-1 regions, so r earlier references own region_bound_offsets[r]-r
         region_types=[
-            region_types[region_bound_offsets[r] - r : region_bound_offsets[r + 1] - r - 1] for r in range(n_refs)
+            region_types[region_bound_offsets[r] - r : region_bound_offsets[r + 1] - r - 1]
+            for r in range(n_refs)
         ],
         sj=sj,
     )

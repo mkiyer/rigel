@@ -257,7 +257,9 @@ def gdna_opportunity_from_index(index: "TranscriptIndex", max_width: int) -> Gdn
         intergenic_contained=contained_opportunity(
             lengths[types_by_region == _TYPE_INTERGENIC], max_width
         ),
-        intronic_contained=contained_opportunity(lengths[types_by_region == _TYPE_INTRON], max_width),
+        intronic_contained=contained_opportunity(
+            lengths[types_by_region == _TYPE_INTRON], max_width
+        ),
         intron_exon_crossing=crossing_opportunity(left[intron_exon], right[intron_exon], max_width),
         intergenic_exon_crossing=crossing_opportunity(
             left[intergenic_exon], right[intergenic_exon], max_width

@@ -263,7 +263,9 @@ def deposit_digest() -> str:
         ref=0,
     )
     accumulator.set_sj(
-        np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32),  # per-donor-region_bound CSR offsets
+        np.array(
+            [0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32
+        ),  # per-donor-region_bound CSR offsets
         np.array([4, 7], dtype=np.int32),  # acceptor region_bound of each sj
         np.array([1, 1], dtype=np.int8),  # STRAND_POS
     )

@@ -26,8 +26,15 @@ def _transcript(
 def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcript:
     """An nRNA entity as the index makes it: single-exon over the clustered span, synthetic."""
     t = Transcript(
-        ref="chr1", strand=Strand.POS, exons=[Interval(start, end)], t_id=transcript_id,
-        g_id=transcript_id, t_index=t_index, is_nrna=True, is_synthetic=True, abundance=0.0,
+        ref="chr1",
+        strand=Strand.POS,
+        exons=[Interval(start, end)],
+        t_id=transcript_id,
+        g_id=transcript_id,
+        t_index=t_index,
+        is_nrna=True,
+        is_synthetic=True,
+        abundance=0.0,
     )
     t.length = t.compute_length()
     return t
@@ -53,9 +60,7 @@ def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
     off.nrna_t_index = 5
     transcripts = [multi_a, multi_b, single, off, shared, lone]
 
-    realized_ratio = apply_sparse_nrna(
-        transcripts, (150.0, 150.0), on_fraction=1.0, seed=17
-    )
+    realized_ratio = apply_sparse_nrna(transcripts, (150.0, 150.0), on_fraction=1.0, seed=17)
 
     # the two contributors SHARE one span, so the span is ONE draw — not one per isoform
     assert shared.nrna_abundance == pytest.approx(150.0)
@@ -102,7 +107,9 @@ def test_fragment_share_solves_the_molecular_ratio_from_the_annotation():
 
     ratio = apply_nrna_fragment_share(rows, 0.20, sim)
     w_m, w_n = expected_rna_weights(rows, sim)
-    assert w_n / (w_m + w_n) == pytest.approx(0.20, abs=1e-9), "(a) the target share must be reached"
+    assert w_n / (w_m + w_n) == pytest.approx(0.20, abs=1e-9), (
+        "(a) the target share must be reached"
+    )
     assert ratio == pytest.approx(0.0227, abs=5e-4), "the derived ratio is ~10x below the share"
 
     apply_nrna_ratio(rows, 0.20)  # (b) the naive reading
@@ -141,8 +148,9 @@ def test_the_fl_pmf_is_the_one_the_engine_draws_from():
     sim = SimulationParams(frag_mean=206, frag_std=98, frag_min=50, frag_max=500)
     widths, p = fl_pmf(sim)
     rng = np.random.default_rng(0)
-    draws = truncated_normal_frag_lengths(rng, 400_000, sim.frag_mean, sim.frag_std,
-                                          sim.frag_min, sim.frag_max)
+    draws = truncated_normal_frag_lengths(
+        rng, 400_000, sim.frag_mean, sim.frag_std, sim.frag_min, sim.frag_max
+    )
     emp = np.bincount(draws - sim.frag_min, minlength=len(widths))[: len(widths)] / len(draws)
     assert np.abs(emp - p).max() < 2e-3, "the analytic pmf must be the sampler's"
     wrong = fl_pmf(SimulationParams(frag_mean=206, frag_std=40, frag_min=50, frag_max=500))[1]
@@ -175,9 +183,7 @@ def test_parse_sparse_nrna_config(tmp_path):
 
 def test_sparse_requires_abundance_ranges(tmp_path):
     config_path = tmp_path / "sim.yaml"
-    config_path.write_text(
-        "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnrna:\n  mode: sparse\n"
-    )
+    config_path.write_text("genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnrna:\n  mode: sparse\n")
 
     with pytest.raises(ValueError, match="abundance_ranges"):
         parse_yaml_config(config_path)
@@ -195,8 +201,6 @@ def test_a_log_uniform_range_may_not_touch_zero(tmp_path):
         parse_yaml_config(config_path)
 
 
-
-
 def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list[Transcript]]:
     """``n`` expressed multi-exon transcripts, one entity each, so an entity's ``nrna_abundance`` reads
     back exactly one draw. Mature abundances span the ladder's own three decades (log-uniform 1 →
@@ -205,7 +209,11 @@ def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list
     contributors, entities = [], []
     for i in range(n):
         base = i * 10_000
-        t = _transcript(f"t{i}", float(10.0 ** rng.uniform(0, 4)), [(base, base + 100), (base + 200, base + 300)])
+        t = _transcript(
+            f"t{i}",
+            float(10.0 ** rng.uniform(0, 4)),
+            [(base, base + 100), (base + 200, base + 300)],
+        )
         t.t_index = i
         t.nrna_t_index = n + i
         contributors.append(t)
@@ -241,9 +249,7 @@ def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
 def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE_span():
     """The two closed ends, exactly — a fraction is a fraction only if its endpoints are honoured."""
     contributors, entities = _sparse_population(40)
-    assert apply_sparse_nrna(
-        contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5
-    ) == 0.0
+    assert apply_sparse_nrna(contributors + entities, (1.0, 1000.0), on_fraction=0.0, seed=5) == 0.0
     assert all(e.nrna_abundance == 0.0 for e in entities)
 
     contributors, entities = _sparse_population(40)
@@ -324,8 +330,11 @@ def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
         entities.append(entity)
         for j in range(k):
             off = base + j * 1_000
-            t = _transcript(f"t{sp}_{j}", float(10.0 ** rng.uniform(0, 4)),
-                            [(off, off + 100), (off + 200, off + 300)])
+            t = _transcript(
+                f"t{sp}_{j}",
+                float(10.0 ** rng.uniform(0, 4)),
+                [(off, off + 100), (off + 200, off + 300)],
+            )
             t.t_index = sp * k + j
             t.nrna_t_index = 10_000 + sp
             rows.append(t)
@@ -348,6 +357,7 @@ def test_the_SEED_actually_drives_the_draw():
 
     Two seeds must disagree, and one seed must reproduce itself exactly.
     """
+
     def draw(seed):
         contributors, entities = _sparse_population(200)
         apply_sparse_nrna(contributors + entities, (1.0, 100.0), on_fraction=0.5, seed=seed)
@@ -355,7 +365,9 @@ def test_the_SEED_actually_drives_the_draw():
 
     a, b, a_again = draw(1), draw(2), draw(1)
     assert np.array_equal(a, a_again), "the same seed did not reproduce its own draw"
-    assert not np.array_equal(a, b), "two different seeds produced identical draws — the seed is inert"
+    assert not np.array_equal(a, b), (
+        "two different seeds produced identical draws — the seed is inert"
+    )
     assert (a > 0).sum() and (b > 0).sum(), "a draw with nothing on cannot distinguish anything"
 
 
@@ -375,9 +387,11 @@ def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER()
     between `--nrna-abundance-ranges '0,100'` and `log(0) = -inf` inside the draw. Deleting either
     guard passed all 13 gates before this one existed."""
     rows = sum(_sparse_population(4), [])
-    for bad, why in [((0.0, 100.0), "zero lower end has no log"),
-                     ((-1.0, 10.0), "negative lower end"),
-                     ((100.0, 1.0), "inverted endpoints")]:
+    for bad, why in [
+        ((0.0, 100.0), "zero lower end has no log"),
+        ((-1.0, 10.0), "negative lower end"),
+        ((100.0, 1.0), "inverted endpoints"),
+    ]:
         with pytest.raises(ValueError, match="0 < lo <= hi|abundance_range"):
             apply_sparse_nrna(list(rows), bad, on_fraction=0.5, seed=1)
     for bad in (1.5, -0.1):

@@ -495,7 +495,10 @@ def test_a_ZERO_exposure_drops_a_region_from_the_pool_with_no_second_predicate()
     payload, ra, substrate = _bg_parts()
     eff = np.array([500.0, 500.0, 500.0])
     live = fit_intron_background(
-        substrate, ra, eff, counts_exposure=(np.array([1.0, 1.0, 7.0]), np.array([10.0, 10.0, 10.0]))
+        substrate,
+        ra,
+        eff,
+        counts_exposure=(np.array([1.0, 1.0, 7.0]), np.array([10.0, 10.0, 10.0])),
     )
     dropped = fit_intron_background(
         substrate, ra, eff, counts_exposure=(np.array([1.0, 1.0, 7.0]), np.array([10.0, 10.0, 0.0]))

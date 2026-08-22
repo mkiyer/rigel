@@ -326,7 +326,10 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
     """
 
     OBSERVED = (62200, 62400)  #: sequenced as CIGAR-N; the detector must NOT re-derive it
-    IMPLIED = (62600, 62800)  #: never sequenced; lies inside the mate gap and must be region_bound from L
+    IMPLIED = (
+        62600,
+        62800,
+    )  #: never sequenced; lies inside the mate gap and must be region_bound from L
 
     #: block1 · block2 · block3, with [62200,62400) crossed by an observed CIGAR-N splice and
     #: [62500,62900) an unsequenced mate gap.
