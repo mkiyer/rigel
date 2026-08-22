@@ -212,9 +212,23 @@ STRATA = (
 
 #: ⭐ The strata whose composition is knowable with NO deconvolution, and they are NOT equally free:
 #: ``R intergenic`` is covered by no transcript at all, so ``f_g = 1`` holds at any nascent level;
-#: ``R intron`` and ``B exon|intron`` need unspliced nascent RNA to be sparse, which this panel cannot
-#: price (``nrna = 0``). ⚠ On a STRANDED library the nascent half of an ``B exon|intron`` boundary is
-#: deconvolvable by the strand channel anyway, so the assumption is load-bearing on unstranded data only.
+#: ``R intron`` and ``B exon|intron`` need unspliced nascent RNA to be sparse. ⚠ On a STRANDED library
+#: the nascent half of an ``B exon|intron`` boundary is deconvolvable by the strand channel anyway, so
+#: the assumption is load-bearing on unstranded data only.
+#:
+#: ⛔⛔⛔ **MEASURED 2026-08-22: THIS POOL IS CONTAMINATED ON THE CURRENT PANEL, AND THE FACTOR IS NOT A
+#: CONSTANT.** The panel used to hold ``nrna = 0``, which made ``R intron`` exactly pure and this pool
+#: exactly right; it now carries SPARSE nascent RNA (``DESIGN.md`` §0b) and the pool's rate over its own
+#: true gDNA rate reads **4.49x at g05, 1.18x at g50, 1.004x at g98 capture-OFF** — it scales with the
+#: RNA:gDNA ratio, so it is worst exactly where gDNA is scarce and the anchor matters most.
+#: ⭐ ``R intergenic`` ALONE is inflated **exactly 1.0000x** on every condition, and so is ``B gene
+#: edge``. ⛔ So any number this instrument reports off ``PURE_GDNA_STRATA`` — including the recorded
+#: exon-reference result in ``ROADMAP.md`` §0 — was produced with an anchor up to 4.49x high and must be
+#: re-derived before it is quoted. ⭐ The SHIPPED path is clean: ``density_deconv.fit_intron_background``
+#: pools intergenic only (``include_introns=False`` at both call sites), so this is an INSTRUMENT defect
+#: rather than shipped behaviour. Whether to drop ``R intron`` from this pool is a MEASUREMENT-DESIGN
+#: decision (it is also the on-target-vs-off-target question), so it is recorded here rather than
+#: silently changed.
 PURE_GDNA_STRATA = ("R intergenic", "R intron")
 
 #: ⭐⭐ The curated gDNA anchor that sits INSIDE genes, and therefore ON-TARGET under hybrid capture —

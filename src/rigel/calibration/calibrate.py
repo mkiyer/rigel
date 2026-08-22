@@ -5,7 +5,9 @@ count-zero-information architecture a region's composition is set by three sourc
 (the Beta-Binomial tilt of the per-strand counts, the only INTRINSIC signal; the count enters ONLY as its
 overdispersed Fisher information), the **cross-region imputation** (the neighbour density messages, at the
 source's own honest belief precision (strand + count) ``pr = n_src/(n_src·vb_src + 1)``), and the
-**population gDNA prior** (the conservative intergenic+intron floor + the Phase-2 density KDE). The solver
+**population gDNA prior** (the conservative INTERGENIC-ONLY floor + the Phase-2 density KDE — both
+`fit_intron_background` call sites below pass ``include_introns=False``, and on a panel carrying sparse
+nascent RNA an intron-inclusive pool is inflated worst exactly where gDNA is scarce). The solver
 is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.calibration.sweep`)::
 
     substrate  (five populations on three axes)

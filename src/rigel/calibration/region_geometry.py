@@ -668,7 +668,7 @@ class RegionStatics:
     ``ACCEPTOR_s``) at each BOUNDARY slot, ``0`` on REGION slots.
     ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them, and
     P1G_SCOPE's own specified predicate was measured to be nearly the COMPLEMENT of what it was meant to
-    replace (plan TRAPS: a-boundary-with-rna-is-not-a-sj). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
+    replace (`TRAPS: a-boundary-with-rna-is-not-an-sj`). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
     :func:`~rigel.calibration.splice_graph.is_splice_site`. It is ``0`` when no graph was supplied.
     """
 

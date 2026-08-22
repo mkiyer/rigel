@@ -12,13 +12,27 @@
 # `docs/TESTING.md` §0a.
 #
 # ⚠ THE `nrna:` BLOCK BELOW IS DEAD BY DESIGN under `abundance.mode: file`: the TSV's
-# `nrna_abundance` column is the one source of nascent weight (stages 2/3 set it to 10 on every
-# multi-exon transcript, pooled onto the index's nascent entities), so the share sweep is skipped and
-# every condition is labelled `nrna_file`.
+# `nrna_abundance` column is the ONE source of nascent weight, pooled onto the index's nascent
+# entities, so the sweep is skipped and every condition is labelled `nrna_file`. It is INERT — editing
+# its numbers changes nothing, and it is retained only so the file reads like the other panel configs.
 #
-# ⚠ ABUNDANCE MODE IS `file`, so `test_abundances.tsv` is the ONE source of truth for both the mature
-# and the nascent weight of every transcript. That is why the nascent sweep is skipped and the label
-# reads `nrna_file`.
+# ⭐⭐⭐ THE NASCENT PATTERN IN THE TSV IS SPARSE AND HAND-AUTHORED (rewritten 2026-08-22). It used to be
+# a flat 10 on every multi-exon transcript — one level everywhere, which is the uniform model the owner
+# retired (`DESIGN.md` §0b, THE NASCENT SCOPE RULING). It is now **4 of the 9 multi-exon spans ON, at
+# 3 / 30 / 30 / 300, against a mature abundance of 100 on every transcript** — so most spans have an
+# EXACTLY nascent-free intron, one span carries three times more nascent than mature, and the levels
+# span two decades. The four are `T9a_2exon_3KB` (3), `T4_cap_2exon_2KB` (30), `TBp_2exon_3900BP` (30)
+# and `T6_3exon_3KB` (300).
+#
+# ⭐⭐ WHY HAND-AUTHORED HERE RATHER THAN DRAWN, and the reason is diagnostic rather than stylistic. The
+# big ladder uses `nrna.mode: sparse`, a Bernoulli-plus-log-uniform DRAW, because it has 3,662 gene
+# spans and the DISTRIBUTION is the thing under test there. This chromosome has 9, where a draw is
+# mostly sampling noise: it would leave the ON set at the mercy of a seed, and it would move every ON
+# span the next time a transcript is added. ⛔ The whole point of a 28-transcript debug substrate is
+# that you know WHICH structure carries nascent RNA before you read a number off it — so the pattern
+# is written down, one span at a time, next to the transcript it belongs to. It is chosen to exercise
+# the properties the ladder's draw produces statistically: nascent absent, nascent present, nascent
+# spanning decades, and nascent EXCEEDING mature.
 
 genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
@@ -65,6 +79,8 @@ gdna:
 # is all there is, which is where message propagation has to carry the answer.
 strand_specificities: [0.50, 0.99]
 
+# ⛔ INERT under `abundance.mode: file` — the nascent weights come from `test_abundances.tsv` and its
+# hand-authored sparse pattern (the header). Do not "fix" nascent RNA by editing this block.
 nrna:
   mode: fragment_share
   shares:       [0.0]

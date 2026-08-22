@@ -20,7 +20,7 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **the sj's LOW end / HIGH end** — `_lo` / `_hi`, or `boundary_left` / `boundary_right` | the two BOUNDARIES a sj is anchored at, named in GENOMIC order, which is the order the code stores them in | ⛔ `donor` · `acceptor` — see below |
 | **slot** | one entry of the chain, which alternates REGION, BOUNDARY, REGION, BOUNDARY … A slot is a REGION **or** a BOUNDARY | — |
 | **step** | one adjacency move along the chain: REGION→BOUNDARY or BOUNDARY→REGION. So REGION→BOUNDARY→REGION is **two steps** | `hop` |
-| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `region_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
+| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible ACCORDING TO THE ANNOTATION, so its composition is certain *given the annotation*: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `region_geometry.g1_locked`. ⚠ On real data the certainty is annotation-derived rather than physical — intergenic space carries unannotated transcription the tool does not model (§0b) — which is safe for a POOLED level and is not a licence to treat one such slot as ground truth | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
 | **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`messages/relay.py`'s `_rescale_v` and its scalar twin inside the scan kernel). "Pin" because the function is named for it | `the mass anchor` |
 | **counts** | discrete integer fragment counts | — |
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
@@ -181,6 +181,77 @@ strata are optimised on.
 gap, because an mRNA fragment must fit inside its transcript and gDNA need not. `TESTING.md` carries the
 measured residual and what it was priced at; ⛔ score the length axis against the simulator's own truth
 table, never against a nominal parameter.
+
+### ⭐⭐⭐ THE NASCENT SCOPE RULING — owner, 2026-08-22
+
+**Real RNA-seq has nascent RNA at very low levels — sparse and rare.** Rigel models it, simply — one
+synthetic transcript spanning every multi-exon transcript — so the tool is ROBUST to it. That is the
+whole of nascent RNA's place in the design.
+
+* **The default assumption and the default behavior: nascent RNA is absent unless there is an
+  abundance of evidence otherwise.**
+* **Experiments designed to capture nascent RNA explicitly are a DIFFERENT experiment and are OUT OF
+  SCOPE for Rigel.**
+* **A number measured at the panel's nascent fragment share (20.2 % capture-OFF and 2.6 % capture-ON) is a STRESS reading, not an
+  expected-case reading.** Robustness may be judged at stress level; design decisions may not be
+  driven from it. The over-rotation this ruling corrects: the tool accumulated design constraints from
+  simulations carrying nascent at levels real data does not have, and started designing AROUND nascent
+  instead of being robust TO it.
+* ⚠ **STATE THE UNIT, BECAUSE THE MOLAR AND FRAGMENT NUMBERS DIFFER BY ~24× AND ONLY ONE OF THEM IS
+  LARGE.** A nascent entity spans a whole gene (mean 40,667 bp on the ladder's index) while a mature
+  transcript is spliced (mean 1,708 bp), so a molecularly SPARSE population still supplies a large
+  share of FRAGMENTS. On the rebuilt panel the molar ratio is **0.00895** and the fragment share is
+  **20.2 %** — the same population described two ways. ⛔ So "the panel is unrealistic" is precise only
+  in fragment terms, and how unrealistic depends on the protocol: poly(A) selection strongly depletes
+  unspliced RNA, total-RNA/rRNA-depleted protocols retain it. Say which unit a nascent number is in,
+  every time, and expect INTRONIC fragment shares in real total-RNA libraries to be non-trivial even
+  where the molar population is sparse.
+* **Consequences licensed by this ruling:** a global gDNA background pooled over intergenic + intron
+  slots is safe on real data — sparse nascent cannot move a pooled megabase-scale level. ⛔⛔ **BUT NOT ON
+  THIS PANEL, AND THE NUMBER IS NOT A CONSTANT**: measured on the rebuilt ladder the intergenic+intron
+  pool is inflated **1.18× at `g50` and 4.49× at `g05`** capture-OFF (it scales with the RNA:gDNA ratio),
+  while intergenic-only is inflated **exactly 1.0000×** on every condition. So an intron-inclusive pool
+  is licensed by the RULING for real data and is CONTAMINATED as a measurement here: the excess IS the
+  intron nascent count, to the fragment. ⭐ And with strand-specific data most exons solve directly and
+  intronic nascent is solved directly by strand — exon-imputation machinery earns its keep on UNSTRANDED
+  data.
+* **The symmetric honesty this ruling demands:** real intergenic regions carry unannotated
+  transcription the tool does not model at all. The sim models nascent and not that — which is exactly
+  why nascent got outsized attention: a modeled contaminant is worried about, an unmodeled one is
+  glossed over. Neither background pool is "clean" on real data, and both are safe for the same
+  reason — sparse RNA cannot move a pooled level.
+
+⛔ **What this ruling is NOT:** it is not a license to break AXIOM 0 — unspliced RNA at an intron is
+still RNA, and the three-population set is unchanged — and it does not delete robustness: the
+synthetic nascent entity, the `--nrna` harness arms, and the zero controls all stay. It re-ranks
+concerns; it does not remove the model.
+
+### ⭐⭐⭐ WHAT "SPARSE" MEANS AS A MODEL — owner, 2026-08-22, and it is the simulator's `sparse` mode
+
+**Sparsity is a per-gene-span ON/OFF pattern, not a low global level.** Transcription and degradation
+set the equilibrium, so nascent RNA is absent from most spans and *present and measurable* in a
+minority. The three rulings that define the mode (`sim.whole_genome.apply_sparse_nrna`, gated by
+`tests/test_whole_genome_sim_config.py`):
+
+* **The unit of sparsity is the GENE SPAN (the nascent entity), not the transcript.** Isoforms share a
+  span, so a per-contributor draw would give a 5-isoform gene `1 − 0.9⁵ = 41 %` chance of nascent at
+  `on_fraction = 0.1` — the intron slots calibration reads would be four times less sparse than
+  configured.
+* **The level is LOG-UNIFORM** over its range: where nascent is present it spans decades, and a linear
+  draw on (1, 1000) puts 90 % of its mass in the top decade.
+* ⭐⭐ **The level is drawn INDEPENDENTLY of the mature level, so `nascent > mature` is a real case the
+  tool must survive.** The retired ratio modes set `nascent = mature × ratio`, which made the two
+  perfectly rank-correlated and capped the interesting case. The steady state says independence is the
+  better null: mature is synthesis/degradation and nascent is synthesis, so the nascent:mature ratio is
+  a STABILITY parameter, not an expression one — an abundant stable transcript shows almost no nascent
+  signal, an unstable rare one can show more nascent than mature.
+
+⚠ **The fragment share is EMERGENT, and the length geometry dominates it**: an entity spans a whole gene
+(mean 40,667 bp on the ladder's index) against a spliced 1,708 bp, so `E[level]` and `on_fraction`
+together set the share through a 23.8× factor. Measured for mature ~ logU(1, 10⁴): level ~ logU(1, 100)
+gives **4.2 %** at `on_fraction = 0.10` and **20.2 %** at 0.50 — measured on the ladder's own index and
+then confirmed by the rebuilt panel to the fragment — while logU(1, 10³) gives ~24 % and ~61 %. ⛔ Price
+the share from the parameters BEFORE simulating; a range chosen by eye lands decades off.
 
 ---
 
@@ -384,7 +455,8 @@ the gDNA landscape can be TRAINED on them; once trained, that per-object prior d
 subsumes much of what message propagation is doing.
 
 ⭐ Two things follow, and both are rulings rather than options:
-* **Set the reference from the data wherever the data allow it** — intergenic space is pure gDNA and a
+* **Set the reference from the data wherever the data allow it** — intergenic space is pure gDNA in the
+  annotation's terms (§0b: on real data it carries unmodelled transcription, which a POOLED level absorbs) and a
   reference of ½ there is simply wrong (`structural_reference` already does this at ¬`mrna_active`).
   ⛔ But do not extend that to objects whose composition the annotation does not determine.
 * **Message propagation's irreducible job is the deep chain**: long runs of `exon|exon` boundaries where
@@ -1254,10 +1326,13 @@ transcript is continuous across this position**, which is exactly `mrna_active`,
 unspliced population as gDNA + nascent. ⚠ That makes the NASCENT LEVEL the load-bearing quantity, and
 deconvolving it out of the introns is what would turn this from assumed into measured.
 
-⛔⛔⛔ **①b THE PRICED RISK, AND WHAT WOULD FALSIFY THE CLAIM — because the flag is ON and the panel
-cannot see this at all.** The 16-condition ladder holds **`nrna = 0` on every row**, so its "true `f_g` =
-1.0000 at all four classes, asserting 1 costs zero fragments" is `nrna = 0` RESTATED and not a measurement
-of the predicate. The claim was therefore priced on a TOY that puts nascent RNA in the introns, shipped
+⛔⛔⛔ **①b THE PRICED RISK, AND WHAT WOULD FALSIFY THE CLAIM.** ⚠ *Stale-repaired 2026-08-22: this
+block was written when the ladder held `nrna = 0` on every row; since the 2026-08-19 rebuild every row
+carries nascent SPARSELY at a **20.2 % capture-OFF and 2.6 % capture-ON** fragment share — a STRESS level under the NASCENT SCOPE RULING (§0b) — so
+the panel now exercises the refute obligation at stress level: certified true `f_g` at `R intron` is
+**0.7045** at `g50 ss0.99` capture-OFF and 0.9915 at `g98 ss0.50`. At realistic nascent shares it
+approaches 1 and the 0.75 claim costs almost nothing.* The claim was first priced on a TOY that puts
+nascent RNA in the introns, shipped
 `SilentPolicy`, mass-weighted `Σ|f_g − truth|·M` over the slots the reference speaks about:
 
     kappa  rho_nascent   truth@intron      OFF ->   ON     ratio
@@ -1280,10 +1355,10 @@ has intergenic REGIONs. Both fixtures are gated, with their perturbations, in
 ⭐⭐ **SO WHAT WOULD FALSIFY THE SHIPPED CLAIM IS NAMED AND IS NOT THE TABLE ABOVE**: a chain that DOES
 carry intergenic REGIONs — so ② is live and asserted live — on which the prior still fails to yield to
 nascent RNA; or a real library whose intronic nascent level is high enough that `m → 0.75` costs more than
-one pseudo-observation is worth. ⛔ **Neither is expressible on the 16-condition ladder**, and adding an
-`nrna > 0` rung is what would make it so. ⚠ Until then the claim is ASSUMED-and-refutable rather than
-measured, and deconvolving the nascent density out of the introns to set `m` from it is what would make it
-measured.
+one pseudo-observation is worth. ⭐ **Both are now expressible on the rebuilt ladder** (nascent on every row since 2026-08-19, at the
+20 % stress share). ⚠ Deconvolving the nascent density out of the introns to set `m` from it is what
+would turn the claim from assumed into measured — and under the NASCENT SCOPE RULING (§0b) that is a
+robustness refinement, not a design priority.
 
 ⭐⭐⭐ **② THE STRENGTH IS ONE PSEUDO-OBSERVATION, AND THE LOCATION IS HOW IT IS WRITTEN.**
 `strength = logit(m)`, so a location on the λ scale IS its strength in nats and the claim's odds are
@@ -1294,9 +1369,10 @@ measured.
 ⛔⛔ **THIS REPLACED `m = σ(L)`, THE LATTICE'S OWN WIDTH, WHICH ASSERTED 9.31 NATS (~10,000:1) AND WAS
 MEASURED WORSE THAN NO PRIOR AT ALL AT BEING REFUTED** (refute-err 2.0247 against no-prior's 0.3946).
 *"A prior may not assert more than the lattice can represent"* is a valid CAP and is still applied; using
-it to CHOOSE was the error. ⚠ **The 16-condition ladder cannot rank a strength** — it holds `nrna = 0`, so
-it scores only the DELIVER obligation, where more nats is monotonically better, which is exactly why it
-preferred the worst option. The instrument that ranks it is a REFUTABILITY test
+it to CHOOSE was the error. ⚠ **The ladder that chose this could not rank a strength** — it held
+`nrna = 0`, so it scored only the DELIVER obligation, where more nats is monotonically better, which is
+exactly why it preferred the worst option. ⭐ The rebuilt ladder (nascent on every row, 2026-08-19)
+exercises REFUTE at stress level; the controlled instrument remains the REFUTABILITY test
 (`tests/calibration/test_structural_reference.py`).
 
 ⭐⭐ **THE TWO MECHANISMS THAT REFUTE IT ARE BUILT AND BOTH ARE REACHED** (owner, 2026-08-16): ① strand
@@ -1333,8 +1409,8 @@ are data):
 | ⛔ REFUSED — `m = σ(L)`, the lattice's own width (9.31 nats) | 0.384 / 0.660 / 0.366 | 0.800 | — |
 
 ⛔ **The refused arm scores BETTER here and that is the point of ruling ② above**, not an argument against
-the shipped one: the ladder holds `nrna = 0`, so it scores the DELIVER obligation alone, where more nats is
-monotonically better. Both arms were run on all 16 ladder conditions; `ROADMAP.md` §0 carries the shipped
+the shipped one: the ladder these arms ran on held `nrna = 0`, so it scored the DELIVER obligation alone,
+where more nats is monotonically better. Both arms were run on all 16 ladder conditions; `ROADMAP.md` §0 carries the shipped
 arm's pass-0, confidently-wrong and thermometer columns.
 
 ⚠ **AND IT EXPOSED A RELAY DEFECT IT DOES NOT CAUSE.** With `message_propagation` ON, the relay carries a

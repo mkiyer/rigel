@@ -624,7 +624,7 @@ def _splice_in_scan_fixture(refuse: bool):
 
 
 def test_the_splice_in_delivers_no_precision_on_a_refused_arm_SCALAR():
-    """The scan twin of the gate above; the two must agree (`TRAPS: two twins`)."""
+    """The scan twin of the gate above; the vectorised and scalar paths must agree."""
     exons, rp, pp, mp = _splice_in_scan_fixture(refuse=True)
     assert np.all(pp[exons] == 0.0), f"scan: splice_in precision survived a refused + arm: {pp[exons]}"
     assert np.all(mp[exons] == 0.0), f"scan: splice_in MEASUREMENT precision survived: {mp[exons]}"

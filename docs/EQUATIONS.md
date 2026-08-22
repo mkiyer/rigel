@@ -173,6 +173,8 @@ assumption and no fragment-length distribution entering. Where one side's wall b
 depressed and the ratio moves in a KNOWN direction. Measured on the 16-condition ladder, every stratum
 and both zero controls: both-exact **1.0018–1.0057**, start-exact/end-bound **0.712–0.879** (`< 1`),
 end-exact/start-bound **1.242–1.428** (`> 1`) — capture-ON included, where every field-dependent
+⚠ **Re-measured on the SPARSE-nascent ladder (2026-08-22): 1.0000–1.0074 / 0.6974–0.9955 / 1.0216–1.4878, 100 gates 0 failures — the DIRECTION holds on every row, and the bound-side margin has nearly collapsed at `g98` capture-OFF (0.9952).**
+(the numbers above are the PRE-REBUILD panel's)
 comparison is vacuous. ⛔ A comparison against the contained bank is NOT field-free and must not be
 read as one: the two weight a region's positions differently, so a probe-shaped field separates them
 legitimately (`TRAPS: two-estimators-of-one-rate-weight-the-field-differently`).
@@ -1024,9 +1026,10 @@ molecule at a BOUNDARY is confined to an exonic block. RNA that has not spliced 
 runs straight through it and violates that; and the block's extent is per-TRANSCRIPT, which is what the
 EM solves, so the constraint is circular (owner, 2026-08-10). ⭐ `A(w) = w − 1` is the CONSERVATIVE
 bound — exactly right for gDNA always, exactly right for unspliced RNA always, and too permissive only
-for RNA that spliced elsewhere — so it errs in one direction for one sub-population. ⛔ Every ladder
-condition is `nrna_none`, i.e. the substrate most favourable to the tighter bound and the least
-representative; a repair validated there is not validated.
+for RNA that spliced elsewhere — so it errs in one direction for one sub-population. ⛔ The ladder this was measured on held `nrna_none` on every condition — the substrate most favourable to
+the tighter bound; a repair validated there is not validated. ⚠ The rebuilt ladder (2026-08-19) carries
+nascent on every row, so the substrate now exercises the permissive direction at STRESS level
+(`DESIGN.md` §0b, the NASCENT SCOPE RULING).
 ⚠ `length_channel_census.py` regenerated every number here and `short_exon_fl_probe.py` priced the
 tighter bound; both were deleted in `b7ed7a0b` and are recoverable from `f470a570`.
 
@@ -1313,8 +1316,11 @@ intron-exclusive evidence exceeds what gDNA alone would explain there.*
 SS=0.65 and **zero at SS=1.0** — gDNA is strand-symmetric and RNA is not, so strand evidence alone
 arbitrates the contested intronic fragment when it is strong enough.
 
-⚠ `alpha = 0` is the correct null but a blunt instrument: it cannot distinguish a nascent entity with
-real intronic support from one with none. The successor is a per-transcript allocation of the RNA prior.
+⚠ `alpha = 0` is a blunt instrument — it cannot distinguish a nascent entity with real intronic support
+from one with none — and under the NASCENT SCOPE RULING (`DESIGN.md` §0b) it is the RIGHT default rather
+than a placeholder: nascent is absent until the data proves otherwise. ⛔ Building per-entity nascent
+ACCURACY is designing around nascent and is not a 0.8.0 candidate; the per-transcript RNA prior lane
+remains valuable for annotated transcripts, which is a different claim.
 
 ### 9b.1 ⭐⭐ THE PRIOR IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT — the weights are the design
 

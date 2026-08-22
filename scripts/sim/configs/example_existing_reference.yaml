@@ -73,14 +73,15 @@ strand_specificities: [0.99, 0.50]
 # Adds nRNA on top of mature RNA. Single-exon transcripts always get nRNA = 0.
 # Ignored when the abundance file already supplies nrna_abundance.
 nrna:
-  mode: additive_ratio       # additive_ratio | random_fraction
+  mode: additive_ratio       # additive_ratio | fragment_share | sparse
   # additive_ratio — every expressed multi-exon transcript: nRNA = mRNA × ratio.
   ratios: [0.0]              # one condition per ratio (0.0 = no nascent RNA)
   ratio_labels: [none]
-  # random_fraction — spike a random subset instead (uncomment + switch mode):
-  # ratio_ranges: [[0.0, 0.0], [0.1, 1.0]]   # per-condition (min,max) for the per-tx draw
-  # ratio_labels: [none, mixed]
-  # eligible_fraction: 1.0    # fraction of expressed multi-exon tx eligible to be spiked
+  # ⭐ sparse — nascent ABSENT from most gene spans, and where present drawn LOG-uniformly and
+  # INDEPENDENTLY of the mature level, so nascent > mature is a real case (owner, 2026-08-22):
+  # abundance_ranges: [[1.0, 100.0]]   # per-condition (lo,hi) ABSOLUTE molecular abundance, both > 0
+  # ratio_labels: [sparse]
+  # on_fraction: 0.10         # fraction of eligible GENE SPANS that are transcribed at all
   # seed: 42
 
 # ── Hybrid capture ──────────────────────────────────────────────────────────

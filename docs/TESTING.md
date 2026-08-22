@@ -9,11 +9,15 @@
 
 ---
 
-## 0. ⭐⭐ THERE IS ONE PANEL ON DISK AND A TOY HARNESS, AND THEY ANSWER DIFFERENT QUESTIONS
+## 0. ⭐⭐ THE RANKING PANEL, TWO SIDE PANELS AND A TOY HARNESS — THEY ANSWER DIFFERENT QUESTIONS
 
 ⛔⛔ **`pilot/`, `flgap_short/` and `flgap_long/` WERE DELETED ON 2026-08-13 (owner) AND THE LADDER WAS
-REBUILT FROM SCRATCH AT 16 CONDITIONS.** Only `ladder/` is on disk, under `~/Downloads/rigel_runs/suite/`,
-beside the reference and index that were kept. ⚠ **The `pilot/` column below is retained as a RECORD of
+REBUILT FROM SCRATCH AT 16 CONDITIONS.** ⚠ **Three panels are on disk** under
+`~/Downloads/rigel_runs/suite/`, beside the reference and index that were kept: `ladder/`, the only panel
+the tool is RANKED on, and the two fl-gap SIDE panels `flgap_rna_long/` and `flgap_rna_short/`, built
+under those new names on 2026-08-21 (5.3 GB and 5.7 GB, measured 2026-08-22).
+⛔⛔ **The two side panels carry a DIFFERENT nascent model from the ladder** — read the fl-gap section
+below before comparing any number across them. ⚠ **The `pilot/` column below is retained as a RECORD of
 the Stage-A question no panel currently answers** — its config file survives, nothing is simulated from
 it — because deleting the column would hide that the question went away with it.
 ⭐⭐ **And §0b's TOY HARNESS is the other substrate: the panel says how much error there is and where, a
@@ -26,6 +30,7 @@ toy says WHY.** Localise on the panel, isolate on a toy, re-measure on the panel
 | why that way | a length model can only be judged where the components' lengths actually differ | ⭐⭐ **because the EM ALREADY USES THE FL DISTRIBUTION** — a large gDNA-vs-RNA length gap lets it split the two origins on LENGTH ALONE, BYPASSING calibration and MASKING bugs in it. Equal lengths FORCE calibration to be exercised. See below |
 | gDNA axis | {0, 100 %} rate ⇒ f_gdna ∈ {0, 0.5} | ⭐ **4 rungs, f_gdna 0 / 0.05 / 0.50 / 0.98** |
 | depth | 10 M RNA, gDNA **added on top** (so 10–20 M total) | ⭐ **10 M TOTAL, fixed**; the rate decides only the SPLIT |
+| nascent RNA | `nrna_none` on every condition | ⭐⭐ **SPARSE on every row (2026-08-22)**: `mode: sparse`, `on_fraction 0.50` of gene SPANS on, level ~ **logU(1, 100)** absolute and INDEPENDENT of the mature level, so `nascent > mature` really occurs — **23.6 % of ON spans carry more nascent than the SUMMED mature abundance of their contributors** (measured 2026-08-22 off the index and this panel's own `truth_abundances_nrna_mid.tsv`). Realised: **1,916 of 3,662 ELIGIBLE spans on** (eligible = named by at least one expressed multi-exon transcript), **molar ratio 0.00895, 20.2 % of RNA fragments** off capture — the same total burden as the retired uniform 20 % model, distributed sparsely, so a behaviour change between the two is attributable to the DISTRIBUTION and not to the amount. ⛔⛔ **0.50 is a DEVELOPMENT STRESS level, not real data** (`DESIGN.md` §0b, THE NASCENT SCOPE RULING); a realistic setting is `on_fraction 0.10` ⇒ 4.2 % |
 | config | `scripts/sim/configs/pilot.yaml` | `scripts/sim/configs/gdna_ladder.yaml` |
 
 ### ⭐⭐ The fl-GAP SIDE PANEL — two arms, opposite signs (added 2026-08-21)
@@ -43,6 +48,22 @@ anything.
 | ⭐ gDNA / RNA **MEASURED** | **78.58 / 247.62** | **249.59 / 78.43** |
 | ⭐ **realised GAP** | **+169.04 bp** | **−171.15 bp** |
 | conditions | `g50` × ss {0.50, 0.99} × capture {off, on} — 4 | the same 4 |
+| nascent RNA | ⛔ the **RETIRED UNIFORM** model — `mode: fragment_share`, `shares: [0.20]` | ⛔ the same retired uniform model |
+
+⛔⛔ **BOTH SIDE PANELS PREDATE THE SPARSE NASCENT REBUILD AND STILL CARRY THE RETIRED UNIFORM MODEL, AND
+A READER MUST KNOW THAT BEFORE COMPARING EITHER ONE AGAINST THE LADDER.** Their configs ask for
+`nrna.mode: fragment_share` at a flat `shares: [0.20]` — nascent RNA on EVERY expressed multi-exon span,
+at one solved molecular level — while the ladder was regenerated on 2026-08-22 with `mode: sparse`, where
+half the spans carry none at all (the ladder table's nascent row, above). ⭐ **Each panel's data on disk matches its own config, so
+both are internally accurate**: this is a difference in what was simulated, not a stale file, and every
+measurement already taken on either arm stands. ⚠ "Retired" here means retired as a PANEL's nascent model,
+not removed — `fragment_share` and `additive_ratio` are still live modes in `src/rigel/sim/`, so these two
+configs run exactly as written. ⛔ What it costs is the CROSS-PANEL reading: a
+ladder-vs-side-panel difference confounds the fl gap with the nascent DISTRIBUTION, and the fl gap is the
+one thing these panels exist to vary — so name the panels behind any such number, or re-simulate first.
+⚠ **Whether to re-simulate them is an open OWNER decision and has not been made.** It is ~11 GB of output,
+and the mechanism the arms probe — `E_r/E_g − 1` on a MIXED pool — is exerted by the fl gap rather than by
+the nascent distribution, so the arms remain usable for the question they were built for.
 
 ⭐ **WHY BOTH DIRECTIONS.** RNA is **not** reliably longer than gDNA — true for cfRNA, false elsewhere —
 so a one-sided panel lets the tool overfit to one library type. And the quantity under test,
@@ -143,24 +164,35 @@ channel is neutralised" as a claim that calibration has one. ⚠ `length_likelih
 `src/rigel/second_pass.py` is per-fragment second-pass assignment and is a third, unaffected thing.
 
 ⛔ **"EQUAL" IS CONFIGURED, NOT ACHIEVED — AND THE RESIDUAL IS MEASURED, NOT ASSUMED.** Identical
-parameters still leave a realised gap of **+4.68 bp off capture / +3.57 on** (TRAPS: configured-lengths-are-not-realised: a mature
-fragment must fit inside its transcript, gDNA need not, so transcript truncation pulls RNA down). What
+parameters still leave a realised gap of **+3.56 to +4.09 bp off capture and +10.80 to +11.26 bp under
+it** (re-measured 2026-08-22 with `simulator_gates.py` over all 12 gDNA-bearing ladder conditions;
+TRAPS: configured-lengths-are-not-realised: a mature fragment must fit inside its transcript, gDNA need
+not, so transcript truncation pulls RNA down). ⚠ **This line used to read `+4.68 / +3.57`, and the
+capture-ON half was stale by ~3×** — the discrepancy is not attributable to the sparse nascent rebuild,
+since capture's length selection did not change. ⭐ Nascent fragments run **~4.7 bp longer than mature**
+(216.4–216.7 against 211.7–212.3 off capture) because a nascent span is not transcript-truncated, so the
+RNA mean is a MIXTURE whose weights the nascent model sets — one more reason to quote the gap per
+population rather than pooled. What
 that residual is WORTH was measured before it was accepted, one thing varied: replacing both pmfs by
 their pooled average moves the per-object error by **−0.0002** off capture and **−0.0054** under it —
 under 2.5 % of the error, with a *fitted* gap 3–5× larger than the residual. Owner ruling: carry it.
 
 ⭐ **An ORACLE CACHE sits beside the panel** at `ladder/oracle_cache/`, built by `panel.py cache`.
 ⛔⛔ **ITS CONDITION COUNT IS NOT STABLE AND MUST NOT BE READ AS EVIDENCE IN EITHER DIRECTION — this
-paragraph used to assert a fixed `12/16`, and that is now wrong on disk.** Re-derived 2026-08-17: the
-cache holds **16/16, all four parts (`gdna`/`mrna`/`nrna`/`_main`) on every condition including the four
-`g00` rows**, and `panel.py status` prints **✔ every stage complete**. Two facts pull against each other
-and a reader needs both:
+paragraph has now asserted `12/16` and `16/16` in turn, and both were true on the day they were written.**
+Re-derived 2026-08-22 on the rebuilt panel: every condition holds all **FIVE** partitions — the three
+`ORIGINS` (`gdna`/`mrna`/`nrna`) plus the per-strand `rna_pos`/`rna_neg` pair — and a stamped
+`slot_truth.npz`, while the undrained `_main` payload is present on **12 of 16**: the four `g00` rows have
+none. ⛔ `panel.py status` counts `(gdna, mrna, nrna, _main)`, so it reads **oracle cache 12/16** and
+prints **✘ on a complete panel**. Two facts pull against each other and a reader needs both:
 
 * ⭐ `pass0_vs_oracle.py`'s own sweep **HOLDS OUT every zero-gDNA condition** ("N zero-gDNA row(s) held
   out as false-positive checks") and builds no cache for one — so a panel cached only by that route
   legitimately reads **12/16**, and `panel.py status` then prints a **✘ on a complete panel**, because it
   counts conditions and the hold-out is invisible to it. ⛔ That ✘ is a false alarm, not a half-built
-  panel, and it has cost a session.
+  panel, and it has cost a session. ⚠ It is also why the four `g00` rows on the rebuilt panel carry five
+  partitions and no `_main`: their partitions came from the per-condition prewarm §2 documents, which
+  fills a cache without scoring the row.
 * ⛔ But `pass0_vs_oracle.measure_condition` **WRITES** `<oracle_cache>/<condition>/_main` whenever an arm
   runs with `--oracle-cache`, and other instruments do sweep the `g00` rows — so any such run fills the
   missing four and the count goes to 16/16. **A `_main` beside a `g00` row therefore proves nothing about
@@ -223,6 +255,18 @@ multi-exon transcripts"*. Give it abundance through its CONTRIBUTOR's `nrna_abun
 pools it onto the entity. ⚠ An ANNOTATED single-exon transcript is already its own nascent equivalent
 (`is_nrna = True`, no synthetic made) — verified on the round trip.
 
+⛔⛔ **AND THIS REFERENCE'S NASCENT PATTERN IS HAND-AUTHORED, NOT DRAWN — the `nrna:` sweep in
+`configs/test_reference.yaml` is DEAD BY DESIGN.** `abundance.mode: file` makes the TSV the one source of
+both weights, so the ladder's `mode: sparse` draw never runs here. ⭐ The TSV was rewritten on 2026-08-22
+to a SPARSE pattern by hand: **4 of the 9 multi-exon spans carry nascent, at 3 / 30 / 30 / 300 against a
+mature abundance of 100 everywhere** — so one span deliberately carries MORE nascent than mature, which is
+the case the sparse model exists to produce. ⭐ **Hand-authoring is the right choice for a 28-transcript
+debug substrate and the reason is diagnostic, not stylistic**: a Bernoulli draw over 9 spans is mostly
+sampling noise, it changes which spans are ON whenever the seed or the transcript list moves, and the whole
+point of this chromosome is that you know exactly which structure carries what before you read a number
+off it. ⚠ The ladder's draw is the right choice there for the opposite reason — 3,662 spans, where the
+DISTRIBUTION is the thing under test.
+
 ⛔ The builder REFUSES a reference it cannot simulate and reports every problem at once: an exon off the
 end, overlapping exons, an intron under 4 bp (too short for a motif), a duplicate id, a transcript with
 no abundance row, an abundance for a transcript that is not in the GTF, the wrong reference name.
@@ -241,8 +285,10 @@ no abundance row, an abundance for a transcript that is not in the GTF, the wron
 ⚠ These two arrived named `_4BP`, which matched neither size; the owner had them renamed to carry their
 true spliced lengths (the correction note below Stage 2 records all three renames).
 
-⭐ **Measured, 8 scenarios in 21 s** (`configs/test_reference.yaml`; g00/g50 × ss 0.50/0.99 × capture
-off/on): off capture the two 1 kb transcripts land within 0.2 % of each other and the nested pair sits at
+⭐ **Measured, 8 scenarios in 21 s** (`configs/test_reference.yaml` as it then stood: g00/g50 × ss
+0.50/0.99 × capture off/on). ⚠ **That config is now a 16-scenario grid** — `g05` and `g98` were added
+2026-08-20 for the two transitions the g00/g50 pair cannot represent — so every "all 8" table in this
+section is a reading on the RETIRED 8-scenario grid and none of them has been re-run: off capture the two 1 kb transcripts land within 0.2 % of each other and the nested pair sits at
 2.70×, their length ratio; `T2p_SE_50BP` gets **exactly 0** fragments at every setting. Under capture
 `T1p_cap_SE_1KB` rises **4.2×** while the unprobed `T1p_SE_1KB` collapses **80×** — capture is a
 competition for one budget — and the shared probe holds both nested transcripts up.
@@ -314,13 +360,17 @@ any measured gDNA.
 | **S3d** 111,000–135,000 | `TAp_3exon_5KB`, `TBp_2exon_3900BP`, `TCp_2exon_4KB`, `TFp_4exon_6KB` (+, `G11`); `TEn_SE_17500BP` (−, `G12`); `TDn_SE_1KB` (−, `G13`) | **THE OWNER'S LOCUS VERBATIM** (the owner's worked example, 2026-08-19, at offset +110,000) — overlapping opposite strands (TE− blankets the + introns, so no intron there measures gDNA), nested TD− inside TE−'s exon, TC/TF sharing a TSS inside TA's exon, TC's acceptor and TF's donor meeting at one boundary, TA/TB sharing exon 3 exactly. Probes on the shared exons |
 
 ⭐ The chromosome is now **28 transcripts, 9 nascent entities, 74 regions, 84 boundaries**, and the
-whole loop (simulate → cache → prewarm → certify → benchmark) is ~1 min. All 8 scenarios certify
-**COMPOSITION + FIELD** (field-gate class z-scores ≤ 1.6 on the capture-OFF rows).
+whole loop (simulate → cache → prewarm → certify → benchmark) is ~1 min. ⚠ **The grid is 16 scenarios
+since 2026-08-20** (`g00/g05/g50/g98` × ss 0.50/0.99 × capture off/on) and all 16 were re-simulated and
+re-certified on 2026-08-22 when the abundance TSV took its hand-authored sparse nascent pattern (§0a's
+NASCENT PATTERN paragraph). The **COMPOSITION + FIELD** certification and the class z-scores ≤ 1.6 quoted
+here were measured on the retired 8-scenario grid.
 
 ⭐⭐ **AND THE GAP IS CLOSED: the relay now REPRODUCES the ladder's sign structure** — it wins both
 zero controls and the deferred stratum and COSTS all three in-scope contaminated strata. gDNA absolute
 error in fragments (axis ALL), `SilentPolicy` → `RelayPolicy`, all 8 shown
-(`TRAPS: never-pool-the-strata`); measured 2026-08-19 on the grown chromosome:
+(`TRAPS: never-pool-the-strata`); measured 2026-08-19 on the grown chromosome, on the 8-scenario grid and
+on the pre-sparse abundance TSV — both have moved since, and this table has not been re-run:
 
 | scenario | Silent | Relay | | ladder stratum analogue |
 |---|---|---|---|---|
@@ -400,11 +450,11 @@ python scripts/design/toy_harness.py --list            # the spec ladder, simple
 
 # one spec against one donor — prints EVERY object beside per-object truth   (~0.1-5 s)
 python scripts/design/toy_harness.py --spec TA_single_exon \
-    --donor gdna_g50_ss_0.50_nrna_none_capture_off
+    --donor gdna_g50_ss_0.50_nrna_mid_capture_off
 
 # ⭐ sweep the transcript's RNA density; the gDNA background stays PINNED, so one variable moves
 python scripts/design/toy_harness.py --spec TA_single_exon \
-    --donor gdna_g50_ss_0.50_nrna_none_capture_off --sweep-density
+    --donor gdna_g50_ss_0.50_nrna_mid_capture_off --sweep-density
 
 python scripts/design/toy_harness.py --spec all --donor <cond>     # the whole ladder
 ```
@@ -436,9 +486,17 @@ SJ BOUNDARY 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
 exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary), so their truth is pure gDNA — but the solver's own
 continuity gate says a strand IS admissible there (RNA that has not spliced *there* could cross), so they
 are **not** G1 objects (`DESIGN.md` §0) and the
-solver has to *derive* what the structure already implies. ⛔ Every cached condition is `nrna_none`, so
-their truth is exactly 1.000 and the panel cannot distinguish "no RNA crosses" from "no *mature* RNA
-crosses". Use `nrna_abundance > 0` as the control — it is the only way to test that face non-trivially.
+solver has to *derive* what the structure already implies. ⚠ Every condition of the ladder this rung was
+written against was `nrna_none`, so their truth was exactly 1.000 and the panel could not distinguish "no
+RNA crosses" from "no *mature* RNA crosses". ⭐ The ladder has carried nascent on every row since
+2026-08-19 and does distinguish the two. ⛔⛔ **But under the SPARSE model it distinguishes them only where
+a span is switched ON, and that is a property to exploit rather than a limitation**: at
+`g50 ss0.99 capture_off` the mass-weighted true intron `f_g` is **0.7019** — unmoved from the retired
+uniform panel's 0.7045 — while **39.4 % of live intron slots now read true `f_g` EXACTLY 1.0000**, which
+the uniform model gave at ~0 % of them. So the same panel now contains both faces of this rung at once:
+introns with nascent RNA in them, and introns whose truth is the exact pure-gDNA 1.000. ⚠ `on_fraction
+0.50` is a DEVELOPMENT STRESS level and not real data (`DESIGN.md` §0b, THE NASCENT SCOPE RULING), so read
+a number from this face as a robustness check.
 
 ⭐ And unlike `nested_exons` there **is** own evidence inside the gene: the 7,000 bp intron REGION is where
 the intron factory lives (τ ≈ 0.18–0.38, |Δf_g| 0.05–0.08), so the gDNA level need not travel from the
@@ -729,14 +787,18 @@ Config key: `index:` (absent ⇒ built into `<outdir>/rigel_index`).
 
 | | |
 |---|---|
-| **nascent RNA is a TRANSCRIPT, not a parallel space** | its molecules are `entity.nrna_abundance` = Σ over contributors of `abundance × nrna_ratio`; it is sampled on its own single-exon template, and its reads keep the `nrna_` origin tag so the oracle's origin split is unchanged |
+| **nascent RNA is a TRANSCRIPT, not a parallel space** | its molecules are `entity.nrna_abundance`, sampled on its own single-exon template, and its reads keep the `nrna_` origin tag so the oracle's origin split is unchanged. ⭐ **How that number is SET is the nascent MODE and nothing else about the machinery depends on it**: under the panel's `mode: sparse` it is drawn per ENTITY — off entirely with probability `1 − on_fraction`, else log-uniform over `abundance_ranges`, ABSOLUTE and independent of the mature level; under `additive_ratio` and `fragment_share` it is `Σ over contributors of abundance × nrna_ratio`, which is why nascent could never exceed mature under either of them |
 | **ONE multinomial over every RNA row** | mature rows and entity rows together, `prob ∝ abundance × capture-aware effective length`. ⛔ The mature/nascent FRAGMENT split is no longer imposed as two pools — it follows from molecules and lengths, and is read off the realised origin counts. ⚠ So a nascent-on condition and its nascent-off twin no longer share a bit-identical mature stream: turning nascent on re-allocates the RNA budget, as it physically must |
 | **capture binds by GENOMIC OVERLAP** | every probe → genomic blocks → gDNA, and projected onto EVERY transcript whose exons it touches, any gene, any isoform, **either strand** (the library is ds-cDNA at capture). Pieces separated by an intron take `gdna_split_penalty`, as gDNA does. ⭐ Measured after the change: under one probe, gDNA and nascent are enriched **1162× and 1003×** — the same rate, which is the physics (`TRAPS: the-panel-enriches-nascent-by-its-own-probes` records the defect this replaced) |
 
 ⭐⭐⭐ **TWO CONSEQUENCES, BOTH MEASURED AND BOTH RULED CORRECT BY THE OWNER (2026-08-19).**
 
-1. ⭐ **CAPTURE DEPLETES NASCENT RNA ~9x, AND THAT IS THE RIGHT BEHAVIOUR** — nascent is **20.01 %** of
-   RNA fragments off capture (exactly the knob) and **2.13 %** under it, measured at `g50 ss0.99`.
+1. ⭐ **CAPTURE DEPLETES NASCENT RNA ~8x, AND THAT IS THE RIGHT BEHAVIOUR** — nascent is **20.27 %** of
+   RNA fragments off capture and **2.60 %** under it, re-measured 2026-08-22 at `g50 ss0.99` off that
+   condition's own `truth_summary.json` origin counts (1,013,538 and 129,985 of 5 M RNA fragments).
+   ⛔ **Neither figure is a knob and the off-capture one is no longer "exactly the knob"**: under
+   `mode: sparse` the fragment share is EMERGENT from the per-span draw, and the 20.2 % it lands on was
+   PRICED in advance with `expected_rna_weights` rather than requested.
    Probes tile EXONS: a mature molecule is entirely probe-covered, a pre-mRNA is mostly intron, and
    there are ~100x more mature molecules. ⭐ Owner: *"capture should consolidate the evidence of nascent
    RNA to the intron|exon boundaries where fragments can partially overlap probes within exons. The
@@ -751,8 +813,11 @@ Config key: `index:` (absent ⇒ built into `<outdir>/rigel_index`).
    G-S5, which pooled mature and nascent into one `mu_rna` and asserted the gDNA gap NARROWS under
    capture: that verdict tracked the nascent MIXTURE, and it passed 12/12 only because the old
    simulator imposed 20 % nascent in every condition. ⭐ G-S5 now asserts the LAW — capture lengthens
-   **each** RNA population (mature 211.8 → 229.0, nascent 216.7 → 238.2, beside gDNA 216.5 → 240.2) —
-   and cannot be moved by a mixture. 6/6 gates pass.
+   **each** RNA population — and cannot be moved by a mixture. ⭐⭐ **That is exactly why it survived the
+   sparse rebuild untouched**: re-run 2026-08-22 on the rebuilt ladder it reads **6/6 gates pass** and
+   G-S5 itself **12/12 (condition × pool)**; at `g50 ss0.99` mature goes 211.68 → 228.98, nascent
+   216.49 → 238.53 and gDNA 216.67 → 240.40. A gate stated on the mixture would have had to be re-derived
+   the moment the mixture's weights changed.
 
 ⚠ **`transcript_filter` is refused** when the transcriptome comes from an index: the index IS the transcript
 set, so filter the GTF before building it.
@@ -796,6 +861,40 @@ resumable, and it prints what exists, what is missing, and which stage to run ne
 (pilot: scan cache 8/8, oracle 0/8; ladder: scan 0/36, oracle 36/36). ⚠ Both panels in that record are
 pre-rebuild: the pilot is deleted and the ladder is now 16 conditions.
 
+### ⛔⛔ TWO WORKFLOW GOTCHAS, BOTH MEASURED 2026-08-22 WHILE REGENERATING THE LADDER
+
+Neither is a defect in the recipe above; both are places where the recipe alone leaves you with a panel
+that looks rebuilt and is not.
+
+* ⛔⛔ **`--force` DOES NOT REACH THE `simulate` STAGE, SO A REGENERATION SILENTLY DOES NOTHING.**
+  `cmd_cache` passes `--force` through to `build_scan_cache.py` and `cmd_build` honours it for the index
+  and the probes, but `cmd_simulate` shells out to `simulate_reads.py` with no such flag — and the
+  simulator skips a condition whose oracle BAM already exists (`skip_existing`, keyed on the BAM). ⭐ So
+  changing a config's `nrna:` block and re-running `panel.py simulate --force` reports success and
+  reproduces the OLD reads. **To regenerate, remove the condition outputs first** (delete the per-condition
+  directories, or the whole panel directory) and then simulate. ⚠ The existence key is deliberately the
+  oracle BAM rather than the FASTQs; that ruling is in `orchestrator.run_condition_grid` and is not the
+  thing to change here.
+* ⛔⛔ **`panel.py cache` DOES NOT BUILD THE FOUR ZERO-gDNA ORACLE CACHES.** The stage's oracle half is
+  `pass0_vs_oracle.py`, which HOLDS OUT every exactly-zero-gDNA row as a false-positive check — so on the
+  16-condition ladder it caches 12 and prints `4 zero-gDNA row(s) held out`. The four `g00` rows then have
+  no partitions at all, and `calibration_oracle.py` REFUSES to certify a condition whose five partitions
+  are absent. ⭐ Fill them one at a time with the same script's per-condition prewarm, which is a pure cache
+  fill and scores nothing (⚠ `--_prewarm` is the worker half of `--jobs` and is hidden from `--help`; it is
+  the honest way in because it reuses the SHIPPED loader, so a stale cache is still refused):
+
+  ```bash
+  for C in $(ls $SUITE/ladder | grep '^gdna_g00_'); do
+      python scripts/design/pass0_vs_oracle.py --suite $SUITE/ladder --index $SUITE/rigel_index \
+          --oracle-cache $SUITE/ladder/oracle_cache --_prewarm $C
+  done
+  ```
+
+  ⚠ Do **not** also pass `--conditions <that row>`: the hold-out runs before the prewarm, so a run whose
+  only named condition is a zero-gDNA one exits with "no contaminated conditions found" and builds nothing.
+  ⛔ The prewarm writes the five partitions and no `_main`, which is why a complete ladder reads
+  **oracle cache 12/16** in `status` (§0).
+
 ⚠ **`build` cannot carve the reference** — that needs the source genome/GTF the panel was region bound from, which
 the panel config does not name. It prints the exact `build_suite_reference.py` command and stops:
 
@@ -812,9 +911,13 @@ python scripts/design/simulator_gates.py --suite $SUITE/ladder --reference $SUIT
 python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/ladder
 ```
 
-⚠ **A cached oracle condition needs ALL FOUR parts** — `gdna`, `mrna`, `nrna` and the undrained `_main`
-payload. `status` counts it complete only then; counting directories would call a half-written condition
-done and fail deep inside an instrument later. Gated by `tests/test_panel_workflow.py`.
+⚠ **`status` counts a cached oracle condition complete only when all FOUR of the parts it knows about are
+present** — `gdna`, `mrna`, `nrna` and the undrained `_main` payload; counting directories would call a
+half-written condition done and fail deep inside an instrument later. Gated by
+`tests/test_panel_workflow.py`. ⛔ **The parts a SCORING instrument needs are FIVE**, because
+`calibration_oracle.py` also requires the per-strand `rna_pos`/`rna_neg` pair and REFUSES rather than
+dropping to three arms — and `_main` is the one part a zero-gDNA row never gets (§0). So `status`'s count
+and an instrument's requirement are two different questions; ask the instrument.
 
 ⚠ **Every panel config states `gdna.genomic_refs: [chr21, chr22]` explicitly.** The engine does **not** infer
 which references carry genomic DNA, and a config that asks for gDNA without stating it is rejected — "has
@@ -838,8 +941,15 @@ names). ⭐ **Every one is directional or an absolute count. Not one carries a t
 | **G-S2** | genomic references carrying gDNA | **≥ 2**, each non-zero, on every gDNA condition |
 | **G-S3** | gDNA mean length, capture off → on | **strictly greater** under capture |
 | **G-S4** | on-target vs off-target gDNA mean length | on-target **strictly longer**. ⚠ A regression guard, not a falsification — it passed *with* the capture defect present, because the conditional was right and only the marginal was discarded (TRAPS: a-gate-that-already-passed) |
-| **G-S5** | \|μ_g − μ_r\|, capture off → on | **strictly narrower** under capture |
+| **G-S5** | mean length of **EACH** RNA population (mature, nascent) separately, capture off → on | **strictly greater** under capture, per condition × pool |
 | **G-S6** | gDNA fragments longer than their own reference | **0** |
+
+⛔⛔ **G-S5's FORM MATTERS AND THIS TABLE USED TO STATE THE RETIRED ONE.** It read `|μ_g − μ_r|` narrowing
+under capture — a claim about the mature/nascent MIXTURE, which passed only because the old simulator put
+20 % nascent in every condition and would have had to be re-derived the moment the nascent model changed
+(§1's second consequence). The shipped gate asserts the LAW instead, on each population separately, so it
+is invariant to how much nascent there is. ⭐ Re-run 2026-08-22 on the rebuilt sparse-nascent ladder:
+**6/6 gates pass**, G-S5 itself **12/12 (condition × pool)**.
 
 ⛔ **"On-target" means OVERLAPS A PROBE, not "its start lands in an exon."** The start-territory version is
 geometry-confounded and stays inverted under any correct capture model — TRAPS: on-target-by-start-is-geometry. The script prints

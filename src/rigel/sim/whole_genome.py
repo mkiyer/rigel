@@ -17,36 +17,58 @@ distribution:
     log_total ~ Uniform(log(min), log(max))
     total = exp(log_total)
 
+**file** — Load from a TSV with columns ``transcript_id``,
+``mrna_abundance``, ``nrna_abundance``.
+
+Nascent RNA
+-----------
 Nascent RNA is controlled separately by the ``nrna`` section, and it lives on the
 rigel index's NASCENT-RNA ENTITIES (owner, 2026-08-19): every multi-exon transcript
 links (``nrna_t_index``) to one single-exon entity over its TSS/TES-clustered span —
 a synthetic transcript, or an annotated single-exon transcript that already covers
-the span. The canonical benchmark mode is a MOLECULAR ratio:
+the span. Annotated multi-exon transcripts carry ``nrna_abundance = 0`` always.
+
+Whatever sets those numbers, sampling is ONE multinomial over every RNA row — mature
+rows and entity rows alike — with probability ∝ abundance × effective length, so the
+nascent FRAGMENT share follows from the molecules and their lengths and is never
+imposed. Three modes set them (``NRNAConfig``):
+
+**sparse** (``abundance_ranges`` + ``on_fraction``) — ⭐ the mode the benchmark panels
+use, and the one to read first. Nascent RNA is ABSENT from most gene spans and present
+in a minority: each ENTITY is switched on with probability ``on_fraction``, and where
+it is on its abundance is drawn LOG-UNIFORMLY over ``(lo, hi)``. That level is
+**ABSOLUTE** and independent of the mature level, so ``nascent > mature`` occurs.
+The fragment share is EMERGENT — priceable in advance with :func:`expected_rna_weights`
+and recorded per condition by the orchestrator. See :func:`apply_sparse_nrna`.
+
+**additive_ratio** (``ratios``) and **fragment_share** (``shares``) — the two RATIO
+modes, where the entity's molecules are pooled from its contributors:
 
     entity.nrna_abundance = Σ over the entity's contributors of (contributor.abundance × nrna_ratio)
 
-i.e. ``nrna_ratio`` nascent molecules per mature molecule of each contributor, pooled
-onto the entity whose span they share. Sampling is ONE multinomial over every row —
-mature rows and entity rows alike — with probability ∝ abundance × effective length,
-so the nascent FRAGMENT share follows from the molecules and their lengths and is
-never imposed. Annotated multi-exon transcripts carry ``nrna_abundance = 0`` always.
-
-**file** — Load from a TSV with columns ``transcript_id``,
-``mrna_abundance``, ``nrna_abundance``.
+``additive_ratio`` states ``nrna_ratio`` directly; ``fragment_share`` states the
+nascent share of RNA FRAGMENTS in the uncaptured library and SOLVES for the ratio that
+produces it (:func:`apply_nrna_fragment_share`). ⛔ Under both, nascent mass tracks
+mature abundance and can never exceed it, which is why the panels no longer use them.
 
 Fragment allocation
 -------------------
-In additive-ratio mode, ``n_rna_fragments`` is the mature RNA depth. nRNA and
-gDNA fragments are added on top:
+``n_rna_fragments`` is the whole RNA budget and gDNA is added on top; or, when
+``n_total_fragments`` is set, the total is fixed and ``gdna_rate`` decides only the
+split (:func:`rigel.sim.orchestrator.resolve_depths`, which the panels use):
 
-    n_mrna = n_rna_fragments
-    n_nrna = round(n_mrna × nrna_ratio)
-    n_gdna = round(n_mrna × gdna_rate)
-    n_total = n_mrna + n_nrna + n_gdna
+    n_gdna = round(n_rna × gdna_rate)              # n_total_fragments unset
+    n_rna  = round(total / (1 + gdna_rate));  n_gdna = total − n_rna
+
+⛔ Nascent comes OUT of ``n_rna``, never on top of it, in every mode: the entities are
+rows of the one RNA multinomial, so the mature/nascent split inside ``n_rna`` is
+realised and read off the origin counts afterwards rather than allocated.
 
 Condition grid
 --------------
-Sweeps: ``nrna ratios × gdna_rates × strand_specificities``.
+Sweeps: ``nrna × gdna_rates × gdna strand overdispersions × strand_specificities ×
+capture scenarios``. The ``nrna`` axis is one condition per configured entry of
+whichever key the mode reads — ``ratios``, ``shares`` or ``abundance_ranges``.
 
 When the abundance file provides explicit nRNA data, the nRNA sweep is
 skipped (single condition using the file's nRNA values).
@@ -235,9 +257,9 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna_raw = raw.get("nrna", {})
     nrna = cfg.nrna
     nrna.mode = str(nrna_raw.get("mode", "additive_ratio"))
-    if nrna.mode not in {"additive_ratio", "random_fraction", "fragment_share"}:
+    if nrna.mode not in {"additive_ratio", "sparse", "fragment_share"}:
         raise ValueError(
-            "nrna.mode must be 'additive_ratio', 'fragment_share' or 'random_fraction'"
+            "nrna.mode must be 'additive_ratio', 'fragment_share' or 'sparse'"
         )
     raw_shares = nrna_raw.get("shares", None)
     if raw_shares is not None:
@@ -249,14 +271,44 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     raw_ratios = nrna_raw.get("ratios", None)
     if raw_ratios is not None:
         nrna.ratios = [float(r) for r in raw_ratios]
-    raw_ratio_ranges = nrna_raw.get("ratio_ranges", None)
-    if raw_ratio_ranges is not None:
-        nrna.ratio_ranges = [(float(pair[0]), float(pair[1])) for pair in raw_ratio_ranges]
+    raw_abundance_ranges = nrna_raw.get("abundance_ranges", None)
+    if raw_abundance_ranges is not None:
+        for pair in raw_abundance_ranges:
+            # ⛔ a range is a PAIR. A three-element entry used to be silently TRUNCATED to its first
+            # two, so `[1, 10, 100]` ran as `(1, 10)` and the panel was quietly not the one configured.
+            if not hasattr(pair, "__len__") or len(pair) != 2:
+                raise ValueError(
+                    f"nrna.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}"
+                )
+        nrna.abundance_ranges = [(float(pair[0]), float(pair[1])) for pair in raw_abundance_ranges]
     nrna.ratio_labels = nrna_raw.get("ratio_labels", None)
-    nrna.eligible_fraction = float(nrna_raw.get("eligible_fraction", 1.0))
+    nrna.on_fraction = float(nrna_raw.get("on_fraction", 1.0))
     nrna.seed = int(nrna_raw.get("seed", 42))
-    if not 0.0 <= nrna.eligible_fraction <= 1.0:
-        raise ValueError("nrna.eligible_fraction must be between 0 and 1")
+    if nrna.mode == "sparse" and nrna.abundance_ranges is None:
+        raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
+    # ⛔⛔ A FIELD THAT THE SELECTED MODE CANNOT READ IS A CONFIG THE AUTHOR DID NOT WRITE. Without
+    # this, `abundance_ranges` + `on_fraction` with `mode:` omitted parsed CLEAN and ran
+    # `additive_ratio` at ratio 0.0 — a NASCENT-FREE panel whose conditions were still named for the
+    # nascent label. Silence is the whole defect: the numbers look like a panel, and are another one.
+    _MODE_FIELDS = {
+        "additive_ratio": ("ratios",),
+        "fragment_share": ("shares",),
+        "sparse": ("abundance_ranges", "on_fraction"),
+    }
+    _ignored = sorted(
+        f
+        for mode, fields in _MODE_FIELDS.items()
+        if mode != nrna.mode
+        for f in fields
+        if f in nrna_raw and f not in _MODE_FIELDS[nrna.mode]
+    )
+    if _ignored:
+        raise ValueError(
+            f"nrna.mode={nrna.mode!r} cannot read {_ignored} — those fields belong to another mode "
+            f"and would be silently ignored. Remove them, or set the mode they belong to."
+        )
+    if not 0.0 <= nrna.on_fraction <= 1.0:
+        raise ValueError("nrna.on_fraction must be between 0 and 1")
     if nrna.mode == "additive_ratio":
         expected_len = len(nrna.ratios)
     elif nrna.mode == "fragment_share":
@@ -265,12 +317,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
                 raise ValueError("nrna.shares entries must satisfy 0 <= share < 1")
         expected_len = len(nrna.shares or [])
     else:
-        if nrna.ratio_ranges is None:
-            raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
-        for lo, hi in nrna.ratio_ranges:
-            if lo < 0 or hi < 0 or hi < lo:
-                raise ValueError("nrna.ratio_ranges entries must satisfy 0 <= min <= max")
-        expected_len = len(nrna.ratio_ranges)
+        for lo, hi in nrna.abundance_ranges or []:
+            # ⛔ a LOG-uniform draw has no zero end: express "no nascent" with on_fraction = 0
+            if lo <= 0 or hi < lo:
+                raise ValueError("nrna.abundance_ranges entries must satisfy 0 < min <= max")
+        expected_len = len(nrna.abundance_ranges or [])
     if nrna.ratio_labels is not None and len(nrna.ratio_labels) != expected_len:
         raise ValueError("nrna.ratio_labels must match the number of nRNA scenarios")
 
@@ -698,62 +749,88 @@ def apply_nrna_fragment_share(
     return ratio
 
 
-def apply_random_nrna_fraction(
+def apply_sparse_nrna(
     transcripts: list[Transcript],
-    ratio_range: tuple[float, float],
+    abundance_range: tuple[float, float],
     *,
-    eligible_fraction: float,
+    on_fraction: float,
     seed: int,
 ) -> float:
-    """Assign nRNA to a random subset of expressed multi-exon transcripts.
+    """⭐⭐⭐ **NASCENT RNA IS SPARSE: ABSENT FROM MOST GENE SPANS, PRESENT AND MEASURABLE IN A
+    MINORITY** (owner, 2026-08-22). Draw, per nascent ENTITY, whether it is transcribed at all
+    (Bernoulli ``on_fraction``) and, if it is, its **ABSOLUTE** molecular abundance LOG-UNIFORMLY over
+    ``abundance_range``. Returns the realised nascent:mature molecular ratio.
 
-    Returns the realized total nRNA:mRNA molecular abundance ratio.
+    ⛔⛔ **THE LEVEL IS INDEPENDENT OF THE MATURE LEVEL, AND THAT IS THE POINT** (owner's ruling; it is
+    what this mode changes). The retired ratio modes set ``nascent = mature x ratio``, so nascent mass
+    tracked mature abundance and nascent could never exceed it. The steady state says the opposite:
+    mature is synthesis/degradation and nascent is synthesis, so the nascent:mature ratio is a
+    STABILITY parameter, not an expression one — an abundant stable transcript shows almost no nascent
+    signal and an unstable rare one can show more nascent than mature. Drawing the two independently
+    makes ``nascent > mature`` a real case the tool must survive.
+
+    ⭐ **LOG-UNIFORM, because the levels span decades where nascent is present** — a linear draw on a
+    range like (0.05, 2) puts 97 % of its mass in the top decade and cannot express "very low in some,
+    high in others".
+
+    ⛔⛔ **THE UNIT OF SPARSITY IS THE ENTITY, NOT THE TRANSCRIPT, and the difference is measurable.**
+    An entity is one TSS/TES-clustered gene span and several isoforms share it, so drawing per
+    contributor would give a gene with 5 isoforms ``1 - (1 - 0.1)^5 = 41 %`` chance of carrying nascent
+    at ``on_fraction = 0.1`` — the INTRON slots, which is what calibration reads, would be four times
+    less sparse than configured. Per entity, the configured fraction is the fraction of gene spans and
+    therefore of intron slots. Pre-mRNA is a property of a locus being transcribed, which is the same
+    unit.
+
+    ⚠ The nascent FRAGMENT share is EMERGENT here rather than solved (owner: acceptable, since a sparse
+    subset and a bounded range control it). It is not a free parameter — the caller can price it
+    exactly with :func:`expected_rna_weights`, and the orchestrator records it per condition.
     """
-    lo, hi = ratio_range
-    if lo < 0 or hi < lo:
-        raise ValueError("ratio_range must satisfy 0 <= min <= max")
-    if not 0.0 <= eligible_fraction <= 1.0:
-        raise ValueError("eligible_fraction must be between 0 and 1")
+    lo, hi = float(abundance_range[0]), float(abundance_range[1])
+    if lo <= 0.0 or hi < lo:
+        raise ValueError(
+            f"abundance_range must satisfy 0 < lo <= hi for a LOG-uniform draw; got ({lo}, {hi})"
+        )
+    if not 0.0 <= on_fraction <= 1.0:
+        raise ValueError(f"on_fraction must be between 0 and 1; got {on_fraction}")
 
     rng = np.random.default_rng(seed)
-    n_eligible = 0
-    n_spiked = 0
-    n_single = 0
-    per = np.zeros(len(transcripts))
+    by_index = {t.t_index: t for t in transcripts}
+    for t in transcripts:
+        t.nrna_abundance = 0.0
 
-    for i, t in enumerate(transcripts):
-        mrna = t.abundance or 0.0
-        if mrna <= 0:
+    # an entity is ELIGIBLE iff at least one EXPRESSED multi-exon transcript names it: a silent gene
+    # is not being transcribed, so it has no pre-mRNA (`TRAPS: starved-is-not-depleted` — this is the
+    # "biology puts nothing there" side, and it must read as an exact zero rather than a small number)
+    eligible: list[Transcript] = []
+    seen: set[int] = set()
+    for t in transcripts:
+        if (t.abundance or 0.0) <= 0.0 or len(t.exons) <= 1:
             continue
-        if len(t.exons) <= 1:
-            n_single += 1
+        entity = by_index.get(t.nrna_t_index)
+        if entity is None:
+            raise ValueError(
+                f"transcript {t.t_id} has no nascent entity (nrna_t_index={t.nrna_t_index}); a "
+                f"transcript list without entities is not a rigel index's"
+            )
+        if entity.t_index not in seen:
+            seen.add(entity.t_index)
+            eligible.append(entity)
+
+    log_lo, log_hi = np.log(lo), np.log(hi)
+    n_on = 0
+    for entity in eligible:
+        if rng.random() >= on_fraction:
             continue
-        n_eligible += 1
-        if rng.random() >= eligible_fraction:
-            continue
-        ratio = float(rng.uniform(lo, hi)) if hi > lo else lo
-        per[i] = mrna * ratio
-        if ratio > 0:
-            n_spiked += 1
-    # the per-contributor molecules are pooled onto the nRNA entities, as in `apply_nrna_ratio`
-    assign_nrna_to_entities(transcripts, per)
+        entity.nrna_abundance = float(np.exp(rng.uniform(log_lo, log_hi)) if hi > lo else lo)
+        n_on += 1
 
     total_mrna = sum(t.abundance or 0.0 for t in transcripts)
     total_nrna = sum(t.nrna_abundance for t in transcripts)
     realized_ratio = total_nrna / total_mrna if total_mrna > 0 else 0.0
     logger.info(
-        "Set random nRNA fractions: range=[%.3g, %.3g], eligible_fraction=%.3g, "
-        "spiked=%d/%d expressed multi-exon, mRNA=%.1f, nRNA=%.1f, "
-        "realized_ratio=%.4g, %d single-exon zeroed",
-        lo,
-        hi,
-        eligible_fraction,
-        n_spiked,
-        n_eligible,
-        total_mrna,
-        total_nrna,
-        realized_ratio,
-        n_single,
+        "Sparse nRNA: %d/%d gene spans ON (on_fraction=%.3g), level ~ logU(%.3g, %.3g), "
+        "mRNA=%.1f, nRNA=%.1f, realised molar ratio=%.4g",
+        n_on, len(eligible), on_fraction, lo, hi, total_mrna, total_nrna, realized_ratio,
     )
     return realized_ratio
 
@@ -867,11 +944,14 @@ def _build_nrna_pairs(
     cfg: WholeGenomeSimConfig,
     has_file_nrna: bool,
 ) -> list[tuple[str, str, float | tuple[float, float] | None, int]]:
-    """Build nRNA sweep pairs.
+    """Build nRNA sweep pairs — one ``(label, mode, value, index)`` per nRNA condition.
 
-    When the abundance file supplied explicit nRNA data, returns a
-    single entry ``("file", None)`` — no spike-in.  Otherwise returns
-    one entry per configured additive ratio.
+    When the abundance file supplied explicit nRNA data, returns the single entry
+    ``("file", "file", None, 0)``: the TSV is the one source of nascent weight and the sweep
+    is skipped entirely. Otherwise one entry per configured value of whichever key the mode
+    reads — ``ratios`` for ``additive_ratio``, ``shares`` for ``fragment_share``, and an
+    ``(lo, hi)`` pair from ``abundance_ranges`` for ``sparse``. ``index`` is the entry's
+    position, which ``sparse`` also folds into its per-condition seed.
     """
     if has_file_nrna:
         return [("file", "file", None, 0)]
@@ -890,12 +970,12 @@ def _build_nrna_pairs(
             label = nrna_label_for_ratio(share, cfg.nrna.ratio_labels, i)
             pairs.append((label, mode, share, i))
         return pairs
-    if mode == "random_fraction":
-        if cfg.nrna.ratio_ranges is None:
-            raise ValueError("nrna.ratio_ranges is required for mode='random_fraction'")
-        for i, ratio_range in enumerate(cfg.nrna.ratio_ranges):
-            label = nrna_label_for_ratio(ratio_range, cfg.nrna.ratio_labels, i)
-            pairs.append((label, mode, ratio_range, i))
+    if mode == "sparse":
+        if cfg.nrna.abundance_ranges is None:
+            raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
+        for i, abundance_range in enumerate(cfg.nrna.abundance_ranges):
+            label = nrna_label_for_ratio(abundance_range, cfg.nrna.ratio_labels, i)
+            pairs.append((label, mode, abundance_range, i))
         return pairs
 
     raise ValueError(f"Unknown nRNA simulation mode: {mode}")
@@ -1115,13 +1195,20 @@ def main() -> int:
     print(f"  Workers:          {cfg.simulation.n_workers}", flush=True)
     print(f"  gDNA rates:       {cfg.gdna.rates}", flush=True)
     print(f"  Strand specs:     {cfg.strand_specificities}", flush=True)
+    # ⚠ Print the CONFIGURED nRNA mode, whichever it is. The `fragment_share` branch used to fall
+    # through to "explicit file values" — right for a config whose abundance TSV supplies nascent
+    # weights and wrong for one that does not, and the two are not distinguishable here: whether the
+    # sweep is skipped is decided later, by whether the loaded file carried an `nrna_abundance` column.
     if cfg.nrna.mode == "additive_ratio":
         print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
-    elif cfg.nrna.mode == "random_fraction":
-        print(f"  nRNA ranges:      {cfg.nrna.ratio_ranges}", flush=True)
-        print(f"  nRNA eligible:    {cfg.nrna.eligible_fraction}", flush=True)
-    else:
-        print("  nRNA:             explicit file values", flush=True)
+    elif cfg.nrna.mode == "fragment_share":
+        print(f"  nRNA frag shares: {cfg.nrna.shares} (molecular ratio SOLVED per share)", flush=True)
+    elif cfg.nrna.mode == "sparse":
+        print(f"  nRNA ranges:      {cfg.nrna.abundance_ranges} (LOG-uniform, absolute)", flush=True)
+        print(f"  nRNA on_fraction: {cfg.nrna.on_fraction} of gene spans", flush=True)
+    if cfg.abundance.mode == "file":
+        print("  nRNA:             the sweep above is SKIPPED if the abundance file supplies "
+              "nrna_abundance", flush=True)
     print(f"  Transcript filter:{cfg.transcript_filter}", flush=True)
     print(f"  Oracle BAM:       {cfg.oracle_bam}", flush=True)
 

@@ -37,7 +37,7 @@ suite:
 
 # ── Read simulation ─────────────────────────────────────────────────────────
 simulation:
-  n_rna_fragments: 1000000   # mature-RNA depth per condition; nRNA + gDNA added on top
+  n_rna_fragments: 1000000   # the WHOLE RNA depth per condition (mature + nascent); gDNA added on top
   frag_mean: 250             # RNA fragment-length truncated-normal: mean (bp)
   frag_std: 50               #   ... std
   frag_min: 80               #   ... lower truncation

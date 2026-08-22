@@ -73,28 +73,42 @@ class GDNASimConfig:
 
 @dataclass
 class NRNAConfig:
-    """Nascent RNA spike-in sweep configuration.
+    """Nascent RNA sweep configuration.
 
-    Two sweep modes are supported:
+    THREE sweep modes are supported, and ⭐ ``sparse`` is the one the benchmark panels use:
 
+    - ⭐⭐ ``sparse`` (via ``abundance_ranges`` + ``on_fraction``): nascent RNA is
+      ABSENT from most gene spans and present in a minority (owner, 2026-08-22).
+      Each nascent ENTITY is switched on with probability ``on_fraction`` and, if
+      on, given an ABSOLUTE molecular abundance drawn LOG-UNIFORMLY from a
+      ``(lo, hi)`` range — INDEPENDENT of the mature level, so ``nascent >
+      mature`` is a real case the tool must survive. The fragment share is
+      EMERGENT rather than requested: it is priceable in advance with
+      ``whole_genome.expected_rna_weights`` and the orchestrator records the
+      realised molar ratio per condition. ⛔ ``on_fraction`` and the range TOGETHER
+      set the nascent burden, so neither is readable on its own.
     - ``additive_ratio`` (via ``ratios``): each entry adds nascent RNA at a
       fixed ratio of mature RNA, ``nrna_abundance = mrna_abundance * ratio``.
-    - ``random_fraction`` (via ``ratio_ranges`` + ``eligible_fraction``): each
-      entry draws per-transcript ratios uniformly from a ``(lo, hi)`` range,
-      applied to a random ``eligible_fraction`` of transcripts (the rest get
-      zero nascent).
-    - ⭐ ``fragment_share`` (via ``shares``): each entry states the nascent share
+    - ``fragment_share`` (via ``shares``): each entry states the nascent share
       of RNA **FRAGMENTS** in the uncaptured library, and the simulator SOLVES for
-      the common molecular scale that produces it. ⛔ This is the mode a panel
-      wants, and the reason is a factor of four: a nascent ENTITY spans a whole
-      gene (mean 40,667 bp on the ladder's index) while a mature transcript is
-      spliced (mean 1,708 bp), so a molecular ratio of 0.25 puts **86 %** of RNA
-      fragments in nascent RNA, not 25 % (measured 2026-08-19). The molecular
-      ratio that gives a 20 % fragment share is **0.0100** — which is also the
-      biologically sensible pre-mRNA:mRNA molar ratio. ⚠ The scale is solved on
-      UNCAPTURED effective lengths, i.e. it fixes the LIBRARY's molecular
-      composition; the realised fragment share then differs under capture, which
-      is the physics (capture acts after the molecules exist).
+      the common molecular scale that produces it. ⭐ Why it exists at all is a
+      factor of four: a nascent ENTITY spans a whole gene (mean 40,667 bp on the
+      ladder's index) while a mature transcript is spliced (mean 1,708 bp), so a
+      molecular ratio of 0.25 puts **86 %** of RNA fragments in nascent RNA, not
+      25 % (measured 2026-08-19). The molecular ratio that gives a 20 % fragment
+      share is **0.0100** — which is also the biologically sensible pre-mRNA:mRNA
+      molar ratio. ⚠ The scale is solved on UNCAPTURED effective lengths, i.e. it
+      fixes the LIBRARY's molecular composition; the realised fragment share then
+      differs under capture, which is the physics (capture acts after the
+      molecules exist).
+
+    ⛔⛔ **BOTH RATIO MODES PUT NASCENT RNA ON EVERY EXPRESSED MULTI-EXON SPAN AT ONE
+    LEVEL, AND THAT IS WHY THE PANELS LEFT THEM** (the owner's NASCENT SCOPE ruling,
+    2026-08-22). Nascent mass tracks mature abundance there and can never exceed it,
+    and no intron is ever exactly nascent-free — so a tool developed against them is
+    designed AROUND nascent RNA rather than robust TO it. ⚠ They are not dead: the
+    fl-gap side panels still use ``fragment_share``, so the two nascent models coexist
+    across the panels on disk, and a config states which one it uses.
 
     When abundances come from a file that already contains explicit nRNA
     data, the configured sweep is ignored and the file's nRNA values are
@@ -103,11 +117,14 @@ class NRNAConfig:
 
     mode: str = "additive_ratio"
     ratios: list[float] = field(default_factory=lambda: [0.0])
-    ratio_ranges: list[tuple[float, float]] | None = None
+    #: per-condition (lo, hi) for the LOG-uniform ABSOLUTE nascent abundance, for ``mode="sparse"``
+    abundance_ranges: list[tuple[float, float]] | None = None
     #: nascent share of RNA FRAGMENTS in the uncaptured library, for ``mode="fragment_share"``
     shares: list[float] | None = None
+    #: labels the CONDITION whatever the quantity swept (ratios, shares or abundance ranges)
     ratio_labels: list[str] | None = None
-    eligible_fraction: float = 1.0
+    #: fraction of eligible gene spans that carry nascent RNA at all, for ``mode="sparse"``
+    on_fraction: float = 1.0
     seed: int = 42
 
 

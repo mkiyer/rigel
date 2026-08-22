@@ -2,6 +2,21 @@
 #  THE fl-GAP SIDE PANEL, ARM 1 — gDNA SHORT (75 bp), RNA LONG (250 bp)
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
+# ⛔⛔⛔ READ FIRST — THIS PANEL PREDATES THE SPARSE NASCENT REBUILD AND STILL CARRIES THE RETIRED
+# UNIFORM NASCENT MODEL. The `nrna:` block below is `mode: fragment_share` at a flat `shares: [0.20]`:
+# nascent RNA on EVERY expressed multi-exon span, at one solved molecular level. The gDNA ladder was
+# regenerated on 2026-08-22 with `mode: sparse`, where half the gene spans carry no nascent RNA at all
+# and the level where they do is ABSOLUTE and log-uniform (`gdna_ladder.yaml`; `DESIGN.md` §0b, THE
+# NASCENT SCOPE RULING). ⭐ THE DATA ON DISK MATCHES THIS CONFIG, so this panel is internally accurate
+# and every measurement already taken on it stands — this is a difference in what was simulated, not a
+# stale file. ⛔ WHAT IT COSTS IS THE CROSS-PANEL READING: a ladder-vs-side-panel difference confounds
+# the fl gap with the nascent DISTRIBUTION, and the fl gap is the one thing this panel exists to vary,
+# so name both panels behind any such number or re-simulate first. ⚠ Re-simulating is an OPEN OWNER
+# DECISION and has not been made: it is ~5.3 GB here (~11 GB for both arms), and the mechanism the arms
+# probe — `rho_r * (E_r/E_g - 1)` on a MIXED pool — is exerted by the fl gap rather than by the nascent
+# distribution. ⚠ "Retired" means retired as a PANEL's nascent model, not removed: `fragment_share` is
+# still a live mode in `src/rigel/sim/`, so this file runs exactly as written.
+#
 # ⛔⛔⛔ THIS IS A SIDE PANEL AND IT IS NEVER A LADDER RUNG. `gdna_ladder.yaml` gives both origins the
 # SAME fragment-length distribution on purpose, and that is a forcing function rather than tidiness:
 # THE EM ALREADY USES THE FRAGMENT-LENGTH DISTRIBUTION (`scoring.cpp` carries `fl_log_prob_` for RNA
@@ -91,9 +106,10 @@
 
 genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
-# ⭐ The SAME reference and index as the ladder — only the fragment-length parameters differ, so the
-# annotation, the probes and the synthetic nascent entities are identical and the fl gap is the one
-# thing that changed.
+# ⭐ The SAME reference and index as the ladder, so the annotation, the probes and the set of synthetic
+# nascent ENTITIES are identical. ⛔ Two things differ from the ladder, not one: the fragment-length
+# parameters (deliberately, this panel's whole purpose) and — since 2026-08-22 — the nascent MODEL, which
+# here is still uniform. See the header block.
 index: /Users/mkiyer/Downloads/rigel_runs/suite/rigel_index
 outdir: /Users/mkiyer/Downloads/rigel_runs/suite/flgap_rna_long
 transcript_filter: all
@@ -132,8 +148,9 @@ gdna:
 # ── Strand — both of the owner's named common cases ─────────────────────────────────────────────
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent — ON, as on the ladder: the intron pool must carry RNA or the mechanism has nothing to
-# bite on (a reading on an `nrna = 0` row is `nrna = 0` restated).
+# ── Nascent — ON, because the intron pool must carry RNA or the mechanism has nothing to bite on (a
+# reading on an `nrna = 0` row is `nrna = 0` restated). ⛔ But NOT "as on the ladder" any more: this is
+# the RETIRED UNIFORM model and the ladder is sparse — see the header block before comparing the two.
 nrna:
   mode: fragment_share
   shares:       [0.20]

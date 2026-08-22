@@ -23,18 +23,29 @@ here: much of this data is DERIVED and the point is to say which command derives
                             `--self-test` passes it
 ==========================  =========================================================================
 
-⚠ **The instrument sweep is the slow half (~2 min)**; `--fast` skips it and checks everything else.
+⭐⭐ **THE DEFAULT IS THE FAST PATH, DELIBERATELY** (owner, 2026-08-22: a session must not open with a
+ten-minute wait). Every instrument is IMPORTED, which is the check that actually rots — an import break is
+what a `src/` deletion or a rename causes. ⛔ The `--self-test` SWEEP is opt-in via `--full`: it runs each
+instrument's own falsification in a subprocess, and it is what you want after a deposit-rule change, a
+default flip, or before a commit that touches many instruments.
+
+⛔⛔ **`--full` IS EXPENSIVE AND THE MEASURED COST IS THE ONE TO QUOTE: 59:56 wall / 7.5 CPU-hours / 845 %
+CPU for 15 instruments** (2026-08-22, 16 cores, with a pytest run competing — so read it as an upper
+bound). `ladder_arm_ab.py --self-test` dominates it and is still running long after every other instrument
+has finished. ⚠ An earlier version of this docstring guessed "~15 min" before measuring; it was wrong by
+4×, which is `TRAPS: re-record-the-baseline` committed inside the file that warns about it.
 
 Usage::
 
-    python scripts/design/preflight.py            # everything
-    python scripts/design/preflight.py --fast     # skip the instrument self-test sweep
+    python scripts/design/preflight.py            # the fast path: toolchain, data, imports
+    python scripts/design/preflight.py --full     # + every instrument's --self-test, in parallel
     python scripts/design/preflight.py --self-test
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import os
 import shutil
 import subprocess
@@ -136,7 +147,7 @@ def check_panel(rep: Report, root: Path, label: str, rebuild: str) -> None:
             "python scripts/design/calibration_oracle.py")
 
 
-def check_instruments(rep: Report, fast: bool) -> None:
+def check_instruments(rep: Report, full: bool) -> None:
     import importlib.util
 
     design = REPO / "scripts" / "design"
@@ -160,16 +171,27 @@ def check_instruments(rep: Report, fast: bool) -> None:
     rep.add(not broken, "every scripts/design/ instrument imports",
             f"{len(files)} files" + (f"; {broken[:2]}" if broken else ""),
             "an instrument that cannot import cannot be run — repair or delete it")
-    if fast:
-        rep.add(True, "instrument --self-test sweep", "SKIPPED (--fast)")
+    if not full:
+        rep.add(True, "instrument --self-test sweep",
+                "SKIPPED (default; --full runs it)")
         return
+    # ⛔⛔ THE OUTER POOL IS DELIBERATELY NARROW BECAUSE THE INSTRUMENTS PARALLELISE THEMSELVES.
+    # `ladder_arm_ab.py --self-test` runs 6 arms concurrently by default and several others shard by
+    # condition, so a wide outer pool oversubscribes the machine and starves the very instrument that
+    # dominates the wall time. Three lets the many quick instruments overlap while leaving cores for the
+    # long one. ⚠ This is reasoned from the instruments' own defaults, NOT measured against a serial
+    # baseline — the sweep costs ~an hour, so an A/B of the width has not been paid for.
     have = [p for p in files if '"--self-test"' in p.read_text()]
-    failed = []
-    for path in have:
+    workers = max(1, min(3, (os.cpu_count() or 2) - 1))
+
+    def _run(path):
         r = subprocess.run([sys.executable, str(path), "--self-test"], capture_output=True,
                            text=True, cwd=str(REPO))
-        if r.returncode != 0:
-            failed.append(path.name)
+        return path.name, r.returncode
+
+    with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(_run, have))
+    failed = sorted(name for name, code in results if code != 0)
     rep.add(not failed, "every instrument's --self-test passes",
             f"{len(have) - len(failed)}/{len(have)}" + (f"; {failed}" if failed else ""),
             "run the named instrument's --self-test and read its output")
@@ -210,7 +232,8 @@ def self_test() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--fast", action="store_true", help="skip the instrument --self-test sweep")
+    ap.add_argument("--full", action="store_true",
+                    help="also run every instrument's --self-test, in parallel (minutes, not seconds)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -221,9 +244,9 @@ def main() -> int:
     check_reference(ref)
     check_panel(panel, LADDER, "panel (16 conditions)",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/gdna_ladder.yaml --jobs 16")
-    check_panel(testref, TESTREF / "scenarios", "test chromosome (8 scenarios)",
+    check_panel(testref, TESTREF / "scenarios", "test chromosome",
                 "python scripts/sim/simulate_reads.py --config scripts/sim/configs/test_reference.yaml -j 8")
-    check_instruments(inst, args.fast)
+    check_instruments(inst, args.full)
 
     tool.print("TOOLCHAIN")
     ref.print("REFERENCE DATA")
@@ -240,7 +263,7 @@ def main() -> int:
         print("⭐ everything present and working: the toolchain, both references, both panels "
               "(five oracle partitions each), and every instrument.")
     print("\n⚠ This checks PRESENCE and IMPORTABILITY. It does not run the suite — do that too:")
-    print("   python -m pytest tests/ -q   (baseline: 0 failed / 3,661 passed / 9 xfailed)")
+    print("   python -m pytest tests/ -q   (ANY failure is a regression; the baseline count lives in CLAUDE.md)")
     return 1 if bad else 0
 
 

@@ -3,7 +3,7 @@
 Both ``suite.main`` (synthetic mini-genome suites) and ``whole_genome.run_simulation`` (simulate
 from an existing reference) sweep the same condition grid — nRNA × gDNA-rate × gDNA-strand-
 overdispersion × strand-specificity × capture — and for each condition deep-copy the transcripts,
-apply the nRNA spike-in, allocate fragment counts, run the :class:`whole_genome.WholeGenomeSimulator`,
+apply the nRNA mode, allocate fragment counts, run the :class:`whole_genome.WholeGenomeSimulator`,
 write the post-capture truth, and record a manifest entry. That loop lived in two near-identical
 copies (so every new axis had to be wired twice). This is the single implementation both call.
 
@@ -30,7 +30,7 @@ from .whole_genome import (
     WholeGenomeSimulator,
     apply_nrna_fragment_share,
     apply_nrna_ratio,
-    apply_random_nrna_fraction,
+    apply_sparse_nrna,
     write_truth_abundances,
 )
 
@@ -158,10 +158,15 @@ def run_condition_grid(
 ) -> list[dict]:
     """Run the full condition grid and return the per-condition manifest entries.
 
-    ``nrna_pairs`` entries are ``(label, mode, value, index)`` (see ``whole_genome._build_nrna_pairs``):
-    mode ``additive_ratio`` / ``random_fraction`` pool nascent molecules onto the index's nRNA entities
-    (`whole_genome.assign_nrna_to_entities`); any other mode (``file``) leaves abundances as loaded.
-    Either way the RNA budget is ONE multinomial over mature and nascent rows. ``capture_meta_by_label`` supplies the suite's probe-provenance fields per
+    ``nrna_pairs`` entries are ``(label, mode, value, index)`` (see ``whole_genome._build_nrna_pairs``).
+    ⭐ The three live modes reach the entities by two different routes and the difference is the point:
+    ``additive_ratio`` and ``fragment_share`` POOL each entity's molecules from its contributors
+    (`whole_genome.assign_nrna_to_entities`, so nascent tracks mature and cannot exceed it), while
+    ``sparse`` writes each ENTITY's absolute abundance directly (`whole_genome.apply_sparse_nrna`, so
+    most entities get exactly zero and the rest are independent of the mature level). ``file`` leaves
+    the loaded abundances alone. Every mode then shares one thing: the RNA budget is ONE multinomial
+    over mature and nascent rows, so the fragment split is realised rather than allocated.
+    ``capture_meta_by_label`` supplies the suite's probe-provenance fields per
     capture label (empty for the reference-driven path). The caller writes the manifest.
     """
     capture_meta_by_label = capture_meta_by_label or {}
@@ -193,7 +198,7 @@ def run_condition_grid(
             t.nrna_abundance = base_nrna
 
         nrna_ratio: float | None = None
-        nrna_ratio_range: tuple[float, float] | None = None
+        nrna_abundance_range: tuple[float, float] | None = None
         nrna_share: float | None = None
         if nrna_mode == "additive_ratio":
             nrna_ratio = float(nrna_value or 0.0)
@@ -203,12 +208,14 @@ def run_condition_grid(
             # from the annotation (`whole_genome.apply_nrna_fragment_share`) and recorded per condition
             nrna_share = float(nrna_value or 0.0)
             nrna_ratio = apply_nrna_fragment_share(cond_transcripts, nrna_share, sim)
-        elif nrna_mode == "random_fraction":
-            nrna_ratio_range = tuple(nrna_value)  # type: ignore[arg-type]
-            nrna_ratio = apply_random_nrna_fraction(
+        elif nrna_mode == "sparse":
+            # ⭐ nascent is ABSENT from most gene spans and INDEPENDENT of the mature level where it
+            # is present (owner, 2026-08-22); the fragment share is emergent and recorded below
+            nrna_abundance_range = tuple(nrna_value)  # type: ignore[arg-type]
+            nrna_ratio = apply_sparse_nrna(
                 cond_transcripts,
-                nrna_ratio_range,
-                eligible_fraction=nrna.eligible_fraction,
+                nrna_abundance_range,
+                on_fraction=nrna.on_fraction,
                 seed=nrna.seed + nrna_index,
             )
 
@@ -261,9 +268,9 @@ def run_condition_grid(
                         "nrna_mode": nrna_mode,
                         "nrna_ratio": nrna_ratio,
                         "nrna_fragment_share": nrna_share,
-                        "nrna_ratio_range": nrna_ratio_range,
-                        "nrna_eligible_fraction": (
-                            nrna.eligible_fraction if nrna_mode == "random_fraction" else None
+                        "nrna_abundance_range": nrna_abundance_range,
+                        "nrna_on_fraction": (
+                            nrna.on_fraction if nrna_mode == "sparse" else None
                         ),
                         "capture_label": capture_scenario.label,
                         "capture_enabled": bool(capture_scenario.config.probes),

@@ -4,12 +4,14 @@
 target is **0.8.0**, and every number in this file exists to say whether that release is reachable yet.
 This is the organising frame — a measurement that does not bear on it is a diagnostic, not a target.
 
-⛔ **STAMP, applying to the whole file: every number here that predates 2026-08-13 was measured on a
-panel that has since been RETIRED** — `pilot`, `flgap_short` and `flgap_long` were deleted and the ladder
-was rebuilt 36 → 16 conditions. They are kept because a measurement is a historical record, and **none of
-them has been re-derived on the panel now on disk**. ⭐ The 2026-08-13/14 figures are on the rebuilt
-ladder and are marked as such. **Re-derive rather than trust — a number that has moved is a result, not a
-documentation bug.**
+⛔⛔ **STAMP, APPLYING TO THE WHOLE FILE: THE PANEL HAS BEEN REBUILT THREE TIMES AND NO FIGURE HERE HAS
+BEEN RE-DERIVED ON THE PANEL NOW ON DISK.** 2026-08-13 retired `pilot`/`flgap_short`/`flgap_long` and took
+the ladder 36 → 16 conditions; 2026-08-19 made the simulator index-driven and put nascent RNA on every
+row; **2026-08-22 replaced the uniform nascent model with a SPARSE one** (`DESIGN.md` §0b). Every number
+in this file is a historical record of the substrate it was measured on. ⛔ **Treat none of them as current
+behaviour** — including the 2026-08-13/14 figures, which this stamp used to certify and which predate both
+later rebuilds. **Re-derive rather than trust: a number that has moved is a result, not a documentation
+bug.**
 
 ---
 

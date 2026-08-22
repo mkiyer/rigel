@@ -14,9 +14,17 @@ design target.
 0.75`` exactly — the mean one gDNA observation takes ``Beta(a,b)`` to. Since ``strength = logit(m)``, that
 is ``log 3`` nats, i.e. a **3:1** claim, refutable at ~1.5 fragments. ⛔ It replaces ``m = σ(L)``, the
 lattice's own width, which asserted **9.31 nats (10,000:1)** and measured WORSE THAN NO PRIOR AT ALL at
-being refuted. ⚠ The ladder holds ``nrna = 0``, so it scores only the DELIVER obligation, where more nats
-is monotonically better — which is exactly why it preferred the worst option
+being refuted. ⚠ **The ladder that CHOSE this could not rank it**: it held ``nrna = 0``, so it scored only the
+DELIVER obligation, where more nats is monotonically better — which is exactly why it preferred the
+worst option
 (`TRAPS: a-single-level-panel-cannot-see-a-constant`, met on a strength rather than a level).
+⭐⭐ **THAT IS NO LONGER TRUE OF THE PANEL ON DISK.** Since 2026-08-22 nascent RNA is SPARSE — absent
+from most gene spans, present in a minority — so within ONE condition a large share of intron slots
+carry NO nascent (the prior is right and free there) while the rest are heavily contaminated. DELIVER
+and REFUTE now coexist on the same substrate, so the strength can be ranked on the panel and not only
+on the fixtures below. ⛔ Score ``R intron`` and ``B exon|intron`` SEPARATELY: their truth is nearly
+identical and their refutation availability is opposite, because the intron factory reaches intron
+REGIONs only.
 
 ⭐⭐⭐ **AND A REFUTABILITY TEST IS ONLY VALID IF THE REFUTATION CHANNEL IS IN THE FIXTURE.** The two
 mechanisms that can prove nascent RNA present are ① strand asymmetry inside an intron (`i_strand`, dead at
@@ -145,8 +153,12 @@ def _mature_exon_chain(*, rho_g=0.5, rho_m=1.0, kappa=0.95):
 
 
 def _nascent_chain(*, rho_g, rho_m, rho_n, kappa=0.5):
-    """The same five regions, but with NASCENT RNA at density ``rho_n`` inside the introns — the one thing
-    the 16-condition ladder cannot produce, because it holds ``nrna = 0`` on every row.
+    """The same five regions, but with NASCENT RNA at density ``rho_n`` inside the introns.
+
+    ⚠ Written when the ladder held ``nrna = 0`` and could not produce intronic nascent at all. The
+    panel now carries it sparsely, so this is no longer the ONLY substrate — it remains the CONTROLLED
+    one, where the density is set rather than drawn and each refuting channel can be included or
+    withheld on its own.
 
     Returns ``(parts, belief, truth_per_slot)``; the truth is derived from the numbers deposited, not
     assumed."""
@@ -299,9 +311,10 @@ def test_the_strength_is_one_pseudo_observation_derived_from_the_reference_s_own
         ⛔ 9.31 (σ(L))         deliver 0.0037   refute 2.0247   total 2.0285   ← worst of seven
 
     ⭐ **The optimum is BROAD — 0.69 → 1.50 nats all within 6 % — which is what makes a DERIVED value safe
-    rather than lucky.** ⚠ The 16-condition ladder cannot rank this and that is why it picked the worst
-    row: it holds ``nrna = 0``, so it scores the DELIVER column alone, where more nats is monotonically
-    better."""
+    rather than lucky.** ⚠ The ladder these arms ran on could not rank this, which is why it picked
+    the worst row: it held ``nrna = 0``, so it scored the DELIVER column alone, where more nats is
+    monotonically better. ⭐ The rebuilt panel (sparse nascent, 2026-08-22) carries both columns at
+    once and can."""
 
     class _S:
         mrna_active_pos = np.array([True, False])

@@ -82,6 +82,16 @@ def _as_float_list(value: object) -> list[float]:
     return [float(item) for item in value]  # type: ignore[union-attr]
 
 
+def _or_default(value, default):
+    """``value`` unless it is None — never unless it is FALSY.
+
+    ⛔ `x or default` is wrong for any knob whose zero is meaningful: it silently substitutes the
+    default for `0`, `0.0` and `""`. Under the sparse nascent model `on_fraction=0` means "no nascent
+    anywhere", which is precisely the value the falsy spelling destroyed.
+    """
+    return default if value is None else value
+
+
 def _as_label_list(value: object) -> list[str]:
     if isinstance(value, str):
         return _parse_csv_labels(value)
@@ -165,8 +175,8 @@ def _load_suite_config(path: Path) -> dict[str, object]:
     put("nrna", "ratios", "nrna_ratios")
     put("nrna", "ratio_labels", "nrna_labels")
     put("nrna", "mode", "nrna_mode")
-    put("nrna", "ratio_ranges", "nrna_ratio_ranges")
-    put("nrna", "eligible_fraction", "nrna_eligible_fraction")
+    put("nrna", "abundance_ranges", "nrna_abundance_ranges")
+    put("nrna", "on_fraction", "nrna_on_fraction")
     put("nrna", "seed", "nrna_seed")
 
     put("capture", "fraction", "capture_fraction")
@@ -495,28 +505,29 @@ def main():
         "--nrna-mode",
         type=str,
         default="additive_ratio",
-        choices=("additive_ratio", "random_fraction"),
+        choices=("additive_ratio", "sparse"),
         help="Nascent sweep mode: additive_ratio (one global ratio for all expressed multi-exon "
-        "transcripts) or random_fraction (a random per-transcript ratio on a fraction of them)",
+        "transcripts) or sparse (nascent absent from most gene spans, and where present drawn "
+        "LOG-uniformly and INDEPENDENTLY of the mature level)",
     )
     parser.add_argument(
-        "--nrna-ratio-ranges",
+        "--nrna-abundance-ranges",
         type=str,
         default=None,
-        help="random_fraction: semicolon-separated lo,hi ranges, e.g. '0,0;0.1,1.0' "
-        "(per-transcript ratio drawn ~Uniform(lo,hi))",
+        help="sparse: semicolon-separated lo,hi ranges, e.g. '1,1000' — the ABSOLUTE nascent "
+        "molecular abundance of an ON gene span, drawn ~LogUniform(lo,hi); both ends > 0",
     )
     parser.add_argument(
-        "--nrna-eligible-fraction",
+        "--nrna-on-fraction",
         type=float,
         default=1.0,
-        help="random_fraction: fraction of expressed multi-exon transcripts that carry nascent RNA",
+        help="sparse: fraction of eligible GENE SPANS that carry nascent RNA at all",
     )
     parser.add_argument(
         "--nrna-seed",
         type=int,
         default=42,
-        help="random_fraction: RNG seed for the per-transcript nascent assignment",
+        help="sparse: RNG seed for the per-gene-span nascent assignment",
     )
     parser.add_argument(
         "--conditions",
@@ -569,21 +580,21 @@ def main():
 
     t0 = time.monotonic()
     nrna_mode = getattr(args, "nrna_mode", None) or "additive_ratio"
-    if nrna_mode == "random_fraction":
-        if args.nrna_ratio_ranges is None or args.nrna_labels is None:
+    if nrna_mode == "sparse":
+        if args.nrna_abundance_ranges is None or args.nrna_labels is None:
             raise ValueError(
-                "nrna.ratio_ranges and nrna.ratio_labels are required for nrna.mode=random_fraction"
+                "nrna.abundance_ranges and nrna.ratio_labels are required for nrna.mode=sparse"
             )
-        raw = args.nrna_ratio_ranges
+        raw = args.nrna_abundance_ranges
         if isinstance(raw, str):
             raw = [pair.split(",") for pair in raw.split(";")]
-        nrna_ratio_ranges = [(float(lo), float(hi)) for lo, hi in raw]
+        nrna_abundance_ranges = [(float(lo), float(hi)) for lo, hi in raw]
         nrna_labels = _as_label_list(args.nrna_labels)
         nrna_ratios = None
-        if len(nrna_labels) != len(nrna_ratio_ranges):
-            raise ValueError("nrna.ratio_labels must match nrna.ratio_ranges in length")
+        if len(nrna_labels) != len(nrna_abundance_ranges):
+            raise ValueError("nrna.ratio_labels must match nrna.abundance_ranges in length")
     else:
-        nrna_ratio_ranges = None
+        nrna_abundance_ranges = None
         if args.nrna_ratios is None:
             nrna_ratios, nrna_labels = PROFILE_NRNA[args.profile]
         else:
@@ -859,10 +870,14 @@ def main():
         nrna=NRNAConfig(
             mode=nrna_mode,
             ratios=nrna_ratios if nrna_ratios is not None else [0.0],
-            ratio_ranges=nrna_ratio_ranges,
+            abundance_ranges=nrna_abundance_ranges,
             ratio_labels=nrna_labels,
-            eligible_fraction=float(getattr(args, "nrna_eligible_fraction", 1.0) or 1.0),
-            seed=int(getattr(args, "nrna_seed", 42) or 42),
+            # ⛔ NO `or` HERE. `0.0 or 1.0` is 1.0, so the inherited spelling silently INVERTED
+            # `on_fraction=0` (no nascent anywhere) into 1.0 (nascent everywhere) — the exact opposite
+            # of the request, with no warning — and turned `seed=0` into 42. Both are meaningful values
+            # under the sparse model, so the default must come from `getattr`, never from falsiness.
+            on_fraction=float(_or_default(getattr(args, "nrna_on_fraction", None), 1.0)),
+            seed=int(_or_default(getattr(args, "nrna_seed", None), 42)),
         ),
         capture=(capture_scenarios[0].config if capture_scenarios else CaptureConfig()),
         capture_configs=(capture_scenarios if include_capture_in_names else []),
@@ -919,10 +934,10 @@ def main():
         for scenario in capture_scenarios
     }
     base_abundances = [(t.abundance or 0.0, t.nrna_abundance) for t in transcripts]
-    if nrna_mode == "random_fraction":
+    if nrna_mode == "sparse":
         nrna_pairs = [
-            (label, "random_fraction", ratio_range, idx)
-            for idx, (ratio_range, label) in enumerate(zip(nrna_ratio_ranges, nrna_labels))
+            (label, "sparse", abundance_range, idx)
+            for idx, (abundance_range, label) in enumerate(zip(nrna_abundance_ranges, nrna_labels))
         ]
     else:
         nrna_pairs = [

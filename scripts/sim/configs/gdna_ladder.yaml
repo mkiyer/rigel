@@ -55,8 +55,16 @@
 # its transcript and gDNA need not: transcript-length truncation pulls the RNA mean down while gDNA
 # keeps the bare truncated-normal mean. Measured on this exact configuration at 400 k fragments:
 #
-#     capture off   gDNA 216.94   RNA 212.26   gap +4.68 bp  (+2.21 %)
-#     capture on    gDNA 240.61   RNA 237.04   gap +3.57 bp  (+1.50 %)
+#     capture off   gDNA 216.67-216.90   RNA 212.66-213.14   gap +3.56 to +4.09 bp  (~+1.9 %)
+#     capture on    gDNA 240.40-240.60   RNA 229.23-229.62   gap +10.81 to +11.25 bp (~+4.8 %)
+#
+# ⚠ RE-MEASURED 2026-08-22 on the rebuilt (sparse-nascent) panel, from every condition's
+# `truth_summary.json`. The capture-OFF gap is essentially unchanged; the capture-ON gap is ~3x the
+# +3.57 bp this table used to claim, and that discrepancy is NOT attributable to the sparse rebuild
+# (capture length selection did not change and the old panel is gone) — treat the old figure as
+# having been stale. ⭐ Nascent fragments run ~4.7 bp LONGER than mature (216.5 vs 211.8 off capture)
+# because a nascent span is not transcript-truncated, so the RNA mean is a mixture whose weights the
+# nascent model sets.
 #
 # ⭐ And what that residual is WORTH was measured before accepting it, one thing varied (both pmfs
 # replaced by their pooled average, so the gap is exactly zero): the per-object mass-weighted error
@@ -164,35 +172,40 @@ gdna:
 # unstranded cells isolate the density channel completely.
 strand_specificities: [0.50, 0.99]
 
-# ── Nascent: ALWAYS ON, AND NO LONGER AN AXIS (owner ruling, 2026-08-19) ────────────────────────
-# ⛔⛔ THE AXIS COST HALF THE PANEL TO ANSWER A QUESTION THE TOY HARNESS ANSWERS IN SECONDS. Owner:
-# *"we don't need to spend 16/32 scenarios just to add nascent RNA … if we are building the behavior
-# with the toy harness, we have an easy way to simulate nascent RNA — just add a single-exon
-# transcript spanning the multi-exon transcripts"*, which is exactly what a nascent ENTITY is. So the
-# nascent ON/OFF contrast is a TOY experiment and the panel carries nascent in every condition:
-# 16 conditions, not 32.
-# ⭐ Keeping it ON everywhere is the half that matters. With `nrna = 0` the panel cannot price ANY
-# claim about nascent RNA — most importantly the "intronic mass is gDNA until proven otherwise"
-# mechanisms, whose whole risk is that an intron flank IS transcribed. A reading taken on an
-# `nrna = 0` row is `nrna = 0` RESTATED, not a measurement, and that caveat now disappears from every
-# row of this panel.
-# ⭐⭐ THE KNOB IS THE NASCENT SHARE OF RNA **FRAGMENTS**, AND THAT IS A CORRECTION, NOT A RENAME
-# (owner, 2026-08-19). It read `mode: additive_ratio, ratios: [0.0, 0.25]` and the old engine then
-# IMPOSED the count split (`n_nrna = n_rna x ratio/(1+ratio)`), so every condition of this panel has
-# always carried nascent at exactly **20 % of RNA fragments** — check any manifest row.
-# ⛔ Since the simulator became index-driven, nascent RNA is the index's ENTITY and is drawn in ONE
-# multinomial with the mature rows, so nothing imposes a count any more and a MOLECULAR ratio of 0.25
-# would put **86 %** of RNA fragments in nascent RNA: an entity spans a whole gene (mean 40,667 bp on
-# this index) while a mature transcript is spliced (mean 1,708 bp). Stating the FRAGMENT share keeps
-# this panel the library it has always been; the simulator solves the molecular ratio from the
-# annotation (**0.00992** here, also the biologically sensible pre-mRNA:mRNA molar ratio) and records
-# it per condition. ⛔ No hand-written ratio: it is a property of the annotation, not a constant
-# (`TRAPS: no-magic-numbers`).
-# ⚠ The share is solved on UNCAPTURED lengths — it fixes the LIBRARY's molecular composition — so the
-# realised share differs under capture. That is the physics: capture acts on molecules that exist.
+# ── Nascent: ALWAYS ON, SPARSE, AND NO LONGER AN AXIS ───────────────────────────────────────────
+# ⭐⭐⭐ NASCENT RNA IS SPARSE — ABSENT FROM MOST GENE SPANS, PRESENT AND MEASURABLE IN A MINORITY
+# (owner, 2026-08-22; `DESIGN.md` §0b, THE NASCENT SCOPE RULING). This replaced a GLOBAL molar ratio
+# applied to every multi-exon transcript, which put nascent everywhere at one level and made the tool
+# be designed AROUND nascent rather than robust TO it.
+#
+# ⭐ THE THREE PROPERTIES, each gated in `tests/test_whole_genome_sim_config.py`:
+#   ① the on/off draw is PER GENE SPAN (the nascent entity), never per transcript — isoforms share a
+#     span, so a per-transcript draw would make a 5-isoform gene 1 − 0.9^5 = 41 % likely to carry
+#     nascent at on_fraction 0.1, and the INTRON slots calibration reads would be four times less
+#     sparse than configured;
+#   ② the level is LOG-UNIFORM over the range — where nascent is present it spans decades, and a
+#     linear draw on (1, 100) would put 90 % of its mass in the top decade;
+#   ③ ⭐⭐ the level is ABSOLUTE and INDEPENDENT of the mature level, so `nascent > mature` is a real
+#     case the tool must survive. The steady state says this is the right null: mature is
+#     synthesis/degradation and nascent is synthesis, so the ratio is a STABILITY parameter rather
+#     than an expression one.
+#
+# ⛔⛔ THE 0.50 on_fraction IS A DEVELOPMENT STRESS LEVEL AND IS NOT REAL DATA (owner, 2026-08-22):
+# *"for the sake of stressing the tool and ensuring robustness … any calibration development will
+# suffer if it does not correctly model nascent RNA. This is the way we build a robust tool. BUT
+# remember, this is not real data."* A realistic setting is on_fraction ≈ 0.10, which the same range
+# prices at a 4.2 % fragment share.
+#
+# ⭐ THE FRAGMENT SHARE IS EMERGENT, and it was PRICED on this index before the panel was rebuilt
+# (`expected_rna_weights`, the same function `fragment_share` inverts): on_fraction 0.50 × logU(1, 100)
+# ⇒ 1,916/3,662 spans on, molar ratio 0.00895, **20.2 % of RNA fragments**. ⭐⭐ That is the same total
+# nascent burden as the retired uniform 20 % model, distributed SPARSELY — so a behaviour change
+# between the two panels is attributable to the DISTRIBUTION and not to the amount.
+# ⚠ The label stays `mid`: it names the CONDITION, and 25 instruments default to `nrna_mid`.
 nrna:
-  mode: fragment_share
-  shares:       [0.20]
+  mode: sparse
+  abundance_ranges: [[1.0, 100.0]]
+  on_fraction: 0.50
   ratio_labels: [mid]
 
 # ── Capture ─────────────────────────────────────────────────────────────────────────────────────

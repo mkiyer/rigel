@@ -387,9 +387,6 @@ class CalibrationConfig:
     #: only by the report and the debug bundle.
     abundance_landscape: bool = True
 
-    #: Background region set: intergenic-only (``False``, sim-safe — the sim's unrealistically abundant nascent
-    #: contaminates introns) vs intergenic + intron (``True``, the real-data path — reclaims the introns' huge
-
     # **gDNA intron factory**. ``True`` ⇒ deconvolve confident gDNA
     #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
