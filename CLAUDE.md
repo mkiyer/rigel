@@ -223,9 +223,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,656 passed / 0 skipped / 9 xfail** (re-derived 2026-08-22; the
+⭐ **THE STANDING BASELINE: 0 failed / 3,658 passed / 0 skipped / 9 xfail** (re-derived 2026-08-22; the
 `+9` over the post-tear-down 3,647 is nine sparse-nascent gates in the EXISTING
-`tests/test_whole_genome_sim_config.py` — the retired mode's parse tests were rewritten rather than
+`tests/test_whole_genome_sim_config.py` plus `+2` for two new `docs/dev/` files, each one jargon case — the retired mode's parse tests were rewritten rather than
 added, so no per-file meta drift. Three of the nine close holes an adversarial perturbation sweep
 PROVED were open: the seed was parsed but unusable-able, the missing-entity raise was gated only on a
 sibling function, and the function's own two validators were covered only through the YAML parser.) ⛔ **ANY failure at all is a regression** — a stronger and

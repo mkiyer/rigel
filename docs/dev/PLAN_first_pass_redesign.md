@@ -185,6 +185,78 @@ falsifies the predicate immediately.
 
 ---
 
+## ⭐⭐⭐ VERIFIED AGAINST THE CODE — the facts that change the design
+
+*Read by a grounding sweep, 2026-08-22 — all five mappers reported. Their full reports are not in the
+repo; the load-bearing subset is here.*
+
+**① STAGE 2's STRAND CHANNEL ALREADY PRODUCES A STANDALONE PER-SLOT ESTIMATE, in production.**
+`region_geometry._type_belief` keeps a strand-only solve wherever
+`g2_active = (free_pos ^ free_neg) & (mass_unspl > 0)` (`region_geometry.py:631-644`) — its docstring
+says "the STRAND DECONVOLUTION alone resolves the pie". So the plan's channel-one estimate is not new
+code; it is an existing quantity that needs surfacing. Measured accuracy at N = 1000, κ = 0.99:
+`f_g` 0.0323 / 0.2312 / 0.7688 / 0.9677 against truth 0 / 0.25 / 0.75 / 1.0 — the residual is the
+Beta(½,½) reference's vertex repulsion, not noise.
+
+**② A PRECISION-WEIGHTED COMBINE ALSO ALREADY EXISTS, and its hazard is already written down.**
+`tau_lam = I_strand + I_density` (`region_init.py:296-303`) is additive on the precision axis, and the
+relay fuses two claims exactly as the plan asks — `c_tau = _fuse_add(atau, btau)` with the λ mode as a
+τ-weighted mean `lam_msg = (atau·alam + btau·blam)/c_tau` (`relay.py:1101, 1116`). ⛔ Its comment
+(`relay.py:1110-1114`) states the trap the plan must adopt: **each claim must be fused by ITS OWN
+precision, never by a ratio read back off the other fuse** — "that mismatch delivered the split at a
+confidence it was never weighted by". ⭐ This resolves `combine-form`: the idiom exists, is used, and
+carries its own recorded failure mode.
+
+**③ AT κ = ½ THE STRAND TERM IS EXACTLY ZERO BY IDENTITY — AND THE DEADBAND IS THE PART THAT MATTERS.**
+`disc = 4·max(0, (κ−½)² − sig2_d)` (`region_init.py:194`) is bit-exactly 0 at κ = ½ for any depth and any
+overdispersion. ⭐ But κ is FITTED, so on a genuinely unstranded library κ̂ ≠ ½, and the deadband
+subtracting κ̂'s own sampling noise is what keeps the channel silent. A design that reasons only from the
+algebraic identity will be surprised by a fitted κ̂.
+
+**④ ⛔ A REAL DEFECT THE SWEEP FOUND, and stage 2 sidesteps it by restriction rather than by fixing it.**
+The two precisions the code carries for the strand channel disagree about κ = ½ and only one is honest;
+at an AMBIG slot `f_g` still moves by ~2.5 nats on strand data, **toward gDNA**, while
+`has_own_composition_evidence` reports no own evidence there. Stage 2's single-stranded restriction
+avoids it. ⚠ Any later stage that admits AMBIG slots inherits it, and it needs its own precision rather
+than a zero.
+
+**⑤ ⭐⭐ THE SUBSTRATE-HOME DECISION HAS A DIRECT PRECEDENT, AND IT CUTS THE OTHER WAY THAN I ASSUMED.**
+`splice_graph.build_region_partition_arrays` already produces `region_types` — a per-region structural
+CLASS array that crosses the scanner ABI and is inside `partition_hash` (`splice_graph.py:910-953`). So
+an index-time structural class array is an established pattern with a hash that already covers it.
+⛔ **But the per-BOUNDARY structural flags were DROPPED from the index schema at
+`INDEX_FORMAT_VERSION 7`** and survive only in `edges.feather` (`region_arrays.py:139-143`, which records
+the deletion), so a per-boundary substrate array would mean re-adding schema that was deliberately
+removed. ⭐ That asymmetry — regions have a home, boundaries do not — is the real content of
+`substrate-home`, and it was not visible before the sweep.
+
+**⑥ ⛔⛔ `mrna_active` MEANS TWO DIFFERENT THINGS ON THE TWO AXES, and Stage 0 depends on the boundary
+one.** At a REGION it is a MEMBERSHIP test (this region carries an exon bit); at a BOUNDARY it is the
+per-strand AND over the two flanks — *mature RNA may cross here contiguously*
+(`region_geometry.py:743-755`). ⭐ The boundary reading is exactly the owner's "no exon|exon boundary
+component", so §B.3's predicate is right — but it is right for a reason that does not transfer to the
+region axis, and anyone reusing the bit must know which axis they are on.
+
+**⑦ A REGION CANNOT SEE ITS OWN FLANKING BOUNDARIES' FLAGS.** `boundary_flags` is 0 at every REGION slot
+(`region_geometry.py:756-758`), so `solvable_exon` must GATHER through `chain.left` / `chain.right`
+(`region_chain.py:51-56`). Mechanical, but it decides where the predicate can live: it needs the chain,
+not just the region arrays.
+
+**⑧ ⚠ THE CLOSEST PRIOR ART IS A FILE I DELETED EARLIER IN THIS SESSION.**
+`scripts/design/exon_solvability.py` — retired because its docstring verdict was not reproducible from
+the file — is, per the sweep, "the closest existing thing to the owner's solvable-exon predicate". ⛔ Read
+it from git (`git show 3176f24d:scripts/design/exon_solvability.py`) before writing the predicate: it
+already had truth-free predictors including hops-to-nearest-pure-gDNA-slot and the flank's sj/terminus
+structure, and its measured finding was that the STRAND BIT dominates — which is why the owner's rule
+leads with single-strandedness.
+
+⭐ **Stage 1 is further along than the plan assumed**: `g1_locked = ¬free_pos ∧ ¬free_neg`
+(`region_geometry.py:531-551`) already pins `{0,0,1}` at `Var(log f_g) = 0` on BOTH axes, so an
+`intergenic|exon` BOUNDARY is already fixed at 100 % gDNA with zero variance in the belief. What is
+missing is not the pin but the EMISSION licence's scoping — see §C.
+
+---
+
 ## §F THE TWO RUNNING LOGS (owner-requested, updated as the design lands)
 
 ### F.1 ⛔ OBSOLETE — superseded by this design
