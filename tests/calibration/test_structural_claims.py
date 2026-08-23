@@ -30,6 +30,10 @@ from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics, g1_locked
 from rigel.calibration.splice_graph import (
+    FLAG_TES_NEG,
+    FLAG_TES_POS,
+    FLAG_TSS_NEG,
+    FLAG_TSS_POS,
     build_boundary_flags_array,
     build_region_partition_arrays,
     is_splice_site,
@@ -50,6 +54,9 @@ from conftest import build_test_index
 #: both splice sites and the "intron" carries exon membership.
 #: Locus F (−): tF is locus A on the MINUS strand — without it, every single-stranded slot is ``+``
 #: and ``~free_pos`` masquerades as ``g1_locked`` (a perturbation this fixture was silent on).
+#: Locus H (chr3, +): tH2 is single-exon and STARTS exactly at tH1's acceptor, so the boundary at 700
+#: is a licensed splice-site flank whose account of the exon is INCOMPLETE — tH2's molecules originate
+#: at the flank and never pass through it. The completeness theorem's canonical negative case.
 GTF = """\
 chr1\ttest\texon\t501\t1000\t.\t+\t.\tgene_id "gA"; transcript_id "tA";
 chr1\ttest\texon\t1501\t2000\t.\t+\t.\tgene_id "gA"; transcript_id "tA";
@@ -65,6 +72,9 @@ chr1\ttest\texon\t6501\t7000\t.\t-\t.\tgene_id "gF"; transcript_id "tF";
 chr1\ttest\texon\t7301\t7600\t.\t-\t.\tgene_id "gF"; transcript_id "tF";
 chr2\ttest\texon\t1\t400\t.\t+\t.\tgene_id "gE"; transcript_id "tE";
 chr2\ttest\texon\t701\t1000\t.\t+\t.\tgene_id "gE"; transcript_id "tE";
+chr3\ttest\texon\t101\t400\t.\t+\t.\tgene_id "gH"; transcript_id "tH1";
+chr3\ttest\texon\t701\t1000\t.\t+\t.\tgene_id "gH"; transcript_id "tH1";
+chr3\ttest\texon\t701\t1000\t.\t+\t.\tgene_id "gH"; transcript_id "tH2";
 """
 
 #: The partition the GTF above must produce — a fixture-shape guard, so every hand-enumerated
@@ -95,13 +105,17 @@ EXPECTED_BOUNDS = {
         7600,
     ],
     "chr2": [400, 700, 1000],
+    "chr3": [100, 400, 700, 1000],
 }
 
 
 @pytest.fixture(scope="module")
 def index(tmp_path_factory):
     return build_test_index(
-        tmp_path_factory, GTF, name="structural_claims", refs={"chr1": 8000, "chr2": 1500}
+        tmp_path_factory,
+        GTF,
+        name="structural_claims",
+        refs={"chr1": 8000, "chr2": 1500, "chr3": 1500},
     )
 
 
@@ -130,7 +144,7 @@ def test_fixture_shape_is_the_designed_partition(index):
     """Guard: the enumerations below index regions/boundaries by genomic order, so the partition must
     be exactly the designed one. A failure here means the FIXTURE moved, not the predicate."""
     positions, offsets, _types = build_region_partition_arrays(index)
-    for f, name in enumerate(("chr1", "chr2")):
+    for f, name in enumerate(("chr1", "chr2", "chr3")):
         lo, hi = int(offsets[f]), int(offsets[f + 1])
         interior = positions[lo + 1 : hi - 1]
         np.testing.assert_array_equal(interior, EXPECTED_BOUNDS[name], err_msg=name)
@@ -141,23 +155,23 @@ def test_hand_enumerated_membership(built):
     chain, _statics, claims = built
     r, b = _region_slots(chain), _boundary_slots(chain)
 
-    want_intergenic_regions = [0, 4, 6, 12, 16, 20, 24]
-    want_intergenic_boundaries = [0, 3, 4, 5, 6, 11, 12, 15, 16, 19, 22]
+    want_intergenic_regions = [0, 4, 6, 12, 16, 20, 24, 25, 29]
+    want_intergenic_boundaries = [0, 3, 4, 5, 6, 11, 12, 15, 16, 19, 22, 23, 26]
     want = np.zeros(chain.n_slots, bool)
     want[r[want_intergenic_regions]] = True
     want[b[want_intergenic_boundaries]] = True
     np.testing.assert_array_equal(claims.intergenic, want, err_msg="intergenic")
 
     want = np.zeros(chain.n_slots, bool)
-    want[r[[2, 18, 22]]] = True  # locus A's, F's and E's introns, and nothing else
+    want[r[[2, 18, 22, 27]]] = True  # locus A's, F's, E's and H's introns, and nothing else
     np.testing.assert_array_equal(claims.ss_intron_region, want, err_msg="ss_intron_region")
 
     want = np.zeros(chain.n_slots, bool)
-    want[b[[1, 2, 17, 18, 20, 21]]] = True  # those loci's donors and acceptors, and nothing else
+    want[b[[1, 2, 17, 18, 20, 21, 24, 25]]] = True  # those loci's donors and acceptors only
     np.testing.assert_array_equal(claims.ss_intron_boundary, want, err_msg="ss_intron_boundary")
 
     want = np.zeros(chain.n_slots, bool)
-    want[r[[1, 3, 17, 19, 21, 23]]] = True  # locus A's, F's and E's exons, and nothing else
+    want[r[[1, 3, 17, 19, 21, 23, 26, 28]]] = True  # locus A's, F's, E's and H's exons only
     np.testing.assert_array_equal(claims.solvable_exon, want, err_msg="solvable_exon")
 
 
@@ -197,6 +211,8 @@ def test_solvable_exon_names_its_licensing_flank(built):
     # license anything — only the right flank (the donor) does. The sentinel clause's gate.
     assert not claims.exon_flank_left[r[21]] and claims.exon_flank_right[r[21]]
     assert claims.exon_flank_left[r[23]] and not claims.exon_flank_right[r[23]]
+    # locus H: the shared exon is licensed ONLY via its left flank (the acceptor tH2's TSS shares).
+    assert claims.exon_flank_left[r[28]] and not claims.exon_flank_right[r[28]]
 
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
@@ -256,6 +272,9 @@ def test_brute_force_equivalence(built):
     sj = is_splice_site(statics.boundary_flags, Strand.POS) | is_splice_site(
         statics.boundary_flags, Strand.NEG
     )
+    flags = np.asarray(statics.boundary_flags, np.uint16)
+    low_end = (flags & (FLAG_TSS_POS | FLAG_TES_NEG)) != 0  # a transcript's genomic-LOW end here
+    high_end = (flags & (FLAG_TES_POS | FLAG_TSS_NEG)) != 0
 
     for s in range(chain.n_slots):
         g1 = not fp[s] and not fn[s]
@@ -275,6 +294,11 @@ def test_brute_force_equivalence(built):
         assert claims.exon_flank_left[s] == want_left, s
         assert claims.exon_flank_right[s] == want_right, s
         assert claims.solvable_exon[s] == (want_left or want_right), s
+        # the completeness theorem, re-derived per slot: a molecule missing the flank must END at it
+        assert claims.exon_flank_left_complete[s] == (want_left and not low_end[int(left[s])]), s
+        assert claims.exon_flank_right_complete[s] == (
+            want_right and not high_end[int(right[s])]
+        ), s
 
 
 def test_intergenic_is_exactly_g1_locked(built):
@@ -282,3 +306,25 @@ def test_intergenic_is_exactly_g1_locked(built):
     (its docstring records why a second home is how region-only variants survive)."""
     _chain, statics, claims = built
     np.testing.assert_array_equal(claims.intergenic, g1_locked(statics.free_pos, statics.free_neg))
+
+
+def test_flank_completeness_hand_enumerated(built):
+    """The completeness theorem on the designed loci: every licensed flank is COMPLETE — a molecule
+    overlapping the exon either passes through the flank or ends exactly at it, and none of these
+    flanks carries a facing end bit — EXCEPT locus H's, where tH2's TSS coincides with the acceptor,
+    so molecules originate at the flank unseen and the flank's account is INCOMPLETE."""
+    chain, _statics, claims = built
+    r = _region_slots(chain)
+    complete = claims.exon_flank_left_complete | claims.exon_flank_right_complete
+    for slot in r[[1, 3, 17, 19, 21, 23, 26]]:
+        assert complete[slot], f"slot {slot} must have a complete licensed flank"
+    assert not complete[r[28]], "locus H's exon has no complete flank — TSS at the acceptor"
+    assert claims.exon_flank_left[r[28]], "…but the flank is still LICENSED (bound-grade)"
+
+
+def test_completeness_is_a_subset_of_the_licence(built):
+    """A completeness bit may only be set where the flank is licensed at all — completeness qualifies
+    a claim; it never creates one."""
+    _chain, _statics, claims = built
+    assert not (claims.exon_flank_left_complete & ~claims.exon_flank_left).any()
+    assert not (claims.exon_flank_right_complete & ~claims.exon_flank_right).any()

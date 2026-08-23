@@ -51,7 +51,13 @@ import numpy as np
 from ..types import Strand
 from .region_chain import BOUNDARY, REGION, RegionChain
 from .region_geometry import RegionStatics, g1_locked
-from .splice_graph import is_splice_site
+from .splice_graph import (
+    FLAG_TES_NEG,
+    FLAG_TES_POS,
+    FLAG_TSS_NEG,
+    FLAG_TSS_POS,
+    is_splice_site,
+)
 
 __all__ = ["StructuralClaims", "build_structural_claims"]
 
@@ -72,6 +78,13 @@ class StructuralClaims:
     solvable_exon: np.ndarray
     exon_flank_left: np.ndarray
     exon_flank_right: np.ndarray
+    #: ⭐ the COMPLETENESS bit, per licensed flank (a strict subset of ``exon_flank_*``): True where the
+    #: flank's account of the exon's RNA is COMPLETE — no transcript-end bit faces the exon, so every
+    #: molecule overlapping the exon passes through this flank (the theorem is in the builder). A
+    #: complete flank's transfer is a TWO-SIDED estimate (estimate-grade for landscape training); an
+    #: incomplete one licenses only the ONE-SIDED at-least-this-much-RNA bound (bound-grade).
+    exon_flank_left_complete: np.ndarray
+    exon_flank_right_complete: np.ndarray
 
     @property
     def claimed(self) -> np.ndarray:
@@ -102,8 +115,23 @@ def build_structural_claims(chain: RegionChain, statics: RegionStatics) -> Struc
     # gather through the chain's adjacency: a -1 terminal indexes the appended sentinel, which is False
     at = np.concatenate([flank_qualifies, [False]])
     exonic = single_stranded & is_region & mrna
-    exon_flank_left = exonic & at[np.asarray(chain.left)]
-    exon_flank_right = exonic & at[np.asarray(chain.right)]
+    left = np.asarray(chain.left)
+    right = np.asarray(chain.right)
+    exon_flank_left = exonic & at[left]
+    exon_flank_right = exonic & at[right]
+
+    # ── THE COMPLETENESS THEOREM ─────────────────────────────────────────────────────────────────────
+    # A molecule overlapping the exon either CONTAINS the licensed flank (crosses it contiguously or
+    # splices through it — both measured AT the flank) or ORIGINATES exactly at it: the exon's interior
+    # holds no boundary, so a molecule that misses the flank must have its end there, and a transcript
+    # end is a graph bit. So a flank's account of the exon's RNA is COMPLETE ⇔ the flank carries no
+    # transcript-end bit FACING the exon: a genomic-LOW end at a LEFT flank, a genomic-HIGH end at a
+    # RIGHT one. ⭐ The both-strand masks below are EXACTLY the strand-specific check at a licensed
+    # flank: an other-strand end in the facing set would extend INTO the exon, making it AMBIG and
+    # therefore unlicensed — so no strand plumbing is needed, and no test can distinguish the forms.
+    flags = np.asarray(statics.boundary_flags, np.uint16)
+    low_end = np.concatenate([(flags & (FLAG_TSS_POS | FLAG_TES_NEG)) != 0, [False]])
+    high_end = np.concatenate([(flags & (FLAG_TES_POS | FLAG_TSS_NEG)) != 0, [False]])
 
     return StructuralClaims(
         n_slots=int(chain.n_slots),
@@ -113,4 +141,6 @@ def build_structural_claims(chain: RegionChain, statics: RegionStatics) -> Struc
         solvable_exon=exon_flank_left | exon_flank_right,
         exon_flank_left=exon_flank_left,
         exon_flank_right=exon_flank_right,
+        exon_flank_left_complete=exon_flank_left & ~low_end[left],
+        exon_flank_right_complete=exon_flank_right & ~high_end[right],
     )

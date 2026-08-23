@@ -445,6 +445,119 @@ the fit-on-your-own-belief circularity).
   `"fanout"` is NOT a candidate shipped default in today's flow; it is pass-0's policy, and the
   default question arrives only with the full redesigned flow.
 
+### §H.2 ⭐⭐⭐ STAGE 4 — THE DESIGN (2026-08-23, design-only turn; no code yet)
+
+**One sentence:** the eligible flank tells the exon its composition, as a density ratio formed from
+everything the flank sees — and a structural bit says whether that account is COMPLETE (a two-sided
+estimate) or PARTIAL (a one-sided at-least-this-much-RNA bound).
+
+#### The completeness theorem — the sidedness rule, derived rather than chosen
+
+A molecule overlapping the exon either **contains the delivering flank** (crosses it contiguously, or
+splices through it — both measured at the flank) or **originates exactly at it** — because the exon's
+interior holds no boundary, a molecule that does not contain the flank must have its end AT the flank,
+which is a transcript-end bit the graph already carries (`region_geometry._RNA_LOW_END` for a left
+flank, `_RNA_HIGH_END` for a right). Therefore:
+
+    a flank's account of the exon's RNA is COMPLETE  ⇔  the flank carries no transcript-end bit
+                                                         facing the exon (on the exon's strand)
+
+Complete ⇒ the transfer is a genuine TWO-SIDED estimate. Incomplete ⇒ RNA invisible to the flank may
+exist, and the honest claim is ONE-SIDED — §1.1's inequality, the only form the zero-gDNA control has
+ever endorsed on every row. ⭐ No constant, index-derived, and falsifiable with NO solver: at complete
+flanks certified truth must satisfy the equality (flank-implied RNA ≈ exon RNA, within the noise
+floor); at incomplete flanks the inequality's DIRECTION must hold. Worked check: TA's FIRST exon
+(TSS at its left flank) delivering through its right donor is COMPLETE — every molecule covering it
+continues through the donor — so the TSS costs nothing when the claim comes from the other side.
+
+⭐ **A derived simplification (2026-08-23): the both-strand end-bit masks suffice.** At a LICENSED
+flank, an other-strand transcript-end in the facing set would have to extend INTO the exon, which
+makes the exon AMBIG and therefore unlicensed — so at licensed flanks the strand-specific check and
+the plain ``_RNA_LOW_END`` / ``_RNA_HIGH_END`` masks are exactly equivalent, and no strand plumbing
+is needed. The derivation lives in the code's docstring; no test can distinguish the two forms at a
+licensed flank, which is the proof the simpler form is the right one.
+
+#### The owner's scope ruling (2026-08-23), folded in
+
+* **Imputation comes ONLY through eligible flanks** — one eligible flank ⇒ one claim; two ⇒ the
+  precision-weighted fuse of two independent claims (the established pattern). An INELIGIBLE flank
+  contributes NOTHING in pass-0: at a terminus there is no spliced measurement of RNA and therefore no
+  composition measure at all, and reaching such slots is a MULTI-HOP problem that belongs to the full
+  forward-backward relay run later WITH the landscape prior — never to pass-0.
+* **Pass-0's product is the most CONFIDENT substrate derivable, not the largest**: it exists to train
+  the gDNA landscape that must see enriched capture against the depleted floor. Widening the exon set
+  would trade substrate confidence for coverage — refused.
+* ⭐ **The completeness bit therefore carries a SECOND duty**: complete-flank exons enter the landscape
+  TRAINING set as estimate-grade; incomplete-flank exons are bound-grade — naturally down-weighted by
+  their one-sided-wide posteriors, or excluded outright (one line, priced at 4g when the training-set
+  choice is made).
+* **The three primitives (fuse, route-merge, reframe) are deliberately REUSABLE** — validated here,
+  they are the candidate vocabulary for the rebuilt full relay downstream.
+
+#### The hop, as three primitives — stage 3 and stage 4 are ONE operator with different currencies
+
+1. **fuse** — precision-weighted λ combine (exists; stage 3's deliver, the relay's recorded idiom).
+2. **route-merge** — at the flank, every route's count over ITS OWN opportunity (unspliced crossing
+   over `crossing_eff_length`; spliced flux over `sj_opportunity`, taking the FACE that enters the
+   exon — `inv_sj_lo/hi` by direction, hop_currency's direction-dependence); densities ADD, variances
+   ADD (a sum of components, not a combine of witnesses — the owner's non-additive-precisions
+   intuition, formalized). One RNA class throughout; AXIOM 0 untouched.
+3. **reframe** — the density RATIO re-formed as the exon's composition through the EXON's own
+   opportunities (destination CONSTANTS ✓). The absolute level cancels, which is what makes the
+   transfer capture-robust — certified by the currency map (COMPOSITION beats LEVEL 20–30× under
+   capture at this hop).
+
+Stage 3 = fuse alone (identity currency: same population, same frame). Stage 4 = fuse at the boundary
+(intron claim ⊗ the boundary's own strand λ — the scan's `step()` becomes real, ~15 lines), then
+route-merge ∘ reframe at delivery, under the completeness sidedness. Depth stays structurally 2:
+claims die at exons because exons publish nothing. ⭐ One policy, one sweep, no calibrate flow change.
+⚠ Deliberately NOT transported: the boundary's reference term — a message carries DATA, and composing
+own-λ (data curvature only) rather than the ψ posterior keeps the reference from being counted twice.
+
+#### The drift (the imputation cost) — measured 5.1 %/10.2 % excess capture-ON at this hop, ~0 OFF
+
+* **v1 (recommended): NO drift term** — the reframe through opportunities is a sharper transport than
+  the currency map's plain-composition rule, so part of the measured excess may already be the frame
+  error the reframe removes. Measure first.
+* Fallback: a capture-gated variance derived from the measured excess (a measured constant; owner
+  sanction required under no-magic-numbers).
+* ⛔ REFUTED in advance: a flank-disagreement-fitted drift — both flanks biased the same way under
+  capture is exactly `TRAPS: a-variance-cannot-fix-a-bias`'s recorded case.
+
+#### What the codebase SIMPLIFIES (the §F ledger's stage-4 entries, prospective)
+
+* `ONE_SIDED_RNA` (a process-global toggle) → a per-message sidedness (one optional `PsiMessage`
+  field, default None ⇒ byte-identical); the global dies with the relay.
+* The fan-out at depth 2 is the honest rebuild of the relay's splice-in + certified-RNA + reframe
+  machinery. When the full flow lands and is priced, the deletion candidates are: `RelayPolicy`'s
+  operator set, the mass rescale, the reframe and its licences — and **rank 11's cancelling pair
+  DISSOLVES rather than being repaired**, because the fan-out never consults `struct_lock` for
+  emission. ⛔ All gated on the deferred stratum (the relay's one stronghold) and the owner's flow
+  ruling; nothing is deleted on promise.
+
+#### The pieces, in order, each with its falsification
+
+* **4a — the completeness bits** in `structural_claims` (structure only): designed-GTF unit cases
+  (first/last exon, retained intron, the 1 % both-bits flank), then the confusion-matrix extension on
+  both panels (equality at complete flanks, direction at incomplete) — stage 0's discipline replayed.
+* **4b — route-merge as a pure function** (counts, opportunities, direction faces → densities +
+  variance): brute-force unit tests; the face selection tested explicitly.
+* **4c — reframe as a pure function** (+ variance propagation): hand-derived cases, and the
+  capture-invariance gate — scaling both components by one factor must leave λ unchanged exactly.
+* **4d — ψ's per-message sidedness**: the optional field, byte-identical when absent; the one-sided
+  behaviour inherits the existing `ONE_SIDED_RNA` test machinery.
+* **4e — wire into `FanOutPolicy`**: `step()` composes at boundaries; `deliver()` runs 4b∘4c at exon
+  destinations under 4a's licence; integration + perturbation sweep as stage 3's.
+* **4f — pricing**: PROMOTE the scratch claimed-slot scorer into `scripts/design/` (one instrument
+  covering the boundary AND exon claimed populations, silent/relay/fanout, DELIVER/REFUTE split at
+  truth-pure slots); test chromosome → ladder; both zero controls.
+* **4g — the flow's ending** (separate stage): the landscape fit on SOLVED slots only.
+
+**Owner sign-offs wanted before code:** ① the per-message sidedness field (it touches ψ);
+② drift v1 = none, fallback measured-capture-gated; ③ the two-sided channel is λ, the one-sided
+claim rides the RNA-share channel with the one-sided residual (the certified-RNA semantics it
+generalizes).
+
 **Implementation shape:** the new message POLICY on the existing backbone (the `the-one-hop` ruling) —
 emission licensed only FROM solved-substrate slots TOWARD adjacent unsolved ones, `SilentPolicy`
 behaviour elsewhere; the forward scan carries the rightward fan-out, the backward the leftward, so the

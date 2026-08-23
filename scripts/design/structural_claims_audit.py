@@ -76,7 +76,19 @@ def confusion(chain, claims, truth: dict) -> list[dict]:
             sel = np.zeros(int(chain.n_slots), bool)
             sel[idx] = True
             n_exons = int(np.asarray(claims.solvable_exon, bool).sum())
-            label = f"solvable_exon ({n_exons} exons, at their flanks)"
+            # ⭐ the completeness split — how much of the exon substrate is ESTIMATE-grade (some
+            # licensed flank's account of the exon is complete: a two-sided transfer) vs BOUND-grade
+            # (every licensed flank incomplete: one-sided only). Substrate composition, not a score.
+            estimate_grade = int(
+                (
+                    np.asarray(claims.exon_flank_left_complete, bool)
+                    | np.asarray(claims.exon_flank_right_complete, bool)
+                ).sum()
+            )
+            label = (
+                f"solvable_exon ({n_exons} exons: {estimate_grade} estimate-grade, "
+                f"{n_exons - estimate_grade} bound-grade)"
+            )
         else:
             sel = np.asarray(getattr(claims, name), bool)
         bad_mass = np.zeros(int(chain.n_slots), np.float64)
@@ -118,9 +130,7 @@ def confusion(chain, claims, truth: dict) -> list[dict]:
 def audit(index, region_arrays, suite: Path, condition: str) -> list[dict]:
     """One condition: rebuild chain + statics, derive the claims, score against certified truth."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    chain = build_region_chain(
-        cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets
-    )
+    chain = build_region_chain(cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets)
     statics = build_region_statics(chain, region_arrays, build_boundary_flags_array(index))
     claims = build_structural_claims(chain, statics)
 
@@ -159,7 +169,9 @@ def report(condition: str, rows: list[dict]) -> int:
         if r["violating_fragments"]:
             n_bad += 1
             for slot, mass in r["worst"]:
-                print(f"      ⛔ worst offender: slot {slot} carries {mass:.0f} forbidden fragments")
+                print(
+                    f"      ⛔ worst offender: slot {slot} carries {mass:.0f} forbidden fragments"
+                )
         if "library_fragments" in r and r["library_fragments"] > 0:
             share = r["claimed_fragments"] / r["library_fragments"]
             print(
@@ -304,7 +316,9 @@ def main() -> int:
     for c in conds:
         bad += report(c, audit(index, region_arrays, args.suite, c))
     if bad:
-        print(f"\n⛔ {bad} class×condition claims VIOLATED — the stage-0 predicate is falsified there.")
+        print(
+            f"\n⛔ {bad} class×condition claims VIOLATED — the stage-0 predicate is falsified there."
+        )
     else:
         print("\n⭐ every claim holds on every condition — the substrate is what it says it is.")
     return 1 if bad else 0

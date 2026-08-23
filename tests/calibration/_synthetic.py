@@ -316,4 +316,6 @@ def neutral_claims(n: int):
         solvable_exon=z.copy(),
         exon_flank_left=z.copy(),
         exon_flank_right=z.copy(),
+        exon_flank_left_complete=z.copy(),
+        exon_flank_right_complete=z.copy(),
     )
