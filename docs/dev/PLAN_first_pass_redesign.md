@@ -326,12 +326,15 @@ missing is not the pin but the EMISSION licence's scoping — see §C.
 
 ### F.1 ⛔ OBSOLETE — superseded by this design
 
-* **`structural_reference_location`'s constant 0.75 at single-stranded intron slots** — superseded by
-  the stage-2 measured location (`m_i = rho_bg·E_g,i/M_i`, FIRM-clipped) **if the ladder confirms the
-  test-chromosome reading**. Evidence so far (test chromosome, 16 conditions, `ladder_arm_ab
-  --arm stage2_intron_ref_r`): zero-gDNA control −92.9 % on the deliverable 8/8 rows, stranded strata
-  flat-to-better, unstranded × capture-OFF +10.3 % on a small absolute base. ⛔ Re-price on the LADDER
-  and at the zero-RNA control before anything is deleted; the constant stays for exons either way.
+* ✅ **EXECUTED 2026-08-23: the four pricing arms deleted from `ladder_arm_ab.py`**
+  (`stage2_intron_ref{,_r}`, `stage1_pair{,_onesided}`) — their mechanism shipped as
+  `measured_intron_reference` (default ON) or was refused, and under the shipped default they could
+  only raise NEVER-FIRED. Verdicts survive in the config docstring, §C.1/§D.4 here, and ROADMAP
+  rank 11; implementations in git one commit back.
+* **`structural_reference_location`'s constant 0.75 — NOT deletable, and here is the boundary of the
+  supersession**: the measured location overrides it ONLY at ss-intron REGIONs; the constant is still
+  the reference for every exon and every intron BOUNDARY (where the boundary-inclusive measured form
+  is measured-refused). The function survives as the measured form's ``base``.
 * **`region_init.strand_evidence`'s `locked = ~solvable` feeder for `struct_lock`** — ⛔ **NOT YET
   obsolete: the re-pricing WITH the stage-2 prior as the replacement load was run (2026-08-26) and
   REFUSED** — see §C.1. The mis-scoped mask stays load-bearing; whatever eventually replaces it needs a
@@ -349,6 +352,17 @@ missing is not the pin but the EMISSION licence's scoping — see §C.
   the stage-0 intergenic REGION class, the same estimand `fit_intron_background` measures (its docstring
   says the pools are measured identical), so the location costs one pooled division rather than a
   second fitting path.
+* **CANDIDATE (owner's call): collapse ψ's location plumbing to ONE construction site.**
+  `solve_chain` now takes both `structural_reference: bool` and `reference_location` and derives the
+  structural location itself when the latter is None. If `calibrate` always constructs the location
+  (structural or measured) and passes it, `solve_chain` loses a parameter and a branch — one site
+  instead of two. Touches the backbone's signature (arms and instruments wrap `solve_chain`), so it
+  wants `rename_identity.py --check` around it, not a tail-end sweep.
+* **CANDIDATE: two stale wrong-fact comment blocks about `message_propagation`.** `calibrate.py`'s
+  solve-chain comment says "MESSAGE PROPAGATION IS OFF (owner, 2026-08-07)… the config is False" and
+  `zero_controls.py`'s docstring says the same — the shipped default has been **True** (RelayPolicy)
+  since 2026-08-18. The measured tables inside those blocks are history worth keeping; the framing
+  sentences state the config wrong and should be corrected in a content-only pass.
 
 ---
 

@@ -40,6 +40,14 @@ check an imported composition against when the destination has no self-solve.
 ⭐ The NESTED-EXONS probe is the precedent that makes this run mandatory rather than optional: its toy delta was LARGER
 (−0.035) and the ladder said it cost the panel nothing. TRAPS: measure-the-ceiling-first.
 
+⚠ **FOUR ARMS WERE DELETED 2026-08-23 BECAUSE THEIR MECHANISM SHIPPED** — `stage2_intron_ref{,_r}`
+(the measured intron reference; regions-only landed as `CalibrationConfig.measured_intron_reference`,
+default ON, whose docstring carries the measured table; the boundary-inclusive form is
+measured-refused there) and `stage1_pair{,_onesided}` (the struct_lock rescope priced WITH that
+reference and REFUSED — `ROADMAP.md` rank 11). Under the shipped default the solve no longer consults
+the name those arms patched, so they could only raise NEVER-FIRED. Do not rebuild them; git has the
+implementations one commit before this note.
+
 ---
 
 ⭐⭐⭐ **THE ZERO-CLAIM DECOMPOSITION ARMS (`zc_*`).** The 39 % win of 2026-08-06 was three distinct
@@ -184,7 +192,6 @@ _NEEDS_MESSAGES = frozenset({
     "zc_own_count", "zc_total_n", "zc_live_count", "zc_transfer", "zc_anchor_mute",
     "zc_jeffreys_mean", "zc_logmean", "zc_struct_lock_g1", "zc_reference_var",
     "zc_discrepancy", "zc_disc_var", "zc_ref_prior", "zc_ref_prior_damp",
-    "stage1_pair", "stage1_pair_onesided",
 })
 
 #: The arms that are MEANT to score byte-identical to `base`; for these "moved nothing" is the pass.
@@ -699,81 +706,6 @@ def _install_zc_struct_lock_g1():
     return orig
 
 
-def _install_stage2_intron_ref(regions_only: bool = False):
-    """⭐⭐⭐ **STAGE 2's PRIOR (the first-pass redesign, plan §D.2):** every single-stranded intron slot
-    takes ψ's reference LOCATION from the MEASURED background — ``m_i = rho_bg·E_g,i / M_i`` — instead
-    of the structural 0.75, clipped FIRM at the lattice cap ``sigma(L)`` (owner ruling 2026-08-26: the
-    LOCATION clips, the STRENGTH stays the reference's own one pseudo-fragment, so real evidence still
-    overturns it).
-
-    ``rho_bg`` is the pooled intergenic-REGION density of the SAME payload — stage 1's anchor pool,
-    `fit_intron_background`'s own population, computed as the ratio of sums — and the admitted slots
-    are exactly the stage-0 substrate's ``ss_intron_region | ss_intron_boundary``
-    (`structural_claims`, confusion-matrix-clean on 32/32 conditions). Exons and locked slots keep the
-    shipped structural reference untouched, so the arm moves ONLY the claimed intron population.
-
-    ⚠ Cases, all derived: a COLLISION (``rho_bg·E_g ≥ M``, an intron no denser than background,
-    including an EMPTY intron under a live background) clips to ``sigma(L)`` — `EQUATIONS.md` §9c.1's
-    valid CAP use, never a chooser; a zero background under live mass reads ``m = 0`` and clips
-    symmetrically to ``sigma(−L)`` (the zero-gDNA control's truth); NO measurement at all
-    (``M = 0 ∧ rho_bg·E_g = 0``) keeps the base location — 0/0 licenses nothing.
-    ⚠ At a BOUNDARY both ``M`` and ``E_g`` are crossing-frame quantities, so their RATIO is
-    frame-consistent. This is a LOCATION only — the intron factory's NB level factor stays region-only
-    for its own recorded reason (`calibrate._build_intron_prior`).
-
-    ``regions_only`` (`stage2_intron_ref_r`) restricts the override to ``ss_intron_region`` — measured
-    on the test chromosome 2026-08-26 with messages OFF, the full arm's stranded × capture-ON
-    regression is entirely the BOUNDARY axis (+52.3 % boundaries, +0.1 % regions): under capture the
-    intergenic rate is the wrong rate for a probe-adjacent crossing."""
-    from rigel.calibration.structural_claims import build_structural_claims
-
-    tag = "stage2_intron_ref_r" if regions_only else "stage2_intron_ref"
-    orig_sweep = SW.solve_chain
-    orig_loc = SW.structural_reference_location
-    cell: dict = {}
-
-    def loc(statics, logodds_window):
-        base = orig_loc(statics, float(logodds_window))
-        if "m" not in cell:
-            return base
-        _fire(tag)
-        cap = 1.0 / (1.0 + np.exp(-float(logodds_window)))
-        sel = cell["sel"]
-        out = np.asarray(base, np.float64).copy()
-        out[sel] = np.clip(cell["m"][sel], 1.0 - cap, cap)
-        _FIRED[f"{tag}_slots"] = int(sel.sum())
-        _FIRED[f"{tag}_collisions"] = int((cell["m"][sel] >= cap).sum())
-        return out
-
-    def sweep(chain, statics, geometry, belief, region_arrays, *a, **kw):
-        claims = build_structural_claims(chain, statics)
-        is_reg = np.asarray(chain.kind) == REGION
-        M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
-        E_g = np.asarray(geometry.eff_gdna, np.float64)
-        anchors = claims.intergenic & is_reg & (E_g > 0.0)
-        e_pool = float(E_g[anchors].sum())
-        rho_bg = (float(M[anchors].sum()) / e_pool) if e_pool > 0.0 else 0.0
-        expected = rho_bg * E_g
-        with np.errstate(divide="ignore", invalid="ignore"):
-            m = np.where(M > 0.0, expected / np.maximum(M, 1e-300), np.inf)
-        cell["m"] = m
-        scope = (
-            claims.ss_intron_region
-            if regions_only
-            else (claims.ss_intron_region | claims.ss_intron_boundary)
-        )
-        cell["sel"] = scope & ((M > 0.0) | (expected > 0.0))
-        try:
-            return orig_sweep(chain, statics, geometry, belief, region_arrays, *a, **kw)
-        finally:
-            cell.clear()
-
-    SW.structural_reference_location = loc
-    for mod in (CAL, SW):
-        if hasattr(mod, "solve_chain"):
-            mod.solve_chain = sweep
-
-
 def _install_zc_logmean():
     """⭐⭐⭐ THE OTHER CONSISTENT LOCATION — ``exp(digamma(a+½))/E``, the **geometric** mean of the same
     ``Gamma(a + ½, E)`` posterior, at a zero-mass slot.
@@ -1176,10 +1108,6 @@ _ARM_CHOICES = (
     "zc_disc_var",
     "zc_ref_prior",
     "zc_ref_prior_damp",
-    "stage2_intron_ref",
-    "stage2_intron_ref_r",
-    "stage1_pair",
-    "stage1_pair_onesided",
 )
 
 #: the two conditions `--self-test` runs every arm on. ⭐ TWO, not one, and they are opposite ends of the
@@ -1442,20 +1370,6 @@ def main() -> int:
         #   belief without damping just competes with an undamped message. TRAPS: a-cancelling-defect-pair.
         _install_zc_ref_prior()
         _install_zc_disc_var()
-    elif args.arm == "stage2_intron_ref":
-        _install_stage2_intron_ref()
-    elif args.arm == "stage2_intron_ref_r":
-        _install_stage2_intron_ref(regions_only=True)
-    elif args.arm in ("stage1_pair", "stage1_pair_onesided"):
-        # ⭐ STAGE 1 OF THE FIRST-PASS REDESIGN, priced as the CANCELLING PAIR demands
-        #   (`TRAPS: a-cancelling-defect-pair`, ROADMAP rank 11): the struct_lock rescope lands ONLY
-        #   together with what replaces the mis-scoped mask's load — the stage-2 measured intron
-        #   reference, the redesign's local level channel. `_onesided` adds the certified-RNA bound's
-        #   one-sided form (§1.1's other half) on top.
-        _install_zc_struct_lock_g1()
-        _install_stage2_intron_ref(regions_only=True)
-        if args.arm == "stage1_pair_onesided":
-            _install_onesided_rna()
 
     index = TranscriptIndex.load(str(args.index))
     config = CalibrationConfig(message_propagation=messages)
@@ -1520,8 +1434,6 @@ def main() -> int:
     #   complete, valid run.
     _COMPOSITE = {
         "zc_ref_prior_damp": ("zc_ref_prior", "zc_disc_var"),
-        "stage1_pair": ("zc_struct_lock_g1", "stage2_intron_ref_r"),
-        "stage1_pair_onesided": ("zc_struct_lock_g1", "stage2_intron_ref_r", "onesided_rna"),
     }
     if args.arm != "base":
         want = _COMPOSITE.get(args.arm, (args.arm,))
