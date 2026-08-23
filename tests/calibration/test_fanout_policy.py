@@ -1,20 +1,22 @@
-"""STAGE 3 OF THE FIRST-PASS REDESIGN — the pass-0 FAN-OUT policy, falsified clause by clause.
+"""STAGES 3 AND 4 OF THE FIRST-PASS REDESIGN — the pass-0 FAN-OUT policy, falsified clause by clause.
 
-`rigel.calibration.messages.fanout.FanOutPolicy`: solved single-stranded introns speak to their
-flanking ``intron|exon`` boundaries on the λ channel, and nothing else says anything. The message is
-the intron's own local solve — mode ``logit(f_g)`` clipped into the grid domain, precision
-``tau_lam`` (the strand + intron-factory Fisher; the reference's location term does not enter, the
-§9c.2 ruling) — with NO drift allowance, which is measured rather than assumed: `hop_currency.py`'s
-excess-over-floor for this hop is 0.2–0.4 % on both panels, capture ON and OFF (2026-08-23).
+**Stage 3**: solved single-stranded introns speak to their flanking ``intron|exon`` boundaries on the
+λ channel — the intron's own local solve, clipped into the grid domain, at ``tau_lam``, with NO drift
+allowance (measured: `hop_currency.py` excess 0.2–0.4 % on both panels, capture ON and OFF). The
+licence lives on the SOURCE alone; the stage-3 destination is implied by adjacency.
 
-The licence is STRUCTURAL and lives on the SOURCE alone (`structural_claims.ss_intron_region`); the
-destination end is IMPLIED by adjacency and an empty intron transports nothing by arithmetic — the
-policy docstring carries both derivations, and the perturbation sweep is what proved the redundant
-masks did no work.
+**Stage 4**: each pass-through boundary COMPOSES the intron claim with its own strand-λ evidence, and
+the licensed exons receive the jointly-derived transfer (:func:`flank_to_exon_lambda`) from the sj
+FACE on their side of the flank, routed by the completeness bit — two-sided λ where the flank's
+account is complete (two complete flanks fuse, precisions adding), the one-sided at-least-this-much-
+RNA bound on the exon's live strand where it is not (two incomplete flanks keep the BINDING bound).
+Nothing echoes back into the introns — the no-echo gate is what makes the returned destination mask
+real.
 
-The unit tests drive the policy through its own interface on a `make_chain_parts` fixture, emulating
-the backbone's source-indexed gather verbatim; the integration test runs the REAL `solve_chain` and
-asserts the message moves ONLY the claimed boundaries.
+The unit tests drive the policy through its own interface on `make_chain_parts` fixtures, emulating
+the backbone's source-indexed gather verbatim, with every stage-4 expectation composed from the
+SEPARATELY-GATED primitives so these tests gate the WIRING (inputs, faces, masks, routing) alone; the
+integration tests run the REAL `solve_chain` and assert exactly the claimed populations move.
 """
 
 from __future__ import annotations
@@ -43,18 +45,9 @@ def _logit(f: float) -> float:
 
 
 def _fixture(signatures, f_g, tau_lam, **counts):
-    """parts + claims + a duck ctx carrying exactly what the policy reads. ``f_g``/``tau_lam`` are the
-    per-SLOT local solve the policy transports (chain order: R B R B … R)."""
-    parts = make_chain_parts(signatures, **counts)
-    claims = build_structural_claims(parts.chain, parts.statics)
-    ctx = SimpleNamespace(
-        claims=claims,
-        own=SimpleNamespace(
-            f_g=np.asarray(f_g, np.float64), tau_lam=np.asarray(tau_lam, np.float64)
-        ),
-        logodds_window=_L,
-    )
-    return parts, claims, ctx
+    """parts + claims + a duck ctx carrying what the policy reads — the stage-3 view: no flags, no
+    counts at the flanks, so no exon is licensed and the stage-4 machinery stays provably inert."""
+    return _rich_fixture(signatures, f_g, tau_lam, **counts)
 
 
 def _deliver(parts, relay):
@@ -275,3 +268,271 @@ def test_flank_to_exon_guards_and_direction():
 
     lam, _ = _f2e(9.9, 20.0, U=1e12, S=0.0, E_sj=100.0, gx=1e9, rx=1e-6, gc=1e9, rc=1e-9)
     assert -_L <= lam[0] <= _L
+
+
+# ── stage 4e: the boundary→exon wiring — compose, face selection, sidedness routing, no echo ───────
+
+
+def _rich_fixture(
+    signatures,
+    f_g,
+    tau_lam,
+    *,
+    flags=None,
+    n_slot=None,
+    sj_lo=None,
+    sj_hi=None,
+    eff_g=None,
+    eff_r=None,
+    e_sj=100.0,
+    **counts,
+):
+    """The stage-4 duck ctx: everything the depth-2 policy reads, every array hand-settable."""
+    parts = make_chain_parts(signatures, boundary_flags=flags, **counts)
+    claims = build_structural_claims(parts.chain, parts.statics)
+    n = int(parts.chain.n_slots)
+
+    def arr(x, default):
+        return np.full(n, default, np.float64) if x is None else np.asarray(x, np.float64)
+
+    def strands(x):
+        a = np.zeros((n, 2), np.float64)
+        if x is not None:
+            a[:, 0] = np.asarray(x, np.float64)
+        return a
+
+    geometry = SimpleNamespace(
+        sj_count_lo=strands(sj_lo),
+        sj_count_hi=strands(sj_hi),
+        eff_sj_lo=strands([e_sj] * n),
+        eff_sj_hi=strands([e_sj] * n),
+    )
+    ctx = SimpleNamespace(
+        claims=claims,
+        own=SimpleNamespace(
+            f_g=np.asarray(f_g, np.float64), tau_lam=np.asarray(tau_lam, np.float64)
+        ),
+        logodds_window=_L,
+        n_slot=arr(n_slot, 0.0),
+        eff_gdna=arr(eff_g, 100.0),
+        eff_rna=arr(eff_r, 100.0),
+        free_pos=np.asarray(parts.statics.free_pos, bool),
+        free_neg=np.asarray(parts.statics.free_neg, bool),
+        geometry=geometry,
+    )
+    return parts, claims, ctx
+
+
+def _stage4_setup(extra_flag_at_b1=0):
+    """SIGS with a donor bit at slot 3 and an acceptor-role donor bit at slot 5 — both exons licensed; asymmetric
+    sj faces so a wrong-face implementation cannot match the expectations."""
+    from rigel.calibration.splice_graph import FLAG_DONOR_POS
+
+    flags = np.array(
+        [0, FLAG_DONOR_POS | extra_flag_at_b1, FLAG_DONOR_POS, 0], np.uint16
+    )  # boundary axis: slots 1, 3, 5, 7
+    n_slot = [0.0, 0.0, 0.0, 100.0, 60.0, 90.0, 0.0, 0.0, 0.0]
+    sj_lo = [0.0, 0.0, 0.0, 12.0, 0.0, 55.0, 0.0, 0.0, 0.0]
+    sj_hi = [0.0, 0.0, 0.0, 99.0, 0.0, 7.0, 0.0, 0.0, 0.0]
+    return _rich_fixture(SIGS, F_G, TAU, flags=flags, n_slot=n_slot, sj_lo=sj_lo, sj_hi=sj_hi)
+
+
+def _expected_exon_claim(ctx, flank, exon, face_count, tau0_intron, lam0_intron):
+    """The expectation composed from the SEPARATELY-GATED primitives: fuse at the flank, then the
+    joint transfer — so this test gates the WIRING (inputs, faces, masks), nothing else."""
+    from rigel.calibration.messages.fanout import flank_to_exon_lambda
+
+    own_l = _logit(float(ctx.own.f_g[flank]))
+    own_t = float(ctx.own.tau_lam[flank])
+    p = tau0_intron + own_t
+    lam_c = (tau0_intron * lam0_intron + own_t * own_l) / p
+    return flank_to_exon_lambda(
+        np.array([lam_c]),
+        np.array([p]),
+        np.array([float(ctx.n_slot[flank])]),
+        np.array([face_count]),
+        np.array([100.0]),
+        np.array([float(ctx.eff_gdna[flank])]),
+        np.array([float(ctx.eff_rna[flank])]),
+        np.array([float(ctx.eff_gdna[exon])]),
+        np.array([float(ctx.eff_rna[exon])]),
+        _L,
+    )
+
+
+def test_stage4_the_exon_receives_the_composed_transfer_from_the_correct_face():
+    """Both exons (complete flanks) receive the two-sided λ claim: the intron's claim fused with the
+    flank's OWN strand evidence, then transferred through the joint function — and each exon takes the
+    sj face on ITS side of the flank (R1 is LEFT of its flank ⇒ the _lo face, 12; R3 is RIGHT of its
+    flank ⇒ the _hi face, 7). A wrong face cannot reproduce these numbers."""
+    parts, claims, ctx = _stage4_setup()
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    want_r1 = _expected_exon_claim(
+        ctx, flank=3, exon=2, face_count=12.0, tau0_intron=50.0, lam0_intron=_logit(0.8)
+    )
+    want_r3 = _expected_exon_claim(
+        ctx, flank=5, exon=6, face_count=7.0, tau0_intron=50.0, lam0_intron=_logit(0.8)
+    )
+    assert msg.lam_prec[2] == pytest.approx(float(want_r1[1][0]))
+    assert msg.lam_mode[2] == pytest.approx(float(want_r1[0][0]))
+    assert msg.lam_prec[6] == pytest.approx(float(want_r3[1][0]))
+    assert msg.lam_mode[6] == pytest.approx(float(want_r3[0][0]))
+
+
+def test_stage4_the_intron_receives_no_echo():
+    """The composed boundary states must NOT flow back into the intron: stage 2 solved it, and an
+    echo would hand its own strand evidence back at message precision. Zero on every channel."""
+    parts, claims, ctx = _stage4_setup()
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    assert msg.lam_prec[4] == 0.0
+    assert msg.rna_prec is None or (msg.rna_prec[0][4] == 0.0 and msg.rna_prec[1][4] == 0.0)
+
+
+def test_stage4_an_incomplete_flank_rides_the_one_sided_rna_channel():
+    """With a transcript-end bit facing R1 (TES at its flank), R1's claim becomes the one-sided
+    at-least-this-much-RNA bound: the RNA-share channel on the exon's live strand, flagged one-sided,
+    at the Jacobian precision — and the λ channel stays silent there. R3 is untouched."""
+    from rigel.calibration.splice_graph import FLAG_TES_POS
+
+    parts, claims, ctx = _stage4_setup(extra_flag_at_b1=FLAG_TES_POS)
+    assert not claims.exon_flank_right_complete[2] and claims.exon_flank_right[2]
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    want = _expected_exon_claim(
+        ctx, flank=3, exon=2, face_count=12.0, tau0_intron=50.0, lam0_intron=_logit(0.8)
+    )
+    lam_e, tau_e = float(want[0][0]), float(want[1][0])
+    f_e = 1.0 / (1.0 + np.exp(-lam_e))
+    assert msg.lam_prec[2] == 0.0
+    assert msg.rna_one_sided is not None and bool(msg.rna_one_sided[2])
+    assert msg.rna_mode[0][2] == pytest.approx(float(np.log1p(-f_e)))
+    assert msg.rna_prec[0][2] == pytest.approx(tau_e / f_e**2)
+    assert msg.rna_prec[1][2] == 0.0, "the dead strand says nothing"
+    assert msg.lam_prec[6] > 0.0 and not msg.rna_one_sided[6]
+
+
+def test_stage4_two_complete_flanks_fuse_on_lambda():
+    """An exon between two solved introns, both flanks licensed and complete: the two independent
+    transfers fuse precision-weighted, precisions adding."""
+    from rigel.calibration.splice_graph import FLAG_DONOR_POS
+
+    sigs = [_INTERGENIC, BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS, _INTERGENIC]
+    f_g = [1.0, 0.9, 0.85, 0.5, 0.4, 0.6, 0.75, 0.9, 1.0]
+    tau = [9.0, 7.0, 40.0, 20.0, 0.0, 25.0, 35.0, 7.0, 9.0]
+    flags = np.array([0, FLAG_DONOR_POS, FLAG_DONOR_POS, 0], np.uint16)
+    n_slot = [0.0, 0.0, 0.0, 80.0, 0.0, 70.0, 0.0, 0.0, 0.0]
+    parts, claims, ctx = _rich_fixture(sigs, f_g, tau, flags=flags, n_slot=n_slot)
+    assert claims.exon_flank_left_complete[4] and claims.exon_flank_right_complete[4]
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    left = _expected_exon_claim(
+        ctx, flank=3, exon=4, face_count=0.0, tau0_intron=40.0, lam0_intron=_logit(0.85)
+    )
+    right = _expected_exon_claim(
+        ctx, flank=5, exon=4, face_count=0.0, tau0_intron=35.0, lam0_intron=_logit(0.75)
+    )
+    lt, rt = float(left[1][0]), float(right[1][0])
+    want_prec = lt + rt
+    want_mode = (lt * float(left[0][0]) + rt * float(right[0][0])) / want_prec
+    assert msg.lam_prec[4] == pytest.approx(want_prec)
+    assert msg.lam_mode[4] == pytest.approx(want_mode)
+
+
+def test_stage4_two_incomplete_flanks_keep_the_binding_bound():
+    """Two one-sided bounds do not fuse (a precision mix of bounds is not a bound): the BINDING one —
+    the smaller λ, the larger RNA floor — is kept whole, on the RNA channel."""
+    from rigel.calibration.splice_graph import FLAG_DONOR_POS, FLAG_TES_POS, FLAG_TSS_POS
+
+    sigs = [_INTERGENIC, BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS, _INTERGENIC]
+    f_g = [1.0, 0.9, 0.85, 0.5, 0.4, 0.6, 0.75, 0.9, 1.0]
+    tau = [9.0, 7.0, 40.0, 20.0, 0.0, 25.0, 35.0, 7.0, 9.0]
+    flags = np.array(
+        [0, FLAG_DONOR_POS | FLAG_TSS_POS, FLAG_DONOR_POS | FLAG_TES_POS, 0], np.uint16
+    )
+    n_slot = [0.0, 0.0, 0.0, 80.0, 0.0, 70.0, 0.0, 0.0, 0.0]
+    parts, claims, ctx = _rich_fixture(sigs, f_g, tau, flags=flags, n_slot=n_slot)
+    assert claims.exon_flank_left[4] and not claims.exon_flank_left_complete[4]
+    assert claims.exon_flank_right[4] and not claims.exon_flank_right_complete[4]
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    left = _expected_exon_claim(
+        ctx, flank=3, exon=4, face_count=0.0, tau0_intron=40.0, lam0_intron=_logit(0.85)
+    )
+    right = _expected_exon_claim(
+        ctx, flank=5, exon=4, face_count=0.0, tau0_intron=35.0, lam0_intron=_logit(0.75)
+    )
+    (lam_w, tau_w) = min(
+        (float(left[0][0]), float(left[1][0])), (float(right[0][0]), float(right[1][0]))
+    )
+    f_w = 1.0 / (1.0 + np.exp(-lam_w))
+    assert msg.lam_prec[4] == 0.0
+    assert bool(msg.rna_one_sided[4])
+    assert msg.rna_mode[0][4] == pytest.approx(float(np.log1p(-f_w)))
+    assert msg.rna_prec[0][4] == pytest.approx(tau_w / f_w**2)
+
+
+def test_stage4_through_the_real_backbone():
+    """Integration with flags: `solve_chain` under FanOutPolicy vs SilentPolicy — the claimed
+    boundaries AND the licensed exons move, and nothing else does."""
+    from rigel.calibration.splice_graph import FLAG_DONOR_POS
+
+    parts = make_chain_parts(
+        SIGS,
+        region_pos=np.array([0.0, 50.0, 40.0, 50.0, 0.0]),
+        region_neg=np.array([0.0, 2.0, 2.0, 2.0, 0.0]),
+        boundary_pos=np.array([1.0, 30.0, 30.0, 1.0]),
+        boundary_neg=np.array([1.0, 20.0, 20.0, 1.0]),
+        boundary_flags=np.array([0, FLAG_DONOR_POS, FLAG_DONOR_POS, 0], np.uint16),
+    )
+    claims = build_structural_claims(parts.chain, parts.statics)
+    assert claims.solvable_exon.any(), "fixture: the flags must license the exons"
+
+    def run(policy):
+        belief = init_beliefs(
+            parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60
+        )
+        return solve_chain(
+            parts.chain,
+            parts.statics,
+            parts.geometry,
+            belief,
+            parts.region_arrays,
+            rna_sense_frac=0.95,
+            n_rna_obs=10000.0,
+            n_gdna_obs=10000.0,
+            n_grid=60,
+            logodds_window=_L,
+            policy=policy,
+        )
+
+    fan, silent = run(FanOutPolicy()), run(SilentPolicy())
+    moved = np.asarray(fan.f_g) != np.asarray(silent.f_g)
+    allowed = claims.ss_intron_boundary | claims.solvable_exon
+    assert moved[claims.ss_intron_boundary].all(), "the boundaries must hear stage 3"
+    assert moved[claims.solvable_exon].all(), "the licensed exons must hear stage 4"
+    assert not moved[~allowed].any(), "nothing else may move — the intron must hear NO echo"
+
+
+def test_stage4_a_minus_strand_exon_rides_the_neg_channel():
+    """The locus-F lesson replayed at stage 4: on a − exon the one-sided bound must land on the
+    NEGATIVE strand's RNA channel, with the positive channel silent — a fixture family that is all
+    ``+`` cannot see a hard-coded column."""
+    from rigel.calibration.signature import BIT_EXON_NEG, BIT_INTRON_NEG
+    from rigel.calibration.splice_graph import FLAG_DONOR_NEG, FLAG_TSS_NEG
+
+    sigs = [_INTERGENIC, BIT_EXON_NEG, BIT_INTRON_NEG, BIT_EXON_NEG, _INTERGENIC]
+    flags = np.array([0, FLAG_DONOR_NEG | FLAG_TSS_NEG, FLAG_DONOR_NEG, 0], np.uint16)
+    n_slot = [0.0, 0.0, 0.0, 100.0, 60.0, 90.0, 0.0, 0.0, 0.0]
+    parts, claims, ctx = _rich_fixture(sigs, F_G, TAU, flags=flags, n_slot=n_slot)
+    assert claims.exon_flank_right[2] and not claims.exon_flank_right_complete[2], (
+        "fixture: R1's right flank must be licensed and incomplete (TSS_NEG is its HIGH-end bit)"
+    )
+    # the sj face arrays: the − strand column must carry the flux, so a hard-coded column 0 reads 0
+    ctx.geometry.sj_count_lo[3, 1] = 12.0
+    ctx.geometry.eff_sj_lo[3, 1] = 100.0
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    assert msg.rna_one_sided is not None and bool(msg.rna_one_sided[2])
+    assert msg.rna_prec[1][2] > 0.0, "the − strand carries the claim"
+    assert msg.rna_prec[0][2] == 0.0, "the + strand says nothing"
+    want = _expected_exon_claim(
+        ctx, flank=3, exon=2, face_count=12.0, tau0_intron=50.0, lam0_intron=_logit(0.8)
+    )
+    f_e = 1.0 / (1.0 + np.exp(-float(want[0][0])))
+    assert msg.rna_mode[1][2] == pytest.approx(float(np.log1p(-f_e)))

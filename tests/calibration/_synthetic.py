@@ -215,6 +215,7 @@ def make_chain_parts(
     gdna_fl=None,
     rna_fl=None,
     ref_names=None,
+    boundary_flags=None,
 ):
     """A chain + substrate + geometry + statics over ``signatures``, on the S5.e axes.
 
@@ -297,7 +298,7 @@ def make_chain_parts(
         substrate=substrate,
         region_arrays=region_arrays,
         geometry=geometry,
-        statics=build_region_statics(chain, region_arrays),
+        statics=build_region_statics(chain, region_arrays, boundary_flags),
     )
 
 
