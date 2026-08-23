@@ -343,9 +343,10 @@ class CalibrationConfig:
     #: previous per-object reference regressed), −3.5 % on the deferred one, and the zero-gDNA control
     #: −19.6 % — worst single-cell regression +0.7 %. Re-run the instrument for a current number.
     #:
-    #: ⛔ ``False`` (shipped) ⇒ the location is not computed and every path is BIT-IDENTICAL to the tree
-    #: before this field existed. The default flip is the owner's call, with `preflight.py --full` after.
-    measured_intron_reference: bool = False
+    #: ⭐ **ON (owner ruling, 2026-08-23)** — flipped the day after landing, on the measured table above.
+    #: ⛔ ``False`` ⇒ the location is not computed and every path is BIT-IDENTICAL to the tree before
+    #: this field existed — which is also stage 2's no-measured-reference control.
+    measured_intron_reference: bool = True
 
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
