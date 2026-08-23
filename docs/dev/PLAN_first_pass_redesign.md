@@ -558,6 +558,35 @@ own-λ (data curvature only) rather than the ψ posterior keeps the reference fr
 claim rides the RNA-share channel with the one-sided residual (the certified-RNA semantics it
 generalizes).
 
+### §H.3 ⭐⭐⭐ STAGE 4 STATUS — BUILT, GATED, PRICED (2026-08-23); one measured residual, one lever
+
+All five pieces landed test-first with full perturbation sweeps (`762065bc` 4a, `17bf23a0` 4b+4c,
+`5e5f232e` 4d, `d46f285e` 4e, plus `pass0_claimed_ab.py`, the 4f instrument — self-test 6/6, indexed).
+
+**Pooled ladder (context):** vs the shipped relay, the complete pass-0 policy reads −37…−40 % on all
+three in-scope strata, 18/18 rows; stage 4's own increment over stage 3 cost ±0.2 % in scope while
+improving the deferred stratum −63.5 % and pooled `g00` −56.5 % (8/8) — the exon fan-out earns its
+keep exactly where exons are blind. The relay's deferred-stratum edge shrank +200 % → +9.3 %.
+
+**Claimed slots (the §E verdict; B = intron boundaries, E = solvable exons; silent/relay/fanout):**
+* **B: the stage-3 verdicts stand** — fanout best on both capture-OFF strata and at `g00`-OFF; the
+  stranded × ON +7.5 % residual unchanged; and on the deferred stratum's boundaries the refit now
+  carries fanout to near-relay (251,503 vs 215,475, from 828k at depth 1).
+* **E, the wins:** deferred-stratum exons **169,659 vs silent 697,694 and relay 258,207** — the
+  design's target population, decisively taken; `g00` exons 9× better than silence (21,836 vs
+  192,486), though the relay's whole-chain zero-spreading still leads there (1,548).
+* **E, the named residuals:** ⛔ **stranded × capture-ON exons REGRESS: 40,528 vs silent 18,042**
+  (2.25×) — the v1 no-drift decision's predicted failure mode: the un-drifted transfer carries the
+  MEASURED 5–10 % capture-ON hop excess at full confidence into slots whose own strand evidence is
+  strong. The principled lever is the reserved fallback (the capture-gated drift variance from the
+  measured excess), which downweights exactly these transfers with no stratum-conditional licence.
+  ⚠ unstranded × capture-OFF exons +21 % on a small base (7,755 vs 6,415) — needs a
+  `worst_objects`-style dissection before any mechanism is guessed.
+
+⛔ Next decisions (owner): ① price the capture-gated drift as the next one-thing-varied increment;
+② dissect the unstranded-OFF exon cell; ③ then 4g — the landscape fit on solved slots only, where
+the estimate/bound grades choose the training set.
+
 **Implementation shape:** the new message POLICY on the existing backbone (the `the-one-hop` ruling) —
 emission licensed only FROM solved-substrate slots TOWARD adjacent unsolved ones, `SilentPolicy`
 behaviour elsewhere; the forward scan carries the rightward fan-out, the backward the leftward, so the
