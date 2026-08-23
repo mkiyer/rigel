@@ -193,3 +193,85 @@ def test_through_the_real_backbone_only_the_claimed_boundaries_move():
     moved = np.asarray(fan.f_g) != np.asarray(silent.f_g)
     assert moved[claims.ss_intron_boundary].all(), "the claimed boundaries must hear the message"
     assert not moved[~claims.ss_intron_boundary].any(), "nothing else may move"
+
+
+# ── stage 4's transfer function: route-merge ∘ reframe, jointly derived ────────────────────────────
+
+
+def _f2e(lam_b, tau_b, U, S, E_sj, gx, rx, gc, rc, L=_L):
+    from rigel.calibration.messages.fanout import flank_to_exon_lambda
+
+    return flank_to_exon_lambda(
+        np.atleast_1d(np.asarray(lam_b, np.float64)),
+        np.atleast_1d(np.asarray(tau_b, np.float64)),
+        np.atleast_1d(np.asarray(U, np.float64)),
+        np.atleast_1d(np.asarray(S, np.float64)),
+        np.atleast_1d(np.asarray(E_sj, np.float64)),
+        np.atleast_1d(np.asarray(gx, np.float64)),
+        np.atleast_1d(np.asarray(rx, np.float64)),
+        np.atleast_1d(np.asarray(gc, np.float64)),
+        np.atleast_1d(np.asarray(rc, np.float64)),
+        L,
+    )
+
+
+def test_flank_to_exon_no_flux_is_a_pure_reparameterization():
+    """With no spliced flux the transfer is λ_b plus an opportunity constant, at EXACTLY the source's
+    precision: the count noise cancels in the ratio and the composition terms collapse to 1/τ_b.
+    ⛔ This is the covariance gate — a split (density, variance) interface between route-merge and
+    reframe double-counts the shared count and λ (`TRAPS: two-gaussians-one-latent`) and fails here."""
+    lam, tau = _f2e(0.7, 25.0, U=40.0, S=0.0, E_sj=100.0, gx=180.0, rx=220.0, gc=150.0, rc=90.0)
+    assert lam[0] == pytest.approx(0.7 + np.log(220.0 * 150.0 / (180.0 * 90.0)), abs=1e-12)
+    assert tau[0] == pytest.approx(25.0, abs=1e-9)
+
+
+def test_flank_to_exon_capture_invariance():
+    """A uniform capture pull multiplies every COUNT at the locus by one factor; the density RATIO —
+    and therefore the delivered λ — must not move at all (the reframe's whole reason to exist)."""
+    base_lam, _ = _f2e(
+        0.3, 12.0, U=50.0, S=30.0, E_sj=100.0, gx=200.0, rx=200.0, gc=120.0, rc=100.0
+    )
+    pulled_lam, _ = _f2e(
+        0.3, 12.0, U=50.0 * 37.0, S=30.0 * 37.0, E_sj=100.0, gx=200.0, rx=200.0, gc=120.0, rc=100.0
+    )
+    assert pulled_lam[0] == base_lam[0]
+
+
+def test_flank_to_exon_variance_matches_monte_carlo():
+    """The delta-method precision against brute force: sample the three raw statistics from their own
+    sampling models, push each through the same arithmetic, and the empirical variance of λ must match
+    ``1/τ`` — the working rule's enumeration check on the covariance handling."""
+    rng = np.random.default_rng(7)
+    lam0, tau0, U0, S0, E_sj = 0.4, 30.0, 400.0, 250.0, 100.0
+    gx, rx, gc, rc = 200.0, 200.0, 150.0, 120.0
+    lam, tau = _f2e(lam0, tau0, U0, S0, E_sj, gx, rx, gc, rc)
+
+    n = 40_000
+    lam_s = rng.normal(lam0, 1.0 / np.sqrt(tau0), n)
+    U_s = rng.poisson(U0, n).astype(float)
+    S_s = rng.poisson(S0, n).astype(float)
+    f = 1.0 / (1.0 + np.exp(-lam_s))
+    rho_g = f * U_s / gx
+    rho_r = (1.0 - f) * U_s / rx + S_s / E_sj
+    ok = (rho_g > 0) & (rho_r > 0)
+    emp = np.log(rho_g[ok] * gc) - np.log(rho_r[ok] * rc)
+    assert emp.mean() == pytest.approx(float(lam[0]), abs=0.02)
+    assert emp.var() == pytest.approx(1.0 / float(tau[0]), rel=0.10)
+
+
+def test_flank_to_exon_guards_and_direction():
+    """No unspliced measurement, or no composed claim, or a dead opportunity ⇒ NO claim (τ = 0, one
+    statement); more spliced flux moves the claim toward RNA; extreme inputs clip into the window."""
+    _, tau = _f2e(0.5, 20.0, U=0.0, S=10.0, E_sj=100.0, gx=200.0, rx=200.0, gc=100.0, rc=100.0)
+    assert tau[0] == 0.0
+    _, tau = _f2e(0.5, 0.0, U=10.0, S=0.0, E_sj=100.0, gx=200.0, rx=200.0, gc=100.0, rc=100.0)
+    assert tau[0] == 0.0
+    _, tau = _f2e(0.5, 20.0, U=10.0, S=0.0, E_sj=100.0, gx=0.0, rx=200.0, gc=100.0, rc=100.0)
+    assert tau[0] == 0.0
+
+    low, _ = _f2e(0.2, 20.0, U=50.0, S=0.0, E_sj=100.0, gx=200.0, rx=200.0, gc=100.0, rc=100.0)
+    high, _ = _f2e(0.2, 20.0, U=50.0, S=80.0, E_sj=100.0, gx=200.0, rx=200.0, gc=100.0, rc=100.0)
+    assert high[0] < low[0], "spliced flux is RNA — it must push the claim toward RNA"
+
+    lam, _ = _f2e(9.9, 20.0, U=1e12, S=0.0, E_sj=100.0, gx=1e9, rx=1e-6, gc=1e9, rc=1e-9)
+    assert -_L <= lam[0] <= _L

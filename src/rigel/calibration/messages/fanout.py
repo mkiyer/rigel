@@ -89,3 +89,84 @@ class FanOutPolicy:
 
     def prepare(self, ctx: StepContext) -> _FanOutRelay:
         return _FanOutRelay(ctx)
+
+
+def flank_to_exon_lambda(
+    lam_b,
+    tau_b,
+    U,
+    S_face,
+    eff_sj_face,
+    eff_gx,
+    eff_rx,
+    eff_gc,
+    eff_rc,
+    logodds_window,
+):
+    """Stage 4's transfer — route-merge ∘ reframe, derived JOINTLY: the flank's composed unspliced
+    claim ``(lam_b, tau_b)`` plus the spliced flux entering the exon, delivered as ``(lam, tau)`` in
+    the EXON's frame.
+
+    The routes merge as DENSITIES (each count over ITS OWN opportunity — the two footings differ by a
+    measured 7–10×, so raw-count pooling is inadmissible), and the ratio is re-formed through the
+    exon's opportunities, so the absolute level CANCELS — a uniform capture pull moves nothing, which
+    is what the currency map certified about this hop::
+
+        f     = sigma(lam_b)                       rho_g  = f·U/E_gx        rho_nu = (1−f)·U/E_rx
+        rho_mu = S/E_sj                            rho_r  = rho_nu + rho_mu
+        lam   = log(rho_g·E_gc) − log(rho_r·E_rc)          clipped into [−L, +L]
+
+    ⛔ **ONE function, not route-merge THEN reframe through a (density, variance) interface — and that
+    is `TRAPS: two-gaussians-one-latent` speaking**: ``rho_g`` and ``rho_nu`` share ``lam_b`` and
+    ``U``, so a split interface loses their covariance and double-counts both. Carried jointly (the
+    delta method on the three RAW statistics ``lam_b``, ``log U``, ``log S`` — each entering once,
+    D.1's requirement)::
+
+        Var(lam) = [(1−f) + f·rho_nu/rho_r]²/tau_b + (rho_mu/rho_r)²·(1/U + 1/S)
+
+    whose limits are the falsification: at ``S = 0`` the transfer is a pure reparameterization —
+    ``lam = lam_b + log(E_rx·E_gc/(E_gx·E_rc))`` at EXACTLY ``1/tau_b``, the count noise cancelling in
+    the ratio — and at ``S ≫`` the gDNA side's Poisson noise carries. Monte-Carlo-gated.
+
+    A claim requires ``tau_b > 0``, live opportunities, and live densities (``U = 0`` withdraws the claim through ``rho_g``) — anything else returns ``tau = 0``,
+    value and precision withdrawn in one statement. ``S_face``/``eff_sj_face`` are the FACE of the sj
+    flux on the exon's side (`RegionGeometry.sj_count_lo/hi`, ``eff_sj_lo/hi`` — the population of a
+    message is direction-dependent).
+    """
+    lam_b = np.asarray(lam_b, np.float64)
+    tau_b = np.asarray(tau_b, np.float64)
+    U = np.asarray(U, np.float64)
+    S = np.asarray(S_face, np.float64)
+    E_sj = np.asarray(eff_sj_face, np.float64)
+    gx = np.asarray(eff_gx, np.float64)
+    rx = np.asarray(eff_rx, np.float64)
+    gc = np.asarray(eff_gc, np.float64)
+    rc = np.asarray(eff_rc, np.float64)
+    L = float(logodds_window)
+
+    # ⭐ no explicit U guard: with U = 0 the gDNA density is 0 and the ``rho_g > 0`` refinement below
+    #   withdraws the claim — the perturbation sweep proved a separate conjunct did no work.
+    live = (tau_b > 0.0) & (gx > 0.0) & (rx > 0.0) & (gc > 0.0) & (rc > 0.0)
+    f = 1.0 / (1.0 + np.exp(-np.clip(lam_b, -L, L)))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho_g = np.where(live, f * U / np.maximum(gx, _EPS), 0.0)
+        rho_nu = np.where(live, (1.0 - f) * U / np.maximum(rx, _EPS), 0.0)
+        rho_mu = np.where((S > 0.0) & (E_sj > 0.0), S / np.maximum(E_sj, _EPS), 0.0)
+        rho_r = rho_nu + rho_mu
+        live = live & (rho_g > 0.0) & (rho_r > 0.0)
+        lam = np.where(
+            live,
+            np.clip(
+                np.log(np.maximum(rho_g * gc, _EPS)) - np.log(np.maximum(rho_r * rc, _EPS)),
+                -L,
+                L,
+            ),
+            0.0,
+        )
+        w_mu = np.where(live, rho_mu / np.maximum(rho_r, _EPS), 0.0)
+        a = np.where(live, (1.0 - f) + f * rho_nu / np.maximum(rho_r, _EPS), 0.0)
+        var = a * a / np.maximum(tau_b, _EPS) + w_mu * w_mu * (
+            1.0 / np.maximum(U, _EPS) + np.where(S > 0.0, 1.0 / np.maximum(S, _EPS), 0.0)
+        )
+        tau = np.where(live & (var > 0.0), 1.0 / np.maximum(var, _EPS), 0.0)
+    return lam, tau
