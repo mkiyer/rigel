@@ -45,7 +45,6 @@ from .region_geometry import (
     RegionBelief,
     RegionGeometry,
     RegionStatics,
-    g1_locked,
     region_gdna_geometry,
     region_rna_geometry,
 )
@@ -465,7 +464,6 @@ def solve_chain(
         is_exon_region=is_exon_region,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
-        g1_locked=g1_locked(np.asarray(fp, bool), np.asarray(fn, bool)),
         boundary_flags=statics.boundary_flags,
         claims=build_structural_claims(chain, statics),
         geometry=geometry,

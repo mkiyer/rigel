@@ -6,19 +6,24 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — tw
 ``N E N E … N`` chain, one combine, one ψ solve, one write-back, and five assertions. Everything about
 *what a message says* is a policy, and it lives here.
 
-Three policies ship:
+Four policies ship (`CalibrationConfig.message_propagation` = True since 2026-08-18, with
+`message_policy` picking which one — this paragraph called SilentPolicy "THE DEFAULT" long after the
+default flipped, a wrong-fact fossil corrected 2026-08-23):
 
-* :class:`~.silent.SilentPolicy` — sends nothing. ⭐ **THE DEFAULT**, and five boundaries long. A reader who
-  holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.head.RelayPolicy` — every operator the evolved solver carried, each behind a NAMED switch, so
-  ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
-* :mod:`~.variance` — the shared variance arithmetic both of the above draw on. Not a policy; a toolbox.
+* :class:`~.relay.RelayPolicy` — ⭐ **THE SHIPPED POLICY** — every operator the evolved solver carried,
+  each behind a NAMED switch, so ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
+* :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five boundaries
+  long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
+* :class:`~.currency.CurrencyPolicy` — the Stage-3 rebuild, measured WORST on the in-scope contaminated
+  strata and FROZEN pending the reference re-contrast.
+* :class:`~.fanout.FanOutPolicy` — the first-pass redesign's pass-0 fan-out, UNDER DEVELOPMENT.
+* :mod:`~.variance` — the shared variance arithmetic the policies draw on. Not a policy; a toolbox.
 
 ⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer
 at the prior-free pass is worth **+0.2 %** of the shipped answer while moving that pass's own error by
 **77.5 %**; muted everywhere it is a net *harm* on three of the four strata and its entire value sits in
-one. So the operators in ``head.py`` are not load-bearing as a group — they have to be priced individually,
-and a switch per operator is the only way to do that.
+one. So the operators in ``relay.py`` are not load-bearing as a group — they have to be priced
+individually, and a switch per operator is the only way to do that.
 
 The interface
 -------------
@@ -184,9 +189,6 @@ class StepContext:
     )  # a REGION whose region signature is EXON — the SPLICE IN's destination
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
-    g1_locked: (
-        np.ndarray
-    )  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
     #: `structural_claims.StructuralClaims` — the stage-0 substrate: per-slot STRUCTURAL class masks
     #: derived from the annotation alone (a constant, so readable at either end of a hop). The fan-out

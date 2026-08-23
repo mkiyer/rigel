@@ -1,13 +1,11 @@
-"""The policy that sends nothing — and it is **THE DEFAULT**.
+"""The policy that sends nothing — the OFF state (``message_propagation = False``) and the measured floor.
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 ⭐⭐⭐ **This file is five boundaries of behaviour, and that is the entire point.** A new session reads
-``sweep.py`` plus this and holds the whole working system in their head. :mod:`~.head` is opt-in — one
-config flag, ``CalibrationConfig.message_propagation``, with every operator inside it behind its own named
-switch. ⛔ This line called ``head`` *"clearly labelled as the legacy arm being dismantled"* until
-2026-08-17: it carries no such label, and it is not being dismantled. Its own docstring says the opposite —
-the switches exist so ``ladder_arm_ab.py`` can price the operators ONE AT A TIME.
+``sweep.py`` plus this and holds the whole working system in their head. :mod:`~.relay` is the SHIPPED
+policy (``message_propagation`` defaults ``True`` since 2026-08-18), with every operator inside it behind
+its own named switch — the switches exist so ``ladder_arm_ab.py`` can price the operators ONE AT A TIME.
 
 ⛔ **It is also a MEASURED floor, not a placeholder.** With no belief propagation whatsoever the panel's
 deliverable is worth −50 % overall, and the sign is not uniform: it is a net **improvement** on three of
@@ -16,13 +14,13 @@ unstranded × capture-OFF **−32.1 %**) and a large regression on exactly one (
 **+154.8 %, 0/16**) — the stratum where ``kappa = 1/2`` makes the strand λ-term exactly 0, so a slot has no
 own composition evidence at all and a message is the only source there is.
 
-⛔⛔ **AND IT IS SHIPPED, SO THAT PRICE IS BEING PAID — this paragraph read "so this is a diagnostic, not a
-proposal" until 2026-08-17, which contradicted this file's own first line.** ``message_propagation``
-defaults ``False`` (owner, 2026-08-07), so ``+8,003 %`` on the zero-gDNA control is the standing cost of
-the shipped configuration, not a hypothetical one. ⚠ It stays down until the tool is optimised end to end
-across all scenarios (owner, 2026-08-10) — a STUDY configuration reversed by one flag, not a retirement.
-What the floor establishes is that the message layer's whole value is ONE stratum, which is what scoped
-the backbone.
+⭐ **AND IT IS NO LONGER SHIPPED — this paragraph asserted the opposite until 2026-08-23, the third
+wrong-fact fossil of the same family** (`calibrate.py` and `zero_controls.py` carried the other two).
+``message_propagation`` has defaulted ``True`` since 2026-08-18, installing :class:`~.relay.RelayPolicy`;
+this policy is the OFF state and the measured floor the message layer is priced against. What the floor
+establishes is unchanged and still load-bearing: the relay's whole value is ONE stratum (the deferred
+unstranded × capture-ON), it is a net harm on the other three, and that is what scoped the backbone —
+and what the pass-0 fan-out rebuild is measured against.
 
 ⛔ **NEEDS AN OWNER RULING — the ``−50 % overall`` above and ``CalibrationConfig.message_propagation``'s
 ``panel TOTAL is +99.9 % worse`` describe the same mute with opposite signs.** They may be two different
