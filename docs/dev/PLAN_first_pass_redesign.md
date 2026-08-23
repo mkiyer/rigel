@@ -576,16 +576,37 @@ keep exactly where exons are blind. The relay's deferred-stratum edge shrank +20
   design's target population, decisively taken; `g00` exons 9× better than silence (21,836 vs
   192,486), though the relay's whole-chain zero-spreading still leads there (1,548).
 * **E, the named residuals:** ⛔ **stranded × capture-ON exons REGRESS: 40,528 vs silent 18,042**
-  (2.25×) — the v1 no-drift decision's predicted failure mode: the un-drifted transfer carries the
-  MEASURED 5–10 % capture-ON hop excess at full confidence into slots whose own strand evidence is
-  strong. The principled lever is the reserved fallback (the capture-gated drift variance from the
-  measured excess), which downweights exactly these transfers with no stratum-conditional licence.
-  ⚠ unstranded × capture-OFF exons +21 % on a small base (7,755 vs 6,415) — needs a
-  `worst_objects`-style dissection before any mechanism is guessed.
+  (2.25× at `g50 ss0.99 ON`); ⚠ unstranded × capture-OFF exons +21 % on a small base (7,755 vs
+  6,415). Neither is pooled away, and neither gets a mechanism before its dissection speaks.
 
-⛔ Next decisions (owner): ① price the capture-gated drift as the next one-thing-varied increment;
-② dissect the unstranded-OFF exon cell; ③ then 4g — the landscape fit on solved slots only, where
-the estimate/bound grades choose the training set.
+#### ⭐⭐⭐ THE OWNER'S ANALYSIS FRAME FOR THE STRANDED × CAPTURE-ON RESIDUAL (2026-08-23) — binding
+
+* **Break the stratum BY gDNA RUNG (`g05`/`g50`/`g98` separately), never pooled**, and SURVEY the
+  regions and boundaries that regress under the fan-out — the dissection is its own piece of work.
+* **The central question: how accurate is the STRAND MODEL ALONE at single-stranded exons?** It is
+  understood to be very accurate there — so the imputed composition arriving from the boundaries is
+  EXPECTED to be less accurate than the exon's internal strand solve. That is anticipated, not a
+  surprise; the question is why the message WINS the fuse anyway.
+* **The problem is two-fold, and both halves are open:** ① ACCURACY (bias) — the imputation is good
+  (it improves many scenarios, especially unstranded) but less accurate than the strand model here,
+  and the brand-new implementation may simply carry bugs; ② PRECISION (too high) — the message's
+  delivered precision is evidently high enough to harm the strand model's solve. **The elegant fix is
+  honest precision on BOTH sides**: the strand model's exon precision must be honestly HIGH, and the
+  composed-and-transferred boundary precision must be honestly (lower) — the computation and
+  propagation of the message precision needs careful evaluation both THEORETICALLY and at the
+  regressed slots.
+* ⚠ **"The drift", defined once so it stops being jargon**: the premise-variance term — the measured
+  excess error that remains when the TRUE source value is transported over this hop
+  (`hop_currency.py`'s excess-over-floor: 5.1 % ladder / 10.2 % test-chromosome under capture-ON,
+  ~0 OFF). It prices "the flank's composition is only locally-approximately the exon's," as a
+  variance ADDED to the message — i.e., one principled candidate INSIDE the owner's precision branch,
+  not a separate concept and not presumed to be the fix.
+* ⛔ **The owner holds a suspicion and will NOT act on it until the dissection data over the
+  regressed regions and boundaries is on the table.** No mechanism lands before then.
+
+⛔ Next work, in order: ① the stranded × capture-ON dissection (per rung, per slot, bias-vs-precision
+columns); ② the unstranded × capture-OFF exon cell's dissection; ③ then 4g — the landscape fit on
+solved slots only, where the estimate/bound grades choose the training set.
 
 **Implementation shape:** the new message POLICY on the existing backbone (the `the-one-hop` ruling) —
 emission licensed only FROM solved-substrate slots TOWARD adjacent unsolved ones, `SilentPolicy`

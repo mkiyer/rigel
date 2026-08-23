@@ -223,12 +223,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,684 passed / 0 skipped / 9 xfail** (re-derived 2026-08-26; the
-`+26` over 3,658 is stages 0 and 2 of the first-pass redesign, exactly per the table below:
-`tests/calibration/test_structural_claims.py` = 9 own + 2 meta, the `structural_claims` module + 3,
-`scripts/design/structural_claims_audit.py` + 4, `tests/calibration/test_measured_reference.py`
-= 7 own + 2 meta, and `−1` for the consumed `docs/dev/NEXT_SESSION.md`, deleted per its own
-instruction. `measured_intron_reference` ships OFF, so no golden moved.) ⛔ **ANY failure at all is a regression** — a stronger and
+⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 9 xfail** (re-derived 2026-08-23; the
+`+36` over 3,684 is stages 3–4 of the first-pass redesign plus the new handoff, exactly per the table
+below: `docs/dev/NEXT_SESSION.md` + 1 (jargon only), stage 3 +12
+(`messages/fanout` module + 3, `test_fanout_policy.py` 7 own + 2 meta), stage 4a + 2 (new cases in the
+existing stage-0 gate), 4b/c + 4 (transfer cases, same file), 4d + 6 (`test_message_sidedness.py`
+4 own + 2 meta), 4e + 7 (wiring cases, same file), 4f + 4 (`pass0_claimed_ab.py`'s meta). The shipped
+defaults are unchanged by 3–4 — `message_policy` stays `"relay"` — so no golden moved.) ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
 next session reads a green run as a regression.
 
