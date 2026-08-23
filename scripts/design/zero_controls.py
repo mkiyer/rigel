@@ -28,13 +28,14 @@ thing the solver ever does: there is nothing to deconvolve.
 If ``fg_loc`` is right and ``f_g`` is not, it is the messages. ⛔ Reading only the final number cannot tell
 those apart, and they have completely different fixes.
 
-⛔⛔ **AND UNDER THE SHIPPED CONFIG THERE IS NO THIRD RUNG.** ``CalibrationConfig.message_propagation``
-is ``False``, which installs ``SilentPolicy`` — no relay runs, so rung 3 can only repeat rung 2. This
-instrument **prints the two rungs' measured maximum separation** rather than implying a relay ran, and
-its relay-derived column reads ``—`` rather than a zero. ⭐ ``--messages on`` restores the third rung and
-the stamp then says the configuration is not the shipped one. ⚠ It defaults to the SHIPPED setting on
-purpose: this is the admissibility control the owner requires on **every experiment**, and an experiment
-runs the configuration the tool ships.
+⭐ **THE THIRD RUNG IS REAL UNDER THE SHIPPED CONFIG** — ``CalibrationConfig.message_propagation``
+ships ``True`` (``message_policy = "relay"`` installs ``RelayPolicy``; this docstring asserted the
+opposite until 2026-08-23, a fossil of the pre-2026-08-18 default). ⚠ Under ``--messages off``
+(``SilentPolicy``, sends nothing) rung 3 can only repeat rung 2: this instrument then **prints the two
+rungs' measured maximum separation** rather than implying a relay ran, and its relay-derived column
+reads ``—`` rather than a zero, with the stamp saying the configuration is not the shipped one. ⚠ It
+defaults to the SHIPPED setting on purpose: this is the admissibility control the owner requires on
+**every experiment**, and an experiment runs the configuration the tool ships.
 
 ⚠ **A zero arm can be DEGENERATE, and then it is not a control at all** (TRAPS: could-the-arm-have-fired). An object with
 zero counts has no density, so the reframe is skipped and every message into it is inert — the arm then

@@ -352,17 +352,16 @@ missing is not the pin but the EMISSION licence's scoping — see §C.
   the stage-0 intergenic REGION class, the same estimand `fit_intron_background` measures (its docstring
   says the pools are measured identical), so the location costs one pooled division rather than a
   second fitting path.
-* **CANDIDATE (owner's call): collapse ψ's location plumbing to ONE construction site.**
-  `solve_chain` now takes both `structural_reference: bool` and `reference_location` and derives the
-  structural location itself when the latter is None. If `calibrate` always constructs the location
-  (structural or measured) and passes it, `solve_chain` loses a parameter and a branch — one site
-  instead of two. Touches the backbone's signature (arms and instruments wrap `solve_chain`), so it
-  wants `rename_identity.py --check` around it, not a tail-end sweep.
-* **CANDIDATE: two stale wrong-fact comment blocks about `message_propagation`.** `calibrate.py`'s
-  solve-chain comment says "MESSAGE PROPAGATION IS OFF (owner, 2026-08-07)… the config is False" and
-  `zero_controls.py`'s docstring says the same — the shipped default has been **True** (RelayPolicy)
-  since 2026-08-18. The measured tables inside those blocks are history worth keeping; the framing
-  sentences state the config wrong and should be corrected in a content-only pass.
+* ✅ **EXECUTED 2026-08-23 (owner's go): ψ's location plumbing collapsed to ONE construction site.**
+  `solve_chain` lost the `structural_reference` bool and its fallback branch; `calibrate` constructs
+  the location (structural base, measured override) and passes `reference_location`. Gated on
+  BIT-IDENTITY: all 52 array/scalar fields of pass-0 and final hashed equal on a real ladder condition
+  under the shipped config, suite 3,684 / 9 xfail unmoved. ⚠ The two instruments that tally the
+  shipped location path (`vertex_ceiling`, `quant_accuracy`) were repointed at `calibrate`'s binding in
+  the same batch — patching `sweep`'s would have counted nothing (`TRAPS: an-ablation-that-never-ran`).
+* ✅ **EXECUTED 2026-08-23: the two wrong-fact `message_propagation` comment blocks corrected**
+  (`calibrate.py`, `zero_controls.py`) — both now state the shipped default (True, RelayPolicy, since
+  2026-08-18) and keep the 2026-08-07 OFF measurement as dated history.
 
 ---
 

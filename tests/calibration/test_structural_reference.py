@@ -233,7 +233,7 @@ def _sweep(args, *, structural: bool, policy):
         n_gdna_obs=10000.0,
         n_grid=60,
         logodds_window=_L,
-        structural_reference=structural,
+        reference_location=structural_reference_location(statics, _L) if structural else None,
         policy=policy,
     )
 
@@ -723,7 +723,7 @@ def _solve_with_factory(parts, belief, kappa, *, structural):
         logodds_window=_L,
         n_grid_ss=256,
         intron_prior=ip,
-        structural_reference=structural,
+        reference_location=structural_reference_location(parts.statics, _L) if structural else None,
         policy=SilentPolicy(),
     )
 
@@ -795,7 +795,9 @@ def test_with_no_refutation_channel_at_all_the_prior_is_the_only_voice(rho_n):
             n_gdna_obs=10000.0,
             n_grid=60,
             logodds_window=_L,
-            structural_reference=structural,
+            reference_location=structural_reference_location(parts.statics, _L)
+            if structural
+            else None,
             policy=SilentPolicy(),
         )
         mass = np.asarray(parts.geometry.unspliced_count, np.float64).sum(axis=1)

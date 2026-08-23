@@ -246,8 +246,8 @@ def install_arm(arm: str, oracle: OracleTruth | None):
         #   make the guard a lie: unlike ``base``, this arm CAN silently fail to reach the solve if the
         #   flag stops being threaded. So COUNT THE PRODUCTION BUILDER, wrapping it without replacing it:
         #   the real function runs and its result is returned untouched, and only the tally is ours.
+        import rigel.calibration.calibrate as _CAL
         import rigel.calibration.simplex_logodds as _SL
-        import rigel.calibration.sweep as _SW
 
         real_loc = _SL.structural_reference_location
         fired = {"n": 0}
@@ -256,12 +256,13 @@ def install_arm(arm: str, oracle: OracleTruth | None):
             fired["n"] += 1
             return real_loc(statics, logodds_window)
 
+        # ⛔ the CALLER is `calibrate` — one construction site since 2026-08-23.
         _SL.structural_reference_location = counted
-        _SW.structural_reference_location = counted
+        _CAL.structural_reference_location = counted
 
         def restore_loc():
             _SL.structural_reference_location = real_loc
-            _SW.structural_reference_location = real_loc
+            _CAL.structural_reference_location = real_loc
 
         return restore_loc, fired
 

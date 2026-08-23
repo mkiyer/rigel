@@ -620,19 +620,19 @@ def calibrate(
                     n_tilt,
                 )
         lam_factor = _intron_prior_at(n_grid, window)
-        # ⭐ ψ's reference LOCATION from the MEASURED background at single-stranded intron REGIONs —
-        # computed AFTER the window rescale above, because the FIRM clip is a function of the window.
-        # OFF ⇒ None ⇒ `solve_chain` derives the structural location itself, bit-identically.
-        reference_location = None
+        # ⭐ ψ's reference LOCATION, constructed HERE and only here (owner simplification,
+        # 2026-08-23) — AFTER the window rescale above, because the measured form's FIRM clip is a
+        # function of the window. The structural location from the annotation (`structural_reference`),
+        # overridden at ss-intron REGIONs by the measured background (`measured_intron_reference`).
+        # ⛔ None ⇒ no term is written — the no-reference control is still one config bool.
+        reference_location = (
+            structural_reference_location(statics, float(window))
+            if config.structural_reference
+            else None
+        )
         if config.measured_intron_reference:
             reference_location = measured_reference_location(
-                chain,
-                statics,
-                geometry,
-                window,
-                base=structural_reference_location(statics, float(window))
-                if config.structural_reference
-                else None,
+                chain, statics, geometry, window, base=reference_location
             )
         out = solve_chain(
             chain,
@@ -651,33 +651,27 @@ def calibrate(
             n_grid_ss=n_grid_ss,
             gdna_prior=prior,
             intron_prior=lam_factor,
-            # ⭐ ψ's reference MEAN from the annotation. OFF ⇒ `location=None` ⇒ no term ⇒ bit-identical.
-            structural_reference=config.structural_reference,
             reference_location=reference_location,
-            # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
-            # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
-            # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
-            # factory. Measured on the 36-condition ladder — RETIRED, rebuilt at 16 conditions on
-            # 2026-08-13, so these are as-recorded and not reproducible as written — muting the message
-            # layer is a net IMPROVEMENT on THREE OF THE FOUR STRATA:
+            # ⭐⭐ **MESSAGE PROPAGATION SHIPS ON (`message_propagation = True` since 2026-08-18), with
+            # `message_policy = "relay"` installing `RelayPolicy`; `SilentPolicy` is the OFF state and
+            # `CurrencyPolicy` the third option — one config value IS the A/B.** This sentence used to
+            # assert the opposite ("OFF, owner 2026-08-07") long after the default flipped — a
+            # wrong-fact comment corrected 2026-08-23; the HISTORY it carried stays below, dated.
+            #
+            # ⛔ The 2026-08-07 OFF ruling was a MEASUREMENT, on the 36-condition ladder — RETIRED,
+            # rebuilt at 16 conditions on 2026-08-13, so these are as-recorded and not reproducible as
+            # written. Muting the message layer was a net IMPROVEMENT on three of the four strata:
             #
             #     stranded   x capture ON    -58.3 %   16/16 conditions better
             #     stranded   x capture OFF   -43.7 %   16/16 better
             #     unstranded x capture OFF   -32.1 %   14/16 better
             #     unstranded x capture ON   +154.8 %    0/16 better
             #
-            # ⚠ The panel TOTAL is +99.9 % worse, because the one stratum the messages help carries 73 % of
-            # the panel's error — so this is a deliberate trade and not a free win. `ROADMAP.md` carries it.
-            # ⭐ That stratum is exactly where kappa = 1/2 makes the strand lambda-term exactly 0, so a
-            # slot has no own composition evidence at all and a message is the only source there is.
-            # ⛔ The planned way out — a theta-independent FRAGMENT-LENGTH channel — was built, measured
-            # on the drained arm and DELETED (2026-08-10): its answer is not a function of the length gap
-            # at all. `TRAPS.md` carries the mechanism.
-            #
-            # ⛔ Switching back is ONE WORD, `RelayPolicy()`, and every operator is still there behind its
-            # own named switch, so this is reversible and each operator stays individually priceable.
-            # ⭐ `message_policy` picks WHICH policy the flag installs: the shipped relay, or the
-            # Stage-3 CurrencyPolicy under development. One config value IS the A/B.
+            # ⚠ The panel TOTAL was +99.9 % worse OFF, because the one stratum messages help carries
+            # most of the panel's error — the deliberate trade `ROADMAP.md` carries. ⭐ That stratum is
+            # where kappa = 1/2 zeroes the strand lambda-term, so a slot has no own composition evidence
+            # and a message is the only source there is. ⛔ The theta-independent FRAGMENT-LENGTH way
+            # out was built, measured and DELETED (2026-08-10); `TRAPS.md` carries the mechanism.
             policy=(
                 (CurrencyPolicy() if config.message_policy == "currency" else RelayPolicy())
                 if config.message_propagation

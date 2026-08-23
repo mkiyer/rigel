@@ -39,7 +39,7 @@ DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
+from rigel.calibration.region_chain import REGION, build_region_chain  # noqa: E402
 from rigel.calibration.region_geometry import RegionStatics, build_region_statics  # noqa: E402
 from rigel.calibration.splice_graph import build_boundary_flags_array  # noqa: E402
 from rigel.calibration.structural_claims import build_structural_claims  # noqa: E402

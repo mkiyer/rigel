@@ -377,8 +377,10 @@ def _count_structural_builder():
         _FIRED["loc"] += 1
         return real(statics, logodds_window)
 
+    # ⛔ the CALLER is `calibrate` — ONE construction site since 2026-08-23; `sweep` no longer
+    #   holds the name, so tallying it there would count nothing (TRAPS: an-ablation-that-never-ran).
     SL.structural_reference_location = counted
-    SW.structural_reference_location = counted
+    CAL.structural_reference_location = counted
 
 
 def _install_reference_location(variant: str):

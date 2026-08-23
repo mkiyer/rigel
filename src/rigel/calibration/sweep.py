@@ -53,7 +53,6 @@ from .region_init import build_region_init
 from .signature import coarse_type_array
 from .simplex_logodds import (
     CompositionPriors,
-    structural_reference_location,
     _log_fg,
     _logodds_grid,
     _solve_regions_logodds_all,
@@ -295,7 +294,6 @@ def solve_chain(
     gdna_prior=None,
     rna_prior=None,
     intron_prior=None,
-    structural_reference: bool = False,
     reference_location=None,
     policy=None,
     _capture: dict | None = None,
@@ -312,9 +310,10 @@ def solve_chain(
     the population gDNA hyperprior — it is not the deliverable, and it does not have to answer objects it
     cannot solve.
 
-    ``structural_reference`` gives that reference its MEAN from the annotation
-    (`structural_reference_location`) instead of the unchosen ½. ⛔ ``False`` ⇒ no term is written and the
-    whole solve is bit-identical to the path before it existed.
+    ``reference_location`` is ψ's per-slot reference MEAN, CONSTRUCTED BY THE CALLER — one
+    construction site (`calibrate`: the structural location from the annotation, optionally overridden
+    at ss-intron REGIONs by the measured background; owner simplification, 2026-08-23). ⛔ ``None`` ⇒ no
+    term is written and the whole solve is bit-identical to the path before the term existed.
     """
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
@@ -413,16 +412,8 @@ def solve_chain(
         rna=rna_prior.logprior(1.0 - solve_grid, _rna_mass, _eff_rna)
         if rna_prior is not None
         else None,
-        # ⭐ a caller-supplied per-slot location (the MEASURED intron reference,
-        # `density_deconv.measured_reference_location`) wins over the derived structural one; the
-        # structural fallback and the None ⇒ no-term contract are unchanged.
-        location=reference_location
-        if reference_location is not None
-        else (
-            structural_reference_location(statics, float(logodds_window))
-            if structural_reference
-            else None
-        ),
+        # ⭐ the LOCATION arrives constructed — one construction site, `calibrate`. None ⇒ no term.
+        location=reference_location,
     )
 
     # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
