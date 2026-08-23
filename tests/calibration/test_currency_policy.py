@@ -72,6 +72,23 @@ def _own(rho=None, prec=None) -> RegionInit:
     )
 
 
+def _no_claims(n: int):
+    """A neutral stage-0 substrate: every class mask False. The currency policy never reads
+    ``claims``; the field exists on the context because the fan-out policy's licence lives there."""
+    from rigel.calibration.structural_claims import StructuralClaims
+
+    z = np.zeros(n, bool)
+    return StructuralClaims(
+        n_slots=n,
+        intergenic=z,
+        ss_intron_region=z.copy(),
+        ss_intron_boundary=z.copy(),
+        solvable_exon=z.copy(),
+        exon_flank_left=z.copy(),
+        exon_flank_right=z.copy(),
+    )
+
+
 def _ctx(
     *,
     own: RegionInit | None = None,
@@ -133,6 +150,7 @@ def _ctx(
         free_neg=fn,
         g1_locked=~fp & ~fn,
         boundary_flags=fl,
+        claims=_no_claims(N),
         geometry=None,
         order=list(range(N)),
         left_list=list(range(-1, N - 1)),

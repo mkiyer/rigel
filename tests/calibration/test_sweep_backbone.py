@@ -25,6 +25,24 @@ from rigel.calibration.simplex_logodds import _logodds_grid, _tilt_grid
 N = 8
 
 
+def _no_claims(n: int):
+    """A neutral stage-0 substrate: every class mask False. The policies these fixtures exercise never
+    read ``claims``; the field exists on the context because the fan-out policy's licence lives there."""
+    from rigel.calibration.structural_claims import StructuralClaims
+    import numpy as np
+
+    z = np.zeros(n, bool)
+    return StructuralClaims(
+        n_slots=n,
+        intergenic=z,
+        ss_intron_region=z.copy(),
+        ss_intron_boundary=z.copy(),
+        solvable_exon=z.copy(),
+        exon_flank_left=z.copy(),
+        exon_flank_right=z.copy(),
+    )
+
+
 def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
     """A minimal StepContext. Only the fields the assertions read need to be real."""
     ones = np.ones(N)
@@ -52,6 +70,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         free_neg=fn,
         g1_locked=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.int64),
+        claims=_no_claims(N),
         geometry=None,
         order=list(range(N)),
         left_list=list(range(-1, N - 1)),

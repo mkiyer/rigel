@@ -188,6 +188,10 @@ class StepContext:
         np.ndarray
     )  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
+    #: `structural_claims.StructuralClaims` — the stage-0 substrate: per-slot STRUCTURAL class masks
+    #: derived from the annotation alone (a constant, so readable at either end of a hop). The fan-out
+    #: policy's licence lives on it; a policy that never reads it is unaffected.
+    claims: object
     geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
     order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
     left_list: list  # ``left`` as a Python list: the scan reads it one element at a time

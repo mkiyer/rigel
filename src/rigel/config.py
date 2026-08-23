@@ -488,13 +488,16 @@ class CalibrationConfig:
     message_propagation: bool = True
 
     #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
-    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own switch) or
+    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own switch),
     #: `"currency"` (the Stage-3 rebuild, :class:`~rigel.calibration.messages.currency.CurrencyPolicy`,
-    #: UNDER DEVELOPMENT — rung by rung on the test chromosome, `docs` carry the plan). Consulted only
-    #: when `message_propagation` is True; the shipped default is byte-identical to the tree before the
-    #: field existed. ⚠ The A/B between the two policies is THIS one value, which is what keeps the
-    #: rebuild from touching the relay (`RelayPolicy` is not modified by the rebuild, so nothing that
-    #: works can break).
+    #: measured WORST on the in-scope contaminated strata and FROZEN), or `"fanout"` (the first-pass
+    #: redesign's pass-0 fan-out, :class:`~rigel.calibration.messages.fanout.FanOutPolicy`, UNDER
+    #: DEVELOPMENT — stage 3 landed: solved single-stranded introns speak to their flanking
+    #: ``intron|exon`` boundaries and nothing else says anything; the plan doc carries stages 3–4).
+    #: Consulted only when `message_propagation` is True; the shipped default is byte-identical to the
+    #: tree before the field existed. ⚠ The A/B between the policies is THIS one value, which is what
+    #: keeps a rebuild from touching the relay (`RelayPolicy` is not modified, so nothing that works
+    #: can break).
     message_policy: str = "relay"
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA

@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .messages.currency import CurrencyPolicy
+from .messages.fanout import FanOutPolicy
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .region_chain import BOUNDARY, REGION
@@ -673,7 +674,13 @@ def calibrate(
             # and a message is the only source there is. ⛔ The theta-independent FRAGMENT-LENGTH way
             # out was built, measured and DELETED (2026-08-10); `TRAPS.md` carries the mechanism.
             policy=(
-                (CurrencyPolicy() if config.message_policy == "currency" else RelayPolicy())
+                (
+                    CurrencyPolicy()
+                    if config.message_policy == "currency"
+                    else FanOutPolicy()
+                    if config.message_policy == "fanout"
+                    else RelayPolicy()
+                )
                 if config.message_propagation
                 else SilentPolicy()
             ),

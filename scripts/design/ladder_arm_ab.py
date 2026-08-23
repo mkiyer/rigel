@@ -192,6 +192,7 @@ _NEEDS_MESSAGES = frozenset({
     "zc_own_count", "zc_total_n", "zc_live_count", "zc_transfer", "zc_anchor_mute",
     "zc_jeffreys_mean", "zc_logmean", "zc_struct_lock_g1", "zc_reference_var",
     "zc_discrepancy", "zc_disc_var", "zc_ref_prior", "zc_ref_prior_damp",
+    "policy_fanout",
 })
 
 #: The arms that are MEANT to score byte-identical to `base`; for these "moved nothing" is the pass.
@@ -1108,6 +1109,7 @@ _ARM_CHOICES = (
     "zc_disc_var",
     "zc_ref_prior",
     "zc_ref_prior_damp",
+    "policy_fanout",
 )
 
 #: the two conditions `--self-test` runs every arm on. ⭐ TWO, not one, and they are opposite ends of the
@@ -1373,6 +1375,13 @@ def main() -> int:
 
     index = TranscriptIndex.load(str(args.index))
     config = CalibrationConfig(message_propagation=messages)
+    if args.arm == "policy_fanout":
+        # ⭐ a CONFIG arm, not a patch: the first-pass redesign's stage-3 policy is one shipped config
+        #   value, so the A/B against `base` (the relay) is exactly the policy contrast rank 1a asks
+        #   for. Fired here because there is no wrapper to fire later; the self-test's INERT/MOVED
+        #   classification is the guard that the value actually reaches the solver.
+        config = dataclasses.replace(config, message_policy="fanout")
+        _fire("policy_fanout")
     print(f"  arm={args.arm}  message_propagation={messages}", flush=True)
     names = args.conditions or sorted(
         p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()

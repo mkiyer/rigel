@@ -365,6 +365,92 @@ missing is not the pin but the EMISSION licence's scoping — see §C.
 
 ---
 
+## §H STAGES 3–4 — THE AGREED DESIGN (owner's plan + review, settled in conversation 2026-08-23)
+
+⭐⭐⭐ **SCOPE (owner): this is PASS-0 ONLY.** It solves the stage-0 substrate and nothing else; its
+product is the training set for the gDNA landscape that can see enriched-vs-depleted, and the full
+solve comes AFTER the refit with that prior. Unsolved slots stay unsolved — that is a feature.
+
+**Stage 3 — intron → flanking `intron|exon` boundaries.** The intron's ψ posterior is delivered as a
+factor on the boundary's λ grid (the EXACT form of the Beta-Binomial predictive — the ``N²·Var(p)``
+epistemic term falls out automatically; no resampling machinery, no ``(α₀,β₀)`` chosen), widened by a
+per-hop-type DRIFT variance **measured by `hop_currency.py`**, never chosen — the honest cost of
+imputation the owner requires. Combined at the boundary with its own strand likelihood + reference by
+the existing lattice product. ⭐ The premise (the intron's contained fragments and the boundary's
+unspliced crossings are ONE population) is CERTIFIED by the stage-0 matrix, 32/32. ⛔ The ghost:
+`intron_phi` (2026-08-04) refuted the UNCONDITIONAL form, split BY STRAND — priced per stratum from
+day one, unstranded rows the watch-list; the fuse, the honest precision, and the repaired intron
+beliefs are what changed.
+
+**Stage 4 — boundary → solvable exon.** AXIOM 0 governs the wording: one RNA, arriving by two ROUTES
+(unspliced contiguous crossing, spliced junction crossing). At the boundary the routes MERGE into one
+RNA quantity (owner's design), under two guards, both measured rather than stylistic:
+
+* **Guard 1 — merge in DENSITY space, never raw counts.** Each route's count over ITS OWN crossing
+  opportunity (`crossing_eff_length` for contiguous, `sj_opportunity` for spliced) — the two footings
+  differ by a MEASURED 7–10×, enough to swing a transferred composition several-fold. In density
+  units the routes are genuinely indistinguishable, which is the owner's point made exact. Variances
+  ADD across the summed routes (a sum of components, not a combine of witnesses — the owner's
+  "precisions are not additive" intuition, formalized). The delivered claim is the DENSITY RATIO,
+  re-formed as a composition through the exon's own opportunities — the absolute level cancels, which
+  is what makes the transfer capture-robust.
+* **Guard 2 — sidedness is STRUCTURAL.** Two-sided iff every RNA route into the exon is accounted
+  (each flank is an eligible splice site or a terminus); ONE-SIDED ("at least this much RNA") when
+  an unaccounted flank exists — §1.1's inequality, the only form the zero-gDNA control has ever
+  endorsed on every row. Decidable from stage-0 structure, no constant.
+
+The exon's solve is then the lattice product of the flank message(s), its own strand likelihood, and
+the reference. **After stage 4: fit the gDNA landscape on SOLVED slots only** (rank 4's ask — kills
+the fit-on-your-own-belief circularity).
+
+### §H.1 STAGE 3 STATUS — BUILT AND GATED (2026-08-23); pricing in flight
+
+* **Landed**: `messages/fanout.FanOutPolicy` behind `message_policy = "fanout"` (shipped default
+  untouched), `StepContext` gained the `claims` constant (built once in `solve_chain`; policies that
+  never read it are unaffected — suite bit-identical), gate `tests/calibration/test_fanout_policy.py`
+  (7 cases written first and verified failing; integration through the REAL backbone asserts ONLY the
+  claimed boundaries move). Suite 3,696 / 9 xfail, +12 re-derived exactly.
+* **The perturbation sweep simplified the policy**: the destination mask and the `tau_lam > 0` guard
+  were PROVEN to do no work (the destination is implied by source-licence + adjacency — derivation in
+  the policy docstring — and a zero-precision claim is no claim) and were DELETED; the `valid` mask
+  stays as the `NeighbourState` contract. All four surviving clauses fire.
+* **First pricing (test chromosome, 16 conditions, vs the relay base)**: pooled deliverable
+  stranded × OFF −54.9 %, stranded × ON −26.7 %, deferred −6.6 %, unstranded × OFF +5.0 % on a small
+  base. ⛔ **The pooled `g00` row (+25,146 %) is an ARTIFACT of the comparison, not a stage-3 defect**:
+  outside its claimed slots the fan-out is silence BY DESIGN (its g00 deliverable is bit-equal to the
+  messages-OFF run), while the relay base sweeps the whole chain — so the pooled instrument charges
+  pass-0 for every slot it deliberately leaves unsolved. The honest verdict is §E's rule — claimed
+  slots only.
+* ⭐⭐⭐ **THE CLAIMED-SLOT VERDICT (ladder, misplaced gDNA fragments at the 17,518
+  `ss_intron_boundary` slots, silent / relay / fanout)**: `g50` capture-OFF both strand settings —
+  **fanout best, beating BOTH silent and the relay** (31,121 / 31,529 / **24,793** at ss0.50; 25,561 /
+  28,266 / **20,944** at ss0.99); `g00` ss0.50 OFF — **fanout best** (100,297 / 8,716 / **7,860**),
+  so the pooled g00 artifact is fully explained: at its OWN slots the fan-out is the best policy at
+  the zero-gDNA control. `g50 ss0.99` capture-ON — silent best, fanout close (+7.7 %, 38,007 vs
+  40,933), relay worst (66,637): under capture the intron's message is slightly net-harmful at
+  boundaries vs silence — small (0.26 % of the crossing mass) but real; the stage-4 drift question's
+  kin. Deferred stratum (`g50 ss0.50` ON) — the relay dominates (215,475 vs fanout's 828,266), as its
+  recorded value-concentration predicts; fanout still beats silence (1,082,469).
+* ⭐⭐⭐ **THE FULL 16-CONDITION CLAIMED-SLOT TABLE (`stage3_claimed` script, 2026-08-23)**: fanout is
+  the BEST of the three policies on **all eight rungs of the two capture-OFF strata** (including the
+  stranded `g00` row at 482 vs silent 4,323 / relay 2,360, and `g98` at −37 %/−51 %); on stranded ×
+  capture-ON it is +3.9 % vs silent summed over the stratum (best at `g00`, slightly behind at
+  `g50`/`g98`) with the relay far worst (−39 % fanout vs relay); the deferred stratum stays the
+  relay's, with fanout still halving silence there.
+* ⭐⭐ **POOLED LADDER (context, `--arm policy_fanout` vs the relay base): every IN-SCOPE stratum
+  improves on the deliverable, 18/18 rows** — stranded × ON −39.1 %, stranded × OFF −39.9 %,
+  unstranded × OFF −36.8 %. The deferred stratum (+199.6 %) and pooled `g00` (+611 %) regress because
+  the fan-out deliberately does NOT do the relay's whole-chain imputation — in the redesign's flow
+  that job belongs to the post-refit FULL solve with the landscape prior, not to pass-0. ⛔ So
+  `"fanout"` is NOT a candidate shipped default in today's flow; it is pass-0's policy, and the
+  default question arrives only with the full redesigned flow.
+
+**Implementation shape:** the new message POLICY on the existing backbone (the `the-one-hop` ruling) —
+emission licensed only FROM solved-substrate slots TOWARD adjacent unsolved ones, `SilentPolicy`
+behaviour elsewhere; the forward scan carries the rightward fan-out, the backward the leftward, so the
+two existing scans cover the depth-2 pattern with no backbone change. Stage 3 first; falsification
+test first; test chromosome before the ladder; both zero controls on every rung.
+
 ## §G OPEN DECISIONS — ALL FOUR RULED (owner, 2026-08-26)
 
 * **`the-one-hop` — RULED: it IS a message.** The exon's hop uses the message framework's operator when

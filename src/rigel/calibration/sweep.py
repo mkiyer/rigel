@@ -51,6 +51,7 @@ from .region_geometry import (
 )
 from .region_init import build_region_init
 from .signature import coarse_type_array
+from .structural_claims import build_structural_claims
 from .simplex_logodds import (
     CompositionPriors,
     _log_fg,
@@ -466,6 +467,7 @@ def solve_chain(
         free_neg=np.asarray(fn, bool),
         g1_locked=g1_locked(np.asarray(fp, bool), np.asarray(fn, bool)),
         boundary_flags=statics.boundary_flags,
+        claims=build_structural_claims(chain, statics),
         geometry=geometry,
         order=order_list,
         left_list=left.tolist(),
