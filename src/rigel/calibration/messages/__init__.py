@@ -95,6 +95,11 @@ class PsiMessage:
     lam_prec: np.ndarray | None = None
     theta_mode: np.ndarray | None = None
     theta_prec: np.ndarray | None = None
+    #: ⭐ per-slot SIDEDNESS of the RNA channel (stage 4d): where True, the claim is the ONE-SIDED
+    #: "at least this much RNA" bound — only the contradiction side penalises (`_rna_residual`'s
+    #: clamp). ``None`` ⇒ every claim two-sided, byte-identical to the path before this field, and the
+    #: process-global ``ONE_SIDED_RNA`` toggle it generalizes still applies then.
+    rna_one_sided: np.ndarray | None = None
 
     @classmethod
     def silent(cls) -> PsiMessage:
@@ -115,6 +120,7 @@ class PsiMessage:
                 "lam_prec",
                 "theta_mode",
                 "theta_prec",
+                "rna_one_sided",
             )
         )
 

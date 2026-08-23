@@ -92,7 +92,7 @@ _JEFFREYS_REF = 0.5
 ONE_SIDED_RNA = [False]
 
 
-def _rna_residual(log_f, mode):
+def _rna_residual(log_f, mode, one_sided=None):
     """The residual the RNA imputed-message penalty is built on — ONE HOME for both ψ paths.
 
     Returns ``log_f - mode``, or its negative part when :data:`ONE_SIDED_RNA` is set. The message asserts
@@ -104,9 +104,13 @@ def _rna_residual(log_f, mode):
     the default byte-identical rather than approximately so.
     """
     d = log_f - mode
-    if not ONE_SIDED_RNA[0]:
-        return d
-    return np.minimum(d, d.dtype.type(0.0))
+    if one_sided is None:
+        if not ONE_SIDED_RNA[0]:
+            return d
+        return np.minimum(d, d.dtype.type(0.0))
+    # per-slot (stage 4d): the mask arrives already broadcast to ``d``'s leading axis; ``where``
+    # preserves the dtype, so the AMBIG cube's float32 path stays float32.
+    return np.where(one_sided, np.minimum(d, d.dtype.type(0.0)), d)
 
 
 # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5]. A pure STATE-SPACE bracket: the widest f_g the grid can
@@ -719,6 +723,7 @@ def _local_loglik_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    rna_one_sided=None,
     lam_logprior=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
@@ -789,12 +794,13 @@ def _local_loglik_logodds(
     if rna_imp_mode is not None and rna_imp_prec is not None:
         # single-strand: the live strand carries f_active = 1−f_g; the per-strand precision gates which
         # message applies (the dead strand's prec is 0 → no-op). Both evaluate against log f_active.
+        _os = None if rna_one_sided is None else np.asarray(rna_one_sided, bool)[:, None]
         for ms, ps in ((rna_imp_mode[0], rna_imp_prec[0]), (rna_imp_mode[1], rna_imp_prec[1])):
             psi = (
                 psi
                 - 0.5
                 * np.asarray(ps, np.float64)[:, None]
-                * _rna_residual(log_fact, np.asarray(ms, np.float64)[:, None]) ** 2
+                * _rna_residual(log_fact, np.asarray(ms, np.float64)[:, None], _os) ** 2
             )
     # ── the SINGLE-λ composition message (the the-single-lambda-combine rank-1 fix): ONE Gaussian on the log-odds grid variable λ
     #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
@@ -833,6 +839,7 @@ def _solve_regions_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    rna_one_sided=None,
     lam_logprior=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
@@ -864,6 +871,7 @@ def _solve_regions_logodds(
         gdna_imp_prec=gdna_imp_prec,
         rna_imp_mode=rna_imp_mode,
         rna_imp_prec=rna_imp_prec,
+        rna_one_sided=rna_one_sided,
         lam_logprior=lam_logprior,
         lam_imp_mode=lam_imp_mode,
         lam_imp_prec=lam_imp_prec,
@@ -924,6 +932,7 @@ def _solve_ambig_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    rna_one_sided=None,
     lam_logprior=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
@@ -1016,10 +1025,11 @@ def _solve_ambig_logodds(
             (log_fpos, rna_imp_mode[0], rna_imp_prec[0]),
             (log_fneg, rna_imp_mode[1], rna_imp_prec[1]),
         ):
+            _os = None if rna_one_sided is None else np.asarray(rna_one_sided, bool)[:, None, None]
             psi -= (
                 F(0.5)
                 * np.asarray(ps, F)[:, None, None]
-                * _rna_residual(log_f, np.asarray(ms, F)[:, None, None]) ** 2
+                * _rna_residual(log_f, np.asarray(ms, F)[:, None, None], _os) ** 2
             )
     # ── the SINGLE-λ composition message on λ DIRECTLY (θ-INDEPENDENT — it lives on the λ axis, which is
     #    exactly what makes the tilt a nuisance): one Gaussian, ψ counts the g-vs-R DOF ONCE. ──
@@ -1103,6 +1113,7 @@ def _solve_regions_logodds_all(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    rna_one_sided=None,
     lam_logprior=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
@@ -1197,6 +1208,7 @@ def _solve_regions_logodds_all(
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
+                    rna_one_sided=_s(rna_one_sided, bidx),
                     lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
                     lam_imp_mode=_s(lam_imp_mode, bidx),
                     lam_imp_prec=_s(lam_imp_prec, bidx),
@@ -1229,6 +1241,7 @@ def _solve_regions_logodds_all(
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
+                    rna_one_sided=_s(rna_one_sided, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
                     lam_imp_mode=_s(lam_imp_mode, bidx),
                     lam_imp_prec=_s(lam_imp_prec, bidx),

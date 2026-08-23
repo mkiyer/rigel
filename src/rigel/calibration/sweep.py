@@ -373,6 +373,7 @@ def solve_chain(
             gdna_imp_prec=msg.gdna_prec,
             rna_imp_mode=msg.rna_mode,
             rna_imp_prec=msg.rna_prec,
+            rna_one_sided=msg.rna_one_sided,
             lam_imp_mode=msg.lam_mode,
             lam_imp_prec=msg.lam_prec,
             theta_imp_mode=msg.theta_mode,
