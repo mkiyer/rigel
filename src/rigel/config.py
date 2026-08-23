@@ -329,6 +329,24 @@ class CalibrationConfig:
     #: the one before it existed.
     structural_reference: bool = True
 
+    #: ⭐⭐ **ψ's reference LOCATION from the MEASURED background at single-stranded intron REGIONs**
+    #: (stage 2 of the first-pass redesign) — ``m_i = rho_bg·E_g,i/M_i`` with ``rho_bg`` pooled over
+    #: intergenic REGIONs, FIRM-clipped into the lattice window
+    #: (`density_deconv.measured_reference_location`; owner ruling 2026-08-26: the location clips, the
+    #: strength stays the reference's one pseudo-fragment). The slots are the stage-0 substrate's
+    #: ``ss_intron_region`` (`structural_claims`) — REGIONS ONLY, a measured refusal: the
+    #: boundary-inclusive form regressed stranded × capture-ON on both panels.
+    #:
+    #: ⭐ **Measured 2026-08-26 as `ladder_arm_ab.py --arm stage2_intron_ref_r --messages on`, 16 ladder
+    #: conditions against a same-session base**: EVERY stratum improved — the deliverable −11.7 % /
+    #: −7.3 % on the two in-scope capture-OFF strata, −1.2 % on stranded × capture-ON (the stratum every
+    #: previous per-object reference regressed), −3.5 % on the deferred one, and the zero-gDNA control
+    #: −19.6 % — worst single-cell regression +0.7 %. Re-run the instrument for a current number.
+    #:
+    #: ⛔ ``False`` (shipped) ⇒ the location is not computed and every path is BIT-IDENTICAL to the tree
+    #: before this field existed. The default flip is the owner's call, with `preflight.py --full` after.
+    measured_intron_reference: bool = False
+
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None

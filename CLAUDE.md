@@ -223,12 +223,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,658 passed / 0 skipped / 9 xfail** (re-derived 2026-08-22; the
-`+9` over the post-tear-down 3,647 is nine sparse-nascent gates in the EXISTING
-`tests/test_whole_genome_sim_config.py` plus `+2` for two new `docs/dev/` files, each one jargon case — the retired mode's parse tests were rewritten rather than
-added, so no per-file meta drift. Three of the nine close holes an adversarial perturbation sweep
-PROVED were open: the seed was parsed but unusable-able, the missing-entity raise was gated only on a
-sibling function, and the function's own two validators were covered only through the YAML parser.) ⛔ **ANY failure at all is a regression** — a stronger and
+⭐ **THE STANDING BASELINE: 0 failed / 3,684 passed / 0 skipped / 9 xfail** (re-derived 2026-08-26; the
+`+26` over 3,658 is stages 0 and 2 of the first-pass redesign, exactly per the table below:
+`tests/calibration/test_structural_claims.py` = 9 own + 2 meta, the `structural_claims` module + 3,
+`scripts/design/structural_claims_audit.py` + 4, `tests/calibration/test_measured_reference.py`
+= 7 own + 2 meta, and `−1` for the consumed `docs/dev/NEXT_SESSION.md`, deleted per its own
+instruction. `measured_intron_reference` ships OFF, so no golden moved.) ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
 next session reads a green run as a regression.
 
@@ -289,6 +289,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 11/11 |
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
+| `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
 | `design/relay_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
 | `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `relay_pool_ab.py --out`. `--self-test` 10/10 |
 | `design/hop_currency.py` | ⭐⭐⭐ **WHICH CURRENCY DOES EACH HOP TYPE CARRY — A LEVEL OR A COMPOSITION?** Every adjacent pair keyed by `object class × {sj, term}`, the source's true value transported both ways and scored against a Monte-Carlo noise floor. `--self-test` 36/36 |

@@ -296,6 +296,7 @@ def solve_chain(
     rna_prior=None,
     intron_prior=None,
     structural_reference: bool = False,
+    reference_location=None,
     policy=None,
     _capture: dict | None = None,
 ) -> RegionBelief:
@@ -412,9 +413,16 @@ def solve_chain(
         rna=rna_prior.logprior(1.0 - solve_grid, _rna_mass, _eff_rna)
         if rna_prior is not None
         else None,
-        location=structural_reference_location(statics, float(logodds_window))
-        if structural_reference
-        else None,
+        # ⭐ a caller-supplied per-slot location (the MEASURED intron reference,
+        # `density_deconv.measured_reference_location`) wins over the derived structural one; the
+        # structural fallback and the None ⇒ no-term contract are unchanged.
+        location=reference_location
+        if reference_location is not None
+        else (
+            structural_reference_location(statics, float(logodds_window))
+            if structural_reference
+            else None
+        ),
     )
 
     # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store

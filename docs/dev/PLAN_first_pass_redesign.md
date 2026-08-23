@@ -170,6 +170,71 @@ disagree, the diagnostic is where that shows up.
 
 ---
 
+## §B.5 ⭐⭐⭐ STAGE 0 STATUS — BUILT AND VALIDATED, 2026-08-26
+
+* **The module**: `rigel.calibration.structural_claims` (layer 3, declared in `_layers.py`), derived at
+  calibration init per the `substrate-home` ruling. Four disjoint classes + the licensing-flank arrays.
+* **The unit gate**: `tests/calibration/test_structural_claims.py` — a designed six-locus GTF where
+  every clause has a positive and a negative case, hand-enumerated membership, and a brute-force
+  per-slot reference. Written first and verified failing; then NINE perturbations of the fixed code,
+  each caught by its designated gate. ⭐ Two perturbations were SILENT on the first fixture (no AMBIG
+  intron without exon shielding; no minus-strand locus, so `~free_pos` masqueraded as `g1_locked`) —
+  both holes closed and the sweep re-run 9/9 FIRED.
+* **The confusion matrix**: `scripts/design/structural_claims_audit.py` (self-test 8/8, including
+  the judge-only-claimed-slots falsification). ⭐⭐⭐ **RESULT: every claim holds on every condition of
+  BOTH panels — 32/32, zero violating fragments in any class.** Coverage of the unspliced library on
+  claimed slots: 27.6 % (capture-ON) to 94 % (`g98` capture-OFF). Suite baseline moved 3,658 → 3,676,
+  re-derived per the table.
+
+## §C.1 ⭐⭐⭐ STAGE 1 STATUS — the assertion already ships; the rescope RE-PRICED AND REFUSED (2026-08-26)
+
+Stage 1's two assertions are production code already (`g1_locked` pins both axes at Var 0;
+`fit_intron_background` pools intergenic REGIONs only). The one proposed change — the emission lock
+rescoped `~solvable ∧ REGION` → `g1_locked ∧ REGION` — was priced exactly as §C demands: TOGETHER
+with the redesign's replacement for the mis-scoped mask's load (the stage-2 measured reference), as
+`ladder_arm_ab --arm stage1_pair` and `--arm stage1_pair_onesided`, messages on, 16 ladder conditions.
+
+⛔ **REFUSED, both compositions, against the stage-2-alone baseline**: the pair's marginal effect is
++1.9 % / +1.6 % / −1.9 % on the three in-scope strata, +19.0 % on the deferred one, and its wins are
+confined to `g00` (−15.6 % further) — one-sided evidence by ROADMAP rank 2's own rule. Adding the
+one-sided certified-RNA bound deepens `g00` to −64.4 % from base and improves unstranded × OFF to
+−12.0 %, but flips stranded × ON to +1.4 % and takes the deferred stratum to +29.9 %. ⭐ The pass-0 vs
+deliverable inversion at `g00` (pass-0 +141 % while the deliverable improves) is §1.1's
+"prior-fidelity anti-correlated with deliverable" shape reproduced on the current panel. The five
+pair-gated xfails stay xfail; the rank-11 brief carries the update.
+
+## §D.4 ⭐⭐⭐ STAGE 2 STATUS — PRICED ON BOTH PANELS AND LANDED, default OFF (2026-08-26)
+
+**The scope ruling came from the A/B, not from preference.** `stage2_intron_ref` (regions +
+boundaries) vs `stage2_intron_ref_r` (regions only), test chromosome then ladder, messages on:
+
+* **FULL arm — REFUSED.** Regressed stranded × capture-ON on both substrates (+38.7 % test chr,
+  +4.2 % ladder with the ladder's boundary axis +31.7 %), and the messages-OFF run attributed the
+  damage to the LOCAL solve on the BOUNDARY axis alone (+52.3 % boundaries, +0.1 % regions): under
+  capture the intergenic rate is the wrong rate for a probe-adjacent crossing.
+* **REGIONS-ONLY — ACCEPTED, every stratum improved on the ladder**: deliverable −11.7 % (stranded ×
+  OFF), −7.3 % (unstranded × OFF), **−1.2 % (stranded × ON — the stratum every previous per-object
+  reference regressed)**, −3.5 % deferred, **zero-gDNA control −19.6 %**; worst single cell +0.7 %.
+  The test chromosome's unstranded × OFF +10.3 % did NOT transfer to the ladder (it improved) —
+  `TRAPS: a-toy-and-a-panel-can-disagree-in-rank`, met again, in rank order.
+
+**Landed**: `density_deconv.measured_reference_location` (layer 5), gate
+`tests/calibration/test_measured_reference.py` (7 cases written first and verified failing; 7
+perturbations each caught), plumbed `calibrate → solve_chain(reference_location=…)`, behind
+`CalibrationConfig.measured_intron_reference` — **default OFF, bit-identical** (suite 3,685/9 xfail,
+zero goldens moved). ⭐ The flag-ON location array is BYTE-IDENTICAL to the priced arm's on a real
+ladder condition (8,640 slots, 4,967 collisions at `g50 ss0.50 ON`). ⚠ The location deliberately uses
+the bare pooled ratio, not the factory's Jeffreys posterior — the 0/0-keeps-base branch needs an
+exact zero on a zero-gDNA library; recorded in the function docstring. ⛔ The default flip is the
+owner's call (`preflight.py --full` after).
+
+**The full §E bar is met (2026-08-26):** DELIVER/REFUTE at claimed intron regions, four `g50`
+conditions, never pooled — **DELIVER −21.8 % to −45.0 %, REFUTE within +5.1 %** (the FIRM trade,
+quantified); and BOTH zero controls via `zero_controls.py`'s own machinery, flag OFF vs ON — the
+zero-gDNA control exact (+0.0001) in both configs, and the flag FIXES two of the three standing
+zero-RNA failures (silent −0.0363 → −0.0018, spliced_exons −0.0591 → −0.0029; the third is an EXON
+slot outside the intron scope, a pre-existing defect this stage does not claim).
+
 ## §E VALIDATION — what has to be true before a stage is called done
 
 Per stage, in this order, and nothing is quoted before it: ① a falsification test written FIRST and
@@ -261,20 +326,49 @@ missing is not the pin but the EMISSION licence's scoping — see §C.
 
 ### F.1 ⛔ OBSOLETE — superseded by this design
 
-*(populated as each stage lands; each entry names the file, the symbol, what supersedes it, the evidence,
-and what has to be re-priced before it can go)*
+* **`structural_reference_location`'s constant 0.75 at single-stranded intron slots** — superseded by
+  the stage-2 measured location (`m_i = rho_bg·E_g,i/M_i`, FIRM-clipped) **if the ladder confirms the
+  test-chromosome reading**. Evidence so far (test chromosome, 16 conditions, `ladder_arm_ab
+  --arm stage2_intron_ref_r`): zero-gDNA control −92.9 % on the deliverable 8/8 rows, stranded strata
+  flat-to-better, unstranded × capture-OFF +10.3 % on a small absolute base. ⛔ Re-price on the LADDER
+  and at the zero-RNA control before anything is deleted; the constant stays for exons either way.
+* **`region_init.strand_evidence`'s `locked = ~solvable` feeder for `struct_lock`** — ⛔ **NOT YET
+  obsolete: the re-pricing WITH the stage-2 prior as the replacement load was run (2026-08-26) and
+  REFUSED** — see §C.1. The mis-scoped mask stays load-bearing; whatever eventually replaces it needs a
+  better level channel than the one-pseudo-fragment reference (rank 11 stays open with the updated
+  brief). ⭐ Stage 0's contribution stands: gene-edge BOUNDARIES carry EXACTLY ZERO RNA fragments on
+  32/32 conditions, so the load is about zero-count slots emitting certainty, not contaminated counts.
 
 ### F.2 ⭐ SIMPLIFICATION — smaller, clearer, fewer branches
 
-*(same, for code that survives but gets simpler)*
+* **Instrument-side population predicates now have ONE gated home.** `structural_claims` (layer 3) is
+  the single definition of intergenic / ss-intron / solvable-exon membership — the thing the retired
+  `exon_solvability.py` re-derived privately, and the population the background fit and the stage-2
+  prior both select on. An instrument that needs the class reads the module instead of restating bits.
+* **The stage-2 prior needs NO fit machinery for its location** — `rho_bg` is the ratio of sums over
+  the stage-0 intergenic REGION class, the same estimand `fit_intron_background` measures (its docstring
+  says the pools are measured identical), so the location costs one pooled division rather than a
+  second fitting path.
 
 ---
 
-## §G OPEN DECISIONS FOR THE OWNER
+## §G OPEN DECISIONS — ALL FOUR RULED (owner, 2026-08-26)
 
-* **`the-one-hop`** — the exon's single hop: use the message framework's operator, or state why a structurally
-  terminated hop is a different thing? (`TRAPS: one-hop-lifted-out-is-still-the-relay`)
-* **`substrate-home`** — at index time and persisted, or derived at calibration init? (recommendation:
-  derived)
-* **`clamp-semantics`** — location only, or strength too?
-* **`combine-form`** — lattice product with per-channel diagnostics, or two point estimates?
+* **`the-one-hop` — RULED: it IS a message.** The exon's hop uses the message framework's operator when
+  the exon-solve stage lands (a constraint recorded on the rebuilt `RelayPolicy`; structural termination
+  becomes a licence state). Stages 0–2 write NO exon-transport code: stage 0 only ADMITS solvable exons
+  to the substrate, whose claims are checkable against certified truth with no solve.
+* **`substrate-home` — RULED: derived at calibration init.** One named layer-3 module, one gated
+  definition, O(n_slots) array math. Persisting to the index is refused for now: per-BOUNDARY structural
+  flags were deliberately dropped at `INDEX_FORMAT_VERSION 7`, and a persisted calibration-facing
+  artifact would need a reach digest no existing hash provides.
+* **`clamp-semantics` — RULED: FIRM.** At a collision (`ρ_bg ≥ ρ_total`) the prior's LOCATION clips to
+  the lattice cap (the valid CAP use of `EQUATIONS.md` §9c.1, never a chooser) and the STRENGTH stays the
+  standing one-pseudo-fragment budget — real evidence overturns it. Grounds: the collision population is
+  dominated by truth-exactly-1 slots under sparsity, and firm beat soft on every stratum when priced
+  (§9c.1). The stage-2 score must split DELIVER/REFUTE and never pool them; `g00` is the structural
+  falsification (no collision may occur there).
+* **`combine-form` — RULED: A, the lattice product** (owner's integrate-don't-invent rule): the existing
+  grid combine is the solve, and each channel's own point estimate + precision is published as a
+  diagnostic. D.1's independence check becomes a test (each channel consumes its own raw sufficient
+  statistic).

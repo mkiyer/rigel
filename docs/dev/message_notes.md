@@ -253,6 +253,270 @@ A few things:
 
 
 
+====================================
+
+# New calibration plan
+
+# Calibration First Pass
+
+## 0. Categorize regions and boundaries
+
+The first pass needs a SUBSTRATE to train a gDNA prior. The substrate must include exons. We need to identify regions and boundaries (including exons) that can be solved and used for training.
+
+We can identify the substrate purely based on structural properties of the transcriptome (at index creation time).
+
+The substrate includes:
+- Intergenic regions and intergenic-exon boundaries
+- Single-stranded introns
+- Single-stranded intron-exon boundaries
+
+The EXON substrate must be carefully defined, and we must ensure that we correctly define our 'solvable' substrate for the pass-0 phase.
+
+EXONS that are universally solvable include:
+- single-stranded
+- at least one side borders an exon|intron boundary with a splice junction. This boundary must have no contiguous exon crossing (no exon|exon boundary component).
+- ok if the exon has two exon|intron splice junction boundaries
+
+### Example 1 of solvable exons:
+
+Here are two transcripts:
+- Transcript TA+ exons (1000, 2000), (10000, 11000)
+- Transcript TB+ exons (1000, 3000), (10000, 11000)
+
+Here, the EXON (10000, 11000) qualifies as solvable, because it is single-stranded and has the splice junction exon|intron boundary at position 10000.
+
+### Example 2:
+
+Given transcripts:
+- Transcript TA+ exons (1000, 2000),(4000,5000),(10000,11000)
+- Transcript TB- exons (500, 3000), (10500,15000)
+
+There are no solvable exons here. Everything is both-stranded (AMBIG)
+
+
+### Example 3:
+
+Given transcripts:
+- Transcript TA+ exons (1000, 2000),(4000,5000),(10000,11000)
+- Transcript TB+ exons (500, 3000), (10500,15000)
+
+Solvable exon regions include:
+- (2000, 3000) region bordered by exon|intron sj boundary at 3000
+- (4000, 5000) single-stranded, TWO sj exon|intron boundaries on both sides 4000, and 5000.
+
+
+## 1. Intergenic initialization
+
+The first stage of calibration is initializing the structurally fixed regions:
+
+- Intergenic regions: 100% gDNA, variance = 0, fixed
+- Intergenic|exon boundaries: 100% gDNA, variance =0, fixed
+
+We then *model* the intergenic gDNA distribution from intergenic REGIONS (not boundaries). Then move to intron deconvolution.
+
+
+## 2. Intron deconvolution
+
+The second stage of calibration is intron deconvolution. 
+
+*Eligible introns must be single-stranded*
+
+Intron deconvolution requires:
+1) strand model (uninformative when ss=0.5)
+2) density model (intergenic region distribution)
+
+We apply our abundance model + our strand model to deconvolute introns. The solve is message free (no outside information needed). 
+
+**What should the prior be?** The question is, "do we need a prior here?"
+
+- predicted fraction of gdna = (intergenic gdna density) / (total density of intron). this can be the prior, right? if the intergenic gdna density is greater than the intron total density, then we clamp to 100% gdna as the composition prior.
+
+**The intron solver needs to integrate the strand model and the density model** The abundance model uses negative binomial model to provide a solution based on total abundance (fraction gdna, fraction rna) and the strand model can independently provide a solution. The two results must be integrated using an honest precision-weighted combine.
+
+
+## 3. Intron|exon boundary deconvolution
+
+**The goal of this step is to solve intron|exon boundaries that are adjacent to solved introns**
+
+- Every solvable intron now has a belief established from the strand model and the density model
+- The next step is to solve the intron|exon boundaries that are adjacent to solved introns.
+- **This step is technically a message passing step**
+
+We "fan out" from the solved introns in step 2 (above) to their neighbors.
+
+The layout looks like this:
+<exon> | **<intron|exon boundary>** | <solved-intron> | **<intron|exon boundary>** | <exon>
+
+**How do we solve for the intron|exon boundaries?**
+
+### Composition transfer 
+
+We borrow the concept of 'composition' transfer. If the intron belief is (85% gdna, 15% rna), we reason that the adjacent intron|exon boundary must share the same composition belief, because the fragments crossing from the intron to the intron|exon boundary are distinctly intronic and share the composition.
+
+Composition transfer still needs to be treated statistically and assigned honest precision. Why? Because ultimately, we have multiple channels of information! The intron|exon boundaries could independently solve with the strand model, without requiring any information from the neighboring introns.
+
+### Example: count discrepancy
+
+- suppose the intron has 3 fragments. deconvolution with the strand model and density model must ultimately assign fragments (a fragment is a discrete observation, and must be either gDNA or RNA). So we only have a few possibilities for the 3 fragments (3/3 = 100% gdna), (2/3 = 66% gDNA), (1/3 = 33% gDNA), or (0/3 = 0% gdna). One degree of freedom.
+
+- suppose the deconvolution predicts (33% gDNA, 66% RNA) because the gDNA background density low.
+
+Now, we look at the neighbors. Suppose the adjacent intron|exon boundary has 300 unspliced crossing fragments (100X). How do we impute?
+
+We are imputing a (33% gdna, 66% rna) composition derived from only 3 fragments to a 300 fragment exon|intron boundary. The arithmetic would set this to 100 fragments gdna, 200 RNA. But what about the precision?
+
+#### Composition transfer proposed derivation
+
+To carry honest precision during upsampling from 3 fragments to 300, you must model the composition as a **posterior probability distribution** over proportions rather than a fixed point estimate, using a **Beta-Binomial framework** or **Law of Total Variance**.
+
+**1. Beta-Binomial Predictive Model**
+Instead of assuming the gDNA fraction $p$ is fixed at $1/3$, treat $p$ as a random variable derived from the 3 observed fragments using a prior distribution $\text{Beta}(\alpha_0, \beta_0)$ (e.g., uninformative flat prior $\alpha_0=1, \beta_0=1$):
+
+* **Posterior for $p$:** Given $k_1 = 1$ gDNA out of $n_1 = 3$ fragments:
+
+$$p \mid k_1 \sim \text{Beta}(1 + \alpha_0,\, 2 + \beta_0) = \text{Beta}(2, 3)$$
+
+* **Predictive Distribution at Boundary ($N_2 = 300$):** Impute the gDNA count $K_2$ using the posterior predictive distribution:
+
+$$K_2 \sim \text{Beta-Binomial}(N_2 = 300,\, \alpha = 2,\, \beta = 3)$$
+
+**2. Quantifying Uncertainty (Variance Propagation)**
+By the **Law of Total Variance**, the total variance of your imputed boundary count $K_2$ splits into two components:
+
+$$\text{Var}(K_2) = \underbrace{N_2 \cdot \mathbb{E}[p(1-p)]}_{\text{Binomial Sampling Noise}} + \underbrace{N_2^2 \cdot \text{Var}(p)}_{\text{Epistemic Uncertainty from } n=3}$$
+
+* **Naive Point Estimate ($p = 0.4$ fixed):** $\text{Var}(K_2) = 300 \times 0.4 \times 0.6 = 72 \quad (\sigma \approx 8.5 \text{ fragments})$
+* **Beta-Binomial Predictive Model:** $\text{Var}(K_2) = 3,660 \quad (\sigma \approx 60.5 \text{ fragments})$
+
+Because the epistemic uncertainty scales quadratically ($N_2^2$), the low count at $n=3$ dominates the calculation. Instead of precise $(120 \text{ gDNA}, 180 \text{ RNA})$ counts, the honest 95% Credible Interval for gDNA spans roughly **18 to 228 fragments**.
+
+**Practical Implementation Strategies**
+
+* **Precision Weighting:** If fitting a downstream model across junctions, weight the boundary observation by the inverse variance $w_i = 1 / \text{Var}(K_2)$ so the system automatically discounts this highly imprecise upsampled boundary.
+
+
+### composition transfer solve overview
+
+We solve for an intron|exon boundary.
+
+Inputs:
+- adjacent neighbor intron composition. the raw counts (gdna fragments, rna fragments) give us our statistical power
+- intron|exon boundary total counts, counts per strand
+
+Procedure:
+- up-sample / down-sample from the intron to the intron|exon boundary to match total counts.
+- the precision model described above could be used to do the upsampling/downsampling while maintaining honest precision based on discrete counts (each count comes from either gdna or rna).
+- precision-weighted combine between the composition transfer solution (upsampled/downsampled composition with precision)
+- solve the intron|exon boundary using its own strand model information (uninformative if we have unstranded data) and the composition transfer from the neighboring intron
+
+
+
+
+## 4. EXON region deconvolution
+
+This is stage 4. To reach this stage, we have already initialized intergenic regions. Then we solved for intronic regions (abundance + strand). Then did a "one-hop" imputation between each solved intron region and the adjacent (intron|exon boundary).
+
+Now, we have enough information to solve a specific subset of EXON regions. The exon subset is described above (part of stage 0 is identifying eligible exons).
+
+Principles:
+- Every solvable exon has two boundaries (left, right).
+- At least one of the boundaries must be a splice junction AND be an intron-only boundary (no exon-exon fragments crossing contiguously)
+- For the eligible boundaries, we can fully interpret the unspliced crossing fragments as gDNA or nascent RNA, AND we have access to SPLICED fragments (pure RNA)
+
+
+### Solvable exons must be matched with solved intron|exon boundaries
+
+The key step here is that we must identify cases where solvable exons can be matched to solvable introns.
+
+Here is an example that demonstrates the matching:
+
+TA+ exons (1000, 2000), (10000, 11000)
+TB+ exons (4000, 5000), (15000, 16000)
+
+In stage 2 we do intron deconvolution:
+- intron region (2000, 4000) is solved
+- intron region (5000, 10000) is solved
+- intron region (11000, 15000) is solved
+
+How do introns match to solvable exons?
+
+- intron region (2000, 4000) matches with exon (1000, 2000) because the (intron|exon) boundary at position 2000 is a splice junction boundary
+- intron region (2000, 4000) DOES NOT match with exon (4000, 5000) because the (intron|exon) boundary at position 4000 IS NOT A SPLICE JUNCTION (it is a transcript start site or TSS for transcript TB+)
+
+- intron region (5000, 10000) matches with exon(4000, 5000) AND matches with exon(10000, 11000).
+
+- intron region (11000, 15000) matches ONLY with exon(15000, 16000) because the left side exons (10000,11000) is a transcript end site (NOT A SJ)
+
+
+### EXON solve procedure: composition transfer again
+
+**this is also a message propagation step**
+
+We will demonstrate the composition transfer between ONE boundary and the EXON region itself. Each solvable EXON has two boundaries. If both the left and right boundaries are eligible, then the composition transfer should be performed for both boundaries. The final solve is the precision-weighted solve from the boundaries AND the strand model (uninformative for unstranded).
+
+Composition transfer procedure:
+- exon|intron boundary has already been solved, and has  (gdna counts, unspliced rna counts).
+- exon|intron boundary also has SPLICE JUNCTION counts (these are pure RNA), spliced rna counts. The spliced counts are measured with count precision. This is different from the unspliced count precision.
+
+#### There must be a precision-weighted combine within the boundary unspliced + spliced before composition transfer
+
+The boundary has unspliced (gdna counts, rna counts) with precision determined from the previous stage solve, from the intron <-> intron|exon boundary deconvolution and the strand model. 
+
+Before we can perform composition transfer to the neighboring exon, we must do a precision-weighted combine between the unspliced fragments and the spliced fragments. The splice fragments have 100% RNA at directly measured count precision.
+
+So we are merging (unspliced gDNA counts, unspliced RNA counts) at one precision with the (spliced RNA counts) at measured count precision ---> new composition (gDNA, unspliced RNA + spliced RNA) with an integrated precision for transfer.
+
+Conceptually, the spliced fragments have count precision and will drive the precision of the message. But, think about if there are very low spliced fragments and high unspliced. Then the precision is driven by the unspliced fragments. I don't think the precisions are additive. The higher precision value is pulled down by the lower one.
+
+
+### EXON composition transfer
+
+The incoming data from the boundary has integrated precision from (gdna counts, unspliced rna counts + spliced rna counts). This gives us our new composition. This is what must be transfered.
+
+We then perform "binomial upsampling/downsampling" so that the total counts are equal. The variance of the resampling process becomes the variance of the transfer. This implies that the transfer has a "price" associated with it. Whatever this is becomes the COST of imputation.
+
+So the composition of the exon|intron boundary (gdna fragments, unspliced rna + spliced rna) is transferred. The composition itself has a precision, and then the TRANSFER itself involves an imputation which we model by upsampling/downsampling in count space, which adds a variance or cost of the imputation process itself.
+
+We must do this modeling for each of the eligible boundaries of the EXON region.
+
+### EXON region solve
+
+Finally, we have inputs:
+- strand model (internal solve of the exon)
+- left boundary (if eligible) composition with precision
+- right boundary (if eligible) composition with precision
+
+We perform the precision-weighted integrated solve of all three. *this is a one-hop message propagation event*
+
+
+===================
+
+After the above, we now have a set of solved regions and boundaries.
+
+Pass-0 thus ends here. Any remaining regions and boundaries are left unsolved. No effort is made during pass-0 to solve them.
+
+Next, we fit the gdna abundance landscape on the solved regions and boundaries ONLY. 
+
+====================
+
+# Open questions
+
+## reference prior?
+
+- when running the reference 
+
+## composition representation: counts or abundance?
+
+- we have two metrics: raw counts (discrete observations) and abundance (counts per base)
+- how is composition represented? if composition a ratio of abundances? or is it a partitioning of the raw counts?
+- the write-up above assumes composition is a partitioning of the counts.
+- if composition refers to the partioning of total abundance into gdna abundance and rna abundance, some of the derivation may (or may not change)
+- the relationship between abundance and counts depends on the relative fragment length distributions of gdna and rna
+
+
+
+
+
 
 
 

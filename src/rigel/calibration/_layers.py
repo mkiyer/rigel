@@ -83,7 +83,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # DRIFTED and is not maintained by hand — the census re-derives it.
         # `total_abundance` is the composition-FREE per-slot total (the START/END banks side-selected
         # by the wall rule, plus the exact boundary banks) — geometry work, and it reads the geometry.
-        ("region_geometry", "simplex_logodds", "total_abundance"),
+        # `structural_claims` is the first pass's substrate — per-slot structural classes derived from
+        # the statics alone (sideways of `region_geometry`, whose statics and `g1_locked` it reads).
+        ("region_geometry", "simplex_logodds", "total_abundance", "structural_claims"),
     ),
     (
         4,

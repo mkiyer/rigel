@@ -66,7 +66,12 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
+from .density_deconv import (
+    GdnaBackground,
+    density_lambda_factor,
+    fit_intron_background,
+    measured_reference_location,
+)
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
 from .total_abundance import (
     build_region_wall_mask,
@@ -81,7 +86,7 @@ from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
-from .simplex_logodds import _logodds_grid
+from .simplex_logodds import _logodds_grid, structural_reference_location
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
 from ..types import Strand
@@ -615,6 +620,20 @@ def calibrate(
                     n_tilt,
                 )
         lam_factor = _intron_prior_at(n_grid, window)
+        # ⭐ ψ's reference LOCATION from the MEASURED background at single-stranded intron REGIONs —
+        # computed AFTER the window rescale above, because the FIRM clip is a function of the window.
+        # OFF ⇒ None ⇒ `solve_chain` derives the structural location itself, bit-identically.
+        reference_location = None
+        if config.measured_intron_reference:
+            reference_location = measured_reference_location(
+                chain,
+                statics,
+                geometry,
+                window,
+                base=structural_reference_location(statics, float(window))
+                if config.structural_reference
+                else None,
+            )
         out = solve_chain(
             chain,
             statics,
@@ -634,6 +653,7 @@ def calibrate(
             intron_prior=lam_factor,
             # ⭐ ψ's reference MEAN from the annotation. OFF ⇒ `location=None` ⇒ no term ⇒ bit-identical.
             structural_reference=config.structural_reference,
+            reference_location=reference_location,
             # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
             # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
             # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
