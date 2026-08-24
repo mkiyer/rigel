@@ -44,9 +44,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
-from .region_chain import REGION
 from .signature import coarse_type_array
-from .structural_claims import build_structural_claims
 
 __all__ = [
     "GdnaBackground",
@@ -54,7 +52,6 @@ __all__ = [
     "fit_intron_background",
     "density_lambda_factor",
     "density_factor_precision",
-    "measured_reference_location",
 ]
 
 _EPS = 1.0e-12
@@ -234,56 +231,3 @@ def density_factor_precision(lam_logprior, lam_grid):
     var = w @ (lam * lam) - mu * mu
     tau[live] = np.where(var > _EPS, 1.0 / np.maximum(var, _EPS), 0.0)
     return tau
-
-
-def measured_reference_location(chain, statics, geometry, logodds_window, base=None) -> np.ndarray:
-    """ψ's per-slot reference LOCATION from the MEASURED background, at single-stranded intron REGIONs.
-
-       Gate: ``tests/calibration/test_measured_reference.py``
-
-    The stage-0 substrate (`structural_claims`) names the slots whose unspliced population is
-    ``gDNA + not-yet-spliced RNA`` with no mature term; at each such REGION the background predicts an
-    expected gDNA count ``rho_bg·E_g,i``, and the location is that expectation over the slot's own
-    measured total::
-
-        m_i  =  rho_bg · E_g,i / M_i          rho_bg = ΣM / ΣE_g  over intergenic REGIONs (ratio of sums)
-
-    FIRM-clipped into the lattice window ``[σ(−L), σ(L)]`` (owner ruling 2026-08-26): a COLLISION —
-    an intron no denser than background, an empty intron under a live background — clips to the CAP,
-    the valid CAP use rather than a chooser; a zero background under live mass clips to the FLOOR (the
-    zero-gDNA library's truth); and ``0/0`` keeps the base location, because no measurement licenses
-    nothing. Every other slot keeps ``base`` bit-exactly (``None`` ⇒ the neutral ½, so the reference
-    term is EXACTLY ZERO wherever the measurement does not reach).
-
-    ⭐ **The location is an ECHO of the density channel at ONE PSEUDO-FRAGMENT, not new information** —
-    it replaces the structural constant 0.75 where that constant contradicts the measured background,
-    and its strength never scales with the channels' precision (the term stays worth ``a+b = 1``).
-    ⛔ **REGIONS ONLY — a measured refusal, not a preference** (2026-08-26, `ladder_arm_ab.py --arm
-    stage2_intron_ref{,_r}`): the boundary-inclusive form regressed stranded × capture-ON on the test
-    chromosome AND the ladder, with the damage entirely on the boundary axis under messages OFF —
-    under capture the intergenic rate is the wrong rate for a probe-adjacent crossing. Regions-only
-    improved every stratum on both substrates, the zero-gDNA control included.
-    ⚠ ``rho_bg`` here is the bare pooled ratio — deliberately NOT `fit_gdna_background`'s Jeffreys
-    posterior ``(Σg+½)/ΣE`` — for two reasons: it is the exact form the panel priced, and the honest
-    ``0/0 → base`` branch needs a background that is exactly zero on a zero-gDNA library rather than
-    ``½/ΣE``. The factory's NB factor keeps its own posterior; the two serve different consumers.
-
-    Reads exactly ``geometry.unspliced_count`` and ``geometry.eff_gdna`` and nothing else.
-    """
-    claims = build_structural_claims(chain, statics)
-    is_region = np.asarray(chain.kind) == REGION
-    M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
-    E_g = np.asarray(geometry.eff_gdna, np.float64)
-
-    anchors = claims.intergenic & is_region & (E_g > 0.0)
-    e_pool = float(E_g[anchors].sum())
-    rho_bg = (float(M[anchors].sum()) / e_pool) if e_pool > 0.0 else 0.0
-    expected = rho_bg * E_g
-
-    out = np.full(int(chain.n_slots), 0.5) if base is None else np.asarray(base, np.float64).copy()
-    sel = claims.ss_intron_region & ((M > 0.0) | (expected > 0.0))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        m = np.where(M > 0.0, expected / np.maximum(M, _EPS), np.inf)
-    cap = 1.0 / (1.0 + np.exp(-float(logodds_window)))
-    out[sel] = np.clip(m[sel], 1.0 - cap, cap)
-    return out

@@ -198,9 +198,22 @@ def test_the_noop_arm_is_byte_identical_and_the_lever_resolves_a_PICOFRAGMENT(me
     assert _moved(_nudged_prior(measured, "mass_gdna_region", inside, 1e-12), base), (
         "1e-12 fragments at an in-locus region changed no prior — the lever cannot resolve an override"
     )
-    assert not _moved(_nudged_prior(measured, "mass_gdna_region", outside, 1.0), base), (
-        "a whole fragment at an INTERGENIC region changed the prior — the locus projection is no "
-        "longer dropping regions that overlap no locus"
+    # ⛔ The intergenic direction is asserted on the COUNT fields only. The locus projection drops
+    #   intergenic regions from the counts — that is what this gate protects — but ``gdna_eff_len``
+    #   may legitimately move: the eff-length contraction's ``_global_reference_density`` KDE reads
+    #   EVERY region's gDNA density by design (its docstring: "detected from the data with no
+    #   assumption about probe locations") and SNAPS to a real region's density, which can be the
+    #   nudged intergenic region itself. Asserting all of ``PRIOR_FIELDS`` here conflated the two
+    #   paths and held only while the snap happened to land elsewhere (exposed by the 2026-08-24
+    #   reference-location deletion moving the mass landscape).
+    nudged_out = _nudged_prior(measured, "mass_gdna_region", outside, 1.0)
+    count_moved = any(
+        not np.array_equal(getattr(nudged_out, f), getattr(base, f))
+        for f in ("gdna_prior_count", "rna_prior_count")
+    )
+    assert not count_moved, (
+        "a whole fragment at an INTERGENIC region changed a locus COUNT prior — the locus "
+        "projection is no longer dropping regions that overlap no locus"
     )
 
 

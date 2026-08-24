@@ -455,10 +455,11 @@ the gDNA landscape can be TRAINED on them; once trained, that per-object prior d
 subsumes much of what message propagation is doing.
 
 ⭐ Two things follow, and both are rulings rather than options:
-* **Set the reference from the data wherever the data allow it** — intergenic space is pure gDNA in the
-  annotation's terms (§0b: on real data it carries unmodelled transcription, which a POOLED level absorbs) and a
-  reference of ½ there is simply wrong (`structural_reference` already does this at ¬`mrna_active`).
-  ⛔ But do not extend that to objects whose composition the annotation does not determine.
+* **Feed the data's background into ψ as a LIKELIHOOD wherever the data allow it** — intergenic space
+  is pure gDNA in the annotation's terms (§0b: on real data it carries unmodelled transcription, which a
+  POOLED level absorbs). ⛔ NOT as a reference location: the location concept was refuted and deleted
+  (§6b.1, owner 2026-08-24) — the channel is the density λ-factor, whose precision scales with counts.
+  ⛔ And do not extend it to objects whose composition the annotation does not determine.
 * **Message propagation's irreducible job is the deep chain**: long runs of `exon|exon` boundaries where
   imputation is the only source of information there is. Strand specificity would solve those, and often
   is not available — which is exactly why the next best thing has to work, and has to be weak.
@@ -522,9 +523,9 @@ ERROR THIS RULING EXISTS TO PREVENT.** It was measured **with a confirmed bug li
 > is relayed into the adjacent EXON and drives it to a confident **wrong vertex**.
 
 ⭐⭐ **That is a BUG, not a verdict on message passing.** The licence RULE is right and settled (§4.1);
-the predicate set implementing it is incomplete by exactly one predicate. ⛔ It is recorded as a **strict
-xfail** — `test_the_relay_does_not_carry_a_structural_claim_across_a_population_change` in
-`tests/calibration/test_structural_reference.py` — and it is localised **to the λ-message**: the same
+the predicate set implementing it is incomplete by exactly one predicate. ⛔ It was recorded as a strict
+xfail in `tests/calibration/test_structural_reference.py`; that file died with the reference-location
+deletion (§6b.1, 2026-08-24), so THIS paragraph is now the record — and the defect is localised **to the λ-message**: the same
 intron goes **0.9006 → 0.7661**, the wrong way, and nulling `lam_channel` restores **0.9006** exactly while
 `cm_g` / `cm_p` stay 0. ⛔ **That localisation is NOT a licence to close it by tuning the reference**: the
 xfail records that softening the prior was MEASURED WORSE and that topping up `τ_λ` is refused outright.
@@ -1308,121 +1309,107 @@ reference is worth one pseudo-fragment, so it is swamped by any evidence channel
 evidence-free object posterior = prior at any depth, and there the reference and the landscape are the
 only two voices.
 
-### 6b.1 ⭐⭐⭐ THE SHIPPED FORM — `structural_reference`, and the four rulings behind it (2026-08-16)
+### 6b.1 ⛔⛔⛔ THE REFERENCE LOCATION — REFUTED AND DELETED (owner, 2026-08-24)
 
-⭐⭐⭐ **IT SHIPS ON — `CalibrationConfig.structural_reference = True`** (owner, confirmed 2026-08-17:
-*"currently we do have a structural per-object reference prior that asserts 100 % gDNA in four groups of
-regions/boundaries"*). It sets ψ's reference MEAN from the ANNOTATION:
-`simplex_logodds.structural_reference_location` returns **`m = min((a+1)/(a+b+1), σ(L))` = 0.75** at
-`a = b = _JEFFREYS_REF` wherever `¬mrna_active`, and the neutral ½ everywhere else; `sweep.solve_chain`
-threads it to the ONE `CompositionPriors` construction. Gate:
-`tests/calibration/test_structural_reference.py`.
-⛔ **This paragraph said `σ(L)` until 2026-08-17, contradicting ruling ② three paragraphs below it and the
-shipped code, inside the commit that landed both** (`25e55b32`). `σ(L)` is the CAP, not the value.
+⛔⛔⛔ **ψ HAS NO REFERENCE LOCATION.** `_location_term`, `structural_reference_location` (the
+annotation-derived `m = 0.75` at `¬mrna_active`), `measured_reference_location` (the measured
+background location at ss-intron REGIONs) and both config flags (`structural_reference`,
+`measured_intron_reference`) were **deleted outright** on 2026-08-24. The reference is the symmetric
+Jeffreys measure and asserts nothing; the location concept may not come back as a flag, a constant,
+or a "weakened" variant.
 
-⭐⭐ **① THE CLAIM IS ABOUT THE ANNOTATION AND ITS PRECISE STATEMENT IS NOT "NOTHING IS TRANSCRIBED
-HERE".** An intron flank IS transcribed — as nascent. What is asserted is that **no annotated MATURE
-transcript is continuous across this position**, which is exactly `mrna_active`, and it leaves the
-unspliced population as gDNA + nascent. ⚠ That makes the NASCENT LEVEL the load-bearing quantity, and
-deconvolving it out of the introns is what would turn this from assumed into measured.
+**The refutation, in one paragraph.** A location is a prior ASSERTION at fixed strength. Where the
+strand channel carries information it was worth ~one fragment as documented; where it does not
+(κ = ½, or composition near a vertex, where the λ-axis Fisher information `∝ [f_g(1−f_g)]²`
+collapses) it was **the entire answer at any depth** — measured 0.7471 at every N from 10 to 10⁶ at
+κ = ½, and at zero refits it decided 100 % of the claimed-boundary error. Pass-0's job is to LEARN
+the prior; asserting one first is circular, and the measured intron form (fit on the data being
+deconvolved) was circular twice over. The concept was refuted by the owner with external review on
+2026-08-24; the measurements above are re-derivable from `pass0_claimed_ab.py` and
+`calibration_vs_oracle.py` on the cached panel.
 
-⛔⛔⛔ **①b THE PRICED RISK, AND WHAT WOULD FALSIFY THE CLAIM.** ⚠ *Stale-repaired 2026-08-22: this
-block was written when the ladder held `nrna = 0` on every row; since the 2026-08-19 rebuild every row
-carries nascent SPARSELY at a **20.2 % capture-OFF and 2.6 % capture-ON** fragment share — a STRESS level under the NASCENT SCOPE RULING (§0b) — so
-the panel now exercises the refute obligation at stress level: certified true `f_g` at `R intron` is
-**0.7045** at `g50 ss0.99` capture-OFF and 0.9915 at `g98 ss0.50`. At realistic nascent shares it
-approaches 1 and the 0.75 claim costs almost nothing.* The claim was first priced on a TOY that puts
-nascent RNA in the introns, shipped
-`SilentPolicy`, mass-weighted `Σ|f_g − truth|·M` over the slots the reference speaks about:
+**What replaces it.** Background information enters as LIKELIHOOD terms whose precision scales with
+counts — the intron-factory λ-factor (`density_lambda_factor`) at ss-intron REGIONs today, and the
+planned learned-enrichment extension of that channel to the other claimed populations (measured at
+boundaries: the intergenic rate predicts certified boundary gDNA to 0.5 % capture-OFF and is 38–50×
+low under capture — the enrichment must be LEARNED, never gated on a capture boolean; owner ruling,
+2026-08-24: capture is a spectrum).
 
-    kappa  rho_nascent   truth@intron      OFF ->   ON     ratio
-     0.50     0.00           1.0000       1,103 ->    1    0.001  ⭐  the direction it ships for
-     0.50     0.25           0.6539         524 -> 1,099   2.099  ⛔
-     0.50     1.00           0.3208         766 -> 4,396   5.736  ⛔
-     0.99     0.25           0.9497          78 ->   248   3.165  ⛔
+**The measured price of the deletion** (`calibration_vs_oracle.py`, all 16, same-session before/after,
+never pooled): the large in-scope error masses (stranded × capture-ON `g50`/`g98`) +4–8 %; smaller
+rows up to +42 % (`g98` ss.99 OFF region); `g00` capture-OFF controls improve; `g00` capture-ON
++30–45 % (the deleted measured form's zero-control win — the density channel is the recorded path to
+winning it back). Accepted: the score was partly measuring the term, not the algorithm.
 
-⛔⛔ **THAT TABLE IS A BOUNDARY, NOT AN ALARM, AND READING IT AS AN ALARM IS THE MISTAKE THIS PARAGRAPH
-EXISTS TO PREVENT.** It was measured on a chain with **no intergenic REGIONs**, where
-`fit_intron_background` has no pool, so mechanism ② below cannot exist — and at κ = ½ mechanism ① is dead
-by derivation — so **neither refutation channel is present and the prior is the only voice**. That is
-correct Bayes on that fixture, and `TRAPS: a-refutability-test-needs-the-refuting-channel-in-the-fixture`
-is the rule it produced. ⭐ **On the same toy WITH intergenic flanks** — where ② reads `τ_fac = 161.4` at
-every intron — **the same prior YIELDS to the same nascent RNA**: within **0.02** of the no-prior answer
-at `ρ_n = 0.25` (truth 0.6539) and equal to **4 dp** at `ρ_n = 1.0` (truth 0.3208). ⛔ Production always
-has intergenic REGIONs. Both fixtures are gated, with their perturbations, in
-`tests/calibration/test_structural_reference.py`.
+⛔⛔ **THE PRICE CONCENTRATES IN THE FAN-OUT ARM, and that is §H.8's requirement 5 measured again**
+(`pass0_claimed_ab.py`, claimed populations, shipped refits, same-session before/after): under
+SILENCE most rows move ≤ 10 % and both `g00` unstranded controls IMPROVE ~2–4×, but under FANOUT the
+transported flank beliefs lose their anchor — the deferred stratum 2.8–3.1× worse (`g50`/`g98`
+unstranded ON), `g98` unstranded OFF boundaries 2.0×, stranded ON boundaries +24–42 % — and on
+stranded × capture-ON the fan-out now LOSES to silence on boundaries. The reference and the messages
+were priced jointly ON; deleting one re-prices the other. The learned-enrichment channel must
+restore the flanks' anchoring for the fan-out to earn its wins back.
 
-⭐⭐ **SO WHAT WOULD FALSIFY THE SHIPPED CLAIM IS NAMED AND IS NOT THE TABLE ABOVE**: a chain that DOES
-carry intergenic REGIONs — so ② is live and asserted live — on which the prior still fails to yield to
-nascent RNA; or a real library whose intronic nascent level is high enough that `m → 0.75` costs more than
-one pseudo-observation is worth. ⭐ **Both are now expressible on the rebuilt ladder** (nascent on every row since 2026-08-19, at the
-20 % stress share). ⚠ Deconvolving the nascent density out of the introns to set `m` from it is what
-would turn the claim from assumed into measured — and under the NASCENT SCOPE RULING (§0b) that is a
-robustness refinement, not a design priority.
+⚠ **What SURVIVES from the old section**: the two refutation mechanisms (strand asymmetry; the
+intron-vs-intergenic density factor, `τ_fac = 161.4` at an intron, alive unstranded) are likelihood
+channels and remain shipped; `TRAPS: a-priors-curvature-is-not-the-datas-information` and
+`TRAPS: a-refutability-test-needs-the-refuting-channel-in-the-fixture` stand; the relay defect the
+old reference EXPOSED (a claim carried across an exon↔intron population change) is a LICENCE bug
+recorded as a constraint on the relay rebuild (§0c.2) — its strict-xfail fixture died with the
+deleted gate file and the constraint carries the record.
 
-⭐⭐⭐ **② THE STRENGTH IS ONE PSEUDO-OBSERVATION, AND THE LOCATION IS HOW IT IS WRITTEN.**
-`strength = logit(m)`, so a location on the λ scale IS its strength in nats and the claim's odds are
-`e^strength`. One pseudo-observation of gDNA takes `Beta(a,b)` to `Beta(a+1,b)`, whose mean is
-`(a+1)/(a+b+1)` = **0.75** exactly at `a = b = _JEFFREYS_REF` — a 3:1 claim, `log 3` nats, overturned by
-**1.46** fragments at κ = 0.99. No new number, and it tracks the exponents (`EQUATIONS.md` §9c.1).
+### 6b.2 ⭐⭐⭐ THE RNA-ANCHORED EVIDENCE FACTOR — BUILT AND SHIPPED ON (owner design + ruling, 2026-08-24)
 
-⛔⛔ **THIS REPLACED `m = σ(L)`, THE LATTICE'S OWN WIDTH, WHICH ASSERTED 9.31 NATS (~10,000:1) AND WAS
-MEASURED WORSE THAN NO PRIOR AT ALL AT BEING REFUTED** (refute-err 2.0247 against no-prior's 0.3946).
-*"A prior may not assert more than the lattice can represent"* is a valid CAP and is still applied; using
-it to CHOOSE was the error. ⚠ **The ladder that chose this could not rank a strength** — it held
-`nrna = 0`, so it scored only the DELIVER obligation, where more nats is monotonically better, which is
-exactly why it preferred the worst option. ⭐ The rebuilt ladder (nascent on every row, 2026-08-19)
-exercises REFUTE at stress level; the controlled instrument remains the REFUTABILITY test
-(`tests/calibration/test_structural_reference.py`).
+**The mechanism** (`calibration.rna_anchor`, default `CalibrationConfig.rna_anchor = True`; the
+derivation, the estimator ledger and the recorded residuals live in the module docstring; gate
+`tests/calibration/test_rna_anchor.py`, 11 cases, 8/8 perturbations verified firing): the RNA side
+of the unspliced count is anchored on quantities hybrid capture cannot mis-scale — certified splice
+flux at complete-flank exons, the adjacent intron's excess-over-background nascent rate at eligible
+ss-intron boundaries — as a count-scale Gaussian likelihood summed into the intron factory's
+per-slot factor array. No gDNA rate for an enriched slot appears anywhere; anchor and target share
+each exon's own probe footprint, so enrichment cancels pair-locally (measured: the RNA-frame
+boundary→exon ratio is capture-invariant, median 1.06–1.24 both states, where the gDNA frame
+shifts 2.9–3.4×). ⛔ Capture GATING remains refuted (capture is a spectrum); this factor needs no
+gate by construction.
 
-⭐⭐ **THE TWO MECHANISMS THAT REFUTE IT ARE BUILT AND BOTH ARE REACHED** (owner, 2026-08-16): ① strand
-asymmetry inside an intron (`i_strand`, dead at κ = ½) and ② intron-vs-intergenic density
-(`fit_intron_background` + `density_lambda_factor` ⇒ `tau_fac`, **alive unstranded**, `intron_factory` is
-`True` in production). Measured, ② carries **τ_fac = 161.4** at an intron slot, and with it live the prior
-yields to nascent RNA at κ = ½ to within 0.02 of the no-prior answer.
-⛔⛔ **A REFUTABILITY TEST IS ONLY VALID IF THE CHANNEL IS IN THE FIXTURE**: `fit_intron_background` pools
-INTERGENIC regions only, so on a chain without them ② is silently absent and the prior looks catastrophic.
-Assert the channel before measuring.
+**The estimator, hardened same-day through three measured iterations** (each defect caught by the
+release metric and pinned by a new gate): ① the transport's CENTER and SPREAD are fitted jointly
+from the two lower quantiles of the pair residuals (gDNA can only inflate a residual upward, so
+the lower quantiles are RNA-only; two log-normal quantiles give both parameters); ② the fit
+carries a SELF-CONSISTENCY GUARD — it predicts its own negative-residual fraction Φ(−m/s) and
+refuses when the observed fraction disagrees beyond the binomial noise band, which is what stops a
+gDNA-saturated tail (`g98`) from fitting a spurious center (measured: unguarded, the center gave
+back most of the high-gDNA win); ③ on refusal the CENTER goes to zero but the WIDTH survives via
+the MAD left-tail fallback, max-combined with the two-flank disagreement (measured: dropping the
+width with the center over-tightened a zero control 207k → 402k). ⛔ The deep lesson, three
+iterations paid for: ANY in-sample residual estimate of the transport has validity that depends on
+the unknown gDNA level itself — the guard makes that dependence explicit and refusable instead of
+silent. The durable exit (recorded, not built): derive the sj-frame→contained-frame transport
+factor from the OPPORTUNITY model (it is geometry, calculable not estimable) and marginalize the
+rate posterior by quadrature — the intron factory's own Gamma⊗Poisson=NB pattern generalized —
+instead of the count-scale Gaussian approximation.
 
-⛔⛔⛔ **③ τ_λ IS THE DATA'S INFORMATION AND THE REFERENCE MAY NOT ADD TO IT.** The location term has real
-curvature on λ (`density_factor_precision` reads 0.743 off it) and contributing it was built, measured and
-REFUSED: the 3,227× fall in `tau_lam` at a pinned slot is ~98 % the `[f(1−f)]²` Jacobian rather than a
-loss; feeding the prior in is a BOOLEAN gate flip that releases the full COUNT precision (τ = 0.029 and
-τ = 1e6 both return 850.44 of a 850.50 ceiling); and it credits data-free slots (`n = 0` → `prec_g`
-0.2026), which is exactly the population the reference's own safety argument rests on being empty.
-⚠ Measured, the contribution was **bit-identical on the deliverable on all 32 panel rows** and moved only
-`has_own_composition_evidence` — 0.8.0's own denominator. `TRAPS: a-priors-curvature-is-not-the-datas-information`.
+**Priced on 0.8.0's own metric** (`calibration_vs_oracle.py`, whole library, all 16, vs the
+same-session pre-deletion baseline): the strata holding 96.7 % of certified gDNA improve — `g98`
+capture-ON 0.68–0.85 (region) / 0.72–0.80 (boundary), `g50` capture-ON 0.72–0.99, capture-OFF
+boundaries 0.91–0.98. The residual concentrates at the CLEAN libraries: `g00` rows 2.2–7.4× worse
+(absolute ~30–280k), `g05`-OFF ~1.6–2.0×, and `g98`-OFF regions +26–36 % — the anchor's remaining
+width/shape error converting to phantom gDNA where truth is RNA-rich, plus the no-nascent-term
+stress row (claimed E 6.4k → ~59k at `g50` unstranded OFF; a STRESS reading under §0b).
 
-⛔ **④ THE NEUTRAL LOCATION IS RETURNED AS AN EXACT ZERO, NOT COMPUTED.** `m = ½` gives the constant
-`log 2` on paper but a row with `ptp = 2.22e-16` in float64, which tips `_posterior_median_fg`'s knife-edge
-at a symmetric posterior and moves `f_g` by a full grid step (0.5423 → 0.4577) at slots the reference
-claims to say nothing about. `TRAPS: a-constant-in-exact-arithmetic-is-not-constant-in-float64`.
+⛔⛔ **OBSOLESCENCE TRACKING (owner directive, 2026-08-24: remove what the anchor obsoletes).**
+Candidates, each pending the policy re-contrast ON THE ANCHORED TREE and none deleted yet:
 
-⭐ **MEASURED, through `calibrate` and against a `base` re-recorded in the same session** — final Σ|Δ| in
-fragments per stratum, ratio to base. ⛔⛔ **TWO ARMS WERE MEASURED AND THIS PARAGRAPH USED TO PRINT THE
-REFUSED ONE'S NUMBERS UNDER THE SHIPPED ONE'S NAME** (repaired 2026-08-17; both are kept, because both
-are data):
-
-| arm | in-scope strata | deferred | `g00` control |
-|---|---|---|---|
-| ⭐ **SHIPPED — `m = 0.75`, one pseudo-observation** | **0.930 / 0.908 / 0.925** | 0.998 | **bit-identical, 8/8 rows** |
-| ⛔ REFUSED — `m = σ(L)`, the lattice's own width (9.31 nats) | 0.384 / 0.660 / 0.366 | 0.800 | — |
-
-⛔ **The refused arm scores BETTER here and that is the point of ruling ② above**, not an argument against
-the shipped one: the ladder these arms ran on held `nrna = 0`, so it scored the DELIVER obligation alone,
-where more nats is monotonically better. Both arms were run on all 16 ladder conditions; `ROADMAP.md` §0 carries the shipped
-arm's pass-0, confidently-wrong and thermometer columns.
-
-⚠ **AND IT EXPOSED A RELAY DEFECT IT DOES NOT CAUSE.** With `message_propagation` ON, the relay carries a
-CORRECT structural claim across an exon↔intron boundary — where the mature-RNA population changes — and
-drives the exon to a confident wrong vertex. The composition licence knows about transcript TERMINI
-(`terminus_flank_gain`) and not about `mrna_active` flipping, which is precisely the predicate that says
-the RNA population differs across that hop. Recorded as a strict xfail; it is not a blocker under the
-shipped `off`.
-⭐ **This paragraph is the MEASUREMENT; §0c.2 is the RULING it produced** — that the defect is a BUG in the
-licence's predicate set rather than a verdict on message passing, and that the recorded **+154.8 %** price
-of turning the relay ON was measured WITH THIS BUG LIVE and on the retired 36-condition ladder, so it must
-be **re-priced and never inherited**.
+* `messages/fanout.py`'s stage-4 flank→exon λ transfer + its receiver-side mismatch deflation —
+  the anchor gives exons own evidence and the transfer's capture frame bias is the §H.4 residual;
+  with the policies converging, the transfer may be pure cost now.
+* `FanOutPolicy` as a whole — built as pass-0's policy precisely because slots lacked own
+  evidence; if relay-with-weak-messages matches it on the anchored tree, converge to ONE policy
+  and delete (`the owner's simplification ruling`).
+* `simplex_logodds.ONE_SIDED_RNA` and the one-sided certified-RNA bound machinery — the anchor IS
+  the two-sided certified-RNA statement at complete flanks, made honest by measured variance.
+* The messages' certified-RNA transfer channel (`rna_imp_*` at stage-4 destinations) — same
+  information, now delivered as own evidence.
 
 ⭐ **HYBRID CAPTURE NEEDS NO DETECTION STEP.** Measure the gDNA density at both the off-target anchors
 (intergenic + intron REGIONs) and the in-gene `exon|intron` boundaries; their RATIO is the enrichment —

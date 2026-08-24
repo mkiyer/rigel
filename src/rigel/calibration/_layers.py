@@ -111,6 +111,11 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "run_fill",
             "density_model",
             "density_deconv",
+            # `rna_anchor` is the RNA-side evidence factor (owner design, 2026-08-24): certified
+            # splice flux + adjacent-intron nascent rates anchoring the RNA half of the unspliced
+            # count at complete-flank exons and eligible boundaries. It reuses `density_deconv`'s
+            # NegBinomial SIDEWAYS and reads layer-3 geometry/claims DOWN.
+            "rna_anchor",
             "landscape",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
             # `landscape`'s estimator SIDEWAYS and reads `total_abundance` (layer 3) DOWN.

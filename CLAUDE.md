@@ -223,13 +223,20 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 9 xfail** (re-derived 2026-08-23; the
-`+36` over 3,684 is stages 3–4 of the first-pass redesign plus the new handoff, exactly per the table
-below: `docs/dev/NEXT_SESSION.md` + 1 (jargon only), stage 3 +12
-(`messages/fanout` module + 3, `test_fanout_policy.py` 7 own + 2 meta), stage 4a + 2 (new cases in the
-existing stage-0 gate), 4b/c + 4 (transfer cases, same file), 4d + 6 (`test_message_sidedness.py`
-4 own + 2 meta), 4e + 7 (wiring cases, same file), 4f + 4 (`pass0_claimed_ab.py`'s meta). The shipped
-defaults are unchanged by 3–4 — `message_policy` stays `"relay"` — so no golden moved.) ⛔ **ANY failure at all is a regression** — a stronger and
+⭐ **THE STANDING BASELINE: 0 failed / 3,682 passed / 0 skipped / 8 xfail** (re-derived 2026-08-24,
+fifth measurement that day; the `+2` over 3,680 is two gates added to the EXISTING
+`tests/calibration/test_rna_anchor.py` during the estimator hardening, no file moved. The `+16`
+over 3,664 is the RNA-ANCHORED EVIDENCE FACTOR (`DESIGN.md` §6b.2): `src/rigel/calibration/rna_anchor.py` (+3: jargon, docs-boundary, layering)
+and `tests/calibration/test_rna_anchor.py` (11 own cases +2 gate cases). Goldens did NOT move —
+the golden toys sit below the factor's dispersion-estimator population minimum, where it is
+deliberately flat. The prior `−64`: the REFERENCE-LOCATION DELETION (owner
+refutation; `DESIGN.md` §6b.1): three gate files removed — `test_structural_reference.py`,
+`test_measured_reference.py`, `test_reference_location.py` — 58 own cases plus 3×2 parametrized
+gate cases. The `−1` xfail is the relay-transports-a-structural-claim strict xfail that lived in
+the first of those files; the DEFECT stays recorded as a relay-rebuild constraint in `DESIGN.md`
+§0c.2/§6b.1. A golden update landed in the same change — the deletion moves shipped output; diff
+magnitudes and the truth-scored before/after live in `DESIGN.md` §6b.1 and `ROADMAP.md` §0.)
+⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
 next session reads a green run as a regression.
 
@@ -261,7 +268,7 @@ FLIP** — `preflight.py --full` does it in one command. A green suite has hidde
 (`TRAPS: a-green-suite-hid-five-dead-instruments`), because the tests install what the shipped default
 does not.
 
-⭐⭐ **THE 9 xfails ARE NOT ONE KIND OF THING.** Some are the recorded price of a config default; the rest
+⭐⭐ **THE 8 xfails ARE NOT ONE KIND OF THING.** Some are the recorded price of a config default; the rest
 are executable records of proven defects whose fixes are panel-negative alone — for those, "fix the test"
 is a category error, because the test is right and the code is wrong. ⛔ An xfail is closed by REPAIRING
 the thing or by asserting the invariant STRUCTURALLY, never by widening a bound.
@@ -291,7 +298,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
-| `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/relay/fanout at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, DELIVER/REFUTE split and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context lives in `ladder_arm_ab --arm policy_fanout`. `--self-test` 6/6 |
+| `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY — AND WHY DOES IT LAND THERE (`--dissect`)?** silent/relay/fanout at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, DELIVER/REFUTE split and never pooled. ⭐ `--dissect` adds the per-slot survey: which STAGE moved the slots, the own-solve-versus-message LEDGER (bias), the delivered message's `median \|z\|` against certified truth (is its precision EARNED — an honest claim reads 0.674), and the DRIFT (the flank's certified composition pushed through the transfer, so the FRAME's error is separated from the source's); `--sweep` adds what each candidate FIX would have to overcome. ⛔ A whole-library number cannot judge pass-0 — that context lives in `ladder_arm_ab --arm policy_fanout`. `--self-test` 15/15 |
 | `design/relay_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
 | `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `relay_pool_ab.py --out`. `--self-test` 10/10 |
 | `design/hop_currency.py` | ⭐⭐⭐ **WHICH CURRENCY DOES EACH HOP TYPE CARRY — A LEVEL OR A COMPOSITION?** Every adjacent pair keyed by `object class × {sj, term}`, the source's true value transported both ways and scored against a Monte-Carlo noise floor. `--self-test` 36/36 |

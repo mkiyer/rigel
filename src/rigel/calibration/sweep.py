@@ -294,7 +294,6 @@ def solve_chain(
     gdna_prior=None,
     rna_prior=None,
     intron_prior=None,
-    reference_location=None,
     policy=None,
     _capture: dict | None = None,
 ) -> RegionBelief:
@@ -310,10 +309,9 @@ def solve_chain(
     the population gDNA hyperprior — it is not the deliverable, and it does not have to answer objects it
     cannot solve.
 
-    ``reference_location`` is ψ's per-slot reference MEAN, CONSTRUCTED BY THE CALLER — one
-    construction site (`calibrate`: the structural location from the annotation, optionally overridden
-    at ss-intron REGIONs by the measured background; owner simplification, 2026-08-23). ⛔ ``None`` ⇒ no
-    term is written and the whole solve is bit-identical to the path before the term existed.
+    ⛔ ψ carries NO reference location (owner refutation, 2026-08-24): the reference is the
+    symmetric Jeffreys measure and asserts nothing; background information enters as the
+    ``intron_prior`` λ-factor, a likelihood whose precision scales with counts.
     """
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
@@ -402,9 +400,6 @@ def solve_chain(
     # ⭐ The RNA arm asks the SAME landscape about the OTHER component: the complementary fraction
     # `1 - f_g` against RNA's own opportunity. `mass_global` is shared because both components split one
     # unspliced population (`region_rna_geometry`).
-    # ⭐ The LOCATION is the reference's own MEAN and belongs to neither arm: it is set from the ANNOTATION
-    # alone (`structural_reference_location`), so it is admissible at pass-0 where no landscape exists yet.
-    # ⛔ ``False`` ⇒ ``None`` ⇒ no term is written and every downstream path is bit-identical.
     _rna_mass, _eff_rna = region_rna_geometry(geometry)
     global_lp = CompositionPriors(
         gdna=gdna_prior.logprior(solve_grid, mass_global, eff_global)
@@ -413,8 +408,6 @@ def solve_chain(
         rna=rna_prior.logprior(1.0 - solve_grid, _rna_mass, _eff_rna)
         if rna_prior is not None
         else None,
-        # ⭐ the LOCATION arrives constructed — one construction site, `calibrate`. None ⇒ no term.
-        location=reference_location,
     )
 
     # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store

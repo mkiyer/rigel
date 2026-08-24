@@ -39,6 +39,23 @@ The interface
     A message may use the destination's **CONSTANTS** (geometry, effective lengths) and its
     **OBSERVATIONS** (counts, mass). It may **NEVER** use the destination's **BELIEFS**.
 
+⭐⭐⭐ **AND THE RULE IS ABOUT SENDING, NOT ABOUT RECEIVING — the owner's ruling, 2026-08-23, which
+resolves what otherwise reads as a contradiction between this contract and two shipped policies.**
+
+    A SENDER publishes its claim UNCHANGED: it does not tailor, scale or hedge it for whoever is
+    listening. Deciding how much of an arriving claim to BELIEVE is the RECIPIENT's job, and a
+    recipient necessarily reads its own belief to do it.
+
+So a destination that receives a composition wildly at odds with what its own data says may DISCOUNT
+it, and that is reception rather than a message built from the destination — `RelayPolicy` does it
+(``relay.py``'s λ-stream `mismatch_deflate`) and so does `FanOutPolicy` (`_FanOutRelay._received`).
+⛔ **The line the trap actually draws is that a claim's VALUE may never be built from the
+destination's belief**, because that manufactures agreement out of nothing; all nine of its costumes
+did exactly that. A reception step is safe when it can only ever **LOWER a precision and never move a
+mode** — it can discard information, never invent it. ⚠ That invariant is what makes a receiver-side
+transform reviewable, and it is the same one the whole shipped relay obeys: every precision transform
+there is ``p -> p/(1 + p*v) <= p``, and the only rises are additive fusions of INDEPENDENT witnesses.
+
 :class:`StepContext` splits its fields under exactly those three headings, and the heading is what turns
 TRAPS: a-message-from-the-destinations-belief from a discipline into something a reader — and the backbone — can check. The backbone enforces the
 half that is enforceable: it hands :meth:`deliver` the relayed belief state **already indexed at the

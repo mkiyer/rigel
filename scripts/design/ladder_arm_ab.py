@@ -41,7 +41,8 @@ check an imported composition against when the destination has no self-solve.
 (−0.035) and the ladder said it cost the panel nothing. TRAPS: measure-the-ceiling-first.
 
 ⚠ **FOUR ARMS WERE DELETED 2026-08-23 BECAUSE THEIR MECHANISM SHIPPED** — `stage2_intron_ref{,_r}`
-(the measured intron reference; regions-only landed as `CalibrationConfig.measured_intron_reference`,
+(the measured intron reference; regions-only landed as a config flag and was then DELETED OUTRIGHT with
+the whole reference-location concept on 2026-08-24 — the owner refuted the location term,
 default ON, whose docstring carries the measured table; the boundary-inclusive form is
 measured-refused there) and `stage1_pair{,_onesided}` (the struct_lock rescope priced WITH that
 reference and REFUSED — `ROADMAP.md` rank 11). Under the shipped default the solve no longer consults

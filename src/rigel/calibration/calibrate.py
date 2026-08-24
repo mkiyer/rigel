@@ -67,11 +67,11 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
+from .rna_anchor import build_rna_anchor_factor
 from .density_deconv import (
     GdnaBackground,
     density_lambda_factor,
     fit_intron_background,
-    measured_reference_location,
 )
 from .abundance_landscape import AbundanceLandscape, fit_abundance_landscape
 from .total_abundance import (
@@ -87,7 +87,7 @@ from .region_chain import build_region_chain
 from .result import CalibrationResult
 from .landscape import DensityLandscape, fit_landscape
 from .signature import RegionType, coarse_type_array
-from .simplex_logodds import _logodds_grid, structural_reference_location
+from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
 from ..types import Strand
@@ -579,6 +579,35 @@ def calibrate(
             )
         return _intron_priors[key]
 
+    # ⭐⭐⭐ THE RNA-ANCHORED EVIDENCE FACTOR (`rna_anchor`, owner design 2026-08-24) — the RNA side
+    # of the unspliced count anchored on certified splice flux (complete-flank exons) and the
+    # adjacent intron's nascent excess (eligible boundaries). Belief-free like the intron factory,
+    # evaluated ON the solve grid so it shares the factory's rebuild-on-bracket-move rule and memo
+    # discipline, and SUMMED with it into one per-slot λ-factor — one array, one consumer contract.
+    _anchor_factors: dict = {}
+
+    def _anchor_at(n_grid: int, window: float):
+        if not config.rna_anchor:
+            return None
+        key = (int(n_grid), float(window))
+        if key not in _anchor_factors:
+            _anchor_factors[key] = build_rna_anchor_factor(
+                chain,
+                statics,
+                geometry,
+                region_arrays,
+                n_grid=int(n_grid),
+                logodds_window=float(window),
+            )
+        return _anchor_factors[key]
+
+    def _lam_factor_at(n_grid: int, window: float):
+        a = _intron_prior_at(n_grid, window)
+        b = _anchor_at(n_grid, window)
+        if a is None:
+            return b
+        return a if b is None else a + b
+
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
@@ -620,21 +649,12 @@ def calibrate(
                     n_grid_ss,
                     n_tilt,
                 )
-        lam_factor = _intron_prior_at(n_grid, window)
-        # ⭐ ψ's reference LOCATION, constructed HERE and only here (owner simplification,
-        # 2026-08-23) — AFTER the window rescale above, because the measured form's FIRM clip is a
-        # function of the window. The structural location from the annotation (`structural_reference`),
-        # overridden at ss-intron REGIONs by the measured background (`measured_intron_reference`).
-        # ⛔ None ⇒ no term is written — the no-reference control is still one config bool.
-        reference_location = (
-            structural_reference_location(statics, float(window))
-            if config.structural_reference
-            else None
-        )
-        if config.measured_intron_reference:
-            reference_location = measured_reference_location(
-                chain, statics, geometry, window, base=reference_location
-            )
+        lam_factor = _lam_factor_at(n_grid, window)
+        # ⛔ ψ has NO reference location (owner refutation, 2026-08-24): the structural 0.75 and the
+        # measured intron override were prior ASSERTIONS at fixed strength — the entire answer
+        # wherever the strand channel was dead. The reference is the symmetric Jeffreys measure;
+        # background information enters as the intron-factory λ-factor above, a likelihood whose
+        # precision scales with counts.
         out = solve_chain(
             chain,
             statics,
@@ -652,7 +672,6 @@ def calibrate(
             n_grid_ss=n_grid_ss,
             gdna_prior=prior,
             intron_prior=lam_factor,
-            reference_location=reference_location,
             # ⭐⭐ **MESSAGE PROPAGATION SHIPS ON (`message_propagation = True` since 2026-08-18), with
             # `message_policy = "relay"` installing `RelayPolicy`; `SilentPolicy` is the OFF state and
             # `CurrencyPolicy` the third option — one config value IS the A/B.** This sentence used to

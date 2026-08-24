@@ -606,13 +606,847 @@ keep exactly where exons are blind. The relay's deferred-stratum edge shrank +20
 
 ⛔ Next work, in order: ① the stranded × capture-ON dissection (per rung, per slot, bias-vs-precision
 columns); ② the unstranded × capture-OFF exon cell's dissection; ③ then 4g — the landscape fit on
-solved slots only, where the estimate/bound grades choose the training set.
+solved slots only, where the estimate/bound grades choose the training set. ⭐ ① and ② are DONE and
+their data is §H.4 below; ③ is the next piece of work.
 
 **Implementation shape:** the new message POLICY on the existing backbone (the `the-one-hop` ruling) —
 emission licensed only FROM solved-substrate slots TOWARD adjacent unsolved ones, `SilentPolicy`
 behaviour elsewhere; the forward scan carries the rightward fan-out, the backward the leftward, so the
 two existing scans cover the depth-2 pattern with no backbone change. Stage 3 first; falsification
 test first; test chromosome before the ladder; both zero controls on every rung.
+
+### §H.4 ⭐⭐⭐ THE RESIDUAL DISSECTION (2026-08-23) — THE DATA. NO MECHANISM PROPOSED
+
+⛔ This section is the deliverable the owner's frame (§H.3) asked for, and it stops at the data. Nothing
+in `src/` was changed; every arm below patches a DELIVERED message or reads a recorded one.
+
+⭐⭐ **THE SURVEY IS RE-DERIVABLE, NOT QUOTED**: it is now `pass0_claimed_ab.py --dissect`, which
+prints readings ①–④ below off one cached payload, under two gates — the recorded `deliver` must
+belong to the sweep the debug capture describes, and the per-slot `f_g·count` must BE
+`mass_gdna_region` rather than merely agree with it. `--self-test` 15/15, and its perturbation sweep
+closed two fixture holes it found on the first pass (a `gx == rx` fixture cannot see a dropped SOURCE
+frame; a direction-only spliced check cannot see `U` at all, because `U` cancels between the two
+unspliced routes — both are now pinned to hand-derived values). ⭐ `--dissect --sweep` adds readings
+**⑤** and **④b**, which price the candidate DIRECTIONS rather than describing the tool, and cost ~15
+solves — so they are opt-in, and everything in this section is re-derivable from one command.
+
+#### ① WHERE IT IS — per rung, never pooled (stranded × capture-ON, claimed exons, silent → fanout)
+
+| rung | silent | fanout | | DELIVER | REFUTE |
+|---|---|---|---|---|---|
+| `g00` | 1,749 | **1,344** | −23 % — a WIN at the zero control | 0 → 0 | 1,749 → 1,344 |
+| `g05` | 10,344 | 12,419 | +20 % | 325 → 361 | 10,020 → 12,058 |
+| `g50` | 18,042 | 40,528 | +125 % | 345 → **201** | 14,003 → 35,068 |
+| `g98` | 18,032 | 28,370 | +57 % | 22 → 27 | 18,010 → 28,344 |
+
+⭐ **The damage is REFUTE-ONLY at every rung** — slots carrying real RNA. DELIVER (certified pure gDNA)
+is flat or IMPROVED. The regression is not monotone in gDNA: it peaks at `g50`.
+
+#### ② WHAT DOES IT — stage 4's λ transfer, and demonstrably nothing else
+
+* **`fanout_no_exon_lam` is EXACTLY EQUAL to silent** at the exon population, on every rung and at both
+  refit settings. Stage 3's boundary message is provably inert here.
+* The one-sided branch is worth ±8 fragments of 22,486. The two-sided λ transfer is the whole thing.
+* The refit is not the amplifier: the gap is +24,860 at `calib_refit_iters = 0` and +22,486 at 3.
+* All **+22,506** of the added error sits on the **4,548** exons that receive a λ message; the other
+  5,614 claimed exons move by **−20** in total.
+
+#### ③ THE TWO HALVES, SEPARATELY MEASURED — one table, one basis (`--dissect`, `calib_refit_iters = 0`)
+
+Everything below is mass-weighted over the exons that HEAR a λ claim. ⭐ `median |z|` is the only
+column that judges the precision against ANYTHING: `z = (lam_mode − lam_true)·sqrt(lam_prec)` at
+interior-truth exons, and an honestly-calibrated claim reads **0.674**.
+
+| condition | own `\|f−true\|` | message `\|f−true\|` | signed (msg) | `lam_prec/tau_lam` med | median `\|z\|` ⇒ over-claim | gDNA route |
+|---|---|---|---|---|---|---|
+| `g05` ss.99 ON | 0.0095 | 0.0234 | −0.018 | 7.8 | 2.19 ⇒ **11×** | −0.98 / −0.80 |
+| `g50` ss.99 ON | 0.0131 | **0.1186** | **−0.110** | 14.9 | 4.50 ⇒ **45×** | −0.96 / −0.98 |
+| `g98` ss.99 ON | 0.0128 | 0.0963 | −0.096 | 9.7 | 2.58 ⇒ **15×** | −1.01 / −1.01 |
+| `g50` ss.99 OFF | 0.0127 | 0.0171 | +0.001 | **47.5** | 1.76 ⇒ 6.8× | **−0.07 / −0.09** |
+| `g50` ss.50 OFF | **0.4640** | 0.0183 | +0.004 | — (own τ ≡ 0) | 1.48 ⇒ 4.8× | **−0.01 / −0.06** |
+
+⭐⭐⭐ **READ THE LAST TWO ROWS AGAINST THE FIRST THREE — they are the whole verdict.** The stranded
+capture-OFF row carries the HIGHEST precision ratio on the panel (47.5, the message outweighing the own
+side at 94.7 % of slots) and the fan-out **WINS** that cell at `refits = 0` (6,671 against silence's
+7,473). ⛔ **So a dominant message is not itself the fault; a dominant WRONG message is.** The bias
+column, not the precision column, is what tracks the sign of the outcome.
+
+⚠ The own side's effective precision was also measured directly rather than assumed — from the
+observed posterior shift, `t_eff = p·(m − λ₁)/(λ₁ − λ₀)`, which agrees with `region_init.tau_lam` to a
+median 1.9×, so `tau_lam` is a sound and conservative proxy. On that footing the message wins the fuse
+at 77 % of slots at `g50` ON — but **at the top 2 % of slots by error the ratio is 0.83**, i.e. the
+message LOSES the fuse there and still does the damage, because a claim off by −0.11 in `f_g` carried
+at even half weight moves a 10⁴-fragment exon by hundreds. ⛔ A precision repair alone cannot reach the
+mass.
+
+#### ④ WHY THE CLAIM IS WRONG — the reframe does NOT cancel capture, and that is measured
+
+Push the flank's **CERTIFIED** composition through the transfer instead of its solved one, and ask how
+much of the delivered bias survives a PERFECT source. `delivered f_g − exon truth`, per side:
+
+| condition | SOLVED source | CERTIFIED source | share of the bias the FRAME owns |
+|---|---|---|---|
+| `g05` ss.99 ON | −0.021 / −0.020 | −0.014 / −0.013 | **66 % / 62 %** |
+| `g50` ss.99 ON | −0.110 / −0.122 | −0.063 / −0.073 | **57 % / 60 %** |
+| `g98` ss.99 ON | −0.107 / −0.107 | −0.020 / −0.022 | 19 % / 20 % |
+| `g50` ss.99 OFF | −0.001 / −0.000 | +0.003 / +0.003 | both ≈ 0 |
+
+⭐⭐ **At the two rungs where the claim does most damage, a PERFECT source composition removes only
+about 40 % of the delivered bias — the majority belongs to the frame.** At `g98` the ordering reverses
+and the source's own error dominates, so the frame is not the whole story at every rung.
+
+⛔ **A CORRECTION, recorded because it was nearly written into this document.** A first pass measured
+this on the slots where a given SIDE's transfer was live rather than on the slots that actually HEAR a
+claim, and on that population the certified source read WORSE than the solved one — which would have
+supported "the two errors cancel, so fixing the boundary solve first makes the exon delivery worse."
+**That is false**; it does not survive on the population the verdict is about, and `--dissect` now
+prints both transports side by side so the comparison cannot be made on a private slot set again.
+(`TRAPS: the-intermediate-is-not-the-deliverable`, in its population costume.)
+
+The `gDNA route` column in ③ is `log(transported ρ_g / the exon's own certified ρ_g)` per side.
+⭐⭐⭐ **It sits at `e^{−1.0}` — 2.7× too LOW — at EVERY capture-ON rung regardless of gDNA level, and
+at `e^{−0.07}` capture-OFF.** The merged RNA route moves far less (−0.12 to −0.34), so the net odds
+run ≈ 2.2× short of gDNA. **The geometric frame is sound; the deficit is capture and only capture.**
+
+⛔ **The reason is structural: `eff_gdna` and `eff_rna` carry NO capture term.** `region_geometry`'s
+`divisor` is `contained_eff_length` at a REGION and `crossing_eff_length` at a BOUNDARY, both purely
+geometric — `capture_eff_length.py` is a TRANSCRIPT-level EM length for `assemble_priors`, not the
+per-slot calibration opportunity. So §H.2's "the absolute level cancels, which is what makes the
+transfer capture-robust" holds only under a UNIFORM capture pull, and a probe-covered exon interior
+against an intron-spanning flank crossing is not uniform — the two routes are pulled differently
+because the sj route's molecules live on the spliced (fully exonic, fully probed) template while the
+crossing route's straddle into unprobed intron.
+
+⚠ **`hop_currency.py`'s recorded 5.1 % / 10.2 % excess badly understates this hop for this
+population** — measured here it is ~1.0 nat on the gDNA route. Do not quote the recorded figure as this
+hop's drift.
+
+#### ④b A NAMED, SEPARABLE SLICE OF THAT BIAS — the reframe constant, built from FITTED fl PMFs
+
+`K = log(E_rx·E_gc) − log(E_gx·E_rc)` enters `lam_e` with coefficient **exactly 1** and carries **no
+variance term at all**, and all four effective lengths come from FITTED fragment-length pmfs. Rebuild
+the four from the simulator's own post-capture pmfs and deliver the difference as a pure mode shift:
+
+| condition | fitted gDNA / RNA pmf mean | truth | median `dK` | share of the regression |
+|---|---|---|---|---|
+| `g05` ON | 254.04 / 221.53 | 240.53 / 229.36 | **+0.495** | 13.9 % |
+| `g50` ON | 254.81 / 221.37 | 240.40 / 229.23 | **+0.467** | 21.1 % |
+| `g98` ON | 254.85 / 221.61 | 240.43 / 229.47 | **+0.504** | 24.1 % |
+| `g50` OFF | 216.58 / 204.09 | 216.67 / 212.66 | **+0.132** | n/a — the fan-out WINS this cell |
+
+⭐ Under capture the fitted gDNA length model runs **6.0 % LONG** and the RNA one **3.4 % SHORT**;
+capture-OFF the gDNA fit is exact to 0.04 %. So the mis-fit is itself capture-specific, and `K`
+amplifies it into a stable **~0.5-nat shove toward RNA** at every capture-ON rung — a fifth of the
+regression, in a term that claims no uncertainty whatsoever. ⛔ This is a DIAGNOSTIC: a truth pmf does
+not exist at run time. It prices the frame constant's error; it does not propose reading truth.
+
+#### ④c THE DELTA METHOD IS RUN ~175× OUTSIDE THE DOMAIN ITS GATE VALIDATES
+
+`test_flank_to_exon_variance_matches_monte_carlo` pins `tau_b = 30, U = 400, S = 250`. Production runs
+at **`tau_b` median 0.171, `U` median 51, `S` median 4**. Re-running that same brute force at the
+production regime:
+
+| regime | delta λ | MC λ | `1/tau` (delta) | MC var | MC/delta |
+|---|---|---|---|---|---|
+| the GATE's | −0.791 | −0.796 | 0.01369 | 0.01375 | **1.00** |
+| `tau_b=0.17 U=51 S=4` | 1.563 | 1.134 | 1.055 | 1.793 | **1.70** |
+| `tau_b=0.17 U=51 S=333` | −2.440 | −2.735 | 0.0686 | 0.4876 | **7.11** |
+| `tau_b=0.41 U=103 S=333` | −1.657 | −1.688 | 0.01313 | 0.02052 | 1.56 |
+| the tail, `tau_b=4.2` | −2.927 | −2.928 | 0.002597 | 0.002601 | 1.00 |
+
+⛔ **The linearisation biases the MODE as well as the variance** (1.563 against 1.134; −2.440 against
+−2.735), so this is not only a precision fault. ⭐ The gate is honest about what it tests and blind to
+where the code runs — `TRAPS: a-falsification-test-needs-perturbation` applied to the FIXTURE's
+operating point rather than to its assertions.
+
+⚠ **④c accounts for only 1.6–7× of ③'s 44× over-claim; the remainder is the frame error of ④/④b,
+which no sampling model contains.** The own side, by the same reading, is honest to slightly
+conservative (median |z| ≈ 0.64).
+
+#### ④e WHERE THE DAMAGE SITS STRUCTURALLY
+
+**84.1 % of the added error (+18,916 over 3,351 exons) is on SINGLE-complete-flank exons**; the
+two-sided fuse carries +3,590 over 1,197. ⛔ Any account resting on the two-flank fuse is capped at
+16 %. ⚠ And the message-receiving exons are **not** RNA-dominated as a population: certified `f_g` is
+**0.515 count-weighted, 0.474 error-weighted** at `g50` ON — capture puts probes on exons, so at 50 %
+gDNA the exon is where the gDNA is. The same exons sit at median 0.038 capture-OFF, which is the other
+half of why the identical machinery wins there.
+
+#### ⑤ NEITHER HALF ALONE CLOSES IT (sweep at `calib_refit_iters = 0`; the silent floor is 17,359)
+
+| `lam_prec ×` | 1 | 0.3 | 0.1 | 0.03 | 0.01 | 0 |
+|---|---|---|---|---|---|---|
+| claimed-exon error | 42,219 | 27,595 | 20,641 | 17,758 | **17,108** | 17,388 |
+
+| `lam_mode +` (nats) | 0 | 0.5 | **0.8** | 1.0 | 1.5 |
+|---|---|---|---|---|---|
+| claimed-exon error | 42,219 | 30,543 | **27,810** | 28,883 | 37,235 |
+
+* **Precision alone**: a **100×** cut is needed merely to reach parity, and the best attainable is
+  **−1.4 %** against silence. Honest precision makes this message INAUDIBLE, not useful.
+* **A scalar bias correction alone**: the optimum is **+0.8 nats**, which independently reproduces the
+  measured median odds deficit — but it is still **+60 %** over silence, because the deficit varies
+  slot to slot and a scalar cannot fix a scattered error.
+* ⛔ `TRAPS: a-variance-cannot-fix-a-bias`, measured at this hop, in both directions.
+
+#### ⑥ THE IMPLEMENTATION IS CORRECT — four plausible bug sites re-derived, none defective
+
+* **the sj FACE.** A LEFT flank reads `sj_count_hi`, and that is right: `jc_hi` is filed at the
+  ACCEPTOR (`region_geometry` fills `jc_lo` at the donor, `jc_hi` at the acceptor), and a molecule
+  splicing INTO an exon arrives at its left boundary as an acceptor. The RIGHT flank mirrors.
+* **`S_all[src, col[rows]]`.** `rows = arange(n)`, so this is `S_all[src, col]` — the SOURCE
+  boundary's flux in the DESTINATION exon's strand column. That is the intended pairing; a licensed
+  exon is single-stranded so `col` is well defined, and every other slot is masked out.
+* **the delta-method Jacobians.** `∂λ_e/∂λ_b = (1−f) + f·ρ_ν/ρ_r`, `∂λ_e/∂log U = w_μ`,
+  `∂λ_e/∂log S = −w_μ` — all three as coded.
+* **the one-sided Jacobian.** `x = log(1−f)`, `dx/dλ = −f`, so `precision(x) = τ_λ/f_g²` — as coded.
+* **the precision compose does not double-count.** A boundary's own `tau_lam` enters its composed
+  state once; the stage-3 branch reads RAW region claims at boundary destinations (regions are never
+  written by the scan), and an exon's two flanks are distinct slots.
+
+⭐⭐ **So the defect is in the model's PREMISE, not in the new code.**
+
+#### ⑦ THE UNSTRANDED × CAPTURE-OFF CELL IS A DIFFERENT MECHANISM, and smaller than it looked
+
+Per rung, claimed exons, silent → fanout: `g00` 192,486 → **21,836** (8.8× better); `g05` 1,922 →
+2,024 (+5 %); `g50` 6,415 → 7,755 (+21 %); `g98` 7,983 → **6,193** (−22 %). ⭐ **The recorded "+21 %" is
+ONE RUNG**; over the three contaminated rungs the stratum is 16,320 → 15,972, a small net WIN.
+
+⛔ **At κ = ½ `strand_evidence`'s `disc = 4·max(0, (κ−½)² − σ²_d)` is IDENTICALLY ZERO, so `tau_lam` is
+EXACTLY 0 at all 5,063 message-receiving exons** — the exon has no own composition evidence on λ at
+all, and "the message's precision is too high" is not the complaint here. **Here the message is the
+ACCURATE voice**: mass-weighted `|f_g − true|` is **0.0183 for the message against 0.4640 for the own
+solve** (signed +0.433 — the own side floods these exons with phantom gDNA). The message is **25×
+more accurate** than what it displaces.
+
+**The competitor is the REFIT.** At `calib_refit_iters = 0` silent reads 268,498 and the fan-out
+**20,809 — 12.9× better**; at 3 refits silent falls to 6,415 and the fan-out only to 7,755. The
+refitted gDNA prior imputes these exons better than the flank message does, and the message DISPLACES
+it. ⭐ The one-sided bound is a small WIN here (20,809 against 22,059 with it muted) — the opposite of
+its stranded irrelevance. ⭐⭐ **The same pattern appears at STRANDED × capture-OFF `g50`**: fan-out
+6,671 against silence's 7,473 at `refits = 0`, and 5,935 against 5,460 at three. So a message and a
+refitted prior are **two imputations competing at the same slot with nothing arbitrating them** —
+a design question in its own right, independent of the capture bias.
+
+The drift is the same mechanism at a tenth the size: gDNA route median −0.34 nats capture-OFF.
+
+#### ⑧ WHAT IS COMMON TO BOTH RESIDUALS, in one sentence
+
+`flank_to_exon_lambda`'s variance prices SAMPLING NOISE only — it is a statement about the source's
+counts and never about whether the flank's composition is the exon's — so the delivered precision is
+unrelated to the error the claim actually carries. In the stranded stratum that beats an accurate
+strand model; in the unstranded one it beats an accurate refitted prior. **One missing term, seen
+through two different competitors.**
+
+⚠ **And the frame's share is rung-dependent, which a single ruling has to accommodate**: at `g05` and
+`g50` capture-ON the frame owns ~60 % of the delivered bias and a perfect source would not rescue the
+cell, while at `g98` the source's own error owns ~80 % of it. So neither "fix the frame" nor "fix the
+source" is sufficient alone, and ④'s table is the thing to re-run after any change to either.
+
+### §H.5 ⭐⭐⭐ THE PRECISION CHAIN, THE REFERENCE PRIOR, AND WHAT A DAMPENER WOULD DO (2026-08-23)
+
+The owner's follow-up to §H.4, answered against the code. ⛔ Still no mechanism in `src/`.
+
+#### ⓪ THE PROBE MECHANISM, MEASURED ON THE PANEL — and it is NOT mainly the splice-junction case
+
+⭐⭐⭐ **Every probe base on this panel lands in an EXON; introns and intergenic carry EXACTLY ZERO.**
+Measured directly off `reference/capture_panel.bed` intersected with the index's region signatures:
+
+| region class | regions | bp | probe bp | coverage | regions with any probe |
+|---|---|---|---|---|---|
+| intergenic + the three intronic signatures (0, 4, 8, 12) | 11,117 | 91,945,594 | **0** | **0.00 %** | **0.0 %** |
+| the twelve exonic signatures | 24,018 | 5,665,613 | 1,568,781 | 23–50 % | 33–59 % |
+
+⛔ **So an intron|exon boundary is a PROBE CLIFF by construction.** An unspliced crossing fragment
+straddles into a region with no probe at all, while the exon interior it speaks to may be a quarter
+probe-covered at a binding weight of ~1200:1 against off-target. The flank's gDNA density is therefore
+systematically below the exon interior's — which IS the measured `e^{−1.0}` gDNA-route deficit, and it
+does not require a splice-junction-spanning probe at all.
+
+⚠ **The panel DOES express the owner's case 3** — probes are tiled in TRANSCRIPT coordinates, so
+**3,348 of 13,824 (24.2 %, and 24.2 % of probe bp) are multi-block in genomic space**, and the sampler
+gives such a probe a `gdna_split_penalty` on the gDNA axis while mature RNA keeps full binding. But
+matched on local probe fraction the capture-attributable deficit is **larger where case 3 is ABSENT**
+(single-block flanks ≈ −0.76 nats against SJ-spanning ≈ −0.41). ⭐ **So case 3 is real and adds to the
+bias, but case 1's converse — probes inside exons, none in introns — is the dominant term on this
+substrate.** ⛔ That matters for scope: a fix aimed only at splice-junction probes would address the
+smaller half.
+
+#### ① HOW THE DELIVERED PRECISION IS BUILT — three steps, and each one's assumption
+
+**STEP 1 — the intron's own λ precision** (`region_init.build_region_init`, `strand_evidence`):
+
+    tau_lam = [single-strand] I_strand  +  I_density
+    I_strand = N_eff · disc · [f_g(1−f_g)]² / (4 p(1−p)),   p = kappa + f_g(½−kappa)
+    N_eff    = N / (1 + (N−1)·od_r)        disc = 4·max(0, (kappa−½)² − sigma²_d)
+
+*Assumes*: the strand counts are the only composition evidence, and the overdispersed effective count
+is the honest sample size. **This step is sound** — §H.4 ③ measures the own side at median |z| ≈ 0.64,
+honest to slightly conservative.
+
+**STEP 2 — the compose at the flank** (`messages/fanout.py`, `_FanOutRelay.step`):
+
+    tau_b = tau_intron + tau_own(boundary)        lam_b = precision-weighted mean
+
+*Assumes*: the intron's contained fragments and the boundary's unspliced crossings are two
+**independent measurements of ONE composition**. The fragment sets are disjoint, so independence holds;
+what is asserted beyond that is that the two slots have the SAME composition. Precisions ADD, so the
+composed claim is **more confident than either input**.
+
+⭐⭐ **AND THIS STEP IS HONEST — measured, not argued.** Scoring the composed `(lam_b, tau_b)` against
+the BOUNDARY's own certified `true_f_g` gives median |z| ≈ **0.80** (L/R), i.e. an over-claim of only
+**1.4–1.5×** capture-ON. ⛔ **None of the 44× exists before the transfer**, which localises the entire
+defect to STEP 3 and retires "the compose adds precisions it should not" as a lead.
+
+**STEP 3 — the transfer** (`flank_to_exon_lambda`), the delta method on three raw statistics:
+
+    Var(lam_e) = a²/tau_b  +  w_mu²·(1/U + 1/S)
+    a    = (1−f) + f·rho_nu/rho_r  = d(lam_e)/d(lam_b)          w_mu = rho_mu/rho_r
+
+*Assumes*: the only uncertainty is SAMPLING NOISE in `lam_b`, `U` and `S`.
+
+#### ①b ⭐⭐⭐ THE INVARIANT THE SHIPPED RELAY OBEYS AND THE FAN-OUT BREAKS
+
+**Every precision transform in `RelayPolicy` moves precision in exactly one direction — DOWN.**
+`_damp(p, s²) = 1/(1/p + s²)` (`relay.py:651`), `_damp_v(p, v) = p/(1+p·v)` (`relay.py:655`), `_dv`
+(`relay.py:875`), `_dv_arr` (`relay.py:914`), and `mismatch_deflate` (`variance.py:531`) are all
+`p ↦ p/(1 + p·v) ≤ p`. The only places precision RISES are additive fusions of genuinely INDEPENDENT
+evidence — the two neighbours at `relay.py:1118`, the sj count at `relay.py:892`.
+
+⛔⛔ **`flank_to_exon_lambda` is the message layer's ONLY precision-AMPLIFYING single-source transform**:
+`tau_e = tau_b/a²` with `a → 0` gives `tau_e/tau_b` a p90 of ~210 capture-ON. ⭐ **So the fan-out did not
+merely omit a deflation — it introduced an amplifier the shipped relay never contains, and then omitted
+every damper the relay uses to keep such a thing safe.** Stated as a design invariant the backbone could
+enforce: *a single-source transform may only REDUCE a precision; only independent evidence may add.*
+
+#### ② WHY IT IS TOO HIGH — the failing assumptions, ranked
+
+1. ⭐⭐⭐ **THERE IS NO PREMISE-VARIANCE TERM AT ALL.** Nothing in the chain prices "the flank's
+   composition is only approximately the exon's", which §H.4 ④ measures at ~1 nat on the gDNA route
+   capture-ON. ⛔ **`fanout.py` imports NOTHING from `messages/variance.py`** — not `transfer_logvar`,
+   not `mismatch_deflate`, not `composition_logvar` — while `relay.py` and `currency.py` both do. It is
+   the only SPEAKING policy with no premise-variance law. That is the defect stated structurally, and
+   it is most of the over-claim. ⚠ **And `transfer_logvar` is NOT the missing law**: measured at this
+   hop it is ~0.033 nats² (sd 0.18 nats) against a delivered composition error of median ~1.07 nats —
+   **34× too small to touch it**, because it prices the SAMPLING uncertainty of the frame step and
+   never its SIZE.
+2. ⭐⭐ **THE DELTA METHOD IS EVALUATED AT A POINT THE SOURCE IS NOWHERE NEAR CONFIDENT ABOUT.**
+   Since `rho_nu/rho_r = 1 − w_mu`, `a = (1−f) + f(1 − w_mu)`, so **`a → 0` iff `f → 1` AND `w_mu → 1`
+   JOINTLY** — a gDNA-saturated flank whose RNA route is all sj flux (measured at `a < 0.1`: median
+   `f` = 0.991, median `w_mu` = 0.998, both conditions always together). Then `tau_e = tau_b/a²`
+   explodes: `a` reads p5 **0.0017**, p25 0.082, p50 0.461; `tau_e/tau_b` reads p50 3.25, p75 35.5,
+   p90 **214**. Meanwhile `sd(lam_b) = 1/√tau_b` is 2–4 nats. §H.4 ④c prices the linearisation error at
+   1.6–7× and shows it biases the MODE too.
+3. ⭐⭐ **NOTHING CAPS THE CLAIM BY THE INFORMATION BEHIND IT.** The source flank holds a median 51
+   unspliced crossings and 4 sj fragments; the destination exons carrying the error hold 10⁴. No term
+   in the chain prevents ~55 fragments from out-weighing 10⁴.
+4. ⚠ **A COORDINATE ASYMMETRY, and it is real rather than cosmetic.** The exon's own λ precision
+   carries the Jacobian `[f_e(1−f_e)]²`, which crushes it as `f_e → 0` or `1`; the transferred `tau_e`
+   carries no equivalent crush. So the same physical evidence buys the message far more weight than it
+   buys the exon, purely because of where each sits in the λ coordinate.
+5. ⚠ **THE FRAME CONSTANT `K` CARRIES COEFFICIENT 1 AND ZERO VARIANCE** (§H.4 ④b) — its four effective
+   lengths are estimated, and their error is a bias that never confesses.
+
+⛔ **Assumptions 1 and 5 are missing INFORMATION; 2 and 3 are missing CEILINGS; 4 is the coordinate.**
+A dampener addresses 1 (and, incidentally, 5, because it reads the OUTCOME rather than the cause). It
+does **not** address 3, and it interacts badly with 4 — see ④ below.
+
+#### ③ THE REFERENCE PRIOR AT STAGE-3 AND STAGE-4 SLOTS — and 0.75 is DERIVED, not a magic number
+
+`simplex_logodds.structural_reference_location` is four lines:
+
+    a = b = _JEFFREYS_REF                                # ½
+    m = min((a + 1)/(a + b + 1), sigmoid(L))             # = 0.75
+    mature = mrna_active_pos | mrna_active_neg
+    return where(mature, _NEUTRAL_LOCATION, m)           # ½ where mature, 0.75 elsewhere
+
+⭐ **`0.75` is the posterior mean after ONE pseudo-observation of gDNA on the reference's own Jeffreys
+exponents** — `(a+1)/(a+b+1)` at `a = b = ½` — so it is a composition mean derived from the reference's
+own parameters, in the same units, introducing no new number, and it moves automatically if
+`_JEFFREYS_REF` does. Its STRENGTH on the log-odds scale is `log(m/(1−m)) = log 3 = 1.0986` nats (3:1),
+and the strength never scales with data. The swept alternative `m = σ(L)` (9.31 nats) was measured
+**worst of all** at the REFUTE obligation, and the ladder cannot rank strength because it scores
+DELIVER alone.
+
+| stage-0 class | reference LOCATION | strength |
+|---|---|---|
+| `intergenic` REGION | 0.75 (¬mature) | 1.0986 nats |
+| `ss_intron_region` | ⭐ the **MEASURED** background `ρ_bg·E_g / M`, clipped to the lattice cap (stage 2, `measured_reference_location`, default ON) | one pseudo-fragment |
+| ⭐ `ss_intron_boundary` — **STAGE 3's destinations** | **0.75** — `measured_reference_location` is REGIONS ONLY (a measured refusal, 2026-08-26: the boundary-inclusive form regressed stranded × capture-ON on both substrates) | 1.0986 nats |
+| ⭐ `solvable_exon` — **STAGE 4's destinations** | **NONE.** An exon is `mature`, so it gets `_NEUTRAL_LOCATION = ½` and **the reference term vanishes identically** | zero |
+
+⭐⭐ **So stage 4's destinations receive no reference at all**, which is worth stating plainly because it
+changes how the unstranded cell must be read.
+
+**THE OWNER'S "LUCKY GUESS" HYPOTHESIS for unstranded × capture-OFF `g50` — REFUTED as stated, but the
+intuition is right about the mechanism.** It cannot be the reference: exons get none. At κ = ½ the
+strand λ-term is identically zero and the intron factory does not reach exons, so a claimed exon's own
+λ evidence is **exactly 0** (§H.4 ⑦, measured at all 5,063 message-receiving exons) — and what solves
+them is the **REFITTED gDNA prior**. §H.4 ⑦'s numbers are the proof: at `calib_refit_iters = 0` the
+silent arm reads 268,498 and three refits take it to 6,415, a **42×** rescue, while the fan-out moves
+only 2.7×. ⭐ So the owner is right that something other than the exon's own data is solving that cell
+accurately and that the message displaces it — it is the refit, not the reference constant.
+
+#### ④ WHAT THE SHIPPED DAMPENER WOULD DO — measured, as a DIAGNOSTIC arm
+
+`messages.variance.mismatch_deflate` is the DerSimonian–Laird between-source mismatch variance, applied
+by the relay on the λ axis at `relay.py:1029`:
+
+    G   = lam_msg − lam_own                     (the observed composition gap)
+    b̂²  = max(0, G² − v_msg − v_own)
+    p   = 1/(v_msg + b̂²) = 1/max(v_msg, G² − v_own)
+
+⭐ **Derived, not tuned — no magic number** — and its closed form states the safety property exactly:
+*a message may out-weigh the destination's own belief only when it agrees with it to within
+`√2·σ_own`.* Its three regimes fall out of `v_own` alone with no gate: `v_own = ∞` (no own evidence)
+⇒ `b̂² = 0` ⇒ the message passes UNTOUCHED; `v_own` finite ⇒ agreement barely moves it and conflict
+kills it; `v_own = 0` ⇒ the full `G²` is charged.
+
+Deflating the STAGE-4 exon claim only, claimed-exon misplaced gDNA fragments:
+
+| condition | silent | fanout | + deflate (exon only) | vs silent |
+|---|---|---|---|---|
+| `g00` ss.99 ON | 1,749 | 1,344 | **1,344 — untouched** | −23.1 % |
+| `g05` ss.99 ON | 10,344 | 12,419 | **9,239** | **−10.7 % — a WIN** |
+| `g50` ss.99 ON | 18,042 | 40,528 | **19,214** | **+6.5 %** (was +125 %) |
+| `g98` ss.99 ON | 18,032 | 28,370 | 24,117 | +33.7 % (was +57 %) |
+| `g50` ss.99 OFF | 5,460 | 5,935 | 5,632 | +3.2 % (was +8.7 %) |
+| `g50` ss.50 OFF | 6,415 | 7,755 | **7,755 — untouched** | +20.9 % |
+| `g00` ss.50 OFF | 192,486 | 21,836 | **21,836 — untouched** | −88.7 % |
+
+⭐⭐⭐ **Both zero controls and the entire unstranded stratum are BYTE-IDENTICAL**, for the structural
+reason the docstring gives: `τ_λ ≡ 0` at κ = ½ ⇒ `v_own = ∞` ⇒ `b̂² = 0`. The cells the fan-out wins
+cannot be harmed by this term.
+
+⛔ **Deflate the STAGE-4 claim ONLY.** Applying it to the stage-3 boundary claim as well costs boundary
+wins (`g50` OFF boundaries go 20,886 → 23,480 against silence's 25,561; `g98` ON 52,127 → 59,187), and
+that is principled rather than empirical: stage 3's premise is CERTIFIED by the stage-0 matrix 32/32,
+stage 4's is the one that fails under capture.
+
+⛔⛔ **IT IS NOT A COMPLETE FIX, AND THE LIMIT IS STRUCTURAL.** `g98` keeps most of its residual because
+the DL test is RELATIVE: it fires on `G² − v_own`, and at `g98` the exon's own `f_g → 1` makes
+`I_strand ∝ [f_g(1−f_g)]²` collapse, so `v_own → ∞` and `b̂² = 0` — **the dampener is disabled exactly
+where failing assumption ④ (the coordinate crush) bites hardest.** The two failure modes interact, and
+closing `g98` needs the missing INFORMATION CEILING (assumption 3), not a better disagreement test.
+
+### §H.6 ⭐⭐⭐ THE REFERENCE, SWEPT ON THE CURRENT PANEL (2026-08-23) — a CONSTANT is the wrong shape
+
+The owner's objection: `m = 0.75` at an intron|exon BOUNDARY is indefensible, because a non-exonic slot
+has no annotated RNA and the only data-free prior there is 100 % gDNA — on the lattice, the highest
+representable point `σ(L)`. ⛔ That form was swept and REFUTED once, but on a substrate holding
+`nrna = 0`, and `simplex_logodds.py`'s own docstring names the falsification: *re-measure on a panel row
+with `nrna > 0`.* **The sparse-nascent panel is that row, so the sweep is now runnable — and it was run.**
+
+⚠ **The first run of this sweep was VOID and the reason is worth carrying**: `rigel.calibration.__init__`
+rebinds the name `calibrate` to the FUNCTION, so `import rigel.calibration.calibrate as CAL` yields a
+function and patching it is a silent no-op; and `calibrate.py` binds
+`structural_reference_location` into its own namespace at import, so patching `simplex_logodds` alone
+does nothing either. The arm reported "no effect at any m" — a perfect
+`TRAPS: an-ablation-that-never-ran` signature. The fixed harness asserts its patch target.
+
+**Claimed `ss_intron_boundary` slots, `Σ|est−true|` in fragments, `SilentPolicy` (so the reference is
+isolated from the message), reference location swept at the ¬mature slots:**
+
+| condition | certified true `f_g` | none (½) | 0.75 | 0.90 | 0.99 | grid `σ(L)` | argmin |
+|---|---|---|---|---|---|---|---|
+| `g00` ss.99 ON | 0.000 | **714** | 975 | 1,348 | 2,495 | 7,733 | **none** |
+| `g00` ss.50 OFF | 0.000 | **48,363** | 100,297 | 136,537 | 155,919 | 157,662 | **none** |
+| `g05` ss.99 ON | 0.662 | 27,529 | 22,714 | **22,363** | 26,282 | 38,557 | **0.90** |
+| `g50` ss.50 OFF | 0.713 | 33,680 | 31,121 | **29,256** | 57,609 | 78,445 | **0.90** |
+| `g50` ss.99 ON | 0.974 | 42,557 | 38,007 | 32,385 | **26,026** | 28,799 | **0.99** |
+| `g98` ss.99 ON | 0.999 | 54,866 | 49,374 | 40,117 | 14,624 | **1,219** | **grid** |
+
+⛔⛔⛔ **THE TABLE ABOVE IS CENSORED ON THE ENTIRE LOWER HALF OF THE LATTICE, AND THAT CHANGES THE
+CONCLUSION.** Its floor is `m = ½` (zero nats), and at the zero controls the required location is far
+BELOW it. Adding `σ(−L)` — the lattice's other end, "presume pure RNA" — to the same sweep:
+
+| condition (silent, refits = 3) | `σ(−L)` | 0.11 | ½ | 0.75 | `σ(+L)` |
+|---|---|---|---|---|---|
+| `g00` ss.50 OFF | **5** | 4,294 | 48,363 | 100,297 | 157,655 |
+| `g00` ss.99 ON | **2** | 345 | 714 | 975 | 4,526 |
+
+⭐⭐⭐ **`σ(−L)` beats "assert nothing" by 9,673× and 357×.** So "no prior wins the zero controls" was an
+artifact of the grid floor, and the corrected reading is far more interesting:
+
+⭐⭐⭐ **THE OWNER'S FORM IS RIGHT AND ONLY ITS SIGN IS DATA-DEPENDENT.** A reference that sits at a
+LATTICE EXTREME and waits to be overturned is the correct shape — it wins by three to four orders of
+magnitude where it points the right way. What is wrong is that **which extreme** is right varies: pure
+RNA at `g00`, pure gDNA at `g98`. ⛔ **And the shipped `structural_reference_location` can express
+NEITHER end — it emits only ½ or `min(0.75, σ(L))`.** That is the defect, stated exactly: not a badly
+chosen constant, but a function whose range excludes both of the answers the panel actually wants.
+
+⚠ **TWO CORRECTIONS to how this section first read, both from re-derivation on all 16 conditions.**
+① *"The argmin tracks certified truth row for row"* is TOO STRONG: argmin and the mass-weighted truth
+disagree by 0.6–5.6 nats on the interior rungs and **flip sign at `g05` capture-OFF** (mass-median
+0.0312 = −3.43 nats against an argmin of 0.90 = +2.20 nats). They corroborate in coarse direction only,
+and `_location_term`'s PROPERTY 4 licenses "m is the prior's median at ONE slot", never a
+fragment-weighted population median. ② Pooled over all 16 conditions the best single constant is
+`σ(L)` at 3.22× the per-condition optimum against the shipped 0.75's **17.57×** — so on a pooled score
+the owner's proposal is ~5.5× better than what ships. ⛔ Pooling across strata is exactly what this repo
+forbids, so that is a caveat and not a verdict — but it does mean "0.75 is safer" is false in every
+reading tried.
+
+⭐ **The premise needs one refinement too.** *"A non-exonic boundary has no annotated RNA"* is true, but
+it does not imply the slot is mostly gDNA: the unspliced population there is gDNA **+ nascent**, and at a
+5 %-gDNA library nascent is the majority of it. Certified mass-weighted `true_f_g` at
+`ss_intron_boundary`, `g05` capture-OFF: **0.1145**, with only **5.1 % of the mass** exactly pure gDNA.
+So at low library gDNA the honest data-free statement at an intron boundary is nearly the opposite of
+"100 % gDNA" — which is precisely why the location must be derived rather than asserted.
+
+**A constant of any value is the wrong SHAPE, and the range must span BOTH ends.**
+
+⭐ The derivation already exists and already ships — `density_deconv.measured_reference_location`,
+`m_i = ρ_bg·E_g,i / M_i` from the intergenic pool — and it is **REGIONS ONLY** by a measured refusal
+(2026-08-26): the boundary-inclusive form regressed stranded × capture-ON on both substrates, because
+*"under capture the intergenic rate is the wrong rate for a probe-adjacent crossing."* ⭐⭐ **§H.5 ⓪ now
+explains that refusal exactly**: every probe base is in an exon and introns carry zero, so the
+intergenic pool is the UNPROBED rate and a probe-adjacent boundary is not on it. The refusal was right
+and its cause is now named.
+
+#### THE SECOND READING — a stronger boundary reference PARTLY CANCELS the transfer's bias
+
+The same sweep under `FanOutPolicy`, at the claimed EXONS (whose own reference is identically zero, so
+this is entirely the message moving):
+
+| condition | none | 0.75 | 0.90 | 0.99 | grid | silence |
+|---|---|---|---|---|---|---|
+| `g05` ss.99 ON | 13,544 | 12,419 | 11,496 | **11,207** | 11,310 | 10,344 |
+| `g50` ss.99 ON | 41,218 | 40,528 | 39,415 | 35,555 | **34,061** | 18,042 |
+| `g98` ss.99 ON | 28,851 | 28,370 | 27,505 | 25,459 | **24,708** | 18,032 |
+
+⭐ **Pushing the boundary reference toward pure gDNA monotonically improves the fan-out's exon delivery
+under capture** — it pushes the source back against the probe cliff's RNA-ward pull. ⛔ **But it never
+approaches silence** (34,061 against 18,042), so the reference is not a substitute for the dampener; the
+two address different halves. ⚠ And it does nothing unstranded, structurally: at κ = ½ a boundary's own
+`tau_lam` is 0, so its reference never reaches the composed claim.
+
+#### THE STAGE-4 EXON REFERENCE — the owner's diagnosis, measured exactly
+
+Certified gDNA densities, and what the intergenic-transported reference would assert at each exon:
+
+| condition | exon / intergenic gDNA density | reference asserts | certified true | error |
+|---|---|---|---|---|
+| `g50` ss.50 OFF | **1.003×** | m = 0.0672 | 0.0691 | 5,998 fragments on 579,207 |
+| `g50` ss.99 OFF | 1.013× | m = 0.0672 | 0.0696 | 6,295 on 580,653 |
+| `g05` ss.99 ON | 586× | m = 0.0001 | 0.0593 | 69,676 |
+| `g50` ss.99 ON | 516× | m = 0.0010 | 0.5455 | 698,490 |
+| `g98` ss.99 ON | 497× | m = 0.0019 | 0.9834 | 1,369,418 |
+
+⭐⭐ **The owner's reasoning is confirmed to the digit.** Capture-OFF the intergenic background
+transported through the exon's own opportunity is a near-exact reference — a few percent relative on the
+composition, with no solver anywhere in it. Capture-ON it is destroyed, asserting ~0 gDNA where truth is
+0.55–0.98, because the intergenic pool is the one place the probes never reach.
+
+**SOLVED, not just predicted.** Widening the SHIPPED estimator's selector from `ss_intron_region` to
+`solvable_exon` (`dataclasses.replace`, so no arithmetic is re-implemented), scored at the claimed exons
+with the stage-4 λ claim muted so the reference is the only thing varied:
+
+* ⭐ **wins 10 of 16 conditions** — **all four `g00` rungs to EXACTLY 0 fragments** (182,112 / 61,040 /
+  4,797 / 1,735 → 0, because `ρ_bg = 0` at a zero-gDNA library makes the transport trivially exact),
+  and **all six contaminated capture-OFF rungs by 2.9–20.7 %**;
+* ⛔ **loses all six contaminated capture-ON rungs**, by +0.03 % to +571 %. The damage is
+  REFUTE-dominated (74.5 % of the added fragments) rather than concentrated on the DELIVER side, and it
+  is not a lattice-clipping artefact.
+
+⭐⭐⭐ **So the owner's proposal (A) is measured CORRECT wherever capture is off — including both zero
+controls, where it is exact — and needs a capture gate for the six ON rungs.** That is a much better
+starting point than the current NOTHING, and the gate is the only open question. ⚠ The enrichment
+detector is trusted as a BOOLEAN only (`ROADMAP` rank 3), which is exactly the amount of information
+this gate needs.
+
+### §H.7 ⭐⭐⭐ STAGE 5 — THE MISMATCH DEFLATION, LANDED (2026-08-23, owner-approved)
+
+**What changed, in one sentence:** `FanOutPolicy` now deflates its stage-4 exon λ claim by the shipped
+DerSimonian–Laird mismatch variance against the destination's own λ solve — the relay's own law, on the
+same axis, applied to the one hop that lacked any premise variance at all.
+
+⭐ **The whole change is one guarded block in `messages/fanout.py` plus one import.** No new file, no
+config flag, no constant: `message_policy` still defaults to `"relay"`, so **no shipped default moves.**
+
+**Why it is admissible, restated as the three things that make it not a knob:**
+
+1. **It is DERIVED** — DerSimonian–Laird between-source heterogeneity, `b̂² = max(0, G² − v_msg − v_own)`
+   at the OBSERVED gap `G = lam_msg − lam_own`. No constant is introduced anywhere.
+2. **It is the SHIPPED law** — `mismatch_var` defaults True in `RelaySwitches`, so this is production
+   0.7.1 code applied at a second hop, not a new mechanism.
+3. **Its safety is ALGEBRAIC, not gated** — where the exon has no own composition evidence
+   (`tau_lam = 0`, which at κ = ½ is EVERY exon) `v_own = ∞` ⇒ `b̂² = 0` ⇒ the claim passes untouched.
+
+**MEASURED, ladder, claimed slots, shipped refits (`pass0_claimed_ab.py`):**
+
+| condition | silent | fanout BEFORE | fanout AFTER | |
+|---|---|---|---|---|
+| `g05` ss.99 ON | 10,344 | 12,419 | **9,239** | +20 % → **−10.7 %, a WIN** |
+| `g50` ss.99 ON | 18,042 | 40,528 | **19,214** | +125 % → **+6.5 %** |
+| `g98` ss.99 ON | 18,032 | 28,370 | **24,117** | +57 % → +33.7 % |
+| `g50` ss.99 OFF | 5,460 | 5,935 | **5,632** | +8.7 % → +3.2 % |
+| `g00` ss.99 ON | 1,749 | 1,344 | **1,344** | *byte-identical* |
+| `g00` ss.50 OFF | 192,486 | 21,836 | **21,836** | *byte-identical* |
+| `g05` ss.50 OFF | 1,922 | 2,024 | **2,024** | *byte-identical* |
+| `g50` ss.50 OFF | 6,415 | 7,755 | **7,755** | *byte-identical* |
+| `g98` ss.50 OFF | 7,983 | 6,193 | **6,193** | *byte-identical* |
+| ⭐ `g50` ss.50 ON (deferred) | 697,694 | 169,659 | **169,659** | *byte-identical* |
+
+⭐⭐⭐ **Every unstranded condition and both zero controls are byte-identical — including the DEFERRED
+stratum, this policy's design target and largest win, unmoved to the fragment.** Boundaries move only
+through the refit (`g50` ON 40,864 → 40,962), and the stranded capture-OFF boundary win is intact
+(20,857 → 20,886 against silence's 25,561).
+
+⚠ **Test chromosome** (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank` — naming the substrate): the
+fan-out beats silence at every condition checked and on both populations, `g50 ss.99 ON` exons
+8,226 → 1,712, the deferred stratum 12,799 → 5,334, the zero control 17,055 → 7,404.
+
+**The gates** — six cases added to `tests/calibration/test_fanout_policy.py`, TWO of them verified
+failing before the code existed and four constraining it afterwards; suite 3,720 → **3,726**. The
+perturbation sweep caught **5 of 7** injected defects, and ⭐ **both misses are provably SEMANTICALLY
+INERT rather than coverage gaps**: `mismatch_deflate` forms `b̂²` from `g*g`, so flipping the gap's sign
+is the same function; and `known = isfinite(vo)` makes `v_own = 1/_EPS` and `v_own = ∞` identical
+outcomes for any `|G| ≤ 2L`, which the λ clip guarantees. Recorded rather than papered over.
+
+⛔ **WHAT THIS DOES NOT FIX, and it is structural.** `g98` keeps most of its residual: the DL test is
+RELATIVE, so it cannot fire where the destination's own λ precision has itself collapsed
+(`I_strand ∝ [f_g(1−f_g)]²` vanishes as `f_g → 1`). Closing that needs the information ceiling of
+§H.5 ②-3, whose blunt form (`tau_e ≤ tau_b`) is measured-DISQUALIFIED at the deferred stratum (§H.5 ⑤).
+
+### §H.8 ⭐⭐⭐ THE DERIVED REFERENCE — THE PLAN (2026-08-23). It is ROADMAP rank 3's rung ④, not a new track
+
+⛔ **Read this first: do NOT build a second reference mechanism.** ROADMAP rank 3 already states rung
+④'s door as *"ψ's location term widening from one scalar to `(m_lo, m_hi, w)`"* behind a
+`composition_reference` flag. §H.6 is the REQUIREMENTS SPEC for that widening, measured. The work below
+is rung ④ scoped and staged; nothing here needs new machinery invented.
+
+**THE ESTIMAND, in one line.** ψ's location wants the slot's own expected composition *before any
+solve* — "the gDNA I should expect HERE, over what I actually observe HERE" — asserted at one
+pseudo-fragment so any real evidence overturns it:
+
+    m_i  =  rho_bg(i) · E_g,i / M_i        clipped into the lattice, strength a + b = 1
+
+⭐ **That form already ships** as `density_deconv.measured_reference_location` at ss-intron REGIONs. It
+is not a new idea; the only open question is what `rho_bg(i)` may be at the OTHER claimed classes.
+
+**WHAT IS MEASURED ABOUT IT (§H.6), which is what makes this a plan rather than a proposal:**
+
+| where | with `rho_bg` = the intergenic pool | verdict |
+|---|---|---|
+| ss-intron REGION | shipped, default ON | ✅ landed |
+| `solvable_exon`, capture-OFF | wins **all six** contaminated rungs by 2.9–20.7 % | ✅ take it |
+| `solvable_exon`, **both zero controls** | **exactly 0 fragments** (`rho_bg = 0` ⇒ the transport is trivially exact) | ✅ take it |
+| `solvable_exon`, capture-ON | loses **all six** contaminated rungs, +0.03 % … +571 % | ⛔ needs an on-rate anchor |
+| `ss_intron_boundary` | 2.8–11.5× better than the constant capture-OFF, exact at `g00`; 2.5–4.3× WORSE capture-ON | ⛔ same |
+
+⭐⭐⭐ **The single cause of every capture-ON failure is named and structural: `rho_bg` is pooled over
+INTERGENIC, and intergenic carries EXACTLY ZERO probe bases (§H.5 ⓪). It is the UNPROBED rate.** A
+destination that is probe-covered is simply not on it — measured, exonic gDNA density runs ~500× the
+intergenic rate under capture and 1.003× off it. That is also the exact cause of the 2026-08-26
+regions-only refusal, which said so in words (*"the intergenic rate is the wrong rate for a
+probe-adjacent crossing"*) without yet knowing why.
+
+**THE SIX REQUIREMENTS §H.6 IMPOSES ON RUNG ④** — each one is a measurement, not a preference:
+
+1. ⭐⭐ **THE RANGE MUST SPAN BOTH LATTICE ENDS.** `structural_reference_location`'s range is
+   `{½, min(0.75, σ(L))}`; the panel wants `σ(−L)` at `g00` (which beats asserting nothing by
+   9,673×/357×) and `σ(+L)` at `g98`. **A function that cannot express the answer cannot be tuned into
+   it** — this is the defect, more than any particular constant.
+2. **`rho_bg` MUST BE ON-RATE FOR THE DESTINATION'S ENRICHMENT CLASS.** One library-wide rate cannot
+   serve a probed and an unprobed slot; that is what `(rho_0, w)` and the enrichment DETECTOR are for.
+3. **EXACT AT `g00`.** The transported form already is, structurally (`rho_bg = 0`). Any replacement
+   must keep that — it is the cheapest possible falsification and it is free.
+4. **STRENGTH STAYS ONE PSEUDO-FRAGMENT.** `_location_term`'s PROPERTY 2 — the tails are `e^(−|λ|/2)`
+   for every `m`, only the LOCATION moves — is what makes widening the range safe. ⚠ But see §H.5 ③'s
+   recorded risk: the FIRM clip already puts a large minority of intron REGIONs at ≈20.7 nats of
+   effective range, ~19× the structural reference, and that has never been priced.
+5. **REFERENCE AND MESSAGE INTERACT — PRICE THEM JOINTLY.** A stronger boundary reference monotonically
+   improves the fan-out's exon delivery under capture (§H.6), because it pushes the source back against
+   the probe cliff. Pricing either alone will mis-attribute the other.
+6. **BOTH ZERO CONTROLS ON EVERY ARM; DELIVER/REFUTE NEVER POOLED.** The whole reference question is a
+   DELIVER-versus-REFUTE trade and a pooled score picks the wrong end of it — that is precisely how
+   `m = σ(L)` was once selected and once rejected.
+
+**THE STAGING, cheapest-first, each step its own experiment:**
+
+* **④a — the EXON selector, capture-gated.** Widen the shipped estimator from `ss_intron_region` to
+  `solvable_exon`, gated OFF under capture. ⭐ Measured to win 10 of 16 conditions already; needs only
+  the gate, and the enrichment detector is trusted as exactly the BOOLEAN this requires. **This is the
+  cheapest real win on the board and it needs no new estimator.** ⛔ Its falsification is requirement 3:
+  both zero controls must read exactly 0.
+* **④b — the ON-RATE ANCHOR.** The open research question: what plays `rho_bg`'s role for a probed
+  destination when probe coordinates are unavailable. This is rank 3's `(rho_0, w)` on the
+  `AbundanceLandscape`, and §H.5 ⓪'s probe-footprint result is the physical statement it must reproduce.
+  ⚠ Until it exists, capture-ON keeps the structural constant at boundaries — which is worse than
+  nothing at `g98` and better than nothing at `g05`, so the gate matters more than the constant.
+* **④c — THE RANGE WIDENING** (requirement 1), which is a one-function change to
+  `structural_reference_location` but must land WITH a licence saying which end, or it is just a new
+  constant with a bigger blast radius.
+
+⛔ **What NOT to do, measured-refused:** replace 0.75 with any other CONSTANT — `σ(L)` is 3.3×/10.8×
+worse than nothing at the zero controls, and 0.75 is optimal at no condition on the panel. The choice is
+not between two constants; it is between a constant and a derivation.
+
+### §H.9 ⛔ ④a — BUILT, PRICED ON ALL 16, AND DELETED (2026-08-24). The MEASUREMENT stands; the CODE is gone
+
+⛔⛔ **READ THIS HEADER BEFORE THE SECTION.** `exon_measured_reference` was implemented, gated (6 cases,
+5 verified failing first), priced on all 16 scenarios — and then **removed from `src/`, `config.py`
+and the test suite**, because §H.10 and the external review settled that it is an instance of the
+circular empirical Bayes the whole reference concept is refuted for: *fitting a prior on the data being
+deconvolved*. ⭐ The table below is kept because it is evidence about the PROBLEM, not about a
+mechanism — it is the cleanest demonstration that a data-derived reference wins wherever the background
+rate is on-rate and fails catastrophically wherever it is not. ⛔ **Do not resurrect it as a flag**
+(`no legacy, converge and delete`).
+
+**Original section follows, unedited.**
+
+#### ④a as it was built — `exon_measured_reference`, default OFF, and the 16-scenario ladder
+
+**What changed:** `density_deconv.measured_reference_location` gained `include_exons`, widening its
+SELECTOR from `ss_intron_region` to `ss_intron_region | solvable_exon`. Same `rho_bg`, same ratio, same
+FIRM clip — **only the selector moves.** Wired to `CalibrationConfig.exon_measured_reference`,
+**default `False` ⇒ bit-identical**.
+
+**Gates:** five cases in `test_measured_reference.py`, all five verified failing first, plus ⭐ **a
+WIRING gate in `test_calibrate.py`** that the perturbation sweep demanded: with `calibrate` hard-wiring
+`include_exons=False`, every estimator-level gate still passed — a flag that nothing forwards is a flag
+that does nothing. Sweep now **6/6**. Suite 3,726 → **3,732**.
+
+⚠ **The import trap bit for the THIRD time this session and is now written into the gate itself**:
+`rigel.calibration.__init__` rebinds the name `calibrate` to the FUNCTION, so
+`import rigel.calibration.calibrate as m` hands back a function and patching it is a silent no-op; and
+`calibrate.py` binds the estimator into its own namespace at import, so patching `density_deconv`
+misses too. Reach the MODULE through `sys.modules`.
+
+#### THE 16-SCENARIO LADDER — claimed EXONS, misplaced gDNA fragments, never pooled
+
+| scenario | certified gDNA | silent | relay | fanout | fanout+④a | silent+④a |
+|---|---|---|---|---|---|---|
+| `g00` ss.50 OFF | 0 | 192,486 | 1,548 | 21,836 | **0** | **0** |
+| `g00` ss.50 ON | 0 | 62,180 | 5,052 | 39,971 | **0** | **0** |
+| `g00` ss.99 OFF | 0 | 4,935 | 1,040 | 1,234 | **0** | **0** |
+| `g00` ss.99 ON | 0 | 1,749 | 1,181 | 1,344 | **0** | **0** |
+| `g05` ss.50 OFF | 4,077 | 1,922 | 2,072 | 2,024 | 1,891 | **1,816** |
+| `g05` ss.50 ON | 69,671 | 48,722 | 28,517 | **31,266** | 66,783 | 69,614 |
+| `g05` ss.99 OFF | 4,038 | 1,761 | 1,912 | 1,809 | 1,737 | **1,711** |
+| `g05` ss.99 ON | 69,751 | 10,344 | 11,109 | **9,239** | 50,525 | 69,686 |
+| `g50` ss.50 OFF | 39,997 | 6,415 | 7,239 | 7,755 | 7,284 | **5,930** |
+| `g50` ss.50 ON | 699,284 | 697,694 | 258,207 | **169,659** | 538,773 | 698,160 |
+| `g50` ss.99 OFF | 40,409 | 5,460 | 5,941 | 5,632 | 5,362 | **5,232** |
+| `g50` ss.99 ON | 699,689 | **18,042** | 24,631 | 19,214 | 20,845 | 20,982 |
+| `g98` ss.50 OFF | 79,297 | 7,983 | 8,131 | 6,193 | **5,295** | 6,335 |
+| `g98` ss.50 ON | 1,371,478 | 1,368,599 | 370,604 | **247,154** | 967,928 | 1,368,978 |
+| `g98` ss.99 OFF | 79,519 | 6,346 | 7,357 | 6,115 | **5,281** | 5,371 |
+| `g98` ss.99 ON | 1,372,029 | **18,032** | 35,706 | 24,117 | 25,479 | 22,292 |
+
+⭐⭐⭐ **④a wins 10 of 16 and the split is exactly the predicted one**: **all 8 capture-OFF rungs**, and
+**all 4 `g00` rows to EXACTLY ZERO** — including the capture-ON ones, because that is the `rho_bg = 0`
+branch and it does not care about capture. It **loses all 6 contaminated capture-ON rungs**.
+
+⛔⛔ **AND THE LOSS IS NOT UNIFORM — it is concentrated where the exon cannot argue back.** At
+UNSTRANDED capture-ON (`g05` 48,722 → 69,614; `g50` fanout 169,659 → 538,773; `g98` fanout 247,154 →
+967,928) the damage is catastrophic, because `τ_λ ≡ 0` at κ = ½ leaves the exon no own evidence to
+overturn a reference asserting near-zero gDNA. At STRANDED capture-ON it is modest (`g50` 18,042 →
+20,982; `g98` 18,032 → 22,292) — the strand solve overturns it. ⚠ `g05` ss.99 ON is the in-scope
+exception and it is severe (10,344 → 69,686), because at 5 % gDNA the reference's error is the whole
+available mass.
+
+⭐ Boundaries are essentially untouched (④a only selects exons; the small movements are the refit).
+
+⛔ **So default OFF stands, and a CAPTURE GATE would convert this into a clean win** — 8/8 capture-OFF
+plus the zero controls, inert elsewhere. ⚠ **A fully-DERIVED subset is available with no detector at
+all**: gate the widening on `rho_bg == 0`, which is exactly the four `g00` rows and is measurable
+without any solve. ⛔ But `ROADMAP` rank 2 rules that **`g00` is ONE-SIDED — a win confined to it is
+not a win** — so that subset is a safety property, not a result, and must not be sold as one.
+
+#### 0.8.0's OWN METRIC, all 16, ranked, scope-tagged (`calibration_vs_oracle.py`, SHIPPED tree)
+
+Worst IN-SCOPE is **`g98 ss.99 capture_on` at Σ|Δ| = 436,569 fragments**, then `g50 ss.99 ON` at
+388,449; the two worst rows overall are the DEFERRED stratum (3,191,561 and 2,190,807) as always.
+⭐⭐ **The residual is overwhelmingly UNDER-calling gDNA at the contaminated rows** — `g98 ss.99 ON`
+reads over 8,359 against under 428,210.
+
+⭐⭐⭐ **AND THE AVAILABILITY CENSUS IS WHAT MAKES THAT ACTIONABLE** (no solver, straight off certified
+truth): **the four `g98` rows hold 64.06 % of the panel's 71.3 M certified gDNA fragments, `g98` + `g50`
+together hold 96.73 %, and all eight `g00`/`g05` rows hold 3.27 %** — the four `g00` rows exactly zero.
+⛔ So an error at `g05` cannot matter much however large its ratio looks, and **effort belongs at `g98`,
+where both the worst in-scope error and two thirds of the panel's mass sit.**
+
+### §H.10 ⭐⭐⭐ "THE REFERENCE IS TOO STRONG" — the DIAGNOSIS confirmed, the PRESCRIPTION refuted (2026-08-24)
+
+**The owner's position (2026-08-24):** ψ's reference is not a prior at all — a prior is what you know
+before the data, and pass-0's whole *job* is to learn it, so setting it FROM the data is cheating by
+definition. All we truly know a priori is STRUCTURE. The term exists because the log-odds simplex needs
+a numerical stabilizer. And its nominal "one pseudo-count" understates its real pull. **Hypothesis:
+weaken it to a pure stabilizer.**
+
+#### ① THE DIAGNOSIS IS RIGHT, AND THE CODEBASE ALREADY MEASURED IT
+
+`simplex_logodds.py:660-663` records it verbatim and it was never acted on: *"the real overturn depth
+is **996–1,993 fragments** — the prior is strongest precisely where the likelihood is flattest.
+⛔⛔ On UNSTRANDED data (κ = ½) **it is never overturned at any depth** (measured 0.9998 against a
+pure-RNA truth at 10,000 fragments)."*
+
+Re-measured directly on ψ (one single-strand slot, TRUE `f_g = 0`, reference `m = 0.75`, noiseless
+strand split — so the answer is the reference against the likelihood and nothing else):
+
+| κ | N = 10 | N = 100 | N = 1,000 | N = 10,000 | N = 10⁶ | overturned at |
+|---|---|---|---|---|---|---|
+| 0.99 | 0.1203 | 0.0298 | 0.0092 | 0.0030 | 0.0004 | **N = 3** |
+| 0.90 | 0.1836 | 0.0393 | 0.0118 | 0.0038 | 0.0005 | **N = 3** |
+| 0.75 | 0.4414 | 0.0725 | 0.0201 | 0.0064 | 0.0008 | **N = 10** |
+| **0.50** | **0.7471** | **0.7471** | **0.7471** | **0.7471** | **0.7471** | ⛔ **NEVER** |
+
+⭐⭐⭐ **Read the last row: at κ = ½ the posterior is 0.7471 at every depth from 10 to 1,000,000 — the
+answer does not depend on the data AT ALL.** And scaling the location's weight `c` moves it and nothing
+else: `c = 1 → 0.7471`, `0.3 → 0.5806`, `0.1 → 0.5271`, `0 → 0.5000`, **identical at N = 100, 1,000 and
+10,000.**
+
+⭐ **So "one pseudo-fragment" is honest as a PSEUDO-COUNT and false as LEVERAGE.** Where the strand
+channel is alive the term is worth ~one fragment exactly as advertised (κ = 0.99: `c = 1` gives 0.0298
+against `c = 0`'s 0.0284 at N = 100 — a 5 % difference, and none at all by N = 1,000). Where the strand
+channel is DEAD its leverage is unbounded, because leverage is the reference's nats against the data's
+own Fisher information on λ, and that information is `N_eff·disc·[f_g(1−f_g)]²` — **identically zero at
+κ = ½**. Divide by zero. ⭐⭐ **This is the SAME coordinate asymmetry that made the fan-out's message
+over-strong (§H.5 ② ④): one mechanism, two symptoms.**
+⭐ And `c = 0` at κ = ½ returns exactly **0.5000** — proper, finite, no pole. **The Jeffreys Beta(½,½)
+alone IS a sufficient stabilizer**, so the location term is not needed for the numerical job.
+
+#### ② THE PRESCRIPTION IS REFUTED ON THE PANEL — weakening makes every contaminated rung WORSE
+
+Location weight swept on all 16 conditions, both policies, claimed populations (`c = 0` is
+"Jeffreys stabilizer only"). Selected rows, and the pattern is uniform:
+
+| condition | pol | B c=1 | B c=0.3 | B c=0.1 | B c=0 |
+|---|---|---|---|---|---|
+| `g00` ss.50 OFF | silent | 100,297 | 66,840 | 54,478 | **48,346** |
+| `g00` ss.50 ON | silent | 22,738 | 9,333 | 7,115 | **6,228** |
+| `g05` ss.99 ON | silent | **22,714** | 25,289 | 26,454 | 27,131 |
+| `g50` ss.99 OFF | fanout | **20,886** | 24,504 | 25,245 | 25,505 |
+| `g50` ss.50 ON | fanout | **251,503** | 530,581 | 656,091 | 712,437 |
+| `g98` ss.50 OFF | fanout | **20,020** | 34,544 | 38,057 | 39,574 |
+| `g98` ss.99 ON | fanout | **52,127** | 68,361 | 72,139 | 73,994 |
+
+⛔⛔ **At the DEFERRED stratum — the fan-out's biggest win and exactly where the owner expected the
+reference to be fighting — removing it is 2.0× worse on exons (169,659 → 346,513) and 2.8× worse on
+boundaries (251,503 → 712,437).** The reference is HELPING there, not fighting.
+
+⭐ Weakening helps only at the ZERO CONTROLS (2.1×–3.7×), which is one-sided by `ROADMAP` rank 2 and
+therefore not a win.
+
+#### ③ THE SYNTHESIS — and it changes what to build, not whether
+
+Both halves are true and they are not in tension:
+
+* Where the strand channel is dead, **the reference is not a weak prior being out-voted — it IS the
+  entire answer, at any depth.** That is exactly as unprincipled as the owner says.
+* But on this panel it happens to point the RIGHT WAY at intron boundaries (certified truth there runs
+  0.66–0.999), so deleting it removes the only voice and the error doubles.
+
+⛔ **So the fix is not to weaken the reference. It is to give those slots real INFORMATION so the
+reference stops being the only voice** — which is precisely what the fan-out message does, and why it
+wins the deferred stratum 4× (697,694 → 169,659) where no reference change comes close.
+
+⭐⭐ **And this re-reads ④a's failure correctly.** ④a was catastrophic at unstranded capture-ON not
+because "a reference is bad there" but because THAT reference **pointed the wrong way**: the
+intergenic-transported location asserts ~0.001 gDNA where certified truth is 0.65–0.98. Same slot, same
+strength, opposite sign, opposite outcome. ⭐ Which makes the on-rate anchor (§H.8 ④b) the thing that
+matters, and weakening a knob the thing that does not.
 
 ## §G OPEN DECISIONS — ALL FOUR RULED (owner, 2026-08-26)
 

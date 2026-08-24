@@ -302,51 +302,15 @@ class CalibrationConfig:
     #: (1.0147× / 1.0046× / 1.0036×), so the effect is the BRACKET and not the lattice.
     sweep_logodds_window: float = 10.0
 
-    #: **ψ's composition reference takes its MEAN from the ANNOTATION** — ``m → 0.75`` wherever no annotated
-    #: MATURE transcript is continuous across the position (``¬mrna_active``), and the shipped neutral ½
-    #: everywhere else (`calibration.simplex_logodds.structural_reference_location`).
-    #: ⛔ This line read ``m → σ(L)`` until 2026-08-17, which is the LATTICE-derived form the function it
-    #: names records as REPLACED and measured WORST OF ALL (9.31 nats; refute-err 2.0247 against no-prior's
-    #: 0.3946). The shipped value is the one derived two paragraphs down, and the cap is all that is left
-    #: of ``σ(L)``: ``m = min((a+1)/(a+b+1), σ(L))``, which needs ``L < 1.0986`` to bind.
-    #:
-    #: ⭐ ``a·log f_g + b·log(1−f_g)`` on the λ grid IS ``Beta(a, b)``, so the reference has always had a
-    #: MEAN ``a/(a+b)`` and nobody chose it: Jeffreys' ½ **asserts the library is half gDNA**. This turns
-    #: that assertion into a per-slot statement the annotation can actually make.
-    #:
-    #: ⭐⭐ **THE STRENGTH IS ONE PSEUDO-OBSERVATION AND INTRODUCES NO CONSTANT.** ``strength = logit(m)``,
-    #: so a location IS its strength in nats; one pseudo-observation of gDNA takes ``Beta(a,b)`` to
-    #: ``Beta(a+1,b)``, mean ``(a+1)/(a+b+1)`` = **0.75** at ``a = b = _JEFFREYS_REF`` — a 3:1 claim,
-    #: overturned by ~1.5 stranded fragments, and refuted unstranded by the intron-vs-intergenic density
-    #: factor (`density_lambda_factor`, ``τ_fac = 161.4`` at an intron).
-    #:
-    #: ⭐ **ON, measured 2026-08-16 through `calibrate` on all 16 ladder conditions** against a `base`
-    #: re-recorded in the same session — final Σ|Δ| in fragments per stratum **0.930 / 0.908 / 0.925** on
-    #: the three IN-SCOPE strata, 0.998 on the deferred one, and the ``g00`` ZERO-gDNA control
-    #: **BIT-IDENTICAL on all 8 rows**. Better on all 12 contaminated conditions, worse on none.
-    #:
-    #: ⛔ ``False`` ⇒ ``location=None`` ⇒ the term is not written at all and every path is BIT-IDENTICAL to
-    #: the one before it existed.
-    structural_reference: bool = True
-
-    #: ⭐⭐ **ψ's reference LOCATION from the MEASURED background at single-stranded intron REGIONs**
-    #: (stage 2 of the first-pass redesign) — ``m_i = rho_bg·E_g,i/M_i`` with ``rho_bg`` pooled over
-    #: intergenic REGIONs, FIRM-clipped into the lattice window
-    #: (`density_deconv.measured_reference_location`; owner ruling 2026-08-26: the location clips, the
-    #: strength stays the reference's one pseudo-fragment). The slots are the stage-0 substrate's
-    #: ``ss_intron_region`` (`structural_claims`) — REGIONS ONLY, a measured refusal: the
-    #: boundary-inclusive form regressed stranded × capture-ON on both panels.
-    #:
-    #: ⭐ **Measured 2026-08-26 as `ladder_arm_ab.py --arm stage2_intron_ref_r --messages on`, 16 ladder
-    #: conditions against a same-session base**: EVERY stratum improved — the deliverable −11.7 % /
-    #: −7.3 % on the two in-scope capture-OFF strata, −1.2 % on stranded × capture-ON (the stratum every
-    #: previous per-object reference regressed), −3.5 % on the deferred one, and the zero-gDNA control
-    #: −19.6 % — worst single-cell regression +0.7 %. Re-run the instrument for a current number.
-    #:
-    #: ⭐ **ON (owner ruling, 2026-08-23)** — flipped the day after landing, on the measured table above.
-    #: ⛔ ``False`` ⇒ the location is not computed and every path is BIT-IDENTICAL to the tree before
-    #: this field existed — which is also stage 2's no-measured-reference control.
-    measured_intron_reference: bool = True
+    #: ⛔ ψ's reference LOCATION is GONE (owner refutation, 2026-08-24). Two fields stood here —
+    #: ``structural_reference`` (the annotation-derived ``m → 0.75``) and
+    #: ``measured_intron_reference`` (the measured background location at ss-intron REGIONs). Both
+    #: were prior ASSERTIONS at fixed strength: where the strand channel carried information they
+    #: were worth ~one fragment as documented, and where it did not (κ = ½, or composition near a
+    #: vertex) they were the ENTIRE answer at any depth — measured, the location decided 100 % of
+    #: the claimed-boundary error at zero refits. The reference is now the symmetric Jeffreys
+    #: measure alone; background information enters as the intron-factory density λ-factor
+    #: (`density_deconv.density_lambda_factor`), a LIKELIHOOD whose precision scales with counts.
 
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
@@ -424,6 +388,17 @@ class CalibrationConfig:
     #: 20 scenarios better / 1 worse / 11 flat; intron mwae 0.1781 → 0.0117 (its share of suite error 17.0 % →
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
+
+    #: ⭐⭐⭐ **THE RNA-ANCHORED EVIDENCE FACTOR — DEFAULT ON (owner, 2026-08-24).** Anchors the RNA
+    #: side of the unspliced count where hybrid capture cannot mis-scale it: certified splice flux
+    #: at complete-flank exons, the adjacent intron's excess-over-background (nascent) rate at
+    #: eligible ss-intron boundaries (`calibration.rna_anchor` — the derivation, the measured wins
+    #: and the two recorded residuals live in its module docstring). Summed with the intron
+    #: factory's λ-factor, so it enters the local solve, the relay, and the slot's own-evidence
+    #: precision. ⛔ ``False`` ⇒ the builder is never called and every path is byte-identical to
+    #: the tree before it existed — gated by ``tests/calibration/test_rna_anchor.py``'s explosive
+    #: reach test in both directions.
+    rna_anchor: bool = True
 
     #: ⭐⭐⭐ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT ON**
     #: (owner, 2026-08-18), after ~11 days muted. ``False`` installs ``messages.silent.SilentPolicy``, ψ

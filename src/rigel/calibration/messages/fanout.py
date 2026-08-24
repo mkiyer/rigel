@@ -36,6 +36,7 @@ from __future__ import annotations
 import numpy as np
 
 from . import NeighbourState, PsiMessage, StepContext
+from .variance import mismatch_deflate
 
 __all__ = ["FanOutPolicy", "flank_to_exon_lambda"]
 
@@ -67,6 +68,12 @@ class _FanOutRelay:
             np.asarray(claims.exon_flank_left_complete, bool),
             np.asarray(claims.exon_flank_right_complete, bool),
         )
+        # the destination's own λ-axis variance, for the stage-4 mismatch deflation below.
+        # ⛔ No ``struct_lock`` branch: a licensed exon is single-stranded WITH mRNA, so it is
+        #    ``solvable`` and therefore never locked unless it is EMPTY — and an empty exon carries no
+        #    mass to misplace. A clause that provably cannot fire is the kind this policy has already
+        #    deleted twice (the stage-3 destination mask, the ``tau_lam > 0`` guard).
+        self._v_own = np.where(tau_own > 0.0, 1.0 / np.maximum(tau_own, _EPS), np.inf)
         self._ctx = ctx
 
     def scan(self, *, backward: bool):
@@ -90,6 +97,47 @@ class _FanOutRelay:
             return lam, tau
 
         return step, publish
+
+    def _received(self, mode, prec, arrived):
+        """The DESTINATION's reading of an arriving stage-4 claim: keep the value, discount the
+        confidence by how far the claim sits from what this slot's own data says.
+
+        The transfer that produced ``mode`` prices SAMPLING noise only — nothing in it states that the
+        flank's composition IS the exon's, and under hybrid capture it measurably is not: every probe
+        base lands in an EXON and introns carry exactly zero, so an intron|exon flank is a probe cliff
+        and its gDNA route arrives ~``e^-1`` low. Worse, that transfer is the message layer's only
+        precision-AMPLIFYING single-source transform (``tau_e = tau_b/a**2`` with ``a = 1 - f*w_mu ->
+        0``), where every operator in the shipped relay only ever deflates.
+
+        ⭐ The discount is the relay's OWN law, not a new one — the DerSimonian-Laird between-source
+        mismatch variance (`variance.mismatch_deflate`, shipped ON as ``RelaySwitches.mismatch_var``),
+        on the same lambda axis, at the OBSERVED gap ``G = lam_msg - lam_own``::
+
+            b_hat^2 = max(0, G^2 - v_msg - v_own)      p = 1 / max(v_msg, G^2 - v_own)
+
+        whose closed form states the safety property exactly: *an arriving claim may out-weigh this
+        slot's own belief only when it agrees with it to within* ``sqrt(2)*sigma_own``. Probe placement
+        is unknowable; its FOOTPRINT — this disagreement — is not.
+
+        ⭐⭐ **AND THE REGIME THAT MAKES IT SAFE IS DERIVED, NOT GATED.** Where the destination has no
+        own composition evidence (``tau_lam = 0``, which at ``kappa = 1/2`` is EVERY exon, because the
+        strand lambda-term is identically zero there) ``v_own`` is infinite, ``b_hat^2`` is 0, and the
+        claim passes UNTOUCHED. That is the whole unstranded half of the panel, both zero controls and
+        the deferred stratum — the cells this policy WINS — protected by the algebra rather than by a
+        condition someone has to remember.
+
+        ⛔ ``arrived`` scopes this to the STAGE-4 destinations, and that scope is measured: stage 3's
+        premise (an intron and its flanking boundary are ONE population) is certified by the stage-0
+        matrix, while discounting the boundary claim too costs boundary wins.
+        ⛔ ``contradicted`` is structurally False here — it marks a component asserted ABSENT, and a
+        lambda claim clipped into ``[-L, +L]`` cannot assert infinite odds.
+        """
+        if not bool(np.any(arrived)):
+            return mode, prec
+        damped = mismatch_deflate(
+            prec, mode - self._own_lam, np.zeros(prec.shape, bool), self._v_own
+        )
+        return mode, np.where(arrived, damped, prec)
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
         ll, lt = (np.asarray(a, np.float64) for a in left.state)
@@ -159,6 +207,17 @@ class _FanOutRelay:
         mode = np.where(p2 > 0.0, (t2l * lam_l + t2r * lam_r) / np.maximum(p2, _EPS), mode)
         prec = np.where(p2 > 0.0, p2, prec)
 
+        # ── RECEPTION: the destination decides what to believe of what arrived ────────────────────
+        # ⭐⭐⭐ **THE PARADIGM, and it is why this is not a contract breach** (owner, 2026-08-23). A
+        # SENDER publishes its claim UNCHANGED — it does not tailor, scale or hedge it for whoever is
+        # listening. Deciding how much of an arriving claim to believe is the RECIPIENT's job, and the
+        # recipient here is the exon. So an exon that receives a composition wildly at odds with what
+        # its own data says may discount it, and doing so reads its OWN belief, never the sender's.
+        # ⛔ That is the line `TRAPS: a-message-from-the-destinations-belief` actually draws: its nine
+        # costumes all BUILT a claim's VALUE out of the destination's belief, which manufactures
+        # agreement out of nothing. Reception cannot — :func:`_received` only ever LOWERS a precision
+        # and never touches a mode, so it can discard information but never invent it.
+        mode, prec = self._received(mode, prec, p2 > 0.0)
         # one-sided: the INCOMPLETE sides — keep the BINDING bound (smaller λ = larger RNA floor)
         t1l = np.where(~cm_l, tau_l, 0.0)
         t1r = np.where(~cm_r, tau_r, 0.0)

@@ -153,7 +153,7 @@ _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip",
-        "oracle_alloc_unspliced", "struct_ref") + tuple(_RULER_ARMS) + ALLOC_ARMS
+        "oracle_alloc_unspliced") + tuple(_RULER_ARMS) + ALLOC_ARMS
 
 #: ⛔⛔ **THE SHIPPED PIPELINE IS NOT REPRODUCIBLE RUN TO RUN, AND EVERY ARM HERE PINS THE SEED THAT
 #: MAKES IT SO.** ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so
@@ -239,32 +239,6 @@ def install_arm(arm: str, oracle: OracleTruth | None):
         # check must not fail on the one arm that has no override. The thing it guards — an
         # injection that silently did not happen — cannot occur here.
         return (lambda: None), {"n": 1}
-
-    if arm == "struct_ref":
-        # ⭐⭐ THE ONE ARM DRIVEN BY A CONFIG FLAG RATHER THAN AN OVERRIDE (`seeded`). It patches nothing,
-        #   so there is no injection to count — ⛔ but returning a hard ``{"n": 1}`` like ``base`` would
-        #   make the guard a lie: unlike ``base``, this arm CAN silently fail to reach the solve if the
-        #   flag stops being threaded. So COUNT THE PRODUCTION BUILDER, wrapping it without replacing it:
-        #   the real function runs and its result is returned untouched, and only the tally is ours.
-        import rigel.calibration.calibrate as _CAL
-        import rigel.calibration.simplex_logodds as _SL
-
-        real_loc = _SL.structural_reference_location
-        fired = {"n": 0}
-
-        def counted(statics, logodds_window):
-            fired["n"] += 1
-            return real_loc(statics, logodds_window)
-
-        # ⛔ the CALLER is `calibrate` — one construction site since 2026-08-23.
-        _SL.structural_reference_location = counted
-        _CAL.structural_reference_location = counted
-
-        def restore_loc():
-            _SL.structural_reference_location = real_loc
-            _CAL.structural_reference_location = real_loc
-
-        return restore_loc, fired
 
     fields = _ARM_FIELDS[arm]
 
@@ -488,15 +462,6 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     out = dataclasses.replace(
         pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
     )
-    if arm == "struct_ref":
-        # ⭐⭐ THE THERMOMETER ARM for psi's annotation-set reference MEAN. ⛔ It is a CONFIG FLAG and not
-        #   an override — nothing here is patched, so this reads the shipped path end to end and differs
-        #   from `base` in exactly one boolean. `CalibrationConfig.structural_reference`'s own gate is
-        #   `tests/calibration/test_structural_reference.py`; the calibration-level score is
-        #   `vertex_ceiling.py --arm config_struct`, and THIS is only the thermometer above it.
-        out = dataclasses.replace(
-            out, calibration=dataclasses.replace(out.calibration, structural_reference=True)
-        )
     return out
 
 

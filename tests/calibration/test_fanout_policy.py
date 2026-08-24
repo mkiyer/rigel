@@ -364,7 +364,10 @@ def test_stage4_the_exon_receives_the_composed_transfer_from_the_correct_face():
     """Both exons (complete flanks) receive the two-sided λ claim: the intron's claim fused with the
     flank's OWN strand evidence, then transferred through the joint function — and each exon takes the
     sj face on ITS side of the flank (R1 is LEFT of its flank ⇒ the _lo face, 12; R3 is RIGHT of its
-    flank ⇒ the _hi face, 7). A wrong face cannot reproduce these numbers."""
+    flank ⇒ the _hi face, 7). A wrong face cannot reproduce these numbers.
+
+    ⚠ The MODE is the transfer's own; the delivered PRECISION is that claim after the mismatch
+    deflation, composed here from its separately-gated primitive so this stays a FACE test."""
     parts, claims, ctx = _stage4_setup()
     msg = _deliver(parts, FanOutPolicy().prepare(ctx))
     want_r1 = _expected_exon_claim(
@@ -373,10 +376,10 @@ def test_stage4_the_exon_receives_the_composed_transfer_from_the_correct_face():
     want_r3 = _expected_exon_claim(
         ctx, flank=5, exon=6, face_count=7.0, tau0_intron=50.0, lam0_intron=_logit(0.8)
     )
-    assert msg.lam_prec[2] == pytest.approx(float(want_r1[1][0]))
-    assert msg.lam_mode[2] == pytest.approx(float(want_r1[0][0]))
-    assert msg.lam_prec[6] == pytest.approx(float(want_r3[1][0]))
-    assert msg.lam_mode[6] == pytest.approx(float(want_r3[0][0]))
+    for exon, want in ((2, want_r1), (6, want_r3)):
+        lam_e, tau_e = float(want[0][0]), float(want[1][0])
+        assert msg.lam_mode[exon] == pytest.approx(lam_e)
+        assert msg.lam_prec[exon] == pytest.approx(_want_deflated(ctx, exon, lam_e, tau_e))
 
 
 def test_stage4_the_intron_receives_no_echo():
@@ -536,3 +539,120 @@ def test_stage4_a_minus_strand_exon_rides_the_neg_channel():
     )
     f_e = 1.0 / (1.0 + np.exp(-float(want[0][0])))
     assert msg.rna_mode[1][2] == pytest.approx(float(np.log1p(-f_e)))
+
+
+# ── THE MISMATCH DEFLATION at the stage-4 destination ──────────────────────────────────────────────
+# The transfer is the message layer's only precision-AMPLIFYING single-source transform
+# (``tau_e = tau_b/a**2``), and it prices sampling noise only — no term anywhere states that the
+# flank's composition IS the exon's, which under hybrid capture it measurably is not. These gates
+# pin the shipped DerSimonian-Laird deflation (`messages.variance.mismatch_deflate`, the relay's own
+# law) onto the stage-4 lambda claim, and above all they pin its SAFETY property: where the exon has
+# no own composition evidence the claim must pass BIT-IDENTICALLY, because that is the whole
+# unstranded half of the panel and both zero controls.
+
+
+def _undeflated(ctx, flank, exon, face_count):
+    """The stage-4 claim as the transfer produces it, before any deflation — composed from the
+    separately-gated primitive so these gates test the DEFLATION and nothing upstream of it."""
+    return _expected_exon_claim(
+        ctx,
+        flank=flank,
+        exon=exon,
+        face_count=face_count,
+        tau0_intron=50.0,
+        lam0_intron=_logit(0.8),
+    )
+
+
+def _want_deflated(ctx, exon, lam_e, tau_e):
+    """The expectation, composed from `mismatch_deflate` itself — the gate is the WIRING (which gap,
+    which own-variance, which slots), never a second copy of the DL arithmetic."""
+    from rigel.calibration.messages.variance import mismatch_deflate
+
+    own_lam = _logit(float(ctx.own.f_g[exon]))
+    own_tau = float(ctx.own.tau_lam[exon])
+    v_own = 1.0 / own_tau if own_tau > 0.0 else np.inf
+    return float(
+        mismatch_deflate(
+            np.array([tau_e]), np.array([lam_e - own_lam]), np.array([False]), np.array([v_own])
+        )[0]
+    )
+
+
+def test_stage4_a_claim_that_agrees_with_the_exons_own_solve_survives():
+    """A message within sqrt(2)*sigma_own of the destination's own belief is barely touched — that is
+    `mismatch_deflate`'s stated safety property, and it is what keeps the fan-out useful."""
+    parts, claims, ctx = _stage4_setup()
+    lam_e, tau_e = _undeflated(ctx, flank=3, exon=2, face_count=12.0)
+    # place the exon's own solve ON the claim: the gap is exactly zero, so b_hat^2 = 0
+    ctx.own.f_g[2] = 1.0 / (1.0 + np.exp(-float(lam_e[0])))
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    assert msg.lam_prec[2] == pytest.approx(float(tau_e[0]))
+
+
+def test_stage4_a_claim_that_contradicts_the_exons_own_solve_is_deflated():
+    """A large observed gap against a confident own solve collapses the claim — and the survivor is
+    exactly the DL law's, monotonically decreasing in the gap."""
+    parts, claims, ctx = _stage4_setup()
+    lam_e, tau_e = _undeflated(ctx, flank=3, exon=2, face_count=12.0)
+    seen = []
+    for f_own in (0.90, 0.99):
+        ctx.own.f_g[2] = f_own
+        ctx.own.tau_lam[2] = 400.0
+        msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+        want = _want_deflated(ctx, 2, float(lam_e[0]), float(tau_e[0]))
+        assert msg.lam_prec[2] == pytest.approx(want)
+        seen.append(float(msg.lam_prec[2]))
+    assert seen[1] < seen[0] < float(tau_e[0]), "a wider gap must deflate further"
+
+
+def test_stage4_an_exon_with_no_own_composition_evidence_hears_the_claim_untouched():
+    """⭐ THE SAFETY PROPERTY, and the reason this term is admissible at all. At kappa = 1/2 the
+    strand lambda-term is IDENTICALLY zero, so an unstranded exon has no own composition evidence,
+    ``v_own = +inf``, ``b_hat^2 = 0`` and the claim passes BIT-IDENTICALLY. That is the entire
+    unstranded half of the panel, both zero controls, and the deferred stratum — the cells the
+    fan-out WINS — protected by derivation rather than by a gate."""
+    parts, claims, ctx = _stage4_setup()
+    lam_e, tau_e = _undeflated(ctx, flank=3, exon=2, face_count=12.0)
+    ctx.own.tau_lam[2] = 0.0
+    ctx.own.f_g[2] = 0.01  # maximally contradictory, and it must STILL pass untouched
+    msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+    assert msg.lam_prec[2] == float(tau_e[0]), "bit-identical, not merely close"
+
+
+def test_stage4_the_deflation_never_touches_the_stage3_boundary_claim():
+    """Scoped to the stage-4 destinations. Stage 3's premise — the intron and its flanking boundary
+    are ONE population — is certified by the stage-0 matrix; stage 4's is the one that fails under
+    capture, and deflating both costs boundary wins."""
+    parts, claims, ctx = _stage4_setup()
+    before = np.asarray(_deliver(parts, FanOutPolicy().prepare(ctx)).lam_prec).copy()
+    ctx.own.f_g[3] = 0.001  # a huge gap AT the boundary, which must change nothing there
+    ctx.own.f_g[5] = 0.001
+    after = np.asarray(_deliver(parts, FanOutPolicy().prepare(ctx)).lam_prec)
+    for b in (3, 5):
+        assert after[b] == before[b], "a boundary claim is never deflated by its own belief"
+
+
+def test_stage4_the_deflation_only_ever_lowers_a_precision():
+    """The invariant the shipped relay obeys everywhere and the transfer broke: a single-source
+    transform may only REDUCE a precision. Swept across the gap, the delivered precision is bounded
+    above by the undeflated claim at every slot."""
+    parts, claims, ctx = _stage4_setup()
+    lam_e, tau_e = _undeflated(ctx, flank=3, exon=2, face_count=12.0)
+    for f_own in (0.001, 0.05, 0.3, 0.7, 0.95, 0.999):
+        ctx.own.f_g[2] = f_own
+        msg = _deliver(parts, FanOutPolicy().prepare(ctx))
+        assert msg.lam_prec[2] <= float(tau_e[0]) + 1e-12
+
+
+def test_stage4_the_deflation_moves_the_precision_and_never_the_mode():
+    """A variance is not a value: the delivered lambda MODE must be bit-identical with the deflation
+    firing hard (`TRAPS: a-variance-cannot-fix-a-bias`, stated as a gate)."""
+    parts, claims, ctx = _stage4_setup()
+    base = _deliver(parts, FanOutPolicy().prepare(ctx))
+    mode_before = np.asarray(base.lam_mode).copy()
+    ctx.own.f_g[2] = 0.999
+    ctx.own.tau_lam[2] = 1000.0
+    after = _deliver(parts, FanOutPolicy().prepare(ctx))
+    assert float(after.lam_prec[2]) < float(base.lam_prec[2]), "the gate must actually fire"
+    assert np.array_equal(np.asarray(after.lam_mode), mode_before)

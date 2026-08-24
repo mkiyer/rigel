@@ -1507,8 +1507,9 @@ survives unstranded data where the strand channel is dead (§5.2). It sits behin
 named, confirmed defect live — the composition licence checks transcript TERMINI (`terminus_flank_gain`)
 and **not** `mrna_active` flipping, which is precisely the predicate saying the RNA population differs
 across an exon↔intron hop, so a correct pure-gDNA claim is transported into the adjacent exon and drives it
-to a confident wrong vertex (strict xfail,
-`tests/calibration/test_structural_reference.py`) — and on the retired 36-condition ladder. **Re-price;
+to a confident wrong vertex (formerly a strict xfail in the reference-location gate file, which died
+with the 2026-08-24 deletion — `DESIGN.md` §6b.1/§0c.2 carry the record) — and on the retired
+36-condition ladder. **Re-price;
 never inherit.**
 ⭐ **What this section supplies is the DISTRIBUTION the imputation is over, not a new transport.**
 
