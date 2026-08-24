@@ -20,7 +20,7 @@ wrong-fact fossil of the same family** (`calibrate.py` and `zero_controls.py` ca
 this policy is the OFF state and the measured floor the message layer is priced against. What the floor
 establishes is unchanged and still load-bearing: the relay's whole value is ONE stratum (the deferred
 unstranded × capture-ON), it is a net harm on the other three, and that is what scoped the backbone —
-and what the pass-0 fan-out rebuild is measured against.
+and the reference every message policy is measured against.
 
 ⛔ **NEEDS AN OWNER RULING — the ``−50 % overall`` above and ``CalibrationConfig.message_propagation``'s
 ``panel TOTAL is +99.9 % worse`` describe the same mute with opposite signs.** They may be two different

@@ -135,7 +135,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "messages/silent",
             "messages/relay",
             "messages/currency",
-            "messages/fanout",
         ),
     ),
     (

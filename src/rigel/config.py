@@ -465,8 +465,9 @@ class CalibrationConfig:
     #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
     #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own switch),
     #: `"currency"` (the Stage-3 rebuild, :class:`~rigel.calibration.messages.currency.CurrencyPolicy`,
-    #: measured WORST on the in-scope contaminated strata and FROZEN), or `"fanout"` (the first-pass
-    #: redesign's pass-0 fan-out, :class:`~rigel.calibration.messages.fanout.FanOutPolicy`, UNDER
+    #: measured WORST on the in-scope contaminated strata and FROZEN). ⛔ `"fanout"` was DELETED
+    #: 2026-08-24 — measured DOMINATED once the RNA-anchored evidence factor (`rna_anchor`) gave its
+    #: destination slots own evidence (`DESIGN.md` §6b.2).
     #: DEVELOPMENT — stage 3 landed: solved single-stranded introns speak to their flanking
     #: ``intron|exon`` boundaries and nothing else says anything; the plan doc carries stages 3–4).
     #: Consulted only when `message_propagation` is True; the shipped default is byte-identical to the

@@ -22,7 +22,6 @@ from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.simplex_logodds import _logodds_grid, _tilt_grid
 
-from _synthetic import neutral_claims
 
 N = 8
 
@@ -53,7 +52,6 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         free_pos=fp,
         free_neg=fn,
         boundary_flags=np.zeros(N, np.int64),
-        claims=neutral_claims(N),
         geometry=None,
         order=list(range(N)),
         left_list=list(range(-1, N - 1)),

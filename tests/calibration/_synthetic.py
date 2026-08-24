@@ -300,23 +300,3 @@ def make_chain_parts(
         geometry=geometry,
         statics=build_region_statics(chain, region_arrays, boundary_flags),
     )
-
-
-def neutral_claims(n: int):
-    """A neutral stage-0 substrate: every class mask False. For fixtures whose policies never read
-    ``StepContext.claims`` — the field exists on the context because the fan-out policy's licence
-    lives there."""
-    from rigel.calibration.structural_claims import StructuralClaims
-
-    z = np.zeros(n, bool)
-    return StructuralClaims(
-        n_slots=n,
-        intergenic=z,
-        ss_intron_region=z.copy(),
-        ss_intron_boundary=z.copy(),
-        solvable_exon=z.copy(),
-        exon_flank_left=z.copy(),
-        exon_flank_right=z.copy(),
-        exon_flank_left_complete=z.copy(),
-        exon_flank_right_complete=z.copy(),
-    )

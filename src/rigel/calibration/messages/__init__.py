@@ -16,7 +16,6 @@ default flipped, a wrong-fact fossil corrected 2026-08-23):
   long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
 * :class:`~.currency.CurrencyPolicy` — the Stage-3 rebuild, measured WORST on the in-scope contaminated
   strata and FROZEN pending the reference re-contrast.
-* :class:`~.fanout.FanOutPolicy` — the first-pass redesign's pass-0 fan-out, UNDER DEVELOPMENT.
 * :mod:`~.variance` — the shared variance arithmetic the policies draw on. Not a policy; a toolbox.
 
 ⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer
@@ -48,7 +47,8 @@ resolves what otherwise reads as a contradiction between this contract and two s
 
 So a destination that receives a composition wildly at odds with what its own data says may DISCOUNT
 it, and that is reception rather than a message built from the destination — `RelayPolicy` does it
-(``relay.py``'s λ-stream `mismatch_deflate`) and so does `FanOutPolicy` (`_FanOutRelay._received`).
+(``relay.py``'s λ-stream `mismatch_deflate`; the deleted `FanOutPolicy` carried a receiver-side
+instance of the same law, the recorded precedent for legal receiver transforms).
 ⛔ **The line the trap actually draws is that a claim's VALUE may never be built from the
 destination's belief**, because that manufactures agreement out of nothing; all nine of its costumes
 did exactly that. A reception step is safe when it can only ever **LOWER a precision and never move a
@@ -213,10 +213,6 @@ class StepContext:
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
-    #: `structural_claims.StructuralClaims` — the stage-0 substrate: per-slot STRUCTURAL class masks
-    #: derived from the annotation alone (a constant, so readable at either end of a hop). The fan-out
-    #: policy's licence lives on it; a policy that never reads it is unaffected.
-    claims: object
     geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
     order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
     left_list: list  # ``left`` as a Python list: the scan reads it one element at a time

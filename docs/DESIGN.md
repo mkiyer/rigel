@@ -1347,8 +1347,8 @@ SILENCE most rows move ≤ 10 % and both `g00` unstranded controls IMPROVE ~2–
 transported flank beliefs lose their anchor — the deferred stratum 2.8–3.1× worse (`g50`/`g98`
 unstranded ON), `g98` unstranded OFF boundaries 2.0×, stranded ON boundaries +24–42 % — and on
 stranded × capture-ON the fan-out now LOSES to silence on boundaries. The reference and the messages
-were priced jointly ON; deleting one re-prices the other. The learned-enrichment channel must
-restore the flanks' anchoring for the fan-out to earn its wins back.
+were priced jointly ON; deleting one re-prices the other. *(Historical: `FanOutPolicy` itself was
+deleted on 2026-08-24 once the RNA anchor restored the slots' own evidence — §6b.2.)*
 
 ⚠ **What SURVIVES from the old section**: the two refutation mechanisms (strand asymmetry; the
 intron-vs-intergenic density factor, `τ_fac = 161.4` at an intron, alive unstranded) are likelihood
@@ -1400,12 +1400,13 @@ stress row (claimed E 6.4k → ~59k at `g50` unstranded OFF; a STRESS reading un
 ⛔⛔ **OBSOLESCENCE TRACKING (owner directive, 2026-08-24: remove what the anchor obsoletes).**
 Candidates, each pending the policy re-contrast ON THE ANCHORED TREE and none deleted yet:
 
-* `messages/fanout.py`'s stage-4 flank→exon λ transfer + its receiver-side mismatch deflation —
-  the anchor gives exons own evidence and the transfer's capture frame bias is the §H.4 residual;
-  with the policies converging, the transfer may be pure cost now.
-* `FanOutPolicy` as a whole — built as pass-0's policy precisely because slots lacked own
-  evidence; if relay-with-weak-messages matches it on the anchored tree, converge to ONE policy
-  and delete (`the owner's simplification ruling`).
+* ✅ **EXECUTED 2026-08-24**: `messages/fanout.py` (the whole policy, its stage-3/4 transfers and
+  the receiver-side mismatch deflation), `test_fanout_policy.py`, the `"fanout"` config value, the
+  `policy_fanout` ladder arm, `pass0_claimed_ab`'s `--dissect`/`--sweep` survey, and
+  `StepContext.claims` (dead surface once no policy read it). The final 16-condition re-contrast
+  on the anchored tree measured the fan-out DOMINATED on every row — never uniquely best:
+  stranded rows belong to silence+anchor, unstranded-exon and deferred wins to relay, zero
+  controls to silence. No shipped behavior moved (`message_policy` was already `"relay"`).
 * `simplex_logodds.ONE_SIDED_RNA` and the one-sided certified-RNA bound machinery — the anchor IS
   the two-sided certified-RNA statement at complete flanks, made honest by measured variance.
 * The messages' certified-RNA transfer channel (`rna_imp_*` at stage-4 destinations) — same

@@ -46,7 +46,6 @@ from rigel.calibration.splice_graph import (
     FLAG_TSS_POS,
 )
 
-from _synthetic import neutral_claims
 
 N = 9
 
@@ -134,7 +133,6 @@ def _ctx(
         free_pos=fp,
         free_neg=fn,
         boundary_flags=fl,
-        claims=neutral_claims(N),
         geometry=None,
         order=list(range(N)),
         left_list=list(range(-1, N - 1)),
