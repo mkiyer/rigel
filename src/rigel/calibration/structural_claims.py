@@ -68,7 +68,7 @@ class StructuralClaims:
 
     ``exon_flank_left`` / ``exon_flank_right`` name WHICH flank licenses a ``solvable_exon`` slot
     (both may be true); the flank slot itself is ``chain.left`` / ``chain.right``. They are exactly
-    the flanks whose claim the confusion matrix must test.
+    the flanks whose claim `structural_claims_audit.py` scores against certified truth.
     """
 
     n_slots: int

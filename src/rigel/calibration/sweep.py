@@ -312,8 +312,8 @@ def solve_chain(
     boundaries holds the whole working system. The shipped answer is
     :class:`~.messages.relay.RelayPolicy`, which ``calibrate`` passes explicitly.
 
-    ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the derived reference alone on
-    both arms. Prior-free is not reference-free. ⭐ That pass's only job is to be a training substrate for
+    ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the Jeffreys reference
+    measure alone on both arms. Prior-free is not reference-free. ⭐ That pass's only job is to be a training substrate for
     the population gDNA hyperprior — it is not the deliverable, and it does not have to answer objects it
     cannot solve.
 
@@ -621,11 +621,15 @@ def solve_chain(
             solve_grid=solve_grid,
             _tau0_lam=own.tau_lam,
             # the incoming belief (the final solve's ``fg_ref``) + the intron-factory λ arm, so an ablation
-            # replay reproduces the shipped f_g exactly BEFORE ablating.
+            # replay reproduces the shipped f_g exactly BEFORE ablating. ⛔ The final solve's row
+            # factor is ``intron_prior`` PLUS the delivered certified-flux rows (`msg.lam_rows`) —
+            # a replay passing the bare ``intron_prior`` is unfaithful whenever the stream is live,
+            # so both are published and a faithful replay sums them.
             fg_init=_fg_init,
             fpos_init=_fp_init,
             fneg_init=_fn_init,
             intron_prior=intron_prior,
+            lam_rows=msg.lam_rows,
             solvable_mask=solvable,
         )
 

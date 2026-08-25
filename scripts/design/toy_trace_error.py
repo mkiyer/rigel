@@ -250,8 +250,8 @@ def main() -> int:
         # ⛔⛔ A SECOND, INDEPENDENT DEATH IN THIS FILE, and it is NOT the `_uni` one: this arm called
         # `_solve_regions_logodds_all(global_logprior=…, length_loglik=None)` and NEITHER parameter
         # exists any more. `global_logprior` became `priors` — one `CompositionPriors` bundling the gDNA
-        # arm, the RNA arm and the reference LOCATION, which is exactly what `sweep.py` publishes as
-        # `global_lp`. `length_loglik` was PURGED with the fragment-length composition channel
+        # arm and the RNA arm (the reference LOCATION was deleted 2026-08-24), which is exactly what
+        # `sweep.py` publishes as `global_lp`. `length_loglik` was PURGED with the fragment-length composition channel
         # (`b7ed7a0b`) and has no successor, so it is simply gone rather than renamed.
         # ⚠ `TRAPS: a-green-suite-hid-five-dead-instruments`: the import gate cannot see a stale kwarg
         # inside a function body.

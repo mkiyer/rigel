@@ -302,15 +302,15 @@ class CalibrationConfig:
     #: (1.0147× / 1.0046× / 1.0036×), so the effect is the BRACKET and not the lattice.
     sweep_logodds_window: float = 10.0
 
-    #: ⛔ ψ's reference LOCATION is GONE (owner refutation, 2026-08-24). Two fields stood here —
-    #: ``structural_reference`` (the annotation-derived ``m → 0.75``) and
-    #: ``measured_intron_reference`` (the measured background location at ss-intron REGIONs). Both
-    #: were prior ASSERTIONS at fixed strength: where the strand channel carried information they
-    #: were worth ~one fragment as documented, and where it did not (κ = ½, or composition near a
-    #: vertex) they were the ENTIRE answer at any depth — measured, the location decided 100 % of
-    #: the claimed-boundary error at zero refits. The reference is now the symmetric Jeffreys
-    #: measure alone; background information enters as the intron-factory density λ-factor
-    #: (`density_deconv.density_lambda_factor`), a LIKELIHOOD whose precision scales with counts.
+    # ⛔ ψ's reference LOCATION is GONE (owner refutation, 2026-08-24). Two fields stood here —
+    # ``structural_reference`` (the annotation-derived ``m → 0.75``) and
+    # ``measured_intron_reference`` (the measured background location at ss-intron REGIONs). Both
+    # were prior ASSERTIONS at fixed strength: where the strand channel carried information they
+    # were worth ~one fragment as documented, and where it did not (κ = ½, or composition near a
+    # vertex) they were the ENTIRE answer at any depth — measured, the location decided 100 % of
+    # the claimed-boundary error at zero refits. The reference is now the symmetric Jeffreys
+    # measure alone; background information enters as the intron-factory density λ-factor
+    # (`density_deconv.density_lambda_factor`), a LIKELIHOOD whose precision scales with counts.
 
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
@@ -404,8 +404,8 @@ class CalibrationConfig:
 
     #: ⭐⭐⭐ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT ON**
     #: (owner, 2026-08-18), after ~11 days muted. ``False`` installs ``messages.silent.SilentPolicy``, ψ
-    #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the derived
-    #: reference, the fitted gDNA prior and the intron factory. ``True`` installs
+    #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the
+    #: fitted gDNA prior and the intron factory. ``True`` installs
     #: ``messages.relay.RelayPolicy``, every operator behind its own named switch.
     #:
     #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** Measured 2026-08-07 on the 36-condition ladder —
@@ -470,8 +470,6 @@ class CalibrationConfig:
     #: measured WORST on the in-scope contaminated strata and FROZEN). ⛔ `"fanout"` was DELETED
     #: 2026-08-24 — measured DOMINATED once the RNA-anchored evidence factor (`rna_anchor`) gave its
     #: destination slots own evidence (`DESIGN.md` §6b.2).
-    #: DEVELOPMENT — stage 3 landed: solved single-stranded introns speak to their flanking
-    #: ``intron|exon`` boundaries and nothing else says anything; the plan doc carries stages 3–4).
     #: Consulted only when `message_propagation` is True; the shipped default is byte-identical to the
     #: tree before the field existed. ⚠ The A/B between the policies is THIS one value, which is what
     #: keeps a rebuild from touching the relay (`RelayPolicy` is not modified, so nothing that works

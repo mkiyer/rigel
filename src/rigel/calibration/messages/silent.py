@@ -49,7 +49,7 @@ class _SilentRelay:
 
 class SilentPolicy:
     """Sends nothing on any channel. ψ then carries the slot's OWN evidence alone — its two strand counts,
-    its spliced count, the derived reference, the fitted gDNA prior and the intron factory."""
+    its spliced count, the fitted gDNA prior and the intron factory."""
 
     name = "silent"
 

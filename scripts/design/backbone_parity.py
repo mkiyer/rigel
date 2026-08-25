@@ -24,8 +24,8 @@ of the tree that still held the predecessor; nothing here will.
 arm pairs must be byte-identical, and an arm the policy cannot express must be visible as such rather than
 scored as inert.
 
-⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** The shipped
-``CalibrationConfig.message_propagation = False`` installs ``SilentPolicy``; every other instrument that
+⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** With
+``message_propagation = False`` (the SHIPPED default is ``True``) ``SilentPolicy`` is installed; every other instrument that
 reads relay state therefore needs a flag to say which policy it ran under. Here the policy **IS** the arm —
 it is named on both sides of every comparison and printed before each run — so a ``--messages`` flag would
 be a second, contradictable source for the same fact. ⚠ The one calibration run at the top exists ONLY to

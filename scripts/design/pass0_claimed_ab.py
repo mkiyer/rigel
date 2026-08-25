@@ -2,9 +2,11 @@
 stage-0 substrate's claimed populations, judged on NOTHING else (the owner's rule).
 
 ⛔ **`FanOutPolicy` and the `--dissect`/`--sweep` survey were DELETED 2026-08-24** with the policy
-they dissected: the RNA-anchored evidence factor (`calibration.rna_anchor`) gives the claimed slots
-own evidence, and the fan-out was measured DOMINATED on every row — never uniquely best, its old
-one-hop job subsumed. The survey's verdicts stand in `DESIGN.md` §6b.2 and the git history.
+they dissected: the certified-flux stream (`calibration.rna_anchor`, ruled A MESSAGE 2026-08-25 and
+delivered by the RELAY — never own evidence) answers the claimed slots, and the fan-out was measured
+DOMINATED on every row. The survey's verdicts stand in `DESIGN.md` §6b.2 and the git history.
+⚠ Since 2026-08-25 the `silent` arm carries NO anchor (silent is the pre-anchor control), so the
+silent-vs-relay contrast here measures the message layer INCLUDING the certified-flux stream.
 
 Two claimed populations, each scored as misplaced gDNA fragments ``Σ|est_gdna − true_gdna|`` against
 certified `slot_truth`, per condition and per policy, DELIVER/REFUTE split and never pooled
@@ -60,7 +62,7 @@ from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import read_scan_cache  # noqa: E402
 
-#: the three policies, as configs — the SHIPPED config with exactly one axis varied.
+#: the two policies, as configs — the SHIPPED config with exactly one axis varied.
 POLICIES = {
     "silent": lambda: CalibrationConfig(message_propagation=False),
     "relay": lambda: CalibrationConfig(),

@@ -36,10 +36,10 @@ made structural). ⭐ A zero abundance is an ordinary VALUE at its own precision
 here" crosses every hop intact (``TRAPS: a-ratio-cannot-carry-zero`` dissolves: the claim itself is
 never a ratio's denominator).
 
-⚠ **CONCEPT LADDER** (owner: test one new concept at a time): A (the population table) and B (the
-own-sourced three-arm relay) are wired; C (composition rescale + §3.5e flux + binomial-sampling
-variance) and D (disagreement damping) land next, each gated first. The §3.5e operators below are
-already gated on the owner's worked numbers and wire at C.
+⚠ **CONCEPT LADDER** (owner: test one new concept at a time): A (the population table), B (the
+own-sourced three-arm relay), C (composition rescale + §3.5e flux + binomial-sampling variance)
+and D (disagreement damping) are ALL WIRED — this paragraph long claimed C/D were "next" after
+they landed, a wrong-fact fossil corrected 2026-08-25.
 
 ⛔ ``RelayPolicy`` is NOT touched by this file's existence: the A/B is one config value
 (``CalibrationConfig.message_policy``) and the shipped default installs the relay unchanged.
@@ -481,6 +481,9 @@ class _CurrencyRelay:
         self._dom_lo, self._dom_hi = float(dom[0]), float(dom[-1])
         # ⭐⭐ THE PREMISE, fitted once from the hops this chain actually has (both directions pooled:
         # a hop is the same pair either way, so its ratio is the same evidence read twice).
+        # ⚠ the ``| True`` below makes the ``eq`` filter DEAD — every hop pools into the fit.
+        # Whether the fit was meant to be restricted to population-equal hops is UNDECIDED
+        # (recorded 2026-08-25); do not silently change a frozen policy's arithmetic.
         _lr = np.concatenate(
             [t["log_r"][np.asarray(t["eq"], bool) | True] for t in self._tables.values()]
         )
@@ -501,8 +504,8 @@ class _CurrencyRelay:
     def scan(self, *, backward: bool):
         """One directional pass of the three-abundance message.
 
-        Concept B: the value crosses every hop unscaled (C adds the composition rescale on
-        population-equal hops; D adds the disagreement variance on unequal ones). At the destination,
+        Concepts B–D: the value crosses each hop scaled by the knob (``r**w``; the docstring's
+        older "unscaled" claim described concept B alone, before C/D wired). At the destination,
         an inadmissible strand's claim is zeroed — value AND precision, one statement — and the claim
         fuses with the destination's own belief precision-weighted, so a beliefless slot relays
         unmodified and a strong local belief dominates."""

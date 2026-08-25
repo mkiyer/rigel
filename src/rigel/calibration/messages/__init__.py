@@ -6,7 +6,7 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — tw
 ``N E N E … N`` chain, one combine, one ψ solve, one write-back, and five assertions. Everything about
 *what a message says* is a policy, and it lives here.
 
-Four policies ship (`CalibrationConfig.message_propagation` = True since 2026-08-18, with
+Three policies ship (`CalibrationConfig.message_propagation` = True since 2026-08-18, with
 `message_policy` picking which one — this paragraph called SilentPolicy "THE DEFAULT" long after the
 default flipped, a wrong-fact fossil corrected 2026-08-23):
 
@@ -82,7 +82,8 @@ __all__ = [
 class PsiMessage:
     """What the two neighbours jointly tell ψ about this slot, and **nothing else**.
 
-    Four channels, each a ``(mode, precision)`` pair, each in ITS OWN COORDINATE — which is the whole
+    Four Gaussian channels, each a ``(mode, precision)`` pair, each in ITS OWN COORDINATE
+    (plus the certified-flux row channel ``lam_rows``, documented on its field) — which is the whole
     reason the modes are stated separately rather than read back off a fused density:
 
     ==================  =====================================  ==============================
@@ -279,7 +280,8 @@ class Relay(Protocol):
         """
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
-        """The four ψ channels at every slot, from the two NEIGHBOUR states only (TRAPS: a-message-from-the-destinations-belief)."""
+        """The ψ channels at every slot — the four Gaussian channels plus the certified-flux
+        rows — from the two NEIGHBOUR states only (TRAPS: a-message-from-the-destinations-belief)."""
 
 
 @runtime_checkable

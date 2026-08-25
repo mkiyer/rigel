@@ -303,8 +303,9 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
     )
 
 
-def test_the_default_policy_is_silent_and_sends_nothing():
-    """⭐ ``SilentPolicy`` is the default, and it is a MEASURED floor rather than a placeholder: with no
+def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
+    """⭐ ``SilentPolicy`` is ``solve_chain``'s PARAMETER default (the shipped config installs the
+    relay), and it is a MEASURED floor rather than a placeholder: with no
     belief propagation the deliverable is a net improvement on three of the four strata and a large
     regression on exactly one — the stratum where kappa = 1/2 leaves a slot no own composition evidence."""
     relay = SilentPolicy().prepare(_ctx())

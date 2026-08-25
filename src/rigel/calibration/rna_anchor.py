@@ -403,7 +403,6 @@ def _selection(chain, statics, geometry, region_arrays, routes: "RouteTable | No
         keep = exon_rate > 0.0
         e_idx, exon_rate, exon_flux = e_idx[keep], exon_rate[keep], exon_flux[keep]
     else:
-        keep = eff_sj[np.where(comp_l[e_idx], left[e_idx], right[e_idx])] >= 0.0
         # membership only — a complete flank with any junction opportunity anchors the exon
         has = np.zeros(e_idx.size, bool)
         for i, e in enumerate(e_idx):

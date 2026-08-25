@@ -120,7 +120,7 @@ def _sibling(name: str):
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 #
 # ⛔⛔ **`_uni` HAS EXACTLY ONE WRITER AND IT IS BEHIND A CONFIG FLAG.** `messages/relay.py` appends it,
-# so it exists only under `RelayPolicy`; the shipped `CalibrationConfig.message_propagation` is `False`,
+# so it exists only under `RelayPolicy`; with `CalibrationConfig.message_propagation` False,
 # which installs `SilentPolicy`. Five instruments read `capture["_uni"]` unconditionally and therefore
 # died with `KeyError: '_uni'` the day that default flipped, while the SUITE stayed green because the
 # test readers install the policy themselves. That is `TRAPS: a-green-suite-hid-five-dead-instruments`

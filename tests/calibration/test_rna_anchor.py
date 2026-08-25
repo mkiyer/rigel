@@ -388,7 +388,6 @@ def anchor_toy(tmp_path_factory):
         build_boundary_flags_array,
         build_sj_geometry_arrays,
     )
-    from rigel.calibration.structural_claims import build_structural_claims
     from rigel.calibration.substrate import CalibrationSubstrate
     from rigel.config import PipelineConfig
     from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
@@ -410,7 +409,6 @@ def anchor_toy(tmp_path_factory):
     bflags = build_boundary_flags_array(index)
     geometry = build_region_geometry(chain, substrate, ra, sj, fl.gdna_pmf, fl.rna_pmf, None)
     statics = build_region_statics(chain, ra, bflags)
-    claims = build_structural_claims(chain, statics)
     routes = RA.build_route_table(sj, substrate, fl.rna_pmf)
     kwargs = dict(
         region_arrays=ra,
@@ -426,7 +424,6 @@ def anchor_toy(tmp_path_factory):
         statics=statics,
         geometry=geometry,
         region_arrays=ra,
-        claims=claims,
         routes=routes,
         calibrate_kwargs=kwargs,
     )

@@ -171,8 +171,8 @@ _FIRED: dict = {}
 
 #: ⛔⛔⛔ **THE ARMS THAT CAN ONLY SPEAK THROUGH THE MESSAGE LAYER — and a fire counter cannot see this.**
 #:
-#: `CalibrationConfig.message_propagation` defaults to ``False`` (owner, 2026-08-07), which installs
-#: ``messages.silent.SilentPolicy``. Every name in this set is then either UNCALLED or expresses itself
+#: With ``message_propagation=False`` (an arm choice — the SHIPPED default is ``True`` since
+#: 2026-08-18) ``messages.silent.SilentPolicy`` is installed. Every name in this set is then either UNCALLED or expresses itself
 #: only through a fusion that no longer happens, so the arm scores byte-identical to ``base`` — which is
 #: TRAPS: an-ablation-that-never-ran's published-and-wrong reading, arriving through a config flag rather than a renamed function.
 #:
