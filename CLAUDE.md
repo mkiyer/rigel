@@ -223,8 +223,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,653 passed / 0 skipped / 8 xfail** (re-derived 2026-08-24,
-sixth measurement that day. The `−29` over 3,682 is the FAN-OUT DELETION (`DESIGN.md` §6b.2 ✅):
+⭐ **THE STANDING BASELINE: 0 failed / 3,660 passed / 0 skipped / 8 xfail** (re-derived 2026-08-24,
+seventh measurement that day. The `+7` over 3,653 is the ANCHOR ROUND-2 REWRITE (`DESIGN.md`
+§6b.2): `tests/calibration/test_rna_anchor.py` grew 13 → 19 own cases in place (route-sum,
+quadrature, marginalized-nascent, capture-cliff and builder-dispatch gates; no file moved), plus
+`+1` for `docs/dev/CLEAN_LIBRARY_RESIDUAL.md` — a `docs/dev/` file, jargon only. Before that, the
+`−29` over 3,682 was the FAN-OUT DELETION (`DESIGN.md` §6b.2 ✅):
 `tests/calibration/test_fanout_policy.py` removed — 27 own cases plus its 2 per-file gate cases —
 after the anchored-tree re-contrast measured `FanOutPolicy` dominated on every row; no shipped
 behavior moved. Before that, `+2` over 3,680: two estimator-hardening gates in the EXISTING

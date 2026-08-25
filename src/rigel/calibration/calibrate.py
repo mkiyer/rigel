@@ -66,7 +66,7 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .rna_anchor import build_rna_anchor_factor
+from .rna_anchor import build_route_table, build_rna_anchor_factor
 from .density_deconv import (
     GdnaBackground,
     density_lambda_factor,
@@ -584,10 +584,15 @@ def calibrate(
     # evaluated ON the solve grid so it shares the factory's rebuild-on-bracket-move rule and memo
     # discipline, and SUMMED with it into one per-slot λ-factor — one array, one consumer contract.
     _anchor_factors: dict = {}
+    #: the per-route table (round 2: the flank rate is the SUM of per-route junction rates — the
+    #: review-confirmed pooling fix). Grid-independent, so built once and shared by every bracket.
+    _anchor_routes: list = []
 
     def _anchor_at(n_grid: int, window: float):
         if not config.rna_anchor:
             return None
+        if not _anchor_routes:
+            _anchor_routes.append(build_route_table(sj, substrate, rna_fl_pmf))
         key = (int(n_grid), float(window))
         if key not in _anchor_factors:
             _anchor_factors[key] = build_rna_anchor_factor(
@@ -595,6 +600,7 @@ def calibrate(
                 statics,
                 geometry,
                 region_arrays,
+                _anchor_routes[0],
                 n_grid=int(n_grid),
                 logodds_window=float(window),
             )

@@ -1362,11 +1362,10 @@ deleted gate file and the constraint carries the record.
 
 **The mechanism** (`calibration.rna_anchor`, default `CalibrationConfig.rna_anchor = True`; the
 derivation, the estimator ledger and the recorded residuals live in the module docstring; gate
-`tests/calibration/test_rna_anchor.py`, 11 cases, 8/8 perturbations verified firing): the RNA side
+`tests/calibration/test_rna_anchor.py`, 19 cases, every perturbation verified firing): the RNA side
 of the unspliced count is anchored on quantities hybrid capture cannot mis-scale — certified splice
 flux at complete-flank exons, the adjacent intron's excess-over-background nascent rate at eligible
-ss-intron boundaries — as a count-scale Gaussian likelihood summed into the intron factory's
-per-slot factor array. No gDNA rate for an enriched slot appears anywhere; anchor and target share
+ss-intron boundaries — as a likelihood summed into the intron factory's per-slot factor array. No gDNA rate for an enriched slot appears anywhere; anchor and target share
 each exon's own probe footprint, so enrichment cancels pair-locally (measured: the RNA-frame
 boundary→exon ratio is capture-invariant, median 1.06–1.24 both states, where the gDNA frame
 shifts 2.9–3.4×). ⛔ Capture GATING remains refuted (capture is a spectrum); this factor needs no
@@ -1384,18 +1383,39 @@ the MAD left-tail fallback, max-combined with the two-flank disagreement (measur
 width with the center over-tightened a zero control 207k → 402k). ⛔ The deep lesson, three
 iterations paid for: ANY in-sample residual estimate of the transport has validity that depends on
 the unknown gDNA level itself — the guard makes that dependence explicit and refusable instead of
-silent. The durable exit (recorded, not built): derive the sj-frame→contained-frame transport
-factor from the OPPORTUNITY model (it is geometry, calculable not estimable) and marginalize the
-rate posterior by quadrature — the intron factory's own Gamma⊗Poisson=NB pattern generalized —
-instead of the count-scale Gaussian approximation.
+silent.
 
-**Priced on 0.8.0's own metric** (`calibration_vs_oracle.py`, whole library, all 16, vs the
-same-session pre-deletion baseline): the strata holding 96.7 % of certified gDNA improve — `g98`
-capture-ON 0.68–0.85 (region) / 0.72–0.80 (boundary), `g50` capture-ON 0.72–0.99, capture-OFF
-boundaries 0.91–0.98. The residual concentrates at the CLEAN libraries: `g00` rows 2.2–7.4× worse
-(absolute ~30–280k), `g05`-OFF ~1.6–2.0×, and `g98`-OFF regions +26–36 % — the anchor's remaining
-width/shape error converting to phantom gDNA where truth is RNA-rich, plus the no-nascent-term
-stress row (claimed E 6.4k → ~59k at `g50` unstranded OFF; a STRESS reading under §0b).
+**ROUND 2 (same day) — derived under adversarial review, prototyped, priced, shipped.** Three
+changes, each priced alone: ① ⛔ **the ROUTE-SUM pooling, a bug fix** — a flank's junctions are
+disjoint routes (each molecule crosses exactly one), so the flank rate is `Σ_J flux_J / A_J`;
+round 1's ratio-of-sums under-predicted k-route exons ~k× and its route-count asymmetry
+MANUFACTURED the heavy-tail "transport dispersion" (the deep-flux floor halved under the fix) —
+the single largest lever; ② the count-scale Gaussian replaced at EXONS by the intron factory's own
+pattern — the Gamma⊗Poisson **NegBinomial marginal (`size = flux + ½`) averaged over the
+multiplicative transport scatter by a median-preserving equal-mass quantile quadrature** (bulk-soft,
+tails bounded; Gauss–Hermite nodes were tried and measured bulk-TIGHT — a priced wrong shape);
+③ the nascent term MARGINALIZED — both point-estimate forms are positively biased at nascent-free
+truth (Jensen: the plug-in clamp by ~0.40σ, the truncated-posterior MEAN by ~0.56σ, measured as a
+`g98`-ON regression), so quantile nodes of the truncated-excess posterior enter the quadrature and
+a clean intron keeps its atom at exactly zero. The excess converts with the intron's RNA
+opportunity (panel-invisible by the equal-length design; the fl-gap side panels falsify it).
+⛔ **The BOUNDARY factor keeps the round-1 guarded-Gaussian family**: its prediction is near-zero
+wherever capture enriches the boundary crossing against the intron the anchor reads (the cliff),
+and a quadrature there asserts that near-zero with counting-only width — priced as a 734 → 27.5k
+zero-control leak, now pinned by a capture-cliff flat gate and a builder-dispatch sentinel gate
+(the revert once shipped as dead code behind 17 green gates). At capture-ON the boundary factor is
+therefore ~flat BY DESIGN and the boundary wins arrive via the exon factor and the messages.
+
+**Priced on 0.8.0's own metric** (whole-library misplaced fragments vs oracle, the graduation
+table in the round-2 review): the round-1 clean-library residual falls 2.7–3.9× — `g00`-OFF relay
+148.8k → 55.4k (claimed E 11.0k), `g05`-OFF silent 124.7k → 31.9k (claimed E 80.7k → 5.5k), the
+`g50`-OFF stress-nascent row restored to the pre-anchor base (claimed E 22.9k → 6.6k vs base
+6.4k) — while every high-gDNA win holds (`g98`-ON silent 80.7k → 68.5k region with claimed E
+5.7k; relay 182k → 146k; `g98`-OFF claimed B 40.9k → 21.5k) and the zero controls sit on the
+anchor-OFF base (`g00`-ON claimed B 718 vs 710). Remaining `g00`-OFF relay gap vs the pre-anchor
+base: 3.2× (55k vs 17k); the named candidates are the review's unaddressed items (single-flank
+center bias, sj strand-column matching, shared-fragment pair correlation, the capture-ON +12 %
+mature offset).
 
 ⛔⛔ **OBSOLESCENCE TRACKING (owner directive, 2026-08-24: remove what the anchor obsoletes).**
 Candidates, each pending the policy re-contrast ON THE ANCHORED TREE and none deleted yet:
