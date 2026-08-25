@@ -230,7 +230,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,664 passed / 0 skipped / 8 xfail** (re-derived 2026-08-25.
+⭐ **THE STANDING BASELINE: 0 failed / 3,665 passed / 0 skipped / 8 xfail** (re-derived 2026-08-25,
+third measurement that day. The `+1` over 3,664 is `docs/dev/HONEST_PRECISION.md` — a `docs/dev/`
+file, jargon only; the same-day cleanup sweep was content-only and moved the total by ZERO, as
+the rule requires.
 The `+4` over 3,660 is the ANCHOR-IS-A-MESSAGE INTEGRATION (`DESIGN.md` §6b.3): the anchor's two
 calibrate-coupling gates replaced by five message-contract gates in the EXISTING
 `tests/calibration/test_rna_anchor.py` (19 → 22 own cases; citizenship, both-ways stream reach,
