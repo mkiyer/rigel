@@ -185,9 +185,9 @@ def _log_negbinom_rows(g, mu, size) -> np.ndarray:
 
 def _quadrature_rows(unspl, mu, size, *, scatter_log_variance, nascent_count_nodes, fg_grid):
     """The factor rows: the NegBinomial marginal averaged over the transport scatter
-    (Gauss–Hermite nodes, symmetric ⇒ median-preserving — a mean-preserving −s²/2 offset is
-    review-refuted under quantile calibration) and, when given, over the nascent-excess
-    posterior nodes. ``scatter_log_variance = 0``
+    (stratified equal-mass midpoint-quantile nodes, symmetric ⇒ median-preserving — a
+    mean-preserving −s²/2 offset is review-refuted under quantile calibration) and, when given,
+    over the nascent-excess posterior nodes. ``scatter_log_variance = 0``
     reduces exactly to the pure NegBinomial (gated). ``None`` scatter ⇒ flat rows (the
     conservative unknown-dispersion limit)."""
     C = np.asarray(unspl, np.float64)
