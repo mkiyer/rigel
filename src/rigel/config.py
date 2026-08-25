@@ -389,15 +389,17 @@ class CalibrationConfig:
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
 
-    #: ⭐⭐⭐ **THE RNA-ANCHORED EVIDENCE FACTOR — DEFAULT ON (owner, 2026-08-24).** Anchors the RNA
-    #: side of the unspliced count where hybrid capture cannot mis-scale it: certified splice flux
-    #: at complete-flank exons, the adjacent intron's excess-over-background (nascent) rate at
-    #: eligible ss-intron boundaries (`calibration.rna_anchor` — the derivation, the measured wins
-    #: and the two recorded residuals live in its module docstring). Summed with the intron
-    #: factory's λ-factor, so it enters the local solve, the relay, and the slot's own-evidence
-    #: precision. ⛔ ``False`` ⇒ the builder is never called and every path is byte-identical to
-    #: the tree before it existed — gated by ``tests/calibration/test_rna_anchor.py``'s explosive
-    #: reach test in both directions.
+    #: ⭐⭐⭐ **THE CERTIFIED-FLUX STREAM — DEFAULT ON (owner, 2026-08-24; ruled A MESSAGE
+    #: 2026-08-25).** Anchors the RNA side of the unspliced count where hybrid capture cannot
+    #: mis-scale it: certified splice flux at complete-flank exons, the adjacent intron's
+    #: excess-over-background (nascent) rate at eligible ss-intron boundaries
+    #: (`calibration.rna_anchor` — the derivation and the recorded residuals live in its module
+    #: docstring). ⛔ **It is a MESSAGE, not own evidence**: a one-hop imputation the RELAY
+    #: delivers (`PsiMessage.lam_rows`), summed into the FINAL solve only — never phase-A, never
+    #: the own-evidence precision — so it is live iff ``message_propagation`` is on and
+    #: ``message_policy`` is ``"relay"``, and the silent CONTROL never carries it. ⛔ ``False`` ⇒
+    #: the evidence is never prepared and every path is byte-identical — gated by
+    #: ``tests/calibration/test_rna_anchor.py``'s explosive reach tests in both directions.
     rna_anchor: bool = True
 
     #: ⭐⭐⭐ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT ON**

@@ -298,7 +298,7 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
         "calibrate no longer reads the switch — whichever policy it now hard-codes, the config option is "
         "lying to anyone who sets it."
     )
-    assert "RelayPolicy()" in src and "SilentPolicy()" in src, (
+    assert "RelayPolicy(" in src and "SilentPolicy()" in src, (
         "both arms must be reachable from the one call site; a switch with one arm is not a switch."
     )
 

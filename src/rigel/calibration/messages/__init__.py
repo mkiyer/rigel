@@ -117,6 +117,14 @@ class PsiMessage:
     #: clamp). ``None`` ⇒ every claim two-sided, byte-identical to the path before this field, and the
     #: process-global ``ONE_SIDED_RNA`` toggle it generalizes still applies then.
     rna_one_sided: np.ndarray | None = None
+    #: ⭐⭐ THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: the anchor IS a message) — an
+    #: ``(n_slots, K)`` λ-factor row array in ψ's general evidence currency (θ-independent, finite,
+    #: an all-zero row is inert), or ``None`` for no claim. The sender publishes its spliced-flux
+    #: observation; these rows are the RECIPIENT's arithmetic (route-sum + the NB marginal at
+    #: claimed exons, the guarded Gaussian at eligible boundaries — `rna_anchor`). The backbone
+    #: sums them into the FINAL solve only: never phase-A, never the own-evidence precision —
+    #: that citizenship is the entire difference from the intron factory's factor.
+    lam_rows: np.ndarray | None = None
 
     @classmethod
     def silent(cls) -> PsiMessage:
@@ -138,6 +146,7 @@ class PsiMessage:
                 "theta_mode",
                 "theta_prec",
                 "rna_one_sided",
+                "lam_rows",
             )
         )
 

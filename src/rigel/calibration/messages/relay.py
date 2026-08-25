@@ -120,6 +120,11 @@ class RelaySwitches:
     rna_channel: bool = True
     lam_channel: bool = True
     theta_channel: bool = True
+    #: ⭐⭐ THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: the anchor IS a message) — the
+    #: spliced-fragment observation delivered as `PsiMessage.lam_rows`, the recipient arithmetic
+    #: being `rna_anchor.flux_rows` (route-sum + NB marginal at claimed exons, guarded Gaussian at
+    #: eligible boundaries). Live only when the policy was CONSTRUCTED with prepared flux evidence.
+    certified_flux: bool = True
 
     def names(self) -> tuple[str, ...]:
         return tuple(f.name for f in fields(self))
@@ -130,25 +135,50 @@ class RelaySwitches:
 
 
 class RelayPolicy:
-    """The shipped message layer. ``RelayPolicy()`` — every switch ON — is the shipped answer."""
+    """The shipped message layer. ``RelayPolicy()`` — every switch ON — is the shipped answer.
+
+    ``flux`` is the prepared certified-flux evidence (`rna_anchor.prepare_flux_evidence`), injected
+    at construction because its ingredients (the chain, the structural claims, the route table) are
+    `calibrate`-level objects a `StepContext` deliberately does not carry. ``None`` ⇒ the stream is
+    silent, byte-identical to the pre-stream relay."""
 
     name = "head"
 
-    def __init__(self, switches: RelaySwitches | None = None):
+    def __init__(self, switches: RelaySwitches | None = None, *, flux=None):
         self.switches = switches if switches is not None else RelaySwitches()
         if self.switches.off():
             self.name = "head-" + "-".join(f"no_{s}" for s in self.switches.off())
+        self._flux = flux if (self.switches.certified_flux and flux is not None) else None
+        #: rows are grid-keyed like every λ-factor (rebuilt when the bracket moves, never regridded)
+        self._flux_rows_by_grid: dict = {}
+
+    def _rows_at(self, n_grid: int, logodds_window: float):
+        if self._flux is None:
+            return None
+        key = (int(n_grid), float(logodds_window))
+        if key not in self._flux_rows_by_grid:
+            from ..rna_anchor import flux_rows
+
+            self._flux_rows_by_grid[key] = flux_rows(
+                self._flux, n_grid=int(n_grid), logodds_window=float(logodds_window)
+            )
+        return self._flux_rows_by_grid[key]
 
     def prepare(self, ctx: StepContext) -> _PreparedRelay:
-        return _PreparedRelay(ctx, self.switches)
+        return _PreparedRelay(
+            ctx, self.switches, flux_rows=self._rows_at(ctx.n_grid, ctx.logodds_window)
+        )
 
 
 class _PreparedRelay:
     """One sweep's worth of prepared state. Everything derived here is a POLICY derivation."""
 
-    def __init__(self, ctx: StepContext, sw: RelaySwitches):
+    def __init__(self, ctx: StepContext, sw: RelaySwitches, *, flux_rows=None):
         self.ctx = ctx
         self.sw = sw
+        #: the certified-flux stream's delivered claim — recipient arithmetic already applied
+        #: (`rna_anchor.flux_rows`), attached to the packet in `deliver`
+        self._flux_rows = flux_rows
         cap = ctx.capture
         n = ctx.n_slots
 
@@ -1213,4 +1243,5 @@ class _PreparedRelay:
             lam_prec=c_tau if sw.lam_channel else None,
             theta_mode=th_msg if sw.theta_channel else None,
             theta_prec=th_prec if sw.theta_channel else None,
+            lam_rows=self._flux_rows if sw.certified_flux else None,
         )

@@ -66,7 +66,7 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .rna_anchor import build_route_table, build_rna_anchor_factor
+from .rna_anchor import build_route_table, prepare_flux_evidence
 from .density_deconv import (
     GdnaBackground,
     density_lambda_factor,
@@ -578,40 +578,26 @@ def calibrate(
             )
         return _intron_priors[key]
 
-    # ⭐⭐⭐ THE RNA-ANCHORED EVIDENCE FACTOR (`rna_anchor`, owner design 2026-08-24) — the RNA side
-    # of the unspliced count anchored on certified splice flux (complete-flank exons) and the
-    # adjacent intron's nascent excess (eligible boundaries). Belief-free like the intron factory,
-    # evaluated ON the solve grid so it shares the factory's rebuild-on-bracket-move rule and memo
-    # discipline, and SUMMED with it into one per-slot λ-factor — one array, one consumer contract.
-    _anchor_factors: dict = {}
-    #: the per-route table (round 2: the flank rate is the SUM of per-route junction rates — the
-    #: review-confirmed pooling fix). Grid-independent, so built once and shared by every bracket.
-    _anchor_routes: list = []
+    # ⭐⭐⭐ THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: the anchor IS a message). The
+    # spliced-fragment anchor no longer rides the local λ-factor — it is a one-hop imputation, so
+    # it belongs to the message layer: `prepare_flux_evidence` packages the observations once
+    # (route table included) and the RELAY delivers the claim as `PsiMessage.lam_rows`, which the
+    # backbone sums into the FINAL solve only. Phase-A and the own-evidence precision never see
+    # it, and the silent CONTROL is a control again. `docs/DESIGN.md` §6b.3 carries the ruling.
+    _flux_evidence: list = []
 
-    def _anchor_at(n_grid: int, window: float):
-        if not config.rna_anchor:
-            return None
-        if not _anchor_routes:
-            _anchor_routes.append(build_route_table(sj, substrate, rna_fl_pmf))
-        key = (int(n_grid), float(window))
-        if key not in _anchor_factors:
-            _anchor_factors[key] = build_rna_anchor_factor(
-                chain,
-                statics,
-                geometry,
-                region_arrays,
-                _anchor_routes[0],
-                n_grid=int(n_grid),
-                logodds_window=float(window),
+    def _flux_at():
+        if not _flux_evidence:
+            _flux_evidence.append(
+                prepare_flux_evidence(
+                    chain,
+                    statics,
+                    geometry,
+                    region_arrays,
+                    build_route_table(sj, substrate, rna_fl_pmf),
+                )
             )
-        return _anchor_factors[key]
-
-    def _lam_factor_at(n_grid: int, window: float):
-        a = _intron_prior_at(n_grid, window)
-        b = _anchor_at(n_grid, window)
-        if a is None:
-            return b
-        return a if b is None else a + b
+        return _flux_evidence[0]
 
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
@@ -621,6 +607,16 @@ def calibrate(
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
+    # ⭐ ONE policy instance for every phase: the relay carries the certified-flux evidence and a
+    # grid-keyed rows memo, so constructing it per sweep would rebuild the rows every refit.
+    if config.message_propagation:
+        if config.message_policy == "currency":
+            policy = CurrencyPolicy()
+        else:
+            policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
+    else:
+        policy = SilentPolicy()
+
     def _sweep(prior):
         capture = {} if _debug is not None else None
         # ⭐⭐⭐ THE λ BRACKET IS `max(the reference's floor, the fitted prior's own demand)`. ψ evaluates
@@ -654,7 +650,7 @@ def calibrate(
                     n_grid_ss,
                     n_tilt,
                 )
-        lam_factor = _lam_factor_at(n_grid, window)
+        lam_factor = _intron_prior_at(n_grid, window)
         # ⛔ ψ has NO reference location (owner refutation, 2026-08-24): the structural 0.75 and the
         # measured intron override were prior ASSERTIONS at fixed strength — the entire answer
         # wherever the strand channel was dead. The reference is the symmetric Jeffreys measure;
@@ -697,11 +693,7 @@ def calibrate(
             # where kappa = 1/2 zeroes the strand lambda-term, so a slot has no own composition evidence
             # and a message is the only source there is. ⛔ The theta-independent FRAGMENT-LENGTH way
             # out was built, measured and DELETED (2026-08-10); `TRAPS.md` carries the mechanism.
-            policy=(
-                (CurrencyPolicy() if config.message_policy == "currency" else RelayPolicy())
-                if config.message_propagation
-                else SilentPolicy()
-            ),
+            policy=policy,
             _capture=capture,
         )
         if capture is not None:

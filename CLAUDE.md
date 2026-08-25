@@ -152,6 +152,13 @@ is not a claim that its modules are the right SIZE; layer 4 being five modules f
 policy is one config value, `message_policy`, default `relay`. Three policies sit on one gated backbone:
 `SilentPolicy`, `RelayPolicy`, and `CurrencyPolicy` (`messages/currency.py`).
 
+⭐⭐⭐ **THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE).** The
+spliced-fragment anchor is a one-hop imputation and lives in the RELAY as a stream
+(`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
+phase-A, never own-evidence precision). ⛔ `SilentPolicy` never carries it: silent is the
+pre-anchor CONTROL again, and `config.rna_anchor` is live iff propagation is on and the policy is
+relay. The ruling, the contract and the integration price are `DESIGN.md` §6b.3.
+
 ⛔ **`CurrencyPolicy` is a DEVELOPMENT BASELINE WITH A MEASURED DEFICIT, not an improvement** — it wins
 every zero control and loses all three in-scope contaminated strata, where `SilentPolicy` still wins.
 ⛔ **On the test chromosome it wins those same strata, so every claim about it MUST name its substrate**
@@ -223,8 +230,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,660 passed / 0 skipped / 8 xfail** (re-derived 2026-08-24,
-seventh measurement that day. The `+7` over 3,653 is the ANCHOR ROUND-2 REWRITE (`DESIGN.md`
+⭐ **THE STANDING BASELINE: 0 failed / 3,664 passed / 0 skipped / 8 xfail** (re-derived 2026-08-25.
+The `+4` over 3,660 is the ANCHOR-IS-A-MESSAGE INTEGRATION (`DESIGN.md` §6b.3): the anchor's two
+calibrate-coupling gates replaced by five message-contract gates in the EXISTING
+`tests/calibration/test_rna_anchor.py` (19 → 22 own cases; citizenship, both-ways stream reach,
+policy-path arithmetic parity, channel silence, biased-claim ψ-reach — every perturbation verified
+firing), plus `+1` for `docs/dev/ANCHOR_AS_MESSAGE.md` — a `docs/dev/` file, jargon only.
+Before that, the `+7` over 3,653 was the ANCHOR ROUND-2 REWRITE (`DESIGN.md`
 §6b.2): `tests/calibration/test_rna_anchor.py` grew 13 → 19 own cases in place (route-sum,
 quadrature, marginalized-nascent, capture-cliff and builder-dispatch gates; no file moved), plus
 `+1` for `docs/dev/CLEAN_LIBRARY_RESIDUAL.md` — a `docs/dev/` file, jargon only. Before that, the

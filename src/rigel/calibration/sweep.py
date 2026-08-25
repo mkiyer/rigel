@@ -156,6 +156,15 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
     # component channels (gDNA, RNA+, RNA-) for the same reason.
     pop = ctx.population_size()
     counts.note("population_at_most_three", pop > 3, np.ones_like(pop, bool))
+    # ── the certified-flux stream: rows in psi's general evidence currency, or absent ────────────────
+    if msg.lam_rows is not None:
+        rows = np.asarray(msg.lam_rows)
+        if rows.shape[0] != ctx.n_slots or rows.ndim != 2:
+            raise ValueError(
+                f"lam_rows has shape {rows.shape}; expected ({ctx.n_slots}, K) — the certified-flux "
+                "stream must deliver one row per slot on the solve grid"
+            )
+        counts.note("flux_rows_finite", ~np.isfinite(rows).all(axis=1), np.ones(ctx.n_slots, bool))
     n_rna_channels = 0 if msg.rna_mode is None else len(msg.rna_mode)
     counts.note(
         "message_has_three_components",
@@ -342,7 +351,7 @@ def solve_chain(
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
 
-    def _psi(g_arr, msg: PsiMessage, *, fg_ref, fpos_ref, fneg_ref):
+    def _psi(g_arr, msg: PsiMessage, *, fg_ref, fpos_ref, fneg_ref, extra_lam_rows=None):
         """The per-slot solve (the log-density log-odds backend). Phase A calls it with a silent message;
         the final call passes the combine's four channels.
 
@@ -378,7 +387,15 @@ def solve_chain(
             # the gDNA intron-factory λ-factor (anchored, per-intron, 0 elsewhere): deconvolves confident gDNA
             # from introns against the intergenic background BEFORE the sweep resolves the pie. Added to ψ,
             # distinct from the gDNA arm; participates in the local solve AND the relay.
-            lam_logprior=intron_prior,
+            lam_logprior=(
+                intron_prior
+                if extra_lam_rows is None
+                else (
+                    np.asarray(extra_lam_rows, np.float64)
+                    if intron_prior is None
+                    else intron_prior + np.asarray(extra_lam_rows, np.float64)
+                )
+            ),
             # ⭐ the FRAGMENT-LENGTH λ-factor. It enters the LOCAL solve and the FINAL one, exactly like
             # the intron factory, so a slot's own length evidence both sets its belief and propagates.
             # ``None`` ⇒ byte-identical to the path without it.
@@ -493,7 +510,18 @@ def solve_chain(
     counts = AssertionCounts()
     _check_message(msg, ctx, counts)
 
-    dc_fin = _psi(global_lp, msg, fg_ref=f_g, fpos_ref=f_pos, fneg_ref=f_neg)
+    # ⭐⭐ THE CITIZENSHIP SEAM (owner ruling 2026-08-25): a delivered certified-flux claim joins the
+    # λ-factor rows in the FINAL solve only. Phase-A (`build_region_init`) and the own-evidence
+    # precision never see it — an imputation may inform the fused answer, never masquerade as the
+    # slot's own evidence.
+    dc_fin = _psi(
+        global_lp,
+        msg,
+        fg_ref=f_g,
+        fpos_ref=f_pos,
+        fneg_ref=f_neg,
+        extra_lam_rows=msg.lam_rows,
+    )
 
     # ── THE WRITE-BACK — only SOLVABLE slots ──────────────────────────────────────────────────────────
     # A locked slot (no admissible RNA strand) or an empty one keeps its signature-binary init. ⛔ The

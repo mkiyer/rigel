@@ -111,10 +111,11 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "run_fill",
             "density_model",
             "density_deconv",
-            # `rna_anchor` is the RNA-side evidence factor (owner design, 2026-08-24): certified
-            # splice flux + adjacent-intron nascent rates anchoring the RNA half of the unspliced
-            # count at complete-flank exons and eligible boundaries. It reuses `density_deconv`'s
-            # NegBinomial SIDEWAYS and reads layer-3 geometry/claims DOWN.
+            # `rna_anchor` is the certified-flux stream's arithmetic (owner design 2026-08-24;
+            # ruled A MESSAGE 2026-08-25): the sender-side evidence bundle and the recipient-side
+            # rows, anchored on certified splice flux + adjacent-intron nascent rates. It reuses
+            # `density_deconv`'s NegBinomial SIDEWAYS and reads layer-3 geometry/claims DOWN; the
+            # RELAY (layer 6) imports it DOWN to deliver the claim as `PsiMessage.lam_rows`.
             "rna_anchor",
             "landscape",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses

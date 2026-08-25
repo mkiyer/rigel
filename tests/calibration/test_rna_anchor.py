@@ -454,9 +454,10 @@ def test_the_factor_touches_only_the_claimed_populations(anchor_toy, monkeypatch
     assert not np.any(touched & ~eligible), "the factor moved a slot outside its populations"
 
 
-def test_the_flag_gates_the_builder_both_ways(anchor_toy, monkeypatch):
-    """`rna_anchor = False` never reaches the builder; `True` always does — explosive-builder
-    reach test in both directions."""
+def test_the_anchor_is_a_message_silent_stays_silent(anchor_toy, monkeypatch):
+    """THE CITIZENSHIP CONTRACT (owner ruling, 2026-08-25): the anchor is a MESSAGE. With message
+    propagation OFF (the silent control) the flag must be inert — the row arithmetic never runs
+    and the result is byte-identical to `rna_anchor=False`. The control is a control again."""
     import sys
 
     import rigel.calibration.calibrate  # noqa: F401
@@ -470,25 +471,29 @@ def test_the_flag_gates_the_builder_both_ways(anchor_toy, monkeypatch):
     def boom(*a, **kw):
         raise Boom
 
-    monkeypatch.setattr(calibrate_mod, "build_rna_anchor_factor", boom)
     t = anchor_toy
-    calibrate_mod.calibrate(
+    res_off = calibrate_mod.calibrate(
         payload=t["payload"],
         config=CalibrationConfig(rna_anchor=False, message_propagation=False),
         **t["calibrate_kwargs"],
     )
-    with pytest.raises(Boom):
-        calibrate_mod.calibrate(
-            payload=t["payload"],
-            config=CalibrationConfig(rna_anchor=True, message_propagation=False),
-            **t["calibrate_kwargs"],
-        )
+    monkeypatch.setattr(calibrate_mod, "prepare_flux_evidence", boom)
+    res_on = calibrate_mod.calibrate(
+        payload=t["payload"],
+        config=CalibrationConfig(rna_anchor=True, message_propagation=False),
+        **t["calibrate_kwargs"],
+    )
+    np.testing.assert_array_equal(
+        np.asarray(res_on.mass_gdna_region), np.asarray(res_off.mass_gdna_region)
+    )
+    np.testing.assert_array_equal(
+        np.asarray(res_on.mass_gdna_boundary), np.asarray(res_off.mass_gdna_boundary)
+    )
 
 
-def test_the_real_builder_runs_through_calibrate(anchor_toy):
-    """The REAL integration, un-monkeypatched: `calibrate` with the flag ON must reach the actual
-    builder (route table included) and complete — the explosive-builder gate above cannot see a
-    signature mismatch in the real call (TRAPS: could-the-arm-have-fired)."""
+def test_the_relay_carries_the_flux_stream_both_ways(anchor_toy, monkeypatch):
+    """With the relay, `rna_anchor=True` must reach the evidence builder (explosive stub), and
+    `rna_anchor=False` must not — the flag gates the STREAM, inside the policy path."""
     import sys
 
     import rigel.calibration.calibrate  # noqa: F401
@@ -496,13 +501,95 @@ def test_the_real_builder_runs_through_calibrate(anchor_toy):
     calibrate_mod = sys.modules["rigel.calibration.calibrate"]
     from rigel.config import CalibrationConfig
 
+    class Boom(Exception):
+        pass
+
+    def boom(*a, **kw):
+        raise Boom
+
+    monkeypatch.setattr(calibrate_mod, "prepare_flux_evidence", boom)
     t = anchor_toy
-    res = calibrate_mod.calibrate(
+    calibrate_mod.calibrate(
         payload=t["payload"],
-        config=CalibrationConfig(rna_anchor=True, message_propagation=False),
+        config=CalibrationConfig(rna_anchor=False, message_propagation=True),
         **t["calibrate_kwargs"],
     )
-    assert res is not None
+    with pytest.raises(Boom):
+        calibrate_mod.calibrate(
+            payload=t["payload"],
+            config=CalibrationConfig(rna_anchor=True, message_propagation=True),
+            **t["calibrate_kwargs"],
+        )
+
+
+def test_the_stream_rows_equal_the_reference_arithmetic(anchor_toy, monkeypatch):
+    """ARITHMETIC PARITY: the rows the relay's certified-flux stream delivers must be byte-equal
+    to `build_rna_anchor_factor` — the citizenship moved, the arithmetic did not. A drift here is
+    a bug in one of them, full stop. The estimators are PINNED so the rows are LIVE on this toy
+    (below the minimums the honest rows are all-zero and any corruption of the policy path would
+    multiply zeros — TRAPS: could-the-arm-have-fired)."""
+    from rigel.calibration.messages.relay import RelayPolicy
+
+    monkeypatch.setattr(RA, "left_fit_center_spread", lambda o, p: (0.0, 0.01))
+    monkeypatch.setattr(RA, "route_pair_log_variance", lambda a, b: 0.01)
+    t = anchor_toy
+    ev = RA.prepare_flux_evidence(
+        t["chain"], t["statics"], t["geometry"], t["region_arrays"], t["routes"]
+    )
+    got = RelayPolicy(flux=ev)._rows_at(K, WINDOW)
+    assert got is not None and float(np.ptp(got)) > 0.0, "the pinned rows must be live"
+    want = RA.build_rna_anchor_factor(
+        t["chain"],
+        t["statics"],
+        t["geometry"],
+        t["region_arrays"],
+        t["routes"],
+        n_grid=K,
+        logodds_window=WINDOW,
+    )
+    np.testing.assert_array_equal(got, want)
+
+
+def test_a_flux_message_is_not_silent_and_silent_carries_none():
+    """`PsiMessage.lam_rows` is a channel: present ⇒ not silent; `silent()` ⇒ None."""
+    from rigel.calibration.messages import PsiMessage
+
+    assert PsiMessage.silent().lam_rows is None
+    assert PsiMessage.silent().is_silent
+    assert not PsiMessage(lam_rows=np.zeros((3, 5))).is_silent
+
+
+def test_the_real_relay_delivers_the_stream_through_calibrate(anchor_toy, monkeypatch):
+    """The REAL integration: `calibrate` with the relay and the flag ON must complete through the
+    genuine path (no stubs), and the stream must REACH ψ — proven by pinning the recipient
+    arithmetic to a biased claim and watching the result move (on this toy the honest rows are
+    exactly zero — below the estimator minimums — so completion alone cannot distinguish a wired
+    stream from a dead one; TRAPS: could-the-arm-have-fired)."""
+    import sys
+
+    import rigel.calibration.calibrate  # noqa: F401
+    import rigel.calibration.rna_anchor  # noqa: F401
+
+    calibrate_mod = sys.modules["rigel.calibration.calibrate"]
+    anchor_mod = sys.modules["rigel.calibration.rna_anchor"]
+    from rigel.config import CalibrationConfig
+
+    t = anchor_toy
+    cfg = CalibrationConfig(rna_anchor=True, message_propagation=True)
+    res_real = calibrate_mod.calibrate(payload=t["payload"], config=cfg, **t["calibrate_kwargs"])
+    assert res_real is not None
+
+    def biased_rows(evidence, *, n_grid, logodds_window):
+        return np.tile(np.linspace(0.0, 60.0, int(n_grid)), (int(evidence["n_slots"]), 1))
+
+    monkeypatch.setattr(anchor_mod, "flux_rows", biased_rows)
+    res_biased = calibrate_mod.calibrate(payload=t["payload"], config=cfg, **t["calibrate_kwargs"])
+    real = np.asarray(res_real.mass_gdna_region, np.float64)
+    biased = np.asarray(res_biased.mass_gdna_region, np.float64)
+    assert not np.array_equal(real, biased), (
+        "a pinned biased claim must move the result — identical outputs mean the stream never "
+        "reached psi"
+    )
 
 
 def test_the_flag_exists_and_defaults_on():

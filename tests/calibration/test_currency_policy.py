@@ -378,7 +378,7 @@ def test_the_policy_is_selectable_by_config_and_the_default_is_the_relay():
 
     assert CalibrationConfig().message_policy == "relay"
     src = inspect.getsource(calibrate)
-    for token in ("RelayPolicy()", "SilentPolicy()", "CurrencyPolicy()", "message_policy"):
+    for token in ("RelayPolicy(", "SilentPolicy()", "CurrencyPolicy()", "message_policy"):
         assert token in src, f"calibrate no longer wires {token}"
 
 

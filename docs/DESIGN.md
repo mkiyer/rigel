@@ -1438,6 +1438,45 @@ measured **0.98** without probes and **113–114** with, a 116× separation with
 ⚠ The in-gene anchor is a DETECTOR and not a calibrated level: it under-reads the on-target gDNA density
 by **2.6–3.6×** because it sits at the EDGE of the probe footprint.
 
+### 6b.3 ⭐⭐⭐ THE ANCHOR IS A MESSAGE — the citizenship ruling and the integration (owner, 2026-08-25)
+
+⭐⭐⭐ **The ruling.** The spliced-fragment anchor is message propagation — a one-hop imputation from
+the flank boundary into the exon — and it may not exist as an appendage beside the message
+framework. The SENDER publishes its spliced-fragment observation unchanged; the RECIPIENT decides
+how to use it, and the recipient's arithmetic is the route-sum + NB marginal §6b.2 describes. The
+2026-08-24 build had it riding the local λ-factor of EVERY policy — the silent control included —
+which was refuted as architecture: "we witnessed building an appendage rather than using the
+framework that already existed."
+
+**The decision made under the ruling: NO new policy.** The anchor is a new *stream* — the
+CERTIFIED-FLUX stream — not a new composition scheme, so it lands in `RelayPolicy` behind one
+switch (`RelaySwitches.certified_flux`), `SilentPolicy` stays silent, and the frozen
+`CurrencyPolicy` is untouched. ⭐ The survey behind the decision found this is a HOMECOMING: the
+framework already carried the observation (`StepContext.inv_sj_lo/hi`, per-fragment
+reciprocal-opportunity — route-sum-correct by construction) and the relay's splice-in stream
+already delivers a certified-RNA claim to exons — built from `sj_count/eff_sj` as a per-face
+density, which is the RATIO-OF-SUMS pooling §6b.2's review refuted. ⛔ So the relay's own
+splice-in carries the k-route under-read, and the stream is the UPGRADE of that claim: the same
+certified observation, correctly pooled, delivered as a count likelihood instead of a Gaussian.
+The Gaussian splice-in claim, `ONE_SIDED_RNA` and the `rna_one_sided` plumbing are its
+obsolescence candidates, measured at the weak-message re-price.
+
+**The contract** (gates in `tests/calibration/test_rna_anchor.py`, every perturbation verified
+firing): `PsiMessage.lam_rows` — an `(n_slots, K)` λ-factor row array in ψ's general evidence
+currency — is the one new channel; the backbone asserts its shape/finiteness and sums it into the
+FINAL solve only, so phase-A (`build_region_init`) and the own-evidence precision
+(`density_factor_precision`) never see an imputation. `calibrate` prepares the evidence once
+(`rna_anchor.prepare_flux_evidence`, route table included) and constructs ONE relay instance with
+it; the relay's grid-keyed memo builds the rows (`rna_anchor.flux_rows`) per bracket.
+`config.rna_anchor` gates the stream: live iff `message_propagation ∧ message_policy == "relay"`.
+⛔ **The behavioural consequences are deliberate**: the silent arm reverts to the pre-anchor
+CONTROL (its panel rows regress by construction — that is the control being restored); anchored
+slots lose own-evidence status, which changes the mismatch-deflation inputs and the refit
+training populations honestly; the shipped candidate is relay-with-stream, accepted per stratum
+against the §6b.2 graduated numbers. ⚠ Deferred deliberately: folding the route-sum into
+`region_geometry` (fixing the relay splice-in's pooling at the source) and per-strand column
+matching — both ride the weak-message re-price.
+
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 
 ⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE.** ψ solves a point on the 2-simplex,

@@ -67,8 +67,14 @@ base (22.9k → 6.6k vs base 6.4k); every `g98`/`g50` win within noise.
 the sj strand columns are summed rather than matched to the exon's strand; short-exon flank pairs
 share fragments (correlated disagreement); the capture-ON +12 % mature offset stays in the width.
 
-Consumed by `calibrate` exactly as the intron factory's factor is: summed into the per-slot
-λ-factor array. Gate: ``tests/calibration/test_rna_anchor.py``.
+**CITIZENSHIP (owner ruling, 2026-08-25): THE ANCHOR IS A MESSAGE.** The flank's spliced-fragment
+observation is a one-hop imputation into the exon, so it lives in the message framework, not the
+local solve: `prepare_flux_evidence` packages the sender-side observations once per library,
+`RelayPolicy` (behind its `certified_flux` switch) delivers the claim as `PsiMessage.lam_rows`,
+and the backbone sums the rows into the FINAL solve only — never phase-A, never the own-evidence
+precision. The silent policy carries nothing, which restores it as the measured control.
+`build_rna_anchor_factor` remains as the composed arithmetic REFERENCE the stream's parity gate
+holds the policy to. Gate: ``tests/calibration/test_rna_anchor.py``.
 """
 
 from __future__ import annotations
@@ -465,26 +471,32 @@ def eligible_slots(chain, statics, geometry, region_arrays) -> np.ndarray:
     return out
 
 
-def build_rna_anchor_factor(
-    chain,
-    statics,
-    geometry,
-    region_arrays,
-    routes: RouteTable,
-    *,
-    n_grid: int,
-    logodds_window: float,
-) -> "np.ndarray | None":
-    """The (n_slots, K) log-factor over the solve grid, zero at every unanchored slot; ``None``
-    when nothing is anchored. Belief-free — counts, opportunities and structure only — so it is
-    built once per grid and summed with the intron factory's factor."""
-    from .simplex_logodds import _logodds_grid
-
+def prepare_flux_evidence(chain, statics, geometry, region_arrays, routes: RouteTable):
+    """The SENDER-SIDE half of the certified-flux stream (owner ruling 2026-08-25: the anchor IS
+    a message): every grid-independent observation the claim is built from — the route-summed
+    flank rates, the eligibility selections, the nascent frame arrays, the intergenic background —
+    prepared once per library and handed to the message policy at construction. Belief-free by
+    construction: counts, opportunities and structure only. Returns ``None`` when nothing is
+    anchored (a toy with no complete flank), which the policy treats as a silent stream."""
     sel = _selection(chain, statics, geometry, region_arrays, routes)
     if sel["exon_idx"].size == 0 and sel["boundary_idx"].size == 0:
         return None
+    sel["n_slots"] = int(np.asarray(chain.kind).shape[0])
+    return sel
+
+
+def flux_rows(evidence, *, n_grid: int, logodds_window: float) -> "np.ndarray | None":
+    """The RECIPIENT-SIDE arithmetic of the certified-flux stream: the delivered observation
+    scored on the solve grid — route-sum + the NB-marginal quadrature at claimed exons, the
+    guarded-Gaussian family at eligible boundaries — as an ``(n_slots, K)`` λ-factor row array,
+    zero at every unanchored slot. ``None`` evidence ⇒ ``None`` (no claim)."""
+    from .simplex_logodds import _logodds_grid
+
+    if evidence is None:
+        return None
+    sel = evidence
     _, fg = _logodds_grid(int(n_grid), float(logodds_window))
-    out = np.zeros((int(np.asarray(chain.kind).shape[0]), int(n_grid)), np.float64)
+    out = np.zeros((int(sel["n_slots"]), int(n_grid)), np.float64)
     rho_bg = sel["background_rate"]
 
     V_pair = route_pair_log_variance(sel["pair_rate_left"], sel["pair_rate_right"])
@@ -542,3 +554,24 @@ def build_rna_anchor_factor(
             pair_log_variance=V_pair,
         )
     return out
+
+
+def build_rna_anchor_factor(
+    chain,
+    statics,
+    geometry,
+    region_arrays,
+    routes: RouteTable,
+    *,
+    n_grid: int,
+    logodds_window: float,
+) -> "np.ndarray | None":
+    """The two halves composed — the arithmetic REFERENCE the stream's parity gate holds the
+    policy to. Production goes through the halves (`prepare_flux_evidence` at `calibrate`,
+    `flux_rows` inside the relay's certified-flux stream); this composition exists so one
+    function still states the whole claim."""
+    return flux_rows(
+        prepare_flux_evidence(chain, statics, geometry, region_arrays, routes),
+        n_grid=n_grid,
+        logodds_window=logodds_window,
+    )
