@@ -230,8 +230,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,714 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
-The `+3` over 3,711 is THE SHIPPED-RELAY PORT (four citizenship/reception gates in the
+⭐ **THE STANDING BASELINE: 0 failed / 3,715 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
+The `+1` over 3,714 is THE COVERAGE RULE (one conservation gate in the EXISTING
+`tests/calibration/test_unified_bridge.py`; the gDNA-continuity and re-anchor gates landed,
+were REFUTED on the panel with their laws, and were removed in the same session — net zero;
+no file added). Before that, the `+3` over 3,711 was THE SHIPPED-RELAY PORT (four
+citizenship/reception gates in the
 EXISTING `tests/calibration/test_unified_bridge.py` — measurement-stream delivery, the
 reception law, the contradiction kill, the unseen-component absorber — replacing the old
 yield gate, net +3; every one verified failing first and perturbation-fired; no file added).

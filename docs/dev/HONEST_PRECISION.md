@@ -532,8 +532,32 @@ ss0.50-OFF, g50-ss0.50-ON 0.68×, g05-ss0.99-ON 0.97×); unstranded wins vs sile
 gDNA (g00/g05), concentrated on the BOUNDARY axis** (g00-ss0.50-OFF boundary 235k of 315k vs
 relay's 37k; g00-ss0.99-ON 96k of 127k — the worst stranded row at 3.66×), mostly OUTSIDE the
 claimed population and present in the norows arm — a propagate+allocate boundary defect, not
-the rows. The relay's low-g strength there is its anchor-imputed gDNA LEVEL at boundaries
-(`residual_level`) — the next port candidate;
+the rows.
+**THE BOUNDARY ITERATION (2026-08-26, same day):** the class dissection localized the phantom
+to EXON|EXON boundaries (167k of 235k at g00-ss0.50-OFF, all over-claimed, 50 % of it in 81–386
+of 4,838 boundaries), and mining both boundary pipelines produced one clean law and one honest
+refutation. ⭐ **THE COVERAGE RULE (kept, gated):** the allocation's components are exactly the
+claims whose fragments the total counted — the spliced components are the node's OWN lanes (a
+boundary's T contains its own certified flux and the live own lanes cover it; a region's T has
+no flux term, so the arriving faces stay out of its allocation — their information enters
+through solve_spliced's rows, which also removes a double-count). This repaired the two-sided
+incoherence the miner proved (boundaries: flux in T, spliced lanes silent ⇒ chronic deficit
+smeared as phantom gDNA wherever no absorber exists — exactly the plain exon|exon class;
+exons: live face claims against a flux-free truncated T ⇒ chronic excess). Better than or equal
+to the committed state on all 16 rows (10 better, 6 equal; g00-ss0.99-ON 127k → 106k,
+g00-ss0.50-ON 362k → 287k). ⛔ **THE gDNA-CONTINUITY RULE — BUILT THREE WAYS AND REFUTED
+WITHOUT ITS SECOND HALF:** relay's `may_share_composition` law (an unsupplied source's gDNA
+level crosses UNSCALED — enrichment measures expression, gDNA is genomically continuous) is
+safe only beside the scan-time MASS RESCALE that OVERWRITES the running level to each licensed
+slot's own measured total (region_geometry's capture-landscape ruling says exactly this). The
+static per-slot licence broke the knob's telescoping cancellation — a value RATCHET delivering
+gdna densities up to 3.9e+32 (g00-unstranded-ON 362k → 952k); the running-state licence killed
+the ratchet but still lost capture-ON (g98-unstranded-ON 3.8M → 5.3M); a fuse-based pure-gDNA
+re-anchor lattice (g1 slots present their own density as a counted witness) measured too weak
+to repair the drift — a fuse negotiates, the rescale overwrites. The upside is real (continuity
+HALVED g05-unstranded-OFF, 331k → 150k), so the recorded path is: port the mass rescale first,
+then re-attempt continuity behind it. The remaining low-g gap to the relay (g00/g05, ~2–5×) is
+this pair plus `residual_level` (the anchor-imputed boundary gDNA level, still unported);
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

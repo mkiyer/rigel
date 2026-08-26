@@ -241,6 +241,8 @@ def _hop_tables(log_r=0.0, v_r=1.0, premise=0.0, fp=(True, True), fn=(True, True
             "fp": np.array([fp[0], fp[1]]),
             "fn": np.array([fn[0], fn[1]]),
             "src": np.array([0, 0]),
+            "shed_pos": np.zeros(2),
+            "shed_neg": np.zeros(2),
         }
     }
     return F, U, m
@@ -285,6 +287,30 @@ def test_the_premise_is_charged_on_every_hop():
     out = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
     assert np.isclose(out.abundance, 1.0)
     assert np.isclose(out.precision, 10.0 / (1.0 + 10.0 * 0.3))
+
+
+def test_conservation_components_are_the_claims_the_total_counted():
+    """THE COVERAGE RULE: the allocation's components are exactly the claims whose fragments
+    the total counted. A boundary's T contains its own certified splice flux, so its spliced
+    components are its OWN lanes (live flux); a region's T contains no flux, so arriving face
+    claims stay out of its allocation. Here: a boundary-like node with T = 10 = 2 unspliced
+    gDNA + 8 own flux — the own spliced component covers the flux and the gdna witness holds
+    at 2 instead of being inflated toward 10 by a phantom deficit."""
+    F, U = _U()
+    m = _mini_solve()
+    m._M = np.full(1, 10.0)
+    own = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    own = own.with_lane(
+        "spliced_rna_pos", F.Claim(np.array([8.0]), np.array([40.0]), np.array([40.0]))
+    )
+    gdna = F.Claim(np.array([2.0]), np.array([5.0]), np.array([5.0]))
+    silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    fwd = silent.with_lane("unspliced_gdna", gdna)
+    out = m.solve_unspliced(own, fwd, silent)
+    assert float(out.gdna_mode[0]) < np.log(0.35), (
+        f"the own flux must cover its share of the total; gdna held at 2/10 "
+        f"(mode {float(out.gdna_mode[0])}, want ~log 0.2)"
+    )
 
 
 def test_spliced_claims_have_one_hop_reach():

@@ -356,6 +356,17 @@ class FrameAwarePropagation(PropagationModel):
         v = float(t["v_r"][i])
         lr2 = lr * lr
         w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
+        # ⛔ THE gDNA-CONTINUITY RULE WAS BUILT, KEYED THREE WAYS, AND REFUTED ON THE PANEL
+        # WITHOUT ITS SECOND HALF. gDNA is genomically continuous, so relay transports an
+        # unsupplied source's level UNSCALED (r_g = 1, may_share_composition) — but that law
+        # is safe only beside the scan-time MASS RESCALE that overwrites the running level to
+        # each licensed slot's own measured total (region_geometry's capture-landscape ruling).
+        # Ported without the rescale: a static per-slot licence broke the knob's telescoping
+        # cancellation (a value RATCHET, arriving gdna densities to 3.9e+32); the running-state
+        # licence killed the ratchet but still lost capture-ON (g98-unstranded-ON 3.8M -> 5.3M)
+        # while a fuse-based pure-gDNA re-anchor lattice measured too weak to repair the drift
+        # (a fuse negotiates; the rescale overwrites). The upside is real — continuity halved
+        # g05-unstranded-OFF — so porting the rescale, THEN continuity, is the recorded path.
         value = float(claim.abundance) * float(np.exp(w * lr))
         resid = (1.0 - w) * lr
         v_hop = w * v + resid * resid + self._premise
@@ -499,6 +510,19 @@ class AllocationSolve(SolveModel):
         n = np.asarray(own.unspliced_gdna.precision).shape[0]
         val, prec, meas = {}, {}, {}
         for lane in self._ALL:
+            # THE COVERAGE RULE: the allocation's components are exactly the claims whose
+            # fragments the total counted. The spliced components are the node's OWN lanes —
+            # a boundary's T contains its own certified flux (live own lanes cover it); a
+            # region's T contains no flux (its own spliced lanes are structurally silent, and
+            # the arriving faces stay out — their information enters through solve_spliced's
+            # rows instead, which also removes a double-count).
+            if lane not in self._UNSPLICED:
+                o = own.lane(lane)
+                v = np.asarray(o.abundance, np.float64)
+                p = np.asarray(o.precision, np.float64)
+                ms = np.asarray(o.measured, np.float64)
+                val[lane], prec[lane], meas[lane] = v, p, ms
+                continue
             v, p, ms = self._fuse_dir(forward.lane(lane), backward.lane(lane))
             if lane in self._UNSPLICED:
                 # THE RECEPTION LAW (relay's mismatch_deflate, ported): per stream,
