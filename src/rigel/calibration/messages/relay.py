@@ -219,10 +219,17 @@ class _PreparedRelay:
         self._logvar_tot = logvar_tot
 
         # ── the per-TRANSCRIPT-STRAND sj DENSITY at each boundary ────────────────────────────────────
+        # ⭐ ROUTE-SUMMED at the geometry source (2026-08-26): the junctions at a face are disjoint
+        # routes, so the face rate is Σ flux_J/A_J — the old pooled ``SPL/ESP`` ratio was the
+        # opportunity-weighted MEAN and under-read k-route faces ~k× (the round-2 review's
+        # confirmed bug, priced per stratum when this landed). Masking unchanged: live iff the
+        # slot carries flux and opportunity.
+        _rr = np.asarray(ctx.route_rate_lo, np.float64) + np.asarray(ctx.route_rate_hi, np.float64)
+
         def _mature_rho(strand: int) -> np.ndarray:
             c, e = SPL[:, strand], ESP[:, strand]
             live = (c > _EPS) & (e > _EPS)
-            return np.where(live, c / np.where(live, e, 1.0), 0.0)
+            return np.where(live, _rr[:, strand], 0.0)
 
         spl_p = _mature_rho(0)  # + transcript sj density at this boundary (0 on REGION slots)
         spl_n = _mature_rho(1)

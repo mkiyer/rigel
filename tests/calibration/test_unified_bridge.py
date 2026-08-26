@@ -185,6 +185,10 @@ def test_own_messages_carry_the_node_banks(sweep_inputs):
     assert np.all(own["spliced_rna_pos"][1][no_opp] == 0.0), (
         "spliced lanes must be silent where there is no crossing opportunity"
     )
+    # the route-sum homecoming: the lane's abundance is the ROUTE-SUMMED rate, never the pooled
+    # ratio-of-sums (the round-2 review's k-route under-read)
+    want = (np.asarray(ctx.route_rate_lo) + np.asarray(ctx.route_rate_hi))[:, 0]
+    np.testing.assert_allclose(own["spliced_rna_pos"][0], want, rtol=1e-12)
 
 
 def test_propagation_travels_the_chain(sweep_inputs):

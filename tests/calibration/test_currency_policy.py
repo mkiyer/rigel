@@ -120,6 +120,8 @@ def _ctx(
         eff_gdna=e,
         eff_sj=np.ones((N, 2)) * 200.0,
         sj_count=np.zeros((N, 2)),
+        route_rate_lo=np.zeros((N, 2)),
+        route_rate_hi=np.zeros((N, 2)),
         unspliced_count=np.stack([m / 2.0, m / 2.0], axis=1),
         # ⚠ the observed COUNTS are what set the knob's noise floor, and they are decoupled from the
         # abundances here on purpose: a scenario may hold the same densities at any depth, and a gate

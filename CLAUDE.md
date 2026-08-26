@@ -230,8 +230,14 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,700 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-fifth measurement that day. The `+5` over 3,695 is STEP 2's first propagation model
+⭐ **THE STANDING BASELINE: 0 failed / 3,702 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
+sixth measurement that day. The `+2` over 3,700 is the ROUTE-SUM HOMECOMING's two geometry gates
+in the EXISTING `tests/calibration/test_region_geometry.py` (independent-derivation parity;
+sum-dominates-pooled). A golden update landed in the same change — the relay's splice-in density
+is now route-summed at the geometry source, a shipped-output move (max 0.06 % relative on the
+golden toys; the 16-condition price: silent byte-unchanged, g00/g05 improve up to −7.3 %,
+worst tick g98-ON +3.9 %, in-scope net +0.1 %). Before that, the `+5` over 3,695 was STEP 2's
+first propagation model
 (`FrameAwarePropagation` + the spec's `Hop`/`prepare` extension): five model gates in the
 EXISTING `tests/calibration/test_unified_bridge.py`, every perturbation verified firing.
 Before that, the `+10` over 3,685 was THE BRIDGE

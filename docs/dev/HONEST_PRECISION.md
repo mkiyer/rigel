@@ -456,7 +456,12 @@ twin discipline); ONE `message_policy` VALUE; THE CONTEST + converge-and-delete.
   Reaching around the message to raw banks would be the appendage pattern again; if the blend
   measurably costs accuracy, that is a propagation-fidelity bug to fix in `attenuate`.
 
-**The build order (each commit priced):** ① the geometry route-sum; ② the unspliced solve
+**The build order (each commit priced):** ① ✅ the geometry route-sum (2026-08-26:
+`RegionGeometry.route_rate_lo/hi` built beside the face banks; the bridge's spliced lanes and
+the RELAY's splice-in density consume it — priced on all 16: silent byte-unchanged, g00/g05
+improve up to −7.3 %, g98-ON +3.9 % worst (the un-yielded tax growing with a more accurate
+certified claim — commit ②'s yielding is the designed counter), in-scope net +0.1 %; goldens
+moved ≤ 0.06 % relative, read before update); ② the unspliced solve
 (first honest end-to-end propagate+solve price, vs silent and currency, per stratum — the zero
 controls and g05 rows referee the yielding); ③ the spliced solve (identity vs the graduated
 anchor on complete flanks within noise; the incomplete-flank branch priced separately);

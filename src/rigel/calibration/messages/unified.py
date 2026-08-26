@@ -82,10 +82,13 @@ def _own_messages(ctx: StepContext) -> dict:
     own = ctx.own
     spl = np.asarray(ctx.sj_count, np.float64)
     esp = np.asarray(ctx.eff_sj, np.float64)
+    # the ROUTE-SUMMED rate (both faces — a boundary's certified flux, correctly pooled at the
+    # geometry source); the pooled ratio under-reads k-route faces ~k×
+    rr = np.asarray(ctx.route_rate_lo, np.float64) + np.asarray(ctx.route_rate_hi, np.float64)
 
     def spliced(col: int):
         live = esp[:, col] > 0.0
-        ab = np.where(live, spl[:, col] / np.maximum(esp[:, col], 1e-300), 0.0)
+        ab = np.where(live, rr[:, col], 0.0)
         pr = np.where(live, 1.0 / count_logvar(spl[:, col]), 0.0)
         return ab, pr
 

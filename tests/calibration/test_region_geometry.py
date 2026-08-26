@@ -699,3 +699,49 @@ def test_the_word_MATURE_names_no_field(geometry):
     fields = set(RegionGeometry.__dataclass_fields__)
     assert not any("mature" in f for f in fields), fields
     assert {"unspliced_count", "spliced_count", "sj_count"} <= fields
+
+
+# ── the route-summed certified rates (the route-sum homecoming, 2026-08-26) ─────────────────────
+
+
+def test_route_rates_are_the_sum_of_per_route_rates(geometry, parts):
+    """`route_rate_lo/hi` must equal the independently derived per-route sum Σ flux_J / A_J over
+    each face's junctions — the disjoint-routes law at the observation's source. Re-derived here
+    from the sj axis by a separate implementation (the self-checking-validator rule)."""
+    _payload, _ra, substrate, chain, sj = parts
+    from rigel.calibration.effective_length import crossing_eff_length
+    from rigel.types import Strand as _S
+
+    n = int(chain.n_slots)
+    want_lo = np.zeros((n, 2))
+    want_hi = np.zeros((n, 2))
+    if sj.n_sj:
+        flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
+        # the same pmf the fixture built the geometry with
+        eff = crossing_eff_length(RNA_PMF, sj.reach_lo, sj.reach_hi)
+        slot_of_region = np.zeros(int(chain.n_regions_total), np.int64)
+        is_region = np.asarray(chain.kind) == REGION
+        slot_of_region[np.asarray(chain.obj_idx)[is_region]] = np.flatnonzero(is_region)
+        donor = np.asarray(chain.right)[slot_of_region[np.asarray(sj.src_region, np.int64)]]
+        acceptor = np.asarray(chain.left)[slot_of_region[np.asarray(sj.dst_region, np.int64)]]
+        col = np.where(np.asarray(sj.strand) == np.int8(_S.POS), 0, 1)
+        for j in range(int(sj.n_sj)):
+            if eff[j] <= 0:
+                continue
+            want_lo[donor[j], col[j]] += flux[j] / eff[j]
+            want_hi[acceptor[j], col[j]] += flux[j] / eff[j]
+    np.testing.assert_allclose(np.asarray(geometry.route_rate_lo), want_lo, rtol=1e-12)
+    np.testing.assert_allclose(np.asarray(geometry.route_rate_hi), want_hi, rtol=1e-12)
+
+
+def test_route_rate_dominates_the_pooled_ratio(geometry):
+    """The property the round-2 review proved: the sum of per-route rates is ≥ the pooled
+    ratio-of-sums at every face (equality iff every route agrees), so the pooled form's k-route
+    under-read cannot survive. Vacuity-guarded: the fixture must expose live faces."""
+    rr = np.asarray(geometry.route_rate_lo) + np.asarray(geometry.route_rate_hi)
+    jc = np.asarray(geometry.sj_count_lo) + np.asarray(geometry.sj_count_hi)
+    ej = np.asarray(geometry.eff_sj_lo) + np.asarray(geometry.eff_sj_hi)
+    live = ej > 0
+    assert live.any(), "the fixture must carry sj flux"
+    pooled = np.where(live, jc / np.where(live, ej, 1.0), 0.0)
+    assert np.all(rr[live] >= pooled[live] - 1e-12)

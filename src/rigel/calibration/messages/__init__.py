@@ -207,6 +207,11 @@ class StepContext:
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)
     eff_sj: np.ndarray  # [n, 2] sj opportunity by TRANSCRIPT strand
     sj_count: np.ndarray  # [n, 2] sj fragment count by TRANSCRIPT strand
+    #: [n, 2] the ROUTE-SUMMED certified rate per face by transcript strand (Σ flux_J/A_J over
+    #: the face's disjoint routes) — the pooled sj_count/eff_sj ratio under-reads k-route faces
+    #: ~k×, so consumers of a face's RATE read these, never the ratio
+    route_rate_lo: np.ndarray
+    route_rate_hi: np.ndarray
     unspliced_count: (
         np.ndarray
     )  # [n, 2] unspliced count by GENOME strand — the density numerator AND n

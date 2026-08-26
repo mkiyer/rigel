@@ -196,6 +196,14 @@ class RegionGeometry:
     #: float64[n_slots, 2] — the matching divisors, split the same way.
     eff_sj_lo: np.ndarray
     eff_sj_hi: np.ndarray
+    #: ⭐⭐ float64[n_slots, 2] — the ROUTE-SUMMED certified rate per face, ``Σ_J flux_J / A_J``
+    #: over the face's junctions, by transcript strand. The junctions at one face are DISJOINT
+    #: ROUTES (each molecule crosses exactly one), so their rates SUM — the pooled
+    #: ``sj_count/eff_sj`` ratio is the opportunity-weighted MEAN and under-reads a k-route face
+    #: ~k× (the 2026-08-24 review's confirmed bug, fixed here AT THE SOURCE so every consumer
+    #: inherits it). Raw observation: no pseudocount — a zero-flux face reads exactly 0.
+    route_rate_lo: np.ndarray
+    route_rate_hi: np.ndarray
 
 
 def build_region_geometry(
@@ -317,6 +325,8 @@ def build_region_geometry(
     #: the flux's MODEL-FREE abundance per face — summed over the sj attached at that end, no divisor
     inv_sj_lo = np.zeros((n, 2), dtype=np.float64)
     inv_sj_hi = np.zeros((n, 2), dtype=np.float64)
+    route_rate_lo = np.zeros((n, 2), dtype=np.float64)
+    route_rate_hi = np.zeros((n, 2), dtype=np.float64)
     ej_lo = np.zeros((n, 2), dtype=np.float64)
     ej_hi = np.zeros((n, 2), dtype=np.float64)
     if sj.n_sj:
@@ -348,6 +358,13 @@ def build_region_geometry(
                 f"sj inv_length_sum has shape {_sj_inv.shape}, expected ({int(sj.n_sj)},) — one "
                 "reciprocal-opportunity column per sj (tests/native/_accumulator_reference.py)"
             )
+        live_route = eff > 0.0
+        for boundary, rr in ((donor, route_rate_lo), (acceptor, route_rate_hi)):
+            np.add.at(
+                rr,
+                (boundary[live_route], column[live_route]),
+                flux[live_route] / eff[live_route],
+            )
         for boundary, jc, ej, inv_face in (
             (donor, jc_lo, ej_lo, inv_sj_lo),
             (acceptor, jc_hi, ej_hi, inv_sj_hi),
@@ -376,6 +393,8 @@ def build_region_geometry(
         sj_count_hi=jc_hi,
         eff_sj_lo=ej_lo,
         eff_sj_hi=ej_hi,
+        route_rate_lo=route_rate_lo,
+        route_rate_hi=route_rate_hi,
     )
 
 

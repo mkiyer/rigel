@@ -464,6 +464,8 @@ def solve_chain(
         eff_gdna=EG,
         eff_sj=ESP,
         sj_count=SPL,
+        route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
+        route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
         unspliced_count=CNT,
         n_slot=n_slot,
         spliced_slot=spliced_slot,
