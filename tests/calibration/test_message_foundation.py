@@ -1,8 +1,8 @@
 """Gates for the message-propagation FOUNDATION SPEC (`calibration.messages.foundation`).
 
 The spec is the owner's architecture (2026-08-26) made executable: one message type with the
-unspliced and spliced lanes SEPARATE (provenance is structural), one propagation-time reconcile
-rule, one solve-time credit interface. Variance models implement the spec by overriding its
+unspliced and spliced lanes SEPARATE (provenance is structural), one propagation-time propagate
+rule, one solve-time solve interface. Variance models implement the spec by overriding its
 narrow extension points; the base classes enforce the rules no implementation may break.
 
 Written BEFORE the module, verified failing; every gate watched firing against a deliberately
@@ -51,7 +51,7 @@ def test_silence_is_expressible_and_detectable():
     assert not loud.is_silent
 
 
-# ── the propagation-time reconcile rule ─────────────────────────────────────────────────────────
+# ── the propagation-time propagate rule ───────────────────────────────────────────────────────────
 
 
 def test_pass_through_when_the_node_has_nothing():
@@ -64,7 +64,7 @@ def test_pass_through_when_the_node_has_nothing():
         spliced_rna_pos=F.Claim(0.8, 25.0),
         spliced_rna_neg=F.Claim.silent(),
     )
-    out = F.PassThroughReconcile().reconcile(F.Message.silent(), incoming)
+    out = F.PassThroughPropagation().propagate(F.Message.silent(), incoming)
     for lane in F.Message.LANES:
         a, b = out.lane(lane), incoming.lane(lane)
         assert a.abundance == b.abundance and a.precision == b.precision, lane
@@ -76,86 +76,86 @@ def test_a_strong_own_belief_integrates():
     F = _F()
     own = F.Message.silent().with_lane("unspliced_gdna", F.Claim(4.0, 20.0))
     incoming = F.Message.silent().with_lane("unspliced_gdna", F.Claim(1.0, 5.0))
-    out = F.PassThroughReconcile().reconcile(own, incoming)
+    out = F.PassThroughPropagation().propagate(own, incoming)
     g = out.lane("unspliced_gdna")
     assert 1.0 < g.abundance < 4.0
     assert np.isclose(g.precision, 25.0)
     assert g.abundance > 2.5, "the stronger claim must dominate the blend"
 
 
-def test_lanes_do_not_mix_at_reconcile():
+def test_lanes_do_not_mix_at_propagation():
     """Provenance is load-bearing: spliced information may never leak into an unspliced lane (or
-    vice versa) during reconciliation — the lanes travel separately so the solve can treat them
+    vice versa) during propagation — the lanes travel separately so the solve can treat them
     by provenance."""
     F = _F()
     incoming = F.Message.silent().with_lane("spliced_rna_pos", F.Claim(9.0, 100.0))
-    out = F.PassThroughReconcile().reconcile(F.Message.silent(), incoming)
+    out = F.PassThroughPropagation().propagate(F.Message.silent(), incoming)
     assert out.lane("spliced_rna_pos").precision == 100.0
     for lane in F.Message.LANES:
         if lane != "spliced_rna_pos":
             assert out.lane(lane).is_silent, f"{lane} must stay silent"
 
 
-def test_the_reconcile_refuses_an_amplifying_discount():
-    """The single-source rule, made structural: a discount (the propagation variance model's
+def test_the_propagation_refuses_an_amplifying_attenuation():
+    """The single-source rule, made structural: an attenuation (the propagation variance model's
     override point) may only LOWER a claim's precision. A model that amplifies must be refused by
     the BASE class — no subclass can smuggle an amplifier past the spec."""
     F = _F()
 
-    class Amplifier(F.PassThroughReconcile):
-        def discount(self, claim, lane):
+    class Amplifier(F.PassThroughPropagation):
+        def attenuate(self, claim, lane):
             if claim.precision > 0:
                 return F.Claim(claim.abundance, claim.precision * 2.0)
             return claim
 
     incoming = F.Message.silent().with_lane("unspliced_gdna", F.Claim(1.0, 5.0))
     with pytest.raises(ValueError, match="amplif"):
-        Amplifier().reconcile(F.Message.silent(), incoming)
+        Amplifier().propagate(F.Message.silent(), incoming)
 
 
-def test_a_lowering_discount_is_accepted_and_applied():
+def test_a_lowering_attenuation_is_accepted_and_applied():
     F = _F()
 
-    class Halver(F.PassThroughReconcile):
-        def discount(self, claim, lane):
+    class Halver(F.PassThroughPropagation):
+        def attenuate(self, claim, lane):
             return F.Claim(claim.abundance, claim.precision * 0.5)
 
     incoming = F.Message.silent().with_lane("unspliced_rna_pos", F.Claim(2.0, 8.0))
-    out = Halver().reconcile(F.Message.silent(), incoming)
+    out = Halver().propagate(F.Message.silent(), incoming)
     assert np.isclose(out.lane("unspliced_rna_pos").precision, 4.0)
 
 
-# ── the solve-time credit interface ─────────────────────────────────────────────────────────────
+# ── the solve-time solve interface ────────────────────────────────────────────────────────────────
 
 
-def test_credit_requires_both_lanes_to_be_implemented():
-    """The credit model is the solve-time half: it must say what it does with the unspliced lanes
-    AND with the spliced lanes (the certified-flux treatment is a spliced-lane credit). A model
-    implementing only one is not a credit model."""
+def test_the_solve_requires_both_lanes_to_be_implemented():
+    """The solve model must say what it does with the unspliced lanes AND with the spliced lanes
+    (the certified-flux treatment is a spliced-lane solve). A model implementing only one is not
+    a solve model."""
     F = _F()
 
-    class HalfDone(F.CreditModel):
-        def unspliced_credit(self, own, forward, backward):
+    class HalfDone(F.SolveModel):
+        def solve_unspliced(self, own, forward, backward):
             return PsiMessage.silent()
 
     with pytest.raises(TypeError):
         HalfDone()
 
 
-def test_credit_assembles_the_two_lanes_into_one_psi_message():
-    """The template: the unspliced credit supplies the Gaussian channels, the spliced credit
+def test_the_solve_assembles_the_two_lanes_into_one_psi_message():
+    """The template: the unspliced solve supplies the Gaussian channels, the spliced solve
     supplies the row factor, and the base assembles them — the seam the shipped tree already
     has (deliver's channels + the certified-flux rows), formalized."""
     F = _F()
 
-    class Trivial(F.CreditModel):
-        def unspliced_credit(self, own, forward, backward):
+    class Trivial(F.SolveModel):
+        def solve_unspliced(self, own, forward, backward):
             return PsiMessage(lam_mode=np.zeros(3), lam_prec=np.ones(3))
 
-        def spliced_credit(self, own, forward, backward):
+        def solve_spliced(self, own, forward, backward):
             return np.ones((3, 5))
 
-    msg = Trivial().credit(F.Message.silent(), F.Message.silent(), F.Message.silent())
+    msg = Trivial().solve(F.Message.silent(), F.Message.silent(), F.Message.silent())
     assert isinstance(msg, PsiMessage)
     assert msg.lam_prec is not None
     assert msg.lam_rows is not None and msg.lam_rows.shape == (3, 5)

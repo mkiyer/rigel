@@ -281,7 +281,7 @@ it — the derivation-based teardown the owner asked for.
 2. ✅ **Derive the premise law** — §4b (2026-08-26): the one moments law, class-keyed, with
    V_common by tail-subtraction; the max() derived; installation is rung 3's first commit.
 3. **The unified hop law** (§3) as the rebuilt policy, gated stream-by-stream against silent AND
-   against both existing policies per stratum, zero controls, DELIVER/REFUTE split. Acceptance:
+   against both existing policies per stratum, zero controls, pure-gDNA/RNA-bearing split. Acceptance:
    ≥ silent on every in-scope stratum (the bar neither policy meets today) — that is what
    "honest precision" must buy, or the layer's honest size is smaller than what ships.
 4. **Converge and delete** per §3's teardown list, verdicts recorded, the losers' epitaphs kept.
@@ -292,9 +292,9 @@ it — the derivation-based teardown the owner asked for.
 ⭐⭐⭐ **The spec is CODE**: `src/rigel/calibration/messages/foundation.py` — read its module
 docstring as the architecture document. One Message type (three unspliced lanes = AXIOM 0's
 populations, two spliced lanes = certified RNA per strand; provenance is the field name, a
-spliced gDNA lane is inexpressible), one propagation-time `ReconcileModel` (the pass-through /
-integrate rule is the base template; `discount` is the propagation-variance override point), one
-solve-time `CreditModel` (`unspliced_credit` supplies ψ's Gaussian channels, `spliced_credit`
+spliced gDNA lane is inexpressible), one propagation-time `PropagationModel` (the pass-through /
+integrate rule is the base template; `attenuate` is the propagation-variance override point), one
+solve-time `SolveModel` (`solve_unspliced` supplies ψ's Gaussian channels, `solve_spliced`
 the row-factor likelihood — the certified-flux treatment is an implementation of THAT). The base
 classes enforce what no implementation may break: sender publishes unchanged, no single-source
 amplification (refused at runtime), lane isolation in transit, pass-through at empty nodes.
@@ -307,32 +307,79 @@ Gate: `tests/calibration/test_message_foundation.py`, every rule perturbation-ve
 | `sweep.solve_chain` | IS the two-timepoint machine: scans = propagation time, deliver + final ψ = solve time; the backbone needs no change |
 | phase-A `build_region_init` | the own belief |
 | currency's 6-number hop state | the unspliced lanes' shape, exactly; its per-hop own-fuse is the reconcile template |
-| the flux stream's arithmetic (`rna_anchor`) | a `spliced_credit` implementation, one hop deep |
+| the flux stream's arithmetic (`rna_anchor`) | a `solve_spliced` implementation, one hop deep |
 | `inv_sj_lo/hi`, per-face sj counts | the spliced lanes' raw observations, already in the context |
 | `NeighbourState` source-indexing | enforces sender-publishes-unchanged by construction |
-| mismatch deflation (as a concept) | recipient-side credit — legal, belongs in `CreditModel` |
+| mismatch deflation (as a concept) | recipient-side weighing — legal, belongs in `SolveModel` |
 
 | VIOLATES (repair = re-expression against the spec) | |
 |---|---|
 | relay's 10-array state, 3 precision streams, 20 operators | no committed message type; propagation and credit smeared together |
 | the frame pair reading `belief_fg` at both ends | the sender reading the recipient's belief — the recorded 57–77 % debt |
-| hop-time dampers (P1d, conservation, transfer var) deciding credit at the sender | credit belongs to the recipient; costs belong to `discount` |
+| hop-time dampers (P1d, conservation, transfer var) deciding the recipient's weighing at the sender | that weighing belongs to the solve; transit costs belong to `attenuate` |
 | `PsiMessage.lam_rows` as a side lane | transitional: the spliced claim outside the message; folds into the spliced lanes when the unified policy is built |
 
 | DISSOLVES (no counterpart in the spec) | |
 |---|---|
 | splice-in / splice-out operators | the spliced lanes carry flux natively; population bookkeeping becomes lane arithmetic |
-| the certified-RNA Gaussian channel + `ONE_SIDED_RNA` / `rna_one_sided` | subsumed by `spliced_credit` (a count likelihood, two-sided, honest) |
+| the certified-RNA Gaussian channel + `ONE_SIDED_RNA` / `rna_one_sided` | subsumed by `solve_spliced` (a count likelihood, two-sided, honest) |
 | mass rescale | no place in the spec (currency already proved its structural absence) |
-| the three-estimator max as an unexplained vote | becomes one `spliced_credit` variance model (the §4b law) |
+| the three-estimator max as an unexplained vote | becomes one `solve_spliced` variance model (the §4b law) |
 | mode-fusion vs measurement precision streams | one precision per claim per lane |
 
 **The build order under the spec** (each an open problem solved separately, in the owner's
-sequence): ① the foundation — DONE, gated; ② the propagation variance model = ONE `discount`
+sequence): ① the foundation — DONE, gated; ② the propagation variance model = ONE `attenuate`
 implementation, derived (the §4b moments law is the candidate for the unspliced lanes; hop
-distance and population licences enter here); ③ the solve = ONE `CreditModel`, built only once
+distance and population licences enter here); ③ the solve = ONE `SolveModel`, built only once
 the architecture has settled — the owner's warning stands: the solve weighs structure, two
 messages and own belief, and is the hardest part. The unified policy then implements the
-backbone's existing `Policy` protocol by delegating scan steps to the `ReconcileModel` and
-deliver to the `CreditModel` — the shipped policies stay untouched until it beats them on the
+backbone's existing `Policy` protocol by delegating scan steps to the `PropagationModel` and
+deliver to the `SolveModel` — the shipped policies stay untouched until it beats them on the
 panel, per stratum, zero controls held.
+
+
+## 7. THE UNIFIED-POLICY ROADMAP (owner request, 2026-08-26) — one policy from three strengths
+
+The goal: ONE propagation policy and ONE solve, built against the foundation spec, integrating
+what each existing piece is best at. What each contributes:
+
+| from CURRENCY | from RELAY | from the SPLICED ANCHOR |
+|---|---|---|
+| the message shape (already the spec's unspliced lanes) | the per-strand population licence (the three-case rule) | the spliced lanes and their count-likelihood solve |
+| the knob: enrichment as ONE unknown, no switch | mismatch-yielding at the recipient (a solve-time behavior) | the §4b variance law (route classes + the tail top-up) |
+| the every-hop premise, precision-weighted | the operator-pricing METHOD (arms per mechanism) | the estimator discipline: guards, refusal ⇒ silence |
+| belief-free frames | the structural licences (terminus flags, admissibility) | route-sum pooling and the geometry corrections of §4b |
+
+**Step 0 — terminology.** ✅ 2026-08-26: propagate (was reconcile), solve (was credit), attenuate
+(was discount), pure-gDNA / RNA-bearing (was DELIVER/REFUTE — which also collided with the
+backbone's `deliver()` method). Instrument keys renamed (`pass0_claimed_ab` score keys are
+`pure_gdna` / `rna_bearing`), self-test green.
+
+**Step 1 — THE BRIDGE (next).** One spec-conforming policy runner: a Policy implementation that
+plugs a `(PropagationModel, SolveModel)` pair into the backbone's existing protocol, and builds
+each node's OWN Message from the banks the context already carries (a boundary's sj flux enters
+its spliced lanes — which retires the `lam_rows` side lane architecturally). Two identity anchors
+falsify it before anything new is claimed: ⓐ PassThroughPropagation + a silent SolveModel must be
+byte-identical to SilentPolicy on the panel; ⓑ a SolveModel whose `solve_spliced` reproduces the
+shipped anchor arithmetic from the messages' spliced lanes must be byte-identical to today's
+relay flux rows (the parity-gate pattern exists). ⚠ Step 1 also settles the spec's one known
+gap: a claim crossing an enrichment frame needs a REFRAME in the value before the fuse — where
+that lives (inside `attenuate`'s contract or as its own extension point) is decided here, with
+currency's belief-free face totals as the frame source.
+
+**Step 2 — PROPAGATE (the unspliced attenuate).** The first real propagation variance model,
+derived: currency's knob for the frame decision, the per-hop premise by weighted moments PER HOP
+CLASS (the §4b estimator form), relay's population licences as structural zeroes. Priced per hop
+first (`hop_currency`/`backbone_parity` style), then the ladder, per stratum.
+
+**Step 3 — SOLVE.** The hardest part, built only when the architecture has settled and designed
+WITH the owner: how a node weighs structure, two travelled messages, and its own belief.
+Integrates the §4b spliced law (`solve_spliced`), mismatch-yielding as recipient behavior, and
+the refit-vs-message arbitration (the ROADMAP's standing open question — two imputations at one
+slot with nothing arbitrating them ends HERE, because the solve is the arbiter). Design doc and
+owner review BEFORE code.
+
+**Step 4 — THE CONTEST.** Unified vs silent vs relay vs currency, all 16 conditions, per
+stratum, both zero controls, the pure-gDNA/RNA-bearing split never pooled. Acceptance: ≥ silent
+on every in-scope stratum (the bar nothing meets today). Converge-and-delete the losers, verdicts
+recorded, per the standing rule.

@@ -13,11 +13,11 @@ and no piece of arithmetic may straddle them:
    incoming message and its own belief, and decides what to relay forward. The rule is fixed by
    this spec: *a node with no own belief relays the message unchanged; a node with its own belief
    integrates the two and relays the blend.* What a hop may COST the message (the propagation
-   variance model) is the open problem `ReconcileModel.discount` reserves.
+   variance model) is the open problem `PropagationModel.attenuate` reserves.
 2. **SOLVE TIME** — after both scans, each node holds two travelled messages plus its own belief,
    and decides how much CREDIT each deserves. The recipient decides — never the sender. What the
    solve does with each lane (the solve variance model, including the certified-flux treatment)
-   is the open problem `CreditModel` reserves.
+   is the open problem `SolveModel` reserves.
 
 **The message.** One type, and the lanes are separated BY PROVENANCE, because the reconcile and
 the solve are entitled to treat a measurement differently from a belief:
@@ -26,31 +26,31 @@ the solve are entitled to treat a measurement differently from a belief:
   is inexpressible). These are deconvolved BELIEFS: products of a solve, imputations, the things
   a premise must be charged on.
 * the SPLICED lanes — certified RNA per strand (gDNA cannot splice, so a spliced gDNA lane does
-  not exist as a field). These are MEASUREMENTS: certified observations whose credit at solve
+  not exist as a field). These are MEASUREMENTS: certified observations whose weight at solve
   time may be a count-likelihood rather than a Gaussian — the certified-flux treatment is a
-  `spliced_credit` implementation, not a side channel.
+  `solve_spliced` implementation, not a side channel.
 
 **The rules the base classes ENFORCE (no implementation may break them):**
 
 * A sender publishes its claim unchanged; deciding how much of an arriving claim to believe is
   the recipient's job (the reconciling node at propagation time; the solved node at solve time).
 * A single-source transform may only LOWER a precision — `reconcile` refuses an amplifying
-  discount at runtime. Precision rises only by the additive fusion of independent witnesses
+  attenuation at runtime. Precision rises only by the additive fusion of independent witnesses
   (a node's own belief is independent of what its neighbours relayed).
-* Lanes never mix in transit: spliced stays spliced, unspliced stays unspliced. Only a CREDIT
+* Lanes never mix in transit: spliced stays spliced, unspliced stays unspliced. Only a SOLVE
   model — the recipient, at solve time — may convert a lane into solve evidence.
 * A node with nothing of its own passes a message through byte-identically.
 
 **What this spec deliberately does NOT decide** — the two open problems, each an override point:
 
-* `ReconcileModel.discount(claim, lane)` — the propagation variance model: what one hop costs.
-* `CreditModel.unspliced_credit` / `CreditModel.spliced_credit` — the solve variance model: how
+* `PropagationModel.attenuate(claim, lane)` — the propagation variance model: what one hop costs.
+* `SolveModel.solve_unspliced` / `SolveModel.solve_spliced` — the solve variance model: how
   the recipient converts two travelled messages plus its own belief into evidence.
 
 The backbone (`sweep.solve_chain`) already runs the two timepoints — the scans are propagation
 time and `deliver` + the final ψ are solve time — and its `Policy` protocol is where a
-spec-conforming implementation plugs in: a policy's scan step is a `ReconcileModel`, its deliver
-is a `CreditModel` returning the `PsiMessage` ψ consumes. The shipped policies predate this spec
+spec-conforming implementation plugs in: a policy's scan step is a `PropagationModel`, its deliver
+is a `SolveModel` returning the `PsiMessage` ψ consumes. The shipped policies predate this spec
 and are grandfathered; the unified policy is built AGAINST it.
 
 Gate: ``tests/calibration/test_message_foundation.py`` — every rule above is asserted there and
@@ -67,7 +67,7 @@ import numpy as np
 
 from . import PsiMessage
 
-__all__ = ["Claim", "CreditModel", "Message", "PassThroughReconcile", "ReconcileModel"]
+__all__ = ["Claim", "Message", "PassThroughPropagation", "PropagationModel", "SolveModel"]
 
 #: Tolerance for the no-amplification check — floating-point headroom, not a policy knob.
 _AMPLIFY_TOL = 1.0 + 1e-12
@@ -135,62 +135,63 @@ def _fuse(own: Claim, incoming: Claim) -> Claim:
     return Claim(abundance=a, precision=p)
 
 
-class ReconcileModel(ABC):
+class PropagationModel(ABC):
     """PROPAGATION TIME — how a node relays one incoming message.
 
-    The skeleton is the spec and is FINAL; a variance model implements only `discount` (what the
-    hop costs the arriving claim, per lane). The base enforces: pass-through when the node has
+    The skeleton is the spec and is FINAL; a variance model implements only `attenuate` (how much
+    one hop weakens the arriving claim, per lane). The base enforces: pass-through when the node has
     nothing, lane isolation, and the no-amplification rule."""
 
-    def reconcile(self, own: Message, incoming: Message) -> Message:
+    def propagate(self, own: Message, incoming: Message) -> Message:
         out = {}
         for lane in Message.LANES:
             arriving = incoming.lane(lane)
-            discounted = self.discount(arriving, lane) if not arriving.is_silent else arriving
-            if float(discounted.precision) > float(arriving.precision) * _AMPLIFY_TOL:
+            weakened = self.attenuate(arriving, lane) if not arriving.is_silent else arriving
+            if float(weakened.precision) > float(arriving.precision) * _AMPLIFY_TOL:
                 raise ValueError(
-                    f"the discount amplified lane {lane!r} "
-                    f"({arriving.precision} -> {discounted.precision}): a single-source "
+                    f"the attenuation amplified lane {lane!r} "
+                    f"({arriving.precision} -> {weakened.precision}): a single-source "
                     "transform may only LOWER a precision (the foundation spec's rule)"
                 )
             mine = own.lane(lane)
-            out[lane] = discounted if mine.is_silent else _fuse(mine, discounted)
+            out[lane] = weakened if mine.is_silent else _fuse(mine, weakened)
         return Message(**out)
 
     @abstractmethod
-    def discount(self, claim: Claim, lane: str) -> Claim:
-        """OPEN PROBLEM (propagation variance): the cost one hop charges an arriving claim."""
+    def attenuate(self, claim: Claim, lane: str) -> Claim:
+        """OPEN PROBLEM (propagation variance): how much one hop weakens an arriving claim —
+        a signal loses strength in transit, and this says how much."""
 
 
-class PassThroughReconcile(ReconcileModel):
+class PassThroughPropagation(PropagationModel):
     """The reference reconcile: a free hop. The spec's own control implementation — it exists so
     the rules are testable, not as a production model (a free hop lets an imputation arrive at
-    full strength beside a real measurement, the measured failure the discount exists to price)."""
+    full strength beside a real measurement, the measured failure attenuation exists to price)."""
 
-    def discount(self, claim: Claim, lane: str) -> Claim:
+    def attenuate(self, claim: Claim, lane: str) -> Claim:
         return claim
 
 
-class CreditModel(ABC):
+class SolveModel(ABC):
     """SOLVE TIME — how the solved node converts its two travelled messages and its own belief
     into the evidence ψ consumes.
 
-    The recipient decides; the template only fixes the ASSEMBLY: the unspliced credit supplies
-    ψ's Gaussian channels, the spliced credit supplies the row-factor likelihood (the
+    The recipient decides; the template only fixes the ASSEMBLY: the unspliced solve supplies
+    ψ's Gaussian channels, the spliced solve supplies the row-factor likelihood (the
     certified-flux treatment lives there), and the base joins them into one `PsiMessage`."""
 
-    def credit(self, own: Message, forward: Message, backward: Message) -> PsiMessage:
-        gaussian = self.unspliced_credit(own, forward, backward)
-        rows = self.spliced_credit(own, forward, backward)
+    def solve(self, own: Message, forward: Message, backward: Message) -> PsiMessage:
+        gaussian = self.solve_unspliced(own, forward, backward)
+        rows = self.solve_spliced(own, forward, backward)
         if rows is None:
             return gaussian
         return dataclasses.replace(gaussian, lam_rows=np.asarray(rows, np.float64))
 
     @abstractmethod
-    def unspliced_credit(self, own: Message, forward: Message, backward: Message) -> PsiMessage:
+    def solve_unspliced(self, own: Message, forward: Message, backward: Message) -> PsiMessage:
         """OPEN PROBLEM (solve variance, belief lanes): the Gaussian channels ψ receives."""
 
     @abstractmethod
-    def spliced_credit(self, own: Message, forward: Message, backward: Message):
+    def solve_spliced(self, own: Message, forward: Message, backward: Message):
         """OPEN PROBLEM (solve variance, measurement lanes): the row-factor likelihood, or
         ``None`` for no claim — the certified-flux arithmetic is an implementation of THIS."""

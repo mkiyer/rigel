@@ -134,7 +134,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "messages",
             # `messages/foundation` is THE FOUNDATION SPEC (owner architecture, 2026-08-26):
             # the Message type (unspliced + spliced lanes, provenance structural), the
-            # propagation-time ReconcileModel and the solve-time CreditModel — the contracts
+            # propagation-time PropagationModel and the solve-time SolveModel — the contracts
             # every variance model implements by overriding their narrow extension points.
             "messages/foundation",
             "messages/variance",

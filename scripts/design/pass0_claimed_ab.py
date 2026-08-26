@@ -9,14 +9,14 @@ DOMINATED on every row. The survey's verdicts stand in `DESIGN.md` §6b.2 and th
 silent-vs-relay contrast here measures the message layer INCLUDING the certified-flux stream.
 
 Two claimed populations, each scored as misplaced gDNA fragments ``Σ|est_gdna − true_gdna|`` against
-certified `slot_truth`, per condition and per policy, DELIVER/REFUTE split and never pooled
+certified `slot_truth`, per condition and per policy, split into PURE-gDNA and RNA-BEARING slots (by certified truth) and never pooled
 (`TRAPS: a-refutability-test-needs-the-refuting-channel-in-the-fixture`):
 
     B   ``ss_intron_boundary``  (stage 3's destinations), on the boundary axis
     E   ``solvable_exon``       (stage 4's destinations), on the region axis
 
-DELIVER rows are the slots whose certified truth is EXACTLY pure gDNA (the claim is true and must be
-delivered); REFUTE rows carry real RNA (the claim must be overturned by evidence). ⛔ A pooled number
+PURE-gDNA rows are the slots whose certified truth is EXACTLY pure gDNA (the right answer is
+f_g = 1); RNA-BEARING rows carry real RNA (the right answer pushes f_g down). ⛔ A pooled number
 over the whole library cannot judge pass-0: outside its claimed slots pass-0
 asserts nothing, so a whole-library comparison charges it for slots it deliberately leaves
 unsolved — that context lives in `calibration_vs_oracle.py`.
@@ -70,7 +70,7 @@ POLICIES = {
 
 
 def claimed_masks(chain, claims, truth: dict) -> dict:
-    """The two claimed populations on their OWN axes, plus the DELIVER/REFUTE split from certified
+    """The two claimed populations on their OWN axes, plus the pure-gDNA/RNA-bearing split from certified
     truth (pure ⇔ every RNA column exactly zero at the slot)."""
     out = {}
     for tag, kind_val, slot_mask in (
@@ -92,8 +92,8 @@ def claimed_masks(chain, claims, truth: dict) -> dict:
         out[tag] = {
             "mask": mask,
             "true_gdna": true_g,
-            "deliver": mask & (rna == 0.0),
-            "refute": mask & (rna > 0.0),
+            "pure_gdna": mask & (rna == 0.0),
+            "rna_bearing": mask & (rna > 0.0),
         }
     return out
 
@@ -106,8 +106,8 @@ def score(est_gdna_by_axis: dict, masks: dict) -> dict:
         err = np.abs(np.asarray(est_gdna_by_axis[tag], np.float64) - m["true_gdna"])
         rows[tag] = {
             "claimed": float(err[m["mask"]].sum()),
-            "deliver": float(err[m["deliver"]].sum()),
-            "refute": float(err[m["refute"]].sum()),
+            "pure_gdna": float(err[m["pure_gdna"]].sum()),
+            "rna_bearing": float(err[m["rna_bearing"]].sum()),
         }
     return rows
 
@@ -140,7 +140,7 @@ def report(condition: str, rows: dict, policies) -> None:
     print(f"\n== {condition}")
     print(f"   {'pop':<4} {'split':<9}" + "".join(f"{p:>12}" for p in policies))
     for tag in ("B", "E"):
-        for split in ("claimed", "deliver", "refute"):
+        for split in ("claimed", "pure_gdna", "rna_bearing"):
             print(
                 f"   {tag if split == 'claimed' else '':<4} {split:<9}"
                 + "".join(f"{rows[p][tag][split]:>12.0f}" for p in policies)
@@ -190,10 +190,10 @@ def self_test() -> int:
         masks["B"]["mask"].sum() == 2 and masks["E"]["mask"].sum() == 2,
     )
     check(
-        "DELIVER and REFUTE split by certified purity and never overlap",
-        masks["B"]["deliver"].sum() == 2
-        and masks["E"]["refute"].sum() == 2
-        and not (masks["B"]["deliver"] & masks["B"]["refute"]).any(),
+        "pure-gDNA and RNA-bearing split by certified purity and never overlap",
+        masks["B"]["pure_gdna"].sum() == 2
+        and masks["E"]["rna_bearing"].sum() == 2
+        and not (masks["B"]["pure_gdna"] & masks["B"]["rna_bearing"]).any(),
     )
     # perfect estimates score zero; an injected error is caught in the right population and split
     truth_b = np.zeros(4)
@@ -206,12 +206,12 @@ def self_test() -> int:
         all(v == 0.0 for row in score(perfect, masks).values() for v in row.values()),
     )
     bad = {k: v.copy().astype(float) for k, v in perfect.items()}
-    bad["B"][1] += 7.0  # boundary obj 1 = the claimed donor (slot 3): DELIVER side
+    bad["B"][1] += 7.0  # boundary obj 1 = the claimed donor (slot 3): the pure-gDNA side
     bad["E"][2] += 5.0  # region obj 2 = the intron — NOT a claimed exon: must score nowhere
     got = score(bad, masks)
     check(
-        "an injected boundary error lands in B/deliver, exactly",
-        got["B"]["claimed"] == 7.0 and got["B"]["deliver"] == 7.0 and got["B"]["refute"] == 0.0,
+        "an injected boundary error lands in B/pure_gdna, exactly",
+        got["B"]["claimed"] == 7.0 and got["B"]["pure_gdna"] == 7.0 and got["B"]["rna_bearing"] == 0.0,
     )
     check(
         "error parked on an UNCLAIMED slot is scored nowhere (judge only what is claimed)",
@@ -219,11 +219,11 @@ def self_test() -> int:
     )
     bad2 = {k: v.copy().astype(float) for k, v in perfect.items()}
     bad2["E"][2 + 0] = bad2["E"][2] + 0.0  # no-op guard
-    bad2["E"][np.flatnonzero(masks["E"]["refute"])[0]] += 3.0
+    bad2["E"][np.flatnonzero(masks["E"]["rna_bearing"])[0]] += 3.0
     got2 = score(bad2, masks)
     check(
-        "an injected exon error lands in E/refute, exactly",
-        got2["E"]["refute"] == 3.0 and got2["E"]["deliver"] == 0.0,
+        "an injected exon error lands in E/rna_bearing, exactly",
+        got2["E"]["rna_bearing"] == 3.0 and got2["E"]["pure_gdna"] == 0.0,
     )
 
     print(f"self-test: {ok}/{ok}")

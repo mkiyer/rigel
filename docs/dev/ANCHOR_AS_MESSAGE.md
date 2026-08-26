@@ -68,7 +68,7 @@ carried every piece the appendage rebuilt:
   construction; that is the control being restored, not a loss.
 * The shipped candidate is relay-with-stream. Acceptance: per in-scope stratum, within noise of
   or better than the graduated relay+appendage readings (`CLEAN_LIBRARY_RESIDUAL.md` §5d /
-  the 16-row all-policies table, 2026-08-24), both zero controls held, DELIVER/REFUTE split
+  the 16-row all-policies table, 2026-08-24), both zero controls held, pure-gDNA/RNA-bearing split
   never pooled. The arithmetic-parity gate (relay rows ≡ appendage rows on the anchor toy)
   separates a citizenship effect from an arithmetic bug by construction.
 
