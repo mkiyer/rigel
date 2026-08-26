@@ -35,7 +35,14 @@ from . import NeighbourState, PsiMessage, StepContext
 from .foundation import Claim, Hop, Message, PropagationModel, SolveModel
 from .variance import count_logvar
 
-__all__ = ["FrameAwarePropagation", "RowsSolve", "SilentSolve", "UnifiedPolicy"]
+__all__ = [
+    "AllocationSolve",
+    "FrameAwarePropagation",
+    "RowsSolve",
+    "SilentSolve",
+    "UnifiedPolicy",
+    "allocate",
+]
 
 
 class SilentSolve(SolveModel):
@@ -72,6 +79,7 @@ class UnifiedPolicy:
 
     def prepare(self, ctx: StepContext) -> "_PreparedUnified":
         self.propagation.prepare(ctx)
+        self.solve_model.prepare(ctx)
         return _PreparedUnified(ctx, self.propagation, self.solve_model)
 
 
@@ -229,3 +237,160 @@ class FrameAwarePropagation(PropagationModel):
         v_hop = w * v + resid * resid + self._premise
         p = float(claim.precision)
         return Claim(abundance=value, precision=p / (1.0 + p * v_hop) if v_hop > 0.0 else p)
+
+
+def allocate(mu, p, *, total, total_precision, absorber):
+    """THE OWNER'S CONSERVATION ALLOCATION (ratified 2026-08-26): distribute the residual between
+    the arriving component claims and the node's measured total IN PROPORTION TO VARIANCE — the
+    certified/strong components hold their values, the weak absorb. The derived repair of the
+    equal-weight rescale (a weak claim can no longer be amplified to satisfy a constraint).
+
+    Soft form (the total is itself a measurement): minimise Σ p_i (x_i − μ_i)² +
+    p_T (Σx − T)², giving x_i = μ_i + k/p_i with k = p_T·(T − Σμ) / (1 + p_T·Σ(1/p_i)).
+    A licensed ABSORBER (terminus-admitted NEW RNA, precision → 0) takes any DEFICIT whole — the
+    known components keep their values and the solve is in abundance space, never share space —
+    but cannot absorb an EXCESS (new transcription cannot be negative). Clamped at zero with one
+    variance-weighted redistribution pass."""
+    mu = np.asarray(mu, np.float64)
+    p = np.asarray(p, np.float64)
+    live = p > 0.0
+    if not live.any():
+        return mu.copy()
+    deficit = float(total) - float(mu[live].sum())
+    if absorber and deficit > 0.0:
+        return mu.copy()  # the absorber takes the whole deficit; every claim holds
+    x = mu.copy()
+    inv = np.where(live, 1.0 / np.where(live, p, 1.0), 0.0)
+    for _ in range(2):  # one clamp-and-redistribute pass is enough for K = 5
+        free = live & (x >= 0.0)
+        s_inv = float(inv[free].sum())
+        if s_inv <= 0.0:
+            break
+        d = float(total) - float(x[live].sum())
+        k = float(total_precision) * d / (1.0 + float(total_precision) * s_inv)
+        x[free] = x[free] + k * inv[free]
+        if np.all(x >= 0.0):
+            break
+        x = np.maximum(x, 0.0)
+    return np.maximum(x, 0.0)
+
+
+class AllocationSolve(SolveModel):
+    """THE UNSPLICED SOLVE (commit two of the build): reception → allocation → conversion.
+
+    Reception: the two directions fuse as independent witnesses, then each fused claim YIELDS
+    where the node's own evidence disagrees (the DerSimonian–Laird deflation, gap measured
+    against the node's OWN lane — never a fused belief; silent own ⇒ no deflation, which is the
+    split census's requirement: messages yield exactly where the slot is sighted). Allocation:
+    the owner's conservation law across the five arriving claims against the node's model-free
+    total, with terminus-licensed absorbers. Conversion: currency's delivery — log-share of the
+    node's own measured mass, clipped into the grid domain. v1 emits the three component
+    channels; the spliced rows arrive with the next commit (the spliced claims already
+    participate in the allocation constraint)."""
+
+    _UNSPLICED = ("unspliced_gdna", "unspliced_rna_pos", "unspliced_rna_neg")
+    _ALL = (
+        "spliced_rna_pos",
+        "spliced_rna_neg",
+        "unspliced_gdna",
+        "unspliced_rna_pos",
+        "unspliced_rna_neg",
+    )
+
+    def prepare(self, ctx) -> None:
+        from ..region_geometry import terminus_flank_gain
+        from ..simplex_logodds import _log_fg, _logodds_grid
+
+        n = int(np.asarray(ctx.n_slot).shape[0])
+        self._E = {
+            "unspliced_gdna": np.asarray(ctx.eff_gdna_global, np.float64),
+            "unspliced_rna_pos": np.asarray(ctx.eff_rna, np.float64),
+            "unspliced_rna_neg": np.asarray(ctx.eff_rna, np.float64),
+        }
+        self._M = np.asarray(ctx.mass, np.float64)
+        # the node's MODEL-FREE total density and its counting precision — the conservation total
+        inv = np.asarray(ctx.inv_abundance, np.float64)
+        self._T = (
+            inv
+            + np.asarray(ctx.inv_sj_lo, np.float64).sum(axis=1)
+            + np.asarray(ctx.inv_sj_hi, np.float64).sum(axis=1)
+        )
+        n_tot = np.asarray(ctx.n_slot, np.float64) + np.asarray(ctx.spliced_slot, np.float64)
+        self._pT = np.where(n_tot > 0, 1.0 / count_logvar(n_tot), 0.0)
+        # terminus-licensed absorbers: NEW RNA may start/stop beside a flank whose population
+        # grows — coarse v1 licence (any gain at an adjacent boundary), refinement recorded
+        rgain, lgain = terminus_flank_gain(ctx.boundary_flags)
+        left = np.clip(np.asarray(ctx.left, np.int64), 0, n - 1)
+        right = np.clip(np.asarray(ctx.right, np.int64), 0, n - 1)
+        gain = np.asarray(rgain, bool) | np.asarray(lgain, bool)
+        self._absorber = gain[left] | gain[right] | gain
+        lam, _ = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
+        dom = _log_fg(lam)
+        self._dom = (float(dom[0]), float(dom[-1]))
+
+    @staticmethod
+    def _fuse_dir(f, b):
+        pf = np.asarray(f.precision, np.float64)
+        pb = np.asarray(b.precision, np.float64)
+        p = pf + pb
+        v = np.where(
+            p > 0,
+            (pf * np.asarray(f.abundance, np.float64) + pb * np.asarray(b.abundance, np.float64))
+            / np.where(p > 0, p, 1.0),
+            0.0,
+        )
+        return v, p
+
+    def solve_unspliced(self, own, forward, backward) -> PsiMessage:
+        n = np.asarray(own.unspliced_gdna.precision).shape[0]
+        val, prec = {}, {}
+        for lane in self._ALL:
+            v, p = self._fuse_dir(forward.lane(lane), backward.lane(lane))
+            # RECEPTION — the yielding rule: where the node's OWN lane disagrees, the arriving
+            # claim loses precision (DerSimonian–Laird; gap vs the own lane, never a fused
+            # belief). Own silent ⇒ no deflation: messages yield exactly where the slot is
+            # sighted (the split census's requirement).
+            po = np.asarray(own.lane(lane).precision, np.float64)
+            vo = np.asarray(own.lane(lane).abundance, np.float64)
+            both = (p > 0) & (po > 0) & (v > 0) & (vo > 0)
+            g2 = np.zeros(n)
+            g2[both] = np.log(v[both] / vo[both]) ** 2
+            b2 = np.maximum(
+                g2
+                - np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), 0.0)
+                - np.where(po > 0, 1.0 / np.where(po > 0, po, 1.0), 0.0),
+                0.0,
+            )
+            with np.errstate(divide="ignore"):
+                deflated = 1.0 / (np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), np.inf) + b2)
+            p = np.where(both & (b2 > 0), deflated, p)
+            val[lane], prec[lane] = v, p
+        # THE ALLOCATION — per slot, the five claims against the node's model-free total
+        mu = np.stack([val[k] for k in self._ALL], axis=1)
+        pp = np.stack([prec[k] for k in self._ALL], axis=1)
+        live_rows = (pp > 0).any(axis=1) & (self._pT > 0)
+        for i in np.flatnonzero(live_rows):
+            mu[i] = allocate(
+                mu[i],
+                pp[i],
+                total=self._T[i],
+                total_precision=self._pT[i],
+                absorber=bool(self._absorber[i]),
+            )
+
+        # CONVERSION — log-share of the node's own measured mass, clipped into the grid domain
+        def channel(lane):
+            x = mu[:, self._ALL.index(lane)]
+            p = pp[:, self._ALL.index(lane)]
+            live = (p > 0) & (self._M > 0) & (x > 0)
+            share = np.where(live, x * self._E[lane] / np.where(self._M > 0, self._M, 1.0), 1.0)
+            mode = np.clip(np.log(np.maximum(share, 1e-300)), self._dom[0], self._dom[1])
+            return np.where(live, mode, 0.0), np.where(live, p, 0.0)
+
+        mg, pg = channel("unspliced_gdna")
+        mp_, pp_ = channel("unspliced_rna_pos")
+        mn_, pn_ = channel("unspliced_rna_neg")
+        return PsiMessage(gdna_mode=mg, gdna_prec=pg, rna_mode=(mp_, mn_), rna_prec=(pp_, pn_))
+
+    def solve_spliced(self, own, forward, backward):
+        return None

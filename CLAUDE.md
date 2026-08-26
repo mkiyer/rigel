@@ -230,8 +230,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,702 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-sixth measurement that day. The `+2` over 3,700 is the ROUTE-SUM HOMECOMING's two geometry gates
+⭐ **THE STANDING BASELINE: 0 failed / 3,708 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
+seventh measurement that day. The `+6` over 3,702 is THE UNSPLICED SOLVE (six allocation/yield
+gates in the EXISTING `tests/calibration/test_unified_bridge.py`, perturbations verified).
+Before that, the `+2` over 3,700 was the ROUTE-SUM HOMECOMING's two geometry gates
 in the EXISTING `tests/calibration/test_region_geometry.py` (independent-derivation parity;
 sum-dominates-pooled). A golden update landed in the same change — the relay's splice-in density
 is now route-summed at the geometry source, a shipped-output move (max 0.06 % relative on the

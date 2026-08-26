@@ -461,7 +461,19 @@ twin discipline); ONE `message_policy` VALUE; THE CONTEST + converge-and-delete.
 the RELAY's splice-in density consume it — priced on all 16: silent byte-unchanged, g00/g05
 improve up to −7.3 %, g98-ON +3.9 % worst (the un-yielded tax growing with a more accurate
 certified claim — commit ②'s yielding is the designed counter), in-scope net +0.1 %; goldens
-moved ≤ 0.06 % relative, read before update); ② the unspliced solve
+moved ≤ 0.06 % relative, read before update); ② ✅ the unspliced solve (2026-08-26:
+`AllocationSolve` — reception (DL yielding vs the OWN lane; own-silent ⇒ no deflation, the
+split-census requirement, gated) → the owner's conservation ALLOCATION (`allocate`:
+variance-proportional residual, absorber-takes-deficit, excess clamped — every rule
+perturbation-gated) → currency's conversion (log-share, domain-clipped). FIRST HONEST PRICE,
+six conditions: ⭐ the ZERO CONTROLS sit AT silence (g00-OFF 26.6k vs silent 26.7k; g00-ON
+14.5k vs 14.5k — messages that yield, structurally; the relay reads 18.4k there), and the
+pass-through arm proves the propagation model's load (3.6M at g00-OFF without
+attenuation/licences). ⛔ Contaminated rows still trail silence (g05-str 40k vs 27k; g50-ON
+247k vs 75k; g98-OFF 145k vs 66k) — expected at this waypoint: the SPLICED solve (the anchor's
+wins) is commit ③, and the class-keyed premise is the recorded calibration lever. Runtime
+~20 s/condition — the scalar scan is panel-viable; vectorization stays deferred); ③ the
+spliced solve
 (first honest end-to-end propagate+solve price, vs silent and currency, per stratum — the zero
 controls and g05 rows referee the yielding); ③ the spliced solve (identity vs the graduated
 anchor on complete flanks within noise; the incomplete-flank branch priced separately);

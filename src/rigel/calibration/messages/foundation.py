@@ -196,6 +196,10 @@ class SolveModel(ABC):
     ψ's Gaussian channels, the spliced solve supplies the row-factor likelihood (the
     certified-flux treatment lives there), and the base joins them into one `PsiMessage`."""
 
+    def prepare(self, ctx) -> None:
+        """Optional hook: build per-sweep tables (the node totals, licences, the grid domain)
+        from the context, once per sweep. The default needs nothing."""
+
     def solve(self, own: Message, forward: Message, backward: Message) -> PsiMessage:
         gaussian = self.solve_unspliced(own, forward, backward)
         rows = self.solve_spliced(own, forward, backward)

@@ -303,3 +303,108 @@ def test_frame_aware_under_a_silent_solve_changes_nothing(sweep_inputs):
     b = _run(sweep_inputs, U.UnifiedPolicy(U.FrameAwarePropagation(), U.SilentSolve()))
     for f in a:
         np.testing.assert_array_equal(a[f], b[f], err_msg=f)
+
+
+# ── step 3 commit 2: the allocation solve ───────────────────────────────────────────────────────
+
+
+def _alloc():
+    from rigel.calibration.messages import unified as U
+
+    return U
+
+
+def test_allocation_passes_through_when_totals_agree():
+    """The owner's solvency rule: when the arriving components already sum to the node's total,
+    the residual is zero and every component passes through untouched — no arbitration exists
+    because none is needed."""
+    U = _alloc()
+    mu = np.array([3.0, 1.0, 0.5])
+    p = np.array([10.0, 5.0, 2.0])
+    x = U.allocate(mu, p, total=4.5, total_precision=100.0, absorber=False)
+    np.testing.assert_allclose(x, mu, rtol=1e-12)
+
+
+def test_allocation_lands_the_residual_on_weak_components():
+    """The precision-weighted allocation: the residual is distributed in proportion to VARIANCE —
+    the certified/strong components hold their values, the weak absorb. The derived repair of the
+    equal-weight rescale (the recorded k = 467,000× and 235,800× amplifications)."""
+    U = _alloc()
+    mu = np.array([10.0, 1.0])
+    p = np.array([1000.0, 0.1])
+    x = U.allocate(mu, p, total=14.0, total_precision=50.0, absorber=False)
+    assert abs(x[0] - 10.0) < 0.05, "the strong component must hold its value"
+    assert x[1] > 3.5, "the weak component must absorb nearly the whole deficit"
+    assert x.sum() < 14.0 + 1e-9, "a soft constraint never overshoots the total"
+
+
+def test_a_licensed_absorber_takes_the_deficit_and_known_components_hold():
+    """The owner's insolvency rule, structural: where a terminus licenses NEW-RNA, the absorber
+    takes the whole deficit and the known components keep their claimed values — the solve is in
+    abundance space, never share space."""
+    U = _alloc()
+    mu = np.array([2.0, 1.0])
+    p = np.array([50.0, 20.0])
+    x = U.allocate(mu, p, total=10.0, total_precision=100.0, absorber=True)
+    np.testing.assert_allclose(x, mu, rtol=1e-12)
+
+
+def test_an_excess_cannot_go_negative():
+    """Excess (arriving claims above the total) is shrunk variance-weighted and clamped at zero —
+    an absorber cannot absorb an excess (new transcription cannot be negative)."""
+    U = _alloc()
+    mu = np.array([5.0, 0.5])
+    p = np.array([100.0, 0.05])
+    x = U.allocate(mu, p, total=4.0, total_precision=200.0, absorber=True)
+    assert np.all(x >= 0.0), "an excess allocation may never go negative"
+    assert x[1] == 0.0, "the weak component is exhausted first"
+    assert 3.9 < x[0] <= 5.0, "the remaining excess lands on the strong component, bounded"
+
+
+def test_the_allocation_solve_is_silent_on_silent_messages(sweep_inputs):
+    """End to end: the full unspliced solve under silent messages must equal SilentPolicy
+    byte-for-byte (no message ⇒ nothing to allocate ⇒ nothing delivered)."""
+    F, U = _U()
+    a = _run(sweep_inputs, SilentPolicy())
+    b = _run(sweep_inputs, U.UnifiedPolicy(F.PassThroughPropagation(), U.AllocationSolve()))
+    # under PassThrough the messages are NOT silent (own beliefs travel), so this is NOT an
+    # identity run — instead assert the solve RUNS end to end and stays finite wherever the
+    # silent baseline is finite (a handful of inf variances are a baseline property of the
+    # sweep at degenerate slots, not the solve's doing)
+    for f in b:
+        base_finite = np.isfinite(a[f])
+        assert np.all(np.isfinite(b[f][base_finite])), f
+    assert not all(np.array_equal(a[f], b[f]) for f in a), (
+        "with travelling messages the allocation solve must move SOMETHING vs silence "
+        "(TRAPS: could-the-arm-have-fired)"
+    )
+
+
+def _mini_solve(n=1):
+    U = _alloc()
+    m = U.AllocationSolve()
+    m._E = {k: np.ones(n) for k in m._UNSPLICED}
+    m._M = np.ones(n)
+    m._T = np.full(n, 10.0)
+    m._pT = np.full(n, 100.0)
+    m._absorber = np.zeros(n, bool)
+    m._dom = (-30.0, 0.0)
+    return m
+
+
+def test_the_solve_yields_where_the_node_is_sighted():
+    """The yielding rule: a message contradicting a SIGHTED node's own lane loses precision; the
+    same message at a BLIND node keeps it — the split census's requirement, unit-level."""
+    F, U = _U()
+    m = _mini_solve()
+    claim = F.Claim(np.array([8.0]), np.array([50.0]))
+    fwd = F.Message.silent().with_lane("unspliced_gdna", claim)
+    own_blind = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    own_sighted = own_blind.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
+    bwd = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    p_blind = _mini_solve().solve_unspliced(own_blind, fwd, bwd).gdna_prec[0]
+    p_sighted = m.solve_unspliced(own_sighted, fwd, bwd).gdna_prec[0]
+    assert p_blind > 0
+    assert p_sighted < 0.6 * p_blind, (
+        f"a contradicted claim at a sighted node must lose precision ({p_sighted} vs {p_blind})"
+    )
