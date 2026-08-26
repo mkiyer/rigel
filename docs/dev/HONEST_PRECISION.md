@@ -190,6 +190,75 @@ comparing against certified per-object truth MUST subtract the truth count's tri
 
 Raw rows per condition: the instrument's `--out-dir` npz files (regenerable in ~4 min).
 
+### 4b. RUNG 2 — THE DERIVATIONS AND THE TRANSFER-VARIANCE MODEL (2026-08-26)
+
+**Derivation A — the length curve attributed, in absolute fragments** (`rung2_geometry.py`
+pattern: per-transcript placement intensity λ_t = observed mature fragments / L_eff(spliced
+length, TRUE pmf) — the panel writes both — then the crossing side `y_J = log(flux/(Σλ·A_J))`
+and the contained side `z_e = log(n_mrna/(Σλ·eff_r))` are absolute, no free constant):
+
+* The CROSSING model `A_J` carries a flank-exon-length mis-shape: y-medians −0.07/−0.08 at the
+  shortest src/dst exon quintile → +0.05 at the longest, both capture states. Mechanism
+  candidates, both calculable: the credit-leftmost cap absent from `reach_lo` (placements
+  crossing the previous junction are in A but never in flux) and the max-over-transcripts reach
+  (a short-continuation isoform's placements are over-counted). Per-junction spread at depth:
+  MAD 0.099 OFF / 0.134 ON.
+* The CONTAINED model carries a FITTED-PMF error: z = −0.143 with the fitted pmf vs −0.070 with
+  the TRUE pmf at OFF — half the contained-side deficit is the fl model's pmf, alone worth ~7 %.
+* ⭐ At capture-ON the contained side is ENRICHED relative to crossing, +0.31 at the shortest
+  exon quintile → +0.02 at the longest: contained placements sit fully ON-probe, crossing
+  placements half-off. This is the mechanism of the ON length curve AND the ON common-mode
+  scatter — a per-exon contained-vs-crossing capture ratio, i.e. exactly the LOCAL enrichment
+  quantity the owner ruled must be learned locally (and the currency knob's estimand).
+
+**Derivation B — the premise's structure** (excess by depth band × route structure, g00):
+
+* OFF single-route pairs: 0.000–0.016 — near ZERO. A single-route exon's two junctions abut the
+  same exon and share their geometry error; it cancels in D.
+* OFF multi-route pairs: 0.019–0.070 — 3–10× the single-route rows. Route mixtures surface the
+  per-route A-error differentials. ⭐ So the OFF "premise" is largely GEOMETRY passing through
+  route structure, and its honest statistical key is the ROUTE-STRUCTURE CLASS, not depth.
+* ON: both classes lift (single 0.02–0.12, multi 0.03–0.28) — the per-junction probe geometry.
+* ⛔ The naive precision-weighted moments over ALL pairs under-read the deep target 2–3×
+  (weighting concentrates on ultra-deep pairs, which sit in the cleanest class) — the weighting
+  is right WITHIN a class and wrong across classes. This resolves the recorded P1d-vs-currency
+  estimator tension: weighted moments PER CLASS, never pooled across a 3–10× structural split.
+
+**THE MODEL.** Scoring machinery unchanged (NB `size = flux + ½` ⊗ scatter nodes). The scatter:
+
+    V_transport(exon) = V_route(class(exon)) + V_common
+    V_route  = max(0, Var_w(D) − mean_w(v_cnt))/2   weighted moments, w ∝ 1/v_cnt, fitted PER
+               ROUTE-STRUCTURE CLASS (single-route pairs | multi-route pairs), refusal below a
+               population minimum, floor 0
+    V_common = max(0, V_tail − V_route_pooled)      the pair-blind half: V_tail = the SAME
+               moments law on the NEGATIVE obs-vs-prediction residuals (gDNA-safe side), with
+               obs-counting subtracted — measures asym + common; the subtraction isolates common
+
+* ⭐ ONE estimator form everywhere — `max(0, Var_w(residual) − mean_w(v_count))`, precision-
+  weighted within its population, counting-subtracted, refusing below a minimum — applied to two
+  residual sources (pair D's per class; negative obs residuals). It replaces `route_pair`'s MAD,
+  the left-tail MAD, the guarded fit's width role, currency's global premise scalar and relay's
+  P1d in one law.
+* ⭐ The shipped `max(V_pair, V_tail)` is DERIVED, not a hack: V_tail sees asym+common, V_route
+  sees asym; total = V_route + (V_tail − V_route)+ ≡ max of the two, each covering the other's
+  blind spot (tail starves at high gDNA → falls back to V_route; pair is common-blind → topped
+  up by tail). The guarded fit keeps its CENTER role only; its sd leaves the width.
+* Validation against certified truth (§4a): predicted V_route(single) ≈ 0.00–0.02,
+  V_route(multi) ≈ 0.02–0.07, V_common OFF ≈ 0.01, ON ≈ 0.07–0.09 — the model's terms match the
+  decomposition's certified rows term by term.
+* ⛔ The current shipped left-tail reads 0.08–0.20 at OFF where the certified transport total is
+  ~0.03 — it carries un-subtracted obs counting and the (calculable) length curve. The new
+  V_tail's counting subtraction fixes the first; rung 3's geometry corrections remove the second.
+
+**Recorded for rung 3 (calculable geometry, each with its measured size — src changes, priced
+on the panel before landing):** ① the per-route A_J corrections (credit-leftmost cap on
+`reach_lo`; the reach MIXTURE over transcripts instead of the max) — worth ±5–8 % by flank
+length and most of the multi-route premise; ② the fl model's pmf error — ~7 % on every
+contained opportunity; ③ the contained-vs-crossing capture ratio — the ON length curve and
+common mode, learnable LOCALLY per exon (the unified knob's estimand). After ①–③ the honest
+premise shrinks toward the single-route floor (~0.01) and the model's fitted share shrinks with
+it — the derivation-based teardown the owner asked for.
+
 ## 5. The campaign rungs
 
 0. ✅ **Repair the pricing instruments** (landed 2026-08-25, same day as the audit that found
@@ -209,8 +278,8 @@ Raw rows per condition: the instrument's `--out-dir` npz files (regenerable in ~
 1. ✅ **The decomposition of §4** — landed 2026-08-26, results in §4a. The premise's honest
    targets: OFF asym 0.015–0.019 (the pair estimator confirmed), ON + common 0.069–0.093
    (the quantified blindness); the length curve goes to geometry (rung 2's derivation).
-2. **Derive the premise law** from the surviving STATISTICS terms; install behind a flag;
-   backbone-parity per slot before any panel number.
+2. ✅ **Derive the premise law** — §4b (2026-08-26): the one moments law, class-keyed, with
+   V_common by tail-subtraction; the max() derived; installation is rung 3's first commit.
 3. **The unified hop law** (§3) as the rebuilt policy, gated stream-by-stream against silent AND
    against both existing policies per stratum, zero controls, DELIVER/REFUTE split. Acceptance:
    ≥ silent on every in-scope stratum (the bar neither policy meets today) — that is what
