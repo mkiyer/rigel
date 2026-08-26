@@ -43,6 +43,10 @@ Usage::
     python scripts/design/relay_pool_ab.py                       # the whole ladder, both arms
     python scripts/design/relay_pool_ab.py --conditions NAME ...
     python scripts/design/relay_pool_ab.py --self-test           # no I/O
+
+⚠ SINCE 2026-08-25 the certified-flux stream is a MESSAGE (relay-only): the "off" arm
+(SilentPolicy) carries NO anchor, so the off/on delta includes the stream and is not comparable
+with numbers recorded before commit cb2268f1.
 """
 
 from __future__ import annotations

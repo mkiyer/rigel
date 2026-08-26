@@ -250,6 +250,12 @@ def main() -> int:
     def resolve(C, drop=()):
         kk = dict(C["kw"])
         for n in drop:
+            if n == "flux":
+                # the certified-flux stream is not an imp channel: it rides `lam_logprior`
+                # pre-summed with the intron factory (a MESSAGE since 2026-08-25), so ablating it
+                # means replacing the summed rows with the bare factory the sweep capture publishes.
+                kk["lam_logprior"] = cap["intron_prior"]
+                continue
             kk[f"{n}_imp_mode"] = None
             kk[f"{n}_imp_prec"] = None
         return np.asarray(_orig(*C["args"], **kk).gdna_frac, np.float64)
@@ -296,9 +302,16 @@ def main() -> int:
     def sigma(x):
         return float(np.abs(x[live] * unspl[live] - tg[live]).sum())
 
+    _flux_rows = cap.get("lam_rows")
+
     def could(drop):
         n = 0
         for nm in drop:
+            if nm == "flux":
+                if _flux_rows is not None:
+                    r = np.asarray(_flux_rows, np.float64)
+                    n = max(n, int(((np.ptp(r, axis=1) > 0) & live).sum()))
+                continue
             p = C["kw"].get(f"{nm}_imp_prec")
             if p is None:
                 continue
@@ -312,7 +325,8 @@ def main() -> int:
     for name, drop in (("as-is (HEAD)", ()), ("− gdna_imp (the LEVEL)", ("gdna",)),
                        ("− rna_imp (certified RNA)", ("rna",)), ("− lam_imp (composition)", ("lam",)),
                        ("− theta_imp (tilt)", ("theta",)),
-                       ("− ALL messages", ("gdna", "rna", "lam", "theta"))):
+                       ("− certified-flux rows (the stream)", ("flux",)),
+                       ("− ALL messages", ("gdna", "rna", "lam", "theta", "flux"))):
         s = sigma(wb(solve(drop)))
         print(f"      {name:<32} {s:>14,.0f} {(s - ref) / max(ref, 1) * 100:>+9.1f}% {could(drop):>11,}")
 

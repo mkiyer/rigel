@@ -228,20 +228,33 @@ def main() -> int:
         )
         return out, cap
 
+    # ⭐ the CAPTURED policy is the shipped relay, and since 2026-08-25 it CARRIES the
+    # certified-flux evidence — every relay arm here must carry the same evidence, or `head` is
+    # not the shipped policy and `no_certified_flux` is vacuous (both arms flux-less scored
+    # byte-identical — exactly the inert-arm failure this file's doctrine forbids; found by the
+    # 2026-08-25 audit).
+    _shipped_flux = getattr(g["kw"].get("policy"), "_flux", None)
+
     def policy_for(spec: str):
         """``head`` | ``silent`` | ``no_<switch>``. ⛔ An unknown switch name RAISES rather than being
         silently ignored — an arm that turns nothing off scores identical and reads as "inert" (TRAPS: an-ablation-that-never-ran)."""
         if spec == "silent":
             return SilentPolicy()
         if spec == "head":
-            return RelayPolicy()
+            return RelayPolicy(flux=_shipped_flux)
         if spec.startswith("no_"):
             name = spec[3:]
             if name not in RelaySwitches().names():
                 raise SystemExit(
                     f"⛔ no such switch {name!r}. Available: {', '.join(RelaySwitches().names())}"
                 )
-            return RelayPolicy(RelaySwitches(**{name: False}))
+            if name == "certified_flux" and _shipped_flux is None:
+                raise SystemExit(
+                    "⛔ no_certified_flux: the captured shipped policy carries NO flux evidence, so "
+                    "this arm would turn nothing off and score byte-identical (TRAPS: an-ablation-that-never-ran). "
+                    "Run with a config whose rna_anchor is ON."
+                )
+            return RelayPolicy(RelaySwitches(**{name: False}), flux=_shipped_flux)
         raise SystemExit(f"⛔ unknown arm {spec!r} — use 'head', 'silent' or 'no_<switch>'")
 
     pa, pb = policy_for(args.arm_a), policy_for(args.arm_b)

@@ -8,10 +8,14 @@ every rung the solver already exposes, so the ladder is:
 
     A  fg_init      the initialisation belief (before any solve)
     B  fg_strand    the strand likelihood alone
-    C  fg_loc       the message-free LOCAL solve (strand + density + reference), refits 0
+    C  fg_loc       the message-free LOCAL solve (strand + density; the reference LOCATION was deleted 2026-08-24), refits 0
     D  f_g          refits 0,      messages ON     -> C→D is what the RELAY does at pass-0
     E  f_g          shipped refits, messages OFF   -> C→E is what the LANDSCAPE refit does alone
     F  f_g          shipped refits, messages ON    -> the SHIPPED tool
+
+⚠ "messages ON" includes the certified-flux stream since 2026-08-25 (the anchor is a MESSAGE,
+delivered by the relay): C→D bundles the stream with the neighbour claims. To separate them use
+`ladder_arm_ab --arm anchor_off` / `backbone_parity --arm-b no_certified_flux`.
 
 ⛔ **TRUTH COMES ONLY FROM THE CERTIFIED TABLE** (`calibration_oracle.py`'s ``slot_truth.npz``) — this
 file recomputes nothing about truth and REFUSES to run on a condition whose table is missing, because a

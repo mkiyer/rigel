@@ -153,13 +153,20 @@ to one derived quantity with one estimator.
 
 ## 5. The campaign rungs
 
-0. **Repair the pricing instruments first** (they cannot currently express or attribute the
-   stream — found by the 2026-08-25 audit): `ladder_arm_ab`'s msgfree/msgscale arms must
-   null/scale `lam_rows`; `backbone_parity` must construct the relay WITH flux so
-   `no_certified_flux` is a real arm (today it is vacuous); `toy_trace_error` /
-   `psi_channel_ablation` replays must consume the published `lam_rows`; add the missing
-   anchor arm to `ladder_arm_ab`; give `RelayPolicy` a flux-aware `name`. Without rung 0, every
-   per-stream price is unattributable.
+0. ✅ **Repair the pricing instruments** (landed 2026-08-25, same day as the audit that found
+   them): `ladder_arm_ab`'s msgfree/msgscale arms now mute/temper `lam_rows` at delivery (the
+   shared `_install_flux_hook`; the `backbone` ≡ `msgfree_all` identity is restored),
+   `backbone_relay` asserts the relay CARRIES the flux evidence, and a new pure-config
+   `anchor_off` arm prices the stream on the ladder; `backbone_parity` reuses the captured
+   shipped policy's flux so `no_certified_flux` is a real arm (validated: 60,403/421,056 output
+   elements differ vs head) and refuses it when vacuous; `toy_trace_error` replays
+   `intron_prior ⊕ lam_rows` (fidelity 0.00e+00) with separate −factory / −stream arms;
+   `psi_channel_ablation` gained the `flux` ablation (identity gate bit-for-bit; −5.0 % on its
+   default condition, 11.6k slots reachable); `relay_pool_ab` / `calibration_walk` carry the
+   changed-meaning notes. Two new gates: the `certified_flux` switch silences the stream with
+   evidence present, and currency silently drops it — both perturbation-verified. In place of a
+   flux-aware `RelayPolicy.name` (golden churn), `backbone_relay`'s flux assertion and
+   `backbone_parity`'s captured-flux arms close the audit's identity hole.
 1. **The decomposition of §4** — measurement only, certified truth, no src changes.
 2. **Derive the premise law** from the surviving STATISTICS terms; install behind a flag;
    backbone-parity per slot before any panel number.

@@ -96,6 +96,15 @@ def run(cond, *, n_rna, genome_length, nrna, work_dir, messages=True):
     return donor, spec, sub, dbg, cfg
 
 
+def _sum_rows(a, b):
+    """intron factory ⊕ certified-flux rows — the final solve's actual `lam_logprior`."""
+    if a is None:
+        return None if b is None else np.asarray(b, float)
+    if b is None:
+        return np.asarray(a, float)
+    return np.asarray(a, float) + np.asarray(b, float)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--condition", required=True)
@@ -255,7 +264,11 @@ def main() -> int:
         # (`b7ed7a0b`) and has no successor, so it is simply gone rather than renamed.
         # ⚠ `TRAPS: a-green-suite-hid-five-dead-instruments`: the import gate cannot see a stale kwarg
         # inside a function body.
-        priors=cap["global_lp"], lam_logprior=cap["intron_prior"],
+        # ⛔ the final solve's row factor is the intron factory PLUS the delivered certified-flux
+        # rows (`msg.lam_rows`, a MESSAGE since 2026-08-25) — replaying the bare `intron_prior`
+        # is unfaithful whenever the stream is live (found by the 2026-08-25 audit; the fidelity
+        # check below is what caught it in the field).
+        priors=cap["global_lp"], lam_logprior=_sum_rows(cap["intron_prior"], cap.get("lam_rows")),
         fg_ref=cap["fg_init"], fpos_ref=cap["fpos_init"], fneg_ref=cap["fneg_init"],
     )
     ch = dict(gdna_imp_mode=uni["mo_g"], gdna_imp_prec=uni["cm_g"],
@@ -289,16 +302,20 @@ def main() -> int:
     OFF_G = dict(gdna_imp_mode=None, gdna_imp_prec=None)
     OFF_R = dict(rna_imp_mode=None, rna_imp_prec=None)
     OFF_L = dict(lam_imp_mode=None, lam_imp_prec=None)
+    # the row factor's two halves, separable because the capture publishes both
+    _factory_only = dict(lam_logprior=cap["intron_prior"])
+    _stream_only = dict(lam_logprior=cap.get("lam_rows"))
     arms = [
         ("full (the shipped solve)", {}),
         ("− the gDNA measurement", OFF_G),
         ("− the RNA measurement", OFF_R),
         ("− the composition λ message", OFF_L),
-        ("− the intron factory", dict(lam_logprior=None)),
+        ("− the intron factory", _stream_only),
+        ("− the certified-flux stream", _factory_only),
         ("⭐ ONLY the gDNA measurement", {**OFF_R, **OFF_L}),
         ("⭐ ONLY the RNA measurement", {**OFF_G, **OFF_L}),
         ("⭐ ONLY the λ message", {**OFF_G, **OFF_R}),
-        ("− ALL messages (= the self-solve)", {**OFF_G, **OFF_R, **OFF_L}),
+        ("− ALL messages (= the self-solve)", {**OFF_G, **OFF_R, **OFF_L, **_factory_only}),
     ]
     keep = [x for x in recs if np.isfinite(x["truth"]) and x["mass"] > 0]
     print(f"\n      {'arm':<36}" + "".join(f"{x['lab'][:13]:>15}" for x in keep))

@@ -188,7 +188,7 @@ _FIRED: dict = {}
 #: ⚠ MEASURED, not declared: `--self-test` runs every arm under both settings and requires this set to be
 #: precisely the arms that move nothing with messages OFF and something with them ON.
 _NEEDS_MESSAGES = frozenset({
-    "backbone_relay", "backbone", "msgfree_p0", "msgfree_all",
+    "anchor_off", "backbone_relay", "backbone", "msgfree_p0", "msgfree_all",
     "msgscale_0.001", "msgscale_0.01", "msgscale_0.1", "msgscale_0.5", "onesided_rna",
     "zc_own_count", "zc_total_n", "zc_live_count", "zc_transfer", "zc_anchor_mute",
     "zc_jeffreys_mean", "zc_logmean", "zc_struct_lock_g1", "zc_reference_var",
@@ -779,9 +779,10 @@ def _install_backbone(silent: bool):
                        argument would be a ~50 % behaviour change with no error, and this arm is the thing
                        that would catch it.
     ``backbone``       ``SilentPolicy()``, which sends nothing — **must be BYTE-IDENTICAL to
-                       ``msgfree_all``**, the arm that mutes psi's four imputed channels. ⭐ Passing it also
-                       PROVES the relay reaches the answer ONLY through those four channels, because one arm
-                       runs the whole relay and discards it while the other never runs it at all.
+                       ``msgfree_all``**, the arm that mutes psi's four imputed channels AND the delivered
+                       certified-flux rows. ⭐ Passing it also PROVES the relay reaches the answer ONLY
+                       through those channels, because one arm runs the whole relay and discards its
+                       delivery while the other never runs it at all.
 
     ⛔ TRAPS: an-ablation-that-never-ran — ``rigel.calibration.calibrate`` is SHADOWED by the re-exported function, so the patch goes
     through ``sys.modules`` (``CAL``, set at import), and the arm RAISES if it never fired.
@@ -811,6 +812,17 @@ def _install_backbone(silent: bool):
                 raise RuntimeError(
                     f"backbone_relay: RelayPolicy has switches OFF: {pol.switches.off()}. "
                     f"This arm is the all-on identity gate."
+                )
+            # ⛔ the shipped relay CARRIES the certified-flux evidence (config.rna_anchor default
+            # ON since 2026-08-24; a message since 2026-08-25). A relay constructed without it is
+            # a real behaviour change invisible to the switch check — exactly the one-level-deeper
+            # failure this arm exists to catch (found by the 2026-08-25 audit).
+            if pol._flux is None:
+                raise RuntimeError(
+                    "backbone_relay: RelayPolicy carries NO certified-flux evidence (flux=None). "
+                    "The shipped config has rna_anchor=True, so calibrate must construct the relay "
+                    "with prepare_flux_evidence(...); its absence is a behaviour change, not a "
+                    "naming detail (TRAPS.md an-ablation-that-never-ran)."
                 )
         _fire(tag)
         return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
@@ -904,13 +916,16 @@ def _install_msgscale(scale: float):
       * NO plateau        => no single attenuation serves both regimes, the defect is structural rather
                              than a mis-calibration, and the backbone must change the messages themselves.
 
-    ⚠ All four channels are scaled together — ``gdna_imp``, ``rna_imp``, ``lam_imp``, ``theta_imp`` — which
+    ⚠ All message channels are scaled together — ``gdna_imp``, ``rna_imp``, ``lam_imp``,
+    ``theta_imp``, and the certified-flux rows (tempered: rows × scale, the precision-scale of a
+    log-likelihood row factor; ``scale = 0`` zeroes them, matching ``msgfree_all``) — which
     is ONE thing varied and is exactly the claim as stated. Scaling them separately is a different, later
     experiment. The MODES are untouched, so nothing about what a message SAYS changes; only how loudly.
     ⛔ TRAPS: an-ablation-that-never-ran — all three ``_solve_regions_logodds_all`` bindings are patched and the arm raises if unfired.
     """
     import rigel.calibration.simplex_logodds as SL
 
+    _install_flux_hook({}, float(scale))
     orig_solve = SL._solve_regions_logodds_all
     k = float(scale)
 
@@ -933,6 +948,62 @@ def _install_msgscale(scale: float):
             mod._solve_regions_logodds_all = solve
 
 
+def _install_anchor_off():
+    """⭐ ``anchor_off`` is a pure CONFIG arm (``rna_anchor=False`` — the certified-flux stream never
+    prepared), so nothing is patched — but the fire gate still demands PROOF OF REACH. The proof is
+    the assertion itself: at the solver boundary the policy must genuinely carry no flux evidence,
+    which is exactly the claim the arm's price depends on (TRAPS: could-the-arm-have-fired)."""
+    from rigel.calibration.messages.relay import RelayPolicy
+
+    orig = CAL.solve_chain
+
+    def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
+        pol = kw.get("policy")
+        if isinstance(pol, RelayPolicy) and pol._flux is not None:
+            raise RuntimeError(
+                "anchor_off: the relay still carries flux evidence — the config arm did not take "
+                "effect and its price would be `base` mislabeled (TRAPS.md an-ablation-that-never-ran)"
+            )
+        _fire("anchor_off")
+        return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
+
+    for mod in (CAL, SW):
+        if hasattr(mod, "solve_chain"):
+            mod.solve_chain = wrapper
+
+
+def _install_flux_hook(state: dict, scale: float | None):
+    """⭐ The certified-flux stream's mute/scale hook, shared by ``msgfree_*`` and ``msgscale_*``.
+
+    The stream is NOT one of psi's four imputed Gaussian channels — it is delivered as
+    ``PsiMessage.lam_rows`` and summed into the final solve's row factor — so muting or scaling
+    "the message layer" at the ``_solve_regions_logodds_all`` level cannot reach it (the rows
+    arrive pre-summed with the intron factory's). The surgical point is DELIVERY: wrap
+    ``_PreparedRelay.deliver`` and strip (``scale is None``, when ``state["muted"]``) or temper
+    (rows × scale — the precision-scale of a log-likelihood row factor) the stream there. The
+    whole relay still runs; only what it delivers changes (same contract as the imp-channel mute).
+    """
+    import dataclasses
+
+    import rigel.calibration.messages.relay as RP
+
+    orig_deliver = RP._PreparedRelay.deliver
+
+    def deliver(self, left, right):
+        msg = orig_deliver(self, left, right)
+        if msg.lam_rows is None:
+            return msg
+        if scale is None:
+            if state.get("muted"):
+                _fire("flux_mute")
+                return dataclasses.replace(msg, lam_rows=None)
+            return msg
+        _fire("flux_scale")
+        return dataclasses.replace(msg, lam_rows=np.asarray(msg.lam_rows, np.float64) * scale)
+
+    RP._PreparedRelay.deliver = deliver
+
+
 def _install_msgfree(where: str):
     """⭐⭐⭐ **HOW MUCH OF THE MESSAGE LAYER DOES THE SUBSTRATE ACTUALLY NEED?** — the consolidation arm.
 
@@ -951,10 +1022,12 @@ def _install_msgfree(where: str):
                      is the floor: whatever it scores is what the accumulator plus psi plus the fitted
                      prior are worth with no belief propagation whatsoever.
 
-    ⚠ **What is muted is exactly the four ``*_imp`` arguments** — ``gdna_imp``, ``rna_imp``, ``lam_imp``,
-    ``theta_imp``. Everything else psi receives is the slot's OWN evidence (its two strand counts, its
-    spliced count, the reference, the fitted prior, the intron factory) and is untouched, so a difference
-    is attributable to the message layer and to nothing else. ⭐ The whole relay still RUNS; only its
+    ⚠ **What is muted is the four ``*_imp`` arguments PLUS the certified-flux rows** — ``gdna_imp``,
+    ``rna_imp``, ``lam_imp``, ``theta_imp`` at psi, and ``PsiMessage.lam_rows`` at delivery (the
+    stream is a message since 2026-08-25 and does not travel through the imp channels). Everything
+    else psi receives is the slot's OWN evidence (its two strand counts, its spliced count, the
+    fitted prior, the intron factory) and is untouched, so a difference is attributable to the
+    message layer and to nothing else. ⭐ The whole relay still RUNS; only its
     delivery into psi is withheld. That keeps one thing varied and leaves the geometry identical.
 
     ⛔ TRAPS: an-ablation-that-never-ran — ``_solve_regions_logodds_all`` is bound as a module global in THREE places
@@ -965,6 +1038,7 @@ def _install_msgfree(where: str):
     import rigel.calibration.simplex_logodds as SL
 
     state = {"muted": where == "all"}
+    _install_flux_hook(state, None)
     orig_solve = SL._solve_regions_logodds_all
 
     def solve(*a, **kw):
@@ -1084,6 +1158,7 @@ def _install_face_one():
 #: same tuple, so an arm cannot be added and left out of the falsification.
 _ARM_CHOICES = (
     "base",
+    "anchor_off",
     "backbone_relay",
     "backbone",
     "msgfree_p0",
@@ -1324,6 +1399,8 @@ def main() -> int:
     #   the shipped one — wrapping first would leave the base sweep in the chain.
     if args.arm in ("backbone", "backbone_relay"):
         _install_backbone(silent=args.arm == "backbone")
+    elif args.arm == "anchor_off":
+        _install_anchor_off()
     elif args.arm in ("msgfree_p0", "msgfree_all"):
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
     elif args.arm.startswith("msgscale_"):
@@ -1373,8 +1450,16 @@ def main() -> int:
         _install_zc_disc_var()
 
     index = TranscriptIndex.load(str(args.index))
-    config = CalibrationConfig(message_propagation=messages)
-    print(f"  arm={args.arm}  message_propagation={messages}", flush=True)
+    # ``anchor_off`` is a pure CONFIG arm: the certified-flux stream never prepared, the relay
+    # constructed without evidence — the ladder price of the stream itself (missing until the
+    # 2026-08-25 audit; the flag shipped ON with no arm able to turn it off).
+    config = CalibrationConfig(
+        message_propagation=messages, rna_anchor=(args.arm != "anchor_off")
+    )
+    print(
+        f"  arm={args.arm}  message_propagation={messages}  rna_anchor={config.rna_anchor}",
+        flush=True,
+    )
     names = args.conditions or sorted(
         p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
     )
