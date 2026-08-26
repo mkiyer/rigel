@@ -114,14 +114,19 @@ class _PreparedUnified:
         self.own = _own_messages(ctx)
 
     def _message_at(self, state: dict, i: int) -> Message:
-        return Message(**{lane: Claim(float(state[lane][0][i]), float(state[lane][1][i]))
-                          for lane in Message.LANES})
+        return Message(
+            **{
+                lane: Claim(float(state[lane][0][i]), float(state[lane][1][i]))
+                for lane in Message.LANES
+            }
+        )
 
     def scan(self, *, backward: bool):
         # state starts as each node's OWN message; a hop overwrites the destination with the
         # propagated blend, so a reference terminal (skipped by the backbone) keeps its own.
-        state = {lane: (self.own[lane][0].copy(), self.own[lane][1].copy())
-                 for lane in Message.LANES}
+        state = {
+            lane: (self.own[lane][0].copy(), self.own[lane][1].copy()) for lane in Message.LANES
+        }
 
         def step(s: int, i: int) -> None:
             incoming = self._message_at(state, s)
@@ -147,6 +152,7 @@ class _PreparedUnified:
         return Message(**lanes)
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
-        own = Message(**{lane: Claim(self.own[lane][0], self.own[lane][1])
-                         for lane in Message.LANES})
+        own = Message(
+            **{lane: Claim(self.own[lane][0], self.own[lane][1]) for lane in Message.LANES}
+        )
         return self._solve.solve(own, self._travelled(left), self._travelled(right))

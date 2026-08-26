@@ -101,8 +101,10 @@ def sweep_inputs(tmp_path_factory):
 
 def _run(si, policy):
     out = SW.solve_chain(*si["args"], **si["kw"], policy=policy)
-    return {f: np.asarray(getattr(out, f)) for f in
-            ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg")}
+    return {
+        f: np.asarray(getattr(out, f))
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg")
+    }
 
 
 def test_the_runner_satisfies_the_backbone_protocol():
