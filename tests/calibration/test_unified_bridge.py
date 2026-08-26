@@ -392,25 +392,103 @@ def _mini_solve(n=1):
     m._pT = np.full(n, 100.0)
     m._absorber = np.zeros(n, bool)
     m._dom = (-30.0, 0.0)
+    # the composition-evidence variances the reception law is keyed on: the default mini node
+    # is composition-BLIND (v_own = inf, the unstranded/AMBIG state — messages pass untouched)
+    m._v_own_g = np.full(n, np.inf)
+    m._v_own_r = np.full(n, np.inf)
+    m._free_pos = np.zeros(n, bool)
+    m._free_neg = np.zeros(n, bool)
     return m
 
 
-def test_the_solve_yields_where_the_node_is_sighted():
-    """The yielding rule: a message contradicting a SIGHTED node's own lane loses precision; the
-    same message at a BLIND node keeps it — the split census's requirement, unit-level."""
+def _msgs(F, lane="unspliced_gdna", claim=None):
+    silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    fwd = silent.with_lane(lane, claim) if claim is not None else silent
+    return silent, fwd, silent
+
+
+def test_delivered_precision_is_the_measurement_stream():
+    """MEASUREMENT CITIZENSHIP (the shipped relay's law, ported): the psi channel precision a
+    solve delivers is the MEASUREMENT stream — what independent witnesses actually counted
+    (struct-locked gDNA anchors, certified sj counts), hop-damped — never the belief precision.
+    A lane arriving with an enormous belief precision and no measurement delivers a DEAD
+    channel; the same lane with a measurement seed delivers exactly that seed (the node here is
+    composition-blind, so reception does not touch it)."""
     F, U = _U()
     m = _mini_solve()
-    claim = F.Claim(np.array([8.0]), np.array([50.0]))
-    fwd = F.Message.silent().with_lane("unspliced_gdna", claim)
-    own_blind = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
-    own_sighted = own_blind.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
-    bwd = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
-    p_blind = _mini_solve().solve_unspliced(own_blind, fwd, bwd).gdna_prec[0]
-    p_sighted = m.solve_unspliced(own_sighted, fwd, bwd).gdna_prec[0]
-    assert p_blind > 0
-    assert p_sighted < 0.6 * p_blind, (
-        f"a contradicted claim at a sighted node must lose precision ({p_sighted} vs {p_blind})"
+    own, fwd, bwd = _msgs(F, claim=F.Claim(np.array([8.0]), np.array([500.0]), np.array([0.0])))
+    assert m.solve_unspliced(own, fwd, bwd).gdna_prec[0] == 0.0, (
+        "a pure belief may inform the value but must never be delivered as channel precision"
     )
+    m2 = _mini_solve()
+    own, fwd, bwd = _msgs(F, claim=F.Claim(np.array([8.0]), np.array([500.0]), np.array([30.0])))
+    got = m2.solve_unspliced(own, fwd, bwd).gdna_prec[0]
+    assert np.isclose(got, 30.0), got
+
+
+def test_reception_is_the_relay_deflation_law():
+    """THE RECEPTION LAW (mismatch_deflate, ported verbatim in shape): per stream,
+    p_eff = 1/max(v_stream, G^2 - v_own) with G the log gap between the arriving and the own
+    lane value, v_own the node's OWN COMPOSITION variance. Strong own composition + a
+    disagreeing claim => capped near 1/G^2; an agreeing claim passes; a composition-blind node
+    (v_own = inf) passes everything untouched — which is exactly what lets messages solve
+    unstranded data while staying weak on stranded data."""
+    F, U = _U()
+    m = _mini_solve()
+    m._v_own_g = np.array([1e-3])
+    claim = F.Claim(np.array([8.0]), np.array([500.0]), np.array([30.0]))
+    own, fwd, bwd = _msgs(F, claim=claim)
+    own = own.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
+    got = m.solve_unspliced(own, fwd, bwd).gdna_prec[0]
+    g2 = float(np.log(8.0) ** 2)
+    assert got <= 1.0 / (g2 - 1e-3) * 1.0001, (got, 1.0 / g2)
+    # the same claim, agreeing: untouched
+    m2 = _mini_solve()
+    m2._v_own_g = np.array([1e-3])
+    agree = F.Claim(np.array([1.0]), np.array([500.0]), np.array([30.0]))
+    own2, fwd2, bwd2 = _msgs(F, claim=agree)
+    own2 = own2.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
+    assert np.isclose(m2.solve_unspliced(own2, fwd2, bwd2).gdna_prec[0], 30.0)
+    # the same disagreeing claim at a composition-blind node: untouched
+    m3 = _mini_solve()
+    own3, fwd3, bwd3 = _msgs(F, claim=claim)
+    own3 = own3.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
+    assert np.isclose(m3.solve_unspliced(own3, fwd3, bwd3).gdna_prec[0], 30.0)
+
+
+def test_the_deficit_lands_on_admissible_unseen_rna_not_on_a_measured_witness():
+    """THE UNSEEN-COMPONENT ABSORBER: a conservation deficit at a node whose annotation admits
+    an RNA strand NOBODY has evidence about (silent lane, admissible bit set) belongs to that
+    unseen component — never to the weakest live witness. Without this, an unstranded library's
+    RNA mass (invisible to every witness) is force-fed to the near-zero gDNA anchor claim as
+    phantom gDNA. With no admissible silent lane the conservation bites as before."""
+    F, U = _U()
+    m = _mini_solve()
+    m._M = np.full(1, 10.0)  # slot mass matches the total, so share = x/10 and the clamp
+    # cannot flatten hold (x=1, mode=log 0.1) into inflate (x~10, mode~log 1)
+    m._free_pos = np.array([True])
+    m._free_neg = np.array([True])
+    gdna = F.Claim(np.array([1.0]), np.array([0.2]), np.array([0.2]))
+    own, fwd, bwd = _msgs(F, claim=gdna)
+    out = m.solve_unspliced(own, fwd, bwd)
+    assert out.gdna_prec[0] > 0
+    assert float(out.gdna_mode[0]) < -2.0, (
+        f"the measured gdna witness was inflated to absorb unseen RNA "
+        f"(mode {float(out.gdna_mode[0])}, want ~log 0.1 = -2.3)"
+    )
+
+
+def test_a_contradicted_claim_is_zeroed():
+    """The contradiction rule (relay's): the own lane and the arriving lane on exactly one
+    side of zero, at a node WITH composition evidence => the claim is killed outright, both
+    streams — a confident zero against a confident positive is not a weak agreement."""
+    F, U = _U()
+    m = _mini_solve()
+    m._v_own_g = np.array([1e-3])
+    zero_claim = F.Claim(np.array([0.0]), np.array([20.0]), np.array([10.0]))
+    own, fwd, bwd = _msgs(F, claim=zero_claim)
+    own = own.with_lane("unspliced_gdna", F.Claim(np.array([1.0]), np.array([50.0])))
+    assert m.solve_unspliced(own, fwd, bwd).gdna_prec[0] == 0.0
 
 
 # ── step 3 commit 3: the spliced solve ──────────────────────────────────────────────────────────

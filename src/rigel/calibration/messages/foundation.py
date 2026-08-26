@@ -88,14 +88,25 @@ _AMPLIFY_TOL = 1.0 + 1e-12
 @dataclass(frozen=True, slots=True)
 class Claim:
     """One population's claim on one lane: an abundance (counts per unit opportunity, in the
-    carrier's frame) and a precision (inverse log-variance; exactly 0 means NO claim)."""
+    carrier's frame), a precision (inverse log-variance; exactly 0 means NO claim), and the
+    MEASUREMENT stream ``measured`` — the share of that weight independent witnesses actually
+    COUNTED (a struct-locked gDNA anchor's fragments, a certified sj flux), as opposed to what
+    a solve merely believes.
+
+    ⭐ MEASUREMENT CITIZENSHIP (the shipped relay's law, ported 2026-08-26): ``precision``
+    weights VALUE fusion in transit, but what a solve may DELIVER as a psi channel precision is
+    only ever ``measured`` — an imputation may inform the blend, never masquerade as counted
+    evidence. ``measured <= precision`` holds by construction (every seed feeds both streams or
+    only ``precision``; every transit cost damps both) and is a property, not an enforced
+    invariant."""
 
     abundance: float
     precision: float
+    measured: float = 0.0
 
     @classmethod
     def silent(cls) -> "Claim":
-        return cls(abundance=0.0, precision=0.0)
+        return cls(abundance=0.0, precision=0.0, measured=0.0)
 
     @property
     def is_silent(self) -> bool:
@@ -140,11 +151,12 @@ class Message:
 
 
 def _fuse(own: Claim, incoming: Claim) -> Claim:
-    """Additive fusion of two INDEPENDENT witnesses: precision-weighted mean, precisions sum.
-    The one licensed way a precision may rise."""
+    """Additive fusion of two INDEPENDENT witnesses: precision-weighted mean, precisions sum —
+    the one licensed way a precision may rise. Both streams add: the belief stream weights the
+    value; the measurement stream simply accumulates its independent counted witnesses."""
     p = own.precision + incoming.precision
     a = (own.precision * own.abundance + incoming.precision * incoming.abundance) / p
-    return Claim(abundance=a, precision=p)
+    return Claim(abundance=a, precision=p, measured=own.measured + incoming.measured)
 
 
 class PropagationModel(ABC):
@@ -159,11 +171,17 @@ class PropagationModel(ABC):
         for lane in Message.LANES:
             arriving = incoming.lane(lane)
             weakened = self.attenuate(arriving, lane, hop) if not arriving.is_silent else arriving
-            if float(weakened.precision) > float(arriving.precision) * _AMPLIFY_TOL:
+            if float(weakened.precision) > float(arriving.precision) * _AMPLIFY_TOL or float(
+                weakened.measured
+            ) > float(arriving.measured) * _AMPLIFY_TOL + (
+                0.0 if float(arriving.measured) > 0.0 else 1e-30
+            ):
                 raise ValueError(
                     f"the attenuation amplified lane {lane!r} "
-                    f"({arriving.precision} -> {weakened.precision}): a single-source "
-                    "transform may only LOWER a precision (the foundation spec's rule)"
+                    f"({arriving.precision}/{arriving.measured} -> "
+                    f"{weakened.precision}/{weakened.measured}): a single-source "
+                    "transform may only LOWER a precision (the foundation spec's rule, "
+                    "both streams)"
                 )
             mine = own.lane(lane)
             out[lane] = weakened if mine.is_silent else _fuse(mine, weakened)

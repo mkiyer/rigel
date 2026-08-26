@@ -508,8 +508,32 @@ the allocation's ACTIVATION TAX, dominant everywhere. First dissection result: t
 PREMISE (region-end key, gated, perturbation-verified) was built and REFUTED — lowering the
 sparse family's charge let composition misinformation through (g00-OFF 91.5k → 394.4k); the
 pooled premise's overcharge is load-bearing, the premise prices LEVEL transport, and the
-missing cost is COMPOSITION transport, which log-r moments cannot see. Pricing that is the
-open derivation, and it gates ⑤;
+missing cost is COMPOSITION transport, which log-r moments cannot see.
+**RESOLVED (2026-08-26, the SHIPPED-RELAY PORT — built by mining relay.py/variance.py/
+region_init.py for the mechanisms the first build failed to draw on):** three laws landed,
+each gated fail-first and perturbation-verified. ⭐ **MEASUREMENT CITIZENSHIP** —
+`Claim` carries a second stream, `measured`: the share of its weight independent witnesses
+actually COUNTED (a struct-locked anchor's fragments, a certified sj flux; a deconvolved
+belief seeds none). Belief precision weights value fusion and the allocation; only `measured`
+may be DELIVERED as a ψ channel precision (relay's cm_* stream). This alone took the stranded
+half from 1.3–4.3× of silence to ≈1× on g50/g98. ⭐ **THE RECEPTION LAW** — relay's
+`mismatch_deflate` ported in shape: per stream `p_eff = 1/max(v_stream, G² − v_own)` with
+`v_own` the node's own COMPOSITION variance (`own_composition_logvar`); exactly-one-side-zero
+with own evidence kills the claim. `v_own = ∞` (AMBIG, unstranded) passes messages untouched —
+the owner's asymmetry (weak on stranded, solving on unstranded) falls out with no knob.
+⭐ **THE UNSEEN-COMPONENT ABSORBER** — a conservation deficit at a node whose annotation
+admits an RNA strand NOBODY has evidence about (admissible bit set, lane silent) belongs to
+that unseen component, never to the weakest live witness; without it the unstranded library's
+RNA mass was force-fed to the near-zero gDNA anchor claim as phantom gDNA. **The full-16
+price after the port** (never pooled): stranded g50/g98 at 0.92–1.00× of silence (g98-ON
+BEATS it); unified beats the SHIPPED relay on 8 of 16 rows (all four g50/g98 stranded, g50/g98
+ss0.50-OFF, g50-ss0.50-ON 0.68×, g05-ss0.99-ON 0.97×); unstranded wins vs silence at g00-OFF
+0.25×, g00-ON 0.80×, g50-ON 0.20×, g98-OFF 0.86×, g98-ON 0.32×. ⛔ **THE OPEN FAMILY: low
+gDNA (g00/g05), concentrated on the BOUNDARY axis** (g00-ss0.50-OFF boundary 235k of 315k vs
+relay's 37k; g00-ss0.99-ON 96k of 127k — the worst stranded row at 3.66×), mostly OUTSIDE the
+claimed population and present in the norows arm — a propagate+allocate boundary defect, not
+the rows. The relay's low-g strength there is its anchor-imputed gDNA LEVEL at boundaries
+(`residual_level`) — the next port candidate;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

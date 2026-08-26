@@ -98,18 +98,27 @@ def _own_messages(ctx: StepContext) -> dict:
         live = esp[:, col] > 0.0
         ab = np.where(live, rr[:, col], 0.0)
         pr = np.where(live, 1.0 / count_logvar(spl[:, col]), 0.0)
-        return ab, pr
+        return ab, pr, pr  # a certified count IS a measurement: both streams
 
+    # MEASUREMENT SEEDS (the shipped relay's citizenship, ported): the gDNA lane's measured
+    # stream is the struct-locked anchor's own counting precision — the one unspliced witness
+    # that COUNTED something (an intergenic pure-gDNA region's fragments are gDNA by
+    # structure). Deconvolved RNA beliefs seed no measurement: a solve's output is not a count.
+    lock = np.asarray(own.struct_lock, bool)
+    pg = np.asarray(own.prec_g, np.float64)
+    zero = np.zeros_like(pg)
     sp_pos, sp_neg = spliced(0), spliced(1)
     return {
-        "unspliced_gdna": (np.asarray(own.rho_g, np.float64), np.asarray(own.prec_g, np.float64)),
+        "unspliced_gdna": (np.asarray(own.rho_g, np.float64), pg, np.where(lock, pg, 0.0)),
         "unspliced_rna_pos": (
             np.asarray(own.rho_pos, np.float64),
             np.asarray(own.prec_pos, np.float64),
+            zero,
         ),
         "unspliced_rna_neg": (
             np.asarray(own.rho_neg, np.float64),
             np.asarray(own.prec_neg, np.float64),
+            zero,
         ),
         "spliced_rna_pos": sp_pos,
         "spliced_rna_neg": sp_neg,
@@ -146,7 +155,8 @@ def _own_spliced_faces(ctx: StepContext) -> dict:
             r = np.asarray(rate, np.float64)[:, col]
             c = np.asarray(count, np.float64)[:, col]
             live = ok & (r > 0.0)
-            out[lane] = (np.where(live, r, 0.0), np.where(live, 1.0 / count_logvar(c), 0.0))
+            pr = np.where(live, 1.0 / count_logvar(c), 0.0)
+            out[lane] = (np.where(live, r, 0.0), pr, pr)
         return out
 
     return {
@@ -191,7 +201,11 @@ class _PreparedUnified:
     def _message_at(self, state: dict, i: int) -> Message:
         return Message(
             **{
-                lane: Claim(float(state[lane][0][i]), float(state[lane][1][i]))
+                lane: Claim(
+                    float(state[lane][0][i]),
+                    float(state[lane][1][i]),
+                    float(state[lane][2][i]),
+                )
                 for lane in Message.LANES
             }
         )
@@ -199,9 +213,7 @@ class _PreparedUnified:
     def scan(self, *, backward: bool):
         # state starts as each node's OWN message; a hop overwrites the destination with the
         # propagated blend, so a reference terminal (skipped by the backbone) keeps its own.
-        state = {
-            lane: (self.own[lane][0].copy(), self.own[lane][1].copy()) for lane in Message.LANES
-        }
+        state = {lane: tuple(arr.copy() for arr in self.own[lane]) for lane in Message.LANES}
         # ⭐ the SPLICED lanes are direction-aware: travelling low→high a boundary presents its
         # HIGH (acceptor) face — the routes entering its rightward exon — and the mirror going
         # back, so the adjacent solve receives exactly the exon-facing flank rate.
@@ -209,7 +221,7 @@ class _PreparedUnified:
         if self._own_faces is not None:
             face = self._own_faces[bool(backward)]
             for lane in ("spliced_rna_pos", "spliced_rna_neg"):
-                state[lane] = (face[lane][0].copy(), face[lane][1].copy())
+                state[lane] = tuple(arr.copy() for arr in face[lane])
                 # ⛔ the scan's own-message must present the SAME masked face, or propagate's
                 # fuse re-publishes the unmasked slot-total lane over the licence at every
                 # visited slot (measured: 3,663 unlicensed exons received faces this way)
@@ -223,6 +235,7 @@ class _PreparedUnified:
                 claim = out.lane(lane)
                 state[lane][0][i] = claim.abundance
                 state[lane][1][i] = claim.precision
+                state[lane][2][i] = claim.measured
 
         def publish():
             return tuple(arr for lane in Message.LANES for arr in state[lane])
@@ -233,15 +246,16 @@ class _PreparedUnified:
         valid = np.asarray(nb.valid, bool)
         lanes = {}
         for k, lane in enumerate(Message.LANES):
-            ab = np.asarray(nb.state[2 * k], np.float64)
-            pr = np.asarray(nb.state[2 * k + 1], np.float64)
-            lanes[lane] = Claim(np.where(valid, ab, 0.0), np.where(valid, pr, 0.0))
+            ab = np.asarray(nb.state[3 * k], np.float64)
+            pr = np.asarray(nb.state[3 * k + 1], np.float64)
+            ms = np.asarray(nb.state[3 * k + 2], np.float64)
+            lanes[lane] = Claim(
+                np.where(valid, ab, 0.0), np.where(valid, pr, 0.0), np.where(valid, ms, 0.0)
+            )
         return Message(**lanes)
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
-        own = Message(
-            **{lane: Claim(self.own[lane][0], self.own[lane][1]) for lane in Message.LANES}
-        )
+        own = Message(**{lane: Claim(*self.own[lane]) for lane in Message.LANES})
         return self._solve.solve(own, self._travelled(left), self._travelled(right))
 
 
@@ -291,10 +305,11 @@ class FrameAwarePropagation(PropagationModel):
         for backward in (False, True):
             t = self._tables[backward]
             src = t["src"]
-            # THE SPLICE-SHED RULE (relay's splice-out, extracted): RNA arriving at a boundary
-            # from a REGION sheds the spliced share — the molecules that left via the junction
-            # cannot continue as unspliced RNA past it (mature never crosses a boundary
-            # unspliced). The shed is the flux SPANNING the intron the message is entering:
+            # THE SPLICE-SHED RULE (relay's SPLICE OUT, extracted): RNA arriving at a
+            # boundary from an EXON sheds the spliced share — the RNA that spliced out at this
+            # junction skipped the intron, so it cannot also be inside it. One RNA, two routes:
+            # the flux names the part that took the junction; the remainder continues unspliced.
+            # The shed is the flux SPANNING the intron the message is entering:
             # forward (heading into the intron on the boundary's genomic-HIGH side) sheds the
             # routes whose LOW end is this boundary; backward sheds the HIGH-ended routes.
             face = np.asarray(ctx.route_rate_hi if backward else ctx.route_rate_lo, np.float64)
@@ -327,12 +342,14 @@ class FrameAwarePropagation(PropagationModel):
             return Claim.silent()
         if lane == "unspliced_rna_pos" and t["shed_pos"][i] > 0.0:
             kept = max(float(claim.abundance) - float(t["shed_pos"][i]), 0.0)
-            claim = Claim(kept, claim.precision if kept > 0.0 else 0.0)
+            live = kept > 0.0
+            claim = Claim(kept, claim.precision if live else 0.0, claim.measured if live else 0.0)
             if claim.precision <= 0.0:
                 return Claim.silent()
         if lane == "unspliced_rna_neg" and t["shed_neg"][i] > 0.0:
             kept = max(float(claim.abundance) - float(t["shed_neg"][i]), 0.0)
-            claim = Claim(kept, claim.precision if kept > 0.0 else 0.0)
+            live = kept > 0.0
+            claim = Claim(kept, claim.precision if live else 0.0, claim.measured if live else 0.0)
             if claim.precision <= 0.0:
                 return Claim.silent()
         lr = float(t["log_r"][i])
@@ -343,7 +360,11 @@ class FrameAwarePropagation(PropagationModel):
         resid = (1.0 - w) * lr
         v_hop = w * v + resid * resid + self._premise
         p = float(claim.precision)
-        return Claim(abundance=value, precision=p / (1.0 + p * v_hop) if v_hop > 0.0 else p)
+        ms = float(claim.measured)
+        if v_hop > 0.0:
+            p = p / (1.0 + p * v_hop)
+            ms = ms / (1.0 + ms * v_hop)
+        return Claim(abundance=value, precision=p, measured=ms)
 
 
 def allocate(mu, p, *, total, total_precision, absorber):
@@ -434,6 +455,16 @@ class AllocationSolve(SolveModel):
         lam, _ = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
         dom = _log_fg(lam)
         self._dom = (float(dom[0]), float(dom[-1]))
+        # the node's OWN composition variance per arm — what the reception law is keyed on
+        # (relay's mismatch_deflate regime): inf = composition-blind (AMBIG / unstranded),
+        # messages pass untouched; small = the strand solve has this slot, disagreement kills
+        from ..region_init import own_composition_logvar
+
+        self._v_own_g, self._v_own_r = own_composition_logvar(
+            ctx.own.f_g, ctx.own.tau_lam, ctx.own.struct_lock
+        )
+        self._free_pos = np.asarray(ctx.free_pos, bool)
+        self._free_neg = np.asarray(ctx.free_neg, bool)
         # ── the spliced law's tables ─────────────────────────────────────────────────────────
         _, self._fg_grid = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
         self._n_slot = np.asarray(ctx.n_slot, np.float64)
@@ -461,35 +492,62 @@ class AllocationSolve(SolveModel):
             / np.where(p > 0, p, 1.0),
             0.0,
         )
-        return v, p
+        ms = np.asarray(f.measured, np.float64) + np.asarray(b.measured, np.float64)
+        return v, p, ms
 
     def solve_unspliced(self, own, forward, backward) -> PsiMessage:
         n = np.asarray(own.unspliced_gdna.precision).shape[0]
-        val, prec = {}, {}
+        val, prec, meas = {}, {}, {}
         for lane in self._ALL:
-            v, p = self._fuse_dir(forward.lane(lane), backward.lane(lane))
-            # RECEPTION — the yielding rule: where the node's OWN lane disagrees, the arriving
-            # claim loses precision (DerSimonian–Laird; gap vs the own lane, never a fused
-            # belief). Own silent ⇒ no deflation: messages yield exactly where the slot is
-            # sighted (the split census's requirement).
-            po = np.asarray(own.lane(lane).precision, np.float64)
-            vo = np.asarray(own.lane(lane).abundance, np.float64)
-            both = (p > 0) & (po > 0) & (v > 0) & (vo > 0)
-            g2 = np.zeros(n)
-            g2[both] = np.log(v[both] / vo[both]) ** 2
-            b2 = np.maximum(
-                g2
-                - np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), 0.0)
-                - np.where(po > 0, 1.0 / np.where(po > 0, po, 1.0), 0.0),
-                0.0,
-            )
-            with np.errstate(divide="ignore"):
-                deflated = 1.0 / (np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), np.inf) + b2)
-            p = np.where(both & (b2 > 0), deflated, p)
-            val[lane], prec[lane] = v, p
-        # THE ALLOCATION — per slot, the five claims against the node's model-free total
+            v, p, ms = self._fuse_dir(forward.lane(lane), backward.lane(lane))
+            if lane in self._UNSPLICED:
+                # THE RECEPTION LAW (relay's mismatch_deflate, ported): per stream,
+                # p_eff = 1/max(v_stream, G^2 - v_own) with G the log gap between the arriving
+                # and the OWN lane value and v_own the node's own COMPOSITION variance —
+                # composition-blind (v_own = inf: AMBIG, unstranded) passes untouched, which is
+                # exactly what lets messages solve unstranded data while a sighted slot caps a
+                # disagreeing claim at ~1/G^2. Exactly one side at zero with own composition
+                # evidence is a CONTRADICTION and kills the claim outright, both streams.
+                v_own = self._v_own_g if lane == "unspliced_gdna" else self._v_own_r
+                vo = np.asarray(own.lane(lane).abundance, np.float64)
+                seen = np.isfinite(v_own)
+                both = (p > 0) & (v > 0) & (vo > 0) & seen
+                g2 = np.zeros(n)
+                g2[both] = np.log(v[both] / vo[both]) ** 2
+                cap = np.maximum(g2 - np.where(seen, v_own, 0.0), 0.0)
+                with np.errstate(divide="ignore"):
+                    p = np.where(
+                        both & (cap > 0),
+                        1.0
+                        / np.maximum(np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), np.inf), cap),
+                        p,
+                    )
+                    ms = np.where(
+                        both & (cap > 0),
+                        1.0
+                        / np.maximum(
+                            np.where(ms > 0, 1.0 / np.where(ms > 0, ms, 1.0), np.inf), cap
+                        ),
+                        ms,
+                    )
+                ms = np.where(np.isfinite(ms), ms, 0.0)
+                contra = seen & (((v > 0) & (p > 0) & (vo <= 0)) | ((v <= 0) & (p > 0) & (vo > 0)))
+                p = np.where(contra, 0.0, p)
+                ms = np.where(contra, 0.0, ms)
+            val[lane], prec[lane], meas[lane] = v, p, ms
+        # THE ALLOCATION — per slot, the five claims against the node's model-free total.
+        # THE UNSEEN-COMPONENT ABSORBER: a deficit at a node whose annotation admits an RNA
+        # strand NOBODY has evidence about (silent lane, admissible bit set) belongs to that
+        # unseen component, never to the weakest live witness — without it, an unstranded
+        # library's RNA mass (invisible to every witness: the strand solve is blind and the
+        # neighbours' RNA lanes are silent) is force-fed to the near-zero gDNA anchor claim as
+        # phantom gDNA (measured: the whole g05-unstranded family).
         mu = np.stack([val[k] for k in self._ALL], axis=1)
         pp = np.stack([prec[k] for k in self._ALL], axis=1)
+        unseen_rna = (self._free_pos & (prec["unspliced_rna_pos"] <= 0)) | (
+            self._free_neg & (prec["unspliced_rna_neg"] <= 0)
+        )
+        absorber = self._absorber | unseen_rna
         live_rows = (pp > 0).any(axis=1) & (self._pT > 0)
         for i in np.flatnonzero(live_rows):
             mu[i] = allocate(
@@ -497,13 +555,16 @@ class AllocationSolve(SolveModel):
                 pp[i],
                 total=self._T[i],
                 total_precision=self._pT[i],
-                absorber=bool(self._absorber[i]),
+                absorber=bool(absorber[i]),
             )
 
         # CONVERSION — log-share of the node's own measured mass, clipped into the grid domain
         def channel(lane):
+            # MEASUREMENT CITIZENSHIP (relay's law): the delivered precision is the measured
+            # stream — the belief stream weighted the value blend and the allocation, but only
+            # counted witnesses may arrive at psi as precision
             x = mu[:, self._ALL.index(lane)]
-            p = pp[:, self._ALL.index(lane)]
+            p = meas[lane]
             live = (p > 0) & (self._M > 0) & (x > 0)
             share = np.where(live, x * self._E[lane] / np.where(self._M > 0, self._M, 1.0), 1.0)
             mode = np.clip(np.log(np.maximum(share, 1e-300)), self._dom[0], self._dom[1])
@@ -520,7 +581,7 @@ class AllocationSolve(SolveModel):
         """THE SPLICED LAW, lane-native (commit three): flank rates from the two arriving
         spliced lanes (one-hop reach ⇒ each is exactly the adjacent flank's exon-facing
         route-summed rate); NB size recovered from the counting-honest precisions; the derived
-        width law V_route(class) + (V_tail − V_route)+; nascent from the ARRIVING unspliced RNA
+        width law V_route(class) + (V_tail − V_route)+; unspliced-RNA nodes from the ARRIVING RNA
         claims (already deconvolved upstream — no background subtraction, the ruled blend); the
         guarded-Gaussian family at boundaries. Completeness withholds the claim where a terminus
         admits unseen molecules (the ruled v1 branch)."""
@@ -557,10 +618,10 @@ class AllocationSolve(SolveModel):
 
         af, pf = rna_blend(forward)
         ab_, pb = rna_blend(backward)
-        # a BOUNDARY's nascent prediction may read only its NON-exon side (the exon side's
-        # unspliced RNA is mature-rich and cannot cross the boundary unspliced); an exon's
-        # nascent input blends both sides (its neighbours' states are intron-side already,
-        # post the splice-shed rule)
+        # a BOUNDARY's unspliced-RNA prediction may read only its NON-exon side: the exon
+        # side's RNA largely splices out at the junction, so it is not part of what crosses
+        # this boundary unspliced. An exon's input blends both sides (its neighbours' states
+        # are intron-side already, post the splice-shed rule)
         fwd_exonic = self._nb_left_is_exon
         bwd_exonic = self._nb_right_is_exon
         pf_b = np.where(self._is_boundary & fwd_exonic, 0.0, pf)
@@ -611,10 +672,10 @@ class AllocationSolve(SolveModel):
                     v_arr[m] = v
             live_v = np.isfinite(v_arr)
             nodes = None
-            has_nas = np.zeros(int(e.sum()), bool)  # ⛔ waypoint: the blend nascent input is
-            # disabled pending its strand-aware derivation — the unstranded blend poisoned the
-            # exon law (claimed E 745k at g05-unstranded); the stress-nascent row's win is
-            # knowingly given back until the derivation lands
+            has_nas = np.zeros(int(e.sum()), bool)  # ⛔ waypoint: the blend-driven
+            # unspliced-RNA nodes are disabled pending their strand-aware derivation (measured
+            # ~inert either way on the panel); the graduated anchor's intron-read win at the
+            # unspliced-RNA stress rows is knowingly given back until the derivation lands
             if has_nas.any():
                 sd = np.where(has_nas, 1.0 / np.sqrt(np.maximum(p_nas[e], 1e-300)), 0.0)
                 z = np.array([-0.9674, 0.0, 0.9674])  # the 1/6, 1/2, 5/6 normal quantiles

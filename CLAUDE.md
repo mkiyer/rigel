@@ -230,8 +230,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,711 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
-The `+3` over 3,708 is THE SPLICED SOLVE (three lane-law gates in the EXISTING
+⭐ **THE STANDING BASELINE: 0 failed / 3,714 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
+The `+3` over 3,711 is THE SHIPPED-RELAY PORT (four citizenship/reception gates in the
+EXISTING `tests/calibration/test_unified_bridge.py` — measurement-stream delivery, the
+reception law, the contradiction kill, the unseen-component absorber — replacing the old
+yield gate, net +3; every one verified failing first and perturbation-fired; no file added).
+Before that, the `+3` over 3,708 was THE SPLICED SOLVE (three lane-law gates in the EXISTING
 `tests/calibration/test_unified_bridge.py` — one-hop reach, count round-trip, spliced-moves-
 beliefs; a class-premise gate was added, REFUTED on the panel and removed in the same session,
 net zero; no file added, so no per-file gate delta). Before that, the `+6` over 3,702 was THE
