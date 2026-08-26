@@ -355,17 +355,29 @@ what each existing piece is best at. What each contributes:
 backbone's `deliver()` method). Instrument keys renamed (`pass0_claimed_ab` score keys are
 `pure_gdna` / `rna_bearing`), self-test green.
 
-**Step 1 — THE BRIDGE (next).** One spec-conforming policy runner: a Policy implementation that
+**Step 1 — THE BRIDGE.** ✅ 2026-08-26 — One spec-conforming policy runner: a Policy implementation that
 plugs a `(PropagationModel, SolveModel)` pair into the backbone's existing protocol, and builds
 each node's OWN Message from the banks the context already carries (a boundary's sj flux enters
 its spliced lanes — which retires the `lam_rows` side lane architecturally). Two identity anchors
 falsify it before anything new is claimed: ⓐ PassThroughPropagation + a silent SolveModel must be
 byte-identical to SilentPolicy on the panel; ⓑ a SolveModel whose `solve_spliced` reproduces the
 shipped anchor arithmetic from the messages' spliced lanes must be byte-identical to today's
-relay flux rows (the parity-gate pattern exists). ⚠ Step 1 also settles the spec's one known
-gap: a claim crossing an enrichment frame needs a REFRAME in the value before the fuse — where
-that lives (inside `attenuate`'s contract or as its own extension point) is decided here, with
-currency's belief-free face totals as the frame source.
+relay flux rows (the parity-gate pattern exists). Landed as `messages/unified.py` — `UnifiedPolicy(PropagationModel, SolveModel)` on the
+backbone's protocol, own messages from the context banks (self-solve densities → unspliced
+lanes; certified sj flux with counting-honest precision → spliced lanes), scans initialised to
+own so terminals hold their own message. Both identity anchors hold BYTE-FOR-BYTE through the
+real backbone (`test_unified_bridge.py`; the flux anchor pins the estimators so the rows are
+live, and the travel gate demands ≥ 2-hop reach — both gates were strengthened after
+perturbations exposed their degenerate first forms). ⚠ The REFRAME decision (a claim crossing
+an enrichment frame needs its value reframed before the fuse; inside `attenuate`'s contract or
+its own extension point, with currency's belief-free face totals as the frame source) MOVES TO
+STEP 2 — pass-through propagation has no frame question, the first real model does.
+⭐ CONVERGENCE STANCE (owner, recorded in the module): the Policy architecture is a development
+sandbox scheduled for retirement; relay and currency are DONORS — their measured-good parts are
+extracted into the unified policy and their files then deleted. Attenuate is NOT a separate
+public function: it is `propagate`'s one internal extension point, so a message policy's whole
+surface is `propagate` + `solve` (with the solve's common assembly in the base class, lane
+treatments as the only overrides — the anti-duplication the owner asked for).
 
 **Step 2 — PROPAGATE (the unspliced attenuate).** The first real propagation variance model,
 derived: currency's knob for the frame decision, the per-hop premise by weighted moments PER HOP

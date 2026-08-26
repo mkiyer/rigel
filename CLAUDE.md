@@ -230,8 +230,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,685 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-third measurement that day. The `+14` over 3,671 is THE FOUNDATION SPEC (owner architecture;
+⭐ **THE STANDING BASELINE: 0 failed / 3,695 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
+fourth measurement that day. The `+10` over 3,685 is THE BRIDGE
+(`src/rigel/calibration/messages/unified.py`, +3: jargon, docs-boundary, layering; and
+`tests/calibration/test_unified_bridge.py`, 5 own cases +2 gate cases — both byte-identity
+anchors through the real backbone, every perturbation verified firing after two gates were
+strengthened past degenerate substrates). Before that, the `+14` over 3,671 was THE FOUNDATION
+SPEC (owner architecture;
 `DESIGN.md` §6b.3 neighbours it): `src/rigel/calibration/messages/foundation.py` (+3: jargon,
 docs-boundary, layering) and `tests/calibration/test_message_foundation.py` (9 own cases +2 gate
 cases, every rule perturbation-verified). Before that, the `+4` over 3,667 was RUNG 1's

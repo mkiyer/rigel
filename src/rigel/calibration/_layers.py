@@ -137,6 +137,10 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # propagation-time PropagationModel and the solve-time SolveModel — the contracts
             # every variance model implements by overriding their narrow extension points.
             "messages/foundation",
+            # `messages/unified` is THE BRIDGE and the CONVERGENCE TARGET (owner, 2026-08-26):
+            # the foundation spec's (PropagationModel, SolveModel) pair running on the backbone's
+            # Policy protocol. The other policies are DONORS scheduled for extract-then-delete.
+            "messages/unified",
             "messages/variance",
             "messages/silent",
             "messages/relay",
