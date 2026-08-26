@@ -50,6 +50,7 @@ from .region_geometry import (
 )
 from .region_init import build_region_init
 from .signature import coarse_type_array
+from .structural_claims import build_structural_claims, interface_masks
 from .simplex_logodds import (
     CompositionPriors,
     _log_fg,
@@ -433,6 +434,10 @@ def solve_chain(
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_region = (np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)
+    # the stage-0 interface masks the message layer consumes — computed by the module that
+    # owns the concept and carried here under policy-neutral names (the backbone's vocabulary
+    # firewall keeps every message-composition concept out of this file)
+    _if_left, _if_right, _ss_b = interface_masks(build_structural_claims(chain, statics))
 
     # ── (A) the per-slot message-free SELF-SOLVE — the four init sources ──────────────────────────────
     own = build_region_init(
@@ -466,6 +471,8 @@ def solve_chain(
         sj_count=SPL,
         route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
         route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
+        route_count_lo=np.asarray(geometry.route_count_lo, np.int64),
+        route_count_hi=np.asarray(geometry.route_count_hi, np.int64),
         unspliced_count=CNT,
         n_slot=n_slot,
         spliced_slot=spliced_slot,
@@ -474,6 +481,9 @@ def solve_chain(
         right=right,
         is_boundary=np.asarray(chain.kind) != REGION,
         is_exon_region=is_exon_region,
+        left_interface_certified=_if_left,
+        right_interface_certified=_if_right,
+        ss_intron_boundary=_ss_b,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
         boundary_flags=statics.boundary_flags,

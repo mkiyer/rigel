@@ -472,11 +472,44 @@ pass-through arm proves the propagation model's load (3.6M at g00-OFF without
 attenuation/licences). ⛔ Contaminated rows still trail silence (g05-str 40k vs 27k; g50-ON
 247k vs 75k; g98-OFF 145k vs 66k) — expected at this waypoint: the SPLICED solve (the anchor's
 wins) is commit ③, and the class-keyed premise is the recorded calibration lever. Runtime
-~20 s/condition — the scalar scan is panel-viable; vectorization stays deferred); ③ the
-spliced solve
-(first honest end-to-end propagate+solve price, vs silent and currency, per stratum — the zero
-controls and g05 rows referee the yielding); ③ the spliced solve (identity vs the graduated
-anchor on complete flanks within noise; the incomplete-flank branch priced separately);
+~20 s/condition — the scalar scan is panel-viable; vectorization stays deferred); ③ ✅ the
+spliced solve (2026-08-26) — the lane-native anchor law, and the debugging that landed it found
+THREE missing propagation laws and EXPOSED a ② artifact. The laws, each found by a price
+explosion and localized by factorial dissection + a slot-level probe against the graduated
+anchor's evidence: ⭐ **THE SPLICE-SHED RULE** (relay's splice-out, extracted into `attenuate`)
+— an unspliced-RNA claim entering a boundary from an EXON sheds the flux spanning the intron it
+is entering (`kept = max(abundance − shed, 0)`; the molecules that spliced away cannot be in
+the intron; intron-side nascent has not spliced there and crosses untouched; the shed face is
+direction-keyed: forward sheds LOW-ended routes, backward HIGH-ended); ⭐ **THE PUBLICATION
+LICENCE** (`_own_spliced_faces`) — a boundary publishes a spliced face only toward an exon
+whose interface is STRUCTURALLY certified (`structural_claims.interface_masks`, policy-neutral
+names for the backbone's vocabulary firewall): an uncertified face's rate is a KNOWN
+underestimate and publishing it as truth manufactured phantom gDNA (12,448 unlicensed exons,
+median C/mu 0.003 — the whole first zero-control explosion); ⭐ **THE SCAN-OWN FIX** — the
+scan's own-message must present the SAME masked faces, or propagate's fuse re-publishes the
+unmasked lane over the licence at every visited slot (3,663 exons received faces this way; the
+probe that found it: all their interface claims were FALSE). Population after the fixes: 4,396
+⊆ graduated 4,725, zero unlicensed, mu ratio ≈ 1.0 on the overlap. **THE HONEST PRICE** (all
+vs certified truth; silent / norows=②-honest / unified): the ③ MARGINAL (unified − norows) is
+−52.7k at g05-unstranded (claimed E 73.2k → 27.6k — the anchor's win, lane-native), ~0 at
+g05-str/g50-ON/g98-OFF, +2.4k at g00-OFF, +13.7k at g00-ON — the NAMED residual: boundary-law
+overconfidence at the capture cliff is HETEROGENEITY (per-hop learned enrichment, the owner's
+capture-spectrum direction), not width — the width-family fix (V_pair joins the boundary ests,
+mirroring the graduated guard) was landed and measured a no-op, kept as the graduated law's
+recorded cliff evidence. Two knowing give-backs at this waypoint: the exon law's nascent nodes
+are DISABLED (the arriving-blend nodes measured ~inert, 745k↔731k — the strand-aware blend
+derivation is the recorded task), and single-flank exons fire with the one live face.
+⛔⛔ **THE EXPOSED ② ARTIFACT — now THE open lever**: ②'s "zero controls at silence" was
+manufactured by the old both-face, esp-live spliced lanes — unphysical mature-RNA claims at
+INTRONS soaked up allocation mass and kept the allocator inert. With honest faces the
+propagate+allocate baseline (norows) prices at g00-OFF 91.5k / g00-ON 27.2k / g05-str 94.1k /
+g05-unstr 567.8k / g50-ON 243.2k / g98-OFF 101.6k vs silence 26.7/14.5/27.0/28.2/74.9/66.0k —
+the allocation's ACTIVATION TAX, dominant everywhere. First dissection result: the CLASS-KEYED
+PREMISE (region-end key, gated, perturbation-verified) was built and REFUTED — lowering the
+sparse family's charge let composition misinformation through (g00-OFF 91.5k → 394.4k); the
+pooled premise's overcharge is load-bearing, the premise prices LEVEL transport, and the
+missing cost is COMPOSITION transport, which log-r moments cannot see. Pricing that is the
+open derivation, and it gates ⑤;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

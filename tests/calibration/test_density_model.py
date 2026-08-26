@@ -113,6 +113,8 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
         eff_sj_lo=np.zeros((n_slots, 2)),
         route_rate_lo=np.zeros((n_slots, 2)),
         route_rate_hi=np.zeros((n_slots, 2)),
+        route_count_lo=np.zeros((n_slots, 2), dtype=np.int64),
+        route_count_hi=np.zeros((n_slots, 2), dtype=np.int64),
         eff_sj_hi=np.zeros((n_slots, 2)),
     )
     return region_gdna_density(chain, geometry, ra)

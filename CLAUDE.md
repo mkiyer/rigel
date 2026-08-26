@@ -230,8 +230,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,708 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-seventh measurement that day. The `+6` over 3,702 is THE UNSPLICED SOLVE (six allocation/yield
+⭐ **THE STANDING BASELINE: 0 failed / 3,711 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
+The `+3` over 3,708 is THE SPLICED SOLVE (three lane-law gates in the EXISTING
+`tests/calibration/test_unified_bridge.py` — one-hop reach, count round-trip, spliced-moves-
+beliefs; a class-premise gate was added, REFUTED on the panel and removed in the same session,
+net zero; no file added, so no per-file gate delta). Before that, the `+6` over 3,702 was THE
+UNSPLICED SOLVE (six allocation/yield
 gates in the EXISTING `tests/calibration/test_unified_bridge.py`, perturbations verified).
 Before that, the `+2` over 3,700 was the ROUTE-SUM HOMECOMING's two geometry gates
 in the EXISTING `tests/calibration/test_region_geometry.py` (independent-derivation parity;

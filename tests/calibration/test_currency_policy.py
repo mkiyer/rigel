@@ -122,6 +122,8 @@ def _ctx(
         sj_count=np.zeros((N, 2)),
         route_rate_lo=np.zeros((N, 2)),
         route_rate_hi=np.zeros((N, 2)),
+        route_count_lo=np.zeros((N, 2), dtype=np.int64),
+        route_count_hi=np.zeros((N, 2), dtype=np.int64),
         unspliced_count=np.stack([m / 2.0, m / 2.0], axis=1),
         # ⚠ the observed COUNTS are what set the knob's noise floor, and they are decoupled from the
         # abundances here on purpose: a scenario may hold the same densities at any depth, and a gate
@@ -132,6 +134,9 @@ def _ctx(
         right=np.append(np.arange(1, N), -1),
         is_boundary=np.arange(N) % 2 == 1,
         is_exon_region=np.arange(N) % 2 == 0,
+        left_interface_certified=np.zeros(N, bool),
+        right_interface_certified=np.zeros(N, bool),
+        ss_intron_boundary=np.zeros(N, bool),
         free_pos=fp,
         free_neg=fn,
         boundary_flags=fl,

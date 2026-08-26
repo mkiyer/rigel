@@ -204,6 +204,10 @@ class RegionGeometry:
     #: inherits it). Raw observation: no pseudocount — a zero-flux face reads exactly 0.
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
+    #: int64[n_slots, 2] — how many routes each face carries (the §-recorded route-structure
+    #: class key: single-route pairs measured near-zero premise, multi-route 3–10×)
+    route_count_lo: np.ndarray
+    route_count_hi: np.ndarray
 
 
 def build_region_geometry(
@@ -327,6 +331,8 @@ def build_region_geometry(
     inv_sj_hi = np.zeros((n, 2), dtype=np.float64)
     route_rate_lo = np.zeros((n, 2), dtype=np.float64)
     route_rate_hi = np.zeros((n, 2), dtype=np.float64)
+    route_count_lo = np.zeros((n, 2), dtype=np.int64)
+    route_count_hi = np.zeros((n, 2), dtype=np.int64)
     ej_lo = np.zeros((n, 2), dtype=np.float64)
     ej_hi = np.zeros((n, 2), dtype=np.float64)
     if sj.n_sj:
@@ -359,12 +365,16 @@ def build_region_geometry(
                 "reciprocal-opportunity column per sj (tests/native/_accumulator_reference.py)"
             )
         live_route = eff > 0.0
-        for boundary, rr in ((donor, route_rate_lo), (acceptor, route_rate_hi)):
+        for boundary, rr, rc in (
+            (donor, route_rate_lo, route_count_lo),
+            (acceptor, route_rate_hi, route_count_hi),
+        ):
             np.add.at(
                 rr,
                 (boundary[live_route], column[live_route]),
                 flux[live_route] / eff[live_route],
             )
+            np.add.at(rc, (boundary[live_route], column[live_route]), 1)
         for boundary, jc, ej, inv_face in (
             (donor, jc_lo, ej_lo, inv_sj_lo),
             (acceptor, jc_hi, ej_hi, inv_sj_hi),
@@ -395,6 +405,8 @@ def build_region_geometry(
         eff_sj_hi=ej_hi,
         route_rate_lo=route_rate_lo,
         route_rate_hi=route_rate_hi,
+        route_count_lo=route_count_lo,
+        route_count_hi=route_count_hi,
     )
 
 

@@ -212,6 +212,8 @@ class StepContext:
     #: ~k×, so consumers of a face's RATE read these, never the ratio
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
+    route_count_lo: np.ndarray  # [n, 2] routes per face (the route-structure class key)
+    route_count_hi: np.ndarray
     unspliced_count: (
         np.ndarray
     )  # [n, 2] unspliced count by GENOME strand — the density numerator AND n
@@ -225,6 +227,11 @@ class StepContext:
     is_exon_region: (
         np.ndarray
     )  # a REGION whose region signature is EXON — the SPLICE IN's destination
+    left_interface_certified: np.ndarray  # exon slots whose LEFT interface is certified —
+    # every route arriving there carries certified flux and no terminus admits unseen
+    # molecules (structural_claims.interface_masks; the sender-side publication licence)
+    right_interface_certified: np.ndarray
+    ss_intron_boundary: np.ndarray  # the claimed ss-intron boundary class (structural_claims)
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?

@@ -94,6 +94,21 @@ class StructuralClaims:
         )
 
 
+def interface_masks(claims: "StructuralClaims") -> tuple:
+    """The three stage-0 masks the message layer consumes, under POLICY-NEUTRAL names — the
+    backbone carries them without knowing the flank concept (its vocabulary firewall,
+    `tests/calibration/test_sweep_backbone.py`): per-exon LEFT/RIGHT interface certification
+    (every route arriving at that interface is certified, and no terminus admits molecules the
+    flux cannot see), and the claimed ss-intron boundary class."""
+    import numpy as np
+
+    return (
+        np.asarray(claims.exon_flank_left_complete, bool),
+        np.asarray(claims.exon_flank_right_complete, bool),
+        np.asarray(claims.ss_intron_boundary, bool),
+    )
+
+
 def build_structural_claims(chain: RegionChain, statics: RegionStatics) -> StructuralClaims:
     """Derive the four classes from the statics — O(n_slots) array math, nothing read but structure."""
     kind = np.asarray(chain.kind)

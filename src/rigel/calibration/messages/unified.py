@@ -116,6 +116,68 @@ def _own_messages(ctx: StepContext) -> dict:
     }
 
 
+def _own_spliced_faces(ctx: StepContext) -> dict:
+    """Per-direction spliced lanes: forward (low→high) presents each boundary's HIGH (acceptor)
+    face; backward presents the LOW (donor) face — so the delivered flank rate is exactly the
+    exon-facing one, route-summed. Precision is counting-honest on the slot's flux count
+    (conservative: never sharper than the total flux supports).
+
+    ⭐ THE PUBLICATION LICENCE (sender-side): a face is published only toward an exon whose
+    flank is STRUCTURALLY COMPLETE — every route into it certified, no terminus admitting
+    molecules the flux cannot see. An incomplete face's rate is a KNOWN underestimate; the
+    honest statement is silence, not a truth claim at a value known to be low. Measured: the
+    lane-liveness gate alone admitted 12,448 exons the structural claim refuses (3.6× the
+    licensed population, 1.2M fragments of C at median C/mu 0.003) and those slots were the
+    whole of the ③ zero-control regression."""
+    n = int(np.asarray(ctx.n_slot).shape[0])
+    left = np.clip(np.asarray(ctx.left, np.int64), 0, n - 1)
+    right = np.clip(np.asarray(ctx.right, np.int64), 0, n - 1)
+    has_l = np.asarray(ctx.left, np.int64) >= 0
+    has_r = np.asarray(ctx.right, np.int64) >= 0
+    comp_l = np.asarray(ctx.left_interface_certified, bool)
+    comp_r = np.asarray(ctx.right_interface_certified, bool)
+    # hi face feeds the exon on the boundary's RIGHT (its left flank); lo the mirror
+    ok_hi = has_r & comp_l[right]
+    ok_lo = has_l & comp_r[left]
+
+    def face(rate, count, ok):
+        out = {}
+        for col, lane in ((0, "spliced_rna_pos"), (1, "spliced_rna_neg")):
+            r = np.asarray(rate, np.float64)[:, col]
+            c = np.asarray(count, np.float64)[:, col]
+            live = ok & (r > 0.0)
+            out[lane] = (np.where(live, r, 0.0), np.where(live, 1.0 / count_logvar(c), 0.0))
+        return out
+
+    return {
+        False: face(ctx.route_rate_hi, ctx.sj_count, ok_hi),
+        True: face(ctx.route_rate_lo, ctx.sj_count, ok_lo),
+    }
+
+
+def count_from_precision(p) -> np.ndarray:
+    """Invert the counting law: precision = 1/trigamma(count + ½) ⇒ count. Newton on the
+    strictly-decreasing trigamma — float-exact in a handful of steps."""
+    from scipy.special import polygamma
+
+    p = np.asarray(p, np.float64)
+    target = np.where(p > 0, 1.0 / np.where(p > 0, p, 1.0), np.inf)
+    c = np.maximum(1.0 / np.maximum(target, 1e-12) - 0.5, 0.0)
+    for _ in range(30):
+        f = polygamma(1, c + 0.5) - target
+        df = polygamma(2, c + 0.5)
+        step = np.where(np.abs(df) > 0, f / np.where(np.abs(df) > 0, df, 1.0), 0.0)
+        c = np.maximum(c - step, 0.0)
+    return np.where(np.isfinite(target), c, 0.0)
+
+
+def flank_complete(*, spliced_live, terminus_gain) -> np.ndarray:
+    """The ruled completeness branch: a flank is complete iff it carries certified routes AND no
+    terminus gain admits molecules the flux cannot see. v1 withholds the flux claim at incomplete
+    flanks (the one-sided form is the recorded refinement)."""
+    return np.asarray(spliced_live, bool) & ~np.asarray(terminus_gain, bool)
+
+
 class _PreparedUnified:
     """One sweep's working object: own messages, the scan kernel, and the solve delivery."""
 
@@ -124,6 +186,7 @@ class _PreparedUnified:
         self._prop = propagation
         self._solve = solve_model
         self.own = _own_messages(ctx)
+        self._own_faces = _own_spliced_faces(ctx)
 
     def _message_at(self, state: dict, i: int) -> Message:
         return Message(
@@ -139,10 +202,22 @@ class _PreparedUnified:
         state = {
             lane: (self.own[lane][0].copy(), self.own[lane][1].copy()) for lane in Message.LANES
         }
+        # ⭐ the SPLICED lanes are direction-aware: travelling low→high a boundary presents its
+        # HIGH (acceptor) face — the routes entering its rightward exon — and the mirror going
+        # back, so the adjacent solve receives exactly the exon-facing flank rate.
+        own_scan = dict(self.own)
+        if self._own_faces is not None:
+            face = self._own_faces[bool(backward)]
+            for lane in ("spliced_rna_pos", "spliced_rna_neg"):
+                state[lane] = (face[lane][0].copy(), face[lane][1].copy())
+                # ⛔ the scan's own-message must present the SAME masked face, or propagate's
+                # fuse re-publishes the unmasked slot-total lane over the licence at every
+                # visited slot (measured: 3,663 unlicensed exons received faces this way)
+                own_scan[lane] = face[lane]
 
         def step(s: int, i: int) -> None:
             incoming = self._message_at(state, s)
-            mine = self._message_at(self.own, i)
+            mine = self._message_at(own_scan, i)
             out = self._prop.propagate(mine, incoming, Hop(src=s, dst=i, backward=backward))
             for lane in Message.LANES:
                 claim = out.lane(lane)
@@ -183,9 +258,7 @@ class FrameAwarePropagation(PropagationModel):
     different RNA population, and that lane's claim is refused (value and precision in one
     statement). The gDNA lane always crosses: gDNA is genomically continuous.
 
-    ⚠ Recorded, deliberately not in this first extraction: the per-hop-class premise (the
-    population-equality bit is the natural class key — the donor's pooled fit is kept verbatim,
-    dead mask and all, until the class-keyed fit is derived on the anchored tree); the sampling
+    ⚠ Recorded, deliberately not in this extraction: the sampling
     CAP (needs per-component source counts the lanes do not carry); and the SPLICED transit law
     — certified counts cross UNREFRAMED (capture-invariance, the anchor's measured property) and
     for now cost nothing, because their honest transit price is derived WITH the spliced solve.
@@ -215,19 +288,53 @@ class FrameAwarePropagation(PropagationModel):
                 "fn": fn,
                 "src": src,
             }
+        for backward in (False, True):
+            t = self._tables[backward]
+            src = t["src"]
+            # THE SPLICE-SHED RULE (relay's splice-out, extracted): RNA arriving at a boundary
+            # from a REGION sheds the spliced share — the molecules that left via the junction
+            # cannot continue as unspliced RNA past it (mature never crosses a boundary
+            # unspliced). The shed is the flux SPANNING the intron the message is entering:
+            # forward (heading into the intron on the boundary's genomic-HIGH side) sheds the
+            # routes whose LOW end is this boundary; backward sheds the HIGH-ended routes.
+            face = np.asarray(ctx.route_rate_hi if backward else ctx.route_rate_lo, np.float64)
+            src_is_exon = np.asarray(ctx.is_exon_region, bool)[src]
+            gate = np.asarray(ctx.is_boundary, bool) & src_is_exon
+            t["shed_pos"] = np.where(gate, face[:, 0], 0.0)
+            t["shed_neg"] = np.where(gate, face[:, 1], 0.0)
         lr = np.concatenate([t["log_r"] for t in self._tables.values()])
         vr = np.concatenate([t["v_r"] for t in self._tables.values()])
+        # ⛔ ONE pooled scalar, and that is now a MEASURED choice, not a deferral: the class-keyed
+        # fit (region-end exon vs not, gated and perturbation-verified) was built and REFUTED on
+        # the panel — lowering the sparse family's charge let composition misinformation through
+        # (g00-OFF 91.5k → 394.4k, g05-unstranded 567.8k → 848.4k; only g00-ON improved, 27.2k
+        # → 21.5k). The premise prices LEVEL transport; the residual damage is COMPOSITION
+        # transport, which log-r moments cannot see — pricing that is the open lever, and it is
+        # not a premise refinement.
         self._premise = float(premise_logvar(lr, vr))
 
     def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:
         t = self._tables[hop.backward]
         i, s = hop.dst, int(t["src"][hop.dst])
         if lane.startswith("spliced"):
-            return claim  # a measurement: never reframed; its transit price is step 3's derivation
+            # THE TRANSIT LAW: a certified count is evidence about its OWN junction only, so an
+            # arriving spliced claim is not relayed onward — one-hop reach. The adjacent solve
+            # receives exactly the neighbour's own flank rate (unreframed: capture-invariance).
+            return Claim.silent()
         if lane == "unspliced_rna_pos" and bool(t["fp"][i]) != bool(t["fp"][s]):
             return Claim.silent()
         if lane == "unspliced_rna_neg" and bool(t["fn"][i]) != bool(t["fn"][s]):
             return Claim.silent()
+        if lane == "unspliced_rna_pos" and t["shed_pos"][i] > 0.0:
+            kept = max(float(claim.abundance) - float(t["shed_pos"][i]), 0.0)
+            claim = Claim(kept, claim.precision if kept > 0.0 else 0.0)
+            if claim.precision <= 0.0:
+                return Claim.silent()
+        if lane == "unspliced_rna_neg" and t["shed_neg"][i] > 0.0:
+            kept = max(float(claim.abundance) - float(t["shed_neg"][i]), 0.0)
+            claim = Claim(kept, claim.precision if kept > 0.0 else 0.0)
+            if claim.precision <= 0.0:
+                return Claim.silent()
         lr = float(t["log_r"][i])
         v = float(t["v_r"][i])
         lr2 = lr * lr
@@ -327,6 +434,21 @@ class AllocationSolve(SolveModel):
         lam, _ = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
         dom = _log_fg(lam)
         self._dom = (float(dom[0]), float(dom[-1]))
+        # ── the spliced law's tables ─────────────────────────────────────────────────────────
+        _, self._fg_grid = _logodds_grid(int(ctx.n_grid), float(ctx.logodds_window))
+        self._n_slot = np.asarray(ctx.n_slot, np.float64)
+        self._eff_rna = np.asarray(ctx.eff_rna, np.float64)
+        self._is_exon = np.asarray(ctx.is_exon_region, bool)
+        self._is_boundary = np.asarray(ctx.is_boundary, bool)
+        self._ss_intron = np.asarray(ctx.ss_intron_boundary, bool)
+        self._gain_l = gain[left]
+        self._gain_r = gain[right]
+        rc_hi = np.asarray(ctx.route_count_hi, np.int64).sum(axis=1)
+        rc_lo = np.asarray(ctx.route_count_lo, np.int64).sum(axis=1)
+        self._k_left = rc_hi[left]  # the left boundary's acceptor face feeds this exon
+        self._k_right = rc_lo[right]
+        self._nb_left_is_exon = self._is_exon[left]
+        self._nb_right_is_exon = self._is_exon[right]
 
     @staticmethod
     def _fuse_dir(f, b):
@@ -392,5 +514,149 @@ class AllocationSolve(SolveModel):
         mn_, pn_ = channel("unspliced_rna_neg")
         return PsiMessage(gdna_mode=mg, gdna_prec=pg, rna_mode=(mp_, mn_), rna_prec=(pp_, pn_))
 
+    _spliced_enabled = True
+
     def solve_spliced(self, own, forward, backward):
-        return None
+        """THE SPLICED LAW, lane-native (commit three): flank rates from the two arriving
+        spliced lanes (one-hop reach ⇒ each is exactly the adjacent flank's exon-facing
+        route-summed rate); NB size recovered from the counting-honest precisions; the derived
+        width law V_route(class) + (V_tail − V_route)+; nascent from the ARRIVING unspliced RNA
+        claims (already deconvolved upstream — no background subtraction, the ruled blend); the
+        guarded-Gaussian family at boundaries. Completeness withholds the claim where a terminus
+        admits unseen molecules (the ruled v1 branch)."""
+        if not self._spliced_enabled:
+            return None
+        from .. import rna_anchor as RA
+
+        n = self._n_slot.shape[0]
+        fg = self._fg_grid
+
+        def lane_pair(msg):
+            rp = np.asarray(msg.spliced_rna_pos.abundance)
+            pp_ = np.asarray(msg.spliced_rna_pos.precision)
+            rn = np.asarray(msg.spliced_rna_neg.abundance)
+            pn_ = np.asarray(msg.spliced_rna_neg.precision)
+            rate = np.where(pp_ > 0, rp, 0.0) + np.where(pn_ > 0, rn, 0.0)
+            cnt = count_from_precision(pp_) + count_from_precision(pn_)
+            live = (pp_ > 0) | (pn_ > 0)
+            return rate, cnt, live
+
+        rate_l, cnt_l, live_l = lane_pair(forward)
+        rate_r, cnt_r, live_r = lane_pair(backward)
+        comp_l = flank_complete(spliced_live=live_l, terminus_gain=self._gain_l)
+        comp_r = flank_complete(spliced_live=live_r, terminus_gain=self._gain_r)
+
+        def rna_blend(msg):
+            a = np.asarray(msg.unspliced_rna_pos.abundance) + np.asarray(
+                msg.unspliced_rna_neg.abundance
+            )
+            p = np.asarray(msg.unspliced_rna_pos.precision) + np.asarray(
+                msg.unspliced_rna_neg.precision
+            )
+            return a, p
+
+        af, pf = rna_blend(forward)
+        ab_, pb = rna_blend(backward)
+        # a BOUNDARY's nascent prediction may read only its NON-exon side (the exon side's
+        # unspliced RNA is mature-rich and cannot cross the boundary unspliced); an exon's
+        # nascent input blends both sides (its neighbours' states are intron-side already,
+        # post the splice-shed rule)
+        fwd_exonic = self._nb_left_is_exon
+        bwd_exonic = self._nb_right_is_exon
+        pf_b = np.where(self._is_boundary & fwd_exonic, 0.0, pf)
+        pb_b = np.where(self._is_boundary & bwd_exonic, 0.0, pb)
+        p_nas = pf_b + pb_b
+        rho_nas = np.where(
+            p_nas > 0, (pf_b * af + pb_b * ab_) / np.where(p_nas > 0, p_nas, 1.0), 0.0
+        )
+
+        rows = np.zeros((n, fg.shape[0]))
+        C = self._n_slot
+
+        # ── the exon law ─────────────────────────────────────────────────────────────────────
+        # the licensed population and the measurability gates — matching the graduated anchor's
+        # selection exactly (the sender's publication licence supplies completeness; these add
+        # the recipient's own requirements: observed count, RNA opportunity)
+        e = self._is_exon & (comp_l | comp_r) & (self._n_slot > 0) & (self._eff_rna > 0)
+        if e.any():
+            n_fl = comp_l[e].astype(float) + comp_r[e].astype(float)
+            rate = (
+                np.where(comp_l[e], rate_l[e], 0.0) + np.where(comp_r[e], rate_r[e], 0.0)
+            ) / np.maximum(n_fl, 1.0)
+            mu = rate * self._eff_rna[e]
+            size = np.where(comp_l[e], cnt_l[e], 0.0) + np.where(comp_r[e], cnt_r[e], 0.0) + 0.5
+            Ce = C[e]
+            fit = RA.left_fit_center_spread(Ce, mu)
+            if fit is not None:
+                mu = mu * float(np.exp(fit[0]))
+            both = comp_l[e] & comp_r[e]
+            single = (self._k_left[e] <= 1) & (self._k_right[e] <= 1)
+            V_route = {}
+            for cls, m in (("single", single), ("multi", ~single)):
+                mm = both & m & (rate_l[e] > 0) & (rate_r[e] > 0)
+                V_route[cls] = RA.route_pair_log_variance(rate_l[e][mm], rate_r[e][mm])
+            V_tail = RA.left_tail_log_variance(Ce, mu)
+            v_arr = np.full(int(e.sum()), np.nan)
+            for cls, m in (("single", single), ("multi", ~single)):
+                vr = V_route[cls]
+                if vr is None and V_tail is None:
+                    v = None
+                elif vr is None:
+                    v = V_tail
+                elif V_tail is None:
+                    v = vr
+                else:
+                    v = vr + max(0.0, V_tail - vr)
+                if v is not None:
+                    v_arr[m] = v
+            live_v = np.isfinite(v_arr)
+            nodes = None
+            has_nas = np.zeros(int(e.sum()), bool)  # ⛔ waypoint: the blend nascent input is
+            # disabled pending its strand-aware derivation — the unstranded blend poisoned the
+            # exon law (claimed E 745k at g05-unstranded); the stress-nascent row's win is
+            # knowingly given back until the derivation lands
+            if has_nas.any():
+                sd = np.where(has_nas, 1.0 / np.sqrt(np.maximum(p_nas[e], 1e-300)), 0.0)
+                z = np.array([-0.9674, 0.0, 0.9674])  # the 1/6, 1/2, 5/6 normal quantiles
+                nodes = (
+                    np.maximum(rho_nas[e], 0.0)[:, None]
+                    * np.exp(sd[:, None] * z[None, :])
+                    * self._eff_rna[e][:, None]
+                )
+                nodes[~has_nas] = 0.0
+            if live_v.any():
+                sub = np.flatnonzero(e)[live_v]
+                rows[sub] += RA._quadrature_rows(
+                    Ce[live_v],
+                    mu[live_v],
+                    size[live_v],
+                    scatter_log_variance=float(np.nanmean(v_arr[live_v])),
+                    nascent_count_nodes=None if nodes is None else nodes[live_v],
+                    fg_grid=fg,
+                )
+
+        # ── the boundary family (guarded Gaussian; cliff-flat behaviour preserved) ──────────
+        b = self._ss_intron & (p_nas > 0) & (C > 0) & (self._eff_rna > 0)
+        if b.any():
+            mu_b = np.maximum(rho_nas[b], 0.0) * self._eff_rna[b]
+            fit_b = RA.left_fit_center_spread(C[b], mu_b)
+            if fit_b is not None:
+                mu_b = mu_b * float(np.exp(fit_b[0]))
+            mad_b = RA.left_tail_log_variance(C[b], mu_b)
+            # the certified route disagreement joins the width family (the graduated law's
+            # guard): at capture-ON it carries the common mode the fit and the MAD are blind
+            # to, and without it the boundary rows arrive overconfident at the capture cliff
+            both_all = comp_l & comp_r & (rate_l > 0) & (rate_r > 0)
+            V_pair_all = RA.route_pair_log_variance(rate_l[both_all], rate_r[both_all])
+            ests = [
+                v
+                for v in (V_pair_all, (fit_b[1] if fit_b is not None else None), mad_b)
+                if v is not None
+            ]
+            if ests:
+                V_b = max(ests)
+                claim_var = np.where(p_nas[b] > 0, 1.0 / p_nas[b], 0.0)
+                var = mu_b + float(np.expm1(V_b)) * mu_b**2 + claim_var * mu_b**2
+                rows[np.flatnonzero(b)] += RA._gaussian_rows(C[b], mu_b, var, fg)
+
+        return rows if float(np.ptp(rows)) > 0.0 else None

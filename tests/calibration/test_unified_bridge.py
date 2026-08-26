@@ -192,9 +192,9 @@ def test_own_messages_carry_the_node_banks(sweep_inputs):
 
 
 def test_propagation_travels_the_chain(sweep_inputs):
-    """The scans must actually MOVE information: a slot whose own spliced lane is silent must
-    still RECEIVE a spliced claim from a fluxed neighbour through the delivered directional
-    message (pass-through propagation; the backbone gathers at the source)."""
+    """The scans must actually MOVE information ≥ 2 hops. The proof rides the UNSPLICED gDNA
+    lane (spliced lanes are one-hop by design under FrameAware; this gate runs pass-through, so
+    any lane works — gDNA is the densest)."""
     F, U = _U()
 
     class SpySolve(U.SilentSolve):
@@ -205,9 +205,10 @@ def test_propagation_travels_the_chain(sweep_inputs):
     solver = SpySolve()
     _run(sweep_inputs, U.UnifiedPolicy(F.PassThroughPropagation(), solver))
     own, fwd, bwd = solver.seen
-    own_p = np.asarray(own.spliced_rna_pos.precision)
-    fwd_p = np.asarray(fwd.spliced_rna_pos.precision)
-    bwd_p = np.asarray(bwd.spliced_rna_pos.precision)
+    # the sparsest belief lane on this toy gives the 2-hop proof its empty middle slots
+    own_p = np.asarray(own.unspliced_rna_neg.precision)
+    fwd_p = np.asarray(fwd.unspliced_rna_neg.precision)
+    bwd_p = np.asarray(bwd.unspliced_rna_neg.precision)
     # ⛔ one-hop receipt is the BACKBONE's gather, not the scan's work: the claim must be shown
     # at least TWO hops from any source — a slot whose own lane AND both neighbours' own lanes
     # are silent, yet whose delivered message carries the claim (TRAPS: could-the-arm-have-fired,
@@ -221,7 +222,7 @@ def test_propagation_travels_the_chain(sweep_inputs):
     far = (own_p == 0) & (nb_l == 0) & (nb_r == 0)
     received = ((fwd_p > 0) | (bwd_p > 0)) & far
     assert received.any(), (
-        "no slot two hops from any flux received a spliced claim — the scans moved nothing"
+        "no slot two hops from any RNA− belief received a claim — the scans moved nothing"
     )
 
 
@@ -286,12 +287,14 @@ def test_the_premise_is_charged_on_every_hop():
     assert np.isclose(out.precision, 10.0 / (1.0 + 10.0 * 0.3))
 
 
-def test_spliced_lanes_cross_unreframed():
-    """Certified counts are capture-invariant (the anchor's measured property): a spliced claim
-    crosses an enrichment frame with its VALUE untouched — no knob, no reframe."""
+def test_spliced_claims_have_one_hop_reach():
+    """THE TRANSIT LAW (FrameAware, not the spec base): a certified count is evidence about its
+    OWN junction only, so an ARRIVING spliced claim is silenced rather than relayed onward — the
+    adjacent solve receives exactly the neighbour's own flank rate, never a chain blend, and it
+    receives it UNREFRAMED (capture-invariance: the delivery path applies no knob to it)."""
     F, U, m = _hop_tables(log_r=2.0, v_r=0.01)
     out = _one_hop(m, F, U, "spliced_rna_pos", F.Claim(3.0, 25.0))
-    assert np.isclose(out.abundance, 3.0), "a measurement's value never reframes"
+    assert out.is_silent, "a travelling spliced claim must not survive a second hop"
 
 
 def test_frame_aware_under_a_silent_solve_changes_nothing(sweep_inputs):
@@ -407,4 +410,49 @@ def test_the_solve_yields_where_the_node_is_sighted():
     assert p_blind > 0
     assert p_sighted < 0.6 * p_blind, (
         f"a contradicted claim at a sighted node must lose precision ({p_sighted} vs {p_blind})"
+    )
+
+
+# ── step 3 commit 3: the spliced solve ──────────────────────────────────────────────────────────
+
+
+def test_count_recovery_inverts_the_trigamma():
+    """count → precision (1/trigamma(count+½)) → count must round-trip."""
+    U = _alloc()
+    from rigel.calibration.messages.variance import count_logvar
+
+    for c in (0.0, 1.0, 7.0, 42.0, 913.0):
+        p = 1.0 / count_logvar(np.array([c]))
+        got = U.count_from_precision(np.asarray(p, float))[0]
+        assert abs(got - c) < 1e-6, (c, got)
+
+
+def test_incomplete_flanks_make_no_flux_claim():
+    """The ruled completeness branch, v1: where a terminus gain makes a flank incomplete, the
+    exon's flux claim is withheld (the one-sided form is the recorded refinement) — an unknown
+    component may enter there and an equality would be wrong."""
+    U = _alloc()
+    ok = U.flank_complete(
+        spliced_live=np.array([True, True]),
+        terminus_gain=np.array([False, True]),
+    )
+    assert bool(ok[0]) and not bool(ok[1])
+
+
+def test_the_spliced_solve_moves_beliefs_through_the_backbone(sweep_inputs, monkeypatch):
+    """End to end with pinned estimators (the toy sits below the estimator minimums, where honest
+    rows are flat — TRAPS: could-the-arm-have-fired): the lane-native spliced law must reach ψ
+    and move the beliefs vs the same solve with its spliced half disabled."""
+    import rigel.calibration.rna_anchor as RA
+
+    monkeypatch.setattr(RA, "left_fit_center_spread", lambda o, p: (0.0, 0.01))
+    monkeypatch.setattr(RA, "route_pair_log_variance", lambda a, b: 0.01)
+    monkeypatch.setattr(RA, "left_tail_log_variance", lambda o, p: 0.01)
+    F, U = _U()
+    a = _run(sweep_inputs, U.UnifiedPolicy(U.FrameAwarePropagation(), U.AllocationSolve()))
+    solver = U.AllocationSolve()
+    solver._spliced_enabled = False
+    b = _run(sweep_inputs, U.UnifiedPolicy(U.FrameAwarePropagation(), solver))
+    assert not all(np.array_equal(a[f], b[f]) for f in a), (
+        "the spliced rows must reach psi and move the beliefs"
     )
