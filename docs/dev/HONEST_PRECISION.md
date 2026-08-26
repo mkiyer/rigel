@@ -151,6 +151,45 @@ What remains IS the premise, fitted per hop class by weighted moments with refus
 point the three-estimator max, both global premise scalars, and the scatter-node "law" all reduce
 to one derived quantity with one estimator.
 
+### 4a. RUNG 1 RESULTS (measured 2026-08-26; `scripts/design/transport_dispersion.py`, six ladder conditions,
+two-complete-flank exon pairs, deep = flank flux ≥ 100)
+
+⭐⭐⭐ **THE HEADLINE: the "certified scatter ~0.44" was ~95 % the TRUTH ESTIMATE'S OWN COUNTING
+NOISE, not transport dispersion.** The deep pairs' median certified-mature count is only 11–19
+fragments, so `ψ'(n_mrna+½) ≈ 0.19–0.23` — sd 0.44 — was riding every certified-vs-truth reading.
+On well-measured exons (n_mrna ≥ 100) the common-mode residual collapses to Var ≈ 0.009–0.013 at
+capture-OFF. ⛔ Every prior "intrinsic dispersion ~0.4–0.65 sd" quote is retired; instruments
+comparing against certified per-object truth MUST subtract the truth count's trigamma.
+
+**The decomposition (deep pairs, per-flank log scale):**
+
+| term | capture-OFF | capture-ON | class / verdict |
+|---|---|---|---|
+| flank counting | 0.008–0.011 | 0.007–0.009 | statistics, derived (trigamma) — exact |
+| truth-side counting | 0.19–0.23 (of Var(c)) | 0.18–0.22 | an INSTRUMENT artifact, not a model term |
+| length-curve center (common-mode) | −0.08 (ℓ<96) … +0.10..0.15 (ℓ>96) | −0.29..−0.14 short, ~0 long | **GEOMETRY, calculable** — the `P(w ≤ ℓ)`-family truncation; both flanks move together, so the pair estimator cannot see it; the exact transcript-coordinate opportunity derivation is rung 2's first job |
+| residual common-mode | **0.009–0.013** | **0.069–0.093** | OFF: small residue; ON: PER-EXON capture-enrichment scatter (sd ~0.26–0.31) — the owner's "enrichment is a spectrum", measured as a variance, shared by both flanks |
+| asymmetric flank excess | **0.015–0.019** | **0.033–0.054** | OFF: the true isoform/route premise (sd ~0.12–0.14); ON: + per-flank probe geometry |
+| termini inside the exon body | exactly 0 exons on this panel | 0 | STRUCTURE — absent from the panel by construction; ⚠ a panel-validity note (real data has them; the panel cannot price this licence) |
+| credit-leftmost deposit rule | no L/R center split at any length | same | REFUTED as a source — the reach-capped opportunity prices the rule correctly |
+| sj strand-column matching | mis-keyed experiment (naive per-sj column matching exploded Var 0.04 → 0.31 at ss.99, ≈ no-op at ss.50) | — | OPEN — the substrate's count columns are genome-strand, not transcript-strand; needs the accumulator's column semantics before re-measuring |
+
+**What this settles for the premise law (rung 2):**
+
+1. ⭐ **The route-pair estimator was RIGHT at capture-OFF all along**: honest asym excess
+   0.015–0.019 ≈ its readings (½·MAD² ≈ 0.011–0.016). The "it under-reads 0.44" charge is
+   withdrawn — 0.44 was the contaminated target, not the truth.
+2. ⭐⭐ **The common-mode blindness is now a NUMBER, and it is capture-ON-specific**: the pair
+   estimator misses 0.069–0.093 of per-exon enrichment-scatter variance at ON (plus the
+   length curve everywhere). The ON premise needs a second, common-mode term; the OFF premise is
+   essentially the pair estimator alone.
+3. The single-flank population reads ~0.05 BELOW the pairs' center (measured −0.05 relative
+   offset OFF) — the recorded single-flank candidate, now sized.
+4. Shallow pairs (flux < 100) are 100 % counting — no premise may be fitted on them (the
+   population-minimum refusals were right).
+
+Raw rows per condition: the instrument's `--out-dir` npz files (regenerable in ~4 min).
+
 ## 5. The campaign rungs
 
 0. ✅ **Repair the pricing instruments** (landed 2026-08-25, same day as the audit that found
@@ -167,7 +206,9 @@ to one derived quantity with one estimator.
    evidence present, and currency silently drops it — both perturbation-verified. In place of a
    flux-aware `RelayPolicy.name` (golden churn), `backbone_relay`'s flux assertion and
    `backbone_parity`'s captured-flux arms close the audit's identity hole.
-1. **The decomposition of §4** — measurement only, certified truth, no src changes.
+1. ✅ **The decomposition of §4** — landed 2026-08-26, results in §4a. The premise's honest
+   targets: OFF asym 0.015–0.019 (the pair estimator confirmed), ON + common 0.069–0.093
+   (the quantified blindness); the length curve goes to geometry (rung 2's derivation).
 2. **Derive the premise law** from the surviving STATISTICS terms; install behind a flag;
    backbone-parity per slot before any panel number.
 3. **The unified hop law** (§3) as the rebuilt policy, gated stream-by-stream against silent AND
