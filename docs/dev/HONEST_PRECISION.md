@@ -379,10 +379,20 @@ public function: it is `propagate`'s one internal extension point, so a message 
 surface is `propagate` + `solve` (with the solve's common assembly in the base class, lane
 treatments as the only overrides — the anti-duplication the owner asked for).
 
-**Step 2 — PROPAGATE (the unspliced attenuate).** The first real propagation variance model,
-derived: currency's knob for the frame decision, the per-hop premise by weighted moments PER HOP
-CLASS (the §4b estimator form), relay's population licences as structural zeroes. Priced per hop
-first (`hop_currency`/`backbone_parity` style), then the ladder, per stratum.
+**Step 2 — PROPAGATE (the unspliced attenuate).** ⭐ v1 LANDED 2026-08-26:
+`FrameAwarePropagation` in `messages/unified.py` — the donors' measured-good parts on the spec:
+currency's belief-free enrichment reading + the knob `w = lr²/(lr²+v)` (value ×= r^w) with its
+two derived costs (`w·v` and `((1−w)·lr)²`) and the pooled premise (imported SIDEWAYS from the
+donor, verbatim including its recorded dead mask — physically migrated at deletion time);
+relay's per-strand population licence as a structural refusal; certified (spliced) claims cross
+UNREFRAMED (capture-invariance). The spec grew `Hop` (per-hop identity handed to
+propagate/attenuate) and the `PropagationModel.prepare` hook. Five gates, every perturbation
+firing; the free invariant holds (FrameAware under SilentSolve ≡ SilentPolicy byte-for-byte —
+propagation alone can never change the answer). ⚠ OPEN, recorded in the model's docstring: the
+per-hop-CLASS premise (the population-equality bit is the natural key), the sampling CAP (needs
+per-component source counts the lanes do not carry), the spliced transit law (derived WITH the
+spliced solve). ⛔ Step 2 CANNOT be panel-priced alone — under a silent solve the messages go
+nowhere (an ablation that never ran); the end-to-end price lands with step 3's solve.
 
 **Step 3 — SOLVE.** The hardest part, built only when the architecture has settled and designed
 WITH the owner: how a node weighs structure, two travelled messages, and its own belief.

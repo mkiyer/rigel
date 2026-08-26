@@ -230,8 +230,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,695 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-fourth measurement that day. The `+10` over 3,685 is THE BRIDGE
+⭐ **THE STANDING BASELINE: 0 failed / 3,700 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
+fifth measurement that day. The `+5` over 3,695 is STEP 2's first propagation model
+(`FrameAwarePropagation` + the spec's `Hop`/`prepare` extension): five model gates in the
+EXISTING `tests/calibration/test_unified_bridge.py`, every perturbation verified firing.
+Before that, the `+10` over 3,685 was THE BRIDGE
 (`src/rigel/calibration/messages/unified.py`, +3: jargon, docs-boundary, layering; and
 `tests/calibration/test_unified_bridge.py`, 5 own cases +2 gate cases — both byte-identity
 anchors through the real backbone, every perturbation verified firing after two gates were

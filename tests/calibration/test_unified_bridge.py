@@ -219,3 +219,83 @@ def test_propagation_travels_the_chain(sweep_inputs):
     assert received.any(), (
         "no slot two hops from any flux received a spliced claim — the scans moved nothing"
     )
+
+
+# ── step 2: the first real propagation model ────────────────────────────────────────────────────
+
+
+def _hop_tables(log_r=0.0, v_r=1.0, premise=0.0, fp=(True, True), fn=(True, True)):
+    """Synthetic per-hop context for unit gates: one hop, src index 0, dst index 1."""
+    F, U = _U()
+    m = U.FrameAwarePropagation()
+    m._premise = premise
+    m._tables = {
+        False: {
+            "log_r": np.array([0.0, log_r]),
+            "v_r": np.array([1.0, v_r]),
+            "fp": np.array([fp[0], fp[1]]),
+            "fn": np.array([fn[0], fn[1]]),
+            "src": np.array([0, 0]),
+        }
+    }
+    return F, U, m
+
+
+def _one_hop(m, F, U, lane, claim):
+    incoming = F.Message.silent().with_lane(lane, claim)
+    hop = U.Hop(src=0, dst=1, backward=False)
+    return m.propagate(F.Message.silent(), incoming, hop).lane(lane)
+
+
+def test_frame_aware_refuses_a_strand_population_change():
+    """A strand admissible on one side of a hop and not the other is a DIFFERENT RNA population
+    (the owner's 2026-08-18 rule, extracted from the donors): that lane's claim is refused —
+    value AND precision in one statement. The gDNA lane always crosses (gDNA is genomically
+    continuous — AXIOM 0)."""
+    F, U, m = _hop_tables(fp=(True, False))
+    out = _one_hop(m, F, U, "unspliced_rna_pos", F.Claim(2.0, 10.0))
+    assert out.is_silent, "a changed-population lane must be refused"
+    g = _one_hop(m, F, U, "unspliced_gdna", F.Claim(2.0, 10.0))
+    assert g.precision > 0, "the gDNA lane always crosses"
+
+
+def test_the_knob_interpolates_between_the_two_strategies():
+    """The knob (currency's derivation, no constant): an enrichment reading that dwarfs its
+    counting noise is believed nearly in full (value ×≈ r); one inside the noise is shrunk to
+    nearly nothing (value ≈ unchanged). Every crossing costs precision."""
+    F, U, m = _hop_tables(log_r=2.0, v_r=0.01)
+    strong = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
+    assert 0.9 * np.exp(2.0) < strong.abundance <= np.exp(2.0)
+    F, U, m = _hop_tables(log_r=0.05, v_r=1.0)
+    weak = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
+    assert 1.0 <= weak.abundance < 1.01
+    assert weak.precision < 10.0, "a hop with any disagreement must cost precision"
+
+
+def test_the_premise_is_charged_on_every_hop():
+    """An imputation must cost something every hop, even at a perfectly agreeing frame: with
+    log_r = 0 the knob and disagreement vanish, and the premise alone must still lower the
+    precision (the recorded free-hop failure is what this forbids)."""
+    F, U, m = _hop_tables(log_r=0.0, premise=0.3)
+    out = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
+    assert np.isclose(out.abundance, 1.0)
+    assert np.isclose(out.precision, 10.0 / (1.0 + 10.0 * 0.3))
+
+
+def test_spliced_lanes_cross_unreframed():
+    """Certified counts are capture-invariant (the anchor's measured property): a spliced claim
+    crosses an enrichment frame with its VALUE untouched — no knob, no reframe."""
+    F, U, m = _hop_tables(log_r=2.0, v_r=0.01)
+    out = _one_hop(m, F, U, "spliced_rna_pos", F.Claim(3.0, 25.0))
+    assert np.isclose(out.abundance, 3.0), "a measurement's value never reframes"
+
+
+def test_frame_aware_under_a_silent_solve_changes_nothing(sweep_inputs):
+    """The free invariant: propagation NEVER changes the answer on its own — a belief only forms
+    at the solve, so FrameAwarePropagation under SilentSolve must equal SilentPolicy
+    byte-for-byte through the real backbone."""
+    F, U = _U()
+    a = _run(sweep_inputs, SilentPolicy())
+    b = _run(sweep_inputs, U.UnifiedPolicy(U.FrameAwarePropagation(), U.SilentSolve()))
+    for f in a:
+        np.testing.assert_array_equal(a[f], b[f], err_msg=f)

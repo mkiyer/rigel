@@ -33,9 +33,9 @@ import numpy as np
 from scipy.special import polygamma
 
 from . import NeighbourState, PsiMessage, StepContext
-from .foundation import Claim, Message, PropagationModel, SolveModel
+from .foundation import Claim, Hop, Message, PropagationModel, SolveModel
 
-__all__ = ["RowsSolve", "SilentSolve", "UnifiedPolicy"]
+__all__ = ["FrameAwarePropagation", "RowsSolve", "SilentSolve", "UnifiedPolicy"]
 
 
 class SilentSolve(SolveModel):
@@ -71,6 +71,7 @@ class UnifiedPolicy:
         self.solve_model = solve_model
 
     def prepare(self, ctx: StepContext) -> "_PreparedUnified":
+        self.propagation.prepare(ctx)
         return _PreparedUnified(ctx, self.propagation, self.solve_model)
 
 
@@ -131,7 +132,7 @@ class _PreparedUnified:
         def step(s: int, i: int) -> None:
             incoming = self._message_at(state, s)
             mine = self._message_at(self.own, i)
-            out = self._prop.propagate(mine, incoming)
+            out = self._prop.propagate(mine, incoming, Hop(src=s, dst=i, backward=backward))
             for lane in Message.LANES:
                 claim = out.lane(lane)
                 state[lane][0][i] = claim.abundance
@@ -156,3 +157,72 @@ class _PreparedUnified:
             **{lane: Claim(self.own[lane][0], self.own[lane][1]) for lane in Message.LANES}
         )
         return self._solve.solve(own, self._travelled(left), self._travelled(right))
+
+
+class FrameAwarePropagation(PropagationModel):
+    """THE FIRST REAL PROPAGATION MODEL — the donors' measured-good parts on the spec.
+
+    Extracted from CurrencyPolicy (imported SIDEWAYS, physically migrated when the donor is
+    deleted): the per-hop enrichment reading from belief-free face totals, the KNOB
+    ``w = (log r)² / ((log r)² + v)`` interpolating between transporting the abundance (w → 0)
+    and believing the frame change in full (w → 1) with no constant, its two derived costs
+    (the knob's own estimate variance ``w·v`` and the residual disagreement ``((1−w)·log r)²``),
+    and the library premise by precision-weighted moments. From the relay: the PER-STRAND
+    population licence — a strand admissible on one side of a hop and not the other is a
+    different RNA population, and that lane's claim is refused (value and precision in one
+    statement). The gDNA lane always crosses: gDNA is genomically continuous.
+
+    ⚠ Recorded, deliberately not in this first extraction: the per-hop-class premise (the
+    population-equality bit is the natural class key — the donor's pooled fit is kept verbatim,
+    dead mask and all, until the class-keyed fit is derived on the anchored tree); the sampling
+    CAP (needs per-component source counts the lanes do not carry); and the SPLICED transit law
+    — certified counts cross UNREFRAMED (capture-invariance, the anchor's measured property) and
+    for now cost nothing, because their honest transit price is derived WITH the spliced solve.
+    """
+
+    def __init__(self):
+        self._tables = None
+        self._premise = 0.0
+
+    def prepare(self, ctx) -> None:
+        from .currency import enrichment_ratio, premise_logvar
+        from .variance import count_logvar
+
+        n = int(np.asarray(ctx.n_slot).shape[0])
+        fp = np.asarray(ctx.free_pos, bool)
+        fn = np.asarray(ctx.free_neg, bool)
+        n_obs = np.asarray(ctx.n_slot, np.float64)
+        self._tables = {}
+        for backward in (False, True):
+            nbr = np.asarray(ctx.right if backward else ctx.left, np.int64)
+            src = np.clip(nbr, 0, n - 1)
+            r = enrichment_ratio(ctx, backward=backward)
+            self._tables[backward] = {
+                "log_r": np.log(np.maximum(r, 1e-300)),
+                "v_r": count_logvar(n_obs) + count_logvar(n_obs[src]),
+                "fp": fp,
+                "fn": fn,
+                "src": src,
+            }
+        lr = np.concatenate([t["log_r"] for t in self._tables.values()])
+        vr = np.concatenate([t["v_r"] for t in self._tables.values()])
+        self._premise = float(premise_logvar(lr, vr))
+
+    def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:
+        t = self._tables[hop.backward]
+        i, s = hop.dst, int(t["src"][hop.dst])
+        if lane.startswith("spliced"):
+            return claim  # a measurement: never reframed; its transit price is step 3's derivation
+        if lane == "unspliced_rna_pos" and bool(t["fp"][i]) != bool(t["fp"][s]):
+            return Claim.silent()
+        if lane == "unspliced_rna_neg" and bool(t["fn"][i]) != bool(t["fn"][s]):
+            return Claim.silent()
+        lr = float(t["log_r"][i])
+        v = float(t["v_r"][i])
+        lr2 = lr * lr
+        w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
+        value = float(claim.abundance) * float(np.exp(w * lr))
+        resid = (1.0 - w) * lr
+        v_hop = w * v + resid * resid + self._premise
+        p = float(claim.precision)
+        return Claim(abundance=value, precision=p / (1.0 + p * v_hop) if v_hop > 0.0 else p)

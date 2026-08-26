@@ -67,7 +67,19 @@ import numpy as np
 
 from . import PsiMessage
 
-__all__ = ["Claim", "Message", "PassThroughPropagation", "PropagationModel", "SolveModel"]
+__all__ = ["Claim", "Hop", "Message", "PassThroughPropagation", "PropagationModel", "SolveModel"]
+
+
+@dataclass(frozen=True, slots=True)
+class Hop:
+    """One hop's identity: source slot, destination slot, scan direction. Handed to
+    `propagate`/`attenuate` so a model can read its own per-hop tables (frames, licences) —
+    the model builds those in its `prepare` hook, from the context."""
+
+    src: int
+    dst: int
+    backward: bool
+
 
 #: Tolerance for the no-amplification check — floating-point headroom, not a policy knob.
 _AMPLIFY_TOL = 1.0 + 1e-12
@@ -142,11 +154,11 @@ class PropagationModel(ABC):
     one hop weakens the arriving claim, per lane). The base enforces: pass-through when the node has
     nothing, lane isolation, and the no-amplification rule."""
 
-    def propagate(self, own: Message, incoming: Message) -> Message:
+    def propagate(self, own: Message, incoming: Message, hop: "Hop | None" = None) -> Message:
         out = {}
         for lane in Message.LANES:
             arriving = incoming.lane(lane)
-            weakened = self.attenuate(arriving, lane) if not arriving.is_silent else arriving
+            weakened = self.attenuate(arriving, lane, hop) if not arriving.is_silent else arriving
             if float(weakened.precision) > float(arriving.precision) * _AMPLIFY_TOL:
                 raise ValueError(
                     f"the attenuation amplified lane {lane!r} "
@@ -157,8 +169,12 @@ class PropagationModel(ABC):
             out[lane] = weakened if mine.is_silent else _fuse(mine, weakened)
         return Message(**out)
 
+    def prepare(self, ctx) -> None:
+        """Optional hook: build per-hop tables (frames, licences, the fitted premise) from the
+        context, once per sweep. The default needs nothing."""
+
     @abstractmethod
-    def attenuate(self, claim: Claim, lane: str) -> Claim:
+    def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:
         """OPEN PROBLEM (propagation variance): how much one hop weakens an arriving claim —
         a signal loses strength in transit, and this says how much."""
 
@@ -168,7 +184,7 @@ class PassThroughPropagation(PropagationModel):
     the rules are testable, not as a production model (a free hop lets an imputation arrive at
     full strength beside a real measurement, the measured failure attenuation exists to price)."""
 
-    def attenuate(self, claim: Claim, lane: str) -> Claim:
+    def attenuate(self, claim: Claim, lane: str, hop: "Hop | None" = None) -> Claim:
         return claim
 
 

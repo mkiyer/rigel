@@ -103,7 +103,7 @@ def test_the_propagation_refuses_an_amplifying_attenuation():
     F = _F()
 
     class Amplifier(F.PassThroughPropagation):
-        def attenuate(self, claim, lane):
+        def attenuate(self, claim, lane, hop=None):
             if claim.precision > 0:
                 return F.Claim(claim.abundance, claim.precision * 2.0)
             return claim
@@ -117,7 +117,7 @@ def test_a_lowering_attenuation_is_accepted_and_applied():
     F = _F()
 
     class Halver(F.PassThroughPropagation):
-        def attenuate(self, claim, lane):
+        def attenuate(self, claim, lane, hop=None):
             return F.Claim(claim.abundance, claim.precision * 0.5)
 
     incoming = F.Message.silent().with_lane("unspliced_rna_pos", F.Claim(2.0, 8.0))
