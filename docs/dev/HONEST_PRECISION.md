@@ -405,3 +405,66 @@ owner review BEFORE code.
 stratum, both zero controls, the pure-gDNA/RNA-bearing split never pooled. Acceptance: ≥ silent
 on every in-scope stratum (the bar nothing meets today). Converge-and-delete the losers, verdicts
 recorded, per the standing rule.
+
+
+## 8. STEP 3 — THE SOLVE DESIGN (2026-08-26; the owner-facing teaching version is the
+"The Solve" briefing; this is the record)
+
+**The framing that keeps it small: the solve does not replace ψ.** ψ already integrates the
+node's own evidence (strand likelihood, factory rows, priors). The solve model decides what the
+two travelled messages contribute and in what form they enter ψ — a gatekeeper and converter,
+not a second solver. Its content is four decisions:
+
+**A · unspliced (belief lanes → Gaussian channels):** A1 coordinate conversion + domain clipping
+(currency's delivery, near-verbatim, incl. zero-reach ⇒ precision exactly 0); A2 the
+independent-witness fuse of forward+backward (the spec's own fuse); A3 THE YIELDING RULE —
+mismatch deflation (relay's DL form), which — verified 2026-08-26 — ALREADY gaps against the
+message-free self-solve (`ctx.own`, `own_composition_logvar`), so it carries over straight; the
+solve adds only the structural guarantee that the fused belief stays out of the gap — the
+mechanism the split census demanded; A4 emit the three component channels only in v1 (λ/θ held back until the
+contest shows the gap they close).
+
+**B · spliced (measurement lanes → the count-likelihood rows):** B1 route-summed rates into
+region_geometry (the deferred homecoming — fixes the bridge's own-message pooling AND the
+relay's old splice-in at the source); B2 count recovery by trigamma inversion (no new message
+field); B3 the exon law lane-native (flank rates from arriving spliced lanes; nascent from the
+arriving UNSPLICED lanes — the intron's density reaches the exon inside the boundary's message;
+§4b variance fitted at solve time); B4 the boundary guarded-Gaussian family lane-native
+(capture-cliff flatness preserved); B5 the spliced transit price derived here (working
+hypothesis: a certified count is evidence about its own junction only ⇒ one-hop reach).
+
+**C · structure:** C1 locks and licences are refusals, already structural; C2 the
+refit-vs-message arbitration — see Q2.
+
+**D · machinery:** D1 vectorize (scalar path stays the executable spec, ONE shared table —
+currency's twin discipline); D2 one `message_policy` value; D3 the contest + converge-and-delete.
+
+**THE THREE OPEN CALLS, with recommendations (presented to the owner):**
+
+* **Q1 equality vs lower bound for the flux** — completeness decides: at a COMPLETE flank the
+  flux is an equality in expectation (the anchor's NB-with-scatter, which won); at an INCOMPLETE
+  flank routes are missing and the one-sided bound is correct (currency's record). Currency
+  applied one form everywhere and measured the average of a right and a wrong answer. One branch
+  on an existing structural bit.
+* **Q2 the refit collision** — no special case: the prior is a claim with a population-honest
+  precision, the messages are claims with hop-honest precisions, own evidence is a measurement;
+  if every precision is honest, ψ's combine IS the arbiter. The work is an audit of the refit's
+  per-slot precision, not a new component. If honest precisions fail to arbitrate, that is a
+  measured refutation and we revisit.
+* **Q3 the nascent input** — use the arriving blended unspliced claim (the marginalization
+  consumes a rate WITH uncertainty; a blurrier input widens the nodes, it does not bias them).
+  Reaching around the message to raw banks would be the appendage pattern again; if the blend
+  measurably costs accuracy, that is a propagation-fidelity bug to fix in `attenuate`.
+
+**The build order (each commit priced):** ① B1 geometry route-sum; ② the unspliced solve
+(first honest end-to-end propagate+solve price, vs silent and currency, per stratum — the zero
+controls and g05 rows referee the yielding); ③ the spliced solve (identity vs the graduated
+anchor on complete flanks within noise; the incomplete-flank branch priced separately);
+④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
+
+**Recorded refutation risks:** honest precisions failing to arbitrate Q2 (⇒ a real arbiter must
+be designed); the blended nascent underperforming the raw read (⇒ propagation fidelity first);
+the unspliced solve unable to beat silence at g05 even with honest yielding (⇒ the message
+layer's honest size on stranded data is near-zero — the contest makes it official, and the
+architecture makes accepting it cheap: a solve granting zero precision IS silence, same code
+path).

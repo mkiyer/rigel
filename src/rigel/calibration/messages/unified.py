@@ -30,10 +30,10 @@ speed work optimises arithmetic that will survive.
 from __future__ import annotations
 
 import numpy as np
-from scipy.special import polygamma
 
 from . import NeighbourState, PsiMessage, StepContext
 from .foundation import Claim, Hop, Message, PropagationModel, SolveModel
+from .variance import count_logvar
 
 __all__ = ["FrameAwarePropagation", "RowsSolve", "SilentSolve", "UnifiedPolicy"]
 
@@ -86,7 +86,7 @@ def _own_messages(ctx: StepContext) -> dict:
     def spliced(col: int):
         live = esp[:, col] > 0.0
         ab = np.where(live, spl[:, col] / np.maximum(esp[:, col], 1e-300), 0.0)
-        pr = np.where(live, 1.0 / polygamma(1, spl[:, col] + 0.5), 0.0)
+        pr = np.where(live, 1.0 / count_logvar(spl[:, col]), 0.0)
         return ab, pr
 
     sp_pos, sp_neg = spliced(0), spliced(1)
