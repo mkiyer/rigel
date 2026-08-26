@@ -230,8 +230,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,671 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
-second measurement that day. The `+4` over 3,667 is RUNG 1's instrument,
+⭐ **THE STANDING BASELINE: 0 failed / 3,685 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26,
+third measurement that day. The `+14` over 3,671 is THE FOUNDATION SPEC (owner architecture;
+`DESIGN.md` §6b.3 neighbours it): `src/rigel/calibration/messages/foundation.py` (+3: jargon,
+docs-boundary, layering) and `tests/calibration/test_message_foundation.py` (9 own cases +2 gate
+cases, every rule perturbation-verified). Before that, the `+4` over 3,667 was RUNG 1's
+instrument,
 `scripts/design/transport_dispersion.py` — a `scripts/design/` file: imports,
 says-what-it-is-for, jargon, docs-boundary. Before that, the `+2` over 3,665 was RUNG 0: two stream-contract gates in the
 EXISTING `tests/calibration/test_rna_anchor.py` (the `certified_flux` switch silences the stream

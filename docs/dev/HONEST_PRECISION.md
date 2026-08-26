@@ -285,3 +285,54 @@ it — the derivation-based teardown the owner asked for.
    ≥ silent on every in-scope stratum (the bar neither policy meets today) — that is what
    "honest precision" must buy, or the layer's honest size is smaller than what ships.
 4. **Converge and delete** per §3's teardown list, verdicts recorded, the losers' epitaphs kept.
+
+
+## 6. THE FOUNDATION SPEC and the code interrogation (owner architecture, ratified 2026-08-26)
+
+⭐⭐⭐ **The spec is CODE**: `src/rigel/calibration/messages/foundation.py` — read its module
+docstring as the architecture document. One Message type (three unspliced lanes = AXIOM 0's
+populations, two spliced lanes = certified RNA per strand; provenance is the field name, a
+spliced gDNA lane is inexpressible), one propagation-time `ReconcileModel` (the pass-through /
+integrate rule is the base template; `discount` is the propagation-variance override point), one
+solve-time `CreditModel` (`unspliced_credit` supplies ψ's Gaussian channels, `spliced_credit`
+the row-factor likelihood — the certified-flux treatment is an implementation of THAT). The base
+classes enforce what no implementation may break: sender publishes unchanged, no single-source
+amplification (refused at runtime), lane isolation in transit, pass-through at empty nodes.
+Gate: `tests/calibration/test_message_foundation.py`, every rule perturbation-verified.
+
+**The interrogation — where every existing piece stands relative to the spec:**
+
+| CONFORMS (the spec found, not invented) | | 
+|---|---|
+| `sweep.solve_chain` | IS the two-timepoint machine: scans = propagation time, deliver + final ψ = solve time; the backbone needs no change |
+| phase-A `build_region_init` | the own belief |
+| currency's 6-number hop state | the unspliced lanes' shape, exactly; its per-hop own-fuse is the reconcile template |
+| the flux stream's arithmetic (`rna_anchor`) | a `spliced_credit` implementation, one hop deep |
+| `inv_sj_lo/hi`, per-face sj counts | the spliced lanes' raw observations, already in the context |
+| `NeighbourState` source-indexing | enforces sender-publishes-unchanged by construction |
+| mismatch deflation (as a concept) | recipient-side credit — legal, belongs in `CreditModel` |
+
+| VIOLATES (repair = re-expression against the spec) | |
+|---|---|
+| relay's 10-array state, 3 precision streams, 20 operators | no committed message type; propagation and credit smeared together |
+| the frame pair reading `belief_fg` at both ends | the sender reading the recipient's belief — the recorded 57–77 % debt |
+| hop-time dampers (P1d, conservation, transfer var) deciding credit at the sender | credit belongs to the recipient; costs belong to `discount` |
+| `PsiMessage.lam_rows` as a side lane | transitional: the spliced claim outside the message; folds into the spliced lanes when the unified policy is built |
+
+| DISSOLVES (no counterpart in the spec) | |
+|---|---|
+| splice-in / splice-out operators | the spliced lanes carry flux natively; population bookkeeping becomes lane arithmetic |
+| the certified-RNA Gaussian channel + `ONE_SIDED_RNA` / `rna_one_sided` | subsumed by `spliced_credit` (a count likelihood, two-sided, honest) |
+| mass rescale | no place in the spec (currency already proved its structural absence) |
+| the three-estimator max as an unexplained vote | becomes one `spliced_credit` variance model (the §4b law) |
+| mode-fusion vs measurement precision streams | one precision per claim per lane |
+
+**The build order under the spec** (each an open problem solved separately, in the owner's
+sequence): ① the foundation — DONE, gated; ② the propagation variance model = ONE `discount`
+implementation, derived (the §4b moments law is the candidate for the unspliced lanes; hop
+distance and population licences enter here); ③ the solve = ONE `CreditModel`, built only once
+the architecture has settled — the owner's warning stands: the solve weighs structure, two
+messages and own belief, and is the hardest part. The unified policy then implements the
+backbone's existing `Policy` protocol by delegating scan steps to the `ReconcileModel` and
+deliver to the `CreditModel` — the shipped policies stay untouched until it beats them on the
+panel, per stratum, zero controls held.
