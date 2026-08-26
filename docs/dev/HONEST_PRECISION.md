@@ -468,3 +468,76 @@ the unspliced solve unable to beat silence at g05 even with honest yielding (⇒
 layer's honest size on stranded data is near-zero — the contest makes it official, and the
 architecture makes accepting it cheap: a solve granting zero precision IS silence, same code
 path).
+
+### 8a. THE CONVERGED SOLVE DESIGN (owner rulings, 2026-08-26 — supersedes the three open calls)
+
+**Rulings:** the refit collision needs NO ARBITER (population-honest prior precision, overridden
+by local evidence where it exists) ✓; the nascent input is the ARRIVING BLEND ✓; and the
+equality-vs-bound question dissolves into the owner's CONSERVATION design below (flank
+completeness survives as the licence that decides whether an absorber component exists).
+
+⭐⭐⭐ **THE OWNER'S CONSERVATION SOLVE — the unspliced/spliced integration as one constrained
+allocation.** A node's measured TOTAL abundance (counts/bp, composition-free — the pre-solve
+total) is conserved across SEVEN components competing for it:
+
+    spliced+  spliced−  unspliced-gDNA  unspliced-RNA+  unspliced-RNA−  NEW-RNA+  NEW-RNA−
+
+where NEW-RNA± is transcription STARTING/STOPPING at this node — licensed only where the
+adjacent boundary's terminus bits (TSS/TES) admit it, and structurally absent from any incoming
+message (a molecule born here cannot have been seen upstream).
+
+**The arithmetic (derived, no constants): a precision-weighted allocation under the conservation
+constraint.** Each component arrives as a claim (value μ_i, precision p_i) — from the two
+messages, fused per lane (independent witnesses). The node's total M is its own measurement.
+Minimise Σ p_i (x_i − μ_i)² subject to Σ x_i = M:
+
+    x_i = μ_i + (M − Σ_j μ_j) · (1/p_i) / Σ_j (1/p_j)      (clamped at 0; iterate if clamped)
+
+— the residual lands on components in proportion to their VARIANCE: strong components (the
+certified spliced lanes) hold their values, weak ones absorb the adjustment. ⭐ This is exactly
+the repair of the recorded equal-weight rescale pathologies: the relay's `mass_rescale` scales
+every component by one factor k (a weak claim amplified as much as a strong one — the recorded
+`k = 467,000×` failure), and currency's deleted mass-identity rescale amplified a weak source
+235,800×. The precision-weighted form cannot amplify a strong claim to satisfy a weak one.
+
+**Solvency unified — the owner's solvent/insolvent split is ONE formula:**
+
+* SOLVENT (population equal, no terminus): all seven precisions are finite; if the arriving
+  totals already match M the residual is zero and every component passes through untouched —
+  "nothing really to do", exactly as the owner said. No arbitration needed or performed.
+* INSOLVENT (terminus-licensed / incomplete flank): the NEW-RNA components exist with precision
+  → 0, so they absorb residual freely — the constraint is always satisfiable, the KNOWN
+  components keep their claimed values, and the solve is effectively in ABUNDANCE space
+  (counts/bp), never in share space. The owner's "must solve in abundance space when insolvent"
+  falls out structurally rather than as a mode switch.
+* The old Q1: a COMPLETE flank ⇒ no absorber ⇒ the spliced claim binds as an equality (the
+  anchor's winning form); an INCOMPLETE flank ⇒ an absorber exists ⇒ the spliced claim is
+  effectively a lower bound (currency's winning form). Both prior records drop out of one
+  mechanism.
+
+**Message synergy is native.** The owner's example (TA+ exons (1000,2000)+(5000,6000); TB−
+exons (5500,6000)+(9000,10000); region (5000,5500)): the left message carries the + strand's
+spliced/unspliced claims, the right message the − strand's — per-lane independent fusion means
+each lane takes whichever direction knows it, and the region becomes solvable from two
+half-informed messages. No mechanism needed beyond the lanes.
+
+**Definitions the owner asked to have plainly stated:**
+
+* A flank of an exon is COMPLETE when every molecule overlapping the exon that extends past
+  that flank MUST cross a counted splice junction there — no transcript terminus at the
+  boundary lets a molecule start or stop without splicing, and every annotated route is
+  counted (`structural_claims.exon_flank_left/right_complete`). INCOMPLETE = a terminus (or
+  unknown route) admits molecules the flux cannot see — the owner's "new transcription or other
+  unknown components", exactly.
+* SINGLE- vs MULTI-ROUTE flanks: the junctions at one flank are DISJOINT ROUTES (each molecule
+  crosses exactly one), so the SENDER fuses them by SUMMING rates — abundance
+  Σ_J (flux_J + ½/k)/A_J — with the delta-method counting precision
+  1/[Σ_J r_J²·trigamma(flux_J+½) / (Σ r_J)²] widened by the route-class premise (§4b: single-
+  route flanks measured near-zero extra spread — the two junctions share their geometry error;
+  multi-route flanks carry 3–10× more, the per-route opportunity error surfacing through the
+  mixture). All already derived; the sender-side fuse is the route-sum homecoming task.
+
+**Build-order impact:** the unspliced solve's core becomes THE ALLOCATION (replacing the plain
+channel conversion as the centerpiece); a TERMINUS-LOGIC task is added (deriving the NEW-RNA
+licences from the boundary bits — the bits exist, the licence table is the work); the yielding
+rule survives as the reception step BEFORE allocation (deflate what arrives, then allocate).
