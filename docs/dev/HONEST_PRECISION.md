@@ -558,6 +558,33 @@ to repair the drift — a fuse negotiates, the rescale overwrites. The upside is
 HALVED g05-unstranded-OFF, 331k → 150k), so the recorded path is: port the mass rescale first,
 then re-attempt continuity behind it. The remaining low-g gap to the relay (g00/g05, ~2–5×) is
 this pair plus `residual_level` (the anchor-imputed boundary gDNA level, still unported);
+**THE FACTORIAL (2026-08-26, owner-mandated A/B contract: each fix in isolation and
+together, full 16, never pooled):** both queued ports were built behind default-OFF flags
+(`FrameAwarePropagation._mass_rescale`, `AllocationSolve._residual_level`), gated fail-first.
+⭐ **They win in exactly complementary regimes**: `+residual` transforms LOW gDNA (g00-ss0.50-ON
+287k → 99k = 0.22× silence; g00-ss0.99-OFF 80k → 53k, BEATS silence; every g00 row) and
+capture-OFF broadly, but damages high-g-ON; `+rescale` wins HIGH-g capture-ON (g50-ss0.50-ON
+1.25M → 842k — beats the relay's 921k; g98-ss0.50-ON 3.9M → 1.68M; both stranded g50/g98-ON
+rows) but damages low-g. Three defects found and two repaired in-flight: the rescale licence
+was tightened to CURRENCY's supply test (gdna + EVERY admissible strand — the any-RNA form has
+a measured 73,728-fragment zero-control pathology); the residual claim was routed through the
+reception law (it is an imputation); and the residual's delivered precision now subtracts the
+estimator's own IGNORANCE POINT (1/trigamma(3), the Uniform branch's precision — a structural
+constant, not a tunable; kept every low-g win, cut g98-ss0.99-ON 1.20M → 863k). ⛔ **The two
+remaining defects, sharply localized**: (1) the rescale's low-g damage (g00 rows 3–13× under
+`+rescale`) — dissect WHERE the projection inflates before touching the licence again; (2) the
+residual's high-g-ON residue — the arriving gdna claim's precision is crushed by my
+premise-heavy hop damping (relay's counting-only damping keeps anchors' precision high, so its
+phi is sharp where mine hits the estimator's wide-sigma branches) — the TRANSPORT DAMPING
+derivation is the root fix, and `+both`'s interaction (residual's high-g damage halves under
+the rescale) confirms the coupling. The boundary-mining ranked list (three sources) is in this
+session's workflow records: HIGH = the splice-out continue-share w = nu/(nu+mu) (replaces my
+subtraction-form shed; needs residual_level), the per-strand TSS/TES three-case transport law
+(relay's measured 7× terminus crush is un-defended in unified), currency's supply test +
+struct-lock hygiene (ported/partial); MEDIUM = the pinned comparison frame for the DL gap, an
+AMBIG theta contrast; DO-NOT-PORT = the belief-coupled hop price, the belief flank frame, the
+tau channel (unportable under measurement citizenship — its predicted signature, a stranded
+deficit, is NOT currently observed);
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

@@ -289,6 +289,80 @@ def test_the_premise_is_charged_on_every_hop():
     assert np.isclose(out.precision, 10.0 / (1.0 + 10.0 * 0.3))
 
 
+def test_the_mass_rescale_projects_a_licensed_state_onto_the_local_total():
+    """THE MASS RESCALE (relay's scan-time conservation projection, ported behind the A/B
+    flag): at every licensed hop the running state must satisfy the local identity
+    sum_c rho_c*E_c = M — an OVERWRITE by k = M/S, never a fuse, so the message carries the
+    COMPOSITION while the level is re-measured at each licensed slot. Licensed = the incoming
+    state supplied both components, or the destination is structurally pure-gDNA. A bare gDNA
+    level at an ordinary slot passes unprojected."""
+    F, U, m = _hop_tables(log_r=0.0, v_r=1.0)
+    m._mass_rescale = True
+    t = m._tables[False]
+    t["E_g"] = np.array([1.0, 2.0])
+    t["E_r"] = np.array([1.0, 4.0])
+    t["M"] = np.array([1.0, 40.0])
+    t["own_g"] = np.zeros(2)
+    t["own_p"] = np.zeros(2)
+    t["own_n"] = np.zeros(2)
+    t["g1"] = np.array([False, False])
+    hop = U.Hop(src=0, dst=1, backward=False)
+    # the supply test: gdna plus EVERY admissible strand (the fixture admits only +)
+    t["fn"][1] = False
+    supplied = (
+        F.Message.silent()
+        .with_lane("unspliced_gdna", F.Claim(3.0, 10.0, 1.0))
+        .with_lane("unspliced_rna_pos", F.Claim(1.0, 5.0))
+    )
+    out = m.propagate(F.Message.silent(), supplied, hop)
+    vg = out.lane("unspliced_gdna").abundance
+    vp = out.lane("unspliced_rna_pos").abundance
+    # budget before: 3*2 + 1*4 = 10 against M = 40 => k = 4; ratios preserved
+    assert np.isclose(vg * 2.0 + vp * 4.0, 40.0), (vg, vp)
+    assert np.isclose(vg / vp, 3.0), "the projection preserves the composition"
+    bare = F.Message.silent().with_lane("unspliced_gdna", F.Claim(3.0, 10.0, 1.0))
+    out2 = m.propagate(F.Message.silent(), bare, hop)
+    assert np.isclose(out2.lane("unspliced_gdna").abundance, 3.0), (
+        "an unlicensed bare level passes unprojected"
+    )
+    t["g1"] = np.array([False, True])
+    out3 = m.propagate(F.Message.silent(), bare, hop)
+    assert np.isclose(out3.lane("unspliced_gdna").abundance * 2.0, 40.0), (
+        "a structurally pure-gDNA destination projects regardless: its whole mass IS gDNA"
+    )
+
+
+def test_the_residual_level_claims_the_unexplained_boundary_mass_as_rna():
+    """RESIDUAL_LEVEL (relay's boundary law, ported behind the A/B flag): everything the
+    imputed gDNA level cannot explain about a boundary's OWN observed mass is continuing RNA,
+    delivered on the RNA channel at near-counting precision. At a low-gDNA boundary the claim
+    is rho_nu ~= M/E_r — the positive half of the pincer the unified boundary solve lacked."""
+    F, U = _U()
+    m = _mini_solve()
+    m._residual_level = True
+    m._is_boundary = np.array([True])
+    m._M = np.full(1, 20.0)
+    m._n_slot = np.full(1, 20.0)
+    m._free_pos = np.array([True])
+    m._free_neg = np.array([False])
+    gdna = F.Claim(np.array([0.01]), np.array([10.0]), np.array([10.0]))
+    own, fwd, bwd = _msgs(F, claim=gdna)
+    out = m.solve_unspliced(own, fwd, bwd)
+    assert out.rna_prec[0][0] > 0, "the residual claim must reach the RNA channel"
+    # rho_nu ~= M/E_r = 20/1; the delivered mode is log(x*E_r/M) ~= log(1) = 0
+    assert abs(float(out.rna_mode[0][0])) < 0.35, float(out.rna_mode[0][0])
+    m2 = _mini_solve()
+    m2._is_boundary = np.array([True])
+    m2._M = np.full(1, 20.0)
+    m2._n_slot = np.full(1, 20.0)
+    m2._free_pos = np.array([True])
+    m2._free_neg = np.array([False])
+    own2, fwd2, bwd2 = _msgs(F, claim=gdna)
+    assert m2.solve_unspliced(own2, fwd2, bwd2).rna_prec[0][0] == 0.0, (
+        "with the flag off the RNA channel stays dead (the v1 baseline)"
+    )
+
+
 def test_conservation_components_are_the_claims_the_total_counted():
     """THE COVERAGE RULE: the allocation's components are exactly the claims whose fragments
     the total counted. A boundary's T contains its own certified splice flux, so its spliced

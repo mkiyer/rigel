@@ -278,9 +278,62 @@ class FrameAwarePropagation(PropagationModel):
     for now cost nothing, because their honest transit price is derived WITH the spliced solve.
     """
 
+    #: A/B flag (the factorial contract: each fix priced in isolation and together):
+    #: relay's scan-time conservation projection at licensed hops.
+    _mass_rescale = False
+
     def __init__(self):
         self._tables = None
         self._premise = 0.0
+
+    def propagate(self, own, incoming, hop=None):
+        out = super().propagate(own, incoming, hop)
+        if not self._mass_rescale or hop is None:
+            return out
+        # THE MASS RESCALE (relay's scan-time conservation projection, ported): at a licensed
+        # hop the running state must satisfy the local identity sum_c rho_c*E_c = M — an
+        # OVERWRITE by k = M/S, never a fuse (the slot's observed mass is a fact), so the
+        # message carries the COMPOSITION forward while the LEVEL is re-measured at every
+        # licensed slot. This is what makes any level-transport rule safe: capture steps,
+        # enrichment misjudgments and stale anchors are erased one hop later. Licensed = the
+        # incoming state supplied both components (a composition), or the destination is
+        # structurally pure-gDNA (its whole observed mass IS gDNA — AXIOM 0). Components the
+        # message did not supply enter the budget at the destination's own density.
+        t = self._tables[hop.backward]
+        i = hop.dst
+        g = out.lane("unspliced_gdna")
+        p_ = out.lane("unspliced_rna_pos")
+        n_ = out.lane("unspliced_rna_neg")
+        # THE SUPPLY TEST (currency's form, the sharper of the two donors): the state must
+        # carry precision on the gDNA lane AND on EVERY strand the destination admits — else
+        # the identity has no right-hand side and the rescale would scale a PARTIAL claim up
+        # to account for mass its missing components hold (measured: 73,728 invented gDNA
+        # fragments at a zero-gDNA control under the any-RNA-precision form).
+        supplied = (
+            float(incoming.unspliced_gdna.precision) > 0.0
+            and (float(incoming.unspliced_rna_pos.precision) > 0.0 or not bool(t["fp"][i]))
+            and (float(incoming.unspliced_rna_neg.precision) > 0.0 or not bool(t["fn"][i]))
+        )
+        if not (supplied or bool(t["g1"][i])):
+            return out
+        eg, er, mass = float(t["E_g"][i]), float(t["E_r"][i]), float(t["M"][i])
+        vg = float(g.abundance) if float(g.precision) > 0.0 else float(t["own_g"][i])
+        vp = float(p_.abundance) if float(p_.precision) > 0.0 else float(t["own_p"][i])
+        vn = float(n_.abundance) if float(n_.precision) > 0.0 else float(t["own_n"][i])
+        budget = vg * eg + (vp + vn) * er
+        if budget <= 1e-9 or mass <= 1e-9:
+            return out
+        k = mass / budget
+        for lane, claim in (
+            ("unspliced_gdna", g),
+            ("unspliced_rna_pos", p_),
+            ("unspliced_rna_neg", n_),
+        ):
+            if float(claim.precision) > 0.0:
+                out = out.with_lane(
+                    lane, Claim(float(claim.abundance) * k, claim.precision, claim.measured)
+                )
+        return out
 
     def prepare(self, ctx) -> None:
         from .currency import enrichment_ratio, premise_logvar
@@ -301,6 +354,14 @@ class FrameAwarePropagation(PropagationModel):
                 "fp": fp,
                 "fn": fn,
                 "src": src,
+                # the mass-rescale banks: the local conservation identity's ingredients
+                "E_g": np.asarray(ctx.eff_gdna_global, np.float64),
+                "E_r": np.asarray(ctx.eff_rna, np.float64),
+                "M": np.asarray(ctx.mass, np.float64),
+                "own_g": np.asarray(ctx.own.rho_g, np.float64),
+                "own_p": np.asarray(ctx.own.rho_pos, np.float64),
+                "own_n": np.asarray(ctx.own.rho_neg, np.float64),
+                "g1": ~fp & ~fn,
             }
         for backward in (False, True):
             t = self._tables[backward]
@@ -554,6 +615,94 @@ class AllocationSolve(SolveModel):
                 p = np.where(contra, 0.0, p)
                 ms = np.where(contra, 0.0, ms)
             val[lane], prec[lane], meas[lane] = v, p, ms
+        if self._residual_level:
+            # RESIDUAL_LEVEL (relay's boundary law, ported): everything the imputed gDNA level
+            # cannot explain about a boundary's OWN observed mass is continuing RNA — the
+            # generic density deconvolution with the gDNA prior supplied by the message. At a
+            # low-gDNA boundary rho_nu -> M/E_r at near-counting precision: the positive half
+            # of the pincer (the anchored near-zero gDNA level is the negative half). The
+            # split across admissible strands follows the arriving RNA values, half each when
+            # both are admissible and unclaimed; delivered as a MEASUREMENT (the donor feeds
+            # its mode and measurement streams alike — the level is anchored to the slot's own
+            # counted mass).
+            from .variance import residual_level
+
+            b = self._is_boundary
+            pg_arr = prec["unspliced_gdna"]
+            with np.errstate(divide="ignore"):
+                v_g = np.where(pg_arr > 0, 1.0 / np.where(pg_arr > 0, pg_arr, 1.0), np.inf)
+            rho_nu, v_log, _v_lin = residual_level(
+                self._M,
+                self._n_slot,
+                val["unspliced_gdna"],
+                self._E["unspliced_gdna"],
+                self._E["unspliced_rna_pos"],
+                v_g,
+            )
+            with np.errstate(divide="ignore"):
+                p_nu = np.where(
+                    np.isfinite(v_log) & (v_log > 0), 1.0 / np.maximum(v_log, 1e-12), 0.0
+                )
+            # deliver only the information ABOVE the estimator's own ignorance point: the
+            # sigma_f >> 1 branch returns f_R ~ Uniform(0,1) at k = 3 — ZERO knowledge, by the
+            # estimator's own declaration — and its precision 1/trigamma(3) must not arrive at
+            # psi as counted evidence (measured: half-the-mass-is-RNA claims at every deep
+            # gDNA-rich boundary whose imputed gdna claim arrived weak). The subtraction point
+            # is the estimator's structure, not a tunable.
+            from scipy.special import polygamma
+
+            p_nu = np.maximum(p_nu - 1.0 / float(polygamma(1, 3.0)), 0.0)
+            # THE RESIDUAL CLAIM IS AN IMPUTATION and passes through the same reception law
+            # as any arriving claim: at a slot with own composition evidence a disagreeing
+            # residual is capped at ~1/G^2 (the uninformative f_R = 1/2 branch cannot arrive
+            # as a confident measurement against sighted strata); a composition-blind slot
+            # passes it untouched — exactly where the claim wins.
+            vo_r = np.asarray(own.unspliced_rna_pos.abundance, np.float64) + np.asarray(
+                own.unspliced_rna_neg.abundance, np.float64
+            )
+            seen_r = np.isfinite(self._v_own_r)
+            both_r = (p_nu > 0) & (rho_nu > 0) & (vo_r > 0) & seen_r
+            g2r = np.zeros(rho_nu.shape[0])
+            g2r[both_r] = np.log(rho_nu[both_r] / vo_r[both_r]) ** 2
+            cap_r = np.maximum(g2r - np.where(seen_r, self._v_own_r, 0.0), 0.0)
+            with np.errstate(divide="ignore"):
+                p_nu = np.where(
+                    both_r & (cap_r > 0),
+                    1.0
+                    / np.maximum(
+                        np.where(p_nu > 0, 1.0 / np.where(p_nu > 0, p_nu, 1.0), np.inf), cap_r
+                    ),
+                    p_nu,
+                )
+            live_nu = b & (p_nu > 0)
+            vp0, vn0 = val["unspliced_rna_pos"], val["unspliced_rna_neg"]
+            tot0 = vp0 + vn0
+            share_p = np.where(
+                self._free_pos & ~self._free_neg,
+                1.0,
+                np.where(
+                    ~self._free_pos & self._free_neg,
+                    0.0,
+                    np.where(tot0 > 0, vp0 / np.where(tot0 > 0, tot0, 1.0), 0.5),
+                ),
+            )
+            for lane, sh, free in (
+                ("unspliced_rna_pos", share_p, self._free_pos),
+                ("unspliced_rna_neg", 1.0 - share_p, self._free_neg),
+            ):
+                m_ = live_nu & free & (sh > 0)
+                add_v = rho_nu * sh
+                add_p = p_nu * sh
+                v0, p0, ms0 = val[lane], prec[lane], meas[lane]
+                pf = p0 + np.where(m_, add_p, 0.0)
+                vf = np.where(
+                    m_ & (pf > 0),
+                    (p0 * v0 + add_p * add_v) / np.where(pf > 0, pf, 1.0),
+                    v0,
+                )
+                val[lane] = vf
+                prec[lane] = np.where(m_, pf, p0)
+                meas[lane] = np.where(m_, ms0 + add_p, ms0)
         # THE ALLOCATION — per slot, the five claims against the node's model-free total.
         # THE UNSEEN-COMPONENT ABSORBER: a deficit at a node whose annotation admits an RNA
         # strand NOBODY has evidence about (silent lane, admissible bit set) belongs to that
@@ -595,6 +744,8 @@ class AllocationSolve(SolveModel):
         return PsiMessage(gdna_mode=mg, gdna_prec=pg, rna_mode=(mp_, mn_), rna_prec=(pp_, pn_))
 
     _spliced_enabled = True
+    #: A/B flag (the factorial contract): relay's residual_level at boundary solves.
+    _residual_level = False
 
     def solve_spliced(self, own, forward, backward):
         """THE SPLICED LAW, lane-native (commit three): flank rates from the two arriving
