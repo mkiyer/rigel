@@ -204,13 +204,6 @@ class RegionGeometry:
     #: inherits it). Raw observation: no pseudocount — a zero-flux face reads exactly 0.
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
-    #: ⭐ THE SUPPORT PROBABILITY, per component (2026-08-27): ``P_c(w <= ell)`` at a REGION —
-    #: the exact factor by which its reciprocal-opportunity total under-reads the density (the
-    #: contract above: the cancellation is conditional on its own support) — and exactly 1 at a
-    #: BOUNDARY, whose crossing form is model-free. Published so a transport can DEBIAS the
-    #: enrichment frame per lane instead of pricing a known, computable bias as variance.
-    support_prob_gdna: np.ndarray
-    support_prob_rna: np.ndarray
     #: int64[n_slots, 2] — how many routes each face carries (the §-recorded route-structure
     #: class key: single-route pairs measured near-zero premise, multi-route 3–10×)
     route_count_lo: np.ndarray
@@ -338,16 +331,6 @@ def build_region_geometry(
     inv_sj_hi = np.zeros((n, 2), dtype=np.float64)
     route_rate_lo = np.zeros((n, 2), dtype=np.float64)
     route_rate_hi = np.zeros((n, 2), dtype=np.float64)
-    # the support probabilities: CDF_c(ell) at regions under each component's own pmf, 1 at
-    # boundaries — the frame factor of the region-form reciprocal-opportunity bank
-    support_prob_gdna = np.ones(n, dtype=np.float64)
-    support_prob_rna = np.ones(n, dtype=np.float64)
-    _sz = np.asarray(region_arrays.region_size_bp, np.int64)
-    _ell = _sz[np.clip(obj, 0, _sz.shape[0] - 1)]
-    for _pmf, _out in ((gdna_fl_pmf, support_prob_gdna), (rna_fl_pmf, support_prob_rna)):
-        _cdf = np.cumsum(np.asarray(_pmf, np.float64))
-        _idx = np.clip(_ell[is_region], 0, _cdf.shape[0] - 1)
-        _out[is_region] = np.where(_ell[is_region] >= _cdf.shape[0], 1.0, _cdf[_idx])
     route_count_lo = np.zeros((n, 2), dtype=np.int64)
     route_count_hi = np.zeros((n, 2), dtype=np.int64)
     ej_lo = np.zeros((n, 2), dtype=np.float64)
@@ -422,8 +405,6 @@ def build_region_geometry(
         eff_sj_hi=ej_hi,
         route_rate_lo=route_rate_lo,
         route_rate_hi=route_rate_hi,
-        support_prob_gdna=support_prob_gdna,
-        support_prob_rna=support_prob_rna,
         route_count_lo=route_count_lo,
         route_count_hi=route_count_hi,
     )

@@ -465,15 +465,14 @@ class CalibrationConfig:
     message_propagation: bool = True
 
     #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
-    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own switch).
-    #: ⛔ `"currency"` and the unified bridge were DELETED 2026-08-27 (owner tear-down: the new
-    #: policy is rebuilt methodically on `messages.policy.MessagePolicy` — the skeleton — with
-    #: silent and relay as the comparison baselines).
-    #: ⛔ `"fanout"` was DELETED 2026-08-24 — measured DOMINATED once the RNA-anchored evidence
-    #: factor (`rna_anchor`) gave its destination slots own evidence (`DESIGN.md` §6b.2).
-    #: Consulted only when `message_propagation` is True. ⚠ The A/B between the policies is THIS
-    #: one value, which is what keeps a rebuild from touching the relay (`RelayPolicy` is not
-    #: modified, so nothing that works can break).
+    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own
+    #: switch), `"silent"` (:class:`~rigel.calibration.messages.silent.SilentPolicy`, the
+    #: measured floor — the same policy `message_propagation = False` installs) or `"message"`
+    #: (:class:`~rigel.calibration.messages.policy.MessagePolicy`, the foundation-spec runner).
+    #: ⛔ An unknown name RAISES: an arm that silently runs a policy other than the one it names
+    #: is a benchmark that cannot be trusted.
+    #: ⚠ The A/B between the policies is THIS one value, which is what keeps development off the
+    #: relay — `RelayPolicy` is not modified, so nothing that works can break.
     message_policy: str = "relay"
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA

@@ -734,27 +734,6 @@ def test_route_rates_are_the_sum_of_per_route_rates(geometry, parts):
     np.testing.assert_allclose(np.asarray(geometry.route_rate_hi), want_hi, rtol=1e-12)
 
 
-def test_support_probability_is_the_pmf_cdf_at_the_region_length(geometry, parts):
-    """THE SUPPORT PROBABILITY (the truncation debias's input, 2026-08-27): a REGION's
-    reciprocal-opportunity total reads rho * P(w <= ell) — a per-component pmf functional
-    this dataclass's own contract states — so the geometry publishes P per component:
-    P_c = CDF_c(ell) at regions (each component under ITS OWN pmf), exactly 1 at boundaries
-    (the crossing form is model-free). Re-derived here from the pmfs by an independent
-    implementation."""
-    _payload, ra, _substrate, chain, _sj = parts
-    kind = np.asarray(chain.kind)
-    obj = np.asarray(chain.obj_idx, np.int64)
-    is_region = kind == REGION
-    sz = np.asarray(ra.region_size_bp, np.int64)
-    ell = sz[np.clip(obj, 0, sz.shape[0] - 1)]
-    for pmf, got in ((GDNA_PMF, geometry.support_prob_gdna), (RNA_PMF, geometry.support_prob_rna)):
-        cdf = np.cumsum(np.asarray(pmf, np.float64))
-        want = np.ones(kind.shape[0])
-        idx = np.clip(ell[is_region], 0, cdf.shape[0] - 1)
-        want[is_region] = np.where(ell[is_region] >= cdf.shape[0], 1.0, cdf[idx])
-        np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
-
-
 def test_route_rate_dominates_the_pooled_ratio(geometry):
     """The property the round-2 review proved: the sum of per-route rates is ≥ the pooled
     ratio-of-sums at every face (equality iff every route agrees), so the pooled form's k-route

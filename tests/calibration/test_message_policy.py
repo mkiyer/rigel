@@ -95,6 +95,15 @@ def sweep_inputs(tmp_path_factory):
         args=(chain, statics, geometry, belief, region_arrays),
         kw=kw,
         flux=shipped_flux,
+        payload=payload,
+        calibrate_kw=dict(
+            region_arrays=ra,
+            strand_model=strand_model,
+            gdna_fl_pmf=fl.gdna_pmf,
+            rna_fl_pmf=fl.rna_pmf,
+            sj=build_sj_geometry_arrays(index),
+            boundary_flags=build_boundary_flags_array(index),
+        ),
     )
 
 
@@ -154,6 +163,49 @@ def test_flux_rows_solve_is_byte_identical_to_the_channels_off_relay(sweep_input
     )
     for f in a:
         np.testing.assert_array_equal(a[f], b[f], err_msg=f)
+
+
+def test_the_policy_name_selects_the_policy(sweep_inputs):
+    """⛔ AN UNREADABLE KNOB IS WORSE THAN NO KNOB. `message_policy` must actually select the
+    policy `calibrate` installs, and an unknown name must RAISE rather than silently fall back
+    — an arm that runs a different policy than it names is exactly the defect a benchmark
+    cannot see. (For a period after the tear-down the knob was read by nothing and every value
+    yielded the relay.)"""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.policy import MessagePolicy
+    from rigel.calibration.messages.relay import RelayPolicy as _Relay
+    from rigel.calibration.messages.silent import SilentPolicy as _Silent
+    from rigel.config import CalibrationConfig
+
+    calibrate_mod = sys.modules["rigel.calibration.calibrate"]
+    seen: list = []
+    orig = SW.solve_chain
+
+    def spy(*a, **kw):
+        seen.append(kw.get("policy"))
+        return orig(*a, **kw)
+
+    def installed(**cfg):
+        seen.clear()
+        calibrate_mod.solve_chain = spy
+        try:
+            calibrate_mod.calibrate(
+                payload=sweep_inputs["payload"],
+                config=_dc.replace(CalibrationConfig(), **cfg),
+                **sweep_inputs["calibrate_kw"],
+            )
+        finally:
+            calibrate_mod.solve_chain = orig
+        assert seen, "the spy never fired"
+        return seen[0]
+
+    assert isinstance(installed(message_policy="relay"), _Relay)
+    assert isinstance(installed(message_policy="silent"), _Silent)
+    assert isinstance(installed(message_policy="message"), MessagePolicy)
+    assert isinstance(installed(message_propagation=False), _Silent)
+    with pytest.raises(ValueError, match="unknown message_policy"):
+        installed(message_policy="no_such_policy")
 
 
 def test_own_messages_carry_the_node_banks(sweep_inputs):

@@ -356,7 +356,7 @@ a threshold here has been refused three times (TRAPS: a-threshold-on-a-fitted-re
 ceiling to measure first is what a PERFECT per-component `r_g` at every hop is worth, re-solved.
 
 **3.5e ⭐⭐⭐ THE TWO OPERATORS AND THE TERMINUS, WORKED IN NUMBERS — owner's derivation, 2026-08-19.**
-(The ruling is `DESIGN.md` §0c.0; this is the arithmetic the third policy is built against, and the
+(The ruling is `DESIGN.md` §0c.0. ⚠ The policy this was built against was DELETED 2026-08-27 — the derivation is kept so it is not re-derived, not a description of shipped behaviour, and the
 toy rungs are checked against it. A message is the three DENSITIES `{gDNA, RNA+, RNA−}`, always.)
 
 ⭐ **(i) SPLICE OUT — exon REGION → `exon|intron` BOUNDARY.** Single-stranded, + strand. The exon's
@@ -471,8 +471,8 @@ comparison is between an object that can hold mature RNA and one that cannot
 and `E_r` remain fragment-length models, so any statement about a COMPONENT's density still uses one. What
 §3.5g buys is that the TOTAL at a **BOUNDARY** — and any enrichment ratio built between boundaries — does
 not. ⛔ At a REGION the shipped bank's `P(w ≤ ℓ)` factor means every REGION↔BOUNDARY ratio still carries a
-pmf functional with no enrichment in it (the chain alternates REGION/BOUNDARY, so under the currency
-policy that is every hop).
+pmf functional with no enrichment in it (the chain alternates REGION/BOUNDARY, so this is
+every hop).
 
 **3.5h ⭐⭐⭐ THE PREMISE VARIANCE — why an imputation must cost something on every hop.**
 (The ruling is `DESIGN.md` §0c.0c.)

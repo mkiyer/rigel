@@ -1,104 +1,41 @@
 ##gtf-version 2.2
 ##description THE METHOD-DEVELOPMENT TEST TRANSCRIPTOME — hand-edited, one transcript at a time.
 ##
-## ⭐⭐⭐ THIS FILE IS THE BENCHMARK. Owner, 2026-08-19: "over the course of this method development we
-## will add transcripts to a 'test chromosome'. Collectively, the test reference chromosome, test
-## transcript GTF, and test abundances comprise a critical method development benchmark."
+## ⭐⭐⭐ THIS FILE IS THE BENCHMARK, AND IT IS EMPTY ON PURPOSE (owner, 2026-08-27). The message
+## policy is developed against a chromosome the owner designs transcript by transcript: add one
+## structure, check the policy solves it AND everything already here, then add the next.
 ##
-## ⛔ IT STARTED AT ZERO TRANSCRIPTS AND GROWS ONE STRUCTURE AT A TIME. Every addition is a deliberate
-## step in the message-propagation policy's development: the policy must solve the new transcript AND
-## everything already here (`docs/dev/PLAN_message_propagation_rebuild.md`).
+## ⛔ IT WAS CLEARED ON 2026-08-27 and starts again at ZERO transcripts. The previous 42 are in git
+## history (`git log -- scripts/sim/test_reference/test_chr.gtf`) if a structure is ever wanted back.
 ##
-## ⭐ The FASTA is DERIVED from this file, never hand-edited — `build_test_reference.py` generates the
-## 1,000,000 bp chromosome from a fixed seed and injects a GT..AG motif at every intron this GTF
-## declares, so the sequence can never disagree with the annotation.
+## ── HOW TO ADD A TRANSCRIPT ───────────────────────────────────────────────────────────────────
 ##
-## ⭐ NAMES CARRY THE SIZE, AND THE SIZE IS THE SPLICED LENGTH. `T3_1p_SE_5KB` is 5,000 bp of exon.
-## ⚠ Two arrived misdescribing themselves and were corrected on the owner's instruction (2026-08-19):
-##      T3_1p_SE_4BP -> T3_1p_SE_5KB   (5,000 bp, not 4)
-##      T3_2p_SE_4BP -> T3_2p_SE_2KB   (2,000 bp, not 4)
-##      T6_3exon_2kb -> T6_3exon_3KB   (1,000 + 500 + 1,500 = 3,000 bp, not 2,000)
+## 1. Add one `exon` line per exon, here. GTF is 1-based and end-inclusive:
 ##
-## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates.
-##   test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "gX"; transcript_id "TX";
+##      test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "G1"; transcript_id "T1";
 ##
-## ⚠ Abundances live in `test_abundances.tsv`, capture probes in `test_probes.bed`.
+##    Exons of one transcript must not overlap, every intron must be at least 4 bp (it needs room
+##    for a GT..AG motif), and every coordinate must fall inside the 1,000,000 bp chromosome.
 ##
-## ── STAGE 1: SINGLE-EXON TRANSCRIPTS (owner, 2026-08-19) ────────────────────────────────────────
-test_chr	rigel_test	exon	10001	11000	.	+	.	gene_id "G1"; transcript_id "T1p_SE_1KB";
-test_chr	rigel_test	exon	5001	6000	.	+	.	gene_id "G1cap"; transcript_id "T1p_cap_SE_1KB";
-test_chr	rigel_test	exon	15001	15050	.	+	.	gene_id "G2"; transcript_id "T2p_SE_50BP";
-test_chr	rigel_test	exon	20001	25000	.	+	.	gene_id "G3"; transcript_id "T3_1p_SE_5KB";
-test_chr	rigel_test	exon	22001	24000	.	+	.	gene_id "G3"; transcript_id "T3_2p_SE_2KB";
+## 2. Add its sampling weights to `test_abundances.tsv` — one row per transcript_id. The builder
+##    REFUSES a transcript with no abundance row and an abundance row with no transcript.
 ##
-## ── STAGE 2: SPLICED TRANSCRIPTS, MINUS STRAND (owner, 2026-08-19) ──────────────────────────────
-## ⭐ The first introns on this chromosome, so the first splice junctions — and therefore the first
-## CERTIFIED RNA (a spliced fragment cannot be gDNA) and the first synthetic NASCENT ENTITIES, one
-## single-exon transcript spanning each of these three.
-test_chr	rigel_test	exon	30001	31000	.	-	.	gene_id "G4"; transcript_id "T4_cap_2exon_2KB";
-test_chr	rigel_test	exon	34001	35000	.	-	.	gene_id "G4"; transcript_id "T4_cap_2exon_2KB";
-test_chr	rigel_test	exon	36001	37000	.	-	.	gene_id "G5"; transcript_id "T5_nocap_2exon_2KB";
-test_chr	rigel_test	exon	39001	40000	.	-	.	gene_id "G5"; transcript_id "T5_nocap_2exon_2KB";
-test_chr	rigel_test	exon	45001	46000	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";
-test_chr	rigel_test	exon	48001	48500	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";
-test_chr	rigel_test	exon	51001	52500	.	-	.	gene_id "G6"; transcript_id "T6_3exon_3KB";
+## 3. Optionally add capture probes to `test_probes.bed` (BED12, 0-based half-open).
 ##
-## ── STAGE 3: THE STRUCTURES THE LADDER HAS AND STAGES 1-2 LACKED (owner's gap list, 2026-08-19) ──
-## RelayPolicy HELPS on all 8 stage-1/2 scenarios yet COSTS the three in-scope strata 1.4-1.7x on the
-## 16-condition ladder — so whatever it gets wrong was not yet represented here. Stage 3 adds the
-## structures named to close that gap: overlapping genes on opposite strands, alternate TSS/TES, and
-## exons many hops from any measured gDNA.
+## 4. Rebuild everything derived, then simulate and cache — `docs/TESTING.md` §0a has the commands.
 ##
-## ── S3a: ANTISENSE OVERLAP — two single-exon genes, opposite strands, 1 kb overlap ──────────────
-## The minimal per-strand population structure: [60001,61000) exon+ only, [61001,62000) BOTH strands,
-## [62001,63000) exon- only. The boundary at 61000|61001 is T8n's TES- crossed by T7p's RNA+; the one
-## at 62000|62001 is T7p's TES+ crossed by T8n's RNA-. No probes.
-test_chr	rigel_test	exon	60001	62000	.	+	.	gene_id "G7"; transcript_id "T7p_SE_2KB";
-test_chr	rigel_test	exon	61001	63000	.	-	.	gene_id "G8"; transcript_id "T8n_SE_2KB";
+## ⭐ NASCENT RNA NEEDS NO DECLARATION: `rigel index` creates a single-exon nascent entity spanning
+## each MULTI-EXON transcript. Give it weight through that transcript's `nrna_abundance` column.
 ##
-## ── S3b: ALTERNATE TSS/TES — one gene, two + isoforms ───────────────────────────────────────────
-## T9b's TSS at 72501 sits INSIDE T9a's intron (B exon|intron[term] — the hop type that carried 209k
-## of the ladder's composition error); T9b's donor at 73000|73001 is a sj inside that intron; the
-## acceptor at 74000|74001 is SHARED; T9b's TES at 75000 sits INSIDE T9a's exon 2 (B exon|exon[term]).
-## One probe on the shared exon start (test_probes.bed).
-test_chr	rigel_test	exon	70001	71000	.	+	.	gene_id "G9"; transcript_id "T9a_2exon_3KB";
-test_chr	rigel_test	exon	74001	76000	.	+	.	gene_id "G9"; transcript_id "T9a_2exon_3KB";
-test_chr	rigel_test	exon	72501	73000	.	+	.	gene_id "G9"; transcript_id "T9b_2exon_1500BP";
-test_chr	rigel_test	exon	74001	75000	.	+	.	gene_id "G9"; transcript_id "T9b_2exon_1500BP";
+## ⚠ κ (the strand-specificity model) IS FITTED FROM SPLICED READS, so a transcriptome of only
+## single-exon transcripts cannot calibrate — `calibrate` raises `CalibrationStrandError`. At least
+## one multi-exon transcript with real depth is required before a benchmark run means anything.
 ##
-## ── S3c: THE DEEP EXONIC CORRIDOR — 10 staggered single-exon tiles, + strand ────────────────────
-## 3 kb tiles every 2 kb: 80001-101000 is 21 kb of CONTINUOUS exon with 18 internal TSS/TES terminus
-## boundaries (B exon|exon[term]) and NO gDNA-measuring object inside — mid-corridor is ~18 hops from
-## the nearest measured gDNA. The ladder puts 23-29 % of imputed mass >= 9 hops out; stages 1-2 put
-## every exon within 2. Every internal boundary is crossed by exactly one tile's RNA. No probes.
-test_chr	rigel_test	exon	80001	83000	.	+	.	gene_id "G10"; transcript_id "T10_tile01_SE_3KB";
-test_chr	rigel_test	exon	82001	85000	.	+	.	gene_id "G10"; transcript_id "T10_tile02_SE_3KB";
-test_chr	rigel_test	exon	84001	87000	.	+	.	gene_id "G10"; transcript_id "T10_tile03_SE_3KB";
-test_chr	rigel_test	exon	86001	89000	.	+	.	gene_id "G10"; transcript_id "T10_tile04_SE_3KB";
-test_chr	rigel_test	exon	88001	91000	.	+	.	gene_id "G10"; transcript_id "T10_tile05_SE_3KB";
-test_chr	rigel_test	exon	90001	93000	.	+	.	gene_id "G10"; transcript_id "T10_tile06_SE_3KB";
-test_chr	rigel_test	exon	92001	95000	.	+	.	gene_id "G10"; transcript_id "T10_tile07_SE_3KB";
-test_chr	rigel_test	exon	94001	97000	.	+	.	gene_id "G10"; transcript_id "T10_tile08_SE_3KB";
-test_chr	rigel_test	exon	96001	99000	.	+	.	gene_id "G10"; transcript_id "T10_tile09_SE_3KB";
-test_chr	rigel_test	exon	98001	101000	.	+	.	gene_id "G10"; transcript_id "T10_tile10_SE_3KB";
+## ⭐ THE FASTA IS DERIVED FROM THIS FILE, never hand-edited: `build_test_reference.py` generates the
+## 1,000,000 bp chromosome from a fixed seed and injects a GT..AG motif at every intron declared
+## here, so the sequence can never disagree with the annotation.
 ##
-## ── S3d: THE OWNER'S LOCUS, VERBATIM (the owner's worked example, 2026-08-19), at offset +110000 ──
-## TA+ (1000,2000)(3000,5000)(10000,12000) · TB+ (3100,5000)(10000,12000) · TC+ (4000,5000)(11000,14000)
-## TD- (7000,8000) · TE- (2500,20000) · TF+ (4000,5000)(10000,11000)(15000,16000)(22000,25000)
-## "Overlapping transcripts in opposite directions, alternate TSS and TES sites. Very complex."
-## TE- blankets the + strand introns, so NO intron here measures gDNA; TD- is nested inside TE-'s
-## exon; TC and TF share a TSS inside TA's exon; TC's acceptor and TF's donor meet at 121000|121001;
-## TA and TB share exon 3 exactly. Probes on the shared exons (test_probes.bed).
-test_chr	rigel_test	exon	111001	112000	.	+	.	gene_id "G11"; transcript_id "TAp_3exon_5KB";
-test_chr	rigel_test	exon	113001	115000	.	+	.	gene_id "G11"; transcript_id "TAp_3exon_5KB";
-test_chr	rigel_test	exon	120001	122000	.	+	.	gene_id "G11"; transcript_id "TAp_3exon_5KB";
-test_chr	rigel_test	exon	113101	115000	.	+	.	gene_id "G11"; transcript_id "TBp_2exon_3900BP";
-test_chr	rigel_test	exon	120001	122000	.	+	.	gene_id "G11"; transcript_id "TBp_2exon_3900BP";
-test_chr	rigel_test	exon	114001	115000	.	+	.	gene_id "G11"; transcript_id "TCp_2exon_4KB";
-test_chr	rigel_test	exon	121001	124000	.	+	.	gene_id "G11"; transcript_id "TCp_2exon_4KB";
-test_chr	rigel_test	exon	114001	115000	.	+	.	gene_id "G11"; transcript_id "TFp_4exon_6KB";
-test_chr	rigel_test	exon	120001	121000	.	+	.	gene_id "G11"; transcript_id "TFp_4exon_6KB";
-test_chr	rigel_test	exon	125001	126000	.	+	.	gene_id "G11"; transcript_id "TFp_4exon_6KB";
-test_chr	rigel_test	exon	132001	135000	.	+	.	gene_id "G11"; transcript_id "TFp_4exon_6KB";
-test_chr	rigel_test	exon	112501	130000	.	-	.	gene_id "G12"; transcript_id "TEn_SE_17500BP";
-test_chr	rigel_test	exon	117001	118000	.	-	.	gene_id "G13"; transcript_id "TDn_SE_1KB";
+## ⭐ NAME TRANSCRIPTS FOR WHAT THEY ARE. The convention that worked: strand, structure and SPLICED
+## length — e.g. `T1p_SE_1KB` is a + strand single-exon transcript of 1,000 bp of exon.
+##
+## ── TRANSCRIPTS (none yet — add below this line) ───────────────────────────────────────────────

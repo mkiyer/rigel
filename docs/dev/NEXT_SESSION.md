@@ -1,101 +1,56 @@
-# NEXT SESSION — the reference location is DELETED and priced; build the learned-enrichment channel, then the weak-message re-contrast
+# NEXT SESSION — the state after the 2026-08-27 tear-down
 
-    ⚠ **A DEV DOC, and it is a HANDOFF.** Read it, do the work, MOVE what settles into the
-    permanent docs, and DELETE this file in the same session. (Precedent: eight previous
-    `NEXT_SESSION.md` files were each deleted per this instruction.)
+    ⚠ **A DEV DOC, and it is a HANDOFF.** It describes where things stand; it does not tell you
+    what to build. MOVE anything that settles into the permanent docs and DELETE this file.
 
-## ① WHAT THE 2026-08-24 SESSION SHIPPED (working tree; the owner drives the commit)
+## What this session did: it removed code, and left one skeleton
 
-1. ⛔⛔⛔ **THE REFERENCE LOCATION IS DELETED FROM `src/`** (owner ruling, in-session):
-   `_location_term`, `structural_reference_location`, `measured_reference_location`, both config
-   flags, the `location` member of `CompositionPriors`, and the threading through
-   `calibrate`/`sweep`. Three gate files deleted with it; one strict xfail died with them — its
-   content (the relay transports a structural claim across a population change) stays recorded as
-   a relay-rebuild constraint (`DESIGN.md` §0c.2/§6b.1). Ruling + price recorded in **`DESIGN.md`
-   §6b.1**; the stale ROADMAP/EQUATIONS mentions repaired; goldens updated (magnitudes: gdna
-   scenarios < 0.03 fragments; nascent scenarios up to 4.5 fragments toward MORE RNA — the
-   deleted `m = 0.75` was suppressing intron RNA). **Suite: 0 failed / 3,664 / 8 xfail**
-   (CLAUDE.md's baseline line carries the full accounting). `preflight` ✔; the three touched
-   instruments' `--self-test` all pass; `ruff` clean.
-2. **The measured price, 0.8.0's own metric** (`calibration_vs_oracle.py`, all 16, same-session
-   before/after — the table is in `DESIGN.md` §6b.1): stranded × capture-ON +4–8 %, smaller rows
-   up to +42 % (`g98` ss.99 OFF region), `g00` capture-OFF IMPROVES, `g00` capture-ON +30–45 %.
-   Accepted by the owner's frame: the score was partly measuring the term.
-3. **The "0.001 pseudocounts" ask, resolved by measurement, not argument**: sub-Jeffreys exponents
-   make the WINDOW the prior — at `a = b = 0.001`, one read's answer moves 0.097 → 0.010 → 0.0001
-   as L goes 10 → 20 → 40 (L-dependence ~0.10 in f), and one read snaps to near-vertex certainty;
-   Jeffreys is L-invariant (0.0017) and reads one read as its true 2:1 odds. The ½,½ measure is
-   the weakest stable point and it asserts NOTHING (it is the arcsine grid measure); with the
-   location term gone, "any nonzero data overcomes the prior" already holds — one fragment moves
-   the posterior to the likelihood's own odds (`THETA_COORDINATE_PROTOTYPE.md` §4b).
-4. **The owner's point-2 measurement frame, settled**: `pass0_claimed_ab.py` IS the
-   fanout-substrate-only instrument (it scores the claimed populations and nothing else,
-   DELIVER/REFUTE split). ⛔ A finer "solved subset" partition via
-   `has_own_composition_evidence` ∪ message-touched was tried and COLLAPSED — the predicate is a
-   divide-by-zero guard, not a resolving-power test (its own docstring), so it admits every slot
-   with counts and the "unsolved" remainder is just empty slots. Do not rebuild that partition;
-   the honest-ignorance frame is `solvability_audit.py`'s fixed denominator.
+A long message-policy campaign was **torn down**. Deleted: `CurrencyPolicy`, a unified bridge
+(`FrameAwarePropagation`, `AllocationSolve` and a stack of mechanisms built on them), their test
+files, and the config values that reached them. Git carries all of it.
 
-## ② THE STANDING OWNER RULINGS (2026-08-24) — BINDING
+What remains in the message layer, and it is deliberately small:
 
-1. ⛔⛔ **Capture gating is refuted as a concept** — capture is a SPECTRUM; enrichment must be
-   LEARNED, universally. No mechanism may gate on a capture boolean.
-2. ⭐⭐⭐ **The enrichment estimate comes from EXONS.** Stranded data solves exons independently
-   (free, no messages needed). Unstranded exons solve only through boundaries, and boundary gDNA
-   UNDERESTIMATES exonic gDNA — the core limitation of unstranded × capture-ON (= the deferred
-   stratum; scope and analysis agree).
-3. ⭐⭐⭐ **Messages extremely WEAK, always propagated** — never able to overpower a live strand
-   channel. ⛔ Historical "dampening measured worse" evidence is CONFOUNDED (measured with the
-   now-deleted location term live) and may not be cited; re-price on the current tree.
-4. **The θ = arcsin(√f_g) coordinate is the architectural direction** (prototype measured
-   equivalent; sparse behavior measured desirable — `THETA_COORDINATE_PROTOTYPE.md`).
+| | |
+|---|---|
+| `messages/foundation.py` | the ratified spec — one `Message` with provenance lanes, the propagate/solve timepoints, and the laws the skeleton ENFORCES (spliced lanes never relay; a single-source transform may only lower a precision; lanes never mix) |
+| `messages/policy.py` | `MessagePolicy` — the runner that plugs a `(PropagationModel, SolveModel)` pair into the backbone. With trivial models it is **byte-identical to `SilentPolicy`**, gated and confirmed on the panel |
+| `messages/silent.py` | `SilentPolicy` — the measured floor. **Frozen** |
+| `messages/relay.py` | `RelayPolicy` — the shipped default. **Frozen** |
 
-## ③ THE ORDER TOWARD 0.8.0
+`CalibrationConfig.message_policy` selects between them (`"relay"` / `"silent"` / `"message"`); an
+unknown name raises rather than silently falling back to the relay.
 
-1. ⭐⭐⭐ **Build the learned-enrichment density channel** — the win-back for the deletion's price
-   and the universal replacement for both the deleted location and the refuted gate. The channel
-   form ships already (`density_lambda_factor`); what is missing is the RATE for enriched slots.
-   Measured anchors: the intergenic rate is EXACT at unprobed boundaries (μ-check median ratio
-   1.005 capture-OFF) and 38–50× low under capture; the boundary-frame factor at the intergenic
-   rate took the `g00` zero controls to ~0 and beat the old location 1.9× on the unstranded
-   contaminated stratum. Ruling 2 names the estimand: exon-derived enrichment where exons solve
-   (stranded), transported with the boundary-underestimates caveat where they do not. The
-   acceptance instrument is the μ-check: predicted rate over certified gDNA ≈ 1 on BOTH capture
-   states, per stratum, never pooled. Zero controls ~0 stay the free falsification.
-2. ⭐⭐ **The weak-message re-contrast** (ruling 3) on the repaired tree: sweep message dampening;
-   the stranded strata must be UNHARMED by propagation (the falsification), unstranded helped.
-   This is `ROADMAP.md` §1's reference-first ordering with the reference now actually fixed.
-3. **The θ coordinate as its own campaign** (prototype doc §8 lists the build items; the
-   reference-term test scaffolding it needed replaced is already gone — this session deleted it).
+## The test chromosome is EMPTY, and it is the owner's to design
 
-## ④ OPEN ITEMS CARRIED
+`scripts/sim/test_reference/` — the GTF, the abundances TSV and the probes BED were cleared to zero
+transcripts on 2026-08-27. The owner adds transcripts one at a time; the FASTA, index, reads and
+caches are all DERIVED and must be rebuilt after every edit.
 
-* The fan-out's high-gDNA residual needs an INFORMATION CEILING (`PLAN_first_pass_redesign.md`
-  §H.5 ⑤); blunt form measured-DISQUALIFIED.
-* The fl-gap side panels still carry the RETIRED uniform nascent model (owner decision);
-  `object_composition.PURE_GDNA_STRATA` still includes `R intron` (recorded, deliberate).
-* `test_flank_to_exon_variance_matches_monte_carlo` passes at `tau_b = 30` vs production ~0.17
-  (§H.4 ④c) — right assertion, unrepresentative fixture.
-* `ROADMAP.md` §0's numbers predate the deletion — re-derive before quoting any of them.
+⛔ The 42-transcript derived artifacts were moved to
+`~/Downloads/rigel_runs/test_reference_STALE_42tx_2026-08-27/` rather than left in place, because a
+benchmark run against stale caches answers a different question and says nothing about it.
 
-## ⑤ SESSION HANDOFF PROMPT
+**`docs/TESTING.md` §0a has the four commands** (build → simulate → cache → score) and the
+constraints that bite: κ is fitted from spliced reads, so at least one multi-exon transcript with
+real depth is needed before any number means anything.
 
-```
-Rigel — the reference location is deleted and priced; build the learned-enrichment density
-channel (owner rulings in docs/dev/NEXT_SESSION.md ②), then the weak-message re-contrast.
-Branch fragment-length-gold-standard.
+## How the work is judged
 
-⛔ FIRST TWO COMMANDS:
-     python scripts/design/preflight.py          (~2 s; --full is ~1 hour, don't)
-     python -m pytest tests/ -q
-   Baseline: the count in CLAUDE.md's standing-baseline line. ANY failure is a regression.
+⛔ **The bar is NOT "beat `SilentPolicy`."** Silence is the floor, and on strand-specific data a
+sighted exon's own strand solve is excellent — a message can mostly only disturb it. Message
+propagation exists for **unstranded data and AMBIG slots**, where the strand channel is dead.
 
-READ, IN THIS ORDER:
-  1. docs/dev/NEXT_SESSION.md                    ← this handoff; delete it at the end
-  2. docs/DESIGN.md §6b.1                        ← the deletion ruling and its measured price
-  3. docs/dev/THETA_COORDINATE_PROTOTYPE.md      ← the coordinate + the boundary-factor evidence
-  4. CLAUDE.md's AXIOM 0 and the 0.8.0 SCOPE
+* **unstranded rows** — the policy must **WIN**.
+* **stranded rows** — the policy must do **as little harm as possible** (near 1.00× of silence).
 
-⛔ No capture gating (refuted — enrichment is a spectrum, learn it). Messages weak, always on.
-The owner drives commits.
-```
+⛔ Never pool the two halves. `python scripts/design/policy_benchmark.py --panel test` prints them
+apart, in seconds; `--panel ladder` is the shipping judgement.
+
+## Before believing anything
+
+* `python scripts/design/preflight.py` — one command, one verdict, before anything else.
+* `python -m pytest tests/ -q` — ANY failure is a regression; the count lives in `CLAUDE.md`.
+* A claim must name its SUBSTRATE (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`).
+* `HONEST_PRECISION.md` in this directory is the record of what the deleted campaign tried,
+  measured and REFUTED. Read it before re-proposing a mechanism, so a dead end is not re-run.

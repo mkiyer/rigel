@@ -52,6 +52,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .messages.foundation import PassThroughPropagation
+from .messages.policy import MessagePolicy, SilentSolve
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .region_chain import BOUNDARY, REGION
@@ -608,10 +610,22 @@ def calibrate(
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
     # ⭐ ONE policy instance for every phase: the relay carries the certified-flux evidence and a
     # grid-keyed rows memo, so constructing it per sweep would rebuild the rows every refit.
-    if config.message_propagation:
-        policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
-    else:
+    # ⛔ THE POLICY NAME MUST SELECT THE POLICY. An unreadable knob is worse than no knob: an
+    # arm that silently runs a different policy than it names is the defect
+    # `relay_pool_ab.py`'s own assertion exists to catch, so an unknown name RAISES here.
+    if not config.message_propagation:
         policy = SilentPolicy()
+    elif config.message_policy == "relay":
+        policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
+    elif config.message_policy == "silent":
+        policy = SilentPolicy()
+    elif config.message_policy == "message":
+        policy = MessagePolicy(PassThroughPropagation(), SilentSolve())
+    else:
+        raise ValueError(
+            f"unknown message_policy {config.message_policy!r} — "
+            f"expected 'relay', 'silent' or 'message'"
+        )
 
     def _sweep(prior):
         capture = {} if _debug is not None else None
@@ -669,9 +683,8 @@ def calibrate(
             n_grid_ss=n_grid_ss,
             gdna_prior=prior,
             intron_prior=lam_factor,
-            # ⭐⭐ **MESSAGE PROPAGATION SHIPS ON (`message_propagation = True` since 2026-08-18), with
-            # `message_policy = "relay"` installing `RelayPolicy`; `SilentPolicy` is the OFF state and
-            # `CurrencyPolicy` the third option — one config value IS the A/B.** This sentence used to
+            # ⭐⭐ MESSAGE PROPAGATION SHIPS ON (`message_propagation = True` since 2026-08-18);
+            # `message_policy` selects which policy that installs — see the dispatch above.
             # assert the opposite ("OFF, owner 2026-08-07") long after the default flipped — a
             # wrong-fact comment corrected 2026-08-23; the HISTORY it carried stays below, dated.
             #

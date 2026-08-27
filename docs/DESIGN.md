@@ -173,7 +173,7 @@ panel MEASURES; it does not say what the panel PREVENTS. Where a doc still carri
 it is incomplete rather than wrong.
 
 ⭐ **What calibration is left with is exactly STRAND and DENSITY** — plus belief propagation across
-objects, which is currently OFF (`SilentPolicy`, §6.1 below) — and on an unstranded library it is density
+objects, which is ON (`RelayPolicy`, §0c.2) — and on an unstranded library it is density
 alone, since the strand λ-term is exactly 0 at κ = ½ (§7 below). That is the substrate the three in-scope
 strata are optimised on.
 
@@ -404,6 +404,8 @@ channel, which is the primary intron deconvolution on stranded data); and the la
 used to explain the geometry is an EXPLANATION and never enters code or docs.
 
 ### 0c.0b ⭐⭐⭐ THE TWO STRATEGIES ARE ONE CONTINUUM, AND THE POINT ON IT IS FITTED — owner, 2026-08-20
+
+⚠ **NO IMPLEMENTATION IN `src/` AND NO GATE since the 2026-08-27 tear-down.** The policy this ruling was built for was deleted; the reasoning is kept so it is not re-derived, and `EQUATIONS.md` §3.5f carries the arithmetic. It is NOT a description of shipped behaviour and NOT an instruction to rebuild it.
 
 ⛔ **§0c.0's table is a statement about INVARIANCES, not an instruction to pick one of two mechanisms**,
 and reading it as the latter produced a policy with a strategy SWITCH whose measurement immediately
@@ -1450,8 +1452,7 @@ framework that already existed."
 
 **The decision made under the ruling: NO new policy.** The anchor is a new *stream* — the
 CERTIFIED-FLUX stream — not a new composition scheme, so it lands in `RelayPolicy` behind one
-switch (`RelaySwitches.certified_flux`), `SilentPolicy` stays silent, and the frozen
-`CurrencyPolicy` is untouched. ⭐ The survey behind the decision found this is a HOMECOMING: the
+switch (`RelaySwitches.certified_flux`), `SilentPolicy` stays silent. ⭐ The survey behind the decision found this is a HOMECOMING: the
 framework already carried the observation (`StepContext.inv_sj_lo/hi`, per-fragment
 reciprocal-opportunity — route-sum-correct by construction) and the relay's splice-in stream
 already delivers a certified-RNA claim to exons — built from `sj_count/eff_sj` as a per-face

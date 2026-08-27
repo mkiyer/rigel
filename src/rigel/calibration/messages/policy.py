@@ -1,31 +1,32 @@
-"""THE MESSAGE POLICY — the skeleton for the ground-up rebuild (owner directive, 2026-08-27).
+"""`MessagePolicy` — the foundation spec running on the calibration backbone.
 
-⭐⭐⭐ **This module is where the ONE production policy is built, slowly and methodically, on
-toy scenarios — one mechanism per rung, each rung gated on the toys before it may touch the
-panel.** It starts as exactly the elegant backbone and NOTHING else:
+WHAT IT IS. `MessagePolicy` plugs a `(PropagationModel, SolveModel)` pair from
+`messages/foundation.py` — the ratified message architecture: one `Message` with provenance
+lanes, the propagate/solve timepoints, and the laws the skeleton enforces — into the
+backbone's existing `Policy` protocol. It supplies the parts that are the same whatever the
+models do: each node's OWN message, built from banks the context already carries (the
+self-solve densities in the unspliced lanes, the certified sj flux in the spliced lanes), the
+two scans, and the delivery of two travelled messages plus the node's own to the solve.
 
-* `MessagePolicy` — the runner that plugs a `(PropagationModel, SolveModel)` pair from the
-  foundation spec into the backbone's existing Policy protocol;
-* each node's OWN message, built from banks the context already carries — the self-solve
-  densities in the unspliced lanes, the certified sj flux in the spliced lanes (route-summed,
-  publication-licensed per face);
-* `SilentSolve` — the trivial solve, and with it the identity anchor this whole build stands
-  on: **MessagePolicy(PassThrough, SilentSolve) ≡ SilentPolicy, byte for byte** through the
-  real backbone. Rung 0 is provably the silent floor; every rung above it is one auditable
-  step.
+WHAT IT IS FOR. Message propagation exists for the slots whose own solve has no composition
+channel — unstranded data and AMBIG slots, where the strand likelihood is flat and the local
+answer is a default rather than a measurement. ⭐ The bar is NOT to beat `SilentPolicy`: on
+strand-specific data a sighted exon's own solve is excellent and messages can only disturb it.
+The goal is to solve the unstranded case while doing as little harm as possible relative to
+silence.
 
-The predecessors are deleted, not forgotten: `UnifiedPolicy`/`FrameAwarePropagation`/
-`AllocationSolve` and `CurrencyPolicy` were torn down 2026-08-27 after their measured-good
-parts were recorded; git carries the code. `SilentPolicy` and `RelayPolicy` remain as the
-comparison baselines — the floor and the shipped tool.
+WHERE IT STARTS. With `PassThroughPropagation` and `SilentSolve` this policy is byte-identical
+to `SilentPolicy` through the real backbone (gated in
+`tests/calibration/test_message_policy.py`), because silence IS the solve ignoring its
+messages — a node's belief only updates at the solve.
 
-⚠ The scan builds per-hop `Message` objects in a Python loop — correct and honest, not yet
-fast. Vectorising is deliberately deferred until the winning arithmetic exists.
+`SilentPolicy` is the measured floor; `RelayPolicy` is the shipped tool. Both are frozen and
+kept for comparison.
+
+⚠ The scan builds per-hop `Message` objects in a Python loop: correct and readable, not fast.
 """
 
 from __future__ import annotations
-
-import dataclasses
 
 import numpy as np
 
@@ -123,8 +124,9 @@ def _own_messages(ctx: StepContext) -> dict:
 def _own_spliced_faces(ctx: StepContext) -> dict:
     """Per-direction spliced lanes: forward (low→high) presents each boundary's HIGH (acceptor)
     face; backward presents the LOW (donor) face — so the delivered flank rate is exactly the
-    exon-facing one, route-summed. Precision is counting-honest on the slot's flux count
-    (conservative: never sharper than the total flux supports).
+    exon-facing one, route-summed. Precision is counting-honest on THAT FACE's own flux count
+    (`sj_count_lo`/`sj_count_hi`): the slot total would be up to 2x too confident at a boundary
+    whose two faces both carry flux, since trigamma is decreasing.
 
     ⭐ THE PUBLICATION LICENCE (sender-side): a face is published only toward an exon whose
     flank is STRUCTURALLY COMPLETE — every route into it certified, no terminus admitting
@@ -155,8 +157,8 @@ def _own_spliced_faces(ctx: StepContext) -> dict:
         return out
 
     return {
-        False: face(ctx.route_rate_hi, ctx.sj_count, ok_hi),
-        True: face(ctx.route_rate_lo, ctx.sj_count, ok_lo),
+        False: face(ctx.route_rate_hi, ctx.sj_count_hi, ok_hi),
+        True: face(ctx.route_rate_lo, ctx.sj_count_lo, ok_lo),
     }
 
 
@@ -186,10 +188,6 @@ class _PreparedMessage:
         # state starts as each node's OWN message; a hop overwrites the destination with the
         # propagated blend, so a reference terminal (skipped by the backbone) keeps its own.
         state = {lane: tuple(arr.copy() for arr in self.own[lane]) for lane in Message.LANES}
-        # the SHARED LEVEL variance travels beside the lanes: own beliefs are locally anchored
-        # (0) and each hop adds its reframe's scale cost, diluted by the destination's own
-        n_slots = int(np.asarray(self.ctx.n_slot).shape[0])
-        level = np.zeros(n_slots, np.float64)
         # ⭐ the SPLICED lanes are direction-aware: travelling low→high a boundary presents its
         # HIGH (acceptor) face — the routes entering its rightward exon — and the mirror going
         # back, so the adjacent solve receives exactly the exon-facing flank rate.
@@ -204,7 +202,7 @@ class _PreparedMessage:
                 own_scan[lane] = face[lane]
 
         def step(s: int, i: int) -> None:
-            incoming = dataclasses.replace(self._message_at(state, s), level_logvar=float(level[s]))
+            incoming = self._message_at(state, s)
             mine = self._message_at(own_scan, i)
             out = self._prop.propagate(mine, incoming, Hop(src=s, dst=i, backward=backward))
             for lane in Message.LANES:
@@ -212,10 +210,9 @@ class _PreparedMessage:
                 state[lane][0][i] = claim.abundance
                 state[lane][1][i] = claim.precision
                 state[lane][2][i] = claim.measured
-            level[i] = out.level_logvar
 
         def publish():
-            return tuple(arr for lane in Message.LANES for arr in state[lane]) + (level,)
+            return tuple(arr for lane in Message.LANES for arr in state[lane])
 
         return step, publish
 
@@ -229,8 +226,7 @@ class _PreparedMessage:
             lanes[lane] = Claim(
                 np.where(valid, ab, 0.0), np.where(valid, pr, 0.0), np.where(valid, ms, 0.0)
             )
-        lv = np.asarray(nb.state[3 * len(Message.LANES)], np.float64)
-        return Message(**lanes, level_logvar=np.where(valid, lv, 0.0))
+        return Message(**lanes)
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
         own = Message(**{lane: Claim(*self.own[lane]) for lane in Message.LANES})

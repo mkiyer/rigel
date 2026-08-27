@@ -6,17 +6,15 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — tw
 ``N E N E … N`` chain, one combine, one ψ solve, one write-back, and five assertions. Everything about
 *what a message says* is a policy, and it lives here.
 
-Three policies ship (`CalibrationConfig.message_propagation` = True since 2026-08-18, with
-`message_policy` picking which one — this paragraph called SilentPolicy "THE DEFAULT" long after the
-default flipped, a wrong-fact fossil corrected 2026-08-23):
+Three policies exist; `CalibrationConfig.message_policy` selects which one
+`message_propagation = True` installs (the default is `"relay"`):
 
 * :class:`~.relay.RelayPolicy` — ⭐ **THE SHIPPED POLICY** — every operator the evolved solver carried,
   each behind a NAMED switch, so ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five boundaries
   long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.policy.MessagePolicy` — THE SKELETON of the ground-up rebuild (owner tear-down,
-  2026-08-27): the foundation-spec runner, anchored byte-identical to silence at rung 0; the one
-  policy under methodical development on the toy ladder.
+* :class:`~.policy.MessagePolicy` — the foundation-spec runner (:mod:`~.foundation`), byte-identical
+  to silence when its models are the trivial ones.
 * :mod:`~.variance` — the shared variance arithmetic the policies draw on. Not a policy; a toolbox.
 
 ⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer
@@ -207,17 +205,16 @@ class StepContext:
     eff_rna: np.ndarray  # per-slot RNA effective length
     eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)
     eff_sj: np.ndarray  # [n, 2] sj opportunity by TRANSCRIPT strand
-    sj_count: np.ndarray  # [n, 2] sj fragment count by TRANSCRIPT strand
+    sj_count: np.ndarray  # [n, 2] sj fragment count by TRANSCRIPT strand (both faces)
+    #: the same flux split by which genomic END of its sj this boundary is — the count that
+    #: matches `route_rate_lo`/`route_rate_hi`, so a per-face rate is priced on its own count
+    sj_count_lo: np.ndarray
+    sj_count_hi: np.ndarray
     #: [n, 2] the ROUTE-SUMMED certified rate per face by transcript strand (Σ flux_J/A_J over
     #: the face's disjoint routes) — the pooled sj_count/eff_sj ratio under-reads k-route faces
     #: ~k×, so consumers of a face's RATE read these, never the ratio
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
-    #: the per-component SUPPORT PROBABILITIES (region_geometry): P_c(w <= ell) at a REGION —
-    #: the exact frame factor of its reciprocal-opportunity total — and 1 at a BOUNDARY; the
-    #: transport debiases the enrichment ratio with them per lane
-    support_prob_gdna: np.ndarray
-    support_prob_rna: np.ndarray
     route_count_lo: np.ndarray  # [n, 2] routes per face (the route-structure class key)
     route_count_hi: np.ndarray
     unspliced_count: (

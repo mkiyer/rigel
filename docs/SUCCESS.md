@@ -106,7 +106,7 @@ every bug in it**. Equal lengths remove that shortcut and **force calibration to
 is the only condition under which the primary metric above means what it says.
 
 ⚠ So calibration is left with exactly the channels it is supposed to use: **strand and density**, plus
-belief propagation across objects (currently OFF — see `CLAUDE.md`). ⚠ "Equal" is a configuration, not a
+belief propagation across objects (ON since 2026-08-18 — `message_propagation = True`). ⚠ "Equal" is a configuration, not a
 guarantee: transcript-length truncation leaves a realised **+3.6 to +4.7 bp** gDNA-over-RNA gap, measured
 and priced at **under 2.5 % of the per-object error** before it was accepted. Score the length axis
 against `truth_fragment_lengths.tsv`, never against a nominal parameter.

@@ -129,14 +129,6 @@ class Message:
     spliced_rna_pos: Claim
     spliced_rna_neg: Claim
 
-    #: ⭐⭐⭐ THE SHARED LEVEL UNCERTAINTY (2026-08-27) — the part of this message's error that
-    #: multiplies EVERY lane identically: the reframe's scale, which is a statement about the
-    #: LEVEL and not about the composition. Kept apart from the per-lane precisions because
-    #: spending it as per-component variance is what converts a common-mode level error into a
-    #: composition error at the solve. Zero for a node's OWN belief (locally anchored); it
-    #: accumulates along a chain of hops and is consumed by `SolveModel`'s conservation.
-    level_logvar: float = 0.0
-
     #: the lane names, in one place — iteration order for every lane-wise rule
     LANES = (
         "unspliced_gdna",
@@ -148,7 +140,7 @@ class Message:
 
     @classmethod
     def silent(cls) -> "Message":
-        return cls(*[Claim.silent() for _ in cls.LANES], level_logvar=0.0)
+        return cls(*[Claim.silent() for _ in cls.LANES])
 
     @property
     def is_silent(self) -> bool:
@@ -205,26 +197,11 @@ class PropagationModel(ABC):
                 )
             mine = own.lane(lane)
             out[lane] = weakened if mine.is_silent else _fuse(mine, weakened)
-        # the shared level accumulates the hop's SCALE cost, then is diluted by whatever the
-        # node knows of its own: an own belief is locally anchored (level variance 0), so a
-        # node with strong own evidence hands the chain a freshly anchored level.
-        level = float(incoming.level_logvar) + float(self.level_cost(hop))
-        p_in = sum(float(incoming.lane(k).precision) for k in Message.LANES)
-        p_own = sum(float(own.lane(k).precision) for k in Message.LANES)
-        if p_in + p_own > 0.0:
-            level = level * p_in / (p_in + p_own)
-        return Message(**out, level_logvar=level)
+        return Message(**out)
 
     def prepare(self, ctx) -> None:
         """Optional hook: build per-hop tables (frames, licences, the fitted premise) from the
         context, once per sweep. The default needs nothing."""
-
-    def level_cost(self, hop: "Hop | None") -> float:
-        """OPEN PROBLEM (propagation variance, the SHARED half): what one hop costs the
-        message's overall SCALE — the reframe's own uncertainty, which multiplies every lane
-        alike. Charged here rather than into each lane so the solve can tell a level error
-        from a composition error. The default hop is scale-free."""
-        return 0.0
 
     @abstractmethod
     def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:

@@ -1,12 +1,10 @@
-test_chr	5000	5120	probe_T1p_cap_a	0	.	5000	5120	0	1	120	0
-test_chr	5800	5920	probe_T1p_cap_b	0	.	5800	5920	0	1	120	0
-test_chr	22000	22120	probe_G3_shared	0	.	22000	22120	0	1	120	0
-test_chr	30800	31000	probe_T4_e1	0	.	30800	31000	0	1	200	0
-test_chr	34000	34120	probe_T4_e2	0	.	34000	34120	0	1	120	0
-test_chr	45000	45120	probe_T6_e1	0	.	45000	45120	0	1	120	0
-test_chr	48000	48120	probe_T6_e2	0	.	48000	48120	0	1	120	0
-test_chr	51000	51120	probe_T6_e3	0	.	51000	51120	0	1	120	0
-test_chr	74000	74120	probe_T9_shared_e2	0	.	74000	74120	0	1	120	0
-test_chr	114000	114120	probe_S3d_shared_TSS	0	.	114000	114120	0	1	120	0
-test_chr	120000	120120	probe_S3d_shared_acc	0	.	120000	120120	0	1	120	0
-test_chr	117000	117120	probe_S3d_TD	0	.	117000	117120	0	1	120	0
+# THE TEST CHROMOSOME'S CAPTURE PROBES — hand-edited, BED12, 0-based half-open.
+#
+# ⭐ EMPTY ON PURPOSE (owner, 2026-08-27): cleared with the transcripts it targeted. Add a probe
+#   only where a transcript exists to be captured; `capture: on` conditions with no probes are a
+#   valid but degenerate arm (every fragment is off-target).
+#
+# One line per probe, tab-separated:
+#   test_chr  START  END  NAME  0  .  START  END  0  1  LENGTH  0
+#
+# The previous 12 probes are in git history if a layout is ever wanted back.

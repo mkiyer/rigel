@@ -148,22 +148,27 @@ is not a claim that its modules are the right SIZE; layer 4 being five modules f
 
 ## ⛔ THE MESSAGE LAYER — where it stands, in one place
 
-⭐⭐⭐ **THE TEAR-DOWN (owner directive, 2026-08-27): ONE policy is being rebuilt from the skeleton,
-slowly and methodically, ON TOY SCENARIOS.** `messages/policy.py` holds **`MessagePolicy`** — the
-foundation-spec runner (`messages/foundation.py`, the owner's ratified architecture: Message with
-provenance lanes, propagate/solve timepoints, skeleton-enforced laws) — anchored byte-identical to
-silence at rung 0 (gated in `tests/calibration/test_message_policy.py`, byte-checked on the panel).
-⛔ **`CurrencyPolicy` and the unified bridge (`FrameAwarePropagation`/`AllocationSolve`) were DELETED**
-after harvest — every derivation, verdict and refutation is recorded in `docs/dev/HONEST_PRECISION.md`,
-and git carries the code. ⛔ Do not resurrect a deleted mechanism without its rung: each rung = ONE
-mechanism, fail-first gate on a toy → the toy ladder → the test chromosome's 16 → only then the panel.
-The acceptance bar is the owner's sentence: **win all unstranded scenarios; close to SILENT on
-strand-specific ones.**
+⭐⭐⭐ **WHAT MESSAGE PROPAGATION IS FOR, AND THE BAR IT IS JUDGED BY (owner, 2026-08-27).** Messages
+exist for the slots whose own solve has no composition channel — **unstranded data and AMBIG slots**,
+where the strand likelihood is flat and the local answer is a default rather than a measurement.
+⛔ **WE DO NOT EXPECT TO BEAT `SilentPolicy`.** On strand-specific data a sighted exon's own solve is
+excellent and a message can mostly only disturb it. The goal is: **perform well on UNSTRANDED data
+while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
+against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart.
 
-⭐ The two BASELINES remain and are frozen for comparison: `SilentPolicy` (the floor; 7 of 16 panel
-rows) and `RelayPolicy` (the shipped default, `message_policy = "relay"`; best at low-gDNA — do not
-repair it per-bug, owner 2026-08-18; its defects are CONSTRAINTS on the replacement, chief among them
-`TRAPS: zero-the-precision-with-the-value`).
+⭐⭐ **THREE POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
+is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES):
+
+| policy | |
+|---|---|
+| `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
+| `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
+| `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
+
+⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
+with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
+`docs/dev/HONEST_PRECISION.md` carries what was derived, measured and REFUTED — read it before
+re-proposing a mechanism, so a refuted experiment is not repeated.
 
 ⭐⭐ **THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE)** stays in the
 relay (`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
@@ -171,6 +176,35 @@ phase-A, never own-evidence precision); `config.rna_anchor` is live iff propagat
 policy is relay. `DESIGN.md` §6b.3. ⭐ The owner's clarified SPLICED law is skeleton-enforced: spliced
 fragments are MEASURED at boundaries, never solved, strictly ONE-HOP — `foundation.propagate` refuses
 to relay a spliced claim for every model.
+
+## ⭐⭐⭐ RUNNING THE BENCHMARKS
+
+Two substrates. Develop on the test chromosome; decide on the ladder.
+
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
+python scripts/design/preflight.py                          # ⭐ FIRST: can this session run at all?
+
+# THE DEVELOPMENT LOOP — the test chromosome, seconds for the whole sweep
+python scripts/design/policy_benchmark.py --panel test
+
+# THE SHIPPING JUDGEMENT — the 16-condition ladder, minutes
+python scripts/design/policy_benchmark.py --panel ladder
+python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
+```
+
+⛔ **THE TEST CHROMOSOME IS EMPTY** (cleared 2026-08-27 — the owner designs its transcripts). After
+editing `scripts/sim/test_reference/*`, everything derived MUST be rebuilt or the benchmark scores a
+stale annotation: `docs/TESTING.md` §0a has the four commands, and `panel.py status` names the next
+stage. ⚠ κ is fitted from spliced reads, so the reference needs at least one multi-exon transcript with
+real depth before a number means anything.
+
+⛔ **READ THE TWO HALVES SEPARATELY AND NEVER POOL THEM** — unstranded rows are where a policy must
+WIN, stranded rows are where it must do minimal HARM against silence. ⚠ A toy and the panel have
+inverted a ranking before (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): confirm on the ladder.
+
+⭐ The other instruments — the oracle-scored metric, the dissections, the thermometer — are indexed in
+the table near the end of this file, grouped by the question each one answers.
 
 ⭐ **The vocabulary rename is in flight.** Landed: `graft` → SPLICE IN, the operator sense of the old
 peel token → SPLICE OUT, the deconvolution verb → `deconvolve`, `mass_pin` → `mass_rescale`,
@@ -232,95 +266,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,653 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
-The `−70` from 3,723 is THE TEAR-DOWN (owner directive): `messages/unified.py`,
-`messages/currency.py`, `tests/calibration/test_unified_bridge.py` and
-`tests/calibration/test_currency_policy.py` DELETED (their own cases + per-file gates), the
-currency-drops gate retired from `tests/calibration/test_rna_anchor.py`, replaced by
-`messages/policy.py` (+3: jargon, docs-boundary, layering) and
-`tests/calibration/test_message_policy.py` (5 backbone gates + 2 per-file). Byte-checked:
-silent and relay panel outputs identical before/after; MessagePolicy rung 0 ≡ silent on the
-panel. Before that, the `+3` over 3,720 was THE THREE LAWS (the terminus-law gate and the
-debias gate, the support-probability gate in the EXISTING
-`tests/calibration/test_region_geometry.py` — all fail-first; the premise gate was
-rewritten in place twice, its exon-end scoping landed, was panel-refuted by the attribution
-factorial, and was reverted the same session — the gates died with their file in the
-tear-down above). Before that,
-the `+1` over 3,719 was THE LEVEL DERIVATION's limits gate in the EXISTING
-`tests/calibration/test_unified_bridge.py` (the AXIOM census and knob gates were restated in
-place, not added). Before that, the `+2` over 3,717 was THE CONSERVATION IDENTITY FIX (the count-identity gate and the
-common-mode-operator gate in the EXISTING `tests/calibration/test_unified_bridge.py`; the
-superseded coverage gate was replaced in place by the spliced-lanes-leave-the-conservation
-gate — net +2, no file added). Before that, the `+2` over 3,715 was THE FACTORIAL PORTS (two default-OFF A/B gates in the EXISTING
-`tests/calibration/test_unified_bridge.py` — the mass-rescale projection and the
-residual-level boundary claim, both fail-first; no file added, no shipped behavior moved).
-Before that, 3,715 was unchanged by THE ONE-HOP LAW's promotion into the foundation skeleton
-(net zero: +1 gate in
-`tests/calibration/test_message_foundation.py`, −1 retired from
-`tests/calibration/test_unified_bridge.py` — the law's one home moved to the spec).
-The `+1` over 3,714 is THE COVERAGE RULE (one conservation gate in the EXISTING
-`tests/calibration/test_unified_bridge.py`; the gDNA-continuity and re-anchor gates landed,
-were REFUTED on the panel with their laws, and were removed in the same session — net zero;
-no file added). Before that, the `+3` over 3,711 was THE SHIPPED-RELAY PORT (four
-citizenship/reception gates in the
-EXISTING `tests/calibration/test_unified_bridge.py` — measurement-stream delivery, the
-reception law, the contradiction kill, the unseen-component absorber — replacing the old
-yield gate, net +3; every one verified failing first and perturbation-fired; no file added).
-Before that, the `+3` over 3,708 was THE SPLICED SOLVE (three lane-law gates in the EXISTING
-`tests/calibration/test_unified_bridge.py` — one-hop reach, count round-trip, spliced-moves-
-beliefs; a class-premise gate was added, REFUTED on the panel and removed in the same session,
-net zero; no file added, so no per-file gate delta). Before that, the `+6` over 3,702 was THE
-UNSPLICED SOLVE (six allocation/yield
-gates in the EXISTING `tests/calibration/test_unified_bridge.py`, perturbations verified).
-Before that, the `+2` over 3,700 was the ROUTE-SUM HOMECOMING's two geometry gates
-in the EXISTING `tests/calibration/test_region_geometry.py` (independent-derivation parity;
-sum-dominates-pooled). A golden update landed in the same change — the relay's splice-in density
-is now route-summed at the geometry source, a shipped-output move (max 0.06 % relative on the
-golden toys; the 16-condition price: silent byte-unchanged, g00/g05 improve up to −7.3 %,
-worst tick g98-ON +3.9 %, in-scope net +0.1 %). Before that, the `+5` over 3,695 was STEP 2's
-first propagation model
-(`FrameAwarePropagation` + the spec's `Hop`/`prepare` extension): five model gates in the
-EXISTING `tests/calibration/test_unified_bridge.py`, every perturbation verified firing.
-Before that, the `+10` over 3,685 was THE BRIDGE
-(`src/rigel/calibration/messages/unified.py`, +3: jargon, docs-boundary, layering; and
-`tests/calibration/test_unified_bridge.py`, 5 own cases +2 gate cases — both byte-identity
-anchors through the real backbone, every perturbation verified firing after two gates were
-strengthened past degenerate substrates). Before that, the `+14` over 3,671 was THE FOUNDATION
-SPEC (owner architecture;
-`DESIGN.md` §6b.3 neighbours it): `src/rigel/calibration/messages/foundation.py` (+3: jargon,
-docs-boundary, layering) and `tests/calibration/test_message_foundation.py` (9 own cases +2 gate
-cases, every rule perturbation-verified). Before that, the `+4` over 3,667 was RUNG 1's
-instrument,
-`scripts/design/transport_dispersion.py` — a `scripts/design/` file: imports,
-says-what-it-is-for, jargon, docs-boundary. Before that, the `+2` over 3,665 was RUNG 0: two stream-contract gates in the
-EXISTING `tests/calibration/test_rna_anchor.py` (the `certified_flux` switch silences the stream
-with evidence present; currency silently drops it — both perturbation-verified). Before that, the
-`+1` over 3,664 was `docs/dev/HONEST_PRECISION.md` — a `docs/dev/` file, jargon only; the
-2026-08-25 cleanup sweep was content-only and moved the total by ZERO, as the rule requires.
-The `+4` over 3,660 is the ANCHOR-IS-A-MESSAGE INTEGRATION (`DESIGN.md` §6b.3): the anchor's two
-calibrate-coupling gates replaced by five message-contract gates in the EXISTING
-`tests/calibration/test_rna_anchor.py` (19 → 22 own cases; citizenship, both-ways stream reach,
-policy-path arithmetic parity, channel silence, biased-claim ψ-reach — every perturbation verified
-firing), plus `+1` for `docs/dev/ANCHOR_AS_MESSAGE.md` — a `docs/dev/` file, jargon only.
-Before that, the `+7` over 3,653 was the ANCHOR ROUND-2 REWRITE (`DESIGN.md`
-§6b.2): `tests/calibration/test_rna_anchor.py` grew 13 → 19 own cases in place (route-sum,
-quadrature, marginalized-nascent, capture-cliff and builder-dispatch gates; no file moved), plus
-`+1` for `docs/dev/CLEAN_LIBRARY_RESIDUAL.md` — a `docs/dev/` file, jargon only. Before that, the
-`−29` over 3,682 was the FAN-OUT DELETION (`DESIGN.md` §6b.2 ✅):
-`tests/calibration/test_fanout_policy.py` removed — 27 own cases plus its 2 per-file gate cases —
-after the anchored-tree re-contrast measured `FanOutPolicy` dominated on every row; no shipped
-behavior moved. Before that, `+2` over 3,680: two estimator-hardening gates in the EXISTING
-`tests/calibration/test_rna_anchor.py`, no file moved. The `+16`
-over 3,664 is the RNA-ANCHORED EVIDENCE FACTOR (`DESIGN.md` §6b.2): `src/rigel/calibration/rna_anchor.py` (+3: jargon, docs-boundary, layering)
-and `tests/calibration/test_rna_anchor.py` (11 own cases +2 gate cases). Goldens did NOT move —
-the golden toys sit below the factor's dispersion-estimator population minimum, where it is
-deliberately flat. The prior `−64`: the REFERENCE-LOCATION DELETION (owner
-refutation; `DESIGN.md` §6b.1): three gate files removed — `test_structural_reference.py`,
-`test_measured_reference.py`, `test_reference_location.py` — 58 own cases plus 3×2 parametrized
-gate cases. The `−1` xfail is the relay-transports-a-structural-claim strict xfail that lived in
-the first of those files; the DEFECT stays recorded as a relay-rebuild constraint in `DESIGN.md`
-§0c.2/§6b.1. A golden update landed in the same change — the deletion moves shipped output; diff
-magnitudes and the truth-scored before/after live in `DESIGN.md` §6b.1 and `ROADMAP.md` §0.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,643 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27,
+after the TEAR-DOWN and the session-close cleanup. The count moved a long way that day and the deltas
+are: the deleted policy files and their tests (`messages/unified.py`, `messages/currency.py` and both
+test files) took their own cases and per-file gates with them; `messages/policy.py` (+3: jargon,
+docs-boundary, layering) and `tests/calibration/test_message_policy.py` (6 own cases + 2 per-file)
+arrived; `scripts/design/policy_benchmark.py` added +4 (imports, says-what-it-is-for, jargon,
+docs-boundary); the unconsumed `support_prob` geometry gate was deleted with its field; and 14
+`docs/dev/` files were removed at −1 each. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the
+per-file deltas, and `pytest --collect-only -q | grep <stem>` confirms any one of them.)
+
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
 next session reads a green run as a regression.
@@ -373,6 +328,8 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 |---|---|
 | **⭐⭐⭐ START A SESSION HERE** | |
 | `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with all five partitions, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test` and costs **~1 hour measured** (7.5 CPU-hours, dominated by `ladder_arm_ab.py`) — run it after a deposit-rule change or a default flip, never every session. `--self-test` 8/8 |
+| **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
+| `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for any of `silent` / `relay` / `message`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 21/21 |
 | `design/object_composition.py` | ⭐⭐⭐ **MUST ψ's Beta REFERENCE BE ONE LIBRARY-WIDE NUMBER, OR CAN EACH OBJECT SUPPLY ITS OWN?** `m_i` per object from the two densities, scored as misplaced fragments against the shipped ½, per stratum. `--self-test` 25/25 |

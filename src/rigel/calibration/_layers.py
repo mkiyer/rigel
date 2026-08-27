@@ -138,9 +138,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # every variance model implements by overriding their narrow extension points.
             "messages/foundation",
             "messages/policy",
-            # `messages/policy` is THE MESSAGE POLICY skeleton (owner tear-down, 2026-08-27):
-            # the foundation spec's (PropagationModel, SolveModel) pair running on the backbone's
-            # Policy protocol. The other policies are DONORS scheduled for extract-then-delete.
+            # `messages/policy` runs the foundation spec's (PropagationModel, SolveModel) pair on
+            # the backbone's Policy protocol; `messages/silent` and `messages/relay` are the
+            # frozen baselines it is measured against.
             "messages/variance",
             "messages/silent",
             "messages/relay",
