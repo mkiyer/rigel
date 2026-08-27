@@ -313,16 +313,6 @@ def test_conservation_components_are_the_claims_the_total_counted():
     )
 
 
-def test_spliced_claims_have_one_hop_reach():
-    """THE TRANSIT LAW (FrameAware, not the spec base): a certified count is evidence about its
-    OWN junction only, so an ARRIVING spliced claim is silenced rather than relayed onward — the
-    adjacent solve receives exactly the neighbour's own flank rate, never a chain blend, and it
-    receives it UNREFRAMED (capture-invariance: the delivery path applies no knob to it)."""
-    F, U, m = _hop_tables(log_r=2.0, v_r=0.01)
-    out = _one_hop(m, F, U, "spliced_rna_pos", F.Claim(3.0, 25.0))
-    assert out.is_silent, "a travelling spliced claim must not survive a second hop"
-
-
 def test_frame_aware_under_a_silent_solve_changes_nothing(sweep_inputs):
     """The free invariant: propagation NEVER changes the answer on its own — a belief only forms
     at the solve, so FrameAwarePropagation under SilentSolve must equal SilentPolicy

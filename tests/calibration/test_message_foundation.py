@@ -55,7 +55,9 @@ def test_silence_is_expressible_and_detectable():
 
 
 def test_pass_through_when_the_node_has_nothing():
-    """THE RULE (owner): a node with no own belief relays the incoming message unchanged."""
+    """THE RULE (owner): a node with no own belief relays the incoming message unchanged —
+    on the UNSPLICED lanes. The spliced lanes are outside the rule entirely: they never relay
+    (the one-hop law's gate below), so the pass-through here shows the arriving flux dropped."""
     F = _F()
     incoming = F.Message(
         unspliced_gdna=F.Claim(3.0, 10.0),
@@ -65,9 +67,32 @@ def test_pass_through_when_the_node_has_nothing():
         spliced_rna_neg=F.Claim.silent(),
     )
     out = F.PassThroughPropagation().propagate(F.Message.silent(), incoming)
-    for lane in F.Message.LANES:
+    for lane in ("unspliced_gdna", "unspliced_rna_pos", "unspliced_rna_neg"):
         a, b = out.lane(lane), incoming.lane(lane)
         assert a.abundance == b.abundance and a.precision == b.precision, lane
+    assert out.lane("spliced_rna_pos").is_silent, "an arriving spliced claim never relays"
+
+
+def test_spliced_lanes_never_relay():
+    """THE ONE-HOP LAW (owner clarification, 2026-08-26): spliced fragments are MEASURED at
+    boundaries — counted explicitly, never solved — and they impute only the ADJACENT region.
+    The outgoing spliced lane is therefore always the node's OWN published measurement (a
+    region publishes silence), never the arriving claim: a boundary's flux is visible to
+    exactly its two neighbours and can never travel further. Enforced by the SKELETON, for
+    every propagation model including the pass-through control, so no implementation can
+    propagate a spliced claim."""
+    F = _F()
+    arriving = F.Message.silent().with_lane("spliced_rna_pos", F.Claim(0.8, 25.0, 25.0))
+    out = F.PassThroughPropagation().propagate(F.Message.silent(), arriving)
+    assert out.lane("spliced_rna_pos").is_silent, (
+        "a node with no flux of its own must publish silence, not the arriving claim"
+    )
+    own = F.Message.silent().with_lane("spliced_rna_pos", F.Claim(2.0, 9.0, 9.0))
+    out2 = F.PassThroughPropagation().propagate(own, arriving)
+    got = out2.lane("spliced_rna_pos")
+    assert got.abundance == 2.0 and got.precision == 9.0, (
+        "the node's own measurement passes untouched — never fused with an arrival"
+    )
 
 
 def test_a_strong_own_belief_integrates():
@@ -88,12 +113,18 @@ def test_lanes_do_not_mix_at_propagation():
     vice versa) during propagation — the lanes travel separately so the solve can treat them
     by provenance."""
     F = _F()
-    incoming = F.Message.silent().with_lane("spliced_rna_pos", F.Claim(9.0, 100.0))
+    incoming = F.Message.silent().with_lane("unspliced_rna_pos", F.Claim(9.0, 100.0))
     out = F.PassThroughPropagation().propagate(F.Message.silent(), incoming)
-    assert out.lane("spliced_rna_pos").precision == 100.0
+    assert out.lane("unspliced_rna_pos").precision == 100.0
     for lane in F.Message.LANES:
-        if lane != "spliced_rna_pos":
+        if lane != "unspliced_rna_pos":
             assert out.lane(lane).is_silent, f"{lane} must stay silent"
+    # and a live spliced arrival leaks into no unspliced lane either (it is dropped whole —
+    # the one-hop law — so nothing of it may resurface anywhere)
+    incoming2 = F.Message.silent().with_lane("spliced_rna_pos", F.Claim(9.0, 100.0))
+    out2 = F.PassThroughPropagation().propagate(F.Message.silent(), incoming2)
+    for lane in F.Message.LANES:
+        assert out2.lane(lane).is_silent, f"{lane} must stay silent"
 
 
 def test_the_propagation_refuses_an_amplifying_attenuation():

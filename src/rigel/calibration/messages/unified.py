@@ -331,11 +331,6 @@ class FrameAwarePropagation(PropagationModel):
     def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:
         t = self._tables[hop.backward]
         i, s = hop.dst, int(t["src"][hop.dst])
-        if lane.startswith("spliced"):
-            # THE TRANSIT LAW: a certified count is evidence about its OWN junction only, so an
-            # arriving spliced claim is not relayed onward — one-hop reach. The adjacent solve
-            # receives exactly the neighbour's own flank rate (unreframed: capture-invariance).
-            return Claim.silent()
         if lane == "unspliced_rna_pos" and bool(t["fp"][i]) != bool(t["fp"][s]):
             return Claim.silent()
         if lane == "unspliced_rna_neg" and bool(t["fn"][i]) != bool(t["fn"][s]):

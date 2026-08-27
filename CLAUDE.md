@@ -231,6 +231,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format 
 ```
 
 ⭐ **THE STANDING BASELINE: 0 failed / 3,715 passed / 0 skipped / 8 xfail** (re-derived 2026-08-26.
+Unchanged by THE ONE-HOP LAW's promotion into the foundation skeleton (net zero: +1 gate in
+`tests/calibration/test_message_foundation.py`, −1 retired from
+`tests/calibration/test_unified_bridge.py` — the law's one home moved to the spec).
 The `+1` over 3,714 is THE COVERAGE RULE (one conservation gate in the EXISTING
 `tests/calibration/test_unified_bridge.py`; the gDNA-continuity and re-anchor gates landed,
 were REFUTED on the panel with their laws, and were removed in the same session — net zero;

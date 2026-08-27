@@ -26,9 +26,12 @@ the solve are entitled to treat a measurement differently from a belief:
   is inexpressible). These are deconvolved BELIEFS: products of a solve, imputations, the things
   a premise must be charged on.
 * the SPLICED lanes — certified RNA per strand (gDNA cannot splice, so a spliced gDNA lane does
-  not exist as a field). These are MEASUREMENTS: certified observations whose weight at solve
-  time may be a count-likelihood rather than a Gaussian — the certified-flux treatment is a
-  `solve_spliced` implementation, not a side channel.
+  not exist as a field). These are MEASUREMENTS: counted explicitly at boundaries, never
+  solved, and STRICTLY ONE-HOP — a boundary's flux imputes its adjacent exon (splice IN /
+  splice OUT are the two directions of the same junction) and is used in the boundary's own
+  solve, and nothing else; the skeleton refuses to relay a spliced claim, so it cannot travel.
+  Their weight at solve time may be a count-likelihood rather than a Gaussian — the
+  certified-flux treatment is a `solve_spliced` implementation, not a side channel.
 
 **The rules the base classes ENFORCE (no implementation may break them):**
 
@@ -169,6 +172,15 @@ class PropagationModel(ABC):
     def propagate(self, own: Message, incoming: Message, hop: "Hop | None" = None) -> Message:
         out = {}
         for lane in Message.LANES:
+            if lane.startswith("spliced"):
+                # THE ONE-HOP LAW (owner, 2026-08-26): spliced fragments are MEASURED at
+                # boundaries — counted explicitly, never solved — and they impute only the
+                # ADJACENT region. The outgoing spliced lane is always the node's OWN published
+                # measurement (a region publishes silence), never the arriving claim, so a
+                # boundary's flux is visible to exactly its two neighbours and can never travel
+                # further. Skeleton-enforced: no propagation model can relay a spliced claim.
+                out[lane] = own.lane(lane)
+                continue
             arriving = incoming.lane(lane)
             weakened = self.attenuate(arriving, lane, hop) if not arriving.is_silent else arriving
             if float(weakened.precision) > float(arriving.precision) * _AMPLIFY_TOL or float(
