@@ -413,10 +413,15 @@ class FrameAwarePropagation(PropagationModel):
         lr2 = lr * lr
         w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
         # ⛔ THE gDNA-CONTINUITY RULE WAS BUILT, KEYED THREE WAYS, AND REFUTED ON THE PANEL
-        # WITHOUT ITS SECOND HALF. gDNA is genomically continuous, so relay transports an
-        # unsupplied source's level UNSCALED (r_g = 1, may_share_composition) — but that law
-        # is safe only beside the scan-time MASS RESCALE that overwrites the running level to
-        # each licensed slot's own measured total (region_geometry's capture-landscape ruling).
+        # WITHOUT ITS SECOND HALF. The enrichment ratio mixes TWO effects: hybrid capture,
+        # which binds nucleic acid regardless of origin and so enriches gDNA and RNA ALIKE at
+        # probe positions (owner, 2026-08-26 — gDNA's density genuinely steps there), and
+        # EXPRESSION, which moves RNA only. A gDNA level should ride the first and not the
+        # second, and the ratio does not separate them; relay's answer is to transport an
+        # unsupplied source's level UNSCALED (r_g = 1, may_share_composition) beside the
+        # scan-time MASS RESCALE that overwrites the level to each licensed slot's own measured
+        # total (region_geometry's capture-landscape ruling: the landscape — capture included —
+        # is carried locally by the pure-gDNA population's own measurements).
         # Ported without the rescale: a static per-slot licence broke the knob's telescoping
         # cancellation (a value RATCHET, arriving gdna densities to 3.9e+32); the running-state
         # licence killed the ratchet but still lost capture-ON (g98-unstranded-ON 3.8M -> 5.3M)
@@ -512,6 +517,9 @@ class AllocationSolve(SolveModel):
         )
         n_tot = np.asarray(ctx.n_slot, np.float64) + np.asarray(ctx.spliced_slot, np.float64)
         self._pT = np.where(n_tot > 0, 1.0 / count_logvar(n_tot), 0.0)
+        # the count identity's own precision: M is the UNSPLICED count, so its counting basis
+        # is n_slot alone (the spliced fragments are not in it)
+        self._pM = 1.0 / count_logvar(np.asarray(ctx.n_slot, np.float64))
         # terminus-licensed absorbers: NEW RNA may start/stop beside a flank whose population
         # grows — coarse v1 licence (any gain at an adjacent boundary), refinement recorded
         rgain, lgain = terminus_flank_gain(ctx.boundary_flags)
@@ -710,28 +718,60 @@ class AllocationSolve(SolveModel):
         # library's RNA mass (invisible to every witness: the strand solve is blind and the
         # neighbours' RNA lanes are silent) is force-fed to the near-zero gDNA anchor claim as
         # phantom gDNA (measured: the whole g05-unstranded family).
-        mu = np.stack([val[k] for k in self._ALL], axis=1)
-        pp = np.stack([prec[k] for k in self._ALL], axis=1)
+        # ⭐⭐⭐ THE CONSERVATION IS THE COUNT IDENTITY: sum_c rho_c * E_c = M — each density
+        # weighted by ITS OWN opportunity, summing to the slot's OBSERVED unspliced count.
+        # That is `region_gdna_geometry`'s stated contract and it is what makes a delivered
+        # f_c a COUNT share, which is exactly what psi consumes (`channel` below divides by M).
+        # ⛔ The earlier form summed raw DENSITIES against the reciprocal-opportunity total:
+        # a different identity, exact at boundaries but WRONG at regions, where
+        # `inv_abundance` reads rho * P(w <= ell) (region_geometry's contract; measured on the
+        # ladder — median exon P = 0.452, p5 = 0.044, so the total was up to 23x too low at
+        # half of all exon slots) — and inconsistent with both the delivery and the mass
+        # rescale, which already used the count identity.
+        # ⭐ The SPLICED lanes leave the allocation with it: their fragments are not in M
+        # (they are counted separately), so they carry no information into the unspliced
+        # conservation. Their evidence reaches psi through `solve_spliced`'s rows alone — the
+        # owner's rule that spliced fragments impute the adjacent region and do nothing else.
+        # The allocation runs in COUNT space (y_c = rho_c * E_c, a plain sum against M) and
+        # converts back: `allocate`'s closed form is unchanged, the constraint is now exact.
+        E = np.stack([self._E[k] for k in self._UNSPLICED], axis=1)
+        mu = np.stack([val[k] for k in self._UNSPLICED], axis=1) * E
+        pp = np.stack([prec[k] for k in self._UNSPLICED], axis=1)
         unseen_rna = (self._free_pos & (prec["unspliced_rna_pos"] <= 0)) | (
             self._free_neg & (prec["unspliced_rna_neg"] <= 0)
         )
         absorber = self._absorber | unseen_rna
-        live_rows = (pp > 0).any(axis=1) & (self._pT > 0)
-        for i in np.flatnonzero(live_rows):
-            mu[i] = allocate(
-                mu[i],
-                pp[i],
-                total=self._T[i],
-                total_precision=self._pT[i],
-                absorber=bool(absorber[i]),
-            )
+        live_rows = (pp > 0).any(axis=1) & (self._pM > 0) & (self._M > 0)
+        if self._conserve_multiplicative:
+            # THE COMMON-MODE FORM (relay's k = M/S, A/B flag): when the live claims are
+            # imputations of comparable quality, a shortfall against the slot's mass is a LEVEL
+            # error they share — scale them together and leave the COMPOSITION untouched.
+            # Shifting the residual additively onto the weakest lane converts a level error
+            # into a composition error, which is how a near-zero gDNA claim eats an unstranded
+            # slot's unexplained RNA mass. A licensed absorber still takes a deficit whole.
+            live = pp > 0
+            S = np.where(live, mu, 0.0).sum(axis=1)
+            hold = absorber & (S < self._M)
+            k = np.where((S > 0) & live_rows & ~hold, self._M / np.where(S > 0, S, 1.0), 1.0)
+            mu = np.where(live, mu * k[:, None], mu)
+        else:
+            for i in np.flatnonzero(live_rows):
+                mu[i] = allocate(
+                    mu[i],
+                    pp[i],
+                    total=self._M[i],
+                    total_precision=self._pM[i],
+                    absorber=bool(absorber[i]),
+                )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mu = np.where(E > 0, mu / np.where(E > 0, E, 1.0), 0.0)
 
         # CONVERSION — log-share of the node's own measured mass, clipped into the grid domain
         def channel(lane):
             # MEASUREMENT CITIZENSHIP (relay's law): the delivered precision is the measured
             # stream — the belief stream weighted the value blend and the allocation, but only
             # counted witnesses may arrive at psi as precision
-            x = mu[:, self._ALL.index(lane)]
+            x = mu[:, self._UNSPLICED.index(lane)]
             p = meas[lane]
             live = (p > 0) & (self._M > 0) & (x > 0)
             share = np.where(live, x * self._E[lane] / np.where(self._M > 0, self._M, 1.0), 1.0)
@@ -746,6 +786,9 @@ class AllocationSolve(SolveModel):
     _spliced_enabled = True
     #: A/B flag (the factorial contract): relay's residual_level at boundary solves.
     _residual_level = False
+    #: A/B flag: the conservation OPERATOR — multiplicative (relay's common-mode k = M/S,
+    #: composition-preserving) instead of the additive precision-weighted allocation.
+    _conserve_multiplicative = False
 
     def solve_spliced(self, own, forward, backward):
         """THE SPLICED LAW, lane-native (commit three): flank rates from the two arriving

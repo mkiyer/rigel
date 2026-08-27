@@ -585,6 +585,32 @@ struct-lock hygiene (ported/partial); MEDIUM = the pinned comparison frame for t
 AMBIG theta contrast; DO-NOT-PORT = the belief-coupled hop price, the belief flank frame, the
 tau channel (unportable under measurement citizenship — its predicted signature, a stranded
 deficit, is NOT currently observed);
+⛔⛔⛔ **THE CONSERVATION IDENTITY WAS WRONG (2026-08-27, owner challenge: "you probably have
+glaring misspecifications; fix those first").** The allocation forced `Σ_c ρ_c → T` with
+`T = inv_abundance + inv_sj` — a DENSITY sum against the reciprocal-opportunity total, whose
+REGION half reads `ρ·P(w ≤ ell)` by `region_geometry`'s own contract. Measured on the ladder:
+**median exon P = 0.452, p5 = 0.044 — the total was up to 23× too low at 5,736 of 10,969 exon
+slots**, while `channel()` delivers COUNT shares and the mass rescale projects onto the COUNT
+identity. Three parts of one solve, two identities, one wrong at half the exons.
+⭐ **THE FIX: `Σ_c ρ_c·E_c = M`** — `region_gdna_geometry`'s stated contract, exact at both slot
+kinds, and what makes a delivered `f_c` a count share. The allocation runs in count space
+(`allocate`'s closed form unchanged) and converts back; the SPLICED lanes LEAVE the
+conservation with it (their fragments are not in M), which is the owner's spliced rule made
+structural and subsumes the coverage rule.
+⭐⭐ **THE OPERATOR (`_conserve_multiplicative`)**: the identity fix ALONE made low-g worse
+(g00-ss0.50-OFF 284k → 405k) — the truncated total had been suppressing claims at short exons,
+a cancelling defect. With the identity correct the residual became attributable: an ADDITIVE
+residual shifted onto the weakest lane turns a common-mode LEVEL error into a COMPOSITION
+error (a near-zero gDNA claim eats an unstranded slot's unexplained RNA mass); the
+MULTIPLICATIVE form (relay's `k = M/S`) scales the live claims together and preserves the
+composition. **Full 16: `mult+residual` closes the low-gDNA family — g00-ss0.50-OFF 62,248 vs
+the shipped relay's 57,186 (0.05× silence; was 5–21× the relay), g00-ss0.99-OFF 17,008 vs
+15,957 — and `mult+rescale` wins high-g capture-ON — g98-ss0.99-ON 201,135 (beats BOTH silence
+275,645 and relay 423,149), g50-ss0.99-ON 208,651, g98-ss0.50-ON 1.59M vs relay 2.78M.**
+⛔ **THE ONE OPEN QUESTION, now well-posed**: rescale and residual still conflict (mult+resc is
+catastrophic at g00, mult+res at g98-ON). Both are LEVEL operators — the rescale overwrites the
+level from the destination's mass, the residual reads RNA off the same mass against the gdna
+level — so they are two answers to one question and must be unified, not stacked;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

@@ -363,28 +363,109 @@ def test_the_residual_level_claims_the_unexplained_boundary_mass_as_rna():
     )
 
 
-def test_conservation_components_are_the_claims_the_total_counted():
-    """THE COVERAGE RULE: the allocation's components are exactly the claims whose fragments
-    the total counted. A boundary's T contains its own certified splice flux, so its spliced
-    components are its OWN lanes (live flux); a region's T contains no flux, so arriving face
-    claims stay out of its allocation. Here: a boundary-like node with T = 10 = 2 unspliced
-    gDNA + 8 own flux — the own spliced component covers the flux and the gdna witness holds
-    at 2 instead of being inflated toward 10 by a phantom deficit."""
+def test_the_conservation_is_the_count_identity_not_a_density_sum():
+    """THE CONSERVATION IDENTITY (region_geometry's own contract, and psi's): the components
+    of one slot satisfy sum_c rho_c * E_c = M — each density weighted by ITS OWN opportunity,
+    summing to the slot's OBSERVED unspliced count. That is what makes the delivered f_c a
+    COUNT share, which is what psi consumes.
+
+    ⛔ Summing raw densities against the reciprocal-opportunity total is a DIFFERENT and, at
+    regions, a WRONG identity: `inv_abundance` reads rho * P(w <= ell) there (region_geometry's
+    contract; measured on the ladder: median exon P = 0.452, p5 = 0.044 — the total is up to
+    23x too low at half of all exon slots), while it is exact at boundaries. The count identity
+    is exact at both.
+
+    The check is the invariant psi expects: with no absorber licensed, the delivered shares of
+    the live lanes sum to one. Lanes with DIFFERENT opportunities make this fail for any
+    unweighted density sum."""
     F, U = _U()
     m = _mini_solve()
-    m._M = np.full(1, 10.0)
-    own = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
-    own = own.with_lane(
-        "spliced_rna_pos", F.Claim(np.array([8.0]), np.array([40.0]), np.array([40.0]))
-    )
-    gdna = F.Claim(np.array([2.0]), np.array([5.0]), np.array([5.0]))
+    m._E = {
+        "unspliced_gdna": np.array([1.0]),
+        "unspliced_rna_pos": np.array([4.0]),
+        "unspliced_rna_neg": np.array([4.0]),
+    }
+    m._M = np.array([40.0])
+    m._n_slot = np.array([40.0])
     silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
-    fwd = silent.with_lane("unspliced_gdna", gdna)
-    out = m.solve_unspliced(own, fwd, silent)
-    assert float(out.gdna_mode[0]) < np.log(0.35), (
-        f"the own flux must cover its share of the total; gdna held at 2/10 "
-        f"(mode {float(out.gdna_mode[0])}, want ~log 0.2)"
+    fwd = silent.with_lane(
+        "unspliced_gdna", F.Claim(np.array([3.0]), np.array([5.0]), np.array([5.0]))
+    ).with_lane("unspliced_rna_pos", F.Claim(np.array([1.0]), np.array([5.0]), np.array([5.0])))
+    out = m.solve_unspliced(silent, fwd, silent)
+    c_g = float(np.exp(out.gdna_mode[0])) * 40.0
+    c_r = float(np.exp(out.rna_mode[0][0])) * 40.0
+    assert out.gdna_prec[0] > 0 and out.rna_prec[0][0] > 0
+    # (a) the counts account for the observed mass
+    assert abs(c_g + c_r - 40.0) < 2.0, (
+        f"the components' counts must account for the slot's mass (got {c_g + c_r})"
     )
+    # (b) the SPLIT is decided in count space: with equal precisions the residual is shared
+    # equally in FRAGMENTS, so both lanes gain the same number — the arriving counts were
+    # 3*1 = 3 and 1*4 = 4, so the delivered counts keep that one-fragment difference. An
+    # unweighted density sum shares the residual in DENSITY and inverts the gap.
+    assert abs((c_r - c_g) - 1.0) < 0.5, (
+        f"the deficit must be shared in count space (gap {c_r - c_g}, want ~1.0)"
+    )
+
+
+def test_a_common_mode_residual_scales_the_claims_and_keeps_the_composition():
+    """THE CONSERVATION OPERATOR, additive vs multiplicative. When every live claim is an
+    imputation of comparable quality and their counts fall short of the slot's mass, the
+    residual is a LEVEL error common to all of them — the honest repair scales them together
+    (relay's k = M/S) and leaves the COMPOSITION untouched. Shifting the residual additively
+    onto the weakest lane converts a level error into a composition error, which is how a
+    near-zero gDNA claim eats an unstranded slot's unexplained RNA mass.
+
+    Gate on the multiplicative mode: two equally-precise claims short of the mass keep their
+    ratio exactly, and their counts sum to M."""
+    F, U = _U()
+    m = _mini_solve()
+    m._conserve_multiplicative = True
+    m._E = {
+        "unspliced_gdna": np.array([1.0]),
+        "unspliced_rna_pos": np.array([1.0]),
+        "unspliced_rna_neg": np.array([1.0]),
+    }
+    m._M = np.array([40.0])
+    m._n_slot = np.array([40.0])
+    silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    fwd = silent.with_lane(
+        "unspliced_gdna", F.Claim(np.array([1.0]), np.array([5.0]), np.array([5.0]))
+    ).with_lane("unspliced_rna_pos", F.Claim(np.array([3.0]), np.array([5.0]), np.array([5.0])))
+    out = m.solve_unspliced(silent, fwd, silent)
+    c_g = float(np.exp(out.gdna_mode[0])) * 40.0
+    c_r = float(np.exp(out.rna_mode[0][0])) * 40.0
+    assert abs(c_g + c_r - 40.0) < 1e-6, (c_g, c_r)
+    assert abs(c_r / c_g - 3.0) < 1e-6, (
+        f"a common-mode residual must not move the composition (ratio {c_r / c_g}, want 3.0)"
+    )
+
+
+def test_spliced_lanes_never_enter_the_unspliced_conservation():
+    """THE SPLICED LANES LEAVE THE ALLOCATION (the owner's rule, made structural by the count
+    identity): spliced fragments are not in M — they are counted separately — so they carry no
+    information into the unspliced conservation and cannot displace an unspliced witness.
+    A live spliced lane of any size must not move the delivered unspliced channels by one ulp;
+    its evidence reaches psi only through `solve_spliced`'s rows."""
+    F, U = _U()
+    silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
+    gdna = F.Claim(np.array([2.0]), np.array([5.0]), np.array([5.0]))
+    fwd = silent.with_lane("unspliced_gdna", gdna)
+
+    def run(own):
+        m = _mini_solve()
+        m._M = np.array([10.0])
+        m._n_slot = np.array([10.0])
+        return m.solve_unspliced(own, fwd, silent)
+
+    bare = run(silent)
+    with_flux = run(
+        silent.with_lane(
+            "spliced_rna_pos", F.Claim(np.array([99.0]), np.array([40.0]), np.array([40.0]))
+        )
+    )
+    assert float(bare.gdna_mode[0]) == float(with_flux.gdna_mode[0])
+    assert float(bare.gdna_prec[0]) == float(with_flux.gdna_prec[0])
 
 
 def test_frame_aware_under_a_silent_solve_changes_nothing(sweep_inputs):
@@ -480,6 +561,9 @@ def _mini_solve(n=1):
     m._M = np.ones(n)
     m._T = np.full(n, 10.0)
     m._pT = np.full(n, 100.0)
+    m._M = np.full(n, 1.0)
+    m._n_slot = np.full(n, 10.0)
+    m._pM = np.full(n, 100.0)
     m._absorber = np.zeros(n, bool)
     m._dom = (-30.0, 0.0)
     # the composition-evidence variances the reception law is keyed on: the default mini node
