@@ -607,40 +607,6 @@ def test_the_certified_flux_switch_silences_the_stream(anchor_toy, monkeypatch):
     assert off is None, "the switch must silence the stream even with evidence present"
 
 
-def test_currency_silently_drops_the_stream(anchor_toy, monkeypatch):
-    """`message_policy="currency"` + `rna_anchor=True` must NOT prepare or deliver the stream —
-    the documented drop (config.py), now gated: the evidence builder must never fire and the
-    result must be byte-identical to `rna_anchor=False` under currency."""
-    import sys
-
-    import rigel.calibration.calibrate  # noqa: F401
-
-    calibrate_mod = sys.modules["rigel.calibration.calibrate"]
-    from rigel.config import CalibrationConfig
-
-    class Boom(Exception):
-        pass
-
-    def boom(*a, **kw):
-        raise Boom
-
-    t = anchor_toy
-    res_off = calibrate_mod.calibrate(
-        payload=t["payload"],
-        config=CalibrationConfig(rna_anchor=False, message_policy="currency"),
-        **t["calibrate_kwargs"],
-    )
-    monkeypatch.setattr(calibrate_mod, "prepare_flux_evidence", boom)
-    res_on = calibrate_mod.calibrate(
-        payload=t["payload"],
-        config=CalibrationConfig(rna_anchor=True, message_policy="currency"),
-        **t["calibrate_kwargs"],
-    )
-    np.testing.assert_array_equal(
-        np.asarray(res_on.mass_gdna_region), np.asarray(res_off.mass_gdna_region)
-    )
-
-
 def test_the_flag_exists_and_defaults_on():
     from rigel.config import CalibrationConfig
 

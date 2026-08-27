@@ -148,27 +148,29 @@ is not a claim that its modules are the right SIZE; layer 4 being five modules f
 
 ## ⛔ THE MESSAGE LAYER — where it stands, in one place
 
-⭐ **Message propagation is ON** (`CalibrationConfig.message_propagation = True` since 2026-08-18), and the
-policy is one config value, `message_policy`, default `relay`. Three policies sit on one gated backbone:
-`SilentPolicy`, `RelayPolicy`, and `CurrencyPolicy` (`messages/currency.py`).
+⭐⭐⭐ **THE TEAR-DOWN (owner directive, 2026-08-27): ONE policy is being rebuilt from the skeleton,
+slowly and methodically, ON TOY SCENARIOS.** `messages/policy.py` holds **`MessagePolicy`** — the
+foundation-spec runner (`messages/foundation.py`, the owner's ratified architecture: Message with
+provenance lanes, propagate/solve timepoints, skeleton-enforced laws) — anchored byte-identical to
+silence at rung 0 (gated in `tests/calibration/test_message_policy.py`, byte-checked on the panel).
+⛔ **`CurrencyPolicy` and the unified bridge (`FrameAwarePropagation`/`AllocationSolve`) were DELETED**
+after harvest — every derivation, verdict and refutation is recorded in `docs/dev/HONEST_PRECISION.md`,
+and git carries the code. ⛔ Do not resurrect a deleted mechanism without its rung: each rung = ONE
+mechanism, fail-first gate on a toy → the toy ladder → the test chromosome's 16 → only then the panel.
+The acceptance bar is the owner's sentence: **win all unstranded scenarios; close to SILENT on
+strand-specific ones.**
 
-⭐⭐⭐ **THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE).** The
-spliced-fragment anchor is a one-hop imputation and lives in the RELAY as a stream
-(`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
-phase-A, never own-evidence precision). ⛔ `SilentPolicy` never carries it: silent is the
-pre-anchor CONTROL again, and `config.rna_anchor` is live iff propagation is on and the policy is
-relay. The ruling, the contract and the integration price are `DESIGN.md` §6b.3.
+⭐ The two BASELINES remain and are frozen for comparison: `SilentPolicy` (the floor; 7 of 16 panel
+rows) and `RelayPolicy` (the shipped default, `message_policy = "relay"`; best at low-gDNA — do not
+repair it per-bug, owner 2026-08-18; its defects are CONSTRAINTS on the replacement, chief among them
+`TRAPS: zero-the-precision-with-the-value`).
 
-⛔ **`CurrencyPolicy` is a DEVELOPMENT BASELINE WITH A MEASURED DEFICIT, not an improvement** — it wins
-every zero control and loses all three in-scope contaminated strata, where `SilentPolicy` still wins.
-⛔ **On the test chromosome it wins those same strata, so every claim about it MUST name its substrate**
-(`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`). The tables are `ROADMAP.md` §0; the rulings are
-`DESIGN.md` §0c and `EQUATIONS.md` §3.5f–h; the reference-first ordering — fix ψ's reference, THEN
-re-contrast the three policies — is `ROADMAP.md` §1.
-
-⛔ **`RelayPolicy` is being REBUILT rather than repaired bug by bug** (owner, 2026-08-18), so do not open a
-per-bug dissection of it. Its known defects are kept as CONSTRAINTS on the replacement, chief among them
-`TRAPS: zero-the-precision-with-the-value`.
+⭐⭐ **THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE)** stays in the
+relay (`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
+phase-A, never own-evidence precision); `config.rna_anchor` is live iff propagation is on and the
+policy is relay. `DESIGN.md` §6b.3. ⭐ The owner's clarified SPLICED law is skeleton-enforced: spliced
+fragments are MEASURED at boundaries, never solved, strictly ONE-HOP — `foundation.propagate` refuses
+to relay a spliced claim for every model.
 
 ⭐ **The vocabulary rename is in flight.** Landed: `graft` → SPLICE IN, the operator sense of the old
 peel token → SPLICE OUT, the deconvolution verb → `deconvolve`, `mass_pin` → `mass_rescale`,
@@ -230,12 +232,20 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,723 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
-The `+3` over 3,720 is THE THREE LAWS (the terminus-law gate and the debias gate in the
-EXISTING `tests/calibration/test_unified_bridge.py`, the support-probability gate in the
-EXISTING `tests/calibration/test_region_geometry.py` — all fail-first; the premise gate was
+⭐ **THE STANDING BASELINE: 0 failed / 3,653 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
+The `−70` from 3,723 is THE TEAR-DOWN (owner directive): `messages/unified.py`,
+`messages/currency.py`, `tests/calibration/test_unified_bridge.py` and
+`tests/calibration/test_currency_policy.py` DELETED (their own cases + per-file gates), the
+currency-drops gate retired from `tests/calibration/test_rna_anchor.py`, replaced by
+`messages/policy.py` (+3: jargon, docs-boundary, layering) and
+`tests/calibration/test_message_policy.py` (5 backbone gates + 2 per-file). Byte-checked:
+silent and relay panel outputs identical before/after; MessagePolicy rung 0 ≡ silent on the
+panel. Before that, the `+3` over 3,720 was THE THREE LAWS (the terminus-law gate and the
+debias gate, the support-probability gate in the EXISTING
+`tests/calibration/test_region_geometry.py` — all fail-first; the premise gate was
 rewritten in place twice, its exon-end scoping landed, was panel-refuted by the attribution
-factorial, and was reverted the same session — net zero from it; no file added). Before that,
+factorial, and was reverted the same session — the gates died with their file in the
+tear-down above). Before that,
 the `+1` over 3,719 was THE LEVEL DERIVATION's limits gate in the EXISTING
 `tests/calibration/test_unified_bridge.py` (the AXIOM census and knob gates were restated in
 place, not added). Before that, the `+2` over 3,717 was THE CONSERVATION IDENTITY FIX (the count-identity gate and the

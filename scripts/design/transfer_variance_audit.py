@@ -20,7 +20,7 @@ not. So the retirement removed a POPULATION-HETEROGENEITY term and replaced it w
 only, and arm ⓑ measures what that costs: on the deeply-counted hops a transport is nearly FREE.
 
 ⭐ The Stage-3 ``CurrencyPolicy`` fills that hole by a different and better route —
-``currency.premise_logvar``, a method-of-moments fit of the leftover spread of ``log r`` after each
+``variance.premise_logvar``, a method-of-moments fit of the leftover spread of ``log r`` after each
 hop's own counting variance is removed, floored at 0. ⭐⭐ **So the role the npmle held is not vacant
 in the tool; it is vacant in the SHIPPED policy** (``message_policy`` defaults to ``relay``), and that
 is this audit's central finding.
@@ -92,7 +92,7 @@ PVO = OC.PVO
 
 from rigel.calibration.abundance_landscape import fit_abundance_landscape  # noqa: E402
 from rigel.calibration.landscape import _poisson_kernels  # noqa: E402
-from rigel.calibration.messages.currency import premise_logvar  # noqa: E402
+from rigel.calibration.messages.variance import premise_logvar  # noqa: E402
 from rigel.calibration.messages.variance import count_logvar, transfer_logvar  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import REGION, build_region_chain  # noqa: E402
@@ -618,7 +618,7 @@ def main(argv=None) -> int:
             "sigma^2_transfer role is not merely unwired, it is gone"
         )
         print(
-            "   ⭐ and the role it filled is NOT vacant in the tool: `currency.premise_logvar` is the "
+            "   ⭐ and the role it filled is NOT vacant in the tool: `variance.premise_logvar` is the "
             "population term, fitted. It IS vacant in the shipped `relay` policy — see ⓑ/ⓒ."
         )
 

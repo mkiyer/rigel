@@ -14,8 +14,9 @@ default flipped, a wrong-fact fossil corrected 2026-08-23):
   each behind a NAMED switch, so ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five boundaries
   long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.currency.CurrencyPolicy` — the Stage-3 rebuild, measured WORST on the in-scope contaminated
-  strata and FROZEN pending the reference re-contrast.
+* :class:`~.policy.MessagePolicy` — THE SKELETON of the ground-up rebuild (owner tear-down,
+  2026-08-27): the foundation-spec runner, anchored byte-identical to silence at rung 0; the one
+  policy under methodical development on the toy ladder.
 * :mod:`~.variance` — the shared variance arithmetic the policies draw on. Not a policy; a toolbox.
 
 ⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer

@@ -129,17 +129,10 @@ def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=N
     #    i.e. only under RelayPolicy; and muted, ψ carries each slot's own evidence alone, so the
     #    final belief must BE the message-free local solve, bit for bit.
     relay_ran = "_uni" in cap
-    currency_ran = "_currency" in cap
     if relay_ran != (messages and policy == "relay"):
         raise AssertionError(
             f"messages={messages} policy={policy} but the relay {'ran' if relay_ran else 'did not run'} "
             "— this arm is not the arm it claims to be (`_uni` is written only under RelayPolicy)."
-        )
-    if currency_ran != (messages and policy == "currency"):
-        raise AssertionError(
-            f"messages={messages} policy={policy} but the currency policy "
-            f"{'ran' if currency_ran else 'did not run'} — this arm is not the arm it claims to be "
-            "(`_currency` is written only under CurrencyPolicy)."
         )
     f_g = np.asarray(cap["f_g"], np.float64)
     if not messages:
@@ -175,12 +168,11 @@ def score(f_g: np.ndarray, truth: dict[str, np.ndarray], sel: np.ndarray) -> dic
 
 
 #: label -> (message_propagation, message_policy). ⭐ "off"/"on" are the standing benchmark's two
-#: arms; "currency" is the Stage-3 policy under development, opt-in via --arms so every existing
+#: arms. ⛔ the "currency" arm was DELETED with CurrencyPolicy (owner tear-down 2026-08-27);
 #: caller and artifact keeps its exact shape.
 ARMS: dict[str, tuple[bool, str]] = {
     "off": (False, "relay"),
     "on": (True, "relay"),
-    "currency": (True, "currency"),
 }
 
 
@@ -345,7 +337,7 @@ def main() -> int:
                     help="write every (condition x arm x axis) row as TSV — the machine-readable form "
                          "of the standing benchmark, and what `benchmark_report.py` renders")
     ap.add_argument("--arms", nargs="+", default=["off", "on"], choices=sorted(ARMS),
-                    help="which arms to run — 'off'/'on' are the standing benchmark; 'currency' is "
+                    help="which arms to run — 'off'/'on' are the standing benchmark"
                          "the Stage-3 policy under development (an 'off' baseline is required)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()

@@ -43,6 +43,7 @@ import numpy as np
 from scipy.special import log_ndtr, polygamma, zeta
 
 __all__ = [
+    "premise_logvar",
     "composition_logvar",
     # ── the pass-0 message-VARIANCE laws ──
     "splice_in_frame_logvar",
@@ -560,6 +561,54 @@ def mismatch_deflate(precision, gap, contradicted, var_own):
     b2 = np.where(known, np.maximum(0.0, g * g - v_msg - np.where(known, vo, 0.0)), 0.0)
     out = np.where((p > 0.0) & (b2 > 0.0), 1.0 / np.maximum(v_msg + b2, _EPS), p)
     return np.where(np.asarray(contradicted, bool) & known, 0.0, out)
+
+
+def premise_logvar(log_r, v_r) -> float:
+    """⭐⭐⭐ **THE VARIANCE OF THE PREMISE EVERY HOP RESTS ON — one library-level scalar, FITTED.**
+
+    A message is an IMPUTATION, and an imputation is a weak predictor by definition: the strand model
+    MEASURES a slot's composition from that slot's own counts, while a message asserts that a
+    NEIGHBOUR's abundances apply here. That assertion has its own uncertainty, and — this is the part
+    the counting terms cannot supply — **it does not shrink as either slot is counted more deeply.**
+    Without it a transport between two deeply-counted slots is free: both counting terms vanish, the
+    knob absorbs the ratio, and the imputation arrives at full strength.
+
+    ⛔ **What that costs is measured:** the composition transport TRAMPLED slots the strand model had
+    already solved — 804 → 6,504 fragments at `g50 ss0.99 capture_on`, an 8.09x degradation of the
+    MEASURED half of the chain, where ablating the transport entirely reads 1.01x.
+
+    ⭐ **Fitted by METHOD OF MOMENTS, so no constant is introduced**: the observed spread of ``log r``
+    over this chain's hops already contains the counting variance those ratios were measured with, so
+    the premise is what is left over::
+
+        premise  =  max( 0,  Var_w(log r)  −  mean_w(v_r) )     weighted by  w ∝ 1/v_r
+
+    ⛔ Floored at 0 rather than clipped to something small: a substrate whose ratios vary no more than
+    Poisson predicts has shown no heterogeneity, and a fit may not manufacture doubt the data do not
+    show. ⚠ It is deliberately ONE scalar for the whole chain — a per-hop-type fit is the obvious
+    refinement and needs a substrate with enough hops per type to estimate on."""
+    lr = np.asarray(log_r, np.float64)
+    vr = np.asarray(v_r, np.float64)
+    live = np.isfinite(lr) & np.isfinite(vr) & (vr > 0.0)
+    if int(np.count_nonzero(live)) < 2:
+        return 0.0
+    lr, vr = lr[live], vr[live]
+    # ⛔⛔⛔ **WEIGHTED BY EACH HOP'S OWN PRECISION, AND THE UNWEIGHTED FORM IS NOT A SIMPLIFICATION OF
+    # THIS — IT IS THE PANEL FAILURE.** A hop measured on two fragments says almost nothing about how
+    # heterogeneous the chain is, and an unweighted mean lets it say so loudly. Measured 2026-08-20: on
+    # the test chromosome the median slot holds 354 fragments and the unweighted fit returns 0.992; on
+    # the 16-condition ladder the median holds **13**, a quarter of slots hold under five and a FIFTH
+    # hold none, so `mean(v_r) = 2.07` swamps `Var(log r) = 0.76` and the fit floors at **0.0** — the
+    # policy ran the whole panel with no premise at all, which is why its toy result did not transfer
+    # (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`).
+    # ⭐ Weighted, the same two substrates return **0.294** and **0.324** — essentially one number, which
+    # is what a library-level property should do. The weights are the hops' own inverse variances, so
+    # nothing is introduced: it is the same moment identity read under the measure the data supply.
+    w = 1.0 / vr
+    w = w / float(w.sum())
+    mu = float(np.sum(w * lr))
+    var_w = float(np.sum(w * (lr - mu) ** 2))
+    return float(max(0.0, var_w - float(np.sum(w * vr))))
 
 
 def splice_in_premise_logvar(flux_a, flux_b, var_a, var_b):

@@ -52,7 +52,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .messages.currency import CurrencyPolicy
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .region_chain import BOUNDARY, REGION
@@ -610,10 +609,7 @@ def calibrate(
     # ⭐ ONE policy instance for every phase: the relay carries the certified-flux evidence and a
     # grid-keyed rows memo, so constructing it per sweep would rebuild the rows every refit.
     if config.message_propagation:
-        if config.message_policy == "currency":
-            policy = CurrencyPolicy()
-        else:
-            policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
+        policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
     else:
         policy = SilentPolicy()
 
