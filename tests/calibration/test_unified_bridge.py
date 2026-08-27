@@ -276,7 +276,12 @@ def test_the_knob_interpolates_between_the_two_strategies():
     F, U, m = _hop_tables(log_r=0.05, v_r=1.0)
     weak = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
     assert 1.0 <= weak.abundance < 1.01
-    assert weak.precision < 10.0, "a hop with any disagreement must cost precision"
+    # ⭐ the knob's costs are the REFRAME's, so they are charged to the message's SHARED LEVEL
+    # (the level derivation, 2026-08-27) — not to this lane's precision
+    hop = U.Hop(src=0, dst=1, backward=False)
+    assert m.level_cost(hop) > 0.0, "a hop with any disagreement must cost the shared level"
+    _f_flat, _u_flat, m_flat = _hop_tables(log_r=0.0, v_r=1.0)
+    assert m_flat.level_cost(hop) == 0.0, "a perfectly agreeing frame costs the level nothing"
 
 
 def test_the_premise_is_charged_on_every_hop():
@@ -406,6 +411,55 @@ def test_the_conservation_is_the_count_identity_not_a_density_sum():
     assert abs((c_r - c_g) - 1.0) < 0.5, (
         f"the deficit must be shared in count space (gap {c_r - c_g}, want ~1.0)"
     )
+
+
+def test_the_level_solve_has_all_three_operators_as_limits():
+    """THE LEVEL DERIVATION (owner directive, 2026-08-27) — one conservation solve with TWO
+    variance kinds: V, the SHARED scale uncertainty a transported message carries (the reframe
+    knob's costs multiply every lane identically, so they are common-mode), and v_c, each
+    component's own. Minimising a^2/2V + sum u_c^2/2v_c subject to sum mu_c e^(a+u_c) = M
+    gives, around the current point,
+
+        a   = V   p_M D S   / (1 + p_M W)      D = M - S,  S = sum y_c
+        u_c = v_c p_M D y_c / (1 + p_M W)      W = V S^2 + sum v_c y_c^2
+
+    and the three operators built separately are its LIMITS. This gates all three:
+
+    * V >> v_c  =>  a -> log(M/S), u -> 0: the multiplicative mass rescale (composition held);
+    * V = 0     =>  the residual distributes per component by v_c y_c: the additive allocation;
+    * one lane uninformative (v -> large) => the residual lands there: residual_level's law,
+      "everything the gDNA level cannot explain about this mass is RNA".
+    """
+    U = _alloc()
+    mu = np.array([3.0, 1.0])
+
+    # (1) shared-level limit: composition preserved, counts sum to M
+    y = U.allocate_level(
+        mu, np.array([1e-6, 1e-6]), total=8.0, total_precision=1e6, level_logvar=1.0, absorber=False
+    )
+    assert abs(y.sum() - 8.0) < 1e-6, y
+    assert abs(y[0] / y[1] - 3.0) < 1e-3, f"a shared-level residual must hold the composition {y}"
+
+    # (2) no shared level: the residual moves the composition, weighted by v_c * y_c
+    y2 = U.allocate_level(
+        mu, np.array([1.0, 1.0]), total=8.0, total_precision=1e6, level_logvar=0.0, absorber=False
+    )
+    assert abs(y2.sum() - 8.0) < 1e-6, y2
+    assert y2[0] / y2[1] > 3.5, f"an own-error residual must move the composition {y2}"
+
+    # (3) one uninformative lane takes the residual whole (residual_level's limit)
+    y3 = U.allocate_level(
+        mu, np.array([1e-9, 1e4]), total=8.0, total_precision=1e6, level_logvar=0.0, absorber=False
+    )
+    assert abs(y3.sum() - 8.0) < 1e-6, y3
+    assert abs(y3[0] - 3.0) < 0.05, f"the confident lane holds its level {y3}"
+    assert abs(y3[1] - 5.0) < 0.05, f"the uninformative lane takes the remainder {y3}"
+
+    # positivity is structural: the log form cannot produce a negative count
+    y4 = U.allocate_level(
+        mu, np.array([1.0, 1.0]), total=0.5, total_precision=1e6, level_logvar=0.0, absorber=False
+    )
+    assert np.all(y4 > 0), y4
 
 
 def test_a_common_mode_residual_scales_the_claims_and_keeps_the_composition():

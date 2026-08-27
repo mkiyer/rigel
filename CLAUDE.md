@@ -230,8 +230,10 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,719 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
-The `+2` over 3,717 is THE CONSERVATION IDENTITY FIX (the count-identity gate and the
+⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
+The `+1` over 3,719 is THE LEVEL DERIVATION's limits gate in the EXISTING
+`tests/calibration/test_unified_bridge.py` (the AXIOM census and knob gates were restated in
+place, not added). Before that, the `+2` over 3,717 was THE CONSERVATION IDENTITY FIX (the count-identity gate and the
 common-mode-operator gate in the EXISTING `tests/calibration/test_unified_bridge.py`; the
 superseded coverage gate was replaced in place by the spliced-lanes-leave-the-conservation
 gate — net +2, no file added). Before that, the `+2` over 3,715 was THE FACTORIAL PORTS (two default-OFF A/B gates in the EXISTING

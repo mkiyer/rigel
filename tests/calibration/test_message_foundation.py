@@ -33,14 +33,21 @@ def test_the_message_carries_exactly_the_axiom_populations():
     F = _F()
     import dataclasses
 
-    fields = {f.name for f in dataclasses.fields(F.Message)}
-    assert fields == {
+    lanes = {
         "unspliced_gdna",
         "unspliced_rna_pos",
         "unspliced_rna_neg",
         "spliced_rna_pos",
         "spliced_rna_neg",
     }
+    assert set(F.Message.LANES) == lanes
+    # ⭐ the axiom is about POPULATIONS, so the check is on CLAIM-typed fields: a message may
+    # carry scalars about itself (the shared level variance), but a sixth population — any
+    # additional field that is a Claim — is what cannot be written down.
+    claim_fields = {f.name for f in dataclasses.fields(F.Message) if f.type in ("Claim", F.Claim)}
+    assert claim_fields == lanes, claim_fields
+    m = F.Message.silent()
+    assert {n for n in vars(F.Message)["__slots__"] if isinstance(getattr(m, n), F.Claim)} == lanes
 
 
 def test_silence_is_expressible_and_detectable():

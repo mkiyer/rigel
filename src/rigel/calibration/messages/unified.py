@@ -29,11 +29,19 @@ speed work optimises arithmetic that will survive.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 
 from . import NeighbourState, PsiMessage, StepContext
 from .foundation import Claim, Hop, Message, PropagationModel, SolveModel
 from .variance import count_logvar
+
+#: numerical budget for the level solve's re-linearisation — a convergence tolerance and a
+#: per-step log bound (stability, not model constants).
+_LEVEL_STEPS = 8
+_LEVEL_TOL = 1e-9
+_LEVEL_MAX_STEP = 30.0
 
 __all__ = [
     "AllocationSolve",
@@ -42,6 +50,7 @@ __all__ = [
     "SilentSolve",
     "UnifiedPolicy",
     "allocate",
+    "allocate_level",
 ]
 
 
@@ -214,6 +223,10 @@ class _PreparedUnified:
         # state starts as each node's OWN message; a hop overwrites the destination with the
         # propagated blend, so a reference terminal (skipped by the backbone) keeps its own.
         state = {lane: tuple(arr.copy() for arr in self.own[lane]) for lane in Message.LANES}
+        # the SHARED LEVEL variance travels beside the lanes: own beliefs are locally anchored
+        # (0) and each hop adds its reframe's scale cost, diluted by the destination's own
+        n_slots = int(np.asarray(self.ctx.n_slot).shape[0])
+        level = np.zeros(n_slots, np.float64)
         # ⭐ the SPLICED lanes are direction-aware: travelling low→high a boundary presents its
         # HIGH (acceptor) face — the routes entering its rightward exon — and the mirror going
         # back, so the adjacent solve receives exactly the exon-facing flank rate.
@@ -228,7 +241,7 @@ class _PreparedUnified:
                 own_scan[lane] = face[lane]
 
         def step(s: int, i: int) -> None:
-            incoming = self._message_at(state, s)
+            incoming = dataclasses.replace(self._message_at(state, s), level_logvar=float(level[s]))
             mine = self._message_at(own_scan, i)
             out = self._prop.propagate(mine, incoming, Hop(src=s, dst=i, backward=backward))
             for lane in Message.LANES:
@@ -236,9 +249,10 @@ class _PreparedUnified:
                 state[lane][0][i] = claim.abundance
                 state[lane][1][i] = claim.precision
                 state[lane][2][i] = claim.measured
+            level[i] = out.level_logvar
 
         def publish():
-            return tuple(arr for lane in Message.LANES for arr in state[lane])
+            return tuple(arr for lane in Message.LANES for arr in state[lane]) + (level,)
 
         return step, publish
 
@@ -252,7 +266,8 @@ class _PreparedUnified:
             lanes[lane] = Claim(
                 np.where(valid, ab, 0.0), np.where(valid, pr, 0.0), np.where(valid, ms, 0.0)
             )
-        return Message(**lanes)
+        lv = np.asarray(nb.state[3 * len(Message.LANES)], np.float64)
+        return Message(**lanes, level_logvar=np.where(valid, lv, 0.0))
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
         own = Message(**{lane: Claim(*self.own[lane]) for lane in Message.LANES})
@@ -389,6 +404,20 @@ class FrameAwarePropagation(PropagationModel):
         # not a premise refinement.
         self._premise = float(premise_logvar(lr, vr))
 
+    def level_cost(self, hop: "Hop | None") -> float:
+        """The hop's SHARED SCALE cost: the knob's own estimate variance ``w·v`` plus the
+        residual disagreement ``((1−w)·log r)²``. Both describe the reframe factor ``r^w``,
+        which multiplies every lane identically — a LEVEL statement, never a composition one."""
+        if hop is None or self._tables is None:
+            return 0.0
+        t = self._tables[hop.backward]
+        lr = float(t["log_r"][hop.dst])
+        v = float(t["v_r"][hop.dst])
+        lr2 = lr * lr
+        w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
+        resid = (1.0 - w) * lr
+        return w * v + resid * resid
+
     def attenuate(self, claim: Claim, lane: str, hop: "Hop | None") -> Claim:
         t = self._tables[hop.backward]
         i, s = hop.dst, int(t["src"][hop.dst])
@@ -412,6 +441,11 @@ class FrameAwarePropagation(PropagationModel):
         v = float(t["v_r"][i])
         lr2 = lr * lr
         w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
+        # ⭐ THE SPLIT (2026-08-27): the knob's two costs — its own estimate variance w·v and
+        # the residual disagreement ((1−w)·log r)² — are properties of the REFRAME, a single
+        # scale applied to every lane alike, so they are charged to the message's SHARED LEVEL
+        # (`level_cost`) and not to this claim. What remains here is the PREMISE: "a
+        # neighbour's abundances apply at all", which is a per-lane composition price.
         # ⛔ THE gDNA-CONTINUITY RULE WAS BUILT, KEYED THREE WAYS, AND REFUTED ON THE PANEL
         # WITHOUT ITS SECOND HALF. The enrichment ratio mixes TWO effects: hybrid capture,
         # which binds nucleic acid regardless of origin and so enriches gDNA and RNA ALIKE at
@@ -429,14 +463,69 @@ class FrameAwarePropagation(PropagationModel):
         # (a fuse negotiates; the rescale overwrites). The upside is real — continuity halved
         # g05-unstranded-OFF — so porting the rescale, THEN continuity, is the recorded path.
         value = float(claim.abundance) * float(np.exp(w * lr))
-        resid = (1.0 - w) * lr
-        v_hop = w * v + resid * resid + self._premise
+        v_hop = self._premise
         p = float(claim.precision)
         ms = float(claim.measured)
         if v_hop > 0.0:
             p = p / (1.0 + p * v_hop)
             ms = ms / (1.0 + ms * v_hop)
         return Claim(abundance=value, precision=p, measured=ms)
+
+
+def allocate_level(mu, v_own, *, total, total_precision, level_logvar, absorber):
+    """⭐⭐⭐ THE LEVEL SOLVE (derived 2026-08-27) — ONE conservation with TWO variance kinds.
+
+    A transported claim's uncertainty is not all of one kind. The reframe knob's costs
+    multiply EVERY lane of a message identically, so they are a SHARED SCALE uncertainty
+    ``V`` (a level statement); each component additionally carries its own ``v_c`` (a
+    composition statement). Spending the shared part as per-component variance is what turns a
+    common-mode level error into a composition error — the measured pathology where a
+    near-zero gDNA claim eats an unstranded slot's unexplained RNA mass.
+
+    Minimise ``a²/2V + Σ u_c²/2v_c`` subject to ``Σ μ_c e^(a+u_c) = M`` (a the shared log-level
+    correction, u_c the per-component ones; the total carries its own counting precision
+    ``p_M``, so the constraint is soft). Stationarity around the current point gives::
+
+        D = M − S,  S = Σ y_c            W = V·S² + Σ v_c·y_c²
+        a   = V  ·p_M·D·S   / (1 + p_M·W)
+        u_c = v_c·p_M·D·y_c / (1 + p_M·W)
+
+    applied as ``y_c ← y_c·exp(a + u_c)`` and re-linearised until the constraint is met — the
+    LOG form, so positivity is structural and no clamp-and-redistribute pass exists.
+
+    ⭐ **The three operators built separately are its limits**, which is why they fought when
+    stacked: ``V ≫ v_c`` ⇒ ``a → log(M/S)``, ``u → 0`` — the multiplicative mass rescale, the
+    composition held; ``V = 0`` ⇒ the additive precision-weighted allocation; one lane
+    uninformative ⇒ the residual lands there, which is ``residual_level``'s law.
+
+    A licensed ABSORBER (terminus-admitted or annotation-admitted-but-unwitnessed RNA) takes a
+    DEFICIT whole — the known components hold — but cannot absorb an EXCESS.
+    """
+    mu = np.asarray(mu, np.float64)
+    v = np.asarray(v_own, np.float64)
+    live = (mu > 0.0) & np.isfinite(v)
+    if not live.any():
+        return mu.copy()
+    y = mu.copy()
+    S = float(y[live].sum())
+    if absorber and float(total) - S > 0.0:
+        return y
+    pM = float(total_precision)
+    V = float(level_logvar)
+    for _ in range(_LEVEL_STEPS):
+        S = float(y[live].sum())
+        D = float(total) - S
+        if abs(D) <= _LEVEL_TOL * max(float(total), 1.0):
+            break
+        W = V * S * S + float((v[live] * y[live] ** 2).sum())
+        denom = 1.0 + pM * W
+        if denom <= 0.0 or not np.isfinite(denom):
+            break
+        a = V * pM * D * S / denom
+        u = np.where(live, v * pM * D * y / denom, 0.0)
+        step = np.clip(a + u, -_LEVEL_MAX_STEP, _LEVEL_MAX_STEP)
+        y = np.where(live, y * np.exp(step), y)
+    return y
 
 
 def allocate(mu, p, *, total, total_precision, absorber):
@@ -742,7 +831,31 @@ class AllocationSolve(SolveModel):
         )
         absorber = self._absorber | unseen_rna
         live_rows = (pp > 0).any(axis=1) & (self._pM > 0) & (self._M > 0)
-        if self._conserve_multiplicative:
+        if self._level_solve:
+            # ⭐⭐⭐ THE LEVEL SOLVE: one conservation, two variance kinds. V is the SHARED
+            # scale uncertainty the arriving messages accumulated (blended by how much each
+            # direction contributed, with the node's OWN belief entering at zero — it is
+            # locally anchored); v_c is each component's own. The three operators built
+            # separately (mass rescale, additive allocation, residual_level) are its limits.
+            lf = np.asarray(forward.level_logvar, np.float64)
+            lb = np.asarray(backward.level_logvar, np.float64)
+            pf = sum(np.asarray(forward.lane(k).precision, np.float64) for k in self._UNSPLICED)
+            pb = sum(np.asarray(backward.lane(k).precision, np.float64) for k in self._UNSPLICED)
+            po = sum(np.asarray(own.lane(k).precision, np.float64) for k in self._UNSPLICED)
+            wsum = pf + pb + po
+            V = np.where(wsum > 0, (pf * lf + pb * lb) / np.where(wsum > 0, wsum, 1.0), 0.0)
+            with np.errstate(divide="ignore"):
+                v_own = np.where(pp > 0, 1.0 / np.where(pp > 0, pp, 1.0), np.inf)
+            for i in np.flatnonzero(live_rows):
+                mu[i] = allocate_level(
+                    mu[i],
+                    v_own[i],
+                    total=self._M[i],
+                    total_precision=self._pM[i],
+                    level_logvar=float(V[i]),
+                    absorber=bool(absorber[i]),
+                )
+        elif self._conserve_multiplicative:
             # THE COMMON-MODE FORM (relay's k = M/S, A/B flag): when the live claims are
             # imputations of comparable quality, a shortfall against the slot's mass is a LEVEL
             # error they share — scale them together and leave the COMPOSITION untouched.
@@ -786,6 +899,9 @@ class AllocationSolve(SolveModel):
     _spliced_enabled = True
     #: A/B flag (the factorial contract): relay's residual_level at boundary solves.
     _residual_level = False
+    #: ⭐ A/B flag: THE LEVEL SOLVE — one conservation with two variance kinds, of which the
+    #: additive allocation and the multiplicative rescale are limits (`allocate_level`).
+    _level_solve = False
     #: A/B flag: the conservation OPERATOR — multiplicative (relay's common-mode k = M/S,
     #: composition-preserving) instead of the additive precision-weighted allocation.
     _conserve_multiplicative = False

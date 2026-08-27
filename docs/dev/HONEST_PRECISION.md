@@ -607,10 +607,35 @@ composition. **Full 16: `mult+residual` closes the low-gDNA family — g00-ss0.5
 the shipped relay's 57,186 (0.05× silence; was 5–21× the relay), g00-ss0.99-OFF 17,008 vs
 15,957 — and `mult+rescale` wins high-g capture-ON — g98-ss0.99-ON 201,135 (beats BOTH silence
 275,645 and relay 423,149), g50-ss0.99-ON 208,651, g98-ss0.50-ON 1.59M vs relay 2.78M.**
-⛔ **THE ONE OPEN QUESTION, now well-posed**: rescale and residual still conflict (mult+resc is
-catastrophic at g00, mult+res at g98-ON). Both are LEVEL operators — the rescale overwrites the
-level from the destination's mass, the residual reads RNA off the same mass against the gdna
-level — so they are two answers to one question and must be unified, not stacked;
+⭐⭐⭐ **THE LEVEL DERIVATION (2026-08-27, owner directive) — the three operators are limits of
+ONE solve.** A transported claim's uncertainty is not all of one kind: the reframe knob's costs
+multiply EVERY lane of a message identically, so they are a SHARED SCALE variance `V` (a level
+statement), while each component also carries its own `v_c` (a composition statement). Spending
+the shared part as per-component variance is precisely what turns a common-mode level error into
+a composition error. Minimise `a²/2V + Σ u_c²/2v_c` s.t. `Σ μ_c e^(a+u_c) = M`; stationarity
+around the current point gives
+
+    D = M − S,  S = Σ y_c        W = V·S² + Σ v_c·y_c²
+    a   = V  ·p_M·D·S   / (1 + p_M·W)
+    u_c = v_c·p_M·D·y_c / (1 + p_M·W)
+
+applied as `y_c ← y_c·exp(a+u_c)` and re-linearised until the constraint holds — the LOG form,
+so positivity is structural and the clamp-and-redistribute pass disappears. ⭐ **The limits,
+gated**: `V ≫ v_c` ⇒ `a → log(M/S)`, `u → 0` = the multiplicative mass rescale (composition
+held); `V = 0` ⇒ the additive precision-weighted allocation; one lane uninformative ⇒ the
+residual lands there = `residual_level`'s law. Wired: `foundation.Message.level_logvar` (zero
+for an own belief — locally anchored — accumulating along a chain and diluted at each node by
+its own evidence), `PropagationModel.level_cost` (the knob's `w·v + ((1−w)·log r)²` moved OFF
+the lanes; the PREMISE stays per-lane, since "a neighbour's abundances apply here" is a
+composition claim). **Measured, full 16**: `level` alone halves the low-gDNA error vs `base`
+(g00-ss0.50-OFF 405k → 211k, g00-ss0.99-OFF 98k → 48k) and is neutral-to-better at stranded
+high-g (g98-ss0.99-ON 253k → 247k, g50-ss0.99-ON 249k → 245k); 8 of 16 rows improve, 7 cost,
+concentrated at g05/g98 capture-OFF. ⛔ **What the unification did NOT do is settle the
+contest**: `level+residual` still ≈ `mult+residual` and `mult+rescale` still owns high-g
+capture-ON, because with the FORM now correct the answer is decided entirely by the VARIANCE
+INPUTS — how big V really is per hop class, and whether the premise is the right per-lane price.
+That is the transport-dispersion decomposition, and it is now the only thing between here and a
+single policy;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must
