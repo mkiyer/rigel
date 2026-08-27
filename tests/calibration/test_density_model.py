@@ -111,6 +111,8 @@ def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, r
         sj_count_lo=np.zeros((n_slots, 2)),
         sj_count_hi=np.zeros((n_slots, 2)),
         eff_sj_lo=np.zeros((n_slots, 2)),
+        support_prob_gdna=np.ones(n_slots),
+        support_prob_rna=np.ones(n_slots),
         route_rate_lo=np.zeros((n_slots, 2)),
         route_rate_hi=np.zeros((n_slots, 2)),
         route_count_lo=np.zeros((n_slots, 2), dtype=np.int64),

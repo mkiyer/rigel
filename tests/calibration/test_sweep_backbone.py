@@ -42,6 +42,8 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         eff_gdna=ones * 200.0,
         eff_sj=np.ones((N, 2)) * 200.0,
         sj_count=np.zeros((N, 2)),
+        support_prob_gdna=np.ones(N),
+        support_prob_rna=np.ones(N),
         route_rate_lo=np.zeros((N, 2)),
         route_rate_hi=np.zeros((N, 2)),
         route_count_lo=np.zeros((N, 2), dtype=np.int64),

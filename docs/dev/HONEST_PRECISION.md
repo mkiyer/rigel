@@ -680,6 +680,34 @@ per class by the PAIR-DISAGREEMENT method (two boundaries transport the same exo
 their disagreement in excess of counting noise is the per-hop dispersion, the same estimator
 already derived for the spliced side in §4a); the pooled premise retires. The class key is
 structural (region type × has-sj), not tuned;
+⭐⭐⭐ **THE THREE LAWS + THE ATTRIBUTION (2026-08-27, second half).** Implemented per the
+owner sign-off, each gated fail-first: ① **THE PER-STRAND TERMINUS LAW** (relay's three-case
+rule; the owner's TSS example is the gate's fixture — this-strand-changed ⇒ no claim;
+other-strand-changed ⇒ density transfer at r = 1; gDNA terminus-immune); ② **THE TRUNCATION
+DEBIAS** (`region_geometry.support_prob_gdna/rna` = P_c(w ≤ ℓ) per component, exact at
+boundaries; the transport removes the known 1/P frame factor from the observed ratio per lane
+under each component's OWN pmf; a no-measurement default ratio is not debiased). The
+instrument confirms the debias: **exon↔B(plain) capture-ON V collapsed 1.0 → 0.10; sj-ON
+4.4 → 1.5**, and the mean/var split shows the remaining sj-ON error is ~⅓ DIRECTIONAL bias
+(±0.73, antisymmetric — the capture step itself) + ~⅔ scatter; ③ the premise's exon-end
+scoping (intron-end hops measured composition-FREE by truth AND the observed-moment fit).
+⛔ **THE PANEL THEN REGRESSED, AND THE ATTRIBUTION FACTORIAL (each law removed alone, full
+16) NAMED THE CARRIER: the premise scoping.** Freeing intron chains of the pooled charge
+before the measured LEVEL charge exists releases un-priced level drift — restoring it
+recovered g98-ss0.50-ON 4.37M → 2.44M (BEATS the relay's 2.78M) and g50-ss0.50-ON
+1.80M → 1.23M. **The scoping was REVERTED the same day** (the truth stands recorded: intron
+hops carry no composition cost; the scoping returns WITH the level charge). The terminus law
+is net-protective on the heavy rows (removing it costs g98-ss0.50-ON +656k) and the debias
+panel-neutral-to-mild — both KEPT.
+⭐ **THE ONE REMAINING UNIT: the class-keyed LEVEL charge (V).** The measured V after the
+debias: intron hops ≈ 0; exon↔B(plain) ≈ 0.10 (both capture states); exon↔B(sj) ≈ 0.35 OFF /
+1.5 ON (⅓ directional capture step, ⅔ scatter). The class-MoM on observed ratios is REFUTED
+at sj classes (the flux cancels the visible step) and the totals-form pair fit is REFUTED by
+construction (the knob consumes the totals, so transported totals agree by construction —
+the (1−w)-algebra); candidate estimators for the sj classes: the certified-flux pair
+disagreement per class (runtime, but a different estimand — underestimates), the g1-lattice
+capture step (the directional ⅓), or the instrument-derived structural law (the anchor-work
+precedent). This choice is the next design decision;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must

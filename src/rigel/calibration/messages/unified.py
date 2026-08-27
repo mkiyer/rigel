@@ -362,8 +362,28 @@ class FrameAwarePropagation(PropagationModel):
             nbr = np.asarray(ctx.right if backward else ctx.left, np.int64)
             src = np.clip(nbr, 0, n - 1)
             r = enrichment_ratio(ctx, backward=backward)
+            lr_obs = np.log(np.maximum(r, 1e-300))
+            # THE TRUNCATION DEBIAS (2026-08-27): a REGION's reciprocal-opportunity total
+            # reads rho * P(w <= ell) (`region_geometry`'s support probability), so the
+            # observed ratio carries a factor 1/P(region end) of pure frame — a KNOWN,
+            # COMPUTABLE bias (up to 23x at short exons), removed per lane under each
+            # component's OWN pmf: into a boundary, lr − (−log P_src); into a region,
+            # lr + (−log P_dst). A no-measurement default ratio (exactly 1) is not debiased —
+            # the truncation is a property of a measured ratio, not a licence to invent one.
+            measured = lr_obs != 0.0
+            is_b_dst = np.asarray(ctx.is_boundary, bool)
+            lanes = {}
+            for key, prob in (
+                ("log_r_g", np.asarray(ctx.support_prob_gdna, np.float64)),
+                ("log_r_r", np.asarray(ctx.support_prob_rna, np.float64)),
+            ):
+                c = -np.log(np.maximum(prob, 1e-300))
+                corr = np.where(is_b_dst, -c[src], c)
+                lanes[key] = np.where(measured, lr_obs + corr, lr_obs)
             self._tables[backward] = {
-                "log_r": np.log(np.maximum(r, 1e-300)),
+                "log_r": lanes["log_r_r"],
+                "log_r_g": lanes["log_r_g"],
+                "log_r_r": lanes["log_r_r"],
                 "v_r": count_logvar(n_obs) + count_logvar(n_obs[src]),
                 "fp": fp,
                 "fn": fn,
@@ -377,9 +397,30 @@ class FrameAwarePropagation(PropagationModel):
                 "own_n": np.asarray(ctx.own.rho_neg, np.float64),
                 "g1": ~fp & ~fn,
             }
+        # THE PER-STRAND TERMINUS LAW's tables (relay's three-case rule; owner example
+        # 2026-08-27: a TSS_POS boundary whose downstream exon carries a second + transcript
+        # poisoned the upstream solve through a same-strand equality claim). The bits pair by
+        # GENOMIC end — the strand flips the side (`terminus_flank_gain`'s trap): the RIGHT
+        # flank gains + at TSS_POS and − at TES_NEG; the LEFT flank gains + at TES_POS and −
+        # at TSS_NEG. A hop reads the gain bits of the INTERFACE it crosses: into a boundary,
+        # that boundary's own facing flank; into a region, the source boundary's facing flank.
+        from ..splice_graph import FLAG_TES_NEG, FLAG_TES_POS, FLAG_TSS_NEG, FLAG_TSS_POS
+
+        flags = np.asarray(ctx.boundary_flags, np.uint16)
+        rg_p = (flags & FLAG_TSS_POS) != 0
+        lg_p = (flags & FLAG_TES_POS) != 0
+        lg_n = (flags & FLAG_TSS_NEG) != 0
+        rg_n = (flags & FLAG_TES_NEG) != 0
+        is_b = np.asarray(ctx.is_boundary, bool)
         for backward in (False, True):
             t = self._tables[backward]
             src = t["src"]
+            if backward:
+                t["gain_pos"] = np.where(is_b, rg_p, lg_p[src])
+                t["gain_neg"] = np.where(is_b, rg_n, lg_n[src])
+            else:
+                t["gain_pos"] = np.where(is_b, lg_p, rg_p[src])
+                t["gain_neg"] = np.where(is_b, lg_n, rg_n[src])
             # THE SPLICE-SHED RULE (relay's SPLICE OUT, extracted): RNA arriving at a
             # boundary from an EXON sheds the spliced share — the RNA that spliced out at this
             # junction skipped the intron, so it cannot also be inside it. One RNA, two routes:
@@ -424,6 +465,22 @@ class FrameAwarePropagation(PropagationModel):
             return Claim.silent()
         if lane == "unspliced_rna_neg" and bool(t["fn"][i]) != bool(t["fn"][s]):
             return Claim.silent()
+        # THE PER-STRAND TERMINUS LAW (three cases, relay's rule ported 2026-08-27). A
+        # terminus changes one strand's population across ONE flank of its boundary; on the
+        # hop crossing that flank: THIS strand's population changed => NO CLAIM (an equality
+        # would carry another transcript's level — the owner's TSS example); only the OTHER
+        # strand changed => this lane's value crosses UNSCALED (the frame ratio is corrupted
+        # by exactly the changed population's step — a density transfer); neither => the
+        # knob. gDNA is terminus-immune by construction.
+        terminus_freeze = False
+        if lane == "unspliced_rna_pos":
+            if bool(t["gain_pos"][i]):
+                return Claim.silent()
+            terminus_freeze = bool(t["gain_neg"][i])
+        elif lane == "unspliced_rna_neg":
+            if bool(t["gain_neg"][i]):
+                return Claim.silent()
+            terminus_freeze = bool(t["gain_pos"][i])
         if lane == "unspliced_rna_pos" and t["shed_pos"][i] > 0.0:
             kept = max(float(claim.abundance) - float(t["shed_pos"][i]), 0.0)
             live = kept > 0.0
@@ -436,7 +493,7 @@ class FrameAwarePropagation(PropagationModel):
             claim = Claim(kept, claim.precision if live else 0.0, claim.measured if live else 0.0)
             if claim.precision <= 0.0:
                 return Claim.silent()
-        lr = float(t["log_r"][i])
+        lr = float(t["log_r_g"][i] if lane == "unspliced_gdna" else t["log_r_r"][i])
         v = float(t["v_r"][i])
         lr2 = lr * lr
         w = 0.0 if lr2 <= 0.0 else (lr2 / (lr2 + v) if v > 0.0 else 1.0)
@@ -461,7 +518,17 @@ class FrameAwarePropagation(PropagationModel):
         # while a fuse-based pure-gDNA re-anchor lattice measured too weak to repair the drift
         # (a fuse negotiates; the rescale overwrites). The upside is real — continuity halved
         # g05-unstranded-OFF — so porting the rescale, THEN continuity, is the recorded path.
-        value = float(claim.abundance) * float(np.exp(w * lr))
+        if terminus_freeze:
+            value = float(claim.abundance)  # case ii: a density transfer, r = 1
+        else:
+            value = float(claim.abundance) * float(np.exp(w * lr))
+        # ⛔ THE PREMISE'S EXON-END SCOPING WAS BUILT AND PANEL-REFUTED THE SAME DAY
+        # (2026-08-27): the dispersion decomposition proves intron-end hops carry no
+        # COMPOSITION cost (truth and the observed-moment fit both ~0.00x), but freeing them
+        # before the measured LEVEL charge exists releases un-priced level drift through
+        # intron chains (attribution: restoring the pooled charge recovered g98-ss0.50-ON
+        # 4.37M -> 2.44M and g50-ss0.50-ON 1.80M -> 1.23M). The scoping returns WITH the
+        # class-keyed level charge, not before.
         v_hop = self._premise
         p = float(claim.precision)
         ms = float(claim.measured)

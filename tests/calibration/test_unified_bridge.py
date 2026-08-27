@@ -243,6 +243,10 @@ def _hop_tables(log_r=0.0, v_r=1.0, premise=0.0, fp=(True, True), fn=(True, True
             "src": np.array([0, 0]),
             "shed_pos": np.zeros(2),
             "shed_neg": np.zeros(2),
+            "gain_pos": np.zeros(2, bool),
+            "gain_neg": np.zeros(2, bool),
+            "log_r_g": np.full(2, log_r),
+            "log_r_r": np.full(2, log_r),
         }
     }
     return F, U, m
@@ -287,11 +291,150 @@ def test_the_knob_interpolates_between_the_two_strategies():
 def test_the_premise_is_charged_on_every_hop():
     """An imputation must cost something every hop, even at a perfectly agreeing frame: with
     log_r = 0 the knob and disagreement vanish, and the premise alone must still lower the
-    precision (the recorded free-hop failure is what this forbids)."""
+    precision (the recorded free-hop failure is what this forbids). ⛔ The measured truth is
+    sharper — intron-end hops carry no COMPOSITION cost — but the exon-end scoping was
+    panel-refuted while the level charge is unbuilt (the attribution table, 2026-08-27); the
+    scoping returns WITH the class-keyed level charge."""
     F, U, m = _hop_tables(log_r=0.0, premise=0.3)
     out = _one_hop(m, F, U, "unspliced_gdna", F.Claim(1.0, 10.0))
     assert np.isclose(out.abundance, 1.0)
     assert np.isclose(out.precision, 10.0 / (1.0 + 10.0 * 0.3))
+
+
+def _terminus_example_ctx(F, U):
+    """The owner's worked example (2026-08-27): TA+ exons (1000,2000),(5000,10000); TB+ exon
+    (5500,11000). Five slots around region X = (5000,5500): [intron, B(sj acceptor), X,
+    B(exon|exon + TSS_POS), downstream exon]. The + population is {TA+} through X and
+    {TA+, TB+} downstream: the TSS boundary's crossing sees only TA+ (TB+ fragments cannot
+    span their own start), so the population breaks on the RIGHT flank of slot 3."""
+    import types
+
+    from rigel.calibration.splice_graph import FLAG_TSS_POS
+
+    n = 5
+    flags = np.zeros(n, np.uint16)
+    flags[3] = FLAG_TSS_POS
+    own = types.SimpleNamespace(
+        rho_g=np.zeros(n),
+        rho_pos=np.zeros(n),
+        rho_neg=np.zeros(n),
+        prec_g=np.zeros(n),
+        prec_pos=np.zeros(n),
+        prec_neg=np.zeros(n),
+    )
+    return types.SimpleNamespace(
+        n_slot=np.full(n, 50.0),
+        support_prob_gdna=np.array([1.0, 1.0, 0.25, 1.0, 1.0]),
+        support_prob_rna=np.array([1.0, 1.0, 0.5, 1.0, 1.0]),
+        free_pos=np.ones(n, bool),
+        free_neg=np.zeros(n, bool),
+        left=np.array([-1, 0, 1, 2, 3]),
+        right=np.array([1, 2, 3, 4, -1]),
+        inv_abundance=np.full(n, 1.0),
+        inv_sj_lo=np.zeros((n, 2)),
+        inv_sj_hi=np.zeros((n, 2)),
+        eff_gdna_global=np.ones(n),
+        eff_rna=np.ones(n),
+        mass=np.full(n, 50.0),
+        own=own,
+        route_rate_lo=np.zeros((n, 2)),
+        route_rate_hi=np.zeros((n, 2)),
+        is_exon_region=np.array([False, False, True, False, True]),
+        is_boundary=np.array([False, True, False, True, False]),
+        boundary_flags=flags,
+    )
+
+
+def test_the_transport_debiases_the_truncation_frame_per_lane():
+    """THE TRUNCATION DEBIAS (2026-08-27): a REGION's reciprocal-opportunity total reads
+    rho * P(w <= ell), so every hop's observed enrichment ratio carries a factor 1/P(region
+    end) of pure frame — a KNOWN, COMPUTABLE bias (measured: up to 23x at short exons), not a
+    variance. The transport removes it per lane under each component's OWN pmf:
+
+        into a boundary (region source):  lr_true = lr_obs − (−log P_src)
+        into a region  (region dest):     lr_true = lr_obs + (−log P_dst)
+
+    and a hop whose ratio is the no-measurement default (exactly 1.0) is NOT debiased — the
+    truncation is a property of a measured ratio, not a licence to invent one. The example
+    ctx sets P_rna(X) = 0.5 and P_gdna(X) = 0.25, so the two lanes debias differently."""
+    F, U = _U()
+    ctx = _terminus_example_ctx(F, U)
+    # give the hops a measured ratio: distinct face totals at every slot
+    ctx.inv_abundance = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    m = U.FrameAwarePropagation()
+    m.prepare(ctx)
+    t = m._tables[False]  # forward: src = left
+    lr_obs = np.log(np.array([1.0, 2.0, 1.5, 4.0 / 3.0, 1.25]))
+    # slot 2 is region X (P_r = 0.5, P_g = 0.25); slot 3 is a boundary fed FROM X
+    c_r, c_g = -np.log(0.5), -np.log(0.25)
+    assert np.isclose(t["log_r_r"][2], lr_obs[2] + c_r), "into a region: + c(dst), rna pmf"
+    assert np.isclose(t["log_r_g"][2], lr_obs[2] + c_g), "into a region: + c(dst), gdna pmf"
+    assert np.isclose(t["log_r_r"][3], lr_obs[3] - c_r), "into a boundary: − c(src), rna pmf"
+    assert np.isclose(t["log_r_g"][3], lr_obs[3] - c_g), "into a boundary: − c(src), gdna pmf"
+    assert np.isclose(t["log_r_r"][4], lr_obs[4]), "P = 1 debiases nothing"
+    # the no-measurement default is untouched: kill the faces at slot 1's hop
+    ctx2 = _terminus_example_ctx(F, U)
+    ctx2.inv_abundance = np.array([0.0, 2.0, 3.0, 4.0, 5.0])
+    m2 = U.FrameAwarePropagation()
+    m2.prepare(ctx2)
+    assert m2._tables[False]["log_r_r"][1] == 0.0, "a default ratio is not a measurement"
+
+
+def test_the_terminus_law_on_the_owners_example():
+    """THE PER-STRAND TERMINUS LAW (relay's three-case rule, ported; owner example
+    2026-08-27). A TSS_POS at slot 3 means the RIGHT flank gains the + population (a +
+    transcript's body extends toward higher coordinates from its start; the boundary's own
+    crossing cannot see it). The three cases, on the hop that crosses that flank — the
+    BACKWARD hop from the downstream exon into slot 3:
+
+    * the + lane's own population changed => NO CLAIM (today it arrives as an equality and
+      force-fits TB+'s level into X's mass — the measured poisoning);
+    * the − lane (other strand changed) => the value crosses UNSCALED (the total ratio is
+      corrupted by exactly the + population's step);
+    * the gDNA lane is terminus-immune and transports as always.
+
+    The clean hops — forward into slot 3 (its LEFT flank), and slot 3 into X — stay open."""
+    F, U = _U()
+    ctx = _terminus_example_ctx(F, U)
+    m = U.FrameAwarePropagation()
+    m.prepare(ctx)
+    into_tss_from_right = U.Hop(src=4, dst=3, backward=True)
+    pos = m.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_rna_pos", into_tss_from_right)
+    assert pos.is_silent, "a claim whose own population changed makes NO claim"
+    # the − lane is inadmissible in this annotation; test case ii on the mirror geometry below
+    g = m.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_gdna", into_tss_from_right)
+    assert not g.is_silent, "gDNA is terminus-immune"
+    into_tss_from_left = U.Hop(src=2, dst=3, backward=False)
+    pos_ok = m.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_rna_pos", into_tss_from_left)
+    assert not pos_ok.is_silent, "the LEFT flank of a TSS_POS boundary is population-equal"
+    tss_into_x = U.Hop(src=3, dst=2, backward=True)
+    pos_x = m.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_rna_pos", tss_into_x)
+    assert not pos_x.is_silent, "the boundary's own crossing continues cleanly into X"
+
+    # the MIRROR annotation (− strand): TSS_NEG means the LEFT flank gains the − population,
+    # so the poisoned hop is the FORWARD one into the boundary — the strand flips the side
+    # (the genomic-pairing trap this gate exists to hold)
+    from rigel.calibration.splice_graph import FLAG_TSS_NEG
+
+    ctx2 = _terminus_example_ctx(F, U)
+    ctx2.boundary_flags = np.zeros(5, np.uint16)
+    ctx2.boundary_flags[3] = FLAG_TSS_NEG
+    ctx2.free_pos = np.ones(5, bool)
+    ctx2.free_neg = np.ones(5, bool)
+    m2 = U.FrameAwarePropagation()
+    m2.prepare(ctx2)
+    into_tss_fwd = U.Hop(src=2, dst=3, backward=False)
+    neg = m2.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_rna_neg", into_tss_fwd)
+    assert neg.is_silent, "TSS_NEG gains on the LEFT flank: the forward hop kills the − lane"
+    # case ii: the + lane crosses the same interface with the OTHER strand's population
+    # changed — the value must cross UNSCALED (the frame ratio is corrupted by the − step)
+    t = m2._tables[False]
+    t["log_r"] = np.full(5, 2.0)
+    t["v_r"] = np.full(5, 1e-9)
+    pos2 = m2.attenuate(F.Claim(2.0, 10.0, 1.0), "unspliced_rna_pos", into_tss_fwd)
+    assert np.isclose(pos2.abundance, 2.0), (
+        f"other-strand terminus: a surviving lane is a DENSITY transfer, r = 1 ({pos2.abundance})"
+    )
 
 
 def test_the_mass_rescale_projects_a_licensed_state_onto_the_local_total():

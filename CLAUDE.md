@@ -230,8 +230,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
-The `+1` over 3,719 is THE LEVEL DERIVATION's limits gate in the EXISTING
+⭐ **THE STANDING BASELINE: 0 failed / 3,723 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27.
+The `+3` over 3,720 is THE THREE LAWS (the terminus-law gate and the debias gate in the
+EXISTING `tests/calibration/test_unified_bridge.py`, the support-probability gate in the
+EXISTING `tests/calibration/test_region_geometry.py` — all fail-first; the premise gate was
+rewritten in place twice, its exon-end scoping landed, was panel-refuted by the attribution
+factorial, and was reverted the same session — net zero from it; no file added). Before that,
+the `+1` over 3,719 was THE LEVEL DERIVATION's limits gate in the EXISTING
 `tests/calibration/test_unified_bridge.py` (the AXIOM census and knob gates were restated in
 place, not added). Before that, the `+2` over 3,717 was THE CONSERVATION IDENTITY FIX (the count-identity gate and the
 common-mode-operator gate in the EXISTING `tests/calibration/test_unified_bridge.py`; the

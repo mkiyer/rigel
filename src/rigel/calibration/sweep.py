@@ -471,6 +471,8 @@ def solve_chain(
         sj_count=SPL,
         route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
         route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
+        support_prob_gdna=np.asarray(geometry.support_prob_gdna, np.float64),
+        support_prob_rna=np.asarray(geometry.support_prob_rna, np.float64),
         route_count_lo=np.asarray(geometry.route_count_lo, np.int64),
         route_count_hi=np.asarray(geometry.route_count_hi, np.int64),
         unspliced_count=CNT,

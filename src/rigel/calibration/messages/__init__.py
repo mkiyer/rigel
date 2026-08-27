@@ -212,6 +212,11 @@ class StepContext:
     #: ~k×, so consumers of a face's RATE read these, never the ratio
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
+    #: the per-component SUPPORT PROBABILITIES (region_geometry): P_c(w <= ell) at a REGION —
+    #: the exact frame factor of its reciprocal-opportunity total — and 1 at a BOUNDARY; the
+    #: transport debiases the enrichment ratio with them per lane
+    support_prob_gdna: np.ndarray
+    support_prob_rna: np.ndarray
     route_count_lo: np.ndarray  # [n, 2] routes per face (the route-structure class key)
     route_count_hi: np.ndarray
     unspliced_count: (
