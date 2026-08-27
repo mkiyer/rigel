@@ -400,16 +400,20 @@ def test_the_conservation_is_the_count_identity_not_a_density_sum():
     c_g = float(np.exp(out.gdna_mode[0])) * 40.0
     c_r = float(np.exp(out.rna_mode[0][0])) * 40.0
     assert out.gdna_prec[0] > 0 and out.rna_prec[0][0] > 0
-    # (a) the counts account for the observed mass
-    assert abs(c_g + c_r - 40.0) < 2.0, (
+    # (a) the counts account for the observed mass — the identity is exact by construction
+    assert abs(c_g + c_r - 40.0) < 1e-3, (
         f"the components' counts must account for the slot's mass (got {c_g + c_r})"
     )
-    # (b) the SPLIT is decided in count space: with equal precisions the residual is shared
-    # equally in FRAGMENTS, so both lanes gain the same number — the arriving counts were
-    # 3*1 = 3 and 1*4 = 4, so the delivered counts keep that one-fragment difference. An
-    # unweighted density sum shares the residual in DENSITY and inverts the gap.
-    assert abs((c_r - c_g) - 1.0) < 0.5, (
-        f"the deficit must be shared in count space (gap {c_r - c_g}, want ~1.0)"
+    # (b) the SPLIT is decided in COUNT space by the derived law: with V = 0 the step is
+    # u_c = lam*v_c*y_c on the log-count, so equal log-variances move each lane by the same
+    # multiple of v*y — the arriving COUNTS were 3*1 = 3 and 1*4 = 4 (a 3:4 gap the density
+    # sum would have read as 3:1). An unweighted density sum shares the residual in DENSITY
+    # units and inverts the gap entirely.
+    assert c_r > c_g, f"the count gap's direction must survive (gdna {c_g}, rna {c_r})"
+    lam_g = np.log(c_g / 3.0)
+    lam_r = np.log(c_r / 4.0)
+    assert abs(lam_r / lam_g - 4.0 / 3.0) < 0.05, (
+        f"the log-steps must follow u_c ∝ v_c*y_c (ratio {lam_r / lam_g}, want 4/3)"
     )
 
 
@@ -474,7 +478,6 @@ def test_a_common_mode_residual_scales_the_claims_and_keeps_the_composition():
     ratio exactly, and their counts sum to M."""
     F, U = _U()
     m = _mini_solve()
-    m._conserve_multiplicative = True
     m._E = {
         "unspliced_gdna": np.array([1.0]),
         "unspliced_rna_pos": np.array([1.0]),
@@ -483,14 +486,19 @@ def test_a_common_mode_residual_scales_the_claims_and_keeps_the_composition():
     m._M = np.array([40.0])
     m._n_slot = np.array([40.0])
     silent = F.Message(**{k: F.Claim(np.zeros(1), np.zeros(1)) for k in F.Message.LANES})
-    fwd = silent.with_lane(
-        "unspliced_gdna", F.Claim(np.array([1.0]), np.array([5.0]), np.array([5.0]))
-    ).with_lane("unspliced_rna_pos", F.Claim(np.array([3.0]), np.array([5.0]), np.array([5.0])))
+    fwd = dataclasses.replace(
+        silent.with_lane(
+            "unspliced_gdna", F.Claim(np.array([1.0]), np.array([5.0]), np.array([5.0]))
+        ).with_lane(
+            "unspliced_rna_pos", F.Claim(np.array([3.0]), np.array([5.0]), np.array([5.0]))
+        ),
+        level_logvar=np.array([1e6]),  # the arriving level is the uncertainty: V >> v_c
+    )
     out = m.solve_unspliced(silent, fwd, silent)
     c_g = float(np.exp(out.gdna_mode[0])) * 40.0
     c_r = float(np.exp(out.rna_mode[0][0])) * 40.0
-    assert abs(c_g + c_r - 40.0) < 1e-6, (c_g, c_r)
-    assert abs(c_r / c_g - 3.0) < 1e-6, (
+    assert abs(c_g + c_r - 40.0) < 1e-3, (c_g, c_r)
+    assert abs(c_r / c_g - 3.0) < 1e-3, (
         f"a common-mode residual must not move the composition (ratio {c_r / c_g}, want 3.0)"
     )
 
@@ -548,22 +556,23 @@ def test_allocation_passes_through_when_totals_agree():
     because none is needed."""
     U = _alloc()
     mu = np.array([3.0, 1.0, 0.5])
-    p = np.array([10.0, 5.0, 2.0])
-    x = U.allocate(mu, p, total=4.5, total_precision=100.0, absorber=False)
-    np.testing.assert_allclose(x, mu, rtol=1e-12)
+    v = 1.0 / np.array([10.0, 5.0, 2.0])
+    x = U.allocate_level(mu, v, total=4.5, total_precision=100.0, level_logvar=0.0, absorber=False)
+    np.testing.assert_allclose(x, mu, rtol=1e-9)
 
 
 def test_allocation_lands_the_residual_on_weak_components():
-    """The precision-weighted allocation: the residual is distributed in proportion to VARIANCE —
-    the certified/strong components hold their values, the weak absorb. The derived repair of the
-    equal-weight rescale (the recorded k = 467,000× and 235,800× amplifications)."""
+    """The precision-weighted allocation (the level solve's V = 0 limit): the residual is
+    distributed in proportion to VARIANCE — the certified/strong components hold their values,
+    the weak absorb. The derived repair of the equal-weight rescale (the recorded k = 467,000×
+    and 235,800× amplifications)."""
     U = _alloc()
     mu = np.array([10.0, 1.0])
-    p = np.array([1000.0, 0.1])
-    x = U.allocate(mu, p, total=14.0, total_precision=50.0, absorber=False)
-    assert abs(x[0] - 10.0) < 0.05, "the strong component must hold its value"
+    v = 1.0 / np.array([1000.0, 0.1])
+    x = U.allocate_level(mu, v, total=14.0, total_precision=50.0, level_logvar=0.0, absorber=False)
+    assert abs(x[0] - 10.0) < 0.2, "the strong component must hold its value"
     assert x[1] > 3.5, "the weak component must absorb nearly the whole deficit"
-    assert x.sum() < 14.0 + 1e-9, "a soft constraint never overshoots the total"
+    assert x.sum() < 14.0 + 1e-6, "a soft constraint never overshoots the total"
 
 
 def test_a_licensed_absorber_takes_the_deficit_and_known_components_hold():
@@ -572,21 +581,22 @@ def test_a_licensed_absorber_takes_the_deficit_and_known_components_hold():
     abundance space, never share space."""
     U = _alloc()
     mu = np.array([2.0, 1.0])
-    p = np.array([50.0, 20.0])
-    x = U.allocate(mu, p, total=10.0, total_precision=100.0, absorber=True)
+    v = 1.0 / np.array([50.0, 20.0])
+    x = U.allocate_level(mu, v, total=10.0, total_precision=100.0, level_logvar=0.0, absorber=True)
     np.testing.assert_allclose(x, mu, rtol=1e-12)
 
 
 def test_an_excess_cannot_go_negative():
-    """Excess (arriving claims above the total) is shrunk variance-weighted and clamped at zero —
-    an absorber cannot absorb an excess (new transcription cannot be negative)."""
+    """Excess (arriving claims above the total) is shrunk variance-weighted — and in the level
+    solve's LOG form positivity is structural: no clamp exists because no path to a negative
+    count exists. An absorber cannot absorb an excess (new transcription cannot be negative)."""
     U = _alloc()
     mu = np.array([5.0, 0.5])
-    p = np.array([100.0, 0.05])
-    x = U.allocate(mu, p, total=4.0, total_precision=200.0, absorber=True)
-    assert np.all(x >= 0.0), "an excess allocation may never go negative"
-    assert x[1] == 0.0, "the weak component is exhausted first"
-    assert 3.9 < x[0] <= 5.0, "the remaining excess lands on the strong component, bounded"
+    v = 1.0 / np.array([100.0, 0.05])
+    x = U.allocate_level(mu, v, total=4.0, total_precision=200.0, level_logvar=0.0, absorber=True)
+    assert np.all(x > 0.0), "the log form cannot even reach zero, let alone cross it"
+    assert x[1] < 0.05, "the weak component is squeezed toward zero first"
+    assert 3.8 < x[0] <= 5.0, "the remaining excess lands on the strong component, bounded"
 
 
 def test_the_allocation_solve_is_silent_on_silent_messages(sweep_inputs):

@@ -39,9 +39,9 @@ from .variance import count_logvar
 
 #: numerical budget for the level solve's re-linearisation — a convergence tolerance and a
 #: per-step log bound (stability, not model constants).
-_LEVEL_STEPS = 8
+_LEVEL_STEPS = 40
 _LEVEL_TOL = 1e-9
-_LEVEL_MAX_STEP = 30.0
+_LEVEL_MAX_STEP = 60.0
 
 __all__ = [
     "AllocationSolve",
@@ -49,7 +49,6 @@ __all__ = [
     "RowsSolve",
     "SilentSolve",
     "UnifiedPolicy",
-    "allocate",
     "allocate_level",
 ]
 
@@ -472,7 +471,7 @@ class FrameAwarePropagation(PropagationModel):
         return Claim(abundance=value, precision=p, measured=ms)
 
 
-def allocate_level(mu, v_own, *, total, total_precision, level_logvar, absorber):
+def allocate_level(mu, v_own, *, total, level_logvar, absorber, total_precision=None):
     """⭐⭐⭐ THE LEVEL SOLVE (derived 2026-08-27) — ONE conservation with TWO variance kinds.
 
     A transported claim's uncertainty is not all of one kind. The reframe knob's costs
@@ -482,21 +481,26 @@ def allocate_level(mu, v_own, *, total, total_precision, level_logvar, absorber)
     common-mode level error into a composition error — the measured pathology where a
     near-zero gDNA claim eats an unstranded slot's unexplained RNA mass.
 
-    Minimise ``a²/2V + Σ u_c²/2v_c`` subject to ``Σ μ_c e^(a+u_c) = M`` (a the shared log-level
-    correction, u_c the per-component ones; the total carries its own counting precision
-    ``p_M``, so the constraint is soft). Stationarity around the current point gives::
+    ⭐ **The constraint is EXACT, because it is definitional**: every observed unspliced
+    fragment came from exactly one population, so ``Σ_c n_c = M`` by construction of the
+    banks — there is nothing statistical to soften (the earlier soft form's
+    ``total_precision`` was misplaced modeling and is retired; the parameter survives,
+    ignored, only so A/B harnesses spanning both forms keep running).
 
-        D = M − S,  S = Σ y_c            W = V·S² + Σ v_c·y_c²
-        a   = V  ·p_M·D·S   / (1 + p_M·W)
-        u_c = v_c·p_M·D·y_c / (1 + p_M·W)
+    Minimise ``a²/2V + Σ u_c²/2v_c`` subject to ``Σ μ_c e^(a+u_c) = M`` (``a`` the shared
+    log-level correction, ``u_c`` the per-component ones). The Lagrangian stationarity gives
+    one direction and one unknown::
 
-    applied as ``y_c ← y_c·exp(a + u_c)`` and re-linearised until the constraint is met — the
-    LOG form, so positivity is structural and no clamp-and-redistribute pass exists.
+        step_c = a + u_c = λ · (V·S + v_c·y_c),        S = Σ y_c
+
+    with ``λ`` solved exactly on the monotone 1-D constraint ``Σ y_c·e^(λ·d_c) = M`` —
+    no overshoot is possible and positivity is structural (the log form).
 
     ⭐ **The three operators built separately are its limits**, which is why they fought when
-    stacked: ``V ≫ v_c`` ⇒ ``a → log(M/S)``, ``u → 0`` — the multiplicative mass rescale, the
-    composition held; ``V = 0`` ⇒ the additive precision-weighted allocation; one lane
-    uninformative ⇒ the residual lands there, which is ``residual_level``'s law.
+    stacked: ``V ≫ v_c`` ⇒ one shared ``a = log(M/S)`` — the multiplicative mass rescale, the
+    composition held; ``V = 0`` ⇒ the residual distributes by each component's own variance —
+    the additive allocation's role; one lane far less informative than the rest ⇒ the residual
+    lands there, which is ``residual_level``'s law.
 
     A licensed ABSORBER (terminus-admitted or annotation-admitted-but-unwitnessed RNA) takes a
     DEFICIT whole — the known components hold — but cannot absorb an EXCESS.
@@ -510,58 +514,30 @@ def allocate_level(mu, v_own, *, total, total_precision, level_logvar, absorber)
     S = float(y[live].sum())
     if absorber and float(total) - S > 0.0:
         return y
-    pM = float(total_precision)
+    if S <= 0.0 or float(total) <= 0.0:
+        return y
     V = float(level_logvar)
+    # mask v BEFORE the product — np.where evaluates both branches, and a dead lane's
+    # v = +inf against y = 0 would form 0*inf = nan (the standing trap)
+    v_fin = np.where(live, v, 0.0)
+    d = np.where(live, V * S + v_fin * y, 0.0)
+    if not (d[live] > 0.0).any():
+        return y  # every live claim is exact: the claims win, nothing may move
+    # Newton on the monotone 1-D constraint g(lam) = sum y e^(lam d) - M; seeded at the
+    # common-mode answer and step-bounded in log space for global safety
+    lam = float(np.log(float(total) / S)) / float(np.max(d[live]))
     for _ in range(_LEVEL_STEPS):
-        S = float(y[live].sum())
-        D = float(total) - S
-        if abs(D) <= _LEVEL_TOL * max(float(total), 1.0):
+        z = np.where(live, np.clip(lam * d, -_LEVEL_MAX_STEP, _LEVEL_MAX_STEP), 0.0)
+        e = np.where(live, y * np.exp(z), 0.0)
+        g = float(e[live].sum()) - float(total)
+        if abs(g) <= _LEVEL_TOL * float(total):
             break
-        W = V * S * S + float((v[live] * y[live] ** 2).sum())
-        denom = 1.0 + pM * W
-        if denom <= 0.0 or not np.isfinite(denom):
+        gp = float((e[live] * d[live]).sum())
+        if gp <= 0.0 or not np.isfinite(gp):
             break
-        a = V * pM * D * S / denom
-        u = np.where(live, v * pM * D * y / denom, 0.0)
-        step = np.clip(a + u, -_LEVEL_MAX_STEP, _LEVEL_MAX_STEP)
-        y = np.where(live, y * np.exp(step), y)
-    return y
-
-
-def allocate(mu, p, *, total, total_precision, absorber):
-    """THE OWNER'S CONSERVATION ALLOCATION (ratified 2026-08-26): distribute the residual between
-    the arriving component claims and the node's measured total IN PROPORTION TO VARIANCE — the
-    certified/strong components hold their values, the weak absorb. The derived repair of the
-    equal-weight rescale (a weak claim can no longer be amplified to satisfy a constraint).
-
-    Soft form (the total is itself a measurement): minimise Σ p_i (x_i − μ_i)² +
-    p_T (Σx − T)², giving x_i = μ_i + k/p_i with k = p_T·(T − Σμ) / (1 + p_T·Σ(1/p_i)).
-    A licensed ABSORBER (terminus-admitted NEW RNA, precision → 0) takes any DEFICIT whole — the
-    known components keep their values and the solve is in abundance space, never share space —
-    but cannot absorb an EXCESS (new transcription cannot be negative). Clamped at zero with one
-    variance-weighted redistribution pass."""
-    mu = np.asarray(mu, np.float64)
-    p = np.asarray(p, np.float64)
-    live = p > 0.0
-    if not live.any():
-        return mu.copy()
-    deficit = float(total) - float(mu[live].sum())
-    if absorber and deficit > 0.0:
-        return mu.copy()  # the absorber takes the whole deficit; every claim holds
-    x = mu.copy()
-    inv = np.where(live, 1.0 / np.where(live, p, 1.0), 0.0)
-    for _ in range(2):  # one clamp-and-redistribute pass is enough for K = 5
-        free = live & (x >= 0.0)
-        s_inv = float(inv[free].sum())
-        if s_inv <= 0.0:
-            break
-        d = float(total) - float(x[live].sum())
-        k = float(total_precision) * d / (1.0 + float(total_precision) * s_inv)
-        x[free] = x[free] + k * inv[free]
-        if np.all(x >= 0.0):
-            break
-        x = np.maximum(x, 0.0)
-    return np.maximum(x, 0.0)
+        lam -= g / gp
+    z = np.where(live, np.clip(lam * d, -_LEVEL_MAX_STEP, _LEVEL_MAX_STEP), 0.0)
+    return np.where(live, y * np.exp(z), y)
 
 
 class AllocationSolve(SolveModel):
@@ -821,8 +797,8 @@ class AllocationSolve(SolveModel):
         # (they are counted separately), so they carry no information into the unspliced
         # conservation. Their evidence reaches psi through `solve_spliced`'s rows alone — the
         # owner's rule that spliced fragments impute the adjacent region and do nothing else.
-        # The allocation runs in COUNT space (y_c = rho_c * E_c, a plain sum against M) and
-        # converts back: `allocate`'s closed form is unchanged, the constraint is now exact.
+        # The conservation runs in COUNT space (y_c = rho_c * E_c, a plain sum against M)
+        # and converts back, so the constraint is exact at both slot kinds.
         E = np.stack([self._E[k] for k in self._UNSPLICED], axis=1)
         mu = np.stack([val[k] for k in self._UNSPLICED], axis=1) * E
         pp = np.stack([prec[k] for k in self._UNSPLICED], axis=1)
@@ -831,51 +807,29 @@ class AllocationSolve(SolveModel):
         )
         absorber = self._absorber | unseen_rna
         live_rows = (pp > 0).any(axis=1) & (self._pM > 0) & (self._M > 0)
-        if self._level_solve:
-            # ⭐⭐⭐ THE LEVEL SOLVE: one conservation, two variance kinds. V is the SHARED
-            # scale uncertainty the arriving messages accumulated (blended by how much each
-            # direction contributed, with the node's OWN belief entering at zero — it is
-            # locally anchored); v_c is each component's own. The three operators built
-            # separately (mass rescale, additive allocation, residual_level) are its limits.
-            lf = np.asarray(forward.level_logvar, np.float64)
-            lb = np.asarray(backward.level_logvar, np.float64)
-            pf = sum(np.asarray(forward.lane(k).precision, np.float64) for k in self._UNSPLICED)
-            pb = sum(np.asarray(backward.lane(k).precision, np.float64) for k in self._UNSPLICED)
-            po = sum(np.asarray(own.lane(k).precision, np.float64) for k in self._UNSPLICED)
-            wsum = pf + pb + po
-            V = np.where(wsum > 0, (pf * lf + pb * lb) / np.where(wsum > 0, wsum, 1.0), 0.0)
-            with np.errstate(divide="ignore"):
-                v_own = np.where(pp > 0, 1.0 / np.where(pp > 0, pp, 1.0), np.inf)
-            for i in np.flatnonzero(live_rows):
-                mu[i] = allocate_level(
-                    mu[i],
-                    v_own[i],
-                    total=self._M[i],
-                    total_precision=self._pM[i],
-                    level_logvar=float(V[i]),
-                    absorber=bool(absorber[i]),
-                )
-        elif self._conserve_multiplicative:
-            # THE COMMON-MODE FORM (relay's k = M/S, A/B flag): when the live claims are
-            # imputations of comparable quality, a shortfall against the slot's mass is a LEVEL
-            # error they share — scale them together and leave the COMPOSITION untouched.
-            # Shifting the residual additively onto the weakest lane converts a level error
-            # into a composition error, which is how a near-zero gDNA claim eats an unstranded
-            # slot's unexplained RNA mass. A licensed absorber still takes a deficit whole.
-            live = pp > 0
-            S = np.where(live, mu, 0.0).sum(axis=1)
-            hold = absorber & (S < self._M)
-            k = np.where((S > 0) & live_rows & ~hold, self._M / np.where(S > 0, S, 1.0), 1.0)
-            mu = np.where(live, mu * k[:, None], mu)
-        else:
-            for i in np.flatnonzero(live_rows):
-                mu[i] = allocate(
-                    mu[i],
-                    pp[i],
-                    total=self._M[i],
-                    total_precision=self._pM[i],
-                    absorber=bool(absorber[i]),
-                )
+        # ⭐⭐⭐ THE LEVEL SOLVE — the ONE conservation operator (2026-08-27; the additive and
+        # multiplicative forms it was A/B'd against are its gated LIMITS and were deleted the
+        # same day, per converge-and-delete). V is the SHARED scale uncertainty the arriving
+        # messages accumulated (blended by how much each direction contributed, with the node's
+        # OWN belief entering at zero — it is locally anchored); v_c is each component's own.
+        lf = np.asarray(forward.level_logvar, np.float64)
+        lb = np.asarray(backward.level_logvar, np.float64)
+        pf = sum(np.asarray(forward.lane(k).precision, np.float64) for k in self._UNSPLICED)
+        pb = sum(np.asarray(backward.lane(k).precision, np.float64) for k in self._UNSPLICED)
+        po = sum(np.asarray(own.lane(k).precision, np.float64) for k in self._UNSPLICED)
+        wsum = pf + pb + po
+        V = np.where(wsum > 0, (pf * lf + pb * lb) / np.where(wsum > 0, wsum, 1.0), 0.0)
+        with np.errstate(divide="ignore"):
+            v_own = np.where(pp > 0, 1.0 / np.where(pp > 0, pp, 1.0), np.inf)
+        for i in np.flatnonzero(live_rows):
+            mu[i] = allocate_level(
+                mu[i],
+                v_own[i],
+                total=self._M[i],
+                total_precision=self._pM[i],
+                level_logvar=float(V[i]),
+                absorber=bool(absorber[i]),
+            )
         with np.errstate(divide="ignore", invalid="ignore"):
             mu = np.where(E > 0, mu / np.where(E > 0, E, 1.0), 0.0)
 
@@ -899,12 +853,6 @@ class AllocationSolve(SolveModel):
     _spliced_enabled = True
     #: A/B flag (the factorial contract): relay's residual_level at boundary solves.
     _residual_level = False
-    #: ⭐ A/B flag: THE LEVEL SOLVE — one conservation with two variance kinds, of which the
-    #: additive allocation and the multiplicative rescale are limits (`allocate_level`).
-    _level_solve = False
-    #: A/B flag: the conservation OPERATOR — multiplicative (relay's common-mode k = M/S,
-    #: composition-preserving) instead of the additive precision-weighted allocation.
-    _conserve_multiplicative = False
 
     def solve_spliced(self, own, forward, backward):
         """THE SPLICED LAW, lane-native (commit three): flank rates from the two arriving

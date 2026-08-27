@@ -636,6 +636,50 @@ capture-ON, because with the FORM now correct the answer is decided entirely by 
 INPUTS — how big V really is per hop class, and whether the premise is the right per-lane price.
 That is the transport-dispersion decomposition, and it is now the only thing between here and a
 single policy;
+⭐⭐⭐ **THE PRUNE + THE MEASUREMENT (2026-08-27, owner mandate: layers must be deserved;
+prototype and measure the transport dispersion).**
+**The prune:** the three conservation operators collapsed into ONE — `allocate_level` — and
+the derivation simplified in the process: the constraint is EXACT because it is definitional
+(every observed unspliced fragment came from exactly one population, so `Σ n_c = M` by
+construction of the banks; the soft form's `total_precision` was misplaced modeling and is
+retired). The Lagrangian gives one direction and one unknown: `step_c = λ·(V·S + v_c·y_c)`
+with λ solved on the monotone 1-D constraint `Σ y_c·e^(λd_c) = M` — no overshoot, positivity
+structural. The additive and multiplicative operator files/flags are DELETED; the limits live
+inside the one function and its gate. Two flags remain (`_mass_rescale`, `_residual_level`),
+their fate decided by the variance inputs. The pruned base at g00-ss0.99-OFF reads **31.7k —
+already beating silence (61.4k)** — and base+residual reaches **17.8k ≈ relay's 16.0k**;
+base+rescale keeps every high-g-ON win (g98-ss0.99-ON 206k).
+**THE UNSPLICED TRANSPORT-DISPERSION DECOMPOSITION (the measurement, scratchpad prototype
+`unspliced_dispersion.py`, four g50 corners, truth-vs-bank match 1.0000, noise-subtracted with
+the truth-side trigamma rule):** per forward hop, the true per-component log-step vs the
+knob's applied reframe, split exactly (two components) into COMMON-MODE (V's estimand) and
+DIFFERENTIAL (the premise's estimand), per hop class:
+
+| class | V-OFF | prem-OFF | V-ON | prem-ON | charged level | classMoM(lr²−v) OFF/ON |
+|---|---|---|---|---|---|---|
+| intron↔B(sj/plain) | **≈0** | **≈0** | (sparse) | | 0.03 | 0.006–0.010 |
+| exon↔B(plain) | 0.10–0.12 | 0.27–0.30 | 0.91–1.05 | 0.33–0.36 | 0.026 | 0.82–0.99 |
+| exon↔B(sj) | 0.35–0.42 | 0.34–0.40 | **4.35–4.40** | 0.95–1.00 | 0.025 | **0.07–0.10 / 0.76–0.89** |
+
+**The readings:** ① intron↔boundary hops are FREE — the pooled premise (0.27 OFF / 1.97 ON)
+overcharges them by everything it charges; ② ALL structural error lives on exon↔boundary
+hops, and it is predominantly COMMON-MODE, exploding under capture (V = 4.4 at ON) — the level
+solve's design is confirmed and its current inputs are wrong by 10–400× (the knob's charged
+level is 0.01–0.03); ③ the obvious runtime candidate — a class-keyed MoM on observed log-r —
+TRACKS truth at intron and plain classes but is REFUTED at sj classes (0.08 observed vs 0.7
+true at OFF: the route-summed flux cancels the visible step exactly where the real error is
+largest); ④ V's two physical sources are identified and BOTH derivable: the truncation frame
+term (an exon's contained bank reads ρ·P(w≤ℓ) against the boundary's exact crossing form —
+log(1/P) is COMPUTABLE per hop from the pmf and the length, is common-mode by construction,
+and matches the OFF magnitudes) and the CAPTURE step (common-mode because probes bind gDNA
+and RNA alike — the owner's clarification — and it is what explodes V at ON); the residual
+differential ≈ 0.3 is the true premise.
+**THE PROPOSED RUNTIME LAW (for owner sign-off before wiring):** charge the computable
+truncation term to the LEVEL per hop (no fit, no constant — pure geometry); fit what remains
+per class by the PAIR-DISAGREEMENT method (two boundaries transport the same exon's density —
+their disagreement in excess of counting noise is the per-hop dispersion, the same estimator
+already derived for the spliced side in §4a); the pooled premise retires. The class key is
+structural (region type × has-sj), not tuned;
 ④ vectorize + config; ⑤ the contest, bar = silence in scope, then converge-and-delete.
 
 **Recorded refutation risks:** honest precisions failing to arbitrate the refit collision (⇒ a real arbiter must
