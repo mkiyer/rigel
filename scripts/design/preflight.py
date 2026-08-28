@@ -68,22 +68,29 @@ class Report:
     """Every check as ``(ok, what, detail, fix)`` — and a MISSING thing always names its command."""
 
     def __init__(self) -> None:
-        self.rows: list[tuple[bool, str, str, str]] = []
+        self.rows: list[tuple[bool | None, str, str, str]] = []
 
     def add(self, ok: bool, what: str, detail: str = "", fix: str = "") -> bool:
         self.rows.append((bool(ok), what, detail, fix))
         return bool(ok)
 
+    def note(self, what: str, detail: str = "") -> None:
+        """A designed state that is neither pass nor fail — an empty test chromosome is the
+        case this exists for. It prints as ⭐ and never counts against the verdict, because a
+        thing the owner has not authored yet is not damage to go hunting for."""
+        self.rows.append((None, what, detail, ""))
+
     def print(self, title: str) -> None:
         print(f"\n══ {title}")
         for ok, what, detail, fix in self.rows:
-            print(f"   {'✔' if ok else '✘'} {what:<58} {detail}")
-            if not ok and fix:
+            mark = "⭐" if ok is None else ("✔" if ok else "✘")
+            print(f"   {mark} {what:<58} {detail}")
+            if ok is False and fix:
                 print(f"       ↳ {fix}")
 
     @property
     def n_bad(self) -> int:
-        return sum(1 for ok, *_ in self.rows if not ok)
+        return sum(1 for ok, *_ in self.rows if ok is False)
 
 
 def check_toolchain(rep: Report) -> None:
@@ -116,11 +123,33 @@ def check_reference(rep: Report) -> None:
     # the METHOD-DEVELOPMENT reference — hand-edited sources in the repo, everything else derived
     gtf = REPO / "scripts" / "sim" / "test_reference" / "test_chr.gtf"
     rep.add(gtf.is_file(), "test chromosome GTF (hand-edited, in the repo)", str(gtf))
+    # ⭐ AN EMPTY TEST CHROMOSOME IS A DESIGNED STATE, NOT A BROKEN ONE (owner, 2026-08-27): the
+    # owner authors its transcripts, and until at least one exists nothing derived from it CAN
+    # exist. Reporting that as a failure sends a fresh session hunting for damage, so say what is
+    # true and name the file to edit.
+    if not test_chromosome_transcripts(gtf):
+        rep.note("test chromosome is EMPTY — add transcripts to build anything derived from it",
+                 f"edit {gtf}, then follow docs/TESTING.md §0a")
+        return
     rep.add((TESTREF / "test_chr.fa").is_file(), "test chromosome FASTA (DERIVED)", str(TESTREF),
             "python scripts/sim/build_test_reference.py")
     rep.add((TESTREF / "idx").is_dir(), "test chromosome rigel index (DERIVED)", "",
             "rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability "
             "--no-tsv -o <T>/idx")
+
+
+def test_chromosome_transcripts(gtf: Path) -> int:
+    """How many transcripts the hand-edited test chromosome declares. Zero is the designed
+    starting state, not a fault — everything derived from it is a command not yet run."""
+    if not gtf.is_file():
+        return 0
+    ids = set()
+    for line in gtf.read_text().splitlines():
+        if line.startswith("#") or "\ttranscript_id" not in line and 'transcript_id "' not in line:
+            continue
+        _, _, rest = line.partition('transcript_id "')
+        ids.add(rest.partition('"')[0])
+    return len(ids)
 
 
 def _conditions(root: Path) -> list[str]:
@@ -244,8 +273,13 @@ def main() -> int:
     check_reference(ref)
     check_panel(panel, LADDER, "panel (16 conditions)",
                 "python scripts/sim/panel.py simulate --config scripts/sim/configs/gdna_ladder.yaml --jobs 16")
-    check_panel(testref, TESTREF / "scenarios", "test chromosome",
-                "python scripts/sim/simulate_reads.py --config scripts/sim/configs/test_reference.yaml -j 8")
+    if test_chromosome_transcripts(REPO / "scripts" / "sim" / "test_reference" / "test_chr.gtf"):
+        check_panel(testref, TESTREF / "scenarios", "test chromosome",
+                    "python scripts/sim/panel.py simulate "
+                    "--config scripts/sim/configs/test_reference.yaml")
+    else:
+        testref.note("test chromosome is EMPTY — no conditions to check yet",
+                     "docs/TESTING.md §0a is the path from a hand-edited GTF to a scored benchmark")
     check_instruments(inst, args.full)
 
     tool.print("TOOLCHAIN")
@@ -260,8 +294,14 @@ def main() -> int:
         print(f"⛔ {bad} check(s) failed. Each one above names the command that regenerates it.")
         print("   ⚠ A missing DERIVED artifact is not damage — it is a command you have not run yet.")
     else:
-        print("⭐ everything present and working: the toolchain, both references, both panels "
-              "(five oracle partitions each), and every instrument.")
+        n_tx = test_chromosome_transcripts(
+            REPO / "scripts" / "sim" / "test_reference" / "test_chr.gtf"
+        )
+        print("⭐ everything present and working: the toolchain, the references, the ladder "
+              "(five oracle partitions per condition), and every instrument.")
+        if not n_tx:
+            print("   ⭐ The TEST CHROMOSOME is empty by design — add transcripts to "
+                  "`scripts/sim/test_reference/test_chr.gtf`, then `docs/TESTING.md` §0a.")
     print("\n⚠ This checks PRESENCE and IMPORTABILITY. It does not run the suite — do that too:")
     print("   python -m pytest tests/ -q   (ANY failure is a regression; the baseline count lives in CLAUDE.md)")
     return 1 if bad else 0

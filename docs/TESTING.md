@@ -269,6 +269,32 @@ multi-exon transcripts"*. Give it abundance through its CONTRIBUTOR's `nrna_abun
 simulator pools it onto the entity. ⚠ An ANNOTATED single-exon transcript is already its own nascent
 equivalent (`is_nrna = True`, no synthetic made).
 
+### ⭐⭐⭐ THE SWEEP — 30 CONDITIONS (owner, 2026-08-27)
+
+`configs/test_reference.yaml` sweeps the chromosome over three axes, and two more requirements are
+carried by the SUBSTRATE the owner authors rather than by the config:
+
+| axis | values | where it lives |
+|---|---|---|
+| **gDNA fraction** | `g00` `g05` `g25` `g50` `g98` — 0 %, 5 %, 25 %, 50 %, 98 % | the config (`rate = f/(1−f)`) |
+| **strand specificity** | `0.50` unstranded · `0.70` · `0.99` strand-specific | the config |
+| **capture** | off · on | the config |
+| **which transcripts are captured** | ⭐ about **HALF** probed, half with NO probe | `test_probes.bed` |
+| **nascent RNA** | ⭐ SPARSE — up to about **HALF** the transcripts carry it, the rest exactly none | the `nrna_abundance` column |
+
+5 × 3 × 2 = **30 conditions.** ⭐ `g00` is the zero control (truth is exactly 0, so every gDNA fragment
+reported is a false positive with nothing to cancel it) and `ss 0.70` is the transition rung — neither
+of the two regimes the bars are written for, and therefore the rung that says whether a policy degrades
+gracefully between them.
+
+⛔ **BOTH SUBSTRATE REQUIREMENTS EXIST SO NO CONDITION IS UNIFORM.** A library where every transcript is
+probed, or where every intron carries nascent RNA, tests the policy on a world it will never meet; the
+half-and-half split puts captured and uncaptured structures, and nascent-free and nascent-bearing
+introns, inside every single condition. ⭐ Vary the nascent LEVEL as well as its presence — below, near,
+and above mature — and hand-author the pattern rather than drawing it: on a chromosome this small a
+Bernoulli draw is mostly sampling noise, and the point of a debug substrate is that you know WHICH
+structure carries nascent RNA before you read a number off it.
+
 ⚠ **THE `nrna:` BLOCK IN `configs/test_reference.yaml` IS DEAD BY DESIGN.** `abundance.mode: file` makes
 the TSV the one source of both weights, so the ladder's `mode: sparse` draw never runs here. Editing
 that block changes nothing.

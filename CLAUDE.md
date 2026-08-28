@@ -193,6 +193,11 @@ python scripts/design/policy_benchmark.py --panel ladder
 python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
 ```
 
+⭐⭐ **THE TEST CHROMOSOME SWEEPS 30 CONDITIONS** — gDNA `g00 g05 g25 g50 g98` × strand
+`0.50 / 0.70 / 0.99` × capture `off / on`. Two more requirements are carried by the SUBSTRATE the
+owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
+up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
+
 ⛔ **THE TEST CHROMOSOME IS EMPTY** (cleared 2026-08-27 — the owner designs its transcripts). After
 editing `scripts/sim/test_reference/*`, everything derived MUST be rebuilt or the benchmark scores a
 stale annotation: `docs/TESTING.md` §0a has the four commands, and `panel.py status` names the next
@@ -224,6 +229,12 @@ allowlist is scoped, never blanket.
 
 ## Working rules
 
+- ⭐⭐⭐ **DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → ONLY THEN `src/`** (owner, 2026-08-27). No idea
+  enters the production source code before it has been derived on paper, designed, planned, prototyped
+  outside `src/`, and A/B'd against the policies that already exist. ⛔ The campaign that was torn down
+  on 2026-08-27 failed by inverting this — mechanisms landed in `src/` first and were justified
+  afterwards, which produced a stack nobody could attribute. ⛔ **One mechanism at a time**: a change
+  that cannot be A/B'd alone cannot be judged alone.
 - **No magic numbers.** Stop and discuss before adding any constant, heuristic or tunable. Every divisor
   must be derived from the deposit rule and unit-tested against brute-force enumeration.
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
