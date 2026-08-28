@@ -125,8 +125,14 @@ def _own_spliced_faces(ctx: StepContext) -> dict:
     """Per-direction spliced lanes: forward (low→high) presents each boundary's HIGH (acceptor)
     face; backward presents the LOW (donor) face — so the delivered flank rate is exactly the
     exon-facing one, route-summed. Precision is counting-honest on THAT FACE's own flux count
-    (`sj_count_lo`/`sj_count_hi`): the slot total would be up to 2x too confident at a boundary
-    whose two faces both carry flux, since trigamma is decreasing.
+    (`sj_count_lo`/`sj_count_hi`), never the slot's lo+hi total.
+
+    ⚠ The two differ only where a position is a donor for one intron AND an acceptor for
+    another, which is RARE — measured on the ladder's annotation: 1 of ~3,600 publishing faces
+    per strand (0.03 %). But where it happens the total is not a small over-statement: the
+    worst face there reads 176x its own count's precision, because trigamma is decreasing and
+    the two faces' fluxes can differ by orders of magnitude. Pricing a face on its own count
+    costs nothing and removes the tail.
 
     ⭐ THE PUBLICATION LICENCE (sender-side): a face is published only toward an exon whose
     flank is STRUCTURALLY COMPLETE — every route into it certified, no terminus admitting
