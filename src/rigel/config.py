@@ -253,12 +253,11 @@ class CalibrationConfig:
     :func:`rigel.calibration.calibrate.calibrate`.
     """
 
-    #: ⭐ The strand-overdispersion PRIOR and CEILING are no longer config: they live as the two
-    #: asserted constants ``_PRIOR_ALPHA_BETA`` / ``_CEIL_ALPHA_BETA`` in
-    #: :mod:`rigel.calibration.gdna_strand`, next to the estimator they parameterise, and the
-    #: shrinkage weight is DERIVED from them rather than asserted. Four fields
-    #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
-    #: structural zero.
+    #: ⭐ The strand-overdispersion CEILING is not config: it lives as the single asserted constant
+    #: ``_CEIL_ALPHA_BETA`` in :mod:`rigel.calibration.gdna_strand`, next to the estimator it
+    #: parameterises. ⭐ 2026-08-30: the shrinkage TARGET went with the four config fields it replaced —
+    #: neither component shrinks toward a constant any more, they shrink toward EACH OTHER by their own
+    #: measured informations (``gdna_strand.reconcile_overdispersions``).
 
     #: **Sweep grid resolution** ``K`` for the per-region log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand regions are exact 1-D, AMBIG

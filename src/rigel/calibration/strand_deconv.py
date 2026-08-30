@@ -3,7 +3,7 @@
 After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.sweep`), the per-region gDNA/RNA
 deconvolution lives in the chain sweep. What is left here is boundary strand geometry:
 
-* :func:`boundary_seeds` — the exon–intron / exon–intergenic ``(sense, total, gDNA weight)`` seeds for the
+* :func:`boundary_seeds` — the exon–intron / exon–intergenic ``(sense, total)`` seeds for the
   gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-region
   seeds (needed under hybrid capture, which depletes off-target intergenic / intronic gDNA).
 
@@ -15,13 +15,15 @@ every observation with a perfectly correlated twin, which is a dispersion estima
 duplication. A contiguous boundary is a 0-bp boundary with one count, so there is one seed and the whole
 ``_SideQuantities`` / ``_compute_side`` / ``_left_right_neighbors`` layer dissolves with the faces.
 
-⭐ **And the seed WEIGHT is now exactly 1, provably.** It was
-``clip(density · eff / mass)`` where a count-observable side read its own crossing density
-``density = mass / eff`` — algebraically 1 whenever the seed mask admits it, and the borrowed-density
-branch could never reach a seed. With ``count`` and ``mass`` the same number that identity is exact
-rather than approximate, so the ratio, the effective length it divided by, and the
-``boundary_side_eff_len`` argument that carried it all go. A seed's weight is "this boundary is gDNA by
-signature", and that is a 1.
+⭐ **The seed set is EVERY strand-observable contiguous boundary (2026-08-29) — exon|intron and gene-edge
+alike — because the estimator no longer needs a seed to be pure.** The gDNA fit is the AWAY-HALF moment
+(:mod:`rigel.calibration.gdna_strand`), unbiased under any RNA content of a seed whose gene strand is
+known; so the only STRAND exclusion left is the one the lemma requires — a boundary with no defined
+sense (opposite-strand or ``TS_AMBIG`` flanks) cannot be oriented and cannot seed. (Count-observability
+still applies on top: a boundary whose flanks share an exon bit is crossed by unspliced MATURE RNA, so its
+count is not a gDNA count at all.) A predecessor restricted
+seeds to gene edges as a certified-pure class; the blank-chromosome control showed purity by class is an
+annotation artefact, and the restriction went with it.
 """
 
 from __future__ import annotations
@@ -73,17 +75,15 @@ def boundary_strand_orientation(
 
 
 def boundary_seeds(
-    substrate, region_arrays, region_density
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous boundary.
+    substrate, region_arrays, boundary_count_observable
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(sense, total)`` — ONE seed per count- and strand-observable contiguous boundary.
 
-    The exon–intron / exon–intergenic boundary seeds for the gDNA strand-overdispersion fit
-    (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture, which
-    depletes off-target intergenic / intronic gDNA).
-
-    ⚠ **``gdna_weight`` is identically 1 on every seed**, and that is a derivation rather than a
-    simplification — see the module docstring. It is returned as an array because the pooled estimator
-    takes a per-seed weight and the contained-region seeds genuinely vary.
+    The exon|intron and exon|intergenic boundary seeds for the gDNA strand-overdispersion fit
+    (:mod:`gdna_strand`), complementing the intron-region seeds (needed under hybrid capture, which
+    depletes off-target intronic gDNA while a boundary abutting a probed exon stays counted). Sense is
+    the boundary's gene strand (:func:`boundary_strand_orientation`); a boundary with no defined sense
+    is not a seed. Gate: ``tests/calibration/test_gdna_strand_fit.py``.
     """
     ts = np.asarray(region_arrays.strand_class)
     lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
@@ -92,11 +92,9 @@ def boundary_seeds(
     total = pos + neg
 
     orient_neg, strand_observable = boundary_strand_orientation(ts[lo], ts[hi])
-    count_observable = np.asarray(region_density.boundary_count_observable, dtype=bool)
+    count_observable = np.asarray(boundary_count_observable, dtype=bool)
     seed = count_observable & strand_observable & (total > 0.0)
-
-    sense = np.where(orient_neg, neg, pos)[seed]
-    return sense, total[seed], np.ones(sense.shape[0], dtype=np.float64)
+    return np.where(orient_neg, neg, pos)[seed], total[seed]
 
 
 __all__ = ["boundary_seeds", "boundary_strand_orientation"]

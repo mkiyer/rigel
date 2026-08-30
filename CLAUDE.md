@@ -138,7 +138,7 @@ something one layer up is telling you the thing belongs lower — a TYPE almost 
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_deconv` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable REFERENCE) |
-| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` `run_fill` |
+| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
 
@@ -277,15 +277,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,643 passed / 0 skipped / 8 xfail** (re-derived 2026-08-27,
-after the TEAR-DOWN and the session-close cleanup. The count moved a long way that day and the deltas
-are: the deleted policy files and their tests (`messages/unified.py`, `messages/currency.py` and both
-test files) took their own cases and per-file gates with them; `messages/policy.py` (+3: jargon,
-docs-boundary, layering) and `tests/calibration/test_message_policy.py` (6 own cases + 2 per-file)
-arrived; `scripts/design/policy_benchmark.py` added +4 (imports, says-what-it-is-for, jargon,
-docs-boundary); the unconsumed `support_prob` geometry gate was deleted with its field; and 14
-`docs/dev/` files were removed at −1 each. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the
-per-file deltas, and `pytest --collect-only -q | grep <stem>` confirms any one of them.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,671 passed / 0 skipped / 8 xfail** (re-derived 2026-08-30 by
+running the suite, not by arithmetic. ⚠ Account it from the value at **HEAD, 3,643** — an intermediate number
+quoted mid-session cannot be reconciled from a clean tree. ADDED: `tests/calibration/test_gdna_strand_fit.py`
+(33 own cases + 2 per-file gates = +35), `tests/test_sim_shadow_transcripts.py` (3 own + 2 = +5; ⚠
+`test_scripts_index` does NOT parametrise a `tests/test_sim_*` file, so a top-level test file moves the total by
++5 and not +6), `docs/dev/message_notes.md` (+1, jargon only). DELETED with the dead density machinery:
+`src/rigel/calibration/run_fill.py` (−3), `tests/calibration/test_run_fill.py` (6 own + 2 = −8), one case from
+`test_density_model.py` (5 → 4); and `test_sweep.py`'s two prior-constant tests collapsed to one (−1).
+3,643 + 35 + 5 + 1 − 3 − 8 − 1 − 1 = 3,671.
+⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

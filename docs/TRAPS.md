@@ -26,13 +26,13 @@ times, most recently during this file's own compaction (2026-08-22).
 
 ## THE INDEX — every rule, by section
 
-**A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-inverted-clip-is-a-constant` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `deadband-from-the-wrong-sample` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards`
+**A. Validation and gates** — `self-checking-validator` · `perturb-every-gate` · `a-field-driven-gate-is-atomic` · `waive-with-a-measurement` · `a-docstring-that-misdescribes-the-graph` · `a-flat-pile-is-not-a-knot` · `the-rename-that-corrupted-a-diagram` · `a-constant-parked-a-value-off-a-knife-edge` · `a-gate-that-restates-the-implementation` · `a-gate-that-already-passed` · `right-conditional-wrong-marginal` · `byte-identity-gate` · `the-deliverable-is-not-reproducible-by-default` · `a-clip-hides-a-scale-error` · `an-inverted-clip-is-a-constant` · `an-ablation-that-never-ran` · `a-green-suite-hid-five-dead-instruments` · `compatibility-is-geometry-not-composition` · `a-zero-count-is-a-measurement` · `a-ratio-cannot-carry-zero` · `the-divergence-was-a-barrier` · `deadband-from-the-wrong-sample` · `honesty-metrics-reward-ignorance` · `predicate-contradicts-its-docstring` · `a-test-that-redefines` · `a-gates-power-is-its-invariant-set` · `a-gate-that-reconstructs` · `off-grid-message-mode` · `a-comment-quoted-as-a-finding` · `the-intermediate-is-not-the-deliverable` · `could-the-arm-have-fired` · `prove-the-substrate` · `can-the-benchmark-resolve-it` · `toys-rank-hotspots-backwards`
 
 **B. Measurement and inference** — `measure-the-ceiling-first` · `a-broad-population-carries-no-prior` · `attribution-must-survive-a-shuffle` · `score-against-truth` · `zero-target-guards-are-one-sided` · `hard-labels-miss-soft-change` · `never-pool-the-strata` · `a-threshold-on-a-fitted-residue` · `excluding-a-population-hides-it` · `name-the-observable-per-site` · `starved-is-not-depleted` · `the-substrate-knob-fought-back` · `key-on-a-realised-quantity` · `price-the-halves-separately` · `panel-before-src` · `capture-inverts-the-counted-side` · `admitting-an-object-costs` · `substitution-understates-a-source` · `a-symptom-is-not-a-second-defect` · `a-locked-object-is-not-a-control` · `draining-breaks-the-oracle` · `an-equal-length-panel-defeats-the-lift` · `a-length-gap-bypasses-calibration` · `weight-it-like-the-consumer` · `a-support-ceiling-is-the-clamp` · `log-variance-is-not-linear` · `re-record-the-baseline` · `a-truth-table-of-aggregates` · `a-single-level-panel-cannot-see-a-constant` · `score-the-consumers-own-count` · `the-floor-must-reproduce-the-selection`
 
 **C. Pools, selections and divisors** — `a-cancellation-is-conditional-on-its-support` · `a-better-estimator-inside-a-weak-consumer-moves-nothing` · `a-pooled-rate-cannot-see-a-short-object-factor` · `two-estimators-of-one-rate-weight-the-field-differently` · `state-the-population-rule-do-not-inherit-it-from-a-table` · `two-divisors-opposite-sign` · `frame-free-is-not-assumption-free` · `a-purity-filter-is-a-length-filter` · `pure-and-length-censored` · `divide-by-a-probability` · `opposite-tilts-must-not-pool` · `a-mean-of-ratios-inherits-the-partition` · `a-trap-names-the-defect-not-the-repair` · `a-stale-gate-accuses-the-newest-change` · `an-upper-bound-is-not-an-estimate` · `a-gate-on-the-helper-is-not-a-gate-on-the-caller` · `fractional-mass-is-the-problem` · `conservation-misses-mis-attribution` · `a-guard-outlives-its-divisor` · `a-fold-grows-a-heuristic` · `a-ratio-needs-a-population-that-can-supply-its-numerator`
 
-**D. Estimation and solver design** — `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
+**D. Estimation and solver design** — `purity-is-a-property-of-the-annotation` · `pair-count-weighting-lets-one-seed-decide` · `we-keep-re-deriving-message-passing` · `one-hop-lifted-out-is-still-the-relay` · `a-variance-cannot-fix-a-bias` · `two-gaussians-one-latent` · `variance-fitted-on-the-belief` · `a-message-from-the-destinations-belief` · `zero-the-precision-with-the-value` · `no-prior-means-haldane` · `prefer-shares-to-differences` · `an-all-zero-factor-is-inert` · `density-below-one-fragment-length` · `identical-paralogs-are-bimodal` · `a-mean-hits-the-mass-weighted-centre-by-luck` · `a-clamp-at-the-closed-end-escapes-the-window` · `the-deconvolution-is-as-good-as-the-density-it-is-handed` · `deriving-one-coordinate-propagates-its-error` · `interpolate-on-the-axis-where-the-lattice-is-uniform` · `read-the-whole-failure-list` · `a-priors-curvature-is-not-the-datas-information` · `a-refutability-test-needs-the-refuting-channel-in-the-fixture` · `a-strength-is-a-nat-a-prior-weight-is-a-count` · `a-four-decimal-print-is-not-a-zero` · `a-constant-in-exact-arithmetic-is-not-constant-in-float64` · `a-toy-and-a-panel-can-disagree-in-rank` · `a-rescale-that-reads-the-source-belief-is-unbounded` · `a-face-total-is-not-a-total-without-its-flux` · `an-imputation-must-cost-something-every-hop` · `a-floored-knob-is-not-the-bandwidth` · `a-mode-count-is-not-a-well-posed-quantity` · `measure-a-default-flip-before-you-write-it`
 
 **E. Structure, indexes and plumbing** — `one-reference-hides-refid-bugs` · `annotated-is-not-genomic` · `an-sj-is-not-a-gap` · `deposit-at-the-sj` · `splicing-makes-the-graph-cyclic` · `nrna-does-not-mean-synthetic` · `credit-exactly-one-sj` · `strand-completes-the-sj-key` · `a-hash-that-misses-its-artifact` · `integer-channels-reproduce` · `worktrees-run-the-wrong-code` · `checkout-deletes-uncommitted-work` · `two-masks-one-name` · `two-docstrings-one-quantity` · `a-transcript-predicate-must-not-silently-drop-a-molecule` · `an-object-class-does-not-see-a-terminus`
 
@@ -85,6 +85,25 @@ prose, and the ones it hits are the ones you did not enumerate — write the for
 then treat its residue as the list of collisions worth understanding rather than exempting.** A
 citation rename rewrote 20 slot ids inside ASCII chain diagrams because the same token was a label
 in one namespace and a slot in another. *Sibling:* `TRAPS: two-masks-one-name`.
+
+**a-constant-parked-a-value-off-a-knife-edge.** Removing a conjured constant can LOOK like a regression when
+the real defect is a discontinuity the constant happened to hide. Measured 2026-08-30: deleting the
+`Beta(14,14)` strand shrinkage let one ladder row's RNA overdispersion fall from 1.1e−5 (a negative raw moment
+lifted by the prior) to its honest 0, and the relay error jumped 2.3 % — because the relay/anchor path has a
+THRESHOLD between `od_r` = 5e−6 and 1e−5 (217,589 → 212,581), not a response. ⭐ Before attributing a
+regression to the change you made, BISECT THE PARAMETER: if an infinitesimal move produces a finite jump, the
+defect is the edge, not your change, and no comparison across it is attributable. ⚠ The tell is a change that
+appears in arms which INJECT the value you altered and therefore cannot have been affected by it.
+
+**a-gate-that-restates-the-implementation.** A gate whose assertion is the code's own expression cannot
+fail while the code is self-consistent, so it CERTIFIES the defect and fires on the repair. Measured
+2026-08-30: the away-half information gate asserted `info == 0.5*_null_information(the seeds that entered)` —
+the implementation, restated — while both the module docstring and the derivation said `half the TOTAL pair
+count`. The estimator's standard error was √2 too wide for as long as the gate stood. ⭐ Assert the PROPERTY
+(a closed form, or a Monte-Carlo null the statistic must match), never the arithmetic the function performs.
+⚠ The same review found three more gates that passed under mutation because they tested a helper and its
+caller separately: substituting a seed COUNT for a participation ratio, dropping an absolute value, and
+dropping a selection weight all fired NOTHING until a gate exercised the wiring.
 
 **a-gate-that-already-passed. A gate that already passes is not a falsification.** A simulator gate
 passed with the defect present because the per-fragment conditional was correct and only the
@@ -786,6 +805,25 @@ something else.
 ---
 
 ## D. Estimation and solver design
+
+**purity-is-a-property-of-the-annotation.** No object class is pure gDNA. "Intergenic" is whatever the
+user's GTF leaves over, pervasive transcription is real, and most genes are OFF in any one sample but nobody
+knows which — so an estimator that picks a structural class and asserts it clean is calibrated to the
+annotation, not the genome. Measured 2026-08-29 on a blank chromosome fed unannotated transcripts the index
+never saw: every purity-based overdispersion fit moved (0.113–0.200 against a truth of 0) and the away-half
+moment did not. ⭐ Where a contaminant can only push a statistic ONE WAY, use the half it cannot reach; that
+is an assumption about direction, which the biology gives you, instead of an assumption about purity, which
+it does not.
+
+**pair-count-weighting-lets-one-seed-decide.** Pooling a SECOND moment weights each object by its pair count
+`n(n−1)/2` ∝ n², which is minimum-variance only when the parameter is ZERO. Once it is not, the object's own
+correlation caps what it can say and its information SATURATES with depth — so a handful of deep objects
+carry the estimate. Measured 2026-08-30 on real cfRNA: one seed carried 77.8 % of a library's numerator,
+7 carried 90 %, and on 3 of 4 libraries the top 1 % carried more than 100 % with the remainder summing
+NEGATIVE. ⛔ The fix is inverse-variance weighting (`EQUATIONS.md` §6b), never trimming: dropping the upper
+tail biases the mean you are estimating. ⚠ Neither simulated panel can expose this — at a true value of zero
+with tens of thousands of seeds no seed can dominate, so the pathology is real-data-only and the panels can
+show no harm but never a benefit.
 
 **we-keep-re-deriving-message-passing. ⭐⭐⭐ FOUR SEPARATE SESSIONS HAVE INDEPENDENTLY RE-DERIVED
 MESSAGE

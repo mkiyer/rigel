@@ -1,41 +1,117 @@
 ##gtf-version 2.2
-##description THE METHOD-DEVELOPMENT TEST TRANSCRIPTOME — hand-edited, one transcript at a time.
+##description THE METHOD-DEVELOPMENT TEST TRANSCRIPTOME — hand-edited, one structure at a time.
 ##
-## ⭐⭐⭐ THIS FILE IS THE BENCHMARK, AND IT IS EMPTY ON PURPOSE (owner, 2026-08-27). The message
-## policy is developed against a chromosome the owner designs transcript by transcript: add one
-## structure, check the policy solves it AND everything already here, then add the next.
+## ⭐⭐⭐ THIS FILE IS THE BENCHMARK (owner, 2026-08-19): the test chromosome, this GTF and
+## `test_abundances.tsv` comprise the method-development benchmark. The FASTA and everything
+## downstream are DERIVED — `build_test_reference.py`, then `docs/TESTING.md` §0a.
 ##
-## ⛔ IT WAS CLEARED ON 2026-08-27 and starts again at ZERO transcripts. The previous 42 are in git
-## history (`git log -- scripts/sim/test_reference/test_chr.gtf`) if a structure is ever wanted back.
+## ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28) ─────────────────────────────────
+## ONE shape everywhere: exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb
+## (span 17,000 bp), 20 kb intergenic between genes, all + strand. FIVE gene types varying
+## exactly one bit each, repeated in FIVE abundance blocks (B1..B5) = 25 transcripts:
 ##
-## ── HOW TO ADD A TRANSCRIPT ───────────────────────────────────────────────────────────────────
+##   clean    unprobed, no nascent — intron + flanks exactly pure gDNA; one certified SJ/intron
+##   nasc     unprobed, nascent ON — the contaminated message source (intron is not pure gDNA)
+##   cap      probed,   no nascent — the enrichment cliff between source and destination
+##   capnasc  probed,   nascent ON — both at once
+##   silent   probed,   mrna = 0  — every object pure gDNA; any claimed RNA is a false positive
 ##
-## 1. Add one `exon` line per exon, here. GTF is 1-based and end-inclusive:
+## Abundances live in `test_abundances.tsv` (⛔ that file takes no comments — both its readers
+## key on the first line — so its design is recorded here). Molar ladders, half-decade steps,
+## mature UP the blocks and nascent DOWN — independent levels, as the big ladder draws them:
 ##
-##      test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "G1"; transcript_id "T1";
+##   block:            B1    B2    B3    B4    B5
+##   mrna_abundance:   10    30   100   300  1000    (clean/nasc/cap/capnasc; silent = 0)
+##   nrna_abundance:  100    30    10     3     1    (nasc/capnasc only; all others = 0)
 ##
-##    Exons of one transcript must not overlap, every intron must be at least 4 bp (it needs room
-##    for a GT..AG motif), and every coordinate must fall inside the 1,000,000 bp chromosome.
+## In FRAGMENT terms the nascent entity spans 17 kb against 3 kb spliced, so the per-gene
+## nascent:mature fragment ratio is ≈ 5.67·nrna/mrna = 57 / 5.7 / 0.57 / 0.057 / 0.0057 across
+## B1..B5 — far-above, above, near, below, far-below mature. Library-wide nascent is ~22 % of
+## RNA fragments off capture, matching the big ladder's stress burden (`DESIGN.md` §0b: a
+## STRESS level, not real data; realistic is ~4 %).
 ##
-## 2. Add its sampling weights to `test_abundances.tsv` — one row per transcript_id. The builder
-##    REFUSES a transcript with no abundance row and an abundance row with no transcript.
+## Probes live in `test_probes.bed` and tile PER EXON, abutting both exon ends (a probe
+## spanning an sj would suppress exactly the boundary-crossing gDNA — `docs/TESTING.md` §0b).
 ##
-## 3. Optionally add capture probes to `test_probes.bed` (BED12, 0-based half-open).
+## The question this substrate answers: on unstranded rows, is the information a blind exon
+## needs actually present in its neighbours — split by source quality (clean vs nasc) and by
+## frame (uncaptured vs the capture cliff) — and on stranded rows, does a policy leave the
+## sighted solve alone?  (`ROADMAP.md` §1 rank 1a.)
 ##
-## 4. Rebuild everything derived, then simulate and cache — `docs/TESTING.md` §0a has the commands.
-##
-## ⭐ NASCENT RNA NEEDS NO DECLARATION: `rigel index` creates a single-exon nascent entity spanning
-## each MULTI-EXON transcript. Give it weight through that transcript's `nrna_abundance` column.
-##
-## ⚠ κ (the strand-specificity model) IS FITTED FROM SPLICED READS, so a transcriptome of only
-## single-exon transcripts cannot calibrate — `calibrate` raises `CalibrationStrandError`. At least
-## one multi-exon transcript with real depth is required before a benchmark run means anything.
-##
-## ⭐ THE FASTA IS DERIVED FROM THIS FILE, never hand-edited: `build_test_reference.py` generates the
-## 1,000,000 bp chromosome from a fixed seed and injects a GT..AG motif at every intron declared
-## here, so the sequence can never disagree with the annotation.
-##
-## ⭐ NAME TRANSCRIPTS FOR WHAT THEY ARE. The convention that worked: strand, structure and SPLICED
-## length — e.g. `T1p_SE_1KB` is a + strand single-exon transcript of 1,000 bp of exon.
-##
-## ── TRANSCRIPTS (none yet — add below this line) ───────────────────────────────────────────────
+## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates.
+##   test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "gX"; transcript_id "TX";
+test_chr	rigel_test	exon	20001	21000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
+test_chr	rigel_test	exon	28001	29000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
+test_chr	rigel_test	exon	36001	37000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
+test_chr	rigel_test	exon	57001	58000	.	+	.	gene_id "gB1_nasc"; transcript_id "B1_nasc";
+test_chr	rigel_test	exon	65001	66000	.	+	.	gene_id "gB1_nasc"; transcript_id "B1_nasc";
+test_chr	rigel_test	exon	73001	74000	.	+	.	gene_id "gB1_nasc"; transcript_id "B1_nasc";
+test_chr	rigel_test	exon	94001	95000	.	+	.	gene_id "gB1_cap"; transcript_id "B1_cap";
+test_chr	rigel_test	exon	102001	103000	.	+	.	gene_id "gB1_cap"; transcript_id "B1_cap";
+test_chr	rigel_test	exon	110001	111000	.	+	.	gene_id "gB1_cap"; transcript_id "B1_cap";
+test_chr	rigel_test	exon	131001	132000	.	+	.	gene_id "gB1_capnasc"; transcript_id "B1_capnasc";
+test_chr	rigel_test	exon	139001	140000	.	+	.	gene_id "gB1_capnasc"; transcript_id "B1_capnasc";
+test_chr	rigel_test	exon	147001	148000	.	+	.	gene_id "gB1_capnasc"; transcript_id "B1_capnasc";
+test_chr	rigel_test	exon	168001	169000	.	+	.	gene_id "gB1_silent"; transcript_id "B1_silent";
+test_chr	rigel_test	exon	176001	177000	.	+	.	gene_id "gB1_silent"; transcript_id "B1_silent";
+test_chr	rigel_test	exon	184001	185000	.	+	.	gene_id "gB1_silent"; transcript_id "B1_silent";
+test_chr	rigel_test	exon	205001	206000	.	+	.	gene_id "gB2_clean"; transcript_id "B2_clean";
+test_chr	rigel_test	exon	213001	214000	.	+	.	gene_id "gB2_clean"; transcript_id "B2_clean";
+test_chr	rigel_test	exon	221001	222000	.	+	.	gene_id "gB2_clean"; transcript_id "B2_clean";
+test_chr	rigel_test	exon	242001	243000	.	+	.	gene_id "gB2_nasc"; transcript_id "B2_nasc";
+test_chr	rigel_test	exon	250001	251000	.	+	.	gene_id "gB2_nasc"; transcript_id "B2_nasc";
+test_chr	rigel_test	exon	258001	259000	.	+	.	gene_id "gB2_nasc"; transcript_id "B2_nasc";
+test_chr	rigel_test	exon	279001	280000	.	+	.	gene_id "gB2_cap"; transcript_id "B2_cap";
+test_chr	rigel_test	exon	287001	288000	.	+	.	gene_id "gB2_cap"; transcript_id "B2_cap";
+test_chr	rigel_test	exon	295001	296000	.	+	.	gene_id "gB2_cap"; transcript_id "B2_cap";
+test_chr	rigel_test	exon	316001	317000	.	+	.	gene_id "gB2_capnasc"; transcript_id "B2_capnasc";
+test_chr	rigel_test	exon	324001	325000	.	+	.	gene_id "gB2_capnasc"; transcript_id "B2_capnasc";
+test_chr	rigel_test	exon	332001	333000	.	+	.	gene_id "gB2_capnasc"; transcript_id "B2_capnasc";
+test_chr	rigel_test	exon	353001	354000	.	+	.	gene_id "gB2_silent"; transcript_id "B2_silent";
+test_chr	rigel_test	exon	361001	362000	.	+	.	gene_id "gB2_silent"; transcript_id "B2_silent";
+test_chr	rigel_test	exon	369001	370000	.	+	.	gene_id "gB2_silent"; transcript_id "B2_silent";
+test_chr	rigel_test	exon	390001	391000	.	+	.	gene_id "gB3_clean"; transcript_id "B3_clean";
+test_chr	rigel_test	exon	398001	399000	.	+	.	gene_id "gB3_clean"; transcript_id "B3_clean";
+test_chr	rigel_test	exon	406001	407000	.	+	.	gene_id "gB3_clean"; transcript_id "B3_clean";
+test_chr	rigel_test	exon	427001	428000	.	+	.	gene_id "gB3_nasc"; transcript_id "B3_nasc";
+test_chr	rigel_test	exon	435001	436000	.	+	.	gene_id "gB3_nasc"; transcript_id "B3_nasc";
+test_chr	rigel_test	exon	443001	444000	.	+	.	gene_id "gB3_nasc"; transcript_id "B3_nasc";
+test_chr	rigel_test	exon	464001	465000	.	+	.	gene_id "gB3_cap"; transcript_id "B3_cap";
+test_chr	rigel_test	exon	472001	473000	.	+	.	gene_id "gB3_cap"; transcript_id "B3_cap";
+test_chr	rigel_test	exon	480001	481000	.	+	.	gene_id "gB3_cap"; transcript_id "B3_cap";
+test_chr	rigel_test	exon	501001	502000	.	+	.	gene_id "gB3_capnasc"; transcript_id "B3_capnasc";
+test_chr	rigel_test	exon	509001	510000	.	+	.	gene_id "gB3_capnasc"; transcript_id "B3_capnasc";
+test_chr	rigel_test	exon	517001	518000	.	+	.	gene_id "gB3_capnasc"; transcript_id "B3_capnasc";
+test_chr	rigel_test	exon	538001	539000	.	+	.	gene_id "gB3_silent"; transcript_id "B3_silent";
+test_chr	rigel_test	exon	546001	547000	.	+	.	gene_id "gB3_silent"; transcript_id "B3_silent";
+test_chr	rigel_test	exon	554001	555000	.	+	.	gene_id "gB3_silent"; transcript_id "B3_silent";
+test_chr	rigel_test	exon	575001	576000	.	+	.	gene_id "gB4_clean"; transcript_id "B4_clean";
+test_chr	rigel_test	exon	583001	584000	.	+	.	gene_id "gB4_clean"; transcript_id "B4_clean";
+test_chr	rigel_test	exon	591001	592000	.	+	.	gene_id "gB4_clean"; transcript_id "B4_clean";
+test_chr	rigel_test	exon	612001	613000	.	+	.	gene_id "gB4_nasc"; transcript_id "B4_nasc";
+test_chr	rigel_test	exon	620001	621000	.	+	.	gene_id "gB4_nasc"; transcript_id "B4_nasc";
+test_chr	rigel_test	exon	628001	629000	.	+	.	gene_id "gB4_nasc"; transcript_id "B4_nasc";
+test_chr	rigel_test	exon	649001	650000	.	+	.	gene_id "gB4_cap"; transcript_id "B4_cap";
+test_chr	rigel_test	exon	657001	658000	.	+	.	gene_id "gB4_cap"; transcript_id "B4_cap";
+test_chr	rigel_test	exon	665001	666000	.	+	.	gene_id "gB4_cap"; transcript_id "B4_cap";
+test_chr	rigel_test	exon	686001	687000	.	+	.	gene_id "gB4_capnasc"; transcript_id "B4_capnasc";
+test_chr	rigel_test	exon	694001	695000	.	+	.	gene_id "gB4_capnasc"; transcript_id "B4_capnasc";
+test_chr	rigel_test	exon	702001	703000	.	+	.	gene_id "gB4_capnasc"; transcript_id "B4_capnasc";
+test_chr	rigel_test	exon	723001	724000	.	+	.	gene_id "gB4_silent"; transcript_id "B4_silent";
+test_chr	rigel_test	exon	731001	732000	.	+	.	gene_id "gB4_silent"; transcript_id "B4_silent";
+test_chr	rigel_test	exon	739001	740000	.	+	.	gene_id "gB4_silent"; transcript_id "B4_silent";
+test_chr	rigel_test	exon	760001	761000	.	+	.	gene_id "gB5_clean"; transcript_id "B5_clean";
+test_chr	rigel_test	exon	768001	769000	.	+	.	gene_id "gB5_clean"; transcript_id "B5_clean";
+test_chr	rigel_test	exon	776001	777000	.	+	.	gene_id "gB5_clean"; transcript_id "B5_clean";
+test_chr	rigel_test	exon	797001	798000	.	+	.	gene_id "gB5_nasc"; transcript_id "B5_nasc";
+test_chr	rigel_test	exon	805001	806000	.	+	.	gene_id "gB5_nasc"; transcript_id "B5_nasc";
+test_chr	rigel_test	exon	813001	814000	.	+	.	gene_id "gB5_nasc"; transcript_id "B5_nasc";
+test_chr	rigel_test	exon	834001	835000	.	+	.	gene_id "gB5_cap"; transcript_id "B5_cap";
+test_chr	rigel_test	exon	842001	843000	.	+	.	gene_id "gB5_cap"; transcript_id "B5_cap";
+test_chr	rigel_test	exon	850001	851000	.	+	.	gene_id "gB5_cap"; transcript_id "B5_cap";
+test_chr	rigel_test	exon	871001	872000	.	+	.	gene_id "gB5_capnasc"; transcript_id "B5_capnasc";
+test_chr	rigel_test	exon	879001	880000	.	+	.	gene_id "gB5_capnasc"; transcript_id "B5_capnasc";
+test_chr	rigel_test	exon	887001	888000	.	+	.	gene_id "gB5_capnasc"; transcript_id "B5_capnasc";
+test_chr	rigel_test	exon	908001	909000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";
+test_chr	rigel_test	exon	916001	917000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";
+test_chr	rigel_test	exon	924001	925000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";

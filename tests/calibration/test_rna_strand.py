@@ -71,10 +71,7 @@ def test_recovers_rna_overdispersion(true_od, kappa):
     sense, total = _beta_binom_regions(
         rng, n_regions=6000, depth=150, overdispersion=true_od, mean=kappa
     )
-    # Weak prior so the 6000 seed sides dominate (tests the estimator, not the shrinkage).
-    model = fit_rna_strand_overdispersion(
-        sense, total, kappa, prior_overdispersion=1 / 7, prior_weight=5.0
-    )
+    model = fit_rna_strand_overdispersion(sense, total, kappa)
     assert not model.fallback_used
     assert model.n_seed_regions == 6000
     assert model.rna_strand_overdispersion == pytest.approx(true_od, rel=0.20, abs=0.01)
@@ -86,9 +83,7 @@ def test_binomial_limit_recovers_near_zero():
     kappa = 0.95
     total = np.full(4000, 150.0)
     sense = rng.binomial(150, kappa, size=4000).astype(np.float64)
-    model = fit_rna_strand_overdispersion(
-        sense, total, kappa, prior_overdispersion=0.0, prior_weight=0.0
-    )
+    model = fit_rna_strand_overdispersion(sense, total, kappa)
     assert model.rna_strand_overdispersion < 0.01
 
 
@@ -98,37 +93,39 @@ def test_fit_clamped_to_ceiling():
     sense, total = _beta_binom_regions(
         rng, n_regions=4000, depth=150, overdispersion=0.45, mean=0.85
     )
-    model = fit_rna_strand_overdispersion(
-        sense, total, 0.85, prior_overdispersion=1 / 7, prior_weight=5.0
-    )
+    model = fit_rna_strand_overdispersion(sense, total, 0.85)
     assert model.rna_strand_overdispersion <= _MAX_OVERDISPERSION + 1e-12
 
 
-def test_no_spliced_data_falls_back_to_prior():
-    """No spliced fragments anywhere → fallback to the prior overdispersion (not 0)."""
-    total = np.zeros(50)
-    sense = np.zeros(50)
-    prior = overdispersion_for_beta(3.0)  # 1/7
-    model = fit_rna_strand_overdispersion(
-        sense, total, 0.9, prior_overdispersion=prior, prior_weight=30.0
-    )
+def test_no_spliced_data_falls_back_to_THE_CEILING_not_a_constant():
+    """⭐ 2026-08-30 (owner ruling): the `Beta(14,14)` ⇒ 0.0345 shrinkage target and its derived weight are
+    DELETED. With no spliced pair the RNA fit has measured nothing, and the least-committal answer is the
+    CEILING — the widest strand likelihood the model admits, so the channel says nothing rather than
+    something confident. `calibrate` then reconciles it against the gDNA fit, which usually HAS measured
+    something (`gdna_strand.reconcile_overdispersions`)."""
+    model = fit_rna_strand_overdispersion(np.zeros(50), np.zeros(50), 0.9)
     assert model.fallback_used
-    assert model.rna_strand_overdispersion == pytest.approx(prior)
+    assert model.rna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
+    assert np.isnan(model.raw_overdispersion)
+    assert model.information == 0.0
     assert model.n_seed_regions == 0
 
 
-def test_shrinks_to_prior_when_sparse():
-    """One thin seed side ⇒ the prior dominates (continuous shrinkage, no hard gate).
+def test_a_SPARSE_fit_is_the_raw_moment_and_says_how_little_it_knows():
+    """⛔ No shrinkage: one thin seed returns its own (noisy) moment inside the physical support, and
+    reports the INFORMATION that lets `calibrate` weigh it against the gDNA fit instead of hiding it."""
+    model = fit_rna_strand_overdispersion(np.array([7.0]), np.array([10.0]), 0.9)
+    assert not model.fallback_used
+    assert 0.0 <= model.rna_strand_overdispersion <= _MAX_OVERDISPERSION
+    assert 0.0 < model.information < 50.0  # a single 10-fragment sj is worth very little
 
-    ⚠ The prior weight is now in INFORMATION units (see `gdna_strand._prior_information`), so it must be
-    given on that scale; a single 10-fragment side carries only ~4 information units at κ = 0.9."""
-    sense = np.array([7.0])
-    total = np.array([10.0])
-    prior = 1 / 7
-    model = fit_rna_strand_overdispersion(
-        sense, total, 0.9, prior_overdispersion=prior, prior_weight=909.0
+    deep = fit_rna_strand_overdispersion(
+        *_beta_binom_regions(
+            np.random.default_rng(9), n_regions=4000, depth=120, overdispersion=0.05, mean=0.9
+        )[::-1][::-1],
+        0.9,
     )
-    assert model.rna_strand_overdispersion == pytest.approx(prior, abs=0.03)
+    assert deep.information > 1000.0 * model.information
 
 
 # ---------------------------------------------------------------- fit-from-SJ-table wrapper
@@ -147,25 +144,16 @@ def test_fit_from_sj_table_uses_every_sj():
     rng = np.random.default_rng(5)
     kappa = 0.9
     sense, total = _beta_binom_regions(rng, 6000, 120, 0.10, kappa)
-    model = fit_rna_strand_from_sj_table(
-        _sj_table(sense, total - sense),
-        rna_sense_frac=kappa,
-        prior_overdispersion=1 / 7,
-        prior_weight=5.0,
-    )
+    model = fit_rna_strand_from_sj_table(_sj_table(sense, total - sense), rna_sense_frac=kappa)
     assert model.n_seed_regions == 6000
     assert model.rna_strand_overdispersion == pytest.approx(0.10, rel=0.25, abs=0.01)
 
 
 def test_fit_from_sj_table_empty_is_fallback():
-    """No sj carrying fragments → fallback to prior (a library with no spliced reads)."""
-    model = fit_rna_strand_from_sj_table(
-        _sj_table([0, 0], [0, 0]),
-        rna_sense_frac=0.9,
-        prior_overdispersion=1 / 7,
-        prior_weight=30.0,
-    )
+    """No sj carrying fragments → the ceiling fallback (a library with no spliced reads)."""
+    model = fit_rna_strand_from_sj_table(_sj_table([0, 0], [0, 0]), rna_sense_frac=0.9)
     assert model.fallback_used
+    assert model.rna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
 
 
 def test_fit_from_sj_table_matches_the_real_table_type():
@@ -224,12 +212,19 @@ def test_rna_model_beta_concentration_roundtrip():
     """RnaStrandModel.beta_concentration inverts overdispersion_for_beta."""
     m = RnaStrandModel(
         rna_strand_overdispersion=overdispersion_for_beta(3.0),
+        raw_overdispersion=float("nan"),
+        information=0.0,
         n_seed_regions=1,
         n_seed_fragments=1,
         fallback_used=False,
     )
     assert m.beta_concentration() == pytest.approx(3.0)
     m0 = RnaStrandModel(
-        rna_strand_overdispersion=0.0, n_seed_regions=0, n_seed_fragments=0, fallback_used=True
+        rna_strand_overdispersion=0.0,
+        raw_overdispersion=float("nan"),
+        information=0.0,
+        n_seed_regions=0,
+        n_seed_fragments=0,
+        fallback_used=True,
     )
     assert m0.beta_concentration() == float("inf")

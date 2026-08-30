@@ -59,9 +59,17 @@ GENOME_LENGTH = 1_000_000
 REF_NAME = "test_chr"
 #: the chromosome's random sequence is fixed by this seed, so the same GTF always gives the same FASTA
 GENOME_SEED = 20260819
+#: ⭐⭐ THE BLANK CHROMOSOME (owner design, 2026-08-29): a second contig with NO annotation in `test_chr.gtf`,
+#: so `rigel index` knows nothing on it — while the SIMULATOR draws unannotated "shadow" transcripts from
+#: `test_shadow.gtf` there. Its own seed; its own length. gDNA is drawn on it too (`gdna.genomic_refs`).
+BLANK_REF_NAME = "test_blank"
+BLANK_GENOME_LENGTH = 1_000_000
+BLANK_GENOME_SEED = 20260829
+REF_LENGTHS = {REF_NAME: GENOME_LENGTH, BLANK_REF_NAME: BLANK_GENOME_LENGTH}
 
 HERE = Path(__file__).resolve().parent / "test_reference"
 DEFAULT_GTF = HERE / "test_chr.gtf"
+DEFAULT_SHADOW_GTF = HERE / "test_shadow.gtf"
 DEFAULT_ABUNDANCES = HERE / "test_abundances.tsv"
 DEFAULT_OUT = Path.home() / "Downloads" / "rigel_runs" / "test_reference"
 
@@ -115,20 +123,28 @@ def inject_motifs(genome: MutableGenome, introns: list[tuple[int, int, Strand]])
     return len(introns)
 
 
-def check_transcripts(transcripts: list[Transcript], abundances: dict) -> list[str]:
-    """Everything that would make a transcript unusable, reported together rather than one per run."""
+def check_transcripts(transcripts: list[Transcript], abundances: dict, shadows: list[Transcript] | None = None) -> list[str]:
+    """Everything that would make a transcript unusable, reported together rather than one per run.
+
+    ``transcripts`` must live on ``test_chr`` (the annotated chromosome, the one the index is built from);
+    ``shadows`` must live on ``test_blank`` (the BLANK chromosome — unannotated by construction); ids are
+    unique across BOTH files (a shadow the index would know is not a shadow); every transcript of either
+    file has an abundance row and every row names a transcript of one of them."""
     problems: list[str] = []
     seen: dict[str, Transcript] = {}
-    for t in transcripts:
-        if t.ref != REF_NAME:
-            problems.append(f"{t.t_id}: reference {t.ref!r}, expected {REF_NAME!r}")
+    shadows = shadows or []
+    for t, expected_ref, length in [(t, REF_NAME, GENOME_LENGTH) for t in transcripts] + [
+        (t, BLANK_REF_NAME, BLANK_GENOME_LENGTH) for t in shadows
+    ]:
+        if t.ref != expected_ref:
+            problems.append(f"{t.t_id}: reference {t.ref!r}, expected {expected_ref!r}")
         if t.t_id in seen:
             problems.append(f"{t.t_id}: declared twice")
         seen[t.t_id] = t
         exons = sorted(t.exons, key=lambda e: e.start)
         for e in exons:
-            if e.start < 0 or e.end > GENOME_LENGTH:
-                problems.append(f"{t.t_id}: exon [{e.start}, {e.end}) outside [0, {GENOME_LENGTH})")
+            if e.start < 0 or e.end > length:
+                problems.append(f"{t.t_id}: exon [{e.start}, {e.end}) outside [0, {length})")
             if e.end <= e.start:
                 problems.append(f"{t.t_id}: empty exon [{e.start}, {e.end})")
         for left, right in zip(exons, exons[1:]):
@@ -141,15 +157,35 @@ def check_transcripts(transcripts: list[Transcript], abundances: dict) -> list[s
             problems.append(f"{t.t_id}: no row in the abundances file")
     for t_id in abundances:
         if t_id not in seen:
-            problems.append(f"{t_id}: has an abundance but is not in the GTF")
+            problems.append(f"{t_id}: has an abundance but is not in either GTF")
     return problems
 
 
-def build(gtf: Path, abundances_path: Path, out: Path) -> dict:
-    """Write the derived FASTA and report what the benchmark currently holds."""
+def _write_two_record_fasta(genomes: list[MutableGenome], path: Path) -> Path:
+    """One FASTA, two records, 80-column wrap, + ``samtools faidx``. ⚠ The file keeps the name
+    ``test_chr.fa`` so every panel config's ``genome:`` path stays valid; it now carries BOTH contigs."""
+    import pysam
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        for g in genomes:
+            f.write(f">{g.name}\n")
+            seq = g.seq
+            for i in range(0, len(seq), 80):
+                f.write(seq[i : i + 80] + "\n")
+    for stale in (path.with_suffix(path.suffix + ".fai"),):
+        if stale.exists():
+            stale.unlink()
+    pysam.faidx(str(path))
+    return path
+
+
+def build(gtf: Path, abundances_path: Path, out: Path, shadow_gtf: Path | None = None) -> dict:
+    """Write the derived FASTA (both contigs) and report what the benchmark currently holds."""
     transcripts = read_test_gtf(gtf)
+    shadows = read_test_gtf(shadow_gtf) if shadow_gtf is not None and shadow_gtf.is_file() else []
     abundances = read_abundances(abundances_path)
-    problems = check_transcripts(transcripts, abundances)
+    problems = check_transcripts(transcripts, abundances, shadows)
     if problems:
         raise ValueError(
             f"{len(problems)} problem(s) in the test reference:\n  " + "\n  ".join(problems)
@@ -157,15 +193,23 @@ def build(gtf: Path, abundances_path: Path, out: Path) -> dict:
     genome = MutableGenome(GENOME_LENGTH, seed=GENOME_SEED, name=REF_NAME)
     introns = intron_spans(transcripts)
     inject_motifs(genome, introns)
+    blank = MutableGenome(BLANK_GENOME_LENGTH, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME)
+    shadow_introns = intron_spans(shadows)
+    inject_motifs(blank, shadow_introns)
     out.mkdir(parents=True, exist_ok=True)
-    fasta = genome.write_fasta(out)
-    # the GTF the tools read is a COPY of the hand-edited one, so the built reference is self-contained
+    fasta = _write_two_record_fasta([genome, blank], out / f"{REF_NAME}.fa")
+    # the GTFs and abundances the tools read are COPIES of the hand-edited ones, so the built reference is
+    # self-contained. ⛔ `test_shadow.gtf` is copied for the SIMULATOR only — the index never reads it.
     (out / "test_chr.gtf").write_text(gtf.read_text())
     (out / "test_abundances.tsv").write_text(abundances_path.read_text())
+    if shadow_gtf is not None and shadow_gtf.is_file():
+        (out / "test_shadow.gtf").write_text(shadow_gtf.read_text())
     multi = sum(1 for t in transcripts if len(t.exons) > 1)
     return {"fasta": fasta, "n_transcripts": len(transcripts), "n_multi_exon": multi,
             "n_introns": len(introns), "length": GENOME_LENGTH,
-            "n_nascent_entities_expected": multi}
+            "n_nascent_entities_expected": multi,
+            "n_shadow_transcripts": len(shadows), "n_shadow_introns": len(shadow_introns),
+            "blank_ref": BLANK_REF_NAME, "blank_length": BLANK_GENOME_LENGTH}
 
 
 def self_test() -> int:
@@ -218,12 +262,29 @@ def self_test() -> int:
           any("under 4 bp" in p for p in check_transcripts([tx("X", [(100, 200), (202, 400)])], {"X": (1.0, 0.0)})))
     check("a transcript with no abundance row is caught",
           any("no row" in p for p in check_transcripts(good, {})))
-    check("an abundance for a transcript that is not in the GTF is caught",
-          any("not in the GTF" in p for p in check_transcripts(good, {**ab, "GHOST": (1.0, 0.0)})))
+    check("an abundance for a transcript that is not in either GTF is caught",
+          any("not in either GTF" in p for p in check_transcripts(good, {**ab, "GHOST": (1.0, 0.0)})))
     check("a duplicate transcript id is caught",
           any("twice" in p for p in check_transcripts(good + good, ab)))
     check("the wrong reference name is caught",
           any("expected" in p for p in check_transcripts([tx("X", [(10, 90)], ref="chr1")], {"X": (1.0, 0.0)})))
+
+    # ── the BLANK chromosome and its shadows (2026-08-29)
+    sh = [tx("shadow_A", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)]
+    both = {"T1": (100.0, 25.0), "shadow_A": (5.0, 0.0)}
+    check("a shadow on the blank chromosome with an abundance row passes", check_transcripts(good, both, sh) == [])
+    check("a shadow placed on the ANNOTATED chromosome is caught",
+          any("expected 'test_blank'" in p for p in check_transcripts(good, both, [tx("shadow_A", [(1000, 2000), (5000, 6000)])])))
+    check("an annotated transcript placed on the blank chromosome is caught",
+          any("expected 'test_chr'" in p for p in check_transcripts([tx("T1", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)], both, sh)))
+    check("a shadow id the annotation already declares is caught (it would not be a shadow)",
+          any("twice" in p for p in check_transcripts(good, both, [tx("T1", [(1000, 2000), (5000, 6000)], ref=BLANK_REF_NAME)])))
+    check("a shadow with no abundance row is caught", any("no row" in p for p in check_transcripts(good, ab, sh)))
+    gb = MutableGenome(8000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME)
+    inject_motifs(gb, intron_spans(sh))
+    check("a shadow intron gets its motif on the BLANK genome", gb[2000:2002] == "GT" and gb[4998:5000] == "AG")
+    check("the two contigs are distinct sequences",
+          MutableGenome(2000, seed=GENOME_SEED, name=REF_NAME).seq != MutableGenome(2000, seed=BLANK_GENOME_SEED, name=BLANK_REF_NAME).seq)
 
     # ── zero transcripts is the STARTING state and must be legal
     check("zero transcripts is legal", check_transcripts([], {}) == [])
@@ -237,13 +298,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gtf", type=Path, default=DEFAULT_GTF)
     ap.add_argument("--abundances", type=Path, default=DEFAULT_ABUNDANCES)
+    ap.add_argument("--shadow-gtf", type=Path, default=DEFAULT_SHADOW_GTF,
+                    help="unannotated SHADOW transcripts on the blank chromosome (simulator-only)")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
 
-    info = build(args.gtf, args.abundances, args.out)
+    info = build(args.gtf, args.abundances, args.out, args.shadow_gtf)
     print(f"\n⭐ THE TEST REFERENCE — {REF_NAME}, {info['length']:,} bp")
     print(f"   fasta        {info['fasta']}")
     print(f"   gtf          {args.gtf}")
@@ -252,6 +315,9 @@ def main() -> int:
     print(f"   introns      {info['n_introns']} (each with a GT..AG injected)")
     print(f"   ⭐ nascent entities `rigel index` will create: {info['n_nascent_entities_expected']}"
           " — one single-exon transcript spanning each multi-exon one")
+    print(f"   ⭐⭐ BLANK chromosome {info['blank_ref']}, {info['blank_length']:,} bp — NO annotation; "
+          f"{info['n_shadow_transcripts']} SHADOW transcripts ({info['n_shadow_introns']} shadow introns with motifs) "
+          f"simulated from {args.shadow_gtf.name}, never given to the index")
     if info["n_transcripts"] == 0:
         print("\n   ⭐ ZERO TRANSCRIPTS — the benchmark's starting state. Add one to "
               f"{args.gtf.name} and a row to {args.abundances.name}, then re-run this.")

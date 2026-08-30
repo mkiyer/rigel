@@ -37,6 +37,9 @@
 
 genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
+# ⭐ SHADOW transcripts (owner, 2026-08-29): unannotated transcription on the BLANK chromosome `test_blank`,
+#   simulated from this file and NEVER given to the index. `docs/TESTING.md` §0a.
+shadow_gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_shadow.gtf
 index: /Users/mkiyer/Downloads/rigel_runs/test_reference/idx
 outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios
 
@@ -71,7 +74,7 @@ gdna:
   # so interpolation from g50 sees neither).
   rates:       [0.0, 0.052632, 0.333333, 1.0, 49.0]
   rate_labels: [g00, g05,      g25,      g50, g98]
-  genomic_refs: [test_chr]
+  genomic_refs: [test_chr, test_blank]   # gDNA is drawn on the BLANK chromosome too
   frag_mean: 206
   frag_std: 98
   frag_min: 50

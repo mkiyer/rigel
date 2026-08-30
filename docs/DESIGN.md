@@ -1012,6 +1012,43 @@ transcript-relative notion and is **derived, never stored**. Two strands exist a
 
 **gDNA and RNA.** "RNA is RNA" — no mature/nascent split in the accumulator. Owner ruling.
 
+### 3.3a ⭐⭐ NO OBJECT CLASS IS ASSERTED PURE gDNA — owner direction, 2026-08-29
+
+"Pure" is a property of the annotation and the sample, not of the genome: pervasive transcription is real,
+the intergenic space is whatever the user's GTF leaves over, and most genes are OFF in any one sample but
+nobody knows which. So the gDNA strand-overdispersion fit trusts no class: it is the away-half moment
+(`EQUATIONS.md` §6a) over EVERY genic count- and strand-observable object — intron regions, exon|intron and
+gene-edge boundaries — with intergenic and AMBIG objects out because they cannot be oriented. Measured
+before landing: every purity-based fit (intergenic seeds, gene edges, density-weighted introns) was moved by
+unannotated transcription on real cfRNA and on the blank-chromosome control; the away-half was not.
+⚠ The simulator carries a supplemental `shadow_gtf` the index never sees, so this stays testable.
+
+⭐⭐ **AND NO SEED IS WORTH ITS PAIR COUNT** (owner, 2026-08-30). Second-moment pooling weights a seed by
+`n(n−1)/2`, optimal only at ρ = 0; a seed's information about ρ saturates with depth, so on real data a
+handful of deep seeds decide the answer — measured: ONE seed carried 77.8 % of a library's numerator, 7 seeds
+carried 90 %, and on 3 of 4 libraries the top 1 % carried MORE than 100 % (the rest summing negative). The fit
+uses inverse-variance weights `w_s = 1/(½ + c_s·V∞(ρ))` (`EQUATIONS.md` §6b), solved by bisection. ⛔ **Trimming
+or Winsorizing is REFUSED**: it biases the upper tail of the distribution whose mean is the estimand. The
+concentration is REPORTED instead — `GdnaStrandModel.effective_seeds`, a threshold-free participation ratio.
+
+⭐⭐ **THE `Beta(2,2)` CEILING STAYS** (owner, 2026-08-30), and a value at it is a CLAMP, not a fit —
+`clamped_at_ceiling` and `raw_overdispersion` say so, on the model and in the QC line. The argument is
+misspecification, not magnitude: a genuine intra-class correlation is depth-INVARIANT, and on every real
+library the moment rises monotonically with seed depth (0.03 → 0.21 → 0.46 → 0.87 on one), so above the ceiling
+the Beta-Binomial is absorbing a process it has no parameter for. ⚠ The derivable boundary is `a = 1` ⇒ od = 1/3,
+where the symmetric Beta turns unimodal → U-shaped (beyond it the model asserts a two-population MIXTURE rather
+than dispersion); `Beta(2,2)` = 0.2 is one conservative step inside it.
+
+⭐⭐⭐ **AND NO COMPONENT SHRINKS TOWARD A CONSTANT — THEY SHRINK TOWARD EACH OTHER** (owner ruling,
+2026-08-30). The `Beta(14,14)` ⇒ 0.0345 target and its derived weight ≈ 909 are DELETED. Each component
+reports the precision of its own fitted estimate and the weaker borrows its deficit from the better measured
+one (`EQUATIONS.md` §6c). ⭐ Both components are influence-weighted at their OWN mean, which is what makes the
+two precisions comparable — a seed at κ carries far less information about ρ than one at ½. ⭐ Truth-scored
+result: the reconciliation IMPROVES the test panel (silent −0.04 %, relay −0.23 %), and on the capture-ON rows
+— where hybrid capture depletes the genomic seeds and the gDNA fit is thin — it lands on the oracle value
+EXACTLY. That is the mechanism working as designed: borrow where you are blind, from the component that is
+not. ⛔ The one asserted constant left in the strand module is the ceiling.
+
 ### 3.4 Fragment length — ONE definition
 
 `L` = genomic span minus cut introns. The scanner's rival histogram, `FragmentLengthModels` and the
@@ -1150,7 +1187,7 @@ and **`messages/` (the POLICY: `silent` `head` `variance`)** · `region_chain` `
 `sj_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand` `strand_balance`
 `strand_deconv` `strand_summary` · `density_deconv` `density_model` `landscape`
 `abundance_landscape`
-`simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
+`simplex_logodds` `derive` · `priors` `result` `errors`
 `diagnostics` `track` · `_layers` (the layering the imports already had).
 ⚠ **Re-derive this list rather than trusting it** — `scripts/design/module_census.py` reads it off the
 AST. It named `node_chain` / `node_geometry` / `node_init`, `junction_opportunity` and a `simplex` — five

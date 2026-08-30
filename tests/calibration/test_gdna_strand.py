@@ -1,6 +1,8 @@
-"""Tests for the gDNA strand Beta-Binomial overdispersion fit (docs/em_strand/03 §4.1-4.3).
+"""Tests for the gDNA strand Beta-Binomial overdispersion fit — the AWAY-HALF estimator.
 
-Core property: data generated with a known overdispersion is recovered by the estimator.
+Core property: data generated with a known overdispersion is recovered by the estimator from pure seeds,
+and contaminated seeds can only pull it DOWN or into the fallback, never up (the contamination gates
+themselves live in ``test_gdna_strand_fit.py``).
 """
 
 from __future__ import annotations
@@ -11,7 +13,6 @@ import numpy as np
 import pytest
 
 from rigel.calibration.gdna_strand import (
-    _PRIOR_OVERDISPERSION,
     _MAX_OVERDISPERSION,
     GdnaStrandModel,
     fit_gdna_strand_from_substrate,
@@ -24,6 +25,7 @@ from rigel.calibration.signature import (
     BIT_INTRON_POS,
     TS_AMBIG,
     TS_NONE,
+    TS_POS,
 )
 from rigel.calibration.strand_likelihood import strand_loglik
 
@@ -45,11 +47,10 @@ def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean=0.5):
 
 @pytest.mark.parametrize("true_od", [0.01, 0.05, 0.10, 0.20])
 def test_recovers_overdispersion_pure_gdna(true_od):
-    """§4.1 — pure-gDNA seeds (weight=1): recovered overdispersion ≈ truth."""
+    """Pure-gDNA seeds: recovered overdispersion ≈ truth (from half the pairs — the away half)."""
     rng = np.random.default_rng(12345)
     sense, total = _beta_binom_regions(rng, n_regions=4000, depth=120, overdispersion=true_od)
-    weight = np.ones_like(total)  # pure gDNA → rna_sense_frac irrelevant
-    model = fit_gdna_strand_overdispersion(sense, total, weight, rna_sense_frac=0.95)
+    model = fit_gdna_strand_overdispersion(sense, total, rna_sense_frac=0.95)
     assert not model.fallback_used
     # MoM on 4000 regions: relative error should be small; absolute floor for tiny od.
     assert model.gdna_strand_overdispersion == pytest.approx(true_od, rel=0.20, abs=0.005)
@@ -61,13 +62,15 @@ def test_binomial_limit_recovers_near_zero():
     # Binomial: shared rate exactly ½ (no Beta spread).
     total = np.full(4000, 120, dtype=np.float64)
     sense = rng.binomial(120, 0.5, size=4000).astype(np.float64)
-    model = fit_gdna_strand_overdispersion(sense, total, np.ones_like(total), rna_sense_frac=0.95)
+    model = fit_gdna_strand_overdispersion(sense, total, rna_sense_frac=0.95)
     assert model.gdna_strand_overdispersion < 0.01
 
 
 @pytest.mark.parametrize("weight", [0.8, 0.5])
-def test_mixture_identifiability(weight):
-    """§4.2 — seeds contaminated by stranded RNA (weight<1): overdispersion still recovered."""
+def test_uniform_contamination_never_inflates_the_fit(weight):
+    """EVERY seed 20 % / 50 % stranded RNA at depth 200: each is pulled far onto the RNA side, so the
+    away half is reached by noise alone — the fit falls back or sits at/below the truth. It is NEVER
+    inflated, which is the lemma's one-sided guarantee; the predecessor read this RNA as gDNA spread."""
     rng = np.random.default_rng(99)
     true_od = 0.10
     kappa = 0.95
@@ -81,40 +84,38 @@ def test_mixture_identifiability(weight):
         n_g = rng.binomial(depth, weight)
         p_g = rng.beta(a, a)  # shared gDNA rate for this region
         sense[i] = rng.binomial(n_g, p_g) + rng.binomial(depth - n_g, kappa)
-    model = fit_gdna_strand_overdispersion(
-        sense, total, np.full(n_regions, weight), rna_sense_frac=kappa
-    )
-    assert not model.fallback_used
-    assert model.gdna_strand_overdispersion == pytest.approx(true_od, rel=0.30, abs=0.02)
+    model = fit_gdna_strand_overdispersion(sense, total, rna_sense_frac=kappa)
+    # ⚠ Either the away half saw enough to answer (and it cannot be INFLATED), or it saw nothing at all and
+    # says so — the ceiling fallback is "I measured nothing", never a claim about this population.
+    assert model.fallback_used or model.gdna_strand_overdispersion <= true_od + 0.02
 
 
 def test_thin_seed_fallback():
-    """§4.3 — no gDNA signal (all weight 0, or empty) → fallback to the PRIOR, no crash.
+    """No gDNA strand signal (empty, or every seed on the RNA side) → the CEILING, no crash.
 
-    ⭐ 2026-07-28: the no-argument fallback is now ``od₀`` (0.0345), not a hard ``0``. A hard zero is a
-    claim of perfect Binomiality — the *most* confident strand likelihood the model can assert — from a
-    library that supplied no evidence at all. Falling back to the near-binomial prior is the honest
-    behaviour, and it is why the shrinkage is kept rather than replaced by a bare clip."""
-    empty = fit_gdna_strand_overdispersion(
-        np.array([]), np.array([]), np.array([]), rna_sense_frac=0.95
-    )
+    ⭐ 2026-08-30 (owner ruling): no conjured constant survives anywhere in this fit. Having measured
+    nothing, the estimator returns the widest dispersion the model admits, so the strand channel says
+    NOTHING rather than something confident; ``calibrate`` then reconciles it against the RNA fit, which
+    usually HAS measured something (``gdna_strand.reconcile_overdispersions``)."""
+    empty = fit_gdna_strand_overdispersion(np.array([]), np.array([]), rna_sense_frac=0.95)
     assert empty.fallback_used
-    assert empty.gdna_strand_overdispersion == pytest.approx(_PRIOR_OVERDISPERSION)
+    assert empty.gdna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
+    assert empty.information == 0.0
 
     rng = np.random.default_rng(1)
     total = np.full(10, 100.0)
     sense = rng.binomial(100, 0.95, size=10).astype(np.float64)
-    no_gdna = fit_gdna_strand_overdispersion(
-        sense, total, np.zeros_like(total), rna_sense_frac=0.95
-    )
+    # pure RNA at κ = 0.95: every seed sits on the RNA side of ½, so the away half is EMPTY
+    no_gdna = fit_gdna_strand_overdispersion(sense, total, rna_sense_frac=0.95)
     assert no_gdna.fallback_used
-    assert no_gdna.gdna_strand_overdispersion == pytest.approx(_PRIOR_OVERDISPERSION)
+    assert no_gdna.gdna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
 
 
 def test_beta_concentration_roundtrip():
     """Model exposes the Beta(a, a) concentration consistent with a = ½(1−od)/od."""
     m = GdnaStrandModel(
         gdna_strand_overdispersion=0.1,
+        information=1000.0,
         n_seed_regions=10,
         n_seed_fragments=1000,
         fallback_used=False,
@@ -150,19 +151,14 @@ def _mock_substrate(pos, neg, ts, count_evidence, observable):
     neg = np.asarray(neg, dtype=np.float64)
     n = pos.shape[0]
     n_boundaries = max(n - 1, 0)
-    mass = pos + neg
     substrate = SimpleNamespace(
         region_contained=_view(pos, neg),
         boundary_unspliced=_view(np.zeros(n_boundaries), np.zeros(n_boundaries)),
     )
     region_arrays = SimpleNamespace(strand_class=np.asarray(ts), ref_id=np.zeros(n, dtype=np.int64))
-    # The seed weight is count_gdna_frac directly (was count_evidence/mass) — preserve the intent.
     ce = np.asarray(count_evidence, dtype=np.float64)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        count_gdna_frac = np.clip(np.where(mass > 0.0, ce / mass, 0.0), 0.0, 1.0)
     region_density = SimpleNamespace(
         count_evidence=ce,
-        count_gdna_frac=count_gdna_frac,
         region_count_observable=np.asarray(observable, dtype=bool),
         boundary_count_observable=np.zeros(n_boundaries, dtype=bool),  # no boundary seeds
         density=np.zeros(n, dtype=np.float64),
@@ -170,18 +166,22 @@ def _mock_substrate(pos, neg, ts, count_evidence, observable):
     return substrate, region_arrays, region_density
 
 
-def test_wrapper_recovers_overdispersion_from_intergenic_seeds():
-    """End-to-end of the Phase-2 wrapper: pure-gDNA (intergenic) seed regions → recovered od."""
+def test_wrapper_recovers_overdispersion_from_intron_seeds():
+    """End-to-end of the wrapper: pure-gDNA INTRON seed regions (a + gene) → recovered od."""
     rng = np.random.default_rng(2024)
     true_od = 0.10
     sense, total = _beta_binom_regions(rng, n_regions=3000, depth=100, overdispersion=true_od)
     pos, neg = sense, total - sense
     n = len(total)
     substrate, region_arrays, region_density = _mock_substrate(
-        pos, neg, np.full(n, TS_NONE), count_evidence=total.copy(), observable=np.ones(n, bool)
-    )  # count_evidence == mass ⇒ weight ≈ 1 (pure gDNA)
+        pos, neg, np.full(n, TS_POS), count_evidence=total.copy(), observable=np.ones(n, bool)
+    )
     model = fit_gdna_strand_from_substrate(
-        substrate, region_arrays, region_density, rna_sense_frac=0.95
+        substrate,
+        region_arrays,
+        region_count_observable=region_density.region_count_observable,
+        boundary_count_observable=region_density.boundary_count_observable,
+        rna_sense_frac=0.95,
     )
     assert not model.fallback_used
     assert model.n_seed_regions == n
@@ -199,7 +199,11 @@ def test_wrapper_excludes_ambig_and_non_observable():
     )
     assert (
         fit_gdna_strand_from_substrate(
-            s_ambig, ra_ambig, nd_ambig, rna_sense_frac=0.95
+            s_ambig,
+            ra_ambig,
+            region_count_observable=nd_ambig.region_count_observable,
+            boundary_count_observable=nd_ambig.boundary_count_observable,
+            rna_sense_frac=0.95,
         ).n_seed_regions
         == 0
     )
@@ -208,7 +212,11 @@ def test_wrapper_excludes_ambig_and_non_observable():
         pos, neg, np.full(n, TS_NONE), np.full(n, 100.0), np.zeros(n, bool)
     )
     assert fit_gdna_strand_from_substrate(
-        s_exon, ra_exon, nd_exon, rna_sense_frac=0.95
+        s_exon,
+        ra_exon,
+        region_count_observable=nd_exon.region_count_observable,
+        boundary_count_observable=nd_exon.boundary_count_observable,
+        rna_sense_frac=0.95,
     ).fallback_used
 
 
@@ -232,7 +240,6 @@ def _boundary_parts(signatures, boundary_pos, boundary_neg, ref_id=None):
         signature=sig, strand_class=transcript_strand_class(sig.astype(np.int64)), ref_id=ref
     )
     region_density = SimpleNamespace(
-        count_gdna_frac=np.zeros(n),
         region_count_observable=region_obs,
         boundary_count_observable=boundary_obs,
         density=np.zeros(n),
@@ -251,15 +258,16 @@ def test_boundary_seeds_emits_ONE_seed_per_boundary_not_two_per_boundary():
     """
     from rigel.calibration.strand_deconv import boundary_seeds
 
-    # intron+ | intron+ : one boundary, count-observable (no shared EXON bit), sense-POS on both flanks.
+    # exon+ | intron+ : one boundary, count-observable (no shared EXON bit), oriented POS.
     substrate, region_arrays, region_density = _boundary_parts(
-        [BIT_INTRON_POS, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
+        [BIT_EXON_POS, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
     )
-    sense, total, weight = boundary_seeds(substrate, region_arrays, region_density)
+    sense, total = boundary_seeds(
+        substrate, region_arrays, region_density.boundary_count_observable
+    )
     assert sense.shape == (1,)  # ⛔ was (2,) — the same crossing, twice
     np.testing.assert_allclose(sense, [70.0])
     np.testing.assert_allclose(total, [100.0])
-    np.testing.assert_allclose(weight, [1.0])
 
 
 def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
@@ -267,9 +275,11 @@ def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
-        [BIT_INTRON_NEG, BIT_INTRON_NEG], boundary_pos=[70.0], boundary_neg=[30.0]
+        [BIT_INTRON_NEG, 0], boundary_pos=[70.0], boundary_neg=[30.0]
+    )  # a NEG gene's edge, intergenic on the right
+    sense, total = boundary_seeds(
+        substrate, region_arrays, region_density.boundary_count_observable
     )
-    sense, total, _ = boundary_seeds(substrate, region_arrays, region_density)
     np.testing.assert_allclose(sense, [30.0])
     np.testing.assert_allclose(total, [100.0])
 
@@ -281,7 +291,7 @@ def test_an_intergenic_flank_is_a_strand_WILDCARD():
     substrate, region_arrays, region_density = _boundary_parts(
         [0, BIT_INTRON_NEG], boundary_pos=[70.0], boundary_neg=[30.0]
     )
-    sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
+    sense, _ = boundary_seeds(substrate, region_arrays, region_density.boundary_count_observable)
     np.testing.assert_allclose(sense, [30.0])  # oriented NEG by the gene side
 
 
@@ -292,7 +302,7 @@ def test_an_opposite_strand_boundary_is_not_strand_observable():
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS, BIT_INTRON_NEG], boundary_pos=[70.0], boundary_neg=[30.0]
     )
-    sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
+    sense, _ = boundary_seeds(substrate, region_arrays, region_density.boundary_count_observable)
     assert sense.shape == (0,)
 
 
@@ -316,7 +326,7 @@ def test_an_AMBIG_flank_cannot_seed():
     assert region_density.boundary_count_observable[
         0
     ]  # count-observable — it fails on STRAND alone
-    sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
+    sense, _ = boundary_seeds(substrate, region_arrays, region_density.boundary_count_observable)
     assert sense.shape == (0,)
 
 
@@ -328,7 +338,7 @@ def test_a_boundary_inside_one_exon_is_not_count_observable():
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_EXON_POS, BIT_EXON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
     )
-    sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
+    sense, _ = boundary_seeds(substrate, region_arrays, region_density.boundary_count_observable)
     assert sense.shape == (0,)
 
 
@@ -339,7 +349,7 @@ def test_boundary_seeds_never_straddle_a_reference():
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS], boundary_pos=[], boundary_neg=[], ref_id=[0, 1]
     )
-    sense, _, _ = boundary_seeds(substrate, region_arrays, region_density)
+    sense, _ = boundary_seeds(substrate, region_arrays, region_density.boundary_count_observable)
     assert sense.shape == (0,)
 
 
@@ -387,61 +397,39 @@ def test_overdispersion_for_beta_conversion():
     assert _MAX_OVERDISPERSION == pytest.approx(0.2)
 
 
-def test_shrinkage_sparse_leans_on_prior_abundant_on_fit():
-    """LOW-INFORMATION seeds → shrink toward the prior; high-information → follow the fitted MoM.
-
-    ⭐ 2026-07-28: "sparse" is now measured in the right currency. Overdispersion is a correlation
-    BETWEEN fragments, so the evidence unit is a PAIR — a seed of one fragment carries none of it. This
-    test used to call 3 regions of depth 100 "sparse" and expect the prior to win; that is 14,850 pairs and
-    the fit should win, which is exactly the confusion the information-weighted shrinkage fixes. Genuine
-    sparsity is many SHALLOW seeds."""
+def test_no_shrinkage_the_fit_is_the_raw_moment():
+    """⭐ 2026-08-29 (owner ruling): the gDNA fit carries NO location prior. Deep seeds follow the fit,
+    and sparse seeds return the raw (noisy) moment inside the physical support — they are not pulled
+    toward any constant, because every constant on offer was either conjured (Beta(14,14)) or measured to
+    over-shrink where gDNA information is scarce (the RNA overdispersion, on the true-od arm)."""
     rng = np.random.default_rng(11)
-    prior = overdispersion_for_beta(3.0)  # 1/7 ≈ 0.143
-    weight = 909.0  # the derived prior weight, in information units
-
-    # LOW information: 40 two-fragment seeds = 40 pairs, far below the prior's 909 ⇒ ≈ prior.
-    s, t = _beta_binom_regions(rng, n_regions=40, depth=2, overdispersion=0.01)
-    sparse = fit_gdna_strand_overdispersion(
-        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
-    )
-    assert sparse.gdna_strand_overdispersion == pytest.approx(prior, abs=0.03)
-
-    # HIGH information: 5000 regions at depth 120 = 35.7M pairs ⇒ the fit dominates.
     s, t = _beta_binom_regions(rng, n_regions=5000, depth=120, overdispersion=0.05)
-    abundant = fit_gdna_strand_overdispersion(
-        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
-    )
+    abundant = fit_gdna_strand_overdispersion(s, t, rna_sense_frac=0.95)
     assert abundant.gdna_strand_overdispersion == pytest.approx(0.05, rel=0.20, abs=0.01)
 
-    # ⭐ And the point of the units fix: 3 DEEP regions are NOT sparse — they must follow the fit.
     s, t = _beta_binom_regions(rng, n_regions=3, depth=400, overdispersion=0.05)
-    deep_few = fit_gdna_strand_overdispersion(
-        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
-    )
-    assert abs(deep_few.gdna_strand_overdispersion - 0.05) < abs(
-        deep_few.gdna_strand_overdispersion - prior
-    )
+    deep_few = fit_gdna_strand_overdispersion(s, t, rna_sense_frac=0.95)
+    assert abs(deep_few.gdna_strand_overdispersion - 0.05) < 0.05
+
+    s, t = _beta_binom_regions(rng, n_regions=40, depth=2, overdispersion=0.01)
+    sparse = fit_gdna_strand_overdispersion(s, t, rna_sense_frac=0.95)
+    assert not sparse.fallback_used
+    assert 0.0 <= sparse.gdna_strand_overdispersion <= _MAX_OVERDISPERSION
 
 
 def test_overdispersion_clamped_to_ceiling():
     """A wildly overdispersed fit is capped at the Beta(2,2) ceiling (od=0.2)."""
     rng = np.random.default_rng(3)
     s, t = _beta_binom_regions(rng, n_regions=2000, depth=120, overdispersion=0.45)
-    model = fit_gdna_strand_overdispersion(s, t, np.ones_like(t), rna_sense_frac=0.95)
+    model = fit_gdna_strand_overdispersion(s, t, rna_sense_frac=0.95)
     assert model.gdna_strand_overdispersion <= _MAX_OVERDISPERSION + 1e-12
     assert model.gdna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION, abs=1e-9)
 
 
-def test_fallback_returns_prior():
-    """No seed signal (empty) ⇒ fall back to the prior overdispersion, not 0."""
-    prior = overdispersion_for_beta(3.0)
-    m = fit_gdna_strand_overdispersion(
-        np.array([]),
-        np.array([]),
-        np.array([]),
-        rna_sense_frac=0.95,
-        prior_overdispersion=prior,
-        prior_weight=30.0,
-    )
+def test_a_component_that_measured_NOTHING_returns_the_ceiling():
+    """No seed signal ⇒ the ceiling and ZERO information, which is what lets `reconcile_overdispersions`
+    hand this component the OTHER one's measured value instead of a conjured constant."""
+    m = fit_gdna_strand_overdispersion(np.array([]), np.array([]), rna_sense_frac=0.95)
     assert m.fallback_used
-    assert m.gdna_strand_overdispersion == pytest.approx(prior)
+    assert m.gdna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
+    assert m.information == 0.0

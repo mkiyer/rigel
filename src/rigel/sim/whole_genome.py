@@ -222,6 +222,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     cfg = WholeGenomeSimConfig()
     cfg.genome = raw.get("genome", "")
     cfg.gtf = raw.get("gtf", "")
+    cfg.shadow_gtf = raw.get("shadow_gtf", None)
     cfg.index = raw.get("index", None)
     cfg.outdir = raw.get("outdir", "sim_output")
     cfg.transcript_filter = raw.get("transcript_filter", "all")
@@ -405,6 +406,43 @@ def load_transcripts(
     n_genes = len({t.g_id for t in transcripts})
     logger.info("Final: %d transcripts from %d genes", len(transcripts), n_genes)
     return transcripts
+
+
+def merge_shadow_transcripts(
+    transcripts: list[Transcript], shadow_gtf: str | Path
+) -> list[Transcript]:
+    """Append SHADOW transcripts — unannotated transcription the simulator draws from and the index
+    never sees (owner design, 2026-08-29).
+
+    ``transcripts`` is the index's list (annotated + nascent entities). The shadow GTF's transcripts are
+    loaded with the ordinary GTF loader and appended with ``t_index`` continuing after the index's rows,
+    ``is_nrna = is_synthetic = False`` and ``nrna_t_index = -1`` (a shadow carries no nascent: it is
+    itself the unannotated RNA). ⛔ A shadow whose ``t_id`` the index already knows is REFUSED — it
+    would be annotated, and the whole point is that the tool cannot know about it. Their fragments are
+    named like any RNA fragment (``{t_id}:…``), so the oracle split files them as ``mrna`` and the
+    certified per-slot truth shows RNA exactly where the annotation says there is none.
+    Gate: ``tests/test_sim_shadow_transcripts.py``."""
+    shadows = load_transcripts(shadow_gtf, transcript_filter="all")
+    known = {t.t_id for t in transcripts}
+    clash = sorted(t.t_id for t in shadows if t.t_id in known)
+    if clash:
+        raise ValueError(
+            f"{len(clash)} shadow transcript(s) are KNOWN to the index and are therefore not shadows: "
+            f"{clash[:5]}{'…' if len(clash) > 5 else ''} — remove them from the shadow GTF or the annotation"
+        )
+    base = max((t.t_index for t in transcripts), default=-1) + 1
+    for k, t in enumerate(shadows):
+        t.t_index = base + k
+        t.is_nrna = False
+        t.is_synthetic = False
+        t.nrna_t_index = -1
+        t.nrna_abundance = 0.0
+    logger.info(
+        "Shadow transcripts: %d appended from %s (unknown to the index by construction)",
+        len(shadows),
+        shadow_gtf,
+    )
+    return transcripts + shadows
 
 
 def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
@@ -1015,9 +1053,11 @@ def write_manifest(
     outdir: Path,
     cfg: WholeGenomeSimConfig,
     conditions: list[dict],
+    *,
+    n_shadow_transcripts: int = 0,
 ) -> None:
     """Write manifest.json summarizing all simulation outputs."""
-    path = write_manifest_file(outdir, cfg, conditions)
+    path = write_manifest_file(outdir, cfg, conditions, n_shadow_transcripts=n_shadow_transcripts)
     logger.info("Wrote manifest to %s", path)
 
 
@@ -1058,6 +1098,13 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     transcripts = load_transcripts_from_index(index_dir)
     if not transcripts:
         raise RuntimeError(f"No transcripts loaded from index {index_dir}")
+    n_shadow = 0
+    if cfg.shadow_gtf:
+        if not Path(cfg.shadow_gtf).exists():
+            raise FileNotFoundError(f"shadow GTF not found: {cfg.shadow_gtf}")
+        n_before = len(transcripts)
+        transcripts = merge_shadow_transcripts(transcripts, cfg.shadow_gtf)
+        n_shadow = len(transcripts) - n_before
 
     # 2. Assign base abundances (total RNA, nRNA = 0)
     ab = cfg.abundance
@@ -1145,7 +1192,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     )
 
     # 4. Write manifest
-    write_manifest(outdir, cfg, conditions)
+    write_manifest(outdir, cfg, conditions, n_shadow_transcripts=n_shadow)
     return conditions
 
 

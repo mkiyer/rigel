@@ -108,7 +108,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # intergenic background on the SAME pool as `density_deconv.fit_intron_background` (measured
         # identical, n = 1,298) and no caller ever consumed it. The census prints the live count.
         (
-            "run_fill",
             "density_model",
             "density_deconv",
             # `rna_anchor` is the certified-flux stream's arithmetic (owner design 2026-08-24;

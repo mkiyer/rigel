@@ -13,7 +13,7 @@ is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.ca
     substrate  (five populations on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
       -> strand balance: rna_sense_frac (κ)
-      -> region_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
+      -> count_observable_masks -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
       -> signature-binary init (G1/G2/G3)
       -> PASS 1 solve_chain (no KDE prior): ONE forward + ONE backward pass — each object integrates its
            strand likelihood + the conservative gDNA floor + the belief-free density messages
@@ -64,7 +64,7 @@ from .region_geometry import (
     region_gdna_geometry,
 )
 from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
-from .density_model import region_gdna_density
+from .density_model import count_observable_masks
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .rna_anchor import build_route_table, prepare_flux_evidence
@@ -80,6 +80,8 @@ from .total_abundance import (
     w_max_from_deposited_lengths,
 )
 from .gdna_strand import (
+    _MAX_OVERDISPERSION,
+    reconcile_overdispersions,
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_sj_table,
 )
@@ -453,39 +455,26 @@ def calibrate(
         rna_sense_frac = float(balance.rna_sense_frac)
         n_rna_obs = float(balance.n_observations)
 
-    # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
-    # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
-    # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
-    # pass must come first. This is NOT the region answer (the sweep below is).
-    region_density_raw = region_gdna_density(chain, geometry, region_arrays)
+    # The gDNA strand fit's SEED SELECTOR: count-observability, straight off the signature. ⭐ It used to
+    # be `region_gdna_density(...)`, a full local density imputation whose density field the fit then read as
+    # a seed weight; the away-half moment (`gdna_strand`) needs no weight, so the imputation — and
+    # `run_fill` with it — was deleted on 2026-08-30 and only the two masks remain.
+    _region_obs, _boundary_obs = count_observable_masks(
+        np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
+    )
 
-    # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
-    # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
-    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-SJ
-    # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
-    # the RNA Beta-Binomial come from one source. Both shrunk
-    # toward the SAME default prior, so under sparse data they collapse to one distribution and an
-    # unstranded region (κ=½) is uninformative. See docs/em_strand/03+05.
-    _gd_seed = _rna_seed = (
-        -1,
-        -1,
-        False,
-    )  # (n_seed_regions, n_seed_frags, fallback) — QC log only; -1 = injected
-    if inj is not None and inj.gdna_strand_overdispersion is not None:
-        gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
-    else:
-        gdna_strand = fit_gdna_strand_from_substrate(
-            substrate,
-            region_arrays,
-            region_density_raw,
-            rna_sense_frac=rna_sense_frac,
-        )
-        gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
-        _gd_seed = (
-            gdna_strand.n_seed_regions,
-            gdna_strand.n_seed_fragments,
-            gdna_strand.fallback_used,
-        )
+    # Strand-module parameters — the two Beta-Binomial overdispersions.
+    # ⭐ RNA FIRST (mean κ; fitted from the PER-SJ SJ strand table, certified pure RNA): it is the gDNA
+    # fit's fallback. THEN gDNA (mean ½) by the AWAY-HALF moment over every genic count- and
+    # strand-observable object — intron regions, exon|intron and gene-edge boundaries — which is
+    # unbiased under any RNA content of the seeds (`gdna_strand`'s lemma), so no seed is weighted and no
+    # class is asserted pure: the fit must hold regardless of the reference transcriptome (owner,
+    # 2026-08-29). Intergenic and AMBIG objects cannot be oriented and are out. The gDNA fit is the raw
+    # pooled moment clipped to the physical support — no location prior (owner ruling 2026-08-29; gate
+    # `tests/calibration/test_gdna_strand_fit.py`).
+    # (n_seed_regions, n_seed_frags, fallback, effective_seeds, raw_od) — QC log only; -1 = injected
+    _gd_seed = (-1, -1, False, float("nan"), float("nan"))
+    _rna_seed = (-1, -1, False, float("nan"))
     if inj is not None and inj.rna_strand_overdispersion is not None:
         rna_strand_overdispersion = float(inj.rna_strand_overdispersion)
     else:
@@ -498,6 +487,41 @@ def calibrate(
             rna_strand.n_seed_regions,
             rna_strand.n_seed_fragments,
             rna_strand.fallback_used,
+            rna_strand.raw_overdispersion,
+        )
+    if inj is not None and inj.gdna_strand_overdispersion is not None:
+        gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
+    else:
+        gdna_strand = fit_gdna_strand_from_substrate(
+            substrate,
+            region_arrays,
+            region_count_observable=_region_obs,
+            boundary_count_observable=_boundary_obs,
+            rna_sense_frac=rna_sense_frac,
+        )
+        gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
+        _gd_seed = (
+            gdna_strand.n_seed_regions,
+            gdna_strand.n_seed_fragments,
+            gdna_strand.fallback_used,
+            gdna_strand.effective_seeds,
+            gdna_strand.raw_overdispersion,
+        )
+
+    # ⭐ RECONCILE THE TWO COMPONENTS — the replacement for the deleted Beta(14,14) shrinkage target (owner,
+    # 2026-08-30). The weaker-measured dispersion shrinks toward the better-measured one, weighted by their
+    # own null informations; neither is pulled toward a conjured number, and with neither measured the two
+    # coincide at the ceiling, which is what leaves the strand channel uninformative rather than confident.
+    # ⛔ ONLY when NEITHER is injected: an injected value is the arm's whole point, and letting the other
+    # component shrink toward it would silently change what every od-injection instrument measures.
+    if inj is None or (
+        inj.rna_strand_overdispersion is None and inj.gdna_strand_overdispersion is None
+    ):
+        rna_strand_overdispersion, gdna_strand_overdispersion = reconcile_overdispersions(
+            rna_strand.raw_overdispersion,
+            rna_strand.information,
+            gdna_strand.raw_overdispersion,
+            gdna_strand.information,
         )
 
     # Strand-Fisher noise-floor SAMPLE SIZES (the sweep's τ seed): N_gdna (gDNA-eligible unspliced fragments in
@@ -894,8 +918,9 @@ def calibrate(
     sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags%s) "
+        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags, %.1f effective%s%s) "
         "rna_strand_overdispersion=%.4g (%d sj, %d frags%s) "
+        "[own-evidence od: rna=%.4g gdna=%.4g] "
         "[sj sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.n_boundaries,
@@ -905,11 +930,19 @@ def calibrate(
         gdna_strand_overdispersion,
         _gd_seed[0],
         _gd_seed[1],
+        _gd_seed[3],
         ", FALLBACK" if _gd_seed[2] else ("" if _gd_seed[0] >= 0 else ", INJECTED"),
+        (
+            f", CLAMPED at the ceiling from a raw {_gd_seed[4]:.3f} - NOT a measurement"
+            if (not _gd_seed[2]) and _gd_seed[4] > _MAX_OVERDISPERSION
+            else ""
+        ),
         rna_strand_overdispersion,
         _rna_seed[0],
         _rna_seed[1],
         ", FALLBACK" if _rna_seed[2] else ("" if _rna_seed[0] >= 0 else ", INJECTED"),
+        _rna_seed[3],
+        _gd_seed[4],
         sj_sense_frac,
         rna_sense_frac,
     )

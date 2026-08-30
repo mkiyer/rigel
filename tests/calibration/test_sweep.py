@@ -629,50 +629,29 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
 
 
-def test_strand_overdispersion_prior_default_is_near_binomial():
-    """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
-    (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
-    and erased its specificity at its own mean ½.
-
-    ⭐ 2026-07-28: the four ``CalibrationConfig`` prior fields were collapsed into the two asserted module
-    constants next to the estimator, so this now asserts on those. The assertion itself is UNCHANGED and
-    still binds — it is the reason ``od₀ = od_max/2 = 0.1`` (derived independently as the max-entropy mean
-    of the ceiling-bounded prior) was REJECTED: at a = 4.5 it fails this test, and it was measured to
-    collapse a balanced pure-gDNA region's strand log-evidence 305.4 → 113.9 nats."""
+def test_the_overdispersion_CEILING_is_the_only_asserted_constant_left():
+    """⭐ 2026-08-30 (owner ruling): the `Beta(14,14)` shrinkage TARGET and its DERIVED weight are deleted.
+    The gDNA fit is the away-half moment (no location prior at all); the RNA fit is its own raw moment; and
+    the weaker of the two shrinks toward the better-measured one, so the reference is a MEASUREMENT of the
+    same library rather than a conjured number. What remains asserted is the ceiling alone."""
+    from rigel.calibration import gdna_strand
     from rigel.calibration.gdna_strand import (
         _CEIL_ALPHA_BETA,
         _MAX_OVERDISPERSION,
-        _PRIOR_ALPHA_BETA,
-        _PRIOR_OVERDISPERSION,
         overdispersion_for_beta,
     )
 
-    assert _PRIOR_ALPHA_BETA == 14.0
-    assert _PRIOR_OVERDISPERSION < 0.05  # the near-binomial null — BUG #1's fix
-    assert overdispersion_for_beta(3.0) > 0.14  # the old default was ~4× more overdispersed
-    # the ceiling is the admissibility clamp, and the prior must sit strictly inside it
     assert _CEIL_ALPHA_BETA == 2.0
     assert _MAX_OVERDISPERSION == pytest.approx(0.2)
-    assert 0.0 < _PRIOR_OVERDISPERSION < _MAX_OVERDISPERSION
-
-
-def test_strand_overdispersion_prior_weight_is_derived_not_asserted():
-    """The prior's weight ``W`` must be DERIVED from the two asserted constants, in the data's own
-    information units — it used to be an asserted ``30`` in *seed-region* units, which is the wrong currency
-    for a second moment (a 1-fragment seed carries no information about a correlation between fragments).
-
-    ``W = 1/τ²`` with ``τ²`` the variance of the maximum-entropy distribution on ``[0, od_max]`` with mean
-    ``od₀`` — the least-committal prior given exactly what we assert."""
-    from rigel.calibration.gdna_strand import (
-        _MAX_OVERDISPERSION,
-        _PRIOR_INFORMATION,
-        _PRIOR_OVERDISPERSION,
-    )
-
-    # bracketed by the two distribution-shape extremes on the same support and mean
-    two_point = _PRIOR_OVERDISPERSION * (_MAX_OVERDISPERSION - _PRIOR_OVERDISPERSION)
-    assert 1.0 / two_point < _PRIOR_INFORMATION < 1.0 / _PRIOR_OVERDISPERSION**2 * 1.5
-    assert _PRIOR_INFORMATION == pytest.approx(909.1, rel=1e-3)
+    assert overdispersion_for_beta(2.0) == pytest.approx(_MAX_OVERDISPERSION)
+    # ⛔ the deleted constants must not come back under any spelling
+    for gone in (
+        "_PRIOR_ALPHA_BETA",
+        "_PRIOR_OVERDISPERSION",
+        "_PRIOR_INFORMATION",
+        "_prior_information",
+    ):
+        assert not hasattr(gdna_strand, gone), gone
 
 
 def test_null_information_reduces_to_pair_count_at_symmetric_mean():

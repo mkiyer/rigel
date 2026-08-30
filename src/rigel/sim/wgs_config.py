@@ -140,6 +140,12 @@ class WholeGenomeSimConfig:
     #: `NRNA_MERGE_TOLERANCE`) — so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an
     #: index is built from ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
     index: str | None = None
+    #: ⭐ SHADOW transcripts (owner design, 2026-08-29): a supplemental GTF the SIMULATOR draws fragments
+    #: from but the INDEX never sees — unannotated transcription, simulated. Their ids must be unknown to
+    #: the index (a shadow that is annotated is not a shadow — refused); they take abundances from the
+    #: same abundance file, carry no nascent, and are tagged like any RNA fragment (``{t_id}:…``, origin
+    #: ``mrna``), so the oracle split and the certified truth see them as RNA the tool cannot know about.
+    shadow_gtf: str | None = None
     outdir: str = "sim_output"
     transcript_filter: str = "all"  # "all", "basic", "mane", "ccds"
 

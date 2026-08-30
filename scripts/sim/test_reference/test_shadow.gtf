@@ -1,0 +1,44 @@
+##gtf-version 2.2
+##description SHADOW TRANSCRIPTS — unannotated transcription the SIMULATOR draws from and the INDEX never sees.
+##
+## ⭐⭐ THE BLANK CHROMOSOME CONTROL (owner design, 2026-08-29). `test_blank` (1 Mb, derived FASTA) carries NO
+## annotation: `rigel index` is built from `test_chr.gtf` alone and knows nothing here. The simulator
+## reads THIS file too (`shadow_gtf:` in the panel config) and samples fragments from these transcripts,
+## so every read they produce is RNA the tool cannot know about — pervasive / unannotated transcription.
+## Abundances live in `test_abundances.tsv` like any transcript (nascent is always 0 here: a shadow IS the
+## unannotated RNA). ⛔ A shadow id that appears in `test_chr.gtf` is refused by the simulator.
+##
+## What it controls: the gDNA strand-overdispersion estimator. On the index's one intergenic region of
+## `test_blank`, unannotated RNA sits with strand-skewed fragments in a slot the annotation calls pure gDNA;
+## an estimator that trusts intergenic purity reads it as overdispersion. The AWAY-HALF estimator, which
+## takes no intergenic seed and needs no purity, must be UNMOVED by everything in this file.
+##
+## Design: eight transcripts at 100 kb spacing, strands alternating, single-exon (lncRNA-like) and
+## 3-exon (unannotated junctions), a molar ladder 250 → 1 whose fragment share is ~5 % of the library's
+## RNA — pervasive transcription at a realistic dose, with two DEEP shadows (U1, U4) reproducing the
+## deep contaminated seeds seen on real data. No probes: an annotation-designed capture panel cannot
+## target what it does not know.
+##
+##   id                          strand  structure                       mrna (molar)
+##   shadow_U1_SE2kb_plus        +       single exon 2 kb                 250   (deep)
+##   shadow_U2_SE2kb_minus       −       single exon 2 kb                  75
+##   shadow_U3_SE10kb_plus       +       single exon 10 kb                 25   (long, unspliced)
+##   shadow_U4_SE500_minus       −       single exon 500 bp               250   (short, deep)
+##   shadow_U5_3ex_plus          +       3 × 1 kb exons, 5 kb introns      25   (unannotated junctions)
+##   shadow_U6_3ex_minus         −       3 × 1 kb exons, 5 kb introns       8
+##   shadow_U7_SE2kb_plus        +       single exon 2 kb                   3
+##   shadow_U8_SE2kb_minus       −       single exon 2 kb                   1
+##
+## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates, reference `test_blank`.
+test_blank	rigel_test	exon	100001	102000	.	+	.	gene_id "gshadow_U1"; transcript_id "shadow_U1_SE2kb_plus";
+test_blank	rigel_test	exon	200001	202000	.	-	.	gene_id "gshadow_U2"; transcript_id "shadow_U2_SE2kb_minus";
+test_blank	rigel_test	exon	300001	310000	.	+	.	gene_id "gshadow_U3"; transcript_id "shadow_U3_SE10kb_plus";
+test_blank	rigel_test	exon	400001	400500	.	-	.	gene_id "gshadow_U4"; transcript_id "shadow_U4_SE500_minus";
+test_blank	rigel_test	exon	500001	501000	.	+	.	gene_id "gshadow_U5"; transcript_id "shadow_U5_3ex_plus";
+test_blank	rigel_test	exon	506001	507000	.	+	.	gene_id "gshadow_U5"; transcript_id "shadow_U5_3ex_plus";
+test_blank	rigel_test	exon	512001	513000	.	+	.	gene_id "gshadow_U5"; transcript_id "shadow_U5_3ex_plus";
+test_blank	rigel_test	exon	600001	601000	.	-	.	gene_id "gshadow_U6"; transcript_id "shadow_U6_3ex_minus";
+test_blank	rigel_test	exon	606001	607000	.	-	.	gene_id "gshadow_U6"; transcript_id "shadow_U6_3ex_minus";
+test_blank	rigel_test	exon	612001	613000	.	-	.	gene_id "gshadow_U6"; transcript_id "shadow_U6_3ex_minus";
+test_blank	rigel_test	exon	700001	702000	.	+	.	gene_id "gshadow_U7"; transcript_id "shadow_U7_SE2kb_plus";
+test_blank	rigel_test	exon	800001	802000	.	-	.	gene_id "gshadow_U8"; transcript_id "shadow_U8_SE2kb_minus";

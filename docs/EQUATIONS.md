@@ -1138,6 +1138,76 @@ Its exact null information `I = (Σ n(n−1)pq)² / Σ[2n²p²q² + npq − 6np�
 `Σn(n−1)/2` **only at mean ½**. ⭐ **Second-moment evidence is counted in PAIRS of fragments inside one
 object — a singleton carries exactly zero.**
 
+### 6a. ⭐⭐⭐ THE AWAY-HALF MOMENT — gDNA overdispersion with NO pure seed (2026-08-29)
+
+The gDNA fit needs seeds whose RNA does not read as strand spread, and no structural class can be asserted
+pure (pervasive transcription; the intergenic space is whatever the GTF leaves over). Orient each genic seed
+so that RNA of its own gene pulls the residual DOWN, `d = (k − n/2)·sign(½ − κ)`; under pure gDNA `d` is
+symmetric about 0 and the moment excess `d² − n/4` is EVEN in `d`, so the pooled moment restricted to the
+away half has the null expectation of the full one:
+
+    od = Σ_s a_s·(d_s² − n_s/4) / Σ_s a_s·n_s(n_s−1)/4        a_s = 1[d_s > 0] + ½·1[d_s = 0]
+
+Unbiased for `ρ_g` under ANY distribution of RNA content across the seeds; a contaminated seed reaches the
+away side only by noise, with small `d`, so it biases DOWN, never up. ⭐ **At `κ = ½` EXACTLY — reachable,
+since `κ = (n_same+1)/(n_obs+2)` is exactly ½ whenever `2·n_same = n_obs`, the modal outcome on an unstranded
+library — the orientation is degenerate and the FULL two-sided moment is used instead: RNA at the same mean ½
+is symmetric, so it contributes only `n_g(n_g−1)/[N(N−1)] ≤ 1` of the excess and the one-sided guarantee
+survives. Without that branch every residual collapses to 0 and the fit returns a hard `od = 0` — perfect
+Binomiality, the most confident strand likelihood assertable.** The tie weight ½ is exact: at `n = 2`
+under `BetaBinom(2, ½, ρ)`, `P(k=1) = ½(1−ρ)` and `P(k=0) = P(k=2) = (1+ρ)/4`, and the away half returns
+exactly `ρ` while full tie weight returns `(3ρ−1)/(3−ρ)`. Half the pairs enter, so the information is half §6's pair count — `I = P/2` for the
+TOTAL `P`, since `Var(e_s)|₀ = n(n−1)/8` and `E[a_s] = ½` give `Var(num) = P/8`, `E[den] = P/4`,
+`Var(od_mom) = 2/P`. ⛔ NOT half the away half's OWN pair count: that halves twice and overstates the
+standard error by √2. ⛔ Requires a gene strand to orient by — intergenic and AMBIG objects cannot enter — and
+unannotated ANTISENSE RNA pushes toward the away side, the one recorded way to inflate it.
+
+### 6b. ⭐⭐⭐ INFLUENCE WEIGHTING — why a deep seed is not worth its pair count (2026-08-30)
+
+Pooling `od̂_s = (d_s² − n_s/4)/(n_s(n_s−1)/4)` by pair count is minimum-variance ONLY at `ρ = 0`. Given the
+seed's latent rate `p` (`u = p − ½`), `E[od̂_s | p] = 4u²` **exactly** (since `E[d² − n/4 | p] = n(n−1)u²`), so
+by the law of total variance
+
+    Var(od̂_s | ρ) = V∞(ρ) + E_p[Var(od̂_s | p)] ≈ 2ρ²(1−ρ)/(1+2ρ) + 2/(n(n−1))
+
+with the between-seed term EXACT from the symmetric Beta's moments (`E[u²] = ρ/4`, `E[u⁴] = 3ρ²/(16(1+2ρ))`;
+MC-verified to 4 s.f. at ρ = 0.01/0.05/0.2/0.5). ⭐ **`V∞` does not depend on `n`** — a seed's information
+about ρ SATURATES with depth — so the inverse-variance (Gauss–Markov) weights are
+
+    w_s = 1/(½ + c_s·V∞(ρ))          c_s = n(n−1)/4
+
+a constant at ρ = 0 (the pair-count estimator is this one with ρ pinned at 0) and equal-per-seed once
+`c_s·V∞ ≫ ½`. ⭐ **No constant is introduced**, and the one approximation — the sampling term at `p = ½`
+rather than integrated over `p` — cannot bias the fit, because the weights depend only on `n_s` and ρ and
+never on a seed's own data, so the ratio has expectation ρ for ANY weight function. ρ enters its own weights,
+and the root of `g(ρ) = clip(moment(ρ)) − ρ` is **bracketed by construction** (`g(0) ≥ 0`, `g(ceiling) ≤ 0`),
+so bisection terminates with no iteration limit. Measured on real cfRNA, where one seed carried 77.8 % of a
+library's pooled numerator: effective seeds 1.9 → 1241, and the fit came off the ceiling.
+
+⭐ **THE MEAN MATTERS, AND THE TWO COMPONENTS DO NOT SHARE IT.** In general
+
+    V∞(ρ, μ) = 3ρ²·[2ρ + μ(1−μ)(1 − 7ρ)] / [μ(1−μ)(1+ρ)(1+2ρ)] − ρ²
+    b_s      = c_s·Var(od̂_s | ρ=0) = (2·n·pq + 1 − 6·pq)/(n − 1)      w_s = 1/(b_s + c_s·V∞(ρ, μ))
+
+which reduces algebraically to `2ρ²(1−ρ)/(1+2ρ)` and `b_s = ½` at μ = ½ (verified against Monte Carlo at
+ρ ∈ {0.01, 0.05, 0.2} × μ ∈ {0.5, 0.9, 0.99, 0.0023}). ⛔ **At a real library's κ = 0.0023 the same ρ = 0.05
+gives V∞ = 0.285 against gDNA's 0.0043** — a seed at an extreme mean carries far less information about ρ than
+its pair count suggests, so the two components may NEVER be compared on pair counts.
+
+### 6c. ⭐⭐⭐ THE TWO COMPONENTS RECONCILE AGAINST EACH OTHER (2026-08-30)
+
+A weighted estimator's precision is `Σ 1/V_s = Σ w_s·c_s` — its own weighted denominator — so each component
+reports the precision of the estimate it actually made, at its own ρ and its own μ. The weaker then borrows
+its DEFICIT from the better-measured one:
+
+    od_w' = (I_w·od_w + (I_s − I_w)·od_s) / I_s          borrow weight (I_s − I_w)/I_s
+
+0 when the two are equally informed (neither moves), 1 when the weak one measured nothing (it takes the
+other's value outright). ⛔ NOT `(I_w·od_w + I_s·od_s)/(I_w + I_s)`, which drags an equally well-measured
+component to the midpoint while the other stays put; and NOT a symmetric pooling, which would erase a real
+difference. With NEITHER measured both take the ceiling: any common value leaves the strand channel
+uninformative, since the composition term reads only the DIFFERENCE of the two dispersions.
+
 ---
 
 ## 7. Background rate, and deconvolving counts without strand

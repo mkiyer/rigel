@@ -1,0 +1,114 @@
+# ⭐ THE FL-GAP SIDE ARM OF THE TEST CHROMOSOME — EQUAL 200±100 both — owner scenario 3; a near-replicate of the 206±98 base arm (noise floor) (owner, 2026-08-29).
+# Derived from `test_reference.yaml`: same reference, index, probes, abundances and 30-condition
+# cross; ONLY the two fragment-length blocks and `outdir` differ. ⛔ 'Equal lengths' on the base
+# arm is a forcing function (docs/TESTING.md §0); this arm deliberately breaks it to exert the
+# fragment-length / opportunity machinery. Configured means are NOT realised means — read the
+# gap off each condition's truth_fragment_lengths.tsv (TRAPS: configured-lengths-are-not-realised).
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE METHOD-DEVELOPMENT SCENARIOS — the test chromosome, swept over the axes that matter
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# ⭐⭐⭐ WHAT THIS IS. The message-propagation policy is developed against `test_reference/` — a
+# 1 Mb chromosome that grows ONE TRANSCRIPT AT A TIME (owner, 2026-08-19). This config sweeps that
+# reference over the same axes as the big ladder, at a depth that simulates in seconds, so a policy
+# change can be scored end to end in the development loop rather than on a 23 GB panel.
+#
+# ⛔ THE TRANSCRIPTS AND THEIR ABUNDANCES ARE NOT HERE. They are `test_reference/test_chr.gtf` and
+# `test_reference/test_abundances.tsv`, both hand-edited; the FASTA and this sweep are derived.
+# `docs/TESTING.md` §0a.
+#
+# ⚠ THE `nrna:` BLOCK BELOW IS DEAD BY DESIGN under `abundance.mode: file`: the TSV's
+# `nrna_abundance` column is the ONE source of nascent weight, pooled onto the index's nascent
+# entities, so the sweep is skipped and every condition is labelled `nrna_file`. It is INERT — editing
+# its numbers changes nothing, and it is retained only so the file reads like the other panel configs.
+#
+# ⭐⭐⭐ THE SUBSTRATE DESIGN THE SWEEP ASSUMES (owner, 2026-08-27). The chromosome is EMPTY and
+# the owner authors its transcripts; when they are added, two of the axes below are carried by the
+# SUBSTRATE rather than by this file, and they must be authored to these proportions:
+#
+#   CAPTURE   — under `capture: on`, only about HALF the transcripts are probed. The other half
+#               must have NO probe, so every condition contains both captured and uncaptured
+#               structures and the policy is never tested on a uniformly enriched library.
+#               Probes live in `test_reference/test_probes.bed`.
+#
+#   NASCENT   — SPARSE: up to about HALF the transcripts carry nascent RNA and the rest carry
+#               exactly none, so an intron that is nascent-free and an intron that is not both
+#               exist in every condition. Weights are the `nrna_abundance` column of
+#               `test_reference/test_abundances.tsv`; `rigel index` makes the spanning entity.
+#               ⭐ Hand-author the pattern rather than drawing it: on a chromosome of this size a
+#               Bernoulli draw is mostly sampling noise, and the point of a debug substrate is
+#               that you know WHICH structure carries nascent RNA before reading a number off it.
+#               ⭐ Vary the LEVEL as well as the presence — nascent below, near, and above mature —
+#               so the sweep exercises what the ladder's draw produces statistically.
+
+genome: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.fa
+gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_chr.gtf
+# ⭐ SHADOW transcripts (owner, 2026-08-29): unannotated transcription on the BLANK chromosome `test_blank`,
+#   simulated from this file and NEVER given to the index. `docs/TESTING.md` §0a.
+shadow_gtf: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_shadow.gtf
+index: /Users/mkiyer/Downloads/rigel_runs/test_reference/idx
+outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios_fl_equal200
+
+simulation:
+  # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
+  n_total_fragments: 200000
+  n_rna_fragments: 200000
+  sim_seed: 42
+  # ⛔ IDENTICAL to the gdna block below: equal fragment lengths force calibration to be exercised
+  # rather than letting the EM split the origins on length alone (`docs/TESTING.md` §0).
+  frag_mean: 200
+  frag_std: 100
+  frag_min: 50
+  frag_max: 500
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 8
+
+abundance:
+  mode: file
+  file: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_abundances.tsv
+
+gdna:
+  # ⭐ THE FIVE gDNA RUNGS (owner, 2026-08-27): zero, 5 %, 25 %, 50 %, 98 %. `g00`'s truth is
+  # exactly 0, so every gDNA fragment the tool reports there is a false positive with nothing to
+  # cancel it; `g98` is the near-vertex population; `g25` fills the gap between the sparse and
+  # the balanced regimes. The rate is f/(1-f), so 25 % is 0.333333. ⭐ `g05` and `g98` were added 2026-08-20, each justified by a measured
+  # transition on the ladder that the g00/g50 grid could not represent: the near-vertex population
+  # (true f_g ≥ 0.999) exists only at g98 and carries ~60-65 % of the Silent frontier there, and
+  # the reference-mean blocker is measured at g05 (a truth-fed library-wide mean reads 2.65x WORSE
+  # at g05 stranded x capture-ON while melting g98's vertex population 0.029x — opposite ends,
+  # so interpolation from g50 sees neither).
+  rates:       [0.0, 0.052632, 0.333333, 1.0, 49.0]
+  rate_labels: [g00, g05,      g25,      g50, g98]
+  genomic_refs: [test_chr, test_blank]   # gDNA is drawn on the BLANK chromosome too
+  frag_mean: 200
+  frag_std: 100
+  frag_min: 50
+  frag_max: 500
+
+# ⭐ THREE STRAND-SPECIFICITIES (owner, 2026-08-27): 0.50 (unstranded — the strand channel is
+# dead and the density channel is all there is, which is where message propagation has to carry
+# the answer and where it must WIN), 0.99 (strand-specific — the local solve is excellent, so the
+# bar is minimal HARM against silence), and 0.70 in between, which is neither and is the rung
+# that says whether a policy degrades gracefully across the transition.
+strand_specificities: [0.50, 0.70, 0.99]
+
+# ⛔ INERT under `abundance.mode: file` — the nascent weights come from `test_abundances.tsv` and its
+# hand-authored sparse pattern (the header). Do not "fix" nascent RNA by editing this block.
+nrna:
+  mode: fragment_share
+  shares:       [0.0]
+  ratio_labels: [none]
+
+capture:
+  probe_format: bed12
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/test_reference/test_probes.bed}
+
+oracle_bam: true
+verbose: true

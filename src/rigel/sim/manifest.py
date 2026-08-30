@@ -56,7 +56,9 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) -> Path:
+def write_manifest(
+    outdir: Path, config: Any, conditions: list[dict[str, Any]], *, n_shadow_transcripts: int = 0
+) -> Path:
     """Write a simulation manifest and return its path."""
     truth_abundances = "truth_abundances.tsv"
     for condition in conditions:
@@ -65,6 +67,9 @@ def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) 
             break
     manifest = {
         "version": 1,
+        # ⭐ SHADOW transcripts (owner design 2026-08-29): unannotated transcription simulated from
+        # `shadow_gtf`, never given to the index — recorded so a scored panel says it carried them.
+        "n_shadow_transcripts": int(n_shadow_transcripts),
         "simulation": _jsonable(getattr(config, "simulation", {})),
         "gdna": _jsonable(getattr(config, "gdna", {})),
         "nrna": _jsonable(getattr(config, "nrna", {})),
@@ -74,10 +79,10 @@ def write_manifest(outdir: Path, config: Any, conditions: list[dict[str, Any]]) 
         "truth_abundances": truth_abundances,
         "conditions": _jsonable(conditions),
     }
-    for key in ("genome", "gtf", "transcript_filter", "strand_specificities"):
+    for key in ("genome", "gtf", "shadow_gtf", "transcript_filter", "strand_specificities"):
         if hasattr(config, key):
             value = getattr(config, key)
-            if key in {"genome", "gtf"} and value:
+            if key in {"genome", "gtf", "shadow_gtf"} and value:
                 value = str(Path(value).resolve())
             manifest[key] = _jsonable(value)
     path = outdir / "manifest.json"
