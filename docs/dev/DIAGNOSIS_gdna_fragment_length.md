@@ -77,3 +77,26 @@ shape as the deleted `Beta(14,14)`: a constant-weighted pull toward a contaminat
   still carry the RETIRED uniform nascent model, so they need regenerating first (an owner decision).
 * ⚠ The capture-ON mechanisms (4a, 4b) are separate defects with the opposite sign; fixing contamination
   alone will not close capture-ON, and pricing them together would confound them.
+
+## 6. Three facts that raise the stakes (all verified at source, not inferred)
+
+**(a) The contaminated pmf is not only an opportunity input — it is the EM's per-fragment length
+likelihood.** `pipeline.py:817` turns `fl_models.gdna_pmf` into a `FragmentLengthModel` and hands it to the
+scorer (`scoring.py` → the native LUT). ⚠ Not a contradiction of the retired length channel — `DESIGN.md`
+retires it as a CALIBRATION COMPOSITION channel — but it means a −121 bp error in the gDNA length model is
+applied per fragment in exactly the channel that separates origins.
+
+**(b) A perfect gDNA length model is already PRICED at −5.90 %, and all of it is capture-ON.**
+`length_ceiling.py`: the shipped solve's −6.31 % splits −5.90 % gDNA / −0.43 % RNA, "all of it capture-ON
+(capture-OFF: −0.0000)". ⭐ That zero at capture-OFF is not evidence the model is right there — it is the
+equal-length design making the contamination invisible, which is exactly §3. So the priced 5.90 % belongs to
+mechanisms 4a/4b, and the contamination's own price has NEVER been measured on a panel that could see it.
+
+**(c) There is already a recorded IMPOSSIBLE control failure that this diagnosis explains.**
+`fl_anchor_gap.py`'s `G-gdna` is "⛔ THE CONTROL. `DNA_INTERGENIC` is pure gDNA and gDNA has NO INTRONS TO
+MISS… If it MOVES, the fix reached fragments with no introns — which is impossible, and therefore a bug."
+It holds at capture-OFF and reads **+6.0 % on all six capture-ON rows**, undiagnosed since 2026-08-17.
+⭐ Mechanism 4a accounts for it: under capture the crossing pools dominate and their length selection is
+corrected by a divisor computed from the INDEX, blind to the probe panel. ⚠ And the control's own premise —
+"`DNA_INTERGENIC` is pure gDNA" — is the §2 assertion; measured here that pool is 53 % mature RNA once
+unannotated transcription exists.
