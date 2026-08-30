@@ -301,7 +301,12 @@ what would ANSWER it and, where the sparse-nascent rebuild moved it, says so.
    relay/anchor path, not a response, and while it stands no relay comparison that crosses it is
    attributable — it is how a deleted constant looked like a regression (`TRAPS:
    a-constant-parked-a-value-off-a-knife-edge`). Same family as the κ̂ − ½ residue slope at unstranded g00.
-   ⛔ It is in the anchor, not in the strand estimator.
+   ⛔ It is in the anchor, not in the strand estimator. ⭐ **BOUNDED 2026-08-30** — a 1e−5 nudge to `od_r`
+   with everything else held fixed, across all 30 test-chromosome conditions: **1/30 rows move more than
+   0.5 % for each policy**, worst 0.59 % (silent) and 1.65 % (relay). So the benchmark RESOLVES a large
+   effect and not a percent-level one: ⛔ **do not believe a single-row policy difference below ~2 %**, and
+   a relay comparison that crosses the edge is not attributable. Driver:
+   `scratchpad/awayhalf/stability.py`.
 
 ## §3 THE RULES THAT MADE THESE NUMBERS TRUSTWORTHY
 
