@@ -250,7 +250,19 @@ certified-RNA channel alone recovering the truth at most of them.
 stratum or a deleted panel cannot change a 0.8.0 decision until something else does. ⭐ Each entry names
 what would ANSWER it and, where the sparse-nascent rebuild moved it, says so.
 
-1. ⭐⭐ **SHOULD THE gDNA LENGTH MODEL RUN A SECOND CONTRAST ON THE *CROSSING* POOLS? — the two pairs have
+1. ⛔⛔ **ANSWERED AND CLOSED, 2026-08-31 — THE gDNA fl pmf's SHAPE IS WORTH NOTHING TO THE CURRENT
+   CONSUMERS, so do not build a better one.** The integrated regions+boundaries estimator was fully
+   derived, prototyped and measured (it matches or improves the shipped pmf on 31 of 32 rows and removes
+   every sign error; ladder capture-ON goes −24 → −3.1 bp with TV 3× better). ⛔ **The CEILING refutes
+   building it**: fed the simulator's EXACT gDNA pmf, the ladder's capture-ON product bias improves by
+   **5.6 %** on one row and gets **117.8 % WORSE** on the other, both far outside the reseed floor — the
+   second is `ROADMAP.md` §0's ruler finding again, two errors partly cancelling. The shipped contained
+   contrast already banked 96 % of the capture-ON bias; nothing is left for a better SHAPE to win.
+   ⭐ **Re-open only if a consumer appears that reads the pmf's SHAPE rather than its first moment** — the
+   current ones (the opportunity moments and the EM's per-fragment term) do not. The derivation and its
+   measurements are preserved as the recorded answer, so this is closed rather than lost.
+
+1. ⚠ **[SUPERSEDED by the row above, kept for its measurements] SHOULD THE gDNA LENGTH MODEL RUN A SECOND CONTRAST ON THE *CROSSING* POOLS? — the two pairs have
    OPPOSITE failure modes and the pool depths are anti-correlated, which is what makes this worth
    answering** (owner question, 2026-08-31; explored, not built). The crossing pair mirrors the contained
    pair exactly in what can contaminate each — mature RNA **cannot** cross an intron|exon boundary
@@ -269,10 +281,19 @@ what would ANSWER it and, where the sparse-nascent rebuild moved it, says so.
    which carries NO annotated genes and therefore NO intergenic|exon boundaries, so pool 3 measures
    **exactly 1.0000** pure on every condition and the contrast silently reduces to "pool 3 alone". On real
    data an unannotated 5'/3' extension crosses precisely that boundary
-   (`TRAPS: purity-is-a-property-of-the-annotation`, a third time). ⭐ **What would answer it**: a shadow
-   transcript that OVERLAPS an annotated gene edge on `test_chr`, then the same oracle scoring; and a
-   probe-aware crossing opportunity. ⭐ The end state if both land is two contrasts combined by their own
-   precision — which is fragment count, and observable.
+   (`TRAPS: purity-is-a-property-of-the-annotation`, a third time). ⭐⭐ **MEASURED 2026-08-31, and it reshapes the question**: each pool's
+   enrichment above the off-target rate (`epsilon_p = true gDNA count / rho_off·E_p^index`) is **~1.0 for
+   both CONTAINED pools even under capture** (the rate is fitted on the same off-target stratum, so the
+   retention cancels) and **294–338× for both CROSSING pools** — the two-strata structure is the entire
+   weight failure. ⭐ **And the two crossing pools' enrichments are EQUAL: `epsilon_2/epsilon_3` = 1.002
+   and 1.034 under capture**, so the weight RATIO `a_2/a_3` survives capture computed from the index alone;
+   only the common LEVEL (one scalar, the boundary-stratum rate) is missing. ⭐ **What would answer it**:
+   ① a shadow transcript OVERLAPPING an annotated gene edge on `test_chr`, so pool 3's contamination is
+   testable at all; ② the missing scalar, for which the candidates are a one-sided fit within the
+   PROBED-boundary stratum (probe membership as a BOOLEAN, which the capture audit says is trustworthy
+   where the calibrated LEVEL is not) or a §6c-style reconciliation that pins the level against the
+   contained estimate and takes the shape from the crossing pair's ~30× larger counts. ⛔ Non-negativity
+   identification is already refuted for the contained pair — do not re-try it here.
 
 1. ⭐⭐⭐ **WHY IS PRIOR FIDELITY ANTI-CORRELATED WITH DELIVERABLE QUALITY? — the leading answer is "it is
    not the prior, it is the messages", and there is a second candidate that must be excluded first.** At

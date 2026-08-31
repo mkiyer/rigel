@@ -53,6 +53,59 @@ contaminated fraction is unestablished; the decline rule does not fire at `g00` 
 (harmless, measured — the derived repair is an SE carrying `rho`'s own relative error rather than dropping
 it as common-mode); and **nothing has been run on real data** (`real-data-is-a-test-input`).
 
+## ⭐⭐⭐ THE INTEGRATED fl ESTIMATOR — prototyped 2026-08-31, measured, NOT landed
+
+The owner's design: capture is a SPECTRUM, so regions and boundaries must be ONE solve with no regime
+switch. Prototyped in full (`integrated_fl_prototype.py.txt` beside this file is the exact code) and
+measured on all 32 rows of four panels:
+
+* **stage 1** — the shipped contained machinery, unchanged.
+* **stage 2** — per-boundary composition, with the REGIONS calibrating the BOUNDARIES: probes bind
+  indiscriminately, so at one boundary gDNA and nascent share the enrichment and it CANCELS from the
+  composition: `R_b = (rho_r,adj/rho_off)·(mu_r−1)/(mu_g−1)`, `a_b = 1/(1+R_b)`, with `rho_r,adj` the
+  adjacent region's own one-sided RNA excess. The crossing pair is then solved COMPLEMENT-FIRST
+  (`r_hat` clipped, subtracted from the mixture) — algebraically the same 2×2, conditioned so the noise
+  enters damped by `(1 − a_mix)`, small exactly when the separation is small.
+* **stage 3** — the EXCESS-enrichment correction: the sampled union already carries every class's
+  uniform part, so the unsampled on-target classes (contained-in-exon, spanning-exon) enter weighted by
+  `(eps_e − 1)+` only — measured per exon from its own boundaries, signed means so noise cancels. At
+  `eps = 1` the correction vanishes IDENTICALLY: no capture ⇒ byte-equal to the shipped estimator.
+
+**Measured (pmf vs origin-split oracle): matches (±1–2 bp) or improves on 31/32 rows; every sign error
+(+26 … +35 bp rows) eliminated; ladder capture-ON −24 → −3.1…−3.4 bp with TV 3× better; capture-OFF
+inert everywhere (≤ +0.6 bp).** The one exception: gdna_long `g05` capture-ON −43.3 vs −38.4, TV better
+by 29 % — a shared residual, not a regression.
+
+⛔⛔⛔ **AND IT IS CLOSED: the CEILING SAYS NO pmf CAN PAY. Do not land this, and do not re-open it
+without a NEW consumer.** `em_fl_ceiling.py` on the ladder capture-ON rows, feeding the solve the
+simulator's EXACT gDNA pmf — the strict upper bound on anything a length model can do there:
+
+| ladder row | base bias | **PERFECT pmf** | verdict |
+|---|---|---|---|
+| `g50` ss0.99 capture-ON | 0.031193 | 0.029455 (**+5.6 %**, 32× floor) | a perfect pmf buys 5.6 % |
+| `g05` ss0.99 capture-ON | 0.000822 | 0.001790 (**−117.8 %**, 16× floor) | a perfect pmf is WORSE |
+
+⭐ **So the remaining capture-ON product bias is NOT a fragment-length problem.** The one row with any
+headroom offers 5.6 %, and the integrated estimator measured +0.001285 and +0.001020 the WRONG way on
+the corresponding test-chromosome rows — it spends more than the ceiling holds. The `g05` row is the
+`ROADMAP.md` §0 ruler finding again: two errors partly cancel, and correcting one alone hurts.
+
+⭐ **What this closes and what it does not.** CLOSED: any further work on the gDNA fl pmf's SHAPE, for
+the current consumers. NOT closed: the derivation itself, which is sound and measured (31/32 rows,
+every sign error eliminated, ladder capture-ON −24 → −3.1 bp with TV 3× better) and is the recorded
+answer if a consumer ever appears that reads the pmf's shape rather than its first moment. ⚠ The
+shipped contained contrast already banked the product win (96 % of the capture-ON bias); the shape on
+top of it is worth nothing.
+
+**Known residual, measured both ways**: the contained-in-exon class needs the within-exon hybridization
+tilt `w(L)`; `g_B` as its proxy fixes big-exon substrates (test-chr ON −8 → +1) and breaks small-exon
+ones (ladder ON +7 → +45), because small exons' crossers sample a different part of the binding curve.
+`phi` is the conservative choice that meets the bar everywhere. The principled fix is measuring the
+binding curve; a weighted-isotonic attempt is in the prototype's history and was refuted by tail noise.
+
+**Also queued (owner-approved)**: a gene-edge-overlapping shadow transcript on `test_chr`, so pool 3's
+contamination and the readthrough robustness are testable at all — requires re-simulation.
+
 ## The live thread
 
 ⭐⭐ **The message policy — the standing charter, still at rung 0.** `MessagePolicy` remains byte-identical
