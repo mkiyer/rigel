@@ -1,111 +1,76 @@
-# NEXT SESSION — the state after the 2026-08-31 fragment-length deconvolution
+# NEXT SESSION — the state after the 2026-08-31 fragment-length work
 
     ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand, not what to build — the ranked
     list is `ROADMAP.md` §1. MOVE anything that settles into the permanent docs and DELETE this file.
 
-## What the last three sessions settled
+## Where the tool is
 
-1. **The gDNA strand overdispersion — SHIPPED.** Holds regardless of the annotation: the away-half
-   moment, influence weighting, the two components reconciling. `EQUATIONS.md` §6a/§6b/§6c,
-   `DESIGN.md` §3.3a. The premise it replaced is `TRAPS: purity-is-a-property-of-the-annotation`.
-2. **The gDNA fragment-length model — PRICED**, and the pricing re-ranked it: not a calibration defect
-   (a perfect pmf moves the 0.8.0 metric less than the benchmark resolves, in an inconsistent direction
-   between the two fl-gap arms), but worth **8–32 % of the library gDNA bias** through the EM.
-3. ⭐⭐⭐ **The gDNA fragment-length model — SHIPPED (2026-08-31).** `ROADMAP.md` §0 carries the state;
-   `src/rigel/calibration/gdna_density.py` and `fl.py` carry the mechanism; the derivation and the
-   refuted routes are `PLAN_gdna_fl_estimator.md` §3/§4/§7.1 and its §9.
+Two multi-session threads have closed. The gDNA **strand overdispersion** now holds regardless of the
+annotation (`EQUATIONS.md` §6a/§6b/§6c, `DESIGN.md` §3.3a). The gDNA **fragment-length model** is
+deconvolved, its two estimands are separated, routed and coupled, and the state is `ROADMAP.md` §0's
+fragment-length row — read that first, it is the single home for the numbers.
 
-## What the fl fix actually is, in three lines
+Six commits this session: `a4b6a134` (the contained contrast), `7314632d` (a closure later reversed),
+`7b3c70ba` (the reversal), `34bae6b4` (the frame diagnosis), `496c1b81` (routing), `0bbabc51` (the
+coupling that removed the last three thresholds).
 
-The two CONTAINED pools are the same two shapes at different mixing weights, so a **contrast** cancels the
-contaminant with **no template**: `g = [(1−a₁)f₀ − (1−a₀)f₁]/(a₀−a₁)`. The weights need one scalar, the
-gDNA density, read off the **LOW side** of the per-object density where a contaminant that only ADDS
-cannot reach — the root of a one-sided Poisson moment with a closed form (De Moivre). **No constant
-anywhere**, and no accumulator or schema change.
+## ⭐⭐⭐ START HERE: the RNA length law — `PLAN_rna_length_law.md`
 
-## ✅ SHIPPED — the owner's call, 2026-08-31, with the equal-length cost accepted
+The one remaining fragment-length defect, diagnosed to its mechanism and **worth an attributable −18,208
+transcripts**. That plan doc has the derivation, the refuted route, the fix, the sequencing and the open
+issues. In three lines:
 
-A pre-registered criterion said "the estimator must be inert where nothing is wrong", and on the ladder's
-equal-length capture-OFF rows it is not, quite: three degrade at **1.25-1.7x the reseed floor** (`g98`
-inside it, and the `g00` zero control **exactly unchanged** because it declines). ⭐ That cost is the
-expected variance and not a defect — with equal component lengths there is no length bias to remove, so
-only the contrast's ~2x variance remains. **The owner accepted the trade**, on these grounds: the ladder
-TOTAL favours it by ~9x (both capture-ON rows improve well outside the floor — 8.2 % of the standing bias
-at `g50`, **51x the floor**), and wherever the two components' lengths actually differ, as on real cfRNA,
-the gain is 20-250x larger.
+* `rna_pmf` is **−4 bp short** because the sj de-tilt divides by the probability a fragment *crosses* a
+  junction while the pool is selected on the splice being **OBSERVED**, and observability falls with
+  length. Plus a smaller **estimand mismatch**: it is a MATURE law used for ALL RNA.
+* ⛔ **No estimator built on spliced fragments escapes this** — the sj bank's model-free identity is
+  *equally* biased (−4.6, −5.3), measured. Do not retry it.
+* ⭐ **The escape is already computed and discarded**: the two-pool contrast solves for the contaminant
+  law `r_hat`, which has no observability selection and lands **inside 0.2 bp** of truth.
 
-## ⭐ Why it survives hybrid capture — SOLVED, and worth understanding before touching it
+⛔ **Step 0 of that plan is not optional**: re-measure the three-way consumer split, because the
+scorer/drain/geometry numbers predate the routing and coupling that landed after them.
 
-The shared-contaminant premise is FALSE under capture (TV between the two pools' contaminants is 0.95,
-against 0.06-0.14 off capture), and the estimator is good there anyway. **Not luck, and no longer
-unexplained**: under capture the intergenic pool is *depleted, not impure* (measured purity 0.48 -> 0.955
-at `g05`), so `a_0 = rho*E_0/n_0` exceeds 1 and CLIPS. At `a_0 = 1` the contrast collapses algebraically
-to `g = f_0` — the intronic pool's coefficient is exactly zero, so **the term the premise was needed for is
-removed, not approximated**. Verified to 3e-17.
-
-⛔ **So the safety rests on `a_0` clipping**, i.e. on intergenic really being near-pure under capture. A
-probe panel that put RNA back into intergenic space would break it silently. That is the thing to watch,
-and it is the reason the two refuted detectors are not missed: there is nothing to detect while the clip
-holds.
-
-⚠ Three smaller risks: the one-sided rate is biased **high** by 0.2-6.7 % and its scaling with the
-contaminated fraction is unestablished; the decline rule does not fire at `g00` on the test chromosome
-(harmless, measured — the derived repair is an SE carrying `rho`'s own relative error rather than dropping
-it as common-mode); and **nothing has been run on real data** (`real-data-is-a-test-input`).
-
-## ✅ THE FRAGMENT-LENGTH WORK IS DONE (2026-08-31) — two estimands, routed, landed
-
-Four commits: the contained contrast (`a4b6a134`), the shape closure that was later reversed
-(`7314632d`), the diagnosis (`34bae6b4`), and the routing (`496c1b81`). `ROADMAP.md` §0 carries the
-state; the mechanism is `calibration/fl.py` + `gdna_density.py`.
-
-**The idea, in one line:** "the gDNA fragment-length distribution" was ONE NAME over TWO QUANTITIES.
-`gdna_pmf` is the UNIFORM-FRAME law — the chemistry, and what the opportunity/prior mathematics assumes,
-since it counts start positions under uniform placement and is applied where `rho` is fitted.
-`gdna_realized_pmf` is the LIBRARY CENSUS — capture's selection included, which is what the EM's
-per-fragment scorer conditions on. ⭐ **Off capture they are the SAME ARRAY**, which is why one name
-sufficed until capture split them; the cost of confusing them is +188,208 transcripts, measured.
-
-**Verified on the landed code**: the +150,809 regression → **+293**; net **−4,350** transcripts over
-eleven scenarios spanning both fl-gap sign arms and the whole capture spectrum; every capture-OFF row
-within ±11; the `g00` zero control at +1. Largest wins gdna_long `g50` unstranded ON **−3,477**, `g05` ON
-−399, equal-length `g98` ON −345.
-
-⛔ **THE ONE THING LEFT, SCOPED AND MEASURED: the RNA pmf's GEOMETRY bias.** Its three consumers split
-**scorer +156 / drain −822 / geometry −18,208**, so RNA needs NO second estimand and no routing — it needs
-a bias fix where `effective_lengths_em` reads it. The sj de-tilt leaves a residual −4.75 bp because longer
-fragments cross more junctions. ⭐ A single, independently landable change with its own A/B, and the last
-known fragment-length defect. ⚠ Measure before assuming symmetry with gDNA — that measurement is exactly
-what stopped the wrong thing being built here.
-
-⚠ Two smaller carries, both recorded rather than open: the on-target contained class uses `phi` as its
-local law where the within-exon hybridization tilt belongs (the `g_B` proxy fixes big-exon substrates and
-breaks small-exon ones — measured both ways, conservative choice ships); and geometry is HYPERSENSITIVE to
-the pmf tail (+188k ON, −15.5k OFF from small tail changes) because the short-exon contained opportunity is
-on a knife edge (−66 % at ell = 100) — effective-length-ruler territory, now with a mapped lever.
-
-## The live thread
+## The other live thread
 
 ⭐⭐ **The message policy — the standing charter, still at rung 0.** `MessagePolicy` remains byte-identical
 to `SilentPolicy` on all 30 test-chromosome conditions. The bar is unchanged: **win on unstranded, minimal
-harm on stranded, never pooled.** Before building any mechanism, answer rank 1a's question with no solver:
-**is the information a blind unstranded or AMBIG slot needs actually present in its neighbours?** The
-anchored twin block was designed for exactly that.
-⚠ Re-baseline first — the policy numbers in `ROADMAP.md` predate both the strand-estimator change and this
-one.
+harm on stranded, never pooled.** Before building any mechanism, answer `ROADMAP.md` §1 rank 1a's question
+with no solver: **is the information a blind unstranded or AMBIG slot actually present in its neighbours?**
+The anchored twin block was designed for exactly that. ⚠ Re-baseline first — the policy numbers in
+`ROADMAP.md` predate both this session and the strand-estimator change.
+
+## ⛔ Standing risks from this session's work
+
+* **The gDNA contrast survives capture by a degeneracy, not by its premise.** Under capture the
+  shared-contaminant assumption is FALSE (TV 0.95), and it is safe only because the intergenic pool is
+  *depleted, not impure*, so `a_0` clips to 1 and the algebra collapses to `g = f_0`. **A probe panel that
+  put RNA back into intergenic space would break it silently.** `ROADMAP.md` §0.
+* **Geometry is knife-edge sensitive to the pmf tail** — ±188k / −15.5k transcripts from small tail
+  changes, because the short-exon contained opportunity falls 66 % at `ell = 100`. Any change to an
+  `effective_lengths_em` input needs the reseed floor beside it. That is effective-length-ruler territory
+  and now has a mapped lever.
+* **Nothing has been run on real data** (`real-data-is-a-test-input`). The cfRNA libraries are where a
+  genuinely different contamination profile lives, and no fragment-length claim here has met one.
 
 ## Cautions that will otherwise cost a day
 
-* ⛔⛔ **COMPARE AGAINST WHAT SHIPS, NOT AGAINST YOUR PROTOTYPE'S BASELINE.** This session called capture-ON
-  a blocker for two revisions of a plan on the strength of a prototype scored against the two CONTAINED
-  pools; what ships is the FOUR-pool sum, and against that capture-ON is a large WIN. A wrong baseline
-  produced a confident, wrong, blocking verdict that survived external review.
-* ⛔ **The benchmark resolves a LARGE effect.** A 1e−5 nudge to a nuisance parameter moves 1/30 rows by
-  more than 0.5 %. Do not believe a single-row policy difference below ~2 %.
+* ⛔⛔ **SCORE A CHANGE ON THE METRIC ITS CONSUMER READS.** This session closed the gDNA shape question on
+  `gdna_frac_est` — which `em_fl_ceiling.py` prints under a "THE PRODUCT" banner — and was WRONG: the fl
+  model's consumer is the EM's per-fragment assignment, and transcript accuracy said the opposite. The
+  banner is right for a composition fix and wrong for a shape fix.
+* ⛔⛔ **COMPARE AGAINST WHAT SHIPS, NOT YOUR PROTOTYPE'S BASELINE.** Capture-ON was called a blocker for
+  two revisions of a plan because a prototype was scored against the two CONTAINED pools while production
+  uses the FOUR-pool sum. A wrong baseline produced a confident, wrong verdict that survived external
+  review.
+* ⛔ **ONE NAME OVER TWO POPULATIONS is this codebase's recurring defect.** Three instances this session:
+  the gDNA pmf (chemistry vs census), the "pure" pools (annotation vs genome), the RNA pmf
+  (spliced-observed vs all-RNA). None was a modelling or numerical error. ⭐ **The audit that finds them**:
+  ask each consumer what population it is conditioning on, and check the producer estimates that one.
 * ⛔ **ALWAYS RUN BOTH fl-GAP SIGN ARMS AND THE EQUAL-LENGTH CONTROL.** The same change has been a win on
   `rna_long` and a loss on `gdna_long` at both the calibration and the transcript level.
 * ⛔ **`np.diff(payload.region_bounds)` is WRONG** — bounds are concatenated per reference, so it
-  manufactures a phantom region at every junction. Use `gdna_density.region_lengths_from_partition`. ⭐ No
-  shipped code had this bug (audited); a prototype did, and it made an estimator look 6× worse than it is.
+  manufactures a phantom region at every junction. Use `gdna_density.region_lengths_from_partition`.
+  ⭐ No shipped code had this bug (audited); a prototype did, and it made an estimator look 6× worse.
 * ⛔ **`docs/dev/` is a sandbox and nothing may cite into it** — a permanent doc that does is a suite
-  FAILURE (`tests/test_docs_boundary.py`), which caught exactly that in a `ROADMAP.md` edit.
+  FAILURE (`tests/test_docs_boundary.py`), which caught exactly that twice this session.

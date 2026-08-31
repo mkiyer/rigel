@@ -277,15 +277,18 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,738 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+⭐ **THE STANDING BASELINE: 0 failed / 3,736 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
 running the suite. Account it from **3,676** at the start of the fragment-length work:
-+4 `scripts/design/em_fl_ceiling.py`; +2 `docs/dev/` files (jargon only);
++4 `scripts/design/em_fl_ceiling.py`;
 +3 `src/rigel/calibration/gdna_density.py` (jargon, docs-boundary, layering — it IS declared in
-`_layers.py`); +2 + 34 own cases for `tests/calibration/test_gdna_density.py`;
-+2 + 14 own cases for `tests/calibration/test_fl_realized.py`; +2 for
-`tests/calibration/fl_realized_fixture.py` (a helper module in the tests tree — jargon and
-docs-boundary, and it collects NO cases of its own).
-3,676 + 4 + 2 + 3 + 36 + 16 + 2 = **3,738**.
+`_layers.py`);
++2 + 34 own cases for `tests/calibration/test_gdna_density.py`;
++2 + 14 own cases for `tests/calibration/test_fl_realized.py`;
++2 for `tests/calibration/fl_realized_fixture.py` (a helper module in the tests tree — jargon and
+docs-boundary, and it collects NO cases of its own);
+and the `docs/dev/` churn nets **−1** (three `.md` deleted, one added, +1 each, jargon only;
+⚠ a non-`.md` file there such as a `.py.txt` is collected by NOTHING and moves the total by 0).
+3,676 + 4 + 3 + 36 + 16 + 2 − 1 = **3,736**.
 ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
