@@ -76,26 +76,37 @@ measured on all 32 rows of four panels:
 inert everywhere (≤ +0.6 bp).** The one exception: gdna_long `g05` capture-ON −43.3 vs −38.4, TV better
 by 29 % — a shared residual, not a regression.
 
-⛔⛔⛔ **AND IT IS CLOSED: the CEILING SAYS NO pmf CAN PAY. Do not land this, and do not re-open it
-without a NEW consumer.** `em_fl_ceiling.py` on the ladder capture-ON rows, feeding the solve the
-simulator's EXACT gDNA pmf — the strict upper bound on anything a length model can do there:
+⭐⭐⭐ **MEASURED END TO END, AND THE FIRST VERDICT WAS WRONG.** I scored it on `gdna_frac_est`, called it
+worthless, and closed it. TRANSCRIPT accuracy — the fl model's actual consumer, the EM's per-fragment
+assignment — says otherwise. ⛔ The mistake to learn from: `em_fl_ceiling.py` prints `gdna_frac_est` under
+a "THE PRODUCT" banner, and that label is right for the CONTAINED contrast (a composition fix) and WRONG
+for this one (a shape fix whose consumer is the EM).
 
-| ladder row | base bias | **PERFECT pmf** | verdict |
-|---|---|---|---|
-| `g50` ss0.99 capture-ON | 0.031193 | 0.029455 (**+5.6 %**, 32× floor) | a perfect pmf buys 5.6 % |
-| `g05` ss0.99 capture-ON | 0.000822 | 0.001790 (**−117.8 %**, 16× floor) | a perfect pmf is WORSE |
+**Capture-OFF — safe, and better.** Every test-chromosome row inside the reseed floor (`g00` EXACTLY
+unchanged); the ladder's `g50` capture-OFF row **−15,544 fragments and −2,470 false-positive mass**, both
+far outside it.
 
-⭐ **So the remaining capture-ON product bias is NOT a fragment-length problem.** The one row with any
-headroom offers 5.6 %, and the integrated estimator measured +0.001285 and +0.001020 the WRONG way on
-the corresponding test-chromosome rows — it spends more than the ceiling holds. The `g05` row is the
-`ROADMAP.md` §0 ruler finding again: two errors partly cancel, and correcting one alone hurts.
+**Capture-ON — large wins, one large loss.** −7,669 (**−72 %**) on gdna_long `g50` unstranded with
+false-positive mass 155 → 8; −6,970 on the ladder `g50`; −407, −172, −155 elsewhere. ⛔ **But the ladder's
+`g05` capture-ON row is +150,809 WORSE, 86× the floor**, so the ladder net is +128k worse and **the
+estimator does not meet the "matches or improves everywhere" bar.**
 
-⭐ **What this closes and what it does not.** CLOSED: any further work on the gDNA fl pmf's SHAPE, for
-the current consumers. NOT closed: the derivation itself, which is sound and measured (31/32 rows,
-every sign error eliminated, ladder capture-ON −24 → −3.1 bp with TV 3× better) and is the recorded
-answer if a consumer ever appears that reads the pmf's shape rather than its first moment. ⚠ The
-shipped contained contrast already banked the product win (96 % of the capture-ON bias); the shape on
-top of it is worth nothing.
+⭐⭐ **THAT ROW IS NOT THE ESTIMATOR'S FAULT, and the ceiling proves it**: fed the simulator's EXACT gDNA
+pmf the same row costs **+186,333**. It REWARDS a wrong pmf — two errors partly cancelling, `ROADMAP.md`
+§0's effective-length ruler finding in a second place. The integrated estimator lands at 81 % of the
+perfect-pmf damage: it behaves like an accurate estimator on a row that punishes accuracy. ⚠ Counterweight,
+stated honestly: on the row where perfect HELPS it captures only 13 % of the gain.
+
+⭐⭐⭐ **THE ROBUSTNESS RESULT IS INDEPENDENT AND IS THE STRONGEST ARGUMENT.** Poisson-thinning the contained
+fragments toward the infinite-capture limit — which is what stronger depletion IS — the SHIPPED estimator
+**collapses at ~1,000 contained fragments to +31 bp and stays there SILENTLY** (its contrast declines and
+it falls back to the raw four-pool sum), while the integrated one holds to **19 fragments** and then
+declines honestly. **50× margin**, and a correctness property, not an accuracy trade. ⚠ Not immune at the
+true limit: it reads `rho_off` and the adjacent RNA excess from the contained regions, needing a RATIO
+where the shipped one needs a SHAPE — that buys the 50×, not immunity.
+
+⛔ **WHAT BLOCKS SHIPPING: the `g05` capture-ON compensating error**, which exists independently of this
+work and is visible in the ceiling. Fix that and this lands; until then the ladder net is negative.
 
 **Known residual, measured both ways**: the contained-in-exon class needs the within-exon hybridization
 tilt `w(L)`; `g_B` as its proxy fixes big-exon substrates (test-chr ON −8 → +1) and breaks small-exon

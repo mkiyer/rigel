@@ -250,17 +250,35 @@ certified-RNA channel alone recovering the truth at most of them.
 stratum or a deleted panel cannot change a 0.8.0 decision until something else does. ⭐ Each entry names
 what would ANSWER it and, where the sparse-nascent rebuild moved it, says so.
 
-1. ⛔⛔ **ANSWERED AND CLOSED, 2026-08-31 — THE gDNA fl pmf's SHAPE IS WORTH NOTHING TO THE CURRENT
-   CONSUMERS, so do not build a better one.** The integrated regions+boundaries estimator was fully
-   derived, prototyped and measured (it matches or improves the shipped pmf on 31 of 32 rows and removes
-   every sign error; ladder capture-ON goes −24 → −3.1 bp with TV 3× better). ⛔ **The CEILING refutes
-   building it**: fed the simulator's EXACT gDNA pmf, the ladder's capture-ON product bias improves by
-   **5.6 %** on one row and gets **117.8 % WORSE** on the other, both far outside the reseed floor — the
-   second is `ROADMAP.md` §0's ruler finding again, two errors partly cancelling. The shipped contained
-   contrast already banked 96 % of the capture-ON bias; nothing is left for a better SHAPE to win.
-   ⭐ **Re-open only if a consumer appears that reads the pmf's SHAPE rather than its first moment** — the
-   current ones (the opportunity moments and the EM's per-fragment term) do not. The derivation and its
-   measurements are preserved as the recorded answer, so this is closed rather than lost.
+1. ⭐⭐⭐ **THE INTEGRATED REGIONS+BOUNDARIES fl ESTIMATOR — BUILT, MEASURED END TO END, AND IT DOES NOT
+   YET MEET THE BAR. One capture-ON row regresses badly; everything else improves.** ⛔ **AND THE FIRST
+   VERDICT ON IT WAS WRONG BECAUSE IT WAS SCORED ON THE WRONG METRIC** — `gdna_frac_est` said "worth
+   nothing", TRANSCRIPT accuracy says otherwise, and the fl model's real consumer is the EM's per-fragment
+   assignment, not the library composition (`TRAPS: the-intermediate-is-not-the-deliverable`, in the
+   REPORTING direction: the instrument's own "THE PRODUCT" label pointed at the wrong number for this
+   question).
+   **Measured end to end, transcript `count_abs_err` against truth.** ⭐ **Capture-OFF is safe and better**:
+   every test-chromosome row inside the reseed floor (`g00` EXACTLY unchanged), and the ladder's
+   `g50` capture-OFF row **−15,544 fragments, −2,470 false-positive mass**, both far outside it. ⭐
+   **Capture-ON wins are large where they land**: **−7,669 (−72 %)** on one arm's `g50` unstranded row with
+   false-positive mass 155 → 8, and −6,970 on the ladder's `g50`. ⛔⛔ **BUT the ladder's `g05` capture-ON
+   row is +150,809 WORSE, 86× the reseed floor**, and the ladder net is therefore **+128k worse**.
+   ⭐⭐ **THE DIAGNOSIS IS ALREADY IN HAND AND IT IS NOT THIS ESTIMATOR'S FAULT**: on that same row a
+   **PERFECT** gDNA pmf costs **+186,333** (`em_fl_ceiling.py`). The row REWARDS A WRONG pmf, because two
+   errors partly cancel there — §0's effective-length ruler finding in a second place. The integrated
+   estimator lands at 81 % of the perfect-pmf damage, i.e. it behaves like an ACCURATE estimator on a row
+   that punishes accuracy. ⚠ It captures only 13 % of the available gain on the row where perfect HELPS,
+   which is the honest counterweight to that reading.
+   ⭐⭐⭐ **THE ROBUSTNESS RESULT IS INDEPENDENT AND STANDS ON ITS OWN.** Walking a capture-ON condition
+   toward the infinite-capture limit (Poisson-thinning the contained fragments, which is what stronger
+   depletion IS), the SHIPPED estimator **collapses at ~1,000 contained fragments to +31 bp and stays
+   there SILENTLY** — its contained contrast declines and it falls back to the raw four-pool sum — while
+   the integrated one holds to **19 fragments** and then declines honestly. A 50× margin, and a
+   correctness property rather than an accuracy trade: strong capture is exactly what empties those pools.
+   ⛔ **What is needed before it can ship**: the `g05` capture-ON compensating error, which the ceiling
+   proves exists independently of this work. ⚠ Not immune at the true limit either — it reads `rho_off`
+   and the adjacent RNA excess from the contained regions, needing a RATIO where the shipped one needs a
+   SHAPE, which buys the 50× but not immunity.
 
 1. ⚠ **[SUPERSEDED by the row above, kept for its measurements] SHOULD THE gDNA LENGTH MODEL RUN A SECOND CONTRAST ON THE *CROSSING* POOLS? — the two pairs have
    OPPOSITE failure modes and the pool depths are anti-correlated, which is what makes this worth
