@@ -277,21 +277,15 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
-running the suite. Account it from **3,676** at the start of the fl work:
+⭐ **THE STANDING BASELINE: 0 failed / 3,731 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+running the suite. Account it from **3,676** at the start of the fragment-length work:
 +4 `scripts/design/em_fl_ceiling.py`; +2 `docs/dev/` files (jargon only);
 +3 `src/rigel/calibration/gdna_density.py` (jargon, docs-boundary, layering — it IS declared in
-`_layers.py`); +2 `tests/calibration/test_gdna_density.py` per-file, +34 own cases.
-3,676 + 4 + 2 + 3 + 36 = **3,720**.
-⚠ Account the 3,676 from the value at the last commit before the previous session, **3,643** — an
-intermediate number quoted mid-session cannot be reconciled from a clean tree.
-ADDED: `tests/calibration/test_gdna_strand_fit.py` (33 own + 2 per-file = +35);
-`tests/test_sim_shadow_transcripts.py` (3 own + 2 = +5; ⚠ `test_scripts_index` does NOT parametrise a
-`tests/test_sim_*` file, so a top-level test file moves the total by +5 and not +6);
-`scripts/design/fl_pool_purity.py` (+4); three `docs/dev/` files (+1 each, jargon only).
-DELETED: `run_fill.py` and its test together (−12: 3 module gates + 7 own cases + 2 per-file);
-one case from `test_density_model.py` (5 → 4) and one from `test_sweep.py` (two prior-constant tests → one).
-3,643 + 35 + 5 + 4 + 3 − 12 − 1 − 1 = 3,676.
+`_layers.py`); +2 + 34 own cases for `tests/calibration/test_gdna_density.py`;
++2 + 7 own cases for `tests/calibration/test_fl_realized.py`; +2 for
+`tests/calibration/fl_realized_fixture.py` (a helper module in the tests tree — jargon and
+docs-boundary, and it collects NO cases of its own).
+3,676 + 4 + 2 + 3 + 36 + 9 + 2 = **3,731**.
 ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and

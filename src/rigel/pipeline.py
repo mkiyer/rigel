@@ -821,8 +821,14 @@ def quant_from_buffer(
     scoring_cfg = scoring or FragmentScoringConfig()
 
     # Scorer FL models from the calibrated pmfs (PR 4c FLModels → scoring LUTs).
+    # ⭐⭐ THE SCORER EATS THE REALIZED (library-census) LAW, NOT THE UNIFORM-FRAME ONE. The per-fragment
+    # length term conditions on "this fragment is IN the library", so capture's selection belongs in its
+    # pmf; the opportunity/prior mathematics assumes uniform placement and keeps `gdna_pmf`. Routing the
+    # realized law into geometry instead was measured at +188,208 misassigned transcripts on one ladder
+    # row (`TRAPS: the-intermediate-is-not-the-deliverable` has the reporting half of that story). Off
+    # capture the two laws are the same array and this line is byte-identical to the old one.
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
-    gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_pmf, fl_models.max_size)
+    gdna_fl = FragmentLengthModel.from_pmf(fl_models.gdna_realized_pmf, fl_models.max_size)
 
     geometry, estimator = _setup_geometry_and_estimator(
         index, rna_fl, em_config, calibration=calibration, region_arrays=region_arrays

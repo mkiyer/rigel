@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 __all__ = [
     "FLModels",
     "GdnaContrast",
+    "GdnaRealized",
     "POOL_EB_PRIOR_ESS",
     "build_fl_models",
     "gdna_contained_fl_mass",
@@ -130,6 +131,25 @@ class GdnaContrast:
 
 
 @dataclass(frozen=True, slots=True)
+class GdnaRealized:
+    """What the LIBRARY-CENSUS (realized) gDNA law's estimator did, or why it declined — QC only.
+
+    ``ontarget_share`` is the number to read: the fraction of the realized law's mass carried by the
+    EXCESS-enrichment exon classes — the capture-only part, identically 0 when the boundaries carry no
+    enrichment excess. ``boundary_share`` is the sampled crossing pair's mass, which is legitimately
+    nonzero at every capture level. Near-zero ``ontarget_share`` says "this library shows no capture
+    excess and the two estimands coincide", which is a measurement, not an inaction.
+    """
+
+    applied: bool
+    declined_because: str
+    boundary_share: float
+    ontarget_share: float
+    intron_exon_share: float
+    intergenic_exon_share: float
+
+
+@dataclass(frozen=True, slots=True)
 class FLModels:
     """Library-wide FL distributions (float64[max_size + 1]) + their pool totals.
 
@@ -168,6 +188,15 @@ class FLModels:
     #: What the two-pool contrast did. ``None`` when it was never offered the per-region inputs (the
     #: second pass and most tests), which is a different state from having declined.
     gdna_contrast: "GdnaContrast | None" = None
+    #: ⭐⭐ THE SECOND ESTIMAND — the LIBRARY-CENSUS law: what a sequenced gDNA fragment looks like,
+    #: capture selection included. ``gdna_pmf`` above is the UNIFORM-FRAME law the opportunity/prior
+    #: mathematics assumes; this one is what the EM's per-fragment scorer conditions on. Off capture the
+    #: two coincide and this field EQUALS ``gdna_pmf`` exactly; it is never ``None``, so the scorer reads
+    #: it unconditionally. ⛔ Routing them was measured, not asserted: the realized law fed to GEOMETRY
+    #: cost +188,208 transcripts on one ladder row, while fed to the SCORER it helps — one name over two
+    #: quantities is how that regression happened.
+    gdna_realized_pmf: np.ndarray = None
+    gdna_realized: "GdnaRealized | None" = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
@@ -361,6 +390,170 @@ def _deconvolved_gdna_counts(
     )
 
 
+def _realized_gdna_counts(
+    payload,
+    gdna_opportunity: "GdnaOpportunity",
+    region_lengths: np.ndarray,
+    region_types: np.ndarray,
+    rna_pmf: np.ndarray,
+    uniform_counts: np.ndarray,
+) -> "tuple[np.ndarray | None, GdnaRealized]":
+    """The LIBRARY-CENSUS gDNA law: the uniform-frame estimate plus everything capture SELECTED.
+
+    Three ingredients, blended by realized gDNA mass so the capture spectrum needs no switch:
+
+    * the OFF-TARGET stratum — the uniform-frame law ``phi`` (``uniform_counts``, stage 1's output),
+      weighted by the contained pools' own gDNA mass;
+    * the BOUNDARY stratum — the two crossing pools, deconvolved by the same two-shape contrast, with
+      per-boundary composition CALIBRATED BY THE REGIONS: probes bind nucleic acid indiscriminately, so
+      at one boundary gDNA and nascent share the enrichment and it CANCELS from the composition —
+      ``a_b = 1/(1 + R_b)`` with ``R_b`` the RNA:gDNA odds transported from the adjacent region's own
+      one-sided RNA excess. The pair is solved COMPLEMENT-FIRST (the contaminant clipped to the cone,
+      then subtracted), which damps the ``1/sep`` noise by ``(1 - a_mix)`` — small exactly when the
+      separation is small, so the conditioning fix is the algebra's own;
+    * the ON-TARGET EXCESS — the exon classes no pool samples (contained-in-exon, spanning-the-exon),
+      priced by each exon's own boundaries' measured enrichment and entering at ``(eps - 1)+`` ONLY:
+      the sampled union already carries every class's uniform part, so at ``eps = 1`` (no capture) the
+      correction vanishes IDENTICALLY and the realized law collapses to the sampled blend.
+
+    Declining is a real answer: with no gDNA density there is no census to take, and the caller then
+    keeps the uniform-frame law for both estimands — which is exactly the off-capture truth.
+    """
+    obs_pools = np.asarray(payload.pool_lengths, dtype=np.float64)
+    ty = np.asarray(region_types).ravel()
+    ell = np.asarray(region_lengths, dtype=np.float64).ravel()
+    cnt = np.asarray(payload.region_contained_count, dtype=np.float64)
+    cnt = cnt.sum(axis=1) if cnt.ndim > 1 else cnt
+    n = min(ty.size, ell.size, cnt.size)
+    ty, ell, cnt = ty[:n], ell[:n], cnt[:n]
+    is_ig = (ty == int(RegionType.INTERGENIC)) & (ell > 0.0)
+    is_in = (ty == int(RegionType.INTRON)) & (ell > 0.0)
+
+    g_C = _normalized(np.asarray(uniform_counts, dtype=np.float64))
+    L_axis = np.arange(g_C.size, dtype=np.float64)
+    e_g = contained_opportunity(g_C, ell)
+    fit = one_sided_rate(cnt[is_ig | is_in], e_g[is_ig | is_in])
+    if not fit.informative:
+        return None, GdnaRealized(False, "no gDNA density", 0.0, 0.0, 0.0, 0.0)
+    rho_off = fit.rate
+
+    m_C = 0.0
+    for mask in (is_ig, is_in):
+        n_p = float(cnt[mask].sum())
+        if n_p > 0.0:
+            m_C += min(rho_off * float(e_g[mask].sum()) / n_p, 1.0) * n_p
+
+    # ── the boundary stratum: per-boundary composition, regions calibrating boundaries
+    rna = np.asarray(rna_pmf, dtype=np.float64)
+    mu_r = float((rna * np.arange(rna.size)).sum() / max(rna.sum(), 1e-30))
+    e_r = contained_opportunity(rna[: g_C.size], ell)
+    excess = np.clip(cnt - rho_off * e_g, 0.0, None)
+    rho_r = np.zeros_like(excess)
+    np.divide(excess, e_r, out=rho_r, where=e_r > 0.0)
+
+    bnd = np.asarray(payload.boundary_unspliced_count, dtype=np.float64)
+    bnd = bnd.sum(axis=1) if bnd.ndim > 1 else bnd
+    roff = np.asarray(payload.ref_region_offsets, dtype=np.int64)
+    boff = np.asarray(payload.ref_boundary_offsets, dtype=np.int64)
+    exon = int(RegionType.EXON)
+
+    mu_g = float((g_C * L_axis).sum())
+    g_B, a2 = None, float("nan")
+    a3, exon_eps = float("nan"), {}
+    for _ in range(2):  # one refresh of mu_g from the boundary law; measured stable
+        num = {2: 0.0, 3: 0.0}
+        den = {2: 0.0, 3: 0.0}
+        exon_eps = {}
+        for r in range(roff.size - 1):
+            r_lo, r_hi = int(roff[r]), int(roff[r + 1])
+            b_lo, b_hi = int(boff[r]), int(boff[r + 1])
+            if r_hi - r_lo < 2 or b_hi - b_lo != r_hi - r_lo - 1:
+                continue
+            for j in range(r_hi - r_lo - 1):
+                left, right = r_lo + j, r_lo + j + 1
+                tl, tr = int(ty[left]), int(ty[right])
+                if tl == exon and tr != exon:
+                    adj, other, exon_region = right, tr, left
+                elif tr == exon and tl != exon:
+                    adj, other, exon_region = left, tl, right
+                else:
+                    continue
+                nb = float(bnd[b_lo + j])
+                if nb <= 0.0:
+                    continue
+                cls = 2 if other == int(RegionType.INTRON) else 3
+                r_b = (
+                    (rho_r[adj] / max(rho_off, 1e-30))
+                    * max(mu_r - 1.0, 1e-9)
+                    / max(mu_g - 1.0, 1e-9)
+                )
+                a_b = 1.0 / (1.0 + r_b)
+                num[cls] += a_b * nb
+                den[cls] += nb
+                # SIGNED enrichment ratio (1 = uniform); the clip lives at the exon mean so noise
+                # cancels instead of accumulating one-sidedly.
+                exon_eps.setdefault(exon_region, []).append(
+                    (a_b * nb) / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30)
+                )
+        if den[2] <= 0.0 or den[3] <= 0.0:
+            break
+        a2, a3 = num[2] / den[2], num[3] / den[3]
+        n2 = float(obs_pools[_GDNA_CROSSING_POOLS[0]].sum())
+        n3 = float(obs_pools[_GDNA_CROSSING_POOLS[1]].sum())
+        total_opp = np.asarray(gdna_opportunity.total, dtype=np.float64)
+        f = []
+        for pool in _GDNA_CROSSING_POOLS:
+            a_of_l = np.asarray(gdna_opportunity.pools[pool], dtype=np.float64)
+            prob = np.zeros_like(a_of_l)
+            np.divide(a_of_l, total_opp, out=prob, where=total_opp > 0.0)
+            f.append(_normalized(detilt_pool(obs_pools[pool], prob)))
+        f2, f3 = f[0][: g_C.size], f[1][: g_C.size]
+        sep = a2 - a3
+        if abs(sep) > float(np.sqrt(a2 * a2 / max(n2, 1.0) + a3 * a3 / max(n3, 1.0))):
+            a_mix = (a2 * n2 + a3 * n3) / max(n2 + n3, 1.0)
+            f_mix = _normalized(n2 * f2 + n3 * f3)
+            r_hat = _normalized(np.clip((a3 * f2 - a2 * f3) / (a3 - a2), 0.0, None))
+            g_B = _normalized(np.clip(f_mix - (1.0 - a_mix) * r_hat, 0.0, None))
+        else:
+            g_B = _normalized(a2 * n2 * f2 + a3 * n3 * f3)
+        mu_next = float((g_B * L_axis[: g_B.size]).sum())
+        if not np.isfinite(mu_next) or abs(mu_next - mu_g) < 0.25:
+            break
+        mu_g = mu_next
+    m_B = 0.0 if g_B is None else a2 * n2 + a3 * n3
+
+    # ── the on-target excess: exon classes no pool samples, at (eps - 1)+ only
+    is_ex = (ty == exon) & (ell > 0.0)
+    mean_eps = float(np.mean([np.mean(v) for v in exon_eps.values()])) if exon_eps else 1.0
+    h_E = np.zeros_like(g_C)
+    m_E = 0.0
+    if exon_eps:
+        for e_idx in np.flatnonzero(is_ex):
+            excess_e = max(float(np.mean(exon_eps.get(int(e_idx), [mean_eps]))) - 1.0, 0.0)
+            if excess_e <= 0.0:
+                continue
+            le = ell[e_idx]
+            shape = g_C * (
+                np.clip(le - L_axis + 1.0, 0.0, None) + np.clip(L_axis - le - 1.0, 0.0, None)
+            )
+            h_E += rho_off * excess_e * shape
+            m_E += rho_off * excess_e * float(shape.sum())
+
+    total_mass = m_C + m_B + m_E
+    if total_mass <= 0.0:
+        return None, GdnaRealized(False, "no gDNA mass anywhere", 0.0, 0.0, a2, a3)
+    m0 = g_C.size if g_B is None else min(g_C.size, g_B.size)
+    out = m_C * g_C[:m0] + h_E[:m0]
+    if g_B is not None:
+        out = out + m_B * g_B[:m0]
+    if not out.sum() > 0.0:
+        return None, GdnaRealized(False, "empty census", 0.0, 0.0, a2, a3)
+    scale = float(obs_pools[list(_GDNA_POOLS)].sum())
+    return _normalized(out) * scale, GdnaRealized(
+        True, "", m_B / total_mass, m_E / total_mass, a2, a3
+    )
+
+
 def _aligned(counts: np.ndarray, max_size: int) -> np.ndarray:
     """Align a raw FL count vector to ``max_size + 1`` bins (overflow → last bin)."""
     out = np.zeros(max_size + 1, dtype=np.float64)
@@ -458,6 +651,7 @@ def build_fl_models(
         rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
     contrast = None
+    realized_counts, realized = None, None
     if gdna_opportunity is None:
         gdna_counts = gdna_contained_fl_mass(payload)
     else:
@@ -468,6 +662,19 @@ def build_fl_models(
             )
             if deconvolved is not None:
                 gdna_counts = deconvolved
+            # ⭐ the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
+            # result and the same banks; on decline the two estimands coincide, which is the honest
+            # off-capture answer rather than a degraded one.
+            realized_counts, realized = _realized_gdna_counts(
+                payload,
+                gdna_opportunity,
+                region_lengths,
+                region_types,
+                detilt_pool(rna_fl_mass(payload), sj_opportunity)
+                if sj_opportunity is not None
+                else rna_fl_mass(payload),
+                gdna_counts,
+            )
 
     return _fl_models_from_histograms(
         global_counts=payload.deposited_lengths,
@@ -477,6 +684,8 @@ def build_fl_models(
         prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,
         gdna_contrast=contrast,
+        gdna_realized_counts=realized_counts,
+        gdna_realized=realized,
     )
 
 
@@ -489,6 +698,8 @@ def _fl_models_from_histograms(
     prior_ess: float = POOL_EB_PRIOR_ESS,
     pool_counts: np.ndarray | None = None,
     gdna_contrast: "GdnaContrast | None" = None,
+    gdna_realized_counts: np.ndarray | None = None,
+    gdna_realized: "GdnaRealized | None" = None,
 ) -> FLModels:
     """The smooth-EB kernel: three histograms in, three pmfs out.
 
@@ -502,6 +713,15 @@ def _fl_models_from_histograms(
     global_pmf = _normalized(global_aligned)
     rna_pmf, n_rna = _smooth_eb(rna_aligned, global_pmf, prior_ess)
     gdna_pmf, n_gdna = _smooth_eb(gdna_aligned, global_pmf, prior_ess)
+    # ⭐ the realized law is shrunk exactly like its sibling; with no realized estimate the two
+    # estimands COINCIDE — same array values, so an off-capture or input-starved build behaves
+    # byte-identically to the single-law world.
+    if gdna_realized_counts is not None:
+        gdna_realized_pmf, _ = _smooth_eb(
+            _aligned(gdna_realized_counts, max_size), global_pmf, prior_ess
+        )
+    else:
+        gdna_realized_pmf = gdna_pmf.copy()
     return FLModels(
         global_pmf=global_pmf,
         rna_pmf=rna_pmf,
@@ -519,4 +739,6 @@ def _fl_models_from_histograms(
         n_gdna=n_gdna,
         max_size=int(max_size),
         gdna_contrast=gdna_contrast,
+        gdna_realized_pmf=gdna_realized_pmf,
+        gdna_realized=gdna_realized,
     )
