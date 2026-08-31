@@ -105,6 +105,48 @@ declines honestly. **50× margin**, and a correctness property, not an accuracy 
 true limit: it reads `rho_off` and the adjacent RNA excess from the contained regions, needing a RATIO
 where the shipped one needs a SHAPE — that buys the 50×, not immunity.
 
+⭐⭐⭐ **THE +150k REGRESSION IS DIAGNOSED — a SIX-ARM channel split at ladder `g05` capture-ON, and the
+answer is a FRAME error, not an accuracy one.** The gdna pmf feeds two consumers, and they want DIFFERENT
+estimands:
+
+| arm (true pmf injected into…) | transcript delta | fp_mass delta |
+|---|---|---|
+| the SCORER only (the EM's length term) | **−2,018** | −2,109 |
+| GEOMETRY only (opportunity → prior) | **+188,208** | +55,141 |
+| both | +186,355 | +54,733 |
+| the RNA pmf, both routes | −18,228 | −8,123 |
+| the fully-consistent TRUE PAIR, both routes | **+171,624** | +50,320 |
+
+⛔ **Pair-consistency is REFUTED as the mechanism** — the true pair regresses too. ⭐ The mechanism: the
+geometry/prior conversion assumes UNIFORM PLACEMENT (`EQUATIONS.md` §4.4 — the capture residual is a
+placement model), so it wants the uniform-frame chemistry law (~216 on the ladder); the REALIZED pmf
+(240, capture-tilted) answers the SCORER's question. Feeding the uniform-frame consumer the realized
+quantity double-counts capture; the fitted pmf's bias had been accidentally keeping geometry in its own
+frame. ⭐ Also real and separate: the true RNA pmf is worth **−18k** on this row — the sj-selection bias
+of the RNA fit (−4.75 bp) has its own price, exactly the owner's original instinct. ⚠ The drain reads
+`rna_pmf`/`global_pmf`, never `gdna_pmf`, so it is exonerated for g-arms but IS touched by r-arms.
+
+⭐⭐⭐ **ROUTING IS VERIFIED — the regression vanishes.** Realized law to the SCORER, fitted (uniform-frame)
+pair kept for GEOMETRY, measured on the ladder: `g05` capture-ON **+150,809 → +525** (inside the
+attribution bar), `g50` capture-ON −6,004 kept, `g50` capture-OFF +723 (inside the bar). ⚠ Read every
+delta against the ATTRIBUTION bar of a few thousand fragments (`ROADMAP.md` §0's attribution-floor row),
+not the reseed floor alone.
+
+⛔⛔ **AND THE HUNT'S DEEPEST FINDING IS GEOMETRY'S HYPERSENSITIVITY TO THE pmf TAIL, in both
+directions**: +188k at capture-ON from the frame slip, and −15.5k at capture-OFF from a ~3 % tail change
+(the full-integrated pmf in geometry) — the short-exon contained opportunity `E[(ell−L+1)+]` is on a
+knife edge (−66 % at ell = 100), so the prior's unit conversion amplifies tail perturbations. That is the
+effective-length-ruler territory §0 already carries, now with a mapped, reproducible 188k-fragment lever.
+⚠ The −15.5k capture-OFF geometry win is REAL and attributable but knife-edge-shaped; do not chase it
+without understanding the ruler first.
+
+**THE LANDING PLAN (next session, gated as usual):** `FLModels` grows a NAMED second estimand — the
+realized gDNA law (the integrated blend when its inputs are present, else the fitted pmf) — and
+`pipeline.py` hands THAT to the scorer's `gdna_fl` while every geometry consumer keeps `gdna_pmf`
+unchanged (byte-identical there). Also worth its own arm: the RNA fit's sj-selection bias is worth an
+attributable **−18k** on the regression row (`r_both`), the owner's original instinct — a separate,
+independently landable improvement.
+
 ⛔ **WHAT BLOCKS SHIPPING: the `g05` capture-ON compensating error**, which exists independently of this
 work and is visible in the ceiling. Fix that and this lands; until then the ladder net is negative.
 
