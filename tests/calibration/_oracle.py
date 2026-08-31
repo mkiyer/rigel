@@ -347,7 +347,9 @@ class OracleTruth:
         return cls.from_parts(full, parts, read_counts, n_ambiguous=n_ambiguous)
 
     @classmethod
-    def from_cached_parts(cls, drained_full, parts: dict, lift: dict) -> "OracleTruth":
+    def from_cached_parts(
+        cls, drained_full, parts: dict, lift: dict, read_counts: dict | None = None
+    ) -> "OracleTruth":
         """Assemble a DRAINED-frame oracle from CACHED pass-one partitions.
 
         ``drained_full`` is the whole payload after ``pipeline._drain_side_buffer(..., _lift=lift)``;
@@ -358,10 +360,10 @@ class OracleTruth:
         identity gate, for free (the same property ``from_bam(drain_with=...)`` relies on).
         """
         if not lift:
-            return cls.from_parts(drained_full, parts)
+            return cls.from_parts(drained_full, parts, read_counts)
         drained, n_amb = lift_drain_parts(lift, [parts[k] for k in ORIGINS])
         return cls.from_parts(
-            drained_full, dict(zip(ORIGINS, drained)), n_ambiguous=n_amb
+            drained_full, dict(zip(ORIGINS, drained)), read_counts, n_ambiguous=n_amb
         )
 
     @classmethod

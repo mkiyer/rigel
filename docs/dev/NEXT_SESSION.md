@@ -21,14 +21,17 @@
 
 ## What the next session should know before measuring anything
 
-* ⛔ **Every `slot_truth.npz` and every wave-1 instrument now speaks the DRAINED frame.** Standing
-  numbers from before today mix frames with anything measured now — re-derive, never compare across.
-  `ISSUES: re-derive-in-scope-baselines` is the sanctioned one-pass re-baseline and should happen
-  BEFORE quoting any panel number.
-* ⛔ **Wave 2 is not migrated** (list in `ISSUES: instruments-calibrate-undrained-cache`):
-  `policy_benchmark`, `pass0_vs_oracle`, `prior_vs_oracle`, `calibration_truth_ab`,
-  `pass0_claimed_ab`, `structural_claims_audit` and the census family still read pass one. A claim
-  spanning the waves compares two frames — say so beside it, or migrate the instrument first.
+* ✅ **The in-scope baselines are RE-DERIVED (2026-08-31), drained frame, same-session floors** —
+  `docs/dev/BASELINE_2026-08-31_drained_frame.md` is the snapshot; run the instrument for a current
+  number. The re-derived facts to know: worst IN-SCOPE scenario is `g98 ss.99 capture-ON` on the
+  0.8.0 metric (gDNA UNDER-called at near-pure objects — the pattern holds on every stratum) and
+  `g50 ss.50 capture-OFF` on solvability's Σ|err|; the relay hurts the solvable set on 9/12
+  contaminated conditions; MessagePolicy ≡ silent on all 46 in the new frame; the reseed floor is
+  ~30–2,700 transcript fragments per condition. ⛔ Nothing measured before 2026-08-31 is comparable.
+* ⛔ **Only wave-3 bank-readers still read pass one** (list in
+  `ISSUES: instruments-calibrate-undrained-cache`): the census family, `structural_claims_audit`,
+  `calibration_truth_ab`, `fl_pool_purity` and friends — migrate as touched. Everything reached
+  through `calibration_inputs`, `pass0_vs_oracle.measure_condition` or `prior_vs_oracle` is drained.
 * ⭐ **The owner's priority: the drain's certified-RNA leak** (`ISSUES: drain-contaminates-certified-rna`,
   elevated 2026-08-31 — "avoid all sources of false positives"). Up to 1.9 % of the certified-RNA
   channel at `g98 ss.99 ON` is drain-assigned gDNA. The issue carries three candidate repairs and the

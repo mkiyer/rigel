@@ -54,21 +54,18 @@ SCORING RULES, NON-NEGOTIABLE
   and this script refuses to average them in.
 * **An object with no mass is ABSENT, not ``f_g = 0``.** Most of any real index carries no fragments.
 
-⛔ **NO DRAIN, AND THAT IS FORCED, NOT AN OVERSIGHT.** T is the production accumulator run on the BAM
-split by true origin, and the second pass's multinomial draw is scored against the payload's own
-densities — so draining three partitions separately is not the same operation as draining the whole,
-and the sum-to-full identity that makes the oracle trustworthy would not survive it. Both T and every
-P arm here are therefore pass-one tallies. The drain is measured against per-fragment truth by
-``second_pass_accuracy.py`` and against the deliverable by ``calibration_truth_ab.py``; it is a
-different axis from this one.
-
-⚠ **AND IT HAS ONE CONSEQUENCE WORTH STATING, BECAUSE IT BIASES EVERY P ARM HERE.** The fitted length
-models are built from the UNDRAINED payload, and the drain is what fixes them: the RNA pool moves
-**−4.0 % → −0.21 %** off capture and **−1.5 % → +1.11 %** under it once the held (systematically LONG)
-fragments are returned. So the P arms are fed worse length models than production ships. ⭐ The direction
-is conservative for the conclusion drawn from ``C_input − P``: a worse fitted input can only make
-perfecting it look *more* valuable, and it still measures as worth ≈ 0. It would NOT be conservative for
-any claim about how good pass-0 is in absolute terms.
+⭐⭐ **THE DRAINED FRAME, since the 2026-08-31 frame ruling**
+(`ISSUES: instruments-calibrate-undrained-cache`). T and every arm describe the tally production
+calibrates: the whole is drained at the production seed, and each origin partition is drained by
+REPLAYING the whole's already-drawn choices (`second_pass.lift_choices`, via
+`OracleTruth.from_cached_parts`), which is what keeps sum-to-full exact — draining the partitions
+independently would not survive it, which is why an earlier revision of this file ruled "no drain,
+and that is forced". That ruling conflated the independent-drain hazard (real, and solved by the
+lift) with the frame choice (wrong: pass-one tallies fed every P arm WORSE length models than
+production ships — the held fragments are systematically long — and mis-stated the certified spliced
+channel by a fifth). ⚠ The oracle may carry a nonzero ``gdna_spliced_leak`` — production's own drain
+behaviour, recorded rather than refused (`ISSUES: drain-contaminates-certified-rna`) — and
+``n_ambiguous`` bounds the lift's origin attribution; report both beside any per-origin claim.
 
 Gates: ``tests/calibration/test_pass0_vs_oracle.py`` (9, each carrying its own perturbation).
 
@@ -112,7 +109,7 @@ from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.substrate import CalibrationSubstrate  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
+from rigel.pipeline import _drain_side_buffer, _native_detect_sj_tag, scan_and_buffer  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
 #: ⛔ **The CURRENT panel, and this default has been stale once already.** It read ``pilot`` until
@@ -422,7 +419,8 @@ def calibrate_arm(payload, kwargs, config, *, gdna_pmf=None, rna_pmf=None, debug
     return calibrate(payload=payload, config=config, _debug=debug, **call)
 
 
-def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root):
+def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root,
+                         lift=None):
     """T, from a per-origin cache when one is valid — otherwise split, scan, and populate it.
 
     ⭐⭐ **WHY THIS IS WORTH CACHING AND THE FULL SCAN IS NOT.** The debug loop is "measure the whole
@@ -441,14 +439,21 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
     ⚠ And the sum-to-full identity is re-run over the loaded arrays regardless
     (:meth:`OracleTruth.from_parts`): the cache can only skip the scanning, never the validation.
     """
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): ``full_payload`` is the drained whole and
+    # ``lift`` the drain's box; the partitions are drained by replaying the whole's choices. An empty
+    # ``lift`` (no held fragments, or a pre-ruling caller) keeps the pass-one identity unchanged.
+    lift = lift or {}
     if cache_root is None:
-        return OracleTruth.from_bam(bam, index, pipeline_config, Path(work_dir), tag,
-                                    full_payload=full_payload)
+        return OracleTruth.from_bam(
+            bam, index, pipeline_config, Path(work_dir), tag, full_payload=full_payload,
+            drain_with=((lift["undrained"], lift["choices"], lift["region_types"], lift["sj"])
+                        if lift else None),
+        )
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     dirs = {k: Path(cache_root) / tag / k for k in ORIGINS}
     try:
         parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
-        truth = OracleTruth.from_parts(full_payload, parts)
+        truth = OracleTruth.from_cached_parts(full_payload, parts, lift)
     except (FileNotFoundError, KeyError, ScanCacheKeyError):
         pass  # no cache, or it does not describe this index/scan — rebuild it below
     else:
@@ -465,7 +470,9 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
         write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
                          bam=paths[origin], scan_config=scan)
     ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
-    return OracleTruth.from_parts(full_payload, parts, read_counts)
+    # ⚠ the CACHE stays pass one (write_scan_cache refuses a drained payload); the returned truth is
+    # lifted into the drained frame exactly as the cached path is.
+    return OracleTruth.from_cached_parts(full_payload, parts, lift, read_counts)
 
 
 def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool:
@@ -595,11 +602,18 @@ def measure_condition(
             write_scan_cache(_sc_dir, payload=payload, strand_model=strand_model, index=index,
                              bam=bam, scan_config=scan)
 
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): every arm below and T itself describe the
+    # tally production calibrates. The drain replays at the production seed; the cache stays pass one.
+    lift: dict = {}
+    payload = _drain_side_buffer(
+        payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
+    )
+
     # T. ⭐ Sum-to-full is validated on every bank exactly and RAISES if it does not hold — on the
     # cached path as well as the scanned one — so nothing below can run on an oracle that is not the
-    # production payload split by origin.
+    # production payload split by origin. In the drained frame it is also the lift's identity gate.
     oracle = load_or_build_oracle(
-        bam, index, pipeline_config, work_dir, tag, payload, oracle_cache
+        bam, index, pipeline_config, work_dir, tag, payload, oracle_cache, lift
     )
 
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
@@ -612,11 +626,18 @@ def measure_condition(
         build_sj_geometry_arrays,
     )
 
+    from rigel.calibration.gdna_density import region_lengths_from_partition
+    from rigel.calibration.splice_graph import build_region_partition_arrays
+
     max_size = int(payload.max_length)
+    _fb, _fo, _frt = build_region_partition_arrays(index)
     fl = build_fl_models(
         payload,
         sj_opportunity=crossing_probability_from_index(index, max_size),
         gdna_opportunity=gdna_opportunity_from_index(index, max_size),
+        # ⭐ production parity: the region args enable the two-pool contrast, exactly as pipeline.py
+        region_lengths=region_lengths_from_partition(_fb, _fo, len(_frt)),
+        region_types=_frt,
     )
     truth_gdna_pmf, truth_rna_pmf = truth_pmfs(max_size) if truth_pmfs is not None else (None, None)
     kwargs = dict(

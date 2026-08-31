@@ -75,21 +75,15 @@ when the question is about the *projection* rather than about the EM. ``Fo − F
 population, per locus, and table ⑪ is it.
 
 ⛔⛔ **UNDRAINED ON EVERY ARM, AND THAT IS FORCED — WITH A MEASUREMENT, NOT AN ASSUMPTION.**
-Production drains the side buffer before calibration; here both sides run undrained so P and O share
-one frame, and the caveat is PRICED rather than waved at: the ``drained`` arm recomputes the shipped
-prior on the production (drained) payload, so ``P_drained − P`` is the drain's own contribution as a
-number. Pass ``--no-drained-arm`` to skip it.
-⚠ **The justification this paragraph used to give was measured WRONG on 2026-08-31 and is corrected
-here.** It attributed the gdna-partition spliced deposits (1,026 ``boundary_spliced`` + 526 ``sj`` at
-the retired ``g25 ss0.50 capture_on``) to canonical-key ties in the lift replay. Decomposed on the
-fl-gap panels: ``flgap_rna_short`` shows the leak at ZERO ambiguity (15 records) and
-``flgap_rna_long`` shows 5,805 ambiguous records with ZERO leak — so the leak is the DRAIN's own
-behaviour (the whole-library draw genuinely picks a spliced hypothesis for some true-gDNA fragments;
-production's tally violates "gDNA never spliced" as a statement about deposits), and the key ties are
-a separate, bounded attribution error that ``lift_choices`` counts. ``OracleTruth._validate``'s
-exact-zeros gate therefore refuses a FACT of the production frame, not an invalid oracle. Whether the
-instruments move to the drained frame is `ISSUES: instruments-calibrate-undrained-cache`; the leak
-itself is `ISSUES: drain-contaminates-certified-rna`.
+⭐⭐ **THE DRAINED FRAME, since the 2026-08-31 frame ruling**
+(`ISSUES: instruments-calibrate-undrained-cache`). P, O and every truth arm describe the tally
+production calibrates: the whole is drained at the production seed, and the oracle partitions are
+drained by REPLAYING the whole's choices (`OracleTruth.from_cached_parts`), which keeps sum-to-full
+exact. An earlier revision ran both sides undrained and recorded that a drained oracle was
+inadmissible; that attribution was measured WRONG (``flgap_rna_short``: leak 15 at ZERO ambiguity —
+the spliced-gdna deposits are the DRAIN's own behaviour, recorded as ``gdna_spliced_leak``, not a
+lift artefact; `ISSUES: drain-contaminates-certified-rna`). The lift's real attribution error is
+bounded and reported as ``n_ambiguous``.
 
 ⛔ **THE UNITS THE ERROR IS REPORTED IN, and both are needed.**
 
@@ -690,11 +684,18 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         build_sj_geometry_arrays,
     )
 
+    from rigel.calibration.gdna_density import region_lengths_from_partition
+    from rigel.calibration.splice_graph import build_region_partition_arrays
+
     max_size = int(payload.max_length)
+    _fb, _fo, _frt = build_region_partition_arrays(index)
     fl = build_fl_models(
         payload,
         sj_opportunity=crossing_probability_from_index(index, max_size),
         gdna_opportunity=gdna_opportunity_from_index(index, max_size),
+        # ⭐ production parity: the region args enable the two-pool contrast, exactly as pipeline.py
+        region_lengths=region_lengths_from_partition(_fb, _fo, len(_frt)),
+        region_types=_frt,
     )
     cal = calibrate(
         payload=payload,
@@ -713,17 +714,13 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
 
 
 def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cache=None,
-                      drained_arm=True, emit_masses=None) -> ConditionResult:
-    """Scan once, build P / O / S / Fo / F, and price the drain caveat.
+                      emit_masses=None) -> ConditionResult:
+    """Scan once, drain to the production frame, build P / O / S / Fo / F.
 
-    ⚠ **Two scans of the same BAM when ``drained_arm`` is on, and they are not interchangeable.** The
-    fragment BUFFER is consumed by ``quant_from_buffer`` (and freed by it), so a second prior needs a
-    second scan; the payload could be cached but the buffer cannot.
-
-    ⚠ **Plus one pysam WALK of the same BAM**, for the ``frag_id → true origin`` key the ``Fo`` arm
-    joins on. Deliberately uncached: it is ~30 s at 10 M fragments against the two scans it sits beside,
-    and a cache keyed on anything weaker than the scan cache's own manifest is how a stale truth array
-    gets read as a result.
+    ⚠ **One scan plus one pysam WALK of the same BAM**, the walk for the ``frag_id → true origin``
+    key the ``Fo`` arm joins on. Deliberately uncached: it is ~30 s at 10 M fragments against the scan
+    it sits beside, and a cache keyed on anything weaker than the scan cache's own manifest is how a
+    stale truth array gets read as a result.
     """
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
@@ -731,8 +728,14 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
 
     stats, strand_model, buffer, payload = scan_and_buffer(bam, index, scan)
     n_held = int(payload.deferred.n_fragments)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): drained at the production seed; the oracle
+    # partitions are drained by replaying the whole's choices, and sum-to-full then validates the lift.
+    lift: dict = {}
+    payload = _drain_side_buffer(
+        payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
+    )
     parts = _oracle_parts(bam, index, scan, pipeline_config, work_dir, tag, oracle_cache)
-    oracle = OracleTruth.from_parts(payload, parts)  # sum-to-full, UNDRAINED, raises if invalid
+    oracle = OracleTruth.from_cached_parts(payload, parts, lift)  # raises if the lift breaks a bank
     frag_origin, walk = frag_id_origins(bam, scan)
     # ⛔ Before anything is scored: the walk must have issued the same frag_ids the scan did.
     check_walk_alignment(walk, stats)
@@ -761,54 +764,17 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         d.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(d / "oracle_masses.npz", **oracle.override_masses(ra))
 
-    # ⭐ THE DRAIN CAVEAT, PRICED. Two numbers, and they answer different questions: whether a DRAINED
-    # oracle is admissible at all (it is not, and the leak says why), and how far the shipped prior
-    # moves when the drain runs (which is what "undrained" costs this table).
-    drain: dict = {"n_held": n_held, "n_ambiguous": None, "gdna_spliced_leak": None,
-                   "p_drained_vs_p": None}
-    if drained_arm and n_held:
-        from rigel.second_pass import drain as sp_drain, lift_choices
-
-        lift: dict = {}
-        # ⭐ ``drain`` is pure — payload in, payload out — so ``payload`` is still the undrained
-        # tally the arms above were scored on, and ``payload_d`` is what production would calibrate.
-        payload_d = _drain_side_buffer(
-            payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
-        )
-        lifted, n_amb = lift_choices(
-            lift["undrained"], [parts[k] for k in ORIGINS], lift["choices"]
-        )
-        parts_d = {
-            k: sp_drain(parts[k], ch, region_types=lift["region_types"], sj=lift["sj"])
-            for k, ch in zip(ORIGINS, lifted)
-        }
-        drain["n_ambiguous"] = int(n_amb)
-        drain["gdna_spliced_leak"] = int(
-            np.asarray(parts_d["gdna"].boundary_spliced_count, np.int64).sum()
-            + np.asarray(parts_d["gdna"].sj_count, np.int64).sum()
-        )
-        # ⚠ A SECOND SCAN, and it buys one thing: a fresh fragment BUFFER. The first was handed to
-        # ``quant_from_buffer`` and a buffer is not re-scannable; the payload is cacheable and the
-        # buffer is not. The scan is a function of the BAM, the index and the scan config alone, so
-        # this reproduces the first one exactly.
-        _s2, sm2, buf2, _p2 = scan_and_buffer(bam, index, scan)
-        _c2, _f2, ml2, p_drained, _u2 = _calibrate_and_prior(
-            payload_d, sm2, buf2, _s2, index, ra, pipeline_config
-        )
-        # ⚠ The drained run builds its OWN loci, and they need not match: build_multi_loci depends on
-        # the scored fragments, which depend on the calibration, which depends on the drain. A
-        # mismatch is REPORTED, never silently index-aligned.
-        drain["n_loci_drained"] = len(ml2)
-        drain["loci_match"] = len(ml2) == len(multi_loci)
-        if drain["loci_match"]:
-            drain["p_drained_vs_p"] = {
-                "gdna": dataclasses.asdict(
-                    score_arm(p_drained.gdna_prior_count, p_arm.gdna_prior_count)
-                ),
-                "rna": dataclasses.asdict(
-                    score_arm(p_drained.rna_prior_count, p_arm.rna_prior_count)
-                ),
-            }
+    # ⭐ the drained-frame report: the leak is production's own behaviour, recorded beside the
+    # numbers it rides with (`ISSUES: drain-contaminates-certified-rna`); ``n_ambiguous`` bounds the
+    # lift's origin attribution. ``gdna_spliced_leak`` is ``None`` only when nothing was held.
+    drain: dict = {
+        "n_held": n_held,
+        "n_ambiguous": int(oracle.n_ambiguous),
+        "gdna_spliced_leak": (
+            None if oracle.gdna_spliced_leak is None
+            else int(sum(oracle.gdna_spliced_leak.values()))
+        ),
+    }
 
     g = float(np.asarray(oracle.parts["gdna"].region_start_count, np.int64).sum())
     r = float(
@@ -1133,31 +1099,18 @@ def report(rows: list[dict]) -> None:
               f"{float(np.mean([x['w_rel_err'] for x in sub])):>11.4f} "
               f"{float(np.median([x['median_rel_err'] for x in sub])):>11.4f}")
 
-    # ── ⑥ the drain caveat, as a number ──
+    # ── ⑥ the drained-frame report ──
     print()
-    print("  ⑥ ⛔ THE DRAIN CAVEAT — measured, not assumed")
-    d = [r["drain"] for r in rows if r["drain"].get("n_ambiguous") is not None]
-    if not d:
-        print("     (not measured — --no-drained-arm)")
-    else:
-        amb, held = sum(x["n_ambiguous"] for x in d), sum(x["n_held"] for x in d)
-        leak = sum(x["gdna_spliced_leak"] for x in d)
-        n_leak = sum(1 for x in d if x["gdna_spliced_leak"] > 0)
-        print(f"     a DRAINED oracle is INADMISSIBLE here: {amb:,} of {held:,} held fragments "
-              f"({amb / max(held, 1):.2%}) tie on the deferred bank's key across origins,")
-        print(f"     depositing {leak:,} spliced records into the gdna partition on "
-              f"{n_leak}/{len(d)} conditions. gDNA cannot splice; OracleTruth refuses it.")
-        mism = [x for x in d if not x.get("loci_match", True)]
-        if mism:
-            print(f"     ⚠ {len(mism)} conditions build a DIFFERENT number of loci once drained "
-                  "(the partition is a function of the scoring stage) — not compared.")
-        ok = [x for x in d if x.get("p_drained_vs_p")]
-        for arm in ("gdna", "rna"):
-            a = _agg([ArmScore(**x["p_drained_vs_p"][arm]) for x in ok])
-            if a:
-                print(f"     what the drain costs this table, {arm:>4} arm: "
-                      f"Σ|P_drained − P| = {a.abs_err:,.0f} on a P total of {a.total_ref:,.0f} "
-                      f"({a.rel:.3%}), net {a.net_err:+,.0f}")
+    print("  ⑥ THE DRAINED FRAME — the lift's attribution bound, and production's certified-RNA leak")
+    d = [r["drain"] for r in rows]
+    amb, held = sum(x["n_ambiguous"] for x in d), sum(x["n_held"] for x in d)
+    leak = sum(x["gdna_spliced_leak"] or 0 for x in d)
+    n_leak = sum(1 for x in d if (x["gdna_spliced_leak"] or 0) > 0)
+    print(f"     {held:,} held fragments drained at the production seed; lift ambiguity "
+          f"{amb:,} ({amb / max(held, 1):.2%}) bounds the per-origin truth attribution.")
+    print(f"     ⚠ the drain deposited {leak:,} spliced records into the gdna partition on "
+          f"{n_leak}/{len(d)} conditions — production behaviour, RECORDED "
+          "(ISSUES: drain-contaminates-certified-rna), never an oracle refusal.")
 
     # ── ⑦ the per-condition ladder, because a stratum total hides the shape ──
     print()
@@ -1238,8 +1191,6 @@ def main() -> int:
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--emit-oracle-masses", type=Path, default=None,
                     help="write the oracle mass override per condition (locus-FREE) for item 3")
-    ap.add_argument("--no-drained-arm", action="store_true",
-                    help="skip the drain caveat measurement (halves the wall clock)")
     ap.add_argument("--jobs", type=int, default=1,
                     help="run this many conditions CONCURRENTLY by re-invoking on shards. The "
                          "conditions are independent, so this changes no number.")
@@ -1271,8 +1222,6 @@ def main() -> int:
                    "--conditions", *sh]
             if cache is not None:
                 cmd += ["--oracle-cache", str(cache)]
-            if args.no_drained_arm:
-                cmd.append("--no-drained-arm")
             if args.emit_oracle_masses is not None:
                 cmd += ["--emit-oracle-masses", str(args.emit_oracle_masses)]
             procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE,
@@ -1305,8 +1254,7 @@ def main() -> int:
         print(f"  … {name}", flush=True)
         results.append(measure_condition(
             bam, index, pipeline_config, args.work_dir, name,
-            oracle_cache=cache, drained_arm=not args.no_drained_arm,
-            emit_masses=args.emit_oracle_masses,
+            oracle_cache=cache, emit_masses=args.emit_oracle_masses,
         ))
     payload = to_json(results)
     if args.json is not None:

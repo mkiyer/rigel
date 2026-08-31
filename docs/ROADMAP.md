@@ -63,17 +63,22 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated
 fix → **add the offending transcripts to the test chromosome** → re-run → repeat.
 
-1. ⭐ **Measurement integrity**: the frame is RULED and wave 1 landed —
-   `calibration_inputs` and its ten consumers now score the DRAINED frame, `slot_truth` re-certified
-   on both panels (`ISSUES: instruments-calibrate-undrained-cache` has the record and the wave-2
-   remainder). Next here: `ISSUES: re-derive-in-scope-baselines` with fresh noise floors, IN the
-   drained frame — every later verdict quotes it.
-2. ⭐ **The drain's certified-RNA leak** — `ISSUES: drain-contaminates-certified-rna` (owner,
+✅ **Measurement integrity is DONE (2026-08-31)**: the frame is ruled and migrated through the
+loaders (`ISSUES: instruments-calibrate-undrained-cache` — only wave-3 bank-readers remain, migrate
+as touched), `slot_truth` is re-certified, and **the in-scope baselines are re-derived in the drained
+frame with same-day noise floors** — five instruments, whole ladder; run any of them for a current
+number. ⭐ The re-derived facts a ranking can lean on: the worst IN-SCOPE scenario is
+`g98 ss.99 capture-ON` on the 0.8.0 metric (almost entirely UNDER-called gDNA at near-pure objects —
+the shortfall pattern holds on every stratum) and `g50 ss.50 capture-OFF` on `solvability_audit`'s
+Σ|err| — dissect both before choosing; the relay hurts the solvable set on 9/12 contaminated
+conditions while winning the blind rows and all four zero controls.
+
+1. ⭐ **The drain's certified-RNA leak** — `ISSUES: drain-contaminates-certified-rna` (owner,
    2026-08-31: avoid all sources of false positives). Derive a repair; do not tune one.
-3. ⭐ **The dissection loop on the worst in-scope scenario**, answering
+2. ⭐ **The dissection loop on the worst in-scope scenario** (named above), answering
    `ISSUES: message-value-for-blind-slots` on the way (no solver needed; the anchored twin block was
    built for it).
-4. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
+3. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint — the one open BUILD aimed directly at
    the 0.8.0 metric — with `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
 

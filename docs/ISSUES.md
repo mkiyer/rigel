@@ -20,7 +20,7 @@ because a graveyard row without its number is an invitation to rebuild.
 ## OPEN
 
 ### instruments-calibrate-undrained-cache
-`priority: now (RULED — migration wave 1 landed; wave 2 remains) · kind: decision · stamped: 2026-08-31`
+`priority: later (RULED and migrated through waves 1–2; only wave-3 bank-readers remain) · kind: decision · stamped: 2026-08-31`
 ⭐⭐ **RULED (owner, 2026-08-31): instruments monitor the DRAINED frame.** Landed the same day:
 `scan_cache.calibration_inputs` now drains at the production seed, builds the fl models exactly as
 production does (region args supplied, so the two-pool contrast runs — a third divergence found and
@@ -33,19 +33,23 @@ partitionings, gdna-first shared choice slice, `rna-strands-close` passes exactl
 `transfer_variance_audit`, `composition_evidence_census`, `prior_units_check`); `slot_truth`
 re-certified on both panels in the drained frame. Gates: `tests/calibration/test_oracle.py` (frame
 behaviour, each perturbed) and `tests/test_scan_cache.py` (the drained contract + determinism).
-⛔ **WAVE 2 — still on the pass-one frame, migrate as touched**: `policy_benchmark`,
-`pass0_vs_oracle`, `prior_vs_oracle` (its undrained choice is now unjustified — the gate refusal it
-cited is redesigned), `calibration_truth_ab`, `pass0_claimed_ab`, `structural_claims_audit`,
-`held_flux_census`, `gdna_pool_census`, `landscape_head_to_head`, `abundance_landscape_census`,
-`transport_dispersion`, `fl_pool_purity`, `certified_q_census`, `anchor_opportunity_census`
-(`fl_anchor_gap` and `boundary_q_population` already drain their whole). ⚠ Until wave 2, a claim that
-spans a wave-1 and a wave-2 instrument compares two frames — say so beside it.
-The calibration instruments run `calibrate()` on the UNDRAINED scan cache
-(`scan_cache.calibration_inputs`) while production drains first (`pipeline._drain_side_buffer`). ⭐ The
-undrained choice was DELIBERATE and recorded in `prior_vs_oracle.py` — but its justification is now
-measured-incomplete (see below), and the gap sat unpriced inside the release metric until it produced
-the RNA-length-law misdiagnosis (`ISSUES: the-rna-length-law-fix`, CLOSED).
-⭐⭐ **PRICED 2026-08-31** (7 ladder conditions, both arms through `calibration_vs_oracle`'s own
+⭐ **WAVE 2 landed the same day** for the loaders the baseline needed: `policy_benchmark` (now
+consistent with the drained-frame `slot_truth` it scores against), `pass0_vs_oracle.measure_condition`
++ `load_or_build_oracle` (drain + lifted oracle + production fl models — which also migrates every
+rider: `solvability_audit`, `worst_objects`, `vertex_ceiling`, `psi_channel_ablation`,
+`pass0_claimed_ab`, `backbone_parity`, `ladder_arm_ab`, `length_ceiling`), and `prior_vs_oracle`
+(the old "drained oracle inadmissible" arm structure deleted; its drained arm IS the frame now;
+`mass_prior_ab` rides it). Both files' recorded no-drain rulings corrected in place.
+⛔ **WAVE 3 — standalone bank-readers still on pass one, migrate as touched**:
+`structural_claims_audit`, `held_flux_census`, `gdna_pool_census`, `landscape_head_to_head`,
+`abundance_landscape_census`, `transport_dispersion`, `fl_pool_purity`, `certified_q_census`,
+`anchor_opportunity_census`, `calibration_truth_ab` (`fl_anchor_gap` and `boundary_q_population`
+already drain their whole). ⚠ A claim spanning a migrated and an unmigrated instrument compares two
+frames — say so beside it.
+⭐ **The history**: the undrained choice was deliberate and recorded in `prior_vs_oracle.py`, but its
+justification was measured-incomplete, and the gap sat unpriced inside the release metric until it
+produced the RNA-length-law misdiagnosis (`ISSUES: the-rna-length-law-fix`, CLOSED).
+⭐⭐ **The PRICING that decided the ruling (2026-08-31)** (7 ladder conditions, both arms through `calibration_vs_oracle`'s own
 `measure_condition`; drained oracle = whole drained at the production seed, cached parts drained by
 `second_pass.lift_choices` replay, sum-to-full re-validated on the drained frame):
 ① **The 0.8.0 metric (P-vs-O misplaced mass) moves ≤1.8 % on every in-scope contaminated stratum** —
@@ -58,15 +62,9 @@ production by a fifth. ③ The RULER comparison moves up to −12 % (`g50 ss.99 
 documented. ④ Lift ambiguity is bounded and reported: 34 → 24,830 records per condition (≤6.9 % of held,
 ≤0.25 % of the library), worst where the library is RNA-heavy at equal lengths. ⑤ The drain LEAK is a
 separate finding — `ISSUES: drain-contaminates-certified-rna`.
-⭐ **Recommendation**: migrate the instruments to the DRAINED frame — it is production's tally, and the
-undrained frame misdescribes exactly the channels current work leans on (zero controls, certified flux,
-the ruler) — accepting the costs: the oracle's exact-zeros gate becomes a RECORDED leak count instead of
-an assertion (a certification-semantics change), `slot_truth` re-certifies on all 46 conditions, and the
-standing numbers re-derive (which `ISSUES: re-derive-in-scope-baselines` owes anyway — do them in one
-pass, in the ruled frame). ⛔ That gate change redefines what "certified" means and is the owner's call.
-**Closes when**: the owner rules on the frame; then either the migration lands (gate redefinition +
-re-certification + re-baseline) or this record is the reason-not-to. Prototype:
-`drained_frame_price.py` in the 2026-08-31 session scratchpad.
+⭐ The in-scope baselines were re-derived the same day in the drained frame with same-session noise
+floors (five instruments, whole ladder — run any of them for a current number).
+**Closes when**: the wave-3 bank-readers are migrated (as touched) and no instrument speaks pass one.
 
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
@@ -109,14 +107,6 @@ number is measured per condition); ③ a derived posterior-odds requirement for 
 genomic when the genomic hypothesis is live (⛔ any fixed floor is a tuned constant — only a derived
 form is admissible). Score any repair on false-positive mass at the zero-RNA direction AND on the
 RNA length-law residual (the drain's repair of the spliced pool must survive).
-
-### re-derive-in-scope-baselines
-`priority: now · kind: measurement · stamped: 2026-08-22`
-Most calibration state numbers were measured on the 36-condition ladder retired 2026-08-13, and
-everything since predates the sparse-nascent rebuild of 2026-08-22. Re-run `prior_vs_oracle.py`,
-`solvability_audit.py` and `calibration_vs_oracle.py` on the current panel, re-recording the reseed noise
-floor in the same session (`TRAPS: re-record-the-baseline`). Cheap insurance that makes every other
-ranking quotable.
 
 ### measured-prior-rung-4
 `priority: now · kind: build · stamped: 2026-08-26`

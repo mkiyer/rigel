@@ -133,7 +133,6 @@ def _measure(result, tmp_path, tag):
         tmp_path,
         tag,
         oracle_cache=None,
-        drained_arm=False,
     )
 
 

@@ -48,18 +48,15 @@ if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.fl import build_fl_models  # noqa: E402
-from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
-from rigel.calibration.sj_opportunity import crossing_probability_from_index  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
     build_sj_geometry_arrays,
 )
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.scan_cache import read_scan_cache  # noqa: E402
+from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 
@@ -94,17 +91,16 @@ def _truth_gdna(cache_dir: Path) -> dict:
 def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policies):
     """One condition, every policy: `sum |estimate - truth|` per axis, in fragments."""
     cache = read_scan_cache(cache_dir / "_main", index)
-    payload = cache.payload
-    fl = build_fl_models(
-        payload,
-        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
-    )
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): `calibration_inputs` drains at the
+    # production seed and builds the production fl models (two-pool contrast included) — the same
+    # frame `slot_truth.npz` is now certified in, so estimate and truth speak one tally.
+    kw = calibration_inputs(cache, index)
+    payload = kw["payload"]
     kwargs = dict(
         region_arrays=region_arrays,
-        strand_model=cache.strand_model,
-        gdna_fl_pmf=fl.gdna_pmf,
-        rna_fl_pmf=fl.rna_pmf,
+        strand_model=kw["strand_model"],
+        gdna_fl_pmf=kw["gdna_fl_pmf"],
+        rna_fl_pmf=kw["rna_fl_pmf"],
         sj=sj,
         boundary_flags=boundary_flags,
     )
