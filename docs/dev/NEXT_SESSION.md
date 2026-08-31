@@ -53,111 +53,36 @@ contaminated fraction is unestablished; the decline rule does not fire at `g00` 
 (harmless, measured — the derived repair is an SE carrying `rho`'s own relative error rather than dropping
 it as common-mode); and **nothing has been run on real data** (`real-data-is-a-test-input`).
 
-## ⭐⭐⭐ THE INTEGRATED fl ESTIMATOR — prototyped 2026-08-31, measured, NOT landed
+## ✅ THE FRAGMENT-LENGTH WORK IS DONE (2026-08-31) — two estimands, routed, landed
 
-The owner's design: capture is a SPECTRUM, so regions and boundaries must be ONE solve with no regime
-switch. Prototyped in full (`integrated_fl_prototype.py.txt` beside this file is the exact code) and
-measured on all 32 rows of four panels:
+Four commits: the contained contrast (`a4b6a134`), the shape closure that was later reversed
+(`7314632d`), the diagnosis (`34bae6b4`), and the routing (`496c1b81`). `ROADMAP.md` §0 carries the
+state; the mechanism is `calibration/fl.py` + `gdna_density.py`.
 
-* **stage 1** — the shipped contained machinery, unchanged.
-* **stage 2** — per-boundary composition, with the REGIONS calibrating the BOUNDARIES: probes bind
-  indiscriminately, so at one boundary gDNA and nascent share the enrichment and it CANCELS from the
-  composition: `R_b = (rho_r,adj/rho_off)·(mu_r−1)/(mu_g−1)`, `a_b = 1/(1+R_b)`, with `rho_r,adj` the
-  adjacent region's own one-sided RNA excess. The crossing pair is then solved COMPLEMENT-FIRST
-  (`r_hat` clipped, subtracted from the mixture) — algebraically the same 2×2, conditioned so the noise
-  enters damped by `(1 − a_mix)`, small exactly when the separation is small.
-* **stage 3** — the EXCESS-enrichment correction: the sampled union already carries every class's
-  uniform part, so the unsampled on-target classes (contained-in-exon, spanning-exon) enter weighted by
-  `(eps_e − 1)+` only — measured per exon from its own boundaries, signed means so noise cancels. At
-  `eps = 1` the correction vanishes IDENTICALLY: no capture ⇒ byte-equal to the shipped estimator.
+**The idea, in one line:** "the gDNA fragment-length distribution" was ONE NAME over TWO QUANTITIES.
+`gdna_pmf` is the UNIFORM-FRAME law — the chemistry, and what the opportunity/prior mathematics assumes,
+since it counts start positions under uniform placement and is applied where `rho` is fitted.
+`gdna_realized_pmf` is the LIBRARY CENSUS — capture's selection included, which is what the EM's
+per-fragment scorer conditions on. ⭐ **Off capture they are the SAME ARRAY**, which is why one name
+sufficed until capture split them; the cost of confusing them is +188,208 transcripts, measured.
 
-**Measured (pmf vs origin-split oracle): matches (±1–2 bp) or improves on 31/32 rows; every sign error
-(+26 … +35 bp rows) eliminated; ladder capture-ON −24 → −3.1…−3.4 bp with TV 3× better; capture-OFF
-inert everywhere (≤ +0.6 bp).** The one exception: gdna_long `g05` capture-ON −43.3 vs −38.4, TV better
-by 29 % — a shared residual, not a regression.
+**Verified on the landed code**: the +150,809 regression → **+293**; net **−4,350** transcripts over
+eleven scenarios spanning both fl-gap sign arms and the whole capture spectrum; every capture-OFF row
+within ±11; the `g00` zero control at +1. Largest wins gdna_long `g50` unstranded ON **−3,477**, `g05` ON
+−399, equal-length `g98` ON −345.
 
-⭐⭐⭐ **MEASURED END TO END, AND THE FIRST VERDICT WAS WRONG.** I scored it on `gdna_frac_est`, called it
-worthless, and closed it. TRANSCRIPT accuracy — the fl model's actual consumer, the EM's per-fragment
-assignment — says otherwise. ⛔ The mistake to learn from: `em_fl_ceiling.py` prints `gdna_frac_est` under
-a "THE PRODUCT" banner, and that label is right for the CONTAINED contrast (a composition fix) and WRONG
-for this one (a shape fix whose consumer is the EM).
+⛔ **THE ONE THING LEFT, SCOPED AND MEASURED: the RNA pmf's GEOMETRY bias.** Its three consumers split
+**scorer +156 / drain −822 / geometry −18,208**, so RNA needs NO second estimand and no routing — it needs
+a bias fix where `effective_lengths_em` reads it. The sj de-tilt leaves a residual −4.75 bp because longer
+fragments cross more junctions. ⭐ A single, independently landable change with its own A/B, and the last
+known fragment-length defect. ⚠ Measure before assuming symmetry with gDNA — that measurement is exactly
+what stopped the wrong thing being built here.
 
-**Capture-OFF — safe, and better.** Every test-chromosome row inside the reseed floor (`g00` EXACTLY
-unchanged); the ladder's `g50` capture-OFF row **−15,544 fragments and −2,470 false-positive mass**, both
-far outside it.
-
-**Capture-ON — large wins, one large loss.** −7,669 (**−72 %**) on gdna_long `g50` unstranded with
-false-positive mass 155 → 8; −6,970 on the ladder `g50`; −407, −172, −155 elsewhere. ⛔ **But the ladder's
-`g05` capture-ON row is +150,809 WORSE, 86× the floor**, so the ladder net is +128k worse and **the
-estimator does not meet the "matches or improves everywhere" bar.**
-
-⭐⭐ **THAT ROW IS NOT THE ESTIMATOR'S FAULT, and the ceiling proves it**: fed the simulator's EXACT gDNA
-pmf the same row costs **+186,333**. It REWARDS a wrong pmf — two errors partly cancelling, `ROADMAP.md`
-§0's effective-length ruler finding in a second place. The integrated estimator lands at 81 % of the
-perfect-pmf damage: it behaves like an accurate estimator on a row that punishes accuracy. ⚠ Counterweight,
-stated honestly: on the row where perfect HELPS it captures only 13 % of the gain.
-
-⭐⭐⭐ **THE ROBUSTNESS RESULT IS INDEPENDENT AND IS THE STRONGEST ARGUMENT.** Poisson-thinning the contained
-fragments toward the infinite-capture limit — which is what stronger depletion IS — the SHIPPED estimator
-**collapses at ~1,000 contained fragments to +31 bp and stays there SILENTLY** (its contrast declines and
-it falls back to the raw four-pool sum), while the integrated one holds to **19 fragments** and then
-declines honestly. **50× margin**, and a correctness property, not an accuracy trade. ⚠ Not immune at the
-true limit: it reads `rho_off` and the adjacent RNA excess from the contained regions, needing a RATIO
-where the shipped one needs a SHAPE — that buys the 50×, not immunity.
-
-⭐⭐⭐ **THE +150k REGRESSION IS DIAGNOSED — a SIX-ARM channel split at ladder `g05` capture-ON, and the
-answer is a FRAME error, not an accuracy one.** The gdna pmf feeds two consumers, and they want DIFFERENT
-estimands:
-
-| arm (true pmf injected into…) | transcript delta | fp_mass delta |
-|---|---|---|
-| the SCORER only (the EM's length term) | **−2,018** | −2,109 |
-| GEOMETRY only (opportunity → prior) | **+188,208** | +55,141 |
-| both | +186,355 | +54,733 |
-| the RNA pmf, both routes | −18,228 | −8,123 |
-| the fully-consistent TRUE PAIR, both routes | **+171,624** | +50,320 |
-
-⛔ **Pair-consistency is REFUTED as the mechanism** — the true pair regresses too. ⭐ The mechanism: the
-geometry/prior conversion assumes UNIFORM PLACEMENT (`EQUATIONS.md` §4.4 — the capture residual is a
-placement model), so it wants the uniform-frame chemistry law (~216 on the ladder); the REALIZED pmf
-(240, capture-tilted) answers the SCORER's question. Feeding the uniform-frame consumer the realized
-quantity double-counts capture; the fitted pmf's bias had been accidentally keeping geometry in its own
-frame. ⭐ Also real and separate: the true RNA pmf is worth **−18k** on this row — the sj-selection bias
-of the RNA fit (−4.75 bp) has its own price, exactly the owner's original instinct. ⚠ The drain reads
-`rna_pmf`/`global_pmf`, never `gdna_pmf`, so it is exonerated for g-arms but IS touched by r-arms.
-
-⭐⭐⭐ **ROUTING IS VERIFIED — the regression vanishes.** Realized law to the SCORER, fitted (uniform-frame)
-pair kept for GEOMETRY, measured on the ladder: `g05` capture-ON **+150,809 → +525** (inside the
-attribution bar), `g50` capture-ON −6,004 kept, `g50` capture-OFF +723 (inside the bar). ⚠ Read every
-delta against the ATTRIBUTION bar of a few thousand fragments (`ROADMAP.md` §0's attribution-floor row),
-not the reseed floor alone.
-
-⛔⛔ **AND THE HUNT'S DEEPEST FINDING IS GEOMETRY'S HYPERSENSITIVITY TO THE pmf TAIL, in both
-directions**: +188k at capture-ON from the frame slip, and −15.5k at capture-OFF from a ~3 % tail change
-(the full-integrated pmf in geometry) — the short-exon contained opportunity `E[(ell−L+1)+]` is on a
-knife edge (−66 % at ell = 100), so the prior's unit conversion amplifies tail perturbations. That is the
-effective-length-ruler territory §0 already carries, now with a mapped, reproducible 188k-fragment lever.
-⚠ The −15.5k capture-OFF geometry win is REAL and attributable but knife-edge-shaped; do not chase it
-without understanding the ruler first.
-
-**THE LANDING PLAN (next session, gated as usual):** `FLModels` grows a NAMED second estimand — the
-realized gDNA law (the integrated blend when its inputs are present, else the fitted pmf) — and
-`pipeline.py` hands THAT to the scorer's `gdna_fl` while every geometry consumer keeps `gdna_pmf`
-unchanged (byte-identical there). Also worth its own arm: the RNA fit's sj-selection bias is worth an
-attributable **−18k** on the regression row (`r_both`), the owner's original instinct — a separate,
-independently landable improvement.
-
-⛔ **WHAT BLOCKS SHIPPING: the `g05` capture-ON compensating error**, which exists independently of this
-work and is visible in the ceiling. Fix that and this lands; until then the ladder net is negative.
-
-**Known residual, measured both ways**: the contained-in-exon class needs the within-exon hybridization
-tilt `w(L)`; `g_B` as its proxy fixes big-exon substrates (test-chr ON −8 → +1) and breaks small-exon
-ones (ladder ON +7 → +45), because small exons' crossers sample a different part of the binding curve.
-`phi` is the conservative choice that meets the bar everywhere. The principled fix is measuring the
-binding curve; a weighted-isotonic attempt is in the prototype's history and was refuted by tail noise.
-
-**Also queued (owner-approved)**: a gene-edge-overlapping shadow transcript on `test_chr`, so pool 3's
-contamination and the readthrough robustness are testable at all — requires re-simulation.
+⚠ Two smaller carries, both recorded rather than open: the on-target contained class uses `phi` as its
+local law where the within-exon hybridization tilt belongs (the `g_B` proxy fixes big-exon substrates and
+breaks small-exon ones — measured both ways, conservative choice ships); and geometry is HYPERSENSITIVE to
+the pmf tail (+188k ON, −15.5k OFF from small tail changes) because the short-exon contained opportunity is
+on a knife edge (−66 % at ell = 100) — effective-length-ruler territory, now with a mapped lever.
 
 ## The live thread
 
