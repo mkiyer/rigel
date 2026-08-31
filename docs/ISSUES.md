@@ -20,14 +20,50 @@ because a graveyard row without its number is an invitation to rebuild.
 ## OPEN
 
 ### instruments-calibrate-undrained-cache
-`priority: now · kind: decision · stamped: 2026-08-31`
-`calibration_vs_oracle.py`, `calibration_oracle.py` and `calibration_walk.py` run `calibrate()` on the
-UNDRAINED scan cache (`scan_cache.calibration_inputs`), while production drains the side buffer BEFORE
-`build_fl_models`/`calibrate` (`pipeline.py`). The cache stores pass one by design (so the drain can
-re-run at any seed); the instruments could drain after loading (`pipeline._drain_side_buffer`, one call).
-The drained-vs-undrained gap is exactly what produced the RNA-length-law misdiagnosis
-(`ISSUES: rna-length-law-fix`, CLOSED), and this gap sits inside the release-metric instrument itself.
-**Closes when**: the delta is priced, then either the instruments drain or the reason not to is recorded.
+`priority: now (owner ruling wanted) · kind: decision · stamped: 2026-08-31, PRICED same day`
+The calibration instruments run `calibrate()` on the UNDRAINED scan cache
+(`scan_cache.calibration_inputs`) while production drains first (`pipeline._drain_side_buffer`). ⭐ The
+undrained choice was DELIBERATE and recorded in `prior_vs_oracle.py` — but its justification is now
+measured-incomplete (see below), and the gap sat unpriced inside the release metric until it produced
+the RNA-length-law misdiagnosis (`ISSUES: the-rna-length-law-fix`, CLOSED).
+⭐⭐ **PRICED 2026-08-31** (7 ladder conditions, both arms through `calibration_vs_oracle`'s own
+`measure_condition`; drained oracle = whole drained at the production seed, cached parts drained by
+`second_pass.lift_choices` replay, sum-to-full re-validated on the drained frame):
+① **The 0.8.0 metric (P-vs-O misplaced mass) moves ≤1.8 % on every in-scope contaminated stratum** —
+below the panel's ~2 % single-row attribution resolution (`ISSUES: relay-od-r-discontinuity`) — **but
+the `g00` capture-ON zero control moves −22.8 %** (region axis; the drained frame shows materially less
+false-positive gDNA), and `g00` OFF ±3–4 %. ② **The certified truth itself is understated undrained**:
+the spliced-boundary truth mass rises 17–20 % in the drained frame on every RNA-bearing condition
+(e.g. 3.14 M → 3.71 M at `g05 ss.99 ON`) — every instrument quoting spliced-channel truth understates
+production by a fifth. ③ The RULER comparison moves up to −12 % (`g50 ss.99 OFF`), knife-edge as
+documented. ④ Lift ambiguity is bounded and reported: 34 → 24,830 records per condition (≤6.9 % of held,
+≤0.25 % of the library), worst where the library is RNA-heavy at equal lengths. ⑤ The drain LEAK is a
+separate finding — `ISSUES: drain-contaminates-certified-rna`.
+⭐ **Recommendation**: migrate the instruments to the DRAINED frame — it is production's tally, and the
+undrained frame misdescribes exactly the channels current work leans on (zero controls, certified flux,
+the ruler) — accepting the costs: the oracle's exact-zeros gate becomes a RECORDED leak count instead of
+an assertion (a certification-semantics change), `slot_truth` re-certifies on all 46 conditions, and the
+standing numbers re-derive (which `ISSUES: re-derive-in-scope-baselines` owes anyway — do them in one
+pass, in the ruled frame). ⛔ That gate change redefines what "certified" means and is the owner's call.
+**Closes when**: the owner rules on the frame; then either the migration lands (gate redefinition +
+re-certification + re-baseline) or this record is the reason-not-to. Prototype:
+`drained_frame_price.py` in the 2026-08-31 session scratchpad.
+
+### drain-contaminates-certified-rna
+`priority: later · kind: defect · stamped: 2026-08-31`
+**The second-pass drain deposits some TRUE-gDNA fragments into the certified-RNA banks** — the
+whole-library drain draws a spliced hypothesis for a held gDNA fragment whose mate gap admits an
+annotated intron, so production's tally violates "gDNA cannot splice" as a statement about DEPOSITS.
+⭐ Proven independent of the lift: on `flgap_rna_short g50 ss.99 OFF` the lift ambiguity is exactly 0
+and the leak is still 15 records; on `flgap_rna_long` ambiguity is 5,805 and the leak is 0 (a long-RNA
+library never mistakes a gDNA length for a spliced one). Measured on the ladder: 233 records at
+`g50 ss.99 OFF` (~1e-4 of the certified channel) but **1,482 at `g98 ss.99 ON` — 1.9 % of that
+condition's whole certified-RNA channel**, an IN-SCOPE stratum. ⚠ The certified-flux anchor and every
+"spliced ⇒ certainly RNA" consumer treat this channel as exact; at high gDNA under capture it is ~98 %
+pure, not 100 %. Invisible to every undrained-frame instrument, which is how it went unmeasured
+(`ISSUES: instruments-calibrate-undrained-cache` carries the frame question). Candidate repairs are a
+drain-confidence floor for the spliced hypothesis (⛔ smells like a threshold — derive, don't tune) or
+simply pricing it into the certified channel's stated precision.
 
 ### re-derive-in-scope-baselines
 `priority: now · kind: measurement · stamped: 2026-08-22`

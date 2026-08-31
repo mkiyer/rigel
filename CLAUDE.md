@@ -278,13 +278,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,737 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
-running the suite after the docs reorganization. Account it from the previous baseline of **3,736**:
-the `docs/dev/` churn is **−1** (`PLAN_rna_length_law.md` deleted, jargon only; `NEXT_SESSION.md`
-rewritten in place, content-only, 0) and the new permanent doc `docs/ISSUES.md` is **+2** (jargon,
-docs-boundary — the permanent-set gate itself is a fixed list, not parametrized). 3,736 − 1 + 2 =
-**3,737**, confirmed by a green run. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the
-per-file deltas.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,738 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+running the suite after the drained-frame pricing. Account it from **3,736** before the docs
+reorganization: `docs/dev/` **−1** (`PLAN_rna_length_law.md` deleted, jargon only), the new permanent
+doc `docs/ISSUES.md` **+2** (jargon, docs-boundary — the permanent-set gate itself is a fixed list, not
+parametrized), and `docs/dev/drained_frame_price.py` **+1** (a `.py` in the sandbox is collected by the
+jargon gate only). 3,736 − 1 + 2 + 1 = **3,738**, confirmed by a green run. ⛔ **RE-DERIVE, NEVER
+ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

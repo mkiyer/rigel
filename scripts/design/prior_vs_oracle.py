@@ -75,15 +75,21 @@ when the question is about the *projection* rather than about the EM. ``Fo − F
 population, per locus, and table ⑪ is it.
 
 ⛔⛔ **UNDRAINED ON EVERY ARM, AND THAT IS FORCED — WITH A MEASUREMENT, NOT AN ASSUMPTION.**
-Production drains the side buffer before calibration. ``lift_choices`` exists to make a DRAINED oracle
-valid, and on this panel it is **not**: measured at ``g25 ss0.50 capture_on``, 6,450 of 209,658 held
-fragments (3.08 %) tie on the deferred bank's canonical key across origins, and replaying the whole's
-choices then deposits 1,026 ``boundary_spliced`` + 526 ``sj`` records inside the **gdna** partition —
-which ``OracleTruth._validate`` refuses, correctly, because gDNA cannot splice. The ladder is built
-with EQUAL configured fragment lengths, so span collisions are the common case there by construction.
-⭐ So both sides run undrained, and the caveat is PRICED rather than waved at: the ``drained`` arm
-recomputes the shipped prior on the production (drained) payload, so ``P_drained − P`` is the
-drain's own contribution as a number. Pass ``--no-drained-arm`` to skip it.
+Production drains the side buffer before calibration; here both sides run undrained so P and O share
+one frame, and the caveat is PRICED rather than waved at: the ``drained`` arm recomputes the shipped
+prior on the production (drained) payload, so ``P_drained − P`` is the drain's own contribution as a
+number. Pass ``--no-drained-arm`` to skip it.
+⚠ **The justification this paragraph used to give was measured WRONG on 2026-08-31 and is corrected
+here.** It attributed the gdna-partition spliced deposits (1,026 ``boundary_spliced`` + 526 ``sj`` at
+the retired ``g25 ss0.50 capture_on``) to canonical-key ties in the lift replay. Decomposed on the
+fl-gap panels: ``flgap_rna_short`` shows the leak at ZERO ambiguity (15 records) and
+``flgap_rna_long`` shows 5,805 ambiguous records with ZERO leak — so the leak is the DRAIN's own
+behaviour (the whole-library draw genuinely picks a spliced hypothesis for some true-gDNA fragments;
+production's tally violates "gDNA never spliced" as a statement about deposits), and the key ties are
+a separate, bounded attribution error that ``lift_choices`` counts. ``OracleTruth._validate``'s
+exact-zeros gate therefore refuses a FACT of the production frame, not an invalid oracle. Whether the
+instruments move to the drained frame is `ISSUES: instruments-calibrate-undrained-cache`; the leak
+itself is `ISSUES: drain-contaminates-certified-rna`.
 
 ⛔ **THE UNITS THE ERROR IS REPORTED IN, and both are needed.**
 
