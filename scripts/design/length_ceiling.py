@@ -13,7 +13,7 @@ Two yardsticks, because they answer different questions and the project has been
 for the other:
 
 * ``mwae_all`` — `pass0_vs_oracle`'s own mass-weighted error over every object with mass. Comparable
-  with `ROADMAP.md` §0's "what perfecting BOTH length models is worth" (−0.7 % on the pilot). ⛔ It
+  with `ROADMAP.md`'s Stage-A line (what perfecting BOTH length models is worth) (−0.7 % on the pilot). ⛔ It
   scores honest ignorance as error, so it is not how pass-0 should be judged.
 * ``mwae_solvable`` — the same error restricted to objects that HAVE own evidence, with the class
   partition **held fixed at the fitted-pmf run's** so the two arms are scored on the same population

@@ -71,7 +71,7 @@ boundary <- EXON (SPLICE OUT)           gDNA     **LEVEL**, at its floor off cap
 `exon|intron`/gene edge <- its own      all 3    **LEVEL** at its floor off capture; the intron's own
  intron / intergenic                             composition where the populations match
 ⛔ exon <- `B gene edge[term]`,         all 3    **NEITHER** — ~10 % excess on every arm, the residual
- UNDER CAPTURE                                   census, and `ROADMAP.md` §1 rank 3's spike-and-slab
+ UNDER CAPTURE                                   census, and `ISSUES: measured-prior-rung-4`'s spike-and-slab
 ======================================  =======  ==============================================
 
 ⭐ **Depth**: capture-OFF puts 23-29 % of imputed mass >= 9 hops from any measured gDNA and depth 1

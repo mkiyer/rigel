@@ -1054,8 +1054,8 @@ toy ranks hotspots backwards (TRAPS: toys-rank-hotspots-backwards). Both, in tha
 
 ⭐⭐ **This REVERSES a standing instruction**, so read it as a correction rather than an addition. The old
 rule — *"profile on real cfRNA, never a small synthetic suite"* — got the second half right and the first
-half wrong, and it is still written that way in `CLAUDE.md`'s working rules and in three `ROADMAP.md`
-rows. ⚠ Where the two disagree, **this is the ruling**; those sites are stale until the lead updates them.
+half wrong, and it may still be written that way at older sites. ⚠ Where two disagree, **this is the ruling**;
+`ISSUES: performance-memory-bounded-solve` carries it forward.
 
 ⛔ **Why cfRNA is the wrong substrate for a COMPUTE measurement, even though it is a fine one for an
 ACCURACY measurement.** The cfRNA libraries on disk are **sparse and small**: most confident-gDNA regions

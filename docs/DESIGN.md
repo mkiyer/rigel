@@ -367,8 +367,7 @@ population is whatever physically enters the destination — evaluated in the tw
 whole justification for the pair, and it is why both must exist.
 
 ⭐ **MEASURED, 2026-08-19 — the principle held on all 32 conditions, and the data named ONE thing the
-synopsis did not** (`scripts/design/hop_currency.py`, Stage 2 of the rebuild; the numbers are
-`ROADMAP.md` §0). A terminus — a TSS/TES, whether at a gene edge or lying inside another transcript's
+synopsis did not** (`scripts/design/hop_currency.py`, Stage 2 of the rebuild — re-derive the numbers there). A terminus — a TSS/TES, whether at a gene edge or lying inside another transcript's
 intron or exon — is a POPULATION change and carries a LEVEL; a splice site into an exon carries the
 SPLICE-IN COMPOSITION; an intron into its own boundary carries a COMPOSITION (exact to the fragment where
 a LEVEL is off by 78–98 % under capture); and a hop OUT of an exon carries a LEVEL on every arm. ⛔ **So a
@@ -802,11 +801,11 @@ The landscape's divisor is a geometry. ⚠ On generic held-out predictive likeli
 capture (−5.36 vs −5.35) and the landscape wins by 0.47 nats under it: the tie says the NPMLE is not a
 bad density estimate, and the nats column says it is the wrong quantity.
 
-⛔⛔ **AND THIS MODULE IS NOT `ROADMAP.md` §4.3's REFUSED DROP-IN — the distinction matters because the
-tokens look alike.** §4.3 refused `region_start_count / ℓ` substituted for `RegionGeometry.inv_abundance`
+⛔⛔ **AND THIS MODULE IS NOT THE REFUSED DROP-IN of `ISSUES: the-truncation-free-region-bank` — the
+distinction matters because the tokens look alike.** That refusal covered `region_start_count / ℓ` substituted for `RegionGeometry.inv_abundance`
 INSIDE the currency channel, with no wall rule, no side selection and no model-free flag; the knob was
 deleted after pricing. This module is a separate per-slot quantity with all three, wired to NO consumer,
-and it does not touch `inv_abundance`. §4.3's bar still stands for any consumer swap: re-opening needs a
+and it does not touch `inv_abundance`. That refusal's bar still stands for any consumer swap: re-opening needs a
 policy whose DELIVERABLE improves under a better level channel.
 
 | | | |

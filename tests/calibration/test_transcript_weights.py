@@ -239,7 +239,7 @@ def test_a_path_that_is_ENTIRELY_ZERO_gets_weight_EXACTLY_ZERO(
 ):
     """⛔⛔ **THE LOAD-BEARING CASE, NOT AN BOUNDARY CASE.** 4,579 of 8,750 annotated transcripts are silent
     at ``g00``, and a zero weight is EXACTLY absorbing — so this is the whole of the prior's ability to
-    say a transcript is absent. Every one of `ROADMAP.md` §4.1's eleven refused mechanisms was a rule
+    say a transcript is absent. Every one of `docs/ISSUES.md` `the-doubt-graveyard`'s eleven refused mechanisms was a rule
     for resolving doubt that lifted an evidence-free object OFF zero, and the refused first attempt's
     per-object ``+½`` took false-positive mass 18.6 M → 41.6 M by reviving exactly this population.
 

@@ -45,7 +45,7 @@ check an imported composition against when the destination has no self-solve.
 the whole reference-location concept on 2026-08-24 — the owner refuted the location term,
 default ON, whose docstring carries the measured table; the boundary-inclusive form is
 measured-refused there) and `stage1_pair{,_onesided}` (the struct_lock rescope priced WITH that
-reference and REFUSED — `ROADMAP.md` rank 11). Under the shipped default the solve no longer consults
+reference and REFUSED — `ISSUES: the-cancelling-pair`). Under the shipped default the solve no longer consults
 the name those arms patched, so they could only raise NEVER-FIRED. Do not rebuild them; git has the
 implementations one commit before this note.
 
@@ -135,7 +135,7 @@ _RA: dict = {}
 
 
 def _install_kappa_half():
-    """⭐⭐ THE ARM `ROADMAP.md` §4 **the-capture-level-residual** ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
+    """⭐⭐ THE ARM `docs/ISSUES.md`'s κ-residue row (**the-capture-level-residual**) ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
 
     On a genuinely unstranded library the strand channel carries **exactly** zero information about
     composition — the Fisher information is ``∝ (2κ−1)²`` and κ is ½. But κ is FITTED, so it lands on
@@ -1314,7 +1314,7 @@ def main() -> int:
     # `CalibrationConfig()`, so when the shipped default of `message_propagation` flipped to False at
     # `0d9d422b` twenty-two of the twenty-six arms silently became no-ops and NOTHING said so.
     # ⭐ Default is the SHIPPED value, so `base` is still the tool as it ships and no existing invocation
-    # changes meaning; `on` is what ranks 6 and 7 of `ROADMAP.md` §1 need.
+    # changes meaning; `on` is what `ISSUES: u-ruler-arm` and `ISSUES: g00-shrinkage-upstream-repair` need.
     ap.add_argument(
         "--messages", choices=("off", "on"), default=None,
         help="message_propagation. Default: whatever CalibrationConfig ships. Recorded in every row, so "

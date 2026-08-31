@@ -223,7 +223,7 @@ STRATA = (
 #: RNA:gDNA ratio, so it is worst exactly where gDNA is scarce and the anchor matters most.
 #: ⭐ ``R intergenic`` ALONE is inflated **exactly 1.0000x** on every condition, and so is ``B gene
 #: edge``. ⛔ So any number this instrument reports off ``PURE_GDNA_STRATA`` — including the recorded
-#: exon-reference result in ``ROADMAP.md`` §0 — was produced with an anchor up to 4.49x high and must be
+#: exon-reference result (see `ISSUES: measured-prior-rung-4`'s anchor-contamination constraint) — was produced with an anchor up to 4.49x high and must be
 #: re-derived before it is quoted. ⭐ The SHIPPED path is clean: ``density_deconv.fit_intron_background``
 #: pools intergenic only (``include_introns=False`` at both call sites), so this is an INSTRUMENT defect
 #: rather than shipped behaviour. Whether to drop ``R intron`` from this pool is a MEASUREMENT-DESIGN

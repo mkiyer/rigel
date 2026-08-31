@@ -67,7 +67,7 @@ __all__ = ["AssertionCounts", "chain_boundary_deconv", "chain_region_deconv", "s
 # COUNTED and PUBLISHED rather than raised, because this commit is a restructure gated on byte-identity and
 # widening an assertion to fit a defect is how a gate becomes vacuous (TRAPS: perturb-every-gate/TRAPS: a-gate-that-reconstructs). Each carries a
 # STRICT xfail in the gate file, which is this project's convention for a PROVEN defect whose fix is
-# panel-negative on its own — the fix is `ROADMAP.md`'s TRAPS: a-cancelling-defect-pair pair, not a looser predicate here.
+# panel-negative on its own — the fix is `ISSUES: the-cancelling-pair` (TRAPS: a-cancelling-defect-pair), not a looser predicate here.
 #: ``name -> why it is not fatal yet``. Anything NOT in here raises.
 _KNOWN_VIOLATIONS: dict[str, str] = {
     # ── the LOG-SHARE grid, low side. All three counts are new: nothing had checked this coordinate. ─────

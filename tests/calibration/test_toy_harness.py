@@ -264,7 +264,7 @@ def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, t
     failed at **2.19× against its 2.0 bound**, and the bound was KEPT rather than widened so it would stay
     the detector for that mechanism. ⚠ It went green when `message_propagation` was turned back ON
     (owner, 2026-08-18) — the relay changes the second hop — and **NOT** by the pair being fixed jointly,
-    which is still open (`ROADMAP.md`'s cancelling-pair item). ⛔ So do not read this passing as evidence
+    which is still open (`ISSUES: the-cancelling-pair`). ⛔ So do not read this passing as evidence
     that the pair is resolved; read it as the detector having moved into the relay-on regime with it.
 
     ⭐⭐ **What it pins now: the dependence is GONE.** The mechanism was the reframe imputing the

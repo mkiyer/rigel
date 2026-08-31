@@ -69,7 +69,7 @@ def test_nothing_outside_the_sandbox_cites_into_it(path: pathlib.Path):
     hits = sorted(set(_CITES_DEV.findall(path.read_text(errors="ignore"))))
     assert not hits, (
         f"{rel} cites the sandbox ({hits}). Nothing outside `docs/dev/` may depend on it. If the finding "
-        f"has settled, MOVE it to its permanent home — a number to ROADMAP.md, a lesson to TRAPS.md, a "
+        f"has settled, MOVE it to its permanent home — an issue or refusal to ISSUES.md, a lesson to TRAPS.md, a "
         f"ruling to DESIGN.md, a derivation to EQUATIONS.md — and delete it from the dev doc in the same "
         f"edit. Copying is what creates two homes; moving does not."
     )
@@ -105,20 +105,23 @@ def test_the_sandbox_exists_and_says_what_it_is_for():
     assert "MOVE it out" in txt and "may cite" in txt
 
 
-def test_the_permanent_set_is_still_eight_files():
-    """⭐ The sandbox is additive. It must not become a ninth permanent doc by accretion — if something in
-    `docs/dev/` has become something everyone reads, that is the signal to promote it, not to bless it."""
+def test_the_permanent_set_is_still_nine_files():
+    """⭐ The sandbox is additive. It must not become a tenth permanent doc by accretion — if something in
+    `docs/dev/` has become something everyone reads, that is the signal to promote it, not to bless it.
+    ⚠ ISSUES.md joined by owner decision, 2026-08-31: the issue log (open + closed/refused), split out of
+    ROADMAP.md so the roadmap stays the short ranked view."""
     top = sorted(p.name for p in (ROOT / "docs").glob("*.md"))
     assert top == [
         "DESIGN.md",
         "EQUATIONS.md",
+        "ISSUES.md",
         "MANUAL.md",
         "PUBLISHING.md",
         "ROADMAP.md",
         "SUCCESS.md",
         "TESTING.md",
         "TRAPS.md",
-    ], f"the permanent set changed: {top}. Adding a ninth is an owner decision, not a side effect."
+    ], f"the permanent set changed: {top}. Adding a tenth is an owner decision, not a side effect."
 
 
 def test_this_gate_is_not_vacuous():

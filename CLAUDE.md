@@ -98,12 +98,13 @@ of what to do next is `ROADMAP.md`** — this section says what counts, not what
 
 ## ⭐ The docs — read them in this order
 
-Six permanent docs. They do not overlap, and none of them is a changelog.
+Seven permanent docs. They do not overlap, and none of them is a changelog — the changelog is git.
 
 | doc | what it is |
 |---|---|
 | ⭐⭐ **`docs/SUCCESS.md`** | **START HERE.** How performance is measured: **Stage A** (the accumulator — faithful, unbiased, sufficient?) and **Stage B** (calibration against an oracle). ⭐ 0.8.0's metric is Stage B's |
-| ⭐⭐ **`docs/ROADMAP.md`** | Where the tool is in measured numbers, and what to do next in priority order. ⛔ **Not a changelog — a completed item is DELETED, not stamped** |
+| ⭐⭐ **`docs/ROADMAP.md`** | The SHORT ranked view: the 0.8.0 frame, a one-line-per-claim state summary, and the ordered next steps. ⛔ **No measurements and no history live here — a claim names the instrument that re-derives it** |
+| ⭐⭐ **`docs/ISSUES.md`** | **The issue log** (2026-08-31): every open problem/question/decision as a NAMED entry (`ISSUES: <kebab-name>`, never a number) with priority and substance, plus the append-only **CLOSED / REFUSED** record that keeps each refusal's stamped measurement so it is not rebuilt. ⛔ The changelog is git — neither file records what was done |
 | ⭐ **`docs/TRAPS.md`** | Mistakes already made. Lessons, not measurements — cite a rule by its NAME |
 | **`docs/EQUATIONS.md`** | The derivations the code depends on |
 | **`docs/DESIGN.md`** | What is built and the rulings behind it — settled, do not re-litigate. ⭐⭐ **§0 is the binding VOCABULARY** (REGION, BOUNDARY, step, structurally pure-gDNA object) and **§0b carries the 0.8.0 SCOPE and the NASCENT SCOPE RULING** |
@@ -112,7 +113,7 @@ Six permanent docs. They do not overlap, and none of them is a changelog.
 Reference rather than design: `docs/MANUAL.md`, `docs/PUBLISHING.md`.
 
 ⛔ **THE MOVE RULE, which governs every doc and `docs/dev/` alike.** When a finding settles, MOVE it to its
-one home — a current number to `ROADMAP.md` §0, a lesson to `TRAPS.md` as a NAMED rule, a ruling to
+one home — an open problem or a refusal to `ISSUES.md`, a lesson to `TRAPS.md` as a NAMED rule, a ruling to
 `DESIGN.md`, a derivation to `EQUATIONS.md` — and delete it from where it was, in the same edit. ⛔ **Move,
 never copy**: copying is what creates two homes that then diverge. ⚠ Both halves of this have been paid
 for — `ROADMAP.md` reached 787 lines under "never delete, only stamp", and two dev docs reached 1,181 lines
@@ -277,19 +278,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,736 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
-running the suite. Account it from **3,676** at the start of the fragment-length work:
-+4 `scripts/design/em_fl_ceiling.py`;
-+3 `src/rigel/calibration/gdna_density.py` (jargon, docs-boundary, layering — it IS declared in
-`_layers.py`);
-+2 + 34 own cases for `tests/calibration/test_gdna_density.py`;
-+2 + 14 own cases for `tests/calibration/test_fl_realized.py`;
-+2 for `tests/calibration/fl_realized_fixture.py` (a helper module in the tests tree — jargon and
-docs-boundary, and it collects NO cases of its own);
-and the `docs/dev/` churn nets **−1** (three `.md` deleted, one added, +1 each, jargon only;
-⚠ a non-`.md` file there such as a `.py.txt` is collected by NOTHING and moves the total by 0).
-3,676 + 4 + 3 + 36 + 16 + 2 − 1 = **3,736**.
-⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,737 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+running the suite after the docs reorganization. Account it from the previous baseline of **3,736**:
+the `docs/dev/` churn is **−1** (`PLAN_rna_length_law.md` deleted, jargon only; `NEXT_SESSION.md`
+rewritten in place, content-only, 0) and the new permanent doc `docs/ISSUES.md` is **+2** (jargon,
+docs-boundary — the permanent-set gate itself is a fixed list, not parametrized). 3,736 − 1 + 2 =
+**3,737**, confirmed by a green run. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the
+per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
@@ -306,6 +301,7 @@ this table, then confirm it with `pytest --collect-only -q | grep <stem>` and EX
 | top-level `tests/` file | **+3** | jargon, docs-boundary, scripts-index |
 | `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
 | `docs/dev/` file | **+1** | jargon only |
+| top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |
 
 ⭐ **A content-only sweep must move the collected total by ZERO, and that is the check** — edits to
 comments, docstrings and prose add no cases, so a moved total after one means a file was added or removed.
@@ -376,7 +372,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⚠ A THERMOMETER above 0.8.0's metric, never the target |
 | `design/mass_prior_ab.py` | ⭐⭐⭐ **CAN THE PRIOR BE A CONSERVED FRAGMENT COUNT RATHER THAN ONE MANUFACTURED FROM A DENSITY?** Subsamples by qname hash so the whole and all three origin partitions stay consistent. ⛔ The subsample must reproduce the defect first |
 | `design/transcript_truth.py` | ⭐⭐⭐ **WHAT IS THE TRUE PER-TRANSCRIPT COUNT, SPLIT BY SPLICEDNESS?** One pass over the oracle BAM, read names only. ⛔ Splicedness comes from spliced-transcript coordinates, NEVER the CIGAR, which misses every sj in the unsequenced inner gap |
-| `design/transcript_weights.py` | ⛔⛔ **WHAT IS THE SOFT-MIN PER-TRANSCRIPT WEIGHT WORTH? — BUILT, PRICED AND REFUSED; a RECORD, not a proposal** (`ROADMAP.md` §4). ⚠ Standalone it runs only its own re-partition falsification; scoring belongs to `quant_accuracy.py` |
+| `design/transcript_weights.py` | ⛔⛔ **WHAT IS THE SOFT-MIN PER-TRANSCRIPT WEIGHT WORTH? — BUILT, PRICED AND REFUSED; a RECORD, not a proposal** (`ISSUES: refused-soft-min-path-weighting`). ⚠ Standalone it runs only its own re-partition falsification; scoring belongs to `quant_accuracy.py` |
 | `rigel.sim.net_flow` (a MODULE, not a script) | ⭐⭐ **WHERE DID EACH MISASSIGNED FRAGMENT GO?** The DIRECTION of transcript error, per transcript, split into gDNA-sourced and RNA-isoform-sourced flow — the one question an accuracy table cannot answer. Gate: `tests/test_net_flow.py` |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME STAGE NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |

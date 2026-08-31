@@ -43,7 +43,7 @@ with the SIGN FLIPPED. ⛔ That is larger than the drain effect this instrument 
 (+0.0033 → −0.0053), so an unstamped row from a study configuration is indistinguishable from a shipped
 one and would read as the mechanism (`TRAPS: an-ablation-that-never-ran`, in the reporting direction).
 ⭐ `ladder_arm_ab.py` stamps `messages` on every arm row for exactly this reason and `arm_score.py`
-refuses to aggregate across it; `ROADMAP.md` §0 had to hand-annotate "messages OFF" beside this
+refuses to aggregate across it; the old state table had to hand-annotate "messages OFF" beside this
 instrument's own numbers, which is the same fact written down by hand. ⚠ **STAMPED, not switchable** —
 no `--messages` flag is added here: the shipped default is what this measures, and a knob is a decision
 for the owner rather than a review repair.

@@ -310,7 +310,7 @@ def build_region_geometry(
     # per-component pmf the channel exists to avoid.
     # ⛔ A truncation-free "start" bank (`region_start_count / ell`) was A/B'd here on 2026-08-20 and
     # REFUSED on the panel: it improves the currency arm's pass-0 exons and regresses its deliverable
-    # (zero controls 2.18x). `ROADMAP.md` §4.1 carries the row; the code is one commit back.
+    # (zero controls 2.18x). `docs/ISSUES.md` (`the-truncation-free-region-bank`) carries the row; the code is one commit back.
     inv_abundance = np.zeros(n, dtype=np.float64)
     _r_inv = getattr(substrate.region_contained, "inv_opportunity_sum", None)
     _b_inv = getattr(substrate.boundary_unspliced, "inv_length_sum", None)

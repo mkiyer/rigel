@@ -10,7 +10,7 @@ strata); the NPMLE's ``mass / eff_gdna`` axis carries an irreducible per-region 
 0.12 nats off capture, **1.66 under it**, comparable to the mode separation itself) that no bandwidth
 removes; and on a generic held-out predictive likelihood the two TIE off capture, which is the finding
 worth keeping — the NPMLE was not a bad density estimate, it was estimating the wrong quantity. The
-permanent homes are `ROADMAP.md` §1 rank 3 and `DESIGN.md` §3.1a-iii; the rendered comparison is the
+permanent homes are `ISSUES: measured-prior-rung-4` and `DESIGN.md` §3.1a-iii; the rendered comparison is the
 Abundance Landscape Atlas.
 
 ⭐⭐ **WHY THE REMAINING ARMS ARE STILL THE RIGHT ONES.** The three origin partitions' START banks SUM

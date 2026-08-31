@@ -27,7 +27,7 @@ linearity of expectation, and scores **1.352 / 1.573 / 3.756** on the three in-s
 **1.801** on the zero control (`vertex_ceiling.py --arm psi_mean`, all 16 conditions): the median is
 closer to truth at both simplex vertices, where 49-83 % of in-scope error lives.
 
-⚠ **Nor is this the renormalisation `ROADMAP.md` refuses.** Nothing is rescaled to hide a residual —
+⚠ **Nor is this the refused means-everywhere renormalisation.** Nothing is rescaled to hide a residual —
 ``f_g`` and the RNA total are exact complements *by parametrisation*, and the tilt is estimated as a
 share because a share is what it is.
 

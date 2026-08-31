@@ -55,7 +55,7 @@ through the gene interior, because ``may_share_composition`` is a PRECISION test
 rather than exactly ½ on a nominally unstranded library — so ``I(f_g) ∝ (2κ−1)²`` lands at 1e-6…1e-4
 instead of 0 and every evidence-free exon "supplies" a composition whose own statement is 10²–10³ nats
 wide against a ±10-nat grid. Switching the rescale off entirely reaches 0.0760 on this toy; the difference is
-that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`ROADMAP.md` §4 **the-capture-level-residual**).
+that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`docs/ISSUES.md` **the-capture-level-residual**).
 
 ⚠ **Perturbation-verified**, and here is the coverage (`scratchpad/perturb.sh`). ⭐ Note that dropping
 the composition branch is caught by gates in OTHER files — so both branches have an independently
@@ -466,7 +466,7 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
 
     ⭐⭐ **THIS IS THE OPERATOR THE CAPTURE LANDSCAPE TRAVELS ON.** An ``intergenic|exon`` BOUNDARY measures
     the gDNA density at its own capture stratum, and the exon behind it has no other way to hear it — a
-    G1 BOUNDARY carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1.1 **the-cancelling-pair**). Drop
+    G1 BOUNDARY carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ISSUES: the-cancelling-pair**). Drop
     case (ii) and the off-probe intergenic floor leaks straight through to the exon: measured, and it
     fires `test_gdna_scale_rule.test_capture_step_is_carried_and_the_off_probe_floor_is_not` at 20x and
     200x. A per-capture-class landscape ratio built to do this job explicitly measured inert

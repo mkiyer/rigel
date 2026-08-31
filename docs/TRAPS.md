@@ -4,7 +4,7 @@
 and
 came out wrong in a way that was not obvious in advance. They are LESSONS, not measurements — a
 number
-that says where the tool *is* lives in `ROADMAP.md` §0.
+that says where the tool *is* lives in `ROADMAP.md` (and is re-derived by the instrument it names).
 
 ⛔ **CITE A RULE BY ITS NAME**, e.g. `TRAPS: panel-before-src`. The name is the identifier, so a
 citation

@@ -342,7 +342,7 @@ def test_inv_abundance_is_FILLED_from_the_substrate_banks_and_the_values_are_ABS
 
     ⚠ A REGION slot carries the CONTAINED bank, whose expectation is ``rho·P(w<=ell)`` — a truncated
     density SHAPE (TRAPS: a-cancellation-is-conditional-on-its-support). A truncation-free "start"
-    bank was A/B'd through this fill on 2026-08-20 and REFUSED on the panel (`ROADMAP.md` §4.1).
+    bank was A/B'd through this fill on 2026-08-20 and REFUSED on the panel (`docs/ISSUES.md`, `the-truncation-free-region-bank`).
     """
     payload, region_arrays, substrate, chain, sj = parts
     kind = np.asarray(chain.kind)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """⛔⛔ **THE SOFT-MIN PER-TRANSCRIPT RNA PRIOR WEIGHT — BUILT, PRICED AND REFUSED (2026-08-13).**
 
-⛔ **This module is a RECORD, not a proposal. Read `ROADMAP.md` §4's row before reusing any of it.**
+⛔ **This module is a RECORD, not a proposal. Read `docs/ISSUES.md` (`refused-soft-min-path-weighting`) before reusing any of it.**
 16 arms on `g00 ss0.99 capture_off` and 3 on the blind stratum `g50 ss0.50 capture_on`, base re-recorded
 in the same session: **worse than base at transcript level everywhere (1.26–1.60×)**, and the one good
 number — gene error **0.395–0.527×** at `g00` — collapses to **1.006–1.041×** on the blind stratum.
@@ -66,7 +66,7 @@ hybrid capture it may equally mean *no probe here* — the same ambiguity the ef
 already refuses to resolve. So a zero object leaves the mean. ⛔⛔ **A transcript whose path is
 ENTIRELY zero gets weight 0, and that is the load-bearing case, not an boundary case:** 4,579 of 8,750
 annotated transcripts are silent at `g00`, and the refused first attempt's per-object `+½` revived
-exactly that half and took false-positive mass **18.6 M → 41.6 M** (`ROADMAP.md` §4). ⛔ There is no
+exactly that half and took false-positive mass **18.6 M → 41.6 M** (`ISSUES: refused-transcript-weights`). ⛔ There is no
 floor here and there must not be one — `g00`'s lesson transposed is that doubt resolves to ABSENT.
 
 ⭐ **THE WEIGHT IS A COUNT, NOT A DENSITY**, because the budget being split is a fragment count::
@@ -149,7 +149,7 @@ OPPORTUNITIES = ("total", "full", "seen")
 #: ``gene`` therefore takes the soft min over the gene's objects (deduplicated) and splits it across the
 #: gene's isoforms by effective length alone — the explicit *no information within the gene* statement,
 #: which is what "equal molar abundance" means. ⛔ It is a RETREAT and is labelled as one:
-#: `ROADMAP.md` §4 records that the gene axis is too coarse for **62.3 %** of mass, whose within-gene
+#: `ISSUES: refused-soft-min-path-weighting` records that the gene axis is too coarse for **62.3 %** of mass, whose within-gene
 #: split IS recoverable. It buys the gene-level win only if the isoform-level harm is real.
 GRANULARITIES = ("transcript", "gene")
 
