@@ -44,6 +44,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import gammaln
 
+from .gdna_density import pooled_log_rate
 from .signature import coarse_type_array
 
 __all__ = [
@@ -93,7 +94,14 @@ def fit_gdna_background(g_counts, eff_g) -> GdnaBackground:
     sg = float(g.sum())
     se = float(E.sum())
     informative = se > _EPS
-    log_mu_bg = float(np.log(sg + _JEFFREYS_SHAPE) - np.log(se)) if informative else -np.inf
+    # ⭐ The location comes from `gdna_density.pooled_log_rate` — the SAME formula, moved so that the two
+    # estimators of the gDNA background rate live in one module (the other being the contamination-robust
+    # `one_sided_rate` the fragment-length model uses). ⚠ This is a byte-identical refactor and nothing
+    # about this fit changed; ⛔ but note that `pooled_log_rate` assumes the pool it is handed is PURE,
+    # which this function's own pool is not — measured 53 % mature RNA at `g05` once unannotated
+    # transcription exists (`TRAPS: purity-is-a-property-of-the-annotation`). Adopting the one-sided rate
+    # here is a SEPARATE change to the composition reference and must be priced on its own.
+    log_mu_bg = pooled_log_rate(g, E, shape=_JEFFREYS_SHAPE) if informative else -np.inf
 
     alpha = np.inf
     if informative and sg > _EPS:

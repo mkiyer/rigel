@@ -10,9 +10,31 @@ excluded from calibration. BOTH FLs drive per-region effective lengths in the sw
 (``region_geometry.build_region_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
 unspliced + spliced) eff-lengths use the RNA FL.
 
-⭐ **Every pool is PURE BY CONSTRUCTION**, and that purity is what
-removes the circularity: each model is fitted only from a population known to be one component, so
-nothing is ever estimated from the fragments it will later explain.
+⛔⛔ **NO POOL IS PURE, AND THIS MODULE USED TO ASSERT ONE WAS.** The claim that stood here — *"every pool
+is PURE BY CONSTRUCTION, and that purity is what removes the circularity"* — is false and was measured
+false: against an origin-split oracle the intronic pool runs **95 % nascent RNA** and the intergenic pool
+**53 % mature**, because "intergenic" is whatever the annotation leaves over and nascent RNA sits inside
+introns by definition (`TRAPS: purity-is-a-property-of-the-annotation`). The resulting bias is
+``RNA_share x (len_RNA - len_gDNA)``, which is why it went unseen: the panels give both components EQUAL
+fragment lengths on purpose, so the second factor is zero there and a 95 %-contaminated pool reads under a
+bp of error.
+
+⭐⭐ **WHAT REPLACES IT: a two-pool CONTRAST, which needs no pure pool and no template.** The two CONTAINED
+pools share one opportunity geometry — nascent RNA in an intron and unannotated transcription in
+intergenic space are genomically contiguous exactly as gDNA is — so de-tilted, each is the SAME two shapes
+at a DIFFERENT mixing weight, and the contaminant cancels::
+
+    f_0 = a_0*g + (1-a_0)*r        f_1 = a_1*g + (1-a_1)*r
+    =>  g = [ (1-a_1)*f_0 - (1-a_0)*f_1 ] / (a_0 - a_1)
+
+⭐ The divisor is the SEPARATION of the two purities, not a purity, so it does not blow up as a pool gets
+dirty; and with ``f_0 = f_1`` it returns them unchanged, so a pool pair with nothing to say changes
+nothing. The weights come from :mod:`rigel.calibration.gdna_density` — ``a_p = rho_g*E_p/n_p`` with
+``rho_g`` read off the low side of the per-object density, where a contaminant that only ADDS cannot
+reach. ⚠ Under hybrid capture the premise weakens — the probes reshape the RNA lengths, so the two
+contaminants stop resembling each other — and the contrast is applied anyway; measured against the
+four-pool sum it is a large WIN there too, but for a reason it does not model, so read
+:func:`_deconvolved_gdna_counts` before relying on it.
 
 * **gDNA** = **all FOUR** gDNA pools — intergenic contained, intronic contained, intron-exon crossing,
   intergenic-exon crossing — each divided by **its own** opportunity and then combined
@@ -38,6 +60,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .gdna_density import contained_opportunity, one_sided_rate
+from .signature import RegionType
+from .sj_opportunity import detilt_pool
 from ..scan_payload import (
     N_FRAGMENT_POOLS,
     POOL_DNA_INTERGENIC,
@@ -54,6 +79,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FLModels",
+    "GdnaContrast",
     "POOL_EB_PRIOR_ESS",
     "build_fl_models",
     "gdna_contained_fl_mass",
@@ -84,6 +110,23 @@ _SPLASH_POOLS = _GDNA_CROSSING_POOLS
 #: cliff: ``pool_total ≫ prior_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
 #: → global. Revisit the default on real-data pool sizes (PR04c decision 5).
 POOL_EB_PRIOR_ESS: float = 1000.0
+
+
+@dataclass(frozen=True, slots=True)
+class GdnaContrast:
+    """What the two-pool contrast did, or why it declined — QC, never an input to anything.
+
+    ⭐ ``rate_over_pooled`` is the number to read: how much contamination the density fit found. A value
+    near 1 says the pools were already clean, which is a measurement and not an inaction.
+    """
+
+    applied: bool
+    declined_because: str
+    gdna_density: float
+    rate_over_pooled: float
+    intergenic_gdna_share: float
+    intronic_gdna_share: float
+    separation: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,6 +165,9 @@ class FLModels:
     #: function's docstring asks for exactly this ("makes that comparison an output instead of an
     #: assumption") and nothing was doing it.
     pool_counts: np.ndarray = None
+    #: What the two-pool contrast did. ``None`` when it was never offered the per-region inputs (the
+    #: second pass and most tests), which is a different state from having declined.
+    gdna_contrast: "GdnaContrast | None" = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
@@ -202,6 +248,119 @@ def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     return _pool_sum(payload, _SPLASH_POOLS)
 
 
+def _deconvolved_gdna_counts(
+    payload: "AccumulatorPayload",
+    gdna_opportunity: "GdnaOpportunity",
+    region_lengths: np.ndarray,
+    region_types: np.ndarray,
+) -> "tuple[np.ndarray | None, GdnaContrast]":
+    """The two-pool contrast: the gDNA length histogram with the contaminant divided out.
+
+    Returns ``(counts_or_None, diagnostics)``. ⭐ **``None`` means DECLINED and the caller must fall back
+    to the four-pool sum** — declining is a real answer here, not a failure, and every decline is named in
+    the returned :class:`GdnaContrast` so a run that corrected nothing cannot be mistaken for one that
+    corrected everything.
+
+    **The three declines, each derived rather than chosen:**
+
+    * *no density* — the one-sided rate found no support, which is what a zero-gDNA library looks like.
+      There is no gDNA length distribution to estimate and inventing one is the failure mode to avoid.
+    * *purities not separated* — the contrast divides by ``a_0 - a_1``, so it needs the two pools to have
+      measurably different compositions. ⛔ The comparison is against that difference's OWN sampling
+      error, never a chosen floor: with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p``, the delta method
+      gives ``Var(a_0 - a_1) ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is common-mode and
+      cancels out of the difference — and the fit stands down when the separation does not exceed its own
+      standard error. Same shape as the strand channel's derived noise-floor deadband. ⭐ This is what
+      makes the estimator stand down by itself at a near-pure library, where nothing needs correcting.
+    * *degenerate* — a pool with no fragments at all.
+
+    ⭐⭐ **UNDER HYBRID CAPTURE THE CONTRAST DEGENERATES TO THE INTERGENIC POOL ALONE, AND THAT IS WHY IT
+    IS SAFE THERE.** The premise is that both pools' contaminants share a length distribution; off capture
+    they agree to a total variation of 0.06-0.14, under capture only 0.95-0.97. That would be alarming
+    except that under capture the intergenic pool is **depleted, not impure** (its measured gDNA purity
+    goes 0.48 -> 0.955 at ``g05``), so ``a_0 = rho*E_0/n_0`` exceeds 1 and CLIPS. Put ``a_0 = 1`` in the
+    formula above and it collapses exactly::
+
+        g = [(1-a_1) f_0 - 0] / (1 - a_1) = f_0
+
+    ⭐ **The intronic pool's coefficient becomes zero, so its contaminant never enters the answer** — which
+    is precisely the term the shared-``r`` premise was needed for. Verified: under capture the returned
+    histogram equals the de-tilted intergenic pool to **3e-17**, machine epsilon. ⚠ So the estimator does
+    not "get away with" a false premise; the clip removes the term that depended on it, and what is left is
+    a one-pool estimate that capture happens to make nearly pure. ⛔ **The safety therefore rests on
+    ``a_0`` clipping**, i.e. on the intergenic pool really being near-pure under capture; a probe panel
+    that put RNA back into intergenic space would silently break it, and nothing here would notice.
+
+    ⛔ **Two candidate detectors were built and BOTH refuted by measurement**, so do not re-propose them:
+    projecting onto the non-negative cone (it reproduces the contrast wherever the contrast is already
+    feasible, and degrades capture further where it is not), and testing the recovered components'
+    negative mass against its own Poisson noise floor (the floor scales with the violation, so the ratio
+    sits flat at 0.2-0.7 on and off capture and never separates).
+    """
+    types = np.asarray(region_types).ravel()
+    lengths = np.asarray(region_lengths, dtype=np.float64).ravel()
+    counts = np.asarray(payload.region_contained_count, dtype=np.float64)
+    # ⚠ genome-strand columns summed: gDNA is strand-symmetric and this estimator is about DENSITY, which
+    # is why it also works on an unstranded library, where the strand axis carries nothing.
+    counts = counts.sum(axis=1) if counts.ndim > 1 else counts
+    n = min(types.size, lengths.size, counts.size)
+    types, lengths, counts = types[:n], lengths[:n], counts[:n]
+
+    is_ig = (types == int(RegionType.INTERGENIC)) & (lengths > 0.0)
+    is_in = (types == int(RegionType.INTRON)) & (lengths > 0.0)
+    pooled_pmf = _normalized(_pool_sum(payload, _GDNA_CONTAINED_POOLS))
+    fit = one_sided_rate(
+        counts[is_ig | is_in], contained_opportunity(pooled_pmf, lengths[is_ig | is_in])
+    )
+    if not fit.informative:
+        return None, GdnaContrast(
+            False, "no gDNA density", fit.rate, fit.rate_over_pooled, 0.0, 0.0, 0.0
+        )
+
+    weights, totals = [], []
+    for mask in (is_ig, is_in):
+        n_p = float(counts[mask].sum())
+        e_p = float(contained_opportunity(pooled_pmf, lengths[mask]).sum())
+        weights.append(min(fit.rate * e_p / n_p, 1.0) if n_p > 0.0 else 0.0)
+        totals.append(n_p)
+    a0, a1 = weights
+    if totals[0] <= 0.0 or totals[1] <= 0.0:
+        return None, GdnaContrast(
+            False, "an empty pool", fit.rate, fit.rate_over_pooled, a0, a1, 0.0
+        )
+
+    sep = a0 - a1
+    se = float(np.sqrt(a0 * a0 / totals[0] + a1 * a1 / totals[1]))
+    if not abs(sep) > se:
+        return None, GdnaContrast(
+            False, "purities not separated", fit.rate, fit.rate_over_pooled, a0, a1, sep
+        )
+
+    pi = gdna_opportunity.combined_probability()
+    del pi  # the combined divisor is for the four-pool sum; each pool here takes its OWN
+    total = np.asarray(gdna_opportunity.total, dtype=np.float64)
+    raw = np.asarray(payload.pool_lengths, dtype=np.float64)
+    f = []
+    for pool in _GDNA_CONTAINED_POOLS:
+        opp = np.asarray(gdna_opportunity.pools[pool], dtype=np.float64)
+        prob = np.zeros_like(opp)
+        np.divide(opp, total, out=prob, where=total > 0.0)
+        f.append(_normalized(detilt_pool(raw[pool], prob)))
+    g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
+    # ⚠ The negative excursions are sampling noise on a quantity that is a density; clipping is the
+    # cheapest projection back onto the cone and was measured equal-or-better than a least-squares one.
+    g = np.clip(g, 0.0, None)
+    if not g.sum() > 0.0:
+        return None, GdnaContrast(
+            False, "empty after the contrast", fit.rate, fit.rate_over_pooled, a0, a1, sep
+        )
+    # ⭐ Rescaled to the pool mass the four-pool path would have carried, because the EB shrinkage reads
+    # the TOTAL as "how much evidence stands behind this shape".
+    return _normalized(g) * float(raw[list(_GDNA_POOLS)].sum()), GdnaContrast(
+        True, "", fit.rate, fit.rate_over_pooled, a0, a1, sep
+    )
+
+
 def _aligned(counts: np.ndarray, max_size: int) -> np.ndarray:
     """Align a raw FL count vector to ``max_size + 1`` bins (overflow → last bin)."""
     out = np.zeros(max_size + 1, dtype=np.float64)
@@ -235,6 +394,8 @@ def build_fl_models(
     *,
     sj_opportunity: np.ndarray | None = None,
     gdna_opportunity: "GdnaOpportunity | None" = None,
+    region_lengths: np.ndarray | None = None,
+    region_types: np.ndarray | None = None,
     prior_ess: float = POOL_EB_PRIOR_ESS,
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
@@ -272,6 +433,14 @@ def build_fl_models(
        category error — it is the defect that read a gDNA mean of 146.05 where the contained pool said
        88.0.
 
+     ⭐ **``region_lengths`` and ``region_types`` are what enable the two-pool CONTRAST** (the module
+     docstring derives it; :func:`_deconvolved_gdna_counts` implements it and owns every reason it
+     declines). Both come straight from
+     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays`, the same partition the
+     scanner deposits into, so they cannot disagree with the banks they index. ⛔ **Omitting them is a
+     supported state, not a degraded one** — the second pass and most tests do — and it falls back to the
+     four-pool sum, which is what shipped before.
+
      ⚠ **``None`` means no annotation was offered, and the fallback is the honest one, not the
      convenient one**: the RNA pool stays tilted and the gDNA pool falls back to the CONTAINED pair
      alone (:func:`gdna_contained_fl_mass`). ⛔ It does **not** fall back to the four pools pooled raw,
@@ -288,10 +457,17 @@ def build_fl_models(
     if sj_opportunity is not None:
         rna_counts = detilt_pool(rna_counts, sj_opportunity)
 
+    contrast = None
     if gdna_opportunity is None:
         gdna_counts = gdna_contained_fl_mass(payload)
     else:
         gdna_counts = detilt_pool(gdna_fl_mass(payload), gdna_opportunity.combined_probability())
+        if region_lengths is not None and region_types is not None:
+            deconvolved, contrast = _deconvolved_gdna_counts(
+                payload, gdna_opportunity, region_lengths, region_types
+            )
+            if deconvolved is not None:
+                gdna_counts = deconvolved
 
     return _fl_models_from_histograms(
         global_counts=payload.deposited_lengths,
@@ -300,6 +476,7 @@ def build_fl_models(
         max_size=int(payload.max_length),
         prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,
+        gdna_contrast=contrast,
     )
 
 
@@ -311,6 +488,7 @@ def _fl_models_from_histograms(
     max_size: int,
     prior_ess: float = POOL_EB_PRIOR_ESS,
     pool_counts: np.ndarray | None = None,
+    gdna_contrast: "GdnaContrast | None" = None,
 ) -> FLModels:
     """The smooth-EB kernel: three histograms in, three pmfs out.
 
@@ -340,4 +518,5 @@ def _fl_models_from_histograms(
         n_rna=n_rna,
         n_gdna=n_gdna,
         max_size=int(max_size),
+        gdna_contrast=gdna_contrast,
     )

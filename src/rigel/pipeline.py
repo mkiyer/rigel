@@ -395,6 +395,7 @@ def _drain_side_buffer(
     early return below is the "nothing was drained" signal on this path too.
     """
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_density import region_lengths_from_partition
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
     from .calibration.sj_opportunity import crossing_probability_from_index
     from .calibration.splice_graph import build_sj_arrays, build_region_partition_arrays
@@ -420,6 +421,13 @@ def _drain_side_buffer(
             payload,
             sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
             gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
+            # ⭐ The gDNA pools are NOT pure, so the length model deconvolves them (`calibration.fl`).
+            # `_region_bounds`/`_offsets`/`region_types` are the partition the scanner itself deposits
+            # into, already built above — the same frame as the banks being indexed.
+            region_lengths=region_lengths_from_partition(
+                _region_bounds, _offsets, len(region_types)
+            ),
+            region_types=region_types,
         ),
         # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
         # this is ≈ 0.01, so DISAGREEMENT is the likely case.
@@ -968,13 +976,22 @@ def run_pipeline(
     # ⭐ And the RNA pool is de-tilted by its own sj opportunity: "used an annotated sj"
     # is a length-dependent selection, so the raw pool is measurably longer than the library.
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_density import region_lengths_from_partition
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
     from .calibration.sj_opportunity import crossing_probability_from_index
+    from .calibration.splice_graph import build_region_partition_arrays
 
+    # ⭐ The partition the scanner deposits into, so the per-region banks and the lengths that divide
+    # them are addressed in one frame (`calibration.fl` derives what the deconvolution needs it for).
+    _fl_bounds, _fl_offsets, _fl_region_types = build_region_partition_arrays(index)
     fl_models = build_fl_models(
         calibration_payload,
         sj_opportunity=crossing_probability_from_index(index, int(calibration_payload.max_length)),
         gdna_opportunity=gdna_opportunity_from_index(index, int(calibration_payload.max_length)),
+        region_lengths=region_lengths_from_partition(
+            _fl_bounds, _fl_offsets, len(_fl_region_types)
+        ),
+        region_types=_fl_region_types,
     )
     gdna_fl_pmf = fl_models.gdna_pmf
     _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)

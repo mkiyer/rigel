@@ -66,11 +66,16 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         "opportunity — how many places a fragment COULD have sat",
         # ⭐ The deposit weight is 1/OPPORTUNITY, so every divisor in the tool is derived here and nowhere
         # else. `fl` is the entry point the scanner and the second pass call.
+        # ⭐ `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
+        # layer's job. It owns BOTH estimators of that one quantity (the naive pooled rate and the
+        # contamination-robust one-sided rate), so layer 5's `density_deconv` calls DOWN to it rather
+        # than carrying a second implementation.
         (
             "effective_length",
             "capture_eff_length",
             "sj_opportunity",
             "gdna_opportunity",
+            "gdna_density",
             "fl",
         ),
     ),

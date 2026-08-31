@@ -88,7 +88,31 @@ mean is safe (no adapter run-off); 88 % of the short arm is under 100 bp.
 ⛔ **WHAT MAY AND MAY NOT BE READ OFF IT.** The TRANSCRIPT-level number is not a calibration result here
 — the EM reads the fl distribution and a gap hands it the answer. Everything that stops BEFORE the EM is
 valid: `total_abundance_audit.py` (banks only) and `calibration_vs_oracle.py` (it runs `calibrate`, never
-the EM).
+the EM). ⭐ The one END-TO-END row that IS valid is the LIBRARY gDNA FRACTION, which is a composition
+deliverable rather than an EM assignment.
+
+### ⭐⭐⭐ AND THERE IS A THIRD fl PANEL — ON THE TEST CHROMOSOME, ALREADY ON THE CURRENT NASCENT MODEL
+
+⛔⛔ **READ THIS BEFORE RE-SIMULATING THE TWO SUITE ARMS ABOVE.** The fl gap is *also* exerted on the
+method-development test chromosome (§0a), by three panels that are fully simulated and cached **30/30 scan
+and oracle** and that were documented nowhere until 2026-08-30:
+
+| | `scenarios_fl_rna_long/` | `scenarios_fl_gdna_long/` | `scenarios_fl_equal200/` |
+|---|---|---|---|
+| config (`scripts/sim/configs/`) | `test_reference_fl_rna_long.yaml` | `test_reference_fl_gdna_long.yaml` | `test_reference_fl_equal200.yaml` |
+| gDNA / RNA fl configured | 100 / 250 | 250 / 100 | 200 / 200 — ⭐ **the CONTROL** |
+| conditions | the full 30 (`g00…g98` × ss `0.50/0.70/0.99` × capture) | the same 30 | the same 30 |
+
+⭐⭐ **They carry the CURRENT nascent model, and that is structural rather than lucky**: the test reference
+is `abundance.mode: file`, so each config's `nrna:` block is **dead by design** and nascent comes from
+`test_abundances.tsv` — the same file the main test panel reads. ⛔ **So the suite arms' stale nascent model
+does NOT block work on the fl gap**, and treating it as a blocking gate has already queued ~11 GB of
+unnecessary re-simulation once. Verify rather than trust the config: the condition names carry `nrna_file`,
+and `fl_pool_purity.py` shows nascent in the intronic pool and *mature* fragments in the intergenic pool
+(the shadow transcripts, §0a).
+
+⭐ **The equal-200 arm is the control that makes the other two a measurement** — an fl-gap result that also
+moves on the equal-length arm is an artefact, not the length gap.
 
 ### The gDNA ladder, in detail
 

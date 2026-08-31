@@ -277,8 +277,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,676 passed / 0 skipped / 8 xfail** (re-derived 2026-08-30 by
-running the suite. ⚠ Account it from the value at the last commit before this session, **3,643** — an
+⭐ **THE STANDING BASELINE: 0 failed / 3,720 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+running the suite. Account it from **3,676** at the start of the fl work:
++4 `scripts/design/em_fl_ceiling.py`; +2 `docs/dev/` files (jargon only);
++3 `src/rigel/calibration/gdna_density.py` (jargon, docs-boundary, layering — it IS declared in
+`_layers.py`); +2 `tests/calibration/test_gdna_density.py` per-file, +34 own cases.
+3,676 + 4 + 2 + 3 + 36 = **3,720**.
+⚠ Account the 3,676 from the value at the last commit before the previous session, **3,643** — an
 intermediate number quoted mid-session cannot be reconciled from a clean tree.
 ADDED: `tests/calibration/test_gdna_strand_fit.py` (33 own + 2 per-file = +35);
 `tests/test_sim_shadow_transcripts.py` (3 own + 2 = +5; ⚠ `test_scripts_index` does NOT parametrise a
@@ -407,6 +412,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/verify_index_rebuild.py` | **DID AN INDEX REBUILD PRESERVE THE STRUCTURE?** Regions byte-identical, boundaries only in contiguous reach |
 | **Stage A — the accumulator** | |
 | `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
+| `design/em_fl_ceiling.py` | ⭐⭐⭐ **WHAT IS A PERFECT gDNA fl pmf WORTH END TO END, THROUGH THE EM? — the one fl question that stops at no earlier stage.** Every other fl instrument stops at `calibrate`, but `pipeline.py` also hands `gdna_pmf` to the fragment scorer, so a wrong length model is applied per fragment in the channel that separates origins. ⭐ Read `gdna_frac_est` against `gdna_frac_true` — the PRODUCT; ⛔ the transcript rows flip sign between the two fl-gap arms and are not the deliverable. Three gates: the injection counts its fires, `noop_fl` must be byte-identical, and `base_reseed` is the noise floor. ⛔⛔ Meaningless on an equal-length panel — run both sign arms AND the equal-length control |
 | `design/fl_anchor_gap.py` | **HOW DO THE ANCHOR AND BOTH LENGTH MODELS COMPARE WITH TRUTH?** `--drain` measures before and after the second pass |
 | `design/gdna_pool_census.py` | ⭐ **DOES EACH OF THE FOUR gDNA POOLS AGREE WITH ITS OWN OPPORTUNITY, AND WITH TRUTH?** |
 | `design/second_pass_accuracy.py` | **HOW ACCURATE IS THE SECOND PASS, PER FRAGMENT, against the oracle BAM's read names?** |
