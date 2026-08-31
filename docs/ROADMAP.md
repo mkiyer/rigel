@@ -251,6 +251,29 @@ certified-RNA channel alone recovering the truth at most of them.
 stratum or a deleted panel cannot change a 0.8.0 decision until something else does. ⭐ Each entry names
 what would ANSWER it and, where the sparse-nascent rebuild moved it, says so.
 
+1. ⭐⭐⭐ **THE RNA LENGTH LAW IS BIASED −4 bp BY SJ OBSERVABILITY, AND THE FIX IS ALREADY BEING COMPUTED
+   AND THROWN AWAY** (diagnosed 2026-08-31, unbuilt). ⭐ **What it is worth: an attributable −18,208
+   transcripts** on the ladder's `g05` capture-ON row — measured by injecting the true RNA pmf, and the
+   three consumers split **scorer +156 / drain −822 / GEOMETRY −18,208**, so this is a geometry problem
+   and needs NO second estimand.
+   ⭐⭐ **THE MECHANISM, decomposed by stage**: the raw spliced pool runs **+10.2 bp** long (longer
+   fragments cross more junctions); the sj de-tilt removes **14.3**, overshooting by **4.1**; the EB
+   shrinkage is inert (0.01). ⛔ The de-tilt divides by the probability a fragment CROSSES an sj, but the
+   pool is selected on the splice being **OBSERVED** — and observability FALLS with length, since the
+   junction must land in a sequenced read rather than the mate gap. `fl.py` already flags the exclusion of
+   `sj_implicit`; this is its unpriced consequence. ⚠ A second, smaller term: `rna_pmf` estimates the
+   MATURE law while geometry wants ALL RNA (mature + nascent), worth 0.3 bp at capture-ON and 1.7 bp off
+   it — the same ESTIMAND mismatch as the gDNA frame error, a third instance.
+   ⛔ **REFUTED, do not retry**: the sj bank's model-free identity (`count/inv_length_sum + 1`) is
+   **equally** biased (−4.6, −5.3) because it samples the same observability-selected population. No
+   estimator built on spliced fragments escapes this; the escape is a different population.
+   ⭐⭐⭐ **AND THE TOOL ALREADY HAS ONE.** The two-pool contrast solves for BOTH components and discards
+   the contaminant `r`. That discarded law is unspliced RNA from pools with **no observability selection**,
+   and measured against truth it lands at **216.45 and 216.83 against 216.48 and 216.64 — inside 0.2 bp**.
+   ⭐ So the fix is to keep it and combine it with the spliced-derived law by precision, reusing
+   `_couple_estimands`; no read-length model and no new input. ⛔ Unbuilt and un-A/B'd: it must be judged
+   on `quant_accuracy.py` transcript error, and the ceiling for the whole RNA side is the −18,208 above.
+
 1. ⚠ **[SUPERSEDED by the row above, kept for its measurements] SHOULD THE gDNA LENGTH MODEL RUN A SECOND CONTRAST ON THE *CROSSING* POOLS? — the two pairs have
    OPPOSITE failure modes and the pool depths are anti-correlated, which is what makes this worth
    answering** (owner question, 2026-08-31; explored, not built). The crossing pair mirrors the contained
