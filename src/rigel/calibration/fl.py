@@ -277,6 +277,68 @@ def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     return _pool_sum(payload, _SPLASH_POOLS)
 
 
+def _resolution_weight(signal_sq: float, noise_sq: float) -> float:
+    """``S / (S + N)`` — how much of an observed split is signal rather than its own sampling noise.
+
+    ⭐⭐ **This is what replaces every "is it big enough?" threshold in this module.** A test of the form
+    ``|split| > standard error`` is a CLIFF: the estimator's behaviour changes discontinuously as data
+    accumulates, and where the cliff sits is a property of the sample rather than of the tool. This is
+    the same comparison made continuously — the Wiener/signal-to-noise weight, 0 when the split is pure
+    noise, 1 when the noise vanishes, ``½`` exactly where the old threshold sat, and monotone between.
+    ⭐ No constant is introduced: both arguments are variances the data supplies.
+    """
+    s = max(float(signal_sq), 0.0)
+    n = max(float(noise_sq), 0.0)
+    if s <= 0.0:
+        return 0.0
+    if n <= 0.0:
+        return 1.0
+    return s / (s + n)
+
+
+def _couple_estimands(g_uniform, mass_uniform: float, g_boundary, mass_boundary: float):
+    """Couple the two gDNA length estimands so they CONVERGE when their split is not measurable.
+
+    ⛔⛔ **THE PROBLEM THIS SOLVES.** Capture is a spectrum, and at either end one of the two strata has
+    no data: at zero capture the boundary pools are nearly empty, and at very strong capture the
+    contained pools are. A hard "use the realized law / fall back to the uniform law" switch is then
+    both a cliff and a lie — the estimates do not merely become uncertain, they become the SAME
+    estimate, because nothing in the data distinguishes them any more.
+
+    So the split is carried explicitly and weighted by how well it is resolved. With ``M`` the total
+    gDNA mass and ``lam`` the resolution weight of ``Δ = g_boundary − g_uniform``::
+
+        g_common = (m_u·g_uniform + m_b·g_boundary) / M          the precision-weighted consensus
+        uniform  = g_uniform + (1 − lam)·(g_common − g_uniform)   shrinks toward consensus as lam → 0
+        realized = g_common                                       the census, always the mixture
+
+    ⭐ At ``lam = 1`` this is exactly the uncoupled behaviour: ``uniform`` is the contained-derived law
+    and ``realized`` the mass-weighted census. ⭐ At ``lam = 0`` **both are ``g_common``** — identical
+    arrays, whichever stratum is the starved one, because ``g_common`` is precision-weighted and the
+    starved stratum contributes nothing to it. The noise term ``1/m_u + 1/m_b`` diverges when EITHER
+    mass collapses, which is what makes the convergence automatic from both ends.
+
+    Returns ``(uniform, realized, lam)``; the caller adds any capture-only correction to ``realized``,
+    itself scaled by ``lam`` so that it too vanishes when the split is unresolved.
+    """
+    g_u = np.asarray(g_uniform, dtype=np.float64)
+    g_b = np.asarray(g_boundary, dtype=np.float64)
+    n = min(g_u.size, g_b.size)
+    g_u, g_b = g_u[:n], g_b[:n]
+    m_u, m_b = max(float(mass_uniform), 0.0), max(float(mass_boundary), 0.0)
+    total = m_u + m_b
+    if total <= 0.0:
+        return g_u.copy(), g_u.copy(), 0.0
+    g_common = (m_u * g_u + m_b * g_b) / total
+    delta = g_b - g_u
+    # the split's own sampling variance: a multinomial pmf from `m` counts has Var ~ p/m per bin, so
+    # summing over bins gives 1/m for a normalised law. It DIVERGES when either mass collapses.
+    noise = (1.0 / m_u if m_u > 0.0 else np.inf) + (1.0 / m_b if m_b > 0.0 else np.inf)
+    lam = _resolution_weight(float((delta * delta).sum()), noise)
+    uniform = g_u + (1.0 - lam) * (g_common - g_u)
+    return uniform, g_common, lam
+
+
 def _deconvolved_gdna_counts(
     payload: "AccumulatorPayload",
     gdna_opportunity: "GdnaOpportunity",
@@ -360,9 +422,14 @@ def _deconvolved_gdna_counts(
 
     sep = a0 - a1
     se = float(np.sqrt(a0 * a0 / totals[0] + a1 * a1 / totals[1]))
-    if not abs(sep) > se:
+    # ⭐ NO THRESHOLD. The inversion is blended toward the pools' own mixture by how well the purity
+    # separation is resolved against its own standard error, so a pair that says nothing changes
+    # nothing and a pair that says a little changes a little. `lam = 1` is the old accept branch and
+    # `lam = 0` the old decline, now joined continuously instead of switched between.
+    lam_sep = _resolution_weight(sep * sep, se * se)
+    if sep == 0.0:
         return None, GdnaContrast(
-            False, "purities not separated", fit.rate, fit.rate_over_pooled, a0, a1, sep
+            False, "purities identical", fit.rate, fit.rate_over_pooled, a0, a1, sep
         )
 
     pi = gdna_opportunity.combined_probability()
@@ -375,9 +442,13 @@ def _deconvolved_gdna_counts(
         prob = np.zeros_like(opp)
         np.divide(opp, total, out=prob, where=total > 0.0)
         f.append(_normalized(detilt_pool(raw[pool], prob)))
+    mixture = _normalized(totals[0] * f[0] + totals[1] * f[1])
     g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
     # ⚠ The negative excursions are sampling noise on a quantity that is a density; clipping is the
     # cheapest projection back onto the cone and was measured equal-or-better than a least-squares one.
+    g = np.clip(g, 0.0, None)
+    s = g.sum()
+    g = mixture + lam_sep * (_normalized(g) - mixture) if s > 0.0 else mixture
     g = np.clip(g, 0.0, None)
     if not g.sum() > 0.0:
         return None, GdnaContrast(
@@ -416,8 +487,14 @@ def _realized_gdna_counts(
       the sampled union already carries every class's uniform part, so at ``eps = 1`` (no capture) the
       correction vanishes IDENTICALLY and the realized law collapses to the sampled blend.
 
-    Declining is a real answer: with no gDNA density there is no census to take, and the caller then
-    keeps the uniform-frame law for both estimands — which is exactly the off-capture truth.
+    Returns ``(realized_counts, uniform_counts, diagnostics)`` — BOTH estimands, because they are
+    coupled: :func:`_couple_estimands` shrinks them toward one another by how well their split is
+    resolved, so the uniform law returned here may differ from the ``uniform_counts`` handed in when the
+    contained stratum is thin. ⭐ That coupling is what removes the last cliff: there is no data at which
+    behaviour switches, only a weight that fades.
+
+    Declining is still a real answer at literally zero gDNA — there is no census to take — and the
+    caller then keeps the uniform-frame law for both estimands.
     """
     obs_pools = np.asarray(payload.pool_lengths, dtype=np.float64)
     ty = np.asarray(region_types).ravel()
@@ -434,7 +511,7 @@ def _realized_gdna_counts(
     e_g = contained_opportunity(g_C, ell)
     fit = one_sided_rate(cnt[is_ig | is_in], e_g[is_ig | is_in])
     if not fit.informative:
-        return None, GdnaRealized(False, "no gDNA density", 0.0, 0.0, 0.0, 0.0)
+        return None, None, GdnaRealized(False, "no gDNA density", 0.0, 0.0, 0.0, 0.0)
     rho_off = fit.rate
 
     m_C = 0.0
@@ -493,7 +570,7 @@ def _realized_gdna_counts(
                 # SIGNED enrichment ratio (1 = uniform); the clip lives at the exon mean so noise
                 # cancels instead of accumulating one-sidedly.
                 exon_eps.setdefault(exon_region, []).append(
-                    (a_b * nb) / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30)
+                    ((a_b * nb) / max(rho_off * max(mu_g - 1.0, 1e-9), 1e-30), a_b * nb)
                 )
         if den[2] <= 0.0 or den[3] <= 0.0:
             break
@@ -509,13 +586,18 @@ def _realized_gdna_counts(
             f.append(_normalized(detilt_pool(obs_pools[pool], prob)))
         f2, f3 = f[0][: g_C.size], f[1][: g_C.size]
         sep = a2 - a3
-        if abs(sep) > float(np.sqrt(a2 * a2 / max(n2, 1.0) + a3 * a3 / max(n3, 1.0))):
-            a_mix = (a2 * n2 + a3 * n3) / max(n2 + n3, 1.0)
-            f_mix = _normalized(n2 * f2 + n3 * f3)
-            r_hat = _normalized(np.clip((a3 * f2 - a2 * f3) / (a3 - a2), 0.0, None))
-            g_B = _normalized(np.clip(f_mix - (1.0 - a_mix) * r_hat, 0.0, None))
+        f_mix = _normalized(n2 * f2 + n3 * f3)
+        if sep == 0.0:
+            g_B = f_mix
         else:
-            g_B = _normalized(a2 * n2 * f2 + a3 * n3 * f3)
+            # the same fade as the contained pair: resolve the separation against its own error and
+            # blend the complement-first inversion toward the pools' mixture by that weight.
+            se_b = float(np.sqrt(a2 * a2 / max(n2, 1.0) + a3 * a3 / max(n3, 1.0)))
+            lam_b = _resolution_weight(sep * sep, se_b * se_b)
+            a_mix = (a2 * n2 + a3 * n3) / max(n2 + n3, 1.0)
+            r_hat = _normalized(np.clip((a3 * f2 - a2 * f3) / (a3 - a2), 0.0, None))
+            inverted = _normalized(np.clip(f_mix - (1.0 - a_mix) * r_hat, 0.0, None))
+            g_B = _normalized(np.clip(f_mix + lam_b * (inverted - f_mix), 0.0, None))
         mu_next = float((g_B * L_axis[: g_B.size]).sum())
         if not np.isfinite(mu_next) or abs(mu_next - mu_g) < 0.25:
             break
@@ -524,12 +606,24 @@ def _realized_gdna_counts(
 
     # ── the on-target excess: exon classes no pool samples, at (eps - 1)+ only
     is_ex = (ty == exon) & (ell > 0.0)
-    mean_eps = float(np.mean([np.mean(v) for v in exon_eps.values()])) if exon_eps else 1.0
+    all_eps = [e for v in exon_eps.values() for e, _ in v]
+    mean_eps = float(np.mean(all_eps)) if all_eps else 1.0
     h_E = np.zeros_like(g_C)
     m_E = 0.0
     if exon_eps:
         for e_idx in np.flatnonzero(is_ex):
-            excess_e = max(float(np.mean(exon_eps.get(int(e_idx), [mean_eps]))) - 1.0, 0.0)
+            obs_e = exon_eps.get(int(e_idx), [(mean_eps, 0.0)])
+            eps_e = float(np.mean([e for e, _ in obs_e]))
+            n_e = float(sum(w for _, w in obs_e))
+            # ⭐ THE EXCESS HAS ITS OWN RESOLUTION, and it is NOT `lam`. `lam` asks whether the two
+            # strata's LAWS differ; this asks whether this exon's ENRICHMENT differs from 1 — a
+            # different question, and gating one on the other suppressed a real correction. Same
+            # helper, its own signal and its own noise: a ratio estimated from `n_e` gDNA crossings
+            # has relative variance ~ 1/n_e, so `Var(eps) ~ eps^2/n_e`.
+            w_e = _resolution_weight(
+                (eps_e - 1.0) ** 2, (eps_e * eps_e / n_e) if n_e > 0.0 else np.inf
+            )
+            excess_e = w_e * max(eps_e - 1.0, 0.0)
             if excess_e <= 0.0:
                 continue
             le = ell[e_idx]
@@ -539,18 +633,30 @@ def _realized_gdna_counts(
             h_E += rho_off * excess_e * shape
             m_E += rho_off * excess_e * float(shape.sum())
 
-    total_mass = m_C + m_B + m_E
-    if total_mass <= 0.0:
-        return None, GdnaRealized(False, "no gDNA mass anywhere", 0.0, 0.0, a2, a3)
-    m0 = g_C.size if g_B is None else min(g_C.size, g_B.size)
-    out = m_C * g_C[:m0] + h_E[:m0]
-    if g_B is not None:
-        out = out + m_B * g_B[:m0]
-    if not out.sum() > 0.0:
-        return None, GdnaRealized(False, "empty census", 0.0, 0.0, a2, a3)
+    if m_C + m_B <= 0.0:
+        return None, None, GdnaRealized(False, "no gDNA mass anywhere", 0.0, 0.0, a2, a3)
+
+    # ⭐⭐ COUPLE THE TWO ESTIMANDS. `lam` is how well the capture-induced split between the strata is
+    # resolved; at `lam = 0` the two laws are the SAME ARRAY, which is the honest answer whenever one
+    # stratum is starved — at zero capture the boundaries are empty, at very strong capture the
+    # contained pools are, and in neither case does the data distinguish a chemistry law from a census.
+    if g_B is None:
+        uniform, realized, lam = g_C.copy(), g_C.copy(), 0.0
+    else:
+        uniform, realized, lam = _couple_estimands(g_C, m_C, g_B, m_B)
+
+    # the on-target excess is a capture-only correction, so it rides `lam` too and vanishes with it
+    m0 = min(uniform.size, realized.size, h_E.size)
+    # ⚠ the excess rides its OWN resolution weight (applied per exon above), not `lam`
+    realized = realized[:m0] + h_E[:m0] / max(m_C + m_B, 1e-30)
+    if not realized.sum() > 0.0 or not uniform[:m0].sum() > 0.0:
+        return None, None, GdnaRealized(False, "empty census", 0.0, 0.0, a2, a3)
     scale = float(obs_pools[list(_GDNA_POOLS)].sum())
-    return _normalized(out) * scale, GdnaRealized(
-        True, "", m_B / total_mass, m_E / total_mass, a2, a3
+    total_mass = m_C + m_B + m_E
+    return (
+        _normalized(realized) * scale,
+        _normalized(uniform[:m0]) * scale,
+        GdnaRealized(True, "", m_B / max(m_C + m_B, 1e-30), m_E / total_mass, a2, a3),
     )
 
 
@@ -665,7 +771,7 @@ def build_fl_models(
             # ⭐ the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
             # result and the same banks; on decline the two estimands coincide, which is the honest
             # off-capture answer rather than a degraded one.
-            realized_counts, realized = _realized_gdna_counts(
+            realized_counts, coupled_uniform, realized = _realized_gdna_counts(
                 payload,
                 gdna_opportunity,
                 region_lengths,
@@ -675,6 +781,10 @@ def build_fl_models(
                 else rna_fl_mass(payload),
                 gdna_counts,
             )
+            # ⭐ the coupling can move the UNIFORM law too — that is the point: when the contained
+            # stratum is starved the chemistry law is not estimable and must borrow the one that is.
+            if coupled_uniform is not None:
+                gdna_counts = coupled_uniform
 
     return _fl_models_from_histograms(
         global_counts=payload.deposited_lengths,
