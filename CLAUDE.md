@@ -278,8 +278,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,742 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
-running the suite after the drained-frame migration and re-baselining. Account it from **3,738** after
+⭐ **THE STANDING BASELINE: 0 failed / 3,743 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+running the suite after the leak derivation: the drained-frame accounting below plus **+1** for
+`docs/dev/PLAN_certified_channel_impurity.md` (jargon only). Account it from **3,738** after
 the pricing commit: **+3** new cases in `tests/calibration/test_oracle.py` (the frame-aware
 exact-zeros gate, each perturbed), **+1** in `tests/test_scan_cache.py` (the drained
 `calibration_inputs` contract + determinism), **−1** for deleting the superseded sandbox prototype

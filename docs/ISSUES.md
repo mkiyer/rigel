@@ -47,18 +47,24 @@ condition's whole certified-RNA channel**, an IN-SCOPE stratum. ⚠ The certifie
 pure, not 100 %. Invisible to every undrained-frame instrument, which is how it went unmeasured
 (the frame ruling is `DESIGN.md` §4.3 — landed, so the leak is now visible: `calibration_vs_oracle` reports it per row and every certified
 `slot_truth.npz` carries the drained-frame report verdict).
-⭐ **Candidate repairs, none yet derived — each must be priced against what it costs the drain's
-correct spliced assignments** (the drain re-includes the gap-hidden TRUE spliced fragments that made
-the RNA length law read −4 bp biased before it ran; a repair that suppresses those re-creates that
-bias): ① keep the assignment but DEPOSIT differently — a drain-resolved spliced fragment enters the
-boundary/sj *count* banks but not the CERTIFIED channel's consumers, i.e. split certified-by-
-observation from assigned-by-inference at the consumer (a provenance split; ⚠ interacts with the
-"determinacy, not provenance" accumulator ruling and needs the owner); ② price the channel honestly —
-give the certified-flux consumers a purity ≈ 1 − leak/channel instead of exactly 1 (no threshold, the
-number is measured per condition); ③ a derived posterior-odds requirement for choosing spliced over
-genomic when the genomic hypothesis is live (⛔ any fixed floor is a tuned constant — only a derived
-form is admissible). Score any repair on false-positive mass at the zero-RNA direction AND on the
-RNA length-law residual (the drain's repair of the spliced pool must survive).
+⭐⭐ **DERIVED 2026-08-31, and the measurements FORCE the design** (the derivation and numbers:
+`docs/dev` carries the plan; prototypes gated on byte-identity with production's drain choices).
+① The leak is EXACTLY posterior sampling — realized gDNA-in-spliced matches Σ P(spliced|record) over
+true-gDNA records within the draw's own noise on every condition measured (0.0σ / 1.4σ / 0.7σ) — so
+"make the drain smarter" has no headroom, and a posterior-odds floor is dominated (the posterior is
+calibrated; a floor trades true splices for gDNA at its own rate, and is a tuned constant besides).
+② A provenance split is refused by arithmetic: at `g50 ss.99 OFF` it evicts 134,850 correct drained
+records from the certified channel to remove 75 contaminants, resurrecting the −4 bp spliced-pool
+bias the drain exists to repair. ③ No structural gDNA channel: records with no genomic survivor are
+100 % mature. ④ The harm is concentrated and qualitative: at `g98 ss.99 ON`, 137 boundaries carry
+certified RNA where truth has ZERO spliced RNA. ⑤ The leakers' own P(genomic) is known at drain time
+(median 0.494 at `g98 ss.99 ON`) — the information to price the false certainty already exists.
+⭐ **The design**: deposits unchanged; the drain accumulates per certified object
+`E_genomic = Σ q_null` and `V_genomic = Σ q(1−q)` (its own posterior, no new model, no constant), and
+CALIBRATION — which owns composition — converts path-contamination to gDNA-contamination with its own
+local `f_g`. Consumers correct the certified count's mean and/or precision. Score per stratum on
+`calibration_vs_oracle.py`, both zero controls, both fl-gap sign arms, AND the spliced-pool means
+(the drain's length-law repair must survive). Sequencing and open points: the plan doc in `docs/dev`.
 
 ### measured-prior-rung-4
 `priority: now · kind: build · stamped: 2026-08-26`
