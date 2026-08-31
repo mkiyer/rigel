@@ -594,8 +594,28 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     }
 
 
-def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
-    """Exactly the keyword arguments `calibrate` needs, with the index-derived ones REBUILT.
+def calibration_inputs(
+    cache: ScanCache, index: "TranscriptIndex", *, drain_seed: int | None = None,
+    lift_out: dict | None = None,
+) -> dict:
+    """Exactly the keyword arguments `calibrate` needs, **in PRODUCTION'S FRAME**.
+
+    ⭐⭐ **THE PAYLOAD IS DRAINED HERE — the frame ruling of 2026-08-31**
+    (`ISSUES: instruments-calibrate-undrained-cache`). The cache stores pass one so the drain can
+    re-run at any seed; production drains the side buffer BEFORE ``build_fl_models``/``calibrate``
+    (`pipeline.py`), and an instrument that calibrated the undrained tally was measuring a library the
+    solver never sees — the certified spliced channel alone is 17–20 % larger drained, and the
+    `g00` capture-ON zero control read 23 % worse undrained. ``drain_seed`` defaults to the production
+    default (``PipelineConfig().second_pass_seed``); pass the run's own when scoring against a
+    specific pipeline invocation. ``lift_out`` (a dict) receives the drain's ``_lift`` box —
+    ``(undrained, choices, region_types, sj)`` — which is what `calibration._oracle.lift_drain_parts`
+    needs to put cached ORACLE PARTITIONS into the same frame; it stays EMPTY when the side buffer
+    held nothing, in which case pass one already IS the drained frame.
+
+    ⭐ **The fl models are built exactly as production builds them** — on the DRAINED payload, with
+    ``region_lengths``/``region_types`` supplied so the two-pool contrast runs (omitting them is a
+    supported fl fallback, but it is not what ships, and an instrument must not measure a different
+    length model than production's).
 
     ⭐ **Every fragment-length histogram comes from the PAYLOAD** — the two pure pools *and*, since
     TRAPS: pure-and-length-censored.1, the unconditional anchor they are shrunk toward. One quantity, one source, one frame: the
@@ -607,16 +627,30 @@ def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
     sj" is a length-dependent selection, and how much so is a fact about the ANNOTATION.
     """
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_density import region_lengths_from_partition
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
     from .calibration.sj_opportunity import crossing_probability_from_index
+    from .calibration.splice_graph import build_region_partition_arrays
+    from .config import PipelineConfig
+    from .pipeline import _drain_side_buffer
 
+    if drain_seed is None:
+        drain_seed = PipelineConfig().second_pass_seed
+    lift = {} if lift_out is None else lift_out
+    payload = _drain_side_buffer(
+        cache.payload, index, cache.strand_model, seed=int(drain_seed), _lift=lift
+    )
+
+    bounds, offsets, region_types = build_region_partition_arrays(index)
     fl_models = build_fl_models(
-        cache.payload,
-        sj_opportunity=crossing_probability_from_index(index, int(cache.payload.max_length)),
-        gdna_opportunity=gdna_opportunity_from_index(index, int(cache.payload.max_length)),
+        payload,
+        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
+        region_lengths=region_lengths_from_partition(bounds, offsets, len(region_types)),
+        region_types=region_types,
     )
     return {
-        "payload": cache.payload,
+        "payload": payload,
         "strand_model": cache.strand_model,
         "gdna_fl_pmf": fl_models.gdna_pmf,
         "rna_fl_pmf": fl_models.rna_pmf,

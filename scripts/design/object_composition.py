@@ -400,14 +400,17 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     """One condition: the target, the stratum census, and every estimator. One JSON-able row."""
     start = time.perf_counter()
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    kw = calibration_inputs(cache, index)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling)
+    payload = kw["payload"]
     chain = build_region_chain(
-        cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets
+        payload.ref_region_offsets, payload.ref_boundary_offsets
     )
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     geometry = build_region_geometry(
         chain,
-        CalibrationSubstrate.from_payload(cache.payload, region_arrays),
+        CalibrationSubstrate.from_payload(payload, region_arrays),
         region_arrays,
         sj,
         kw["gdna_fl_pmf"],
@@ -432,7 +435,8 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     #   this instrument cannot race a concurrent arm.
     root = Path(oracle_cache) / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    OracleTruth.from_parts(cache.payload, parts)
+    truth_oracle = OracleTruth.from_cached_parts(payload, parts, lift)
+    parts = truth_oracle.parts  # the drained partitions — the same frame as `payload`
 
     n_g = slot_counts(parts["gdna"], region_arrays, chain)
     n_r = slot_counts(parts["mrna"], region_arrays, chain) + slot_counts(
@@ -450,7 +454,7 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     est_mass = np.zeros(int(chain.n_slots), np.float64)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
-    full_sub = CalibrationSubstrate.from_payload(cache.payload, region_arrays)
+    full_sub = CalibrationSubstrate.from_payload(payload, region_arrays)
     est_mass[kind == REGION] = np.asarray(full_sub.region_contained.count, np.float64).sum(1)[
         obj[kind == REGION]
     ]

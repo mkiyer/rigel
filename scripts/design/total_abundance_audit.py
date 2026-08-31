@@ -672,7 +672,6 @@ def _mass_frac(mass: np.ndarray, sel: np.ndarray) -> float:
 def load_condition(suite: Path, condition: str, index, cached: dict) -> tuple[object, dict, dict]:
     """The full payload, the three origin payloads, and the index-derived parts (built once)."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    payload = cache.payload
     root = Path(suite) / "oracle_cache" / condition
     parts = {}
     for k in ORIGINS:
@@ -684,7 +683,14 @@ def load_condition(suite: Path, condition: str, index, cached: dict) -> tuple[ob
             )
         parts[k] = read_scan_cache(d, index).payload
 
-    kw = calibration_inputs(cache, index)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): the audited total and the origin partitions
+    # it is scored against are drained consistently (`lift_drain_parts` replays the whole's choices).
+    payload = kw["payload"]
+    from calibration._oracle import lift_drain_parts
+
+    parts = dict(zip(ORIGINS, lift_drain_parts(lift, [parts[k] for k in ORIGINS])[0]))
     ra = cached["region_arrays"]
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     substrate = CalibrationSubstrate.from_payload(payload, ra)

@@ -20,7 +20,26 @@ because a graveyard row without its number is an invitation to rebuild.
 ## OPEN
 
 ### instruments-calibrate-undrained-cache
-`priority: now (owner ruling wanted) · kind: decision · stamped: 2026-08-31, PRICED same day`
+`priority: now (RULED — migration wave 1 landed; wave 2 remains) · kind: decision · stamped: 2026-08-31`
+⭐⭐ **RULED (owner, 2026-08-31): instruments monitor the DRAINED frame.** Landed the same day:
+`scan_cache.calibration_inputs` now drains at the production seed, builds the fl models exactly as
+production does (region args supplied, so the two-pool contrast runs — a third divergence found and
+closed in the same change), and publishes the `lift_out` box; `OracleTruth` gained
+`from_cached_parts`/`lift_drain_parts` and a frame-aware exact-zeros gate (pass-one: hard refusal;
+drained: the leak is RECORDED as `gdna_spliced_leak` — `ISSUES: drain-contaminates-certified-rna`).
+All ten `calibration_inputs` consumers migrated (`calibration_vs_oracle`, `calibration_oracle` — both
+partitionings, gdna-first shared choice slice, `rna-strands-close` passes exactly — `calibration_walk`,
+`relay_pool_ab`, `object_composition`, `total_abundance_audit`, `hop_currency`,
+`transfer_variance_audit`, `composition_evidence_census`, `prior_units_check`); `slot_truth`
+re-certified on both panels in the drained frame. Gates: `tests/calibration/test_oracle.py` (frame
+behaviour, each perturbed) and `tests/test_scan_cache.py` (the drained contract + determinism).
+⛔ **WAVE 2 — still on the pass-one frame, migrate as touched**: `policy_benchmark`,
+`pass0_vs_oracle`, `prior_vs_oracle` (its undrained choice is now unjustified — the gate refusal it
+cited is redesigned), `calibration_truth_ab`, `pass0_claimed_ab`, `structural_claims_audit`,
+`held_flux_census`, `gdna_pool_census`, `landscape_head_to_head`, `abundance_landscape_census`,
+`transport_dispersion`, `fl_pool_purity`, `certified_q_census`, `anchor_opportunity_census`
+(`fl_anchor_gap` and `boundary_q_population` already drain their whole). ⚠ Until wave 2, a claim that
+spans a wave-1 and a wave-2 instrument compares two frames — say so beside it.
 The calibration instruments run `calibrate()` on the UNDRAINED scan cache
 (`scan_cache.calibration_inputs`) while production drains first (`pipeline._drain_side_buffer`). ⭐ The
 undrained choice was DELIBERATE and recorded in `prior_vs_oracle.py` — but its justification is now
@@ -49,8 +68,22 @@ pass, in the ruled frame). ⛔ That gate change redefines what "certified" means
 re-certification + re-baseline) or this record is the reason-not-to. Prototype:
 `drained_frame_price.py` in the 2026-08-31 session scratchpad.
 
+### rename-the-drain
+`priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
+"Drain" carries no intuition — the concept is: pass one BUFFERS any fragment whose unsequenced mate
+gap admits more than one explanation (an annotated intron may lie in the gap), and the second pass
+performs DATA-DRIVEN ASSIGNMENT of each buffered fragment against the whole library's densities and
+length models. The buffer is already well named (`payload.deferred`, `DeferredFragments`); the verb
+family is not (`drain`, `DrainQC`, `_drain_side_buffer`, `payload.drain`, `lift_choices`' docs).
+⚠ ~530 sites across src/scripts/tests/docs — `arm`-rename scale, so it needs its own
+`rename_census.py` sense registration and a staged pass with `rename_identity.py --freeze/--check`,
+never a tail-end sweep. ⚠ Candidate verbs and their collisions: *resolve* (collides with
+`resolve.cpp`, fragment construction), *assign* (collides with the EM's fragment→transcript
+assignment), *settle*, *place*, *adjudicate* — the owner picks. The QC dataclass and the
+`payload.drain is not None` frame test rename with it.
+
 ### drain-contaminates-certified-rna
-`priority: later · kind: defect · stamped: 2026-08-31`
+`priority: next (owner, 2026-08-31: "extremely concerned … avoid all sources of false positives") · kind: defect · stamped: 2026-08-31`
 **The second-pass drain deposits some TRUE-gDNA fragments into the certified-RNA banks** — the
 whole-library drain draws a spliced hypothesis for a held gDNA fragment whose mate gap admits an
 annotated intron, so production's tally violates "gDNA cannot splice" as a statement about DEPOSITS.
@@ -61,9 +94,21 @@ library never mistakes a gDNA length for a spliced one). Measured on the ladder:
 condition's whole certified-RNA channel**, an IN-SCOPE stratum. ⚠ The certified-flux anchor and every
 "spliced ⇒ certainly RNA" consumer treat this channel as exact; at high gDNA under capture it is ~98 %
 pure, not 100 %. Invisible to every undrained-frame instrument, which is how it went unmeasured
-(`ISSUES: instruments-calibrate-undrained-cache` carries the frame question). Candidate repairs are a
-drain-confidence floor for the spliced hypothesis (⛔ smells like a threshold — derive, don't tune) or
-simply pricing it into the certified channel's stated precision.
+(`ISSUES: instruments-calibrate-undrained-cache` carries the frame question — RULED and landed, so
+the leak is now visible: `calibration_vs_oracle` reports it per row and every certified
+`slot_truth.npz` carries the drained-frame report verdict).
+⭐ **Candidate repairs, none yet derived — each must be priced against what it costs the drain's
+correct spliced assignments** (the drain re-includes the gap-hidden TRUE spliced fragments that made
+the RNA length law read −4 bp biased before it ran; a repair that suppresses those re-creates that
+bias): ① keep the assignment but DEPOSIT differently — a drain-resolved spliced fragment enters the
+boundary/sj *count* banks but not the CERTIFIED channel's consumers, i.e. split certified-by-
+observation from assigned-by-inference at the consumer (a provenance split; ⚠ interacts with the
+"determinacy, not provenance" accumulator ruling and needs the owner); ② price the channel honestly —
+give the certified-flux consumers a purity ≈ 1 − leak/channel instead of exactly 1 (no threshold, the
+number is measured per condition); ③ a derived posterior-odds requirement for choosing spliced over
+genomic when the genomic hypothesis is live (⛔ any fixed floor is a tuned constant — only a derived
+form is admissible). Score any repair on false-positive mass at the zero-RNA direction AND on the
+RNA length-law residual (the drain's repair of the spliced pool must survive).
 
 ### re-derive-in-scope-baselines
 `priority: now · kind: measurement · stamped: 2026-08-22`

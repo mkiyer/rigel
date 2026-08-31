@@ -477,19 +477,25 @@ def load_condition(index, region_arrays, sj, bflags, suite: Path, condition: str
             "this instrument scores against CERTIFIED truth only."
         )
     truth = np.load(truth_path, allow_pickle=True)
+    from calibration._oracle import lift_drain_parts  # via object_composition's tests-path setup
+
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    kw = calibration_inputs(cache, index)
-    chain = build_region_chain(cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): the whole and every per-component partition
+    # below are drained consistently, one exact partitioning per lift call, gdna FIRST in each list.
+    payload = kw["payload"]
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     statics = build_region_statics(chain, region_arrays, bflags)
 
     def geom_of(payload):
         return build_region_geometry(chain, CalibrationSubstrate.from_payload(payload, region_arrays),
                                      region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None)
 
-    geom = geom_of(cache.payload)
+    geom = geom_of(payload)
     root = Path(suite) / "oracle_cache" / condition
     try:
-        geoms = {k: geom_of(read_scan_cache(root / k, index).payload) for k in COMPONENT_ORIGIN}
+        comp_parts = [read_scan_cache(root / k, index).payload for k in COMPONENT_ORIGIN]
     except Exception as exc:  # noqa: BLE001
         raise FileNotFoundError(
             f"{root} lacks the per-COMPONENT partitions {list(COMPONENT_ORIGIN)} "
@@ -497,7 +503,11 @@ def load_condition(index, region_arrays, sj, bflags, suite: Path, condition: str
             "built by `panel.py cache`; without them the three arms cannot be scored and a pooled-RNA "
             "map is not what the policy carries."
         ) from exc
-    nrna_geom = geom_of(read_scan_cache(root / "nrna", index).payload)
+    geoms = dict(zip(COMPONENT_ORIGIN, (geom_of(q) for q in lift_drain_parts(lift, comp_parts)[0])))
+    # ⚠ nrna alone is NOT an exact partition, so it is drained through the ORIGINS partitioning
+    # (gdna, mrna, nrna) — its own complete cover of the whole — and the nrna member taken.
+    origin_parts = [read_scan_cache(root / k, index).payload for k in ("gdna", "mrna", "nrna")]
+    nrna_geom = geom_of(lift_drain_parts(lift, origin_parts)[0][2])
     label = OC.strata(chain, statics, geom, region_arrays)["label"].astype(str)
     if not np.array_equal(label, truth["stratum"].astype(str)):
         raise AssertionError("the object classes re-derived here differ from the certified table's")

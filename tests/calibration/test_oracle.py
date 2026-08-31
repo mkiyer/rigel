@@ -7,6 +7,8 @@ fragment independently, so the per-origin parts must sum to the whole). This tes
 per-fragment linearity, this fails loudly rather than letting a silently-wrong oracle percolate.
 """
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -158,3 +160,55 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
     )
     truth = dataclasses.replace(blank, **ov)  # __post_init__ re-validates every axis
     assert truth.count_rna_sj.sum() > 0
+
+
+def _as_drained(payload):
+    """The same payload MARKED as drained — a zero-filled DrainQC, which is what frame detection reads.
+
+    ⚠ A marking, not a drain: the banks are untouched, so sum-to-full still holds and the tests below
+    vary exactly one thing — which FRAME the validator believes it is in.
+    """
+    from rigel.scan_payload import DrainQC
+
+    qc = DrainQC(**{f.name: 0 for f in dataclasses.fields(DrainQC)})
+    return dataclasses.replace(payload, drain=qc)
+
+
+def test_undrained_frame_still_refuses_gdna_spliced_deposits(oracle_scenario, tmp_path):
+    """⛔ Perturbation of the exact-zeros gate: in PASS-ONE (undrained) frame a spliced deposit in the
+    gdna partition is physically impossible and must still RAISE. The injection keeps sum-to-full
+    intact (full and part move together) so the exact-zeros gate — not sum-to-full — is what fires."""
+    orc = OracleTruth.from_bam(
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_uz"
+    )
+    np.asarray(orc.parts["gdna"].boundary_spliced_count).flat[0] += 1
+    np.asarray(orc.full.boundary_spliced_count).flat[0] += 1
+    with pytest.raises(AssertionError, match="gdna partition has"):
+        OracleTruth.from_parts(orc.full, orc.parts)
+
+
+def test_drained_frame_records_the_leak_instead_of_refusing(oracle_scenario, tmp_path):
+    """⭐ In the DRAINED frame the same deposits are a FACT of production's tally — the whole-library
+    drain genuinely draws a spliced hypothesis for some true-gDNA fragments (measured lift-independent:
+    flgap_rna_short showed the leak at ZERO ambiguity) — so the oracle must RECORD them, per bank,
+    instead of refusing to describe the frame the calibrator actually reads."""
+    orc = OracleTruth.from_bam(
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_dz"
+    )
+    np.asarray(orc.parts["gdna"].boundary_spliced_count).flat[0] += 3
+    np.asarray(orc.full.boundary_spliced_count).flat[0] += 3
+    np.asarray(orc.parts["gdna"].sj_count).flat[0] += 2
+    np.asarray(orc.full.sj_count).flat[0] += 2
+    truth = OracleTruth.from_parts(_as_drained(orc.full), orc.parts)
+    assert truth.gdna_spliced_leak == {"boundary_spliced_count": 3, "sj_count": 2, "sj_mass": 0}
+
+
+def test_drained_frame_still_enforces_sum_to_full(oracle_scenario, tmp_path):
+    """⛔ The frame changes ONE gate. Sum-to-full is the lift's end-to-end identity and must keep
+    raising in the drained frame — a tolerant exact-zeros gate must not have loosened its neighbour."""
+    orc = OracleTruth.from_bam(
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_ds"
+    )
+    np.asarray(orc.parts["gdna"].region_contained_count).flat[0] += 1  # part only: breaks the identity
+    with pytest.raises(AssertionError, match="sum to full"):
+        OracleTruth.from_parts(_as_drained(orc.full), orc.parts)

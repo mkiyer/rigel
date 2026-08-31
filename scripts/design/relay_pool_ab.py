@@ -181,16 +181,19 @@ def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: st
     """One condition, the requested arms, three axes. ⛔ ONE cached payload, so the arms differ by
     exactly the config values `ARMS` names."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    kw = calibration_inputs(cache, index)
-    chain = build_region_chain(
-        cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets
-    )
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling) — the payload the arms solve and the truth
+    # they are scored against are the tally production calibrates, drained consistently.
+    payload = kw["payload"]
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     root = Path(oracle_cache) / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    # ⭐ sum-to-full runs as a HARD gate on every condition — a cached partition that does not
-    #   reconstruct the scan's own read is a silently wrong truth, invisible in every number below.
-    OracleTruth.from_parts(cache.payload, parts)
-    truth = pool_truth(parts, region_arrays, chain)
+    # ⭐ sum-to-full runs as a HARD gate on every condition — now on the drained frame, where it is
+    #   also the lift's end-to-end identity; a cached partition that does not reconstruct the scan's
+    #   own read is a silently wrong truth, invisible in every number below.
+    oracle = OracleTruth.from_cached_parts(payload, parts, lift)
+    truth = pool_truth(oracle.parts, region_arrays, chain)
 
     kind = np.asarray(chain.kind)
     axes = {
@@ -201,7 +204,7 @@ def measure(index, region_arrays, suite: Path, oracle_cache: Path, condition: st
     rows = []
     for label in arms:
         messages, policy = ARMS[label]
-        f_g = arm(cache.payload, kw, messages=messages, policy=policy,
+        f_g = arm(payload, kw, messages=messages, policy=policy,
                   injected_priors=injected_priors)
         for axis, sel in axes.items():
             row = {"condition": condition, "arm": label, "axis": axis}

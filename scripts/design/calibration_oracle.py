@@ -95,7 +95,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth  # noqa: E402
+from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_drain_parts  # noqa: E402
 
 DEFAULT_SUITE = OC.DEFAULT_SUITE
 DEFAULT_INDEX = OC.DEFAULT_INDEX
@@ -183,24 +183,30 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     sj = build_sj_geometry_arrays(index)
     bflags = build_boundary_flags_array(index)
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    kw = calibration_inputs(cache, index)
-    chain = build_region_chain(cache.payload.ref_region_offsets, cache.payload.ref_boundary_offsets)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): the truth certified here must describe the
+    # tally production calibrates, so the whole and every partition below are drained consistently.
+    payload = kw["payload"]
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     statics = build_region_statics(chain, region_arrays, bflags)
     geom = build_region_geometry(
-        chain, CalibrationSubstrate.from_payload(cache.payload, region_arrays),
+        chain, CalibrationSubstrate.from_payload(payload, region_arrays),
         region_arrays, sj, kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None,
     )
     label = OC.strata(chain, statics, geom, region_arrays)["label"]
 
-    # **sum-to-full** — sum-to-full runs as a hard gate inside from_parts; an exception IS the verdict.
+    # **sum-to-full** — a hard gate inside from_parts, now asserted on the DRAINED frame, which
+    # makes it the lift's own end-to-end identity check; an exception IS the verdict. The parts are
+    # loaded pass-one and drained by replaying the whole's choices (`from_cached_parts`).
     root = Path(suite) / "oracle_cache" / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    OracleTruth.from_parts(cache.payload, parts)
+    truth = OracleTruth.from_cached_parts(payload, parts, lift)
 
-    count = OC.slot_counts(cache.payload, region_arrays, chain)
-    n_g = OC.slot_counts(parts["gdna"], region_arrays, chain)
-    n_n = OC.slot_counts(parts["nrna"], region_arrays, chain)
-    n_m = OC.slot_counts(parts["mrna"], region_arrays, chain)
+    count = OC.slot_counts(payload, region_arrays, chain)
+    n_g = OC.slot_counts(truth.parts["gdna"], region_arrays, chain)
+    n_n = OC.slot_counts(truth.parts["nrna"], region_arrays, chain)
+    n_m = OC.slot_counts(truth.parts["mrna"], region_arrays, chain)
     # ⭐ the same RNA reads again, keyed by TRANSCRIPT strand — the per-ARM truth. REFUSED rather than
     # skipped if absent: an instrument that silently drops to two arms would measure a different thing.
     try:
@@ -211,8 +217,15 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
             "built by `pass0_vs_oracle.py` (via `panel.py cache`) alongside the three ORIGINS ones; "
             "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
         ) from exc
-    n_rp = OC.slot_counts(strand_parts["rna_pos"], region_arrays, chain)
-    n_rn = OC.slot_counts(strand_parts["rna_neg"], region_arrays, chain)
+    # ⭐ the SECOND exact partitioning of the same whole — drained with the SAME choice queue,
+    # gdna FIRST in both lists so the shared member takes the identical choice slice and the two
+    # partitionings' RNA remainders stay consistent (`lift_drain_parts`' docstring). `drain` is pure,
+    # so the undrained `parts["gdna"]` loaded above is reusable here.
+    strand_drained, n_amb_strand = lift_drain_parts(
+        lift, [parts["gdna"], strand_parts["rna_pos"], strand_parts["rna_neg"]]
+    )
+    n_rp = OC.slot_counts(strand_drained[1], region_arrays, chain)
+    n_rn = OC.slot_counts(strand_drained[2], region_arrays, chain)
 
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -229,6 +242,14 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
 
     verdicts = [gate_partition(count, n_g, n_n, n_m), gate_rna_strands_close(n_rp, n_rn, n_m, n_n)]
+    # ⭐ the drained frame's own report — informational, never a pass/fail: the leak is production's
+    # behaviour (`ISSUES: drain-contaminates-certified-rna`) and the ambiguity bounds the lift.
+    verdicts.append({
+        "gate": "drained-frame report", "ok": True, "vacuous": False,
+        "gdna_spliced_leak": truth.gdna_spliced_leak,
+        "n_ambiguous_origins": int(truth.n_ambiguous),
+        "n_ambiguous_strands": int(n_amb_strand),
+    })
     if capture_on:
         verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
                          "note": "capture-ON: the field is deliberately non-uniform; gate not applicable"})

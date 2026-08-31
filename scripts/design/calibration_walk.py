@@ -114,12 +114,15 @@ def main() -> int:
     index = TranscriptIndex.load(args.index)
     cache = read_scan_cache(args.suite / "scan_cache" / args.condition, index)
     kw = calibration_inputs(cache, index)
+    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling) — every rung walks the payload production
+    # calibrates. ⚠ slot_truth must be certified in the same frame (re-run calibration_oracle.py).
+    payload = kw["payload"]
 
     shipped_refits = int(CalibrationConfig().calib_refit_iters)
-    cell_cd = run_arm(cache.payload, kw, refits=0, messages=False)
-    cell_d = run_arm(cache.payload, kw, refits=0, messages=True)
-    cell_e = run_arm(cache.payload, kw, refits=None, messages=False)
-    cell_f = run_arm(cache.payload, kw, refits=None, messages=True)
+    cell_cd = run_arm(payload, kw, refits=0, messages=False)
+    cell_d = run_arm(payload, kw, refits=0, messages=True)
+    cell_e = run_arm(payload, kw, refits=None, messages=False)
+    cell_f = run_arm(payload, kw, refits=None, messages=True)
 
     stages = [
         ("A init", np.asarray(cell_cd["fg_init"], np.float64)),

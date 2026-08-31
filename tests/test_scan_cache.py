@@ -555,6 +555,39 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert result.n_regions > 0
         assert result.n_sj == cache.payload.n_sj
 
+    def test_calibration_inputs_hand_calibrate_the_DRAINED_frame(self, scanned, tmp_path):
+        """⭐ THE FRAME RULING (owner, 2026-08-31; `ISSUES: instruments-calibrate-undrained-cache`):
+        production drains the side buffer before calibrating, so the instrument-facing input builder
+        must hand out the DRAINED payload — and publish the lift box that puts cached ORACLE
+        partitions into the same frame (`calibration._oracle.lift_drain_parts`)."""
+        _cache_dir, cache = round_trip(scanned, tmp_path)
+        # the cache stores pass one, by design (write_scan_cache refuses a drained payload)
+        assert cache.payload.drain is None
+        held = int(cache.payload.deferred.n_fragments)
+        assert held > 0, "vacuous fixture: nothing held, so this test would prove nothing"
+
+        lift: dict = {}
+        inputs = calibration_inputs(cache, scanned[0], lift_out=lift)
+        drained = inputs["payload"]
+        assert drained.drain is not None, "calibration_inputs returned the pass-one frame"
+        assert int(drained.drain.offered) == held
+        # after the drain nothing is held — the counter and the fragments it counts stay one population
+        assert int(drained.deferred.n_fragments) == 0
+        assert {"undrained", "choices", "region_types", "sj"} <= set(lift)
+        assert lift["undrained"].drain is None
+
+        # ⭐ determinism at the production seed: the same cache must reproduce the same frame
+        # byte-identically, or two instruments would score two different libraries.
+        again = calibration_inputs(cache, scanned[0])["payload"]
+        np.testing.assert_array_equal(
+            np.asarray(drained.region_contained_count),
+            np.asarray(again.region_contained_count),
+        )
+        np.testing.assert_array_equal(
+            np.asarray(drained.boundary_spliced_count),
+            np.asarray(again.boundary_spliced_count),
+        )
+
 
 def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path):
     """✅ Unblocked by S5.f — `calibrate()` runs, so the population-prior seed path is live.

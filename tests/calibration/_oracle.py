@@ -253,6 +253,27 @@ def _scan_payload(bam: str, index, cfg):
     return payload
 
 
+def lift_drain_parts(lift: dict, parts_list: list) -> tuple[list, int]:
+    """Drain a list of partition payloads by REPLAYING the whole's already-drawn choices.
+
+    ⛔ One call per exact PARTITIONING of the whole (the choice queue is shared across the list —
+    `second_pass.lift_choices`' own contract), and the list order matters for the greedy tie
+    assignment, so callers draining two partitionings (e.g. origins and RNA strands) should put any
+    SHARED member (``gdna``) first in both lists, which hands it the identical choice slice and keeps
+    the two partitionings' remainders consistent. Returns ``(drained_parts, n_ambiguous)``; an empty
+    ``lift`` (no held fragments) returns the parts unchanged with 0.
+    """
+    if not lift:
+        return list(parts_list), 0
+    from rigel.second_pass import drain, lift_choices
+
+    lifted, n_amb = lift_choices(lift["undrained"], list(parts_list), lift["choices"])
+    return [
+        drain(p, ch, region_types=lift["region_types"], sj=lift["sj"])
+        for p, ch in zip(parts_list, lifted)
+    ], int(n_amb)
+
+
 @dataclass
 class OracleTruth:
     """Validated per-origin accumulator payloads for one condition. Construct via :meth:`from_bam`, which
@@ -265,6 +286,14 @@ class OracleTruth:
     #: ⭐ held records whose ORIGIN attribution the lift could not determine — 0 unless ``drain_with``
     #: was used. It bounds the truth error exactly; a caller must REPORT it (`second_pass.lift_choices`).
     n_ambiguous: int = 0
+    #: ⭐ DRAINED frame only (``full.drain is not None``): the gdna partition's deposits in each
+    #: RNA-only bank. ⛔ Not an oracle defect — the whole-library drain genuinely draws a spliced
+    #: hypothesis for some true-gDNA fragments (measured lift-independent on ``flgap_rna_short``:
+    #: leak 15 at ZERO ambiguity), so production's tally violates "gDNA never spliced" as a statement
+    #: about DEPOSITS and the truth must SAY so rather than refuse to describe the frame
+    #: (`ISSUES: drain-contaminates-certified-rna`). ``None`` in the pass-one frame, where the same
+    #: deposits are impossible and remain a hard failure.
+    gdna_spliced_leak: "dict | None" = None
 
     @classmethod
     def from_bam(
@@ -316,6 +345,24 @@ class OracleTruth:
                 for k, ch in zip(ORIGINS, lifted)
             }
         return cls.from_parts(full, parts, read_counts, n_ambiguous=n_ambiguous)
+
+    @classmethod
+    def from_cached_parts(cls, drained_full, parts: dict, lift: dict) -> "OracleTruth":
+        """Assemble a DRAINED-frame oracle from CACHED pass-one partitions.
+
+        ``drained_full`` is the whole payload after ``pipeline._drain_side_buffer(..., _lift=lift)``;
+        ``parts`` are FRESHLY LOADED undrained partition payloads (drained here in place — pass loads
+        nothing else holds); ``lift`` is the ``_lift`` box the drain published. An EMPTY ``lift``
+        means the side buffer was empty, so pass one IS the drained frame and the parts stand.
+        ⭐ ``from_parts``' sum-to-full then runs on the drained frame — the lift's own end-to-end
+        identity gate, for free (the same property ``from_bam(drain_with=...)`` relies on).
+        """
+        if not lift:
+            return cls.from_parts(drained_full, parts)
+        drained, n_amb = lift_drain_parts(lift, [parts[k] for k in ORIGINS])
+        return cls.from_parts(
+            drained_full, dict(zip(ORIGINS, drained)), n_ambiguous=n_amb
+        )
 
     @classmethod
     def from_parts(
@@ -387,12 +434,24 @@ class OracleTruth:
                     "partition is not the production split, or the accumulator stopped depositing "
                     "per fragment."
                 )
-        # gDNA is never spliced (physical), on EITHER spliced bank — including the sj axis, which
-        # the old 4-channel layout had no room for.
-        for bank in _RNA_ONLY_BANKS:
-            g = int(np.asarray(getattr(self.parts["gdna"], bank), np.int64).sum())
-            if g != 0:
-                raise AssertionError(f"oracle INVALID: gdna partition has {g} deposits in {bank}.")
+        # gDNA is never spliced (physical) — but the frames differ in what that means for DEPOSITS.
+        # ⛔ PASS-ONE frame: a spliced deposit in the gdna partition is impossible and is a hard
+        # failure, on EITHER spliced bank — including the sj axis, which the old 4-channel layout had
+        # no room for. ⭐ DRAINED frame (``full.drain is not None``): the whole-library drain
+        # genuinely draws a spliced hypothesis for some true-gDNA fragments, so the same deposits are
+        # a FACT of production's tally; the truth RECORDS them per bank (``gdna_spliced_leak``)
+        # instead of refusing to describe the frame the calibrator reads
+        # (`ISSUES: drain-contaminates-certified-rna` has the measurement and the frame ruling).
+        leak = {
+            bank: int(np.asarray(getattr(self.parts["gdna"], bank), np.int64).sum())
+            for bank in _RNA_ONLY_BANKS
+        }
+        if getattr(self.full, "drain", None) is not None:
+            self.gdna_spliced_leak = leak
+        else:
+            for bank, g in leak.items():
+                if g != 0:
+                    raise AssertionError(f"oracle INVALID: gdna partition has {g} deposits in {bank}.")
 
     # ---- per-REGION TRUE counts on the accumulator basis ----
     def region_unspliced(self):

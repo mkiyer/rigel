@@ -63,15 +63,17 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated
 fix → **add the offending transcripts to the test chromosome** → re-run → repeat.
 
-1. ⭐ **Measurement integrity first, one cheap session**: settle
-   `ISSUES: instruments-calibrate-undrained-cache` (the release-metric instruments score the UNDRAINED
-   payload; production calibrates the drained one — the same frame gap that produced the RNA-length-law
-   misdiagnosis), then `ISSUES: re-derive-in-scope-baselines` with fresh noise floors. Every later
-   verdict quotes these.
-2. ⭐ **The dissection loop on the worst in-scope scenario**, answering
+1. ⭐ **Measurement integrity**: the frame is RULED and wave 1 landed —
+   `calibration_inputs` and its ten consumers now score the DRAINED frame, `slot_truth` re-certified
+   on both panels (`ISSUES: instruments-calibrate-undrained-cache` has the record and the wave-2
+   remainder). Next here: `ISSUES: re-derive-in-scope-baselines` with fresh noise floors, IN the
+   drained frame — every later verdict quotes it.
+2. ⭐ **The drain's certified-RNA leak** — `ISSUES: drain-contaminates-certified-rna` (owner,
+   2026-08-31: avoid all sources of false positives). Derive a repair; do not tune one.
+3. ⭐ **The dissection loop on the worst in-scope scenario**, answering
    `ISSUES: message-value-for-blind-slots` on the way (no solver needed; the anchored twin block was
    built for it).
-3. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
+4. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint — the one open BUILD aimed directly at
    the 0.8.0 metric — with `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
 
@@ -85,7 +87,7 @@ message-vs-prior questions `ISSUES: refit-vs-message-arbitration`,
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
 `alt-splice-rung-unverified` · `transfer-variance-premise` · `nascent-stress-sensitivity` ·
 `relay-od-r-discontinuity` · `f32-strand-tilt-at-half` · `hygiene-ledger` ·
-`oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `the-cancelling-pair`
+`oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` · `the-cancelling-pair`
 (refused twice) · `crossing-pool-contrast` (blocked) · `parked-capture-pilot-sign` ·
 `pure-rna-mirror-asymmetry` · `capture-degeneracy-standing-risk`.
 

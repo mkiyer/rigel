@@ -372,24 +372,23 @@ def noop_differences(shipped, noop, eff_shipped, eff_noop) -> list[str]:
 # ── one condition ────────────────────────────────────────────────────────────────────────────────
 
 
-def load_oracle(suite: Path, oracle_cache: Path, condition: str, index, scan_payload):
-    """The origin-split truth for one condition, plus WHICH source supplied the full payload.
+def load_oracle(suite: Path, oracle_cache: Path, condition: str, index, drained_payload, lift):
+    """The origin-split truth for one condition, **in the DRAINED frame** (the frame ruling of
+    2026-08-31, `ISSUES: instruments-calibrate-undrained-cache`).
 
-    ⛔ **The zero-gDNA conditions have no ``_main`` and the fallback is announced, never silent.**
-    ``pass0_vs_oracle.py`` holds every zero-gDNA condition out as a false-positive check, so it never
-    wrote one. ``_main`` is the undrained full payload — the same scan as the plain scan cache — so
-    reading it from ``scan_cache/<condition>`` is the identical quantity, and ``from_parts`` re-runs
-    sum-to-full over it either way. A caller that could not tell the two apart could not tell a valid
-    fallback from a cache pointing at another panel.
+    ⭐ The FULL side is the very payload ``P`` calibrated — ``_main`` is byte-identical to the plain
+    scan cache (both store pass one), so draining either yields the same frame and re-reading
+    ``_main`` would be a second copy of the same quantity; the zero-gDNA rows, which have no
+    ``_main``, therefore need no announced fallback any more. The cached PARTS are drained by
+    replaying the whole's already-drawn choices (`from_cached_parts` → `lift_drain_parts`), and
+    ``from_parts``' sum-to-full then validates the lift end to end on the drained frame.
+    ⚠ The oracle may carry a nonzero ``gdna_spliced_leak`` — production's own drain behaviour
+    (`ISSUES: drain-contaminates-certified-rna`) — and ``n_ambiguous`` bounds the lift's origin
+    attribution; both are REPORTED on the row, never swallowed.
     """
     root = Path(oracle_cache) / condition
-    main = root / "_main"
-    if main.is_dir():
-        full, source = read_scan_cache(main, index).payload, "_main"
-    else:
-        full, source = scan_payload, "scan_cache (no _main; zero-gDNA row)"
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
-    return OracleTruth.from_parts(full, parts), source
+    return OracleTruth.from_cached_parts(drained_payload, parts, lift), "cached parts, drained frame"
 
 
 def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle_cache: Path,
@@ -397,10 +396,14 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
     """calibrate once, build P / O / noop / U, gate them, and score. One JSON-able row."""
     start = time.perf_counter()
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    kw = calibration_inputs(cache, index)
+    lift: dict = {}
+    kw = calibration_inputs(cache, index, lift_out=lift)
+    # ⭐ the DRAINED frame — everything below (P, the substrate, the oracle's full side) reads THIS
+    # payload, never `cache.payload`, or the same-basis gates would be comparing two frames.
+    payload = kw["payload"]
     p_arm = calibrate(config=pipeline_config.calibration, **kw)
 
-    oracle, oracle_source = load_oracle(suite, oracle_cache, condition, index, cache.payload)
+    oracle, oracle_source = load_oracle(suite, oracle_cache, condition, index, payload, lift)
     override = oracle.override_masses(region_arrays)
     check_override_field_set(override)
     o_arm = dataclasses.replace(p_arm, **override)
@@ -408,12 +411,12 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
 
     # ⛔ Both arms must be on the payload's own per-object totals, per axis. Without that identity a
     # mass-weighted mean of fractions is an average over different denominators.
-    substrate = CalibrationSubstrate.from_payload(cache.payload, region_arrays)
+    substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     P0.check_same_basis("P", p_arm, substrate)
     P0.check_same_basis("O", o_arm, substrate)
 
     # -- the ruler, on the FL-marginal lengths the pipeline builds it from --
-    rna_fl = FragmentLengthModel.from_pmf(kw["rna_fl_pmf"], int(cache.payload.max_length))
+    rna_fl = FragmentLengthModel.from_pmf(kw["rna_fl_pmf"], int(payload.max_length))
     fl_eff = rna_fl.compute_all_transcript_eff_lens(
         index.t_df["length"].values.astype(np.int64)
     )
@@ -428,6 +431,8 @@ def measure_condition(index, region_arrays, pipeline_config, suite: Path, oracle
         "condition": condition,
         "stratum": list(PVO.stratum(condition)),
         "oracle_source": oracle_source,
+        "gdna_spliced_leak": oracle.gdna_spliced_leak,
+        "lift_n_ambiguous": oracle.n_ambiguous,
         "noop_differences": bad,
         "seconds": time.perf_counter() - start,
         "library_f_gdna_P": P0.library_f_gdna(p_arm),

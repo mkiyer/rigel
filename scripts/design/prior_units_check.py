@@ -89,7 +89,7 @@ def check_one(index: TranscriptIndex, cache_dir: Path) -> dict:
     a_g = np.asarray(priors.gdna_prior_count, np.float64)
     a_r = np.asarray(priors.rna_prior_count, np.float64)
 
-    frags = float(np.asarray(cache.payload.region_start_count, np.float64).sum())
+    frags = float(np.asarray(inputs["payload"].region_start_count, np.float64).sum())
     total = float(a_g.sum() + a_r.sum())
     unspliced = _unspliced_fragments(cal)
     return {

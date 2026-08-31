@@ -318,7 +318,10 @@ def load_condition(suite: Path, condition: str, index, cached: dict) -> dict:
     duly failed on `substrate.boundary_unspliced_count` (the banks live behind a `PopulationView`, so
     it is `substrate.boundary_unspliced.count`). Run the instrument, never just its self-test."""
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
-    payload = cache.payload
+    from rigel.scan_cache import calibration_inputs
+
+    kw = calibration_inputs(cache, index)
+    payload = kw["payload"]  # the DRAINED frame (the 2026-08-31 frame ruling)
     ra = cached["region_arrays"]
     substrate = CalibrationSubstrate.from_payload(payload, ra)
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
@@ -339,9 +342,7 @@ def load_condition(suite: Path, condition: str, index, cached: dict) -> dict:
     # them, and the premise fit read "0 hops". A boundary has zero genomic measure but a perfectly
     # well-defined crossing opportunity, which is exactly what the geometry supplies.
     from rigel.calibration.region_geometry import build_region_geometry, region_gdna_geometry
-    from rigel.scan_cache import calibration_inputs
 
-    kw = calibration_inputs(cache, index)
     geometry = build_region_geometry(
         chain, substrate, ra, cached["sj"], kw["gdna_fl_pmf"], kw["rna_fl_pmf"], None
     )
