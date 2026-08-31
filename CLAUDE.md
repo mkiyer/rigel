@@ -277,15 +277,16 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,671 passed / 0 skipped / 8 xfail** (re-derived 2026-08-30 by
-running the suite, not by arithmetic. ⚠ Account it from the value at **HEAD, 3,643** — an intermediate number
-quoted mid-session cannot be reconciled from a clean tree. ADDED: `tests/calibration/test_gdna_strand_fit.py`
-(33 own cases + 2 per-file gates = +35), `tests/test_sim_shadow_transcripts.py` (3 own + 2 = +5; ⚠
-`test_scripts_index` does NOT parametrise a `tests/test_sim_*` file, so a top-level test file moves the total by
-+5 and not +6), `docs/dev/message_notes.md` (+1, jargon only). DELETED with the dead density machinery:
-`src/rigel/calibration/run_fill.py` (−3), `tests/calibration/test_run_fill.py` (6 own + 2 = −8), one case from
-`test_density_model.py` (5 → 4); and `test_sweep.py`'s two prior-constant tests collapsed to one (−1).
-3,643 + 35 + 5 + 1 − 3 − 8 − 1 − 1 = 3,671.
+⭐ **THE STANDING BASELINE: 0 failed / 3,676 passed / 0 skipped / 8 xfail** (re-derived 2026-08-30 by
+running the suite. ⚠ Account it from the value at the last commit before this session, **3,643** — an
+intermediate number quoted mid-session cannot be reconciled from a clean tree.
+ADDED: `tests/calibration/test_gdna_strand_fit.py` (33 own + 2 per-file = +35);
+`tests/test_sim_shadow_transcripts.py` (3 own + 2 = +5; ⚠ `test_scripts_index` does NOT parametrise a
+`tests/test_sim_*` file, so a top-level test file moves the total by +5 and not +6);
+`scripts/design/fl_pool_purity.py` (+4); three `docs/dev/` files (+1 each, jargon only).
+DELETED: `run_fill.py` and its test together (−12: 3 module gates + 7 own cases + 2 per-file);
+one case from `test_density_model.py` (5 → 4) and one from `test_sweep.py` (two prior-constant tests → one).
+3,643 + 35 + 5 + 4 + 3 − 12 − 1 − 1 = 3,676.
 ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
@@ -405,6 +406,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/index_census.py` | **WHAT IS ACTUALLY IN THIS INDEX?** ⛔ Re-derive the census; never quote a stored table |
 | `design/verify_index_rebuild.py` | **DID AN INDEX REBUILD PRESERVE THE STRUCTURE?** Regions byte-identical, boundaries only in contiguous reach |
 | **Stage A — the accumulator** | |
+| `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
 | `design/fl_anchor_gap.py` | **HOW DO THE ANCHOR AND BOTH LENGTH MODELS COMPARE WITH TRUTH?** `--drain` measures before and after the second pass |
 | `design/gdna_pool_census.py` | ⭐ **DOES EACH OF THE FOUR gDNA POOLS AGREE WITH ITS OWN OPPORTUNITY, AND WITH TRUTH?** |
 | `design/second_pass_accuracy.py` | **HOW ACCURATE IS THE SECOND PASS, PER FRAGMENT, against the oracle BAM's read names?** |

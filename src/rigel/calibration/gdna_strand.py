@@ -386,8 +386,9 @@ def fit_gdna_strand_overdispersion(
     gDNA and was moved by unannotated transcription on real libraries and on the blank-chromosome control.
 
     ⛔ **No shrinkage target.** When there is NO gDNA strand information at all (no seed carries a pair on
-    the away side), the fit returns ``fallback_overdispersion`` — the caller hands it the library's RNA
-    strand overdispersion, a MEASURED quantity of the same library, never a conjured one.
+    the away side), the fit returns the CEILING at zero information — the widest strand likelihood the model
+    admits, so the channel says nothing — and ``calibrate`` then hands this component the RNA fit's MEASURED
+    value through :func:`reconcile_overdispersions`, never a conjured one.
 
     Gate: ``tests/calibration/test_gdna_strand_fit.py`` (each property watched failing against the
     previous fit, and the two-sided moment re-imposed as the perturbation).

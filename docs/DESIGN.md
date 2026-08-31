@@ -326,7 +326,7 @@ is a DETECTOR, not a calibrated level"*.
 | ⛔ the hatch | why it is closed |
 |---|---|
 | **① a POOLED scalar reference** — one library-wide gDNA level | **3.90× WORSE than `base` on stranded × capture-ON.** A scalar cannot express a per-exon enrichment that spans 122× within one condition |
-| **② a LOCAL anchor — "just use the nearest measured rung"** | **1.27× worse (nearest rung); 1.50× worse (`density_model.region_gdna_density`, the shipped local boundary-anchored imputation)**, both on stranded × capture-ON. ⭐ And the SAME local form scores **0.4037–0.4977** — far BETTER than `base` — off capture. ⛔ It is not a bad estimator; it is a good estimator whose premise capture destroys. Partial enrichment is exactly the 2.6–3.6× under-read above |
+| **② a LOCAL anchor — "just use the nearest measured rung"** | **1.27× worse (nearest rung); 1.50× worse (the local boundary-anchored imputation — ⚠ `density_model.region_gdna_density`, DELETED 2026-08-30 with its only consumer; git carries it)**, both on stranded × capture-ON. ⭐ And the SAME local form scores **0.4037–0.4977** — far BETTER than `base` — off capture. ⛔ It is not a bad estimator; it is a good estimator whose premise capture destroys. Partial enrichment is exactly the 2.6–3.6× under-read above |
 | **③ `capture_eff_length`** | **REFUSED STRUCTURALLY, not by measurement.** `capture_eff_length.transcript_capture_eff_lengths(calibration: CalibrationResult, …)` **takes a solved system as its first argument**. It cannot be the thing that produces the solve; proposing it is a circular dependency, and the circularity is visible in the signature |
 
 ⛔ **So the escape hatches are not a matter of effort.** ① and ② fail because the quantity is genuinely

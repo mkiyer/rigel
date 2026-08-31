@@ -224,7 +224,7 @@ def test_wrapper_excludes_ambig_and_non_observable():
 
 
 def _boundary_parts(signatures, boundary_pos, boundary_neg, ref_id=None):
-    """A substrate + geometry-free ``RegionDensity`` over ``signatures``, on the region/boundary axes."""
+    """A substrate plus the two count-observability MASKS over ``signatures``, on the region/boundary axes."""
     from rigel.calibration.density_model import count_observable_masks
     from rigel.calibration.signature import transcript_strand_class
 

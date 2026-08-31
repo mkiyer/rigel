@@ -62,13 +62,13 @@ on unstranded libraries where Option A cannot. ⛔ Must be gated OFF under captu
 
 ## Option C — the two capture-ON defects, independent of contamination
 
-**C1 · a probe-aware opportunity divisor.** `gdna_opportunity_from_index` is computed from the index alone,
+**C-i · a probe-aware opportunity divisor.** `gdna_opportunity_from_index` is computed from the index alone,
 so it removes only ~6 bp of the crossing pools' ~30 bp length selection under capture. `capture_eff_length`
 already models the probe panel; the divisor should use it. ⭐ This is what the `fl_anchor_gap.py` `G-gdna`
 control has been reporting as "impossible, and therefore a bug" (+6.0 % on all six capture-ON rows) since
 2026-08-17.
 
-**C2 · stop shrinking a component toward a mixture.** Replace the `POOL_EB_PRIOR_ESS = 1000` pull toward
+**C-ii · stop shrinking a component toward a mixture.** Replace the `POOL_EB_PRIOR_ESS = 1000` pull toward
 `global_pmf` with either (i) within-component smoothing at a derived bandwidth, or ⭐ (ii) **the same
 reconciliation the strand fit now uses**: pools 1/2/3 all estimate the SAME `g(L)` under different
 opportunities, so a thin pool should borrow from the better-measured ones — its own components, never the
@@ -89,7 +89,7 @@ never been measured on a substrate that can see it.
 
 1. **Regenerate the fl-gap arms on the current sparse-nascent model** (they still carry the retired uniform
    one) and price A there with `length_ceiling.py`. Owner decision; nothing can be ranked without it.
-2. **C1 and C2** — independent of A, cheap, and they own the already-priced 5.90 %.
+2. **Both halves of C** — independent of A, cheap, and they own the already-priced 5.90 %.
 3. **A** if step 1 justifies the schema change, with **B** as the unstranded/no-rebuild fallback.
 
 ⚠ Whatever is built, judge it on a panel where the two components' fragment lengths DIFFER. The equal-length

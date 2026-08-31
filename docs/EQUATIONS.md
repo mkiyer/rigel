@@ -1601,7 +1601,7 @@ stranded × capture-ON, ratio to a `base` re-recorded in the same session, 2026-
 |---|---|---|
 | a POOLED scalar reference | **3.90× WORSE** | — |
 | the NEAREST anchor rung | 1.27× worse | — |
-| LOCAL — `density_model.region_gdna_density` | 1.50× worse | **0.4037–0.4977, much BETTER than base** |
+| LOCAL — the boundary-anchored density imputation (⚠ `density_model.region_gdna_density`, DELETED 2026-08-30 with its only consumer; git carries it) | 1.50× worse | **0.4037–0.4977, much BETTER than base** |
 
 ⭐ **The last row is the whole difficulty in one line: the same local form is the best thing available off
 capture and a regression on it.** A single functional form cannot serve both, which is what forces a

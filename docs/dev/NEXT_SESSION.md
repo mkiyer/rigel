@@ -1,56 +1,46 @@
-# NEXT SESSION — the state after the 2026-08-27 tear-down
+# NEXT SESSION — the state after the 2026-08-30 strand-overdispersion work
 
-    ⚠ **A DEV DOC, and it is a HANDOFF.** It describes where things stand; it does not tell you
-    what to build. MOVE anything that settles into the permanent docs and DELETE this file.
+    ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand, not what to build — the ranked
+    list is `ROADMAP.md` §1. MOVE anything that settles into the permanent docs and DELETE this file.
 
-## What this session did: it removed code, and left one skeleton
+## What the last session shipped
 
-A long message-policy campaign was **torn down**. Deleted: `CurrencyPolicy`, a unified bridge
-(`FrameAwarePropagation`, `AllocationSolve` and a stack of mechanisms built on them), their test
-files, and the config values that reached them. Git carries all of it.
+The gDNA strand overdispersion, refitted so it holds **regardless of the annotation**. The premise it
+replaced — that some structural class of objects is pure gDNA — is false, and that is now a named trap
+(`TRAPS: purity-is-a-property-of-the-annotation`). Three derived pieces, no new constant in any of them:
+the **away-half** moment, **influence weighting**, and the two components **reconciling against each
+other** instead of against a conjured `Beta(14,14)`. Derivations: `EQUATIONS.md` §6a/§6b/§6c. Rulings:
+`DESIGN.md` §3.3a. State: `ROADMAP.md` §0.
 
-What remains in the message layer, and it is deliberately small:
+Also landed: the clamp announces itself and the concentration is reported (`clamped_at_ceiling`,
+`raw_overdispersion`, `effective_seeds`); the simulator gained a **shadow-transcript** mechanism and a
+blank chromosome so the annotation premise stays testable (`TESTING.md` §0a); and the dead density
+machinery went with the seed weight it existed to compute (`run_fill`, `RegionDensity`,
+`region_gdna_density` deleted).
 
-| | |
-|---|---|
-| `messages/foundation.py` | the ratified spec — one `Message` with provenance lanes, the propagate/solve timepoints, and the laws the skeleton ENFORCES (spliced lanes never relay; a single-source transform may only lower a precision; lanes never mix) |
-| `messages/policy.py` | `MessagePolicy` — the runner that plugs a `(PropagationModel, SolveModel)` pair into the backbone. With trivial models it is **byte-identical to `SilentPolicy`**, gated and confirmed on the panel |
-| `messages/silent.py` | `SilentPolicy` — the measured floor. **Frozen** |
-| `messages/relay.py` | `RelayPolicy` — the shipped default. **Frozen** |
+## The two live threads, in priority order
 
-`CalibrationConfig.message_policy` selects between them (`"relay"` / `"silent"` / `"message"`); an
-unknown name raises rather than silently falling back to the relay.
+1. ⭐⭐⭐ **`ROADMAP.md` §1 rank 1b — the gDNA FRAGMENT-LENGTH model.** Diagnosed, not built. Same premise
+   failure, in a second place: `fl.py` asserts "Every pool is PURE BY CONSTRUCTION" and the intronic pool
+   measures **95 % nascent**. Read `docs/dev/DIAGNOSIS_gdna_fragment_length.md` then
+   `DESIGN_gdna_fragment_length_fix.md` — the options are worked and **one is already refuted by
+   measurement**, so start from what is left rather than from the obvious idea.
+   ⛔ **The first move is a decision, not code**: the fix cannot be RANKED until the fl-gap arms are
+   regenerated on the current sparse-nascent model, because every panel the tool is scored on gives the
+   two components equal fragment lengths and therefore cannot see the defect.
 
-## The test chromosome is EMPTY, and it is the owner's to design
+2. ⭐⭐ **The message policy — the standing charter, and still at rung 0.** `MessagePolicy` remains
+   byte-identical to `SilentPolicy` on all 30 test-chromosome conditions. The bar is unchanged: **win on
+   unstranded, minimal harm on stranded, never pooled.** Before building any mechanism, answer rank 1a's
+   question with no solver: **is the information a blind unstranded or AMBIG slot needs actually present
+   in its neighbours?** The anchored twin block was designed for exactly that.
+   ⚠ Re-baseline first — the policy numbers in `ROADMAP.md` predate this session's estimator change.
 
-`scripts/sim/test_reference/` — the GTF, the abundances TSV and the probes BED were cleared to zero
-transcripts on 2026-08-27. The owner adds transcripts one at a time; the FASTA, index, reads and
-caches are all DERIVED and must be rebuilt after every edit.
+## Two cautions that will otherwise cost a day
 
-⛔ The 42-transcript derived artifacts were moved to
-`~/Downloads/rigel_runs/test_reference_STALE_42tx_2026-08-27/` rather than left in place, because a
-benchmark run against stale caches answers a different question and says nothing about it.
-
-**`docs/TESTING.md` §0a has the four commands** (build → simulate → cache → score) and the
-constraints that bite: κ is fitted from spliced reads, so at least one multi-exon transcript with
-real depth is needed before any number means anything.
-
-## How the work is judged
-
-⛔ **The bar is NOT "beat `SilentPolicy`."** Silence is the floor, and on strand-specific data a
-sighted exon's own strand solve is excellent — a message can mostly only disturb it. Message
-propagation exists for **unstranded data and AMBIG slots**, where the strand channel is dead.
-
-* **unstranded rows** — the policy must **WIN**.
-* **stranded rows** — the policy must do **as little harm as possible** (near 1.00× of silence).
-
-⛔ Never pool the two halves. `python scripts/design/policy_benchmark.py --panel test` prints them
-apart, in seconds; `--panel ladder` is the shipping judgement.
-
-## Before believing anything
-
-* `python scripts/design/preflight.py` — one command, one verdict, before anything else.
-* `python -m pytest tests/ -q` — ANY failure is a regression; the count lives in `CLAUDE.md`.
-* A claim must name its SUBSTRATE (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`).
-* `HONEST_PRECISION.md` in this directory is the record of what the deleted campaign tried,
-  measured and REFUTED. Read it before re-proposing a mechanism, so a dead end is not re-run.
+* ⛔ **The benchmark resolves a LARGE effect, not a percent-level one.** A 1e−5 nudge to a nuisance
+  parameter moves 1/30 rows by more than 0.5 % (worst 1.65 %, relay). Do not believe a single-row policy
+  difference below ~2 %. `ROADMAP.md` §2 q8 and `TRAPS: a-constant-parked-a-value-off-a-knife-edge`.
+* ⛔ **`docs/dev/` is a sandbox and nothing may cite into it.** Its own README carries the move-and-delete
+  rule; a 727-line plan doc was deleted at the end of the last session precisely because its findings had
+  been promoted.
