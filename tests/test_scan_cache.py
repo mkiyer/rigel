@@ -556,7 +556,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert result.n_sj == cache.payload.n_sj
 
     def test_calibration_inputs_hand_calibrate_the_DRAINED_frame(self, scanned, tmp_path):
-        """⭐ THE FRAME RULING (owner, 2026-08-31; `ISSUES: instruments-calibrate-undrained-cache`):
+        """⭐ THE FRAME RULING (owner, 2026-08-31; `DESIGN.md` §4.3):
         production drains the side buffer before calibrating, so the instrument-facing input builder
         must hand out the DRAINED payload — and publish the lift box that puts cached ORACLE
         partitions into the same frame (`calibration._oracle.lift_drain_parts`)."""

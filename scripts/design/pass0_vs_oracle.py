@@ -55,7 +55,7 @@ SCORING RULES, NON-NEGOTIABLE
 * **An object with no mass is ABSENT, not ``f_g = 0``.** Most of any real index carries no fragments.
 
 ⭐⭐ **THE DRAINED FRAME, since the 2026-08-31 frame ruling**
-(`ISSUES: instruments-calibrate-undrained-cache`). T and every arm describe the tally production
+(`DESIGN.md` §4.3). T and every arm describe the tally production
 calibrates: the whole is drained at the production seed, and each origin partition is drained by
 REPLAYING the whole's already-drawn choices (`second_pass.lift_choices`, via
 `OracleTruth.from_cached_parts`), which is what keeps sum-to-full exact — draining the partitions

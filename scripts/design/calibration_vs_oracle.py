@@ -374,7 +374,7 @@ def noop_differences(shipped, noop, eff_shipped, eff_noop) -> list[str]:
 
 def load_oracle(suite: Path, oracle_cache: Path, condition: str, index, drained_payload, lift):
     """The origin-split truth for one condition, **in the DRAINED frame** (the frame ruling of
-    2026-08-31, `ISSUES: instruments-calibrate-undrained-cache`).
+    2026-08-31, `DESIGN.md` §4.3).
 
     ⭐ The FULL side is the very payload ``P`` calibrated — ``_main`` is byte-identical to the plain
     scan cache (both store pass one), so draining either yields the same frame and re-reading

@@ -19,53 +19,6 @@ because a graveyard row without its number is an invitation to rebuild.
 
 ## OPEN
 
-### instruments-calibrate-undrained-cache
-`priority: later (RULED and migrated through waves 1–2; only wave-3 bank-readers remain) · kind: decision · stamped: 2026-08-31`
-⭐⭐ **RULED (owner, 2026-08-31): instruments monitor the DRAINED frame.** Landed the same day:
-`scan_cache.calibration_inputs` now drains at the production seed, builds the fl models exactly as
-production does (region args supplied, so the two-pool contrast runs — a third divergence found and
-closed in the same change), and publishes the `lift_out` box; `OracleTruth` gained
-`from_cached_parts`/`lift_drain_parts` and a frame-aware exact-zeros gate (pass-one: hard refusal;
-drained: the leak is RECORDED as `gdna_spliced_leak` — `ISSUES: drain-contaminates-certified-rna`).
-All ten `calibration_inputs` consumers migrated (`calibration_vs_oracle`, `calibration_oracle` — both
-partitionings, gdna-first shared choice slice, `rna-strands-close` passes exactly — `calibration_walk`,
-`relay_pool_ab`, `object_composition`, `total_abundance_audit`, `hop_currency`,
-`transfer_variance_audit`, `composition_evidence_census`, `prior_units_check`); `slot_truth`
-re-certified on both panels in the drained frame. Gates: `tests/calibration/test_oracle.py` (frame
-behaviour, each perturbed) and `tests/test_scan_cache.py` (the drained contract + determinism).
-⭐ **WAVE 2 landed the same day** for the loaders the baseline needed: `policy_benchmark` (now
-consistent with the drained-frame `slot_truth` it scores against), `pass0_vs_oracle.measure_condition`
-+ `load_or_build_oracle` (drain + lifted oracle + production fl models — which also migrates every
-rider: `solvability_audit`, `worst_objects`, `vertex_ceiling`, `psi_channel_ablation`,
-`pass0_claimed_ab`, `backbone_parity`, `ladder_arm_ab`, `length_ceiling`), and `prior_vs_oracle`
-(the old "drained oracle inadmissible" arm structure deleted; its drained arm IS the frame now;
-`mass_prior_ab` rides it). Both files' recorded no-drain rulings corrected in place.
-⛔ **WAVE 3 — standalone bank-readers still on pass one, migrate as touched**:
-`structural_claims_audit`, `held_flux_census`, `gdna_pool_census`, `landscape_head_to_head`,
-`abundance_landscape_census`, `transport_dispersion`, `fl_pool_purity`, `certified_q_census`,
-`anchor_opportunity_census`, `calibration_truth_ab` (`fl_anchor_gap` and `boundary_q_population`
-already drain their whole). ⚠ A claim spanning a migrated and an unmigrated instrument compares two
-frames — say so beside it.
-⭐ **The history**: the undrained choice was deliberate and recorded in `prior_vs_oracle.py`, but its
-justification was measured-incomplete, and the gap sat unpriced inside the release metric until it
-produced the RNA-length-law misdiagnosis (`ISSUES: the-rna-length-law-fix`, CLOSED).
-⭐⭐ **The PRICING that decided the ruling (2026-08-31)** (7 ladder conditions, both arms through `calibration_vs_oracle`'s own
-`measure_condition`; drained oracle = whole drained at the production seed, cached parts drained by
-`second_pass.lift_choices` replay, sum-to-full re-validated on the drained frame):
-① **The 0.8.0 metric (P-vs-O misplaced mass) moves ≤1.8 % on every in-scope contaminated stratum** —
-below the panel's ~2 % single-row attribution resolution (`ISSUES: relay-od-r-discontinuity`) — **but
-the `g00` capture-ON zero control moves −22.8 %** (region axis; the drained frame shows materially less
-false-positive gDNA), and `g00` OFF ±3–4 %. ② **The certified truth itself is understated undrained**:
-the spliced-boundary truth mass rises 17–20 % in the drained frame on every RNA-bearing condition
-(e.g. 3.14 M → 3.71 M at `g05 ss.99 ON`) — every instrument quoting spliced-channel truth understates
-production by a fifth. ③ The RULER comparison moves up to −12 % (`g50 ss.99 OFF`), knife-edge as
-documented. ④ Lift ambiguity is bounded and reported: 34 → 24,830 records per condition (≤6.9 % of held,
-≤0.25 % of the library), worst where the library is RNA-heavy at equal lengths. ⑤ The drain LEAK is a
-separate finding — `ISSUES: drain-contaminates-certified-rna`.
-⭐ The in-scope baselines were re-derived the same day in the drained frame with same-session noise
-floors (five instruments, whole ladder — run any of them for a current number).
-**Closes when**: the wave-3 bank-readers are migrated (as touched) and no instrument speaks pass one.
-
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
 "Drain" carries no intuition — the concept is: pass one BUFFERS any fragment whose unsequenced mate
@@ -92,8 +45,7 @@ library never mistakes a gDNA length for a spliced one). Measured on the ladder:
 condition's whole certified-RNA channel**, an IN-SCOPE stratum. ⚠ The certified-flux anchor and every
 "spliced ⇒ certainly RNA" consumer treat this channel as exact; at high gDNA under capture it is ~98 %
 pure, not 100 %. Invisible to every undrained-frame instrument, which is how it went unmeasured
-(`ISSUES: instruments-calibrate-undrained-cache` carries the frame question — RULED and landed, so
-the leak is now visible: `calibration_vs_oracle` reports it per row and every certified
+(the frame ruling is `DESIGN.md` §4.3 — landed, so the leak is now visible: `calibration_vs_oracle` reports it per row and every certified
 `slot_truth.npz` carries the drained-frame report verdict).
 ⭐ **Candidate repairs, none yet derived — each must be priced against what it costs the drain's
 correct spliced assignments** (the drain re-includes the gap-hidden TRUE spliced fragments that made
@@ -327,8 +279,13 @@ and pre-existing; bites only a very deep library with a dominant locus. ⛔ Repa
 `TRAPS: panel-before-src`.
 
 ### hygiene-ledger
-`priority: later · kind: hygiene · stamped: 2026-08-2x`
-Each its own commit (`TRAPS: one-thing-varied`), none moving the 0.8.0 metric: the index's duplicate map
+`priority: later · kind: hygiene · stamped: 2026-08-31`
+Each its own commit (`TRAPS: one-thing-varied`), none moving the 0.8.0 metric:
+**the wave-3 frame migration** — the standalone bank-readers still on pass one
+(`structural_claims_audit`, `held_flux_census`, `gdna_pool_census`, `landscape_head_to_head`,
+`abundance_landscape_census`, `transport_dispersion`, `fl_pool_purity`, `certified_q_census`,
+`anchor_opportunity_census`, `calibration_truth_ab`), migrate as touched per the frame ruling
+(`DESIGN.md` §4.3; a claim spanning frames must say so); the index's duplicate map
 (an ALIAS MAP `dropped_t_id → kept_t_id`, not re-admission); `mass_*_boundary` → `count_*_boundary`
 (crossing INCIDENCES); restore the moment tests deleted with the length channel; the ledger of dead
 surface and stale sibling references; the stale comment at `pipeline.py:416` (the drain's fl models are

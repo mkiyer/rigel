@@ -76,7 +76,7 @@ population, per locus, and table ⑪ is it.
 
 ⛔⛔ **UNDRAINED ON EVERY ARM, AND THAT IS FORCED — WITH A MEASUREMENT, NOT AN ASSUMPTION.**
 ⭐⭐ **THE DRAINED FRAME, since the 2026-08-31 frame ruling**
-(`ISSUES: instruments-calibrate-undrained-cache`). P, O and every truth arm describe the tally
+(`DESIGN.md` §4.3). P, O and every truth arm describe the tally
 production calibrates: the whole is drained at the production seed, and the oracle partitions are
 drained by REPLAYING the whole's choices (`OracleTruth.from_cached_parts`), which keeps sum-to-full
 exact. An earlier revision ran both sides undrained and recorded that a drained oracle was

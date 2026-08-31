@@ -64,8 +64,7 @@ rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → f
 fix → **add the offending transcripts to the test chromosome** → re-run → repeat.
 
 ✅ **Measurement integrity is DONE (2026-08-31)**: the frame is ruled and migrated through the
-loaders (`ISSUES: instruments-calibrate-undrained-cache` — only wave-3 bank-readers remain, migrate
-as touched), `slot_truth` is re-certified, and **the in-scope baselines are re-derived in the drained
+loaders (the ruling is `DESIGN.md` §4.3; only wave-3 bank-readers remain — `ISSUES: hygiene-ledger`), `slot_truth` is re-certified, and **the in-scope baselines are re-derived in the drained
 frame with same-day noise floors** — five instruments, whole ladder; run any of them for a current
 number. ⭐ The re-derived facts a ranking can lean on: the worst IN-SCOPE scenario is
 `g98 ss.99 capture-ON` on the 0.8.0 metric (almost entirely UNDER-called gDNA at near-pure objects —

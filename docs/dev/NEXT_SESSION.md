@@ -28,8 +28,8 @@
   `g50 ss.50 capture-OFF` on solvability's Σ|err|; the relay hurts the solvable set on 9/12
   contaminated conditions; MessagePolicy ≡ silent on all 46 in the new frame; the reseed floor is
   ~30–2,700 transcript fragments per condition. ⛔ Nothing measured before 2026-08-31 is comparable.
-* ⛔ **Only wave-3 bank-readers still read pass one** (list in
-  `ISSUES: instruments-calibrate-undrained-cache`): the census family, `structural_claims_audit`,
+* ⛔ **Only wave-3 bank-readers still read pass one** (the ruling is `DESIGN.md` §4.3; the list is
+  in `ISSUES: hygiene-ledger`): the census family, `structural_claims_audit`,
   `calibration_truth_ab`, `fl_pool_purity` and friends — migrate as touched. Everything reached
   through `calibration_inputs`, `pass0_vs_oracle.measure_condition` or `prior_vs_oracle` is drained.
 * ⭐ **The owner's priority: the drain's certified-RNA leak** (`ISSUES: drain-contaminates-certified-rna`,

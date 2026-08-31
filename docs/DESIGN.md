@@ -1159,6 +1159,35 @@ the fragments it counts are the same population" stays absolute. Pass one's numb
 | **D-4** — should a density carry its weight of evidence? | a density of 0.01 from 1000 fragments and from 1 are not the same statement |
 | the traffic term's **Poisson likelihood** | `ρ` enters as a hard zero; `P(0|λ,E) = e^(−λE)` is not zero (`EQUATIONS.md` §10). Deferred on a measurement, not on a missing piece — the exposure it needs is now available |
 
+### 4.3 ⭐⭐⭐ THE FRAME RULING — instruments measure the DRAINED tally (owner, 2026-08-31)
+
+**Every calibration-facing instrument scores the frame production calibrates: the drained one.** The
+scan caches store pass one by design (so the drain can re-run at any seed); an instrument loads, drains
+at the production seed (`scan_cache.calibration_inputs`), and puts cached ORACLE PARTITIONS into the
+same frame by REPLAYING the whole's already-drawn choices (`second_pass.lift_choices`, via
+`OracleTruth.from_cached_parts` — one lift call per exact partitioning, any shared member FIRST in each
+list so two partitionings stay consistent). Sum-to-full re-validated on the drained frame is then the
+lift's own end-to-end identity gate.
+
+⭐ **The pricing that decided it** (2026-08-31, both arms through `calibration_vs_oracle`'s own scorer):
+the P-vs-O metric moved ≤ 1.8 % on the in-scope contaminated strata — but the `g00` capture-ON zero
+control moved **−22.8 %**, the certified spliced-channel TRUTH was understated **17–20 %** undrained on
+every RNA-bearing condition, and the effective-length-ruler comparison moved up to −12 %. The undrained
+frame misdescribed exactly the channels current work leans on. The lift's origin-attribution ambiguity
+is bounded and REPORTED (`OracleTruth.n_ambiguous`; ladder-wide ~3.5 % of held ≈ 0.11 % of the library).
+
+⭐⭐ **The exact-zeros gate is FRAME-AWARE, and that is a semantics ruling.** "gDNA never splices" is
+true of molecules and of pass-one DEPOSITS, so in the pass-one frame a spliced deposit in the gdna
+partition remains a hard refusal. In the drained frame the same deposits are a FACT of production's
+tally — the multinomial draw genuinely assigns a spliced hypothesis to some true-gDNA held fragments —
+so the oracle RECORDS them per bank (`OracleTruth.gdna_spliced_leak`) instead of refusing to describe
+the frame. Proven lift-independent (`flgap_rna_short`: leak at ZERO ambiguity; `flgap_rna_long`: 5,805
+ambiguous, zero leak). The leak itself is an open defect: `ISSUES: drain-contaminates-certified-rna`.
+
+⚠ Two prior in-tree rulings said the opposite ("no drain, and that is forced" / "a drained oracle is
+inadmissible") and are corrected at their sites: the independent-drain hazard they named is real and is
+what the lift solves; the frame choice they defended mis-stated production.
+
 ---
 
 ## 5. nRNA components

@@ -4,7 +4,7 @@
     current number is to run the instrument; this snapshot exists so the next session can see what
     moved without re-running everything. Substrate: the sparse-nascent 16-condition ladder +
     30-condition test chromosome, slot_truth certified in the DRAINED frame the same day. Tree: the
-    frame-migration commits of 2026-08-31 (`ISSUES: instruments-calibrate-undrained-cache`). Every
+    frame-migration commits of 2026-08-31 (the ruling now lives at `DESIGN.md` §4.3). Every
     number below is drained-frame; ⛔ nothing measured before 2026-08-31 is comparable to these.
 
 ## ① The 0.8.0 metric — `calibration_vs_oracle.py`, all 16 ladder conditions (512 s)

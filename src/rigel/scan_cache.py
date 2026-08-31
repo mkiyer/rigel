@@ -601,7 +601,7 @@ def calibration_inputs(
     """Exactly the keyword arguments `calibrate` needs, **in PRODUCTION'S FRAME**.
 
     ⭐⭐ **THE PAYLOAD IS DRAINED HERE — the frame ruling of 2026-08-31**
-    (`ISSUES: instruments-calibrate-undrained-cache`). The cache stores pass one so the drain can
+    (`DESIGN.md` §4.3). The cache stores pass one so the drain can
     re-run at any seed; production drains the side buffer BEFORE ``build_fl_models``/``calibrate``
     (`pipeline.py`), and an instrument that calibrated the undrained tally was measuring a library the
     solver never sees — the certified spliced channel alone is 17–20 % larger drained, and the
