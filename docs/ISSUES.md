@@ -59,12 +59,21 @@ bias the drain exists to repair. ③ No structural gDNA channel: records with no
 100 % mature. ④ The harm is concentrated and qualitative: at `g98 ss.99 ON`, 137 boundaries carry
 certified RNA where truth has ZERO spliced RNA. ⑤ The leakers' own P(genomic) is known at drain time
 (median 0.494 at `g98 ss.99 ON`) — the information to price the false certainty already exists.
-⭐ **The design**: deposits unchanged; the drain accumulates per certified object
-`E_genomic = Σ q_null` and `V_genomic = Σ q(1−q)` (its own posterior, no new model, no constant), and
-CALIBRATION — which owns composition — converts path-contamination to gDNA-contamination with its own
-local `f_g`. Consumers correct the certified count's mean and/or precision. Score per stratum on
-`calibration_vs_oracle.py`, both zero controls, both fl-gap sign arms, AND the spliced-pool means
-(the drain's length-law repair must survive). Sequencing and open points: the plan doc in `docs/dev`.
+⑥ **The per-record reliability** (oracle truth walk, 100 % matched): the posterior is essentially
+PERFECT at the extremes (~75 % of records) and UNDER-calls genomic in the torn middle — realized
+null-truth 0.70 at q 0.50, same shape both regimes — so `Σ q_null` recovers ~70 % of the true
+contamination; the mature-genomic-gap term is real (405 of 542 at `g50 ss.99 OFF`) and is RNA.
+⑦ ⛔ **The NO-LEAK COUNTERFACTUAL CEILING REFUSES any in-solve correction**: rebuilding BOTH worlds
+with the leaked choices flipped to genomic (residual leak exactly 0) moves the release metric by
+**−0.60 %/−0.05 %** at the worst condition (`g98 ss.99 ON`) and ≤0.10 % mixed-sign elsewhere — all
+under the ~2 % attribution floor. The leak's harm is the CERTAINTY CLAIM, not calibration accuracy.
+⭐ **What remains to build** (the plan doc in `docs/dev` carries both):
+① honest labeling — the drain records its own expected certified-channel impurity
+(`Σ q_null`, variance free) into `DrainQC`/the QC report; no solve behaviour changes; and
+② the one true false-positive REDUCER — repair the middle-bin posterior bias (suspect: the genomic
+side's `_bottleneck` min over several noisy boundary densities vs one sj flux; a derived pooled
+aggregation, no constant), which cuts actual leak draws with no trade-off. Each its own
+DERIVE → prototype → A/B; the reliability curve is the re-check instrument.
 
 ### measured-prior-rung-4
 `priority: now · kind: build · stamped: 2026-08-26`

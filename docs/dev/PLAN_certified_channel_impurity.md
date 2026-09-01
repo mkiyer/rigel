@@ -62,11 +62,59 @@ arrays need NO accumulator/ABI change — they can ride the drained payload the 
 ⚠ The scan cache stores pass one, so nothing is cached; instruments get them through the drain they
 already run (`DESIGN.md` §4.3).
 
+## 2b. Step 0 RESULTS — the per-record reliability of `q_null` (2026-08-31, oracle truth walk)
+
+Full genomic-path truth per held record (pysam walk: origin + the true transcript's unobserved
+introns within the span; 100 % of held records matched), `g98 ss.99 ON` and `g50 ss.99 OFF`:
+
+* ⭐ **The posterior is essentially PERFECT at the extremes** — the [0, 0.02) and [0.98, 1] bins
+  (~75 % of records with a null hypothesis) realize 0.001/0.999 and 0.002/0.998 — **and
+  systematically UNDER-calls genomic in the torn middle**: at mean q 0.50 the realized null-truth is
+  0.70, at 0.33 it is 0.51, the SAME shape on both regimes. So `E_genomic = Σ q` recovers ~70 % of
+  the true contamination in expectation (368 of 504 at `g98 ss.99 ON`), not all of it.
+* The mature-genomic-gap term is REAL and dominant at `g50 ss.99 OFF`: full genomic truth among
+  drawn-spliced = 542 = gdna 75 + **mrna 405** + nrna 62 (a mature fragment whose gap holds another
+  isoform's intron its own transcript did not splice). It is RNA — the consumer-side `f_g`
+  conversion handles it by construction.
+* ⚠ **A candidate SECOND mechanism for the middle-bin bias, not yet derived**: the genomic
+  hypothesis's ρ is `_bottleneck` (a min) over SEVERAL noisy boundary densities while the spliced
+  side takes one sj's flux — min-of-k under noise shrinks below the common density, deflating the
+  genomic score exactly in contested cases. Its own DERIVE, one mechanism at a time; it would
+  raise the recovery above ~70 % if repaired.
+
 ## 3. Sequencing
 
-0. ⭐ Prototype the accumulation outside `src/` (extend the session's `leak_derive.py` mapping
-   records → receiving objects) and verify per-object: `E_genomic` vs the oracle's realized leak,
-   condition by condition — the per-object calibration check that aggregate point 1 already passed.
+0. ✅ **DONE — the reliability check above.** Next in step 0's spirit: the per-object `E_genomic`
+   accumulation (records → receiving objects) rides the consumer prototype below.
+0b. ✅ **The NO-LEAK COUNTERFACTUAL CEILING — measured, and it REFUSES the heavy correction.**
+   Flip only the true-gDNA leaked records' choices to genomic, rebuild BOTH sides (whole re-drained,
+   partitions lift-drained with the same corrected choices; residual leak exactly 0, flips counted):
+   removing the leak ENTIRELY is worth **−0.60 % / −0.05 %** (region/boundary) at `g98 ss.99 ON` —
+   the worst leak condition — and **≤ 0.10 %, mixed sign**, at `g50 ss.99 OFF` and `g05 ss.99 ON`.
+   All far under the panel's ~2 % attribution floor. ⛔ **So the consumer correction inside the
+   solve (§2's mean/precision machinery) CANNOT pay on the release metric and is not to be built**
+   — the ceiling refuses it before a line of `src/` was written, which is what a ceiling is for.
+
+## 2c. What survives the ceiling — the two pieces that still answer the owner's concern
+
+1. ⭐ **HONEST LABELING (small, buildable, metric-neutral by construction).** The harm that remains
+   is the certainty claim: 137 pure-false-positive boundaries at `g98 ss.99 ON`, and every consumer
+   (the report, the certified-flux anchor, a real-data reader) treating "certified" as exact.
+   Production can STATE its own expected impurity: the drain accumulates `Σ q_null` (and its
+   variance) over its gap-spliced deposits — the truth-free quantity step 0 validated at ~70 %
+   recovery — and carries it in `DrainQC` / the QC report as the certified channel's measured
+   purity. No solve behaviour changes; a false certainty becomes a priced one.
+2. ⭐⭐ **THE ONE TRUE FALSE-POSITIVE REDUCER: repair the middle-bin posterior bias.** The
+   reliability curve (§2b) shows the genomic side systematically UNDER-scored in contested cases
+   (realized 0.70 at q 0.50, both regimes) — and the leakers live exactly there (median q 0.494).
+   A calibrated posterior would draw those records genomic at their true rate, cutting the realized
+   leak with NO trade-off (this is fixing a bias, not gating a draw). The suspect is derivable:
+   `_bottleneck` (a min) over SEVERAL noisy per-boundary densities on the genomic side against ONE
+   sj flux on the spliced side — min-of-k under sampling noise sits below the common density by
+   construction. The candidate repair is an aggregation derived from the deposit rule (e.g. the
+   pooled count-over-exposure across the distinguishing boundaries — no constant), taken through
+   its own DERIVE → prototype → reliability-curve re-check → A/B (leak counts AND the mature
+   re-inclusion must both be scored; one mechanism at a time).
 1. Prototype the CONSUMER correction on the certified banks inside a `calibrate` injection arm and
    score on `calibration_vs_oracle.py` per stratum, both zero controls, plus the fl-gap sign arms —
    ⛔ the RNA-length-law lesson: the drain's repair of the spliced pool must SURVIVE (the corrected
