@@ -2,7 +2,7 @@
 
     ⚠ **A DEV DOC. Nothing may cite it, and it is NOT the state.** Derivations: `EQUATIONS.md` §2
     (support-conditional cancellation), §9d (the mixture). Rulings: `DESIGN.md` §0c.3, §0c.0d.
-    Refutations: `ROADMAP.md` §4.2/§4.3. ⛔ v1–v3 (this file's history as
+    Refutations: `ISSUES.md`'s CLOSED / REFUSED record. ⛔ v1–v3 (this file's history as
     `PLAN_spike_slab_reference.md`) are superseded and survive in git; their defects are recorded in
     v3's header one commit back. **v4 adds the owner's start/span/end taxonomy (2026-08-21), the
     what-do-we-need-to-know inventory, and the two implementation recipes.** This is the handoff for
@@ -190,23 +190,24 @@ ladder rung — equal lengths are the ladder's forcing function). Build it when 
    drop-in), the derivation to `EQUATIONS.md` §2.3b (`A_start(w|d)`, the exactness condition, the
    field-free pair), the two lessons to `TRAPS.md`
    (`two-estimators-of-one-rate-weight-the-field-differently`,
-   `state-the-population-rule-do-not-inherit-it-from-a-table`), and the numbers to `ROADMAP.md` §1
+   `state-the-population-rule-do-not-inherit-it-from-a-table`), and the numbers to `ISSUES: measured-prior-rung-4`
    rank 3. Built: `rigel.calibration.total_abundance` (layer 3, no consumer) +
    `splice_graph.build_mature_wall_distances`; gated by `tests/calibration/test_total_abundance.py`
    (23 cases, 16 perturbations all fired) and `scripts/design/total_abundance_audit.py` (15/15).
 2. ⏳ **Rung 2 — REPLACE PER CONSUMER: ENUMERATED, TWO CONSUMERS LANDED AND PRICED, the rest ranked.**
-   ⛔ **A prior session called this rung BLOCKED by `ROADMAP.md` §4.3 and the owner corrected it. The
+   ⛔ **A prior session called this rung BLOCKED by a refusal scoped to ONE consumer, and the owner corrected it. The
    error is worth keeping**: §4.3 is scoped to ONE consumer (the currency channel's `enrichment_ratio`,
    substituted UNMASKED and without side selection, judged on that policy's deliverable), and
    "readers of `inv_abundance`" is not "places total abundance is used" — one member versus 240.
-   * The census is `docs/dev/CENSUS_total_abundance_consumers.md` (240 sites; 8 SWAP / 20
-     NEEDS-MEASUREMENT in `src/`), with the four FORMS and the rule that only a TOTAL-wanting site (or
-     a gDNA level at a structurally pure-gDNA object, where total ≡ gDNA) is a candidate at all.
+   * The census that established this counted **240 sites** (8 SWAP / 20 NEEDS-MEASUREMENT in `src/`);
+     its enumeration was deleted 2026-09-01 as a stale-on-arrival artefact — ⛔ **re-derive it with
+     `module_census.py` rather than quoting it**. What survives is the RULE: only a TOTAL-wanting site
+     (or a gDNA level at a structurally pure-gDNA object, where total ≡ gDNA) is a candidate at all.
    * LANDED behind `CalibrationConfig.background_abundance` (`"contained"` default ⇒ bit-identical):
      `fit_intron_background` (→ ψ) and `measure_background` (→ the refit floor). The PAIR changes, not
      the estimator.
    * PRICED at the estimator level on all 32: a tie off capture, a 1.8–4.3× repair under it, and a
-     ~2 pp nascent-contamination cost on RNA-bearing pools. `ROADMAP.md` §1 rank 3 carries the table.
+     ~2 pp nascent-contamination cost on RNA-bearing pools. `ISSUES: measured-prior-rung-4` carries the table.
    * ⭐⭐⭐ NEXT, and it is rung ③'s work rather than rung ②'s: `capture_eff_length.py:194` +
      `priors.py:353` — the expression that produces the 0.0951. A composition-free total can supply
      that reference, but only through the LANDSCAPE's enriched mode; a pooled-anchor drop-in is right
@@ -303,7 +304,7 @@ ladder rung — equal lengths are the ladder's forcing function). Build it when 
    ### 3d. ✅ THE NPMLE RETIREMENT — EXECUTED 2026-08-21. The recipe is deleted; its record MOVED.
 
    ⛔ The step-by-step recipe that stood here has been REMOVED rather than stamped, per the MOVE rule.
-   Where it went: the outcome and the measured justification to `ROADMAP.md` §1 rank 3 item ①b; the
+   Where it went: the outcome and the measured justification to `ISSUES: measured-prior-rung-4`; the
    lesson to `TRAPS: measure-a-default-flip-before-you-write-it`; the ruling on which landscape outputs
    a consumer may read to `DESIGN.md` §3.1a-iii.
 

@@ -1,93 +1,105 @@
-# NEXT SESSION — the coordinate thread ran to a verdict (2026-09-01)
+# NEXT SESSION — the MESSAGE LAYER, developed on the test chromosome
 
-    ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand, not what to build — the ranked
-    list is `ROADMAP.md`. MOVE anything that settles into the permanent docs and DELETE this file.
+    ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand and how to start, not what is
+    settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
+    `ISSUES.md`. MOVE anything that settles into those and DELETE this file.
 
-## What happened this session
+## The thread, and why it is next
 
-`ISSUES: arcsine-magnitude-coordinate` was executed end to end — step ① the dissection, step ② the
-derivation on paper for BOTH solvers, step ③ the prototype outside `src/` with a per-stratum A/B.
-**`src/` is untouched.** Suite green at **3,745** (baseline 3,743 **+2** for the two `docs/dev/` files
-added — the derivation and the preserved prototype, jargon only each, confirmed by bracket-matched
-collection; `CLAUDE.md`'s standing-baseline line is updated).
+**The message layer is the largest measured in-scope defect, and it ships ON.** Two independent
+routes arrived at it on 2026-09-01:
 
-**The verdict, in one line: the attribution is CONFIRMED, the headline premise is REFUTED, and the
-thread needs re-aiming at a MODEL term.** The full record is `ISSUES: arcsine-magnitude-coordinate`
-(entries ①–⑥ + the re-aim) with the derivation in `docs/dev/DERIVATION_arcsine_magnitude.md`.
-⛔ Do not re-derive any of it; do not re-run the refuted claims.
+* the calibration walk — at the worst in-scope condition the SHIPPED tool is **456,838** fragments of
+  error against **298,597** with messages off. Messages ADD **+158,241 (+53 %)**; at `g98 ss.99 OFF`
+  they add **+81,839 (+65 %)**. Re-derive with `calibration_walk.py --condition <name>` (rung E vs F);
+* the vertex ceiling — handing every reachable vertex-truth object the ORACLE answer and re-solving
+  the whole chain nets **≈0** (boundary −20,208, region +18,887). **A perfect local answer does not
+  survive propagation**, which is why no local repair — coordinate, prior, or atom — can pay off until
+  this is fixed. The arcsine coordinate thread was run to a verdict and refused on the same day;
+  `ISSUES.md`'s CLOSED / REFUSED carries it, and ⛔ do not re-derive it.
 
-The three things a next session most needs:
+⭐ The relay is not simply bad — its value is real and CONCENTRATED where the local solve is blind,
+and its harm is concentrated where the destination already has good own evidence. That is the whole
+shape of the problem, and it is exactly the charter's failure mode: **"minimal harm on stranded" is
+currently not met.**
 
-1. **The under-call scales as `1/√n` across four decades of depth** (obs/pred 0.63…1.21 against
-   `w/4 = 1/(2√n)` on 34,207 solved exact-vertex slots). That is a posterior WIDTH, not a grid
-   artifact. The solver is answering honestly; the error is the price of a CONTINUOUS prior with no
-   atom at the vertex, scored against a truth that sits exactly on it.
-2. **The coordinate's whole leverage is ~2.5 % of the defect**, bounded by K-invariance: the two
-   coordinates each converge to their own limit while the gap between them holds at 6.5e-04 (the λ
-   bracket's truncated DOMAIN — refining K cannot recover it) against a 0.026 shortfall.
-3. **λ is FINER at the vertices than uniform-φ**, and the median cannot reach a vertex in ANY
-   coordinate (`t = 1 − 0.5/m ≤ ½` for the outer bin). The issue's premise was backwards.
+## ⭐⭐⭐ THE PARADIGM — develop on the test chromosome, decide on the ladder
 
-## Where the prototype is
+The substrate is `docs/TESTING.md` §0a — **read it first**; it owns the description, the commands and
+the two bars, and nothing is duplicated here. In one line: the ANCHORED TWIN BLOCK is one shape
+repeated over five gene types × five abundance blocks, and the five types are the message layer's own
+controls — `clean` (a pure-gDNA message SOURCE), `nasc` (a contaminated one), `cap` (the enrichment
+cliff between source and destination), `capnasc` (both), `silent` (every object pure gDNA, so any
+claimed RNA is a false positive).
 
-⭐ **`docs/dev/arcsine_proto.py` is PRESERVED IN THE REPO** — the mechanism itself: three module
-patches (`_logodds_grid` → the midpoint uniform-φ lattice, the two arms → no written reference,
-`_posterior_median_fg` → interpolate in φ) plus **23 perturbed self-test gates, all passing**. Run it
-directly: `python docs/dev/arcsine_proto.py`. `install("noop")` reinstalls the ORIGINALS through the
-same mechanism and is byte-identical to production on every condition and both metrics — that is the
-harness's own falsification, and it held throughout.
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
+python scripts/design/preflight.py                          # FIRST — ~2 s, can this session run?
 
-The A/B drivers were left in the session scratchpad and are thin by comparison (an afternoon to
-rewrite against the preserved prototype): `arcsine_ab.py` (walk metric vs certified `slot_truth`),
-`arcsine_release_ab.py` (0.8.0's release metric via `calibration_vs_oracle.measure_condition`),
-`arcsine_kinvariance.py` (the acceptance test), `band_dissect.py` (truth-banded dissection),
-`neighbour_information.py` (the no-solver neighbour ceiling — see the parallel section).
+python scripts/design/policy_benchmark.py --panel test      # THE LOOP — 30 conditions, seconds
+python scripts/design/policy_benchmark.py --panel ladder    # THE JUDGEMENT — 16 conditions, minutes
+```
 
-## The re-aim — proposed AND priced in the same session; it is ALSO not a win
+⛔ **THE OWNER'S RULING ON HOW TO USE IT: the test chromosome is where the policy is DEVELOPED, and a
+result is only believed once the ladder confirms it** (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`
+— a small substrate's objects mostly lack own evidence, so a message is nearly free there and a policy
+looks better than it is). ⭐ **When a condition indicts a structure, ADD THAT STRUCTURE TO THE TEST
+CHROMOSOME** — that is the loop, and the substrate is designed to grow one structure at a time
+(`TESTING.md` §0a has the edit-then-rebuild sequence; the three hand-edited files are the only inputs).
 
-The obvious next mechanism is **an ATOM at the vertex** ("this slot holds NO RNA" as a point mass —
-a point-null/spike-and-slab that no continuous reference expresses in any coordinate), because the
-source already names the socket and its price: `simplex_logodds._rna_arm` — nothing fits `logP_r`,
-and the unfitted reference is a fixed **3.107 nats** repulsion at `f_g = 0.999` (a 22:1 handicap);
-objects with true `f_g ≥ 0.999` carry **49–83 %** of all calibration error and read **0.13–0.23
-below** the vertex. The target population is **half the ladder's live mass** (50.0 %, no solver).
+⛔ **NEVER POOL THE TWO HALVES.** Unstranded rows are where a policy must WIN; stranded rows are where
+it must do as little HARM as possible. They are judged against DIFFERENT bars.
 
-⛔⛔ **But it was priced before recommending it, and the ceiling is roughly a WASH.**
-`vertex_ceiling.py`, three conditions, oracle truth pinned and the whole chain RE-SOLVED (`noop` pins
-0 and is byte-identical — falsification passing; `vertex_free` pins ~70–79 k objects):
-`vertex_free` gives region Σ|err| **+18,887** and boundary **−20,208** — they cancel. The looser
-`vertex_all` is clearly worse (+94,490 / −18,237). Handing a vertex object the exact answer changes
-what it BROADCASTS and the relay over-propagates it.
+## What the baseline says about where to aim
 
-⭐⭐ **What that leaves, and it is the session's real handoff**: the near-vertex error is (a) an
-honest posterior width that scales as `1/√n`, and (b) NOT removable by local certainty either. Both
-the coordinate and the local-prior repair are priced and neither wins. **That points the question at
-the MESSAGE LAYER** — which is also where `ISSUES: message-value-for-blind-slots` (below) now has its
-first numbers. ⚠ Owed before anyone builds an atom: the whole-ladder `vertex_ceiling` run and a
-`calibration_vs_oracle` equivalent (the ceiling above is that instrument's pass-0-flavoured metric).
+The full numbers are the dated snapshot beside this file. The three that set the direction:
 
-## Cautions that still stand
+1. **On the test chromosome the split is stark.** Relay beats silence by **0.01–0.32×** on unstranded
+   × capture-ON — a large, real win exactly where the local solve is blind — and LOSES on stranded ×
+   capture-ON by **2.1–4.96×** (and 58× on one near-zero-error row, where the ratio is not the thing
+   to read). Off capture it is roughly neutral, degrading to **1.25–1.67×** harm as gDNA rises.
+2. **On the ladder the same shape**: relay wins the blind rows and all four zero controls, and hurts
+   the solvable set on 9/12 contaminated conditions.
+3. ⛔ **The declared precision is NOT EARNED on 11/12 rows** (`solvability_audit.py`). That is the
+   suspected mechanism: a message that claims more precision than it has will overwhelm good own
+   evidence, which is precisely the measured stranded harm.
 
-* ⛔ Nothing measured before 2026-08-31 is comparable to current numbers (the drained-frame ruling,
+## The first two steps, in order
+
+**① Measure the split — no new code.** Score silent vs relay **split by whether the destination had
+its own composition evidence**. That is the unfinished half of `ISSUES: message-value-for-blind-slots`
+and it converts "relay hurts 9/12" into "relay hurts THIS destination class by THIS much", which is
+what says whether an emission gate alone recovers the harm. ⚠ Its no-solver companion is already
+measured and recorded in that issue: an ORACLE neighbour message has POSITIVE skill only in a narrow
+regime (mid-contamination and `g98` off capture) and is actively MISLEADING at low gDNA — so a policy
+that speaks everywhere cannot win, however well engineered.
+
+**② The precision ledger, per node type** — the owner's own question in `message_notes.md`, and the
+right one: *when the strand model solves an exon, what precision does that exon actually get?* Three
+numbers per node type: what `τ_λ` the strand channel EARNS (`region_init.build_region_init`), what the
+relay DECLARES after `hop_logvar` damping (`messages/relay.py`), and their ratio. The owner's node
+order — exon regions → `intron|exon` boundaries → intron regions — is right, and exons first is right
+because that is where the harm concentrates.
+
+**Then one mechanism at a time**, whichever the ledger indicts: the emission gate (speak only into
+blind destinations) or the precision correction (declare what you earned). ⛔ Not both —
+`CLAUDE.md`'s DERIVE → DESIGN → PLAN → PROTOTYPE → A/B, and a change that cannot be A/B'd alone
+cannot be judged alone.
+
+⛔ **What NOT to do: flip the default to silent.** It is tempting at 1.65× worst harm, but relay wins
+all four zero controls and the blind rows, so a blanket flip trades those away. The destination gate
+is the shape that keeps both.
+
+## Standing cautions
+
+* ⛔ **Read `HONEST_PRECISION.md` beside this file before proposing any mechanism** — it is the record
+  of the 2026-08-27 campaign that was torn down, so a refuted experiment is not re-run.
+* ⛔ `MessagePolicy` is byte-identical to `SilentPolicy` at rung 0 and confirmed so on all 46
+  conditions. That identity is the foundation spec's gate — keep it as the falsification for every
+  new rung (`TRAPS: an-ablation-that-never-ran`).
+* ⚠ The certified-flux stream rides inside the relay (`RelaySwitches.certified_flux`, final solve
+  only) and `config.rna_anchor` is live iff propagation is on AND the policy is relay — so a
+  silent-vs-relay delta bundles the anchor. Separate it with
+  `ladder_arm_ab.py --arm anchor_off` or `backbone_parity.py --arm-b no_certified_flux`.
+* ⚠ Nothing measured before 2026-08-31 is comparable to current numbers (the drained-frame ruling,
   `DESIGN.md` §4.3).
-* ⛔ The A/B (whole ladder, all 16, noop byte-identical on every one) **splits cleanly by stratum**:
-  stranded × OFF WINS and more as gDNA rises (1.008 / 0.939 / 0.898); unstranded × OFF LOSES every
-  row (1.107 / 1.071 / 1.014); stranded × ON mild loss; 3 of 4 zero controls win. ⭐ The coordinate
-  helps where the strand LIKELIHOOD is strong and hurts where it is flat (there the posterior IS the
-  reference, so the grid's tail resolution moves the answer directly). That is a real trade, and
-  losing all three in-scope unstranded rows is what disqualifies it — never pool
-  (`TRAPS: never-pool-the-strata`), the ladder total would have hidden it.
-* ⚠ **Rung B is derived but NOT measured**: φ-native message DELIVERY (map a claim's precision by
-  `(dx/dphi)²` — derivation §5). Rung A delivers claims pointwise in λ's coordinate, which is the
-  honest suspect for the F-stage losses, since the C-stage (message-free) improves nearly everywhere.
-  It cannot exceed the 2.5 % bound.
-* ⚠ `_posterior_median_fg`'s interpolation coordinate is load-bearing and easy to get wrong — the
-  histogram edges must be midpoints in the coordinate whose measure is UNIFORM, or a one-hot posterior
-  comes back biased. Production documents this for λ; the prototype re-derives it for φ.
-
-## Parallel, cheap, no solver — unchanged and unaffected by the verdict
-
-`ISSUES: message-value-for-blind-slots` on the anchored twin block: is the information a blind
-unstranded/AMBIG slot needs actually PRESENT in its neighbours? It decides the message policy's
-ceiling. ⚠ The owner's "the policy is built once, on the settled coordinate" ordering was premised on
-the coordinate landing; with the thread re-aimed, that ordering is the owner's to re-rule.

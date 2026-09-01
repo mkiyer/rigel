@@ -37,7 +37,8 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
   on real data read `clamped_at_ceiling` and `effective_seeds`, never the bare value.
 - **The message layer**: `relay` ships (propagation ON); `silent` is the measured floor; `MessagePolicy`
   ≡ silent at rung 0. The bar: **win on unstranded, minimal harm on stranded, never pooled** —
-  `policy_benchmark.py`.
+  `policy_benchmark.py`. ⛔ **The harm half is NOT met**: messages ADD error at the worst in-scope
+  conditions, and the relay's declared precision is not earned on most rows — rank 1 below.
 - **ψ**: the composition closes structurally on every published object (`test_composition_closes.py`);
   the reference location is DELETED (owner, 2026-08-24; the surviving form is `DESIGN.md` §6b.1); the
   λ-bracket widening is built and ships OFF — `ISSUES: psi-lambda-bracket-unshipped`.
@@ -63,39 +64,40 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated
 fix → **add the offending transcripts to the test chromosome** → re-run → repeat.
 
-✅ **Measurement integrity is DONE (2026-08-31)**: the frame is ruled and migrated through the
-loaders (the ruling is `DESIGN.md` §4.3; only wave-3 bank-readers remain — `ISSUES: hygiene-ledger`), `slot_truth` is re-certified, and **the in-scope baselines are re-derived in the drained
-frame with same-day noise floors** — five instruments, whole ladder; run any of them for a current
-number. ⭐ The re-derived facts a ranking can lean on: the worst IN-SCOPE scenario is
-`g98 ss.99 capture-ON` on the 0.8.0 metric (almost entirely UNDER-called gDNA at near-pure objects —
-the shortfall pattern holds on every stratum) and `g50 ss.50 capture-OFF` on `solvability_audit`'s
-Σ|err| — dissect both before choosing; the relay hurts the solvable set on 9/12 contaminated
-conditions while winning the blind rows and all four zero controls.
+⭐ **The measurement frame is settled and the baselines are current** — the ruling is `DESIGN.md`
+§4.3 (only wave-3 bank-readers remain: `ISSUES: hygiene-ledger`), `slot_truth` is certified in that
+frame, and every in-scope baseline was re-derived on the whole ladder with a same-session noise floor.
+⭐ The facts a ranking can lean on, each with the instrument that re-derives it: the worst IN-SCOPE
+scenario differs between the two rankers — `calibration_vs_oracle.py` and `solvability_audit.py`
+disagree because they weigh objects differently, so dissect BOTH before choosing one; the error is
+almost entirely gDNA UNDER-called at near-pure objects, on every stratum; and the relay hurts the
+solvable set on most contaminated conditions while winning the blind rows and all four zero controls.
 
-1. ⛔⛔ **THE COORDINATE THREAD RAN TO A VERDICT ON 2026-09-01 AND NEEDS AN OWNER DECISION** —
-   `ISSUES: arcsine-magnitude-coordinate` carries it. Steps ①–③ all executed (dissection → derivation
-   → prototype → per-stratum A/B, noop byte-identical throughout). **The attribution is confirmed but
-   the headline premise is refuted**: the median cannot reach a vertex in ANY coordinate, λ is
-   actually FINER at the vertices than uniform-φ, and K-invariance bounds the coordinate's whole
-   leverage to a small fraction of the defect. **The under-call scales as `1/√n` with depth** — a
-   posterior WIDTH, not a grid artifact — so the defect is the `Beta(½,½)` reference's missing ATOM
-   at the vertex, a MODEL term. The A/B is mixed-sign in scope and does not clear
-   `TRAPS: panel-before-src`. ⛔⛔ **And the obvious re-aim was PRICED IN THE SAME SESSION AND IS ALSO
-   NOT A WIN**: `vertex_ceiling.py --arm vertex_free` — a PERFECT answer at every reachable
-   vertex-truth object, whole chain re-solved — nets out to roughly a WASH (boundary improves on
-   every row, region degrades, they cancel). ⭐ Taken together the near-vertex error is an HONEST
-   posterior width that local certainty does not remove, which points the question at the MESSAGE
-   LAYER rather than the prior or the coordinate. ⚠ Three conditions; the whole-ladder ceiling is
-   owed before anyone builds a vertex atom.
-2. ⭐ **In parallel, no solver needed**: `ISSUES: message-value-for-blind-slots` on the anchored twin
-   block — the message policy's ceiling question, unaffected by ①'s verdict.
-3. ⭐ **Then the message policy itself** (the standing charter: win on unstranded, minimal harm on
-   stranded, never pooled). ⚠ The owner's "build it once, on the settled coordinate" ordering was
-   premised on the coordinate landing; with ① re-aimed, the ordering is the owner's to re-rule.
-4. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
-   `ISSUES: reference-prior-refuted-at-concept-level` constraint — noting the coordinate change may
-   moot the reference half by construction (flat measure = Jeffreys) — with
+⛔ **Two local repairs were run to a verdict on 2026-09-01 and BOTH are refused** — the arcsine
+magnitude coordinate (`ISSUES.md` CLOSED / REFUSED carries the full record) and, priced in the same
+session, a PERFECT vertex answer at every reachable object with the whole chain re-solved, which nets
+roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local answer does not survive
+propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
+is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
+
+1. ⭐⭐⭐ **THE MESSAGE LAYER — the largest measured in-scope defect, and it ships ON.** The charter
+   stands: **win on unstranded, minimal harm on stranded, never pooled** — and the "minimal harm"
+   half is currently not met. Developed on the test chromosome, judged on the ladder
+   (`policy_benchmark.py`; the substrate and its two bars are `TESTING.md` §0a). In order: ① score
+   silent vs relay **split by destination-had-own-composition-evidence** — no new code, and the
+   unfinished half of `ISSUES: message-value-for-blind-slots`, whose no-solver companion is already
+   measured; ② the **precision ledger per node type** — what `τ_λ` the strand channel EARNS versus
+   what the relay DECLARES, exons first (the suspected mechanism: the declared precision is not
+   earned on most rows, so a message overwhelms good own evidence); ③ then ONE mechanism — the
+   emission gate or the precision correction, never both. ⛔ Not a blanket default flip: relay wins
+   all four zero controls and the blind rows.
+2. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
+   `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
+3. ⭐ **Re-price the vertex atom AFTER the message layer is repaired, never before** — `EQUATIONS.md`
+   §9a.1/§9d.4 already carry the derivation and the spike with no new constant; what is owed is the
+   whole-ladder `vertex_ceiling.py` and a release-metric equivalent, against a solver that keeps what
+   it is given.
 
 Then, in standing order: `ISSUES: per-transcript-prior-lane` (the largest in-scope end-to-end lever,
 now with a measured target population) · `ISSUES: performance-memory-bounded-solve` (owner: mandatory

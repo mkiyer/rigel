@@ -19,163 +19,6 @@ because a graveyard row without its number is an invitation to rebuild.
 
 ## OPEN
 
-### arcsine-magnitude-coordinate
-`priority: OWNER DECISION — derived, prototyped and A/B'd 2026-09-01; the headline premise is REFUTED and the thread needs re-aiming (below) · kind: build · stamped: 2026-09-01`
-
-⭐⭐⭐ **MEASURED 2026-09-01 — READ THIS BEFORE THE ORIGINAL ENTRY BELOW, WHICH IT CORRECTS.**
-Steps 1–3 all ran (dissection → derivation → prototype → per-stratum A/B); `src/` untouched. The full
-derivation and the working notes are in `docs/dev` (a handoff and a derivation doc); the prototype and
-its 23 perturbed gates are in the session scratchpad, outside the repo. ⛔ The NOOP arm is
-byte-identical to production on every condition and both metrics — the harness prices something
-rather than changing answers by existing.
-
-**① STEP 1's ATTRIBUTION IS CONFIRMED, in the sense that matters and not in the sense assumed.** The
-error mass IS on near-vertex objects, pre-message, on both capture arms (`g98 ss.99 ON`: exact-vertex
-slots carry 56 % of the message-free local solve's error, truth ≥ 0.99 carries 79 %, all one-sided
-under-call; OFF: 62 %). The alternatives are refused by the same tables — not the capture-ON divisor
-(OFF shows the same band), not the refits (E − C = −722). ⚠ But the slots reading exactly `f_g = 1`
-are all `solvable = False` (signature-locked init), so **no solver-reached slot reads either vertex** —
-which is what made "vertex-blocked" look like the mechanism.
-
-**② THE HEADLINE PREMISE IS REFUTED.** "A vertex is a finite interior endpoint instead of ±∞" does not
-buy what it promises. (a) The posterior MEDIAN cannot reach a vertex in ANY coordinate: for the outer
-bin holding mass `m` the CDF crossing is `t = 1 − 0.5/m ≤ ½`, so the read-out never passes the outer
-bin's midpoint. (b) In `f`-space **the λ grid is FINER at the vertices than uniform-φ** — `sigma(±L)`
-already sits `4.54e-5` from the vertex; at K=60 the top `f`-gap is `1.83e-5` (λ) vs `1.37e-3` (φ) and
-the one-hot read-out is `0.999954602` (λ) vs `0.999828662` (φ). λ **concentrates** resolution at the
-vertices; that is what `logit` does.
-
-**③ THE COORDINATE'S TOTAL LEVERAGE IS 2.5 % OF THE DEFECT** (K-invariance, `g98 ss.99 ON`, rung C).
-Each coordinate converges to its own limit (mass-wtd `|K60 − K240|`: base 1.47e-04, arcsine 1.31e-04)
-while the gap BETWEEN them holds at ~6.5e-04 and grows slightly with K — a DOMAIN difference (the λ
-bracket's truncation), not quadrature. Against a measured shortfall of 0.026 in the vertex band that
-is 2.5 %.
-
-**④ THE DEFECT'S REAL MECHANISM, MEASURED — and it is a MODEL term, not a coordinate.** On 34,207
-SOLVED exact-vertex slots the under-call tracks `w/4 = 1/(2·√n)` across four decades of depth
-(obs/pred 0.63 / 0.72 / 0.70 / 0.82 / 0.82 / 1.21 / 0.96 from n≈16 to n≈14,916). **It scales as
-`1/√n` — the signature of a posterior WIDTH, not of a grid** (a grid artifact is constant in depth or
-saturates at the grid's resolution). Derivation: the strand channel releases `f_rna ∈ [0, w]`,
-`w ≈ 2/√n`; under the `Beta(½,½)` reference the density there is `∝ f_rna^{−½}`, whose median is at
-`w/4`. **The solver is answering honestly.** The error is the price of a CONTINUOUS prior with no
-atom at the vertex, scored against a truth sitting exactly on it.
-⛔⛔ **SCOPE, AND THIS IS A RE-DERIVATION RATHER THAN A DISCOVERY**: the condition measured
-(`g98 ss.99 ON`) is STRANDED, so `1/√n` is the **stranded** reading and it reproduces `EQUATIONS.md`
-§9a's recorded log-log slope of **−0.5221**. ⛔ §9a also records that on the real UNSTRANDED fit the
-shortfall is **depth-INDEPENDENT** (slope −0.0000 over 5.4 decades) — *"do not quote an `n^(−1/2)`
-shrinkage on an unstranded stratum"*. ⭐ §9a and §9a.1 already carry the whole theorem (a proper prior
-WITH A DENSITY cannot put its median at a vertex; a spike-and-slab with `π ≥ ½` can), and §9d.4
-already carries a fully derived atom with no new constant. **What this session ADDS to them is ⑦'s
-pin-and-re-solve**, which is a stronger statement than §9a's "value of missing information": supplying
-the information PERFECTLY still nets ≈0.
-
-**⑤ THE A/B SPLITS CLEANLY BY STRATUM — WHOLE LADDER, all 16 conditions, noop byte-identical on
-every one** (release metric Σ|Δ|, `arcsine/base`, <1 better):
-
-| stratum | rows (low→high gDNA) | reading |
-|---|---|---|
-| stranded × OFF (IN SCOPE) | 1.008 · 0.939 · 0.898 | ⭐ **WINS, and more as gDNA rises** |
-| stranded × ON (IN SCOPE) | 0.998 · 1.010 · 1.037 | mild LOSS, worsening with gDNA |
-| unstranded × OFF (IN SCOPE) | 1.107 · 1.071 · 1.014 | ⛔ **LOSES every row** |
-| unstranded × ON (DEFERRED) | 1.024 · 1.007 · 1.002 | mild loss |
-| `g00` zero controls | 0.824 · 0.925 · 0.978 · 1.037 | 3 of 4 WIN |
-
-⭐ **The mechanism the split suggests**: the coordinate helps where the strand LIKELIHOOD is strong
-(stranded, capture-OFF — there the reference matters least and φ's ~3× finer mid-simplex resolution
-is a real gain) and hurts where the likelihood is flat (every unstranded row — there the posterior
-essentially IS the reference, so the grid's different tail resolution moves the answer directly).
-⛔ **That is a genuine trade, not noise, and it is what disqualifies the change**: 0.8.0's own charter
-counts unstranded × capture-OFF as IN SCOPE, and the arm loses all three of its rows
-(`TRAPS: never-pool-the-strata` — the ladder total would have hidden this).
-⭐ On the walk metric across nine conditions the message-free LOCAL solve is neutral-to-slightly
-better nearly everywhere (C median ≈ 0.997, range 0.970–1.007 — ③'s small, real, bracket-sourced
-gain) while the SHIPPED stage carries the spread (F 0.824–1.107). ⚠ Rung B (φ-native message
-delivery — the derivation's §5, mapping a claim's precision by `(dx/dphi)²`) is DERIVED BUT NOT
-MEASURED and is the honest candidate for the shipped-stage spread, since rung A delivers claims
-pointwise in λ's coordinate while the C stage is the half that behaves. It cannot exceed ③'s bound.
-
-**⑥ WHAT SURVIVES, AND IS WORTH KEEPING**: the derivation itself (§1–§2, confirmed numerically to
-`2e-8`) — under `f = sin²φ` the measure conversion is EXACTLY minus the two written Jeffreys halves,
-so **neither a Jacobian NOR a reference is written**, uniform-φ weights reproduce `Beta(½,½)` bin mass
-to `3.3e-15`, the tilt's fact-3 cancellation survives (the two Jacobians are independent), and there
-is no bracket. ⭐ **And the coordinate is a genuine ENABLER for the re-aim**: an atom needs a
-representable endpoint.
-
-⭐⭐⭐ **THE RE-AIM (the owner's call).** The mechanism ④ names is already named in the source WITH its
-price — `simplex_logodds._rna_arm`: "NOTHING FITS `logP_r` YET, AND THE COST OF THAT IS MEASURED …
-a FIXED repulsion of **3.107 nats** at `f_g = 0.999` relative to `f_g = ½` (a 22:1 handicap) … objects
-whose TRUE `f_g ≥ 0.999` carry **49–83 %** of all calibration error … read **0.13–0.23 below** the
-vertex. The parameter exists now so that an estimator can close that asymmetry; the socket is not
-speculative surface, it is the repair's landing point." Same band, same direction, same magnitude as
-the 2026-08-31 baseline. The candidate is an **ATOM at the vertex** — "this slot holds NO RNA" as a
-point mass rather than a density limit, a well-posed point-null/spike-and-slab that no continuous
-reference can express in any coordinate — and it needs its own DERIVE → DESIGN → PLAN → PROTOTYPE →
-A/B. ⭐⭐ **AND THE TARGET POPULATION IS HALF THE DATA** — measured with no solver, straight off the
-certified `slot_truth` (whole 16-condition ladder): **50.0 % of live mass (72.9 M of 145.8 M
-fragments) sits EXACTLY on a simplex vertex.** Per condition: `g98 ss.99 OFF` **73.0 %**,
-`g98 ss.99 ON` **50.0 %**, `g50` rows 19–39 %, `g05` rows 3.7–21.6 %, and all four `g00` controls
-100 % (pure RNA by construction). ⛔ That is the mass a continuous prior structurally cannot reach in
-ANY coordinate, and it is why the atom is not a corner case.
-
-⛔⛔⛔ **BUT THE CEILING PRICES THE ATOM AT ROUGHLY A WASH — MEASURE BEFORE BUILDING.**
-`vertex_ceiling.py` on three conditions (`g98 ss.99 ON/OFF`, `g50 ss.50 OFF`), oracle truth pinned
-and the whole chain **RE-SOLVED**; `noop` pins 0 objects and is byte-identical (the instrument's own
-falsification, PASSING), `vertex_free` pins 69,850–78,820 and `vertex_all` 365,490–391,910. Read
-`mwae ALL` / `Σ|err| ALL` only — `confidently wrong` and `solv%` are contaminated by the pin itself,
-which hands objects certainty and so moves them into the confident population (the instrument says
-so).
-
-| arm | region Σ\|err\| | boundary Σ\|err\| | net |
-|---|---|---|---|
-| `vertex_free` (the reachable population — **THE CEILING**) | **+18,887** (2 better/1 worse) | **−20,208** (3 better/0 worse) | **≈ −1,321, a WASH** |
-| `vertex_all` (looser bound, includes objects with own evidence) | +94,490 | −18,237 | **+76,253, WORSE** |
-
-⭐⭐ **So a PERFECT vertex answer at every reachable object is worth approximately nothing net**: the
-BOUNDARY axis improves consistently (3/3 rows) and the REGION axis degrades, and the two nearly
-cancel. ⛔ **This is the finding that should stop the atom from being built on intuition.** The
-reading: handing a vertex object the exact answer changes what it BROADCASTS, and the relay then
-over-propagates it — which is why the instrument re-solves rather than substitutes
-(`TRAPS: substitution-understates-a-source`). ⭐ Taken with ④, the near-vertex error is both an
-HONEST posterior width AND not removable by local certainty — which points the whole question at the
-MESSAGE LAYER rather than at the prior or the coordinate. ⚠ Three conditions only, and this is
-`vertex_ceiling`'s pass-0-flavoured metric, not `calibration_vs_oracle`'s: the whole-ladder run and a
-release-metric equivalent are OWED before anything is built on it.
-
----
-*The original entry, kept because its four unified pathologies and its cautions still stand — read it
-with ①–⑥ above, which correct its central claim:*
-**Replace the simplex solver's MAGNITUDE axis `λ = logit(f_g)` with the arcsine coordinate
-(`f_g = sin²φ`), so a vertex is a finite interior endpoint instead of ±∞.** The tilt axis is ALREADY
-arcsine (`θ = arcsin(τ)`, landed 2026-08-24 with the Berger–Bernardo cancellation —
-`simplex_logodds.py`'s fact 3); this issue is the other axis, and it covers BOTH solvers: the 1-D λ
-solve at single-strand regions and the 2-D `(λ, θ)` grid at AMBIG regions (`_solve_ambig_logodds`).
-⭐⭐ **Why this is the biggest in-scope lever, per the 2026-08-31 drained-frame baseline**: on EVERY
-stratum, both axes, the solver UNDER-calls gDNA at near-pure objects (shortfall +0.15…+0.29 at true
-`f_g ∈ [0.999, 1]`, carrying 34–43 % of each stratum's error mass; the worst in-scope condition
-`g98 ss.99 ON` is ~99 % under-call), and the doubt-graveyard's whole pattern is the same defect at the
-OTHER vertex (`g00` must resolve to zero). Belief cannot sit at a vertex, in either direction.
-⭐ **The coordinate unifies four recorded pathologies with no constant**: ① rank-1d′'s refutation
-(data information in λ `∝ [f_g(1−f_g)]²` vanishes at the vertices — pure Jacobian; the arcsine is the
-variance-stabilising transform, so information in φ is CONSTANT); ② the λ-bracket defect
-(`ISSUES: psi-lambda-bracket-unshipped` — a bounded coordinate has no bracket); ③ the flat measure in
-φ IS the Jeffreys reference (the reference becomes literally uniform — the reference-mean graveyard is
-moot by construction); ④ the vertex-reachability xfail family.
-⭐ **The derivation must address** (the module docstring is the map): the measure bookkeeping — fact 2's
-"no Jacobian is written" cancellation is λ-specific and must be re-derived or correctly written for φ;
-the reference in φ (flat, if the BB analysis carries over — verify, don't assume); vertex endpoints ON
-the grid (at exact `f = 0/1` a component's rate is 0, so data with counts forbids the vertex and zero
-counts reach it — the desired behaviour, derived not clamped); the grid spacing (the current `dlam =
-0.3390` note in `simplex_logodds.py` is measured-in-λ and does not transfer); message delivery and
-`hop_logvar` (claims are delivered in ψ's OWN coordinate — `TRAPS: off-grid-message-mode`); and the
-precision semantics (`τ_λ` → `τ_φ`).
-⛔ **Cautions**: the 2026-08-24 arcsine measurement ("equivalent-and-clean, never a panel win") was the
-TILT axis under the old tree — the magnitude-axis claim is new and must be measured, not assumed; and
-step 1 is ATTRIBUTION, not the build — dissect `g98 ss.99 ON` (`worst_objects.py` →
-`calibration_walk.py` against the drained-frame `slot_truth`) to confirm the error mass sits on
-vertex-blocked objects rather than e.g. `ISSUES: capture-blind-gdna-divisor`.
-⭐ **Ordering ruling (owner, 2026-09-01): this lands BEFORE the message policy** — messages deliver in
-ψ's coordinate, so a policy built on λ would be reworked; `ISSUES: message-value-for-blind-slots` (a
-no-solver measurement) may run in parallel.
 
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
@@ -205,8 +48,8 @@ condition's whole certified-RNA channel**, an IN-SCOPE stratum. ⚠ The certifie
 pure, not 100 %. Invisible to every undrained-frame instrument, which is how it went unmeasured
 (the frame ruling is `DESIGN.md` §4.3 — landed, so the leak is now visible: `calibration_vs_oracle` reports it per row and every certified
 `slot_truth.npz` carries the drained-frame report verdict).
-⭐⭐ **DERIVED 2026-08-31, and the measurements FORCE the design** (the derivation and numbers:
-`docs/dev` carries the plan; prototypes gated on byte-identity with production's drain choices).
+⭐⭐ **DERIVED 2026-08-31, and the measurements FORCE the design** (every prototype was gated on
+byte-identity with production's own drain choices).
 ① The leak is EXACTLY posterior sampling — realized gDNA-in-spliced matches Σ P(spliced|record) over
 true-gDNA records within the draw's own noise on every condition measured (0.0σ / 1.4σ / 0.7σ) — so
 "make the drain smarter" has no headroom, and a posterior-odds floor is dominated (the posterior is
@@ -225,7 +68,7 @@ contamination; the mature-genomic-gap term is real (405 of 542 at `g50 ss.99 OFF
 with the leaked choices flipped to genomic (residual leak exactly 0) moves the release metric by
 **−0.60 %/−0.05 %** at the worst condition (`g98 ss.99 ON`) and ≤0.10 % mixed-sign elsewhere — all
 under the ~2 % attribution floor. The leak's harm is the CERTAINTY CLAIM, not calibration accuracy.
-⭐ **What remains to build** (the plan doc in `docs/dev` carries both):
+⭐ **What remains to build** — both are recorded here, in full, and nowhere else:
 ① honest labeling — the drain records its own expected certified-channel impurity
 (`Σ q_null`, variance free) into `DrainQC`/the QC report; no solve behaviour changes; and
 ② the one true false-positive REDUCER — repair the middle-bin posterior bias (suspect: the genomic
@@ -571,6 +414,61 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### arcsine-magnitude-coordinate — DERIVED, PROTOTYPED, A/B'd, REFUSED (2026-09-01). Do not rebuild it.
+
+⭐ Replacing the simplex solver's magnitude axis `λ = logit(f_g)` with the arcsine coordinate
+`f_g = sin²φ`, so that a vertex becomes a finite interior endpoint. Steps ①–③ all ran (dissection →
+derivation → prototype outside `src/` → per-stratum A/B); `src/` was never touched. The prototype and
+the full derivation are in commit `48be3d0a`, one commit before their deletion.
+
+⛔ **THE HEADLINE PREMISE IS FALSE, and that is the durable finding.** (a) A posterior MEDIAN cannot
+reach a vertex in ANY coordinate: for the outer bin holding mass `m` the CDF crossing is
+`t = 1 − 0.5/m ≤ ½`, so the read-out never passes the outer bin's midpoint. (b) In `f`-space the λ
+grid is **FINER at the vertices than uniform-φ** — `σ(±L)` already sits `4.54e-5` from the vertex; at
+K=60 the top `f`-gap is `1.83e-5` (λ) vs `1.37e-3` (φ), and the one-hot read-out is `0.999954602` (λ)
+vs `0.999828662` (φ). `logit` CONCENTRATES resolution at the vertices; uniform-φ spends it evenly, so
+the change is a resolution REALLOCATION (~3× finer mid-simplex, ~75× coarser at the extremes).
+
+⛔ **THE LEVERAGE IS BOUNDED AT ~2.5 % OF THE DEFECT** (K-invariance, `g98 ss.99 ON`, rung C). Each
+coordinate converges to its OWN limit (mass-wtd `|K60 − K240|`: base 1.47e-04, arcsine 1.31e-04) while
+the gap BETWEEN them holds at ~6.5e-04 and grows slightly with K — the λ bracket's truncated DOMAIN,
+which refining a grid cannot recover — against a 0.026 shortfall in the vertex band.
+
+⛔ **THE A/B SPLITS BY STRATUM AND LOSES WHERE IT MATTERS** (whole ladder, release metric Σ|Δ|,
+`arcsine/base`, noop byte-identical on all 16): stranded × OFF **1.008 / 0.939 / 0.898** (wins, and
+more as gDNA rises); stranded × ON 0.998 / 1.010 / 1.037; **unstranded × OFF 1.107 / 1.071 / 1.014 —
+loses EVERY row**; deferred 1.024 / 1.007 / 1.002; `g00` controls 0.824 / 0.925 / 0.978 / 1.037.
+⭐ The mechanism the split names: the coordinate helps where the strand LIKELIHOOD is strong and hurts
+where it is flat — there the posterior essentially IS the reference, so the grid's tail resolution
+moves the answer directly. Losing all three IN-SCOPE unstranded rows is what refused it; a pooled
+total would have hidden it (`TRAPS: never-pool-the-strata`).
+
+⭐⭐ **WHAT SURVIVES AND IS WORTH KNOWING.** The derivation is CORRECT and was confirmed numerically:
+under `f = sin²φ` the measure conversion `log(dλ/dφ) = −½·log f − ½·log(1−f) + log 4` is EXACTLY minus
+the two written Jeffreys reference halves, so under φ **neither a Jacobian NOR a reference is
+written**; uniform-φ weights reproduce `Beta(½,½)` bin mass to `3.3e-15`; the two solvers agree to
+`2e-8`; the tilt's fact-3 cancellation survives (the two Jacobians are independent). ⚠ **Rung B —
+φ-native message DELIVERY, mapping a claim's precision by `(dx/dφ)²` — was derived but NEVER
+MEASURED**, and is the honest candidate for the shipped-stage spread (the message-free local solve
+behaves: C median ≈ 0.997). It cannot exceed the 2.5 % bound. ⚠ Also never run on the arcsine arm:
+`zero_controls.py`, the 30-condition test chromosome, and a same-session reseed floor.
+
+⭐ **AND THE OBVIOUS RE-AIM WAS PRICED IN THE SAME SESSION AND IS ALSO NOT A WIN.** The near-vertex
+under-call is an HONEST posterior width — on the STRANDED condition measured it tracks
+`w/4 = 1/(2·√n)` across four decades of depth (obs/pred 0.63…1.21), reproducing `EQUATIONS.md` §9a's
+recorded log-log slope of −0.5221. ⛔ §9a also records that on the real UNSTRANDED fit the shortfall
+is depth-INDEPENDENT, so **never quote an `n^(−1/2)` shrinkage on an unstranded stratum.** §9a/§9a.1
+already carry the theorem and its spike-and-slab exception, and §9d.4 already carries a fully derived
+atom with no new constant. **What this session ADDS is the pin-and-re-solve**: `vertex_ceiling.py`
+(3 conditions; `noop` pins 0 and is byte-identical, `vertex_free` pins 69,850–78,820) gives
+`vertex_free` region Σ|err| **+18,887** and boundary **−20,208** — **a WASH** — and `vertex_all`
++94,490 / −18,237, clearly worse. ⭐⭐ **Supplying the vertex information PERFECTLY nets ≈0, because
+handing an object the exact answer changes what it BROADCASTS and the relay over-propagates it.**
+⛔ That is a stronger statement than §9a's "value of missing information", and it is why the next
+thread is the MESSAGE LAYER and not the prior: if a perfect local answer cannot survive propagation,
+no local improvement can pay off. ⚠ Three conditions, on `vertex_ceiling`'s pass-0-flavoured metric —
+re-price the atom on the whole ladder AFTER the message layer is repaired, not before.
 
 | | closed by | verdict |
 |---|---|---|

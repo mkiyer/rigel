@@ -36,7 +36,7 @@
 ## The question this substrate answers: on unstranded rows, is the information a blind exon
 ## needs actually present in its neighbours — split by source quality (clean vs nasc) and by
 ## frame (uncaptured vs the capture cliff) — and on stranded rows, does a policy leave the
-## sighted solve alone?  (`ROADMAP.md` §1 rank 1a.)
+## sighted solve alone?  (`ISSUES: message-value-for-blind-slots`.)
 ##
 ## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates.
 ##   test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "gX"; transcript_id "TX";

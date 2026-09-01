@@ -254,12 +254,31 @@ function of the calibration code that fit it, so caching it would serve a stale 
 
 ## 0a. ⭐⭐⭐ THE METHOD-DEVELOPMENT TEST CHROMOSOME — where the message policy is developed
 
-⭐⭐⭐ **A 1 Mb chromosome the owner designs one transcript at a time, and it is EMPTY.** Owner:
-*"over the course of this method development, we will add transcripts to a 'test chromosome' …
-collectively, the test reference chromosome, test transcript GTF, and test abundances comprise a
-critical method development benchmark. We start with ZERO transcripts."* It was cleared back to zero on
-2026-08-27; the 42 transcripts it had accumulated are in git history
-(`git log -- scripts/sim/test_reference/test_chr.gtf`).
+⭐⭐⭐ **A 1 Mb chromosome the owner designs one structure at a time.** Owner: *"over the course of
+this method development, we will add transcripts to a 'test chromosome' … collectively, the test
+reference chromosome, test transcript GTF, and test abundances comprise a critical method development
+benchmark."* It was cleared to zero on 2026-08-27 (the 42 transcripts it had accumulated are in
+`git log -- scripts/sim/test_reference/test_chr.gtf`) and rebuilt on 2026-08-28 as:
+
+⭐⭐ **THE ANCHORED TWIN BLOCK** — ONE shape everywhere: exon 1 kb · intron 7 kb · exon 1 kb ·
+intron 7 kb · exon 1 kb (span 17,000 bp), 20 kb intergenic between genes, all `+` strand. FIVE gene
+types varying **exactly one bit each**, repeated in FIVE abundance blocks = **25
+transcripts**, plus **8 SHADOW transcripts** on the blank contig (unannotated transcription the
+simulator draws from and the index never sees). ⭐ The five types ARE the message layer's controls,
+which is why this substrate is where the policy is developed:
+
+| type | probed | nascent | what it controls |
+|---|---|---|---|
+| `clean` | no | no | intron + flanks **exactly pure gDNA** — the clean message SOURCE; one certified sj per intron |
+| `nasc` | no | yes | the **contaminated** source — the intron is not pure gDNA |
+| `cap` | yes | no | the **enrichment cliff** between source and destination |
+| `capnasc` | yes | yes | both at once |
+| `silent` | yes | `mrna = 0` | every object pure gDNA — **any claimed RNA is a false positive** |
+
+Abundances are molar ladders in half-decade steps with **mature UP the blocks and nascent DOWN**
+(10/30/100/300/1000 against 100/30/10/3/1), i.e. independent levels, exactly as the big ladder draws
+them. ⛔ `test_abundances.tsv` takes no comments — both its readers key on the first line — so that
+design is recorded in `test_chr.gtf`'s header, which is the file to read before editing either.
 
 ⭐⭐ **WHY THIS SUBSTRATE EXISTS: the whole loop is SECONDS.** One calibrate on the cached test
 chromosome measured **0.04 s** (74 slots), against minutes on the ladder — so a policy change can be

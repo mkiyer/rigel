@@ -30,7 +30,7 @@
 # not. What may NOT be dropped, each for a measured reason:
 #
 #   · **`g00`, the ZERO-gDNA control** — owner-required on every experiment. Its truth is exactly 0,
-#     so every deviation is a false positive with nothing to cancel it. `ROADMAP.md` §4.1's graveyard
+#     so every deviation is a false positive with nothing to cancel it. `ISSUES.md`'s CLOSED / REFUSED graveyard
 #     is eleven mechanisms that looked good on their target and died here.
 #   · **unstranded × capture-ON, the DEFERRED stratum** — **64.5 % of transcript error and 90 % of
 #     gene-level error** (measured 2026-08-13/14 on this panel; the "~73 %" once recorded here was

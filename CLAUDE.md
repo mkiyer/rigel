@@ -157,6 +157,16 @@ excellent and a message can mostly only disturb it. The goal is: **perform well 
 while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
 against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart.
 
+⛔⛔ **THE HARM HALF IS CURRENTLY NOT MET, AND THAT IS THE 0.8.0 THREAD** (measured 2026-09-01, whole
+ladder + test chromosome). Messages ADD error at the worst in-scope conditions — `calibration_walk.py`
+rung E vs F is the re-derivation — and the relay hurts the solvable set on most contaminated
+conditions. ⭐ The suspected mechanism is the PRECISION, not the value: `solvability_audit.py`'s
+`calib` column shows the relay declaring several times more precision than it earns on nearly every
+row, and a message that over-claims will overwhelm a destination's good own evidence. ⭐ The value is
+real and CONCENTRATED where the local solve is blind (unstranded rows, all four zero controls), so
+⛔ the answer is not a blanket default flip — it is WHERE the policy speaks and WHAT it claims.
+`ROADMAP.md` rank 1 carries the order of work.
+
 ⭐⭐ **THREE POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
 is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES):
 
@@ -199,11 +209,17 @@ python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
 owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
 up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
 
-⛔ **THE TEST CHROMOSOME IS EMPTY** (cleared 2026-08-27 — the owner designs its transcripts). After
-editing `scripts/sim/test_reference/*`, everything derived MUST be rebuilt or the benchmark scores a
-stale annotation: `docs/TESTING.md` §0a has the four commands, and `panel.py status` names the next
-stage. ⚠ κ is fitted from spliced reads, so the reference needs at least one multi-exon transcript with
-real depth before a number means anything.
+⭐⭐ **THE TEST CHROMOSOME CARRIES THE ANCHORED TWIN BLOCK** (owner design, 2026-08-28) — ONE shape
+everywhere (exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb, 20 kb intergenic, all +
+strand), FIVE gene types varying exactly one bit each × FIVE abundance blocks = **25 transcripts**,
+plus **8 SHADOW transcripts** the simulator draws from and the index never sees. The five types are the
+message layer's own controls: `clean` (pure-gDNA message source) · `nasc` (contaminated source) ·
+`cap` (the enrichment cliff) · `capnasc` (both) · `silent` (every object pure gDNA, so any claimed RNA
+is a false positive). ⛔ The owner designs it one structure at a time; after editing
+`scripts/sim/test_reference/*`, everything derived MUST be rebuilt or the benchmark scores a stale
+annotation — `docs/TESTING.md` §0a has the commands and `panel.py status` names the next stage.
+⚠ κ is fitted from spliced reads, so the reference needs at least one multi-exon transcript with real
+depth before a number means anything.
 
 ⛔ **READ THE TWO HALVES SEPARATELY AND NEVER POOL THEM** — unstranded rows are where a policy must
 WIN, stranded rows are where it must do minimal HARM against silence. ⚠ A toy and the panel have
@@ -278,20 +294,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,745 passed / 0 skipped / 8 xfail** (re-derived 2026-09-01 by
-running the suite after the coordinate thread, which touched DOCS ONLY — `src/` untouched: **+1** for
-`docs/dev/DERIVATION_arcsine_magnitude.md` and **+1** for the preserved sandbox prototype
-`docs/dev/arcsine_proto.py` (jargon only, each), confirmed by bracket-matched collection.
-3,743 + 2 = **3,745**, confirmed by a green run. ⭐ Its predecessor, re-derived 2026-08-31 by
-running the suite after the leak derivation: the drained-frame accounting below plus **+1** for
-`docs/dev/PLAN_certified_channel_impurity.md` (jargon only). Account it from **3,738** after
-the pricing commit: **+3** new cases in `tests/calibration/test_oracle.py` (the frame-aware
-exact-zeros gate, each perturbed), **+1** in `tests/test_scan_cache.py` (the drained
-`calibration_inputs` contract + determinism), **−1** for deleting the superseded sandbox prototype
-`docs/dev/drained_frame_price.py`, and **+1** for the dated snapshot
-`docs/dev/BASELINE_2026-08-31_drained_frame.md` (jargon only, each). 3,738 + 4 − 1 + 1 = **3,742**,
-then **+1** for the plan doc = **3,743**, confirmed by a green run.
-⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,733 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-01 after the sandbox cleanup; `src/` was untouched all session, so nothing here is a code
+change). Account it from **3,743** — the count before the coordinate thread — by `docs/dev/` files
+alone, at **+1 each** (jargon only): **−11** for the settled sandbox docs deleted and **+1** for the
+dated baseline snapshot added. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file
+deltas, and a bracket-matched `--collect-only` confirms the attribution.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
