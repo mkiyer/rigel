@@ -1,48 +1,83 @@
-# NEXT SESSION — the state after the 2026-08-31 frame migration
+# NEXT SESSION — the coordinate thread (ruled 2026-09-01)
 
     ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand, not what to build — the ranked
     list is `ROADMAP.md`. MOVE anything that settles into the permanent docs and DELETE this file.
 
-## What landed today (three commits; the changelog is git)
+## The ruling this session ended on (owner, 2026-09-01)
 
-1. **The RNA length-law plan was refuted** — `rna_pmf` is sound as shipped; the −18k "fix" was a
-   compensation lever on the EM's isoform misassignment. `docs/ISSUES.md` (CLOSED,
-   `the-rna-length-law-fix`).
-2. **The docs were reorganized** (owner decision): `ROADMAP.md` is the short ranked view,
-   `docs/ISSUES.md` the issue log, git the changelog.
-3. **The frame ruling landed, wave 1** (owner: instruments monitor the DRAINED frame).
-   `scan_cache.calibration_inputs` drains at the production seed, runs the production fl models
-   (two-pool contrast included — a third divergence closed), and publishes the lift box;
-   `OracleTruth.from_cached_parts`/`lift_drain_parts` put cached oracle partitions in the same frame;
-   the exact-zeros gate is frame-aware (pass-one refuses, drained RECORDS `gdna_spliced_leak`).
-   All ten `calibration_inputs` consumers migrated; **`slot_truth` re-certified on both panels in the
-   drained frame** (all gates green, `rna-strands-close` exact). Gates: `test_oracle.py`,
-   `test_scan_cache.py`, each perturbed.
+**The next build is the simplex solver's MAGNITUDE coordinate** — `ISSUES: arcsine-magnitude-coordinate`
+— and it lands BEFORE the message policy, because messages deliver claims in ψ's own coordinate
+(`TRAPS: off-grid-message-mode`) and a policy built on λ would be reworked. The certified-RNA leak is
+PARKED (its no-leak ceiling was worth −0.6 % on the release metric at the worst condition — the
+in-solve correction refused itself; two follow-ups recorded in the issue).
 
-## What the next session should know before measuring anything
+## Step 1 — the DISSECTION, before any derivation is trusted
 
-* ✅ **The in-scope baselines are RE-DERIVED (2026-08-31), drained frame, same-session floors** —
-  `docs/dev/BASELINE_2026-08-31_drained_frame.md` is the snapshot; run the instrument for a current
-  number. The re-derived facts to know: worst IN-SCOPE scenario is `g98 ss.99 capture-ON` on the
-  0.8.0 metric (gDNA UNDER-called at near-pure objects — the pattern holds on every stratum) and
-  `g50 ss.50 capture-OFF` on solvability's Σ|err|; the relay hurts the solvable set on 9/12
-  contaminated conditions; MessagePolicy ≡ silent on all 46 in the new frame; the reseed floor is
-  ~30–2,700 transcript fragments per condition. ⛔ Nothing measured before 2026-08-31 is comparable.
-* ⛔ **Only wave-3 bank-readers still read pass one** (the ruling is `DESIGN.md` §4.3; the list is
-  in `ISSUES: hygiene-ledger`): the census family, `structural_claims_audit`,
-  `calibration_truth_ab`, `fl_pool_purity` and friends — migrate as touched. Everything reached
-  through `calibration_inputs`, `pass0_vs_oracle.measure_condition` or `prior_vs_oracle` is drained.
-* ⭐ **The owner's priority: the drain's certified-RNA leak** (`ISSUES: drain-contaminates-certified-rna`,
-  elevated 2026-08-31 — "avoid all sources of false positives"). Up to 1.9 % of the certified-RNA
-  channel at `g98 ss.99 ON` is drain-assigned gDNA. The issue carries three candidate repairs and the
-  two-sided scoring requirement (false positives at zero-RNA AND the spliced-pool repair the drain
-  provides — a fix must not resurrect the −4 bp bias the drain currently prevents). DERIVE, don't
-  tune; the provenance-split candidate needs the owner (it touches "determinacy, not provenance").
-* ⚠ `ISSUES: rename-the-drain` is filed (owner: "might consider") — ~530 sites, needs its own staged
-  census pass; candidate verbs and their collisions are in the entry. Do not rename ad hoc.
+Confirm the attribution at the object level: the 2026-08-31 drained-frame baseline
+(`docs/dev/BASELINE_2026-08-31_drained_frame.md`) shows the solver UNDER-calling gDNA at near-pure
+objects on EVERY stratum (shortfall +0.15…+0.29 at true `f_g ∈ [0.999, 1]`, 34–43 % of each stratum's
+error mass; `g98 ss.99 capture-ON` is the worst in-scope condition at ~99 % under-call). The claim to
+verify: that error mass sits on VERTEX-BLOCKED objects (belief pinned short of `f_g = 1` by the λ grid
+and its measure), not on e.g. the capture-ON divisor (`ISSUES: capture-blind-gdna-divisor`).
 
-## The other live thread
+    python scripts/design/worst_objects.py        # rank g98 ss.99 ON's objects by error mass
+    python scripts/design/calibration_walk.py     # which STAGE introduces it (needs slot_truth — certified, drained frame)
 
-⭐⭐ **The message policy — the standing charter, still at rung 0.** Bar unchanged: win on unstranded,
-minimal harm on stranded, never pooled. First answer `ISSUES: message-value-for-blind-slots` with no
-solver; the anchored twin block was built for it. ⚠ Re-baseline first (see above).
+Read the concentration curve first (concentrated ⇒ a mechanism; diffuse ⇒ systematic — here a
+SYSTEMATIC shortfall in one f_g band is itself the expected signature). ⚠ `solvability_audit`'s worst
+in-scope row differs (`g50 ss.50 OFF` by Σ|err|) — look at both before concluding.
+
+## Step 2 — the DERIVATION (paper before prototype; BOTH solvers)
+
+**The map is `src/rigel/calibration/simplex_logodds.py`'s own docstring — read it first.** Current
+state: magnitude axis `λ = logit(f_g)` on a FIXED `[−L, L]` grid (`_logodds_grid`, `_DEFAULT_L`);
+`f_g = σ(λ)`. Single-strand regions solve 1-D in λ; AMBIG regions marginalise on the 2-D `(λ, θ)`
+grid (`_solve_ambig_logodds`). ⭐ **The TILT is already arcsine** (`θ = arcsin(τ)`, fact 3 — the
+Berger–Bernardo Jacobian cancellation, landed 2026-08-24). The derivation must cover:
+
+1. **The measure bookkeeping.** Fact 2's "no Jacobian is written" is λ-SPECIFIC (each `logP` density
+   in log-rate cancels `log σ′(λ)` exactly, once per group). Under `f_g = sin²φ` that cancellation
+   does not hold as written — derive the φ-analogue or write the correct Jacobian explicitly, and
+   prove which on paper before any grid code.
+2. **The reference in φ.** The flat measure in φ is the Jeffreys prior for the binary split — if the
+   BB analysis carries over, `ψ_ref` may vanish entirely (the reference-mean graveyard moot by
+   construction). Verify against the BB derivation, don't assume; the tilt's fact-3 cancellation must
+   survive alongside.
+3. **Vertex endpoints ON the grid.** At exact `f = 0/1` one component's rate is 0: data with counts
+   there forbid the vertex through the likelihood; zero counts reach it. That is the desired
+   behaviour and must come out of the derivation, never a clamp. The `g00`/near-pure behaviours on
+   both panels are the falsifications.
+4. **Grid spacing.** The `dlam = 0.3390` note in the module is measured-in-λ and does not transfer;
+   information in φ is CONSTANT (the arcsine is the variance-stabilising transform), which suggests a
+   uniform-φ grid is the derived choice — derive it, don't assert it.
+5. **Messages and precisions.** Claim delivery (`TRAPS: off-grid-message-mode`), `hop_logvar`, and
+   `τ_λ → τ_φ` semantics all map through the coordinate; the message laws
+   (`TRAPS: zero-the-precision-with-the-value`, single-source-may-only-reduce) must survive the map.
+6. **The 2-D solve.** The AMBIG `(φ, θ)` grid — memory shape (`sweep_n_grid`) and the tilt
+   marginalisation.
+
+Then: prototype OUTSIDE `src/` as a parallel solve, A/B per stratum on `calibration_vs_oracle.py`
+with BOTH zero controls (and the fl-gap sign arms if anything length-adjacent moves).
+⚠ `rename_identity.py --freeze` before and `--check` after — this is exactly the numerically-loaded
+change it exists for.
+
+## Cautions
+
+* ⛔ The 2026-08-24 arcsine measurement ("equivalent-and-clean, never a panel win") was the TILT axis
+  on the pre-fix tree. The magnitude-axis claim is NEW and must be measured. Expectation: the
+  coordinate fixes reachability and the information pathology structurally; how much the panel moves
+  is the A/B's to say.
+* ⛔ The attribution can still surprise — if the dissection points at the capture-ON divisor or the
+  EB anchor instead, STOP and re-rank before deriving.
+* ⭐ General state: baselines re-derived 2026-08-31 in the drained frame with same-session floors
+  (the snapshot beside this file — worst in-scope `g98 ss.99 ON`; relay hurts the solvable set on
+  9/12 contaminated conditions; MessagePolicy ≡ silent on all 46; reseed floor ~30–2,700 transcript
+  fragments per condition). The frame ruling is `DESIGN.md` §4.3; only wave-3 bank-readers still read
+  pass one (`ISSUES: hygiene-ledger`). ⛔ Nothing measured before 2026-08-31 is comparable to
+  current numbers.
+
+## Parallel, cheap, no solver
+
+`ISSUES: message-value-for-blind-slots` on the anchored twin block: is the information a blind
+unstranded/AMBIG slot needs actually PRESENT in its neighbours? It decides the message policy's
+ceiling before the policy is built — and the policy itself comes AFTER the coordinate.

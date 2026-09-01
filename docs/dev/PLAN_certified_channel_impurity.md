@@ -1,5 +1,9 @@
 # PLAN — the certified channel carries its own measured impurity
 
+    ⛔ **PARKED (owner, 2026-09-01 — diminishing returns).** The ceiling in §3 step 0b refused the
+    in-solve correction; the two §2c survivors (QC labeling; the middle-bin posterior bias) are
+    recorded here and in `ISSUES: drain-contaminates-certified-rna` for whenever this is picked up.
+
     ⚠ **A DEV DOC and a SANDBOX.** Nothing here is authoritative and nothing may cite into it.
     ⛔ **NOTHING HERE IS BUILT.** The DERIVE measurements were taken 2026-08-31 by prototypes in the
     session scratchpad (`leak_derive.py`); the defect record is `ISSUES: drain-contaminates-certified-rna`.

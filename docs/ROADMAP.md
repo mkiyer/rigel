@@ -57,7 +57,7 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 - **Reading rules**: rank per stratum; quote `mwae_all`/Σ|err| and the SHIPPED column, never
   `solv%`/pass-0 (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
-## ⭐⭐⭐ NEXT — the recommended order (audited 2026-08-31)
+## ⭐⭐⭐ NEXT — the recommended order (audited 2026-09-01)
 
 **The method stays the owner's dissection loop** (2026-08-20): run the panel → worst IN-SCOPE scenario →
 rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated
@@ -72,14 +72,20 @@ the shortfall pattern holds on every stratum) and `g50 ss.50 capture-OFF` on `so
 Σ|err| — dissect both before choosing; the relay hurts the solvable set on 9/12 contaminated
 conditions while winning the blind rows and all four zero controls.
 
-1. ⭐ **The drain's certified-RNA leak** — `ISSUES: drain-contaminates-certified-rna` (owner,
-   2026-08-31: avoid all sources of false positives). Derive a repair; do not tune one.
-2. ⭐ **The dissection loop on the worst in-scope scenario** (named above), answering
-   `ISSUES: message-value-for-blind-slots` on the way (no solver needed; the anchored twin block was
-   built for it).
-3. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
-   `ISSUES: reference-prior-refuted-at-concept-level` constraint — the one open BUILD aimed directly at
-   the 0.8.0 metric — with `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
+1. ⭐⭐⭐ **THE COORDINATE THREAD** — `ISSUES: arcsine-magnitude-coordinate` (owner ruling,
+   2026-09-01: this lands BEFORE the message policy, because messages deliver in ψ's coordinate).
+   In order: ① the DISSECTION on `g98 ss.99 capture-ON` to pin the attribution (the baseline's
+   vertex-under-call signature must be confirmed at the object level before the build); ② the
+   DERIVATION, covering BOTH solvers — the 1-D magnitude axis and the 2-D `(magnitude, tilt)` AMBIG
+   grid; ③ prototype outside `src/`, A/B per stratum with both zero controls.
+2. ⭐ **In parallel, no solver needed**: `ISSUES: message-value-for-blind-slots` on the anchored twin
+   block — the message policy's ceiling question, answerable while the coordinate work runs.
+3. ⭐ **Then the message policy itself** (the standing charter: win on unstranded, minimal harm on
+   stranded, never pooled), built once, on the settled coordinate.
+4. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
+   `ISSUES: reference-prior-refuted-at-concept-level` constraint — noting the coordinate change may
+   moot the reference half by construction (flat measure = Jeffreys) — with
+   `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
 
 Then, in standing order: `ISSUES: per-transcript-prior-lane` (the largest in-scope end-to-end lever,
 now with a measured target population) · `ISSUES: performance-memory-bounded-solve` (owner: mandatory
@@ -91,7 +97,7 @@ message-vs-prior questions `ISSUES: refit-vs-message-arbitration`,
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
 `alt-splice-rung-unverified` · `transfer-variance-premise` · `nascent-stress-sensitivity` ·
 `relay-od-r-discontinuity` · `f32-strand-tilt-at-half` · `hygiene-ledger` ·
-`oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` · `the-cancelling-pair`
+`oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` · `drain-contaminates-certified-rna` (parked 2026-09-01: the ceiling refused the in-solve correction; two recorded follow-ups) · `the-cancelling-pair`
 (refused twice) · `crossing-pool-contrast` (blocked) · `parked-capture-pilot-sign` ·
 `pure-rna-mirror-asymmetry` · `capture-degeneracy-standing-risk`.
 

@@ -19,6 +19,41 @@ because a graveyard row without its number is an invitation to rebuild.
 
 ## OPEN
 
+### arcsine-magnitude-coordinate
+`priority: now (owner, 2026-09-01 — the next build thread) · kind: build · stamped: 2026-09-01`
+**Replace the simplex solver's MAGNITUDE axis `λ = logit(f_g)` with the arcsine coordinate
+(`f_g = sin²φ`), so a vertex is a finite interior endpoint instead of ±∞.** The tilt axis is ALREADY
+arcsine (`θ = arcsin(τ)`, landed 2026-08-24 with the Berger–Bernardo cancellation —
+`simplex_logodds.py`'s fact 3); this issue is the other axis, and it covers BOTH solvers: the 1-D λ
+solve at single-strand regions and the 2-D `(λ, θ)` grid at AMBIG regions (`_solve_ambig_logodds`).
+⭐⭐ **Why this is the biggest in-scope lever, per the 2026-08-31 drained-frame baseline**: on EVERY
+stratum, both axes, the solver UNDER-calls gDNA at near-pure objects (shortfall +0.15…+0.29 at true
+`f_g ∈ [0.999, 1]`, carrying 34–43 % of each stratum's error mass; the worst in-scope condition
+`g98 ss.99 ON` is ~99 % under-call), and the doubt-graveyard's whole pattern is the same defect at the
+OTHER vertex (`g00` must resolve to zero). Belief cannot sit at a vertex, in either direction.
+⭐ **The coordinate unifies four recorded pathologies with no constant**: ① rank-1d′'s refutation
+(data information in λ `∝ [f_g(1−f_g)]²` vanishes at the vertices — pure Jacobian; the arcsine is the
+variance-stabilising transform, so information in φ is CONSTANT); ② the λ-bracket defect
+(`ISSUES: psi-lambda-bracket-unshipped` — a bounded coordinate has no bracket); ③ the flat measure in
+φ IS the Jeffreys reference (the reference becomes literally uniform — the reference-mean graveyard is
+moot by construction); ④ the vertex-reachability xfail family.
+⭐ **The derivation must address** (the module docstring is the map): the measure bookkeeping — fact 2's
+"no Jacobian is written" cancellation is λ-specific and must be re-derived or correctly written for φ;
+the reference in φ (flat, if the BB analysis carries over — verify, don't assume); vertex endpoints ON
+the grid (at exact `f = 0/1` a component's rate is 0, so data with counts forbids the vertex and zero
+counts reach it — the desired behaviour, derived not clamped); the grid spacing (the current `dlam =
+0.3390` note in `simplex_logodds.py` is measured-in-λ and does not transfer); message delivery and
+`hop_logvar` (claims are delivered in ψ's OWN coordinate — `TRAPS: off-grid-message-mode`); and the
+precision semantics (`τ_λ` → `τ_φ`).
+⛔ **Cautions**: the 2026-08-24 arcsine measurement ("equivalent-and-clean, never a panel win") was the
+TILT axis under the old tree — the magnitude-axis claim is new and must be measured, not assumed; and
+step 1 is ATTRIBUTION, not the build — dissect `g98 ss.99 ON` (`worst_objects.py` →
+`calibration_walk.py` against the drained-frame `slot_truth`) to confirm the error mass sits on
+vertex-blocked objects rather than e.g. `ISSUES: capture-blind-gdna-divisor`.
+⭐ **Ordering ruling (owner, 2026-09-01): this lands BEFORE the message policy** — messages deliver in
+ψ's coordinate, so a policy built on λ would be reworked; `ISSUES: message-value-for-blind-slots` (a
+no-solver measurement) may run in parallel.
+
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
 "Drain" carries no intuition — the concept is: pass one BUFFERS any fragment whose unsequenced mate
@@ -34,7 +69,7 @@ assignment), *settle*, *place*, *adjudicate* — the owner picks. The QC datacla
 `payload.drain is not None` frame test rename with it.
 
 ### drain-contaminates-certified-rna
-`priority: next (owner, 2026-08-31: "extremely concerned … avoid all sources of false positives") · kind: defect · stamped: 2026-08-31`
+`priority: later (PARKED by owner, 2026-09-01 — diminishing returns; the ceiling refused the in-solve correction) · kind: defect · stamped: 2026-08-31`
 **The second-pass drain deposits some TRUE-gDNA fragments into the certified-RNA banks** — the
 whole-library drain draws a spliced hypothesis for a held gDNA fragment whose mate gap admits an
 annotated intron, so production's tally violates "gDNA cannot splice" as a statement about DEPOSITS.
@@ -104,7 +139,7 @@ widening the shipped estimator's selector to `solvable_exon`, BUILT, priced on a
 — the cleanest statement of why a data-derived location fails).
 
 ### reference-prior-refuted-at-concept-level
-`priority: now · kind: design-constraint · stamped: 2026-08-24 (owner + external review)`
+`priority: now (its "reparameterisation away from λ" candidate IS `ISSUES: arcsine-magnitude-coordinate`) · kind: design-constraint · stamped: 2026-08-24 (owner + external review)`
 **The reference prior's location tilt is refuted at the concept level — do not repair it.** The root
 cause is a COORDINATE mismatch: on the λ = logit(f_g) axis the data's information
 `I ∝ N_eff·disc·[f_g(1−f_g)]²` vanishes at the vertices and is identically zero at κ = ½, while the
@@ -244,7 +279,7 @@ on their own terms — but a claim spanning the ladder and a side panel varies T
 comparable. Re-simulating them is the owner's call, not a prerequisite anyone should assert.
 
 ### psi-lambda-bracket-unshipped
-`priority: later · kind: decision · stamped: 2026-08-2x`
+`priority: later (dissolves into `ISSUES: arcsine-magnitude-coordinate` — a bounded coordinate has no bracket) · kind: decision · stamped: 2026-08-2x`
 ψ's λ bracket was too narrow to express its own prior; `DensityLandscape.required_logodds_window`
 derives the correct bracket with no chosen constant (predicted matches measured on every stratum).
 Built, gated, priced: nearly every in-scope condition improves, one dense capture-ON rung regresses
