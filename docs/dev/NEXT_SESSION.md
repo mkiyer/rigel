@@ -4,6 +4,12 @@
     settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
     `ISSUES.md`. MOVE anything that settles into those and DELETE this file.
 
+⭐ **THE SLATE IS CLEAN.** `origin/main` was fast-forwarded to `c6b30255` on 2026-09-01 (the coordinate
+thread's verdict plus the doc cleanup and the re-derived baseline), and this thread runs on the
+**`message-layer`** branch cut from it. `src/` has not changed since the 2026-08-31 frame migration, so
+the baseline beside this file is a REPRODUCTION that matched to the fragment — trust it as the
+starting point and do not re-run the whole panel before beginning.
+
 ## The thread, and why it is next
 
 **The message layer is the largest measured in-scope defect, and it ships ON.** Two independent
