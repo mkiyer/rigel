@@ -1,83 +1,93 @@
-# NEXT SESSION — the coordinate thread (ruled 2026-09-01)
+# NEXT SESSION — the coordinate thread ran to a verdict (2026-09-01)
 
     ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand, not what to build — the ranked
     list is `ROADMAP.md`. MOVE anything that settles into the permanent docs and DELETE this file.
 
-## The ruling this session ended on (owner, 2026-09-01)
+## What happened this session
 
-**The next build is the simplex solver's MAGNITUDE coordinate** — `ISSUES: arcsine-magnitude-coordinate`
-— and it lands BEFORE the message policy, because messages deliver claims in ψ's own coordinate
-(`TRAPS: off-grid-message-mode`) and a policy built on λ would be reworked. The certified-RNA leak is
-PARKED (its no-leak ceiling was worth −0.6 % on the release metric at the worst condition — the
-in-solve correction refused itself; two follow-ups recorded in the issue).
+`ISSUES: arcsine-magnitude-coordinate` was executed end to end — step ① the dissection, step ② the
+derivation on paper for BOTH solvers, step ③ the prototype outside `src/` with a per-stratum A/B.
+**`src/` is untouched.** Suite green at **3,745** (baseline 3,743 **+2** for the two `docs/dev/` files
+added — the derivation and the preserved prototype, jargon only each, confirmed by bracket-matched
+collection; `CLAUDE.md`'s standing-baseline line is updated).
 
-## Step 1 — the DISSECTION, before any derivation is trusted
+**The verdict, in one line: the attribution is CONFIRMED, the headline premise is REFUTED, and the
+thread needs re-aiming at a MODEL term.** The full record is `ISSUES: arcsine-magnitude-coordinate`
+(entries ①–⑥ + the re-aim) with the derivation in `docs/dev/DERIVATION_arcsine_magnitude.md`.
+⛔ Do not re-derive any of it; do not re-run the refuted claims.
 
-Confirm the attribution at the object level: the 2026-08-31 drained-frame baseline
-(`docs/dev/BASELINE_2026-08-31_drained_frame.md`) shows the solver UNDER-calling gDNA at near-pure
-objects on EVERY stratum (shortfall +0.15…+0.29 at true `f_g ∈ [0.999, 1]`, 34–43 % of each stratum's
-error mass; `g98 ss.99 capture-ON` is the worst in-scope condition at ~99 % under-call). The claim to
-verify: that error mass sits on VERTEX-BLOCKED objects (belief pinned short of `f_g = 1` by the λ grid
-and its measure), not on e.g. the capture-ON divisor (`ISSUES: capture-blind-gdna-divisor`).
+The three things a next session most needs:
 
-    python scripts/design/worst_objects.py        # rank g98 ss.99 ON's objects by error mass
-    python scripts/design/calibration_walk.py     # which STAGE introduces it (needs slot_truth — certified, drained frame)
+1. **The under-call scales as `1/√n` across four decades of depth** (obs/pred 0.63…1.21 against
+   `w/4 = 1/(2√n)` on 34,207 solved exact-vertex slots). That is a posterior WIDTH, not a grid
+   artifact. The solver is answering honestly; the error is the price of a CONTINUOUS prior with no
+   atom at the vertex, scored against a truth that sits exactly on it.
+2. **The coordinate's whole leverage is ~2.5 % of the defect**, bounded by K-invariance: the two
+   coordinates each converge to their own limit while the gap between them holds at 6.5e-04 (the λ
+   bracket's truncated DOMAIN — refining K cannot recover it) against a 0.026 shortfall.
+3. **λ is FINER at the vertices than uniform-φ**, and the median cannot reach a vertex in ANY
+   coordinate (`t = 1 − 0.5/m ≤ ½` for the outer bin). The issue's premise was backwards.
 
-Read the concentration curve first (concentrated ⇒ a mechanism; diffuse ⇒ systematic — here a
-SYSTEMATIC shortfall in one f_g band is itself the expected signature). ⚠ `solvability_audit`'s worst
-in-scope row differs (`g50 ss.50 OFF` by Σ|err|) — look at both before concluding.
+## Where the prototype is
 
-## Step 2 — the DERIVATION (paper before prototype; BOTH solvers)
+⭐ **`docs/dev/arcsine_proto.py` is PRESERVED IN THE REPO** — the mechanism itself: three module
+patches (`_logodds_grid` → the midpoint uniform-φ lattice, the two arms → no written reference,
+`_posterior_median_fg` → interpolate in φ) plus **23 perturbed self-test gates, all passing**. Run it
+directly: `python docs/dev/arcsine_proto.py`. `install("noop")` reinstalls the ORIGINALS through the
+same mechanism and is byte-identical to production on every condition and both metrics — that is the
+harness's own falsification, and it held throughout.
 
-**The map is `src/rigel/calibration/simplex_logodds.py`'s own docstring — read it first.** Current
-state: magnitude axis `λ = logit(f_g)` on a FIXED `[−L, L]` grid (`_logodds_grid`, `_DEFAULT_L`);
-`f_g = σ(λ)`. Single-strand regions solve 1-D in λ; AMBIG regions marginalise on the 2-D `(λ, θ)`
-grid (`_solve_ambig_logodds`). ⭐ **The TILT is already arcsine** (`θ = arcsin(τ)`, fact 3 — the
-Berger–Bernardo Jacobian cancellation, landed 2026-08-24). The derivation must cover:
+The A/B drivers were left in the session scratchpad and are thin by comparison (an afternoon to
+rewrite against the preserved prototype): `arcsine_ab.py` (walk metric vs certified `slot_truth`),
+`arcsine_release_ab.py` (0.8.0's release metric via `calibration_vs_oracle.measure_condition`),
+`arcsine_kinvariance.py` (the acceptance test), `band_dissect.py` (truth-banded dissection),
+`neighbour_information.py` (the no-solver neighbour ceiling — see the parallel section).
 
-1. **The measure bookkeeping.** Fact 2's "no Jacobian is written" is λ-SPECIFIC (each `logP` density
-   in log-rate cancels `log σ′(λ)` exactly, once per group). Under `f_g = sin²φ` that cancellation
-   does not hold as written — derive the φ-analogue or write the correct Jacobian explicitly, and
-   prove which on paper before any grid code.
-2. **The reference in φ.** The flat measure in φ is the Jeffreys prior for the binary split — if the
-   BB analysis carries over, `ψ_ref` may vanish entirely (the reference-mean graveyard moot by
-   construction). Verify against the BB derivation, don't assume; the tilt's fact-3 cancellation must
-   survive alongside.
-3. **Vertex endpoints ON the grid.** At exact `f = 0/1` one component's rate is 0: data with counts
-   there forbid the vertex through the likelihood; zero counts reach it. That is the desired
-   behaviour and must come out of the derivation, never a clamp. The `g00`/near-pure behaviours on
-   both panels are the falsifications.
-4. **Grid spacing.** The `dlam = 0.3390` note in the module is measured-in-λ and does not transfer;
-   information in φ is CONSTANT (the arcsine is the variance-stabilising transform), which suggests a
-   uniform-φ grid is the derived choice — derive it, don't assert it.
-5. **Messages and precisions.** Claim delivery (`TRAPS: off-grid-message-mode`), `hop_logvar`, and
-   `τ_λ → τ_φ` semantics all map through the coordinate; the message laws
-   (`TRAPS: zero-the-precision-with-the-value`, single-source-may-only-reduce) must survive the map.
-6. **The 2-D solve.** The AMBIG `(φ, θ)` grid — memory shape (`sweep_n_grid`) and the tilt
-   marginalisation.
+## The re-aim — proposed AND priced in the same session; it is ALSO not a win
 
-Then: prototype OUTSIDE `src/` as a parallel solve, A/B per stratum on `calibration_vs_oracle.py`
-with BOTH zero controls (and the fl-gap sign arms if anything length-adjacent moves).
-⚠ `rename_identity.py --freeze` before and `--check` after — this is exactly the numerically-loaded
-change it exists for.
+The obvious next mechanism is **an ATOM at the vertex** ("this slot holds NO RNA" as a point mass —
+a point-null/spike-and-slab that no continuous reference expresses in any coordinate), because the
+source already names the socket and its price: `simplex_logodds._rna_arm` — nothing fits `logP_r`,
+and the unfitted reference is a fixed **3.107 nats** repulsion at `f_g = 0.999` (a 22:1 handicap);
+objects with true `f_g ≥ 0.999` carry **49–83 %** of all calibration error and read **0.13–0.23
+below** the vertex. The target population is **half the ladder's live mass** (50.0 %, no solver).
 
-## Cautions
+⛔⛔ **But it was priced before recommending it, and the ceiling is roughly a WASH.**
+`vertex_ceiling.py`, three conditions, oracle truth pinned and the whole chain RE-SOLVED (`noop` pins
+0 and is byte-identical — falsification passing; `vertex_free` pins ~70–79 k objects):
+`vertex_free` gives region Σ|err| **+18,887** and boundary **−20,208** — they cancel. The looser
+`vertex_all` is clearly worse (+94,490 / −18,237). Handing a vertex object the exact answer changes
+what it BROADCASTS and the relay over-propagates it.
 
-* ⛔ The 2026-08-24 arcsine measurement ("equivalent-and-clean, never a panel win") was the TILT axis
-  on the pre-fix tree. The magnitude-axis claim is NEW and must be measured. Expectation: the
-  coordinate fixes reachability and the information pathology structurally; how much the panel moves
-  is the A/B's to say.
-* ⛔ The attribution can still surprise — if the dissection points at the capture-ON divisor or the
-  EB anchor instead, STOP and re-rank before deriving.
-* ⭐ General state: baselines re-derived 2026-08-31 in the drained frame with same-session floors
-  (the snapshot beside this file — worst in-scope `g98 ss.99 ON`; relay hurts the solvable set on
-  9/12 contaminated conditions; MessagePolicy ≡ silent on all 46; reseed floor ~30–2,700 transcript
-  fragments per condition). The frame ruling is `DESIGN.md` §4.3; only wave-3 bank-readers still read
-  pass one (`ISSUES: hygiene-ledger`). ⛔ Nothing measured before 2026-08-31 is comparable to
-  current numbers.
+⭐⭐ **What that leaves, and it is the session's real handoff**: the near-vertex error is (a) an
+honest posterior width that scales as `1/√n`, and (b) NOT removable by local certainty either. Both
+the coordinate and the local-prior repair are priced and neither wins. **That points the question at
+the MESSAGE LAYER** — which is also where `ISSUES: message-value-for-blind-slots` (below) now has its
+first numbers. ⚠ Owed before anyone builds an atom: the whole-ladder `vertex_ceiling` run and a
+`calibration_vs_oracle` equivalent (the ceiling above is that instrument's pass-0-flavoured metric).
 
-## Parallel, cheap, no solver
+## Cautions that still stand
+
+* ⛔ Nothing measured before 2026-08-31 is comparable to current numbers (the drained-frame ruling,
+  `DESIGN.md` §4.3).
+* ⛔ The A/B (whole ladder, all 16, noop byte-identical on every one) **splits cleanly by stratum**:
+  stranded × OFF WINS and more as gDNA rises (1.008 / 0.939 / 0.898); unstranded × OFF LOSES every
+  row (1.107 / 1.071 / 1.014); stranded × ON mild loss; 3 of 4 zero controls win. ⭐ The coordinate
+  helps where the strand LIKELIHOOD is strong and hurts where it is flat (there the posterior IS the
+  reference, so the grid's tail resolution moves the answer directly). That is a real trade, and
+  losing all three in-scope unstranded rows is what disqualifies it — never pool
+  (`TRAPS: never-pool-the-strata`), the ladder total would have hidden it.
+* ⚠ **Rung B is derived but NOT measured**: φ-native message DELIVERY (map a claim's precision by
+  `(dx/dphi)²` — derivation §5). Rung A delivers claims pointwise in λ's coordinate, which is the
+  honest suspect for the F-stage losses, since the C-stage (message-free) improves nearly everywhere.
+  It cannot exceed the 2.5 % bound.
+* ⚠ `_posterior_median_fg`'s interpolation coordinate is load-bearing and easy to get wrong — the
+  histogram edges must be midpoints in the coordinate whose measure is UNIFORM, or a one-hot posterior
+  comes back biased. Production documents this for λ; the prototype re-derives it for φ.
+
+## Parallel, cheap, no solver — unchanged and unaffected by the verdict
 
 `ISSUES: message-value-for-blind-slots` on the anchored twin block: is the information a blind
 unstranded/AMBIG slot needs actually PRESENT in its neighbours? It decides the message policy's
-ceiling before the policy is built — and the policy itself comes AFTER the coordinate.
+ceiling. ⚠ The owner's "the policy is built once, on the settled coordinate" ordering was premised on
+the coordinate landing; with the thread re-aimed, that ordering is the owner's to re-rule.

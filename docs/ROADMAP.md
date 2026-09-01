@@ -72,16 +72,26 @@ the shortfall pattern holds on every stratum) and `g50 ss.50 capture-OFF` on `so
 Σ|err| — dissect both before choosing; the relay hurts the solvable set on 9/12 contaminated
 conditions while winning the blind rows and all four zero controls.
 
-1. ⭐⭐⭐ **THE COORDINATE THREAD** — `ISSUES: arcsine-magnitude-coordinate` (owner ruling,
-   2026-09-01: this lands BEFORE the message policy, because messages deliver in ψ's coordinate).
-   In order: ① the DISSECTION on `g98 ss.99 capture-ON` to pin the attribution (the baseline's
-   vertex-under-call signature must be confirmed at the object level before the build); ② the
-   DERIVATION, covering BOTH solvers — the 1-D magnitude axis and the 2-D `(magnitude, tilt)` AMBIG
-   grid; ③ prototype outside `src/`, A/B per stratum with both zero controls.
+1. ⛔⛔ **THE COORDINATE THREAD RAN TO A VERDICT ON 2026-09-01 AND NEEDS AN OWNER DECISION** —
+   `ISSUES: arcsine-magnitude-coordinate` carries it. Steps ①–③ all executed (dissection → derivation
+   → prototype → per-stratum A/B, noop byte-identical throughout). **The attribution is confirmed but
+   the headline premise is refuted**: the median cannot reach a vertex in ANY coordinate, λ is
+   actually FINER at the vertices than uniform-φ, and K-invariance bounds the coordinate's whole
+   leverage to a small fraction of the defect. **The under-call scales as `1/√n` with depth** — a
+   posterior WIDTH, not a grid artifact — so the defect is the `Beta(½,½)` reference's missing ATOM
+   at the vertex, a MODEL term. The A/B is mixed-sign in scope and does not clear
+   `TRAPS: panel-before-src`. ⛔⛔ **And the obvious re-aim was PRICED IN THE SAME SESSION AND IS ALSO
+   NOT A WIN**: `vertex_ceiling.py --arm vertex_free` — a PERFECT answer at every reachable
+   vertex-truth object, whole chain re-solved — nets out to roughly a WASH (boundary improves on
+   every row, region degrades, they cancel). ⭐ Taken together the near-vertex error is an HONEST
+   posterior width that local certainty does not remove, which points the question at the MESSAGE
+   LAYER rather than the prior or the coordinate. ⚠ Three conditions; the whole-ladder ceiling is
+   owed before anyone builds a vertex atom.
 2. ⭐ **In parallel, no solver needed**: `ISSUES: message-value-for-blind-slots` on the anchored twin
-   block — the message policy's ceiling question, answerable while the coordinate work runs.
+   block — the message policy's ceiling question, unaffected by ①'s verdict.
 3. ⭐ **Then the message policy itself** (the standing charter: win on unstranded, minimal harm on
-   stranded, never pooled), built once, on the settled coordinate.
+   stranded, never pooled). ⚠ The owner's "build it once, on the settled coordinate" ordering was
+   premised on the coordinate landing; with ① re-aimed, the ordering is the owner's to re-rule.
 4. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint — noting the coordinate change may
    moot the reference half by construction (flat measure = Jeffreys) — with

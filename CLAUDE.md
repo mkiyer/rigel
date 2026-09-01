@@ -278,7 +278,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,743 passed / 0 skipped / 8 xfail** (re-derived 2026-08-31 by
+⭐ **THE STANDING BASELINE: 0 failed / 3,745 passed / 0 skipped / 8 xfail** (re-derived 2026-09-01 by
+running the suite after the coordinate thread, which touched DOCS ONLY — `src/` untouched: **+1** for
+`docs/dev/DERIVATION_arcsine_magnitude.md` and **+1** for the preserved sandbox prototype
+`docs/dev/arcsine_proto.py` (jargon only, each), confirmed by bracket-matched collection.
+3,743 + 2 = **3,745**, confirmed by a green run. ⭐ Its predecessor, re-derived 2026-08-31 by
 running the suite after the leak derivation: the drained-frame accounting below plus **+1** for
 `docs/dev/PLAN_certified_channel_impurity.md` (jargon only). Account it from **3,738** after
 the pricing commit: **+3** new cases in `tests/calibration/test_oracle.py` (the frame-aware
@@ -286,7 +290,7 @@ exact-zeros gate, each perturbed), **+1** in `tests/test_scan_cache.py` (the dra
 `calibration_inputs` contract + determinism), **−1** for deleting the superseded sandbox prototype
 `docs/dev/drained_frame_price.py`, and **+1** for the dated snapshot
 `docs/dev/BASELINE_2026-08-31_drained_frame.md` (jargon only, each). 3,738 + 4 − 1 + 1 = **3,742**,
-confirmed by a green run.
+then **+1** for the plan doc = **3,743**, confirmed by a green run.
 ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas.)
 
 ⛔ **ANY failure at all is a regression** — a stronger and
