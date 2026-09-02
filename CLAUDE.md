@@ -157,15 +157,22 @@ excellent and a message can mostly only disturb it. The goal is: **perform well 
 while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
 against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart.
 
-⛔⛔ **THE HARM HALF IS CURRENTLY NOT MET, AND THAT IS THE 0.8.0 THREAD** (measured 2026-09-01, whole
-ladder + test chromosome). Messages ADD error at the worst in-scope conditions — `calibration_walk.py`
-rung E vs F is the re-derivation — and the relay hurts the solvable set on most contaminated
-conditions. ⭐ The suspected mechanism is the PRECISION, not the value: `solvability_audit.py`'s
-`calib` column shows the relay declaring several times more precision than it earns on nearly every
-row, and a message that over-claims will overwhelm a destination's good own evidence. ⭐ The value is
-real and CONCENTRATED where the local solve is blind (unstranded rows, all four zero controls), so
-⛔ the answer is not a blanket default flip — it is WHERE the policy speaks and WHAT it claims.
-`ROADMAP.md` rank 1 carries the order of work.
+⭐⭐⭐ **THE REBUILD EXISTS AND MEETS BOTH BARS; THE DEFAULT DOES NOT FLIP UNTIL IT IS FINISHED
+(owner ruling, 2026-09-02).** The `transfer` policy (rungs 1–3, three commits on `message-layer`)
+reads on the ladder: unstranded **7/8 wins, worst 1.01×**; stranded **7/8, worst 1.00×** — against
+the shipped relay's 5/8 (1.49×) and 2/8 (1.65×) — and it is best-or-near-best on BOTH adversarial
+probe panels where the relay's anchor is catastrophic (its cross-locale level assumption is refuted
+by measurement; the thread record and handoff live in the dev sandbox on `message-layer`). ⛔ **But the
+policy is INCOMPLETE — the owner will not ship a policy full of holes.** The audited holes, by
+ladder population: **exon|exon boundaries** (12,811 slots, ~2.6 M crossing mass — mature RNA
+crosses them contiguously; 8,779 exons have ONLY such faces), **terminus-refused intron|exon faces**
+(~3,800 exons), strand-change faces, the AMBIG tilt channel, and the spliced lanes at refused
+faces. ⭐ Accepted errors, recorded so they are not re-litigated: the zero-gDNA edge residual (the
+enrichment-ceiling upper side is owner-REFUSED as over-engineering) and the deferred `g05 ss.50 ON`
+row. ⚠ The relay's old defects still ship meanwhile, and its recorded facts stand
+(`calibration_walk.py` rung E vs F; the unearned `calib` column). `ROADMAP.md` rank 1 carries the
+order of work; `ISSUES: gdna-landscape-trains-on-false-positives` is the systemic issue this thread
+exposed.
 
 ⭐⭐ **FOUR POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
 is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES):

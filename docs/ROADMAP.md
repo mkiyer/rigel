@@ -80,17 +80,22 @@ roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local 
 propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
 is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
 
-1. ⭐⭐⭐ **THE MESSAGE LAYER — the largest measured in-scope defect, and it ships ON.** The charter
-   stands: **win on unstranded, minimal harm on stranded, never pooled** — and the "minimal harm"
-   half is currently not met. Developed on the test chromosome, judged on the ladder
-   (`policy_benchmark.py`; the substrate and its two bars are `TESTING.md` §0a). In order: ① score
-   silent vs relay **split by destination-had-own-composition-evidence** — no new code, and the
-   unfinished half of `ISSUES: message-value-for-blind-slots`, whose no-solver companion is already
-   measured; ② the **precision ledger per node type** — what `τ_λ` the strand channel EARNS versus
-   what the relay DECLARES, exons first (the suspected mechanism: the declared precision is not
-   earned on most rows, so a message overwhelms good own evidence); ③ then ONE mechanism — the
-   emission gate or the precision correction, never both. ⛔ Not a blanket default flip: relay wins
-   all four zero controls and the blind rows.
+1. ⭐⭐⭐ **FINISH THE `transfer` POLICY, THEN FLIP THE DEFAULT (owner ruling, 2026-09-02).** The
+   rebuild (rungs 1–3: intron→boundary, face-composed exon, edge lower bound) meets both bars on
+   the ladder — unstranded 7/8 worst 1.01×, stranded 7/8 worst 1.00× — but is INCOMPLETE, and an
+   incomplete policy does not ship. The audited holes, in the owner's order: ① **exon|exon
+   boundaries** (12,811 ladder slots, ~2.6 M crossing mass; 8,779 exons have ONLY such faces —
+   mature RNA crosses them contiguously, so the shared-population licence may extend there);
+   ② **terminus-refused intron|exon faces** (~3,800 exons — internal TSS/TES); then strand-change
+   faces, the AMBIG tilt, the spliced lanes at refused faces. ⛔ THE SUBSTRATE FIRST: the twin
+   block has NO exon|exon boundaries and NO internal termini — the owner authors the indicting
+   structures (a multi-isoform / shared-exon block) before any mechanism is derived
+   (`TESTING.md` §0a). Discipline per rung: fail-first gates, one mechanism, adversarial probe
+   panels in the loop, ladder before belief. ⭐ After completion: the 0.8.0-metric pricing
+   (`calibration_vs_oracle.py`, `solvability_audit.py` under `transfer`) and the flip protocol
+   (`preflight --full`; instruments, not only the suite). The thread's working record and handoff live in the sandbox on the
+   `message-layer` branch; the exposed systemic issue is
+   `ISSUES: gdna-landscape-trains-on-false-positives`.
 2. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.

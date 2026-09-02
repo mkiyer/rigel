@@ -1,111 +1,82 @@
-# NEXT SESSION — the MESSAGE LAYER, developed on the test chromosome
+# NEXT SESSION — FINISH the `transfer` policy (then, and only then, the default flip)
 
-    ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand and how to start, not what is
-    settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
+    ⚠ **A DEV DOC, and it is a HANDOFF.** It says where things stand and how to start, not what
+    is settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
     `ISSUES.md`. MOVE anything that settles into those and DELETE this file.
 
-⭐ **THE SLATE IS CLEAN.** `origin/main` was fast-forwarded to `c6b30255` on 2026-09-01 (the coordinate
-thread's verdict plus the doc cleanup and the re-derived baseline), and this thread runs on the
-**`message-layer`** branch cut from it. `src/` has not changed since the 2026-08-31 frame migration, so
-the baseline beside this file is a REPRODUCTION that matched to the fragment — trust it as the
-starting point and do not re-run the whole panel before beginning.
+## Where the thread stands (2026-09-02, branch `message-layer`)
 
-## The thread, and why it is next
+Three rungs of the ground-up message rebuild are SHIPPED as `message_policy = "transfer"`
+(`bbdf067f`, `3c73f0a6`, `71c3b668`): intron→boundary composition transfer, the face-composed
+exon transfer (monotone map, flux ceiling, derived ingredient width), and the intergenic|exon
+edge's sign-certified lower bound (zero edges VACUOUS BY LAW). Ladder, both bars, never pooled:
+**unstranded 7/8 wins (worst 1.01×), stranded 7/8 (worst 1.00×)** — vs the shipped relay's 5/8
+(1.49×) and 2/8 (1.65×) — and best-or-near-best on BOTH adversarial probe panels, where the
+relay's anchor is catastrophic. Suite baseline: `CLAUDE.md`. Thread record with every stage,
+refutation and accepted error: `docs/dev/COMPOSITION_TRANSFER_STAGE01.md`.
 
-**The message layer is the largest measured in-scope defect, and it ships ON.** Two independent
-routes arrived at it on 2026-09-01:
+⭐ **The owner's ruling: `transfer` will easily become the default, but an INCOMPLETE policy does
+not ship. Finish it first — audit the remaining holes and tackle them one by one.**
 
-* the calibration walk — at the worst in-scope condition the SHIPPED tool is **456,838** fragments of
-  error against **298,597** with messages off. Messages ADD **+158,241 (+53 %)**; at `g98 ss.99 OFF`
-  they add **+81,839 (+65 %)**. Re-derive with `calibration_walk.py --condition <name>` (rung E vs F);
-* the vertex ceiling — handing every reachable vertex-truth object the ORACLE answer and re-solving
-  the whole chain nets **≈0** (boundary −20,208, region +18,887). **A perfect local answer does not
-  survive propagation**, which is why no local repair — coordinate, prior, or atom — can pay off until
-  this is fixed. The arcsine coordinate thread was run to a verdict and refused on the same day;
-  `ISSUES.md`'s CLOSED / REFUSED carries it, and ⛔ do not re-derive it.
+## THE HOLE AUDIT (2026-09-02, ladder chain + `g00 ss.50` truth for the mass column)
 
-⭐ The relay is not simply bad — its value is real and CONCENTRATED where the local solve is blind,
-and its harm is concentrated where the destination already has good own evidence. That is the whole
-shape of the problem, and it is exactly the charter's failure mode: **"minimal harm on stranded" is
-currently not met.**
+| hole | population | crossing/slot mass | state |
+|---|---|---|---|
+| ⭐⭐⭐ **exon\|exon boundaries** | **12,811 slots** | **~2.6 M** (mature RNA crosses these contiguously — 14× the exon\|intron crossing mass) | NO rung touches them: unsolved as destinations, and 8,779 exons (~1.6 M mass) have ONLY such faces — fully unreached |
+| ⭐⭐ terminus-refused intron\|exon faces (internal TSS/TES) | ~3,800 exons | ~600 k | rung 2's licence refuses (an UNMEASURED population change); nothing delivered through that face |
+| strand-change faces (AMBIG ↔ single-strand) | unmeasured — census it | — | licence refuses |
+| the AMBIG tilt channel | ladder AMBIG slots | — | `transfer` delivers λ rows only; θ never imputed |
+| spliced lanes at refused faces | — | — | flux info enters only through rung 2's map (`s`); refused faces lose it. The relay's certified-flux anchor is DEAD (cross-locale assumption refuted on the probe panels) — any flux use must be face-local |
+| chain-end exons ("no faces") | 92 exons | ~39 k | small; note, don't chase |
 
-## ⭐⭐⭐ THE PARADIGM — develop on the test chromosome, decide on the ladder
+⛔ **THE SUBSTRATE GATES EVERYTHING: the twin block has ZERO exon|exon boundaries and ZERO
+internal termini.** The owner authors the indicting structures first (`TESTING.md` §0a — the
+paradigm: grow one structure at a time). The natural addition: a multi-isoform block (two
+isoforms sharing exons with offset boundaries → exon|exon REGIONs and boundaries; an isoform
+with an internal TSS/TES → terminus-flagged intron|exon faces). Mind the recorded rebuild
+recipe: GTF+abundances+probes edits → `build_test_reference.py` → index → all SEVEN panels
+simulate+cache → g00 prewarm + `_main` copy → `calibration_oracle.py` certify (the one-command
+chain from this session lives in the scratchpad's `rebuild_all_test_panels.sh` pattern —
+rewrite it, it died with the session).
 
-The substrate is `docs/TESTING.md` §0a — **read it first**; it owns the description, the commands and
-the two bars, and nothing is duplicated here. In one line: the ANCHORED TWIN BLOCK is one shape
-repeated over five gene types × five abundance blocks, and the five types are the message layer's own
-controls — `clean` (a pure-gDNA message SOURCE), `nasc` (a contaminated one), `cap` (the enrichment
-cliff between source and destination), `capnasc` (both), `silent` (every object pure gDNA, so any
-claimed RNA is a false positive).
+## Derivation notes banked for the exon|exon rung (verify, don't trust)
 
-```bash
-source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-python scripts/design/preflight.py                          # FIRST — ~2 s, can this session run?
-
-python scripts/design/policy_benchmark.py --panel test      # THE LOOP — 30 conditions, seconds
-python scripts/design/policy_benchmark.py --panel ladder    # THE JUDGEMENT — 16 conditions, minutes
-```
-
-⛔ **THE OWNER'S RULING ON HOW TO USE IT: the test chromosome is where the policy is DEVELOPED, and a
-result is only believed once the ladder confirms it** (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`
-— a small substrate's objects mostly lack own evidence, so a message is nearly free there and a policy
-looks better than it is). ⭐ **When a condition indicts a structure, ADD THAT STRUCTURE TO THE TEST
-CHROMOSOME** — that is the loop, and the substrate is designed to grow one structure at a time
-(`TESTING.md` §0a has the edit-then-rebuild sequence; the three hand-edited files are the only inputs).
-
-⛔ **NEVER POOL THE TWO HALVES.** Unstranded rows are where a policy must WIN; stranded rows are where
-it must do as little HARM as possible. They are judged against DIFFERENT bars.
-
-## What the baseline says about where to aim
-
-The full numbers are the dated snapshot beside this file. The three that set the direction:
-
-1. **On the test chromosome the split is stark.** Relay beats silence by **0.01–0.32×** on unstranded
-   × capture-ON — a large, real win exactly where the local solve is blind — and LOSES on stranded ×
-   capture-ON by **2.1–4.96×** (and 58× on one near-zero-error row, where the ratio is not the thing
-   to read). Off capture it is roughly neutral, degrading to **1.25–1.67×** harm as gDNA rises.
-2. **On the ladder the same shape**: relay wins the blind rows and all four zero controls, and hurts
-   the solvable set on 9/12 contaminated conditions.
-3. ⛔ **The declared precision is NOT EARNED on 11/12 rows** (`solvability_audit.py`). That is the
-   suspected mechanism: a message that claims more precision than it has will overwhelm good own
-   evidence, which is precisely the measured stranded harm.
-
-## The first two steps, in order
-
-**① Measure the split — no new code.** Score silent vs relay **split by whether the destination had
-its own composition evidence**. That is the unfinished half of `ISSUES: message-value-for-blind-slots`
-and it converts "relay hurts 9/12" into "relay hurts THIS destination class by THIS much", which is
-what says whether an emission gate alone recovers the harm. ⚠ Its no-solver companion is already
-measured and recorded in that issue: an ORACLE neighbour message has POSITIVE skill only in a narrow
-regime (mid-contamination and `g98` off capture) and is actively MISLEADING at low gDNA — so a policy
-that speaks everywhere cannot win, however well engineered.
-
-**② The precision ledger, per node type** — the owner's own question in `message_notes.md`, and the
-right one: *when the strand model solves an exon, what precision does that exon actually get?* Three
-numbers per node type: what `τ_λ` the strand channel EARNS (`region_init.build_region_init`), what the
-relay DECLARES after `hop_logvar` damping (`messages/relay.py`), and their ratio. The owner's node
-order — exon regions → `intron|exon` boundaries → intron regions — is right, and exons first is right
-because that is where the harm concentrates.
-
-**Then one mechanism at a time**, whichever the ledger indicts: the emission gate (speak only into
-blind destinations) or the precision correction (declare what you earned). ⛔ Not both —
-`CLAUDE.md`'s DERIVE → DESIGN → PLAN → PROTOTYPE → A/B, and a change that cannot be A/B'd alone
-cannot be judged alone.
-
-⛔ **What NOT to do: flip the default to silent.** It is tempting at 1.65× worst harm, but relay wins
-all four zero controls and the blind rows, so a blanket flip trades those away. The destination gate
-is the shape that keeps both.
+* An exon|exon boundary's crossing population = {gDNA, RNA± INCLUDING mature} — the SAME set as
+  its flanking exons when no terminus intervenes and strand sets match. The shared-population
+  licence may therefore extend to exon↔exon|exon-boundary hops directly (composition transfer,
+  no new currency). The open questions: neither flank has an intron factory (what carries the
+  split evidence INTO the pair?), and chains of exon|exon hops raise the one-hop-vs-multi-hop
+  question the foundation spec reserves.
+* For internal-terminus faces: the population changes by an UNMEASURED amount (the licence is
+  right); what survives is the gDNA side — the edge rung's sign-certified profile-bound pattern
+  (`edge_bound_row`) may generalize (gDNA is continuous across a terminus), with the same
+  vacuity law.
 
 ## Standing cautions
 
-* ⛔ **Read `HONEST_PRECISION.md` beside this file before proposing any mechanism** — it is the record
-  of the 2026-08-27 campaign that was torn down, so a refuted experiment is not re-run.
-* ⛔ `MessagePolicy` is byte-identical to `SilentPolicy` at rung 0 and confirmed so on all 46
-  conditions. That identity is the foundation spec's gate — keep it as the falsification for every
-  new rung (`TRAPS: an-ablation-that-never-ran`).
-* ⚠ The certified-flux stream rides inside the relay (`RelaySwitches.certified_flux`, final solve
-  only) and `config.rna_anchor` is live iff propagation is on AND the policy is relay — so a
-  silent-vs-relay delta bundles the anchor. Separate it with
-  `ladder_arm_ab.py --arm anchor_off` or `backbone_parity.py --arm-b no_certified_flux`.
-* ⚠ Nothing measured before 2026-08-31 is comparable to current numbers (the drained-frame ruling,
-  `DESIGN.md` §4.3).
+* DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → only then `src/`; ONE mechanism per rung;
+  fail-first gates and WATCH each perturbation fire (three gates this thread only earned their
+  teeth after a watched non-firing).
+* Never pool the two halves; develop on the test chromosome, believe nothing before the ladder;
+  run the ADVERSARIAL PROBE PANELS in every rung's loop (`scenarios_probes_sparse` /
+  `_junction` — they killed the anchor; they keep the next mechanism honest).
+* Prototype via the `message_policy="message"` seam (patch `calibrate.MessagePolicy`
+  in-process); compare `src`-vs-`src` across a landing, never harness-vs-`src` (a measured
+  1-ULP/flat-posterior divergence family produced fake, flip-insensitive wins twice).
+* A claim below its own evidence is SILENCE, never a near-zero row (the vacuity law; near-zero
+  rows perturb flat posteriors through refit amplification).
+* Accepted errors — do not re-litigate without new evidence: the zero-gDNA edge residual (the
+  enrichment-ceiling upper side is owner-REFUSED as over-engineering), the deferred
+  `g05 ss.50 ON` row.
+* `ISSUES: gdna-landscape-trains-on-false-positives` is the exposed systemic issue (100 %
+  fiction training at `g00 ss.50`; the naive exclusion REFUTED — it starves the bootstrap that
+  generalizes message-delivered truth). Related, separate; the owner ranks it.
+
+## After the policy is finished (the recorded order)
+
+1. The 0.8.0-METRIC pricing under `transfer` — `calibration_vs_oracle.py` per stratum and
+   `solvability_audit.py` (its `calib` column answers whether the rebuilt policy's declared
+   precision is EARNED — the thread's original indictment).
+2. The DEFAULT FLIP decision with the full trade table (the relay's remaining `g00 ss.50` lead
+   is real and rests on the probe-fragile level transport), then the flip protocol:
+   `preflight --full`, instruments-not-only-suite.
