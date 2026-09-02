@@ -1,0 +1,35 @@
+# ADVERSARIAL PROBE PANEL — derived from test_chr.gtf by make_adversarial_probes.py
+# (owner directive 2026-09-01: probe designs that stress the capture assumptions).
+# Probed genes unchanged: cap/capnasc/silent of every block. BED12, 0-based half-open.
+# JUNCTION: one BED12 two-block probe per sj (62+63 bp, contiguous in cDNA) and
+# nothing else — spliced fragments enriched over unspliced/gDNA at the same face.
+test_chr	94938	102063	junction_B1_cap_sj0	0	.	94938	102063	0	2	62,63	0,7062
+test_chr	102938	110063	junction_B1_cap_sj1	0	.	102938	110063	0	2	62,63	0,7062
+test_chr	131938	139063	junction_B1_capnasc_sj0	0	.	131938	139063	0	2	62,63	0,7062
+test_chr	139938	147063	junction_B1_capnasc_sj1	0	.	139938	147063	0	2	62,63	0,7062
+test_chr	168938	176063	junction_B1_silent_sj0	0	.	168938	176063	0	2	62,63	0,7062
+test_chr	176938	184063	junction_B1_silent_sj1	0	.	176938	184063	0	2	62,63	0,7062
+test_chr	279938	287063	junction_B2_cap_sj0	0	.	279938	287063	0	2	62,63	0,7062
+test_chr	287938	295063	junction_B2_cap_sj1	0	.	287938	295063	0	2	62,63	0,7062
+test_chr	316938	324063	junction_B2_capnasc_sj0	0	.	316938	324063	0	2	62,63	0,7062
+test_chr	324938	332063	junction_B2_capnasc_sj1	0	.	324938	332063	0	2	62,63	0,7062
+test_chr	353938	361063	junction_B2_silent_sj0	0	.	353938	361063	0	2	62,63	0,7062
+test_chr	361938	369063	junction_B2_silent_sj1	0	.	361938	369063	0	2	62,63	0,7062
+test_chr	464938	472063	junction_B3_cap_sj0	0	.	464938	472063	0	2	62,63	0,7062
+test_chr	472938	480063	junction_B3_cap_sj1	0	.	472938	480063	0	2	62,63	0,7062
+test_chr	501938	509063	junction_B3_capnasc_sj0	0	.	501938	509063	0	2	62,63	0,7062
+test_chr	509938	517063	junction_B3_capnasc_sj1	0	.	509938	517063	0	2	62,63	0,7062
+test_chr	538938	546063	junction_B3_silent_sj0	0	.	538938	546063	0	2	62,63	0,7062
+test_chr	546938	554063	junction_B3_silent_sj1	0	.	546938	554063	0	2	62,63	0,7062
+test_chr	649938	657063	junction_B4_cap_sj0	0	.	649938	657063	0	2	62,63	0,7062
+test_chr	657938	665063	junction_B4_cap_sj1	0	.	657938	665063	0	2	62,63	0,7062
+test_chr	686938	694063	junction_B4_capnasc_sj0	0	.	686938	694063	0	2	62,63	0,7062
+test_chr	694938	702063	junction_B4_capnasc_sj1	0	.	694938	702063	0	2	62,63	0,7062
+test_chr	723938	731063	junction_B4_silent_sj0	0	.	723938	731063	0	2	62,63	0,7062
+test_chr	731938	739063	junction_B4_silent_sj1	0	.	731938	739063	0	2	62,63	0,7062
+test_chr	834938	842063	junction_B5_cap_sj0	0	.	834938	842063	0	2	62,63	0,7062
+test_chr	842938	850063	junction_B5_cap_sj1	0	.	842938	850063	0	2	62,63	0,7062
+test_chr	871938	879063	junction_B5_capnasc_sj0	0	.	871938	879063	0	2	62,63	0,7062
+test_chr	879938	887063	junction_B5_capnasc_sj1	0	.	879938	887063	0	2	62,63	0,7062
+test_chr	908938	916063	junction_B5_silent_sj0	0	.	908938	916063	0	2	62,63	0,7062
+test_chr	916938	924063	junction_B5_silent_sj1	0	.	916938	924063	0	2	62,63	0,7062

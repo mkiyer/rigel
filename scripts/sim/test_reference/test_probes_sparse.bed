@@ -1,0 +1,49 @@
+# ADVERSARIAL PROBE PANEL — derived from test_chr.gtf by make_adversarial_probes.py
+# (owner directive 2026-09-01: probe designs that stress the capture assumptions).
+# Probed genes unchanged: cap/capnasc/silent of every block. BED12, 0-based half-open.
+# SPARSE: one 125 bp probe CENTERED per exon — faces depleted, mid-exon enriched.
+test_chr	94438	94563	sparse_B1_cap_e0	0	.	94438	94563	0	1	125	0
+test_chr	102438	102563	sparse_B1_cap_e1	0	.	102438	102563	0	1	125	0
+test_chr	110438	110563	sparse_B1_cap_e2	0	.	110438	110563	0	1	125	0
+test_chr	131438	131563	sparse_B1_capnasc_e0	0	.	131438	131563	0	1	125	0
+test_chr	139438	139563	sparse_B1_capnasc_e1	0	.	139438	139563	0	1	125	0
+test_chr	147438	147563	sparse_B1_capnasc_e2	0	.	147438	147563	0	1	125	0
+test_chr	168438	168563	sparse_B1_silent_e0	0	.	168438	168563	0	1	125	0
+test_chr	176438	176563	sparse_B1_silent_e1	0	.	176438	176563	0	1	125	0
+test_chr	184438	184563	sparse_B1_silent_e2	0	.	184438	184563	0	1	125	0
+test_chr	279438	279563	sparse_B2_cap_e0	0	.	279438	279563	0	1	125	0
+test_chr	287438	287563	sparse_B2_cap_e1	0	.	287438	287563	0	1	125	0
+test_chr	295438	295563	sparse_B2_cap_e2	0	.	295438	295563	0	1	125	0
+test_chr	316438	316563	sparse_B2_capnasc_e0	0	.	316438	316563	0	1	125	0
+test_chr	324438	324563	sparse_B2_capnasc_e1	0	.	324438	324563	0	1	125	0
+test_chr	332438	332563	sparse_B2_capnasc_e2	0	.	332438	332563	0	1	125	0
+test_chr	353438	353563	sparse_B2_silent_e0	0	.	353438	353563	0	1	125	0
+test_chr	361438	361563	sparse_B2_silent_e1	0	.	361438	361563	0	1	125	0
+test_chr	369438	369563	sparse_B2_silent_e2	0	.	369438	369563	0	1	125	0
+test_chr	464438	464563	sparse_B3_cap_e0	0	.	464438	464563	0	1	125	0
+test_chr	472438	472563	sparse_B3_cap_e1	0	.	472438	472563	0	1	125	0
+test_chr	480438	480563	sparse_B3_cap_e2	0	.	480438	480563	0	1	125	0
+test_chr	501438	501563	sparse_B3_capnasc_e0	0	.	501438	501563	0	1	125	0
+test_chr	509438	509563	sparse_B3_capnasc_e1	0	.	509438	509563	0	1	125	0
+test_chr	517438	517563	sparse_B3_capnasc_e2	0	.	517438	517563	0	1	125	0
+test_chr	538438	538563	sparse_B3_silent_e0	0	.	538438	538563	0	1	125	0
+test_chr	546438	546563	sparse_B3_silent_e1	0	.	546438	546563	0	1	125	0
+test_chr	554438	554563	sparse_B3_silent_e2	0	.	554438	554563	0	1	125	0
+test_chr	649438	649563	sparse_B4_cap_e0	0	.	649438	649563	0	1	125	0
+test_chr	657438	657563	sparse_B4_cap_e1	0	.	657438	657563	0	1	125	0
+test_chr	665438	665563	sparse_B4_cap_e2	0	.	665438	665563	0	1	125	0
+test_chr	686438	686563	sparse_B4_capnasc_e0	0	.	686438	686563	0	1	125	0
+test_chr	694438	694563	sparse_B4_capnasc_e1	0	.	694438	694563	0	1	125	0
+test_chr	702438	702563	sparse_B4_capnasc_e2	0	.	702438	702563	0	1	125	0
+test_chr	723438	723563	sparse_B4_silent_e0	0	.	723438	723563	0	1	125	0
+test_chr	731438	731563	sparse_B4_silent_e1	0	.	731438	731563	0	1	125	0
+test_chr	739438	739563	sparse_B4_silent_e2	0	.	739438	739563	0	1	125	0
+test_chr	834438	834563	sparse_B5_cap_e0	0	.	834438	834563	0	1	125	0
+test_chr	842438	842563	sparse_B5_cap_e1	0	.	842438	842563	0	1	125	0
+test_chr	850438	850563	sparse_B5_cap_e2	0	.	850438	850563	0	1	125	0
+test_chr	871438	871563	sparse_B5_capnasc_e0	0	.	871438	871563	0	1	125	0
+test_chr	879438	879563	sparse_B5_capnasc_e1	0	.	879438	879563	0	1	125	0
+test_chr	887438	887563	sparse_B5_capnasc_e2	0	.	887438	887563	0	1	125	0
+test_chr	908438	908563	sparse_B5_silent_e0	0	.	908438	908563	0	1	125	0
+test_chr	916438	916563	sparse_B5_silent_e1	0	.	916438	916563	0	1	125	0
+test_chr	924438	924563	sparse_B5_silent_e2	0	.	924438	924563	0	1	125	0

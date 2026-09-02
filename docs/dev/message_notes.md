@@ -127,8 +127,9 @@ Provided that the boundary at position=10000 has no TSS/TES flag AND there is no
 spliced fragments are STATIC and NOT "solved". They are fixed. They add signal to existing messages.
 
 
+The first goal is to design the architecture for the message propagation INTO exons. The message must incorporate the SPLICED-IN RNA, the UNSPLICED RNA, and the gDNA (unspliced by definition). The message honest precision must be derived.
 
-
+This is our first task.
 
 
 

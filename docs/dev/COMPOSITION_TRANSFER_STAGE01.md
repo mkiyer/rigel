@@ -249,12 +249,251 @@ runtime-fitted widening (the `splice_in_premise_logvar` pattern), never as a con
   tests/calibration file, +4 its own gates, +1 the docs/dev note. (CLAUDE.md's baseline line
   is updated by the commit that lands this, per its own rule.)
 
-## Next, in order
+# RUNG 2 — EXON REGIONS: the derivation + design (2026-09-01, owner notes in message_notes.md)
 
-1. The owner's commit of the landing (tree is clean-green, uncommitted).
-2. **The exon-region rung** — the second node type, same discipline (derive -> prototype ->
-   A/B -> ladder -> promote). Its targets, both measured here: the relay's remaining lead on
-   the deferred unstranded-capture-ON rows (the relay solves exons; the transfer touches only
-   boundaries) and the relay's large `g00` whole-library wins.
-3. The prototype harnesses (`stage0`–`stage5`) live in the session scratchpad; the shipped
-   gates and instruments carry everything load-bearing, so they die with the session by design.
+## The route reformulation of the owner's licence, and the one sharp law
+
+The owner's archetypes: equal populations (no TSS/TES, no strand change) -> composition
+transfer; unequal -> not. The derivation sharpens this: at a licensed face the exon's population
+is NOT equal to the boundary's — the exon additionally holds RNA that arrived by the SPLICED
+route — but that difference is CERTIFIED-MEASURED (the face's route-summed flux). So the law is:
+
+    ⭐ A population difference that is MEASURED at the face does not refuse the hop —
+      it becomes part of the message. Only an UNMEASURED difference refuses
+      (a terminus: molecules enter uncounted; a strand flip: membership changes).
+
+The exon message is therefore composition transfer (the contiguous routes: gDNA + unspliced RNA,
+continuous across a licensed face) PLUS the measured spliced route — never species, always
+routes (AXIOM 0: the split is "how did RNA arrive at this face", not "what kind of RNA is it").
+
+## ⛔ OWNER RULING (2026-09-01): the anchor's cross-locale assumption is REFUSED as rung 2's basis
+
+The first draft of this section proposed migrating `rna_anchor`'s flux rows to exons. The owner
+refused the load-bearing assumption — *"the RNA-frame boundary->exon ratio is capture-invariant"*
+is a LEVEL claim across two locales, and it holds only under benign probe geometry. Two real
+probe placements break it in OPPOSITE directions: a sparse mid-exon probe with short fragments
+depletes the faces relative to the interior (flux under-reads the exon), and a junction-spanning
+probe enriches spliced fragments over everything else (flux over-reads). An opposite-sign,
+placement-dependent failure is a BIAS, not a variance — no global width can price it honestly.
+
+⭐ **Why the measured 1.00–1.03 route identity was exact — and why that VINDICATES the concern**:
+`test_probes.bed`'s own header says probes tile PER EXON, 8×125 bp SEAMLESS, abutting both exon
+ends, **deliberately never spanning an sj**, and the sampler weights a fragment by its best
+single-probe overlap — so on this substrate spliced, crossing and contained fragments at a face
+share near-identical capture weight BY THE PANEL'S OWN DESIGN. The identity is a property of the
+benign tiling, not of biology. (`TRAPS`-adjacent: real data is a test input, never a design
+input — and so is a benign simulation.)
+
+The owner also REFUSED two-flank disagreement as the width RULE: it is computable only where
+both flanks are comparable, which is systematically the SIMPLE subpopulation (single isoform, no
+terminus, one strand), so a width fitted there under-covers exactly the exons where the model is
+most wrong. It survives only as a diagnostic on that subset. The replacement is a DERIVED width
+(counting, opportunity/length conversions, the propagated split evidence) checked
+population-unbiased by the calibration ratio (declared vs realised, `solvability_audit`), plus —
+on stranded libraries — supervised validation against exons' own strand solves.
+
+## Rung-2 stage 0 — the licence census and the two route identities (test chromosome, certified)
+
+* **Licence census**: middle exons 25/25 BOTH faces licensed; outer exons 50/50 exactly ONE
+  (the gene-end face carries TSS/TES). Archetype A covers every twin-block exon; outer exons
+  are the one-message case.
+* **Spliced route** (face route-rate vs exon true mature density): median ratio **1.00-1.03 at
+  every gene type with flux, capture ON and OFF alike** (cap ON 1.010, capnasc ON 1.016) — the
+  identity is essentially exact and capture-proof. `clean` ON reads 1.26 on 92 thin pairs
+  (unprobed under capture — counting noise); `silent` is all-zero (the route cannot produce a
+  false positive).
+* **Contiguous route** (boundary vs exon true nascent density): **1.02 off capture**;
+  **0.775 at `capnasc` ON** — the probe-shoulder gradient: the boundary sits at the enrichment
+  shoulder while the exon interior is fully enriched. Real, directional, ~25 %; the honest cost
+  of the contiguous transfer under capture (the anchor's recorded "+12 % mature offset stays in
+  the width" is the same family).
+
+## THE RUNG-2 DESIGN (owner direction): the FACE-COMPOSED COMPOSITION TRANSFER
+
+**The whole face composition transfers** — spliced RNA + unspliced RNA + gDNA at the face, as
+FRACTIONS, to the exon. Every ratio is formed WITHIN one locale, so the surviving assumption is
+only that enrichment is COMPONENT-BLIND at each locale separately (each ratio cancels its own
+locale's enrichment) — strictly weaker than the anchor's cross-locale equality. The one named
+residual premise: spliced vs unspliced fragments at the SAME face must share capture affinity
+(violated by deliberate junction probes); it is a library-measurable contrast (the sj-depletion
+family) and can later feed a derived width — never a flank-pair fit.
+
+**The construction** (all ingredients exist). At a licensed face `b` into exon `e`, with
+densities g (gDNA), r (unspliced RNA), s (spliced route, route-summed):
+`n_u = g·A_g + r·A_r` (the crossing count and its face opportunities), the crossing split
+`lam_u = log(g·A_g) − log(r·A_r)` constrained by rung 1's intron row, and `s` measured with
+counting width. The exon's composition claim is the MONOTONE map
+
+    lam_e(lam_u) = log( n_u·sigma(lam_u)·E_g^e / A_g )
+                 − log( ( n_u·(1−sigma(lam_u))/A_r + s ) · E_r^e )
+
+and the exon row = the intron row PUSHED FORWARD through this map (change of variables on the
+grid), composed with the flux count's marginal (quantile nodes, the honest-marginal pattern).
+⭐ **The structural ceiling**: as `lam_u -> +inf` (crossing pure gDNA), `lam_e` SATURATES at
+`log(n_u·E_g^e/A_g) − log(s·E_r^e)` — certified flux structurally CAPS the exon's claimable
+`f_g`. No prior mechanism had this; it is the certified-RNA bound done in composition space.
+gDNA needs no separate lane — it rides inside the transferred composition, and no level ever
+crosses a locale.
+
+**Derived width, per the owner's list** — count precision (`n_u`, `n_s` trigamma), length/
+opportunity conversions (`A_g`, `A_r`, `A_sj`, `E^e` — exact geometry on the panel; the fl
+model's priced uncertainty on real data), the split evidence's own width (the intron row,
+propagated through the map's Jacobian — automatic in the pushforward), and the named premise
+residual (recorded, initially unpriced, later a measured library contrast). No fitted pairs.
+
+**Known-by-construction behaviour**: `g00` — intron row ≈ all-RNA, transfers, no false gDNA;
+`silent` genes — no flux + pure-gDNA row -> pure-gDNA claim (true); empty face -> silence; two
+licensed faces -> two rows summed by psi (left face uses the left intron, right the right —
+independent sources; short-exon shared-fragment correlation across faces is a recorded residual);
+outer exons -> one row (the terminus face refuses, archetype B deferred).
+
+## THE ADVERSARIAL PROBE PANELS — built, certified, and the falsification FIRED (2026-09-01)
+
+Two full 30-condition panels beside the benign one, drafted from the GTF (hand-edited-class
+files pending owner review: `test_probes_sparse.bed` — one 125 bp probe centred per exon;
+`test_probes_junction.bed` — one BED12 two-block probe per sj, 62+63 bp, contiguous only in
+cDNA; configs `test_reference_probes_{sparse,junction}.yaml`, ONLY outdir+probes differ).
+Simulated, cached, `slot_truth` certified 30/30 each (the recorded g00-prewarm + `_main`-copy +
+`calibration_oracle.py` recipe). ⭐ The sampler expresses the real chemistry: block overlaps SUM
+within a probe group, so a junction probe enriches spliced fragments over unspliced/gDNA at the
+same face; `gdna_split_penalty` applies on top.
+
+**The route identities on hostile probes (probed gene types, capture-ON; off-capture rows are
+byte-identical across all three panels — the internal control):**
+
+| panel | spliced-route ratio | contiguous ratio |
+|---|---|---|
+| benign (seamless tiling) | 1.00–1.03 | 1.02 (0.78 capnasc-ON) |
+| SPARSE (mid-exon probe) | **0.003** (~300x under-read) | (faces too thin to read) |
+| JUNCTION (sj-spanning) | **24–26x over-read** | **11x** at capnasc-ON |
+
+⭐ The benign 1.00–1.03 was PROBE-PLACEMENT LUCK, as the owner suspected — the anchor's
+cross-locale level assumption is off by 2.5 orders of magnitude in one direction on sparse
+probes and 1.4 in the other on junction probes, on the same chromosome, same truth, same tool.
+Unprobed gene types stay ~1.0 on both panels (the break is exactly where probes are).
+
+## RUNG-2 v0 PROTOTYPE — the face-composed transfer, first sweep (benign panel, whole-library)
+
+`t_face` = rung 1 + the exon rows (the intron row transported through the face map; soft flux
+ceiling; silence on an empty face; likelihoods transport with NO Jacobian). Wins where it must:
+`g25 ss.50 ON` 2,556 (silent 43,428, **relay 8,470**); `g50 ss.50 ON` 2,936 (silent 86,453,
+relay 6,695) — face-local composition BEATS the anchor's cross-locale claim on the anchor's own
+friendly ground. Relay keeps `g98`/`g00` ON (900 / 6,017 vs 8,333 / 26,435). Flip falsification
+fires (10,072 -> 54,663 at `g00 ss.50 OFF`).
+⚠ **v0's measured shadows, cause understood**: `g05 ss.50 ON` +8,909 vs silent (the recorded
+misleading-neighbour regime), `g25 ss.50 OFF` +5,399 (mechanism NOT yet dissected), mild
+stranded-ON harm (+150…+330). v0 transports the row at FULL strength through a map built from
+noisy point ingredients (`n_u`, `s`) — **v1's owed derivation is the ingredient width**: the
+counting uncertainty of `n_u` and `s` propagated through the map's Jacobian into a per-face
+widening. Derived, per-face, no constants, no pairs.
+
+## THE PRICING VERDICT ACROSS THREE PROBE WORLDS (whole-library, capture-ON rows)
+
+**The anchor is dead, by measurement, on its own chromosome.** On SPARSE probes the relay
+(carrying the anchor) is catastrophic: `g25 ss.99 ON` **140,424** vs silent 1,415 (**99x harm on
+a stranded row**), `g05 ss.70 ON` 182,421 vs 1,233, `g50 ss.99 ON` 98,585 vs 6,914 — the 300x
+flux under-read becomes a confident wrong level claim that destroys even rows the local solve
+had right. On JUNCTION probes the relay is harmed on EVERY capture-ON row (21,663 vs silent
+1,387 at the `g00 ss.50` zero control). It is good only on the benign panel it was measured on.
+
+**`t_face` is best-or-near-best on nearly every capture-ON row of ALL THREE panels** — the
+owner's robustness expectation confirmed, and stronger: even on the junction panel (the declared
+unmodelable case) it WINS almost every capture-ON row (`g25 ss.50 ON` 2,200 vs silent 22,866;
+`g50 ss.50 ON` 3,113 vs 45,011; `g98 ss.50 ON` 2,318 vs 88,385; every stranded-ON row a small
+win). **Why the graceful degradation is structural**: a probe-affinity asymmetry enters a
+COMPOSITION logarithmically (a 2x spliced-over-unspliced face asymmetry is ~0.7 nats of tilt in
+one component of a ratio), while it enters a LEVEL claim in full (the 25x over-read is 3.2 nats
+applied as a location); and interior depletion cancels inside the exon's own composition
+entirely. Bounded damage vs unbounded damage — the owner's "compromise" is the right currency.
+
+**v0's standing shadows** (each appears on every panel or is panel-shared): benign `g05 ss.50
+ON` +8,909; `g25 ss.50 OFF` +5,399 (OFF rows are shared across panels — ONE defect, not three;
+undissected); sparse `g25 ss.99 ON` +914; mild stranded-ON (+150…+330). The v1 ingredient-width
+derivation targets all of these.
+
+## THE `g25 OFF` DISSECTION — a mechanism worth keeping (2026-09-01)
+
+Concentrated: FIVE exons in the two highest abundance blocks carried ~96 % of the +5.4k. The chain of
+refuted hypotheses, each tested: refit feedback (REFUTED — final-sweep-only delivery is WORSE
+everywhere, and the blind-row wins are legitimately bootstrap-mediated: true row information
+trains the prior, which is where much of the whole-library win compounds); prior training on
+message-shaped widths (REFUTED by the same arm). The REAL mechanism, named by a one-slot psi
+factor replay at slot 258:
+
+    landscape prior: peak at lam = −5.59 (truth), ~8 nats     row: cliff −18 nats AT that peak,
+    flat above −4.6                                           SUM: flat to within 0.1 nat over
+    [0.01, 1) — the factors ANNIHILATE, and psi's point estimate becomes the CENTROID of a
+    vacuous plateau: f = 0.64 where truth is 0.003.
+
+⭐ The lesson, stated generally: **two mildly-conflicting one-sided factors can cancel into a
+flat posterior whose estimator wanders — the failure is not over-claiming but mutual
+annihilation.** The row's cliff POSITION is a measurement (a 13-fragment face, 4-sigma lucky),
+and its honesty is the ingredient width.
+
+## v1 — THE INGREDIENT WIDTH (derived, per face, no constants)
+
+The map's position variance by the delta method: `Var = trigamma(n_u+1/2) + trigamma(n_s+1/2)`
+(the crossing count and the face's spliced count — the two measured map ingredients; the intron
+row's own width is already inside the transported shape, so no double-count). Each face's
+transported row is blurred by ITS OWN variance — a deep face blurs ~0, a 13-fragment face by
+~0.28 nats, which softens the lucky cliff into a slope the prior's 8 nats overrule. Decisive-set
+verdict: `g25 OFF` FIXED (12,969 → 8,070, slot 258 lands 0.005 vs truth 0.003); every win
+retained (g50 ON 3,196; junction 2,351; sparse 2,714); the stranded-ON residue FLIPPED TO A WIN
+(`g50 ss.99 ON` 1,544 vs silent 1,610). Standing shadow: `g05 ss.50 ON` (unchanged ~35.6k vs
+silent 26.7k) — a DEFERRED-stratum row (unstranded × ON), the recorded misleading-neighbour
+regime; not a 0.8.0 blocker, owed a dissection eventually.
+
+## v1 CONFIRMED — three probe panels AND THE LADDER (2026-09-01)
+
+Three-panel v1: every v0 win kept; `g25 OFF` residual +500; `g00 ss.50` zero controls now BEAT
+silent on the benign panel; sparse panel worst degradation +582 (relay: 98k–188k harm on nine
+rows); **junction panel: t_face_v1 is the best arm on every capture-ON row** — the bounded-damage
+algebra held under the pathology built to break it.
+
+**THE LADDER (silent / relay / rung1 / t_face_v1), the two halves apart:**
+
+* HARM bar (ss.99): t_face_v1 ≤ silent on 7 of 8 rows (worst residue +406 = +0.5 % at
+  `g05 ON`); at the WORST IN-SCOPE condition `g98 ss.99 ON`: silent 298,597 / relay 456,838 /
+  rung1 294,676 / **t_face_v1 288,774**. `g98 ss.99 OFF`: 109,291 vs silent 126,467 (−14 %).
+* WIN bar (ss.50): `g50 ON` **1,938,411** vs silent 6,141,095 (−68 %, within 8 % of the relay's
+  entire machinery); `g98 ON` 3,077,782 vs 12,030,888 (−74 %; relay 2,433,908 keeps a 26 % lead);
+  `g00 ss.50 OFF` (in-scope zero control) **303,826 vs silent 1,254,145** (−76 %; relay 58,840
+  still ahead); in-scope `g50/g98 ss.50 OFF` −6 % / −15 %.
+* Flip falsification catastrophic everywhere (3.9M at `g00 OFF`). Two-substrate sign agreement
+  holds on both halves.
+
+**Against the thread's original problem statement**: the shipped message layer ADDED +158,241
+fragments (+53 %) at the worst in-scope condition; the two composition-transfer rungs REMOVE
+9,823 (−3.3 %) there instead — while cutting the blind rows by 68–76 % and surviving hostile
+probe designs the shipped relay cannot. The relay's remaining leads are the deferred-blind rows
+and the benign-panel `g00`/`g98-ON` rows where its anchor still profits from probe-placement
+luck (measured as such on the adversarial panels).
+
+## RUNG 2 PROMOTED AND SHIPPED (2026-09-01, owner ruling "proceed, implement, ship")
+
+Landed in `messages/transfer.py` as ONE mechanism beside rung 1: `face_is_licensed` (the
+licence as a PURE predicate — extracted because the integration toy cannot falsify its terminus
+branch, watched), `face_map_lambda` (monotone, flux-capped), `transport_row` (preimage read —
+no Jacobian — then the delta-method ingredient width), and the exon-face block in
+`TransferPolicy.prepare` (two licensed faces sum as independent witnesses; depleted/flat/
+unlicensed faces deliver nothing). Rows ride EVERY sweep — the final-sweep-only citizenship was
+built and REFUTED (true information training the prior bootstrap is where the blind-row value
+compounds). Gates: 7, each written fail-first; watched perturbations: the ceiling dropped from
+the map (fires), the width at half strength (fires), the terminus branch dropped from the
+predicate (fires via the pure gate). Faithfulness: `policy_benchmark.py --policies silent
+transfer` reproduces the harness TO THE FRAGMENT (`g98 ss.99 ON` 288,774; `g50 ss.50 ON`
+1,938,411). Suite 3,747 passed / 8 xfail, 3,755 collected — accounted in CLAUDE.md (one case is
+the owner's own `docs/dev/rename.md`).
+
+## Next
+
+1. The deferred `g05 ss.50 ON` dissection (the standing shadow, out of 0.8.0 scope).
+2. Archetype B (terminus faces), then opposite strands / overlapping isoforms — each its own
+   rung, each entering through the same fail-first discipline.
+3. The adversarial probe panels join the standing benchmark (owner has the two BEDs + configs).
+
+## Housekeeping
+
+The prototype harnesses (`stage0`-`stage5`, rung-2 stage 0) live in the session scratchpad; the
+shipped gates and instruments carry everything load-bearing, so they die with the session by
+design.
