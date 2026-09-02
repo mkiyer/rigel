@@ -209,6 +209,8 @@ def test_drained_frame_still_enforces_sum_to_full(oracle_scenario, tmp_path):
     orc = OracleTruth.from_bam(
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_ds"
     )
-    np.asarray(orc.parts["gdna"].region_contained_count).flat[0] += 1  # part only: breaks the identity
+    np.asarray(orc.parts["gdna"].region_contained_count).flat[0] += (
+        1  # part only: breaks the identity
+    )
     with pytest.raises(AssertionError, match="sum to full"):
         OracleTruth.from_parts(_as_drained(orc.full), orc.parts)

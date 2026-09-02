@@ -193,3 +193,48 @@ def test_the_shipped_panel_configs_all_load(tmp_path):
     for c in cfgs:
         p = PANEL.Panel(c)
         assert p.dir.name and p.index.name, f"{c.name} produced an empty path"
+
+
+# ── the cache stage is COMPLETE (2026-09-02) ─────────────────────────────────────────────────────
+
+
+def test_cache_prewarms_the_zero_gdna_rows_copies_their_main_payload_and_certifies(
+    tmp_path, monkeypatch
+):
+    """⛔ Three steps every scorer needs lived only in a session recipe until 2026-09-02: the `g00` rows
+    are held out of pass-0's sweep and need a per-row pre-warm; their `_main` payload is the scan
+    cache's (the pre-warm never writes it); and `slot_truth.npz` is written only by
+    `calibration_oracle.py`. `cache` must issue all three, and a non-zero certification exit must not
+    stop the workflow (a failed FIELD gate still writes the COMPOSITION table)."""
+    p = PANEL.Panel(_config(tmp_path))
+    for c in ("gdna_g00_ss_0.50_x", "gdna_g50_ss_0.50_x"):
+        (p.dir / c).mkdir(parents=True)
+        (p.dir / c / "sim_oracle.bam").touch()
+        (p.scan_cache / c).mkdir(parents=True)
+        (p.scan_cache / c / "payload.npz").write_bytes(b"scan")
+    issued = []
+    monkeypatch.setattr(
+        PANEL, "run", lambda cmd, *, what: issued.append((what, [str(c) for c in cmd]))
+    )
+
+    class _Done:
+        returncode = 1  # a certification gate "failed" — must be reported, not fatal
+
+    monkeypatch.setattr(PANEL.subprocess, "run", lambda *a, **k: _Done())
+    args = type("A", (), {"jobs": 1, "conditions": None, "force": False})()
+    assert PANEL.cmd_cache(p, args) == 0
+    whats = [w for w, _ in issued]
+    assert any("pre-warm" in w and "gdna_g00_ss_0.50_x" in w for w in whats), whats
+    assert not any("pre-warm" in w and "g50" in w for w in whats), (
+        "only zero-gDNA rows are pre-warmed"
+    )
+    prewarm = next(cmd for w, cmd in issued if "pre-warm" in w)
+    assert "--_prewarm" in prewarm and "gdna_g00_ss_0.50_x" in prewarm
+    assert (p.oracle_cache / "gdna_g00_ss_0.50_x" / "_main" / "payload.npz").read_bytes() == b"scan"
+    assert not (p.oracle_cache / "gdna_g50_ss_0.50_x" / "_main").exists()
+
+
+def test_the_zero_gdna_predicate_names_both_conventions():
+    assert PANEL._is_zero_gdna("gdna_g00_ss_0.99_nrna_file_capture_on")
+    assert PANEL._is_zero_gdna("gdna_none_ss_0.50_nrna_none")
+    assert not PANEL._is_zero_gdna("gdna_g05_ss_0.50_nrna_file_capture_off")

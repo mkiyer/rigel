@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -131,10 +132,18 @@ def cmd_status(p: Panel, args) -> int:
         ("build", p.index.is_dir(), "index", p.index),
         ("build", p.probes.is_file(), "capture probes", p.probes),
         ("simulate", bool(conds), f"{len(conds)}/{p.planned or '?'} conditions", p.dir),
-        ("cache", n_scan >= len(conds) and n_scan > 0, f"scan cache {n_scan}/{len(conds)}",
-         p.scan_cache),
-        ("cache", n_oracle >= len(conds) and n_oracle > 0, f"oracle cache {n_oracle}/{len(conds)}",
-         p.oracle_cache),
+        (
+            "cache",
+            n_scan >= len(conds) and n_scan > 0,
+            f"scan cache {n_scan}/{len(conds)}",
+            p.scan_cache,
+        ),
+        (
+            "cache",
+            n_oracle >= len(conds) and n_oracle > 0,
+            f"oracle cache {n_oracle}/{len(conds)}",
+            p.oracle_cache,
+        ),
         ("score", bool(arms), f"{len(arms)} arm file(s)", p.arms),
     ]
     for stage, ok, what, path in rows:
@@ -151,20 +160,45 @@ def cmd_status(p: Panel, args) -> int:
 def cmd_build(p: Panel, args) -> int:
     """Reference, index, capture probes. ⚠ The reference build is NOT driven from the panel config —
     it needs the source genome/GTF the panel was carved from, which the panel config does not name."""
-    need(p.genome.is_file() and p.gtf.is_file(),
-         f"the reference ({p.genome}, {p.gtf})",
-         f"python {SIM / 'build_suite_reference.py'} --fasta <source.fa> --gtf <source.gtf> "
-         f"--refs chr21 chr22 --ercc -o {p.reference}")
+    need(
+        p.genome.is_file() and p.gtf.is_file(),
+        f"the reference ({p.genome}, {p.gtf})",
+        f"python {SIM / 'build_suite_reference.py'} --fasta <source.fa> --gtf <source.gtf> "
+        f"--refs chr21 chr22 --ercc -o {p.reference}",
+    )
     if not p.index.is_dir() or args.force:
-        run(["rigel", "index", "--fasta", p.genome, "--gtf", p.gtf,
-             "--collapse-duplicate-transcripts", "--no-mappability", "--no-tsv", "-o", p.index],
-            what=f"index -> {p.index}")
+        run(
+            [
+                "rigel",
+                "index",
+                "--fasta",
+                p.genome,
+                "--gtf",
+                p.gtf,
+                "--collapse-duplicate-transcripts",
+                "--no-mappability",
+                "--no-tsv",
+                "-o",
+                p.index,
+            ],
+            what=f"index -> {p.index}",
+        )
     else:
         print(f"   ✔ index exists: {p.index}  (--force to rebuild)")
     if not p.probes.is_file() or args.force:
-        run([sys.executable, SIM / "design_suite_probes.py", "--gtf", p.gtf,
-             "-o", p.probes, "--capture-fraction", "0.5"],
-            what=f"capture probes -> {p.probes}")
+        run(
+            [
+                sys.executable,
+                SIM / "design_suite_probes.py",
+                "--gtf",
+                p.gtf,
+                "-o",
+                p.probes,
+                "--capture-fraction",
+                "0.5",
+            ],
+            what=f"capture probes -> {p.probes}",
+        )
     else:
         print(f"   ✔ probes exist: {p.probes}  (--force to rebuild)")
     return 0
@@ -172,8 +206,10 @@ def cmd_build(p: Panel, args) -> int:
 
 def cmd_simulate(p: Panel, args) -> int:
     need(p.index.is_dir(), f"the index ({p.index})", "panel.py build")
-    run([sys.executable, SIM / "simulate_reads.py", "--config", p.config, "-j", str(args.jobs)],
-        what=f"simulate -> {p.dir}")
+    run(
+        [sys.executable, SIM / "simulate_reads.py", "--config", p.config, "-j", str(args.jobs)],
+        what=f"simulate -> {p.dir}",
+    )
     return 0
 
 
@@ -192,38 +228,144 @@ def cmd_cache(p: Panel, args) -> int:
     #    reused. Measured 2026-08-19: after the chimera repair every condition reported `cached / skip`
     #    and the rebuild was a no-op (`TRAPS: a-transcript-predicate-must-not-silently-drop-a-molecule`
     #    is the change that exposed it).
-    run([sys.executable, DESIGN / "build_scan_cache.py", "--index", p.index, "--suite", p.dir,
-         "--out", p.scan_cache, *(["--force"] if args.force else []),
-         *(["--conditions", *conds] if args.conditions else [])],
-        what=f"scan cache -> {p.scan_cache}")
+    run(
+        [
+            sys.executable,
+            DESIGN / "build_scan_cache.py",
+            "--index",
+            p.index,
+            "--suite",
+            p.dir,
+            "--out",
+            p.scan_cache,
+            *(["--force"] if args.force else []),
+            *(["--conditions", *conds] if args.conditions else []),
+        ],
+        what=f"scan cache -> {p.scan_cache}",
+    )
     # ⭐ `--jobs` reaches the oracle stage too. Building one condition's cache is a BAM split plus four
     #    scans, ~95 % of this stage's wall clock, and it saturates exactly ONE core at ~2 GB of real
     #    memory — so the stage is core-bound and shards cleanly. Measured 2026-08-19: serial, the stage
     #    used 1 of 16 cores.
-    run([sys.executable, DESIGN / "pass0_vs_oracle.py", "--suite", p.dir, "--index", p.index,
-         "--oracle-cache", p.oracle_cache, "--jobs", str(args.jobs),
-         *(["--conditions", *conds] if args.conditions else [])],
-        what=f"oracle cache (origin-split truth) -> {p.oracle_cache}")
+    run(
+        [
+            sys.executable,
+            DESIGN / "pass0_vs_oracle.py",
+            "--suite",
+            p.dir,
+            "--index",
+            p.index,
+            "--oracle-cache",
+            p.oracle_cache,
+            "--jobs",
+            str(args.jobs),
+            *(["--conditions", *conds] if args.conditions else []),
+        ],
+        what=f"oracle cache (origin-split truth) -> {p.oracle_cache}",
+    )
+    # ⭐ The zero-gDNA rows are HELD OUT of pass-0's scoring sweep (a saturated row cannot be scored),
+    #    so their oracle partitions must be pre-warmed one by one, and their `_main` payload — which the
+    #    pre-warm never writes — is the scan cache's own (value-identical up to accumulation-order ULPs).
+    #    Until 2026-09-02 these two steps and the certification below lived only in a session recipe.
+    for c in conds:
+        if not _is_zero_gdna(c):
+            continue
+        if not all(
+            (p.oracle_cache / c / part / "payload.npz").is_file()
+            for part in ORACLE_PARTS
+            if part != "_main"
+        ):
+            run(
+                [
+                    sys.executable,
+                    DESIGN / "pass0_vs_oracle.py",
+                    "--suite",
+                    p.dir,
+                    "--index",
+                    p.index,
+                    "--oracle-cache",
+                    p.oracle_cache,
+                    "--_prewarm",
+                    c,
+                ],
+                what=f"oracle cache, zero-gDNA row {c} (pre-warm)",
+            )
+        main = p.oracle_cache / c / "_main"
+        if not (main / "payload.npz").is_file():
+            need(
+                (p.scan_cache / c / "payload.npz").is_file(),
+                f"the scan cache of {c}",
+                "panel.py cache",
+            )
+            shutil.copytree(p.scan_cache / c, main, dirs_exist_ok=True)
+    # ⭐ CERTIFY: every scoring instrument reads `slot_truth.npz`, which only `calibration_oracle.py`
+    #    writes — and it exits non-zero when a FIELD gate fails while still writing the COMPOSITION-level
+    #    table, so its exit code is reported, not fatal.
+    rc = subprocess.run(
+        [
+            sys.executable,
+            str(DESIGN / "calibration_oracle.py"),
+            "--suite",
+            str(p.dir),
+            "--index",
+            str(p.index),
+        ],
+        cwd=str(REPO),
+    ).returncode
+    n_cert = sum((p.oracle_cache / c / "slot_truth.npz").is_file() for c in conds)
+    print(
+        f"\n   slot_truth certified: {n_cert}/{len(conds)}"
+        + (
+            ""
+            if rc == 0
+            else "   (⚠ a certification gate failed on some row — read the table above)"
+        )
+    )
     return 0
+
+
+def _is_zero_gdna(condition: str) -> bool:
+    """A condition simulated with NO gDNA — the `g00` rung of the ladder and test-chromosome sweeps
+    (`gdna_g00_...`), and the older `gdna_none_...` naming. Its truth is exactly zero, so pass-0 holds
+    it out of its scoring sweep."""
+    return condition.startswith(("gdna_g00_", "gdna_none_"))
 
 
 def cmd_score(p: Panel, args) -> int:
     need(p.oracle_cache.is_dir(), f"the oracle cache ({p.oracle_cache})", "panel.py cache")
     p.arms.mkdir(parents=True, exist_ok=True)
     for arm in args.arms:
-        run([sys.executable, DESIGN / "quant_accuracy.py", "--arm", arm, "--jobs", str(args.jobs),
-             "--suite", p.dir, "--index", p.index, "--oracle-cache", p.oracle_cache,
-             "--out", p.arms / f"qa_{p.dir.name}_{arm}.jsonl",
-             *(["--conditions", *args.conditions] if args.conditions else [])],
-            what=f"score --arm {arm}")
+        run(
+            [
+                sys.executable,
+                DESIGN / "quant_accuracy.py",
+                "--arm",
+                arm,
+                "--jobs",
+                str(args.jobs),
+                "--suite",
+                p.dir,
+                "--index",
+                p.index,
+                "--oracle-cache",
+                p.oracle_cache,
+                "--out",
+                p.arms / f"qa_{p.dir.name}_{arm}.jsonl",
+                *(["--conditions", *args.conditions] if args.conditions else []),
+            ],
+            what=f"score --arm {arm}",
+        )
     return 0
 
 
 def cmd_report(p: Panel, args) -> int:
     files = [p.arms / f"qa_{p.dir.name}_{a}.jsonl" for a in args.arms]
     missing = [f for f in files if not f.is_file()]
-    need(not missing, f"arm file(s) {[m.name for m in missing]}",
-         f"panel.py score --arms {' '.join(args.arms)}")
+    need(
+        not missing,
+        f"arm file(s) {[m.name for m in missing]}",
+        f"panel.py score --arms {' '.join(args.arms)}",
+    )
     run([sys.executable, DESIGN / "quant_accuracy.py", "--report", *files], what="report")
     return 0
 
@@ -239,14 +381,22 @@ def main() -> int:
     ap.add_argument("--index", type=Path, default=None, help="override the derived index path")
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--conditions", nargs="*", default=None, help="a subset, for a quick loop")
-    ap.add_argument("--arms", nargs="+", default=["base"],
-                    help="quant_accuracy arms: base, oracle, noop, base_reseed, oracle_gdna, …")
+    ap.add_argument(
+        "--arms",
+        nargs="+",
+        default=["base"],
+        help="quant_accuracy arms: base, oracle, noop, base_reseed, oracle_gdna, …",
+    )
     ap.add_argument("--force", action="store_true", help="rebuild a stage that already exists")
     args = ap.parse_args()
     p = Panel(args.config, args.index)
     return {
-        "status": cmd_status, "build": cmd_build, "simulate": cmd_simulate,
-        "cache": cmd_cache, "score": cmd_score, "report": cmd_report,
+        "status": cmd_status,
+        "build": cmd_build,
+        "simulate": cmd_simulate,
+        "cache": cmd_cache,
+        "score": cmd_score,
+        "report": cmd_report,
     }[args.stage](p, args)
 
 

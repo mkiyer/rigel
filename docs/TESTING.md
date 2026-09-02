@@ -364,9 +364,11 @@ isoform block (raised from 200 k to hold per-transcript depth as the chromosome 
 ### ⭐⭐⭐ THE COMMANDS — from a hand-edited GTF to a scored benchmark
 
 Everything derived is rebuilt from the one YAML. Run in order; each stage is resumable and
-`panel.py status` names the next one. ⚠ Three steps the `cache` stage does not do yet: the six `g00`
-rows are held out of the oracle sweep and need a pre-warm plus a `_main` copy from the scan cache, and
-`cache` does not certify — `calibration_oracle.py` writes `slot_truth.npz`.
+`panel.py status` names the next one. ⭐ Since 2026-09-02 the `cache` stage is COMPLETE: it builds both
+caches, pre-warms the six `g00` rows (held out of the oracle sweep) and copies their `_main` payload from
+the scan cache, then certifies (`calibration_oracle.py` writes `slot_truth.npz`; a failed FIELD gate is
+reported, not fatal — the row is COMPOSITION-certified). The expanded form is kept below for a session
+that needs one step alone.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel

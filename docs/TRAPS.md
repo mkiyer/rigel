@@ -38,7 +38,7 @@ times, most recently during this file's own compaction (2026-08-22).
 
 **F. Domain facts that read like defects** — `specificity-and-sense-are-complements` · `strand-measures-the-tilt` · `a-linear-likelihood-emits-a-sign` · `amplitude-fades-influence-does-not` · `a-pooled-conversion-applied-per-component` · `an-identity-with-a-qualifier` · `equal-lengths-carry-no-composition` · `capture-is-1000x-on-exons` · `capture-selects-for-length` · `on-target-by-start-is-geometry` · `real-data-is-a-test-input` · `eff-lengths-do-not-cancel-at-an-end` · `configured-lengths-are-not-realised` · `mature-rna-never-crosses-a-boundary` · `a-boundary-with-rna-is-not-an-sj` · `the-panel-enriches-nascent-by-its-own-probes`
 
-**G. Process** — `no-magic-numbers` · `one-thing-varied` · `converge-and-delete` · `the-source-does-not-cite-docs` · `running-an-arm-is-a-fresh-process` · `shard-an-arm-sweep-by-condition` · `no-enumeration-without-a-census`
+**G. Process** — `no-magic-numbers` · `one-thing-varied` · `a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism` · `converge-and-delete` · `the-source-does-not-cite-docs` · `running-an-arm-is-a-fresh-process` · `shard-an-arm-sweep-by-condition` · `no-enumeration-without-a-census`
 
 ---
 
@@ -1548,6 +1548,16 @@ divisor must be derived from the deposit rule and unit-tested against brute-forc
 **one-thing-varied. One thing varied per experiment**, with the falsification test written first and
 verified failing,
 and a baseline re-recorded from the current tree in the same session.
+
+**a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism. A prototype harness that
+subclasses the shipped policy and calls the parent's `prepare` delivers the LANDED mechanism too, the
+moment it lands** — and then double-counts its own copy. Measured 2026-09-02 on item 1 of the message
+rungs: the harness read 3,032 fragments where the shipped policy read 3,082, and three innocent
+candidates (the quadrature node set, the width's exact-vs-asymptotic form, the reference clip) were
+chased before the double delivery was found; forcing the parent's message off restored identity to the
+fragment. So a landing's faithfulness check compares `src` before against `src` after, and a harness
+built on the parent class is retired the day the parent gains what it prototyped.
+*Sibling:* `one-thing-varied`.
 
 **converge-and-delete. Converge and delete.** No legacy, no backwards compatibility, no speculative
 code. Code kept "for

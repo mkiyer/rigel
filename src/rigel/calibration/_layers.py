@@ -148,9 +148,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "messages/variance",
             "messages/silent",
             "messages/relay",
-            # `messages/transfer` is rung 1 of the ground-up rebuild (owner ruling 2026-09-01):
-            # the intron -> intron|exon boundary composition transfer, one hop, factory rows
-            # blurred by the measured pair dispersion.
+            # `messages/transfer` is the composition-transfer policy (the ground-up rebuild,
+            # owner rulings 2026-09-01/02) and `messages/transfer_rows` its pure row constructors.
+            "messages/transfer_rows",
             "messages/transfer",
         ),
     ),

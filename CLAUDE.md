@@ -305,15 +305,14 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,760 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-02 with item 1 of the message rungs — the exon → intron|exon boundary message — landed in
-the transfer policy). Account it from **3,757** by **+3**: the three item-1 gates in
-`tests/calibration/test_transfer_policy.py` (deadband silence, the licensed-face recompute, the
-splice-out row's analytic properties); no file was added. Before that, from **3,748** — the rung-3
-count — by **+9**: the render-sync gate file `tests/test_test_reference_renders.py` (+5 own cases,
-+2 parametrised gates) and two dev notes (+1 each). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
-gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution
-(3,768 collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,768 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-02 after the cleanup session that followed item 1 of the message rungs). Account it from
+**3,760** — the item-1 count — by **+8**: `messages/transfer_rows.py`, the row constructors split
+out of the transfer policy (+3: jargon, docs-boundary, layering), `scripts/design/policy_prototype.py`,
+the promoted prototype harness (+4), two gates on `panel.py cache`'s completed recipe
+(`tests/test_panel_workflow.py`, +2), and the folded dev note `docs/dev/ISOFORM_BLOCK.md` (−1).
+⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file deltas, and a bracket-matched
+`--collect-only` confirms the attribution (3,776 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
@@ -369,6 +368,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | **⭐⭐⭐ START A SESSION HERE** | |
 | `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with all five partitions, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test` and costs **~1 hour measured** (7.5 CPU-hours, dominated by `ladder_arm_ab.py`) — run it after a deposit-rule change or a default flip, never every session. `--self-test` 8/8 |
 | **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
+| `design/policy_prototype.py` | ⭐⭐⭐ **HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness every message rung is developed on before `src/`. Installs a class from `--module` in place of the shipped policy for the `transfer` arm; whole-library and per-type tables, `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for any of `silent` / `relay` / `message`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 21/21 |

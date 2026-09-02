@@ -20,6 +20,21 @@ because a graveyard row without its number is an invitation to rebuild.
 ## OPEN
 
 
+### splice-out-premise-bias-uncorrected
+`priority: later · kind: decision · stamped: 2026-09-02`
+**The exon → intron|exon boundary message assumes spliced and unspliced fragments at one face share
+capture affinity, and the assumption is MEASURED to fail as a BIAS under capture — recorded, not
+corrected.** The two-witness estimator (`messages/transfer_rows.splice_out_row`'s premise: the exon's
+and the boundary's own strand solves imply the face's spliced-to-unspliced ratio, the face measured
+one) reads `log a ≈ 0` off capture, `+0.28` under benign capture (the enrichment shoulder — the
+contiguous ratio `DESIGN.md` §6b.2 measured at 0.775, seen from the spliced side), `+0.78` on
+junction probes, each with negligible spread. A fitted widening therefore does nothing (measured
+identical to a few fragments). A bias correction would subtract a fitted level — the kind of
+cross-locale fudge the rebuild exists to avoid — and is the owner's call; re-derive with the
+estimator before deciding (the session harness `item1_proto.py`'s `PREMISE` arm carries it; promote
+it if the decision is taken up). Cost of leaving it: the message over-claims gDNA at nascent-bearing
+probed boundaries by ~`a` in the ratio, bounded by saturation at pure gDNA.
+
 ### gdna-landscape-trains-on-false-positives
 `priority: now · kind: defect+question · stamped: 2026-09-02 (owner: "figure out the implications")`
 **At zero-gDNA conditions the fitted gDNA landscape is trained ENTIRELY on pass-1 false

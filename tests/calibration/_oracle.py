@@ -453,7 +453,9 @@ class OracleTruth:
         else:
             for bank, g in leak.items():
                 if g != 0:
-                    raise AssertionError(f"oracle INVALID: gdna partition has {g} deposits in {bank}.")
+                    raise AssertionError(
+                        f"oracle INVALID: gdna partition has {g} deposits in {bank}."
+                    )
 
     # ---- per-REGION TRUE counts on the accumulator basis ----
     def region_unspliced(self):

@@ -32,11 +32,13 @@ Finishing rungs 1 and 2 (owner: high priority, first):
 | 3 | **the exon solve with every face speaking** | both faces' incoming rows plus the exon's own evidence, once item 1 exists on both sides; the two-witness sum re-priced | ☐ |
 | 4 | the factory on a region carrying BOTH exon and intron bits (raised 2026-09-02: today the factory runs only where no exon bit is set) | whether the density-against-background measurement is valid there and under capture | ☐ when first needed |
 
+⭐ ORDER (owner, end of 2026-09-02): item 2, then rung 4's terminus case (items 5–9), then item 3.
+
 Rung 4, one structure per step (each step = one YAML change, one licence or message):
 
 | # | boundary case | structure | what must be derived | state |
 |---|---|---|---|---|
-| 5 | **exon\|exon boundary WITH a terminus, solved from the OUTSIDE flank** | `altstart` (present) | the orientation table (TSS+/TES− body right, TES+/TSS− body left; mixed → no side), the opportunity shift, the solve; verified per object, then with orientation reversed | ☐ after items 1–3 |
+| 5 | **exon\|exon boundary WITH a terminus, solved from the OUTSIDE flank** | `altstart` (present) | the orientation table (TSS+/TES− body right, TES+/TSS− body left; mixed → no side), the opportunity shift, the solve; verified per object, then with orientation reversed | ☐ after item 2 |
 | 6 | the region INSIDE the terminus | `altstart` | what, if anything, crosses into it (a level bound was derived and REFUTED on the sparse panel — record, do not re-litigate without a new measurement) | ☐ |
 | 7 | exon\|exon boundary at an alternative SPLICE SITE | add `altss` | the crossing loses the transcript that splices out (join vs leave direction); the composed transport was prototyped and measured neutral on the ladder | ☐ |
 | 8 | a region WALLED by two termini | add `nest` | what reaches it; measured 2026-09-02: the refit prior already serves it (0.666 vs 0.630) | ☐ |
@@ -51,7 +53,9 @@ locus, the AMBIG tilt channel.
 * The rung-4 prototype (`rung4_proto.py`, session scratchpad 2026-09-02): composed join-only transport
   NEUTRAL on the ladder (worst 1.006×/1.008×, −6 % at `g00 ss.50 OFF`); the inside bound REFUTED
   (in-scope +1.3 %, sparse probes +8 %); flips fire. Its pieces re-enter only as items 5–8 earn them.
-* The census instruments (`exon_exon_census.py`, `terminus_pair_gap.py`, `directed_reach_census.py`)
-  live in the same scratchpad; promotion into `scripts/design/` with `--self-test` is owed when item 5
-  starts.
-* `panel.py cache` lacks the g00 pre-warm / `_main` copy / certify steps (recipe in `TESTING.md` §0a).
+* The rung-4 census instruments (an exon|exon boundary census by flag class, a directed
+  reachability census, a terminus pair-gap measurement on certified truth) lived in a session scratchpad
+  and are gone; their findings are in the thread record's RUNG 4 sections and are re-derivable from
+  `slot_truth.npz` + the chain in an afternoon. The generic prototype harness survived as
+  `scripts/design/policy_prototype.py`.
+* `panel.py cache` now pre-warms the g00 rows, copies `_main` and certifies (2026-09-02).

@@ -261,7 +261,7 @@ def test_the_edge_bound_row_is_one_sided_and_vacuous_at_zero():
     enrichment explains an excess), the edge count's own Poisson tail below it (the sign
     certificate makes the bias direction structural), and IDENTICALLY vacuous at n_b = 0 —
     a zero edge can never manufacture a claim."""
-    from rigel.calibration.messages.transfer import edge_bound_row
+    from rigel.calibration.messages.transfer_rows import edge_bound_row
 
     lam = np.linspace(-10, 10, 401)
     n_b, n_e, a_g_b, a_g_e = 30.0, 800.0, 200.0, 780.0
@@ -283,7 +283,7 @@ def test_the_face_licence_refuses_unmeasured_population_changes():
     """The licence predicate, gated DIRECTLY — the integration gate cannot falsify the terminus
     branch on this toy (no terminus-flagged intron|exon face exists there; watched 2026-09-01),
     so the pure function carries the falsification instead."""
-    from rigel.calibration.messages.transfer import face_is_licensed
+    from rigel.calibration.messages.transfer_rows import face_is_licensed
     from rigel.calibration.splice_graph import (
         FLAG_TES_NEG,
         FLAG_TES_POS,
@@ -303,7 +303,7 @@ def test_the_face_map_is_monotone_and_flux_capped():
     """The map lam_e(lam_u) is monotone nondecreasing; a measured spliced density CAPS the
     exon's claimable f_g at the closed-form ceiling; s = 0 degenerates to a pure shift by the
     opportunity ratio."""
-    from rigel.calibration.messages.transfer import face_map_lambda
+    from rigel.calibration.messages.transfer_rows import face_map_lambda
 
     lam = np.linspace(-10, 10, 401)
     n_u, A_g_b, A_r_b, A_g_e, A_r_e, s = 40.0, 200.0, 210.0, 800.0, 790.0, 3.0
@@ -326,7 +326,7 @@ def test_the_ingredient_width_adds_the_counting_variance():
     watched 2026-09-01)."""
     from scipy.special import polygamma
 
-    from rigel.calibration.messages.transfer import transport_row
+    from rigel.calibration.messages.transfer_rows import transport_row
 
     lam = np.linspace(-10, 10, 401)
     row = -0.5 * (lam - 0.8) ** 2  # unit-variance Gaussian factor
@@ -572,7 +572,7 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
     mode sits at f_b = f_E (U+S)/U — the owner's arithmetic with the enrichment ratio cancelled;
     (ii) more gDNA at the boundary than in the exon whenever S > 0 (the reversed subtraction cannot
     pass); (iii) the marginal over log rho is WIDER at a thin face than at a deep one."""
-    from rigel.calibration.messages.transfer import splice_out_row
+    from rigel.calibration.messages.transfer_rows import splice_out_row
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))

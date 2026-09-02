@@ -595,7 +595,10 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
 
 
 def calibration_inputs(
-    cache: ScanCache, index: "TranscriptIndex", *, drain_seed: int | None = None,
+    cache: ScanCache,
+    index: "TranscriptIndex",
+    *,
+    drain_seed: int | None = None,
     lift_out: dict | None = None,
 ) -> dict:
     """Exactly the keyword arguments `calibrate` needs, **in PRODUCTION'S FRAME**.
