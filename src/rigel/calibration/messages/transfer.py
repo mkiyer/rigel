@@ -68,10 +68,41 @@ from ..splice_graph import (
 )
 from . import NeighbourState, PsiMessage, StepContext
 
-__all__ = ["TransferPolicy", "face_is_licensed", "face_map_lambda", "transport_row"]
+__all__ = [
+    "TransferPolicy",
+    "edge_bound_row",
+    "face_is_licensed",
+    "face_map_lambda",
+    "transport_row",
+]
 
 _EPS = 1.0e-9
 _TERM = _TSS_POS | _TSS_NEG | _TES_POS | _TES_NEG
+
+
+def edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e):
+    """RUNG 3 — the intergenic|exon EDGE's claim, LOWER BOUND ONLY (owner ruling 2026-09-02:
+    the enrichment-ceiling upper side is refused as over-engineering, and the zero-edge
+    residual at zero-gDNA libraries is an ACCEPTED error until something clearly better exists).
+
+    The edge's crossing is structurally pure gDNA (certified 0.0 RNA on every panel), and by
+    the documented tool-scope assumption — probe panels neither target intergenic sequence at
+    gene boundaries nor trail past annotated ends — an exon is at-least-as-enriched as its own
+    edge, so the bias direction is STRUCTURAL: the edge under-reads, never over-reads. The
+    honest claim is therefore the PROFILE likelihood over the nuisance enrichment ``s >= 1``:
+    ``sup_s Pois(n_b; c(lam)/s)`` with ``c = sigma(lam)·n_e·A_g^edge/E_g^exon`` — exactly 0
+    wherever ``c >= n_b`` (some enrichment explains any excess) and the edge count's own
+    one-sided Poisson tail ``n_b·log(c/n_b) − (c − n_b)`` below it. At ``n_b = 0`` the row is
+    identically zero: a zero edge is VACUOUS, never a claim (measured: near-zero rows perturb
+    flat posteriors through refit amplification, so nothing below the profile's own content may
+    be delivered)."""
+    lam = np.asarray(lam, np.float64)
+    n_b = float(n_b)
+    if not n_b > 0.0:
+        return np.zeros_like(lam)
+    sig = 1.0 / (1.0 + np.exp(-lam))
+    c = sig * float(n_e) * float(a_g_b) / float(a_g_e)
+    return np.where(c >= n_b, 0.0, n_b * np.log(np.maximum(c, 1e-300) / n_b) - (c - n_b))
 
 
 def face_is_licensed(flags_b, fp_e, fn_e, fp_i, fn_i) -> bool:
@@ -193,6 +224,21 @@ class TransferPolicy:
                 n_s = float((sc_hi if entering_hi else sc_lo)[b])
                 le = face_map_lambda(lam, n_u[b], a_g[b], a_r[b], a_g[e], a_r[e], s)
                 r = transport_row(row_i, lam, le, n_u[b], n_s)
+                add = r if add is None else add + r
+            # ── RUNG 3: the intergenic|exon EDGE faces, lower bound only ─────────────────
+            is_intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
+            for b in (left[e], right[e]):
+                if b < 0 or not is_bnd[b]:
+                    continue
+                o = left[b] if right[b] == e else right[b]
+                if o < 0 or not is_intergenic[o]:
+                    continue  # not a gene edge
+                if not (n_u[b] > 0 and a_g[b] > 0 and a_g[e] > 0):
+                    continue  # a zero edge is vacuous by the profile — silence, never ~0 rows
+                r = edge_bound_row(lam, n_u[b], n_u[e], a_g[b], a_g[e])
+                if np.ptp(r) <= _EPS:
+                    continue
+                r = r - r.max()
                 add = r if add is None else add + r
             if add is not None:
                 rows[e] = add - add.max()

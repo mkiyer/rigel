@@ -485,15 +485,108 @@ transfer` reproduces the harness TO THE FRAGMENT (`g98 ss.99 ON` 288,774; `g50 s
 1,938,411). Suite 3,747 passed / 8 xfail, 3,755 collected — accounted in CLAUDE.md (one case is
 the owner's own `docs/dev/rename.md`).
 
+# RUNG 3 — ARCHETYPE B case 1: the intergenic|exon EDGE (owner notes 2026-09-02)
+
+Owner rulings (2026-09-02): the policy is INCOMPLETE and will not ship until terminus faces are
+addressed; start with the intergenic|exon edge. Two design concerns RULED and absorbed: a biased
+imputation mode cannot be rescued by a penalty (price bias vs benefit), and a single per-library
+enrichment dispersion is the wrong model for a probed/unprobed/placement MIXTURE — the learned
+enrichment structure is the LANDSCAPE's job, available only after a pass (the circularity the
+refit bootstrap already resolves). Further rulings: `r ~ 1` rests on a DOCUMENTED TOOL-SCOPE
+ASSUMPTION — probe panels do not target intergenic boundaries or trail off annotated transcript
+ends — with discrete counting randomness around 1; and the substrate gains SINGLE-EXON
+transcripts (owner-approved; Claude authored).
+
+## Stage 0 (certified, no solver, all four panels)
+
+* **(i) The structural premise holds EXACTLY**: certified RNA crossing intergenic|exon
+  boundaries = 0.0 on every condition of every panel. (The recorded caution stands:
+  `strand_evidence` refuses struct-lock CERTAINTY at the G1 boundary — ragged TSS/read-through
+  are the real-data leak class — so the edge always speaks as a counted claim with width.)
+* **(ii) The edge-level identity** (edge crossing density vs exon true gDNA density): **OFF
+  capture 0.96–1.08 everywhere**; under capture a probe-design SPECTRUM — benign probed
+  0.77–0.79, junction probed 0.16–0.19, sparse probed **0.004**, unprobed ~1.0–1.2, ladder ON
+  pooled 0.43. The step is unknowable a priori; and the ratio never meaningfully exceeds 1 —
+  **the bias has a KNOWN SIGN** (probes target exons, so an exon is at-least-as-enriched as its
+  own edge crossing).
+* **(iii) The census (ladder)**: 974 exons with edge+intron faces, **1,250 edge-only**
+  (single-exon-like), 12,923 intron-only, 8,871 neither. 2,620 edges.
+
+## THE REVISED DESIGN — the sign-certified INTERVAL claim, landscape-spanned
+
+**Pass 1 (prior-free):** the edge delivers a soft ONE-SIDED row — the exon's observed gDNA
+count is at least the edge's expectation (`sigma(lam)·n_e >= ~rho_edge·E_g^e`, cliff below,
+flat above; softness = the two counting trigammas, which also carries the owner's r~1-by-
+counting-randomness ruling). Sign-certified, so bias-immune under any probe design (an
+under-read edge is a WEAKER true bound, never a false one); vacuous at `g00`; strong off
+capture; harmlessly weak at probed exons under capture. The bias-cost half of the pricing
+question drops to ~zero structurally.
+
+**Refit sweeps (landscape fitted):** the claim becomes the MULTIPLICATIVE INTERVAL
+`rho_e^obs ∈ [rho_edge·r_lo, rho_edge·r_hi]`, with `r_lo ~ 1` softened by counting and
+`log r_hi` = the landscape's OWN learned span from the intergenic-anchored depleted level to
+its support top (`log_rho[-1] − log rho_bg` — both derived per refit, no constants; the
+landscape is a nonparametric `logP` over log-rate, so the span is read off the fitted object,
+not off extracted "modes"). Off capture the fitted span is small -> tight intervals; under
+capture it is decades -> weak upper sides at probed loci; a PASS-1-POISONED landscape (g00
+unstranded false positives inflating the support) can only WIDEN `r_hi` — the safe direction.
+
+⭐ **The `g00` kill returns through the MULTIPLICATIVE form, not through a learned narrow
+span**: at `g00` the edge measures `rho_edge ~ 0` over real opportunity (structurally gDNA-only
+crossing), and `[~0, r_hi·~0] = ~0` for ANY `r_hi` — the interval pins the exon at zero
+regardless of enrichment, with softness = the edge count's own Gamma posterior tail. The same
+immunity as before (`mu ~ 0` times any step is `~ 0`), now carried by both sides.
+
+**Documented tool-scope assumption (to MOVE to `DESIGN.md` when this rung ships)**: probe
+panels are assumed not to target intergenic sequence at gene boundaries nor to trail past
+annotated transcript ends; `r ~ 1` (edge enrichment ≤ exon enrichment) rests on it, and a
+panel violating it voids the edge claim's sign certificate.
+
+## The substrate: THE MONO BLOCK (authored 2026-09-02, owner-approved)
+
+20 single-exon transcripts appended to the twin block: one 1 kb exon, 20 kb intergenic, all
+`+`, FOUR types × the five blocks — `mono` (unprobed, expressed), `capmono` (probed),
+`monosilent` / `capmonosilent` (mrna = 0, the false-positive controls) — mrna by the standard
+ladder, nascent 0 by ruling (nothing to model on a single exon). No sj anywhere, so the ONLY
+message source is the gene edge. The generated chromosome was extended to **1.5 Mb** to hold
+them (`GENOME_LENGTH`; ⚠ the blank contig also went to 1.5 Mb — an unintended-but-symmetric
+side effect of the edit, kept; gDNA densities shift accordingly and the full rebuild
+re-baselines). The adversarial probe generator gained the mono types (sparse 55 probes;
+junction unchanged at 30 — a mono gene HAS no junction, so on the junction panel even "probed"
+mono genes are uncapturable, itself a useful stress). ⛔ Every derived test-chromosome artifact
+went stale with the GTF edit; the full rebuild (index + all seven panels + certification) ran
+the same day.
+
 ## Next
 
-1. The deferred `g05 ss.50 ON` dissection (the standing shadow, out of 0.8.0 scope).
-2. Archetype B (terminus faces), then opposite strands / overlapping isoforms — each its own
-   rung, each entering through the same fail-first discipline.
-3. The adversarial probe panels join the standing benchmark (owner has the two BEDs + configs).
+1. Rung-3 prototype once panels certify: arms {off, pass-1 bound only, +landscape interval},
+   flip; falsifiers: sparse probed exons (bound must stay harmless), `g00` kill by refit 1,
+   mono-silent genes clean, stranded ladder rows unmoved.
+2. Then the remaining terminus cases, opposite strands, overlapping isoforms — each a rung.
+3. The deferred `g05 ss.50 ON` dissection stays parked.
 
-## Housekeeping
+## RUNG 3 CLOSED — the LOWER BOUND landed; the ceiling REFUSED (owner ruling, 2026-09-02)
 
-The prototype harnesses (`stage0`-`stage5`, rung-2 stage 0) live in the session scratchpad; the
-shipped gates and instruments carry everything load-bearing, so they die with the session by
-design.
+The owner's ruling after the landscape-poison study: the enrichment-ceiling upper side is
+over-engineering — "take the win, keep the policy clean and simple, accept the error." Landed in
+`messages/transfer.py` as `edge_bound_row` + the edge block: the profile likelihood
+`sup_{s>=1} Pois(n_b; c/s)` (0 wherever the exon's implied gDNA count covers the edge's; the
+edge count's own one-sided Poisson tail below; IDENTICALLY VACUOUS at `n_b = 0` — the
+near-zero-row artifact family is barred by law, not by threshold). 8 gates green, three
+perturbations watched firing (two-sided bound, licence dropped, vacuity dropped). The A/B
+(src-before vs src-after, the official instrument): `g50 ss.50 ON` 2,844 -> 2,734; stranded
+1,772 -> 1,753; **`g00 ss.50 OFF` byte-unchanged at 14,602 — the accepted error stays visibly
+accepted**. New-substrate sweep: unstranded 14/20 wins, stranded worst 1.02x. Suite 3,748 / 8
+xfail (3,756 collected, accounted).
+
+⚠ The harness's earlier `g00` "wins" (9,015; the flip-identical 33) are attributed to
+harness-vs-src implementation divergence amplified by flat-posterior centroid sensitivity —
+prototype artifacts, not mechanism; the src numbers above are the record.
+
+## THE EXPOSED SYSTEMIC ISSUE — raised as `ISSUES: gdna-landscape-trains-on-false-positives`
+
+The landscape-poison study's findings moved to the issue log (the MOVE rule): 100 % fiction
+training at `g00 ss.50`; the annotation-vs-kappa gate mismatch; the reliability weight blind to
+composition blindness; ⛔ the naive exclusion REFUTED by measurement (it starves the bootstrap
+that generalizes message-delivered truth — `g50 ss.50 ON` 2,691 -> 56,422); and the separate
+grid-vs-mass span-read defect. The open question and candidate mechanisms live in the entry.

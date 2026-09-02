@@ -175,7 +175,7 @@ is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
 | `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
-| `transfer` | ⭐⭐ **RUNGS 1+2 of the ground-up rebuild** (`messages/transfer.py`, owner rulings 2026-09-01, LADDER-CONFIRMED) — COMPOSITION TRANSFER, one hop, nothing relayed, silence-not-zeros. Rung 1: the intron's factory row VERBATIM at intron\|exon boundaries. Rung 2: the same row transported into EXONS through the monotone FACE MAP (certified flux CAPS the claimable gDNA share) and widened by the face's own counting variance — no constants. Face-local ratios only, so no level crosses a capture cliff; ≤ silent on 7/8 stranded ladder rows (worst +0.5 %), −68…−76 % on the blind rows, best-or-near-best on BOTH adversarial probe panels where the relay's anchor is catastrophic. Deferred `g05 ss.50 ON` is its one standing shadow |
+| `transfer` | ⭐⭐ **RUNGS 1+2+3 of the ground-up rebuild** (`messages/transfer.py`, owner rulings 2026-09-01/02, LADDER-CONFIRMED) — COMPOSITION TRANSFER, one hop, nothing relayed, silence-not-zeros. Rung 1: the intron's factory row VERBATIM at intron\|exon boundaries. Rung 2: the same row transported into EXONS through the monotone FACE MAP (certified flux CAPS the claimable gDNA share) and widened by the face's own counting variance. Rung 3: the intergenic\|exon EDGE's sign-certified LOWER BOUND (the profile likelihood over enrichment ≥ 1; a zero edge is VACUOUS by law — ⛔ the enrichment-ceiling upper side is owner-REFUSED as over-engineering and the zero-gDNA edge residual is an ACCEPTED error). No constants anywhere; face-local ratios only, so no level crosses a capture cliff. ≤ silent on 7/8 stranded ladder rows, −68…−76 % on the blind rows, best-or-near-best on BOTH adversarial probe panels where the relay's anchor is catastrophic. Standing shadows: deferred `g05 ss.50 ON`, and `ISSUES: gdna-landscape-trains-on-false-positives` |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -295,13 +295,12 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,747 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-01 with the rung-2 landing of the transfer policy). Account it from **3,743** — the
-rung-1 count — by: **+3** rung 2's own gates (the face map, the ingredient width, the extracted
-licence predicate; the delivery gate renamed 1-for-1) and **+1** the owner's `docs/dev/rename.md`
-(jargon only, per the table below). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the
-per-file deltas, and a bracket-matched `--collect-only` confirms the attribution (3,755
-collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,748 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-02 with the rung-3 landing of the transfer policy — the intergenic|exon edge bound).
+Account it from **3,747** — the rung-2 count — by **+1**: rung 3's pure gate (the one-sided
+edge-bound row; the delivery gate extended in place). ⛔ **RE-DERIVE, NEVER ADJUST** — the
+table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
+attribution (3,756 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

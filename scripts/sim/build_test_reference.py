@@ -55,7 +55,7 @@ from rigel.types import Strand  # noqa: E402
 #: same day (*"in hindsight we are going to need more than 100kb"*) to leave room for the loci this
 #: benchmark will grow: overlapping genes, long introns, alternate TSS/TES, nested isoforms. ⚠ Still
 #: tiny to simulate, and the gDNA depth is what sets the density, not the length.
-GENOME_LENGTH = 1_000_000
+GENOME_LENGTH = 1_500_000
 REF_NAME = "test_chr"
 #: the chromosome's random sequence is fixed by this seed, so the same GTF always gives the same FASTA
 GENOME_SEED = 20260819
@@ -63,7 +63,7 @@ GENOME_SEED = 20260819
 #: so `rigel index` knows nothing on it — while the SIMULATOR draws unannotated "shadow" transcripts from
 #: `test_shadow.gtf` there. Its own seed; its own length. gDNA is drawn on it too (`gdna.genomic_refs`).
 BLANK_REF_NAME = "test_blank"
-BLANK_GENOME_LENGTH = 1_000_000
+BLANK_GENOME_LENGTH = 1_500_000
 BLANK_GENOME_SEED = 20260829
 REF_LENGTHS = {REF_NAME: GENOME_LENGTH, BLANK_REF_NAME: BLANK_GENOME_LENGTH}
 

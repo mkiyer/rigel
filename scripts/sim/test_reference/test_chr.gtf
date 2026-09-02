@@ -40,6 +40,22 @@
 ##
 ## FORMAT: one `exon` line per exon, GTF 1-based inclusive coordinates.
 ##   test_chr  rigel_test  exon  START  END  .  STRAND  .  gene_id "gX"; transcript_id "TX";
+##
+## ── THE MONO BLOCK (owner-approved addition, 2026-09-02) ───────────────────────────────
+## SINGLE-EXON transcripts — the edge-only message case: no sj, no spliced RNA, the ONLY
+## message source is the gene edge (rung 3, archetype B case 1). One 1 kb exon per gene,
+## 20 kb intergenic, all + strand, FOUR types × the same FIVE blocks = 20 transcripts,
+## appended after the twin block (starts 945,001; the generated chromosome was extended to
+## 1.5 Mb to hold them):
+##
+##   mono           unprobed, expressed  — mrna by block (10/30/100/300/1000), nrna = 0
+##   capmono        probed,   expressed  — the enrichment cliff with NO spliced anchor
+##   monosilent     unprobed, mrna = 0   — false-positive control
+##   capmonosilent  probed,   mrna = 0   — false-positive control under enrichment
+##
+## No nascent RNA on any mono gene (a single-exon transcript has no unspliced/spliced
+## distinction to model — owner ruling 2026-09-02). ⚠ An annotated single-exon transcript is
+## its own nascent-class entity in the index (`is_nrna`); weight goes in `mrna_abundance`.
 test_chr	rigel_test	exon	20001	21000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
 test_chr	rigel_test	exon	28001	29000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
 test_chr	rigel_test	exon	36001	37000	.	+	.	gene_id "gB1_clean"; transcript_id "B1_clean";
@@ -115,3 +131,23 @@ test_chr	rigel_test	exon	887001	888000	.	+	.	gene_id "gB5_capnasc"; transcript_i
 test_chr	rigel_test	exon	908001	909000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";
 test_chr	rigel_test	exon	916001	917000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";
 test_chr	rigel_test	exon	924001	925000	.	+	.	gene_id "gB5_silent"; transcript_id "B5_silent";
+test_chr	rigel_test	exon	945001	946000	.	+	.	gene_id "gB1_mono"; transcript_id "B1_mono";
+test_chr	rigel_test	exon	966001	967000	.	+	.	gene_id "gB1_capmono"; transcript_id "B1_capmono";
+test_chr	rigel_test	exon	987001	988000	.	+	.	gene_id "gB1_monosilent"; transcript_id "B1_monosilent";
+test_chr	rigel_test	exon	1008001	1009000	.	+	.	gene_id "gB1_capmonosilent"; transcript_id "B1_capmonosilent";
+test_chr	rigel_test	exon	1029001	1030000	.	+	.	gene_id "gB2_mono"; transcript_id "B2_mono";
+test_chr	rigel_test	exon	1050001	1051000	.	+	.	gene_id "gB2_capmono"; transcript_id "B2_capmono";
+test_chr	rigel_test	exon	1071001	1072000	.	+	.	gene_id "gB2_monosilent"; transcript_id "B2_monosilent";
+test_chr	rigel_test	exon	1092001	1093000	.	+	.	gene_id "gB2_capmonosilent"; transcript_id "B2_capmonosilent";
+test_chr	rigel_test	exon	1113001	1114000	.	+	.	gene_id "gB3_mono"; transcript_id "B3_mono";
+test_chr	rigel_test	exon	1134001	1135000	.	+	.	gene_id "gB3_capmono"; transcript_id "B3_capmono";
+test_chr	rigel_test	exon	1155001	1156000	.	+	.	gene_id "gB3_monosilent"; transcript_id "B3_monosilent";
+test_chr	rigel_test	exon	1176001	1177000	.	+	.	gene_id "gB3_capmonosilent"; transcript_id "B3_capmonosilent";
+test_chr	rigel_test	exon	1197001	1198000	.	+	.	gene_id "gB4_mono"; transcript_id "B4_mono";
+test_chr	rigel_test	exon	1218001	1219000	.	+	.	gene_id "gB4_capmono"; transcript_id "B4_capmono";
+test_chr	rigel_test	exon	1239001	1240000	.	+	.	gene_id "gB4_monosilent"; transcript_id "B4_monosilent";
+test_chr	rigel_test	exon	1260001	1261000	.	+	.	gene_id "gB4_capmonosilent"; transcript_id "B4_capmonosilent";
+test_chr	rigel_test	exon	1281001	1282000	.	+	.	gene_id "gB5_mono"; transcript_id "B5_mono";
+test_chr	rigel_test	exon	1302001	1303000	.	+	.	gene_id "gB5_capmono"; transcript_id "B5_capmono";
+test_chr	rigel_test	exon	1323001	1324000	.	+	.	gene_id "gB5_monosilent"; transcript_id "B5_monosilent";
+test_chr	rigel_test	exon	1344001	1345000	.	+	.	gene_id "gB5_capmonosilent"; transcript_id "B5_capmonosilent";

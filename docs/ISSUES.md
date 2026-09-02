@@ -20,6 +20,31 @@ because a graveyard row without its number is an invitation to rebuild.
 ## OPEN
 
 
+### gdna-landscape-trains-on-false-positives
+`priority: now · kind: defect+question · stamped: 2026-09-02 (owner: "figure out the implications")`
+**At zero-gDNA conditions the fitted gDNA landscape is trained ENTIRELY on pass-1 false
+positives, and the refit loop then entrenches them** — the prior that exists to rescue blind
+slots is taught by the blind slots. Measured (test chromosome, `landscape_poison_study` in the
+session scratchpad; re-derive by spying `_fit_gdna_hyperprior`'s inputs against `slot_truth`):
+at `g00 ss.50` **100 % of the training gDNA-mass** sits on slots whose certified gDNA is zero.
+Two mechanism facts: the training gate (`fp ^ fn`) is an ANNOTATION test that cannot see κ = ½
+(unstranded exons train at full membership), and `_reliability` consumes the SOLVED posterior's
+`var_gdna` — small at blind slots — rather than the own-composition variance
+(`own_composition_logvar`, ∞ at τ = 0) that would catch them; measured mean weight 0.90–0.93.
+⛔ **The naive fix is REFUTED (2026-09-02): excluding κ-dead exons from training destroys the
+bootstrap** — the blind slots' training values carry the MESSAGE ROWS' corrections after sweep
+1, and re-fitting on them is how local true evidence generalizes population-wide (whole-library
+`g50 ss.50 ON` regressed 2,691 → 56,422 under the exclusion; the stranded control was
+byte-identical). So the open question is a robustness mechanism that discounts PURE-ECHO
+training mass without starving message-corrected mass — candidates to derive, not assume:
+sweep-aware weighting (sweep-1's blind values are echo; later sweeps' are message-informed),
+own-OR-DELIVERED-evidence weighting, or capping the landscape's claim strength by its
+evidence-bearing mass. ⚠ Downstream symptom already priced: `silent`'s residual `g00 ss.50 OFF`
+whole-library error (~1.25 M on the ladder) is largely this loop; the transfer policy's rows
+break it wherever they deliver. ⚠ A second, separate defect found by the same study: a
+consumer reading `log_rho[-1] − log_rho[0]` as "the landscape's span" reads the GRID (built
+from `mass/eff` — what is expressible), not the fitted mass's support.
+
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
 "Drain" carries no intuition — the concept is: pass one BUFFERS any fragment whose unsequenced mate

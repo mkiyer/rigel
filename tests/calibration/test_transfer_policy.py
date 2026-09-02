@@ -156,12 +156,29 @@ def _expected_exon_rows(si, ctx, src, lam):
     rr_hi = np.asarray(ctx.route_rate_hi, np.float64).sum(axis=1)
     sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
     sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
+    is_intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
     sig = 1.0 / (1.0 + np.exp(-lam))
     dlam = float(lam[1] - lam[0])
     out = {}
     for e in np.flatnonzero(is_exon):
         add = np.zeros(lam.shape[0])
         live = False
+        for b in (left[e], right[e]):
+            # rung 3: the intergenic|exon EDGE, lower bound only (owner ruling 2026-09-02)
+            if b < 0 or not is_bnd[b]:
+                continue
+            o = left[b] if right[b] == e else right[b]
+            if o < 0 or not is_intergenic[o]:
+                continue
+            if not (n_u[b] > 0 and A_g[b] > 0 and A_g[e] > 0):
+                continue  # a zero edge is VACUOUS by the profile (no false claim possible)
+            c = sig * n_u[e] * A_g[b] / A_g[e]
+            n_b = float(n_u[b])
+            r = np.where(c >= n_b, 0.0, n_b * np.log(np.maximum(c, 1e-300) / n_b) - (c - n_b))
+            if np.ptp(r) <= 1e-9:
+                continue
+            add += r - r.max()
+            live = True
         for b, hi in ((left[e], True), (right[e], False)):
             if b < 0 or not is_bnd[b]:
                 continue
@@ -191,7 +208,7 @@ def _expected_exon_rows(si, ctx, src, lam):
             add += r - r.max()
             live = True
         if live:
-            out[int(e)] = add
+            out[int(e)] = add - add.max()
     return out
 
 
@@ -233,6 +250,31 @@ def test_the_transfer_delivers_at_pairs_and_licensed_faces_and_relays_nothing(sw
             )
         else:
             assert not rows[i].any(), f"slot {i} received a transfer it is not licensed for"
+
+
+def test_the_edge_bound_row_is_one_sided_and_vacuous_at_zero():
+    """RUNG 3 (owner ruling 2026-09-02: LOWER BOUND ONLY — the upper side is refused as
+    over-engineering and the g00-edge residual is an ACCEPTED error): the profile-likelihood
+    row sup_{s>=1} Pois(n_b; c/s) is 0 wherever the exon's implied gDNA count c >= n_b (any
+    enrichment explains an excess), the edge count's own Poisson tail below it (the sign
+    certificate makes the bias direction structural), and IDENTICALLY vacuous at n_b = 0 —
+    a zero edge can never manufacture a claim."""
+    from rigel.calibration.messages.transfer import edge_bound_row
+
+    lam = np.linspace(-10, 10, 401)
+    n_b, n_e, a_g_b, a_g_e = 30.0, 800.0, 200.0, 780.0
+    row = edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e)
+    sig = 1.0 / (1.0 + np.exp(-lam))
+    c = sig * n_e * a_g_b / a_g_e
+    assert np.all(row[c >= n_b] == 0.0), "at or above the bound the row must be exactly flat"
+    below = c < n_b
+    assert np.all(row[below] < 0.0) and np.all(np.diff(row[below]) > 0), (
+        "below the bound the penalty must be the one-sided increasing Poisson tail"
+    )
+    np.testing.assert_allclose(
+        row[below], n_b * np.log(c[below] / n_b) - (c[below] - n_b), rtol=0, atol=1e-9
+    )
+    assert not edge_bound_row(lam, 0.0, n_e, a_g_b, a_g_e).any(), "n_b = 0 must be vacuous"
 
 
 def test_the_face_licence_refuses_unmeasured_population_changes():
