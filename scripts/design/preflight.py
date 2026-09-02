@@ -120,9 +120,13 @@ def check_reference(rep: Report) -> None:
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
     rep.add((SUITE / "reference" / "capture_panel.tsv").is_file(), "panel capture probes", "",
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
-    # the METHOD-DEVELOPMENT reference — hand-edited sources in the repo, everything else derived
-    gtf = REPO / "scripts" / "sim" / "test_reference" / "test_chr.gtf"
-    rep.add(gtf.is_file(), "test chromosome GTF (hand-edited, in the repo)", str(gtf))
+    # the METHOD-DEVELOPMENT reference — ONE hand-edited YAML in the repo (owner ruling 2026-09-02),
+    # the GTFs / abundances / probe panels RENDERED beside it, everything else derived
+    spec = REPO / "scripts" / "sim" / "test_reference" / "test_chr.yaml"
+    gtf = spec.parent / "test_chr.gtf"
+    rep.add(spec.is_file(), "test chromosome YAML (the ONE hand-edited file)", str(spec))
+    rep.add(test_chromosome_renders_in_sync(spec), "test chromosome renders match the YAML", str(gtf),
+            "python scripts/sim/build_test_reference.py")
     # ⭐ AN EMPTY TEST CHROMOSOME IS A DESIGNED STATE, NOT A BROKEN ONE (owner, 2026-08-27): the
     # owner authors its transcripts, and until at least one exists nothing derived from it CAN
     # exist. Reporting that as a failure sends a fresh session hunting for damage, so say what is
@@ -136,6 +140,22 @@ def check_reference(rep: Report) -> None:
     rep.add((TESTREF / "idx").is_dir(), "test chromosome rigel index (DERIVED)", "",
             "rigel index --fasta <T>/test_chr.fa --gtf <T>/test_chr.gtf --no-mappability "
             "--no-tsv -o <T>/idx")
+
+
+def test_chromosome_renders_in_sync(spec: Path) -> bool:
+    """Do the checked-in renders (GTFs, abundances, probe panels) match what the YAML renders now?
+    In-process and read-only — the builder's own `--check`, without a subprocess."""
+    if not spec.is_file():
+        return False
+    import importlib.util
+
+    mod_spec = importlib.util.spec_from_file_location(
+        "build_test_reference", REPO / "scripts" / "sim" / "build_test_reference.py")
+    module = importlib.util.module_from_spec(mod_spec)
+    sys.modules[mod_spec.name] = module
+    mod_spec.loader.exec_module(module)
+    loaded = module.load_spec(spec)
+    return not module.check_spec(loaded) and not module.check_renders(loaded, spec.parent)
 
 
 def test_chromosome_transcripts(gtf: Path) -> int:

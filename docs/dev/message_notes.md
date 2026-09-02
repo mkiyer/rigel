@@ -132,6 +132,145 @@ The first goal is to design the architecture for the message propagation INTO ex
 This is our first task.
 
 
+# intergenic|exon boundaries
+
+we need to briefly discuss and confirm that intergenic|exon boundaries are certified pure gDNA structurally. They are always 100% gDNA by definition. They are not solved.
+
+
+## exon regions with terminus boundaries
+
+There are many situations where an incoming message does not have composition-compatible information. For these messages, we cannot employ the composition transfer paradigm.
+
+We need to dissect the individual situations where we have incompatible messages, and address them one by one.
+
+Let's start with what is probably the simplest: the intergenic-exon boundary.
+
+### intergenic|exon boundary <-> exon message
+
+We are solving for EXON regions. When an EXON region is bordered by an intergenic|exon boundary, we cannot use composition transfer.
+
+Characteristics of the Intergenic|exon boundary:
+- Only gDNA (unspliced) crosses the boundary
+- The boundary MUST also be a terminus (by definition)
+- intergenic regions are currently defined as pure gDNA (structurally, due to complete lack of annotation overlap)
+
+Genomic DNA crosses contiguously across the boundary as unspliced fragments.
+
+Hybrid capture probes placed near the intergenic|exon boundary can partially enrich these fragments. Typically, the probe will not fully enrich the boundary crossing fragments due to partial overlap.
+
+So how to we impute from the intergenic|exon boundaries onto exons?
+
+- We can directly impute the gDNA abundance itself from the boundary onto the exon.
+- The precision of the imputation depends on the same precision determinants (count, effective length, etc) similar to the other cases.
+
+
+### how does an exon reconcile TWO messages?
+
+when we add intergenic|exon boundary messages, we will have more exons that have to reconcile two message sources.
+
+If our structure is:
+<intergenic> | <exon> | <intron> | <...>
+
+The <exon> receives messages from the intergenic boundary and the intron boundary.
+
+Prior to the initial solve, in the unstranded case, the exon has no 'own' belief. It relies solely on messages.
+
+The intergenic message provides a gDNA level, but the message cannot provide an RNA estimate.
+
+The intronic message provides a composition (gDNA and RNA).
+
+At SOLVE time, the exon has both messages.
+
+There is an option to *BORROW* composition information if it exists in either one of the two messages.
+
+The intron boundary message carries composition information. The intergenic boundary message carries only gDNA abundance. 
+
+**How can these be reconciled?**
+
+This is the crux of the question.
+
+Solving this is the goal of this next sequence of turns.
+
+
+### single-stranded exon|exon boundary
+
+An exon|exon boundary implies that there are EXONIC regions on both sides. There can also be an intron on one or both sides too.
+
+Example:
+TA+ (1000, 2000), (20000, 21000)
+TB+ (1000, 2000), (10000, 11000), (20000, 21000)
+TC+ (500, 22000)
+
+The simplest way to create lots of exon|exon this is to cover everything with one long transcript span (TC+). Now every boundary is exon|exon. 1000, 2000, 10000, 11000, and 20000, and 21000 become exon|exon boundaries.
+
+We can consider each case and make sure we have the right model. Let's do this one case at a time, and build the model one case at a time.
+
+Let's start with the Boundary at 1000:
+- left region is exon (5000,1000)
+- right region is exon(1000,2000)
+- terminus present (TSS+)
+- if message propagation is FORWARD (left -> right), we ADD a new transcript (transcript gain)
+- if message propagation is REVERSE (right -> left), we LOSE a transcript (transcript loss)
+
+We have TWO problems to address: (1) message propagation, and (2) solving.
+
+Let's solve for boundary 1000:
+- two incoming messages, left is (500,1000), right is (1000,2000)
+- boundary is a terminus (TSS+), + strand transcript start. this orients the solver. this is critical! getting the orientation logic correct is a crucial
+- boundary thus knows that the RIGHT sided message is composition-incompatible because *some* transcription ENDS at the boundary (some of the exon(1000,2000) transcription does not cross the boundary).
+- boundary also knows that the LEFT RNA population DOES cross the boundary
+- so the boundary composition equals the LEFT RNA abundance and the gDNA abundance 
+
+
+We need to derive and design the logic and arithmetic for solving this time of exon|exon boundary. Let's call it "exon|exon boundary with terminus".
+
+The key aspect of this is ORIENTING so we can figure out which transcript population is composition-compatible with the boundary. This requires:
+- strand of the exons
+- transcript start vs end
+
+Do you agree?
+
+Be sure that when you derive and design this, you teach me what you are doing, and ensure that I understand every piece of this. 
+
+
+==================
+
+
+Boundary at 2000:
+- left region is exon (1000,2000)
+- right region is exon+intron (2000,10000)
+- the boundary is a splice junction (+ stranded)
+- if message propagation is FORWARD (left -> right) then RNA SPLICES OUT (splice-out == leaving) at boundary 2000
+- if message propagation is REVERSE (right -> left) then RNA SPLICED IN (splice-in == joining) at boundary 2000
+
+So the logic depends on the direction of message propagation, the strand of the splice junction.
+
+
+
+
+
+
+We need to augment our test chromosome to include more complicated cases with exon|exon boundaries. These boundaries start to emerge when transcripts have multiple isoforms.
+
+the single-stranded exon|exon boundary is the first case to solve.
+
+the behavior of the boundary depends on the following:
+- splice junction? (yes/no)
+- terminus? (yes/no)
+- direction of message propagation (forward or backward)
+- active strand (+ or -)
+
+we need to be meticulous about the LOGIC at these boundaries.
+
+here are examples:
+
+- TA+ exons (2000, 3000), (10000, 13000)
+- TB+ exons (2000, 3000), (11000, 13000)
+- TC+ exons (12000, 13000)
+
+At position 2000 we have an exon|exon boundary.
+
+
 
 
 

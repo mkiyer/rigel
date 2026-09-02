@@ -197,7 +197,9 @@ def _expected_exon_rows(si, ctx, src, lam):
             le = np.log(n_u[b] * sig / A_g[b] * A_g[e]) - np.log(
                 (n_u[b] * (1.0 - sig) / A_r[b] + s) * A_r[e]
             )
-            r = np.interp(np.interp(lam, le, lam, left=lam[0], right=lam[-1]), lam, row_i - row_i.max())
+            r = np.interp(
+                np.interp(lam, le, lam, left=lam[0], right=lam[-1]), lam, row_i - row_i.max()
+            )
             v = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_s + 0.5))
             half = max(int(np.ceil(4.0 * np.sqrt(v) / dlam)), 1)
             x = np.arange(-half, half + 1) * dlam
@@ -399,6 +401,9 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
     finally:
         calibrate_mod.solve_chain = orig
     assert seen and all(isinstance(p, TransferPolicy) for p in seen)
+    assert all(p._strand is not None for p in seen), (
+        "the exon -> boundary message must be ON in production"
+    )
     with pytest.raises(ValueError, match="unknown message_policy"):
         calibrate_mod.calibrate(
             payload=sweep_inputs["payload"],
@@ -407,3 +412,186 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
             ),
             **sweep_inputs["calibrate_kw"],
         )
+
+
+# ── ITEM 1 (owner design 2026-09-02): the exon -> intron|exon boundary message ────────────────────
+
+
+def _expected_splice_out_rows(si, ctx, strand, lam):
+    """The item-1 boundary rows recomputed INDEPENDENTLY of the policy: for every licensed
+    intron|exon face of every exon whose strand channel is live, the exon's own frozen-variance
+    strand row read at the GEOMETRIC splice-in map (both components on ``eff_gdna_global``, the
+    spliced density ``S / A_g^b``), marginalised over ``log rho ~ N(log S/U, trigamma(S+1/2) + trigamma(U+1/2))`` on nine
+    equal-probability nodes — a second implementation, so a policy bug cannot hide."""
+    from scipy.special import polygamma
+    from scipy.stats import norm
+
+    from rigel.calibration.splice_graph import (
+        FLAG_TES_NEG,
+        FLAG_TES_POS,
+        FLAG_TSS_NEG,
+        FLAG_TSS_POS,
+    )
+
+    kappa, od_g, od_r = strand
+    term = FLAG_TSS_POS | FLAG_TSS_NEG | FLAG_TES_POS | FLAG_TES_NEG
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    is_intron = ~is_bnd & ~is_exon & (fp | fn)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    n_u = np.asarray(ctx.n_slot, np.float64)
+    A_g = np.asarray(ctx.eff_gdna_global, np.float64)
+    sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
+    sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+    nodes = norm.ppf((np.arange(9) + 0.5) / 9.0)
+    out = {}
+    for e in np.flatnonzero(is_exon):
+        if fp[e] == fn[e] or not tau[e] > 0.0:
+            continue
+        n = cnt[e].sum()
+        ks = kappa if fp[e] else 1.0 - kappa
+        f_ref = float(np.clip(belief[e], 1e-3, 1 - 1e-3))
+        p = 0.5 * fg + ks * (1 - fg)
+        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+        var = max(
+            n * p_ref * (1 - p_ref)
+            + (n * f_ref) ** 2 * 0.25 * od_g
+            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+            1e-9,
+        )
+        row_e = -0.5 * (cnt[e, 0] - n * p) ** 2 / var
+        row_e -= row_e.max()
+        if np.ptp(row_e) <= 1e-9:
+            continue
+        for b, hi in ((left[e], True), (right[e], False)):
+            if b < 0 or not is_bnd[b]:
+                continue
+            i = left[b] if right[b] == e else right[b]
+            if i < 0 or not is_intron[i] or (flags[b] & term) or fp[e] != fp[i] or fn[e] != fn[i]:
+                continue
+            n_s = float((sc_hi if hi else sc_lo)[b])
+            if not (n_u[b] > 0 and A_g[b] > 0 and A_g[e] > 0):
+                continue
+            v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_u[b] + 0.5))
+            acc = np.zeros(lam.shape[0])
+            for z in nodes:
+                s = n_s / A_g[b] * np.exp(z * np.sqrt(v))
+                m = np.log(n_u[b] * fg / A_g[b] * A_g[e]) - np.log(
+                    (n_u[b] * (1 - fg) / A_g[b] + s) * A_g[e]
+                )
+                acc += np.exp(np.interp(m, lam, row_e, left=row_e[0], right=row_e[-1]))
+            r = np.log(np.maximum(acc / nodes.size, 1e-300))
+            r -= r.max()
+            if np.ptp(r) <= 1e-9:
+                continue
+            out.setdefault(int(b), np.zeros(lam.shape[0]))
+            out[int(b)] += r
+    return out
+
+
+def _strand_of(si):
+    kw = si["kw"]
+    return (
+        float(kw["rna_sense_frac"]),
+        float(kw.get("gdna_strand_overdispersion", 0.0)),
+        float(kw.get("rna_strand_overdispersion", 0.0)),
+    )
+
+
+def test_the_exon_message_is_silence_inside_the_strand_deadband(sweep_inputs):
+    """ITEM 1's vacuity law: an exon whose strand channel the solver declares dead (its own
+    ``tau_lam`` is 0 — the derived noise-floor deadband, no constant) sends NOTHING, so the
+    policy's rows equal the rungs-1–3 rows byte for byte; and a policy built without strand
+    parameters is the rungs-1–3 policy exactly."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    base = np.asarray(
+        TransferPolicy(provider).prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    dead = _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=np.zeros(n)))
+    gated = TransferPolicy(provider, strand=_strand_of(sweep_inputs)).prepare(dead)
+    np.testing.assert_array_equal(
+        np.asarray(gated.deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows), base
+    )
+
+
+def test_the_exon_message_lands_at_licensed_faces_beside_the_intron_row(sweep_inputs):
+    """ITEM 1's contract: at every licensed intron|exon face of a strand-live exon the boundary
+    receives the exon's splice-out row (independently recomputed) SUMMED with rung 1's intron row —
+    two witnesses; every other slot is exactly as rungs 1–3 leave it."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    base = np.asarray(
+        TransferPolicy(provider).prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    rows = np.asarray(
+        TransferPolicy(provider, strand=strand)
+        .prepare(ctx)
+        .deliver(_dummy_nb(n), _dummy_nb(n))
+        .lam_rows
+    )
+    expected = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
+    assert expected, (
+        "the toy must carry a strand-live exon with a licensed face or this gate proves nothing"
+    )
+    for i in range(n):
+        if i in expected:
+            want = base[i] + expected[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"slot {i}"
+            )
+        else:
+            np.testing.assert_array_equal(
+                rows[i], base[i], err_msg=f"slot {i} moved without a licence"
+            )
+
+
+def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
+    """The splice-out row's three analytic properties: (i) with equal face and region geometry its
+    mode sits at f_b = f_E (U+S)/U — the owner's arithmetic with the enrichment ratio cancelled;
+    (ii) more gDNA at the boundary than in the exon whenever S > 0 (the reversed subtraction cannot
+    pass); (iii) the marginal over log rho is WIDER at a thin face than at a deep one."""
+    from rigel.calibration.messages.transfer import splice_out_row
+
+    lam = np.linspace(-8, 8, 801)
+    sig = 1 / (1 + np.exp(-lam))
+    f_e = 0.20
+    row_e = -0.5 * ((lam - np.log(f_e / (1 - f_e))) / 0.05) ** 2  # a sharp exon belief at f_E
+
+    def _mode_f(r):
+        return float(sig[np.argmax(r)])
+
+    def _var(r):
+        w = np.exp(r - r.max())
+        w /= w.sum()
+        m = w @ lam
+        return float(w @ (lam * lam) - m * m)
+
+    deep = splice_out_row(row_e, lam, n_u=2000.0, n_s=3000.0, a_g_b=210.0, a_g_e=210.0)
+    assert _mode_f(deep) == pytest.approx(f_e * (2000 + 3000) / 2000, abs=0.01)
+    assert _mode_f(deep) > f_e
+    thin = splice_out_row(row_e, lam, n_u=6.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0)
+    assert _var(thin) > 3 * _var(deep), "a thin face must deliver a much wider claim"
+    assert abs(float(deep.max())) < 1e-12 and abs(float(thin.max())) < 1e-12
+    assert not splice_out_row(row_e, lam, n_u=0.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0).any()

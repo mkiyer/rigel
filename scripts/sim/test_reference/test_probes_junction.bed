@@ -1,8 +1,7 @@
-# ADVERSARIAL PROBE PANEL — derived from test_chr.gtf by make_adversarial_probes.py
-# (owner directive 2026-09-01: probe designs that stress the capture assumptions).
-# Probed genes unchanged: cap/capnasc/silent of every block. BED12, 0-based half-open.
-# JUNCTION: one BED12 two-block probe per sj (62+63 bp, contiguous in cDNA) and
-# nothing else — spliced fragments enriched over unspliced/gDNA at the same face.
+# THE JUNCTION ADVERSARIAL PANEL (owner directive 2026-09-01) — one BED12 two-block probe
+# (62 + 63 bp, contiguous only in cDNA) per sj of a probed gene and nothing else: spliced
+# fragments enriched over unspliced/gDNA at the same face.
+# DERIVED from test_chr.yaml by build_test_reference.py — do not edit; edit the YAML and re-run it.
 test_chr	94938	102063	junction_B1_cap_sj0	0	.	94938	102063	0	2	62,63	0,7062
 test_chr	102938	110063	junction_B1_cap_sj1	0	.	102938	110063	0	2	62,63	0,7062
 test_chr	131938	139063	junction_B1_capnasc_sj0	0	.	131938	139063	0	2	62,63	0,7062
@@ -33,3 +32,13 @@ test_chr	871938	879063	junction_B5_capnasc_sj0	0	.	871938	879063	0	2	62,63	0,706
 test_chr	879938	887063	junction_B5_capnasc_sj1	0	.	879938	887063	0	2	62,63	0,7062
 test_chr	908938	916063	junction_B5_silent_sj0	0	.	908938	916063	0	2	62,63	0,7062
 test_chr	916938	924063	junction_B5_silent_sj1	0	.	916938	924063	0	2	62,63	0,7062
+test_chr	1402938	1410063	junction_B1_capaltstart_U_sj0	0	.	1402938	1410063	0	2	62,63	0,7062
+test_chr	1410938	1418063	junction_B1_capaltstart_U_sj1	0	.	1410938	1418063	0	2	62,63	0,7062
+test_chr	1476938	1484063	junction_B2_capaltstart_U_sj0	0	.	1476938	1484063	0	2	62,63	0,7062
+test_chr	1484938	1492063	junction_B2_capaltstart_U_sj1	0	.	1484938	1492063	0	2	62,63	0,7062
+test_chr	1550938	1558063	junction_B3_capaltstart_U_sj0	0	.	1550938	1558063	0	2	62,63	0,7062
+test_chr	1558938	1566063	junction_B3_capaltstart_U_sj1	0	.	1558938	1566063	0	2	62,63	0,7062
+test_chr	1624938	1632063	junction_B4_capaltstart_U_sj0	0	.	1624938	1632063	0	2	62,63	0,7062
+test_chr	1632938	1640063	junction_B4_capaltstart_U_sj1	0	.	1632938	1640063	0	2	62,63	0,7062
+test_chr	1698938	1706063	junction_B5_capaltstart_U_sj0	0	.	1698938	1706063	0	2	62,63	0,7062
+test_chr	1706938	1714063	junction_B5_capaltstart_U_sj1	0	.	1706938	1714063	0	2	62,63	0,7062

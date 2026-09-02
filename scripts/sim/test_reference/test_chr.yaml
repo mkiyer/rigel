@@ -1,0 +1,418 @@
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+#  THE METHOD-DEVELOPMENT TEST CHROMOSOME — the ONE hand-edited file (owner ruling, 2026-09-02)
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+#
+# ⭐⭐⭐ THIS FILE IS THE BENCHMARK (owner, 2026-08-19): the test chromosome, its transcripts and their
+# abundances comprise the method-development benchmark the message policy is developed against. It
+# grows ONE STRUCTURE AT A TIME. Everything else in this directory — test_chr.gtf, test_shadow.gtf,
+# test_abundances.tsv and the three probe panels — is RENDERED from this file by
+# `scripts/sim/build_test_reference.py` (which also derives the two-contig FASTA with a splice motif
+# at every declared intron); the suite gate `tests/test_test_reference_renders.py` refuses a render
+# that drifted from the YAML. ⛔ Edit THIS file, then re-run the builder; never a render.
+#
+# THE SCHEMA is the `rigel sim` scenario schema (docs/MANUAL.md `rigel sim`; the toy harness's
+# ToySpec uses the same `genes` shape), plus two keys it lacks:
+#
+#   genes:                         one entry per transcript GROUP (a gene)
+#     - gene_id: gB1_clean
+#       strand: "+"                ⭐ explicit, always; see the strand rule below
+#       probed: false              ⭐ the capture panels are DESIGNED from this (benign / sparse / junction)
+#       transcripts:
+#         - {t_id: B1_clean, exons: [[20000, 21000], ...], abundance: 10, nrna_abundance: 0}
+#   shadow_genes:                  transcripts on the BLANK contig `test_blank` — the SIMULATOR draws from
+#                                  them and the INDEX never sees them (unannotated transcription)
+#
+# exons are 0-based HALF-OPEN [start, end) as in every `rigel sim` scenario (a GTF line reads
+# start+1 .. end). `abundance` / `nrna_abundance` are RELATIVE MOLECULAR sampling weights (mature /
+# nascent). Nascent RNA needs no declaration: `rigel index` creates a single-exon nascent ENTITY spanning
+# each multi-exon transcript, and the simulator pools its contributor's nrna_abundance onto it. An
+# annotated single-exon transcript is its own nascent-class entity, so its weight goes in `abundance`.
+#
+# ⭐ THE STRAND RULE (owner, 2026-09-02): every group has an explicit strand and the chromosome carries
+# EQUAL representation of + and − (the builder refuses counts differing by more than one) — a sign error
+# in any strand-dependent rule is invisible on a one-strand substrate. Strands here follow
+# (type index + block) mod 2, so every TYPE appears on both strands across its five blocks. This is NOT
+# the both-stranded locus (overlapping transcripts on opposite strands): that is a later step, and
+# every gene here keeps its 20 kb intergenic spacer.
+#
+# ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28) ───────────────────────────────────────────
+# ONE shape: exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb (span 17 kb), 20 kb
+# intergenic between genes; FIVE gene types varying exactly one bit each × FIVE abundance blocks:
+#   clean    unprobed, no nascent — intron + flanks exactly pure gDNA; one certified sj per intron
+#   nasc     unprobed, nascent ON — the contaminated message source
+#   cap      probed,   no nascent — the enrichment cliff between source and destination
+#   capnasc  probed,   nascent ON — both at once
+#   silent   probed,   mrna = 0  — every object pure gDNA; any claimed RNA is a false positive
+# Molar ladders, half-decade steps, mature UP the blocks and nascent DOWN — independent levels, as the
+# big ladder draws them: mrna 10/30/100/300/1000 (silent = 0), nrna 100/30/10/3/1 (nasc/capnasc only).
+# In fragment terms the nascent entity spans 17 kb against 3 kb spliced, so the per-gene nascent:mature
+# fragment ratio is ≈ 5.67·nrna/mrna = 57 / 5.7 / 0.57 / 0.057 / 0.0057 across the blocks; library-wide
+# nascent is a STRESS burden, not real data (DESIGN.md §0b, the nascent scope ruling).
+#
+# ── THE MONO BLOCK (owner-approved 2026-09-02) ────────────────────────────────────────────────────
+# Single-exon transcripts — the edge-only message case: no sj, no spliced RNA, the ONLY message source
+# is the gene edge (rung 3). One 1 kb exon, 20 kb intergenic, FOUR types × the five blocks:
+#   mono / capmono (unprobed / probed, mrna by block) · monosilent / capmonosilent (mrna = 0, the
+#   false-positive controls). No nascent on any mono gene (nothing to model on a single exon).
+#
+# ── THE ISOFORM BLOCK (owner-approved 2026-09-02; TRIMMED to one structure the same day) ──────────
+# Multi-exonic, multi-isoform, single-stranded transcripts — rung 3 of the message layer, grown ONE
+# structure at a time (owner ruling: a moved number must have one cause). Host U = the twin shape
+# (unprobed or probed), no nascent; each type adds ONE second isoform T (offsets from the gene start s;
+# mirrored within the 17 kb span on a − gene). Present now:
+#   altstart  T starts INSIDE U's middle exon (an alternative TSS): T = [s+8500, s+9000) [s+16000, s+17000)
+#             → one exon|exon TERMINUS boundary at s+8500; outside piece [s+8000, s+8500) U-only, inside
+#             piece [s+8500, s+9000) U+T
+#   capaltstart  the same, probed
+# Queued, each to be added on the day it becomes the target (docs/dev/MESSAGE_RUNGS.md):
+#   altss (alternative splice sites → licensed exon|exon boundaries), nest (a single-exon T nested in
+#   U's middle exon → a region walled by termini), instart (T's alternative first exon inside U's intron).
+# U by the mature ladder (10/30/100/300/1000), T by the ANTI-ladder (100/30/10/3/1), so the terminus
+# step runs from T-dominant to invisible across the blocks. The block starts at 1,365,000, pitch
+# 37,000; `genome_length` stays 2.9 Mb so the gDNA density per base does not move when a structure is
+# added or removed.
+#
+# ── THE BLANK CHROMOSOME + SHADOWS (owner design, 2026-08-29) ─────────────────────────────────────
+# `test_blank` carries NO annotation; the shadow transcripts below are simulated there (both strands,
+# single-exon and 3-exon, a molar ladder 250 → 1, ≈ 5 % of RNA fragments — pervasive transcription at
+# a realistic dose, two DEEP shadows reproducing the contaminated seeds seen on real data). No probes:
+# an annotation-designed panel cannot target what it does not know. What it controls: anything that
+# trusts the annotation's notion of "pure gDNA" — the gDNA strand-overdispersion fit above all.
+#
+# Capture panels (rendered): BENIGN tiles each probed gene's exon UNION 8 × 125 bp seamless per union
+# piece, never spanning an sj; SPARSE centres one 125 bp probe on every annotated exon of a probed gene;
+# JUNCTION places one two-block probe (62 + 63 bp) per sj of a probed gene and nothing else.
+
+ref_name: test_chr
+genome_length: 2900000      # the isoform block ends at 2,845,000 (last spacer included)
+seed: 20260819
+blank:
+  ref_name: test_blank
+  genome_length: 1500000
+  seed: 20260829
+
+genes:
+  # ── THE ANCHORED TWIN BLOCK (owner design, 2026-08-28): 5 types × 5 blocks, first gene at 20,000, pitch 37,000
+  - gene_id: gB1_clean
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_clean, exons: [[20000, 21000], [28000, 29000], [36000, 37000]], abundance: 10}
+  - gene_id: gB1_nasc
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B1_nasc, exons: [[57000, 58000], [65000, 66000], [73000, 74000]], abundance: 10, nrna_abundance: 100}
+  - gene_id: gB1_cap
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B1_cap, exons: [[94000, 95000], [102000, 103000], [110000, 111000]], abundance: 10}
+  - gene_id: gB1_capnasc
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capnasc, exons: [[131000, 132000], [139000, 140000], [147000, 148000]], abundance: 10, nrna_abundance: 100}
+  - gene_id: gB1_silent
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B1_silent, exons: [[168000, 169000], [176000, 177000], [184000, 185000]], abundance: 0}
+  - gene_id: gB2_clean
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_clean, exons: [[205000, 206000], [213000, 214000], [221000, 222000]], abundance: 30}
+  - gene_id: gB2_nasc
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_nasc, exons: [[242000, 243000], [250000, 251000], [258000, 259000]], abundance: 30, nrna_abundance: 30}
+  - gene_id: gB2_cap
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_cap, exons: [[279000, 280000], [287000, 288000], [295000, 296000]], abundance: 30}
+  - gene_id: gB2_capnasc
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capnasc, exons: [[316000, 317000], [324000, 325000], [332000, 333000]], abundance: 30, nrna_abundance: 30}
+  - gene_id: gB2_silent
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_silent, exons: [[353000, 354000], [361000, 362000], [369000, 370000]], abundance: 0}
+  - gene_id: gB3_clean
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_clean, exons: [[390000, 391000], [398000, 399000], [406000, 407000]], abundance: 100}
+  - gene_id: gB3_nasc
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B3_nasc, exons: [[427000, 428000], [435000, 436000], [443000, 444000]], abundance: 100, nrna_abundance: 10}
+  - gene_id: gB3_cap
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B3_cap, exons: [[464000, 465000], [472000, 473000], [480000, 481000]], abundance: 100}
+  - gene_id: gB3_capnasc
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capnasc, exons: [[501000, 502000], [509000, 510000], [517000, 518000]], abundance: 100, nrna_abundance: 10}
+  - gene_id: gB3_silent
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B3_silent, exons: [[538000, 539000], [546000, 547000], [554000, 555000]], abundance: 0}
+  - gene_id: gB4_clean
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_clean, exons: [[575000, 576000], [583000, 584000], [591000, 592000]], abundance: 300}
+  - gene_id: gB4_nasc
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_nasc, exons: [[612000, 613000], [620000, 621000], [628000, 629000]], abundance: 300, nrna_abundance: 3}
+  - gene_id: gB4_cap
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_cap, exons: [[649000, 650000], [657000, 658000], [665000, 666000]], abundance: 300}
+  - gene_id: gB4_capnasc
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capnasc, exons: [[686000, 687000], [694000, 695000], [702000, 703000]], abundance: 300, nrna_abundance: 3}
+  - gene_id: gB4_silent
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_silent, exons: [[723000, 724000], [731000, 732000], [739000, 740000]], abundance: 0}
+  - gene_id: gB5_clean
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_clean, exons: [[760000, 761000], [768000, 769000], [776000, 777000]], abundance: 1000}
+  - gene_id: gB5_nasc
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B5_nasc, exons: [[797000, 798000], [805000, 806000], [813000, 814000]], abundance: 1000, nrna_abundance: 1}
+  - gene_id: gB5_cap
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B5_cap, exons: [[834000, 835000], [842000, 843000], [850000, 851000]], abundance: 1000}
+  - gene_id: gB5_capnasc
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capnasc, exons: [[871000, 872000], [879000, 880000], [887000, 888000]], abundance: 1000, nrna_abundance: 1}
+  - gene_id: gB5_silent
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B5_silent, exons: [[908000, 909000], [916000, 917000], [924000, 925000]], abundance: 0}
+  # ── THE MONO BLOCK (owner-approved 2026-09-02): single-exon transcripts, 4 types × 5 blocks, first gene at 945,000, pitch 21,000
+  - gene_id: gB1_mono
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_mono, exons: [[945000, 946000]], abundance: 10}
+  - gene_id: gB1_capmono
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capmono, exons: [[966000, 967000]], abundance: 10}
+  - gene_id: gB1_monosilent
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_monosilent, exons: [[987000, 988000]], abundance: 0}
+  - gene_id: gB1_capmonosilent
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capmonosilent, exons: [[1008000, 1009000]], abundance: 0}
+  - gene_id: gB2_mono
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_mono, exons: [[1029000, 1030000]], abundance: 30}
+  - gene_id: gB2_capmono
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capmono, exons: [[1050000, 1051000]], abundance: 30}
+  - gene_id: gB2_monosilent
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_monosilent, exons: [[1071000, 1072000]], abundance: 0}
+  - gene_id: gB2_capmonosilent
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capmonosilent, exons: [[1092000, 1093000]], abundance: 0}
+  - gene_id: gB3_mono
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_mono, exons: [[1113000, 1114000]], abundance: 100}
+  - gene_id: gB3_capmono
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capmono, exons: [[1134000, 1135000]], abundance: 100}
+  - gene_id: gB3_monosilent
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_monosilent, exons: [[1155000, 1156000]], abundance: 0}
+  - gene_id: gB3_capmonosilent
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capmonosilent, exons: [[1176000, 1177000]], abundance: 0}
+  - gene_id: gB4_mono
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_mono, exons: [[1197000, 1198000]], abundance: 300}
+  - gene_id: gB4_capmono
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capmono, exons: [[1218000, 1219000]], abundance: 300}
+  - gene_id: gB4_monosilent
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_monosilent, exons: [[1239000, 1240000]], abundance: 0}
+  - gene_id: gB4_capmonosilent
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capmonosilent, exons: [[1260000, 1261000]], abundance: 0}
+  - gene_id: gB5_mono
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_mono, exons: [[1281000, 1282000]], abundance: 1000}
+  - gene_id: gB5_capmono
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capmono, exons: [[1302000, 1303000]], abundance: 1000}
+  - gene_id: gB5_monosilent
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_monosilent, exons: [[1323000, 1324000]], abundance: 0}
+  - gene_id: gB5_capmonosilent
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capmonosilent, exons: [[1344000, 1345000]], abundance: 0}
+  # ── THE ISOFORM BLOCK (owner-approved 2026-09-02): host U = the twin shape + ONE second isoform T,
+  #    8 types × 5 blocks, first gene at 1,365,000, pitch 37,000. U by the mature ladder, T by the
+  #    anti-ladder (100/30/10/3/1) so the terminus step runs from T-dominant to invisible. On a − gene
+  #    the geometry is MIRRORED within the 17 kb span so each type keeps its biological meaning.
+  - gene_id: gB1_altstart
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_altstart_U, exons: [[1365000, 1366000], [1373000, 1374000], [1381000, 1382000]], abundance: 10}
+      - {t_id: B1_altstart_T, exons: [[1365000, 1366000], [1373000, 1373500]], abundance: 100}
+  - gene_id: gB1_capaltstart
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capaltstart_U, exons: [[1402000, 1403000], [1410000, 1411000], [1418000, 1419000]], abundance: 10}
+      - {t_id: B1_capaltstart_T, exons: [[1410500, 1411000], [1418000, 1419000]], abundance: 100}
+  - gene_id: gB2_altstart
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_altstart_U, exons: [[1439000, 1440000], [1447000, 1448000], [1455000, 1456000]], abundance: 30}
+      - {t_id: B2_altstart_T, exons: [[1447500, 1448000], [1455000, 1456000]], abundance: 30}
+  - gene_id: gB2_capaltstart
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltstart_U, exons: [[1476000, 1477000], [1484000, 1485000], [1492000, 1493000]], abundance: 30}
+      - {t_id: B2_capaltstart_T, exons: [[1476000, 1477000], [1484000, 1484500]], abundance: 30}
+  - gene_id: gB3_altstart
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_altstart_U, exons: [[1513000, 1514000], [1521000, 1522000], [1529000, 1530000]], abundance: 100}
+      - {t_id: B3_altstart_T, exons: [[1513000, 1514000], [1521000, 1521500]], abundance: 10}
+  - gene_id: gB3_capaltstart
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capaltstart_U, exons: [[1550000, 1551000], [1558000, 1559000], [1566000, 1567000]], abundance: 100}
+      - {t_id: B3_capaltstart_T, exons: [[1558500, 1559000], [1566000, 1567000]], abundance: 10}
+  - gene_id: gB4_altstart
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altstart_U, exons: [[1587000, 1588000], [1595000, 1596000], [1603000, 1604000]], abundance: 300}
+      - {t_id: B4_altstart_T, exons: [[1595500, 1596000], [1603000, 1604000]], abundance: 3}
+  - gene_id: gB4_capaltstart
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltstart_U, exons: [[1624000, 1625000], [1632000, 1633000], [1640000, 1641000]], abundance: 300}
+      - {t_id: B4_capaltstart_T, exons: [[1624000, 1625000], [1632000, 1632500]], abundance: 3}
+  - gene_id: gB5_altstart
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_altstart_U, exons: [[1661000, 1662000], [1669000, 1670000], [1677000, 1678000]], abundance: 1000}
+      - {t_id: B5_altstart_T, exons: [[1661000, 1662000], [1669000, 1669500]], abundance: 1}
+  - gene_id: gB5_capaltstart
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capaltstart_U, exons: [[1698000, 1699000], [1706000, 1707000], [1714000, 1715000]], abundance: 1000}
+      - {t_id: B5_capaltstart_T, exons: [[1706500, 1707000], [1714000, 1715000]], abundance: 1}
+shadow_genes:
+  - gene_id: gshadow_U1
+    strand: "+"
+    transcripts:
+      - {t_id: shadow_U1_SE2kb_plus, exons: [[100000, 102000]], abundance: 250}
+  - gene_id: gshadow_U2
+    strand: "-"
+    transcripts:
+      - {t_id: shadow_U2_SE2kb_minus, exons: [[200000, 202000]], abundance: 75}
+  - gene_id: gshadow_U3
+    strand: "+"
+    transcripts:
+      - {t_id: shadow_U3_SE10kb_plus, exons: [[300000, 310000]], abundance: 25}
+  - gene_id: gshadow_U4
+    strand: "-"
+    transcripts:
+      - {t_id: shadow_U4_SE500_minus, exons: [[400000, 400500]], abundance: 250}
+  - gene_id: gshadow_U5
+    strand: "+"
+    transcripts:
+      - {t_id: shadow_U5_3ex_plus, exons: [[500000, 501000], [506000, 507000], [512000, 513000]], abundance: 25}
+  - gene_id: gshadow_U6
+    strand: "-"
+    transcripts:
+      - {t_id: shadow_U6_3ex_minus, exons: [[600000, 601000], [606000, 607000], [612000, 613000]], abundance: 8}
+  - gene_id: gshadow_U7
+    strand: "+"
+    transcripts:
+      - {t_id: shadow_U7_SE2kb_plus, exons: [[700000, 702000]], abundance: 3}
+  - gene_id: gshadow_U8
+    strand: "-"
+    transcripts:
+      - {t_id: shadow_U8_SE2kb_minus, exons: [[800000, 802000]], abundance: 1}

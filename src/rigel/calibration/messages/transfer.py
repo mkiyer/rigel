@@ -30,6 +30,26 @@ tension can otherwise ANNIHILATE into a flat posterior whose estimator wanders (
 13-fragment face's unwidened cliff sat on the prior's 8-nat truth peak and the point estimate
 landed at the centroid of a vacuous plateau) — the width is what prevents it.
 
+**RUNG 1 COMPLETED — the EXON -> intron|exon BOUNDARY message (owner design 2026-09-02).** The
+exon publishes its OWN evidence only — its strand row (`simplex_logodds.strand_row_logodds`, the
+solver's own frozen-variance term, so an unstranded library's exon says nothing), and only when
+the solver's derived strand DEADBAND declares the channel live (`own.tau_lam > 0`; no constant).
+The exon holds one population more than the crossing — the mature RNA that arrived by the sj — so
+the boundary reads the exon's row AT the splice-in map: the owner's rescale / subtract / rescale,
+in which the enrichment ratio CANCELS and only the face's own spliced-to-unspliced ratio survives,
+``f_b = f_E (U + S) / U``. ⛔ Both components must see ONE opportunity ratio between the two
+locales for that cancellation to hold, so the map runs on the capture-blind GEOMETRIC opportunity
+(``eff_gdna_global``) for gDNA and RNA alike, with the spliced density ``S / A_g^b``; a
+capture-aware opportunity on one component alone re-introduced a level across locales and was
+measured to fail on sparse probes. The width is the MARGINAL over the measured ratio,
+``log rho ~ N(log S/U, 1/S + 1/U)`` on equal-probability nodes — wide exactly where the map is
+sensitive (a thin face near the pure-gDNA vertex), no wider elsewhere; a uniform blur in ``lam``
+under-states it there. The premise the message carries — spliced and unspliced fragments at the
+same face share capture affinity — was MEASURED as a bias (``a ~ 1.3`` under benign capture, ~2.2
+on junction probes, 1 off capture) with negligible spread; it is recorded, not corrected. Ladder:
+unstranded rows byte-identical, stranded capture-ON rows 0.987–0.995x, capture-OFF within 33
+fragments, the reversal fails everywhere the message acts.
+
 **The hop cost is MEASURED, priced, and zero beyond what the row already carries** — an
 imputation must cost something every hop, and this one's cost was derived rather than waived:
 the certified intron-vs-boundary composition dispersion is 0.000 off capture (32,534 ladder
@@ -59,6 +79,7 @@ from typing import Callable
 import numpy as np
 
 from scipy.special import polygamma
+from scipy.stats import norm
 
 from ..splice_graph import (
     FLAG_TES_NEG as _TES_NEG,
@@ -66,6 +87,7 @@ from ..splice_graph import (
     FLAG_TSS_NEG as _TSS_NEG,
     FLAG_TSS_POS as _TSS_POS,
 )
+from ..simplex_logodds import strand_row_logodds
 from . import NeighbourState, PsiMessage, StepContext
 
 __all__ = [
@@ -73,11 +95,15 @@ __all__ = [
     "edge_bound_row",
     "face_is_licensed",
     "face_map_lambda",
+    "splice_out_row",
     "transport_row",
 ]
 
 _EPS = 1.0e-9
 _TERM = _TSS_POS | _TSS_NEG | _TES_POS | _TES_NEG
+#: the marginal over ``log rho`` is taken on equal-probability nodes of the standard normal —
+#: quadrature resolution, like ``n_grid``, not a model constant
+_MARGINAL_NODES = norm.ppf((np.arange(9) + 0.5) / 9.0)
 
 
 def edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e):
@@ -145,6 +171,28 @@ def transport_row(row, lam, lam_e_of_u, n_u, n_s):
     return out - out.max()
 
 
+def splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e):
+    """The exon -> boundary claim: the exon's own row ``row_e`` read at the GEOMETRIC splice-in map
+    (both components on the gDNA opportunity ``a_g``; spliced density ``n_s / a_g_b``), marginalised
+    over the measured ratio ``log rho ~ N(log n_s/n_u, trigamma(n_s+1/2) + trigamma(n_u+1/2))`` — the
+    same counting price rung 2 charges its ingredients; max-normalised. Vacuous
+    (all zeros) at a depleted face or a flat row — silence, never a near-zero row."""
+    lam = np.asarray(lam, np.float64)
+    r = np.asarray(row_e, np.float64)
+    if not (n_u > 0.0 and a_g_b > 0.0 and a_g_e > 0.0) or np.ptp(r) <= _EPS:
+        return np.zeros_like(lam)
+    r = r - r.max()
+    sd = float(np.sqrt(polygamma(1, float(n_s) + 0.5) + polygamma(1, float(n_u) + 0.5)))
+    acc = np.zeros_like(lam)
+    for z in _MARGINAL_NODES:
+        s = float(n_s) / float(a_g_b) * float(np.exp(z * sd))
+        m = face_map_lambda(lam, n_u, a_g_b, a_g_b, a_g_e, a_g_e, s)
+        acc += np.exp(np.interp(m, lam, r, left=r[0], right=r[-1]))
+    out = np.log(np.maximum(acc / _MARGINAL_NODES.size, 1.0e-300))
+    out -= out.max()
+    return out if np.ptp(out) > _EPS else np.zeros_like(lam)
+
+
 class TransferPolicy:
     """The composition-transfer policy. ``rows_at(n_grid, logodds_window)`` supplies the intron
     factory's per-slot rows on the sweep's own grid (``calibrate`` passes its memoized
@@ -153,8 +201,12 @@ class TransferPolicy:
 
     name = "transfer"
 
-    def __init__(self, rows_at: Callable):
+    def __init__(self, rows_at: Callable, strand: tuple[float, float, float] | None = None):
+        """``strand`` = ``(kappa, od_g, od_r)``, the library's fitted strand model, which the exon ->
+        boundary message needs to state an exon's own row; ``None`` leaves that message off
+        (rungs 1–3 exactly)."""
         self._rows_at = rows_at
+        self._strand = None if strand is None else tuple(float(x) for x in strand)
 
     def prepare(self, ctx: StepContext) -> "_PreparedTransfer":
         src = self._rows_at(int(ctx.n_grid), float(ctx.logodds_window))
@@ -192,38 +244,48 @@ class TransferPolicy:
             rows[b] = row - row.max()
             live = True
 
-        # ── RUNG 2: the face-composed transfer into exons ────────────────────────────────────
-        # For each exon, each LICENSED intron|exon face contributes the intron row transported
-        # through the face map and widened by the face's own counting variance; two licensed
-        # faces sum as independent witnesses (left face reads the left intron, right the right).
+        # ── the LICENSED intron|exon faces of an exon: (boundary, intron, the face's flux column) ──
+        # A face is licensed when no terminus sits on it and both flanks admit the same strands (an
+        # UNMEASURED population change refuses the hop). The spliced flux that enters the exon across
+        # its LEFT face is the sj whose HIGH end is that boundary, and vice versa — the same column
+        # serves the splice-in (rung 2) and the splice-out (item 1) directions of one face.
         lam = np.linspace(-float(ctx.logodds_window), float(ctx.logodds_window), src.shape[1])
         flags = np.asarray(ctx.boundary_flags, np.uint16)
         n_u = np.asarray(ctx.n_slot, np.float64)
         a_g = np.asarray(ctx.eff_gdna_global, np.float64)
         a_r = np.asarray(ctx.eff_rna, np.float64)
-        rr_lo = np.asarray(ctx.route_rate_lo, np.float64).sum(axis=1)
-        rr_hi = np.asarray(ctx.route_rate_hi, np.float64).sum(axis=1)
-        sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
-        sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
-        for e in np.flatnonzero(is_exon):
-            add = None
-            for b, entering_hi in ((left[e], True), (right[e], False)):
+        rr = (
+            np.asarray(ctx.route_rate_lo, np.float64).sum(axis=1),
+            np.asarray(ctx.route_rate_hi, np.float64).sum(axis=1),
+        )
+        sc = (
+            np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1),
+            np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1),
+        )
+
+        def licensed_faces(e):
+            for b, hi in ((left[e], 1), (right[e], 0)):
                 if b < 0 or not is_bnd[b]:
                     continue
                 i = left[b] if right[b] == e else right[b]
                 if i < 0 or not is_intron[i]:
-                    continue  # an exon|exon or terminus-adjacent face: not this rung's hop
-                if not face_is_licensed(flags[b], fp[e], fn[e], fp[i], fn[i]):
-                    continue  # an UNMEASURED population change refuses the hop
+                    continue  # an exon|exon or terminus-adjacent face: not these rungs' hop
+                if face_is_licensed(flags[b], fp[e], fn[e], fp[i], fn[i]):
+                    yield b, i, hi
+
+        # ── RUNG 2: the face-composed transfer into exons ────────────────────────────────────
+        # Each licensed face contributes the intron row transported through the face map and
+        # widened by the face's own counting variance; two faces sum as independent witnesses.
+        for e in np.flatnonzero(is_exon):
+            add = None
+            for b, i, hi in licensed_faces(e):
                 row_i = src[i]
                 if np.ptp(row_i) <= _EPS or not (
                     n_u[b] > 0 and a_g[b] > 0 and a_r[b] > 0 and a_g[e] > 0 and a_r[e] > 0
                 ):
                     continue  # no split evidence, or a depleted/empty face: silence
-                s = float((rr_hi if entering_hi else rr_lo)[b])
-                n_s = float((sc_hi if entering_hi else sc_lo)[b])
-                le = face_map_lambda(lam, n_u[b], a_g[b], a_r[b], a_g[e], a_r[e], s)
-                r = transport_row(row_i, lam, le, n_u[b], n_s)
+                le = face_map_lambda(lam, n_u[b], a_g[b], a_r[b], a_g[e], a_r[e], float(rr[hi][b]))
+                r = transport_row(row_i, lam, le, n_u[b], float(sc[hi][b]))
                 add = r if add is None else add + r
             # ── RUNG 3: the intergenic|exon EDGE faces, lower bound only ─────────────────
             is_intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
@@ -243,6 +305,30 @@ class TransferPolicy:
             if add is not None:
                 rows[e] = add - add.max()
                 live = True
+
+        # ── RUNG 1 COMPLETED: the EXON -> intron|exon BOUNDARY message (item 1) ─────────────────
+        # A strand-live exon publishes its own strand row; each licensed face's boundary reads it
+        # at the geometric splice-in map, marginalised over the face's measured ratio, and sums it
+        # with the intron row already there — two independent witnesses of one composition.
+        if self._strand is not None:
+            kappa, od_g, od_r = self._strand
+            tau = np.asarray(ctx.own.tau_lam, np.float64)
+            cnt = np.asarray(ctx.unspliced_count, np.float64)
+            belief = np.asarray(ctx.belief_fg, np.float64)
+            for e in np.flatnonzero(is_exon & (fp != fn) & (tau > 0.0)):
+                f_ref = float(belief[e]) if np.isfinite(belief[e]) else 0.5
+                row_e = strand_row_logodds(
+                    lam, cnt[e, 0], cnt[e, 1], bool(fp[e]), kappa, od_g, od_r, f_ref
+                )
+                if np.ptp(row_e) <= _EPS:
+                    continue  # inside the deadband in all but name: silence
+                for b, _i, hi in licensed_faces(e):
+                    r = splice_out_row(row_e, lam, n_u[b], float(sc[hi][b]), a_g[b], a_g[e])
+                    if np.ptp(r) <= _EPS:
+                        continue
+                    rows[b] = rows[b] + r
+                    rows[b] -= rows[b].max()
+                    live = True
         return _PreparedTransfer(rows if live else None)
 
 

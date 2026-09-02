@@ -57,6 +57,7 @@ __all__ = [
     "CompositionPriors",
     "_logodds_grid",
     "_solve_regions_logodds_all",
+    "strand_row_logodds",
 ]
 
 _EPS = 1.0e-9
@@ -218,6 +219,38 @@ def _mixture_strand_loglik(
     )
     var = np.maximum(var, _EPS)
     return -0.5 * (u_pos - mean) ** 2 / var - 0.5 * np.log(var)
+
+
+def strand_row_logodds(lam, u_pos, u_neg, live_pos, kappa, od_g, od_r, f_ref):
+    """ONE single-strand region's OWN strand log-likelihood over the log-odds grid ``lam``
+    (``f_g = sigma(lam)``, the live RNA strand carrying ``1 - f_g``), max-normalised.
+
+    The same term the local solve uses (:func:`_mixture_strand_loglik`), with the same
+    count-zero-information FREEZE: the variance is evaluated at the reference composition ``f_ref``
+    (the slot's incoming belief), so at ``kappa = 1/2`` the mean is constant in ``f_g`` and the row is
+    EXACTLY flat — an unstranded library says nothing, structurally. ``live_pos`` names the live strand:
+    a ``-`` region's RNA reads sense at rate ``1 - kappa``. This is the row a region PUBLISHES about
+    itself (the exon -> boundary message consumes it); it carries no prior and no message."""
+    lam = np.asarray(lam, np.float64)
+    fg = expit(lam)
+    f_ref = float(np.clip(f_ref, _EPS, 1.0 - _EPS))
+    zero = np.zeros_like(fg)
+    f_pos, f_neg = ((1.0 - fg), zero) if live_pos else (zero, (1.0 - fg))
+    ref_pos, ref_neg = ((1.0 - f_ref), 0.0) if live_pos else (0.0, (1.0 - f_ref))
+    row = _mixture_strand_loglik(
+        float(u_pos),
+        float(u_pos) + float(u_neg),
+        fg,
+        f_pos,
+        f_neg,
+        float(kappa),
+        float(od_g),
+        float(od_r),
+        f_ref,
+        ref_pos,
+        ref_neg,
+    )
+    return row - row.max()
 
 
 def _log_fg(lam):

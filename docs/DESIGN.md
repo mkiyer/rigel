@@ -1543,6 +1543,50 @@ against the §6b.2 graduated numbers. ⚠ Deferred deliberately: folding the rou
 `region_geometry` (fixing the relay splice-in's pooling at the source) and per-strand column
 matching — both ride the weak-message re-price.
 
+### 6b.4 ⭐⭐⭐ THE EXON → BOUNDARY MESSAGE IS THE SPLICE-IN MAP READ BACKWARDS (owner design + ruling, 2026-09-02)
+
+**The population accounting.** An intron|exon boundary's unspliced crossing holds gDNA and the
+unspliced RNA of the transcripts that span it; the exon holds those AND the mature RNA that arrived by
+the splice junction (fragments fully inside the exon are unspliced, but their molecules crossed no
+boundary). So the exon → boundary message must REMOVE the mature share — the SPLICE-OUT direction.
+
+**The arithmetic (owner).** Rescale the boundary's spliced density into the exon's frame by the
+enrichment ratio `e = T_E / (U_b + S_b)`, subtract it from the exon's RNA, rescale back. Done in symbols,
+`e` CANCELS and only the face's own spliced-to-unspliced ratio survives: `f_b = f_E · (U_b + S_b) / U_b`.
+That is the splice-in face map (§6b.2's route reformulation) solved for the boundary, so at solve time
+the boundary evaluates the exon's likelihood row AT the map — one function, read the other way. It was
+checked unbiased on certified truth across the abundance ladder before any code.
+
+**Three rulings the measurements forced.** (1) The exon publishes its OWN evidence only — its
+strand row — and only when the solver's derived strand DEADBAND (`region_init.strand_evidence`) declares
+the channel live: an unstranded library's exon says nothing, exactly, with no constant.
+(2) Both components must convert counts to densities with ONE opportunity treatment: the map runs on
+the capture-blind geometric opportunity for gDNA and RNA alike (`eff_gdna_global`, spliced density
+`S / A_g^b`). A capture-aware opportunity on one component alone re-introduces a level across
+locales — measured as a 12 % harm on sparse probes, gone under the geometric form; dropping the
+opportunities altogether is catastrophic (the crossing-vs-contained placement geometry is
+load-bearing). (3) The width is the MARGINAL over the measured ratio (`log ρ ~ N(log S/U, 1/S + 1/U)`,
+equal-probability nodes), not a uniform blur in log-odds — noise in the ratio moves the boundary's
+log-odds by `σ/(1 − f_b)`, unbounded at the pure-gDNA vertex, and a uniform blur left thin faces
+over-confident there.
+
+**The premise, measured.** The message assumes spliced and unspliced fragments at the SAME face share
+capture affinity. Fitted per library by the two-witness estimator (the exon's and the boundary's own
+strand solves imply a ratio; the face measured one; the excess of their disagreement over counting is the
+premise variance), it reads: off capture, no bias and no spread; under benign capture a BIAS of
+`a ≈ 1.3` (the shoulder — the contiguous ratio 0.775 of §6b.2's stage 0 seen from the other side) with
+negligible spread; on junction probes `a ≈ 2.2`. A fitted widening therefore does nothing, and a bias
+correction would be a level-like fudge: the bias is RECORDED, NOT CORRECTED (owner ruling pending on a
+correction; none is proposed).
+
+**Measured (2026-09-02).** Test chromosome: wins every stranded / part-stranded capture-ON row
+(0.83–0.996×) on the benign, sparse and junction panels, identical to rungs 1–3 on every other row.
+Ladder: unstranded byte-identical; stranded capture-ON 0.987 / 0.994 / 0.995×; capture-OFF within 33
+fragments; the reversed subtraction fails everywhere the message acts. Gates:
+`tests/calibration/test_transfer_policy.py` (deadband silence, the independent recompute at licensed
+faces, the count-form mode / direction / marginal width), each watched failing first and each
+perturbation watched firing.
+
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 
 ⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE.** ψ solves a point on the 2-simplex,

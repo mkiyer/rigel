@@ -590,3 +590,527 @@ training at `g00 ss.50`; the annotation-vs-kappa gate mismatch; the reliability 
 composition blindness; ⛔ the naive exclusion REFUTED by measurement (it starves the bootstrap
 that generalizes message-delivered truth — `g50 ss.50 ON` 2,691 -> 56,422); and the separate
 grid-vs-mass span-read defect. The open question and candidate mechanisms live in the entry.
+
+# RUNG 4 — THE TERMINUS MECHANISM (holes ① and ②): derivation + stage 0 (2026-09-02)
+
+## What the ladder census re-framed (chain of `g50 ss.50 OFF`, no solver)
+
+Hole ① is two holes. Of the 12,811 exon|exon boundaries, **7,604 are internal TERMINI** (a TSS/TES of one
+isoform inside another's exon; 950 k crossing mass) and 4,838 are alternative splice sites (licensed by
+the rung-2 predicate; 458 k). 10,259 exons (1.05 M) are unreachable by ANY chain of licensed faces —
+walled by terminus faces (11,630 of their faces). Hole ② (`exon|intron[term]`, 2,979 slots) is the same
+mechanism at an intron flank. Strand-change faces are small (246 exon|exon + 888 exon|intron) and stay a
+later rung, as the owner ruled (both-stranded loci last).
+
+## Stage 0 — THE DIRECTED LICENCE, certified on ladder truth
+
+A terminus boundary's terminating transcripts cover exactly one flank (the INSIDE); the direction is
+read off the flag (TSS+ / TES− extend genomic-right, so outside = left flank; TES+ / TSS− extend left).
+Noise-subtracted logit-composition gap (`gap² − Σ trigamma(n+½)`), mixed slots ≥ 20 fragments,
+single-direction boundaries:
+
+| condition | class | n | OUTSIDE excess | INSIDE excess |
+|---|---|---|---|---|
+| g50 ss.50 OFF | exon\|exon | 268 | −0.023 | 0.667 |
+| g50 ss.50 OFF | exon\|intron | 176 | 0.003 | 2.716 |
+| g50 ss.50 ON | exon\|exon | 312 | 0.021 | 1.802 |
+| g98 ss.50 OFF / ON | exon\|exon | 109 / 187 | −0.016 / −0.021 | 0.354 / 0.786 |
+
+**The OUTSIDE flank shares the crossing's composition to within counting noise on every condition; the
+INSIDE flank does not.** The gDNA LEVEL across an `exon|intron[term]` face under capture is destroyed
+(median log ratio 5.9, the cliff) while the composition survives.
+
+## The derivation — three mechanisms, one currency, one source factor
+
+Notation as rung 2: at boundary `b` the crossing count `n_b` with opportunities `A_g^b, A_r^b`; at a region
+`R` the count `n_R` with `E_g^R, E_r^R`; λ = log-odds of the gDNA COUNT share at a slot; `s` a measured
+spliced density.
+
+**(i) The OUTSIDE transfer (composition, either direction).** `comp(b) = comp(O)` is the same
+shared-population law as rung 1's intron→boundary pair, so the hop is the s = 0 face map (a pure
+opportunity shift): `λ_b = λ_O − log(E_g^O/A_g^b) + log(E_r^O/A_r^b)` and its inverse. For hole ②
+(`O` = intron) rung 1 ALREADY delivers the intron row to `b` — its pair detection never checked flags, so
+`exon|intron[term]` boundaries are served. What is new is `O` = exon: `b` receives `O`'s composition —
+and `O`'s composition is not `O`'s own belief (that would be a relay of a destination belief, the
+foundation's reserved case) but **the source factor `O` was itself reached by, transported one map
+further**. So rung 4 is built on
+
+**(ii) THE COMPOSED TRANSPORT — one source factor through a chain of licensed maps.** The nearest
+intron factory's row is carried region→boundary→region through licensed faces, each step a monotone
+map, each measured ingredient adding its delta-method width (rung 2's `trigamma(n_u+½) + trigamma(n_s+½)`
+per face; widths sum along the chain — a deep chain is honestly wide). Two step kinds:
+* BOUNDARY → REGION: rung 2's face map (spliced route `s` joins on the entering side).
+* REGION → BOUNDARY: the crossing carries the region's unspliced population MINUS the mature RNA that
+  splices OUT at `b` in the direction of travel. Where nothing leaves — the sj at `b` is an ACCEPTOR
+  w.r.t. travel (genomic-order flag `ACC_s` when travelling right, `DON_s` when travelling left; the
+  boundary at the HIGH end of an intron is where spliced RNA JOINS rightward travel, at the LOW end it
+  LEAVES, on either strand) — the step is the identity (s = 0 inverse map). Where mature RNA LEAVES, the
+  step is a SUBTRACTION of the measured splice-out flux from the region's RNA density — the relay's
+  classic trouble spot (`TRAPS: zero-the-precision-with-the-value`); rung 4 REFUSES leave steps
+  (silence) and prices what that costs (below). ⭐ On `altss` every exon is reachable JOIN-ONLY from the
+  appropriate side (the core at depth 2 from either intron), so the structure that indicts the licensed
+  multi-hop needs no splice-out.
+
+**(iii) THE INSIDE BOUND (level, one-sided).** `I`'s population = crossing + the terminating
+transcripts' RNA (unmeasured), so composition cannot cross; gDNA CONTINUITY can: `ρ_g^I = s·ρ_g^b`,
+`s` the unknown enrichment step. With `g_b(λ_b) = σ(λ_b)·n_b` the crossing's implied gDNA count and
+`c(λ_I) = σ(λ_I)·n_I·A_g^b/E_g^I` the count `b` would show under continuity, the claim on `I` is the
+PROFILE over the nuisance `s ≥ 1` AND over the crossing's own composition:
+
+    L_I(λ_I) = max_{λ_b} [ L_b(λ_b) + sup_{s≥1} logPois( g_b(λ_b) ; c(λ_I)/s ) ]
+
+— the source row's RUNNING MAXIMUM read through the level map, softened by the crossing count's
+one-sided Poisson tail. It reduces EXACTLY to rung 3's `edge_bound_row` when `L_b` is the pure-gDNA
+point (an intergenic crossing), so the edge rung is its special case; a peaked `L_b` becomes one-sided
+(the upper side is dropped — the refused ceiling never enters); a cliff row keeps its cliff. ⚠ The sign
+certificate `s ≥ 1` (destination at least as enriched as the crossing) holds for `exon|intron[term]` by the
+edge's documented tool-scope assumption (probes target exons; the face is where they trail off) and is
+NOT certified for `exon|exon[term]` under capture (both flanks are exons of the host; the ladder's median
+log level ratio there is +0.14–0.17 ON, ≈ 0 OFF) — price it on the three probe panels before believing it.
+Nothing goes from `I` to `O`: the gDNA level the other way is an UPPER bound on `O` (the refused
+direction) and `O` is reached from its own side.
+
+**What the rules reach on the ladder (chain census, `g50 ss.50 OFF`):** rungs 1–3 today leave 11,350
+exons (1.11 M) unreached. Under (i)+(ii) join-only +(iii): **COMP 12,018 exons (701 k) · BOUND-only 5,392
+(388 k) · UNREACHED 6,608 (841 k)**; non-edge boundaries COMP 21,524 · BOUND 4,071 · UNREACHED 6,826
+(1.04 M crossing mass). Allowing LEAVE steps would move 1,741 exons (177 k) from unreached to
+composition — the measured price of refusing splice-out, to weigh later. The remaining unreached are
+exons between two termini facing away from each other (2,167; 190 k), leave-only sj chains (1,232;
+165 k), and edge+terminus exons the edge rung already bounds (802; 63 k — not counted here).
+
+**On the new test chromosome** the same census says the substrate indicts exactly these: every exon is
+reached by composition except the mono block (edge-only, rung 3) and the 10 `nest` walls (BOUND-only,
+3,840 mass); the `altss` cores sit at depth 2 (join-only); 30 exon|exon terminus boundaries and 10
+`exon|intron[term]` faces exist, on both strands.
+
+## The plan (DERIVE done → DESIGN → PLAN → PROTOTYPE → A/B → src)
+
+1. Baseline on the rebuilt substrate FIRST (`policy_benchmark.py --panel test --policies silent
+   transfer`, all seven panels certified), before any code.
+2. Prototype through the `message` seam, ONE mechanism per arm, each with its flip falsification:
+   arm A = (i)+(ii) join-only composed transport (reaches `altss` cores and the `altstart`/`nest`
+   OUTSIDE pieces and their boundaries); arm B = A + (iii) the inside bound (reaches `instart`'s first
+   exon, `altstart`'s inside piece, the `nest` walls). Score per type × strand × probe panel; the
+   stranded rows must stay ≤ silent, the zero controls and `silent`/`monosilent` genes clean.
+3. Confirm on the ladder, both halves apart, all three probe worlds; then the promotion ruling.
+
+## RUNG 4 — the PROTOTYPE on the rebuilt benign panel (2026-09-02, same day)
+
+**The new baseline first** (`policy_benchmark.py --panel test --policies silent transfer`, the
+rebuilt 85-gene chromosome at 480 k fragments): unstranded `transfer` beats silence on **14/20**, worst
+row **1.21×** (`g00 ss.50 ON`, the deferred zero control: 25,820 vs 21,422); stranded **9/10**, worst
+**1.01×**. The in-scope unstranded OFF rows sit at 0.92–1.01× and are near the counting floor
+(whole-library ~7–9 k fragments on 480 k) — the region axis is slightly WORSE than silence at
+`g25/g50 ss.50 OFF` (7,808 vs 7,653; 6,805 vs 6,425) while the boundary axis is better. The blind
+capture-ON rows keep the large wins (0.05–0.20×). Two rows (`g25 ss.70/.99 OFF`) certify at
+COMPOSITION level only on every panel — the gdna-field-uniformity gate flags 1–2 of 981 z-scored slots
+(a naive per-ref z reproduces no flag; the OFF simulations are shared across probe panels so it is one
+event, not three). Recorded, not chased.
+
+**The prototype** (`rung4_proto.py`, scratchpad; a `TransferPolicy` subclass installed by patching the
+module attribute `rigel.calibration.calibrate.TransferPolicy` — ⚠ `from rigel.calibration import
+calibrate` returns the FUNCTION, and patching it silently does nothing: every arm read identical to
+`transfer` until the module was patched). Arms: `ident` (MULTI off, BOUND off — **byte-identical to
+`transfer` on every condition and type**, the identity gate), `multi` (the composed join-only transport
++ the outside→terminus composition), `bound` (multi + the inside bound), `flip` (the inside bound with
+the inequality reversed).
+
+Whole-library |err| (fragments), `g50` rows:
+
+| row | silent | transfer | multi | bound | flip |
+|---|---|---|---|---|---|
+| ss.50 OFF (in scope) | 6,983 | 7,064 | 7,161 | 7,269 | 7,133 |
+| ss.50 ON (deferred) | 207,139 | 27,892 | **25,445** | 25,806 | 30,897 |
+| ss.99 OFF | 6,209 | 6,050 | 6,068 | 6,078 | 6,064 |
+| ss.99 ON | 4,155 | 4,119 | 4,115 | 4,112 | 4,359 |
+
+Per type, the mechanism's own structures at `ss.50 ON`: `capaltss` 5,471 → 4,640 (multi), `capaltstart`
+2,666 → 2,428, `capnest` 2,870 → 2,638, `capinstart` 8,979 → 8,732 (bound 8,795; **flip 14,901** — the
+falsification fires where the structure is hole ②); stranded rows unmoved (±3). At `ss.50 OFF` multi
+costs `altss` +44 and a few fragments elsewhere.
+
+**Dissections (per slot, truth beside each arm):**
+* `altss` OFF, block 1: the core (truth f_g 0.094, 363 fragments) reads 0.127 under `transfer` and 0.155
+  under `multi` — the transported claim over-reads by ~20 fragments. The crossing's truth (0.108, 111
+  fragments) and the T-only piece's (0.136) differ by counting noise; in per-opportunity terms the piece
+  and core have the SAME RNA density and the composition gap is the gDNA count's Poisson noise (19 vs
+  34). A 10-molar gene at 480 k is at the floor; the in-scope OFF cost is noise-level in absolute
+  terms but it is a cost.
+* `capaltstart` ON: the inside piece's `transfer` estimate already sits ABOVE truth (block 1: 0.708 vs
+  0.635; block 2 [the − gene; the inside piece is the mirrored `[8000, 8500)`]: 0.769 vs 0.749) because
+  rung 2 reaches it from its licensed intron face — so a LOWER bound is inert there and the flip's
+  "win" is an accident of direction. ⭐ The directed licence reads correctly on the − gene: the inside
+  piece carries more RNA, the crossing matches the outside flank (0.877 vs 0.873).
+* `capnest` ON — the walled exon, the pure case: silence is blind (0.001) but **`transfer` already
+  reads 0.666 vs truth 0.630 — the refit landscape prior, trained by the other rows, reaches the wall**.
+  `bound` 0.665, `multi` 0.659, `flip` 0.460 (fires). The inside bound's marginal value is ~zero where
+  the bootstrap prior already generalizes.
+
+**Verdict so far**: the mechanisms behave exactly as derived (identity holds, both falsifications fire
+where the structure is theirs, direction correct on both strands), the composed transport wins ~9 % on
+the deferred blind row with ≤ 3 fragments of stranded movement, and the inside bound is INERT on this
+substrate (every inside flank here has either a licensed witness or the prior). ⛔ Nothing here says
+"ship": the in-scope unstranded OFF rows show a small cost, and the population that motivated the rung
+(the ladder's 10,259 walled exons) is not on this chromosome in bulk. The LADDER run
+(`rung4_proto.py ladder transfer,multi,bound,flip all`, ~1 h) is the decision.
+
+**The adversarial probe panels (whole-library |err|, `g50` capture-ON rows + the `g00 ss.50 ON` zero control):**
+
+| panel · row | silent | transfer | multi | bound | flip |
+|---|---|---|---|---|---|
+| SPARSE · ss.50 ON | 212,933 | 55,154 | **54,114** | 59,489 | 61,444 |
+| SPARSE · ss.99 ON | 4,056 | 3,916 | 3,909 | 3,912 | 8,606 |
+| SPARSE · g00 ss.50 ON | 55,416 | 56,101 | 56,101 | 56,101 | 56,101 |
+| JUNCTION · ss.50 ON | 119,379 | 19,645 | **13,389** | 13,255 | 12,693 |
+| JUNCTION · ss.99 ON | 4,510 | 3,987 | 3,993 | 4,001 | 4,252 |
+| JUNCTION · g00 ss.50 ON | 103 | 102 | 102 | 102 | 102 |
+
+⭐ `multi` is robust on both hostile designs (−2 % sparse, −32 % junction on the blind row; stranded
+within 0.2 %; zero controls untouched). ⛔ **The inside bound HARMS on the sparse panel (+8 %)** — the
+sign certificate `s ≥ 1` is not guaranteed at an exon|exon terminus (the derivation said so), and on
+sparse probes the crossing can be MORE enriched than the inside piece, turning the "lower bound" into
+an over-claim. So the inside bound is refuted as a shipping candidate by measurement: inert where a
+witness or the prior exists, harmful where the enrichment sign flips. **The candidate for `src/` is the
+composed join-only transport ALONE** — one mechanism — pending the ladder run.
+
+## RUNG 4 — THE LADDER (16 conditions, silent / transfer / multi / bound / flip; 2026-09-02)
+
+Ratios are against the SHIPPED `transfer` (rungs 1–3); silence for scale.
+
+| unstranded (ss.50) | silent | transfer | multi | bound | flip |
+|---|---|---|---|---|---|
+| g00 OFF (in-scope zero control) | 1,254,145 | 303,826 | **285,785 (0.941×)** | 285,785 | 251,989 |
+| g00 ON | 454,560 | 344,331 | 338,890 (0.984×) | 338,890 | 326,748 |
+| g05 OFF | 50,435 | 51,074 | 51,149 (1.001×) | 51,313 (1.005×) | 51,145 |
+| g05 ON (deferred) | 518,535 | 220,181 | 221,455 (1.006×) | 217,384 (0.987×) | 248,056 |
+| g50 OFF | 155,660 | 147,736 | 148,661 (1.006×) | 149,613 (1.013×) | 148,901 |
+| g50 ON (deferred) | 6,141,095 | 1,456,056 | 1,445,494 (0.993×) | **1,388,167 (0.953×)** | 1,811,445 |
+| g98 OFF | 165,259 | 139,694 | 139,326 (0.997×) | 138,761 (0.993×) | 140,965 |
+| g98 ON (deferred) | 12,030,888 | 2,522,236 | 2,479,621 (0.983×) | **2,385,564 (0.946×)** | 3,213,817 |
+
+| stranded (ss.99) | silent | transfer | multi | bound | flip |
+|---|---|---|---|---|---|
+| g00 OFF | 30,606 | 18,960 | 18,305 (0.965×) | 18,305 | 17,775 |
+| g00 ON | 20,787 | 18,197 | 18,117 (0.996×) | 18,117 | 17,974 |
+| g05 OFF | 44,519 | 44,155 | 44,205 (1.001×) | 44,192 | 44,239 |
+| g05 ON | 85,294 | 85,302 | 85,404 (1.001×) | 85,316 | 90,185 |
+| g50 OFF | 125,634 | 117,679 | 118,614 (1.008×) | 118,551 (1.007×) | 118,864 |
+| g50 ON | 260,629 | 244,163 | 244,035 (0.999×) | 243,677 | 333,588 |
+| g98 OFF | 126,467 | 108,890 | 108,637 (0.998×) | 108,359 | 109,365 |
+| g98 ON | 298,597 | 288,834 | 288,423 (0.999×) | 288,138 | 498,711 |
+
+**Reading it, halves apart.** `multi` (the composed join-only transport) is NEUTRAL on the ladder: 5/8
+rows better in each half, worst 1.006× unstranded and 1.008× stranded, one real move (−6 % at the
+in-scope `g00 ss.50 OFF` zero control, which the shipped policy had left at 303,826). `bound` adds a
+−5 % on the two large DEFERRED rows (`g50/g98 ss.50 ON`) and costs +1.3 % at the in-scope
+`g50 ss.50 OFF`; on the sparse-probe panel it costs +8 %. `flip` is catastrophic where the bound acts
+(deferred rows +25 %, `g98 ss.99 ON` +73 %) — the falsification fires on the ladder too. At `g00`
+multi ≡ bound exactly (no background ⇒ flat intron rows ⇒ nothing to transport; the g00 gains come from
+the outside→terminus and join hops feeding the prior bootstrap).
+
+**Verdict.** The 1.05 M fragments of walled exon mass did not turn into whole-library error movement:
+those exons are already served by the refit prior about as well as a transported row serves them. So
+rung 4 CLOSES holes ① and ② structurally — every reachable terminus and exon|exon face now receives a
+derived claim, join-only, no constants — at a measured cost of ≤ 0.8 % on any in-scope row and a −6 %
+zero-control gain, but it does not buy a win. The inside bound is REFUTED for shipping (in-scope cost,
+sparse-probe harm, its only gain on the deferred stratum). ⭐ The owner's call: ship `multi` as the
+completion of the policy (structural coverage at neutral cost) or record it as measured-and-unneeded and
+call the holes closed by the prior's reach.
+
+# THE RESET (owner, 2026-09-02, late) — and ITEM 1: the exon → intron|exon boundary message (DERIVATION DRAFT)
+
+The owner's rulings: rungs 1 and 2 are unfinished (the exon-side messages were nullified and are
+owed), they come first, one message at a time; rung 4 grows one structure per step (`altstart` only
+now); the tracker is `MESSAGE_RUNGS.md`. Every piece is derived AND taught.
+
+## Item 1 — the setting, single isoform U on +, one intron|exon boundary b (an ACCEPTOR of U)
+
+    intron I  |  b  |  exon E
+
+Unspliced populations (spliced fragments are certified RNA and live in their own lane):
+
+| slot | gDNA | U pre-mRNA (nascent) | U mature (fragments fully inside E) |
+|---|---|---|---|
+| I (contained) | yes | yes | no |
+| b (crossing) | yes | yes | **no** — a mature molecule reaches E by the sj, never across b |
+| E (contained) | yes | yes | **yes** |
+
+Rung 1 (I → b) is exact because I and b share a population. Item 1 is the OTHER witness: E → b. E holds
+one component more than b, so the message must REMOVE it. Two forms, in order of how much they assume.
+
+**Form A — the inequality (assumes nothing beyond E's composition).** Mature RNA is non-negative, so the
+crossing's RNA density is at most E's: `ρ_r^b ≤ ρ_r^E`, while gDNA is continuous, `ρ_g^b = ρ_g^E` (up to
+the enrichment step between a face and an interior, which cancels in a ratio only if it is
+component-blind at each locale — the same premise rung 2 already carries). Hence in log-odds
+
+    λ_b ≥ λ_E + [ log(A_g^b/A_r^b) − log(E_g^E/E_r^E) ]
+
+— a LOWER bound on the boundary's gDNA share: cliff below, flat above. It is the running maximum of E's
+row read through the opportunity shift — the same one-sided-row currency rung 3 ships and the rung-4
+inside bound used. It needs no spliced measurement at all.
+
+**Form B — the subtraction (assumes the spliced route measures E's mature density).** Remove the mature
+share: `ρ_r^b = ρ_r^E − s`, where `s` is the face's route-summed certified spliced density (rung 2's `s`).
+Then `λ_b` is a point claim. ⚠ This is a SUBTRACTION of a quantity measured in a different locale (the
+junction's) from one measured in E's, so a wrong `s` enters in FULL — the adversarial panels measured the
+route identity at 0.003× (sparse probes) and 25× (junction probes) against 1.00–1.03 on the benign one.
+Rung 2 survives that because it ADDS `s` (a wrong `s` only mis-caps a claim); form B would not. It is
+also the relay's `TRAPS: zero-the-precision-with-the-value` family: near `ρ_r^E ≈ s` the estimate's
+variance diverges, and the honest statement there is again one-sided.
+
+**Where the message has value.** At a boundary whose intron is well measured, rung 1 already solves it
+and E's witness adds little. The value is where the intron is thin — capture-ON unprobed introns hold
+~10–20 fragments — and E is probed and, on stranded data, sharply solved by its own strand evidence. So
+the first measurement is: per boundary, the intron row's width against E's, on capture-ON rows.
+
+**The falsification** for either form: reverse the inequality (form A) or add instead of subtract (form
+B); both must make the boundary's error jump on the rows where the message acts.
+
+**Recommendation (for the owner's ruling):** derive and measure form A first — it is exact, needs no
+`s`, and its residual (how far the crossing sits below E's share, i.e. the mature share of E) is a
+measured number that then tells us what form B would be worth and where it is safe.
+
+## THE BASELINE ON THE TRIMMED SUBSTRATE (55 genes: twin + mono + `altstart`; 480 k fragments; 2026-09-02)
+
+`policy_benchmark.py --panel test --policies silent transfer`, the shipped rungs 1–3 against silence —
+the number every item in `MESSAGE_RUNGS.md` is measured from. Unstranded: transfer beats silence on
+**14/20**, worst **1.16×** (`g00 ss.50 ON`, the deferred zero control, 64,143 vs 55,290); stranded
+**8/10**, worst **1.00×**. In-scope unstranded OFF rows: `g05` 1.00×, `g25` **1.06×** (12,738 vs
+12,042 — the one in-scope row where the shipped policy costs), `g50` 0.99×, `g98` 0.92×. Blind
+capture-ON rows: `g05` 0.08×, `g25` 0.76×, `g50` 0.05×, `g98` 0.07×. Full table in the session's
+`baseline_trimmed_silent_transfer.txt`; every earlier test-chromosome number is on another substrate.
+
+## Item 1, form B — THE OWNER'S ARITHMETIC, and what it reduces to (2026-09-02)
+
+Owner design (`message_notes.md`): enrichment ratio `e = T_E / (U_b + S_b)` (exon total density over
+the boundary's spliced + unspliced), rescale the boundary's spliced density into the exon's frame, subtract
+it from the exon's RNA, rescale the leftover back. Done in symbols, with `f_E` the exon's gDNA share:
+
+    mature at E's scale       m = e·S_b
+    leftover RNA at E's scale (1 − f_E)·T_E − e·S_b
+    boundary share            f_b = f_E·T_E / (T_E − e·S_b) = f_E / (1 − S_b/(U_b + S_b))
+
+⭐ **`e` cancels.** `e·S_b/T_E = S_b/(U_b+S_b)` is the boundary's OWN spliced share, so
+
+    f_b = f_E · (U_b + S_b) / U_b            (capped at 1)
+
+— every ratio is formed within one locale (rung 2's law), no level ever crosses the face, and the
+rescale/subtract/rescale is exactly the INVERSE of the shipped splice-in face map (`face_map_lambda`
+solved for `f_b`). So at solve time the boundary evaluates the exon's row AT the splice-in map:
+`L_b(λ_b) = L_E(M(λ_b))` — the same function, read the other way, no inversion code.
+
+**Certified check (twin block, `g50 ss.99 OFF`, every splice-out face with ≥ 5 crossings):** the
+prediction from the exon's TRUE share and the face's own counts tracks the boundary's true share across
+the ladder — nascent genes 0.09/0.09, 0.20/0.21, 0.22/0.20, 0.62/0.61, 0.81/0.77; pure-gDNA faces
+(`clean`/`cap`, true 1.000) read 0.65–1.00, the shortfall being the Poisson noise of `U_b` (7–18
+fragments), the smallest count in the formula and its dominant variance term. Table in the session's
+`splice_out_check.py`. So form B is UNBIASED in expectation and its honest width is the delta-method
+variance of `S_b/(U_b+S_b)` through the map, which diverges as `U_b → 0` (the row saturates at "pure
+gDNA" — one-sided, never a near-zero row). The premise it carries: spliced and unspliced fragments at
+the SAME face share capture affinity (the junction-probe pathology inflates `S_b/U_b` and over-claims
+gDNA at the boundary; to be priced on the adversarial panels, never assumed away).
+
+On unstranded data the exon's own row is flat and the message is silence; its value is on stranded
+rows where the exon is sharply solved and the intron is thin (capture-ON). Falsifiers: the nullified
+form (`f_b = f_E`) and the reversed map must both lose where `S_b/U_b` is large.
+
+## Item 1 — THE PROTOTYPE (form B through the `transfer` seam; `item1_proto.py`, 2026-09-02)
+
+The exon publishes its OWN evidence: its strand log-likelihood over the grid (variance frozen at its
+incoming belief, the solver's own count-zero-information freeze), gated by the solver's derived strand
+DEADBAND (`own.tau_lam > 0`; inside the noise floor the exon says nothing — no constant). The boundary
+reads that row at the splice-in face map, `L_b(λ_b) = L_E(M(λ_b))`, widened by the face's counting
+variance `trigamma(U_b+½) + trigamma(S_b+½)`. Arms: `transfer` (src), `formb`, `null` (`f_b = f_E`,
+splice-out ignored), `rev` (the exon claimed to hold LESS RNA than the crossing). ⚠ A first `rev` arm
+accidentally re-implemented the correct map and tracked `formb` to the fragment — a falsifier that
+cannot fail is not a falsifier; it was rewritten as the true reversal before anything was read.
+
+**Benign panel, whole-library |err| (boundary axis in the last column):**
+
+| row | silent | transfer | formb | null | rev | formb/transfer | boundary tr → fb |
+|---|---|---|---|---|---|---|---|
+| g05 ss.70 ON | 1,625 | 1,667 | **1,408** | 3,405 | 3,784 | 0.845 | 745 → 486 |
+| g05 ss.99 ON | 1,433 | 1,367 | 1,357 | 3,488 | 3,818 | 0.993 | 237 → 227 |
+| g25 ss.70 ON | 4,517 | 4,098 | **3,952** | 12,083 | 14,553 | 0.964 | 837 → 691 |
+| g25 ss.99 ON | 2,403 | 2,216 | 2,247 | 10,122 | 12,553 | **1.014** | 522 → 553 |
+| g50 ss.70 ON | 5,433 | 5,240 | **5,034** | 15,577 | 19,746 | 0.961 | 1,071 → 865 |
+| g50 ss.99 ON | 3,356 | 3,288 | **3,189** | 14,160 | 18,909 | 0.970 | 613 → 514 |
+| g98 ss.70 ON | 6,314 | 6,402 | **6,098** | 6,525 | 6,318 | 0.953 | 901 → 597 |
+| g98 ss.99 ON | 3,763 | 3,719 | **3,086** | 4,227 | 5,002 | 0.830 | 1,082 → 448 |
+| every capture-OFF row | — | — | ±4 | worse | worse | 1.000 | — |
+| every ss.50 row (gated) | — | — | ≡ transfer | ≡ | ≡ | 1.000 | byte-identical |
+| every g00 row | — | — | ≡ transfer | ≡ | ≡ | 1.000 | — |
+
+The message acts exactly where derived — stranded and part-stranded capture-ON rows, where the probed
+exon is sharp and the unprobed intron thin — and is silence off capture, at the zero controls and on
+unstranded data. Both falsifiers fire wherever it acts (null 4–5×, rev 5–6× on the boundary axis).
+Per boundary (`cap`, `g98 ss.99 ON`, ~1,000 crossings each, truth 1.000): residuals 12 → 2, 10 → 1.
+
+**The adversarial panels (stranded capture-ON rows):** junction 0.926 / 0.883 / 0.961 (wins);
+sparse **1.124** at `g50 ss.99 ON` (boundary 482 → 885), 0.993 at `g98`, 1.011 at `ss.70`.
+
+**The one benign cost, dissected (`capnasc`, `g25 ss.99 ON`):** the nascent-bearing probed gene's
+boundaries are OVER-claimed (block 3: 0.909 vs truth 0.814 where `transfer` read 0.816; 0.974 vs
+0.851). Cause: at a probed face the unspliced crossing sits on the enrichment SHOULDER (rung-2 stage 0
+measured the contiguous ratio at 0.775 for `capnasc` ON) while the spliced fragments, whose bodies lie
+in two interiors, are fully enriched — so `S_b/U_b` over-reads the mature share and the subtraction
+removes too much RNA. Nascent-free genes hide it (their boundaries are pure gDNA and the claim
+saturates at the truth). The sparse panel is the same premise at full strength. ⭐ This is the
+IMPUTATION COST the derivation named, now measured: the counting width alone under-states the
+message, and the missing term is the premise "spliced and unspliced fragments at the same face share
+capture affinity".
+
+**Next (the honest width):** the premise must be FITTED at runtime, never a constant — the house
+pattern is `messages/variance.premise_logvar` / `splice_in_premise_logvar` (method of moments: the
+observed spread of a measured contrast minus the counting variance it was measured with, floored at
+0). The natural contrast here is the TWO WITNESSES at a licensed intron|exon boundary: the intron's row
+and the exon's form-B row are independent statements of the same composition, and the part of their
+disagreement that counting cannot explain is the premise variance, added to the message's blur. Owed:
+derive the estimator, measure it per condition (it should read ~0 off capture and grow with the
+shoulder), then re-run the four arms.
+
+## Item 1 — THE TRANSFER VARIANCE, derived fresh (owner: reuse nothing older; 2026-09-02)
+
+**One measured ratio carries the message**, `ρ = S_b/U_b`; beyond the exon's own row, every error of the
+message is an error in `log ρ`: (1) COUNTING, `Var(log ρ) = 1/S_b + 1/U_b`, shrinking with depth; (2) THE
+PREMISE, `log ρ_obs = log ρ_true + log a` with `a` the spliced-vs-unspliced enrichment ratio AT THE FACE
+(`a = 1` is the premise), which does not shrink with depth and is a property of probe geometry.
+
+**The two-witness estimator of the premise** (fitted per library, no constant): at every licensed
+intron|exon face where the exon AND the boundary both have a live strand row, the two strand solves
+IMPLY a ratio, `ρ_imp = f_b(own)/f_E − 1`, and the face MEASURED one, `ρ_obs = S/U`; their difference is
+`log a`. With each witness's counting variance carried by the delta method,
+`v_prem = max(0, Var_w(d) − mean_w(v_count))`, `w = 1/v_count`, and the weighted mean of `d` is the
+BIAS. ⚠ Two coordinates were tried and refused by their own numbers: logit-of-`f_b` (both witnesses'
+variances explode at the vertex: counting terms of 40–65 logit²) and a first version against the INTRON
+witness (one-sided cliff rows have no usable variance). `log ρ` is the coordinate where everything is
+tame, and only faces with `ρ_imp > 0.05` and ≥ 5 fragments each side can speak about `a`.
+
+**What it measured:**
+
+| panel · row | faces | mean d = log a | Var_w(d) | mean_w(v_count) | v_prem |
+|---|---|---|---|---|---|
+| benign g50 ss.99 OFF | 95 | +0.12 | 0.48 | 1.13 | 0 |
+| benign g98 ss.99 OFF | 60 | −0.00 | 0.10 | 0.29 | 0 |
+| benign g25 ss.99 ON | 57 | **+0.27** | 0.016 | 0.010 | 0.005 |
+| benign g50 ss.99 ON | 54 | **+0.29** | 0.020 | 0.006 | 0.014 |
+| junction g50 ss.99 ON | 68 | **+0.78** | 0.031 | 0.020 | 0.011 |
+| sparse g50 ss.99 ON | 8 | −0.15 | 0.008 | 0.020 | 0 |
+
+⭐ Off capture the premise is clean (`a ≈ 1`, no spread). Under benign capture `a ≈ e^0.28 = 1.3` —
+EXACTLY the shoulder rung 2's stage 0 measured from the other side (contiguous ratio 0.775 = 1/1.29):
+spliced fragments, whose bodies lie in two fully-tiled interiors, are enriched ~1.3× over the crossers
+on the shoulder. On junction probes `a ≈ 2.2`. And the SPREAD is tiny everywhere: on these panels the
+premise error is a BIAS with a known sign, not a variance — so a fitted widening cannot fix it
+(`formb_w` ≡ `formb` to a few fragments), and correcting the bias would be a level-like fudge: the
+owner's ruling, not the derivation's. Recorded, not corrected.
+
+**The width that was actually wrong: the coordinate of the blur.** The prototype applied the counting
+width as a uniform blur in `λ_b`, but noise in `log ρ` moves `λ_b` by `σ_b/(1−f_b)` per unit — unbounded
+near the pure-gDNA vertex — so thin faces near the vertex (the sparse panel's 1–5-crossing faces)
+received a claim far more confident than their counts allow. The honest width is a MARGINAL over the
+measured ratio: `log ρ ~ N(log ρ_obs, 1/S + 1/U)`, nine quantile nodes, the exon row read at each
+node's map, likelihoods averaged (`formb_m`). Wide exactly where the map is sensitive, no wider
+elsewhere, no constant (the node count is quadrature resolution like `n_grid`).
+
+| row | transfer | formb (uniform blur) | **formb_m (marginal)** |
+|---|---|---|---|
+| benign g25 ss.99 ON | 2,216 | 2,247 | **2,171** (the one cost is gone) |
+| benign g50 ss.99 ON | 3,288 | 3,189 | **3,168** |
+| benign g98 ss.99 ON | 3,719 | 3,086 | **3,022** |
+| benign g05 ss.70 ON | 1,667 | 1,408 | **1,407** |
+| benign g50 ss.99 OFF | 8,495 | 8,498 | 8,496 |
+| junction g50 ss.99 ON | 2,228 | 2,064 | 2,091 |
+| sparse g50 ss.99 ON | 3,261 | 3,664 | 3,582 (boundary 482 → 885 → 802) |
+| sparse g98 ss.99 ON | 3,182 | 3,161 | **3,147** |
+
+**The sparse residual, dissected to one face, and what it taught (2026-09-02).** All of it sat in
+`capaltstart`, at the inside piece's face toward the intron (offset 9000 on + genes, 8000 mirrored):
+crossing 302 fragments, truth 1.000 (pure gDNA), `transfer` 0.972, form B 0.748. Not the premise: an
+UNDER-claim. The face's own numbers say why: the exon-to-face opportunity ratio is 1.30 for gDNA but
+0.69 for RNA there (`eff_rna` is capture-aware, `eff_gdna_global` is not; on the benign panel the two read
+1.27 and 1.22 and nearly cancel). The owner's derivation needs both components to see ONE opportunity
+ratio between the two locales — that is what lets the enrichment ratio cancel — and the shipped face
+map's opportunities violate it under hostile probes. Two forms were then measured:
+* the pure COUNT form (`f_b = f_E (U+S)/U`, every opportunity dropped) is CATASTROPHIC (benign
+  `g50 ss.99 ON` 14,576 vs 3,168; junction 18,597): the placement geometry of a crossing versus a
+  contained fragment (~1.27 between a face and a region) and of a spliced fragment versus a crosser is
+  load-bearing and must stay;
+* the GEOMETRIC form — both components on the capture-blind geometric opportunity `a_g` at both locales,
+  the spliced density as `S / A_g^b` — keeps the geometry and drops only the capture asymmetry.
+
+**The final table (item 1, `formb_g` = geometric form + the marginal width; `rev_g` its reversal):**
+
+| panel · row | silent | transfer | formb_m | **formb_g** | rev_g |
+|---|---|---|---|---|---|
+| benign g25 ss.99 ON | 2,403 | 2,216 | 2,171 | **2,189** | 12,557 |
+| benign g50 ss.99 ON | 3,356 | 3,288 | 3,168 | **3,210** | 18,722 |
+| benign g98 ss.99 ON | 3,763 | 3,719 | 3,022 | **3,084** | 5,000 |
+| benign g05 ss.70 ON | 1,625 | 1,667 | 1,407 | **1,408** | 3,784 |
+| benign g50 ss.99 OFF | 8,572 | 8,495 | 8,496 | 8,496 | 9,418 |
+| sparse g50 ss.99 ON | 3,300 | 3,261 | 3,582 | **3,269** | 4,430 |
+| sparse g98 ss.99 ON | 3,431 | 3,182 | 3,147 | **3,137** | 3,287 |
+| sparse g50 ss.70 ON | 10,651 | 11,798 | 11,891 | **11,744** | 12,566 |
+| junction g50 ss.99 ON | 2,486 | 2,228 | 2,091 | **2,092** | 19,617 |
+| junction g98 ss.99 ON | 2,778 | 2,432 | 2,213 | **2,200** | 2,390 |
+
+`formb_g` wins every stranded / part-stranded capture-ON row on all three probe worlds, is neutral off
+capture, exact silence on unstranded and zero-control rows (the deadband gate), and its reversal fires
+everywhere it acts. It gives back a little of `formb_m`'s benign gain — the owner's compromise currency,
+bounded damage over the last few fragments. ⭐ The lesson for every later message: a composition
+transfer must convert counts to densities with ONE opportunity treatment for all components; a
+capture-aware opportunity on one component alone re-introduces a level across locales.
+
+**The full benign sweep, `formb_g` vs the shipped `transfer` (30 conditions):** IDENTICAL on 19 rows (every
+unstranded row, every `g00` row, every capture-OFF row except two that differ by ONE fragment), BETTER on
+the 9 stranded / part-stranded capture-ON rows — `g05 ss.70` 0.845, `g05 ss.99` 0.996, `g25 ss.70` 0.965,
+`g25 ss.99` 0.988, `g50 ss.70` 0.966, `g50 ss.99` 0.976, `g98 ss.70` 0.956, `g98 ss.99` **0.829** — and
+`rev_g` fires on every one of them (up to 5.7×). The ladder (16 conditions, run as 8 parallel
+per-condition processes — the serial harness took ~4 min per ladder condition) is the shipping judgement.
+
+## Item 1 — THE LADDER (16 conditions, 8 parallel per-condition processes; 2026-09-02)
+
+| unstranded (ss.50) | transfer | formb_g | rev_g |
+|---|---|---|---|
+| all 8 rows | — | **byte-identical** (the deadband gate: exact silence) | identical |
+
+| stranded (ss.99) | silent | transfer | formb_g | rev_g | boundary tr → g |
+|---|---|---|---|---|---|
+| g00 OFF / ON | 30,606 / 20,787 | 18,960 / 18,197 | identical | identical | — |
+| g05 OFF | 44,519 | 44,155 | 44,163 (+8) | 45,824 | 19,769 → 19,777 |
+| g05 ON | 85,294 | 85,302 | **84,886 (0.995×)** | 111,221 | 58,444 → 58,027 |
+| g50 OFF | 125,634 | 117,679 | 117,712 (+33) | 134,036 | 48,514 → 48,547 |
+| g50 ON | 260,629 | 244,163 | **242,803 (0.994×)** | 349,664 | 168,737 → 167,377 |
+| g98 OFF | 126,467 | 108,890 | 108,917 (+27) | 109,995 | 44,953 → 44,979 |
+| g98 ON | 298,597 | 288,834 | **285,139 (0.987×)** | 288,342 | 209,269 → 205,574 |
+
+**Verdict.** The message is exact silence on every unstranded row and every zero control; on the
+stranded half it wins every capture-ON row (−416 / −1,360 / −3,695 fragments; 0.5–1.3 %) and costs
+8–33 fragments (< 0.03 %) on the capture-OFF rows, where the intron row is already sharp and the exon
+adds nothing the boundary lacks. The reversal fires on every row where the message acts (up to 1.43×).
+Smaller than on the test chromosome (3–17 %) because the ladder's whole-library error is dominated by
+regions, not boundaries, and its faces are fewer per fragment of error; the direction and the sign
+agreement between the two substrates hold (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank` satisfied).
+⭐ Meets the bar for a stranded-data message: derived, checked on certified truth, falsified twice, wins
+the rows it exists for on three probe worlds and the ladder, harmless elsewhere. READY FOR PROMOTION —
+the owner's ruling — as ONE mechanism: the exon's own strand row, gated by the strand deadband, read at
+the geometric-opportunity splice-in map, widened by the marginal over the measured ratio; delivered as a
+`PsiMessage.lam_rows` row at the intron|exon boundary beside rung 1's intron row.
+
+## Item 1 — SHIPPED (2026-09-02, owner: "land this")
+
+Landed in `messages/transfer.py` as ONE mechanism beside rungs 1–3: `splice_out_row` (the geometric
+splice-in map read backwards, marginalised over the face's measured ratio on equal-probability nodes
+with the trigamma counting price rung 2 charges), the exon block on a shared `licensed_faces` helper
+(rung 2 rewritten on the same helper — one licence, one flux-column rule for both directions of a
+face), the strand triple passed by `calibrate`; `simplex_logodds.strand_row_logodds` is the public
+row a region publishes about itself (the solver's own frozen-variance term). Ruling: `DESIGN.md`
+§6b.4. Gates: 3 new, each watched failing first; perturbations watched firing: a capture-aware
+opportunity in the map (2 gates), the deadband dropped (1), the subtraction reversed (2). Faithfulness:
+`policy_benchmark.py --policies silent transfer` reproduces the harness's `formb_g` TO THE FRAGMENT
+(`g98 ss.99 ON` 3,082, `g25 ss.99 ON` 2,206) — ⚠ only once the harness's parent message was switched
+off: after a landing a subclass that calls the parent's `prepare` DELIVERS THE LANDED MESSAGE TOO and
+double-counts it (the harness read 3,032 / 2,228 until then; three innocent candidates — node set,
+width form, reference clip — were chased first). The recorded caution "compare src-vs-src across a
+landing" has this second face: a harness built on the parent class is dead the moment the parent
+gains the mechanism.

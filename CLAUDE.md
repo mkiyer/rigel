@@ -182,7 +182,7 @@ is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
 | `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
-| `transfer` | ⭐⭐ **RUNGS 1+2+3 of the ground-up rebuild** (`messages/transfer.py`, owner rulings 2026-09-01/02, LADDER-CONFIRMED) — COMPOSITION TRANSFER, one hop, nothing relayed, silence-not-zeros. Rung 1: the intron's factory row VERBATIM at intron\|exon boundaries. Rung 2: the same row transported into EXONS through the monotone FACE MAP (certified flux CAPS the claimable gDNA share) and widened by the face's own counting variance. Rung 3: the intergenic\|exon EDGE's sign-certified LOWER BOUND (the profile likelihood over enrichment ≥ 1; a zero edge is VACUOUS by law — ⛔ the enrichment-ceiling upper side is owner-REFUSED as over-engineering and the zero-gDNA edge residual is an ACCEPTED error). No constants anywhere; face-local ratios only, so no level crosses a capture cliff. ≤ silent on 7/8 stranded ladder rows, −68…−76 % on the blind rows, best-or-near-best on BOTH adversarial probe panels where the relay's anchor is catastrophic. Standing shadows: deferred `g05 ss.50 ON`, and `ISSUES: gdna-landscape-trains-on-false-positives` |
+| `transfer` | ⭐⭐ **RUNGS 1+2+3 of the ground-up rebuild** (`messages/transfer.py`, owner rulings 2026-09-01/02, LADDER-CONFIRMED) — COMPOSITION TRANSFER, one hop, nothing relayed, silence-not-zeros. Rung 1: the intron's factory row VERBATIM at intron\|exon boundaries. Rung 2: the same row transported into EXONS through the monotone FACE MAP (certified flux CAPS the claimable gDNA share) and widened by the face's own counting variance. Rung 3: the intergenic\|exon EDGE's sign-certified LOWER BOUND (the profile likelihood over enrichment ≥ 1; a zero edge is VACUOUS by law — ⛔ the enrichment-ceiling upper side is owner-REFUSED as over-engineering and the zero-gDNA edge residual is an ACCEPTED error). ⭐ Rung 1 COMPLETED 2026-09-02 (item 1): the EXON → intron\|exon boundary message — the exon's own strand row (deadband-gated) read at the GEOMETRIC splice-in map (`f_b = f_E (U+S)/U`, the enrichment ratio cancels; capture-blind opportunities for BOTH components), marginalised over the face's measured ratio; ladder: unstranded byte-identical, stranded ON 0.987–0.995×. No constants anywhere; face-local ratios only, so no level crosses a capture cliff. ≤ silent on 7/8 stranded ladder rows, −68…−76 % on the blind rows, best-or-near-best on BOTH adversarial probe panels where the relay's anchor is catastrophic. Standing shadows: deferred `g05 ss.50 ON`, and `ISSUES: gdna-landscape-trains-on-false-positives` |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -217,15 +217,18 @@ python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
 owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
 up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
 
-⭐⭐ **THE TEST CHROMOSOME CARRIES THE ANCHORED TWIN BLOCK** (owner design, 2026-08-28) — ONE shape
-everywhere (exon 1 kb · intron 7 kb · exon 1 kb · intron 7 kb · exon 1 kb, 20 kb intergenic, all +
-strand), FIVE gene types varying exactly one bit each × FIVE abundance blocks = **25 transcripts**,
-plus **8 SHADOW transcripts** the simulator draws from and the index never sees. The five types are the
-message layer's own controls: `clean` (pure-gDNA message source) · `nasc` (contaminated source) ·
-`cap` (the enrichment cliff) · `capnasc` (both) · `silent` (every object pure gDNA, so any claimed RNA
-is a false positive). ⛔ The owner designs it one structure at a time; after editing
-`scripts/sim/test_reference/*`, everything derived MUST be rebuilt or the benchmark scores a stale
-annotation — `docs/TESTING.md` §0a has the commands and `panel.py status` names the next stage.
+⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND THREE BLOCKS** (owner rulings 2026-08-28 / 2026-09-02).
+`scripts/sim/test_reference/test_chr.yaml` — the `rigel sim` scenario schema plus `probed` and
+`shadow_genes` — is the ONE hand-edited file; the GTFs, abundances, three capture panels and the FASTA
+are RENDERED from it by `build_test_reference.py` (a suite gate refuses a drifted render). It carries the
+ANCHORED TWIN BLOCK (5 types × 5 abundance blocks: `clean` · `nasc` · `cap` · `capnasc` · `silent` — the
+message layer's own controls), the MONO BLOCK (single-exon, edge-only: `mono` · `capmono` · the two
+silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart` now,
+`altss` · `nest` · `instart` queued in `docs/dev/MESSAGE_RUNGS.md`'s order), and 8 SHADOW transcripts
+the index never sees. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
+representation (a sign error is invisible on one strand); both-stranded loci are a later step.
+⛔ After editing the YAML, everything derived MUST be rebuilt or the benchmark scores a stale
+annotation — `docs/TESTING.md` §0a has the full recipe and `panel.py status` names the next stage.
 ⚠ κ is fitted from spliced reads, so the reference needs at least one multi-exon transcript with real
 depth before a number means anything.
 
@@ -302,12 +305,15 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,748 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-02 with the rung-3 landing of the transfer policy — the intergenic|exon edge bound).
-Account it from **3,747** — the rung-2 count — by **+1**: rung 3's pure gate (the one-sided
-edge-bound row; the delivery gate extended in place). ⛔ **RE-DERIVE, NEVER ADJUST** — the
-table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
-attribution (3,756 collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,760 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-02 with item 1 of the message rungs — the exon → intron|exon boundary message — landed in
+the transfer policy). Account it from **3,757** by **+3**: the three item-1 gates in
+`tests/calibration/test_transfer_policy.py` (deadband silence, the licensed-face recompute, the
+splice-out row's analytic properties); no file was added. Before that, from **3,748** — the rung-3
+count — by **+9**: the render-sync gate file `tests/test_test_reference_renders.py` (+5 own cases,
++2 parametrised gates) and two dev notes (+1 each). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
+gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution
+(3,768 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
