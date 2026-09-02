@@ -72,6 +72,9 @@ POLICIES = {
     "silent": dict(message_propagation=False, rna_anchor=False),
     "relay": dict(message_propagation=True, message_policy="relay", rna_anchor=True),
     "message": dict(message_propagation=True, message_policy="message", rna_anchor=False),
+    # rung 1 of the message rebuild: the intron -> intron|exon boundary composition transfer
+    # (messages/transfer.py). Not in the default arm list yet — name it with --policies.
+    "transfer": dict(message_propagation=True, message_policy="transfer", rna_anchor=False),
 }
 
 

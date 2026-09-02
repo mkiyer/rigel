@@ -148,6 +148,10 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "messages/variance",
             "messages/silent",
             "messages/relay",
+            # `messages/transfer` is rung 1 of the ground-up rebuild (owner ruling 2026-09-01):
+            # the intron -> intron|exon boundary composition transfer, one hop, factory rows
+            # blurred by the measured pair dispersion.
+            "messages/transfer",
         ),
     ),
     (

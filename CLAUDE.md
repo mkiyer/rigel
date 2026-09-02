@@ -167,7 +167,7 @@ real and CONCENTRATED where the local solve is blind (unstranded rows, all four 
 ⛔ the answer is not a blanket default flip — it is WHERE the policy speaks and WHAT it claims.
 `ROADMAP.md` rank 1 carries the order of work.
 
-⭐⭐ **THREE POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
+⭐⭐ **FOUR POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
 is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES):
 
 | policy | |
@@ -175,6 +175,7 @@ is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
 | `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
+| `transfer` | ⭐ **RUNG 1 of the ground-up rebuild** (`messages/transfer.py`, owner ruling 2026-09-01, LADDER-CONFIRMED) — the intron → intron\|exon boundary COMPOSITION TRANSFER: the intron's own factory row delivered VERBATIM one hop (no blur — the hop cost was measured inert beneath `α_eff`), nothing relayed, silence-not-zeros. Meets both bars; scope is the 100-per-chromosome pair boundaries only |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -294,12 +295,13 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,733 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-01 after the sandbox cleanup; `src/` was untouched all session, so nothing here is a code
-change). Account it from **3,743** — the count before the coordinate thread — by `docs/dev/` files
-alone, at **+1 each** (jargon only): **−11** for the settled sandbox docs deleted and **+1** for the
-dated baseline snapshot added. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below gives the per-file
-deltas, and a bracket-matched `--collect-only` confirms the attribution.)
+⭐ **THE STANDING BASELINE: 0 failed / 3,743 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-01 with the transfer-policy landing — rung 1 of the message rebuild). Account it from
+**3,733** — the pre-landing count — by the table below: **+3** the new calibration module
+(`messages/transfer.py`, declared in `_layers.py`), **+2** the new `tests/calibration/` gate file,
+**+4** that file's own gates, **+1** the `docs/dev/` thread note. ⛔ **RE-DERIVE, NEVER ADJUST** —
+the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
+attribution (3,751 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

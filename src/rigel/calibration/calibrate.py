@@ -56,6 +56,7 @@ from .messages.foundation import PassThroughPropagation
 from .messages.policy import MessagePolicy, SilentSolve
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
+from .messages.transfer import TransferPolicy
 from .region_chain import BOUNDARY, REGION
 from .region_geometry import (
     build_region_geometry,
@@ -645,10 +646,16 @@ def calibrate(
         policy = SilentPolicy()
     elif config.message_policy == "message":
         policy = MessagePolicy(PassThroughPropagation(), SilentSolve())
+    elif config.message_policy == "transfer":
+        # the intron -> intron|exon boundary composition transfer (rung 1 of the rebuild). Its
+        # evidence IS the intron factory's own memoized rows, so the policy consumes
+        # `_intron_prior_at` directly — grid-keyed exactly like the relay's flux rows, and
+        # `None` (factory off / uninformative background) makes it byte-identical to silence.
+        policy = TransferPolicy(_intron_prior_at)
     else:
         raise ValueError(
             f"unknown message_policy {config.message_policy!r} — "
-            f"expected 'relay', 'silent' or 'message'"
+            f"expected 'relay', 'silent', 'message' or 'transfer'"
         )
 
     def _sweep(prior):
