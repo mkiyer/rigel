@@ -9,16 +9,21 @@ installs it in place of ``calibrate``'s ``TransferPolicy`` for the ``transfer`` 
 across a landing — a prototype that subclasses the shipped policy and calls its ``prepare`` delivers the
 landed mechanism TOO once it lands (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`).
 
-**Two views**, never pooled with each other: the whole-library |gDNA estimate − truth| per condition with
+**Three views**, never pooled with each other: the whole-library |gDNA estimate − truth| per condition with
 its region/boundary split and a per-GENE-TYPE table (a gene's type is the token after ``B<k>_`` in its
 ``gene_id`` on the test chromosome — ``clean``, ``capnasc``, ``altstart`` …, so a moved number names its
-structure), and ``dissect``, every slot of one gene type with its truth beside every arm.
+structure); ``--by-class``, the same error summed per NODE CLASS (the certified stratum, boundaries
+split by their terminus and junction flags, exons by reach: a licensed intron face, an edge only, or
+walled) — the view that judges a message at its DESTINATIONS, which the whole-library number cannot
+(it carries the refit prior's response); and ``dissect``, every slot of one gene type with its truth
+beside every arm.
 
 Usage::
 
     python scripts/design/policy_prototype.py --panel test --arms transfer my_arm \\
         --module path/to/proto.py --conditions gdna_g50_ss_0.99_nrna_file_capture_on
     python scripts/design/policy_prototype.py --panel test --arms transfer my_arm --module p.py --all
+    python scripts/design/policy_prototype.py --panel test --arms transfer my_arm --module p.py --all --by-class
     python scripts/design/policy_prototype.py dissect --panel test --arms transfer my_arm --module p.py \\
         --condition gdna_g50_ss_0.99_nrna_file_capture_on --type capnasc
 
@@ -135,6 +140,7 @@ def condition_setup(index, ra, sj, bflags, suite, cond):
         kwargs=kwargs,
         kind=kind,
         obj=obj,
+        strata=np.asarray(truth["stratum"]).astype(str),
         truth_gdna=np.asarray(truth["n_gdna"], float),
         count=np.asarray(truth["count"], float),
         types=types,
@@ -162,7 +168,39 @@ def run_arm(arm, arms, c):
     return est
 
 
-def score(panel, arm_names, arms, conds):
+def slot_classes(c, bflags):
+    """One label per slot: the certified stratum (``R exon``, ``B exon|exon`` …), a boundary's terminus /
+    junction flags, and an exon's reach — ``licensed`` (an intron|exon face without a terminus),
+    ``edge`` (an intergenic|exon edge and no licensed face), or ``walled`` (neither)."""
+    from rigel.calibration.messages.transfer_rows import SJ_FLAGS, TERMINUS
+
+    kind, obj, chain, strata = c["kind"], c["obj"], c["chain"], c["strata"]
+    left = np.asarray(chain.left, np.int64)
+    right = np.asarray(chain.right, np.int64)
+    flags = np.asarray(bflags, np.uint16)
+    labels = np.array(list(strata), dtype=object)
+    is_bnd = kind == BOUNDARY
+    for b in np.flatnonzero(is_bnd):
+        f = int(flags[obj[b]])
+        labels[b] = strata[b] + (" [term]" if f & TERMINUS else "") + (" [sj]" if f & SJ_FLAGS else "")
+    for e in np.flatnonzero(strata == "R exon"):
+        reach = "walled"
+        for b in (left[e], right[e]):
+            if b < 0 or not is_bnd[b]:
+                continue
+            o = right[b] if left[b] == e else left[b]
+            if o < 0:
+                continue
+            if strata[o] == "R intron" and not (int(flags[obj[b]]) & TERMINUS):
+                reach = "licensed"
+                break
+            if strata[o] == "R intergenic":
+                reach = "edge"
+        labels[e] = f"R exon ({reach})"
+    return labels
+
+
+def score(panel, arm_names, arms, conds, by_class=False):
     index, ra, sj, bflags, suite = load_panel(panel)
     if conds == ["all"]:
         conds = sorted(d.name for d in (suite / "oracle_cache").iterdir() if (d / "slot_truth.npz").exists())
@@ -182,6 +220,14 @@ def score(panel, arm_names, arms, conds):
         for t in sorted(per["silent"]):
             if t != "-":
                 print(f"  {t:<14}" + "".join(f"{per[a][t]:>11,.0f}" for a in line))
+        if by_class:
+            labels = slot_classes(c, bflags)
+            errs = {arm: np.abs(run_arm(arm, arms, c) - c["truth_gdna"]) for arm in ["silent", *arm_names]}
+            mass = c["count"]
+            print(f"  {'node class':<36}{'slots':>7}{'mass':>11}" + "".join(f"{a:>12}" for a in errs))
+            for lab in sorted(set(labels), key=lambda x: -float(mass[labels == x].sum())):
+                m = labels == lab
+                print(f"  {lab:<36}{int(m.sum()):>7}{float(mass[m].sum()):>11,.0f}" + "".join(f"{float(errs[a][m].sum()):>12,.0f}" for a in errs))
 
 
 def dissect(panel, arm_names, arms, cond, gtype):
@@ -244,6 +290,7 @@ def main() -> int:
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--condition", default=None)
     ap.add_argument("--type", default=None)
+    ap.add_argument("--by-class", action="store_true", help="also sum each arm's error per node class")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
     if args.self_test:
@@ -257,7 +304,7 @@ def main() -> int:
     conds = ["all"] if args.all else (args.conditions or [])
     if not conds:
         raise SystemExit("name --conditions or pass --all")
-    score(args.panel, args.arms, arms, conds)
+    score(args.panel, args.arms, arms, conds, by_class=args.by_class)
     return 0
 
 

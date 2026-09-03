@@ -1894,6 +1894,56 @@ completion contract asks for: a chain of k hops accumulates k pairs' widths, non
 pooled. What witnesses a hop on an UNSTRANDED library — where no strand modes exist — is the scan's open
 derivation.
 
+### 6b.9 ⭐⭐⭐ THE REBUILD'S FOUNDATION — rungs 1–3 of the `transfer` policy, and the rung-4 excursion (owner rulings 2026-09-01/02; moved from the thread record 2026-09-03)
+
+**The paradigm (owner, 2026-09-01).** One node type, one message, one boundary case at a time; every
+message a COMPOSITION — a scale-free statement of gDNA against RNA — carried across ONE face by a derived
+map, so no level ever crosses a capture cliff and no constant exists anywhere; silence, never a
+zero-filled channel, where there is nothing to say; DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → `src/`,
+the two halves of every panel read apart. ⛔ The shipped relay's cross-locale level assumption (its
+anchor) was REFUSED as the rebuild's basis: measured on the adversarial probe panels, a level carried
+between locales under capture is refuted by probe placement alone.
+
+**Rung 1 — the intron's factory row, VERBATIM, at intron|exon boundaries.** The intron and its
+boundary share their unspliced population (mature RNA cannot cross that boundary), so the intron's
+own composition row is delivered unchanged. Stage 0 on certified truth measured the pair gap; the
+epsilon ladder and two candidate precision laws priced the hop's cost at ZERO beyond the row's own
+width; the blur constant that survived the prototypes was DELETED on the ladder A/B. `scan` returns
+nothing, so one hop is structural.
+
+**Rung 2 — the face-composed transfer into EXONS.** The intron row travels into the exon through the
+splice-in FACE MAP at every LICENSED face (`face_is_licensed`: no terminus, the same strand set — a
+PURE predicate because the integration toy cannot falsify its terminus branch), `face_map_lambda`
+monotone with the certified flux CAPPING the claimable gDNA share, `transport_row` reading the
+preimage (no Jacobian) and widening by the face's own measured-ingredient variance
+`trigamma(n_u+½) + trigamma(n_s+½)` (the crossing and the face's spliced count; the intron row's
+width is already inside the shape). Two licensed faces sum as independent witnesses. Rows ride EVERY
+sweep — the final-sweep-only citizenship was built and REFUTED (true information training the prior
+bootstrap is where the blind-row value compounds). The ingredient width was decisive: `g25 OFF`'s
+lucky-cliff slot (12,969 → 8,070) and the stranded residue flipped to a win. Confirmed on all three
+probe worlds (best arm on every capture-ON row of the junction panel) and the ladder: stranded ≤
+silent 7/8; unstranded `g50 ON` −68 %, `g98 ON` −74 %, the in-scope `g00 ss.50 OFF` control −76 %.
+The adversarial probe panels — junction-probed and sparse-probed twins of the test chromosome — were
+built for this rung and stay in every loop.
+
+**Rung 3 — the intergenic|exon EDGE's lower bound.** With the mono block (single-exon transcripts) in
+the substrate: the edge's gDNA count against the exon's implied one as the profile likelihood
+`sup_{s ≥ 1} Pois(n_b; c/s)` — zero wherever the exon's implied count covers the edge's, the edge
+count's own one-sided Poisson tail below, IDENTICALLY VACUOUS at `n_b = 0` (the near-zero-row artifact
+family barred by law, not threshold). `r ≈ 1` rests on a documented tool-scope assumption: probe
+panels do not target intergenic boundaries. ⛔ The enrichment-ceiling UPPER side is owner-REFUSED as
+over-engineering ("take the win, keep the policy clean and simple, accept the error"): the zero-gDNA
+edge residual is an ACCEPTED error. Its study exposed `ISSUES: gdna-landscape-trains-on-false-positives`.
+
+**The rung-4 excursion (2026-09-02), recorded so it is not rebuilt.** Three mechanisms were derived
+and prototyped together — the outside transfer, the COMPOSED TRANSPORT (one source factor through a
+chain of licensed maps, each adding its ingredient width) and an inside LEVEL bound — and measured
+NEUTRAL (the composed transport: 5/8 better in each half, worst 1.008×) and REFUTED (the inside bound:
++1.3 % in scope, +8 % on sparse probes — an uncertified enrichment sign at an exon|exon terminus).
+The owner's reset: finish rungs 1–2's nullified messages first, one at a time, then rung 4 one
+structure per step. The pieces re-entered as items 1, 2, 5, 6 and 7 (§6b.4–§6b.8); the composed
+transport's multi-hop form is THE SCAN, the next case; the level bound is owed as the tracker's phase A.
+
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 
 ⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE.** ψ solves a point on the 2-simplex,

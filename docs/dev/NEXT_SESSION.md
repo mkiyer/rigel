@@ -1,4 +1,4 @@
-# NEXT SESSION — FINISH THE MESSAGE POLICY: the scan (multi-hop with per-hop premises), then sj+terminus (owner ruling 2026-09-02, `DESIGN.md` §0c.0e)
+# NEXT SESSION — FINISH THE MESSAGE POLICY: THE SCAN (multi-hop through the derived maps, each hop priced by the owner's rule), then sj+terminus (owner ruling 2026-09-02, `DESIGN.md` §0c.0e)
 
     ⚠ A DEV DOC, and it is a HANDOFF. It says where things stand and how to start, not what is
     settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
@@ -33,41 +33,73 @@
   crossing — test the MEAN gap in f-space by component; excess variance and a plug-in null cannot see
   a bias), and the terminus-boundary decomposition by what lies beyond the outside flank.
 
-## START HERE: the completion checklist — the scan, then sj+terminus
+## START HERE: THE SCAN — multi-hop composition through every case already derived
 
 ⛔ The owner's ruling (2026-09-02, late): this thread does not switch away until every case in
-`MESSAGE_RUNGS.md`'s COMPLETION CHECKLIST reads ✅ — no nullified message, no skipped boundary, multi-hop
-through chains with per-hop dampening, gDNA always conveyed where composition cannot cross, every node
-solved from two honest messages. Other priorities are LOGGED in the tracker's parked list, not taken up.
+`MESSAGE_RUNGS.md`'s COMPLETION CHECKLIST reads ✅. Other priorities are LOGGED in the tracker's
+parked list, not taken up. ⛔ Start every case with the SIMPLEST LOCAL form of the owner's rule; pooling
+and global models are for after the tool works end to end (`ISSUES: the-pooled-hop-step`).
 
-Items 5, 6 and 7 landed (`DESIGN.md` §6b.6–§6b.8). Item 7 is the template for every hop the scan will
-take: a licence certified on truth, then THE OWNER'S DISCREPANCY RULE PER PAIR — where a pair's two
-witnesses (the boundary's own strand mode and the flank's mapped to it) disagree beyond counting, that
-pair's messages are widened by the excess; nothing pooled, no mode shifted. ⛔ The lesson the owner
-paid for on 2026-09-03: a per-library POOLED step was built first and refused as over-engineering —
-"how do we know the behaviour of other node pairs is predictive of a global pattern?" Start with the
-simplest elegant form, finish the tool end to end, and only then take up subtler accuracy work (a
-global model of disagreement, such as the production relay's projection of a pair onto the
-total-abundance landscape, is that kind of later work). Two more lessons: a second-moment fit alone is
-blind to a consistent bias under wide counting, and two premises the pairs cannot separate must not both
-be fitted.
+**Why the scan is next.** Ten one-hop messages ship, each from a node's OWN evidence (a factory row or
+a strand row). On unstranded data the strand rows are dead, so a walled exon — the largest error class
+on the ladder (11,350 slots, 2.0 M mass; 35 % of the in-scope zero control's error, where the relay's
+anchor still beats the transfer policy 5×) — receives nothing from the policy and is left to the
+landscape prior. What can reach it is the composition its NEIGHBOUR received: the intron row that
+arrived at the next exon through a licensed face, carried one hop further through the terminus or
+alt-ss boundary between them. That is the scan: the policy's forward and backward step kernels on the
+backbone's two directional passes, each hop through the map its boundary case already has, each hop
+priced by the owner's discrepancy rule and nothing pooled.
+
+**The backbone's protocol (`sweep.py` `_scan`, `messages/__init__.py`).** `Relay.scan(backward)`
+returns `None` (relay nothing — what `transfer` does today) or a pair `(step, publish)`: the backbone
+calls `step(s, i)` for every slot `i` in chain order with `s` its neighbour of the other kind
+(`i−1` forward, `i+1` backward; a `−1` reference terminal is skipped, so nothing crosses a reference),
+then `publish()` returns the state the pass produced. `deliver(left, right)` then receives two
+`NeighbourState`s — each pass's published arrays gathered AT THE SOURCE slot with a `valid` mask — and
+may fuse them into the slot's `PsiMessage.lam_rows`. ⛔ `NeighbourState` is indexed at the source by
+construction (`TRAPS: a-message-from-the-destinations-belief`): a kernel carries what the SOURCE holds,
+never a destination belief. The relay's own kernel (`relay.py` `scan`) is the worked example of the
+shape; its content (a scalar level with `_damp`) is what the rebuild replaced.
+
+**The design to derive, one piece at a time.** (1) The state a pass carries per slot: a composition
+ROW in λ (the currency of every message) plus what is needed to price the next hop — the row's own
+width is inside its shape; the per-pair discrepancy needs the two witnesses at the hop. (2) The step
+kernel per boundary case, each reusing the landed map: intron|exon licensed face → `face_map_lambda`
++ `transport_row` (rung 2's form); exon|exon terminus → §6b.6's spliced-crossing map (`splice_out_row`
+into the boundary, the face map with the spliced density out of it), the inside flank through §6b.7's
+abundance map; alt-ss → §6b.8's two maps; a strand change or a refused face → no composition crosses
+(the level message, phase A, is a separate case). (3) The pricing at each hop where the destination
+has no strand witness (unstranded data, the purpose): the owner's ABUNDANCE-DISCREPANCY rule — the
+ratio of the two objects' total abundances is measured on every library, and `abundance_row` already
+turns it into width with the two hypotheses; where both strand witnesses exist, the per-pair rule of
+item 7. Nothing pooled. (4) No echo: a forwarded row never returns to the slot it came from (item 5's
+snapshot rule made this structural for one hop; the scan needs it for every hop — the backbone's
+direction split gives it for free if the forward state is built only from forward arrivals).
+
+**The first cases, already measured un-premised** (`DESIGN.md` §6b.6, §6b.9): forwarding a terminus
+boundary's arrivals one hop further (−2 % at the in-scope `g00 ss.50 OFF` control, +5 % at inside exons
+on `g50 ss.50 OFF` — over-claiming without a premise), the reverse direction into the boundary
+(+0.8 %), and the chains of termini (`DESIGN.md` §6b.6's census: a hop of ≤ 20 bases carries
+composition within counting; half the terminus-boundary error is empty outside pieces whose far face
+is another terminus). Stage 0 on certified truth first: the composition transported k hops through the
+landed maps against the truth at the destination, by hop count and boundary case, with the counting
+width beside it — the instrument that says how fast composition degrades along a chain and which
+premise each case needs.
+
+**Acceptance, unchanged:** improves or stable with minimal harm on the test chromosome (all three probe
+panels, `policy_prototype.py --all --by-class`), the ladder (halves apart) — node-locally at the
+destinations beside whole-library; every gate fail-first, every perturbation watched; faithfulness of
+the landed code against the prototype's RECORDED numbers on a parent WITHOUT the mechanism.
+
+**After the scan, in the tracker's order:** sj+terminus (item 10, the two maps composed), the level
+message where composition cannot cross (phase A: strand-change faces, termini both ways, the empty
+chains), the AMBIG tilt and the both-stranded locus, then the ship protocol.
 
 ⭐ OWNER DECISIONS OUTSTANDING (each landed with the residue recorded, none re-litigated): item 2's
 `g05 ss.99 ON` residue; item 5's +46 at `g05 OFF`; item 6's +1.2 % inside exons at `g50 ON`; item 7's
-low-gDNA capture-ON rows on the benign and junction panels (`g05`, `g25`: +1.5…+9 % against the
-pre-item-7 policy — a systematic offset of the licence that hides below each pair's counting; a shift
-would recover it and shifts are refused, `ISSUES: the-pooled-hop-step`) and `g50 ss.99 ON` on the benign
-and sparse panels (+2.0 / +2.4 %); the ladder itself reads four wins and two harms under 0.12 %; and
-the commit of the local form.
-
-Next: THE SCAN — the policy's forward/backward step kernels on the backbone's two scans, one per
-boundary case, each hop priced by the item-7 rule (the pair's own disagreement beyond counting); its first
-cases are the two HELD pieces (forwarding a boundary's arrivals one hop further, and the reverse
-direction into the boundary — both measured, both over-claiming without a premise) and the chains of
-termini (`DESIGN.md` §6b.6: a hop of ≤ 20 bases carries composition within counting). What to fit on an
-UNSTRANDED library, where no strand modes exist, is the open derivation. Then sj+terminus (the two maps
-composed), the rule at strand-change faces and termini both ways, the tilt ruling and the both-stranded
-locus, then the ship protocol.
+low-gDNA capture-ON rows on the benign and junction panels (`g05`, `g25`: +1.5…+9 % — an offset of the
+licence below each pair's counting that only pooling would see, and pooling is refused) and
+`g50 ss.99 ON` on the benign and sparse panels (+2.0 / +2.4 %).
 
 ## THE LESSONS FROM THE RUNG-4 EXCURSION (2026-09-02), carried so they are not re-learned
 

@@ -1,8 +1,9 @@
 # THE MESSAGE RUNGS — the tracked list of messages and boundary cases still to finish (owner, 2026-09-02)
 
-    ⚠ A DEV DOC and a TRACKER. It says what is done, what is next and in which order; the
-    derivations and measurements live in `COMPOSITION_TRANSFER_STAGE01.md`, the substrate in
-    `test_chr.yaml`'s header. Move a finished item's verdict to its permanent home and mark it here.
+    ⚠ A DEV DOC and a TRACKER. It says what is done, what is next and in which order; the rulings
+    and measurements of everything landed live in `DESIGN.md` §6b.4–§6b.9, the open working notes in
+    `COMPOSITION_TRANSFER_STAGE01.md`, the substrate in `test_chr.yaml`'s header. Move a finished
+    item's verdict to its permanent home and mark it here.
 
 **The paradigm (owner rulings 2026-09-01/02):** one node type, one message, one boundary case at a
 time; DERIVE → DESIGN → PLAN → PROTOTYPE (outside `src/`) → A/B on the test chromosome against
@@ -15,10 +16,11 @@ substrate grows ONE structure per step and a step is a whole session or more, va
 
 | rung | substrate | what it is | state |
 |---|---|---|---|
-| 1 | twin block | multi-exonic, single-isoform, single-stranded: the intron\|exon BOUNDARY | ✅ COMPLETE 2026-09-02 — intron → boundary (rung 1) and exon → boundary (item 1) both ship |
-| 2 | twin block | the same substrate: the EXON region | ⚠ PARTIAL — the boundary → exon face map (rung 2) and the boundary → intron row (item 2, 2026-09-02) ship; item 3 (the exon solve with every face) is owed |
-| 3 | mono block | single-exon transcripts: the intergenic\|exon EDGE | ✅ the sign-certified lower bound ships; the ceiling REFUSED (accepted error) |
-| 4 | isoform block | multi-exonic, MULTI-isoform, single-stranded: exon\|exon boundaries | ⏳ substrate holds ONE structure (`altstart`); item 5 (the terminus boundary from the outside flank, spliced crossing included) SHIPS 2026-09-02; the chain-of-termini bound, `altss`, `nest`, `instart` remain |
+| 1 | twin block | multi-exonic, single-isoform, single-stranded: the intron\|exon BOUNDARY | ✅ COMPLETE — intron → boundary (rung 1), exon → boundary (item 1), boundary → intron (item 2) ship (`DESIGN.md` §6b.9, §6b.4, §6b.5) |
+| 2 | twin block | the same substrate: the EXON region | ⚠ PARTIAL — the boundary → exon face map ships (§6b.9); item 3 (the exon solve with every face speaking) is owed and is subsumed by THE SCAN |
+| 3 | mono block | single-exon transcripts: the intergenic\|exon EDGE | ✅ the sign-certified lower bound ships; the ceiling REFUSED (accepted error; §6b.9) |
+| 4 | isoform block | multi-exonic, MULTI-isoform, single-stranded: exon\|exon boundaries | ⚠ PARTIAL — items 5, 6 (`altstart`; §6b.6–§6b.7) and 7 (`altss`; §6b.8) ship, every message priced by the owner's per-pair discrepancy rule; `nest`, `instart`, the chain of termini and sj+terminus remain |
+| — | every block | THE SCAN — multi-hop through every case above | ⏳ NEXT (phase C below) |
 | 5 | — | strand-change faces, both-stranded loci, the AMBIG tilt channel | ⛔ LAST, owner ruling |
 
 ## ⭐⭐⭐ THE COMPLETION CHECKLIST (owner ruling, 2026-09-02, `DESIGN.md` §0c.0e) — every case, its state
@@ -47,17 +49,20 @@ condition's, from `policy_benchmark.py --by-class` and the terminus census (`DES
 | termini-both-ways | boundary with termini BOTH ways | 48 | **level** only | level | ⏳ with the level message |
 | ambig-tilt | AMBIG boundary / the tilt channel | 4,671 | rungs 1–3 for λ | as its class | ⏳ rung 5: rule whether the tilt has any message (likely local-only, measured) |
 | strand-change-face | strand-change face | 249 + 889 | **level** only (composition refused: membership changes) | level | ⏳ with the level message |
-| multi-hop-scan | MULTI-HOP through any chain of the above | — | each hop's map + width + fitted premise; forward and backward; every node fused from two arrivals | — | ⏳ the transfer policy's `scan` (the backbone's two directional scans; one step kernel per boundary case) |
+| multi-hop-scan | MULTI-HOP through any chain of the above | — | each hop through its case's landed map, priced per pair by the owner's discrepancy rule (the abundance form where no strand witness exists), nothing pooled; forward and backward; every node fused from two arrivals | — | ⏳ NEXT — the transfer policy's `scan` (the backbone's two directional passes; one step kernel per boundary case); the brief is in `NEXT_SESSION.md` |
 
-**The phases, in order.** ⭐ (A) is DONE as the owner's abundance-discrepancy rule (item 6, `DESIGN.md` §6b.7): the level message IS the composition map with the step between enrichment and new RNA, fitted. What (A) still owes: the same rule at strand-change faces and at termini both ways (the rule needs no orientation there; measure). (A, as first written) DERIVE THE LEVEL MESSAGE — gDNA continuity through an unmeasured
-population change, two-sided, with counting width and a FITTED enrichment-step premise (stage 0: the
-gDNA-density log-ratio across such faces on certified truth, its spread beyond counting, by capture,
-range and probe state); prototype on `altstart`'s inside piece (exon-inside-or-walled/terminus-outside-populated), then intron-exon-face-terminus, termini-both-ways, strand-change-face. (B) alt-splice-site on
-`altss` ✅ (its per-pair DISCREPANCY RULE — nothing pooled — is the scan's per-hop
-dampening template); sj-plus-terminus after it. (C) THE SCAN — the policy's forward/backward step kernels, one per boundary
-case, which subsume terminus-outside-empty's composite, multi-hop-scan and item 3, with per-hop premises fitted and multi-hop
-dampening measured on chains (a chain structure in the YAML). (D) ambig-tilt, and the both-stranded locus.
-(E) The ship protocol (the SHIP LIST below).
+**THE ORDER (owner + census, 2026-09-03).** (C) THE SCAN first — it is the only mechanism that reaches the
+walled exons (the largest class: 11,350 ladder slots, 2.0 M mass, 35 % of the in-scope zero control's
+error) and the only one that serves unstranded data, where every own-row message is dead; its hops reuse
+the maps already landed and are priced by the owner's discrepancy rule, the abundance form where no strand
+witness exists; first cases: the forwarded terminus arrivals, the reverse direction, the chains of
+termini; stage 0 on certified truth by hop count and case. Then (B) sj+terminus (item 10: the two maps
+composed, 1,968 boundaries). Then (A) THE LEVEL MESSAGE — gDNA continuity where composition cannot cross
+(strand-change faces, termini both ways, the empty chains), two-sided with counting width and the
+abundance-discrepancy premise; the one-sided profile was refuted at exon|exon termini on sparse probes.
+Then (D) the AMBIG tilt ruling and the both-stranded locus (rung 5, last by owner ruling). Then (E) the
+ship protocol (the SHIP LIST below). ⛔ Every case starts with the simplest LOCAL form; nothing pooled
+(`ISSUES: the-pooled-hop-step`).
 
 ## ⛔ THE PARKED-PRIORITIES LOG (owner, 2026-09-02: "keep a log, come back after the policy is done")
 
@@ -98,19 +103,30 @@ Rung 4, one structure per step (each step = one YAML change, one licence or mess
 Rung 5 (last): strand-change faces (246 exon|exon + 888 exon|intron on the ladder), the both-stranded
 locus, the AMBIG tilt channel.
 
-## THE SHIP LIST (2026-09-02, after item 2) — what stands between `transfer` and the default
+## THE SHIP LIST (re-stamped 2026-09-03, after item 7) — what stands between `transfer` and the default
 
-Re-derive every number here with `policy_benchmark.py --panel ladder --policies silent transfer
+Re-derive every number here with `policy_benchmark.py --panel ladder --policies silent relay transfer
 --by-class` (and `--panel test`); the shares are of each row's own |err| under `transfer`.
 
-**Where the shipped policy's remaining error sits, by node class (ladder):**
+**Where the shipped policy's remaining error sits, by node class (ladder, 2026-09-03):**
 
 | row | exon\|exon (terminus + alt-ss) | R exon WALLED | B exon\|intron (+ terminus) | R exon licensed / edge-only | R intron |
 |---|---|---|---|---|---|
+| g50 ss.50 OFF (in scope, unstranded) | 20 % | 8 % | 18 % | 9 % | 46 % |
+| g98 ss.50 OFF (in scope, unstranded) | 23 % | 9 % | 17 % | 8 % | 44 % |
 | g50 ss.99 OFF (in scope) | 21 % | 7 % | 20 % | 7 % | 45 % |
-| g98 ss.99 OFF (in scope) | 23 % | 9 % | 18 % | 7 % | 43 % |
-| g05 ss.99 ON (in scope) | 39 % | 18 % | 30 % | 11 % | 3 % |
-| g98 ss.99 ON (in scope) | 47 % | 14 % | 26 % | 10 % | 3 % |
+| g98 ss.99 OFF (in scope) | 23 % | 8 % | 19 % | 7 % | 43 % |
+| g05 ss.99 ON (in scope) | 40 % | 18 % | 28 % | 11 % | 3 % |
+| g98 ss.99 ON (in scope) | 47 % | 14 % | 27 % | 10 % | 3 % |
+
+⭐ Read with the g00 census (`DESIGN.md` §6b.9's zero-control note): at the in-scope zero control the
+transfer policy's error sits at walled exons (35 %), exon|exon terminus boundaries (31 %) and alt-ss
+boundaries (19 %) — the objects the relay's anchor pins and the transfer policy leaves to the prior.
+⚠ The own-row messages of items 5–7 serve the exon|exon boundaries but barely move them on the
+contaminated rows (g98 ss.99 ON: terminus boundaries 79,582 silent → 72,812; alt-ss 55,906 → 51,053):
+they sit at the resolution of their own evidence plus the prior. The scan is what changes the walled
+exons' and the zero controls' standing; the boundaries' remaining share is the prior's question
+(`ISSUES: gdna-landscape-trains-on-false-positives`, parked behind the policy).
 | g50 ss.50 OFF (in scope) | 20 % | 8 % | 18 % | 9 % | 46 % |
 | g00 ss.50 OFF (in-scope zero control) | 51 % | 35 % | 1 % | 13 % | 0 % |
 | g50 ss.50 ON (deferred) | 44 % | 16 % | 29 % | 11 % | 1 % |

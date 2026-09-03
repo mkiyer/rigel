@@ -80,28 +80,24 @@ roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local 
 propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
 is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
 
-1. ⭐⭐⭐ **FINISH THE `transfer` POLICY, THEN FLIP THE DEFAULT (owner ruling, 2026-09-02).** The
-   rebuild — rungs 1–3 (intron→boundary, face-composed exon, edge lower bound) plus items 1–2
-   (exon→boundary, boundary→intron) — meets both bars on the ladder (`policy_benchmark.py`,
-   halves apart) but is INCOMPLETE, and an incomplete policy does not ship. ⭐ The holes are
-   RE-SIZED by `policy_benchmark.py --by-class` (2026-09-02): ① **exon|exon boundaries and the
-   exons they wall** — no message reaches them, and they hold half the stranded capture-ON error
-   and most of the zero-control error (the gap to the relay at the in-scope zero control sits
-   there) — rung 4, one structure per step, `altstart` present; ② **item 3**, the exon solve with
-   every face; then strand-change faces and the AMBIG tilt (rung 5, a few percent of mass).
-   ⛔ Introns off capture are the LARGEST class and NOT a message hole — the one-sided factory and
-   the vanishing strand row leave the prior deciding at the pure-gDNA vertex (rank 3, after the
-   message layer). Discipline per rung: fail-first gates, one mechanism, node-local scoring at the
-   served slots beside the whole-library number, adversarial probe panels in the loop, ladder
-   before belief. The sized list and the ship protocol are the tracker's in the sandbox. ⛔ Owner
-   ruling (2026-09-02, `DESIGN.md` §0c.0e): the policy is finished only when EVERY case is handled —
-   multi-hop with per-hop dampening, gDNA always conveyed where composition cannot cross, every node
-   solved from two honest messages — and the thread does not switch away until then; every other
-   priority below is parked behind it. ⭐ After completion: the 0.8.0-metric pricing
-   (`calibration_vs_oracle.py`, `solvability_audit.py` under `transfer`) and the flip protocol
-   (`preflight --full`; instruments, not only the suite). The thread's working record and handoff live in the sandbox on the
-   `message-layer` branch; the exposed systemic issue is
-   `ISSUES: gdna-landscape-trains-on-false-positives`.
+1. ⭐⭐⭐ **FINISH THE `transfer` POLICY, THEN FLIP THE DEFAULT (owner ruling, 2026-09-02).** Ten
+   messages ship (`DESIGN.md` §6b.4–§6b.9): rungs 1–3, the exon and boundary own-row messages, the
+   terminus boundary from both flanks, the alternative splice site — each priced by the owner's
+   discrepancy rule, nothing pooled. On the ladder the policy beats silence on 15/16 rows and the
+   relay on 12/16 (`policy_benchmark.py --panel ladder --policies silent relay transfer`); the rows the
+   relay still wins are the zero-gDNA controls, where the transfer policy leaves the walled exons and
+   exon|exon boundaries to the landscape prior. ⭐ **Next is THE SCAN** (the tracker's phase C): the
+   policy's forward/backward step kernels on the backbone's two scans, carrying each node's arrivals one
+   hop further through the licences already derived, each hop priced by the discrepancy rule (strand
+   witnesses where they exist, the abundance discrepancy where they do not) — the mechanism that reaches
+   the walled exons and serves unstranded data at all. Then sj+terminus, the level message at strand
+   changes and termini both ways, the AMBIG tilt and the both-stranded locus (rung 5), then the ship
+   protocol (the 0.8.0-metric pricing under `transfer`, `preflight --full`, the flip). ⛔ Owner ruling
+   (`DESIGN.md` §0c.0e): the policy is finished only when EVERY case is handled, and the thread does not
+   switch away until then; every other priority below is parked behind it. ⛔ Start every case with the
+   simplest local form of the owner's rule; pooling and global models are for after the tool works end
+   to end (`ISSUES: the-pooled-hop-step`). The tracker, the handoff and the thread record live in the
+   sandbox on `message-layer`; the exposed systemic issue is `ISSUES: gdna-landscape-trains-on-false-positives`.
 2. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
