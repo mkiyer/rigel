@@ -31,6 +31,15 @@ EM and re-scans nothing: every condition is read from its cached scan.
     python scripts/design/policy_benchmark.py --panel test
     python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
     python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nrna_file_capture_off
+    python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
+
+⭐ **`--by-class` — WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** The same per-slot
+error summed per certified stratum, boundaries split by terminus flag and exons by reach — an
+intron|exon face without a terminus flag (the strand-set half of the licence is not applied here,
+so a both-stranded face counts as licensed), an edge only, or WALLED (no such face). It ranks the
+holes a message rebuild has left; read it per row, never pooled. ⚠ On the test chromosome the
+off-capture rows are dominated by the designed shadow-transcription floor at intergenic regions,
+identical in every arm — read the capture-ON rows there, and the ladder for the rest.
 """
 
 from __future__ import annotations
@@ -48,8 +57,9 @@ if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
+from rigel.calibration.messages.transfer_rows import TERMINUS  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
     build_sj_geometry_arrays,
@@ -91,8 +101,38 @@ def _truth_gdna(cache_dir: Path) -> dict:
     return out
 
 
-def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policies):
-    """One condition, every policy: `sum |estimate - truth|` per axis, in fragments."""
+def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
+    """Each slot's node class: its certified stratum, a boundary tagged ``[term]`` when a transcript
+    terminus sits on it, an exon tagged by its REACH — ``(licensed intron face)`` when some adjacent
+    intron|exon face carries no terminus, else ``(edge only)`` when it has a gene edge, else
+    ``(walled: no licensed face)`` — the classes the message rebuild's holes are named in."""
+    kind = np.asarray(truth["kind"])
+    obj = np.asarray(truth["obj"], np.int64)
+    strata = np.asarray(truth["stratum"]).astype(str)
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
+    left = np.asarray(chain.left, np.int64)
+    right = np.asarray(chain.right, np.int64)
+    is_b = kind == BOUNDARY
+    term = np.zeros(kind.shape[0], bool)
+    term[is_b] = (np.asarray(boundary_flags, np.uint16)[obj[is_b]] & TERMINUS) != 0
+    cls = strata.astype(object)
+    for i in np.flatnonzero(is_b & term):
+        cls[i] = strata[i] + " [term]"
+    for e in np.flatnonzero(strata == "R exon"):
+        faces = [b for b in (left[e], right[e]) if b >= 0 and is_b[b]]
+        if any(strata[b] == "B exon|intron" and not term[b] for b in faces):
+            cls[e] = "R exon (licensed intron face)"
+        elif any(strata[b] == "B gene edge" for b in faces):
+            cls[e] = "R exon (edge only)"
+        else:
+            cls[e] = "R exon (walled: no licensed face)"
+    return cls.astype(str)
+
+
+def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policies, by_class=False):
+    """One condition, every policy: `sum |estimate - truth|` per axis, in fragments — and, with
+    ``by_class``, the same error summed per node class (``rows[name]["classes"]``, each value
+    ``(slots, mass, error)``)."""
     cache = read_scan_cache(cache_dir / "_main", index)
     # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): `calibration_inputs` drains at the
     # production seed and builds the production fl models (two-pool contrast included) — the same
@@ -108,6 +148,13 @@ def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policie
         boundary_flags=boundary_flags,
     )
     truth = _truth_gdna(cache_dir)
+    if by_class:
+        slots = dict(np.load(cache_dir / "slot_truth.npz", allow_pickle=True))
+        classes = _slot_classes(slots, payload, boundary_flags)
+        kind_s = np.asarray(slots["kind"])
+        obj_s = np.asarray(slots["obj"], np.int64)
+        truth_s = np.asarray(slots["n_gdna"], np.float64)
+        mass_s = np.asarray(slots["count"], np.float64)
     rows = {}
     for name in policies:
         started = time.perf_counter()
@@ -124,6 +171,16 @@ def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policie
             seconds=time.perf_counter() - started,
         )
         rows[name]["total"] = rows[name]["region"] + rows[name]["boundary"]
+        if by_class:
+            is_r = kind_s == REGION
+            est = np.zeros(kind_s.shape[0])
+            est[is_r] = region[obj_s[is_r]]
+            est[~is_r] = boundary[obj_s[~is_r]]
+            err = np.abs(est - truth_s)
+            rows[name]["classes"] = {
+                k: (int((classes == k).sum()), float(mass_s[classes == k].sum()), float(err[classes == k].sum()))
+                for k in np.unique(classes)
+            }
     return rows
 
 
@@ -137,6 +194,11 @@ def main() -> int:
     ap.add_argument("--panel", choices=sorted(PANELS), default="test")
     ap.add_argument("--policies", nargs="+", default=["silent", "relay", "message"])
     ap.add_argument("--conditions", nargs="+", default=None, help="default: all cached")
+    ap.add_argument(
+        "--by-class",
+        action="store_true",
+        help="also sum each policy's error per node class (stratum, terminus flag, exon reach)",
+    )
     args = ap.parse_args()
 
     for name in args.policies:
@@ -174,7 +236,13 @@ def main() -> int:
     table = {}
     for condition in conditions:
         rows = score_condition(
-            index, region_arrays, sj, boundary_flags, oracle / condition, args.policies
+            index,
+            region_arrays,
+            sj,
+            boundary_flags,
+            oracle / condition,
+            args.policies,
+            by_class=args.by_class,
         )
         table[condition] = rows
         cells = "  ".join(f"{rows[p]['total']:>12,.0f}" for p in args.policies)
@@ -195,6 +263,22 @@ def main() -> int:
             for p in args.policies
         )
         print(f"{condition:<{width}}  {detail}")
+
+    if args.by_class:
+        print("\nby NODE CLASS — slots, mass, then each policy's |err| and its share of that policy's row:")
+        for condition, rows in table.items():
+            print(f"\n{condition}")
+            names = [k for k in sorted(rows[args.policies[0]]["classes"])]
+            names.sort(key=lambda k: -rows[args.policies[-1]]["classes"][k][2])
+            print(f"   {'class':<38}{'slots':>8}{'mass':>12}" + "".join(f"{p:>12}{'share':>7}" for p in args.policies))
+            for k in names:
+                n, mass, _ = rows[args.policies[0]]["classes"][k]
+                cells = "".join(
+                    f"{rows[p]['classes'][k][2]:>12,.0f}"
+                    f"{(rows[p]['classes'][k][2] / rows[p]['total'] if rows[p]['total'] else 0):>7.1%}"
+                    for p in args.policies
+                )
+                print(f"   {k:<38}{n:>8,}{mass:>12,.0f}{cells}")
 
     if "silent" in args.policies and len(args.policies) > 1:
         print("\nthe two bars, counted separately (never pooled):")

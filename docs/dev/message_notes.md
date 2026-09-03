@@ -273,4 +273,36 @@ At position 2000 we have an exon|exon boundary.
 
 
 
+================================
 
+# exon region -> exon|intron boundary message
+
+Currently, we nullify these messages. Messages that are sent from exon region to exon|intron boundary (with a splice junction on the correct strand) must handle RNA fragments that SPLICE OUT.
+
+The concept of "SPLICE OUT" implies that fragments do not cross the boundary as unspliced. Instead, they LEAVE via a splice junction. In many ways, this is the inverse operation from the "SPLICE IN" operation we have already solved.
+
+From the standpoint of the exon REGION sending the message, there is nothing to do. The exon sends the message. Done.
+
+We approach the exon region -> exon|intron boundary message from the perspective of the boundary that receives the message. One of the messages that the exon|intron boundary receives is from the EXON. That message contains purely unspliced fragments (RNA+, RNA-, gDNA).
+
+The boundary measures spliced fragments and unspliced fragments. We'll proceed with this example with everything on the positive (+) strand for clarity.
+
+The main question is, "how do we perform a composition transfer across the exon -> exon|intron boundary?"
+
+We can compute the enrichment ratio as the ratio of total abundance:
+
+`enrichment_ratio = exon_abundance / boundary_abundance`
+
+Where `boundary_abundance = (spliced fragment abundance) + (unspliced fragment abundance). This is the same enrichment ratio that we computed for the SPLICE IN composition transfer.
+
+Remember that `spliced fragment abundance` must be computed from all of the splice junctions that splice out. Same as what we did for splicing in.
+
+First, we *rescale* the boundary by the enrichment ratio. This places the exon region and the exon|intron boundary on the same total abundance scale. Now, we can perform the transfer.
+
+After the rescale, the spliced-out fragment abundance is subtracted from the exon's RNA abundance (on the same strand as the SJ). The subtraction is licensed because we have rescaled to the same total abundance.
+
+After the subtraction, the leftover abundance is unspliced RNA + gDNA. That leftover abundance is still in on the exon's scale. We must rescale back to the boundary's frame of reference and the remaining abundance becomes the boundary's unspliced RNA + gDNA.
+
+This is the arithmetic operation. This is an imputation. We also need to address the honest precision. 
+
+The factors that affect precision are: 1) the exon count and effective length (abundance in counts/bp), 2) the boundary spliced fragment count and its length, 3) the boundary unspliced fragment count and length. Then there is the "cost" of imputation that we need to price as we have with other messages.

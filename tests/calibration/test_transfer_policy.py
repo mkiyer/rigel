@@ -17,7 +17,10 @@ The rung's anchors, in the fail-first order they were built:
 * the ingredient width adds EXACTLY the face's counting variance (trigamma(n_u+1/2) +
   trigamma(n_s+1/2)) to a transported Gaussian factor — an inverted or mis-scaled kernel fails;
 * `message_policy = "transfer"` actually installs the policy, and the unknown-name refusal
-  stays intact.
+  stays intact;
+* ITEM 1 (the exon → boundary message) and ITEM 2 (the boundary → intron message) each carry a
+  deadband-silence gate, an independent recompute of their rows at exactly the licensed slots
+  with every other slot untouched, and a directly-gated pure predicate or row law.
 
 ⚠ Falsification note (2026-09-01, watched): dropping the exon-flank requirement from the pair
 predicate is NOT catchable on this toy — every intron-flanking boundary here also has an exon
@@ -242,15 +245,16 @@ def test_the_transfer_delivers_at_pairs_and_licensed_faces_and_relays_nothing(sw
     exon_rows = _expected_exon_rows(sweep_inputs, ctx, src, lam)
     assert exon_rows, "the toy must license at least one exon face or this gate proves nothing"
     expected_b = {b for b, _j in pairs}
+    item5 = _item5_slots(ctx)  # the terminus boundaries and outside exons: item 5's own gate
     for i in range(n_slots):
         if i in expected_b:
             j = dict(pairs)[i]
             np.testing.assert_array_equal(rows[i], src[j] - src[j].max(), err_msg=f"slot {i}")
-        elif int(i) in exon_rows:
+        elif int(i) in exon_rows and i not in item5:
             np.testing.assert_allclose(
                 rows[i], exon_rows[int(i)], rtol=0, atol=1e-12, err_msg=f"exon slot {i}"
             )
-        else:
+        elif i not in item5:
             assert not rows[i].any(), f"slot {i} received a transfer it is not licensed for"
 
 
@@ -531,7 +535,8 @@ def test_the_exon_message_is_silence_inside_the_strand_deadband(sweep_inputs):
 def test_the_exon_message_lands_at_licensed_faces_beside_the_intron_row(sweep_inputs):
     """ITEM 1's contract: at every licensed intron|exon face of a strand-live exon the boundary
     receives the exon's splice-out row (independently recomputed) SUMMED with rung 1's intron row —
-    two witnesses; every other slot is exactly as rungs 1–3 leave it."""
+    two witnesses; every other slot is exactly as rungs 1–3 leave it, except the INTRON slots, which
+    item 2 serves off the same ``strand`` parameter and whose contract is item 2's own gate."""
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.simplex_logodds import _logodds_grid
 
@@ -555,13 +560,15 @@ def test_the_exon_message_lands_at_licensed_faces_beside_the_intron_row(sweep_in
     assert expected, (
         "the toy must carry a strand-live exon with a licensed face or this gate proves nothing"
     )
+    intron = _intron_mask(ctx)
+    item5 = _item5_slots(ctx)
     for i in range(n):
         if i in expected:
             want = base[i] + expected[i]
             np.testing.assert_allclose(
                 rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"slot {i}"
             )
-        else:
+        elif not intron[i] and i not in item5:
             np.testing.assert_array_equal(
                 rows[i], base[i], err_msg=f"slot {i} moved without a licence"
             )
@@ -595,3 +602,838 @@ def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
     assert _var(thin) > 3 * _var(deep), "a thin face must deliver a much wider claim"
     assert abs(float(deep.max())) < 1e-12 and abs(float(thin.max())) < 1e-12
     assert not splice_out_row(row_e, lam, n_u=0.0, n_s=9.0, a_g_b=210.0, a_g_e=210.0).any()
+
+
+# ── ITEM 2 (owner design 2026-09-02): the intron|exon boundary -> intron message ──────────────────
+
+
+def _expected_boundary_rows(si, ctx, strand, lam):
+    """The item-2 intron rows recomputed INDEPENDENTLY of the policy: for every intron|exon pair whose
+    boundary admits the intron's SINGLE strand set and whose strand channel the solver declares live
+    (``own.tau_lam > 0`` at the boundary — the strand Fisher information itself, there being no
+    factory at a boundary), the boundary's own frozen-variance strand row VERBATIM, summed at the
+    intron — a second implementation, so a policy bug cannot hide."""
+    kappa, od_g, od_r = strand
+    pairs, _n = _expected_pairs(si)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+    out = {}
+    for b, i in pairs:
+        if fp[b] != fp[i] or fn[b] != fn[i] or fp[b] == fn[b] or not tau[b] > 0.0:
+            continue
+        n = cnt[b].sum()
+        ks = kappa if fp[b] else 1.0 - kappa
+        f_ref = float(np.clip(belief[b], 1e-9, 1 - 1e-9))
+        p = 0.5 * fg + ks * (1 - fg)
+        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+        var = max(
+            n * p_ref * (1 - p_ref)
+            + (n * f_ref) ** 2 * 0.25 * od_g
+            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+            1e-9,
+        )
+        row = -0.5 * (cnt[b, 0] - n * p) ** 2 / var
+        row -= row.max()
+        if np.ptp(row) <= 1e-9:
+            continue
+        out.setdefault(int(i), np.zeros(lam.shape[0]))
+        out[int(i)] += row
+    return out
+
+
+def _intron_mask(ctx):
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    return ~is_bnd & ~is_exon & (fp | fn)
+
+
+def _dead_boundaries(ctx):
+    """The context with every BOUNDARY's strand channel declared dead and every region's intact."""
+    import dataclasses as _dc
+
+    tau = np.asarray(ctx.own.tau_lam, np.float64).copy()
+    tau[np.asarray(ctx.is_boundary, bool)] = 0.0
+    return _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=tau))
+
+
+def test_the_boundary_message_is_silence_inside_the_strand_deadband(sweep_inputs):
+    """ITEM 2's vacuity law: a boundary whose strand channel the solver declares dead (its own
+    ``tau_lam`` is 0 — at a boundary that IS the strand Fisher information, no constant) sends
+    NOTHING to its intron. With every boundary dead and every exon live, no intron receives a row and
+    every other slot is exactly as the fully-live policy leaves it (item 1 reads the EXON's deadband,
+    which is intact). ⚠ This gate cannot fail before the mechanism exists — nothing delivered to an
+    intron before item 2 — so its falsification is the watched perturbation (the deadband dropped)."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
+    live = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    dead = np.asarray(
+        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    intron = _intron_mask(ctx)
+    keep = ~intron
+    keep[sorted(_item5_slots(ctx))] = False  # a dead boundary also stops item 5's row to its exon
+    assert not dead[intron].any(), "a dead boundary delivered to its intron"
+    np.testing.assert_array_equal(dead[keep], live[keep])
+
+
+def test_the_boundary_message_lands_at_introns_beside_nothing_else(sweep_inputs):
+    """ITEM 2's contract: every intron whose licensed, strand-live boundaries send receives the SUM of
+    their own strand rows (independently recomputed — two witnesses at a two-faced intron); an intron
+    with no such boundary receives nothing; every other slot is exactly as rungs 1–3 + item 1 leave
+    it (the boundaries-dead rows, which the vacuity gate proves item-2-free)."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    pol = TransferPolicy(provider, strand=strand)
+    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    base = np.asarray(
+        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    expected = _expected_boundary_rows(sweep_inputs, ctx, strand, lam)
+    assert expected, "the toy must carry a strand-live intron|exon pair or this gate proves nothing"
+    intron = _intron_mask(ctx)
+    item5 = _item5_slots(ctx)
+    for i in range(n):
+        if i in expected:
+            want = expected[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"intron slot {i}"
+            )
+        elif intron[i]:
+            assert not rows[i].any(), f"intron slot {i} received a row without a licensed live face"
+        elif i not in item5:
+            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 2")
+
+
+def test_the_boundary_strand_licence_requires_one_shared_strand():
+    """The pair predicate, gated DIRECTLY — the integration toy cannot falsify it (every pair there
+    shares one strand), so the pure function carries the falsification: one strand, shared by both
+    flanks, is licensed; an AMBIG pair (whose strand split constrains the tilt, never f_g), a
+    strand-set change and an empty boundary refuse."""
+    from rigel.calibration.messages.transfer_rows import boundary_shares_strand
+
+    assert boundary_shares_strand(True, False, True, False)
+    assert boundary_shares_strand(False, True, False, True)
+    assert not boundary_shares_strand(True, True, True, True), "an AMBIG pair must refuse"
+    assert not boundary_shares_strand(True, False, True, True), "a strand-set change must refuse"
+    assert not boundary_shares_strand(False, False, True, False), "an empty boundary must refuse"
+
+
+# ── ITEM 5 (rung 4, 2026-09-02): the exon|exon TERMINUS boundary and its OUTSIDE exon ────────────
+
+
+def _expected_terminus_rows(si, ctx, strand, lam, exon_rows):
+    """Item 5 recomputed INDEPENDENTLY of the policy. At every exon|exon boundary carrying exactly one
+    terminus direction and no splice junction, the OUTSIDE flank is read off the flag alone (TSS+ and
+    TES− bodies extend right, outside = LEFT; TES+ and TSS− extend left, outside = RIGHT). The boundary
+    receives (i) the rungs-2/3 rows of its outside exon (``exon_rows``, the independent recompute) and
+    (ii) the exon's own frozen-variance strand row when its channel is live, each through the
+    splice-out map with S = the boundary's SPLICED crossing; the outside exon receives the boundary's
+    own strand row through the face map with that spliced density, widened by the counting variance.
+    Returns ``(rows_at_boundaries, rows_at_outside_exons)`` keyed by slot."""
+    from rigel.calibration.messages.transfer_rows import (
+        face_map_lambda,
+        splice_out_row,
+        transport_row,
+    )
+    from rigel.calibration.splice_graph import (
+        FLAG_ACCEPTOR_NEG,
+        FLAG_ACCEPTOR_POS,
+        FLAG_DONOR_NEG,
+        FLAG_DONOR_POS,
+        FLAG_TES_NEG,
+        FLAG_TES_POS,
+        FLAG_TSS_NEG,
+        FLAG_TSS_POS,
+    )
+
+    kappa, od_g, od_r = strand
+    sj = FLAG_DONOR_POS | FLAG_DONOR_NEG | FLAG_ACCEPTOR_POS | FLAG_ACCEPTOR_NEG
+    body_right, body_left = FLAG_TSS_POS | FLAG_TES_NEG, FLAG_TES_POS | FLAG_TSS_NEG
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    n_u = np.asarray(ctx.n_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    A_g = np.asarray(ctx.eff_gdna_global, np.float64)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+
+    def strand_row(x):
+        n = cnt[x].sum()
+        ks = kappa if fp[x] else 1.0 - kappa
+        f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
+        p = 0.5 * fg + ks * (1 - fg)
+        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+        var = max(
+            n * p_ref * (1 - p_ref)
+            + (n * f_ref) ** 2 * 0.25 * od_g
+            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+            1e-9,
+        )
+        row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
+        return row - row.max()
+
+    at_b, at_o = {}, {}
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+            continue
+        f = int(flags[b])
+        to_right, to_left = bool(f & body_right), bool(f & body_left)
+        if (f & sj) or to_right == to_left:
+            continue
+        o = lo if to_right else hi
+        if fp[b] != fp[o] or fn[b] != fn[o] or fp[b] == fn[b]:
+            continue
+        if not (n_u[b] > 0 and A_g[b] > 0 and A_g[o] > 0):
+            continue
+        acc = np.zeros(lam.shape[0])
+        if int(o) in exon_rows:
+            acc += splice_out_row(exon_rows[int(o)], lam, n_u[b], n_s[b], A_g[b], A_g[o])
+        if tau[o] > 0.0:
+            acc += splice_out_row(strand_row(o), lam, n_u[b], n_s[b], A_g[b], A_g[o])
+        if np.ptp(acc) > 1e-9:
+            at_b[int(b)] = acc
+        if tau[b] > 0.0:
+            le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
+            at_o.setdefault(int(o), np.zeros(lam.shape[0]))
+            at_o[int(o)] += transport_row(strand_row(b), lam, le, n_u[b], n_s[b])
+    return at_b, at_o
+
+
+def _item5_slots(ctx):
+    """Item 5's delivery sites — every exon|exon boundary carrying one terminus direction and no sj
+    whose outside flank shares its single strand, and that outside exon — derived from the flags
+    alone, so the earlier gates can hand these slots to item 5's own gate."""
+    from rigel.calibration.messages.transfer_rows import boundary_shares_strand, outside_flank
+
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    out = set()
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+            continue
+        o, _i = outside_flank(flags[b], lo, hi)
+        if o is not None and boundary_shares_strand(fp[b], fn[b], fp[o], fn[o]):
+            out |= {int(b), int(o)}
+    return out
+
+
+def _terminus_flags_cleared(ctx):
+    """The context with every exon|exon boundary's terminus bits cleared — item 5 sees no terminus,
+    every other message is unchanged (they read flags at intron|exon faces only)."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer_rows import TERMINUS
+
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16).copy()
+    for b in np.flatnonzero(is_bnd):
+        if left[b] >= 0 and right[b] >= 0 and is_exon[left[b]] and is_exon[right[b]]:
+            flags[b] &= ~TERMINUS
+    return _dc.replace(ctx, boundary_flags=flags)
+
+
+def test_the_terminus_orientation_reads_the_flag_alone():
+    """The orientation table, gated DIRECTLY: a + start or a − end extends genomic-right, so the
+    OUTSIDE flank is the left one; a + end or a − start extends left, so it is the right one; termini
+    pointing both ways, no terminus at all, or a splice junction sharing the boundary give no side."""
+    from rigel.calibration.messages.transfer_rows import outside_flank
+    from rigel.calibration.splice_graph import (
+        FLAG_DONOR_POS,
+        FLAG_TES_NEG,
+        FLAG_TES_POS,
+        FLAG_TSS_NEG,
+        FLAG_TSS_POS,
+    )
+
+    assert outside_flank(FLAG_TSS_POS, 7, 9) == (7, 9)
+    assert outside_flank(FLAG_TES_NEG, 7, 9) == (7, 9)
+    assert outside_flank(FLAG_TES_POS, 7, 9) == (9, 7)
+    assert outside_flank(FLAG_TSS_NEG, 7, 9) == (9, 7)
+    assert outside_flank(FLAG_TSS_POS | FLAG_TES_POS, 7, 9) == (None, None), "both ways: no side"
+    assert outside_flank(0, 7, 9) == (None, None), "no terminus: no side"
+    assert outside_flank(FLAG_TSS_POS | FLAG_DONOR_POS, 7, 9) == (None, None), (
+        "sj+terminus: its own item"
+    )
+
+
+def test_the_terminus_messages_land_at_the_outside_pair_beside_nothing_else(sweep_inputs):
+    """ITEM 5's contract on the toy's two exon|exon terminus boundaries (a + start and a + end): the
+    boundary receives exactly the independently recomputed composed transport plus the outside
+    exon's mapped strand row; the outside exon receives exactly the boundary's mapped strand row on
+    top of its rungs-2/3 rows; the INSIDE exon and every other slot are exactly as the policy leaves
+    them when the terminus bits are cleared — so a reversed orientation, a dropped spliced crossing,
+    or a delivery to the inside flank fails (each watched firing, 2026-09-02). ⚠ An ECHO — the
+    composed transport reading a row item 5 itself delivered to the exon — is NOT catchable on this
+    toy (each outside exon serves one boundary and is read before anything reaches it; watched
+    silent), so the policy keeps that law STRUCTURALLY: item 5 accumulates apart and reads only the
+    rows the earlier messages left."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    pol = TransferPolicy(provider, strand=strand)
+    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    base = np.asarray(
+        pol.prepare(_terminus_flags_cleared(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    exon_rows = _expected_exon_rows(sweep_inputs, ctx, provider(n_grid, window), lam)
+    at_b, at_o = _expected_terminus_rows(sweep_inputs, ctx, strand, lam, exon_rows)
+    assert len(at_b) >= 2 and at_o, (
+        "the toy must carry two served terminus boundaries or this gate proves nothing"
+    )
+    for i in range(n):
+        if i in at_b:
+            assert not base[i].any(), f"boundary {i} receives something other than item 5"
+            want = at_b[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"terminus boundary {i}"
+            )
+        elif i in at_o:
+            want = base[i] + at_o[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"outside exon {i}"
+            )
+        else:
+            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 5")
+
+
+# ── ITEM 6 (owner design 2026-09-02): the abundance-discrepancy message into the inside flank ────
+
+
+def _expected_abundance_rows(si, ctx, strand, lam):
+    """Item 6 recomputed INDEPENDENTLY of the policy: at every served terminus boundary (one direction,
+    no sj, exon flanks, a live strand channel), the boundary's own strand row carried into the INSIDE
+    flank through the abundance map, the step's spread refit here from the served pairs' two modes,
+    the hard cap and the delta-method width — keyed by the inside slot."""
+    from rigel.calibration.messages.transfer_rows import (
+        abundance_row,
+        boundary_shares_strand,
+        outside_flank,
+    )
+
+    kappa, od_g, od_r = strand
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    n_u = np.asarray(ctx.n_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    A_g = np.asarray(ctx.eff_gdna_global, np.float64)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+
+    def strand_row(x):
+        n = cnt[x].sum()
+        ks = kappa if fp[x] else 1.0 - kappa
+        f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
+        p = 0.5 * fg + ks * (1 - fg)
+        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+        var = max(
+            n * p_ref * (1 - p_ref)
+            + (n * f_ref) ** 2 * 0.25 * od_g
+            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+            1e-9,
+        )
+        row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
+        return row - row.max()
+
+    served = []
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+            continue
+        _o, i = outside_flank(flags[b], lo, hi)
+        if i is None or not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
+            continue
+        if not (tau[b] > 0.0 and n_u[b] > 0 and n_u[i] > 0 and A_g[b] > 0 and A_g[i] > 0):
+            continue
+        served.append((int(b), int(i), (n_u[i] / A_g[i]) / ((n_u[b] + n_s[b]) / A_g[b])))
+    ls, vs = [], []
+    for b, i, r in served:
+        if not tau[i] > 0.0:
+            continue
+        ks = kappa if fp[b] else 1.0 - kappa
+        fs, vv = [], 0.0
+        for x in (b, i):
+            n = cnt[x].sum()
+            p = cnt[x, 0] / n
+            f = (p - ks) / (0.5 - ks)
+            fs.append(f)
+            vv += p * (1 - p) / n / (p - ks) ** 2
+        if not all(0.0 < f < 1.0 for f in fs):
+            continue
+        ls.append(np.log(fs[1] / (fs[0] * n_u[b] / (n_u[b] + n_s[b]) / r)))
+        vs.append(vv + 1.0 / n_u[i] + 1.0 / (n_u[b] + n_s[b]))
+    v_step = 0.0
+    if len(ls) >= 2:
+        ls, vs = np.asarray(ls), np.asarray(vs)
+        w = 1.0 / vs
+        w /= w.sum()
+        mu = float(w @ ls)
+        v_step = max(0.0, float(w @ (ls - mu) ** 2) - float(w @ vs))
+    out = {}
+    for b, i, r in served:
+        row = abundance_row(strand_row(b), lam, n_u[b], n_s[b], r, n_u[i], v_step)
+        if np.ptp(row) > 1e-9:
+            out.setdefault(i, np.zeros(lam.shape[0]))
+            out[i] += row
+    return out, v_step
+
+
+def _with_populated_inside(ctx):
+    """The toy's inside pieces are EMPTY (shorter than a fragment: no contained fragment, a contained
+    opportunity below one base), so item 6 serves nothing there and a gate on the bare toy proves
+    nothing. A context is data: populate the two inside slots with consistent counts (both strand
+    channels live, so the step's spread is fitted from two pairs) and a plausible contained
+    opportunity, for the policy and the independent recompute alike."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer_rows import outside_flank
+
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
+    a_g = np.asarray(ctx.eff_gdna_global, np.float64).copy()
+    a_r = np.asarray(ctx.eff_rna, np.float64).copy()
+    tau = np.asarray(ctx.own.tau_lam, np.float64).copy()
+    fills = iter(
+        [(20.0, 180.0), (80.0, 120.0), (25.0, 175.0), (70.0, 130.0)]
+    )  # two pairs that DISAGREE
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+            continue
+        _o, i = outside_flank(flags[b], lo, hi)
+        if i is None:
+            continue
+        cnt[i] = next(fills)
+        a_g[i] = a_r[i] = 150.0
+        tau[i] = 1.0
+    return _dc.replace(
+        ctx,
+        unspliced_count=cnt,
+        n_slot=cnt.sum(axis=1),
+        eff_gdna_global=a_g,
+        eff_rna=a_r,
+        own=_dc.replace(ctx.own, tau_lam=tau),
+    )
+
+
+def test_the_abundance_map_holds_the_two_hypotheses_and_the_cap():
+    """The map's three analytic properties: at s = r the flank's share is the composition-transfer
+    value f_c = f_b U/(U+S) (enrichment); at s = 1 it is f_c / r (new RNA); it is monotone in the
+    boundary's log-odds; and the row never claims a share above f_c — a source peaked at f_b arrives
+    at or below the composition-transfer value whatever the step prior, the hard cap."""
+    from rigel.calibration.messages.transfer_rows import abundance_map, abundance_row
+
+    lam = np.linspace(-8, 8, 801)
+    sig = 1 / (1 + np.exp(-lam))
+    U, S, r = 300.0, 60.0, 2.5
+    fc = U * sig / (U + S)
+    m_enrich = abundance_map(lam, U, S, r, r)
+    m_new = abundance_map(lam, U, S, r, 1.0)
+    np.testing.assert_allclose(1 / (1 + np.exp(-m_enrich)), fc, rtol=0, atol=1e-9)
+    np.testing.assert_allclose(1 / (1 + np.exp(-m_new)), fc / r, rtol=0, atol=1e-9)
+    assert np.all(np.diff(m_enrich) >= -1e-12) and np.all(np.diff(m_new) >= -1e-12)
+
+    def _var(rw):
+        p = np.exp(rw - rw.max())
+        p /= p.sum()
+        m = p @ lam
+        return float(p @ (lam * lam) - m * m)
+
+    f_b = 0.6
+    row_b = -0.5 * ((lam - np.log(f_b / (1 - f_b))) / 0.05) ** 2
+    # the cap is exact in the map and softened only by the ingredients' counting width, so it is
+    # asserted on DEEP counts (the blur's sd ~0.03 nats there); the shallow case is asserted by mode
+    Ud, Sd, nd = 3000.0, 600.0, 4000.0
+    fc_b = f_b * Ud / (Ud + Sd)
+    for v in (0.0, 0.3):
+        row = abundance_row(row_b, lam, Ud, Sd, r, nd, v)
+        w = np.exp(row - row.max())
+        assert float(sig[np.argmax(row)]) <= fc_b + 0.02, (
+            "the cap: never above the composition-transfer value"
+        )
+        assert w[sig > fc_b + 0.05].max() < 1e-3, "no mass above the cap"
+    sharp = abundance_row(row_b, lam, Ud, Sd, r, nd, 0.0)
+    wide = abundance_row(row_b, lam, Ud, Sd, r, nd, 0.3)
+    assert abs(float(sig[np.argmax(sharp)]) - fc_b / r) < 0.02, (
+        "v_step = 0 is the new-RNA point when the totals rise"
+    )
+    down = abundance_row(row_b, lam, Ud, Sd, 0.4, nd, 0.0)
+    assert abs(float(sig[np.argmax(down)]) - fc_b) < 0.02, (
+        "v_step = 0 is the composition point when the totals fall"
+    )
+    down_wide = abundance_row(row_b, lam, Ud, Sd, 0.4, nd, 0.3)
+    assert float(sig[np.argmax(down_wide)]) <= fc_b + 0.02 and _var(down_wide) > _var(down), (
+        "below the cap, and wider with a fitted spread"
+    )
+    assert _var(wide) > _var(sharp), "a fitted spread widens the claim"
+    assert not abundance_row(row_b, lam, 0.0, S, r, 400.0, 0.0).any(), (
+        "a depleted boundary is vacuous"
+    )
+
+
+def test_the_abundance_message_lands_at_inside_exons_beside_their_face_rows(sweep_inputs):
+    """ITEM 6's contract on the toy's two terminus boundaries: each INSIDE exon receives exactly the
+    independently recomputed abundance row (the step's spread refit here) on top of its rungs-2/3
+    face rows; every slot that is neither an item-5 site nor an inside exon is exactly as the policy
+    leaves it with the terminus bits cleared — so a dropped cap, a dropped fit, an inverted ratio or a
+    delivery to the outside flank fails."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _with_populated_inside(_ctx_of(sweep_inputs))
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    pol = TransferPolicy(provider, strand=strand)
+    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    base = np.asarray(
+        pol.prepare(_terminus_flags_cleared(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    exon_rows = _expected_exon_rows(sweep_inputs, ctx, provider(n_grid, window), lam)
+    expected, v_step = _expected_abundance_rows(sweep_inputs, ctx, strand, lam)
+    assert len(expected) >= 2 and v_step > 0.0, (
+        "the toy must carry two served inside exons or this gate proves nothing"
+    )
+    item5 = _item5_slots(ctx)
+    for i in range(n):
+        if i in expected:
+            want = exon_rows.get(i, np.zeros(lam.shape[0])) + expected[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"inside exon {i}"
+            )
+        elif i not in item5:
+            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 6")
+
+
+def test_the_abundance_message_is_silence_inside_the_strand_deadband(sweep_inputs):
+    """ITEM 6's vacuity law: a terminus boundary whose strand channel the solver declares dead sends
+    nothing into its inside exon — with every boundary dead, each inside exon's row equals its row
+    under cleared terminus bits (rungs 2/3 alone). ⚠ Cannot fail before the mechanism exists; its
+    falsification is the watched perturbation (the deadband dropped)."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _with_populated_inside(_ctx_of(sweep_inputs))
+    n = int(ctx.n_slots)
+    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
+    dead = np.asarray(
+        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
+    )
+    cleared = np.asarray(
+        pol.prepare(_terminus_flags_cleared(_dead_boundaries(ctx)))
+        .deliver(_dummy_nb(n), _dummy_nb(n))
+        .lam_rows
+    )
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    lam, _ = _logodds_grid(n_grid, window)
+    expected, _v = _expected_abundance_rows(sweep_inputs, ctx, _strand_of(sweep_inputs), lam)
+    for i in expected:
+        np.testing.assert_array_equal(
+            dead[i], cleared[i], err_msg=f"inside exon {i} received a row from a dead boundary"
+        )
+
+
+# ── ITEM 7 (2026-09-02): the alternative splice site ──────────────────────────────────────────────
+
+
+def test_the_junction_flanks_read_the_flag_kind_alone():
+    """The flank predicate, gated DIRECTLY: a DONOR bit puts the intron to the right on either strand
+    (the flags are genomic-order), an ACCEPTOR bit to the left; a terminus on the boundary, no junction,
+    or junctions both ways give no flanks."""
+    from rigel.calibration.messages.transfer_rows import junction_flanks
+    from rigel.calibration.splice_graph import (
+        FLAG_ACCEPTOR_NEG,
+        FLAG_ACCEPTOR_POS,
+        FLAG_DONOR_NEG,
+        FLAG_DONOR_POS,
+        FLAG_TSS_POS,
+    )
+
+    assert junction_flanks(FLAG_DONOR_POS, 7, 9) == (9, 7)
+    assert junction_flanks(FLAG_DONOR_NEG, 7, 9) == (9, 7)
+    assert junction_flanks(FLAG_ACCEPTOR_POS, 7, 9) == (7, 9)
+    assert junction_flanks(FLAG_ACCEPTOR_NEG, 7, 9) == (7, 9)
+    assert junction_flanks(FLAG_DONOR_POS | FLAG_TSS_POS, 7, 9) == (None, None), (
+        "sj+terminus: its own item"
+    )
+    assert junction_flanks(0, 7, 9) == (None, None)
+    assert junction_flanks(FLAG_DONOR_POS | FLAG_ACCEPTOR_NEG, 7, 9) == (None, None), (
+        "junctions both ways"
+    )
+
+
+def test_the_hop_premise_is_the_fitted_step_with_its_error_and_the_excess():
+    """`hop_step_fit` on constructed witnesses: pairs disagreeing by one common step at pure counting
+    return that step, its standard error 1/sum(w) and NO excess; pairs scattered beyond counting return
+    a positive excess; agreeing pairs return a null step; one pair fits nothing. `shift_row` moves a
+    delta row by exactly the step along the grid."""
+    from rigel.calibration.messages.transfer_rows import hop_step_fit, shift_row
+
+    rng = np.random.default_rng(7)
+    v = np.full(400, 0.04)
+    d = 0.3 + rng.normal(0.0, np.sqrt(v))  # a common step, counting scatter only
+    step, se2, excess = hop_step_fit(d, v)
+    assert abs(step - 0.3) < 3.0 * np.sqrt(se2) and abs(se2 - 0.04 / 400) < 1e-12
+    assert excess < 0.01, "counting scatter alone must not read as excess"
+    d2 = 0.3 + rng.normal(0.0, np.sqrt(v + 0.09))  # scatter beyond counting
+    _s, _e, excess2 = hop_step_fit(d2, v)
+    assert 0.05 < excess2 < 0.14, excess2
+    step0, _se, _ex = hop_step_fit(rng.normal(0.0, 0.2, 400), np.full(400, 0.04))
+    assert abs(step0) < 0.03
+    assert hop_step_fit([0.5], [0.01]) == (0.0, 0.0, 0.0)
+    lam = np.linspace(-6.0, 6.0, 241)
+    row = np.full(lam.shape[0], -50.0)
+    row[120] = 0.0
+    moved = shift_row(row, lam, 0.5)
+    assert int(np.argmax(moved)) == 130 and np.allclose(moved.max(), 0.0)
+    assert int(np.argmax(shift_row(row, lam, -0.5))) == 110
+
+
+def _with_alt_splice_sites(ctx):
+    """The toy carries no alternative splice site: turn its two exon|exon terminus boundaries into a
+    DONOR (intron to the right) and an ACCEPTOR (intron to the left) with a route flux each, and
+    populate the pieces beyond them — a context is data; the policy and the recompute read the same."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer_rows import TERMINUS
+    from rigel.calibration.splice_graph import FLAG_ACCEPTOR_NEG, FLAG_DONOR_POS
+
+    base = _with_populated_inside(ctx)
+    is_bnd = np.asarray(base.is_boundary, bool)
+    is_exon = np.asarray(base.is_exon_region, bool)
+    left, right = np.asarray(base.left, np.int64), np.asarray(base.right, np.int64)
+    flags = np.asarray(base.boundary_flags, np.uint16).copy()
+    sjc = np.asarray(base.sj_count, np.float64).copy()
+    kinds = iter([(FLAG_DONOR_POS, (40.0, 0.0)), (FLAG_ACCEPTOR_NEG, (0.0, 50.0))])
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]) or not (flags[b] & TERMINUS):
+            continue
+        kind, fl = next(kinds)
+        flags[b] = kind
+        sjc[b] = fl
+    return _dc.replace(base, boundary_flags=flags, sj_count=sjc)
+
+
+def _expected_alt_splice_rows(si, ctx, strand, lam):
+    """Item 7 recomputed INDEPENDENTLY of the policy on the patched context: at each junction boundary
+    the two flanks' own strand rows through the splice-out map (E with S_b + F, C with S_b) into the
+    boundary and the boundary's own row through the face map into each flank, each shifted by the
+    hop premise refit here per flank kind and blurred by its error, the excess and the pair's own
+    residual disagreement. Keyed by slot; the premises returned beside."""
+    from rigel.calibration.messages.transfer_rows import (
+        blur_row,
+        boundary_shares_strand,
+        face_map_lambda,
+        hop_step_fit,
+        junction_flanks,
+        shift_row,
+        splice_out_row,
+        transport_row,
+    )
+
+    kappa, od_g, od_r = strand
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    n_u = np.asarray(ctx.n_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
+    A_g = np.asarray(ctx.eff_gdna_global, np.float64)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+
+    def strand_row(x):
+        n = cnt[x].sum()
+        ks = kappa if fp[x] else 1.0 - kappa
+        f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
+        p = 0.5 * fg + ks * (1 - fg)
+        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+        var = max(
+            n * p_ref * (1 - p_ref)
+            + (n * f_ref) ** 2 * 0.25 * od_g
+            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+            1e-9,
+        )
+        row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
+        return row - row.max()
+
+    served = []
+    for b in np.flatnonzero(is_bnd):
+        lo, hi = left[b], right[b]
+        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+            continue
+        c_side, e_side = junction_flanks(flags[b], lo, hi)
+        if c_side is None or not (n_u[b] > 0 and A_g[b] > 0):
+            continue
+        for x, s_out, kind in ((e_side, n_s[b] + flux[b], "E"), (c_side, n_s[b], "C")):
+            if boundary_shares_strand(fp[b], fn[b], fp[x], fn[x]) and A_g[x] > 0:
+                served.append((int(b), int(x), float(s_out), kind))
+    obs, premise = {}, {}
+    for kind in ("C", "E"):
+        ds, vs = [], []
+        for b, x, s_out, k in served:
+            if k != kind or not (tau[b] > 0.0 and tau[x] > 0.0):
+                continue
+            lo_v = []
+            for y in (b, x):
+                n = cnt[y].sum()
+                ks = kappa if fp[y] else 1.0 - kappa
+                p = cnt[y, 0] / n
+                f = (p - ks) / (0.5 - ks)
+                if not 0.0 < f < 1.0:
+                    break
+                lo_v.append((np.log(f / (1 - f)), p * (1 - p) / n / (p - ks) ** 2 / (1 - f) ** 2))
+            if len(lo_v) < 2:
+                continue
+            v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
+            d = lo_v[0][0] - lo_v[1][0] - np.log((n_u[b] + s_out) / n_u[b])
+            ds.append(d)
+            vs.append(lo_v[0][1] + lo_v[1][1] + v_ratio)
+            obs[(b, x)] = (d, vs[-1])
+        premise[kind] = hop_step_fit(ds, vs)
+    out = {}
+    for b, x, s_out, kind in served:
+        step, se2, excess = premise[kind]
+        width = se2 + excess
+        if (b, x) in obs:
+            d, v = obs[(b, x)]
+            width += max(0.0, (d - step) ** 2 - v)
+        if tau[x] > 0.0 and fp[x] != fn[x]:
+            row = splice_out_row(strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x])
+            if np.ptp(row) > 1e-9:
+                out.setdefault(b, np.zeros(lam.shape[0]))
+                out[b] += blur_row(shift_row(row, lam, step), lam, width)
+        if tau[b] > 0.0:
+            le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
+            row = transport_row(strand_row(b), lam, le, n_u[b], s_out)
+            if np.ptp(row) > 1e-9:
+                out.setdefault(x, np.zeros(lam.shape[0]))
+                out[x] += blur_row(shift_row(row, lam, -step), lam, width)
+    return out, premise
+
+
+def test_the_alt_splice_messages_land_at_the_junction_and_both_flanks(sweep_inputs):
+    """ITEM 7's contract on the patched toy (one donor, one acceptor, both flanks populated): the
+    junction boundary receives exactly both flanks' mapped rows and each flank exactly the boundary's
+    mapped row — the premise refit here per flank kind, the pairs' fills chosen to DISAGREE so the step
+    and the widths are all non-trivial — on top of its rungs-2/3 rows; every other slot is exactly as
+    the policy leaves it with the junction bits cleared. So swapped flanks, a dropped flux, a dropped
+    step or width, or a delivery to the wrong flank fails."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.messages.transfer_rows import SJ_FLAGS
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    pol = TransferPolicy(provider, strand=strand)
+    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    flags = np.asarray(ctx.boundary_flags, np.uint16).copy()
+    flags[np.asarray(ctx.is_boundary, bool)] &= ~SJ_FLAGS
+    base = np.asarray(
+        pol.prepare(_dc.replace(ctx, boundary_flags=flags))
+        .deliver(_dummy_nb(n), _dummy_nb(n))
+        .lam_rows
+    )
+    expected, premise = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
+    assert len(expected) >= 4, (
+        "the patched toy must serve two junctions and their flanks or this gate proves nothing"
+    )
+    assert all(p[0] != 0.0 and p[1] > 0.0 for p in premise.values()), premise
+    for i in range(n):
+        if i in expected:
+            want = base[i] + expected[i]
+            np.testing.assert_allclose(
+                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"slot {i}"
+            )
+        else:
+            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 7")
+
+
+def test_the_alt_splice_messages_are_silence_inside_the_strand_deadband(sweep_inputs):
+    """ITEM 7's vacuity law: with every boundary's strand channel dead and the flanks' too, the junction
+    bits change nothing — each slot's row equals its row with the junction bits cleared. ⚠ Cannot fail
+    before the mechanism exists; its falsification is the watched perturbation (a deadband dropped)."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.messages.transfer_rows import SJ_FLAGS
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
+    n = int(ctx.n_slots)
+    tau = np.zeros(n)
+    dead = _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=tau))
+    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
+    rows = np.asarray(pol.prepare(dead).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    flags = np.asarray(dead.boundary_flags, np.uint16).copy()
+    flags[np.asarray(dead.is_boundary, bool)] &= ~SJ_FLAGS
+    cleared = np.asarray(
+        pol.prepare(_dc.replace(dead, boundary_flags=flags))
+        .deliver(_dummy_nb(n), _dummy_nb(n))
+        .lam_rows
+    )
+    np.testing.assert_array_equal(rows, cleared)

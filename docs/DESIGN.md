@@ -465,6 +465,30 @@ subsumes much of what message propagation is doing.
   imputation is the only source of information there is. Strand specificity would solve those, and often
   is not available — which is exactly why the next best thing has to work, and has to be weak.
 
+### 0c.0e ⭐⭐⭐ THE COMPLETION CONTRACT OF THE MESSAGE POLICY — owner ruling, 2026-09-02
+
+**The policy is finished when every case is handled, and not before.** No message may stay nullified and
+no boundary or region may be skipped: for every node type and every boundary case the policy must pass
+whatever CAN be passed, forward and backward, so that every node solves with TWO messages, each with an
+honest precision, and knows how to fuse them with its own evidence. Two laws follow. (1) **Multi-hop.**
+Real annotations carry long chains of exon|exon boundaries — alternative starts, ends, splice sites,
+nested isoforms — with no intron or intergenic region for many nodes; a message must travel such a
+chain, each hop charging its own dampening (the measured-ingredient width of the hop's map, and a fitted
+per-hop premise, never a constant). The rebuild's "one hop" was its scaffolding, not a ruling.
+(2) **gDNA is always conveyed.** Where composition cannot cross — a terminus admits uncounted
+molecules, a strand change alters membership — the gDNA LEVEL still can, with its own honest width;
+the part of the message that survives is passed, never the whole message dropped.
+
+**The acceptance criterion.** On the test chromosome, the ladder and every panel the project builds,
+each case either improves accuracy or leaves it stable with minimal harm where a small disadvantage is
+measured — the two halves judged apart, never pooled, node-locally at the destinations beside the
+whole-library number. When that holds for the whole checklist (the tracker in the sandbox carries it),
+the default flips, the other policies retire, and the tool shrinks around one cornerstone.
+
+**The focus rule.** Until then this thread is the work; other high-priority problems (the landscape
+prior's false-positive training first among them) are LOGGED in the tracker's parked-priorities list and
+taken up after — switching away is what has kept this policy elusive.
+
 ### 0c.1 ⭐⭐⭐ THE MECHANISM IS ALREADY BUILT AND IS NOW ON — do not build it again
 
 ⛔⛔ **The hop the derivation above asks for EXISTS IN `src/`, is individually switchable, and is behind
@@ -1586,6 +1610,285 @@ fragments; the reversed subtraction fails everywhere the message acts. Gates:
 `tests/calibration/test_transfer_policy.py` (deadband silence, the independent recompute at licensed
 faces, the count-form mode / direction / marginal width), each watched failing first and each
 perturbation watched firing.
+
+### 6b.5 ⭐⭐⭐ THE BOUNDARY → INTRON MESSAGE IS THE BOUNDARY'S OWN STRAND ROW, VERBATIM (derived, measured and landed 2026-09-02 — item 2 of the message rungs)
+
+**The population accounting.** An intron and both of its intron|exon boundaries hold ONE unspliced
+population: gDNA plus the unspliced RNA of the transcripts that span the intron. Mature RNA reaches an
+exon by the splice junction and crosses neither boundary — certified: the mature count at every
+intron|exon boundary of the test chromosome is zero on every condition. (On the ladder 0.3 % OFF /
+0.7 % ON of such boundaries carry a few mature fragments, 0.02–0.03 % of the crossing mass, every one
+a ≤ 100 bp intron inside a fragment's unsequenced mate gap where the accumulator cannot see the
+splice — an accepted accumulator residual, not this message's premise.) So the message has no
+splice-out term and no premise. The witnesses are disjoint: the accumulator deposits a fragment either
+as CONTAINED in a region or as CROSSING boundaries, never both. A fragment spanning a whole intron is
+deposited on both its boundaries, which correlates the two witnesses at introns shorter than a
+fragment — recorded, not modelled.
+
+**The coordinate.** ψ's λ is the log-odds of the gDNA COUNT share. Two objects with one density pair
+have count shares that differ by their opportunity ratios — the splice-in face map at s = 0, a pure
+opportunity shift with NO measured ingredient (the crossing count cancels), hence no delta-method
+width. Under §6b.4's one-opportunity rule the map is the identity, so the row is delivered VERBATIM,
+exactly as rung 1 does in the other direction. The per-component form (each component's own fl PMF)
+puts the shift at ±0.02 nats on the panel — the two pure pools' fitted PMFs — and only the retired
+fl-gap side panel could price it: a refinement recorded for BOTH directions of this hop.
+
+**What the boundary sends, and the width.** Its OWN strand row (`simplex_logodds.strand_row_logodds`
+on its crossing count split by genome strand, the variance frozen at the boundary's incoming
+belief — a source-side read; the mode is data only, the quadratic peaking where the model's sense
+probability equals the observed sense fraction) — never its belief, which already holds rung 1's
+intron row. The frozen Beta-Binomial width is the honest precision and saturates near the reciprocal
+overdispersion. The hop adds nothing: stage 0 on certified truth (`slot_truth.npz`, no solver) reads
+ZERO excess variance over counting between an intron's composition and its boundaries' on all three
+test panels and the ladder, capture on and off, terminus faces included; the mean gap is reproduced by
+a plug-in Poisson null within one null sd on the test chromosome and within 0.1 nats on the ladder
+(the large raw gaps there are the digamma estimator at the pure-gDNA vertex, where it degenerates into
+a count ratio). No widening ships — rung 1's verdict on its blur, and no constant.
+
+**The licence and the gate.** The pair is rung 1's structural pair (an exon on one flank, an intron
+on the other); the boundary must admit the intron's SINGLE strand set
+(`transfer_rows.boundary_shares_strand` — an AMBIG face's strand split constrains only the tilt); a
+terminus flag does NOT refuse: a true intron flank carries no exon bit, so no transcript terminating
+at the boundary covers it and the intron is always the OUTSIDE flank (on the ladder 4,130 of 19,610
+intron|exon boundaries carry a terminus, and their pair gap is as shared as the rest). The deadband
+is the solver's own: at a boundary there is no factory, so `own.tau_lam` IS the strand Fisher
+information and `tau_lam > 0` is the derived deadband — an unstranded library sends nothing,
+structurally (byte-identical on every unstranded row of every panel and of the ladder).
+
+**Where it acts, measured (2026-09-02).** The information budget (the solver's message-free
+precisions): off capture the two faces carry 1–7 % of an RNA-bearing intron's own λ-information
+(~900 contained fragments against ~30 crossings each); under capture at a PROBED, RNA-bearing gene
+4–59× (the intron holds 4–22, each face 100–550). Node-local at the receiving introns: test chromosome
+−53…−58 % on the stranded capture-ON rows and −2 % off capture; junction probes −27…−40 %; sparse
+probes −4 %; the ladder −26 % (g05), −37 % (g50), −38 % (g98) at ss.99 ON, and +1 % at g05 ss.99 OFF
+(five-fragment faces added to 190-fragment introns — the one destination-level cost). The REVERSED
+row (λ → −λ) multiplies the destination error by 1.7–30× on every acting row of every substrate.
+⛔ Judge a message at its DESTINATIONS: the whole-library number carries the refit prior's response
+to the changed intron beliefs — on the sparse panel the reversed row "won" 4 % whole-library entirely
+at mono genes and boundaries, where nothing is delivered, while losing 2.3× at the introns.
+
+**Whole-library, both halves apart.** Test chromosome, stranded capture-ON: 0.980–0.986× the shipped
+policy at g25/g50/g98 and 1.007× at g05; capture-OFF 0.995–1.000×; junction panel 0.91–0.95×;
+sparse panel 0.998–1.003×. Ladder, unstranded: byte-identical 8/8. Ladder, stranded: ≤ silence on
+7/8 rows (g98 OFF 0.849×, g50 ON 0.929×, g50 OFF 0.940×, g98 ON 0.945×, g05 OFF 0.996×); against
+the shipped policy −748 (g50 ON), −1,508 (g98 OFF), −2,932 (g98 ON), +161 (g05 OFF), +402 (g50 OFF),
++750 (g05 ON). ⚠ The one row above silence, `g05 ss.99 ON` at 1.005×, is PRIOR-MEDIATED: the message
+improves 5,144 near-empty introns (7,300 fragments in all) by 26 % at their own slots, and the refit
+prior then moves the thin boundary class, which receives nothing, by +1,104 — the
+`ISSUES: gdna-landscape-trains-on-false-positives` family and the same regime as rung 1's recorded
++169. Whether that residue is accepted is the owner's call. Gates:
+`tests/calibration/test_transfer_policy.py` (the boundary deadband silence, the independent recompute
+at exactly the licensed live pairs with every other slot untouched, the pure strand predicate) — the
+landing and predicate gates watched failing first, four perturbations watched firing (the mirrored
+row, the deadband dropped, the single-strand requirement dropped, delivery to the exon flank).
+
+### 6b.6 ⭐⭐⭐ THE EXON|EXON TERMINUS BOUNDARY AND ITS OUTSIDE EXON — the licence counts the spliced crossing (rung 4, item 5; derived, measured and landed 2026-09-02)
+
+**The orientation.** A transcript terminus at an exon|exon boundary covers exactly one flank, the
+INSIDE; the other flank, the OUTSIDE, is read off the flag alone: TSS+ and TES− bodies extend
+genomic-right, so the outside is the left flank; TES+ and TSS− extend left, so it is the right;
+termini pointing both ways, or a splice junction sharing the boundary (its own item), give no side
+(`transfer_rows.outside_flank`, gated directly). Certified on both substrates: the outside flank's
+composition matches the crossing (test chromosome, excess variance 0.000 on every row; ladder, 13,985
+pairs) while the inside flank differs by +0.25…+0.51 nats (test) and +0.38 nats at z 33–94 (ladder).
+
+**The licence is NOT verbatim, and the census that found it.** Own strand rows exchanged verbatim
+between the boundary and its outside exon HARMED the boundaries on the ladder (+6…+10 % at g05/g50
+ss.99 ON, +3 % OFF; the reversed orientation 1.5× worse). On 1,003 deep pairs the boundary's true gDNA
+share exceeded its outside exon's by +0.11; by component the gap was entirely MATURE RNA (density
+log-ratio −0.07…−0.28 under capture, −0.04…−0.2 off; nascent ≈ 0; gDNA off by the fl model's level
+artifact at short regions, which a composition transfer never uses). The mechanism: a mature fragment
+that crosses an exon|exon boundary and splices within its own extent is counted in the boundary's
+SPLICED bank (`boundary_spliced`: crossed contiguously, spliced elsewhere), not in its unspliced
+crossing, while a fragment contained in the outside piece has no junction by geometry. Intron|exon
+faces never meet this (mature RNA never crosses them unspliced), which is why items 1–2 could be
+verbatim. The FULL crossing `U_b + S_b` shares the outside exon's population, so the licence is
+§6b.4's map with the spliced crossing as S: `f_b = f_O (U_b + S_b) / U_b` — certified on ladder truth,
+the residual +0.004 after the map against +0.055 before (`g50 ss.99 ON`), +0.003 against +0.023 off
+capture; the boundary's own junction flux does nothing there, as it must at a terminus. The
+two-isoform `altstart` structure hides the effect because its terminus sits 500 bp from the nearest
+splice site. ⛔ Two stage-0 lessons: a noise-subtracted EXCESS VARIANCE cannot see a MEAN bias (the
+rung-4 excursion's "shared" reading was the variance statistic), and a plug-in Poisson null resamples
+around the realized counts, so it removes small-count estimator bias and cannot test whether a realized
+gap is zero — test the mean gap, in f-space and by component, against the truth.
+
+**Three messages, every one a shipped constructor.** The outside exon's own strand row to the
+boundary through `splice_out_row` with S = the spliced crossing; the boundary's own strand row to the
+outside exon through the face map with the spliced density (`transport_row`, the delta-method width);
+and THE COMPOSED TRANSPORT — what rungs 2–3 delivered to the outside exon, carried one hop further
+through the same map into the boundary, the half that reaches unstranded data where the boundary has
+no own channel. The no-echo law is STRUCTURAL: item 5 accumulates apart and reads only the rows the
+earlier messages left, so a boundary can never hear its own row back through the exon (an echo is
+unfalsifiable on the gate toy, watched). An empty outside piece sends and receives nothing; the
+inside flank is never a destination. Nothing new is fitted; the per-hop dampening is each hop's
+measured-ingredient width (the ratio's counting marginal, the face map's delta-method width).
+
+**Measured (2026-09-02).** Ladder, unstranded: at or below the shipped policy on 6/8 rows (0.985× at
+the in-scope `g00 ss.50 OFF` zero control, 0.994× g50 ON, 0.989× g98 ON; +37 and +28 fragments on
+g05/g50 OFF); stranded: at or below on 7/8 (0.991× g05 ON, 0.997× g50 ON, 0.992× g98 OFF, 0.974× g98
+ON; +29 at g05 OFF), below silence everywhere; the reversed orientation worse on every row where the
+vertex leaves it room (1.006–1.117× on g05/g50; uninformative at the g00 and g98 vertices, where every
+object shares one composition). Test chromosome: unstranded byte-identical, stranded 0.985–1.022×
+(ten terminus boundaries: sampling noise). Sparse probes 0.96–1.02× on stranded rows, junction probes
+within ±1 %. Node-locally the message is small at its destinations on the contaminated rows (±1 %)
+because those boundaries already hold their own strand evidence and the refit prior; it is worth
+−4.6 % at the zero control's boundaries, whose error is the prior's false-positive training.
+
+**What the census says about the rest of the class (recorded here so it is not re-derived).** The
+ladder's terminus boundaries split by what lies beyond the outside flank (`g50 ss.99 OFF / ON / g00
+ss.50 OFF`, share of the class's error): a populated outside exon 30 / 40 / 43 % (median 282 bp —
+item 5's territory); an EMPTY outside piece a dozen bases long whose far face is ANOTHER terminus
+49 / 44 / 47 %; empty with a licensed intron|exon far face 8 / 5 / 4 %; empty with an alternative
+splice site 7 / 8 / 6 %; empty with a gene edge 6 / 3 / 1 %. In a chain of termini each boundary is
+the inside flank of the previous one, so composition reaches none but the outermost from either side;
+what crosses a dozen bases is the gDNA LEVEL, continuous under one probe footprint, which would bound
+the inner boundary's gDNA share from above — a derivation owed to the chain item, not built. And the
+terminus boundaries' error on the contaminated rows is 1.8 % of their mass, the resolution of their
+own evidence plus the prior, not blindness: the lever for this class and for the zero controls is
+`ISSUES: gdna-landscape-trains-on-false-positives`. Gates: `tests/calibration/test_transfer_policy.py`
+(the orientation table directly; the independent recompute at the toy's two terminus boundaries and
+their outside exons, everything else byte-identical to the policy with the terminus bits cleared), the
+two watched failing first, three perturbations watched firing (orientation reversed, spliced crossing
+dropped, delivery to the inside flank).
+
+### 6b.7 ⭐⭐⭐ THE ABUNDANCE-DISCREPANCY RULE — what crosses a face composition cannot (owner design, 2026-09-02; certified on truth, landed as item 6)
+
+**The owner's rule, in the policy's terms.** Across a face that refuses composition — the INSIDE flank
+of a terminus, a strand change — the two objects' TOTAL abundances differ by a measured ratio
+`r = (n_X / E_X) / ((U_b + S_b) / A_b)` (the boundary's total counts its spliced crossing, §6b.6). If the
+totals match, the abundance simply transfers. If they differ, the discrepancy must be explained, and
+there are two explanations: ENRICHMENT (hybrid capture moved everything, so the gDNA abundance scales
+by `r` and composition transfers) or NEW RNA (transcripts starting or ending at the terminus, so the gDNA
+abundance is unchanged and the composition shifts by `r`); a ratio below one is de-enrichment with the
+new transcript silent, composition again. We do not know which, and we do not know the behaviour of
+capture, so **the precision of the message is set by the discrepancy itself: the more the totals differ,
+the less can be inferred.** First do no harm: where strand-specific data solves the destination, a wide
+row cannot hurt it.
+
+**The arithmetic.** With the enrichment step `s` (the gDNA-abundance ratio across the face), the
+destination's gDNA share is `f_X = f_c · s / r`, where `f_c = f_b U_b / (U_b + S_b)` is the
+composition-transfer value (§6b.6's map). Enrichment is `s = r`, giving `f_c`; new RNA is `s = 1`,
+giving `f_c / r`; every mixture of the two lies between. And one bound is hard: since new RNA can only
+add, `s ≤ r` always, so **the inside's gDNA share never exceeds the composition-transfer value**. The
+message is therefore the source row read through the map `λ_X = log(s f_c) − log(r − s f_c)`,
+marginalised over the enrichment step `s` on the support the totals allow — `[1, r]` when they rise
+(the two hypotheses and their mixtures), `(0, r]` when they fall (de-enrichment is then certain) —
+and widened by the counting of its ingredients (`n_X`, `U_b + S_b`, `S_b`, `U_b`, by the delta method).
+**The step's spread within that support is the hop's premise, FITTED**, never a constant: from the served
+pairs' own two witnesses (the boundary's and the inside exon's strand modes, data only), the
+method-of-moments excess of their disagreement over counting in the map's coordinate, truncated
+normal within the support — so with no fitted spread the message is exactly the new-RNA point when
+the totals rise and the composition point when they fall, and it widens only where the library's own
+pairs show enrichment structure. A uniform marginal over the bracket, and a profile over it, were
+measured first and agree with this form within a few fragments; a spread unbounded below (de-enrichment
+at rising totals) measured weaker everywhere; and every prototype shared one sign error the landing
+draft exposed — for falling totals the bracket had run from `r` up to one, above the hard cap — whose
+correction is the landed support.
+
+**What ships (item 6, 2026-09-02).** The boundary's OWN strand row into the inside flank, gated by the
+solver's derived deadband at the boundary (`transfer_rows.abundance_map`, `abundance_row`; the fit in
+the policy). Two parts are measured and HELD for the scan phase with their own premises: forwarding the
+boundary's arrivals (item 5's composed transport) one hop further, which is the entire −2.0 % at the
+`g00 ss.50 OFF` zero control (the cap pinning inside exons to zero gDNA) and the entire +5 % harm at the
+inside exons on `g50 ss.50 OFF` — a three-map chain carrying counting widths only; and the reverse
+direction (the inside exon's own row back to the boundary through the inverse), +0.8 % at the
+boundaries on `g50 ss.99 ON`, where the boundary already holds its own evidence. First do no harm.
+
+**Measured (2026-09-02).** Ladder, unstranded: byte-identical 8/8 (the row is dead by the deadband).
+Ladder, stranded: at or below the shipped policy on 5/6 contaminated rows (0.9924× `g05 ON`, 0.9952×
+`g50 ON`, 0.994× `g98 ON`, 0.9987× `g98 OFF`, 0.9999× `g50 OFF`), +46 fragments at `g05 OFF`; below
+silence on all 16. Node-local at the inside exons: −0.6 % (g05 ON), −0.8 % (g50 OFF), +1.2 % (g50 ON,
+the accepted residue: the certified check's uncovered mixture and the prior's response), −3.6 %
+(g98 ON). Test chromosome: 16/30 rows identical, the rest within ±1 % but the `g00 ss.70 ON` zero
+control 614 → 363 (the cap) and `g00 ss.70 OFF` +1.2 %; sparse probes worst +3 % (`g98 ss.99 ON`);
+junction probes within ±0.6 %. The sharp composition transfer and the mirrored bracket, the two
+falsifiers, are worse at the inside exons on every contaminated row (`g50 ss.99 ON` 22,260 and
+22,372 against 21,440 for the bracket; `g50 ss.50 OFF` 6,397 and 7,028 against 5,659). Gates:
+`tests/calibration/test_transfer_policy.py` (the map's two hypotheses and cap, directly; the
+independent recompute with the fit refit at populated inside exons, everything else byte-identical
+to the policy with the terminus bits cleared; the deadband silence) — two watched failing first,
+five perturbations watched firing (cap dropped, fit dropped, ratio inverted, delivery to the outside,
+deadband dropped). Faithfulness: the landed policy and the prototype deliver identical rows (0.0
+difference at every slot) on the same context; the ladder numbers differ by 1–22 fragments per row
+because the landed fit drops two conveniences the prototype carried — a 20-fragment count floor and
+a mode clip at 0.02/0.98 — per the no-constants rule.
+
+**Certified on ladder truth (2026-09-02, inside flanks of one-direction terminus boundaries with
+≥ 20 fragments at both ends, the bracket widened by two counting sigmas).** Off capture the truth sits
+ON the new-RNA hypothesis (mean truth − `f_c/r` = −0.0003 at `g50 ss.99`, −0.0004 at `g05`) and the
+bracket covers 94–96 % — its nominal rate — while composition transfer alone is right only 68 % (g50).
+Under capture the truth lies between the hypotheses (+0.044 above the new-RNA value at `g50 ON`) and
+the bracket covers 81 % (g50), 93 % (g05), 88 % (g98); the uncovered fifth at g50 is the mixture the
+rule cannot see — de-enrichment across the face with new RNA compensating — recorded as the rule's
+residual, to be priced by the A/B before any widening is proposed. The median width is 0.2–0.4 nats
+(p90 0.9–2.7). Outside flanks read 90–95 % covered and 88–93 % right under sharp transfer, as §6b.6
+found. The one message replaces the REFUTED one-sided inside bound (§6b.6's excursion): that bound
+assumed a certified enrichment sign; this rule assumes nothing about capture and lets the totals speak.
+
+### 6b.8 ⭐⭐⭐ THE ALTERNATIVE SPLICE SITE, AND THE HOP PREMISE — every message across a hop carries a fitted step, its error, and the pair's own discrepancy (rung 4, item 7; derived, certified, measured and landed 2026-09-02)
+
+**The case.** An exon|exon boundary carrying a splice junction and no terminus: one isoform (U)
+continues contiguously across it, the other (T) splices out there. Read off the flag alone — a DONOR bit
+marks the intron's LOW end on either strand, the flags being genomic-order, so the intron lies to the
+boundary's right; an ACCEPTOR bit its high end — the two flanks are **C**, the flank on the junction's
+intron side (exonic in U only), and **E**, the flank where both isoforms are exonic
+(`transfer_rows.junction_flanks`). ⚠ The first stage 0 read the flags in transcript order and swapped
+every − gene; the gate carries the orientation table.
+
+**The two licences, both derived and certified.** C shares the boundary's FULL unspliced crossing, so
+it is §6b.6's law with the spliced crossing alone: `f_b = f_C · U/(U + S_b)`. E holds the crossing plus
+the isoform that splices out at this face, MEASURED as the face's route flux `F` (the certified
+spliced lane), so it is §6b.4's law with the splice-out quantity `S_b + F`: `f_b = f_E · U/(U + S_b + F)`.
+On the ladder (386 OFF / 647 ON boundaries): C − pred **+0.003 / +0.002** and E − pred **−0.002 /
+−0.018** in f; the flanks swapped open **±0.10 OFF, ±0.25 ON** — a falsification that scales with the
+leaving isoform's share. By flank LENGTH (bins 200…3,200 bp) the C hop's odds step is ZERO on the
+ladder at every length, ON and OFF. The substrate is `altss` in the test chromosome — the twin host's
+second isoform under the REPLICATION RULE (owner, 2026-09-02): a multi-isoform structure is
+replicated across A ≫ B, A ≪ B and A ≈ B.
+
+**The messages.** Each flank's own strand row travels to the boundary through `splice_out_row` with
+its `s_out`, and the boundary's own strand row to each flank through the face map with the matching
+spliced density (`transport_row`); both directions, deadband-gated, unstranded libraries send nothing.
+
+**What the first prototype found, and why: the HOP PREMISE.** Delivered at counting width, the messages
+HARMED the alt-ss boundaries on benign capture-ON rows (`g50 ss.99 ON`: 126 → 249 node-locally) while
+winning at the vertex and off capture. The dissection on certified truth, by COMPONENT, named it: at
+every probed pair the gDNA's crossing-to-contained ratio runs about 10 % above the mature RNA's, whose
+ratio matches the geometry — because a fragment's capture weight is its overlap with the best probe
+group, so a gDNA fragment starting within one fragment length of a probed exon's genomic edge is
+tapered while a mature molecule's probe continues in transcript space. A short flank beside an intron
+therefore holds less gDNA per opportunity than the crossing: **one odds step per library and hop kind**
+(the fitted +0.114 ± 0.067 reproduced truth's +0.15). ⛔ Two things a width fit cannot see, both paid
+for: a second-moment fit is BLIND to a consistent bias under wide counting (nine of twelve pairs in one
+direction, each within its own counting), and a message to a SIGHTED node whose belief the prior has
+sharpened below its own counting is disturbed by any residual bias. So every hop's message now carries
+THE HOP PREMISE (`transfer_rows.hop_step_fit`): per hop kind, the STEP between the two witnesses' strand
+modes in the boundary's log-odds coordinate (the map's ratio charged with its own counting,
+`s/(U(U+s))`, which vanishes at `s = 0`), fitted as the precision-weighted mean over the sighted pairs
+— its standard error `1/Σw` carried as width, the excess scatter beyond counting as more width — and,
+the owner's abundance-discrepancy rule transposed to composition and applied PER PAIR, this pair's own
+residual disagreement beyond counting as this message's width. The transported row is shifted by the
+step (`shift_row`) and blurred (`blur_row`). Off capture the fits are null within their errors; on the
+junction-probed adversarial panel the C fit recovers 1.40 ± 0.10 of a 1.49-nat truth step. ⛔ The E
+hop's premise as a FLUX FACTOR (the junction's spliced fragments captured differently from the
+unspliced crossing) is REFUSED as a fitted parameter, alone or jointly with the step: at n ≈ 14 the two
+are degenerate, and the joint profile commits tightly to the wrong one on the sparse panel
+(`ISSUES.md` CLOSED/REFUSED). One mechanism per arm.
+
+**Measured.** Ladder, `transfer` → landed: unstranded byte-identical (7/8; +4 fragments on `g98 ss.50
+OFF`); stranded `g05 OFF` +0.17 %, `g05 ON` −1.4 %, `g50 OFF` +0.08 %, `g50 ON` −0.7 %, `g98 OFF`
+−0.75 %, `g98 ON` −2.5 %; below silence on 6/6. Full 30-condition sweeps: capture-OFF stranded rows all
+within ±0.2 % on every panel; capture-ON stranded rows win 8/8 on the sparse panel (to −10 %), 6/9 on the
+benign panel, 5/8 on the junction panel. ⭐ **Owner decisions, recorded, not re-litigated:** `g05`
+capture-ON on the benign and junction panels (+2.3…+5.6 %, mostly the refit prior's response to the
+boundaries' shifted beliefs — node-locally the served objects move by +6…+14 fragments, the rest is
+indirect) and the junction panel's `g50 ss.99 ON` (+3.4 %: the E flanks, the refused flux mechanism).
+Node-locally at the 30 alt-ss boundaries: `g98 ON` 151 → 83, `g50 OFF` 68 → 68, `g50 ON` 126 → 171,
+`g05 ON` 75 → 81; the C flanks win on every row.
+
+**What this settles for the scan.** The hop premise is the per-hop dampening the completion contract
+asks for: a chain of k hops accumulates k fitted premises' widths, none a constant. What to fit on an
+UNSTRANDED library — where no strand modes exist to witness a hop — is the scan's open derivation.
 
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 

@@ -64,13 +64,23 @@
 #             → one exon|exon TERMINUS boundary at s+8500; outside piece [s+8000, s+8500) U-only, inside
 #             piece [s+8500, s+9000) U+T
 #   capaltstart  the same, probed
+#   altss     T splices out at an alternative DONOR 600 bp into U's middle exon: T = [s, s+1000)
+#             [s+8000, s+8600) [s+16000, s+17000) → one exon|exon boundary at s+8600 carrying a DONOR flag
+#             and no terminus; the piece [s+8600, s+9000) is U's exon AND T's intron (a mixed-bit region).
+#             Added 2026-09-02 as the alternative-splice-site case (the owner's approval, same day).
+#   capaltss  the same, probed
+# ⭐ THE REPLICATION RULE FOR MULTI-ISOFORM STRUCTURES (owner, 2026-09-02): a structure is replicated
+# across THREE abundance regimes of its two isoforms A (the host U) and B (the second isoform T) —
+# A ≫ B (9:1), A ≪ B (1:9) and A ≈ B (1:1), suffixes `_ab`, `_ba`, `_eq` — with the PAIR's total on the
+# mature ladder (10/30/100/300/1000), so the ratio and the depth are separate axes. `altstart` predates
+# the rule and keeps its anti-ladder (U up, T down); it is re-cut under the rule when it is next touched.
 # Queued, each to be added on the day it becomes the target (docs/dev/MESSAGE_RUNGS.md):
-#   altss (alternative splice sites → licensed exon|exon boundaries), nest (a single-exon T nested in
-#   U's middle exon → a region walled by termini), instart (T's alternative first exon inside U's intron).
-# U by the mature ladder (10/30/100/300/1000), T by the ANTI-ladder (100/30/10/3/1), so the terminus
-# step runs from T-dominant to invisible across the blocks. The block starts at 1,365,000, pitch
-# 37,000; `genome_length` stays 2.9 Mb so the gDNA density per base does not move when a structure is
-# added or removed.
+#   nest (a single-exon T nested in U's middle exon → a region walled by termini), instart (T's
+#   alternative first exon inside U's intron).
+# The block starts at 1,365,000, pitch 37,000, 8 types × 5 blocks = 40 gene slots, the types
+# interleaved within a block (slot = (block − 1) · n_types + type); strand = "+" when (type + block) is
+# even, else "−"; `genome_length` stays 2.9 Mb so the gDNA density per base does not move when a
+# structure is added or removed.
 #
 # ── THE BLANK CHROMOSOME + SHADOWS (owner design, 2026-08-29) ─────────────────────────────────────
 # `test_blank` carries NO annotation; the shadow transcripts below are simulated there (both strands,
@@ -383,6 +393,188 @@ genes:
     transcripts:
       - {t_id: B5_capaltstart_U, exons: [[1698000, 1699000], [1706000, 1707000], [1714000, 1715000]], abundance: 1000}
       - {t_id: B5_capaltstart_T, exons: [[1706500, 1707000], [1714000, 1715000]], abundance: 1}
+  # ── altss (2026-09-02): the alternative DONOR 600 bp into U's middle exon, three abundance regimes
+  #    (A ≫ B 9:1, A ≪ B 1:9, A ≈ B 1:1; the pair's total on the ladder), probed and unprobed, slots 10–39.
+  - gene_id: gB1_altss_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_altss_ab_U, exons: [[1735000, 1736000], [1743000, 1744000], [1751000, 1752000]], abundance: 9}
+      - {t_id: B1_altss_ab_T, exons: [[1735000, 1736000], [1743400, 1744000], [1751000, 1752000]], abundance: 1}
+  - gene_id: gB1_capaltss_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capaltss_ab_U, exons: [[1772000, 1773000], [1780000, 1781000], [1788000, 1789000]], abundance: 9}
+      - {t_id: B1_capaltss_ab_T, exons: [[1772000, 1773000], [1780000, 1780600], [1788000, 1789000]], abundance: 1}
+  - gene_id: gB1_altss_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_altss_ba_U, exons: [[1809000, 1810000], [1817000, 1818000], [1825000, 1826000]], abundance: 1}
+      - {t_id: B1_altss_ba_T, exons: [[1809000, 1810000], [1817400, 1818000], [1825000, 1826000]], abundance: 9}
+  - gene_id: gB1_capaltss_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capaltss_ba_U, exons: [[1846000, 1847000], [1854000, 1855000], [1862000, 1863000]], abundance: 1}
+      - {t_id: B1_capaltss_ba_T, exons: [[1846000, 1847000], [1854000, 1854600], [1862000, 1863000]], abundance: 9}
+  - gene_id: gB1_altss_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B1_altss_eq_U, exons: [[1883000, 1884000], [1891000, 1892000], [1899000, 1900000]], abundance: 5}
+      - {t_id: B1_altss_eq_T, exons: [[1883000, 1884000], [1891400, 1892000], [1899000, 1900000]], abundance: 5}
+  - gene_id: gB1_capaltss_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B1_capaltss_eq_U, exons: [[1920000, 1921000], [1928000, 1929000], [1936000, 1937000]], abundance: 5}
+      - {t_id: B1_capaltss_eq_T, exons: [[1920000, 1921000], [1928000, 1928600], [1936000, 1937000]], abundance: 5}
+  - gene_id: gB2_altss_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_altss_ab_U, exons: [[1957000, 1958000], [1965000, 1966000], [1973000, 1974000]], abundance: 27}
+      - {t_id: B2_altss_ab_T, exons: [[1957000, 1958000], [1965000, 1965600], [1973000, 1974000]], abundance: 3}
+  - gene_id: gB2_capaltss_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltss_ab_U, exons: [[1994000, 1995000], [2002000, 2003000], [2010000, 2011000]], abundance: 27}
+      - {t_id: B2_capaltss_ab_T, exons: [[1994000, 1995000], [2002400, 2003000], [2010000, 2011000]], abundance: 3}
+  - gene_id: gB2_altss_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_altss_ba_U, exons: [[2031000, 2032000], [2039000, 2040000], [2047000, 2048000]], abundance: 3}
+      - {t_id: B2_altss_ba_T, exons: [[2031000, 2032000], [2039000, 2039600], [2047000, 2048000]], abundance: 27}
+  - gene_id: gB2_capaltss_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltss_ba_U, exons: [[2068000, 2069000], [2076000, 2077000], [2084000, 2085000]], abundance: 3}
+      - {t_id: B2_capaltss_ba_T, exons: [[2068000, 2069000], [2076400, 2077000], [2084000, 2085000]], abundance: 27}
+  - gene_id: gB2_altss_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_altss_eq_U, exons: [[2105000, 2106000], [2113000, 2114000], [2121000, 2122000]], abundance: 15}
+      - {t_id: B2_altss_eq_T, exons: [[2105000, 2106000], [2113000, 2113600], [2121000, 2122000]], abundance: 15}
+  - gene_id: gB2_capaltss_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltss_eq_U, exons: [[2142000, 2143000], [2150000, 2151000], [2158000, 2159000]], abundance: 15}
+      - {t_id: B2_capaltss_eq_T, exons: [[2142000, 2143000], [2150400, 2151000], [2158000, 2159000]], abundance: 15}
+  - gene_id: gB3_altss_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_altss_ab_U, exons: [[2179000, 2180000], [2187000, 2188000], [2195000, 2196000]], abundance: 90}
+      - {t_id: B3_altss_ab_T, exons: [[2179000, 2180000], [2187400, 2188000], [2195000, 2196000]], abundance: 10}
+  - gene_id: gB3_capaltss_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capaltss_ab_U, exons: [[2216000, 2217000], [2224000, 2225000], [2232000, 2233000]], abundance: 90}
+      - {t_id: B3_capaltss_ab_T, exons: [[2216000, 2217000], [2224000, 2224600], [2232000, 2233000]], abundance: 10}
+  - gene_id: gB3_altss_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_altss_ba_U, exons: [[2253000, 2254000], [2261000, 2262000], [2269000, 2270000]], abundance: 10}
+      - {t_id: B3_altss_ba_T, exons: [[2253000, 2254000], [2261400, 2262000], [2269000, 2270000]], abundance: 90}
+  - gene_id: gB3_capaltss_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capaltss_ba_U, exons: [[2290000, 2291000], [2298000, 2299000], [2306000, 2307000]], abundance: 10}
+      - {t_id: B3_capaltss_ba_T, exons: [[2290000, 2291000], [2298000, 2298600], [2306000, 2307000]], abundance: 90}
+  - gene_id: gB3_altss_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B3_altss_eq_U, exons: [[2327000, 2328000], [2335000, 2336000], [2343000, 2344000]], abundance: 50}
+      - {t_id: B3_altss_eq_T, exons: [[2327000, 2328000], [2335400, 2336000], [2343000, 2344000]], abundance: 50}
+  - gene_id: gB3_capaltss_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B3_capaltss_eq_U, exons: [[2364000, 2365000], [2372000, 2373000], [2380000, 2381000]], abundance: 50}
+      - {t_id: B3_capaltss_eq_T, exons: [[2364000, 2365000], [2372000, 2372600], [2380000, 2381000]], abundance: 50}
+  - gene_id: gB4_altss_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altss_ab_U, exons: [[2401000, 2402000], [2409000, 2410000], [2417000, 2418000]], abundance: 270}
+      - {t_id: B4_altss_ab_T, exons: [[2401000, 2402000], [2409000, 2409600], [2417000, 2418000]], abundance: 30}
+  - gene_id: gB4_capaltss_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltss_ab_U, exons: [[2438000, 2439000], [2446000, 2447000], [2454000, 2455000]], abundance: 270}
+      - {t_id: B4_capaltss_ab_T, exons: [[2438000, 2439000], [2446400, 2447000], [2454000, 2455000]], abundance: 30}
+  - gene_id: gB4_altss_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altss_ba_U, exons: [[2475000, 2476000], [2483000, 2484000], [2491000, 2492000]], abundance: 30}
+      - {t_id: B4_altss_ba_T, exons: [[2475000, 2476000], [2483000, 2483600], [2491000, 2492000]], abundance: 270}
+  - gene_id: gB4_capaltss_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltss_ba_U, exons: [[2512000, 2513000], [2520000, 2521000], [2528000, 2529000]], abundance: 30}
+      - {t_id: B4_capaltss_ba_T, exons: [[2512000, 2513000], [2520400, 2521000], [2528000, 2529000]], abundance: 270}
+  - gene_id: gB4_altss_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altss_eq_U, exons: [[2549000, 2550000], [2557000, 2558000], [2565000, 2566000]], abundance: 150}
+      - {t_id: B4_altss_eq_T, exons: [[2549000, 2550000], [2557000, 2557600], [2565000, 2566000]], abundance: 150}
+  - gene_id: gB4_capaltss_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltss_eq_U, exons: [[2586000, 2587000], [2594000, 2595000], [2602000, 2603000]], abundance: 150}
+      - {t_id: B4_capaltss_eq_T, exons: [[2586000, 2587000], [2594400, 2595000], [2602000, 2603000]], abundance: 150}
+  - gene_id: gB5_altss_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_altss_ab_U, exons: [[2623000, 2624000], [2631000, 2632000], [2639000, 2640000]], abundance: 900}
+      - {t_id: B5_altss_ab_T, exons: [[2623000, 2624000], [2631400, 2632000], [2639000, 2640000]], abundance: 100}
+  - gene_id: gB5_capaltss_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capaltss_ab_U, exons: [[2660000, 2661000], [2668000, 2669000], [2676000, 2677000]], abundance: 900}
+      - {t_id: B5_capaltss_ab_T, exons: [[2660000, 2661000], [2668000, 2668600], [2676000, 2677000]], abundance: 100}
+  - gene_id: gB5_altss_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_altss_ba_U, exons: [[2697000, 2698000], [2705000, 2706000], [2713000, 2714000]], abundance: 100}
+      - {t_id: B5_altss_ba_T, exons: [[2697000, 2698000], [2705400, 2706000], [2713000, 2714000]], abundance: 900}
+  - gene_id: gB5_capaltss_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capaltss_ba_U, exons: [[2734000, 2735000], [2742000, 2743000], [2750000, 2751000]], abundance: 100}
+      - {t_id: B5_capaltss_ba_T, exons: [[2734000, 2735000], [2742000, 2742600], [2750000, 2751000]], abundance: 900}
+  - gene_id: gB5_altss_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B5_altss_eq_U, exons: [[2771000, 2772000], [2779000, 2780000], [2787000, 2788000]], abundance: 500}
+      - {t_id: B5_altss_eq_T, exons: [[2771000, 2772000], [2779400, 2780000], [2787000, 2788000]], abundance: 500}
+  - gene_id: gB5_capaltss_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B5_capaltss_eq_U, exons: [[2808000, 2809000], [2816000, 2817000], [2824000, 2825000]], abundance: 500}
+      - {t_id: B5_capaltss_eq_T, exons: [[2808000, 2809000], [2816000, 2816600], [2824000, 2825000]], abundance: 500}
 shadow_genes:
   - gene_id: gshadow_U1
     strand: "+"

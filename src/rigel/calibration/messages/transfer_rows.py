@@ -15,6 +15,10 @@ from scipy.special import polygamma
 from scipy.stats import norm
 
 from ..splice_graph import (
+    FLAG_ACCEPTOR_NEG as _ACC_NEG,
+    FLAG_ACCEPTOR_POS as _ACC_POS,
+    FLAG_DONOR_NEG as _DON_NEG,
+    FLAG_DONOR_POS as _DON_POS,
     FLAG_TES_NEG as _TES_NEG,
     FLAG_TES_POS as _TES_POS,
     FLAG_TSS_NEG as _TSS_NEG,
@@ -22,18 +26,48 @@ from ..splice_graph import (
 )
 
 __all__ = [
+    "abundance_map",
+    "abundance_row",
+    "blur_row",
+    "boundary_shares_strand",
     "edge_bound_row",
     "face_is_licensed",
     "face_map_lambda",
+    "hop_step_fit",
+    "junction_flanks",
+    "outside_flank",
+    "shift_row",
     "splice_out_row",
     "transport_row",
 ]
 
 EPS = 1.0e-9
 TERMINUS = _TSS_POS | _TSS_NEG | _TES_POS | _TES_NEG
+SJ_FLAGS = _DON_POS | _DON_NEG | _ACC_POS | _ACC_NEG
+#: a transcript body that extends genomic-RIGHT from its terminus (a + start, a − end) leaves the
+#: OUTSIDE flank on the left; one that extends LEFT (a + end, a − start) leaves it on the right
+_BODY_RIGHT = _TSS_POS | _TES_NEG
+_BODY_LEFT = _TES_POS | _TSS_NEG
 #: the marginal over ``log rho`` is taken on equal-probability nodes of the standard normal —
 #: quadrature resolution, like ``n_grid``, not a model constant
 _MARGINAL_NODES = norm.ppf((np.arange(9) + 0.5) / 9.0)
+#: the same nodes as probabilities, for a TRUNCATED normal (the enrichment step's support)
+_STEP_NODES_Q = (np.arange(9) + 0.5) / 9.0
+
+
+def blur_row(row, lam, v):
+    """The delta-method counting width: a Gaussian blur of variance ``v`` along ``lam`` applied to a
+    max-normalised log-row (the kernel `transport_row`, `abundance_row` and the hop premise share)."""
+    out = np.asarray(row, np.float64) - np.max(row)
+    if v > 0.0 and lam.shape[0] > 1:
+        dlam = float(lam[1] - lam[0])
+        half = max(int(np.ceil(4.0 * float(np.sqrt(v)) / dlam)), 1)
+        x = np.arange(-half, half + 1) * dlam
+        kern = np.exp(-0.5 * x * x / v)
+        kern /= kern.sum()
+        pr = np.convolve(np.pad(np.exp(out), half, mode="edge"), kern, mode="valid")
+        out = np.log(np.maximum(pr, 1.0e-300))
+    return out - out.max()
 
 
 def face_is_licensed(flags_b, fp_e, fn_e, fp_i, fn_i) -> bool:
@@ -42,6 +76,88 @@ def face_is_licensed(flags_b, fp_e, fn_e, fp_i, fn_i) -> bool:
     molecules; a strand flip changes membership) refuses the hop; the measured spliced route does
     not — it joins the message instead."""
     return (not (int(flags_b) & TERMINUS)) and bool(fp_e) == bool(fp_i) and bool(fn_e) == bool(fn_i)
+
+
+def boundary_shares_strand(fp_b, fn_b, fp_i, fn_i) -> bool:
+    """An intron|exon boundary may send its own strand row to its intron when the two admit the SAME
+    strand set and that set is a SINGLE strand: the row is a statement about one live strand, and an
+    AMBIG boundary's strand split constrains only the tilt, never the gDNA level (the Schur complement
+    the local solve already applies). A terminus flag does not refuse: a true intron flank carries no
+    exon bit, so no transcript terminating at the boundary covers it — the intron is always the
+    OUTSIDE flank, whose composition the crossing shares."""
+    return bool(fp_b) == bool(fp_i) and bool(fn_b) == bool(fn_i) and bool(fp_b) != bool(fn_b)
+
+
+def outside_flank(flags_b, left, right):
+    """The flank of a TERMINUS boundary that the terminating transcripts do NOT cover — the one whose
+    population is exactly what crosses the boundary, spliced crossing included — and the covered
+    (INSIDE) flank, as ``(outside, inside)``; ``(None, None)`` when the termini point both ways, when
+    no terminus sits here, or when a splice junction shares the boundary (the sj+terminus case is its
+    own item). The orientation is read off the flag alone: TSS+ and TES− bodies extend genomic-right,
+    so the outside is the LEFT flank; TES+ and TSS− extend left, so it is the RIGHT."""
+    f = int(flags_b)
+    if not (f & TERMINUS) or (f & SJ_FLAGS):
+        return None, None
+    to_right, to_left = bool(f & _BODY_RIGHT), bool(f & _BODY_LEFT)
+    if to_right and not to_left:
+        return left, right
+    if to_left and not to_right:
+        return right, left
+    return None, None
+
+
+#: a DONOR bit marks the intron's LOW end on either strand (the flags are genomic-order), so the
+#: intron lies to the boundary's right; an ACCEPTOR bit marks its HIGH end, the intron to the left
+_INTRON_RIGHT = _DON_POS | _DON_NEG
+_INTRON_LEFT = _ACC_POS | _ACC_NEG
+
+
+def junction_flanks(flags_b, left, right):
+    """At an exon|exon boundary carrying a splice junction and no terminus: ``(C, E)`` — the flank on
+    the junction's INTRON side, which shares the boundary's full unspliced crossing (the outside-flank
+    law, `splice_out_row` with the spliced crossing alone), and the flank where both isoforms are
+    exonic, which holds the crossing plus the isoform that splices out here, MEASURED at the face as
+    the route flux (the splice-in law with the spliced crossing plus the flux). ``(None, None)`` when a
+    terminus shares the boundary (its own case), when no junction sits here, or when junctions leave
+    both ways."""
+    f = int(flags_b)
+    if (f & TERMINUS) or not (f & SJ_FLAGS):
+        return None, None
+    to_right, to_left = bool(f & _INTRON_RIGHT), bool(f & _INTRON_LEFT)
+    if to_right and not to_left:
+        return right, left
+    if to_left and not to_right:
+        return left, right
+    return None, None
+
+
+def shift_row(row, lam, shift):
+    """A max-normalised log-row read ``shift`` nats higher along ``lam`` (edge-held): the hop's
+    fitted step, applied to a transported row."""
+    out = np.asarray(row, np.float64)
+    if shift == 0.0 or lam.shape[0] < 2:
+        return out - out.max()
+    out = np.interp(lam - shift, lam, out, left=out[0], right=out[-1])
+    return out - out.max()
+
+
+def hop_step_fit(disagreements, countings):
+    """THE HOP PREMISE, fitted: the served pairs' two witnesses disagree, in the boundary's log-odds
+    coordinate, by ``d_i`` with counting variance ``v_i``; the hop's STEP is their precision-weighted
+    mean (the library's systematic offset across this hop kind — under capture the gDNA landscape
+    tapers within a fragment length of a probed exon's edge while a mature molecule's probe continues
+    in transcript space, one odds factor), its standard error ``se2 = 1 / sum(w)`` is carried as
+    width, and the ``excess`` scatter about the step beyond counting (method of moments) is more
+    width. Fewer than two pairs fit nothing: ``(0.0, 0.0, 0.0)``, the un-premised counting form."""
+    d = np.asarray(disagreements, np.float64)
+    v = np.asarray(countings, np.float64)
+    if d.shape[0] < 2:
+        return 0.0, 0.0, 0.0
+    w = 1.0 / v
+    step = float(w @ d / w.sum())
+    se2 = 1.0 / float(w.sum())
+    excess = max(0.0, float(w @ (d - step) ** 2) / float(w.sum()) - d.shape[0] / float(w.sum()))
+    return step, se2, excess
 
 
 def face_map_lambda(lam, n_u, a_g_b, a_r_b, e_g_e, e_r_e, s):
@@ -70,15 +186,7 @@ def transport_row(row, lam, lam_e_of_u, n_u, n_s):
     lam_u_of_x = np.interp(lam, np.asarray(lam_e_of_u, np.float64), lam, left=lam[0], right=lam[-1])
     out = np.interp(lam_u_of_x, lam, r - r.max())
     v = float(polygamma(1, float(n_u) + 0.5) + polygamma(1, float(n_s) + 0.5))
-    if v > 0.0 and lam.shape[0] > 1:
-        dlam = float(lam[1] - lam[0])
-        half = max(int(np.ceil(4.0 * float(np.sqrt(v)) / dlam)), 1)
-        x = np.arange(-half, half + 1) * dlam
-        kern = np.exp(-0.5 * x * x / v)
-        kern /= kern.sum()
-        pr = np.convolve(np.pad(np.exp(out - out.max()), half, mode="edge"), kern, mode="valid")
-        out = np.log(np.maximum(pr, 1.0e-300))
-    return out - out.max()
+    return blur_row(out, lam, v)
 
 
 def splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e):
@@ -103,6 +211,65 @@ def splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e):
         acc += np.exp(np.interp(m, lam, r, left=r[0], right=r[-1]))
     out = np.log(np.maximum(acc / _MARGINAL_NODES.size, 1.0e-300))
     out -= out.max()
+    return out if np.ptp(out) > EPS else np.zeros_like(lam)
+
+
+def abundance_map(lam, n_u, n_s, r, s):
+    """THE ABUNDANCE-DISCREPANCY MAP ``lam_X(lam_b)``: the gDNA log-odds of a flank composition cannot
+    reach, given the boundary's, its spliced crossing, the measured total-abundance ratio ``r`` between
+    the flank and the boundary and an enrichment step ``s`` — with ``T = U + S`` and the composition-
+    transfer value ``f_c = U sigma(lam_b) / T``, the flank holds gDNA ``s f_c T`` and RNA ``r T − s f_c T``:
+
+        lam_X = log(s f_c) − log(r − s f_c)
+
+    Enrichment is ``s = r`` (composition transfers), new RNA is ``s = 1`` (the gDNA abundance
+    transfers); monotone nondecreasing in ``lam_b``."""
+    lam = np.asarray(lam, np.float64)
+    sig = 1.0 / (1.0 + np.exp(-lam))
+    fc = float(n_u) * sig / (float(n_u) + float(n_s))
+    g = float(s) * fc
+    return np.log(np.maximum(g, 1e-300)) - np.log(np.maximum(float(r) - g, 1e-300))
+
+
+def abundance_row(row_b, lam, n_u, n_s, r, n_x, v_step):
+    """A boundary's row carried INTO the flank composition cannot reach: read at the preimage of the
+    abundance map for each enrichment-step node and averaged. The step's prior is ``log s ~ N(0, v_step)``
+    — ``v_step`` the hop's premise FITTED from the served pairs' own two witnesses, zero when they agree
+    within counting — on the support the totals allow: ``[1, r]`` when they rise (the two hypotheses
+    and their mixtures), ``(0, r]`` when they fall (de-enrichment is then certain), and never above the
+    hard cap ``s <= r`` (new RNA can only add, so the flank's gDNA share never exceeds the
+    composition-transfer value). With ``v_step`` zero it is the new-RNA point when the totals rise and
+    the composition point when they fall.
+    Then the delta-method width of the ingredients (both totals, the spliced ratio). Vacuous at a
+    depleted boundary or a flat row."""
+    lam = np.asarray(lam, np.float64)
+    rb = np.asarray(row_b, np.float64)
+    if not (n_u > 0.0 and n_x > 0.0 and r > 0.0) or np.ptp(rb) <= EPS:
+        return np.zeros_like(lam)
+    rb = rb - rb.max()
+    cap = float(np.log(max(float(r), 1e-300)))
+    sd = float(np.sqrt(max(float(v_step), 0.0)))
+    if sd <= 0.0:
+        nodes = [min(0.0, cap)]  # totals up: new RNA (s = 1); totals down: composition (s = r)
+    else:
+        # the step's support: [1, r] when the totals rise (the owner's two hypotheses and their
+        # mixtures), (0, r] when they fall (de-enrichment is then certain); the cap s <= r always
+        lo_q = norm.cdf(0.0) if cap >= 0.0 else 0.0
+        hi_q = norm.cdf(cap / sd)
+        nodes = [float(norm.ppf(lo_q + (hi_q - lo_q) * q) * sd) for q in _STEP_NODES_Q]
+    acc = np.zeros_like(lam)
+    for ls in nodes:
+        m = abundance_map(lam, n_u, n_s, r, float(np.exp(ls)))
+        pre = np.interp(lam, m, lam, left=lam[0], right=lam[-1])
+        acc += np.exp(np.interp(pre, lam, rb))
+    out = np.log(np.maximum(acc / len(nodes), 1e-300))
+    v = float(
+        polygamma(1, float(n_x) + 0.5)
+        + polygamma(1, float(n_u) + float(n_s) + 0.5)
+        + polygamma(1, float(n_s) + 0.5)
+        + polygamma(1, float(n_u) + 0.5)
+    )
+    out = blur_row(out, lam, v)
     return out if np.ptp(out) > EPS else np.zeros_like(lam)
 
 

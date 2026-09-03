@@ -730,3 +730,53 @@ homes — the ruling and measurements to `DESIGN.md` §6b.4, the premise-bias de
 `TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`, the gates to
 `tests/calibration/test_transfer_policy.py`. The session harness (`item1_proto.py`, scratchpad) was
 promoted as `scripts/design/policy_prototype.py`.
+
+## Item 2 — SHIPPED (2026-09-02); the record moved
+
+The intron|exon boundary → intron message: the derivation (one shared population, the s = 0 map the
+identity, the boundary's own strand row verbatim, the derived deadband at the boundary), stage 0 on
+certified truth (zero excess variance over counting on all four substrates; the plug-in Poisson null
+that exposed the digamma estimator's vertex artifact; the ladder's mate-gap mature crossings at
+0.3–0.7 % of boundaries), the information budget, the node-local and whole-library tables on the three
+test panels and the ladder, the reversed-row falsification and the prior-mediated `g05 ss.99 ON`
+residue all MOVED to `DESIGN.md` §6b.5; the prior's second exposure to
+`ISSUES: gdna-landscape-trains-on-false-positives`; the gates to `tests/calibration/test_transfer_policy.py`.
+Two session instruments (the node-local scorer, the pair-gap census with its null) are described in
+`NEXT_SESSION.md` for promotion. The prototype (`item2_proto.py`, scratchpad) subclassed the shipped
+policy with `strand` passed THROUGH so item 1 stayed on in both arms — one thing varied — and is
+retired with the landing.
+
+# ITEM 5 — SHIPPED (2026-09-02); the record moved
+
+The exon|exon terminus boundary from the outside flank: the orientation table, the certified
+directed licence on both substrates, the census of the ladder's terminus boundaries by what lies
+beyond the outside flank (half are chains of termini a dozen bases apart), the REFUTATION of the
+verbatim own-row exchange and its diagnosis by component (the mature depletion of the unspliced
+crossing), the corrected licence with the spliced crossing, the three messages, the node-local and
+whole-library tables on all four substrates, the structural no-echo law and the two stage-0 lessons
+all MOVED to `DESIGN.md` §6b.6; the gates to `tests/calibration/test_transfer_policy.py`; the chain-
+of-termini derivation owed to the tracker's item 6b. The prototypes (`item5_proto.py` and its
+refuted verbatim form `item5_proto_v0_verbatim.py`, scratchpad) are retired with the landing.
+
+# ITEM 6 — SHIPPED (2026-09-02); the record moved
+
+The owner's abundance-discrepancy rule into the inside flank of a terminus: the certified bracket
+check, the three marginal forms (uniform, profile, fitted step) and their agreement, the falling-totals
+sign error every prototype shared and its corrected support, the isolation of the ingredients (the
+forwarded arrivals — held for the scan with a per-hop premise; the reverse direction — held), the
+self-fitted hop premise, and the node-local, three-panel and ladder tables all MOVED to `DESIGN.md`
+§6b.7; the gates to `tests/calibration/test_transfer_policy.py`. The prototype (`item6_proto.py`,
+scratchpad, eleven arms) is retired with the landing.
+
+## Item 7 — SHIPPED (2026-09-02); the record moved
+
+The alternative splice site: the two licences (C through §6b.6's map with `S_b`, E through §6b.4's map
+with `S_b + F`), the stage-0 certification on both substrates and by flank length, the component
+dissection that named the capture taper, THE HOP PREMISE (the fitted step with its error, the excess,
+the per-pair discrepancy), the refused flux-factor forms and every measurement now live in
+`DESIGN.md` §6b.8 and `ISSUES.md` CLOSED/REFUSED (`the-flux-factor-hop-premise`); the substrate's
+`altss` block and the REPLICATION RULE in `TESTING.md` §0a's YAML header. Instruments left in the
+session scratchpad: `item7_stage0.py` / `item7_stage0_len.py` (the licences on certified truth, by type
+and by flank length), `item7_components.py` (the by-component dissection), `item7_nodelocal.py` (the
+node-local scorer at alt-ss objects), `item7_proto.py` (every arm tried: own rows, width-only fit,
+step forms, flux forms, joint fit, per-pair discrepancy).

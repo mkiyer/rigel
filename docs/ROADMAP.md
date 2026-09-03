@@ -81,17 +81,23 @@ propagation, so no local repair — coordinate, prior, or atom — can pay off u
 is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
 
 1. ⭐⭐⭐ **FINISH THE `transfer` POLICY, THEN FLIP THE DEFAULT (owner ruling, 2026-09-02).** The
-   rebuild (rungs 1–3: intron→boundary, face-composed exon, edge lower bound) meets both bars on
-   the ladder — unstranded 7/8 worst 1.01×, stranded 7/8 worst 1.00× — but is INCOMPLETE, and an
-   incomplete policy does not ship. The audited holes, in the owner's order: ① **exon|exon
-   boundaries** (12,811 ladder slots, ~2.6 M crossing mass; 8,779 exons have ONLY such faces —
-   mature RNA crosses them contiguously, so the shared-population licence may extend there);
-   ② **terminus-refused intron|exon faces** (~3,800 exons — internal TSS/TES); then strand-change
-   faces, the AMBIG tilt, the spliced lanes at refused faces. ⛔ THE SUBSTRATE FIRST: the twin
-   block has NO exon|exon boundaries and NO internal termini — the owner authors the indicting
-   structures (a multi-isoform / shared-exon block) before any mechanism is derived
-   (`TESTING.md` §0a). Discipline per rung: fail-first gates, one mechanism, adversarial probe
-   panels in the loop, ladder before belief. ⭐ After completion: the 0.8.0-metric pricing
+   rebuild — rungs 1–3 (intron→boundary, face-composed exon, edge lower bound) plus items 1–2
+   (exon→boundary, boundary→intron) — meets both bars on the ladder (`policy_benchmark.py`,
+   halves apart) but is INCOMPLETE, and an incomplete policy does not ship. ⭐ The holes are
+   RE-SIZED by `policy_benchmark.py --by-class` (2026-09-02): ① **exon|exon boundaries and the
+   exons they wall** — no message reaches them, and they hold half the stranded capture-ON error
+   and most of the zero-control error (the gap to the relay at the in-scope zero control sits
+   there) — rung 4, one structure per step, `altstart` present; ② **item 3**, the exon solve with
+   every face; then strand-change faces and the AMBIG tilt (rung 5, a few percent of mass).
+   ⛔ Introns off capture are the LARGEST class and NOT a message hole — the one-sided factory and
+   the vanishing strand row leave the prior deciding at the pure-gDNA vertex (rank 3, after the
+   message layer). Discipline per rung: fail-first gates, one mechanism, node-local scoring at the
+   served slots beside the whole-library number, adversarial probe panels in the loop, ladder
+   before belief. The sized list and the ship protocol are the tracker's in the sandbox. ⛔ Owner
+   ruling (2026-09-02, `DESIGN.md` §0c.0e): the policy is finished only when EVERY case is handled —
+   multi-hop with per-hop dampening, gDNA always conveyed where composition cannot cross, every node
+   solved from two honest messages — and the thread does not switch away until then; every other
+   priority below is parked behind it. ⭐ After completion: the 0.8.0-metric pricing
    (`calibration_vs_oracle.py`, `solvability_audit.py` under `transfer`) and the flip protocol
    (`preflight --full`; instruments, not only the suite). The thread's working record and handoff live in the sandbox on the
    `message-layer` branch; the exposed systemic issue is

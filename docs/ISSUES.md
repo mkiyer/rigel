@@ -59,6 +59,23 @@ whole-library error (~1.25 M on the ladder) is largely this loop; the transfer p
 break it wherever they deliver. ⚠ A second, separate defect found by the same study: a
 consumer reading `log_rho[-1] − log_rho[0]` as "the landscape's span" reads the GRID (built
 from `mass/eff` — what is expressible), not the fitted mass's support.
+⭐ **A second exposure (item 2 of the message rungs, 2026-09-02).** On the ladder at `g05 ss.99 ON`
+the boundary → intron message improves 5,144 near-empty introns (7,300 fragments in all) by 26 % at
+their own slots, and the refit prior then moves the thin boundary class — which receives nothing —
+by +1,104 (1.9 %), for a whole-library 1.005× against silence. The two were told apart only by
+scoring the message at its DESTINATIONS (node-local) beside the whole-library number; the reversed
+row moved the same boundary class by a different amount in the same direction, so the boundary
+movement is the prior's response to changed training beliefs, not the message's sign. Same regime
+as rung 1's recorded +169. `DESIGN.md` §6b.5 carries the measurement.
+⭐⭐ **A third exposure, and the re-ranking (item 5, 2026-09-02; owner: "an important priority").** The
+by-class census (`policy_benchmark.py --by-class`) puts 62 % of the stranded capture-ON error and 85 %
+of the zero controls' at exon|exon boundaries and the exons they wall — and item 5, the message built
+for them, moved their error by ±1 % on the contaminated rows (they sit at the resolution of their own
+evidence plus the prior, 1.8 % of mass) and −4.6 % at the `g00 ss.50 OFF` zero control, whose error IS
+this prior's false-positive training (silent 327k → the messages 97k → nothing further). The
+messages have done what messages can at these slots; the prior is the lever. ⛔ PARKED behind the
+message policy's completion (owner ruling 2026-09-02, `DESIGN.md` §0c.0e): first in the parked list,
+taken up the moment the checklist reads ✅.
 
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
@@ -454,6 +471,22 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### the-flux-factor-hop-premise — DERIVED, PROTOTYPED, A/B'd, REFUSED (2026-09-02). Do not rebuild it as a fitted parameter.
+
+The E hop of the alternative splice site (`DESIGN.md` §6b.8) reads the boundary through `U/(U+S_b+F)`;
+where a panel captures the junction's spliced fragments differently from the unspliced crossing, the
+measured flux `F` is off by a factor, and the premise "fit `1/delta` on the flux from the sighted
+pairs" was built two ways. ALONE (the flux factor as the E hop's only premise): fitted 2.07 ± 0.26 on
+the benign `g50 ss.99 ON` row and HARMED more than the un-premised arm (boundaries 231 → 280 node-
+locally; the sparse panel 394 → 562) — this simulator's probes are tiled in transcript space, so there
+is no junction depletion there, and what the pairs see is E's own edge taper, an odds step. JOINTLY
+with the step (a profile over `k` with the step in closed form): at n ≈ 14 the two are degenerate — the
+profile picked the step on the junction panel (k = 1.14 ± 0.30, E flanks 294 → 210) and the flux
+factor on the benign row (k = 2.28 ± 0.20) and on the sparse panel (k = 2.59 ± 0.13 with χ² = 47.7 for
+14 pairs: a tight, wrong commitment; boundaries 382 → 526). The mechanism is real at junction-probed
+panels (the junction panel's E flanks carry +106 fragments under the step-only form, recorded as an
+owner decision) but is not identifiable from the sighted pairs beside the step; one mechanism per arm.
 
 ### arcsine-magnitude-coordinate — DERIVED, PROTOTYPED, A/B'd, REFUSED (2026-09-01). Do not rebuild it.
 

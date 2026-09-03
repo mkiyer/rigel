@@ -1,41 +1,72 @@
-# NEXT SESSION — item 2 of the message rungs: the intron|exon BOUNDARY → INTRON message
+# NEXT SESSION — FINISH THE MESSAGE POLICY: the scan (multi-hop with per-hop premises), then sj+terminus (owner ruling 2026-09-02, `DESIGN.md` §0c.0e)
 
     ⚠ A DEV DOC, and it is a HANDOFF. It says where things stand and how to start, not what is
     settled — rulings are `DESIGN.md`, the ranked list is `ROADMAP.md`, the open problems are
     `ISSUES.md`, the message-rung order is `MESSAGE_RUNGS.md`. MOVE anything that settles.
 
-## Where the thread stands (2026-09-02, branch `message-layer`, HEAD after the cleanup commit)
+## Where the thread stands (2026-09-02, branch `message-layer`, after items 2, 5, 6 and 7 landed)
 
-* The `transfer` policy ships four messages (`messages/transfer.py`, rows in `messages/transfer_rows.py`):
-  intron → boundary, boundary → exon, edge → exon, and — item 1, landed 2026-09-02 — exon → boundary.
-  Rulings: `DESIGN.md` §6b.2–§6b.4. Ladder, both bars, never pooled: unstranded 7/8 wins, stranded
-  every capture-ON row won by item 1 (0.987–0.995×), capture-OFF within 33 fragments.
-* The tracker `MESSAGE_RUNGS.md` carries the order. Rung 1 is COMPLETE; rung 2 is partial (items 2
-  and 3); rung 4 holds one structure (`altstart`) and resumes after items 2–3; rung 5 (both-stranded)
-  is last.
-* The substrate: `scripts/sim/test_reference/test_chr.yaml` is the one hand-edited file (55 genes, both
-  strands balanced; twin + mono + `altstart`); all seven panels certified 30/30; the recipe is
-  `TESTING.md` §0a and `panel.py cache` now does the g00 pre-warm, `_main` copy and certification itself.
-* Baselines to measure from: suite `CLAUDE.md`; `policy_benchmark.py --panel test --policies silent
-  transfer` (unstranded 14/20 worst 1.16× at the deferred zero control; stranded 10/10 after item 1).
+* The `transfer` policy ships TEN messages (`messages/transfer.py`, rows in `messages/transfer_rows.py`):
+  intron → boundary, boundary → exon, edge → exon, exon → boundary (item 1), boundary → intron
+  (item 2), item 5's three at exon|exon TERMINUS boundaries (through the spliced-crossing map), item 6's
+  abundance-discrepancy message into the inside flank, and item 7's at the ALTERNATIVE SPLICE SITE
+  (both flanks, both directions, each carrying the fitted HOP PREMISE). Rulings: `DESIGN.md` §6b.2–§6b.8. Ladder, both bars, never pooled: unstranded
+  ≤ the pre-item-5 policy on 6/8 (0.985× at the in-scope zero control), stranded ≤ on 7/8 and below
+  silence on 8/8.
+* ⭐ **Where the remaining error sits is now measured** (`policy_benchmark.py --panel ladder --policies
+  silent transfer --by-class`, the tracker's SHIP LIST): exon|exon boundaries and walled exons hold
+  62 % of the stranded capture-ON error and 85 % of the zero controls' — and item 5 showed why a
+  message barely moves them: on the contaminated rows they sit at the resolution of their own
+  evidence plus the prior (1.8 % of mass), and at the zero controls the error IS the prior's
+  false-positive training. Introns off capture (42–46 %) are the vertex-atom thread. So the lever is
+  now `ISSUES: gdna-landscape-trains-on-false-positives` (owner: "an important priority",
+  2026-09-02), and rung 4's remaining structures are priced against a prior that already serves them.
+* The owner's rulings of 2026-09-02, late: there is NO "one-hop paradigm" — multi-hop propagation with
+  per-hop dampening is the direction (the composed transport is its first instance; the per-hop
+  premise is fitted, never a constant); and the landscape prior's poisoning is a priority.
+* The substrate: `scripts/sim/test_reference/test_chr.yaml` is the one hand-edited file; all seven
+  panels certified 30/30; `TESTING.md` §0a is the recipe.
+* Instruments left in the session scratchpad, worth promoting when next needed: a NODE-LOCAL scorer
+  (|err| at a message's destinations beside every other class — the instrument that separated item
+  2's and item 5's effects from the refit prior's response; `policy_prototype.py` is its natural
+  home), a certified-truth pair-gap census by COMPONENT (the instrument that found the spliced
+  crossing — test the MEAN gap in f-space by component; excess variance and a plug-in null cannot see
+  a bias), and the terminus-boundary decomposition by what lies beyond the outside flank.
 
-## START HERE: item 2 — boundary → intron
+## START HERE: the completion checklist — the scan, then sj+terminus
 
-The question, as the owner framed it: an intron has its own composition measurement (the density
-factory against the intergenic background); can its two boundaries add anything, and what? Both share
-the intron's population exactly (mature RNA crosses neither), so the transfer is the opportunity shift
-only — no splice-out, no premise. What a boundary holds that the intron does not is its OWN strand
-evidence at the face and, under capture, depth (a probed exon's faces carry hundreds of crossings; the
-unprobed intron ten or twenty). So the honest outcomes are "the intron takes the boundaries' strand
-rows, opportunity-shifted, where the deadband declares them live" or "nothing" — both measured, not
-assumed. Derive first, teach every piece, check on certified truth (the pair gap of stage 0 already says
-the composition is shared), prototype through `scripts/design/policy_prototype.py` (subclass the shipped
-policy — ⚠ `TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`), falsify
-by reversing the boundary's claim, ladder both halves apart, then `src/` with fail-first gates.
+⛔ The owner's ruling (2026-09-02, late): this thread does not switch away until every case in
+`MESSAGE_RUNGS.md`'s COMPLETION CHECKLIST reads ✅ — no nullified message, no skipped boundary, multi-hop
+through chains with per-hop dampening, gDNA always conveyed where composition cannot cross, every node
+solved from two honest messages. Other priorities are LOGGED in the tracker's parked list, not taken up.
 
-## THE ORDER AFTER ITEM 2 (owner, end of 2026-09-02): the exon|exon boundaries, terminus structures first
+Items 5, 6 and 7 landed today (`DESIGN.md` §6b.6–§6b.8). Item 7 is the template for every hop the
+scan will take: a licence certified on truth, then THE HOP PREMISE — per hop kind, the step between the
+two witnesses' strand modes fitted from the sighted pairs (its physical name under capture: the gDNA
+landscape's taper at a probed exon's edge), its standard error and the excess as width, and the owner's
+discrepancy rule per pair. Two lessons paid for there: a second-moment fit alone is blind to a
+consistent bias under wide counting, and two premises the pairs cannot separate (a step and a flux
+factor at n ≈ 14) must not both be fitted — one mechanism per arm.
 
-After item 2 ships, the next work is rung 4 — the exon|exon boundary types, starting with the TERMINUS
+⭐ OWNER DECISIONS OUTSTANDING (each landed with the residue recorded, none re-litigated): item 2's
+`g05 ss.99 ON` residue; item 5's +46 at `g05 OFF`; item 6's +1.2 % inside exons at `g50 ON`; item 7's
+`g05` capture-ON rows (+2.3…+5.6 % on the benign and junction panels, mostly the refit prior's response
+to the boundaries' shifted beliefs) and the junction panel's `g50 ss.99 ON` (+3.4 %: at a
+junction-probed panel the flux is captured differently from the unspliced crossing — a real second
+mechanism on the E hop, refused as a second fitted parameter, `ISSUES.md` CLOSED/REFUSED); and the commit.
+
+Next: THE SCAN — the policy's forward/backward step kernels on the backbone's two scans, one per
+boundary case, each hop priced by its fitted premise (the item-7 machinery, `hop_step_fit`); its first
+cases are the two HELD pieces (forwarding a boundary's arrivals one hop further, and the reverse
+direction into the boundary — both measured, both over-claiming without a premise) and the chains of
+termini (`DESIGN.md` §6b.6: a hop of ≤ 20 bases carries composition within counting). What to fit on an
+UNSTRANDED library, where no strand modes exist, is the open derivation. Then sj+terminus (the two maps
+composed), the rule at strand-change faces and termini both ways, the tilt ruling and the both-stranded
+locus, then the ship protocol.
+
+## THE LESSONS FROM THE RUNG-4 EXCURSION (2026-09-02), carried so they are not re-learned
+
+The next work is rung 4 — the exon|exon boundary types, starting with the TERMINUS
 case on `altstart` (tracker items 5–9), before item 3 (the exon solve with every face). This session
 began that rung and pulled back; nothing it learned is to be re-derived. The record is the thread
 record's RUNG 4 sections (the census, the certified directed licence, the derivation of the three
