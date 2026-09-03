@@ -47,13 +47,12 @@ constant is anywhere. Ten messages ship, each delivered as ``PsiMessage.lam_rows
   isoform that splices out here, MEASURED at the face as the route flux (item 1's law with the
   spliced crossing plus the flux) — both certified on the ladder at every flank length, the flanks
   swapped opening gaps that scale with the leaving isoform's share. Each flank's own strand row
-  travels to the boundary and the boundary's own row to each flank, every message carrying THE HOP
-  PREMISE: per flank kind, the STEP fitted from the sighted pairs' two strand modes (under capture
-  the gDNA landscape tapers within a fragment length of a probed exon's edge while a mature
-  molecule's probe continues in transcript space — one odds factor per library, null off capture
-  within its error), its standard error and the excess beyond counting as width, and the owner's
-  discrepancy rule PER PAIR: this pair's own residual disagreement beyond counting is this
-  message's width. Deadband-gated both ways; unstranded libraries send nothing.
+  travels to the boundary and the boundary's own row to each flank, every message carrying THE
+  OWNER'S DISCREPANCY RULE PER PAIR: where the pair's two witnesses — the boundary's own strand mode
+  and the flank's mapped to it — disagree beyond counting, this pair's messages are widened by that
+  excess; nothing is pooled across pairs and no mode is shifted (under capture the gDNA landscape
+  tapers at a probed exon's edge by a locus-dependent amount, priced where it is seen).
+  Deadband-gated both ways; unstranded libraries send nothing.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient (psi, in the
 final solve) fuses the rows against the slot's own evidence; a no-claim stays a no-claim — a flat
@@ -77,10 +76,8 @@ from .transfer_rows import (
     edge_bound_row,
     face_is_licensed,
     face_map_lambda,
-    hop_step_fit,
     junction_flanks,
     outside_flank,
-    shift_row,
     splice_out_row,
     transport_row,
 )
@@ -332,12 +329,12 @@ class TransferPolicy:
         # law with S_b + F). Certified on the ladder at every flank length, the flanks swapped opening
         # 0.10–0.26 gaps in f. Each flank's own strand row travels to the boundary through
         # `splice_out_row`, the boundary's own row to each flank through the face map with the
-        # matching spliced density — and every message carries THE HOP PREMISE: per flank kind, the
-        # step fitted from the sighted pairs' two strand modes (`hop_step_fit`: under capture the gDNA
-        # landscape tapers at a probed exon's edge and the flank's odds sit one factor below the
-        # crossing's; off capture the fit is null within its error), its standard error and the
-        # excess as width, and — the owner's discrepancy rule per pair — this pair's own residual
-        # disagreement beyond counting as this message's width. Both directions, deadband-gated.
+        # matching spliced density — and every message carries THE OWNER'S DISCREPANCY RULE, PER PAIR:
+        # where the pair's two witnesses (the boundary's own strand mode and the flank's mapped to it)
+        # disagree beyond counting, this pair's messages are widened by that excess — nothing pooled
+        # across pairs, no shift of any mode (under capture the gDNA landscape tapers at a probed
+        # exon's edge by a locus-dependent amount; the disagreement it makes is priced where it is
+        # seen). Both directions, deadband-gated.
         served7 = []
         for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
             lo, hi_ = left[b], right[b]
@@ -346,50 +343,40 @@ class TransferPolicy:
             c_side, e_side = junction_flanks(flags[b], lo, hi_)
             if c_side is None or not (n_u[b] > 0 and a_g[b] > 0):
                 continue
-            for x, s_out, kind in ((e_side, n_s[b] + flux[b], 1), (c_side, n_s[b], 0)):
+            for x, s_out in ((e_side, n_s[b] + flux[b]), (c_side, n_s[b])):
                 if boundary_shares_strand(fp[b], fn[b], fp[x], fn[x]) and a_g[x] > 0:
-                    served7.append((b, x, s_out, kind))
-        premise = {}
-        pair_obs = {}
-        for kind in (0, 1):
-            ds, vs = [], []
-            for b, x, s_out, k in served7:
-                if k != kind or not (tau[b] > 0.0 and tau[x] > 0.0):
-                    continue
-                ok, lo_v = True, []
-                for y in (b, x):
-                    n = cnt[y].sum()
-                    p = cnt[y, 0] / n
-                    f = (p - ks_of(y)) / (0.5 - ks_of(y))
-                    if not 0.0 < f < 1.0:
-                        ok = False  # a vertex mode has no log-odds
-                        break
-                    v_log = p * (1.0 - p) / n / (p - ks_of(y)) ** 2
-                    lo_v.append((np.log(f / (1.0 - f)), v_log / (1.0 - f) ** 2))
-                if not ok:
-                    continue
-                (lo_b, v_b), (lo_x, v_x) = lo_v
-                v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
-                d = lo_b - lo_x - np.log((n_u[b] + s_out) / n_u[b])
-                ds.append(d)
-                vs.append(v_b + v_x + v_ratio)
-                pair_obs[(b, x)] = (d, vs[-1])
-            premise[kind] = hop_step_fit(ds, vs)
-        for b, x, s_out, kind in served7:
-            step, se2, excess = premise[kind]
-            width = se2 + excess
-            if (b, x) in pair_obs:
-                d, v = pair_obs[(b, x)]
-                width += max(0.0, (d - step) ** 2 - v)
+                    served7.append((b, x, s_out, None))
+        pair_width = {}
+        for b, x, s_out, _kind in served7:
+            if not (tau[b] > 0.0 and tau[x] > 0.0):
+                continue
+            ok, lo_v = True, []
+            for y in (b, x):
+                n = cnt[y].sum()
+                p = cnt[y, 0] / n
+                f = (p - ks_of(y)) / (0.5 - ks_of(y))
+                if not 0.0 < f < 1.0:
+                    ok = False  # a vertex mode has no log-odds
+                    break
+                v_log = p * (1.0 - p) / n / (p - ks_of(y)) ** 2
+                lo_v.append((np.log(f / (1.0 - f)), v_log / (1.0 - f) ** 2))
+            if not ok:
+                continue
+            (lo_b, v_b), (lo_x, v_x) = lo_v
+            v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
+            d = lo_b - lo_x - np.log((n_u[b] + s_out) / n_u[b])
+            pair_width[(b, x)] = max(0.0, d * d - (v_b + v_x + v_ratio))
+        for b, x, s_out, _kind in served7:
+            width = pair_width.get((b, x), 0.0)
             if strand_live[x]:
                 row = splice_out_row(own_row(x), lam, n_u[b], s_out, a_g[b], a_g[x])
                 if np.ptp(row) > EPS:
-                    deliver(b, blur_row(shift_row(row, lam, step), lam, width))
+                    deliver(b, blur_row(row, lam, width))
             if tau[b] > 0.0:
                 le = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[x], a_g[x], s_out / a_g[b])
                 row = transport_row(own_row(b), lam, le, n_u[b], s_out)
                 if np.ptp(row) > EPS:
-                    deliver(x, blur_row(shift_row(row, lam, -step), lam, width))
+                    deliver(x, blur_row(row, lam, width))
         return _PreparedTransfer(rows if live else None)
 
 

@@ -40,23 +40,28 @@
 through chains with per-hop dampening, gDNA always conveyed where composition cannot cross, every node
 solved from two honest messages. Other priorities are LOGGED in the tracker's parked list, not taken up.
 
-Items 5, 6 and 7 landed today (`DESIGN.md` §6b.6–§6b.8). Item 7 is the template for every hop the
-scan will take: a licence certified on truth, then THE HOP PREMISE — per hop kind, the step between the
-two witnesses' strand modes fitted from the sighted pairs (its physical name under capture: the gDNA
-landscape's taper at a probed exon's edge), its standard error and the excess as width, and the owner's
-discrepancy rule per pair. Two lessons paid for there: a second-moment fit alone is blind to a
-consistent bias under wide counting, and two premises the pairs cannot separate (a step and a flux
-factor at n ≈ 14) must not both be fitted — one mechanism per arm.
+Items 5, 6 and 7 landed (`DESIGN.md` §6b.6–§6b.8). Item 7 is the template for every hop the scan will
+take: a licence certified on truth, then THE OWNER'S DISCREPANCY RULE PER PAIR — where a pair's two
+witnesses (the boundary's own strand mode and the flank's mapped to it) disagree beyond counting, that
+pair's messages are widened by the excess; nothing pooled, no mode shifted. ⛔ The lesson the owner
+paid for on 2026-09-03: a per-library POOLED step was built first and refused as over-engineering —
+"how do we know the behaviour of other node pairs is predictive of a global pattern?" Start with the
+simplest elegant form, finish the tool end to end, and only then take up subtler accuracy work (a
+global model of disagreement, such as the production relay's projection of a pair onto the
+total-abundance landscape, is that kind of later work). Two more lessons: a second-moment fit alone is
+blind to a consistent bias under wide counting, and two premises the pairs cannot separate must not both
+be fitted.
 
 ⭐ OWNER DECISIONS OUTSTANDING (each landed with the residue recorded, none re-litigated): item 2's
 `g05 ss.99 ON` residue; item 5's +46 at `g05 OFF`; item 6's +1.2 % inside exons at `g50 ON`; item 7's
-`g05` capture-ON rows (+2.3…+5.6 % on the benign and junction panels, mostly the refit prior's response
-to the boundaries' shifted beliefs) and the junction panel's `g50 ss.99 ON` (+3.4 %: at a
-junction-probed panel the flux is captured differently from the unspliced crossing — a real second
-mechanism on the E hop, refused as a second fitted parameter, `ISSUES.md` CLOSED/REFUSED); and the commit.
+low-gDNA capture-ON rows on the benign and junction panels (`g05`, `g25`: +1.5…+9 % against the
+pre-item-7 policy — a systematic offset of the licence that hides below each pair's counting; a shift
+would recover it and shifts are refused, `ISSUES: the-pooled-hop-step`) and `g50 ss.99 ON` on the benign
+and sparse panels (+2.0 / +2.4 %); the ladder itself reads four wins and two harms under 0.12 %; and
+the commit of the local form.
 
 Next: THE SCAN — the policy's forward/backward step kernels on the backbone's two scans, one per
-boundary case, each hop priced by its fitted premise (the item-7 machinery, `hop_step_fit`); its first
+boundary case, each hop priced by the item-7 rule (the pair's own disagreement beyond counting); its first
 cases are the two HELD pieces (forwarding a boundary's arrivals one hop further, and the reverse
 direction into the boundary — both measured, both over-claiming without a premise) and the chains of
 termini (`DESIGN.md` §6b.6: a hop of ≤ 20 bases carries composition within counting). What to fit on an

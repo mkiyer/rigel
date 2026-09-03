@@ -1850,45 +1850,49 @@ replicated across A ≫ B, A ≪ B and A ≈ B.
 its `s_out`, and the boundary's own strand row to each flank through the face map with the matching
 spliced density (`transport_row`); both directions, deadband-gated, unstranded libraries send nothing.
 
-**What the first prototype found, and why: the HOP PREMISE.** Delivered at counting width, the messages
-HARMED the alt-ss boundaries on benign capture-ON rows (`g50 ss.99 ON`: 126 → 249 node-locally) while
-winning at the vertex and off capture. The dissection on certified truth, by COMPONENT, named it: at
-every probed pair the gDNA's crossing-to-contained ratio runs about 10 % above the mature RNA's, whose
-ratio matches the geometry — because a fragment's capture weight is its overlap with the best probe
-group, so a gDNA fragment starting within one fragment length of a probed exon's genomic edge is
-tapered while a mature molecule's probe continues in transcript space. A short flank beside an intron
-therefore holds less gDNA per opportunity than the crossing: **one odds step per library and hop kind**
-(the fitted +0.114 ± 0.067 reproduced truth's +0.15). ⛔ Two things a width fit cannot see, both paid
-for: a second-moment fit is BLIND to a consistent bias under wide counting (nine of twelve pairs in one
-direction, each within its own counting), and a message to a SIGHTED node whose belief the prior has
-sharpened below its own counting is disturbed by any residual bias. So every hop's message now carries
-THE HOP PREMISE (`transfer_rows.hop_step_fit`): per hop kind, the STEP between the two witnesses' strand
-modes in the boundary's log-odds coordinate (the map's ratio charged with its own counting,
-`s/(U(U+s))`, which vanishes at `s = 0`), fitted as the precision-weighted mean over the sighted pairs
-— its standard error `1/Σw` carried as width, the excess scatter beyond counting as more width — and,
-the owner's abundance-discrepancy rule transposed to composition and applied PER PAIR, this pair's own
-residual disagreement beyond counting as this message's width. The transported row is shifted by the
-step (`shift_row`) and blurred (`blur_row`). Off capture the fits are null within their errors; on the
-junction-probed adversarial panel the C fit recovers 1.40 ± 0.10 of a 1.49-nat truth step. ⛔ The E
-hop's premise as a FLUX FACTOR (the junction's spliced fragments captured differently from the
-unspliced crossing) is REFUSED as a fitted parameter, alone or jointly with the step: at n ≈ 14 the two
-are degenerate, and the joint profile commits tightly to the wrong one on the sparse panel
-(`ISSUES.md` CLOSED/REFUSED). One mechanism per arm.
+**What the first prototype found, and the rule that prices it.** Delivered at counting width, the
+messages HARMED the alt-ss boundaries on benign capture-ON rows (`g50 ss.99 ON`: 126 → 249
+node-locally) while winning at the vertex and off capture. The dissection on certified truth, by
+COMPONENT, named the cause: at every probed pair the gDNA's crossing-to-contained ratio runs about 10 %
+above the mature RNA's, whose ratio matches the geometry — a fragment's capture weight is its overlap
+with the best probe group, so a gDNA fragment starting within one fragment length of a probed exon's
+genomic edge is tapered while a mature molecule's probe continues in transcript space, by an amount
+that depends on the locus (the piece's length and what lies past its far edge: truth steps of −0.07
+to +0.49 nats across the test chromosome's pairs; none on the ladder's C hop at any length; the
+ladder's E hop shrinking with length). ⭐ **The ruling (owner, 2026-09-03): THE DISCREPANCY RULE, PER
+PAIR, AND NOTHING POOLED.** Each pair holds two witnesses of one quantity — the boundary's own strand
+mode and the flank's mapped to it through the licence — and where they disagree beyond counting, in the
+boundary's log-odds coordinate with the map's ratio charged with its own counting `s/(U(U+s))`, that
+pair's messages are widened by the excess `max(0, d² − v)` (`blur_row`); no mode is shifted, no
+library-level quantity exists, and a pair the deadband or a vertex mode leaves unsighted goes at
+counting width. ⛔ A POOLED step per hop kind — the precision-weighted mean of the pairs' disagreement,
+applied to every pair with its standard error as width — was derived, landed for a day and REFUSED by
+the owner: the behaviour of other node pairs is not known to predict a given pair's, the pooled shift
+carries ~1/n of the recipient's own mode back into the message, and on the ladder the two forms are
+within 0.25 % of each other on every row (`ISSUES.md` CLOSED/REFUSED, `the-pooled-hop-step`). Start with the simplest
+elegant form; a global model of disagreement (the production relay projected each node of a pair onto
+the total-abundance landscape for its disagreement-aware variance) is an option the owner named for
+AFTER the tool works end to end.
 
-**Measured.** Ladder, `transfer` → landed: unstranded byte-identical (7/8; +4 fragments on `g98 ss.50
-OFF`); stranded `g05 OFF` +0.17 %, `g05 ON` −1.4 %, `g50 OFF` +0.08 %, `g50 ON` −0.7 %, `g98 OFF`
-−0.75 %, `g98 ON` −2.5 %; below silence on 6/6. Full 30-condition sweeps: capture-OFF stranded rows all
-within ±0.2 % on every panel; capture-ON stranded rows win 8/8 on the sparse panel (to −10 %), 6/9 on the
-benign panel, 5/8 on the junction panel. ⭐ **Owner decisions, recorded, not re-litigated:** `g05`
-capture-ON on the benign and junction panels (+2.3…+5.6 %, mostly the refit prior's response to the
-boundaries' shifted beliefs — node-locally the served objects move by +6…+14 fragments, the rest is
-indirect) and the junction panel's `g50 ss.99 ON` (+3.4 %: the E flanks, the refused flux mechanism).
-Node-locally at the 30 alt-ss boundaries: `g98 ON` 151 → 83, `g50 OFF` 68 → 68, `g50 ON` 126 → 171,
-`g05 ON` 75 → 81; the C flanks win on every row.
+**Measured (the local rule, whole-library).** Ladder, the pre-item-7 policy → landed: unstranded
+byte-identical (7/8; +4 fragments on `g98 ss.50 OFF`); stranded `g05 OFF` +0.12 %, `g05 ON` −1.3 %,
+`g50 OFF` +0.06 %, `g50 ON` −0.4 %, `g98 OFF` −0.8 %, `g98 ON` −2.7 %; below silence on 6/6. Beside
+the refused pooled form the two are within 0.25 % of each other on every ladder row, the local rule the
+better on four of the six stranded rows. Full 30-condition sweeps against the pre-item-7 policy:
+capture-OFF stranded rows within ±0.2 % on every panel; capture-ON stranded rows on the sparse panel
+7/8 wins (to −10 %), on the benign panel g98 −3…−4 % and g25/g50 ss.70 wins against g05/g25/g50 ss.99
++1.5…+2.1 %, on the junction panel g50 ss.99 −0.6 % and g98 ss.99 −2.2 % against g05 +8…+9 % and g25
++3…+6 %. Node-locally at the 30 alt-ss boundaries (`g50 ss.99 ON`): 126 pre-item-7, 249 un-premised,
+229 the local rule, 171 pooled. ⭐ **Owner decisions, recorded, not re-litigated:** the capture-ON
+rows at low gDNA on the benign and junction panels (`g05`, `g25`: +1.5…+9 %), where a systematic offset
+of the licence hides below each pair's counting — a shift would recover it and shifts are refused;
+mostly the refit prior's response to the boundaries' shifted beliefs on the benign panel — and
+`g50 ss.99 ON` on the benign (+2.0 %) and sparse (+2.4 %) panels.
 
-**What this settles for the scan.** The hop premise is the per-hop dampening the completion contract
-asks for: a chain of k hops accumulates k fitted premises' widths, none a constant. What to fit on an
-UNSTRANDED library — where no strand modes exist to witness a hop — is the scan's open derivation.
+**What this settles for the scan.** The per-pair discrepancy rule is the per-hop dampening the
+completion contract asks for: a chain of k hops accumulates k pairs' widths, none a constant and none
+pooled. What witnesses a hop on an UNSTRANDED library — where no strand modes exist — is the scan's open
+derivation.
 
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 

@@ -33,10 +33,8 @@ __all__ = [
     "edge_bound_row",
     "face_is_licensed",
     "face_map_lambda",
-    "hop_step_fit",
     "junction_flanks",
     "outside_flank",
-    "shift_row",
     "splice_out_row",
     "transport_row",
 ]
@@ -57,7 +55,7 @@ _STEP_NODES_Q = (np.arange(9) + 0.5) / 9.0
 
 def blur_row(row, lam, v):
     """The delta-method counting width: a Gaussian blur of variance ``v`` along ``lam`` applied to a
-    max-normalised log-row (the kernel `transport_row`, `abundance_row` and the hop premise share)."""
+    max-normalised log-row (the kernel `transport_row`, `abundance_row` and item 7's pair width share)."""
     out = np.asarray(row, np.float64) - np.max(row)
     if v > 0.0 and lam.shape[0] > 1:
         dlam = float(lam[1] - lam[0])
@@ -129,35 +127,6 @@ def junction_flanks(flags_b, left, right):
     if to_left and not to_right:
         return left, right
     return None, None
-
-
-def shift_row(row, lam, shift):
-    """A max-normalised log-row read ``shift`` nats higher along ``lam`` (edge-held): the hop's
-    fitted step, applied to a transported row."""
-    out = np.asarray(row, np.float64)
-    if shift == 0.0 or lam.shape[0] < 2:
-        return out - out.max()
-    out = np.interp(lam - shift, lam, out, left=out[0], right=out[-1])
-    return out - out.max()
-
-
-def hop_step_fit(disagreements, countings):
-    """THE HOP PREMISE, fitted: the served pairs' two witnesses disagree, in the boundary's log-odds
-    coordinate, by ``d_i`` with counting variance ``v_i``; the hop's STEP is their precision-weighted
-    mean (the library's systematic offset across this hop kind — under capture the gDNA landscape
-    tapers within a fragment length of a probed exon's edge while a mature molecule's probe continues
-    in transcript space, one odds factor), its standard error ``se2 = 1 / sum(w)`` is carried as
-    width, and the ``excess`` scatter about the step beyond counting (method of moments) is more
-    width. Fewer than two pairs fit nothing: ``(0.0, 0.0, 0.0)``, the un-premised counting form."""
-    d = np.asarray(disagreements, np.float64)
-    v = np.asarray(countings, np.float64)
-    if d.shape[0] < 2:
-        return 0.0, 0.0, 0.0
-    w = 1.0 / v
-    step = float(w @ d / w.sum())
-    se2 = 1.0 / float(w.sum())
-    excess = max(0.0, float(w @ (d - step) ** 2) / float(w.sum()) - d.shape[0] / float(w.sum()))
-    return step, se2, excess
 
 
 def face_map_lambda(lam, n_u, a_g_b, a_r_b, e_g_e, e_r_e, s):

@@ -472,6 +472,29 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
 
+### the-pooled-hop-step — DERIVED, PROTOTYPED, A/B'd, landed for a day, REFUSED by the owner (2026-09-03). Do not rebuild a per-library premise.
+
+Item 7's messages (`DESIGN.md` §6b.8) first carried a POOLED premise: per hop kind, the precision-
+weighted mean of the sighted pairs' disagreement (the boundary's own strand mode against the flank's
+mapped to it), applied to every pair as a shift with its standard error as width — justified by a
+named mechanism (capture's taper of gDNA at a probed exon's edge) and by measurement (the un-premised
+form's +1.9 % at ladder `g50 ss.99 ON` turned into −0.7 %). Refused on three grounds: (1) the other
+pairs' behaviour is not known to predict a given pair's — truth showed the offset locus-dependent
+(−0.07…+0.49 nats across the test chromosome, none on the ladder's C hop, length-dependent on its E
+hop); (2) the pooled shift carries ~1/n of the recipient's own mode back into the message it receives;
+(3) on the ladder the owner's per-pair discrepancy rule alone stands within 0.25 % of it on every row and
+ahead on four of six stranded rows (local vs pooled against the pre-item-7 policy: `g05 ON` −1.34 vs
+−1.38 %, `g50 ON` −0.44 vs −0.67 %, `g98 ON` −2.70 vs −2.49 %, `g98 OFF` −0.76 vs −0.75 %, `g05 OFF`
++0.12 vs +0.17 %, `g50 OFF` +0.06 vs +0.08 %; unstranded identical). Where the pooled shift wins is
+the test chromosome's low-gDNA capture-ON rows and the junction-probed panel (junction `g05` +8…+9 %
+local vs +3.5…+5.6 % pooled; benign `g50 ss.99 ON` 3,933 vs 3,873; sparse 4,118 vs 4,011): a
+systematic offset of the licence below each pair's counting, which only pooling can see and which the
+owner declines to extrapolate. ⚠ A first "local" measurement reported the pooled form's E hop by
+mistake (a leftover branch in the prototype) — corrected the same day; log what an arm APPLIES before
+reporting it. Owner: start with the simplest elegant form; a global model of disagreement (the
+production relay's projection of each node onto the total-abundance landscape) is an option for after
+the tool works end to end, not before.
+
 ### the-flux-factor-hop-premise — DERIVED, PROTOTYPED, A/B'd, REFUSED (2026-09-02). Do not rebuild it as a fitted parameter.
 
 The E hop of the alternative splice site (`DESIGN.md` §6b.8) reads the boundary through `U/(U+S_b+F)`;

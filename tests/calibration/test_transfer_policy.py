@@ -1212,33 +1212,6 @@ def test_the_junction_flanks_read_the_flag_kind_alone():
     )
 
 
-def test_the_hop_premise_is_the_fitted_step_with_its_error_and_the_excess():
-    """`hop_step_fit` on constructed witnesses: pairs disagreeing by one common step at pure counting
-    return that step, its standard error 1/sum(w) and NO excess; pairs scattered beyond counting return
-    a positive excess; agreeing pairs return a null step; one pair fits nothing. `shift_row` moves a
-    delta row by exactly the step along the grid."""
-    from rigel.calibration.messages.transfer_rows import hop_step_fit, shift_row
-
-    rng = np.random.default_rng(7)
-    v = np.full(400, 0.04)
-    d = 0.3 + rng.normal(0.0, np.sqrt(v))  # a common step, counting scatter only
-    step, se2, excess = hop_step_fit(d, v)
-    assert abs(step - 0.3) < 3.0 * np.sqrt(se2) and abs(se2 - 0.04 / 400) < 1e-12
-    assert excess < 0.01, "counting scatter alone must not read as excess"
-    d2 = 0.3 + rng.normal(0.0, np.sqrt(v + 0.09))  # scatter beyond counting
-    _s, _e, excess2 = hop_step_fit(d2, v)
-    assert 0.05 < excess2 < 0.14, excess2
-    step0, _se, _ex = hop_step_fit(rng.normal(0.0, 0.2, 400), np.full(400, 0.04))
-    assert abs(step0) < 0.03
-    assert hop_step_fit([0.5], [0.01]) == (0.0, 0.0, 0.0)
-    lam = np.linspace(-6.0, 6.0, 241)
-    row = np.full(lam.shape[0], -50.0)
-    row[120] = 0.0
-    moved = shift_row(row, lam, 0.5)
-    assert int(np.argmax(moved)) == 130 and np.allclose(moved.max(), 0.0)
-    assert int(np.argmax(shift_row(row, lam, -0.5))) == 110
-
-
 def _with_alt_splice_sites(ctx):
     """The toy carries no alternative splice site: turn its two exon|exon terminus boundaries into a
     DONOR (intron to the right) and an ACCEPTOR (intron to the left) with a route flux each, and
@@ -1268,16 +1241,14 @@ def _with_alt_splice_sites(ctx):
 def _expected_alt_splice_rows(si, ctx, strand, lam):
     """Item 7 recomputed INDEPENDENTLY of the policy on the patched context: at each junction boundary
     the two flanks' own strand rows through the splice-out map (E with S_b + F, C with S_b) into the
-    boundary and the boundary's own row through the face map into each flank, each shifted by the
-    hop premise refit here per flank kind and blurred by its error, the excess and the pair's own
-    residual disagreement. Keyed by slot; the premises returned beside."""
+    boundary and the boundary's own row through the face map into each flank, each blurred by the
+    pair's OWN disagreement beyond counting (the owner's discrepancy rule, nothing pooled). Keyed by
+    slot; the pair widths returned beside."""
     from rigel.calibration.messages.transfer_rows import (
         blur_row,
         boundary_shares_strand,
         face_map_lambda,
-        hop_step_fit,
         junction_flanks,
-        shift_row,
         splice_out_row,
         transport_row,
     )
@@ -1323,57 +1294,48 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
         for x, s_out, kind in ((e_side, n_s[b] + flux[b], "E"), (c_side, n_s[b], "C")):
             if boundary_shares_strand(fp[b], fn[b], fp[x], fn[x]) and A_g[x] > 0:
                 served.append((int(b), int(x), float(s_out), kind))
-    obs, premise = {}, {}
-    for kind in ("C", "E"):
-        ds, vs = [], []
-        for b, x, s_out, k in served:
-            if k != kind or not (tau[b] > 0.0 and tau[x] > 0.0):
-                continue
-            lo_v = []
-            for y in (b, x):
-                n = cnt[y].sum()
-                ks = kappa if fp[y] else 1.0 - kappa
-                p = cnt[y, 0] / n
-                f = (p - ks) / (0.5 - ks)
-                if not 0.0 < f < 1.0:
-                    break
-                lo_v.append((np.log(f / (1 - f)), p * (1 - p) / n / (p - ks) ** 2 / (1 - f) ** 2))
-            if len(lo_v) < 2:
-                continue
-            v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
-            d = lo_v[0][0] - lo_v[1][0] - np.log((n_u[b] + s_out) / n_u[b])
-            ds.append(d)
-            vs.append(lo_v[0][1] + lo_v[1][1] + v_ratio)
-            obs[(b, x)] = (d, vs[-1])
-        premise[kind] = hop_step_fit(ds, vs)
+    width = {}
+    for b, x, s_out, _kind in served:
+        if not (tau[b] > 0.0 and tau[x] > 0.0):
+            continue
+        lo_v = []
+        for y in (b, x):
+            n = cnt[y].sum()
+            ks = kappa if fp[y] else 1.0 - kappa
+            p = cnt[y, 0] / n
+            f = (p - ks) / (0.5 - ks)
+            if not 0.0 < f < 1.0:
+                break
+            lo_v.append((np.log(f / (1 - f)), p * (1 - p) / n / (p - ks) ** 2 / (1 - f) ** 2))
+        if len(lo_v) < 2:
+            continue
+        v_ratio = s_out / (n_u[b] * (n_u[b] + s_out)) if s_out > 0 else 0.0
+        d = lo_v[0][0] - lo_v[1][0] - np.log((n_u[b] + s_out) / n_u[b])
+        width[(b, x)] = max(0.0, d * d - (lo_v[0][1] + lo_v[1][1] + v_ratio))
     out = {}
-    for b, x, s_out, kind in served:
-        step, se2, excess = premise[kind]
-        width = se2 + excess
-        if (b, x) in obs:
-            d, v = obs[(b, x)]
-            width += max(0.0, (d - step) ** 2 - v)
+    for b, x, s_out, _kind in served:
+        w = width.get((b, x), 0.0)
         if tau[x] > 0.0 and fp[x] != fn[x]:
             row = splice_out_row(strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x])
             if np.ptp(row) > 1e-9:
                 out.setdefault(b, np.zeros(lam.shape[0]))
-                out[b] += blur_row(shift_row(row, lam, step), lam, width)
+                out[b] += blur_row(row, lam, w)
         if tau[b] > 0.0:
             le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
             row = transport_row(strand_row(b), lam, le, n_u[b], s_out)
             if np.ptp(row) > 1e-9:
                 out.setdefault(x, np.zeros(lam.shape[0]))
-                out[x] += blur_row(shift_row(row, lam, -step), lam, width)
-    return out, premise
+                out[x] += blur_row(row, lam, w)
+    return out, width
 
 
 def test_the_alt_splice_messages_land_at_the_junction_and_both_flanks(sweep_inputs):
     """ITEM 7's contract on the patched toy (one donor, one acceptor, both flanks populated): the
     junction boundary receives exactly both flanks' mapped rows and each flank exactly the boundary's
-    mapped row — the premise refit here per flank kind, the pairs' fills chosen to DISAGREE so the step
-    and the widths are all non-trivial — on top of its rungs-2/3 rows; every other slot is exactly as
-    the policy leaves it with the junction bits cleared. So swapped flanks, a dropped flux, a dropped
-    step or width, or a delivery to the wrong flank fails."""
+    mapped row — each blurred by the pair's own disagreement beyond counting, the fills chosen to
+    DISAGREE so at least one width is non-trivial — on top of its rungs-2/3 rows; every other slot is
+    exactly as the policy leaves it with the junction bits cleared. So swapped flanks, a dropped flux,
+    a dropped width, or a delivery to the wrong flank fails."""
     import dataclasses as _dc
 
     from rigel.calibration.messages.transfer import TransferPolicy
@@ -1396,11 +1358,13 @@ def test_the_alt_splice_messages_land_at_the_junction_and_both_flanks(sweep_inpu
         .deliver(_dummy_nb(n), _dummy_nb(n))
         .lam_rows
     )
-    expected, premise = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
+    expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
     assert len(expected) >= 4, (
         "the patched toy must serve two junctions and their flanks or this gate proves nothing"
     )
-    assert all(p[0] != 0.0 and p[1] > 0.0 for p in premise.values()), premise
+    assert any(w > 0.0 for w in widths.values()), (
+        "the fills must disagree beyond counting somewhere or the width is untested"
+    )
     for i in range(n):
         if i in expected:
             want = base[i] + expected[i]

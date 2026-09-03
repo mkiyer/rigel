@@ -780,3 +780,36 @@ session scratchpad: `item7_stage0.py` / `item7_stage0_len.py` (the licences on c
 and by flank length), `item7_components.py` (the by-component dissection), `item7_nodelocal.py` (the
 node-local scorer at alt-ss objects), `item7_proto.py` (every arm tried: own rows, width-only fit,
 step forms, flux forms, joint fit, per-pair discrepancy).
+
+## The pooled step questioned and REFUSED (owner, 2026-09-03); the record moved
+
+The owner's critique of item 7's per-library step, the purely local form measured against it
+(on the ladder within 0.25 % of the pooled form on every row and ahead on four of six stranded rows;
+behind on the test chromosome's low-gDNA capture-ON rows), the refusal and its grounds, and the lesson (simplest elegant form first; end-to-end before subtler accuracy work) live in
+`DESIGN.md` §6b.8 and `ISSUES.md` CLOSED/REFUSED (`the-pooled-hop-step`). The local rule is what ships.
+
+## ⛔ A MEASUREMENT ERROR OF MINE, corrected (2026-09-03)
+
+The "purely local" prototype arm whose numbers I reported to the owner (node-locally 177 at the g50 ON
+boundaries; the ladder within +0.45 % of the pooled form) was NOT purely local: a leftover branch in
+the prototype re-set the E hop's width and shift to the POOLED values after my local block, so it was a
+hybrid — a local C hop and a pooled E hop. Found by logging the widths each implementation applies
+(the landed local form: 96 non-zero widths summing to 57.8; the prototype's "local" arm: 184 summing
+to 10.8, the recurring 0.0509 being the pooled E width). The lesson: before reporting an arm, log
+what it APPLIES, not what its flags say. The landed code is truly local on both hops and the corrected
+prototype arm reproduces it exactly (3,933 / 229 / 121 / 310 on benign g50 ss.99 ON).
+
+**The true local form against the pre-item-7 policy (full 30-condition sweeps, whole-library):**
+benign — capture-OFF stranded rows within ±0.2 %, unstranded identical on 9/10; capture-ON stranded
+g05 +1.7 / +2.1 %, g25 −0.8 / +1.5 %, g50 −1.0 / +2.0 %, g98 −4.1 / −3.2 %. Junction panel — ON: g05
++9.0 / +7.7 %, g25 +6.1 / +3.1 %, g50 0.0 / −0.6 %, g98 +0.5 / −2.2 %. Sparse panel — ON: every row a
+win (−1.6 … −10.4 %) except g50 ss.99 (+2.4 %). Beside the pooled form: better where a pair's
+disagreement is large enough to see (junction g50 ss.99 ON 3,029 vs 3,149), worse where a systematic
+offset hides below each pair's counting (junction g05 / g25; benign g50 ss.99 ON 3,933 vs 3,873; sparse
+g50 ss.99 ON 4,118 vs 4,011) — exactly the case the per-pair rule gives up by design. Node-locally at
+the 30 alt-ss boundaries (g50 ss.99 ON): 126 pre-item-7, 249 un-premised, 229 local, 171 pooled.
+The corrected ladder A/B (`proto7L_ladder_*`: pre7 / local / pooled) is the standing.
+
+**Corrected ladder A/B (pre-item-7 → local / pooled):** g05 OFF +0.12 / +0.17 %, g05 ON −1.34 / −1.38 %,
+g50 OFF +0.06 / +0.08 %, g50 ON −0.44 / −0.67 %, g98 OFF −0.76 / −0.75 %, g98 ON −2.70 / −2.49 %;
+unstranded identical. The local rule ships.
