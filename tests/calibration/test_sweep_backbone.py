@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration import sweep as SW
-from rigel.calibration.messages import NeighbourState, PsiMessage, StepContext
+from rigel.calibration.messages import NO_NEIGHBOUR, SILENCE, Message, PsiMessage, StepContext
 from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches
 from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.simplex_logodds import _logodds_grid, _tilt_grid
@@ -80,36 +80,104 @@ def _counts(msg: PsiMessage, ctx: StepContext | None = None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 1 — deliver() sees only the two NEIGHBOUR states.  TRAPS: a-message-from-the-destinations-belief, nine recurrences in nine costumes.
+# ASSERTION 1 — THE TWO PHASES (owner ruling 2026-09-04): every node holds a message from each neighbour
+# it has; a real hop must ARRIVE; a missing neighbour is not silence; the kernel sees indices only.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_neighbour_state_is_gathered_at_the_source_so_d4_is_not_expressible():
-    """⭐⭐ The structural half of TRAPS: a-message-from-the-destinations-belief: what ``deliver`` is handed is already indexed at the source.
+class _Echo:
+    """A policy whose kernel records every hop and returns a message naming its source — so the pass's
+    ORDER and SIDES are observable, and so the solve can be shown the two held lists."""
 
-    A message computed from the destination's own relayed belief carries zero information and confirms the
-    destination — and every one of TRAPS: a-message-from-the-destinations-belief's nine costumes was that. After the gather there is no array in a
-    :class:`NeighbourState` that still answers questions about the destination, so none of the nine is
-    expressible however the policy is written."""
-    relayed = tuple(np.arange(N, dtype=np.float64) + 100.0 * k for k in range(10))
-    src = np.array([0, 0, 1, 2, 3, 4, 5, 6])  # slot i's source, clipped at the terminal
-    at_src = SW._at_source(relayed, src)
-    for a, b in zip(relayed, at_src):
-        assert np.array_equal(b, a[src])
-        # the destination's own value is NOT what the policy now holds, except where src == dst
-        differs = src != np.arange(N)
-        assert np.any(b[differs] != a[differs]), (
-            "the gather did not actually move anything (TRAPS: could-the-arm-have-fired)"
-        )
+    name = "echo"
+
+    def __init__(self):
+        self.hops = {False: [], True: []}
+        self.held = None
+
+    def prepare(self, ctx):
+        return self
+
+    def propagate(self, *, backward: bool):
+        def receive(s, i):
+            self.hops[backward].append((int(s), int(i)))
+            return Message(level=(float(s), 0.0))
+
+        return receive
+
+    def solve(self, from_left, from_right):
+        self.held = (list(from_left), list(from_right))
+        return PsiMessage.silent()
 
 
-def test_the_gather_is_exact_so_assertion_one_costs_no_bits():
-    """A gather cannot change a double, so making TRAPS: a-message-from-the-destinations-belief structural is free. If it were not, the assertion
-    would be trading correctness for identity and could not ship in a byte-identity commit."""
-    rng = np.random.default_rng(7)
-    a = rng.standard_normal(500) * 1e17
-    src = rng.integers(0, 500, 500)
-    assert np.array_equal(SW._at_source((a,), src)[0], a[src])
+def test_every_node_holds_a_message_from_each_neighbour_it_has():
+    """⭐⭐ The ruling made executable: after the two passes every interior node holds TWO messages, one
+    naming its low neighbour and one its high; the chain's two end nodes hold ONE and ``NO_NEIGHBOUR``
+    on the open side — which is not a message and not SILENCE."""
+    ctx = _ctx()
+    left, right = list(ctx.left), list(ctx.right)
+    fl = SW._pass(list(ctx.order), left, _Echo().prepare(ctx), backward=False)
+    br = SW._pass(list(ctx.order)[::-1], right, _Echo().prepare(ctx), backward=True)
+    for i in range(N):
+        if left[i] >= 0:
+            assert fl[i].level[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
+        else:
+            assert fl[i] is NO_NEIGHBOUR and fl[i] is not SILENCE
+        if right[i] >= 0:
+            assert br[i].level[0] == float(right[i])
+        else:
+            assert br[i] is NO_NEIGHBOUR
+    assert sum(m is None for m in fl) == 1 and sum(m is None for m in br) == 1, "one open side each"
+
+
+def test_the_passes_run_in_chain_order_and_read_one_side_each():
+    """The forward pass visits low→high reading each node's LOW neighbour; the backward pass the
+    mirror — so what a source holds from its far side is written before it is asked to send."""
+    ctx = _ctx()
+    pol = _Echo()
+    SW._pass(list(ctx.order), list(ctx.left), pol.prepare(ctx), backward=False)
+    SW._pass(list(ctx.order)[::-1], list(ctx.right), pol.prepare(ctx), backward=True)
+    assert pol.hops[False] == [(i - 1, i) for i in range(1, N)]
+    assert pol.hops[True] == [(i + 1, i) for i in range(N - 2, -1, -1)]
+
+
+def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
+    """⛔ A hop that carries nothing must still ARRIVE as SILENCE. A kernel returning ``None`` for a node
+    that HAS a neighbour is the one thing the pass refuses, because the solve could not then tell
+    "nothing to say" from "never spoken to"."""
+
+    class _Mute(_Echo):
+        def propagate(self, *, backward: bool):
+            return lambda s, i: None
+
+    ctx = _ctx()
+    with pytest.raises(AssertionError, match="ARRIVE as SILENCE"):
+        SW._pass(list(ctx.order), list(ctx.left), _Mute().prepare(ctx), backward=False)
+
+
+def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
+    """``propagate`` returning no kernel means every node holds SILENCE from that side — delivered,
+    distinguishable from the open side of the chain."""
+    ctx = _ctx()
+
+    class _Quiet(_Echo):
+        def propagate(self, *, backward: bool):
+            return None
+
+    fl = SW._pass(list(ctx.order), list(ctx.left), _Quiet().prepare(ctx), backward=False)
+    assert fl[0] is NO_NEIGHBOUR and all(m is SILENCE for m in fl[1:])
+    assert SILENCE.is_silent and Message(level=(0.0, 1.0)).is_silent is False
+
+
+def test_the_solve_receives_the_two_held_lists_at_the_recipient():
+    """Phase 2's inputs are the two held lists indexed AT THE RECIPIENT, straight from the passes."""
+    ctx = _ctx()
+    pol = _Echo()
+    prepared = pol.prepare(ctx)
+    fl = SW._pass(list(ctx.order), list(ctx.left), prepared, backward=False)
+    br = SW._pass(list(ctx.order)[::-1], list(ctx.right), prepared, backward=True)
+    prepared.solve(fl, br)
+    assert pol.held == (fl, br)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -317,11 +385,10 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
     relay), and it is a MEASURED floor rather than a placeholder: with no
     belief propagation the deliverable is a net improvement on three of the four strata and a large
     regression on exactly one — the stratum where kappa = 1/2 leaves a slot no own composition evidence."""
-    relay = SilentPolicy().prepare(_ctx())
-    assert relay.scan(backward=False) is None, "a silent policy must relay nothing at all"
-    assert relay.scan(backward=True) is None
-    nb = NeighbourState(state=(), valid=np.ones(N, bool), src=np.arange(N))
-    assert relay.deliver(nb, nb).is_silent
+    prepared = SilentPolicy().prepare(_ctx())
+    assert prepared.propagate(backward=False) is None, "a silent policy must send nothing at all"
+    assert prepared.propagate(backward=True) is None
+    assert prepared.solve([SILENCE] * N, [SILENCE] * N).is_silent
 
 
 def test_every_head_operator_is_an_independently_named_switch():

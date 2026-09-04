@@ -217,6 +217,29 @@ worse than the shipped local solve". The decision-relevant contrast against `Sil
 needs `policy_benchmark.py`. What the measurement DOES settle is the issue's literal question — the
 information is present at `g50`/`g98`-OFF and absent-to-negative at `g05` and at `g98` capture-ON.
 
+### two-sided-exon-row
+`priority: now · kind: problem · stamped: 2026-09-04`
+**What an exon needs before the scan can forward anything on unstranded data, and where it can come
+from.** Rung 2's transported row is the intron's composition pulled through the s = 1 face map: its
+upper side is the intron factory's own upper tail (soft at mid-gDNA, a cliff at a zero control), so an
+exon's held row is a LOWER bound on gDNA wherever the intron cannot distinguish 0.9 from 1.0, and a pass
+that forwards it compounds the bias (`policy_prototype.py --by-class` under a forward-backward
+prototype: the in-scope unstranded row +10 % when today's rows are forwarded, the stranded half within
+4 %). The flux LEVEL as the two-sided pin is REFUTED (`ISSUES: the-certified-flux-row-as-a-level`).
+What remains: (a) the crossing composition itself sharpened on the gDNA side — the intron's own solve
+(`ROADMAP.md` rank 3, the vertex atom) is the source, because the composition paradigm is invariant to
+a common enrichment step and its only residual is the TAPER — the ratio of the spliced fragments'
+enrichment to the crossing fragments' at a probed exon's edge (measured +0.25…+0.3 nats under exon
+probes, ≈0 under junction probes, 0 off capture; `flux_stage0.py`, session scratchpad; the tool never
+sees the probe panel, so the taper is learned or bounded, never read); (b) a bounded marginal over the
+taper in the face map in place of the flat top. Neither is built. ⭐ READ AT PASS ZERO FIRST (the
+owner's method, `DESIGN.md` §6b.12): in the first pass today's messages leave unstranded exons at
+silence (licensed exons 131k silent / 145k transfer on the in-scope test-chromosome row), so every
+unstranded exon number in the full pipeline is the prior's work; the refuted flux profile is the only
+candidate that solves them first-pass (→ 6k) where its transport is 1, so the actual problem is a
+PER-LIBRARY transport the exons can learn (one probe design per library is the reason they share it).
+Judge at `R exon (licensed)` and the walled classes, halves apart, pass zero beside the full pipeline.
+
 ### per-transcript-prior-lane
 `priority: next · kind: build · stamped: 2026-08-31`
 **The largest in-scope end-to-end lever measured, and the weighting function IS the work.**
@@ -471,6 +494,36 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### the-certified-flux-row-as-a-level — DERIVED, STAGE 0 ON TRUTH, PROTOTYPED, A/B'd on three probe panels and the ladder, REFUTED by probe placement (2026-09-04). Do not rebuild a flux LEVEL into an exon without a per-face transport.
+
+The candidate: at a CERTIFIED interface the exon's spliced-in RNA is predicted by the face's
+route-summed flux rate × the exon's RNA opportunity, the contiguous RNA by the crossing's composition
+row × the opportunity ratio, and the exon's gDNA is the remainder of its OWN count — a two-sided
+NegBinomial row over the exon's composition, replacing rung 2's one-sided transported row at certified
+faces (the relay's anchor re-derived as a composition-currency message, `DESIGN.md` §6b.3). Stage 0 on
+the exon-probed test chromosome was clean: the flux-implied RNA is unbiased for the exon's spliced-in
+RNA (median log ratio −0.03, mad 0.04–0.09 at depth ≥ 50, on and off capture, probed or not; the
+overhang hypothesis refuted; the two faces of one exon agree within counting, median excess variance
+0.000, so the local discrepancy rule is a no-op). On that panel it WON: unstranded 9/10 vs the shipped
+transfer, ≤ silent 10/10 (`g50 ss.50 OFF` 11,242 → 8,876 vs silent 9,349, licensed exons 4,071 →
+1,803); stranded 16/20, worst +1.2 %. **Refuted where the probes move**: on the junction-probed panel
+the spliced fragments are enriched e^3.0…e^3.6 (20–35×) MORE than the exon's contained fragments (stage
+0, probed exons, mad 0.04), so the row over-claims RNA — stranded capture-ON rows 1.5–4.1× the shipped
+error (`g50 ss.99 ON` 6,502 → 26,497), unstranded `g98 ss.50 ON` 1.48×; on the sparse-probed panel
+worst 17.4× (`g25 ss.70 ON`) and 5.0× (`g05 ss.50 ON`); on the full ladder unstranded 4/8 with the zero controls at 3.3× (`g00 ss.50 OFF`, 299,380 →
+995,880) and 6.9× (`g00 ss.50 ON`) and `g05 ss.50 ON` at 4.1×, stranded within 2 % except the two
+`g00 ss.99` rows (1.2–1.3×); at `g00 ss.50 OFF` the mechanism being tiny exons (3 contained fragments, median) beside
+a large flux where a count-based row has no resolution, whose false modes the refit prior then trains
+on (`ISSUES: gdna-landscape-trains-on-false-positives`; walled exons 106k → 371k, terminus boundaries
+93k → 296k) — ⚠ a PRIOR-MEDIATED number: on the test chromosome's zero control the same row is slightly
+BETTER than transfer at pass zero (266,954 vs 278,108) and worse only through the pipeline. The relay's own transport-centre estimator (`rna_anchor.left_fit_center_spread`) REFUSES
+on 9 of 10 conditions tried and misfires where it accepts (`g50 ss.99 ON` 6,006 → 32,235). Joining the
+row beside rung 2 (the relay's placement) double-counts the flux and the intron row and fails the same
+way. A hard s ≥ 1 truncation of the crossing marginal is refuted on its own (5,712 vs 1,803 at the
+in-scope unstranded row). This is `DESIGN.md` §6b.9's founding refusal re-measured: a level carried
+between locales under capture is refuted by probe placement alone, and the tool never sees the probe
+panel. What survives is recorded in `ISSUES: two-sided-exon-row`.
 
 ### the-pooled-hop-step — DERIVED, PROTOTYPED, A/B'd, landed for a day, REFUSED by the owner (2026-09-03). Do not rebuild a per-library premise.
 

@@ -13,9 +13,16 @@ Three policies exist; `CalibrationConfig.message_policy` selects which one
   each behind a NAMED switch, so ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five boundaries
   long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.policy.MessagePolicy` — the foundation-spec runner (:mod:`~.foundation`), byte-identical
-  to silence when its models are the trivial ones.
-* :mod:`~.variance` — the shared variance arithmetic the policies draw on. Not a policy; a toolbox.
+* :class:`~.transfer.TransferPolicy` — the REBUILD: every message a composition profile carried across
+  one face by a derived map (the owner's rulings of 2026-09-01 onward).
+* :mod:`~.variance` — the shared variance arithmetic the relay draws on. Not a policy; a toolbox.
+
+⭐⭐⭐ **THE TWO PHASES (owner ruling 2026-09-04).** Phase 1, PROPAGATE: a forward pass then a backward
+pass; at each hop the RECIPIENT receives what its neighbour sends — the sender's own claim composed with
+what the sender holds from its far side — and decides to STOP, FORWARD or MODIFY it; beliefs do not
+change; when both passes end every node holds one message from each neighbour it has. Phase 2, SOLVE:
+every node once, from its own evidence, the two held messages and the gDNA hyperprior. The backbone owns
+the passes and the solve's shape; a policy owns what a message says and what a recipient does with it.
 
 ⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer
 at the prior-free pass is worth **+0.2 %** of the shipped answer while moving that pass's own error by
@@ -27,10 +34,10 @@ The interface
 -------------
 ::
 
-    relay = policy.prepare(ctx)                  # one working object per sweep
-    step, publish = relay.scan(backward=False)   # the per-hop kernel; None ⇒ nothing to relay
-    ...                                          # the BACKBONE runs the loop
-    msg = relay.deliver(left_state, right_state) # -> PsiMessage
+    prepared = policy.prepare(ctx)                # one working object per sweep: every node's OWN claim
+    receive  = prepared.propagate(backward=False) # phase 1: the recipient's kernel, or None ⇒ all Silence
+    held[i]  = receive(source, destination)       # ... the BACKBONE runs the pass, in chain order
+    evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
 
 ⛔⛔ **THE CONTRACT, AND IT IS TRAPS: a-message-from-the-destinations-belief — a lesson that has recurred NINE times in nine costumes:**
 
@@ -57,8 +64,10 @@ there is ``p -> p/(1 + p*v) <= p``, and the only rises are additive fusions of I
 
 :class:`StepContext` splits its fields under exactly those three headings, and the heading is what turns
 TRAPS: a-message-from-the-destinations-belief from a discipline into something a reader — and the backbone — can check. The backbone enforces the
-half that is enforceable: it hands :meth:`deliver` the relayed belief state **already indexed at the
-SOURCE**, so no policy can read a neighbour's relayed belief at the destination however it is written.
+half that is enforceable: the kernel is called with two INDICES and builds the message into the
+destination from the SOURCE's claim and what the source holds; the backbone writes ``held`` and the
+policy never reaches past its hop, so a message built from the destination's belief has nowhere to
+come from.
 """
 
 from __future__ import annotations
@@ -69,10 +78,12 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 __all__ = [
-    "NeighbourState",
+    "Message",
+    "NO_NEIGHBOUR",
     "Policy",
+    "Prepared",
     "PsiMessage",
-    "Relay",
+    "SILENCE",
     "StepContext",
 ]
 
@@ -152,21 +163,34 @@ class PsiMessage:
 
 
 @dataclass(frozen=True, slots=True)
-class NeighbourState:
-    """One neighbour's relayed belief, **already indexed at the SOURCE**, plus the validity mask.
+class Message:
+    """What one node holds from one neighbour after a pass — the transfer policy's message.
 
-    ⭐⭐ **THIS TYPE IS THE TRAPS: a-message-from-the-destinations-belief ASSERTION.** The backbone gathers each relayed array at the source slot
-    before handing it over, so a policy holding a :class:`NeighbourState` is holding values for the source
-    and has no way to ask the same array about the destination. TRAPS: a-message-from-the-destinations-belief's nine costumes were all a message built
-    from the destination's own relayed/fused belief; none of them is expressible through this type.
+    Two LANES, by what they can cross. ``composition`` is a max-normalised log-likelihood over the
+    solve grid of the destination's gDNA share (a composition PROFILE: scale-free, so it crosses a
+    face by a derived map and never carries a level across a capture cliff); ``level`` is a gDNA
+    rate claim ``(log rate, log-variance)`` for faces composition cannot cross. ``None`` in a lane is
+    "nothing on this lane". ⭐ :data:`SILENCE` — both lanes ``None`` — is a MESSAGE, delivered: the
+    neighbour spoke and had nothing to say. A node with no neighbour on a side holds
+    :data:`NO_NEIGHBOUR` instead, which is not a message (the owner's ruling, 2026-09-04: a hop that
+    carries nothing still arrives, explicitly uninformative).
 
-    ``valid`` is ``False`` at a reference terminal, where ``chain.left`` / ``chain.right`` is ``-1`` and the
-    gathered value is whatever the clipped index happened to hit — so it must be masked, never read.
+    ⚠ The relay policy predates this type and holds its own per-node state tuple; the backbone treats
+    what a kernel returns as opaque and only insists that a real hop returns SOMETHING.
     """
 
-    state: tuple[np.ndarray, ...]
-    valid: np.ndarray
-    src: np.ndarray
+    composition: np.ndarray | None = None
+    level: tuple[float, float] | None = None
+
+    @property
+    def is_silent(self) -> bool:
+        return self.composition is None and self.level is None
+
+
+#: the explicitly uninformative message: a neighbour that spoke and had nothing to say
+SILENCE = Message()
+#: the marker a node holds on a side where it HAS no neighbour (a reference terminal) — not a message
+NO_NEIGHBOUR = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,25 +302,30 @@ class StepContext:
 
 
 @runtime_checkable
-class Relay(Protocol):
-    """A policy's per-sweep working object: prepared arrays, the scan kernel, and the combine."""
+class Prepared(Protocol):
+    """A policy's per-sweep working object: every node's own claim, the propagate kernel, the solve."""
 
-    def scan(self, *, backward: bool):
-        """Return ``(step, publish)`` for one direction, or ``None`` to relay nothing.
+    def propagate(self, *, backward: bool):
+        """PHASE 1. Return ``receive(source, destination) -> message`` for one direction, or ``None``
+        when this policy sends nothing (every node then holds :data:`SILENCE` from that side).
 
-        ``step(s, i)`` performs ONE hop from source slot ``s`` into destination slot ``i``, accumulating in
-        place — which is the forward half of forward-backward on a chain. ``publish()`` returns the relayed
-        state as a tuple of arrays.
+        The BACKBONE runs the pass: in chain order, for every destination with a neighbour on that
+        side, ``held[destination] = receive(source, destination)``. Inside ``receive`` the policy
+        composes what the source sends — its own claim with what the source holds from ITS far side,
+        written by this same pass one step earlier — and applies the recipient's decision for the face:
+        STOP (return :data:`SILENCE`), FORWARD, or MODIFY. ⛔ A real hop must return a message, never
+        ``None``: the backbone refuses a kernel that leaves a node unspoken to.
 
-        ⛔ **TRAPS: a-comment-quoted-as-a-finding: "in place" is not "iterative".** Both directions are ONE pass. A source comment
-        calling the scan "Gauss-Seidel" meant *un-vectorisable*, that word crossed into a design doc as if
-        it were a structural finding, and a reviewer then correctly derived a build plan for a defect that
-        does not exist.
+        ⛔ **TRAPS: a-comment-quoted-as-a-finding: ONE pass per direction.** The forward pass reads each
+        node's LOW neighbour and the backward pass its HIGH one; on a chain that IS forward-backward,
+        and nothing here iterates.
         """
 
-    def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
-        """The ψ channels at every slot — the four Gaussian channels plus the certified-flux
-        rows — from the two NEIGHBOUR states only (TRAPS: a-message-from-the-destinations-belief)."""
+    def solve(self, from_left: list, from_right: list) -> PsiMessage:
+        """PHASE 2, the policy's half: the ψ channels at every slot from the two held messages —
+        ``from_left[i]`` is what slot ``i`` holds from its LOW neighbour (:data:`NO_NEIGHBOUR` at a
+        reference start), ``from_right[i]`` from its HIGH one. Never the destination's belief
+        (TRAPS: a-message-from-the-destinations-belief)."""
 
 
 @runtime_checkable
@@ -305,5 +334,5 @@ class Policy(Protocol):
 
     name: str
 
-    def prepare(self, ctx: StepContext) -> Relay:
-        """Derive whatever this policy needs from ``ctx``, once per sweep."""
+    def prepare(self, ctx: StepContext) -> Prepared:
+        """Derive whatever this policy needs from ``ctx``, once per sweep: every node's OWN claim."""

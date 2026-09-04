@@ -466,10 +466,9 @@ class CalibrationConfig:
     #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
     #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own
     #: switch), `"silent"` (:class:`~rigel.calibration.messages.silent.SilentPolicy`, the
-    #: measured floor — the same policy `message_propagation = False` installs), `"message"`
-    #: (:class:`~rigel.calibration.messages.policy.MessagePolicy`, the foundation-spec runner)
-    #: or `"transfer"` (:class:`~rigel.calibration.messages.transfer.TransferPolicy`, the
-    #: intron -> intron|exon boundary composition transfer — rung 1 of the message rebuild).
+    #: measured floor — the same policy `message_propagation = False` installs) or `"transfer"`
+    #: (:class:`~rigel.calibration.messages.transfer.TransferPolicy`, the composition-transfer
+    #: rebuild — the owner's rulings of 2026-09-01 onward).
     #: ⛔ An unknown name RAISES: an arm that silently runs a policy other than the one it names
     #: is a benchmark that cannot be trusted.
     #: ⚠ The A/B between the policies is THIS one value, which is what keeps development off the

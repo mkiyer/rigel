@@ -136,15 +136,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "region_init",
             "sweep",
             "messages",
-            # `messages/foundation` is THE FOUNDATION SPEC (owner architecture, 2026-08-26):
-            # the Message type (unspliced + spliced lanes, provenance structural), the
-            # propagation-time PropagationModel and the solve-time SolveModel — the contracts
-            # every variance model implements by overriding their narrow extension points.
-            "messages/foundation",
-            "messages/policy",
-            # `messages/policy` runs the foundation spec's (PropagationModel, SolveModel) pair on
-            # the backbone's Policy protocol; `messages/silent` and `messages/relay` are the
-            # frozen baselines it is measured against.
+            # `messages/__init__` is the two-phase protocol (owner ruling 2026-09-04: prepare /
+            # propagate → receive / solve) and the message type; `messages/silent` and
+            # `messages/relay` are the frozen baselines every policy is measured against.
             "messages/variance",
             "messages/silent",
             "messages/relay",

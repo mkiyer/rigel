@@ -179,15 +179,19 @@ facts stand (`calibration_walk.py` rung E vs F; the unearned `calib` column). `R
 carries the order of work; `ISSUES: gdna-landscape-trains-on-false-positives` is the systemic issue this
 thread exposed.
 
-⭐⭐ **FOUR POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
-is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES):
+⭐⭐ **THREE POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
+is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES). ⭐⭐⭐ **They all
+run on the TWO-PHASE backbone (owner ruling 2026-09-04, `DESIGN.md` §6b.12)**: `prepare` (every node's
+own claim) → `propagate(backward)` returning `receive(source, destination)`, which the backbone runs as
+a forward pass then a backward pass, every node ending with one message from each neighbour it has
+(`SILENCE` is a message, `NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`. The foundation spec's
+Gaussian-lane `Message` and the `message` policy are RETIRED (same ruling).
 
 | policy | |
 |---|---|
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
-| `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
-| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…03, LADDER-CONFIRMED). Every message is a composition carried across ONE face by a derived map, silence-not-zeros, no constants: the intron's row at intron\|exon boundaries and into exons through the face map (rungs 1–2), the edge's lower bound (rung 3), the exon's and the boundary's own strand rows both ways (items 1–2), the terminus boundary and its outside exon through the spliced-crossing map (item 5), the abundance-discrepancy message into the inside flank (item 6), and the alternative splice site both ways (item 7) — each priced by the owner's DISCREPANCY RULE where two witnesses exist, nothing pooled (`ISSUES: the-pooled-hop-step`). Rulings and measurements: `DESIGN.md` §6b.4–§6b.9. ⭐ THE SCAN SEAM ships INERT (§6b.10): every delivery is recorded with its source and adjacent map and the backbone's two passes can carry a slot's arrivals further, but the hop budget is 0 — no ledger built, nothing relayed, the one-hop rows exactly — until a hop's pricing is ruled. ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart. Standing shadows: the deferred `g05 ss.50 ON` row, the recorded owner decisions in the handoff, and `ISSUES: gdna-landscape-trains-on-false-positives` |
+| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -198,8 +202,8 @@ re-proposing a mechanism, so a refuted experiment is not repeated.
 relay (`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
 phase-A, never own-evidence precision); `config.rna_anchor` is live iff propagation is on and the
 policy is relay. `DESIGN.md` §6b.3. ⭐ The owner's clarified SPLICED law is skeleton-enforced: spliced
-fragments are MEASURED at boundaries, never solved, strictly ONE-HOP — `foundation.propagate` refuses
-to relay a spliced claim for every model.
+fragments are MEASURED at boundaries, never solved, strictly ONE-HOP (a law the retired foundation spec
+enforced at runtime; the transfer policy keeps it by construction — a flux enters a map, never a lane).
 
 ## ⭐⭐⭐ RUNNING THE BENCHMARKS
 
@@ -313,14 +317,18 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,782 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-03 after the scan seam landed inert). Account it from **3,779** — the count after item 7's
-per-pair rule — by **+3**: the three scan gates (inert at the shipped budget, the kernel on a
-synthetic ledger, the first real hop), all added to the EXISTING
-`tests/calibration/test_transfer_policy.py` (no file was added or removed, so no parametrised gate
-moved; the walled block edits the substrate YAML and its renders, which carry no cases). ⛔ **RE-DERIVE,
-NEVER ADJUST** — the table below gives the per-file deltas, and a bracket-matched `--collect-only`
-confirms the attribution (3,790 collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,755 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-04 after the two-phase backbone landed, the foundation scaffold retired and the transfer
+policy was rebuilt as claims and rules). Account it from **3,791** — the count after
+`docs/dev/TWO_PHASE_BACKBONE.md` was added (+1 jargon) to the previous 3,790 — by **−28**: the two
+retired gate files `test_message_foundation.py` and `test_message_policy.py` (−16 own cases, −4
+jargon/docs-boundary), the two retired modules `messages/foundation.py` and `messages/policy.py`
+(−6: jargon, docs-boundary, layering), +3 for the backbone-law gates that replaced the two
+gather-at-source gates in `tests/calibration/test_sweep_backbone.py`, and −5 in
+`tests/calibration/test_transfer_policy.py` (13 one-hop "beside nothing else" and scan-seam gates
+retired with the seam, 8 pass-form gates added). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
+gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution (3,763
+collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

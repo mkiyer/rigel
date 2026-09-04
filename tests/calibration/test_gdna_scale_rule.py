@@ -379,7 +379,7 @@ def _transport_fixture(pop_pair: bool, pop_p: bool, pop_n: bool):
 
     from test_sweep_backbone import _ctx
 
-    from rigel.calibration.messages import NeighbourState
+    from rigel.calibration.messages.relay import NeighbourState
 
     ctx = _ctx(
         free_neg=np.ones(8, bool)
@@ -496,7 +496,7 @@ def _splice_in_transport_fixture(pop_p: bool):
 
     from test_sweep_backbone import _ctx
 
-    from rigel.calibration.messages import NeighbourState
+    from rigel.calibration.messages.relay import NeighbourState
 
     ctx = _ctx(free_neg=np.ones(8, bool))
     n = ctx.n_slots
@@ -621,10 +621,10 @@ def _splice_in_scan_fixture(refuse: bool):
         ctx, is_exon_region=~is_bnd, sj_count=sj, boundary_flags=flags, own=own, geometry=geom
     )
     relay = RelayPolicy().prepare(ctx)
-    step, publish = relay.scan(backward=False)
+    receive = relay.propagate(backward=False)
     for i in range(1, n):
-        step(i - 1, i)
-    rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = publish()
+        receive(i - 1, i)
+    rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = relay._published[False]()
     exons = ~is_bnd & (np.arange(n) >= 2)  # exons whose left neighbour is a sj-carrying boundary
     return exons, rp, pp, mp
 

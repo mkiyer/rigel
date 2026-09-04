@@ -81,7 +81,6 @@ PANELS = {
 POLICIES = {
     "silent": dict(message_propagation=False, rna_anchor=False),
     "relay": dict(message_propagation=True, message_policy="relay", rna_anchor=True),
-    "message": dict(message_propagation=True, message_policy="message", rna_anchor=False),
     # rung 1 of the message rebuild: the intron -> intron|exon boundary composition transfer
     # (messages/transfer.py). Not in the default arm list yet — name it with --policies.
     "transfer": dict(message_propagation=True, message_policy="transfer", rna_anchor=False),
@@ -192,7 +191,7 @@ def _stranded(condition: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--panel", choices=sorted(PANELS), default="test")
-    ap.add_argument("--policies", nargs="+", default=["silent", "relay", "message"])
+    ap.add_argument("--policies", nargs="+", default=["silent", "relay", "transfer"])
     ap.add_argument("--conditions", nargs="+", default=None, help="default: all cached")
     ap.add_argument(
         "--by-class",

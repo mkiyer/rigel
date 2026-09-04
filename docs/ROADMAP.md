@@ -35,8 +35,8 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
   `ISSUES: the-rna-length-law-fix` (CLOSED). Watch item: `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: robust to the annotation (`EQUATIONS.md` §6a–§6c, `DESIGN.md` §3.3a);
   on real data read `clamped_at_ceiling` and `effective_seeds`, never the bare value.
-- **The message layer**: `relay` ships (propagation ON); `silent` is the measured floor; `MessagePolicy`
-  ≡ silent at rung 0. The bar: **win on unstranded, minimal harm on stranded, never pooled** —
+- **The message layer**: `relay` ships (propagation ON); `silent` is the measured floor; `transfer` is
+  the rebuild, on the two-phase backbone (`DESIGN.md` §6b.12; the foundation scaffold retired 2026-09-04). The bar: **win on unstranded, minimal harm on stranded, never pooled** —
   `policy_benchmark.py`. ⛔ **The harm half is NOT met**: messages ADD error at the worst in-scope
   conditions, and the relay's declared precision is not earned on most rows — rank 1 below.
 - **ψ**: the composition closes structurally on every published object (`test_composition_closes.py`);

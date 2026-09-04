@@ -35,7 +35,9 @@ from ..splice_graph import (
     FLAG_TSS_POS as _TSS_POS_BIT,
 )
 from ..region_init import own_composition_logvar
-from . import NeighbourState, PsiMessage, StepContext
+from . import PsiMessage, StepContext
+
+
 from .variance import (
     _fmax,
     composition_logvar,
@@ -53,6 +55,20 @@ from .variance import (
 )
 
 __all__ = ["RelayPolicy", "RelaySwitches"]
+
+
+@dataclass(frozen=True, slots=True)
+class NeighbourState:
+    """One neighbour's relayed belief, **indexed at the SOURCE**, plus the validity mask — the relay's
+    own message type. ``state`` holds, for every slot, the values of its neighbour on that side (what
+    the propagate kernel returned per hop, stacked); ``valid`` is ``False`` at a reference terminal,
+    where the value is whatever the clipped index happened to hit and must be masked, never read;
+    ``src`` is the neighbour index, clipped."""
+
+    state: tuple
+    valid: np.ndarray
+    src: np.ndarray
+
 
 _EPS = 1.0e-9
 
@@ -179,6 +195,9 @@ class _PreparedRelay:
         #: the certified-flux stream's delivered claim — recipient arithmetic already applied
         #: (`rna_anchor.flux_rows`), attached to the packet in `deliver`
         self._flux_rows = flux_rows
+        #: per direction, the pass's running state (the shipped ``publish``) — the relay publishes it
+        #: into the diagnostics capture at its solve (``fwd_*`` / ``bwd_*``)
+        self._published: dict = {}
         cap = ctx.capture
         n = ctx.n_slots
 
@@ -646,8 +665,10 @@ class _PreparedRelay:
         return out
 
     # ── THE SCAN: one hop, accumulated in place — the forward half of forward-backward ─────────────────
-    def scan(self, *, backward: bool):
-        """Return ``(step, publish)``. ``step(s, i)`` relays from source ``s`` into destination ``i``.
+    def propagate(self, *, backward: bool):
+        """PHASE 1: return ``receive(s, i)`` — one hop from source ``s`` into destination ``i``, run by the
+        backbone in chain order; what ``i`` holds from ``s`` is ``s``'s running state after its own hop
+        (this policy's semantics: a source publishes its state, the recipient transports it at the solve).
 
         ⭐ **The whole direction dependence is one swap.** The FORWARD pass reads its source at ``i-1``,
         the slot's genomic-LOW neighbour, so the destination presents its LOW-flank total and the source
@@ -832,7 +853,29 @@ class _PreparedRelay:
                 np.asarray(a, np.float64) for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
             )
 
-        return step, publish
+        self._published[bool(backward)] = publish
+
+        def receive(s, i):
+            step(s, i)
+            return (rg[s], rp[s], rn[s], pg[s], pp[s], pn[s], mg[s], mp[s], mn[s], tau[s])
+
+        return receive
+
+    def _neighbour_state(self, held: list, nbr: np.ndarray, backward: bool) -> NeighbourState:
+        """The stacked per-slot messages as the source-indexed state the combine reads. At a reference
+        terminal the value is the published state at the clipped index (slot 0), exactly as the
+        backbone's gather read it before the two-phase protocol — masked by ``valid``, never read."""
+        n = int(nbr.shape[0])
+        valid = nbr >= 0
+        src = np.clip(nbr, 0, n - 1)
+        pub = self._published[bool(backward)]()
+        cols = []
+        for k in range(len(pub)):
+            col = np.array(
+                [pub[k][0] if held[i] is None else held[i][k] for i in range(n)], np.float64
+            )
+            cols.append(col)
+        return NeighbourState(state=tuple(cols), valid=valid, src=src)
 
     # ── THE COMBINE: both neighbours transported into this slot's frame, then the message packet ───────
     def _transport(self, nb: NeighbourState, rho_dst, rho_src_a, pop, pop_p, pop_n):
@@ -1124,8 +1167,8 @@ class _PreparedRelay:
         k = np.where((s_ > _EPS) & (M > _EPS), M / np.maximum(s_, _EPS), 1.0)
         return g * k, p * k, n * k
 
-    def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
-        """The four ψ channels, from the two NEIGHBOUR states only.
+    def solve(self, from_left: list, from_right: list) -> PsiMessage:
+        """PHASE 2, the policy's half: the four ψ channels from the two held messages only.
 
         ⚠ The SAME role pairing as the scan: the left-hand message's source is the genomic-LOW neighbour,
         so the destination presents ``rho_lo`` and the source ``rho_hi``; the right-hand message is the
@@ -1135,6 +1178,15 @@ class _PreparedRelay:
         cap = self.ctx.capture
         E_g, E_r, M = self._E_g, self._E_r, self._M
         rho_lo, rho_hi = self._rho_lo, self._rho_hi
+        left = self._neighbour_state(from_left, np.asarray(self.ctx.left, np.int64), False)
+        right = self._neighbour_state(from_right, np.asarray(self.ctx.right, np.int64), True)
+        if cap is not None:
+            # ⭐ the RAW per-slot relayed state, both directions, under the shipped keys: the dissect
+            # loop reads them, and this policy is the only thing that holds the un-indexed form
+            _NAMES = ("g", "p", "n", "pg", "pp", "pn", "mg", "mp", "mn", "tau")
+            st = cap.setdefault("_uni_static", {})
+            for _tag, _bw in (("fwd", False), ("bwd", True)):
+                st.update({f"{_tag}_{k}": v for k, v in zip(_NAMES, self._published[_bw]())})
 
         ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = self._transport(
             left, rho_lo, rho_hi, self._pop_l_a, self._pop_p_l_a, self._pop_n_l_a
@@ -1221,10 +1273,7 @@ class _PreparedRelay:
                     "cpg": cpg.copy(),
                 }
             )
-            # ⚠ The RAW per-slot relay state (``fwd_*``/``bwd_*``) is published by the BACKBONE, not
-            # here — ``deliver`` is handed those arrays already gathered AT THE SOURCE, which is what makes
-            # TRAPS: a-message-from-the-destinations-belief structural, so this policy genuinely cannot see the un-indexed form. That is the
-            # assertion working, not a gap.
+            # ⚠ The RAW per-slot relay state (``fwd_*``/``bwd_*``) is published above, at the solve.
             # ⚠ ``prec_*`` here is the MODE-FUSION precision, NOT the precision ψ receives — ψ gets the
             # separate MEASUREMENT stream ``cm_*``, which is published beside it in ``_uni``. The two are
             # different quantities and an instrument that conflates them reads a channel's confidence off

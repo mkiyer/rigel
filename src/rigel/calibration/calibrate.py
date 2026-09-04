@@ -52,8 +52,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .messages.foundation import PassThroughPropagation
-from .messages.policy import MessagePolicy, SilentSolve
 from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
@@ -644,8 +642,6 @@ def calibrate(
         policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
     elif config.message_policy == "silent":
         policy = SilentPolicy()
-    elif config.message_policy == "message":
-        policy = MessagePolicy(PassThroughPropagation(), SilentSolve())
     elif config.message_policy == "transfer":
         # the intron -> intron|exon boundary composition transfer (rung 1 of the rebuild). Its
         # evidence IS the intron factory's own memoized rows, so the policy consumes
@@ -658,7 +654,7 @@ def calibrate(
     else:
         raise ValueError(
             f"unknown message_policy {config.message_policy!r} — "
-            f"expected 'relay', 'silent', 'message' or 'transfer'"
+            f"expected 'relay', 'silent' or 'transfer'"
         )
 
     def _sweep(prior):

@@ -34,16 +34,16 @@ reconciled by guesswork.
 
 from __future__ import annotations
 
-from . import NeighbourState, PsiMessage, StepContext
+from . import PsiMessage, StepContext
 
 __all__ = ["SilentPolicy"]
 
 
-class _SilentRelay:
-    def scan(self, *, backward: bool):
-        return None  # nothing to relay, so the backbone runs no loop at all
+class _PreparedSilence:
+    def propagate(self, *, backward: bool):
+        return None  # sends nothing: every node holds SILENCE from this side
 
-    def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
+    def solve(self, from_left, from_right) -> PsiMessage:
         return PsiMessage.silent()
 
 
@@ -53,5 +53,5 @@ class SilentPolicy:
 
     name = "silent"
 
-    def prepare(self, ctx: StepContext) -> _SilentRelay:
-        return _SilentRelay()
+    def prepare(self, ctx: StepContext) -> _PreparedSilence:
+        return _PreparedSilence()

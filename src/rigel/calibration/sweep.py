@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .messages import NeighbourState, PsiMessage, StepContext
+from .messages import SILENCE, PsiMessage, StepContext
 from .messages.silent import SilentPolicy
 from .region_geometry import (
     RegionBelief,
@@ -146,10 +146,11 @@ class AssertionCounts(dict):
 def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -> None:
     """Assertions 2, 3 and 4 — on what the policy actually delivered.
 
-    ⛔ Assertion 1 (TRAPS: a-message-from-the-destinations-belief) is not checked here because it is enforced BY CONSTRUCTION: ``deliver`` is handed
-    :class:`~.messages.NeighbourState`, whose relayed arrays are already gathered at the source, so no
-    policy can read a neighbour's relayed belief at the destination. A structural impossibility beats a
-    check. ⛔ Assertion 5 is checked at the write-back, where its basis lives.
+    ⛔ Assertion 1 (TRAPS: a-message-from-the-destinations-belief) is not checked here because it is enforced BY CONSTRUCTION: the
+    propagate kernel is called with two INDICES and builds the message into the destination from the
+    source's claim and what the source holds; the backbone writes ``held`` and the policy never reaches
+    past its hop. A structural impossibility beats a check. ⛔ Assertion 5 is checked at the write-back,
+    where its basis lives.
     """
     # ── (4) AXIOM 0, made executable: |T(slot)| = 1 + free_pos + free_neg, and it is <= 3 ALWAYS ────────
     # There are THREE populations and there is no fourth. This is a function of TWO BITS, which is what
@@ -270,18 +271,6 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
             live_any = live_any | (pk > 0.0)
             total = total + np.exp(np.asarray(mo, np.float64))
         counts.note("share_sum_at_most_one", live_any & (total > 1.0), live_any)
-
-
-def _at_source(state: tuple[np.ndarray, ...], src: np.ndarray) -> tuple[np.ndarray, ...]:
-    """Gather every relayed array at the SOURCE slot. ⭐⭐ **THIS IS ASSERTION 1.**
-
-    ``TRAPS.md`` TRAPS: a-message-from-the-destinations-belief has recurred NINE times in nine costumes, and every one of them was a message built
-    from the destination's own relayed or fused belief. After this gather the policy holds values FOR THE
-    SOURCE and has no way to ask the same array about the destination, so none of the nine is expressible.
-    A gather is exact, so this costs nothing in bits — the shipped policy did the same gather one level
-    down.
-    """
-    return tuple(np.asarray(a)[src] for a in state)
 
 
 def solve_chain(
@@ -503,24 +492,18 @@ def solve_chain(
         capture=_capture,
     )
 
-    relay = (policy if policy is not None else SilentPolicy()).prepare(ctx)
+    prepared = (policy if policy is not None else SilentPolicy()).prepare(ctx)
 
-    # ── (B) the FORWARD scan L→R and (C) the BACKWARD scan R→L ────────────────────────────────────────
-    # ⛔ TRAPS: a-comment-quoted-as-a-finding: ONE pass each, accumulating IN PLACE, which on a chain IS the forward half of
-    # forward-backward. "In place" is why it cannot be vectorised; it is not an iterative scheme, and a
-    # source comment's shorthand for the first crossed into a design doc as if it were the second.
-    fwd = _scan(order_list, ctx.left_list, relay, backward=False)
-    bwd = _scan(order_list[::-1], ctx.right_list, relay, backward=True)
+    # ── PHASE 1, PROPAGATE: (B) the FORWARD pass L→R and (C) the BACKWARD pass R→L ────────────────────
+    # ⛔ TRAPS: a-comment-quoted-as-a-finding: ONE pass each, in chain order, which on a chain IS
+    # forward-backward. It is not an iterative scheme, and a source comment's shorthand once crossed
+    # into a design doc as if it were one. When both passes end every node holds one message from each
+    # neighbour it has (owner ruling 2026-09-04): the recipient's kernel wrote it, or SILENCE stands.
+    from_left = _pass(order_list, ctx.left_list, prepared, backward=False)
+    from_right = _pass(order_list[::-1], ctx.right_list, prepared, backward=True)
 
-    # ── (D) the COMBINE — both neighbours into this slot's frame, then ONE batched ψ solve ────────────
-    n = int(chain.n_slots)
-    sl = np.clip(np.asarray(left, np.int64), 0, n - 1)
-    sr = np.clip(np.asarray(right, np.int64), 0, n - 1)
-    vl, vr = np.asarray(left, np.int64) >= 0, np.asarray(right, np.int64) >= 0
-    msg = relay.deliver(
-        NeighbourState(state=_at_source(fwd, sl) if fwd else (), valid=vl, src=sl),
-        NeighbourState(state=_at_source(bwd, sr) if bwd else (), valid=vr, src=sr),
-    )
+    # ── PHASE 2, SOLVE: (D) the policy's half — the two held messages into ψ's channels ──────────────
+    msg = prepared.solve(from_left, from_right)
     counts = AssertionCounts()
     _check_message(msg, ctx, counts)
 
@@ -599,14 +582,8 @@ def solve_chain(
             left=np.asarray(left, np.int64),
             right=np.asarray(right, np.int64),
         )
-        # ⭐ the RAW per-slot relayed state, both directions. The BACKBONE publishes it because the
-        # backbone is the only thing that holds it un-indexed: ``deliver`` receives it gathered at the
-        # source, which is assertion 1. The dissect loop reads these keys, so the names are the shipped
-        # ones and the values are the arrays exactly as each scan published them.
-        _NAMES = ("g", "p", "n", "pg", "pp", "pn", "mg", "mp", "mn", "tau")
-        for _tag, _st in (("fwd", fwd), ("bwd", bwd)):
-            if _st is not None:
-                _capture["_uni_static"].update({f"{_tag}_{k}": v for k, v in zip(_NAMES, _st)})
+        # ⚠ the RAW per-slot relayed state (``fwd_*`` / ``bwd_*``) is the RELAY's to publish — it is the
+        # only thing that holds it — and it does so into this same ``_uni_static`` at its solve.
         _capture.update(
             backbone_assertions=counts,
             fg_loc=own.f_g,
@@ -657,24 +634,31 @@ def solve_chain(
     )
 
 
-def _scan(seq, nbr, relay, *, backward: bool):  # noqa: D401 — see solve_chain's (B)/(C)
-    """ONE directional pass: for each slot in ``seq``, relay from its neighbour of the other kind.
+def _pass(seq, nbr, prepared, *, backward: bool) -> list:
+    """ONE directional pass — phase 1 of the two-phase solve: for each node in ``seq``, in chain order,
+    the node RECEIVES from its neighbour of the other kind and holds the result.
 
-    ⭐ **The whole direction dependence is which neighbour array is read.** ``-1`` is a reference terminal
-    and therefore a propagation sink — it is skipped, so a sweep cannot relay across a reference boundary.
-
-    Returns the policy's published state, or ``None`` if the policy relays nothing at all.
+    ⭐ **The whole direction dependence is which neighbour array is read.** ``-1`` is a reference terminal:
+    the node holds ``NO_NEIGHBOUR`` (``None``) there, which is not a message — the chain's two end nodes
+    hold one message, every other node two. ⛔ **A real hop must arrive**: a kernel that returns ``None``
+    for a node that HAS a neighbour is refused, because the solve could not then tell "nothing to say"
+    (:data:`~.messages.SILENCE`) from "never spoken to". A policy that sends nothing at all returns no
+    kernel, and every node then holds SILENCE from this side.
     """
-    kernel = relay.scan(backward=backward)
-    if kernel is None:
-        return None
-    step, publish = kernel
+    receive = prepared.propagate(backward=backward)
+    held: list = [None] * len(seq)
     for i in seq:
         s = nbr[i]
         if s < 0:
             continue
-        step(s, i)
-    return publish()
+        held[i] = SILENCE if receive is None else receive(s, i)
+        if held[i] is None:
+            raise AssertionError(
+                f"the {'backward' if backward else 'forward'} pass left slot {i} with no message from "
+                f"its neighbour {s}: a hop that carries nothing must still ARRIVE as SILENCE (owner "
+                "ruling 2026-09-04) — return SILENCE, never None, from a real hop"
+            )
+    return held
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────

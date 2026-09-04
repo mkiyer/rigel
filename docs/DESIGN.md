@@ -1946,6 +1946,14 @@ transport's multi-hop form is THE SCAN, the next case; the level bound is owed a
 
 ### 6b.10 ⭐⭐⭐ THE SCAN SEAM — the ledger, the two passes, and a zero point that costs nothing (landed inert 2026-09-03)
 
+⚠ **SUPERSEDED 2026-09-04 by §6b.12.** The seam's ledger, names, consumed set and hop budget were
+scaffolding for a policy that computed its messages in `prepare`; under the two-phase backbone the
+passes compose what a node holds and the four laws below hold by construction (① a hop is taken
+where a rule is registered; ② a node sends only what it holds from its far side; ③ nothing is counted
+twice because every hop is one rule application; ④ the width is charged per hop by the rule). Kept as
+the record of the zero point it measured.
+
+
 **What is built.** Every message the policy delivers is now recorded with the slot it came FROM, a
 NAME, and the ADJACENT MAP that carried it (`_Ledger` in `messages/transfer.py`), and the prepared
 object answers the backbone's `scan(backward)` with its `(step, publish)` kernel: each of the two
@@ -1996,6 +2004,42 @@ as the row crosses — so the mechanism is in the right place; what is owed is t
 side at every node, the recipient's three decisions stated explicitly rather than implied by whether a
 map exists, and the pricing of each decision. ⛔ The budget stays 0 until that form is built and
 priced, so nothing about the shipped answer changes meanwhile.
+
+### 6b.12 ⭐⭐⭐ THE SKELETON IS RE-FOUNDED ON THE OWNER'S TWO PHASES, AND EVERY POLICY IDEA IS JUDGED AT PASS ZERO AND WITH THE PRIOR, APART (owner rulings, 2026-09-04)
+
+⭐⭐⭐ **The backbone is the owner's two phases and nothing straddles them.** `propagate` — a forward
+pass then a backward pass; at each hop the RECIPIENT receives what its neighbour sends (the sender's
+own claim composed with what the sender holds from its far side), decides to STOP, FORWARD or MODIFY
+it, and holds the result; beliefs do not change; when both passes end every node holds one message
+from each neighbour it has, Silence being a message and a missing neighbour being not one. `solve` —
+every node once, from its own evidence, the two held messages and the gDNA hyperprior. The names are
+`prepare / propagate(backward) → receive(source, destination) / solve(from_left, from_right)`; the
+per-sweep object is `Prepared`; the message is one type with a composition lane and a level lane.
+⛔ **The foundation spec's Gaussian-lane `Message` and the `message` policy RETIRE** — they carried the
+pre-rebuild currency and were byte-identical to silence; their laws survive as the backbone's gates.
+The shipped relay keeps running byte-identically until the flip (its `receive` returns the source's
+state, its `solve` is today's combine). ⭐ LANDED the same day, in two stages: the backbone and the protocol first (silent, relay and the
+one-hop transfer byte-identical on three conditions; the suite's goldens unchanged), then the transfer
+policy rebuilt as claims and rules (`messages/transfer.py`: `prepare` states every node's own claim and a
+rule per directed face, `propagate` is the recipient's kernel, `solve` adds the two held profiles), the
+landed form bit-identical to the prototype's formal arm on three conditions. ⭐ Measured before the
+ruling: the shipped transfer policy
+re-expressed as passes reproduces itself per slot on 1,768 of 1,782 slots (the rest: the walled
+block's chains of termini, where the shipped `prepare`'s construction ORDER was an unstated rule — a
+pass replaces it), and the formal form with today's messages wins BOTH halves of the ladder against
+the shipped transfer, 7/8 and 7/8 (`policy_prototype.py`, the record in the sandbox's
+`TWO_PHASE_BACKBONE.md`).
+
+⭐⭐⭐ **Every message-policy idea is judged TWICE, and the two readings are never pooled.** The gDNA
+landscape prior is fitted AFTER the first pass, on that pass's solved gDNA, and comes back in the second
+pass — so a first-pass error poisons the prior and the prior returns it everywhere
+(`ISSUES: gdna-landscape-trains-on-false-positives`). A new mechanism is therefore read at PASS ZERO
+(`calib_refit_iters = 0`: the solve without the landscape, which is what trains it) and with the full
+pipeline, side by side. ⛔ A refutation or a win read only through the full pipeline is not
+attributed: it may be the prior's response. ⭐ The first pass does not have to solve every node; it
+has to solve ENOUGH nodes confidently to train a landscape that solves the rest in the second pass —
+which nodes train it is the landscape's own owed work, taken up AFTER the message architecture works
+end to end, becomes the default and the older policies retire (the owner's order, 2026-09-04).
 
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 

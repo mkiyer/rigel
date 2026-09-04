@@ -43,21 +43,84 @@ from rigel.calibration.messages.silent import SilentPolicy
 from rigel.calibration.region_chain import REGION
 
 
-def _mp():
-    spec = importlib.util.spec_from_file_location(
-        "tmp_for_transfer_policy", Path(__file__).parent / "test_message_policy.py"
-    )
-    m = importlib.util.module_from_spec(spec)
-    sys.modules["tmp_for_transfer_policy"] = m
-    spec.loader.exec_module(m)
-    return m
-
-
 @pytest.fixture(scope="module")
 def sweep_inputs(tmp_path_factory):
-    """The message-policy gate file's captured `solve_chain` inputs, reused verbatim so every
-    policy gate in this package runs on byte-identical inputs."""
-    return _mp().sweep_inputs.__wrapped__(tmp_path_factory)
+    """ONE real `solve_chain` call captured from a calibrate run on the toy — the backbone-parity
+    pattern: every gate below re-runs the sweep with a different policy on byte-identical inputs.
+    (Moved here from the retired foundation-spec gate file, 2026-09-04.)"""
+    import dataclasses
+
+    spec = importlib.util.spec_from_file_location(
+        "tpo_for_transfer_policy", Path(__file__).parent / "test_prior_vs_oracle.py"
+    )
+    m = importlib.util.module_from_spec(spec)
+    sys.modules["tpo_for_transfer_policy"] = m
+    spec.loader.exec_module(m)
+    toy = m.toy.__wrapped__(tmp_path_factory)
+
+    from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+    from rigel.calibration.region_arrays import RegionArrays
+    from rigel.calibration.sj_opportunity import crossing_probability_from_index
+    from rigel.calibration.splice_graph import (
+        build_boundary_flags_array,
+        build_sj_geometry_arrays,
+    )
+    from rigel.config import CalibrationConfig, PipelineConfig
+    from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+
+    index = toy.index
+    scan_cfg = dataclasses.replace(
+        PipelineConfig().scan, sj_strand_tag=_native_detect_sj_tag(str(toy.bam_path))
+    )
+    _stats, strand_model, _buf, payload = scan_and_buffer(str(toy.bam_path), index, scan_cfg)
+    ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
+    fl = build_fl_models(
+        payload,
+        sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
+    )
+    grabbed: list = []
+    calibrate_mod = sys.modules["rigel.calibration.calibrate"]
+    orig = SW.solve_chain
+
+    def spy(chain, statics, geometry, belief, region_arrays, **kw):
+        if not grabbed:
+            grabbed.append((chain, statics, geometry, belief, region_arrays, dict(kw)))
+        return orig(chain, statics, geometry, belief, region_arrays, **kw)
+
+    calibrate_mod.solve_chain = spy
+    try:
+        calibrate_mod.calibrate(
+            payload=payload,
+            config=CalibrationConfig(rna_anchor=True, message_propagation=True),
+            region_arrays=ra,
+            strand_model=strand_model,
+            gdna_fl_pmf=fl.gdna_pmf,
+            rna_fl_pmf=fl.rna_pmf,
+            sj=build_sj_geometry_arrays(index),
+            boundary_flags=build_boundary_flags_array(index),
+        )
+    finally:
+        calibrate_mod.solve_chain = orig
+    assert grabbed, "the spy never fired"
+    chain, statics, geometry, belief, region_arrays, kw = grabbed[0]
+    shipped_flux = getattr(kw.get("policy"), "_flux", None)
+    kw = {k: v for k, v in kw.items() if k not in ("policy", "_capture")}
+    return dict(
+        args=(chain, statics, geometry, belief, region_arrays),
+        kw=kw,
+        flux=shipped_flux,
+        payload=payload,
+        calibrate_kw=dict(
+            region_arrays=ra,
+            strand_model=strand_model,
+            gdna_fl_pmf=fl.gdna_pmf,
+            rna_fl_pmf=fl.rna_pmf,
+            sj=build_sj_geometry_arrays(index),
+            boundary_flags=build_boundary_flags_array(index),
+        ),
+    )
 
 
 def _run(si, policy, capture=None):
@@ -217,47 +280,6 @@ def _expected_exon_rows(si, ctx, src, lam):
     return out
 
 
-def test_the_transfer_delivers_at_pairs_and_licensed_faces_and_relays_nothing(sweep_inputs):
-    """The rungs-1+2 contract: rung-1 rows VERBATIM at exactly the independently-derived
-    intron|exon pair boundaries; rung-2 rows at exactly the licensed exon faces, equal to the
-    independently recomputed map+width transport; zero everywhere else — and the policy's scan
-    is None, so nothing can travel a second hop by construction."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    pairs, n_slots = _expected_pairs(sweep_inputs)
-    assert pairs, "the toy must carry at least one intron|exon pair or this gate proves nothing"
-
-    ctx = _ctx_of(sweep_inputs)
-    pol = TransferPolicy(provider)
-    prepared = pol.prepare(ctx)
-    assert prepared.scan(backward=False) is None and prepared.scan(backward=True) is None
-    import rigel.calibration.messages as M
-
-    msg = prepared.deliver(_dummy_nb(n_slots), _dummy_nb(n_slots))
-    assert isinstance(msg, M.PsiMessage) and msg.lam_rows is not None
-    rows = np.asarray(msg.lam_rows)
-    src = provider(n_grid, window)
-    lam, _ = _logodds_grid(n_grid, window)
-    exon_rows = _expected_exon_rows(sweep_inputs, ctx, src, lam)
-    assert exon_rows, "the toy must license at least one exon face or this gate proves nothing"
-    expected_b = {b for b, _j in pairs}
-    item5 = _item5_slots(ctx)  # the terminus boundaries and outside exons: item 5's own gate
-    for i in range(n_slots):
-        if i in expected_b:
-            j = dict(pairs)[i]
-            np.testing.assert_array_equal(rows[i], src[j] - src[j].max(), err_msg=f"slot {i}")
-        elif int(i) in exon_rows and i not in item5:
-            np.testing.assert_allclose(
-                rows[i], exon_rows[int(i)], rtol=0, atol=1e-12, err_msg=f"exon slot {i}"
-            )
-        elif i not in item5:
-            assert not rows[i].any(), f"slot {i} received a transfer it is not licensed for"
-
-
 def test_the_edge_bound_row_is_one_sided_and_vacuous_at_zero():
     """RUNG 3 (owner ruling 2026-09-02: LOWER BOUND ONLY — the upper side is refused as
     over-engineering and the g00-edge residual is an ACCEPTED error): the profile-likelihood
@@ -367,11 +389,11 @@ def _ctx_of(si):
     return grabbed[0]
 
 
-def _dummy_nb(n_slots):
-    from rigel.calibration.messages import NeighbourState
+def _nothing_held(n_slots):
+    """The two held lists of a policy that sent nothing: SILENCE at every interior node."""
+    from rigel.calibration.messages import SILENCE
 
-    idx = np.zeros(n_slots, np.int64)
-    return NeighbourState(state=(), valid=np.zeros(n_slots, bool), src=idx)
+    return [SILENCE] * int(n_slots)
 
 
 def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
@@ -508,72 +530,6 @@ def _strand_of(si):
     )
 
 
-def test_the_exon_message_is_silence_inside_the_strand_deadband(sweep_inputs):
-    """ITEM 1's vacuity law: an exon whose strand channel the solver declares dead (its own
-    ``tau_lam`` is 0 — the derived noise-floor deadband, no constant) sends NOTHING, so the
-    policy's rows equal the rungs-1–3 rows byte for byte; and a policy built without strand
-    parameters is the rungs-1–3 policy exactly."""
-    import dataclasses as _dc
-
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    base = np.asarray(
-        TransferPolicy(provider).prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    dead = _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=np.zeros(n)))
-    gated = TransferPolicy(provider, strand=_strand_of(sweep_inputs)).prepare(dead)
-    np.testing.assert_array_equal(
-        np.asarray(gated.deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows), base
-    )
-
-
-def test_the_exon_message_lands_at_licensed_faces_beside_the_intron_row(sweep_inputs):
-    """ITEM 1's contract: at every licensed intron|exon face of a strand-live exon the boundary
-    receives the exon's splice-out row (independently recomputed) SUMMED with rung 1's intron row —
-    two witnesses; every other slot is exactly as rungs 1–3 leave it, except the INTRON slots, which
-    item 2 serves off the same ``strand`` parameter and whose contract is item 2's own gate."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    base = np.asarray(
-        TransferPolicy(provider).prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    rows = np.asarray(
-        TransferPolicy(provider, strand=strand)
-        .prepare(ctx)
-        .deliver(_dummy_nb(n), _dummy_nb(n))
-        .lam_rows
-    )
-    expected = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
-    assert expected, (
-        "the toy must carry a strand-live exon with a licensed face or this gate proves nothing"
-    )
-    intron = _intron_mask(ctx)
-    item5 = _item5_slots(ctx)
-    for i in range(n):
-        if i in expected:
-            want = base[i] + expected[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"slot {i}"
-            )
-        elif not intron[i] and i not in item5:
-            np.testing.assert_array_equal(
-                rows[i], base[i], err_msg=f"slot {i} moved without a licence"
-            )
-
-
 def test_the_splice_out_row_is_the_count_form_widened_by_the_marginal():
     """The splice-out row's three analytic properties: (i) with equal face and region geometry its
     mode sits at f_b = f_E (U+S)/U — the owner's arithmetic with the enrichment ratio cancelled;
@@ -658,68 +614,6 @@ def _dead_boundaries(ctx):
     tau = np.asarray(ctx.own.tau_lam, np.float64).copy()
     tau[np.asarray(ctx.is_boundary, bool)] = 0.0
     return _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=tau))
-
-
-def test_the_boundary_message_is_silence_inside_the_strand_deadband(sweep_inputs):
-    """ITEM 2's vacuity law: a boundary whose strand channel the solver declares dead (its own
-    ``tau_lam`` is 0 — at a boundary that IS the strand Fisher information, no constant) sends
-    NOTHING to its intron. With every boundary dead and every exon live, no intron receives a row and
-    every other slot is exactly as the fully-live policy leaves it (item 1 reads the EXON's deadband,
-    which is intact). ⚠ This gate cannot fail before the mechanism exists — nothing delivered to an
-    intron before item 2 — so its falsification is the watched perturbation (the deadband dropped)."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
-    live = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    dead = np.asarray(
-        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    intron = _intron_mask(ctx)
-    keep = ~intron
-    keep[sorted(_item5_slots(ctx))] = False  # a dead boundary also stops item 5's row to its exon
-    assert not dead[intron].any(), "a dead boundary delivered to its intron"
-    np.testing.assert_array_equal(dead[keep], live[keep])
-
-
-def test_the_boundary_message_lands_at_introns_beside_nothing_else(sweep_inputs):
-    """ITEM 2's contract: every intron whose licensed, strand-live boundaries send receives the SUM of
-    their own strand rows (independently recomputed — two witnesses at a two-faced intron); an intron
-    with no such boundary receives nothing; every other slot is exactly as rungs 1–3 + item 1 leave
-    it (the boundaries-dead rows, which the vacuity gate proves item-2-free)."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    pol = TransferPolicy(provider, strand=strand)
-    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    base = np.asarray(
-        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    expected = _expected_boundary_rows(sweep_inputs, ctx, strand, lam)
-    assert expected, "the toy must carry a strand-live intron|exon pair or this gate proves nothing"
-    intron = _intron_mask(ctx)
-    item5 = _item5_slots(ctx)
-    for i in range(n):
-        if i in expected:
-            want = expected[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"intron slot {i}"
-            )
-        elif intron[i]:
-            assert not rows[i].any(), f"intron slot {i} received a row without a licensed live face"
-        elif i not in item5:
-            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 2")
 
 
 def test_the_boundary_strand_licence_requires_one_shared_strand():
@@ -884,53 +778,6 @@ def test_the_terminus_orientation_reads_the_flag_alone():
     assert outside_flank(FLAG_TSS_POS | FLAG_DONOR_POS, 7, 9) == (None, None), (
         "sj+terminus: its own item"
     )
-
-
-def test_the_terminus_messages_land_at_the_outside_pair_beside_nothing_else(sweep_inputs):
-    """ITEM 5's contract on the toy's two exon|exon terminus boundaries (a + start and a + end): the
-    boundary receives exactly the independently recomputed composed transport plus the outside
-    exon's mapped strand row; the outside exon receives exactly the boundary's mapped strand row on
-    top of its rungs-2/3 rows; the INSIDE exon and every other slot are exactly as the policy leaves
-    them when the terminus bits are cleared — so a reversed orientation, a dropped spliced crossing,
-    or a delivery to the inside flank fails (each watched firing, 2026-09-02). ⚠ An ECHO — the
-    composed transport reading a row item 5 itself delivered to the exon — is NOT catchable on this
-    toy (each outside exon serves one boundary and is read before anything reaches it; watched
-    silent), so the policy keeps that law STRUCTURALLY: item 5 accumulates apart and reads only the
-    rows the earlier messages left."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    pol = TransferPolicy(provider, strand=strand)
-    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    base = np.asarray(
-        pol.prepare(_terminus_flags_cleared(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    exon_rows = _expected_exon_rows(sweep_inputs, ctx, provider(n_grid, window), lam)
-    at_b, at_o = _expected_terminus_rows(sweep_inputs, ctx, strand, lam, exon_rows)
-    assert len(at_b) >= 2 and at_o, (
-        "the toy must carry two served terminus boundaries or this gate proves nothing"
-    )
-    for i in range(n):
-        if i in at_b:
-            assert not base[i].any(), f"boundary {i} receives something other than item 5"
-            want = at_b[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"terminus boundary {i}"
-            )
-        elif i in at_o:
-            want = base[i] + at_o[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"outside exon {i}"
-            )
-        else:
-            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 5")
 
 
 # ── ITEM 6 (owner design 2026-09-02): the abundance-discrepancy message into the inside flank ────
@@ -1115,74 +962,6 @@ def test_the_abundance_map_holds_the_two_hypotheses_and_the_cap():
     )
 
 
-def test_the_abundance_message_lands_at_inside_exons_beside_their_face_rows(sweep_inputs):
-    """ITEM 6's contract on the toy's two terminus boundaries: each INSIDE exon receives exactly the
-    independently recomputed abundance row (the step's spread refit here) on top of its rungs-2/3
-    face rows; every slot that is neither an item-5 site nor an inside exon is exactly as the policy
-    leaves it with the terminus bits cleared — so a dropped cap, a dropped fit, an inverted ratio or a
-    delivery to the outside flank fails."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _with_populated_inside(_ctx_of(sweep_inputs))
-    n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    pol = TransferPolicy(provider, strand=strand)
-    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    base = np.asarray(
-        pol.prepare(_terminus_flags_cleared(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    exon_rows = _expected_exon_rows(sweep_inputs, ctx, provider(n_grid, window), lam)
-    expected, v_step = _expected_abundance_rows(sweep_inputs, ctx, strand, lam)
-    assert len(expected) >= 2 and v_step > 0.0, (
-        "the toy must carry two served inside exons or this gate proves nothing"
-    )
-    item5 = _item5_slots(ctx)
-    for i in range(n):
-        if i in expected:
-            want = exon_rows.get(i, np.zeros(lam.shape[0])) + expected[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"inside exon {i}"
-            )
-        elif i not in item5:
-            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 6")
-
-
-def test_the_abundance_message_is_silence_inside_the_strand_deadband(sweep_inputs):
-    """ITEM 6's vacuity law: a terminus boundary whose strand channel the solver declares dead sends
-    nothing into its inside exon — with every boundary dead, each inside exon's row equals its row
-    under cleared terminus bits (rungs 2/3 alone). ⚠ Cannot fail before the mechanism exists; its
-    falsification is the watched perturbation (the deadband dropped)."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _with_populated_inside(_ctx_of(sweep_inputs))
-    n = int(ctx.n_slots)
-    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
-    dead = np.asarray(
-        pol.prepare(_dead_boundaries(ctx)).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows
-    )
-    cleared = np.asarray(
-        pol.prepare(_terminus_flags_cleared(_dead_boundaries(ctx)))
-        .deliver(_dummy_nb(n), _dummy_nb(n))
-        .lam_rows
-    )
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    lam, _ = _logodds_grid(n_grid, window)
-    expected, _v = _expected_abundance_rows(sweep_inputs, ctx, _strand_of(sweep_inputs), lam)
-    for i in expected:
-        np.testing.assert_array_equal(
-            dead[i], cleared[i], err_msg=f"inside exon {i} received a row from a dead boundary"
-        )
-
-
 # ── ITEM 7 (2026-09-02): the alternative splice site ──────────────────────────────────────────────
 
 
@@ -1329,241 +1108,464 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     return out, width
 
 
-def test_the_alt_splice_messages_land_at_the_junction_and_both_flanks(sweep_inputs):
-    """ITEM 7's contract on the patched toy (one donor, one acceptor, both flanks populated): the
-    junction boundary receives exactly both flanks' mapped rows and each flank exactly the boundary's
-    mapped row — each blurred by the pair's own disagreement beyond counting, the fills chosen to
-    DISAGREE so at least one width is non-trivial — on top of its rungs-2/3 rows; every other slot is
-    exactly as the policy leaves it with the junction bits cleared. So swapped flanks, a dropped flux,
-    a dropped width, or a delivery to the wrong flank fails."""
-    import dataclasses as _dc
-
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.messages.transfer_rows import SJ_FLAGS
-    from rigel.calibration.simplex_logodds import _logodds_grid
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
-    n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    pol = TransferPolicy(provider, strand=strand)
-    rows = np.asarray(pol.prepare(ctx).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    flags = np.asarray(ctx.boundary_flags, np.uint16).copy()
-    flags[np.asarray(ctx.is_boundary, bool)] &= ~SJ_FLAGS
-    base = np.asarray(
-        pol.prepare(_dc.replace(ctx, boundary_flags=flags))
-        .deliver(_dummy_nb(n), _dummy_nb(n))
-        .lam_rows
-    )
-    expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
-    assert len(expected) >= 4, (
-        "the patched toy must serve two junctions and their flanks or this gate proves nothing"
-    )
-    assert any(w > 0.0 for w in widths.values()), (
-        "the fills must disagree beyond counting somewhere or the width is untested"
-    )
-    for i in range(n):
-        if i in expected:
-            want = base[i] + expected[i]
-            np.testing.assert_allclose(
-                rows[i], want - want.max(), rtol=0, atol=1e-10, err_msg=f"slot {i}"
-            )
-        else:
-            np.testing.assert_array_equal(rows[i], base[i], err_msg=f"slot {i} moved with item 7")
-
-
-def test_the_alt_splice_messages_are_silence_inside_the_strand_deadband(sweep_inputs):
-    """ITEM 7's vacuity law: with every boundary's strand channel dead and the flanks' too, the junction
-    bits change nothing — each slot's row equals its row with the junction bits cleared. ⚠ Cannot fail
-    before the mechanism exists; its falsification is the watched perturbation (a deadband dropped)."""
-    import dataclasses as _dc
-
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.messages.transfer_rows import SJ_FLAGS
-
-    n_grid = int(sweep_inputs["kw"]["n_grid"])
-    window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
-    n = int(ctx.n_slots)
-    tau = np.zeros(n)
-    dead = _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=tau))
-    pol = TransferPolicy(provider, strand=_strand_of(sweep_inputs))
-    rows = np.asarray(pol.prepare(dead).deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    flags = np.asarray(dead.boundary_flags, np.uint16).copy()
-    flags[np.asarray(dead.is_boundary, bool)] &= ~SJ_FLAGS
-    cleared = np.asarray(
-        pol.prepare(_dc.replace(dead, boundary_flags=flags))
-        .deliver(_dummy_nb(n), _dummy_nb(n))
-        .lam_rows
-    )
-    np.testing.assert_array_equal(rows, cleared)
-
-
-# ── THE SCAN SEAM (2026-09-03): the ledger, the two passes, and the inert shipped budget ──────────
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE PASS FORM (owner ruling 2026-09-04, `DESIGN.md` §6b.12): every node's OWN CLAIM, a RULE per
+# directed face, and the two passes. Each family below is gated on its claim and its rule directly
+# (the independent recomputations above supply the expected rows); the passes are gated once, against
+# an independent recursive reference, and once for the no-echo law.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
 def _drive_the_backbone(prepared, ctx):
-    """The backbone's own contract, reproduced (`sweep.solve_chain`'s two directional scans and its
-    combine): each pass calls ``step(source, destination)`` over the chain order — the forward pass
-    reading each slot's LOW neighbour, the backward pass its HIGH one — then ``publish()``; the
-    published arrays are gathered AT THE SOURCE and handed to ``deliver`` as the two neighbour
-    states. Returns the delivered rows."""
-    from rigel.calibration.messages import NeighbourState
+    """The backbone's own contract, reproduced (`sweep.solve_chain`'s two directional passes and its
+    solve): each pass calls ``receive(source, destination)`` over the chain order — the forward pass
+    reading each slot's LOW neighbour, the backward pass its HIGH one — and holds the result at the
+    destination; ``solve`` receives the two held lists. Returns the delivered rows (zeros when the
+    policy is silent)."""
+    from rigel.calibration.messages import SILENCE
 
-    n = int(ctx.n_slots)
     order = list(ctx.order)
-    states = []
+    held = []
     for nbr, seq, backward in (
         (np.asarray(ctx.left, np.int64), order, False),
         (np.asarray(ctx.right, np.int64), order[::-1], True),
     ):
-        kernel = prepared.scan(backward=backward)
-        if kernel is None:
-            states.append(_dummy_nb(n))
-            continue
-        step, publish = kernel
+        receive = prepared.propagate(backward=backward)
+        got = [None] * len(order)
         for i in seq:
             s = int(nbr[i])
             if s >= 0:
-                step(s, i)
-        src = np.clip(nbr, 0, n - 1)
-        states.append(
-            NeighbourState(
-                state=tuple(np.asarray(a)[src] for a in publish()), valid=nbr >= 0, src=src
-            )
-        )
-    return np.asarray(prepared.deliver(*states).lam_rows)
+                got[i] = SILENCE if receive is None else receive(s, i)
+        held.append(got)
+    msg = prepared.solve(*held)
+    if msg.lam_rows is None:
+        return np.zeros((len(order), int(ctx.n_grid)))
+    return np.asarray(msg.lam_rows)
 
 
-def test_the_scan_is_inert_at_the_shipped_hop_budget(sweep_inputs):
-    """THE ZERO POINT: at the shipped budget the policy builds no ledger, relays nothing in either
-    direction, and delivers exactly its one-hop rows — so attenuating every hop past the first costs
-    nothing and cannot change an answer."""
+def _rows_of(pol, ctx):
+    return _drive_the_backbone(pol.prepare(ctx), ctx)
+
+
+def _reference_rows(prepared, ctx):
+    """AN INDEPENDENT IMPLEMENTATION OF THE TWO PASSES — recursive rather than sequential: the message
+    into ``i`` from its neighbour ``s`` is the face's rule applied to ``s``'s own claim composed with
+    the message into ``s`` from ``s``'s OTHER neighbour, and the rows are the two messages composed.
+    Nothing here reads the policy's pass state; only its claims and rules."""
+    from rigel.calibration.messages.transfer_rows import EPS
+
+    left, right = list(ctx.left), list(ctx.right)
+    own, rule = prepared.own, prepared.rule
+    memo = {}
+
+    def norm(r):
+        return r - r.max()
+
+    def into(s, i):
+        key = (s, i)
+        if key in memo:
+            return memo[key]
+        fn = rule.get((s, i))
+        out = None
+        if fn is not None:
+            far = left[s] if right[s] == i else right[s]
+            parts = [] if own[s] is None else [own[s]]
+            if far >= 0:
+                m = into(far, s)
+                if m is not None:
+                    parts.append(m)
+            if parts:
+                sending = norm(sum(parts))
+                r = fn(sending)
+                if r is not None and np.ptp(r) > EPS:
+                    out = norm(r)
+        memo[key] = out
+        return out
+
+    n = len(own)
+    rows = np.zeros((n, int(ctx.n_grid)))
+    for i in range(n):
+        parts = [into(s, i) for s in (left[i], right[i]) if s >= 0]
+        parts = [p for p in parts if p is not None]
+        if parts:
+            rows[i] = norm(sum(parts))
+    return rows
+
+
+def _strand_row_of(ctx, strand, lam, x):
+    """A slot's own strand profile, recomputed independently (the frozen-variance count form)."""
+    kappa, od_g, od_r = strand
+    fp = np.asarray(ctx.free_pos, bool)
+    cnt = np.asarray(ctx.unspliced_count, np.float64)
+    belief = np.asarray(ctx.belief_fg, np.float64)
+    fg = 1.0 / (1.0 + np.exp(-lam))
+    n = cnt[x].sum()
+    ks = kappa if fp[x] else 1.0 - kappa
+    f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
+    p = 0.5 * fg + ks * (1 - fg)
+    p_ref = 0.5 * f_ref + ks * (1 - f_ref)
+    var = max(
+        n * p_ref * (1 - p_ref)
+        + (n * f_ref) ** 2 * 0.25 * od_g
+        + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
+        1e-9,
+    )
+    row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
+    return row - row.max()
+
+
+def _full_policy(sweep_inputs):
     from rigel.calibration.messages.transfer import TransferPolicy
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
     provider = _live_provider(sweep_inputs, n_grid, window)
+    return TransferPolicy(provider, strand=_strand_of(sweep_inputs)), provider, n_grid, window
+
+
+def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passes(sweep_inputs):
+    """THE PASSES, gated against a second implementation: what the backbone's two sequential passes
+    deliver equals the recursive definition — the message into a node is the face's rule applied to
+    the sender's own claim composed with what reached the sender from ITS far side — on the live toy
+    and on the toy with populated inside pieces and alternative splice sites (every rule family live)."""
+    pol, _p, _g, _w = _full_policy(sweep_inputs)
+    for ctx in (_ctx_of(sweep_inputs), _with_alt_splice_sites(_ctx_of(sweep_inputs))):
+        prepared = pol.prepare(ctx)
+        rows = _drive_the_backbone(prepared, ctx)
+        assert rows.any(), "the toy delivered nothing — this gate would prove nothing"
+        np.testing.assert_allclose(rows, _reference_rows(prepared, ctx), rtol=0, atol=1e-10)
+
+
+def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
+    """THE NO-ECHO LAW, watched: replace ONE node's own claim by a distinctive profile and re-run the
+    passes — what that node HOLDS from either side must not move (its claim never returns to it),
+    while some other node's rows must (the claim did travel). Checked at an intron with two live faces
+    and at a strand-live exon."""
+    from rigel.calibration.messages.transfer_rows import EPS
+
+    pol, _p, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
-    n = int(ctx.n_slots)
-    prepared = TransferPolicy(provider, strand=_strand_of(sweep_inputs)).prepare(ctx)
-    assert prepared.scan(backward=False) is None and prepared.scan(backward=True) is None
-    assert not prepared._ledger.on and prepared._ledger.arrivals == [] and not prepared._ledger.maps
-    rows = np.asarray(prepared.deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
-    np.testing.assert_array_equal(rows, np.asarray(_drive_the_backbone(prepared, ctx)))
+    prepared = pol.prepare(ctx)
+    lam = np.linspace(-window, window, n_grid)
+    probes = [
+        i
+        for i in range(ctx.n_slots)
+        if prepared.own[i] is not None and np.ptp(prepared.own[i]) > EPS
+    ]
+    assert probes, "no node carries a claim — this gate would prove nothing"
+    checked = 0
+    for i in probes[:12]:
+        base_rows = _drive_the_backbone(prepared, ctx)
+        held_before = [
+            None if h is None else h.composition
+            for h in (prepared.held[False][i], prepared.held[True][i])
+        ]
+        saved = prepared.own[i]
+        prepared.own[i] = -0.5 * ((lam - 3.3) / 0.2) ** 2  # a spike nowhere near any real claim
+        rows = _drive_the_backbone(prepared, ctx)
+        held_after = [
+            None if h is None else h.composition
+            for h in (prepared.held[False][i], prepared.held[True][i])
+        ]
+        prepared.own[i] = saved
+        for a, b in zip(held_before, held_after):
+            if a is None or b is None:
+                assert a is None and b is None
+            else:
+                np.testing.assert_array_equal(a, b, err_msg=f"slot {i} heard its own claim back")
+        moved = [
+            j for j in range(ctx.n_slots) if j != i and not np.array_equal(rows[j], base_rows[j])
+        ]
+        if moved:
+            checked += 1
+    assert checked >= 1, "no perturbed claim travelled anywhere — the gate could not have fired"
 
 
-def test_the_scan_kernel_carries_the_far_side_one_hop_and_no_further():
-    """THE KERNEL, on a ledger built by hand so the arithmetic is checkable: a hop carries the
-    source's arrivals from the side AWAY from the destination (never the near side — no echo), drops
-    the names the hop's own message already carries, takes a second hop only when the budget allows
-    it, and stops where no map is registered."""
-    from rigel.calibration.messages.transfer import _Ledger, _PreparedTransfer
-
-    n, k = 5, 4
-    lam_rows = np.zeros((n, k))
-    lam_rows[3] = np.array([-1.0, 0.0, -1.0, -2.0])
-    far = np.array([0.0, -1.0, -2.0, -3.0])  # reaches slot 1 from its LOW side
-    near = np.array([-3.0, -2.0, -1.0, 0.0])  # reaches slot 1 from its HIGH side — never carried
-    over = np.array([0.0, -0.5, -1.0, -1.5])  # reaches slot 2, and hop (2,3) already carries it
-
-    def ledger_of():
-        led = _Ledger(n, True)
-        led.arrival(1, 0, "far", far)
-        led.arrival(1, 2, "near", near)
-        led.arrival(2, 1, "over", over)
-        led.hop(1, 2, lambda row: 2.0 * row)
-        led.hop(2, 3, lambda row: 0.5 * row, consumes=("over",))
-        return led
-
-    def run(hops):
-        prepared = _PreparedTransfer(lam_rows.copy(), ledger_of(), hops)
-        ctx = type(
-            "C",
-            (),
-            dict(
-                n_slots=n,
-                order=list(range(n)),
-                left=np.array([-1, 0, 1, 2, 3]),
-                right=np.array([1, 2, 3, 4, -1]),
-            ),
-        )()
-        return _drive_the_backbone(prepared, ctx)
-
-    one = run(1)
-    step_one = 2.0 * far  # the far-side arrival through the (1, 2) map, already max-normalised
-    np.testing.assert_allclose(one[2], step_one, rtol=0, atol=1e-12)
-    np.testing.assert_array_equal(one[3], lam_rows[3])  # the budget stops the second hop
-    for i in (0, 1, 4):
-        np.testing.assert_array_equal(one[i], lam_rows[i])
-
-    two = run(2)
-    step_two = 0.5 * step_one  # the consumed arrival is dropped; what is carried is the first hop's
-    want = lam_rows[3] + (step_two - step_two.max())
-    np.testing.assert_allclose(two[3], want - want.max(), rtol=0, atol=1e-12)
-    np.testing.assert_allclose(two[2], step_one, rtol=0, atol=1e-12)
-    np.testing.assert_array_equal(two[4], lam_rows[4])  # no map (3, 4): the chain ends there
-
-
-def test_the_scan_carries_the_exons_row_through_the_boundary_into_its_intron(sweep_inputs):
-    """THE FIRST REAL HOP: with one hop of budget, an intron receives — on top of everything the
-    one-hop policy gives it — the EXON's own row that reached its boundary from the far side, carried
-    across the shared-population identity; recomputed independently (`_expected_splice_out_rows`).
-    An exon whose faces are all plain intron|exon receives NOTHING new, because rung 2 already
-    carries that intron's row one hop — the CONSUMED law — and no slot hears its own row back."""
-    from rigel.calibration.messages.transfer import TransferPolicy
-    from rigel.calibration.messages.transfer_rows import TERMINUS, boundary_shares_strand
+def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs):
+    """RUNGS 1–3 as claims and rules: an intron's own claim is its factory profile and its rule into
+    each boundary is the identity (FORWARD); the rule from a licensed face into the exon, applied to
+    the intron's claim and summed with the edge's level rule, equals the independently recomputed
+    rung-2 + rung-3 rows of that exon; an unlicensed face has no rule into the exon."""
+    from rigel.calibration.messages.transfer import TransferPolicy, _forward
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
     provider = _live_provider(sweep_inputs, n_grid, window)
+    pairs, _n = _expected_pairs(sweep_inputs)
+    assert pairs, "the toy must carry at least one intron|exon pair or this gate proves nothing"
+    ctx = _ctx_of(sweep_inputs)
+    prepared = TransferPolicy(provider).prepare(ctx)
+    src = provider(n_grid, window)
+    lam, _ = _logodds_grid(n_grid, window)
+    for b, j in pairs:
+        assert prepared.rule.get((int(j), int(b))) is _forward, f"pair ({j}, {b}) is not FORWARD"
+        np.testing.assert_array_equal(prepared.own[j], src[j] - src[j].max())
+    exon_rows = _expected_exon_rows(sweep_inputs, ctx, src, lam)
+    assert exon_rows, "the toy must license at least one exon face or this gate proves nothing"
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    intron = _intron_mask(ctx)
+    for e in np.flatnonzero(is_exon):
+        acc = None
+        for b in (left[e], right[e]):
+            fn = prepared.rule.get((int(b), int(e)))
+            if fn is None:
+                continue
+            i = left[b] if right[b] == e else right[b]
+            claim = prepared.own[i] if (i >= 0 and intron[i]) else prepared.own[b]
+            if claim is None:
+                continue
+            r = fn(claim)
+            if r is not None and np.ptp(r) > 1e-9:
+                acc = (r - r.max()) if acc is None else acc + (r - r.max())
+        if int(e) in exon_rows:
+            assert acc is not None, f"exon {e} has no rule where the recompute expects rows"
+            np.testing.assert_allclose(acc - acc.max(), exon_rows[int(e)], rtol=0, atol=1e-12)
+        else:
+            assert acc is None, f"exon {e} received a rule it is not licensed for"
+
+
+def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
+    """THE VACUITY LAW for every strand-borne claim (items 1, 2, 5, 6, 7): where the solver's derived
+    deadband declares a node's strand channel dead (``own.tau_lam == 0``), that node's OWN CLAIM is
+    absent — an exon's and a boundary's alike — so nothing of its own can travel; and a policy built
+    without strand parameters carries no strand claim anywhere."""
+    import dataclasses as _dc
+
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    pol, provider, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     n = int(ctx.n_slots)
-    strand = _strand_of(sweep_inputs)
-    lam, _ = _logodds_grid(n_grid, window)
-    one_hop = np.asarray(
-        TransferPolicy(provider, strand=strand)
-        .prepare(ctx)
-        .deliver(_dummy_nb(n), _dummy_nb(n))
-        .lam_rows
-    )
-    scanned = _drive_the_backbone(TransferPolicy(provider, strand=strand, hops=1).prepare(ctx), ctx)
-    item1 = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
-    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
-    flags = np.asarray(ctx.boundary_flags, np.uint16)
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
-    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
-    is_intron = ~is_bnd & ~is_exon & (fp | fn)
-    carried = 0
-    for i in np.flatnonzero(is_intron):
-        want = one_hop[i].copy()
-        for b in (left[i], right[i]):
-            if b < 0 or not is_bnd[b] or int(b) not in item1:
-                continue
-            if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
-                continue
-            want = want + item1[int(b)]
-            want -= want.max()
-            carried += 1
-        np.testing.assert_allclose(scanned[i], want, rtol=0, atol=1e-10, err_msg=f"intron {i}")
-    assert carried >= 1, "no intron received a forwarded row — this gate would prove nothing"
-    led = TransferPolicy(provider, strand=strand, hops=1).prepare(ctx)._ledger
-    faces = []
-    for source, dest in led.maps:  # a licensed face: a boundary into its exon, an intron beyond it
-        if not (is_bnd[source] and is_exon[dest]) or int(flags[source]) & TERMINUS:
+    live = pol.prepare(ctx)
+    assert any(live.own[e] is not None for e in np.flatnonzero(is_exon)), "no live exon claim"
+    dead = pol.prepare(_dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=np.zeros(n))))
+    for x in range(n):
+        if is_exon[x]:
+            assert dead.own[x] is None, f"a dead exon {x} carries a claim"
+        elif is_bnd[x] and dead.own[x] is not None:
+            assert not dead.own[x].any(), f"a dead boundary {x} carries a strand claim"
+    no_strand = TransferPolicy(provider).prepare(ctx)
+    for x in range(n):
+        if is_exon[x]:
+            assert no_strand.own[x] is None
+    # boundaries dead, exons live: item 2's claim is absent at every boundary
+    dead_b = pol.prepare(_dead_boundaries(ctx))
+    for b in np.flatnonzero(is_bnd):
+        assert dead_b.own[b] is None or not dead_b.own[b].any()
+
+
+def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_the_maps(
+    sweep_inputs,
+):
+    """ITEMS 1 and 2 as claims and rules: at every licensed face of a strand-live exon the rule
+    exon → boundary applied to the exon's claim, summed per boundary, equals the independently
+    recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
+    the rule boundary → intron is the identity and the boundary's claim, summed per intron, equals
+    the independently recomputed strand rows."""
+    from rigel.calibration.messages.transfer import _forward
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    ctx = _ctx_of(sweep_inputs)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    prepared = pol.prepare(ctx)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    expected = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
+    assert expected, (
+        "the toy must carry a strand-live exon with a licensed face or this gate proves nothing"
+    )
+    intron = _intron_mask(ctx)
+    got = {}
+    for e in np.flatnonzero(is_exon):
+        if prepared.own[e] is None:
             continue
-        far = left[source] if right[source] == dest else right[source]
-        if far >= 0 and is_intron[far]:
-            faces.append((source, dest))
-    assert faces, "no licensed face registered a hop — the consumed law would go untested"
-    for key in faces:
-        assert "intron row" in led.consumed.get(key, ()), (
-            f"the hop {key} carries rung 2's transported intron row already and must declare it "
-            "consumed, or the scan double-counts it"
+        for b in (left[e], right[e]):
+            fn = prepared.rule.get((int(e), int(b)))
+            if fn is None or b < 0:
+                continue
+            other = left[b] if right[b] == e else right[b]
+            if other < 0 or not intron[other]:
+                continue  # item 5 / item 7 rules leave through exon|exon faces: their own gates
+            r = fn(prepared.own[e])
+            if r is not None and np.ptp(r) > 1e-9:
+                got[int(b)] = got.get(int(b), 0.0) + (r - r.max())
+    assert set(got) == set(expected), set(got) ^ set(expected)
+    for b in expected:
+        np.testing.assert_allclose(
+            got[b] - got[b].max(), expected[b] - expected[b].max(), rtol=0, atol=1e-10
         )
+    expected_i = _expected_boundary_rows(sweep_inputs, ctx, strand, lam)
+    assert expected_i, (
+        "the toy must carry a strand-live intron|exon pair or this gate proves nothing"
+    )
+    pairs, _n = _expected_pairs(sweep_inputs)
+    got_i = {}
+    for b, i in pairs:
+        fn = prepared.rule.get((int(b), int(i)))
+        if fn is None or prepared.own[b] is None:
+            continue
+        assert fn is _forward, f"the boundary → intron rule at ({b}, {i}) is not the identity"
+        got_i[int(i)] = got_i.get(int(i), 0.0) + prepared.own[b]
+    assert set(got_i) == set(expected_i), set(got_i) ^ set(expected_i)
+    for i in expected_i:
+        np.testing.assert_allclose(
+            got_i[i] - got_i[i].max(), expected_i[i] - expected_i[i].max(), rtol=0, atol=1e-10
+        )
+
+
+def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_clear(sweep_inputs):
+    """ITEM 5 as claims and rules: at every exon|exon terminus boundary the rule outside exon → boundary
+    applied to the exon's claim is the independently recomputed splice-out row with the SPLICED
+    crossing, the rule boundary → outside exon applied to the boundary's claim the recomputed face-map
+    row; the rules exist exactly at the outside pairs and vanish when the terminus bits are cleared."""
+    from rigel.calibration.messages.transfer_rows import (
+        face_map_lambda,
+        splice_out_row,
+        transport_row,
+    )
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    ctx = _ctx_of(sweep_inputs)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    prepared = pol.prepare(ctx)
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    n_u = np.asarray(ctx.n_slot, np.float64)
+    n_s = np.asarray(ctx.spliced_slot, np.float64)
+    A_g = np.asarray(ctx.eff_gdna_global, np.float64)
+    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    sites = _item5_slots(ctx)
+    served = 0
+    for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
+        if not (is_exon[left[b]] and is_exon[right[b]]):
+            continue
+        outs = [
+            (s, i) for (s, i) in prepared.rule if (s == b and is_exon[i]) or (i == b and is_exon[s])
+        ]
+        if int(b) not in sites:
+            assert not outs, f"boundary {b} carries exon|exon rules without a served terminus"
+            continue
+        served += 1
+        (o,) = (
+            {s if s != b else i for (s, i) in outs} & {int(left[b]), int(right[b])}
+            if outs
+            else (None,)
+        )
+        assert o is not None
+        want = splice_out_row(
+            _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o]
+        )
+        if tau[o] > 0.0 and prepared.own[o] is not None:
+            got = prepared.rule[(int(o), int(b))](prepared.own[o])
+            np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
+        if tau[b] > 0.0:
+            le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
+            want_o = transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
+            got_o = prepared.rule[(int(b), int(o))](prepared.own[b])
+            np.testing.assert_allclose(
+                got_o - got_o.max(), want_o - want_o.max(), rtol=0, atol=1e-10
+            )
+    assert served >= 2, (
+        "the toy must carry two served terminus boundaries or this gate proves nothing"
+    )
+    cleared = pol.prepare(_terminus_flags_cleared(ctx))
+    for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
+        if is_exon[left[b]] and is_exon[right[b]]:
+            assert not any(s == b or i == b for (s, i) in cleared.rule), (
+                f"rules survive at {b} with no terminus"
+            )
+
+
+def test_the_abundance_rule_is_the_fitted_step_map_at_every_inside_exon(sweep_inputs):
+    """ITEM 6 as a rule: at every served terminus boundary the rule into the INSIDE exon applied to the
+    boundary's claim equals the independently recomputed abundance row with the step's spread refit
+    from the served pairs' two witnesses; the rule vanishes when the terminus bits are cleared."""
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    ctx = _with_populated_inside(_ctx_of(sweep_inputs))
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    prepared = pol.prepare(ctx)
+    expected, v_step = _expected_abundance_rows(sweep_inputs, ctx, strand, lam)
+    assert len(expected) >= 2 and v_step > 0.0, (
+        "the toy must carry two served inside exons or this gate proves nothing"
+    )
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+
+    def terminus(b):  # an exon|exon boundary: item 6's source; an intron|exon face is rung 2's
+        return (
+            is_bnd[b] and left[b] >= 0 and right[b] >= 0 and is_exon[left[b]] and is_exon[right[b]]
+        )
+
+    for i, want in expected.items():
+        hits = [
+            (s, d)
+            for (s, d) in prepared.rule
+            if d == i and s in (left[i], right[i]) and terminus(s)
+        ]
+        got = None
+        for s, d in hits:
+            if prepared.own[s] is None:
+                continue
+            r = prepared.rule[(s, d)](prepared.own[s])
+            if r is not None and np.ptp(r) > 1e-9:
+                got = (r - r.max()) if got is None else got + (r - r.max())
+        assert got is not None, f"inside exon {i} has no live rule"
+        np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
+    cleared = pol.prepare(_terminus_flags_cleared(ctx))
+    for i in expected:
+        assert not any(d == i and terminus(s) for (s, d) in cleared.rule), (
+            f"inside exon {i} keeps a terminus rule with no terminus"
+        )
+
+
+def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs):
+    """ITEM 7 as claims and rules on the patched toy: the rule flank → junction boundary applied to the
+    flank's claim, summed over the two flanks, equals the independently recomputed rows at the
+    boundary; the rule boundary → flank applied to the boundary's claim equals the recomputed row at
+    each flank — every message blurred by its own pair's disagreement beyond counting."""
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    pol, _p, n_grid, window = _full_policy(sweep_inputs)
+    ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    prepared = pol.prepare(ctx)
+    expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
+    assert expected and any(w > 0.0 for w in widths.values()), (
+        "the patched toy must carry served junctions with a live pair width or this gate proves nothing"
+    )
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    got = {}
+    for (s, d), fn in prepared.rule.items():
+        if not (
+            (is_bnd[s] and s in widths_keys(widths)) or (is_bnd[d] and d in widths_keys(widths))
+        ):
+            continue
+        if prepared.own[s] is None:
+            continue
+        r = fn(prepared.own[s])
+        if r is not None and np.ptp(r) > 1e-9:
+            got[int(d)] = got.get(int(d), 0.0) + (r - r.max())
+    for slot, want in expected.items():
+        assert slot in got, f"slot {slot} has no live item-7 rule"
+        np.testing.assert_allclose(
+            got[slot] - got[slot].max(), want - want.max(), rtol=0, atol=1e-10
+        )
+
+
+def widths_keys(widths):
+    """The junction boundaries the recompute served (its width keys are ``(boundary, flank)`` pairs)."""
+    return {int(k[0]) if isinstance(k, tuple) else int(k) for k in widths}

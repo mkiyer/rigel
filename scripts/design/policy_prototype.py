@@ -3,7 +3,7 @@
 — the harness every message rung is developed on before it touches `src/`.
 
 ⭐ **The seam.** A prototype is a Python class with the backbone's ``Policy`` shape (``prepare(ctx)``
-returning an object with ``scan``/``deliver``), named in a module the caller supplies; this harness
+returning an object with ``propagate``/``solve`` — the two phases), named in a module the caller supplies; this harness
 installs it in place of ``calibrate``'s ``TransferPolicy`` for the ``transfer`` arm and scores it beside
 ``silent`` and the SHIPPED ``transfer`` on a cached, certified condition. ⛔ Compare `src` against `src`
 across a landing — a prototype that subclasses the shipped policy and calls its ``prepare`` delivers the
