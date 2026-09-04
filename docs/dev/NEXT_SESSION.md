@@ -26,18 +26,18 @@ unstranded half — the deferred capture-ON rows 0.05–0.18× silence, the in-s
 0.35× / 0.66× silence where the relay's anchor still leads (8,623 / 6,372). The ladder table is
 `landed_ladder.out` (session scratchpad; §6e of the note by construction).
 
-## THE NEXT CASES, in the owner's order
+## THE NEXT CASES — the SHIP AUDIT's order (`MESSAGE_RUNGS.md`, 2026-09-04)
 
-1. **`ISSUES: two-sided-exon-row`** — what makes an exon's profile two-sided on unstranded data, now
-   that forwarding is structural: (a) the intron's own solve (`ROADMAP.md` rank 3), or (b) a bounded
-   taper marginal in the face map. ⛔ Not the flux level. Judge at `R exon (licensed)` and the walled
-   classes, pass zero beside the full pipeline (`pass0_score.py`), all three probe panels, the ladder.
-2. `sj-plus-terminus` (1,968 ladder boundaries): the two maps composed — a RULE at that face.
-3. THE LEVEL MESSAGE where composition cannot cross (strand-change faces, termini both ways, the empty
-   chains): the `Message.level` lane exists and carries one rule (the edge bound); the rest are owed.
-4. `ambig-tilt` and the both-stranded locus (rung 5, last by ruling).
-5. The SHIP LIST: the 0.8.0-metric pricing under `transfer`, the default flip, the obsolescence pass
-   (`relay.py`, `variance.py`, `rna_anchor.py`), `preflight --full`, goldens.
+1. **THE LEVEL RULE** (strand-change faces, termini both ways, the inside of exon|intron termini, the
+   empty chain pieces): the largest STOP-by-omission hole, 12–28 % of in-scope error at the terminus
+   and walled classes. The `Message.level` lane exists with one rule (the edge bound).
+2. **sj + terminus** faces (2,354 ladder boundaries): one composed rule.
+3. **The two-sided exon profile** (`ISSUES: two-sided-exon-row`; the note's §9 shows it on three exons).
+4. **AMBIG tilt / both-stranded locus** (a ruling), with `nest` / `instart` grown as 1–2 need them.
+5. **The SHIP LIST**: the 0.8.0-metric pricing under `transfer`, the flip, the obsolescence pass,
+   `preflight --full`, goldens, the docs.
+⚠ The intron's own solve carries 43–45 % of in-scope off-capture error under EVERY policy — parked by
+the owner's order until the policy ships.
 
 ## HOW TO START
 

@@ -469,3 +469,49 @@ on 14 of 16 (the two above are `g05 ss.50 OFF` 1.01× and `g05 ss.99 OFF` 1.00×
 three `g00` rows its anchor pins (58,840 vs 233,420 at `g00 ss.50 OFF`; 152,534 vs 305,626 ON; 7,421 vs
 17,851 at `g00 ss.99 OFF`) and ties `g00 ss.99 ON`. Where the relay is worst the landed policy is best:
 `g98 ss.99 ON` 456,838 relay vs 224,402 transfer vs 298,597 silent.
+
+## 9. THE TWO-SIDED EXON PROFILE PROBLEM, SHOWN ON THREE REAL EXONS (2026-09-04, for the owner)
+
+Three `clean` exons of the test chromosome at `g50 ss.50 OFF` (unstranded, in scope), each with a
+pure-gDNA intron beside it. The rows are log-likelihood in nats (0 = best supported, −30 = ruled out),
+read at seven candidate gDNA shares of the exon; the truth is in the left column.
+
+| exon (true gDNA share) | profile | 0.05 | 0.20 | 0.40 | 0.60 | 0.80 | 0.95 | 0.995 |
+|---|---|---|---|---|---|---|---|---|
+| 126 (**0.10**), 401 fragments | the intron's own (391 fragments) | −272 | −160 | −78 | −33 | −8.5 | −0.8 | 0 |
+| | mapped into the exon through its face | −31 | −0.3 | 0 | 0 | 0 | 0 | 0 |
+| 130 (**0.07**), 399 fragments | mapped into the exon | −10 | −0.1 | 0 | 0 | 0 | 0 | 0 |
+| 186 (**0.04**), 1,051 fragments | mapped into the exon | −2.1 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+**What each row says.** The intron's own profile is a wall on the low side (a 10 % gDNA intron is ruled
+out by 160 nats) and a gentle slope on the high side: 80 % costs 8.5 nats, 95 % costs 0.8, 100 % costs
+nothing — density against the background cannot tell 95 % from 100 %. The face map carries that shape
+into the exon and adds the face's counting: the result says "the exon has AT LEAST about 20 % gDNA" and
+is flat from 40 % to 100 %. That is a one-sided profile. It never says "this much".
+
+**Why the flat top is not merely uninformative but HARMFUL.** The position of the wall — the "at least"
+— is set by the face's crossing count, which is 12–25 fragments here: Poisson noise of ±30–50 %. Exon
+126's crossing drew 25 fragments where its intron's density predicts 12 (the crossing opportunity is
+unbiased: pooled ratio 0.99–1.005 over 10,600 ladder faces on certified truth), so the wall landed at
+about 18 % while the truth is 10 %, and the message charges the truth about 8 nats. When the crossing
+draws LOW the wall lands below the truth and the profile is silent about everything above it — no
+harm, no help. So the counting noise acts as a one-way ratchet: half the faces push their exon above
+the truth and the other half say nothing. Under forwarding the ratchet compounds: an exon with no claim
+of its own (every exon on unstranded data) passes the "at least" on through its next face, where it
+becomes another "at least". That is the whole of the unstranded harm on the probe panels, and the
+reason the prior — which trains on these exons — is fed a gDNA excess (`ISSUES:
+gdna-landscape-trains-on-false-positives`).
+
+**A two-sided profile** would put a peak at the value the evidence supports and charge both sides. It
+cannot come from the crossing count alone (it is a count of the crossing, not of the exon); the flux
+level was refuted (§6d); what remains is a sharper INTRON profile on its high side — the intron's own
+solve — or an honest bounded marginal in the face map in place of the flat top.
+
+**Is it the largest residual? No.** By node class on the ladder under the landed policy: off capture,
+the INTRON class carries 43–45 % of the in-scope error (65k of 145k at `g50 ss.50 OFF`), identical under
+every policy — the intron's own solve, not a message problem; exon|intron boundaries 12–14 %; terminus
+boundaries 12–15 %; walled exons 8–10 %; alternative splice sites 8–9 %; the licensed exons this
+section is about 6–7 %. On capture-ON stranded rows the terminus boundaries (28 %), alternative splice
+sites (21 %) and walled exons (18 %) lead, licensed exons 10 %. The two-sided profile matters for two
+other reasons: it is what a pass forwards INTO the walled and terminus classes, and at pass zero it is
+the only thing that would give the landscape an unstranded exon population to train on (§6f).
