@@ -94,7 +94,22 @@
 # JUNCTION places one two-block probe (62 + 63 bp) per sj of a probed gene and nothing else.
 
 ref_name: test_chr
-genome_length: 2900000      # the isoform block ends at 2,845,000 (last spacer included)
+#
+# ── THE WALLED BLOCK (owner-approved 2026-09-03; THE SCAN's stress test) ──────────────────────────
+# Exon PIECES with NO licensed face — the classes the ladder's walled-exon census found that a scan can
+# reach (11,350 ladder slots, 2.0 M fragments: 35 % between two termini, 24 % junction|terminus, 17 %
+# junction|junction, 17 % against a refused intron face). Host U = the twin shape; FOUR structures:
+#   chain     three alternative TSSs 40 / 100 / 240 bp into exon 1 — two walled pieces in a row (60, 140 bp)
+#   tssalt    a TSS 300 bp into exon 2 beside an alternative donor 600 bp in — one piece, terminus|junction
+#   tandem    an alternative acceptor and donor on exon 2 — one piece between two junctions (600 bp)
+#   altlast   two isoforms ending in an intronic last exon by different acceptors and TESs — two pieces
+#             in a row, the last against a REFUSED intron face
+# Under the REPLICATION RULE: three regimes (ab host 9 : alternatives 1 each; ba 1 : 9; eq 5 : 5),
+# unprobed / probed (cap*), blocks B2 and B4 (×3, ×30 of the twin ladder / 10); slots 40–87, strands
+# balanced. The chromosome grows to 4.65 Mb and the test configs' fragment budget from 480 k to 720 k so
+# the existing blocks keep their depth. The refused|refused class (an exon inside an intron) is the level
+# message's case and is deferred with it.
+genome_length: 4650000      # the walled block ends at 4,601,000 (last spacer included)
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -575,6 +590,349 @@ genes:
     transcripts:
       - {t_id: B5_capaltss_eq_U, exons: [[2808000, 2809000], [2816000, 2817000], [2824000, 2825000]], abundance: 500}
       - {t_id: B5_capaltss_eq_T, exons: [[2808000, 2809000], [2816000, 2816600], [2824000, 2825000]], abundance: 500}
+  # ── THE WALLED BLOCK (designed 2026-09-03 for THE SCAN): exon pieces with NO licensed face — the four
+  #    classes the ladder's walled-exon census found that a scan can reach: chain (three alternative TSSs
+  #    40/100/240 bp into exon 1: a chain of termini), tssalt (a TSS 300 bp into exon 2 beside an
+  #    alternative donor 600 bp in), tandem (alternative acceptor and donor on exon 2), altlast (two isoforms
+  #    ending in an intronic last exon by different acceptors and TESs); three regimes (ab host-dominant,
+  #    ba alternatives-dominant, eq equal) × unprobed / probed × blocks B2, B4 (×3, ×30); slots 40–87.
+  - gene_id: gB2_chain_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_chain_ab_U, exons: [[2845000, 2846000], [2853000, 2854000], [2861000, 2862000]], abundance: 27}
+      - {t_id: B2_chain_ab_T1, exons: [[2845040, 2846000], [2853000, 2854000], [2861000, 2862000]], abundance: 3}
+      - {t_id: B2_chain_ab_T2, exons: [[2845100, 2846000], [2853000, 2854000], [2861000, 2862000]], abundance: 3}
+      - {t_id: B2_chain_ab_T3, exons: [[2845240, 2846000], [2853000, 2854000], [2861000, 2862000]], abundance: 3}
+  - gene_id: gB2_capchain_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capchain_ab_U, exons: [[2882000, 2883000], [2890000, 2891000], [2898000, 2899000]], abundance: 27}
+      - {t_id: B2_capchain_ab_T1, exons: [[2882040, 2883000], [2890000, 2891000], [2898000, 2899000]], abundance: 3}
+      - {t_id: B2_capchain_ab_T2, exons: [[2882100, 2883000], [2890000, 2891000], [2898000, 2899000]], abundance: 3}
+      - {t_id: B2_capchain_ab_T3, exons: [[2882240, 2883000], [2890000, 2891000], [2898000, 2899000]], abundance: 3}
+  - gene_id: gB2_chain_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_chain_ba_U, exons: [[2919000, 2920000], [2927000, 2928000], [2935000, 2936000]], abundance: 3}
+      - {t_id: B2_chain_ba_T1, exons: [[2919040, 2920000], [2927000, 2928000], [2935000, 2936000]], abundance: 27}
+      - {t_id: B2_chain_ba_T2, exons: [[2919100, 2920000], [2927000, 2928000], [2935000, 2936000]], abundance: 27}
+      - {t_id: B2_chain_ba_T3, exons: [[2919240, 2920000], [2927000, 2928000], [2935000, 2936000]], abundance: 27}
+  - gene_id: gB2_capchain_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capchain_ba_U, exons: [[2956000, 2957000], [2964000, 2965000], [2972000, 2973000]], abundance: 3}
+      - {t_id: B2_capchain_ba_T1, exons: [[2956040, 2957000], [2964000, 2965000], [2972000, 2973000]], abundance: 27}
+      - {t_id: B2_capchain_ba_T2, exons: [[2956100, 2957000], [2964000, 2965000], [2972000, 2973000]], abundance: 27}
+      - {t_id: B2_capchain_ba_T3, exons: [[2956240, 2957000], [2964000, 2965000], [2972000, 2973000]], abundance: 27}
+  - gene_id: gB2_chain_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_chain_eq_U, exons: [[2993000, 2994000], [3001000, 3002000], [3009000, 3010000]], abundance: 15}
+      - {t_id: B2_chain_eq_T1, exons: [[2993040, 2994000], [3001000, 3002000], [3009000, 3010000]], abundance: 15}
+      - {t_id: B2_chain_eq_T2, exons: [[2993100, 2994000], [3001000, 3002000], [3009000, 3010000]], abundance: 15}
+      - {t_id: B2_chain_eq_T3, exons: [[2993240, 2994000], [3001000, 3002000], [3009000, 3010000]], abundance: 15}
+  - gene_id: gB2_capchain_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capchain_eq_U, exons: [[3030000, 3031000], [3038000, 3039000], [3046000, 3047000]], abundance: 15}
+      - {t_id: B2_capchain_eq_T1, exons: [[3030040, 3031000], [3038000, 3039000], [3046000, 3047000]], abundance: 15}
+      - {t_id: B2_capchain_eq_T2, exons: [[3030100, 3031000], [3038000, 3039000], [3046000, 3047000]], abundance: 15}
+      - {t_id: B2_capchain_eq_T3, exons: [[3030240, 3031000], [3038000, 3039000], [3046000, 3047000]], abundance: 15}
+  - gene_id: gB2_tssalt_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_tssalt_ab_U, exons: [[3067000, 3068000], [3075000, 3076000], [3083000, 3084000]], abundance: 27}
+      - {t_id: B2_tssalt_ab_T, exons: [[3075300, 3076000], [3083000, 3084000]], abundance: 3}
+      - {t_id: B2_tssalt_ab_T2, exons: [[3067000, 3068000], [3075000, 3075600], [3083000, 3084000]], abundance: 3}
+  - gene_id: gB2_captssalt_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_captssalt_ab_U, exons: [[3104000, 3105000], [3112000, 3113000], [3120000, 3121000]], abundance: 27}
+      - {t_id: B2_captssalt_ab_T, exons: [[3112300, 3113000], [3120000, 3121000]], abundance: 3}
+      - {t_id: B2_captssalt_ab_T2, exons: [[3104000, 3105000], [3112000, 3112600], [3120000, 3121000]], abundance: 3}
+  - gene_id: gB2_tssalt_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_tssalt_ba_U, exons: [[3141000, 3142000], [3149000, 3150000], [3157000, 3158000]], abundance: 3}
+      - {t_id: B2_tssalt_ba_T, exons: [[3149300, 3150000], [3157000, 3158000]], abundance: 27}
+      - {t_id: B2_tssalt_ba_T2, exons: [[3141000, 3142000], [3149000, 3149600], [3157000, 3158000]], abundance: 27}
+  - gene_id: gB2_captssalt_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_captssalt_ba_U, exons: [[3178000, 3179000], [3186000, 3187000], [3194000, 3195000]], abundance: 3}
+      - {t_id: B2_captssalt_ba_T, exons: [[3186300, 3187000], [3194000, 3195000]], abundance: 27}
+      - {t_id: B2_captssalt_ba_T2, exons: [[3178000, 3179000], [3186000, 3186600], [3194000, 3195000]], abundance: 27}
+  - gene_id: gB2_tssalt_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_tssalt_eq_U, exons: [[3215000, 3216000], [3223000, 3224000], [3231000, 3232000]], abundance: 15}
+      - {t_id: B2_tssalt_eq_T, exons: [[3223300, 3224000], [3231000, 3232000]], abundance: 15}
+      - {t_id: B2_tssalt_eq_T2, exons: [[3215000, 3216000], [3223000, 3223600], [3231000, 3232000]], abundance: 15}
+  - gene_id: gB2_captssalt_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_captssalt_eq_U, exons: [[3252000, 3253000], [3260000, 3261000], [3268000, 3269000]], abundance: 15}
+      - {t_id: B2_captssalt_eq_T, exons: [[3260300, 3261000], [3268000, 3269000]], abundance: 15}
+      - {t_id: B2_captssalt_eq_T2, exons: [[3252000, 3253000], [3260000, 3260600], [3268000, 3269000]], abundance: 15}
+  - gene_id: gB2_tandem_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_tandem_ab_U, exons: [[3289000, 3290000], [3297000, 3298000], [3305000, 3306000]], abundance: 27}
+      - {t_id: B2_tandem_ab_T, exons: [[3289000, 3290000], [3297200, 3297800], [3305000, 3306000]], abundance: 3}
+  - gene_id: gB2_captandem_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_captandem_ab_U, exons: [[3326000, 3327000], [3334000, 3335000], [3342000, 3343000]], abundance: 27}
+      - {t_id: B2_captandem_ab_T, exons: [[3326000, 3327000], [3334200, 3334800], [3342000, 3343000]], abundance: 3}
+  - gene_id: gB2_tandem_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_tandem_ba_U, exons: [[3363000, 3364000], [3371000, 3372000], [3379000, 3380000]], abundance: 3}
+      - {t_id: B2_tandem_ba_T, exons: [[3363000, 3364000], [3371200, 3371800], [3379000, 3380000]], abundance: 27}
+  - gene_id: gB2_captandem_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_captandem_ba_U, exons: [[3400000, 3401000], [3408000, 3409000], [3416000, 3417000]], abundance: 3}
+      - {t_id: B2_captandem_ba_T, exons: [[3400000, 3401000], [3408200, 3408800], [3416000, 3417000]], abundance: 27}
+  - gene_id: gB2_tandem_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_tandem_eq_U, exons: [[3437000, 3438000], [3445000, 3446000], [3453000, 3454000]], abundance: 15}
+      - {t_id: B2_tandem_eq_T, exons: [[3437000, 3438000], [3445200, 3445800], [3453000, 3454000]], abundance: 15}
+  - gene_id: gB2_captandem_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_captandem_eq_U, exons: [[3474000, 3475000], [3482000, 3483000], [3490000, 3491000]], abundance: 15}
+      - {t_id: B2_captandem_eq_T, exons: [[3474000, 3475000], [3482200, 3482800], [3490000, 3491000]], abundance: 15}
+  - gene_id: gB2_altlast_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_altlast_ab_U, exons: [[3511000, 3512000], [3519000, 3520000], [3527000, 3528000]], abundance: 27}
+      - {t_id: B2_altlast_ab_T, exons: [[3511000, 3512000], [3514000, 3514800]], abundance: 3}
+      - {t_id: B2_altlast_ab_T2, exons: [[3511000, 3512000], [3514300, 3514600]], abundance: 3}
+  - gene_id: gB2_capaltlast_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltlast_ab_U, exons: [[3548000, 3549000], [3556000, 3557000], [3564000, 3565000]], abundance: 27}
+      - {t_id: B2_capaltlast_ab_T, exons: [[3548000, 3549000], [3551000, 3551800]], abundance: 3}
+      - {t_id: B2_capaltlast_ab_T2, exons: [[3548000, 3549000], [3551300, 3551600]], abundance: 3}
+  - gene_id: gB2_altlast_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_altlast_ba_U, exons: [[3585000, 3586000], [3593000, 3594000], [3601000, 3602000]], abundance: 3}
+      - {t_id: B2_altlast_ba_T, exons: [[3585000, 3586000], [3588000, 3588800]], abundance: 27}
+      - {t_id: B2_altlast_ba_T2, exons: [[3585000, 3586000], [3588300, 3588600]], abundance: 27}
+  - gene_id: gB2_capaltlast_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltlast_ba_U, exons: [[3622000, 3623000], [3630000, 3631000], [3638000, 3639000]], abundance: 3}
+      - {t_id: B2_capaltlast_ba_T, exons: [[3622000, 3623000], [3625000, 3625800]], abundance: 27}
+      - {t_id: B2_capaltlast_ba_T2, exons: [[3622000, 3623000], [3625300, 3625600]], abundance: 27}
+  - gene_id: gB2_altlast_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_altlast_eq_U, exons: [[3659000, 3660000], [3667000, 3668000], [3675000, 3676000]], abundance: 15}
+      - {t_id: B2_altlast_eq_T, exons: [[3659000, 3660000], [3662000, 3662800]], abundance: 15}
+      - {t_id: B2_altlast_eq_T2, exons: [[3659000, 3660000], [3662300, 3662600]], abundance: 15}
+  - gene_id: gB2_capaltlast_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capaltlast_eq_U, exons: [[3696000, 3697000], [3704000, 3705000], [3712000, 3713000]], abundance: 15}
+      - {t_id: B2_capaltlast_eq_T, exons: [[3696000, 3697000], [3699000, 3699800]], abundance: 15}
+      - {t_id: B2_capaltlast_eq_T2, exons: [[3696000, 3697000], [3699300, 3699600]], abundance: 15}
+  - gene_id: gB4_chain_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_chain_ab_U, exons: [[3733000, 3734000], [3741000, 3742000], [3749000, 3750000]], abundance: 270}
+      - {t_id: B4_chain_ab_T1, exons: [[3733040, 3734000], [3741000, 3742000], [3749000, 3750000]], abundance: 30}
+      - {t_id: B4_chain_ab_T2, exons: [[3733100, 3734000], [3741000, 3742000], [3749000, 3750000]], abundance: 30}
+      - {t_id: B4_chain_ab_T3, exons: [[3733240, 3734000], [3741000, 3742000], [3749000, 3750000]], abundance: 30}
+  - gene_id: gB4_capchain_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capchain_ab_U, exons: [[3770000, 3771000], [3778000, 3779000], [3786000, 3787000]], abundance: 270}
+      - {t_id: B4_capchain_ab_T1, exons: [[3770040, 3771000], [3778000, 3779000], [3786000, 3787000]], abundance: 30}
+      - {t_id: B4_capchain_ab_T2, exons: [[3770100, 3771000], [3778000, 3779000], [3786000, 3787000]], abundance: 30}
+      - {t_id: B4_capchain_ab_T3, exons: [[3770240, 3771000], [3778000, 3779000], [3786000, 3787000]], abundance: 30}
+  - gene_id: gB4_chain_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_chain_ba_U, exons: [[3807000, 3808000], [3815000, 3816000], [3823000, 3824000]], abundance: 30}
+      - {t_id: B4_chain_ba_T1, exons: [[3807040, 3808000], [3815000, 3816000], [3823000, 3824000]], abundance: 270}
+      - {t_id: B4_chain_ba_T2, exons: [[3807100, 3808000], [3815000, 3816000], [3823000, 3824000]], abundance: 270}
+      - {t_id: B4_chain_ba_T3, exons: [[3807240, 3808000], [3815000, 3816000], [3823000, 3824000]], abundance: 270}
+  - gene_id: gB4_capchain_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capchain_ba_U, exons: [[3844000, 3845000], [3852000, 3853000], [3860000, 3861000]], abundance: 30}
+      - {t_id: B4_capchain_ba_T1, exons: [[3844040, 3845000], [3852000, 3853000], [3860000, 3861000]], abundance: 270}
+      - {t_id: B4_capchain_ba_T2, exons: [[3844100, 3845000], [3852000, 3853000], [3860000, 3861000]], abundance: 270}
+      - {t_id: B4_capchain_ba_T3, exons: [[3844240, 3845000], [3852000, 3853000], [3860000, 3861000]], abundance: 270}
+  - gene_id: gB4_chain_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_chain_eq_U, exons: [[3881000, 3882000], [3889000, 3890000], [3897000, 3898000]], abundance: 150}
+      - {t_id: B4_chain_eq_T1, exons: [[3881040, 3882000], [3889000, 3890000], [3897000, 3898000]], abundance: 150}
+      - {t_id: B4_chain_eq_T2, exons: [[3881100, 3882000], [3889000, 3890000], [3897000, 3898000]], abundance: 150}
+      - {t_id: B4_chain_eq_T3, exons: [[3881240, 3882000], [3889000, 3890000], [3897000, 3898000]], abundance: 150}
+  - gene_id: gB4_capchain_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capchain_eq_U, exons: [[3918000, 3919000], [3926000, 3927000], [3934000, 3935000]], abundance: 150}
+      - {t_id: B4_capchain_eq_T1, exons: [[3918040, 3919000], [3926000, 3927000], [3934000, 3935000]], abundance: 150}
+      - {t_id: B4_capchain_eq_T2, exons: [[3918100, 3919000], [3926000, 3927000], [3934000, 3935000]], abundance: 150}
+      - {t_id: B4_capchain_eq_T3, exons: [[3918240, 3919000], [3926000, 3927000], [3934000, 3935000]], abundance: 150}
+  - gene_id: gB4_tssalt_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_tssalt_ab_U, exons: [[3955000, 3956000], [3963000, 3964000], [3971000, 3972000]], abundance: 270}
+      - {t_id: B4_tssalt_ab_T, exons: [[3963300, 3964000], [3971000, 3972000]], abundance: 30}
+      - {t_id: B4_tssalt_ab_T2, exons: [[3955000, 3956000], [3963000, 3963600], [3971000, 3972000]], abundance: 30}
+  - gene_id: gB4_captssalt_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_captssalt_ab_U, exons: [[3992000, 3993000], [4000000, 4001000], [4008000, 4009000]], abundance: 270}
+      - {t_id: B4_captssalt_ab_T, exons: [[4000300, 4001000], [4008000, 4009000]], abundance: 30}
+      - {t_id: B4_captssalt_ab_T2, exons: [[3992000, 3993000], [4000000, 4000600], [4008000, 4009000]], abundance: 30}
+  - gene_id: gB4_tssalt_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_tssalt_ba_U, exons: [[4029000, 4030000], [4037000, 4038000], [4045000, 4046000]], abundance: 30}
+      - {t_id: B4_tssalt_ba_T, exons: [[4037300, 4038000], [4045000, 4046000]], abundance: 270}
+      - {t_id: B4_tssalt_ba_T2, exons: [[4029000, 4030000], [4037000, 4037600], [4045000, 4046000]], abundance: 270}
+  - gene_id: gB4_captssalt_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_captssalt_ba_U, exons: [[4066000, 4067000], [4074000, 4075000], [4082000, 4083000]], abundance: 30}
+      - {t_id: B4_captssalt_ba_T, exons: [[4074300, 4075000], [4082000, 4083000]], abundance: 270}
+      - {t_id: B4_captssalt_ba_T2, exons: [[4066000, 4067000], [4074000, 4074600], [4082000, 4083000]], abundance: 270}
+  - gene_id: gB4_tssalt_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_tssalt_eq_U, exons: [[4103000, 4104000], [4111000, 4112000], [4119000, 4120000]], abundance: 150}
+      - {t_id: B4_tssalt_eq_T, exons: [[4111300, 4112000], [4119000, 4120000]], abundance: 150}
+      - {t_id: B4_tssalt_eq_T2, exons: [[4103000, 4104000], [4111000, 4111600], [4119000, 4120000]], abundance: 150}
+  - gene_id: gB4_captssalt_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_captssalt_eq_U, exons: [[4140000, 4141000], [4148000, 4149000], [4156000, 4157000]], abundance: 150}
+      - {t_id: B4_captssalt_eq_T, exons: [[4148300, 4149000], [4156000, 4157000]], abundance: 150}
+      - {t_id: B4_captssalt_eq_T2, exons: [[4140000, 4141000], [4148000, 4148600], [4156000, 4157000]], abundance: 150}
+  - gene_id: gB4_tandem_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_tandem_ab_U, exons: [[4177000, 4178000], [4185000, 4186000], [4193000, 4194000]], abundance: 270}
+      - {t_id: B4_tandem_ab_T, exons: [[4177000, 4178000], [4185200, 4185800], [4193000, 4194000]], abundance: 30}
+  - gene_id: gB4_captandem_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_captandem_ab_U, exons: [[4214000, 4215000], [4222000, 4223000], [4230000, 4231000]], abundance: 270}
+      - {t_id: B4_captandem_ab_T, exons: [[4214000, 4215000], [4222200, 4222800], [4230000, 4231000]], abundance: 30}
+  - gene_id: gB4_tandem_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_tandem_ba_U, exons: [[4251000, 4252000], [4259000, 4260000], [4267000, 4268000]], abundance: 30}
+      - {t_id: B4_tandem_ba_T, exons: [[4251000, 4252000], [4259200, 4259800], [4267000, 4268000]], abundance: 270}
+  - gene_id: gB4_captandem_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_captandem_ba_U, exons: [[4288000, 4289000], [4296000, 4297000], [4304000, 4305000]], abundance: 30}
+      - {t_id: B4_captandem_ba_T, exons: [[4288000, 4289000], [4296200, 4296800], [4304000, 4305000]], abundance: 270}
+  - gene_id: gB4_tandem_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_tandem_eq_U, exons: [[4325000, 4326000], [4333000, 4334000], [4341000, 4342000]], abundance: 150}
+      - {t_id: B4_tandem_eq_T, exons: [[4325000, 4326000], [4333200, 4333800], [4341000, 4342000]], abundance: 150}
+  - gene_id: gB4_captandem_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_captandem_eq_U, exons: [[4362000, 4363000], [4370000, 4371000], [4378000, 4379000]], abundance: 150}
+      - {t_id: B4_captandem_eq_T, exons: [[4362000, 4363000], [4370200, 4370800], [4378000, 4379000]], abundance: 150}
+  - gene_id: gB4_altlast_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altlast_ab_U, exons: [[4399000, 4400000], [4407000, 4408000], [4415000, 4416000]], abundance: 270}
+      - {t_id: B4_altlast_ab_T, exons: [[4399000, 4400000], [4402000, 4402800]], abundance: 30}
+      - {t_id: B4_altlast_ab_T2, exons: [[4399000, 4400000], [4402300, 4402600]], abundance: 30}
+  - gene_id: gB4_capaltlast_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltlast_ab_U, exons: [[4436000, 4437000], [4444000, 4445000], [4452000, 4453000]], abundance: 270}
+      - {t_id: B4_capaltlast_ab_T, exons: [[4436000, 4437000], [4439000, 4439800]], abundance: 30}
+      - {t_id: B4_capaltlast_ab_T2, exons: [[4436000, 4437000], [4439300, 4439600]], abundance: 30}
+  - gene_id: gB4_altlast_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_altlast_ba_U, exons: [[4473000, 4474000], [4481000, 4482000], [4489000, 4490000]], abundance: 30}
+      - {t_id: B4_altlast_ba_T, exons: [[4473000, 4474000], [4476000, 4476800]], abundance: 270}
+      - {t_id: B4_altlast_ba_T2, exons: [[4473000, 4474000], [4476300, 4476600]], abundance: 270}
+  - gene_id: gB4_capaltlast_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltlast_ba_U, exons: [[4510000, 4511000], [4518000, 4519000], [4526000, 4527000]], abundance: 30}
+      - {t_id: B4_capaltlast_ba_T, exons: [[4510000, 4511000], [4513000, 4513800]], abundance: 270}
+      - {t_id: B4_capaltlast_ba_T2, exons: [[4510000, 4511000], [4513300, 4513600]], abundance: 270}
+  - gene_id: gB4_altlast_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B4_altlast_eq_U, exons: [[4547000, 4548000], [4555000, 4556000], [4563000, 4564000]], abundance: 150}
+      - {t_id: B4_altlast_eq_T, exons: [[4547000, 4548000], [4550000, 4550800]], abundance: 150}
+      - {t_id: B4_altlast_eq_T2, exons: [[4547000, 4548000], [4550300, 4550600]], abundance: 150}
+  - gene_id: gB4_capaltlast_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B4_capaltlast_eq_U, exons: [[4584000, 4585000], [4592000, 4593000], [4600000, 4601000]], abundance: 150}
+      - {t_id: B4_capaltlast_eq_T, exons: [[4584000, 4585000], [4587000, 4587800]], abundance: 150}
+      - {t_id: B4_capaltlast_eq_T2, exons: [[4584000, 4585000], [4587300, 4587600]], abundance: 150}
+
 shadow_genes:
   - gene_id: gshadow_U1
     strand: "+"
