@@ -10,3 +10,9 @@ Calibration solver has a term called 'row'. This is obscure. I do not know what 
 
 The accumulator phase buffers fragments that may be implicitly spliced (compatible with splice junction spanning fragment, but the splice junction present in the gap between the reads). After the first pass, the buffered items are 'drained'. This is a second pass where the buffered fragments are assigned. The term 'drain' is obscure. It is true that we are draining a buffer, but this is not a good explanation for what is happening. This needs a full rename.
 
+
+## 'face'
+
+I believe 'face' refers to 'boundary' in the "region" and "boundary" terms from calibration. It is true that a 'face' is a synonym for boundary, but we should try to keep the terminology standardized.
+
+

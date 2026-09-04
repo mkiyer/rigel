@@ -134,3 +134,83 @@ The corrected ladder A/B (`proto7L_ladder_*`: pre7 / local / pooled) is the stan
 **Corrected ladder A/B (pre-item-7 → local / pooled):** g05 OFF +0.12 / +0.17 %, g05 ON −1.34 / −1.38 %,
 g50 OFF +0.06 / +0.08 %, g50 ON −0.44 / −0.67 %, g98 OFF −0.76 / −0.75 %, g98 ON −2.70 / −2.49 %;
 unstranded identical. The local rule ships.
+
+# THE SCAN — the machinery built, the zero point held, and what it exposed (2026-09-03)
+
+**The machinery — LANDED INERT in `src/` on 2026-09-03 (`DESIGN.md` §6b.10 carries the laws and the
+zero point); what follows is the prototype it was measured with (`scan_proto.py`, session scratchpad,
+which also holds the three candidate exon rows below).** The landed policy's `prepare` restructured
+so every one-hop delivery is recorded with its SOURCE, its KIND and the adjacent MAP that made it
+(`arrivals`, `maps`, `consumed`); `scan(backward)` returns the backbone's `(step, publish)`: the forward
+pass carries each slot's LEFT-side arrivals (those today's policy has not already carried across that
+hop — rung 1's row across the boundary into the exon, and the outside exon's arrivals into the terminus
+boundary, are marked consumed) plus the state it received, through the adjacent map, into the next
+slot; the backward pass mirrors it; the published state is what a slot SENDS (the backbone gathers at
+the source); `deliver` adds the two forwarded terms to today's rows. Maps are registered by GEOMETRY,
+not inside the deadband guards, so an unstranded library's chains do not break at the first exon.
+`HOPS = 0` is BYTE-IDENTICAL to the landed policy (checked exactly on four conditions, the unstranded
+in-scope row and the zero control among them) — the owner's one-hop fallback, structural.
+
+**Scan v0 (today's rows forwarded, map widths only), whole-library, test chromosome:**
+
+| row | transfer | 1 hop | 2 hops | 6 hops |
+|---|---|---|---|---|
+| g50 ss.50 OFF (in scope, unstranded) | 11,242 | 11,115 | 11,909 | 12,727 |
+| g98 ss.50 OFF | 6,363 | 6,361 | 6,117 | 6,149 |
+| g50 ss.99 ON | 6,367 | 6,275 | 6,102 | 6,123 |
+| g05 ss.99 ON | 2,293 | 2,271 | 2,282 | 2,171 |
+| g98 ss.99 ON | 6,854 | 6,482 | 6,083 | 5,196 |
+| g00 ss.50 OFF (zero control) | 16,819 | 16,819 | 16,490 | 15,447 |
+
+The walled exons: g98 ss.99 ON 135 → 115 at six hops, the zero control 60 → 44; on the in-scope
+unstranded row 125 → 225 — worse with every hop, and the licensed exons 4,071 → 5,316. The forwarded
+rows compound a bias that was already in them.
+
+**What the bias is — rung 2's row is a LOWER BOUND.** The first reading of the rebuilt chromosome (the
+in-scope unstranded row 1.04× → 1.20× against silence, at licensed exons of every type) was traced to
+the substrate (the parked panels read the same slots near truth with the current code), then to the
+row's SHAPE (`rung2_shape.py`, real factory rows): `transport_row` reads the intron row at the map's
+preimage and takes the flat limit above the map's ceiling, so the transported row penalises exon shares
+BELOW the ceiling and is flat above it — "at least this much gDNA", never a peak. Two faces fuse to the
+HIGHER of two noisy ceilings (a clean exon of true share 0.324: ceilings 0.41 and 0.26, plateau from
+0.5 up, the exon lands at 0.52); the ceiling's noise is the crossing count's (9–25 fragments), so the
+bias is largest at low depth, and the walled block added many low-depth licensed exons.
+
+**Four forms of the row, node-locally on six rows (whole-library; licensed exons in brackets):**
+
+| row | transfer | two-sided Poisson | abundance-bounded | flux cap (route rate) |
+|---|---|---|---|---|
+| g50 ss.50 OFF | 11,242 [4,071] | **8,945** [1,874] | **8,936** [1,868] | 11,027 |
+| g98 ss.50 OFF | 6,363 [2,529] | 5,604 [1,711] | 5,556 [1,666] | 5,712 |
+| g50 ss.99 ON | 6,367 [4,216] | 15,558 [13,086] | 12,333 [9,970] | 10,548 |
+| g05 ss.99 ON | 2,293 [1,426] | 3,188 [2,247] | 3,090 [2,160] | 3,297 |
+| g98 ss.99 ON | 6,854 [4,519] | 7,483 [5,113] | 5,660 [3,331] | 4,573 |
+| g00 ss.50 OFF | 16,819 [6,615] | 15,506 [5,757] | 15,508 [5,758] | 121,263 [96,147] |
+
+(1) The TWO-SIDED Poisson form (the likelihood of the crossing count under the exon's hypothesised
+share, marginalised over the intron row's composition) fixes capture-OFF — the in-scope unstranded row
+goes BELOW silence — and is catastrophic capture-ON: under capture the exon interior's gDNA exceeds
+what its tapered edge crossing implies, and the flat top was tolerating exactly that. (2) The
+ABUNDANCE-BOUNDED form (the owner's discrepancy rule on this face: the crossing count fixes the level up
+to an enrichment step bounded by the exon's measured total against what the crossing and flux predict;
+`transport_row_bounded`) keeps the OFF wins, lets the scan's hops help the walled exons on unstranded
+rows for the first time (125 → 113, 115 → 92, the zero control 60 → 36), and still fails at g50/g05
+ON: a bound on the TOTAL abundance is blind to the gDNA's enrichment where RNA dominates the total,
+which is most probed exons. (3) What measures the exon's gDNA LEVEL two-sidedly on and off capture is
+the exon's own count minus the RNA its certified flux implies — THE RELAY'S ANCHOR, which `DESIGN.md`
+§6b.3 ruled a message and which the transfer policy never received (it stayed in the relay behind
+`certified_flux`; the relay's lead at every zero control is that anchor). (4) The quick flux-cap arm
+(`route_rate × the exon's RNA opportunity` as the exon's RNA) is REFUTED at the zero control: it claims
+19 % gDNA at exons that have none — the route rate under-states the contained RNA systematically (the
+sj opportunity's overhang requirement is the likely cause), which is precisely what the anchor's
+estimator (`rna_anchor`: the sj opportunity, the route sum, the NB marginal) exists to get right.
+
+**The verdict and the next case.** The scan machinery is sound and its zero point holds; forwarding
+helps stranded capture-ON rows and the zero control already, and cannot help the unstranded rows it
+exists for until the exon's rows are two-sided. That needs the certified-flux message into exons —
+the anchor, face-local, as a transfer message, with the anchor's own estimator of the exon's RNA — which
+also turns rung 2's lower bounds into peaks and explains the walled block's first reading. Order: land
+the scan machinery at HOPS = 0 (no behaviour change; the seam and its bookkeeping in `src/`, gated
+byte-identical), then the certified-flux message as its own case (derive from `rna_anchor`'s estimator;
+stage 0 on truth: the flux-implied RNA against the exon's true RNA, by depth and probe state), then the
+hops with the rows two-sided, priced per hop by the discrepancy rule.

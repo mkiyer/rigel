@@ -19,8 +19,8 @@ substrate grows ONE structure per step and a step is a whole session or more, va
 | 1 | twin block | multi-exonic, single-isoform, single-stranded: the intron\|exon BOUNDARY | ✅ COMPLETE — intron → boundary (rung 1), exon → boundary (item 1), boundary → intron (item 2) ship (`DESIGN.md` §6b.9, §6b.4, §6b.5) |
 | 2 | twin block | the same substrate: the EXON region | ⚠ PARTIAL — the boundary → exon face map ships (§6b.9); item 3 (the exon solve with every face speaking) is owed and is subsumed by THE SCAN |
 | 3 | mono block | single-exon transcripts: the intergenic\|exon EDGE | ✅ the sign-certified lower bound ships; the ceiling REFUSED (accepted error; §6b.9) |
-| 4 | isoform block | multi-exonic, MULTI-isoform, single-stranded: exon\|exon boundaries | ⚠ PARTIAL — items 5, 6 (`altstart`; §6b.6–§6b.7) and 7 (`altss`; §6b.8) ship, every message priced by the owner's per-pair discrepancy rule; `nest`, `instart`, the chain of termini and sj+terminus remain |
-| — | every block | THE SCAN — multi-hop through every case above | ⏳ NEXT (phase C below) |
+| 4 | isoform block + WALLED block | multi-exonic, MULTI-isoform, single-stranded: exon\|exon boundaries, and exon pieces with NO licensed face | ⚠ PARTIAL — items 5, 6 (`altstart`; §6b.6–§6b.7) and 7 (`altss`; §6b.8) ship, every message priced by the owner's per-pair discrepancy rule; the WALLED BLOCK (`chain` · `tssalt` · `tandem` · `altlast`, 48 genes, owner-approved 2026-09-03) is the scan's substrate; `nest`, `instart`, the chain of termini beyond it and sj+terminus remain |
+| — | every block | THE SCAN — multi-hop through every case above | ⚠ THE SEAM IS LANDED AND INERT 2026-09-03 (`DESIGN.md` §6b.10: the ledger, the two passes, the four laws, budget 0 = today exactly); what is owed is a hop's PRICING, and before it the two-sided exon row (the certified-flux message) |
 | 5 | — | strand-change faces, both-stranded loci, the AMBIG tilt channel | ⛔ LAST, owner ruling |
 
 ## ⭐⭐⭐ THE COMPLETION CHECKLIST (owner ruling, 2026-09-02, `DESIGN.md` §0c.0e) — every case, its state
@@ -49,15 +49,16 @@ condition's, from `policy_benchmark.py --by-class` and the terminus census (`DES
 | termini-both-ways | boundary with termini BOTH ways | 48 | **level** only | level | ⏳ with the level message |
 | ambig-tilt | AMBIG boundary / the tilt channel | 4,671 | rungs 1–3 for λ | as its class | ⏳ rung 5: rule whether the tilt has any message (likely local-only, measured) |
 | strand-change-face | strand-change face | 249 + 889 | **level** only (composition refused: membership changes) | level | ⏳ with the level message |
-| multi-hop-scan | MULTI-HOP through any chain of the above | — | each hop through its case's landed map, priced per pair by the owner's discrepancy rule (the abundance form where no strand witness exists), nothing pooled; forward and backward; every node fused from two arrivals | — | ⏳ NEXT — the transfer policy's `scan` (the backbone's two directional passes; one step kernel per boundary case); the brief is in `NEXT_SESSION.md` |
+| multi-hop-scan | FORMAL FORWARD-BACKWARD through every case above | — | ⭐ the owner's ruling 2026-09-04 (`DESIGN.md` §6b.11): the sender just sends; the RECIPIENT decides to FORWARD, MODIFY or STOP; when the two passes end, EVERY node holds a message from each neighbour (the chain's two end nodes hold one) — a hop that carries nothing still ARRIVES, explicitly uninformative | — | ⚠ THE SEAM LANDED INERT 2026-09-03 (`DESIGN.md` §6b.10, gated byte-identical at budget 0: the ledger, the two passes, the four laws). Owed: the FORM (a message per side at every node, the three decisions explicit), the two-sided exon row (the certified-flux message, §6b.3 — the prerequisite the first measurement exposed), then a hop's pricing |
 
-**THE ORDER (owner + census, 2026-09-03).** (C) THE SCAN first — it is the only mechanism that reaches the
-walled exons (the largest class: 11,350 ladder slots, 2.0 M mass, 35 % of the in-scope zero control's
-error) and the only one that serves unstranded data, where every own-row message is dead; its hops reuse
-the maps already landed and are priced by the owner's discrepancy rule, the abundance form where no strand
-witness exists; first cases: the forwarded terminus arrivals, the reverse direction, the chains of
-termini; stage 0 on certified truth by hop count and case. Then (B) sj+terminus (item 10: the two maps
-composed, 1,968 boundaries). Then (A) THE LEVEL MESSAGE — gDNA continuity where composition cannot cross
+**THE ORDER (owner + census, 2026-09-03; the scan's form ruled 2026-09-04).** (C) THE SCAN first — it is
+the only mechanism that reaches the walled exons (the largest class: 11,350 ladder slots, 2.0 M mass, 35 %
+of the in-scope zero control's error) and the only one that serves unstranded data, where every own-row
+message is dead. Its form is `DESIGN.md` §6b.11's ruling — formal forward-backward, the recipient
+deciding, two messages at every node — and its prerequisite is a TWO-SIDED exon row (the certified-flux
+message, §6b.3), because forwarding today's one-sided lower bounds compounds a bias (measured: the
+in-scope unstranded row worsens with every hop). Then (B) sj+terminus (item 10: the two maps composed,
+1,968 boundaries). Then (A) THE LEVEL MESSAGE — gDNA continuity where composition cannot cross
 (strand-change faces, termini both ways, the empty chains), two-sided with counting width and the
 abundance-discrepancy premise; the one-sided profile was refuted at exon|exon termini on sparse probes.
 Then (D) the AMBIG tilt ruling and the both-stranded locus (rung 5, last by owner ruling). Then (E) the

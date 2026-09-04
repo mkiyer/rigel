@@ -152,7 +152,9 @@ is not a claim that its modules are the right SIZE; layer 4 being five modules f
 ⭐⭐⭐ **THE COMPLETION CONTRACT (owner ruling, 2026-09-02; `DESIGN.md` §0c.0e).** The policy is finished
 when EVERY case is handled — no nullified message, no skipped boundary or region; multi-hop through
 chains with per-hop dampening; gDNA always conveyed where composition cannot cross; every node solved
-from two honest messages — and it either improves or stays stable with minimal harm on the test
+from two honest messages — ⭐ formally, FORWARD-BACKWARD, where the sender just sends and THE RECIPIENT
+decides to forward, modify or stop, and every node ends holding a message from each neighbour
+(`DESIGN.md` §6b.11, owner 2026-09-04) — and it either improves or stays stable with minimal harm on the test
 chromosome, the ladder and every panel. ⛔ **This thread does not switch away until then**: other
 priorities go to the PARKED-PRIORITIES LOG in the tracker (the sandbox), and the checklist there is the
 definition of done.
@@ -185,7 +187,7 @@ is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
 | `message` | `MessagePolicy` (`messages/policy.py`) — the foundation-spec runner (`messages/foundation.py`: one `Message` with provenance lanes, the propagate/solve timepoints, the laws the skeleton enforces). With trivial models it is **byte-identical to silence**, gated in `tests/calibration/test_message_policy.py` and confirmed on the panel |
-| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…03, LADDER-CONFIRMED). Every message is a composition carried across ONE face by a derived map, silence-not-zeros, no constants: the intron's row at intron\|exon boundaries and into exons through the face map (rungs 1–2), the edge's lower bound (rung 3), the exon's and the boundary's own strand rows both ways (items 1–2), the terminus boundary and its outside exon through the spliced-crossing map (item 5), the abundance-discrepancy message into the inside flank (item 6), and the alternative splice site both ways (item 7) — each priced by the owner's DISCREPANCY RULE where two witnesses exist, nothing pooled (`ISSUES: the-pooled-hop-step`). Rulings and measurements: `DESIGN.md` §6b.4–§6b.9. ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart. Standing shadows: the deferred `g05 ss.50 ON` row, the recorded owner decisions in the handoff, and `ISSUES: gdna-landscape-trains-on-false-positives` |
+| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…03, LADDER-CONFIRMED). Every message is a composition carried across ONE face by a derived map, silence-not-zeros, no constants: the intron's row at intron\|exon boundaries and into exons through the face map (rungs 1–2), the edge's lower bound (rung 3), the exon's and the boundary's own strand rows both ways (items 1–2), the terminus boundary and its outside exon through the spliced-crossing map (item 5), the abundance-discrepancy message into the inside flank (item 6), and the alternative splice site both ways (item 7) — each priced by the owner's DISCREPANCY RULE where two witnesses exist, nothing pooled (`ISSUES: the-pooled-hop-step`). Rulings and measurements: `DESIGN.md` §6b.4–§6b.9. ⭐ THE SCAN SEAM ships INERT (§6b.10): every delivery is recorded with its source and adjacent map and the backbone's two passes can carry a slot's arrivals further, but the hop budget is 0 — no ledger built, nothing relayed, the one-hop rows exactly — until a hop's pricing is ruled. ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart. Standing shadows: the deferred `g05 ss.50 ON` row, the recorded owner decisions in the handoff, and `ISSUES: gdna-landscape-trains-on-false-positives` |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -220,15 +222,18 @@ python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
 owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
 up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
 
-⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND THREE BLOCKS** (owner rulings 2026-08-28 / 2026-09-02).
+⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND FOUR BLOCKS** (owner rulings 2026-08-28 / 2026-09-02 / 2026-09-03).
 `scripts/sim/test_reference/test_chr.yaml` — the `rigel sim` scenario schema plus `probed` and
 `shadow_genes` — is the ONE hand-edited file; the GTFs, abundances, three capture panels and the FASTA
 are RENDERED from it by `build_test_reference.py` (a suite gate refuses a drifted render). It carries the
 ANCHORED TWIN BLOCK (5 types × 5 abundance blocks: `clean` · `nasc` · `cap` · `capnasc` · `silent` — the
 message layer's own controls), the MONO BLOCK (single-exon, edge-only: `mono` · `capmono` · the two
-silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart` now,
-`altss` · `nest` · `instart` queued in `docs/dev/MESSAGE_RUNGS.md`'s order), and 8 SHADOW transcripts
-the index never sees. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
+silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart`
+and `altss` present, `nest` · `instart` queued in `docs/dev/MESSAGE_RUNGS.md`'s order, every multi-isoform
+structure REPLICATED across A ≫ B, A ≪ B, A ≈ B), the WALLED BLOCK (four transcript groups whose exon
+pieces have NO licensed face — `chain` · `tssalt` · `tandem` · `altlast` — the scan's stress test, designed
+from the ladder's walled-exon census), and 8 SHADOW transcripts the index never sees: 133 genes at a
+720 k-fragment budget per condition. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
 representation (a sign error is invisible on one strand); both-stranded loci are a later step.
 ⛔ After editing the YAML, everything derived MUST be rebuilt or the benchmark scores a stale
 annotation — `docs/TESTING.md` §0a has the full recipe and `panel.py status` names the next stage.
@@ -308,13 +313,14 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,779 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-03 after item 7's pooled step was replaced by the owner's per-pair discrepancy rule). Account it
-from **3,780** — the count after item 7 first landed — by **−1**: the gate on the deleted pooled fit
-(`hop_step_fit` / `shift_row`), removed from the EXISTING `tests/calibration/test_transfer_policy.py`
-(no file was added or removed, so no parametrised gate moved). ⛔ **RE-DERIVE, NEVER ADJUST** — the
-table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution
-(3,787 collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,782 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-03 after the scan seam landed inert). Account it from **3,779** — the count after item 7's
+per-pair rule — by **+3**: the three scan gates (inert at the shipped budget, the kernel on a
+synthetic ledger, the first real hop), all added to the EXISTING
+`tests/calibration/test_transfer_policy.py` (no file was added or removed, so no parametrised gate
+moved; the walled block edits the substrate YAML and its renders, which carry no cases). ⛔ **RE-DERIVE,
+NEVER ADJUST** — the table below gives the per-file deltas, and a bracket-matched `--collect-only`
+confirms the attribution (3,790 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

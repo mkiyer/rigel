@@ -57,7 +57,18 @@ constant is anywhere. Ten messages ship, each delivered as ``PsiMessage.lam_rows
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient (psi, in the
 final solve) fuses the rows against the slot's own evidence; a no-claim stays a no-claim — a flat
 row, an absent factory, an evidence-free provider all deliver SILENCE, never a zero-filled channel;
-``scan`` relays nothing, so one hop is structural rather than a discipline.
+``scan`` relays nothing at the shipped hop budget, so one hop is structural rather than a discipline.
+
+⭐ **THE SCAN SEAM.** Every delivery above is recorded with the slot it came FROM, a NAME, and the
+ADJACENT MAP that carried it, so a later pass can carry a slot's arrivals one hop further through the
+same maps: the backbone's two directional passes take ``scan``'s ``(step, publish)`` kernel and
+``deliver`` fuses what each side forwarded. The budget is ``hops``, and at 0 — the shipped value — the
+ledger is not built, ``scan`` relays nothing, and the delivered rows are exactly the one-hop rows, so
+attenuating every hop past the first is structural rather than a switch. A hop is taken only where a
+map is registered (composition crosses that face at all) and only from the side AWAY from the
+destination, so no row returns to its source; a map that already carries an arrival one hop — rung 2
+carrying rung 1's intron row into the exon, item 5's composed transport carrying rungs 2–3 into the
+boundary — declares that arrival CONSUMED, so nothing is counted twice.
 """
 
 from __future__ import annotations
@@ -85,18 +96,65 @@ from .transfer_rows import (
 __all__ = ["TransferPolicy"]
 
 
+def _verbatim(row):
+    """The identity map: a hop whose two objects share one population exactly, so the composition
+    crosses unchanged (rung 1's intron\u2192boundary pair, and item 2's back the other way)."""
+    return row
+
+
+def _fuse(a, b):
+    """Two independent witnesses about one slot: log-rows add, then re-normalise."""
+    out = np.asarray(a, np.float64) + np.asarray(b, np.float64)
+    return out - out.max()
+
+
+class _Ledger:
+    """THE SCAN'S BOOKKEEPING — who told whom, under which name, and through which map.
+
+    ``arrivals[dst]`` holds ``(source, name, row)`` for every row delivered to ``dst``; ``maps`` holds
+    the ADJACENT map of each hop the policy knows how to take, keyed ``(source, destination)``; and
+    ``consumed[(source, destination)]`` names the arrivals at ``source`` that this hop's own message
+    already carries, so a forwarded row never double-counts one. ⛔ ``on`` is False whenever the hop
+    budget is zero, and then every method returns at once and no map is ever built: a one-hop policy
+    pays nothing for machinery it does not use."""
+
+    def __init__(self, n_slots: int, on: bool):
+        self.on = bool(on)
+        self.arrivals = [[] for _ in range(int(n_slots))] if self.on else []
+        self.maps: dict[tuple[int, int], object] = {}
+        self.consumed: dict[tuple[int, int], frozenset] = {}
+
+    def arrival(self, dst, src, name, row):
+        if self.on:
+            self.arrivals[int(dst)].append((int(src), name, row))
+
+    def hop(self, src, dst, fn, consumes=()):
+        if self.on:
+            self.maps[(int(src), int(dst))] = fn
+            if consumes:
+                self.consumed[(int(src), int(dst))] = frozenset(consumes)
+
+
 class TransferPolicy:
     """``rows_at(n_grid, logodds_window)`` supplies the intron factory's per-slot rows on the sweep's
     own grid (``calibrate`` passes its memoized ``_intron_prior_at``; ``None`` means no factory
     evidence and the policy is silent — the rung-0 identity). ``strand = (kappa, od_g, od_r)`` is the
     library's fitted strand model, which the exon → boundary and boundary → intron messages need to
-    state a slot's own row; ``None`` leaves both off."""
+    state a slot's own row; ``None`` leaves both off. ``hops`` is THE SCAN'S BUDGET — how many hops
+    past its own face a message may be carried; 0 (the shipped value) is one hop, exactly the rows
+    this policy has always delivered, with no ledger built and nothing relayed."""
 
     name = "transfer"
 
-    def __init__(self, rows_at: Callable, strand: tuple[float, float, float] | None = None):
+    def __init__(
+        self,
+        rows_at: Callable,
+        strand: tuple[float, float, float] | None = None,
+        hops: int = 0,
+    ):
         self._rows_at = rows_at
         self._strand = None if strand is None else tuple(float(x) for x in strand)
+        self._hops = max(0, int(hops))
 
     def prepare(self, ctx: StepContext) -> "_PreparedTransfer":
         src = self._rows_at(int(ctx.n_grid), float(ctx.logodds_window))
@@ -133,13 +191,17 @@ class TransferPolicy:
         )
         rows = np.zeros((n, src.shape[1]))
         live = False
+        led = _Ledger(n, self._hops > 0)
 
-        def deliver(slot, row):
+        def deliver(slot, row, src_slot=None, name=None):
             nonlocal live
             if np.ptp(row) > EPS:
-                rows[slot] += row - row.max()
+                row = row - row.max()
+                rows[slot] += row
                 rows[slot] -= rows[slot].max()
                 live = True
+                if src_slot is not None:
+                    led.arrival(slot, src_slot, name, row)
 
         def other_flank(b, e):
             return left[b] if right[b] == e else right[b]
@@ -161,9 +223,13 @@ class TransferPolicy:
         for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
             lo, hi_ = left[b], right[b]
             if is_exon[lo] and is_intron[hi_]:
-                deliver(b, src[hi_])
+                i = hi_
             elif is_exon[hi_] and is_intron[lo]:
-                deliver(b, src[lo])
+                i = lo
+            else:
+                continue
+            deliver(b, src[i], src_slot=i, name="intron row")
+            led.hop(i, b, _verbatim)
 
         strand_live = np.zeros(n, bool)
         if self._strand is not None:
@@ -188,19 +254,35 @@ class TransferPolicy:
                 ):
                     continue  # no split evidence, or a depleted face: silence
                 le = face_map_lambda(lam, n_u[b], a_g[b], a_r[b], a_g[e], a_r[e], float(rr[hi][b]))
-                deliver(e, transport_row(src[i], lam, le, n_u[b], float(sc[hi][b])))
+
+                def face(row, le=le, b=b, s=float(sc[hi][b])):
+                    return transport_row(row, lam, le, n_u[b], s)
+
+                deliver(e, face(src[i]), src_slot=b, name="intron face")
+                led.hop(b, e, face, consumes=("intron row",))
             # ── rung 3: each intergenic|exon edge's lower bound, into the exon ──────────────
             for b in (left[e], right[e]):
                 if b < 0 or not is_bnd[b]:
                     continue
                 o = other_flank(b, e)
                 if o >= 0 and is_intergenic[o] and n_u[b] > 0 and a_g[b] > 0 and a_g[e] > 0:
-                    deliver(e, edge_bound_row(lam, n_u[b], n_u[e], a_g[b], a_g[e]))
+                    deliver(
+                        e,
+                        edge_bound_row(lam, n_u[b], n_u[e], a_g[b], a_g[e]),
+                        src_slot=b,
+                        name="edge bound",
+                    )
             # ── rung 1 completed: the exon's own strand row, out to each licensed face ─────
-            if strand_live[e]:
-                row_e = own_row(e)
+            if strand_live[e] or led.on:
+                row_e = own_row(e) if strand_live[e] else None
                 for b, _i, hi in licensed_faces(e):
-                    deliver(b, splice_out_row(row_e, lam, n_u[b], float(sc[hi][b]), a_g[b], a_g[e]))
+
+                    def out(row, b=b, e=e, s=float(sc[hi][b])):
+                        return splice_out_row(row, lam, n_u[b], s, a_g[b], a_g[e])
+
+                    led.hop(e, b, out)
+                    if row_e is not None:
+                        deliver(b, out(row_e), src_slot=e, name="exon row")
         # ── rung 2 completed: each intron|exon boundary's own strand row, verbatim, into its intron ──
         # The intron and its boundary share ONE unspliced population exactly (mature RNA crosses
         # neither boundary), so the composition transfers with no splice-out term and no premise, and
@@ -211,7 +293,7 @@ class TransferPolicy:
         # only) — never its belief, which already holds rung 1's intron row. With no factory at a
         # boundary, ``own.tau_lam`` there IS the strand Fisher information, so the deadband gate is
         # the derived one and an unstranded library sends nothing, structurally.
-        if self._strand is not None:
+        if self._strand is not None or led.on:
             for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
                 lo, hi_ = left[b], right[b]
                 if is_exon[lo] and is_intron[hi_]:
@@ -220,9 +302,11 @@ class TransferPolicy:
                     i = lo
                 else:
                     continue
-                if not (boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]) and tau[b] > 0.0):
+                if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
                     continue
-                deliver(i, own_row(b))
+                led.hop(b, i, _verbatim)
+                if self._strand is not None and tau[b] > 0.0:
+                    deliver(i, own_row(b), src_slot=b, name="boundary row")
         # ── rung 4, item 5: the exon|exon TERMINUS boundary and its OUTSIDE exon ───────────────
         # The terminating transcripts cover exactly one flank; the OUTSIDE flank holds exactly the
         # population that crosses the boundary — counting BOTH crossings, the unspliced U_b and the
@@ -241,10 +325,15 @@ class TransferPolicy:
         rows5 = np.zeros_like(rows)
         served5 = np.zeros(n, bool)
 
-        def deliver5(slot, row):
+        pending5 = []  # item 5's arrivals, recorded when rows5 is folded into the rows
+
+        def deliver5(slot, row, src_slot=None, name=None):
             if np.ptp(row) > EPS:
-                rows5[slot] += row - row.max()
+                row = row - row.max()
+                rows5[slot] += row
                 served5[slot] = True
+                if led.on and src_slot is not None:
+                    pending5.append((slot, src_slot, name, row))
 
         for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
             lo, hi_ = left[b], right[b]
@@ -255,19 +344,33 @@ class TransferPolicy:
                 continue
             if not (n_u[b] > 0 and a_g[b] > 0 and a_g[o] > 0):
                 continue
+
+            def out5(row, b=b, o=o):
+                return splice_out_row(row, lam, n_u[b], n_s[b], a_g[b], a_g[o])
+
+            back5 = None
+            if led.on or (self._strand is not None and tau[b] > 0.0):
+                le5 = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[o], a_g[o], n_s[b] / a_g[b])
+
+                def back5(row, le=le5, b=b):  # noqa: F811 — the map into the outside exon
+                    return transport_row(row, lam, le, n_u[b], n_s[b])
+
+                led.hop(o, b, out5, consumes=("intron face", "edge bound"))
+                led.hop(b, o, back5)
             if np.ptp(rows[o]) > EPS:
-                deliver5(b, splice_out_row(rows[o], lam, n_u[b], n_s[b], a_g[b], a_g[o]))
+                deliver5(b, out5(rows[o]), src_slot=o, name="outside composed")
             if self._strand is None:
                 continue
             if strand_live[o]:
-                deliver5(b, splice_out_row(own_row(o), lam, n_u[b], n_s[b], a_g[b], a_g[o]))
+                deliver5(b, out5(own_row(o)), src_slot=o, name="outside row")
             if tau[b] > 0.0:
-                le = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[o], a_g[o], n_s[b] / a_g[b])
-                deliver5(o, transport_row(own_row(b), lam, le, n_u[b], n_s[b]))
+                deliver5(o, back5(own_row(b)), src_slot=b, name="terminus row")
         for slot in np.flatnonzero(served5):
             deliver(slot, rows5[slot])
+        for slot, src_slot, name, row in pending5:
+            led.arrival(slot, src_slot, name, row)
         if self._strand is None:
-            return _PreparedTransfer(rows if live else None)
+            return _PreparedTransfer(rows if live else None, led, self._hops)
         # ── rung 4, item 6: THE ABUNDANCE-DISCREPANCY message into the INSIDE flank of a terminus ──
         # (owner design, 2026-09-02). Where composition cannot cross, the two objects' TOTAL
         # abundances differ by a measured ratio r, and two hypotheses explain it — enrichment (the gDNA
@@ -290,14 +393,14 @@ class TransferPolicy:
             _o, i = outside_flank(flags[b], lo, hi_)
             if i is None or not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
                 continue
-            if not (tau[b] > 0.0 and n_u[b] > 0 and n_u[i] > 0 and a_g[b] > 0 and a_g[i] > 0):
+            if not (n_u[b] > 0 and n_u[i] > 0 and a_g[b] > 0 and a_g[i] > 0):
                 continue
             served.append((b, i, (n_u[i] / a_g[i]) / ((n_u[b] + n_s[b]) / a_g[b])))
         v_step = 0.0
         if served:
             log_s, var_s = [], []
             for b, i, r in served:
-                if not tau[i] > 0.0:
+                if not (tau[b] > 0.0 and tau[i] > 0.0):
                     continue  # one witness only: nothing to fit from this pair
                 ok = True
                 modes = []
@@ -321,7 +424,13 @@ class TransferPolicy:
                 mu = float(w @ ls)
                 v_step = max(0.0, float(w @ (ls - mu) ** 2) - float(w @ vs))
         for b, i, r in served:
-            deliver(i, abundance_row(own_row(b), lam, n_u[b], n_s[b], r, n_u[i], v_step))
+
+            def step6(row, b=b, i=i, r=r):
+                return abundance_row(row, lam, n_u[b], n_s[b], r, n_u[i], v_step)
+
+            led.hop(b, i, step6)
+            if tau[b] > 0.0:
+                deliver(i, step6(own_row(b)), src_slot=b, name="abundance step")
         # ── rung 4, item 7: THE ALTERNATIVE SPLICE SITE — an exon|exon boundary with a junction ──
         # The flank on the junction's intron side, C, shares the boundary's full unspliced crossing
         # (item 5's law with the spliced crossing S_b); the exon-of-both flank, E, holds the crossing
@@ -368,28 +477,103 @@ class TransferPolicy:
             pair_width[(b, x)] = max(0.0, d * d - (v_b + v_x + v_ratio))
         for b, x, s_out, _kind in served7:
             width = pair_width.get((b, x), 0.0)
+            if led.on:
+                le7 = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[x], a_g[x], s_out / a_g[b])
+
+                def out7(row, b=b, x=x, s=s_out, w=width):
+                    return blur_row(splice_out_row(row, lam, n_u[b], s, a_g[b], a_g[x]), lam, w)
+
+                def back7(row, le=le7, b=b, s=s_out, w=width):
+                    return blur_row(transport_row(row, lam, le, n_u[b], s), lam, w)
+
+                led.hop(x, b, out7)
+                led.hop(b, x, back7)
             if strand_live[x]:
                 row = splice_out_row(own_row(x), lam, n_u[b], s_out, a_g[b], a_g[x])
                 if np.ptp(row) > EPS:
-                    deliver(b, blur_row(row, lam, width))
+                    deliver(b, blur_row(row, lam, width), src_slot=x, name="junction row")
             if tau[b] > 0.0:
                 le = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[x], a_g[x], s_out / a_g[b])
                 row = transport_row(own_row(b), lam, le, n_u[b], s_out)
                 if np.ptp(row) > EPS:
-                    deliver(x, blur_row(row, lam, width))
-        return _PreparedTransfer(rows if live else None)
+                    deliver(x, blur_row(row, lam, width), src_slot=b, name="junction back")
+        return _PreparedTransfer(rows if live else None, led, self._hops)
 
 
 class _PreparedTransfer:
-    """One sweep's delivery: the rows, or silence. ``scan`` relays nothing."""
+    """One sweep's delivery: the one-hop rows, or silence — and, when the hop budget allows it, THE
+    SCAN that carries those rows further along the chain.
 
-    def __init__(self, rows: np.ndarray | None):
+    ⭐ At ``hops = 0`` (the shipped budget) ``scan`` relays nothing and ``deliver`` returns the rows
+    unchanged, so the whole seam is inert and one hop is structural. Above it, each of the backbone's
+    two directional passes calls ``step(source, destination)`` in chain order and then ``publish()``;
+    the backbone gathers the published arrays AT THE SOURCE, so what a slot sends is written into the
+    source's row of ``sent`` and arrives at ``deliver`` already indexed by destination."""
+
+    def __init__(self, rows: np.ndarray | None, ledger: "_Ledger | None" = None, hops: int = 0):
         self._rows = rows
+        self._ledger = ledger
+        self._hops = max(0, int(hops))
+
+    def _carry(self, source, destination, backward):
+        """What ``source`` has to say to ``destination``: its arrivals from the side AWAY from the
+        destination — so a row never returns towards where it came from — less those the hop's own
+        message already carries."""
+        led = self._ledger
+        spent = led.consumed.get((int(source), int(destination)), ())
+        acc = None
+        for src, name, row in led.arrivals[int(source)]:
+            if name in spent:
+                continue
+            if (src > source) if backward else (src < source):
+                acc = row if acc is None else _fuse(acc, row)
+        return acc
 
     def scan(self, *, backward: bool):
-        return None
+        if self._rows is None or self._ledger is None or not self._ledger.on:
+            return None  # the ledger is live exactly when the budget allows a hop
+        led = self._ledger
+        n, k = self._rows.shape
+        held = np.zeros((n, k))  # what this pass has carried INTO each slot
+        depth = np.zeros(n, np.int64)  # how many hops that row has taken
+        sent = np.zeros((n, k))  # what each slot SENDS — the backbone gathers this at the source
+        sent_depth = np.zeros(n, np.int64)
+
+        def step(s, i):
+            fn = led.maps.get((int(s), int(i)))
+            if fn is None:
+                return  # composition does not cross this face: the chain ends here for this pass
+            carried = self._carry(s, i, backward)
+            taken = 1
+            if 0 < depth[s] < self._hops:
+                carried = held[s] if carried is None else _fuse(carried, held[s])
+                taken = int(depth[s]) + 1
+            if carried is None:
+                return
+            out = fn(carried)
+            if np.ptp(out) <= EPS:
+                return
+            held[i] = out - out.max()
+            depth[i] = taken
+            sent[s] = held[i]
+            sent_depth[s] = taken
+
+        def publish():
+            return sent, sent_depth
+
+        return step, publish
 
     def deliver(self, left: NeighbourState, right: NeighbourState) -> PsiMessage:
         if self._rows is None:
             return PsiMessage.silent()
-        return PsiMessage(lam_rows=self._rows)
+        if not (left.state or right.state):
+            return PsiMessage(lam_rows=self._rows)  # nothing was relayed: the one-hop rows stand
+        rows = np.array(self._rows, np.float64, copy=True)
+        for nb in (left, right):
+            if not nb.state:
+                continue
+            forwarded, taken = nb.state
+            live = np.asarray(nb.valid, bool) & (np.asarray(taken) > 0)
+            for i in np.flatnonzero(live):
+                rows[i] = _fuse(rows[i], forwarded[i])
+        return PsiMessage(lam_rows=rows)

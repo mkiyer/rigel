@@ -1944,6 +1944,59 @@ The owner's reset: finish rungs 1–2's nullified messages first, one at a time,
 structure per step. The pieces re-entered as items 1, 2, 5, 6 and 7 (§6b.4–§6b.8); the composed
 transport's multi-hop form is THE SCAN, the next case; the level bound is owed as the tracker's phase A.
 
+### 6b.10 ⭐⭐⭐ THE SCAN SEAM — the ledger, the two passes, and a zero point that costs nothing (landed inert 2026-09-03)
+
+**What is built.** Every message the policy delivers is now recorded with the slot it came FROM, a
+NAME, and the ADJACENT MAP that carried it (`_Ledger` in `messages/transfer.py`), and the prepared
+object answers the backbone's `scan(backward)` with its `(step, publish)` kernel: each of the two
+directional passes carries a slot's arrivals one hop further through the same maps, and `deliver`
+fuses what each side forwarded onto the one-hop rows. ⭐ **The budget is `hops`, and 0 — the shipped
+value — builds no ledger, relays nothing and delivers exactly the rows the policy has always
+delivered.** Attenuating every hop past the first is therefore structural rather than a switch, and
+costs nothing: no map is built, no arrival recorded (gated per slot against the previous policy on
+seven conditions of the test chromosome, both halves, both capture states and the zero control).
+
+**The four laws the kernel keeps, each gated.** ① A hop is taken only where a MAP IS REGISTERED —
+composition crosses that face at all — and the chain ends where none is. ② A slot forwards only the
+arrivals from the side AWAY from the destination, so no row returns towards its source (the no-echo
+law item 5 made structural for one hop, now general). ③ A map that already carries an arrival one
+hop declares it CONSUMED — rung 2 carrying rung 1's intron row into the exon, item 5's composed
+transport carrying rungs 2–3 into the boundary — so nothing is counted twice. ④ A forwarded row is
+carried at most `hops` times; the published state is what a slot SENDS, because the backbone gathers
+each pass's arrays at the SOURCE.
+
+⛔ **The seam is the mechanism; the PRICING of a hop is not settled and the budget stays 0 until it
+is.** Measured with the machinery (the thread record carries the tables): forwarding today's rows
+helps stranded capture-ON rows and the zero control and HARMS the in-scope unstranded row, because
+rung 2's transported row is a one-sided lower bound — flat above the face map's ceiling — so
+forwarding compounds a bias rather than a measurement. What the scan needs first is a two-sided row
+at exons, which is the certified-flux message (§6b.3's ruling, never delivered by this policy).
+
+### 6b.11 ⭐⭐⭐ THE PROPAGATION IS FORMAL FORWARD-BACKWARD, AND THE RECIPIENT DECIDES (owner ruling, 2026-09-04)
+
+⭐⭐⭐ **The sender does not decide; it sends.** For almost every message the SOURCE has no choice to
+make — it states its claim and publishes it. ⭐⭐⭐ **The RECIPIENT decides, during the propagation
+phase**, what to do with what it received: FORWARD it along, MODIFY it (the face's map, the hop's
+width), or STOP it (the composition cannot cross here). Every rule the policy has — the licence, the
+map, the discrepancy width, the no-echo side rule, the consumed set — is therefore a decision made AT
+THE NODE THAT RECEIVED, never a filter applied at the node that spoke.
+
+⭐⭐⭐ **And the propagation is FORMAL FORWARD-BACKWARD: when it ends, EVERY node has received TWO
+messages, one from each neighbour, except the two nodes at a chain's ends, which receive one.** That
+is the definition of done for the scan, and it is stronger than what ships today: the ten one-hop
+messages leave most nodes hearing from one side or from neither, and a node with no message from a
+side is not a node that was told "nothing" — it is a node the policy never spoke to. ⛔ Under this
+ruling a hop that carries nothing must still ARRIVE, as an explicitly uninformative message, so the
+solve can tell silence from ignorance and every node is solved from two honest messages (the
+completion contract, §0c.0e).
+
+**What this settles about the seam (§6b.10) and what it opens.** The seam's kernel already runs at the
+receiving node — the backbone calls ``step(source, destination)`` and the policy's arithmetic happens
+as the row crosses — so the mechanism is in the right place; what is owed is the FORM: a message per
+side at every node, the recipient's three decisions stated explicitly rather than implied by whether a
+map exists, and the pricing of each decision. ⛔ The budget stays 0 until that form is built and
+priced, so nothing about the shipped answer changes meanwhile.
+
 ## 6c. ⭐⭐⭐ ψ's COMPOSITION IS A POINT ON THE SIMPLEX, AND CLOSURE IS STRUCTURAL (2026-08-17)
 
 ⭐ **THE COMPOSITION HAS TWO DEGREES OF FREEDOM, NOT THREE.** ψ solves a point on the 2-simplex,

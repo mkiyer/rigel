@@ -1401,3 +1401,169 @@ def test_the_alt_splice_messages_are_silence_inside_the_strand_deadband(sweep_in
         .lam_rows
     )
     np.testing.assert_array_equal(rows, cleared)
+
+
+# ── THE SCAN SEAM (2026-09-03): the ledger, the two passes, and the inert shipped budget ──────────
+
+
+def _drive_the_backbone(prepared, ctx):
+    """The backbone's own contract, reproduced (`sweep.solve_chain`'s two directional scans and its
+    combine): each pass calls ``step(source, destination)`` over the chain order — the forward pass
+    reading each slot's LOW neighbour, the backward pass its HIGH one — then ``publish()``; the
+    published arrays are gathered AT THE SOURCE and handed to ``deliver`` as the two neighbour
+    states. Returns the delivered rows."""
+    from rigel.calibration.messages import NeighbourState
+
+    n = int(ctx.n_slots)
+    order = list(ctx.order)
+    states = []
+    for nbr, seq, backward in (
+        (np.asarray(ctx.left, np.int64), order, False),
+        (np.asarray(ctx.right, np.int64), order[::-1], True),
+    ):
+        kernel = prepared.scan(backward=backward)
+        if kernel is None:
+            states.append(_dummy_nb(n))
+            continue
+        step, publish = kernel
+        for i in seq:
+            s = int(nbr[i])
+            if s >= 0:
+                step(s, i)
+        src = np.clip(nbr, 0, n - 1)
+        states.append(
+            NeighbourState(
+                state=tuple(np.asarray(a)[src] for a in publish()), valid=nbr >= 0, src=src
+            )
+        )
+    return np.asarray(prepared.deliver(*states).lam_rows)
+
+
+def test_the_scan_is_inert_at_the_shipped_hop_budget(sweep_inputs):
+    """THE ZERO POINT: at the shipped budget the policy builds no ledger, relays nothing in either
+    direction, and delivers exactly its one-hop rows — so attenuating every hop past the first costs
+    nothing and cannot change an answer."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    prepared = TransferPolicy(provider, strand=_strand_of(sweep_inputs)).prepare(ctx)
+    assert prepared.scan(backward=False) is None and prepared.scan(backward=True) is None
+    assert not prepared._ledger.on and prepared._ledger.arrivals == [] and not prepared._ledger.maps
+    rows = np.asarray(prepared.deliver(_dummy_nb(n), _dummy_nb(n)).lam_rows)
+    np.testing.assert_array_equal(rows, np.asarray(_drive_the_backbone(prepared, ctx)))
+
+
+def test_the_scan_kernel_carries_the_far_side_one_hop_and_no_further():
+    """THE KERNEL, on a ledger built by hand so the arithmetic is checkable: a hop carries the
+    source's arrivals from the side AWAY from the destination (never the near side — no echo), drops
+    the names the hop's own message already carries, takes a second hop only when the budget allows
+    it, and stops where no map is registered."""
+    from rigel.calibration.messages.transfer import _Ledger, _PreparedTransfer
+
+    n, k = 5, 4
+    lam_rows = np.zeros((n, k))
+    lam_rows[3] = np.array([-1.0, 0.0, -1.0, -2.0])
+    far = np.array([0.0, -1.0, -2.0, -3.0])  # reaches slot 1 from its LOW side
+    near = np.array([-3.0, -2.0, -1.0, 0.0])  # reaches slot 1 from its HIGH side — never carried
+    over = np.array([0.0, -0.5, -1.0, -1.5])  # reaches slot 2, and hop (2,3) already carries it
+
+    def ledger_of():
+        led = _Ledger(n, True)
+        led.arrival(1, 0, "far", far)
+        led.arrival(1, 2, "near", near)
+        led.arrival(2, 1, "over", over)
+        led.hop(1, 2, lambda row: 2.0 * row)
+        led.hop(2, 3, lambda row: 0.5 * row, consumes=("over",))
+        return led
+
+    def run(hops):
+        prepared = _PreparedTransfer(lam_rows.copy(), ledger_of(), hops)
+        ctx = type(
+            "C",
+            (),
+            dict(
+                n_slots=n,
+                order=list(range(n)),
+                left=np.array([-1, 0, 1, 2, 3]),
+                right=np.array([1, 2, 3, 4, -1]),
+            ),
+        )()
+        return _drive_the_backbone(prepared, ctx)
+
+    one = run(1)
+    step_one = 2.0 * far  # the far-side arrival through the (1, 2) map, already max-normalised
+    np.testing.assert_allclose(one[2], step_one, rtol=0, atol=1e-12)
+    np.testing.assert_array_equal(one[3], lam_rows[3])  # the budget stops the second hop
+    for i in (0, 1, 4):
+        np.testing.assert_array_equal(one[i], lam_rows[i])
+
+    two = run(2)
+    step_two = 0.5 * step_one  # the consumed arrival is dropped; what is carried is the first hop's
+    want = lam_rows[3] + (step_two - step_two.max())
+    np.testing.assert_allclose(two[3], want - want.max(), rtol=0, atol=1e-12)
+    np.testing.assert_allclose(two[2], step_one, rtol=0, atol=1e-12)
+    np.testing.assert_array_equal(two[4], lam_rows[4])  # no map (3, 4): the chain ends there
+
+
+def test_the_scan_carries_the_exons_row_through_the_boundary_into_its_intron(sweep_inputs):
+    """THE FIRST REAL HOP: with one hop of budget, an intron receives — on top of everything the
+    one-hop policy gives it — the EXON's own row that reached its boundary from the far side, carried
+    across the shared-population identity; recomputed independently (`_expected_splice_out_rows`).
+    An exon whose faces are all plain intron|exon receives NOTHING new, because rung 2 already
+    carries that intron's row one hop — the CONSUMED law — and no slot hears its own row back."""
+    from rigel.calibration.messages.transfer import TransferPolicy
+    from rigel.calibration.messages.transfer_rows import TERMINUS, boundary_shares_strand
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    n_grid = int(sweep_inputs["kw"]["n_grid"])
+    window = float(sweep_inputs["kw"]["logodds_window"])
+    provider = _live_provider(sweep_inputs, n_grid, window)
+    ctx = _ctx_of(sweep_inputs)
+    n = int(ctx.n_slots)
+    strand = _strand_of(sweep_inputs)
+    lam, _ = _logodds_grid(n_grid, window)
+    one_hop = np.asarray(
+        TransferPolicy(provider, strand=strand)
+        .prepare(ctx)
+        .deliver(_dummy_nb(n), _dummy_nb(n))
+        .lam_rows
+    )
+    scanned = _drive_the_backbone(TransferPolicy(provider, strand=strand, hops=1).prepare(ctx), ctx)
+    item1 = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    flags = np.asarray(ctx.boundary_flags, np.uint16)
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    is_intron = ~is_bnd & ~is_exon & (fp | fn)
+    carried = 0
+    for i in np.flatnonzero(is_intron):
+        want = one_hop[i].copy()
+        for b in (left[i], right[i]):
+            if b < 0 or not is_bnd[b] or int(b) not in item1:
+                continue
+            if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
+                continue
+            want = want + item1[int(b)]
+            want -= want.max()
+            carried += 1
+        np.testing.assert_allclose(scanned[i], want, rtol=0, atol=1e-10, err_msg=f"intron {i}")
+    assert carried >= 1, "no intron received a forwarded row — this gate would prove nothing"
+    led = TransferPolicy(provider, strand=strand, hops=1).prepare(ctx)._ledger
+    faces = []
+    for source, dest in led.maps:  # a licensed face: a boundary into its exon, an intron beyond it
+        if not (is_bnd[source] and is_exon[dest]) or int(flags[source]) & TERMINUS:
+            continue
+        far = left[source] if right[source] == dest else right[source]
+        if far >= 0 and is_intron[far]:
+            faces.append((source, dest))
+    assert faces, "no licensed face registered a hop — the consumed law would go untested"
+    for key in faces:
+        assert "intron row" in led.consumed.get(key, ()), (
+            f"the hop {key} carries rung 2's transported intron row already and must declare it "
+            "consumed, or the scan double-counts it"
+        )
