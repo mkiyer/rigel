@@ -1,4 +1,4 @@
-# NEXT SESSION — THE TWO-PHASE BACKBONE IS LANDED; NEXT IS THE TWO-SIDED EXON PROFILE (handoff, 2026-09-04)
+# NEXT SESSION — STEP A (THE LEVEL RULE) IS LANDED; NEXT IS STEP E, RULE 5 AS A LEVEL (handoff, 2026-09-04)
 
     ⚠ A DEV DOC, and a HANDOFF. It says where things stand and how to start, not what is settled —
     rulings are `DESIGN.md`, the ranked list `ROADMAP.md`, the open problems `ISSUES.md`, the
@@ -26,22 +26,23 @@ unstranded half — the deferred capture-ON rows 0.05–0.18× silence, the in-s
 0.35× / 0.66× silence where the relay's anchor still leads (8,623 / 6,372). The ladder table is
 `landed_ladder.out` (session scratchpad; §6e of the note by construction).
 
-## THE NEXT CASES — the SHIP AUDIT's order (`MESSAGE_RUNGS.md`, 2026-09-04)
+## THE NEXT CASES — `MESSAGE_PLAN.md` §6, in order (owner review, 2026-09-04)
 
-1. **THE LEVEL RULE** (strand-change faces, termini both ways, the inside of exon|intron termini, the
-   empty chain pieces): the largest STOP-by-omission hole, 12–28 % of in-scope error at the terminus
-   and walled classes. The `Message.level` lane exists with one rule (the edge bound).
-2. **sj + terminus** faces (2,354 ladder boundaries): one composed rule.
-3. **The two-sided exon profile** (`ISSUES: two-sided-exon-row`; the note's §9 shows it on three exons).
-4. **AMBIG tilt / both-stranded locus** (a ruling), with `nest` / `instart` grown as 1–2 need them.
-5. **The SHIP LIST**: the 0.8.0-metric pricing under `transfer`, the flip, the obsolescence pass,
-   `preflight --full`, goldens, the docs.
-⚠ The intron's own solve carries 43–45 % of in-scope off-capture error under EVERY policy — parked by
-the owner's order until the policy ships.
+A. ✅ LANDED 2026-09-04 — THE LEVEL RULE at every terminus face (`DESIGN.md` §6b.12; the record in
+   `MESSAGE_PLAN.md` §5b): a level is made from the sender's MEASUREMENT only, shape-preserving
+   through the level-kept map, per-pair widths, the crossing total's upper bound without a claim;
+   item 6's map, cap and pooled spread deleted; every rule now receives (own claim, what is held).
+E. rule 5 as a level (one-sided vs two-sided, A/B'd; the zero controls) — NEXT;
+F, G. rules 3 and 4 refined (the wall from the intron's level; the per-pair discrepancy);
+B. strand-change faces and termini both ways; C. the empty chain pieces (`nest`); D. junction plus
+terminus (`instart`); H. the AMBIG ruling; then the ship list.
+⚠ Residue decisions are deferred until no rule is missing. ⚠ Report class error both as fragments and
+relative to the class's own mass (`MESSAGE_PLAN.md` §7).
 
 ## HOW TO START
 
-* Read `TWO_PHASE_BACKBONE.md` §0 (the words), §3 (the skeleton as landed), §6d–§6f, §8.
+* Read `MESSAGE_PLAN.md` first (the ten rules' status, the level rule, the order), then
+  `TWO_PHASE_BACKBONE.md` §0 (the words), §3 (the skeleton as landed), §6d–§6f, §8–§9.
 * The prototypes and logs are in the 2026-09-04 session scratchpad
   (`/private/tmp/claude-503/-Users-mkiyer-proj-rigel/d7adfcc1-…/scratchpad/`): `bp_proto.py`,
   `flux_proto.py`, `flux_stage0.py`, `bp_identity.py`, `pass0_score.py`, `halves.py` and every `.out`.

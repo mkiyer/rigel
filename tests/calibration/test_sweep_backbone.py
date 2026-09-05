@@ -101,7 +101,7 @@ class _Echo:
     def propagate(self, *, backward: bool):
         def receive(s, i):
             self.hops[backward].append((int(s), int(i)))
-            return Message(level=(float(s), 0.0))
+            return Message(level_gdna=(float(s), 0.0))
 
         return receive
 
@@ -120,11 +120,11 @@ def test_every_node_holds_a_message_from_each_neighbour_it_has():
     br = SW._pass(list(ctx.order)[::-1], right, _Echo().prepare(ctx), backward=True)
     for i in range(N):
         if left[i] >= 0:
-            assert fl[i].level[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
+            assert fl[i].level_gdna[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
         else:
             assert fl[i] is NO_NEIGHBOUR and fl[i] is not SILENCE
         if right[i] >= 0:
-            assert br[i].level[0] == float(right[i])
+            assert br[i].level_gdna[0] == float(right[i])
         else:
             assert br[i] is NO_NEIGHBOUR
     assert sum(m is None for m in fl) == 1 and sum(m is None for m in br) == 1, "one open side each"
@@ -166,7 +166,41 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
 
     fl = SW._pass(list(ctx.order), list(ctx.left), _Quiet().prepare(ctx), backward=False)
     assert fl[0] is NO_NEIGHBOUR and all(m is SILENCE for m in fl[1:])
-    assert SILENCE.is_silent and Message(level=(0.0, 1.0)).is_silent is False
+    assert SILENCE.is_silent and Message(level_gdna=(0.0, 1.0)).is_silent is False
+
+
+def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
+    """THE LANES (owner ruling 2026-09-04): a kernel that fills every lane — both composition profiles
+    and the three level claims — hands them to the solve untouched, and a message with any one lane is
+    not silent. The backbone carries; it never reads a lane."""
+    ctx = _ctx()
+    full = Message(
+        composition=np.zeros(3),
+        tilt=np.zeros(2),
+        level_gdna=(-2.0, 0.1),
+        level_rna_pos=(-3.0, 0.2),
+        level_rna_neg=(-4.0, 0.3),
+    )
+
+    class _Full(_Echo):
+        def propagate(self, *, backward: bool):
+            return lambda s, i: full
+
+    pol = _Full()
+    prepared = pol.prepare(ctx)
+    fl = SW._pass(list(ctx.order), list(ctx.left), prepared, backward=False)
+    br = SW._pass(list(ctx.order)[::-1], list(ctx.right), prepared, backward=True)
+    prepared.solve(fl, br)
+    got_l, got_r = pol.held
+    for i in range(N):
+        if list(ctx.left)[i] >= 0:
+            assert got_l[i] is full
+        if list(ctx.right)[i] >= 0:
+            assert got_r[i] is full
+    assert not full.is_silent and Message().is_silent
+    for lane in Message.LANES:
+        one = Message(**{lane: np.zeros(2) if lane in ("composition", "tilt") else (0.0, 1.0)})
+        assert not one.is_silent, f"a message with only {lane} read as silence"
 
 
 def test_the_solve_receives_the_two_held_lists_at_the_recipient():

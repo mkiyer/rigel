@@ -26,15 +26,26 @@ ever crosses a capture cliff and no constant is anywhere. The policy has three p
     count — the one level-lane rule; a zero edge is vacuous (rung 3).
   - the exon|exon TERMINUS boundary ⇄ its OUTSIDE exon: the licence counts the spliced crossing,
     ``f_b = f_O (U_b + S_b) / U_b`` (item 5) — the outside exon's message travels the splice-out map,
-    the boundary's the face map with the spliced density; the inside flank takes the owner's
-    ABUNDANCE-DISCREPANCY map, the step's spread fitted from the served pairs' two witnesses (item 6).
+    the boundary's the face map with the spliced density.
+  - a TERMINUS boundary → the region INSIDE it (exon|exon and exon|intron alike): THE LEVEL RULE
+    (the owner's design, 2026-09-04). Composition cannot cross a terminus (new transcription starts
+    or ends there), the gDNA LEVEL can: the boundary's OWN strand profile — a measurement, never what
+    it holds — carried through the level-kept map (the inside's gDNA share is the boundary's share
+    times its crossing density, over the inside's own total), its shape preserved, blurred by the two
+    totals' counting and by the pair's own discrepancies: the excess of the totals' disagreement over
+    counting, and, where the inside exon's strand channel is live, the excess of the two strand
+    modes' disagreement over counting. Value kept, nothing pooled, no hypothesis chosen for the
+    discrepancy. With no own claim the boundary still sends what every library measures: its
+    crossing's total bounds the inside's gDNA density above.
   - the ALTERNATIVE SPLICE SITE ⇄ both flanks: the intron-side flank shares the full unspliced
     crossing, the exon-of-both flank the crossing plus the leaving isoform measured as the route flux;
     each pair widened by its own disagreement beyond counting, nothing pooled (item 7).
 
-* **The two passes and the solve** (``propagate`` / ``solve``): what a node SENDS is its own claim
-  composed with what it holds from its far side (a witness product: profiles add), and the recipient's
-  rule maps or stops it — so a claim travels as far as the faces admit it, each hop charging its own
+* **The two passes and the solve** (``propagate`` / ``solve``): a node SENDS two things apart — its
+  own claim (a measurement) and what it holds from its far side (an imputation) — and the recipient's
+  rule decides what to do with each: a composition rule composes them (a witness product: profiles
+  add) and maps the product; a level rule reads the measurement only, because an imputation is never
+  re-issued as a level; either may stop — so a claim travels as far as the faces admit it, each hop charging its own
   counting width, and no node ever hears its own claim back (the forward pass composes only what came
   from the left, the backward pass only what came from the right). At the solve the two held profiles
   add, and ψ fuses them with the slot's own evidence and the prior.
@@ -57,18 +68,21 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+from scipy.special import polygamma
 
 from ..simplex_logodds import strand_row_logodds
 from . import SILENCE, Message, PsiMessage, StepContext
 from .transfer_rows import (
     EPS,
-    abundance_row,
     blur_row,
     boundary_shares_strand,
     edge_bound_row,
     face_is_licensed,
     face_map_lambda,
     junction_flanks,
+    level_bound_row,
+    level_map_lambda,
+    level_row,
     outside_flank,
     splice_out_row,
     transport_row,
@@ -90,9 +104,20 @@ def _fuse(parts):
     return None if out is None else _norm(out)
 
 
-def _forward(row):
+def _forward(own, held):
     """FORWARD: the identity — a hop whose two objects share one population exactly."""
-    return row
+    return _fuse([r for r in (own, held) if r is not None])
+
+
+def _composed(mapping):
+    """A composition rule: the sender's own claim and what it holds compose (profiles add) and the
+    face's map carries the product."""
+
+    def rule(own, held):
+        sending = _fuse([r for r in (own, held) if r is not None])
+        return None if sending is None else mapping(sending)
+
+    return rule
 
 
 class TransferPolicy:
@@ -211,8 +236,8 @@ class TransferPolicy:
             def out_rule(row, b=b, e=e, s=float(sc[hi][b])):
                 return splice_out_row(row, lam, n_u[b], s, a_g[b], a_g[e])
 
-            rule[(int(b), int(e))] = face_rule  # rung 2
-            rule[(int(e), int(b))] = out_rule  # item 1
+            rule[(int(b), int(e))] = _composed(face_rule)  # rung 2
+            rule[(int(e), int(b))] = _composed(out_rule)  # item 1
 
         # rung 3: the intergenic|exon EDGE — the level lane's one rule. The edge's own claim is its
         # gDNA count (a marker profile: its value is read by the rule, not the row); the recipient
@@ -228,20 +253,19 @@ class TransferPolicy:
                     def edge_rule(row, b=b, e=e):
                         return edge_bound_row(lam, n_u[b], n_u[e], a_g[b], a_g[e])
 
-                    rule[(int(b), int(e))] = edge_rule
+                    rule[(int(b), int(e))] = _composed(edge_rule)
 
-        # items 5 and 6: the exon|exon TERMINUS boundary — its outside exon by the spliced-crossing
-        # licence, its inside exon by the abundance-discrepancy map
-        served6 = []
+        # item 5: the exon|exon TERMINUS boundary and its OUTSIDE exon — composition, by the
+        # spliced-crossing licence; and THE LEVEL RULE into the region INSIDE every terminus
         for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
             lo, hi_ = left[b], right[b]
-            if not (is_exon[lo] and is_exon[hi_]):
-                continue
             o, i = outside_flank(flags[b], lo, hi_)
             if o is None:
                 continue
             if (
-                boundary_shares_strand(fp[b], fn[b], fp[o], fn[o])
+                is_exon[lo]
+                and is_exon[hi_]
+                and boundary_shares_strand(fp[b], fn[b], fp[o], fn[o])
                 and n_u[b] > 0
                 and a_g[b] > 0
                 and a_g[o] > 0
@@ -255,54 +279,51 @@ class TransferPolicy:
                 def back5(row, le=le5, b=b):
                     return transport_row(row, lam, le, n_u[b], n_s[b])
 
-                rule[(int(o), int(b))] = out5
-                rule[(int(b), int(o))] = back5
-            if (
-                self._strand is not None
-                and boundary_shares_strand(fp[b], fn[b], fp[i], fn[i])
-                and n_u[b] > 0
-                and n_u[i] > 0
-                and a_g[b] > 0
-                and a_g[i] > 0
-            ):
-                served6.append((b, i, (n_u[i] / a_g[i]) / ((n_u[b] + n_s[b]) / a_g[b])))
-        if served6:
-            # the step's spread: the hop's premise, FITTED from the served pairs' two witnesses (the
-            # boundary's and the inside exon's strand modes, data only) by the method of moments
-            # beyond counting — zero where they agree within counting
-            kappa = self._strand[0]
-            ks_of = lambda x: kappa if fp[x] else 1.0 - kappa  # noqa: E731
-            log_s, var_s = [], []
-            for b, i, r in served6:
-                if not (tau[b] > 0.0 and tau[i] > 0.0):
-                    continue  # one witness only: nothing to fit from this pair
+                rule[(int(o), int(b))] = _composed(out5)
+                rule[(int(b), int(o))] = _composed(back5)
+            # ── THE LEVEL RULE: the boundary's gDNA level into the inside region ─────────────────
+            if not (is_exon[i] and (is_exon[o] or is_intron[o])):
+                continue
+            if not (n_u[b] > 0 and n_u[i] > 0 and a_g[b] > 0 and a_g[i] > 0):
+                continue
+            if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
+                continue  # a strand change is the plan's step B
+            density_b = n_u[b] / a_g[b]
+            total_b = n_u[b] + n_s[b]
+            # the pair's discrepancies, each the excess of a disagreement over its counting:
+            # (i) the totals per opportunity, the dampening the owner ruled
+            r = (n_u[i] / a_g[i]) / (total_b / a_g[b])
+            v_pair = max(0.0, float(np.log(r)) ** 2 - (1.0 / n_u[i] + 1.0 / total_b))
+            # (ii) the two strand modes, where both channels are live (data only, as item 7)
+            if self._strand is not None and tau[b] > 0.0 and tau[i] > 0.0:
+                kappa = self._strand[0]
                 ok, modes = True, []
-                for x in (b, i):
-                    nn = cnt[x].sum()
-                    p = cnt[x, 0] / nn
-                    f = (p - ks_of(x)) / (0.5 - ks_of(x))
+                for y in (b, i):
+                    nn = cnt[y].sum()
+                    p = cnt[y, 0] / nn
+                    ks = kappa if fp[y] else 1.0 - kappa
+                    f = (p - ks) / (0.5 - ks)
                     if not 0.0 < f < 1.0:
-                        ok = False  # a vertex mode has no logarithm
+                        ok = False  # a vertex mode has no log-odds
                         break
-                    modes.append((f, p * (1.0 - p) / nn / (p - ks_of(x)) ** 2))
-                if not ok:
-                    continue
-                (f_b, v_b), (f_i, v_i) = modes
-                log_s.append(np.log(f_i / (f_b * n_u[b] / (n_u[b] + n_s[b]) / r)))
-                var_s.append(v_b + v_i + 1.0 / n_u[i] + 1.0 / (n_u[b] + n_s[b]))
-            v_step = 0.0
-            if len(log_s) >= 2:
-                ls, vs = np.asarray(log_s), np.asarray(var_s)
-                w = 1.0 / vs
-                w /= w.sum()
-                mu = float(w @ ls)
-                v_step = max(0.0, float(w @ (ls - mu) ** 2) - float(w @ vs))
-            for b, i, r in served6:
+                    v_log = p * (1.0 - p) / nn / (p - ks) ** 2
+                    modes.append((f, v_log / (1.0 - f) ** 2))
+                if ok:
+                    (f_b, v_b), (f_i, v_i) = modes
+                    f_pred = min(f_b / r, 1.0 - 1e-9)  # the level kept: the boundary's share over r
+                    d = np.log(f_i / (1.0 - f_i)) - np.log(f_pred / (1.0 - f_pred))
+                    v_pair += max(0.0, float(d * d) - (v_b + v_i + 1.0 / n_u[i] + 1.0 / total_b))
+            v_level = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5)) + v_pair
+            m_level = level_map_lambda(lam, density_b, a_g[i], n_u[i])
+            bound = level_bound_row(lam, density_b, a_g[i], n_u[i], v_level)
 
-                def step6(row, b=b, i=i, r=r, v=v_step):
-                    return abundance_row(row, lam, n_u[b], n_s[b], r, n_u[i], v)
+            def level_rule(own, held, m=m_level, v=v_level, ub=bound):
+                """A level is made from the sender's MEASUREMENT only: its own profile through the
+                level-kept map; with none, the crossing total's upper bound. What it holds — an
+                imputation — never crosses a level face."""
+                return level_row(own, lam, m, v) if own is not None else ub
 
-                rule[(int(b), int(i))] = step6
+            rule[(int(b), int(i))] = level_rule
 
         # item 7: the ALTERNATIVE SPLICE SITE, both flanks both ways, the discrepancy rule PER PAIR
         if self._strand is not None:
@@ -345,8 +366,8 @@ class TransferPolicy:
                     def back7(row, le=le7, b=b, s=s_out, w=width):
                         return blur_row(transport_row(row, lam, le, n_u[b], s), lam, w)
 
-                    rule[(int(x), int(b))] = out7
-                    rule[(int(b), int(x))] = back7
+                    rule[(int(x), int(b))] = _composed(out7)
+                    rule[(int(b), int(x))] = _composed(back7)
 
         return _PreparedTransfer(own, rule, K)
 
@@ -368,22 +389,14 @@ class _PreparedTransfer:
         self.held[bool(backward)] = held
 
         def receive(s: int, i: int):
-            """What ``s`` SENDS is its own claim composed with what it holds from its far side (written
-            by this pass one step earlier); the rule for the face maps it (MODIFY), passes it (FORWARD)
-            or is absent (STOP)."""
+            """``s`` sends two things apart — its own claim and what it holds from its far side (written
+            by this pass one step earlier) — and the rule for the face decides: compose and map
+            (MODIFY), pass (FORWARD), read the measurement only (a level face), or absent (STOP)."""
             fn = self.rule.get((int(s), int(i)))
             if fn is None:
                 return SILENCE
-            parts = []
-            if self.own[s] is not None:
-                parts.append(self.own[s])
             far = held[s]
-            if far is not None and far.composition is not None:
-                parts.append(far.composition)
-            sending = _fuse(parts)
-            if sending is None:
-                return SILENCE
-            out = fn(sending)
+            out = fn(self.own[s], None if far is None else far.composition)
             if out is None or np.ptp(out) <= EPS:
                 return SILENCE
             msg = Message(composition=_norm(out))

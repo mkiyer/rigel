@@ -317,17 +317,20 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,755 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-04 after the two-phase backbone landed, the foundation scaffold retired and the transfer
-policy was rebuilt as claims and rules). Account it from **3,791** — the count after
+⭐ **THE STANDING BASELINE: 0 failed / 3,757 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-04 after the two-phase backbone landed, the foundation scaffold retired, the transfer
+policy was rebuilt as claims and rules, the message gained its five lanes, and the level rule replaced
+item 6). Account it from **3,791** — the count after
 `docs/dev/TWO_PHASE_BACKBONE.md` was added (+1 jargon) to the previous 3,790 — by **−28**: the two
 retired gate files `test_message_foundation.py` and `test_message_policy.py` (−16 own cases, −4
 jargon/docs-boundary), the two retired modules `messages/foundation.py` and `messages/policy.py`
 (−6: jargon, docs-boundary, layering), +3 for the backbone-law gates that replaced the two
-gather-at-source gates in `tests/calibration/test_sweep_backbone.py`, and −5 in
+gather-at-source gates in `tests/calibration/test_sweep_backbone.py`, −5 in
 `tests/calibration/test_transfer_policy.py` (13 one-hop "beside nothing else" and scan-seam gates
-retired with the seam, 8 pass-form gates added). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
-gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution (3,763
+retired with the seam, 8 pass-form gates added), +1 for the lanes gate in
+`test_sweep_backbone.py`, and +1 for `docs/dev/MESSAGE_PLAN.md` (jargon) — **−26** in all; the level
+rule's two gates replaced item 6's two one-for-one. ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
+gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution (3,765
 collected).
 
 ⛔ **ANY failure at all is a regression** — a stronger and

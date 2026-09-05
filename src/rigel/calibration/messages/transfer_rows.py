@@ -26,8 +26,9 @@ from ..splice_graph import (
 )
 
 __all__ = [
-    "abundance_map",
-    "abundance_row",
+    "level_bound_row",
+    "level_map_lambda",
+    "level_row",
     "blur_row",
     "boundary_shares_strand",
     "edge_bound_row",
@@ -49,13 +50,11 @@ _BODY_LEFT = _TES_POS | _TSS_NEG
 #: the marginal over ``log rho`` is taken on equal-probability nodes of the standard normal —
 #: quadrature resolution, like ``n_grid``, not a model constant
 _MARGINAL_NODES = norm.ppf((np.arange(9) + 0.5) / 9.0)
-#: the same nodes as probabilities, for a TRUNCATED normal (the enrichment step's support)
-_STEP_NODES_Q = (np.arange(9) + 0.5) / 9.0
 
 
 def blur_row(row, lam, v):
     """The delta-method counting width: a Gaussian blur of variance ``v`` along ``lam`` applied to a
-    max-normalised log-row (the kernel `transport_row`, `abundance_row` and item 7's pair width share)."""
+    max-normalised log-row (the kernel `transport_row`, `level_row` and item 7's pair width share)."""
     out = np.asarray(row, np.float64) - np.max(row)
     if v > 0.0 and lam.shape[0] > 1:
         dlam = float(lam[1] - lam[0])
@@ -183,63 +182,41 @@ def splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e):
     return out if np.ptp(out) > EPS else np.zeros_like(lam)
 
 
-def abundance_map(lam, n_u, n_s, r, s):
-    """THE ABUNDANCE-DISCREPANCY MAP ``lam_X(lam_b)``: the gDNA log-odds of a flank composition cannot
-    reach, given the boundary's, its spliced crossing, the measured total-abundance ratio ``r`` between
-    the flank and the boundary and an enrichment step ``s`` — with ``T = U + S`` and the composition-
-    transfer value ``f_c = U sigma(lam_b) / T``, the flank holds gDNA ``s f_c T`` and RNA ``r T − s f_c T``:
-
-        lam_X = log(s f_c) − log(r − s f_c)
-
-    Enrichment is ``s = r`` (composition transfers), new RNA is ``s = 1`` (the gDNA abundance
-    transfers); monotone nondecreasing in ``lam_b``."""
+def level_map_lambda(lam, density_b, opportunity_i, total_i):
+    """THE LEVEL-KEPT MAP ``lam_i(lam_b)``: the gDNA level crosses a face composition cannot — the
+    inside's gDNA share is the sender's gDNA share times the sender's crossing density
+    ``density_b`` (its total per base of gDNA opportunity), times the inside's gDNA opportunity, over
+    the inside's OWN total (an observation). Monotone nondecreasing; clipped at the grid's ends."""
     lam = np.asarray(lam, np.float64)
     sig = 1.0 / (1.0 + np.exp(-lam))
-    fc = float(n_u) * sig / (float(n_u) + float(n_s))
-    g = float(s) * fc
-    return np.log(np.maximum(g, 1e-300)) - np.log(np.maximum(float(r) - g, 1e-300))
+    f_i = np.clip(sig * float(density_b) * float(opportunity_i) / float(total_i), 1e-9, 1.0 - 1e-9)
+    return np.log(f_i / (1.0 - f_i))
 
 
-def abundance_row(row_b, lam, n_u, n_s, r, n_x, v_step):
-    """A boundary's row carried INTO the flank composition cannot reach: read at the preimage of the
-    abundance map for each enrichment-step node and averaged. The step's prior is ``log s ~ N(0, v_step)``
-    — ``v_step`` the hop's premise FITTED from the served pairs' own two witnesses, zero when they agree
-    within counting — on the support the totals allow: ``[1, r]`` when they rise (the two hypotheses
-    and their mixtures), ``(0, r]`` when they fall (de-enrichment is then certain), and never above the
-    hard cap ``s <= r`` (new RNA can only add, so the flank's gDNA share never exceeds the
-    composition-transfer value). With ``v_step`` zero it is the new-RNA point when the totals rise and
-    the composition point when they fall.
-    Then the delta-method width of the ingredients (both totals, the spliced ratio). Vacuous at a
-    depleted boundary or a flat row."""
+def level_row(row_b, lam, lam_i_of_b, v):
+    """A sender's profile carried across a level face: read at the map's preimage (its shape —
+    and its sidedness — preserved; no value is summarised), then blurred by ``v``: the two totals'
+    counting plus the pair's own dampening. Vacuous at a flat profile."""
+    r = np.asarray(row_b, np.float64)
+    if np.ptp(r) <= EPS:
+        return np.zeros_like(np.asarray(lam, np.float64))
     lam = np.asarray(lam, np.float64)
-    rb = np.asarray(row_b, np.float64)
-    if not (n_u > 0.0 and n_x > 0.0 and r > 0.0) or np.ptp(rb) <= EPS:
-        return np.zeros_like(lam)
-    rb = rb - rb.max()
-    cap = float(np.log(max(float(r), 1e-300)))
-    sd = float(np.sqrt(max(float(v_step), 0.0)))
-    if sd <= 0.0:
-        nodes = [min(0.0, cap)]  # totals up: new RNA (s = 1); totals down: composition (s = r)
-    else:
-        # the step's support: [1, r] when the totals rise (the owner's two hypotheses and their
-        # mixtures), (0, r] when they fall (de-enrichment is then certain); the cap s <= r always
-        lo_q = norm.cdf(0.0) if cap >= 0.0 else 0.0
-        hi_q = norm.cdf(cap / sd)
-        nodes = [float(norm.ppf(lo_q + (hi_q - lo_q) * q) * sd) for q in _STEP_NODES_Q]
-    acc = np.zeros_like(lam)
-    for ls in nodes:
-        m = abundance_map(lam, n_u, n_s, r, float(np.exp(ls)))
-        pre = np.interp(lam, m, lam, left=lam[0], right=lam[-1])
-        acc += np.exp(np.interp(pre, lam, rb))
-    out = np.log(np.maximum(acc / len(nodes), 1e-300))
-    v = float(
-        polygamma(1, float(n_x) + 0.5)
-        + polygamma(1, float(n_u) + float(n_s) + 0.5)
-        + polygamma(1, float(n_s) + 0.5)
-        + polygamma(1, float(n_u) + 0.5)
-    )
-    out = blur_row(out, lam, v)
+    pre = np.interp(lam, np.asarray(lam_i_of_b, np.float64), lam, left=lam[0], right=lam[-1])
+    out = blur_row(np.interp(pre, lam, r - r.max()), lam, v)
     return out if np.ptp(out) > EPS else np.zeros_like(lam)
+
+
+def level_bound_row(lam, density_b, opportunity_i, total_i, v):
+    """The level every library can send: the crossing's TOTAL density bounds the gDNA density
+    above, so the inside's gDNA share times its own density may not exceed it — one-sided, at the
+    level face's width ``v``."""
+    lam = np.asarray(lam, np.float64)
+    sig = 1.0 / (1.0 + np.exp(-lam))
+    x = np.log(np.maximum(sig * float(total_i) / float(opportunity_i), 1e-300)) - np.log(
+        float(density_b)
+    )
+    row = -0.5 * np.maximum(x, 0.0) ** 2 / max(float(v), 1e-12)
+    return row - row.max()
 
 
 def edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e):

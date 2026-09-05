@@ -36,6 +36,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.special import polygamma
 
 import rigel.calibration.sweep as SW
 from rigel.calibration.messages import Policy
@@ -780,17 +781,22 @@ def test_the_terminus_orientation_reads_the_flag_alone():
     )
 
 
-# ── ITEM 6 (owner design 2026-09-02): the abundance-discrepancy message into the inside flank ────
+# ── THE LEVEL RULE (MESSAGE_PLAN.md step A, 2026-09-04): the terminus boundary into the region inside it ──
 
 
-def _expected_abundance_rows(si, ctx, strand, lam):
-    """Item 6 recomputed INDEPENDENTLY of the policy: at every served terminus boundary (one direction,
-    no sj, exon flanks, a live strand channel), the boundary's own strand row carried into the INSIDE
-    flank through the abundance map, the step's spread refit here from the served pairs' two modes,
-    the hard cap and the delta-method width — keyed by the inside slot."""
+def _expected_level_rows(si, ctx, strand, lam):
+    """THE LEVEL RULE recomputed INDEPENDENTLY of the policy: at every terminus boundary with an inside
+    EXON (the outside an exon or an intron), the boundary's own strand row through the level-kept map
+    (the boundary's share times its crossing density, times the inside's opportunity, over the
+    inside's total), blurred by both totals' counting plus the pair's discrepancies — the totals'
+    disagreement beyond counting and, where both strand channels are live, the two strand modes'
+    disagreement beyond counting. With no own row the crossing total's one-sided upper bound. Keyed by
+    the inside slot; ``(rows, served pairs)``."""
     from rigel.calibration.messages.transfer_rows import (
-        abundance_row,
         boundary_shares_strand,
+        level_bound_row,
+        level_map_lambda,
+        level_row,
         outside_flank,
     )
 
@@ -798,6 +804,7 @@ def _expected_abundance_rows(si, ctx, strand, lam):
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    is_intron = ~is_bnd & ~is_exon & (fp | fn)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     flags = np.asarray(ctx.boundary_flags, np.uint16)
     n_u = np.asarray(ctx.n_slot, np.float64)
@@ -805,65 +812,48 @@ def _expected_abundance_rows(si, ctx, strand, lam):
     A_g = np.asarray(ctx.eff_gdna_global, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
     tau = np.asarray(ctx.own.tau_lam, np.float64)
-    belief = np.asarray(ctx.belief_fg, np.float64)
-    fg = 1.0 / (1.0 + np.exp(-lam))
-
-    def strand_row(x):
-        n = cnt[x].sum()
-        ks = kappa if fp[x] else 1.0 - kappa
-        f_ref = float(np.clip(belief[x], 1e-9, 1 - 1e-9))
-        p = 0.5 * fg + ks * (1 - fg)
-        p_ref = 0.5 * f_ref + ks * (1 - f_ref)
-        var = max(
-            n * p_ref * (1 - p_ref)
-            + (n * f_ref) ** 2 * 0.25 * od_g
-            + (n * (1 - f_ref)) ** 2 * ks * (1 - ks) * od_r,
-            1e-9,
-        )
-        row = -0.5 * (cnt[x, 0] - n * p) ** 2 / var
-        return row - row.max()
-
-    served = []
+    out, served = {}, []
     for b in np.flatnonzero(is_bnd):
         lo, hi = left[b], right[b]
-        if lo < 0 or hi < 0 or not (is_exon[lo] and is_exon[hi]):
+        if lo < 0 or hi < 0:
             continue
-        _o, i = outside_flank(flags[b], lo, hi)
-        if i is None or not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
+        o, i = outside_flank(flags[b], lo, hi)
+        if i is None or not is_exon[i] or not (is_exon[o] or is_intron[o]):
             continue
-        if not (tau[b] > 0.0 and n_u[b] > 0 and n_u[i] > 0 and A_g[b] > 0 and A_g[i] > 0):
+        if not boundary_shares_strand(fp[b], fn[b], fp[i], fn[i]):
             continue
-        served.append((int(b), int(i), (n_u[i] / A_g[i]) / ((n_u[b] + n_s[b]) / A_g[b])))
-    ls, vs = [], []
-    for b, i, r in served:
-        if not tau[i] > 0.0:
+        if not (n_u[b] > 0 and n_u[i] > 0 and A_g[b] > 0 and A_g[i] > 0):
             continue
-        ks = kappa if fp[b] else 1.0 - kappa
-        fs, vv = [], 0.0
-        for x in (b, i):
-            n = cnt[x].sum()
-            p = cnt[x, 0] / n
-            f = (p - ks) / (0.5 - ks)
-            fs.append(f)
-            vv += p * (1 - p) / n / (p - ks) ** 2
-        if not all(0.0 < f < 1.0 for f in fs):
-            continue
-        ls.append(np.log(fs[1] / (fs[0] * n_u[b] / (n_u[b] + n_s[b]) / r)))
-        vs.append(vv + 1.0 / n_u[i] + 1.0 / (n_u[b] + n_s[b]))
-    v_step = 0.0
-    if len(ls) >= 2:
-        ls, vs = np.asarray(ls), np.asarray(vs)
-        w = 1.0 / vs
-        w /= w.sum()
-        mu = float(w @ ls)
-        v_step = max(0.0, float(w @ (ls - mu) ** 2) - float(w @ vs))
-    out = {}
-    for b, i, r in served:
-        row = abundance_row(strand_row(b), lam, n_u[b], n_s[b], r, n_u[i], v_step)
+        served.append((int(b), int(i), "exon|exon" if is_exon[o] else "exon|intron"))
+        d_b, T_b = n_u[b] / A_g[b], n_u[b] + n_s[b]
+        r = (n_u[i] / A_g[i]) / (T_b / A_g[b])
+        v = max(0.0, np.log(r) ** 2 - (1.0 / n_u[i] + 1.0 / T_b))
+        if tau[b] > 0.0 and tau[i] > 0.0:
+            ok, modes = True, []
+            for y in (b, i):
+                n = cnt[y].sum()
+                p = cnt[y, 0] / n
+                ks = kappa if fp[y] else 1.0 - kappa
+                f = (p - ks) / (0.5 - ks)
+                if not 0.0 < f < 1.0:
+                    ok = False
+                    break
+                modes.append((f, p * (1 - p) / n / (p - ks) ** 2 / (1 - f) ** 2))
+            if ok:
+                (f_b, v_b), (f_i, v_i) = modes
+                f_pred = min(f_b / r, 1 - 1e-9)
+                dd = np.log(f_i / (1 - f_i)) - np.log(f_pred / (1 - f_pred))
+                v += max(0.0, dd * dd - (v_b + v_i + 1.0 / n_u[i] + 1.0 / T_b))
+        v += float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5))
+        m = level_map_lambda(lam, d_b, A_g[i], n_u[i])
+        if tau[b] > 0.0 and fp[b] != fn[b]:
+            row = level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
+        else:
+            row = level_bound_row(lam, d_b, A_g[i], n_u[i], v)
         if np.ptp(row) > 1e-9:
-            out.setdefault(i, np.zeros(lam.shape[0]))
-            out[i] += row
-    return out, v_step
+            out.setdefault(int(i), np.zeros(lam.shape[0]))
+            out[int(i)] += row
+    return out, served
 
 
 def _with_populated_inside(ctx):
@@ -907,59 +897,45 @@ def _with_populated_inside(ctx):
     )
 
 
-def test_the_abundance_map_holds_the_two_hypotheses_and_the_cap():
-    """The map's three analytic properties: at s = r the flank's share is the composition-transfer
-    value f_c = f_b U/(U+S) (enrichment); at s = 1 it is f_c / r (new RNA); it is monotone in the
-    boundary's log-odds; and the row never claims a share above f_c — a source peaked at f_b arrives
-    at or below the composition-transfer value whatever the step prior, the hard cap."""
-    from rigel.calibration.messages.transfer_rows import abundance_map, abundance_row
+def test_the_level_map_keeps_the_level_and_the_bound_is_vacuous_below_the_total():
+    """THE LEVEL RULE's arithmetic, gated directly: through the level-kept map a boundary whose share is
+    f_b and whose crossing density is d lands the inside at f_b * d * E_i / T_i (the gDNA level kept,
+    the inside's own total supplying the rest); the map is monotone; a profile read through it keeps
+    its peak there and its width grows with the dampening; the total's upper bound charges nothing
+    below the crossing's density and charges above it."""
+    from rigel.calibration.messages.transfer_rows import (
+        level_bound_row,
+        level_map_lambda,
+        level_row,
+    )
 
     lam = np.linspace(-8, 8, 801)
     sig = 1 / (1 + np.exp(-lam))
-    U, S, r = 300.0, 60.0, 2.5
-    fc = U * sig / (U + S)
-    m_enrich = abundance_map(lam, U, S, r, r)
-    m_new = abundance_map(lam, U, S, r, 1.0)
-    np.testing.assert_allclose(1 / (1 + np.exp(-m_enrich)), fc, rtol=0, atol=1e-9)
-    np.testing.assert_allclose(1 / (1 + np.exp(-m_new)), fc / r, rtol=0, atol=1e-9)
-    assert np.all(np.diff(m_enrich) >= -1e-12) and np.all(np.diff(m_new) >= -1e-12)
-
-    def _var(rw):
-        p = np.exp(rw - rw.max())
-        p /= p.sum()
-        m = p @ lam
-        return float(p @ (lam * lam) - m * m)
-
-    f_b = 0.6
+    d_b, E_i, T_i = (
+        0.2,
+        500.0,
+        200.0,
+    )  # the boundary crosses 0.2 fragments/base; the inside holds 200
+    m = level_map_lambda(lam, d_b, E_i, T_i)
+    assert np.all(np.diff(m) >= 0.0)
+    f_b = 0.4
     row_b = -0.5 * ((lam - np.log(f_b / (1 - f_b))) / 0.05) ** 2
-    # the cap is exact in the map and softened only by the ingredients' counting width, so it is
-    # asserted on DEEP counts (the blur's sd ~0.03 nats there); the shallow case is asserted by mode
-    Ud, Sd, nd = 3000.0, 600.0, 4000.0
-    fc_b = f_b * Ud / (Ud + Sd)
-    for v in (0.0, 0.3):
-        row = abundance_row(row_b, lam, Ud, Sd, r, nd, v)
-        w = np.exp(row - row.max())
-        assert float(sig[np.argmax(row)]) <= fc_b + 0.02, (
-            "the cap: never above the composition-transfer value"
-        )
-        assert w[sig > fc_b + 0.05].max() < 1e-3, "no mass above the cap"
-    sharp = abundance_row(row_b, lam, Ud, Sd, r, nd, 0.0)
-    wide = abundance_row(row_b, lam, Ud, Sd, r, nd, 0.3)
-    assert abs(float(sig[np.argmax(sharp)]) - fc_b / r) < 0.02, (
-        "v_step = 0 is the new-RNA point when the totals rise"
-    )
-    down = abundance_row(row_b, lam, Ud, Sd, 0.4, nd, 0.0)
-    assert abs(float(sig[np.argmax(down)]) - fc_b) < 0.02, (
-        "v_step = 0 is the composition point when the totals fall"
-    )
-    down_wide = abundance_row(row_b, lam, Ud, Sd, 0.4, nd, 0.3)
-    assert float(sig[np.argmax(down_wide)]) <= fc_b + 0.02 and _var(down_wide) > _var(down), (
-        "below the cap, and wider with a fitted spread"
-    )
-    assert _var(wide) > _var(sharp), "a fitted spread widens the claim"
-    assert not abundance_row(row_b, lam, 0.0, S, r, 400.0, 0.0).any(), (
-        "a depleted boundary is vacuous"
-    )
+    want = f_b * d_b * E_i / T_i  # 0.2: the level kept
+    tight = level_row(row_b, lam, m, 0.001)
+    assert float(sig[np.argmax(tight)]) == pytest.approx(want, abs=0.01)
+
+    def _var(r):
+        w = np.exp(r - r.max())
+        w /= w.sum()
+        mu = w @ lam
+        return float(w @ (lam * lam) - mu * mu)
+
+    wide = level_row(row_b, lam, m, 0.5)
+    assert _var(wide) > 3 * _var(tight), "the dampening must widen the delivered profile"
+    assert not level_row(np.zeros_like(lam), lam, m, 0.1).any(), "a flat profile is vacuous"
+    ub = level_bound_row(lam, d_b, E_i, T_i, 0.01)
+    below = sig * T_i / E_i < d_b  # inside gDNA density below the crossing's total density
+    assert np.all(ub[below] == 0.0) and np.all(ub[~below] <= 0.0) and np.any(ub[~below] < 0.0)
 
 
 # ── ITEM 7 (2026-09-02): the alternative splice site ──────────────────────────────────────────────
@@ -1169,16 +1145,10 @@ def _reference_rows(prepared, ctx):
         out = None
         if fn is not None:
             far = left[s] if right[s] == i else right[s]
-            parts = [] if own[s] is None else [own[s]]
-            if far >= 0:
-                m = into(far, s)
-                if m is not None:
-                    parts.append(m)
-            if parts:
-                sending = norm(sum(parts))
-                r = fn(sending)
-                if r is not None and np.ptp(r) > EPS:
-                    out = norm(r)
+            m = into(far, s) if far >= 0 else None
+            r = fn(own[s], m)
+            if r is not None and np.ptp(r) > EPS:
+                out = norm(r)
         memo[key] = out
         return out
 
@@ -1316,7 +1286,7 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
             claim = prepared.own[i] if (i >= 0 and intron[i]) else prepared.own[b]
             if claim is None:
                 continue
-            r = fn(claim)
+            r = fn(claim, None)
             if r is not None and np.ptp(r) > 1e-9:
                 acc = (r - r.max()) if acc is None else acc + (r - r.max())
         if int(e) in exon_rows:
@@ -1392,7 +1362,7 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
             other = left[b] if right[b] == e else right[b]
             if other < 0 or not intron[other]:
                 continue  # item 5 / item 7 rules leave through exon|exon faces: their own gates
-            r = fn(prepared.own[e])
+            r = fn(prepared.own[e], None)
             if r is not None and np.ptp(r) > 1e-9:
                 got[int(b)] = got.get(int(b), 0.0) + (r - r.max())
     assert set(got) == set(expected), set(got) ^ set(expected)
@@ -1465,12 +1435,12 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o]
         )
         if tau[o] > 0.0 and prepared.own[o] is not None:
-            got = prepared.rule[(int(o), int(b))](prepared.own[o])
+            got = prepared.rule[(int(o), int(b))](prepared.own[o], None)
             np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
         if tau[b] > 0.0:
             le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
             want_o = transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
-            got_o = prepared.rule[(int(b), int(o))](prepared.own[b])
+            got_o = prepared.rule[(int(b), int(o))](prepared.own[b], None)
             np.testing.assert_allclose(
                 got_o - got_o.max(), want_o - want_o.max(), rtol=0, atol=1e-10
             )
@@ -1485,10 +1455,15 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
             )
 
 
-def test_the_abundance_rule_is_the_fitted_step_map_at_every_inside_exon(sweep_inputs):
-    """ITEM 6 as a rule: at every served terminus boundary the rule into the INSIDE exon applied to the
-    boundary's claim equals the independently recomputed abundance row with the step's spread refit
-    from the served pairs' two witnesses; the rule vanishes when the terminus bits are cleared."""
+def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(sweep_inputs):
+    """THE LEVEL RULE (MESSAGE_PLAN.md step A) as a rule: at every terminus boundary with an inside exon —
+    exon|exon and exon|intron alike — the rule applied to the boundary's OWN claim equals the
+    independent recompute; what the boundary HOLDS changes nothing (an imputation never becomes a
+    level); with no own claim the crossing total's upper bound is what crosses; the rule vanishes when
+    the terminus bits are cleared; and no library-wide parameter exists — changing another pair's
+    counts leaves this pair's message unchanged."""
+    import dataclasses as _dc
+
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
@@ -1496,39 +1471,36 @@ def test_the_abundance_rule_is_the_fitted_step_map_at_every_inside_exon(sweep_in
     strand = _strand_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
     prepared = pol.prepare(ctx)
-    expected, v_step = _expected_abundance_rows(sweep_inputs, ctx, strand, lam)
-    assert len(expected) >= 2 and v_step > 0.0, (
-        "the toy must carry two served inside exons or this gate proves nothing"
+    expected, served = _expected_level_rows(sweep_inputs, ctx, strand, lam)
+    assert len(served) >= 2, (
+        "the toy must carry two served terminus pairs or this gate proves nothing"
     )
-    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
-    is_exon = np.asarray(ctx.is_exon_region, bool)
-    is_bnd = np.asarray(ctx.is_boundary, bool)
-
-    def terminus(b):  # an exon|exon boundary: item 6's source; an intron|exon face is rung 2's
-        return (
-            is_bnd[b] and left[b] >= 0 and right[b] >= 0 and is_exon[left[b]] and is_exon[right[b]]
+    spike = -0.5 * ((lam - 2.0) / 0.1) ** 2  # a held imputation that must not cross a level face
+    for b, i, _kind in served:
+        fn = prepared.rule.get((b, i))
+        assert fn is not None, f"no level rule at terminus pair ({b}, {i})"
+        got = fn(prepared.own[b], None)
+        np.testing.assert_allclose(
+            got - got.max(), expected[i] - expected[i].max(), rtol=0, atol=1e-10
         )
-
-    for i, want in expected.items():
-        hits = [
-            (s, d)
-            for (s, d) in prepared.rule
-            if d == i and s in (left[i], right[i]) and terminus(s)
-        ]
-        got = None
-        for s, d in hits:
-            if prepared.own[s] is None:
-                continue
-            r = prepared.rule[(s, d)](prepared.own[s])
-            if r is not None and np.ptp(r) > 1e-9:
-                got = (r - r.max()) if got is None else got + (r - r.max())
-        assert got is not None, f"inside exon {i} has no live rule"
-        np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
+        np.testing.assert_array_equal(
+            fn(prepared.own[b], spike), got, err_msg="what is held crossed a level face"
+        )
+        bound = fn(None, spike)
+        assert bound is not None and np.ptp(bound) > 0.0 and np.all(bound <= 0.0), (
+            "no upper bound without a claim"
+        )
     cleared = pol.prepare(_terminus_flags_cleared(ctx))
-    for i in expected:
-        assert not any(d == i and terminus(s) for (s, d) in cleared.rule), (
-            f"inside exon {i} keeps a terminus rule with no terminus"
-        )
+    for b, i, _kind in served:
+        assert (b, i) not in cleared.rule, f"a level rule survives at ({b}, {i}) with no terminus"
+    b0, i0, _k = served[0]
+    b1, i1, _k = served[-1]
+    cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
+    cnt[i1] = cnt[i1] * 3.0 + 7.0
+    other = pol.prepare(_dc.replace(ctx, unspliced_count=cnt, n_slot=cnt.sum(axis=1)))
+    np.testing.assert_array_equal(
+        other.rule[(b0, i0)](other.own[b0], None), prepared.rule[(b0, i0)](prepared.own[b0], None)
+    )
 
 
 def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs):
@@ -1556,7 +1528,7 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
             continue
         if prepared.own[s] is None:
             continue
-        r = fn(prepared.own[s])
+        r = fn(prepared.own[s], None)
         if r is not None and np.ptp(r) > 1e-9:
             got[int(d)] = got.get(int(d), 0.0) + (r - r.max())
     for slot, want in expected.items():

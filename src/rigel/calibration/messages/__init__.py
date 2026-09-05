@@ -166,25 +166,44 @@ class PsiMessage:
 class Message:
     """What one node holds from one neighbour after a pass — the transfer policy's message.
 
-    Two LANES, by what they can cross. ``composition`` is a max-normalised log-likelihood over the
-    solve grid of the destination's gDNA share (a composition PROFILE: scale-free, so it crosses a
-    face by a derived map and never carries a level across a capture cliff); ``level`` is a gDNA
-    rate claim ``(log rate, log-variance)`` for faces composition cannot cross. ``None`` in a lane is
-    "nothing on this lane". ⭐ :data:`SILENCE` — both lanes ``None`` — is a MESSAGE, delivered: the
-    neighbour spoke and had nothing to say. A node with no neighbour on a side holds
-    :data:`NO_NEIGHBOUR` instead, which is not a message (the owner's ruling, 2026-09-04: a hop that
-    carries nothing still arrives, explicitly uninformative).
+    ⭐ **THE LANES (owner ruling 2026-09-04).** A node's unknown is its COMPOSITION on the simplex
+    ``(f_g, f_+, f_-)`` — two degrees of freedom where both strands are live, one where a single strand
+    is — and, where composition cannot cross a face, the LEVELS of the three populations. So a message
+    carries up to five lanes, every one optional (``None`` = nothing on this lane, which is how a
+    single-stranded chain pays nothing for the tilt):
+
+    * ``composition`` — the gDNA-versus-RNA PROFILE: a max-normalised log-likelihood over the solve
+      grid of the destination's gDNA share (``lam = log f_g/(1-f_g)``, ``K = n_grid`` points). Scale-
+      free, so it crosses a face by a derived map and never carries a level across a capture cliff.
+    * ``tilt`` — the RNA+ versus RNA− PROFILE over ψ's tilt grid (the angle ``arcsin(tau)``), the
+      second degree of freedom at a node where both strands are live.
+    * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a rate claim ``(log rate, log-variance)``
+      per population, in counts per base of that population's opportunity, for faces composition
+      cannot cross: gDNA is genomically continuous across ANY face; a strand's RNA continues across a
+      face where that strand's population is unchanged (an AMBIG region's two degrees of freedom are
+      imputed by exactly these).
+
+    ⭐ :data:`SILENCE` — every lane ``None`` — is a MESSAGE, delivered: the neighbour spoke and had
+    nothing to say. A node with no neighbour on a side holds :data:`NO_NEIGHBOUR` instead, which is not
+    a message (the owner's ruling, 2026-09-04: a hop that carries nothing still arrives, explicitly
+    uninformative). ⚠ Today's rules fill ``composition`` only; the tilt profile is the AMBIG ruling's
+    and the level lanes are the level rule's to fill (`MESSAGE_RUNGS.md`'s ship audit, items 1 and 4).
 
     ⚠ The relay policy predates this type and holds its own per-node state tuple; the backbone treats
     what a kernel returns as opaque and only insists that a real hop returns SOMETHING.
     """
 
     composition: np.ndarray | None = None
-    level: tuple[float, float] | None = None
+    tilt: np.ndarray | None = None
+    level_gdna: tuple[float, float] | None = None
+    level_rna_pos: tuple[float, float] | None = None
+    level_rna_neg: tuple[float, float] | None = None
+
+    LANES = ("composition", "tilt", "level_gdna", "level_rna_pos", "level_rna_neg")
 
     @property
     def is_silent(self) -> bool:
-        return self.composition is None and self.level is None
+        return all(getattr(self, lane) is None for lane in self.LANES)
 
 
 #: the explicitly uninformative message: a neighbour that spoke and had nothing to say

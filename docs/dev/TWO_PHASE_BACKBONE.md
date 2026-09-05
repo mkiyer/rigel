@@ -108,20 +108,26 @@ belief has nowhere to get it.
 4. `solve` receives the two held arrays indexed AT THE RECIPIENT and returns a `PsiMessage` whose
    channels pass the existing domain assertions.
 
-**The message.** One type, two LANES by what they can cross:
+**The message.** One type, FIVE optional lanes (owner ruling 2026-09-04, `DESIGN.md` §6b.12):
 
 ```
-Message(composition: row over lam | None,     # scale-free: the rebuild's currency
-        level: (log gDNA rate, log-variance) | None)   # counts/bp: crosses where composition cannot
-Silence = Message(None, None)
+Message(composition: profile over lam | None,   # gDNA vs RNA: the 60-point curve, scale-free
+        tilt: profile over theta | None,         # RNA+ vs RNA-: the second degree of freedom at
+                                                 #   a both-stranded node; None elsewhere (memory)
+        level_gdna: (log rate, log var) | None,  # counts/bp — crosses ANY face
+        level_rna_pos: (log rate, log var) | None,   # crosses where that strand's population continues
+        level_rna_neg: (log rate, log var) | None)
+SILENCE = Message()                              # every lane None: delivered, uninformative
 ```
 
-The composition lane is today's row. The LEVEL lane is the checklist's owed "level message": gDNA is
+The composition lane is today's row; the tilt lane is the AMBIG node's second degree of freedom (item
+4 of the ship audit). The LEVEL lanes are the checklist's owed "level message" (item 1): gDNA is
 genomically continuous, so its rate crosses ANY face (a terminus, a strand change, an empty chain
-piece), priced by the opportunity ratio and the enrichment premise; rung 3's edge bound is already its
-first instance (an edge's gDNA count converted at the exon, one-sided, one hop). A level is converted
-into a composition row only AT A RECIPIENT, using the recipient's own count — an observation, which
-the contract allows at either end of a hop.
+piece), and a strand's RNA rate crosses a face where that strand's population continues — which is how
+an AMBIG region's two degrees of freedom are imputed one at a time by single-stranded neighbours; each
+priced by the opportunity ratio and the enrichment premise. Rung 3's edge bound is the pattern for how a
+level is consumed: converted into a composition profile only AT A RECIPIENT, through the recipient's own
+count — an observation, which the contract allows at either end of a hop.
 
 **The recipient's three decisions, per lane, per directed face**, are one registry:
 `face[(s, i)] = STOP | FORWARD | MODIFY(map, width, discrepancy)`. Today's policy already holds every
@@ -507,9 +513,11 @@ cannot come from the crossing count alone (it is a count of the crossing, not of
 level was refuted (§6d); what remains is a sharper INTRON profile on its high side — the intron's own
 solve — or an honest bounded marginal in the face map in place of the flat top.
 
-**Is it the largest residual? No.** By node class on the ladder under the landed policy: off capture,
-the INTRON class carries 43–45 % of the in-scope error (65k of 145k at `g50 ss.50 OFF`), identical under
-every policy — the intron's own solve, not a message problem; exon|intron boundaries 12–14 %; terminus
+**Is it the largest residual? No — and read the shares as FRAGMENTS, not percentages of small truths
+(`MESSAGE_PLAN.md` §7).** By node class on the ladder under the landed policy: off capture, the INTRON
+class carries 43–45 % of the in-scope error mass (65k of 145k fragments at `g50 ss.50 OFF`, which is 2.3 %
+of the class's own 2.8 M fragments), identical under every policy — the intron's own solve, not a
+message problem; relative to their own mass the exon|intron boundaries are the worst class (8.3 %); exon|intron boundaries 12–14 %; terminus
 boundaries 12–15 %; walled exons 8–10 %; alternative splice sites 8–9 %; the licensed exons this
 section is about 6–7 %. On capture-ON stranded rows the terminus boundaries (28 %), alternative splice
 sites (21 %) and walled exons (18 %) lead, licensed exons 10 %. The two-sided profile matters for two

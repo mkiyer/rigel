@@ -495,6 +495,22 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
 
+### the-abundance-discrepancy-map — LANDED as item 6 (2026-09-02), found MISSPECIFIED on the owner's review and REPLACED by the level rule (2026-09-04). Do not rebuild a fitted step or a hypothesis mix.
+
+Item 6 carried the boundary's own strand row into the inside exon through a map with a step `s` between
+the "enrichment" and "new RNA" hypotheses, the step's spread FITTED across the served pairs' two
+witnesses and a cap `s ≤ r`. Refused on four grounds: (1) a pooled premise — the per-pair discrepancy
+rule (`the-pooled-hop-step`, 2026-09-03) refused exactly this for item 7 and was never swept back;
+(2) it chose between hypotheses by a fitted prior where the owner ruled that nothing can be assumed —
+value kept, precision dampened; (3) the composition currency where the ruling is a level; (4) only
+exon|exon termini served. Measured on the pass-form policy: removing it improved the in-scope
+unstranded row (`g50 ss.50 OFF` 12,328 → 11,044) and `g25 ss.50 ON` (28,414 → 19,854) and was within
+0–4.8 % on stranded rows. The replacement (`MESSAGE_PLAN.md` step A): the level rule from the
+boundary's MEASUREMENT only, shape-preserving through the level-kept map, per-pair widths, the crossing
+total's upper bound without a claim. ⚠ Two forms were tried and refuted on the way and are recorded
+there: a Gaussian summary of a one-sided profile (invents a value), and a level made from what the
+boundary holds (forwards an imputation).
+
 ### the-certified-flux-row-as-a-level — DERIVED, STAGE 0 ON TRUTH, PROTOTYPED, A/B'd on three probe panels and the ladder, REFUTED by probe placement (2026-09-04). Do not rebuild a flux LEVEL into an exon without a per-face transport.
 
 The candidate: at a CERTIFIED interface the exon's spliced-in RNA is predicted by the face's

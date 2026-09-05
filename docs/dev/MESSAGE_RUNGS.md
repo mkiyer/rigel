@@ -51,6 +51,33 @@ condition's, from `policy_benchmark.py --by-class` and the terminus census (`DES
 | strand-change-face | strand-change face | 249 + 889 | **level** only (composition refused: membership changes) | level | ⏳ with the level message |
 | multi-hop-scan | FORMAL FORWARD-BACKWARD through every case above | — | ⭐ the owner's ruling 2026-09-04 (`DESIGN.md` §6b.11): the sender just sends; the RECIPIENT decides to FORWARD, MODIFY or STOP; when the two passes end, EVERY node holds a message from each neighbour (the chain's two end nodes hold one) — a hop that carries nothing still ARRIVES, explicitly uninformative | — | ✅ LANDED 2026-09-04 (`DESIGN.md` §6b.12): the two-phase backbone (`sweep._pass`, `messages/__init__.py`'s `Message`/`SILENCE`/`NO_NEIGHBOUR`/`Prepared`), the foundation scaffold retired, the relay byte-identical, and `messages/transfer.py` rebuilt as claims + rules + the passes (bit-identical to the prototype's formal arm; gated on an independent recursive reference of the passes, the no-echo perturbation, and a claim-and-rule gate per family). Measured: wins BOTH halves of the ladder against the one-hop policy 7/8 + 7/8 (pass zero and full); probe panels stranded within 4–8 %, unstranded mixed — the forwarded exon profile is one-sided, `ISSUES: two-sided-exon-row`. ⛔ The prerequisite as first proposed (the certified-flux row) is REFUTED as a level (`ISSUES: the-certified-flux-row-as-a-level`) |
 
+## ⭐⭐⭐ THE TEN RULES, BY CURRENCY (2026-09-04) — what each directed face does today
+
+A rule is what the RECIPIENT does with what arrives; every rule below is a function of the sender's
+claim and the two nodes' observations, never a belief. "Composition" = the gDNA-vs-RNA profile crosses
+by a map; "level" = a gDNA abundance crosses and is converted at the recipient through its own total.
+
+| # | face (source → destination) | rule | currency | ingredients | owner ruling |
+|---|---|---|---|---|---|
+| 1 | intron → intron\|exon boundary | FORWARD (identity) | composition | the intron's factory profile; one shared unspliced population | rung 1, `DESIGN.md` §6b.9 |
+| 2 | intron\|exon boundary → intron | FORWARD, if the pair shares ONE strand | composition | the boundary's strand profile | item 2, §6b.5 |
+| 3 | boundary → exon at a LICENSED face | the splice-in face map + the face's counting width | composition (the flux enters the MAP as a measured spliced density) | crossing count, both opportunities, the route rate | rung 2, §6b.9 — ⚠ one-sided (`ISSUES: two-sided-exon-row`) |
+| 4 | exon → boundary at that face | the splice-in map read backwards, marginalised over the face's spliced/unspliced ratio | composition | the exon's strand profile | item 1, §6b.4 — the premise bias under capture recorded, not corrected |
+| 5 | intergenic\|exon edge → exon | the edge's gDNA COUNT as a one-sided lower bound on the exon's gDNA | **level** (converted at the exon through its own count) | the edge's crossing count, the opportunity ratio | rung 3, §6b.9 — the ceiling REFUSED, accepted |
+| 6 | outside exon → exon\|exon TERMINUS boundary | splice-out with S = the boundary's SPLICED crossing | composition | the outside exon's claim (and what it holds from beyond) | item 5, §6b.6 |
+| 7 | terminus boundary → outside exon | the face map with the spliced density | composition | the boundary's strand profile | item 5, §6b.6 |
+| 8 | terminus boundary → the region INSIDE (exon\|exon AND exon\|intron) | THE LEVEL RULE: the boundary's OWN strand profile through the level-kept map (its share × its crossing density × the inside's opportunity / the inside's own total), shape preserved, blurred by both totals' counting and the pair's own discrepancies (totals; strand modes where live); with no own claim, the crossing total's upper bound | **level** (a measurement only; what is held never crosses) | the boundary's own claim, both totals, the spliced crossing | `MESSAGE_PLAN.md` step A, landed 2026-09-04; item 6's map, cap and pooled spread deleted (`DESIGN.md` §6b.7 superseded) |
+| 9 | flank → ALTERNATIVE SPLICE SITE boundary | splice-out with S_b (+ the route flux F on the exon-of-both flank), blurred by the pair's own disagreement | composition | the flank's strand profile | item 7, §6b.8 |
+| 10 | alt-ss boundary → flank | the face map with the matching spliced density, blurred by the pair's disagreement | composition | the boundary's strand profile | item 7, §6b.8 |
+
+**The missing rules (STOP by omission), and what exists for each:** STRAND-CHANGE faces (1,138) and termini BOTH WAYS (48) — rule 8's map is the candidate, the
+totals' comparability at those faces is the derivation owed; the EMPTY chain pieces (5,588 terminus
+boundaries, 3,792 reached only through another terminus) — no implementation: the node has no total to
+convert with, so the gDNA level must be FORWARDED (the `level_gdna` lane's first real use) and converted
+at the next node that has one; SJ + TERMINUS faces (2,354) — the constructors exist, the licence (which
+flank shares which population when a junction and a terminus share a face) is the derivation owed;
+the AMBIG tilt and the both-stranded locus — no substrate, no rule, a ruling first.
+
 ## ⭐⭐⭐ THE SHIP AUDIT (2026-09-04, after the two-phase backbone landed) — what stands between `transfer` and the flip
 
 The bar (owner, 2026-09-04): an INTACT design for every node type and face before the policy ships —
@@ -60,7 +87,7 @@ shares are the landed policy's (`policy_benchmark.py --panel ladder --by-class`)
 
 | # | case | kind of hole | ladder slots | error share (in scope) | what it needs | state |
 |---|---|---|---|---|---|---|
-| 1 | **THE LEVEL RULE** — strand-change faces, termini both ways, the inside of exon\|intron termini, the EMPTY chain pieces between termini | STOP by omission (no rule) | 1,138 + 48 + 4,130 + 5,588 boundaries (3,792 reached only through another terminus) | terminus boundaries 12–15 % OFF / 28 % ON; walled exons 8–10 % / 18 % | the `Message.level` lane's rules: gDNA continuity across any face, counting width, the abundance-discrepancy premise; the one derivation the checklist hinges on | ⏳ the lane exists with one rule (the edge bound) |
+| 1 | **THE LEVEL RULE** — the inside of every terminus (✅ landed 2026-09-04 as rule 8, both terminus kinds), then strand-change faces, termini both ways, the EMPTY chain pieces between termini | STOP by omission (no rule) at the remaining faces | 1,138 + 48 + 5,588 boundaries (3,792 reached only through another terminus) | terminus boundaries 12–15 % OFF / 28 % ON; walled exons 8–10 % / 18 % | the landed rule's laws (a level from the measurement only, shape preserved, per-pair widths, the total's upper bound) extended to the faces where composition cannot cross; the empty piece needs the level LANE forwarded | ⏳ the inside of termini ✅; the rest owed |
 | 2 | **sj + terminus** faces | STOP by omission (`outside_flank`/`junction_flanks` return none) | 1,968 + 386 | inside the terminus / alt-ss shares | item 5's and item 7's maps COMPOSED into one rule | ⏳ |
 | 3 | **the two-sided exon profile** (unstranded data) | no CLAIM at exons; the forwarded profile is one-sided | 11,418 licensed + 11,350 walled exons | licensed 6–10 %; feeds walled/terminus via forwarding; the prior's training population at pass zero | the intron's own high-side sharpness, or a bounded taper marginal in the face map; ⛔ not the flux level | ⏳ `ISSUES: two-sided-exon-row` |
 | 4 | **AMBIG tilt** and the both-stranded locus | a ruling, not a hole (rung 5) | 4,671 + 5,241 | 6–13 % of mass | rule whether any message exists; likely local-only | ⏳ last by owner ruling |
@@ -68,12 +95,16 @@ shares are the landed policy's (`policy_benchmark.py --panel ladder --by-class`)
 | 6 | the INTRON's own solve | not a message | 9,805 | **43–45 % off capture**, identical under every policy | `ROADMAP.md` rank 3 (parked: after the policy ships) | parked |
 | 7 | THE SHIP LIST | — | — | — | the 0.8.0-metric pricing under `transfer` (`calibration_vs_oracle.py`, `solvability_audit.py`), the flip, the obsolescence pass (`relay.py` 1,254 lines, `variance.py` 727, `rna_anchor.py` 576, 15 instruments and 8 test files naming the relay), `preflight --full`, goldens, `MANUAL.md`, `CLAUDE.md` | after 1–4 |
 
-**THE ORDER.** 1 → 2 (with 5 as each needs a structure) → 3 → 4 → 7. Every case: the simplest LOCAL
-form, nothing pooled; stage 0 on certified truth; prototype through `policy_prototype.py`; judged at
-its DESTINATIONS, halves apart, PASS ZERO beside the full pipeline, all three probe panels, then the
-ladder; then `src/` with fail-first gates and every perturbation watched. ⛔ The relay's zero-control
-lead (its anchor: 58,840 vs 233,420 at ladder `g00 ss.50 OFF`) is item 3's and the parked landscape's
-to close, not a reason to keep the relay.
+**THE ORDER (owner review, 2026-09-04 — `MESSAGE_PLAN.md` carries the designs).** (A) rule 8
+re-specified as THE LEVEL RULE for the inside of every terminus (it is misspecified: a pooled spread, a
+hypothesis mix, the wrong currency, half its faces missing) → (E) rule 5 as a level, one-sided vs
+two-sided A/B'd (a zero-count edge is vacuous today: the relay's zero-control lead) → (F, G) rules 3 and
+4 refined (the wall from the intron's level, the per-pair discrepancy) → (B) strand-change faces and
+termini both ways → (C) the empty chain pieces → (D) junction plus terminus → (H) the AMBIG ruling →
+the ship list. Every case: the simplest LOCAL form, nothing pooled; stage 0 on certified truth;
+prototype through `policy_prototype.py`; judged at its DESTINATIONS, halves apart, PASS ZERO beside the
+full pipeline, all three probe panels, then the ladder; then `src/` with fail-first gates and every
+perturbation watched. ⛔ Residue decisions are deferred until no rule is missing.
 
 ## ⛔ THE PARKED-PRIORITIES LOG (owner, 2026-09-02: "keep a log, come back after the policy is done")
 

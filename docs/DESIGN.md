@@ -1753,6 +1753,18 @@ dropped, delivery to the inside flank).
 
 ### 6b.7 ⭐⭐⭐ THE ABUNDANCE-DISCREPANCY RULE — what crosses a face composition cannot (owner design, 2026-09-02; certified on truth, landed as item 6)
 
+⚠ **SUPERSEDED 2026-09-04 by THE LEVEL RULE (§6b.12).** The
+item as landed was found misspecified on the owner's review: it FITTED the step's spread across the
+served pairs (a pooled premise, refused for item 7 the next day and never swept back), mixed the two
+hypotheses through that fit, worked on the composition axis where the ruling is a LEVEL, and served only
+exon|exon termini. Measured on the pass-form policy it was net harm on the unstranded rows (removing it:
+`g50 ss.50 OFF` 12,328 → 11,044, `g25 ss.50 ON` 28,414 → 19,854) and near-inert on the stranded ones.
+The rule that replaces it keeps this section's insight — the two hypotheses cannot be told apart — and
+the owner's consequent ruling: the VALUE is the boundary's level, kept; the PRECISION is dampened by the
+pair's own discrepancies; and a level is made from the boundary's MEASUREMENT only, never from what it
+holds. The map, the cap and the fitted spread are gone. Kept as the record of the derivation.
+
+
 **The owner's rule, in the policy's terms.** Across a face that refuses composition — the INSIDE flank
 of a terminus, a strand change — the two objects' TOTAL abundances differ by a measured ratio
 `r = (n_X / E_X) / ((U_b + S_b) / A_b)` (the boundary's total counts its spliced crossing, §6b.6). If the
@@ -2029,6 +2041,33 @@ block's chains of termini, where the shipped `prepare`'s construction ORDER was 
 pass replaces it), and the formal form with today's messages wins BOTH halves of the ladder against
 the shipped transfer, 7/8 and 7/8 (`policy_prototype.py`, the record in the sandbox's
 `TWO_PHASE_BACKBONE.md`).
+
+⭐⭐⭐ **THE MESSAGE'S LANES (owner ruling, later the same day).** A node's unknown is its COMPOSITION on
+the simplex — two degrees of freedom where both strands are live — and, where composition cannot cross
+a face, the LEVELS of the three populations. So the message carries up to five optional lanes: the
+gDNA-versus-RNA profile (today's curve), a TILT profile for the RNA+ versus RNA− split (off at
+single-stranded nodes to save memory), and a `(log rate, log-variance)` level claim each for gDNA, RNA+
+and RNA−. ⭐ The level lanes are for the faces composition cannot cross AND for AMBIG regions, whose two
+degrees of freedom a single-stranded neighbour can impute one at a time; the tilt lane is for the AMBIG
+node's own second degree of freedom. The type carries every lane (`messages/__init__.py`, gated in
+`test_sweep_backbone.py`); the rules that fill the tilt and the levels are the ship audit's items 4
+and 1. ⚠ Open inside item 1: whether the composition profile at an AMBIG node is separable (a λ curve
+times a θ curve, ψ's channel structure) or joint.
+
+⭐⭐⭐ **THE LEVEL RULE (owner design, landed the same day; replaces §6b.7).** At a face composition
+cannot cross — the region INSIDE a terminus, exon|exon and exon|intron alike — the gDNA LEVEL crosses:
+the boundary's own strand profile carried through the level-kept map (the inside's gDNA share is the
+boundary's share times its crossing density, times the inside's opportunity, over the inside's OWN
+total — an observation), its shape preserved, blurred by both totals' counting and by the pair's own
+discrepancies: the excess of the totals' disagreement over counting, and, where both strand channels
+are live, the excess of the two strand modes' disagreement over counting. The VALUE is kept; nothing is
+pooled; no hypothesis is chosen for the discrepancy. ⭐ **A level is made from the sender's MEASUREMENT
+only** — its own claim and its total — never from what it holds: an imputation is not re-issued as a
+level. Measured on the way: a Gaussian summary of a one-sided profile invents a value (refuted), and a
+level made from the held profile forwards an imputation (refuted). With no own claim the boundary still
+sends what every library measures, the crossing total's upper bound on the inside's gDNA density. Item
+6's fitted spread, hypothesis mix and cap are deleted. Every rule now receives the sender's own claim
+and what it holds as two arguments and decides.
 
 ⭐⭐⭐ **Every message-policy idea is judged TWICE, and the two readings are never pooled.** The gDNA
 landscape prior is fitted AFTER the first pass, on that pass's solved gDNA, and comes back in the second
