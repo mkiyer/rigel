@@ -195,7 +195,7 @@ def test_an_evidence_free_transfer_is_byte_identical_to_silence(sweep_inputs):
         np.testing.assert_array_equal(a[f], b[f], err_msg=f)
 
 
-def _expected_exon_rows(si, ctx, src, lam):
+def _expected_exon_rows(si, ctx, src, lam, strand_of_si=None):
     """The rung-2 exon rows recomputed INDEPENDENTLY of the policy: for every licensed
     intron|exon face of every exon, the intron row pushed through the face map and widened by
     the face's counting variance — a second implementation, so a policy bug cannot hide."""
@@ -237,11 +237,11 @@ def _expected_exon_rows(si, ctx, src, lam):
             o = left[b] if right[b] == e else right[b]
             if o < 0 or not is_intergenic[o]:
                 continue
-            if not (n_u[b] > 0 and A_g[b] > 0 and A_g[e] > 0):
-                continue  # a zero edge is VACUOUS by the profile (no false claim possible)
-            c = sig * n_u[e] * A_g[b] / A_g[e]
-            n_b = float(n_u[b])
-            r = np.where(c >= n_b, 0.0, n_b * np.log(np.maximum(c, 1e-300) / n_b) - (c - n_b))
+            if not (A_g[b] > 0 and A_g[e] > 0 and n_u[e] > 0):
+                continue
+            from rigel.calibration.messages.transfer_rows import edge_level_row
+
+            r = edge_level_row(lam, n_u[b], n_u[e], A_g[b], A_g[e])
             if np.ptp(r) <= 1e-9:
                 continue
             add += r - r.max()
@@ -281,29 +281,27 @@ def _expected_exon_rows(si, ctx, src, lam):
     return out
 
 
-def test_the_edge_bound_row_is_one_sided_and_vacuous_at_zero():
-    """RUNG 3 (owner ruling 2026-09-02: LOWER BOUND ONLY — the upper side is refused as
-    over-engineering and the g00-edge residual is an ACCEPTED error): the profile-likelihood
-    row sup_{s>=1} Pois(n_b; c/s) is 0 wherever the exon's implied gDNA count c >= n_b (any
-    enrichment explains an excess), the edge count's own Poisson tail below it (the sign
-    certificate makes the bias direction structural), and IDENTICALLY vacuous at n_b = 0 —
-    a zero edge can never manufacture a claim."""
-    from rigel.calibration.messages.transfer_rows import edge_bound_row
+def test_the_edge_level_is_one_sided_and_a_zero_count_is_vacuous():
+    """RULE 5 AS A LEVEL (MESSAGE_PLAN.md step E, the form the ladder kept): below the edge's level the
+    count's exact Poisson — the exon has at least the edge's gDNA density; NOTHING above it (no local
+    witness prices capture's enrichment of the interior); a ZERO count is vacuous — darkness under
+    capture is not absence."""
+    from rigel.calibration.messages.transfer_rows import edge_level_row
 
-    lam = np.linspace(-10, 10, 401)
-    n_b, n_e, a_g_b, a_g_e = 30.0, 800.0, 200.0, 780.0
-    row = edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e)
-    sig = 1.0 / (1.0 + np.exp(-lam))
-    c = sig * n_e * a_g_b / a_g_e
-    assert np.all(row[c >= n_b] == 0.0), "at or above the bound the row must be exactly flat"
-    below = c < n_b
-    assert np.all(row[below] < 0.0) and np.all(np.diff(row[below]) > 0), (
-        "below the bound the penalty must be the one-sided increasing Poisson tail"
+    lam = np.linspace(-8, 8, 801)
+    sig = 1 / (1 + np.exp(-lam))
+    n_e, a_b, a_e = 400.0, 200.0, 800.0
+    row = edge_level_row(
+        lam, 25.0, n_e, a_b, a_e
+    )  # the implied edge count is 100 f: the level at f = 0.25
+    c = sig * n_e * a_b / a_e
+    below = c < 25.0
+    np.testing.assert_allclose(row[below], 25 * np.log(c[below] / 25) - (c[below] - 25), atol=1e-9)
+    assert np.all(row[~below] == 0.0), "nothing above the edge's level"
+    assert float(np.interp(np.log(0.1 / 0.9), lam, row)) < -3.0, (
+        "below it the count's own Poisson charges"
     )
-    np.testing.assert_allclose(
-        row[below], n_b * np.log(c[below] / n_b) - (c[below] - n_b), rtol=0, atol=1e-9
-    )
-    assert not edge_bound_row(lam, 0.0, n_e, a_g_b, a_g_e).any(), "n_b = 0 must be vacuous"
+    assert not edge_level_row(lam, 0.0, n_e, a_b, a_e).any(), "a zero count is vacuous"
 
 
 def test_the_face_licence_refuses_unmeasured_population_changes():

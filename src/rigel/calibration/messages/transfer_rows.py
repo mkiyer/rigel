@@ -31,7 +31,7 @@ __all__ = [
     "level_row",
     "blur_row",
     "boundary_shares_strand",
-    "edge_bound_row",
+    "edge_level_row",
     "face_is_licensed",
     "face_map_lambda",
     "junction_flanks",
@@ -219,13 +219,18 @@ def level_bound_row(lam, density_b, opportunity_i, total_i, v):
     return row - row.max()
 
 
-def edge_bound_row(lam, n_b, n_e, a_g_b, a_g_e):
-    """The intergenic|exon EDGE's claim on its exon, LOWER BOUND ONLY. The edge's crossing is
-    structurally pure gDNA and an exon is at least as enriched as its own edge (probe panels target
-    exons), so the honest claim is the profile likelihood over the nuisance enrichment ``s >= 1``,
-    ``sup_s Pois(n_b; c(lam)/s)`` with ``c = sigma(lam)*n_e*a_g_b/a_g_e``: exactly 0 wherever
-    ``c >= n_b`` (some enrichment explains any excess), the edge count's own one-sided Poisson tail
-    below it, and identically zero at ``n_b = 0`` — a zero edge is vacuous, never a claim."""
+def edge_level_row(lam, n_b, n_e, a_g_b, a_g_e):
+    """THE EDGE'S LEVEL, ONE-SIDED (rule 5 as a level, the owner's design; the form the ladder kept,
+    2026-09-04). The intergenic|exon edge's crossing is structurally pure gDNA, so its COUNT measures the
+    gDNA level the exon continues; for each hypothesised exon share the implied edge count is
+    ``c = sigma(lam) * n_e * a_g_b / a_g_e``. BELOW the edge's level the count's exact Poisson likelihood
+    ``n_b log(c/n_b) − (c − n_b)`` — the exon has at least the edge's gDNA density, at counting width —
+    and NOTHING above it. The upper side has no honest form: capture enriches a probed interior over
+    its edge by an amount no local witness measures (1.25× on the test chromosome, 2.3× on the ladder),
+    and a two-sided or dampened upper side pulls an unstranded exon toward a centre below the truth
+    (ladder `g05 ss.50 ON` +15 %, `g50 ss.50 ON` +11 %). A ZERO count is vacuous: under capture a dark
+    edge beside a probed exon is not an empty one (the two-sided zero claim read 36,645 against 6,981
+    on the sparse-probe panel's `g98 ss.99 ON`); the zero controls it would win are the landscape's."""
     lam = np.asarray(lam, np.float64)
     n_b = float(n_b)
     if not n_b > 0.0:

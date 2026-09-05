@@ -22,8 +22,10 @@ ever crosses a capture cliff and no constant is anywhere. The policy has three p
     the certified flux capping the claimable gDNA share, widened by the face's counting (rung 2).
   - exon → boundary at that face: the splice-in map read backwards, marginalised over the face's
     spliced-to-unspliced ratio (item 1).
-  - intergenic|exon edge → exon: the sign-certified LOWER bound on the exon's gDNA from the edge's
-    count — the one level-lane rule; a zero edge is vacuous (rung 3).
+  - intergenic|exon edge → exon: THE EDGE'S LEVEL, one-sided (rule 5 as a level, the owner's design
+    2026-09-04): the exon has at least the edge's gDNA density, at the count's Poisson width; nothing
+    above (no local witness prices capture's enrichment of the interior), a zero count vacuous
+    (darkness is not absence).
   - the exon|exon TERMINUS boundary ⇄ its OUTSIDE exon: the licence counts the spliced crossing,
     ``f_b = f_O (U_b + S_b) / U_b`` (item 5) — the outside exon's message travels the splice-out map,
     the boundary's the face map with the spliced density.
@@ -76,7 +78,7 @@ from .transfer_rows import (
     EPS,
     blur_row,
     boundary_shares_strand,
-    edge_bound_row,
+    edge_level_row,
     face_is_licensed,
     face_map_lambda,
     junction_flanks,
@@ -239,21 +241,27 @@ class TransferPolicy:
             rule[(int(b), int(e))] = _composed(face_rule)  # rung 2
             rule[(int(e), int(b))] = _composed(out_rule)  # item 1
 
-        # rung 3: the intergenic|exon EDGE — the level lane's one rule. The edge's own claim is its
-        # gDNA count (a marker profile: its value is read by the rule, not the row); the recipient
-        # exon converts it with its own count into the one-sided profile-likelihood bound.
+        # rule 5: the intergenic|exon EDGE — a LEVEL, one-sided (the owner's design, 2026-09-04; the
+        # form the ladder kept). The edge's own claim is its gDNA COUNT (a marker profile; the rule reads
+        # the count), and the exon converts it through its own total: the exon has at least the edge's
+        # gDNA density, at the count's own Poisson width; nothing above (no local witness prices a
+        # probed interior's enrichment over its edge), and a zero count is vacuous (darkness under
+        # capture is not absence).
         for e in np.flatnonzero(is_exon):
             for b in (left[e], right[e]):
                 if b < 0 or not is_bnd[b]:
                     continue
                 o = other_flank(b, e)
-                if o >= 0 and is_intergenic[o] and n_u[b] > 0 and a_g[b] > 0 and a_g[e] > 0:
-                    own[b] = np.zeros(K)
+                if not (o >= 0 and is_intergenic[o] and a_g[b] > 0 and a_g[e] > 0 and n_u[e] > 0):
+                    continue
+                own[b] = np.zeros(K)  # the level claim (the rule reads the count, not the row)
+                row_edge = edge_level_row(lam, n_u[b], n_u[e], a_g[b], a_g[e])
 
-                    def edge_rule(row, b=b, e=e):
-                        return edge_bound_row(lam, n_u[b], n_u[e], a_g[b], a_g[e])
+                def edge_rule(own_claim, held, row=row_edge):
+                    """The edge's level: its count, converted at the exon; nothing is held at an edge."""
+                    return row if np.ptp(row) > EPS else None
 
-                    rule[(int(b), int(e))] = _composed(edge_rule)
+                rule[(int(b), int(e))] = edge_rule
 
         # item 5: the exon|exon TERMINUS boundary and its OUTSIDE exon — composition, by the
         # spliced-crossing licence; and THE LEVEL RULE into the region INSIDE every terminus

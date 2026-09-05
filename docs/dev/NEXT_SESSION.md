@@ -1,4 +1,4 @@
-# NEXT SESSION — STEP A (THE LEVEL RULE) IS LANDED; NEXT IS STEP E, RULE 5 AS A LEVEL (handoff, 2026-09-04)
+# NEXT SESSION — STEPS A AND E ARE LANDED; NEXT IS F+G, RULES 3 AND 4 REFINED (handoff, 2026-09-04)
 
     ⚠ A DEV DOC, and a HANDOFF. It says where things stand and how to start, not what is settled —
     rulings are `DESIGN.md`, the ranked list `ROADMAP.md`, the open problems `ISSUES.md`, the
@@ -32,8 +32,13 @@ A. ✅ LANDED 2026-09-04 — THE LEVEL RULE at every terminus face (`DESIGN.md` 
    `MESSAGE_PLAN.md` §5b): a level is made from the sender's MEASUREMENT only, shape-preserving
    through the level-kept map, per-pair widths, the crossing total's upper bound without a claim;
    item 6's map, cap and pooled spread deleted; every rule now receives (own claim, what is held).
-E. rule 5 as a level (one-sided vs two-sided, A/B'd; the zero controls) — NEXT;
-F, G. rules 3 and 4 refined (the wall from the intron's level; the per-pair discrepancy);
+E. ✅ DONE 2026-09-04 — rule 5 as a level, ONE-SIDED (`edge_level_row`: the exact Poisson below the
+   edge's level, nothing above, a zero count vacuous): every upper side was refused by the sparse panel
+   and the ladder (`ISSUES: the-edge-upper-side`); the code is rung 3's formula re-derived, byte-identical
+   to step A's standings. The zero controls are the landscape's to win (`MESSAGE_PLAN.md` §5d).
+F. ⛔ REFUSED 2026-09-04 — a cap on rule 3's plateau (priced by the pair's discrepancies) fixes the
+   first pass on unstranded rows and harms weakly stranded junction-probed rows 12 %; the plateau is the
+   honest form (`MESSAGE_PLAN.md` §5 F). G. rule 4's per-pair discrepancy (a widening only) — measure;
 B. strand-change faces and termini both ways; C. the empty chain pieces (`nest`); D. junction plus
 terminus (`instart`); H. the AMBIG ruling; then the ship list.
 ⚠ Residue decisions are deferred until no rule is missing. ⚠ Report class error both as fragments and

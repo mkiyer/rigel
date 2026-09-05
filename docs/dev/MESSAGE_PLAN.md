@@ -125,7 +125,30 @@ level with the per-pair discrepancy dampening. ⚠ At an expressed gene the tota
 and always large, so form (ii) is weakest exactly where form (i) is informative; the zero controls
 and the capture-ON rows decide, halves apart, pass zero beside the full pipeline.
 
-**F. Rule 3 made two-sided at the face.** The wall's position comes from the INTRON's gDNA level —
+**F. Rule 3 made two-sided at the face.** ⚠ Stage 0 (`ratchet_stage0.py`, 2026-09-04) corrected the
+mechanism before anything was built: the crossing count's draw does NOT predict the licensed exon's
+signed error (correlation −0.09 to +0.2), so the ratchet below is minor. The mechanism is the PLATEAU:
+`transport_row` clamps the preimage above the face map's ceiling, leaving the profile flat to f = 1 as
+an unbounded enrichment tolerance, and the posterior median of that plateau in log-odds sits near 1 —
+at pass zero an unstranded licensed exon is over-estimated ~9× on the in-scope row (+2,000 % at
+`g25 ss.50 OFF`), and the landscape repairs it while training on it. The design that follows steps A
+and E: the tolerance above the ceiling is priced by the pair's discrepancy — a log-level Gaussian fall
+of variance counting + the totals' disagreement beyond counting — never unbounded (`cap3_proto.py`).
+**Step F's verdict (2026-09-04): the cap is REFUSED, by the same law that refused the edge's upper side.**
+With the strand witness the junction panel's `g25 ss.99 ON` came back to 1.022×, but its weakly
+stranded `g25 ss.70 ON` reads 1.122× — at κ = 0.7 the exon's own strand mode cannot witness the
+disagreement beyond counting, its own solve is too weak to resist, and the cap pulls the exon toward a
+ceiling that under junction probes sits below the truth (the flux is enriched more than the crossing
+beside it, which no total can see). A cap wide enough to be safe there is no cap at all on unstranded
+data, which is where its value was (first pass −20 to −24 %). So the plateau stays: it is the honest
+statement of an enrichment ambiguity with no local witness. What that leaves: the first-pass estimate of
+an unstranded exon under a one-sided profile is ~all gDNA, and the remedy belongs to the SOLVE and the
+LANDSCAPE, not the message — a node with a one-sided profile and no own evidence is honest ignorance
+(`solvability_audit.py`'s rule), and the landscape's training population must exclude it (the parked
+issue, the owner's "which regions and boundaries train the landscape"). Recorded in
+`ISSUES: two-sided-exon-row`.
+
+The earlier plan for the wall's position stands as a refinement: the wall's position comes from the INTRON's gDNA level —
 its density (hundreds of fragments) times its composition — carried by the opportunity ratio, not
 from the 12–25-fragment crossing count; the crossing count becomes the pair's discrepancy WITNESS
 (its excess over counting dampens), which is also where the capture taper shows. That removes the
@@ -196,6 +219,45 @@ the OFF rows within 0.2 %, and the three DEFERRED unstranded capture-ON rows 8 %
 (a level from the sender's own claim only) removes it; on unstranded data the terminus face now carries
 only the crossing total's upper bound. Reported, not a target (`CLAUDE.md`'s scope ruling); the
 two-sided exon profile (step 3) is what would give those rows a first-pass claim to forward.
+
+## 5d. STEP E — rule 5 as a level: derived, measured, and the ladder's verdict (2026-09-04)
+
+**Stage 0 on truth** (`edge_stage0.py`): off capture the exon's gDNA density equals its edge's (median log
+ratio +0.04 to +0.05, counting spread on ~12 edge fragments); under capture a probed exon's interior is
+1.25× its edge on the test chromosome (q10 +0.16, q90 +0.33) and 2.3× on the ladder — the taper,
+one-sided as argued; zero-count edges are 30–47 % of gene edges at `g05` and capture-ON (63–91 % at
+unprobed exons) and 100 % at `g00`. **The relay's zero-control lead is this level, not its anchor**:
+with the anchor off the relay reads 8,623 at the in-scope zero control (unchanged) and 39 at the
+capture-ON one.
+
+**Forms measured** (`edge_proto.py`; `pass0_score.py` for the first pass), each against the committed
+policy: (i) the two-sided Poisson level, undampened — zero controls 14,501 → 8,640 and 22,299 → 2,223,
+the in-scope unstranded row 12,030 → 9,627 (first pass 171,260 → 77,851), and a first-pass disaster on
+stranded capture-ON rows (`g98 ss.99 ON` +75 %, `g98 ss.70 ON` +360 %); (ii) both sides dampened in
+log level by the pair's discrepancies — equal or better on every main-panel row, and REFUTED on the
+sparse-probe panel (`g98 ss.99 ON` 36,645 vs 6,981): under sparse capture a probed interior is captured
+many-fold more than its dark edge, the level's centre sits far below the truth, and a node with no
+evidence of its own settles at the centre — a variance cannot fix a bias; (iii) the split form, exact
+Poisson below and a dampened log-level Gaussian above, a zero count vacuous — safe on all three probe
+panels (worst 1.03×), wins on the main panel's unstranded rows (`g05/g25/g50 ss.50 ON` 0.82–0.86×),
+and REFUSED BY THE LADDER: in scope within 0.5 % (no win), stranded 0/8 wins (worst 1.004×), the
+deferred unstranded capture-ON rows 1.065–1.146× — the upper side, even dampened, pulls an unstranded
+probed exon toward a centre 2.3× below the truth.
+
+**What stands.** The one-sided level: the exact Poisson below the edge's level ("the exon has at least
+the edge's gDNA density", at counting width), NOTHING above it, a zero count vacuous — rung 3's formula,
+now derived as the level rule's lower side rather than a profile over a nuisance, with the reasons the
+upper side cannot exist recorded: no local witness prices a probed interior's enrichment over its edge,
+and a dark edge under capture is not an empty one. `edge_level_row` carries that derivation; the
+policy's rule reads the count alone. Byte-identical to the committed step-A standings (checked on three
+conditions). The zero controls' win that "zero means zero" would buy is the relay's capture-blind lever;
+those rows are the landscape's to win (its parked issue). Lesson for the method: the exon-probed test
+chromosome passed two forms the sparse panel and the ladder refused — all three panels AND the ladder,
+every time.
+
+## 5e. Standings after step E
+
+Identical to §5c (the committed step-A policy) by construction. Suite: 3,757 passed / 8 xfail / 0 failed.
 
 ## 6. THE ORDER, and the method every step keeps
 

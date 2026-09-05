@@ -1938,7 +1938,7 @@ silent 7/8; unstranded `g50 ON` −68 %, `g98 ON` −74 %, the in-scope `g00 ss.
 The adversarial probe panels — junction-probed and sparse-probed twins of the test chromosome — were
 built for this rung and stay in every loop.
 
-**Rung 3 — the intergenic|exon EDGE's lower bound.** With the mono block (single-exon transcripts) in
+**Rung 3 — the intergenic|exon EDGE's lower bound.** ⚠ SUPERSEDED 2026-09-04: rule 5 is a LEVEL (§6b.12) — the profile over an unbounded enrichment nuisance was vacuous at every zero-count edge, which is where a zero-gDNA library's evidence lives; the two-sided level with the pair's dampening replaced it. Kept as the record. With the mono block (single-exon transcripts) in
 the substrate: the edge's gDNA count against the exon's implied one as the profile likelihood
 `sup_{s ≥ 1} Pois(n_b; c/s)` — zero wherever the exon's implied count covers the edge's, the edge
 count's own one-sided Poisson tail below, IDENTICALLY VACUOUS at `n_b = 0` (the near-zero-row artifact
@@ -2068,6 +2068,18 @@ level made from the held profile forwards an imputation (refuted). With no own c
 sends what every library measures, the crossing total's upper bound on the inside's gDNA density. Item
 6's fitted spread, hypothesis mix and cap are deleted. Every rule now receives the sender's own claim
 and what it holds as two arguments and decides.
+
+⭐⭐⭐ **RULE 5 IS A LEVEL, AND IT IS ONE-SIDED (the owner's review; the ladder's verdict, 2026-09-04).**
+The intergenic|exon edge's crossing is structurally pure gDNA, so its COUNT measures the gDNA level the
+exon continues; the exon converts it through its own total: it has at least the edge's gDNA density, at
+the count's exact Poisson width — and nothing above. The upper side has no honest form: capture enriches
+a probed interior over its edge by an amount no local witness measures (1.25× on the test chromosome,
+2.3× on the ladder), and every upper side tried — undampened, dampened both sides, dampened above only —
+pulled unstranded probed exons toward a centre below the truth (the sparse-probe panel's `g98 ss.99 ON`
+36,645 against 6,981; the ladder's deferred rows 1.07–1.15×). A ZERO count is vacuous: a dark edge under
+capture is not an empty one. ⭐ The relay's zero-control lead is exactly the two-sided zero claim
+(`relay` with its anchor off: 8,623 at the in-scope zero control, 39 at the capture-ON one) — a
+capture-blind lever, refused; those rows are the landscape's to win.
 
 ⭐⭐⭐ **Every message-policy idea is judged TWICE, and the two readings are never pooled.** The gDNA
 landscape prior is fitted AFTER the first pass, on that pass's solved gDNA, and comes back in the second

@@ -239,6 +239,15 @@ unstranded exon number in the full pipeline is the prior's work; the refuted flu
 candidate that solves them first-pass (→ 6k) where its transport is 1, so the actual problem is a
 PER-LIBRARY transport the exons can learn (one probe design per library is the reason they share it).
 Judge at `R exon (licensed)` and the walled classes, halves apart, pass zero beside the full pipeline.
+⭐ STEP F's MEASUREMENT (2026-09-04): the one-sidedness is the face map's PLATEAU above its ceiling (an
+unbounded enrichment tolerance), not the crossing count's noise (correlation with the exon's error
+−0.09); at pass zero an unstranded licensed exon reads ~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`).
+A cap priced by the pair's discrepancies fixes the first pass (−20 to −24 %) and is REFUSED on the
+junction-probed panel's weakly stranded rows (`g25 ss.70 ON` 1.122×): under junction probes the flux is
+enriched more than the crossing beside it, the ceiling sits below the truth, and no total or weak strand
+mode can witness it. The plateau is honest; the first-pass remedy is the solve's (honest ignorance at a
+node with a one-sided profile and no own evidence) and the landscape's training population — not a
+message. The remaining message-side candidate is a sharper INTRON profile (its own solve).
 
 ### per-transcript-prior-lane
 `priority: next · kind: build · stamped: 2026-08-31`
@@ -494,6 +503,22 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### the-edge-upper-side — DERIVED, PROTOTYPED, A/B'd on three panels and the ladder, REFUSED (2026-09-04). Do not rebuild an upper side on the edge's level, nor a zero-count claim.
+
+Rule 5 (the intergenic|exon edge → exon) is a LEVEL: the exon has at least the edge's gDNA density, at
+the count's Poisson width. Three upper sides were tried because a two-sided level wins the zero controls
+(the relay's lead there is exactly this: with its anchor off it reads 8,623 at the in-scope zero control
+and 39 at the capture-ON one, against the transfer policy's 14,501 and 22,299): (i) undampened — a
+first-pass disaster under capture on stranded rows (`g98 ss.99 ON` +75 %, `g98 ss.70 ON` +360 %);
+(ii) dampened both sides in log level by the pair's discrepancies — every main-panel row equal or better,
+REFUTED on the sparse-probe panel (`g98 ss.99 ON` 36,645 vs 6,981: a dark edge beside a probed exon is
+darkness, not absence, and the centre sits far below the truth); (iii) the split form, dampened above
+only, a zero count vacuous — safe on all three probe panels (worst 1.03×) and REFUSED BY THE LADDER: no
+in-scope win, stranded 0/8, the deferred unstranded capture-ON rows 1.065–1.146×. The physics is
+one-sided (capture only enriches the interior over its edge) and no local witness prices the size of
+that enrichment on unstranded data, so the upper side cannot be honest. The one-sided level stands; the
+zero controls are the landscape's (`gdna-landscape-trains-on-false-positives`).
 
 ### the-abundance-discrepancy-map — LANDED as item 6 (2026-09-02), found MISSPECIFIED on the owner's review and REPLACED by the level rule (2026-09-04). Do not rebuild a fitted step or a hypothesis mix.
 
