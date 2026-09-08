@@ -42,15 +42,24 @@ ever crosses a capture cliff and no constant is anywhere. The policy has three p
   - the ALTERNATIVE SPLICE SITE ⇄ both flanks: the intron-side flank shares the full unspliced
     crossing, the exon-of-both flank the crossing plus the leaving isoform measured as the route flux;
     each pair widened by its own disagreement beyond counting, nothing pooled (item 7).
+  - EVERY OTHER DIRECTED FACE — a strand change, termini pointing both ways, the AMBIG complex, and
+    every face into or out of an EMPTY node (a piece with no total) — carries THE LEVEL LANE
+    (2026-09-05): the gDNA level as an ABSOLUTE profile over the log density, which needs no map and
+    no recipient. An empty node forwards it unchanged; a full node emits the intersection of its own
+    level's lower side and the level it holds; the recipient prices the hop (both totals' counting
+    plus the abundance discrepancy beyond it) and takes it as a LOWER bound — a level that crosses a
+    face says "at least this much gDNA" and nothing more. The only faces with no rule at all lead into
+    intergenic regions (structurally pure gDNA) or off the chain.
 
 * **The two passes and the solve** (``propagate`` / ``solve``): a node SENDS two things apart — its
   own claim (a measurement) and what it holds from its far side (an imputation) — and the recipient's
   rule decides what to do with each: a composition rule composes them (a witness product: profiles
   add) and maps the product; a level rule reads the measurement only, because an imputation is never
-  re-issued as a level; either may stop — so a claim travels as far as the faces admit it, each hop charging its own
-  counting width, and no node ever hears its own claim back (the forward pass composes only what came
-  from the left, the backward pass only what came from the right). At the solve the two held profiles
-  add, and ψ fuses them with the slot's own evidence and the prior.
+  re-issued as a level; the lane intersects them as bounds; either may stop — so a claim travels as
+  far as the faces admit it, each hop charging its own counting width, and no node ever hears its own
+  claim back (the forward pass composes only what came from the left, the backward pass only what came
+  from the right). At the solve the two held profiles add, the two held levels intersect and join them
+  as a constraint, and ψ fuses the row with the slot's own evidence and the prior.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
 stays a no-claim — a flat profile, an absent factory, an evidence-free provider all deliver SILENCE,
@@ -73,7 +82,7 @@ import numpy as np
 from scipy.special import polygamma
 
 from ..simplex_logodds import strand_row_logodds
-from . import SILENCE, Message, PsiMessage, StepContext
+from . import SILENCE, Level, Message, PsiMessage, StepContext
 from .transfer_rows import (
     EPS,
     blur_row,
@@ -88,6 +97,13 @@ from .transfer_rows import (
     outside_flank,
     splice_out_row,
     transport_row,
+    hop_price,
+    intersect,
+    level_of_profile,
+    lower_side,
+    poisson_level,
+    priced_level,
+    profile_of_level,
 )
 
 __all__ = ["TransferPolicy"]
@@ -377,37 +393,126 @@ class TransferPolicy:
                     rule[(int(x), int(b))] = _composed(out7)
                     rule[(int(b), int(x))] = _composed(back7)
 
-        return _PreparedTransfer(own, rule, K)
+        # ── THE LEVEL LANE: the default rule of every directed face that has no composition rule ──
+        # A gDNA level is absolute (a profile over u = log(rho / rho_ref)), so it needs no map and no
+        # recipient: it crosses the faces composition cannot (strand changes, termini both ways, the
+        # AMBIG complex) and the EMPTY node — a piece with no total, 52 % of the ladder's exon pieces —
+        # which forwards it unchanged. A full node emits the product of its own level and the priced
+        # level it holds; the recipient prices the hop and takes the level as a LOWER bound.
+        empty = ~(n_u > 0.0) | ~(a_g > 0.0)
+        pure = is_intergenic & (a_g > 0.0)
+        if a_g[pure].sum() > 0.0:
+            rho_ref = float(n_u[pure].sum() / a_g[pure].sum())
+        else:
+            rho_ref = float(n_u[a_g > 0.0].sum() / max(a_g[a_g > 0.0].sum(), EPS))
+        lane = None
+        if rho_ref > 0.0:
+            u = lam
+            gene_edge = np.zeros(n, bool)
+            for b in np.flatnonzero(is_bnd):
+                lo, hi_ = left[b], right[b]
+                gene_edge[b] = (lo >= 0 and is_intergenic[lo]) or (hi_ >= 0 and is_intergenic[hi_])
+            own_level: list = [None] * n
+            for x in np.flatnonzero(~empty & ~is_intergenic):
+                if gene_edge[x]:
+                    own_level[x] = poisson_level(u, n_u[x], a_g[x], rho_ref)
+                elif own[x] is not None and np.ptp(own[x]) > EPS:
+                    own_level[x] = level_of_profile(own[x], lam, u, n_u[x], a_g[x], rho_ref)
+            faces = {
+                (int(x), int(y))
+                for x in range(n)
+                for y in (left[x], right[x])
+                if y >= 0 and not is_intergenic[y] and (int(x), int(y)) not in rule
+            }
+            lane = _Lane(u, lam, rho_ref, n_u, a_g, empty, own_level, faces)
+        return _PreparedTransfer(own, rule, K, lane)
+
+
+class _Lane:
+    """The level lane's static data for one sweep: the grid, the reference density, every node's total,
+    opportunity, emptiness and own level, and the directed faces the lane serves."""
+
+    __slots__ = ("u", "lam", "rho_ref", "n_u", "a_g", "empty", "own_level", "faces")
+
+    def __init__(self, u, lam, rho_ref, n_u, a_g, empty, own_level, faces):
+        self.u, self.lam, self.rho_ref = u, lam, float(rho_ref)
+        self.n_u, self.a_g, self.empty = n_u, a_g, empty
+        self.own_level, self.faces = own_level, faces
+
+    def emit(self, s: int, held: Message | None) -> Level | None:
+        """What ``s`` sends on the lane: an empty node forwards what it holds unchanged; a full node the
+        INTERSECTION of its own level's lower side and the (already priced) level it holds. Bounds
+        intersect, they do not multiply: a product of one-sided claims sharpens along a chain into a
+        hard bound at the noisiest node's mode (measured: nine terminus boundaries with one true gDNA
+        fragment each moved 2 → 29 on the ladder's `g05 ss.99 OFF`); the tighter bound winning at each
+        density sharpens nothing."""
+        far = None if held is None else held.level_gdna
+        if self.empty[s]:
+            return far
+        own = self.own_level[s]
+        parts = [
+            p
+            for p in (
+                None if own is None else lower_side(own),
+                None if far is None else far.profile,
+            )
+            if p is not None
+        ]
+        if not parts:
+            return None
+        return Level(intersect(parts), float(self.n_u[s]), float(self.a_g[s]))
+
+    def receive(self, level: Level, x: int) -> Level:
+        """What a FULL recipient holds: the level priced for this hop and taken as a lower bound, now
+        standing at ``x``."""
+        v = hop_price(level.n, level.a, self.n_u[x], self.a_g[x])
+        return Level(priced_level(level.profile, self.u, v), float(self.n_u[x]), float(self.a_g[x]))
+
+    def row(self, level: Level, x: int):
+        """A held level as ``x``'s composition profile (a coordinate change: it was priced on arrival)."""
+        return profile_of_level(
+            level.profile, self.u, self.lam, self.n_u[x], self.a_g[x], self.rho_ref
+        )
 
 
 class _PreparedTransfer:
-    """One sweep's working object: every node's own claim, the rules, the two passes' state."""
+    """One sweep's working object: every node's own claim, the rules, the lane, the two passes' state."""
 
-    def __init__(self, own, rule: dict, n_grid: int):
+    def __init__(self, own, rule: dict, n_grid: int, lane: _Lane | None = None):
         self.own = own
         self.rule = rule
+        self.lane = lane
         self._K = int(n_grid)
         self.held: dict = {False: None, True: None}
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
     def propagate(self, *, backward: bool):
-        if self.own is None or not self.rule:
+        if self.own is None or not (self.rule or (self.lane and self.lane.faces)):
             return None  # nothing to say anywhere: every node holds SILENCE
         held: list = [None] * len(self.own)
         self.held[bool(backward)] = held
+        lane = self.lane
 
         def receive(s: int, i: int):
             """``s`` sends two things apart — its own claim and what it holds from its far side (written
-            by this pass one step earlier) — and the rule for the face decides: compose and map
-            (MODIFY), pass (FORWARD), read the measurement only (a level face), or absent (STOP)."""
-            fn = self.rule.get((int(s), int(i)))
-            if fn is None:
-                return SILENCE
+            by this pass one step earlier) — and the face decides: a composition rule composes and maps
+            (MODIFY), passes (FORWARD) or reads the measurement only (a level face); with no rule the
+            LANE carries the gDNA level; absent both (a structural pure-gDNA neighbour) STOP."""
             far = held[s]
-            out = fn(self.own[s], None if far is None else far.composition)
-            if out is None or np.ptp(out) <= EPS:
+            comp = None
+            fn = self.rule.get((int(s), int(i)))
+            if fn is not None:
+                out = fn(self.own[s], None if far is None else far.composition)
+                if out is not None and np.ptp(out) > EPS:
+                    comp = _norm(out)
+            level = None
+            if lane is not None and (int(s), int(i)) in lane.faces:
+                level = lane.emit(s, far)
+                if level is not None and not lane.empty[i]:
+                    level = lane.receive(level, i)
+            if comp is None and level is None:
                 return SILENCE
-            msg = Message(composition=_norm(out))
+            msg = Message(composition=comp, level_gdna=level)
             held[i] = msg
             return msg
 
@@ -420,12 +525,18 @@ class _PreparedTransfer:
         n = len(self.own)
         rows = np.zeros((n, self._K))
         live = False
+        lane = self.lane
         for i in range(n):
-            parts = [
-                m.composition
-                for m in (from_left[i], from_right[i])
-                if m is not None and m.composition is not None
-            ]
+            parts, bounds = [], []
+            for m in (from_left[i], from_right[i]):
+                if m is None:
+                    continue
+                if m.composition is not None:
+                    parts.append(m.composition)
+                if m.level_gdna is not None and lane is not None and not lane.empty[i]:
+                    bounds.append(lane.row(m.level_gdna, i))
+            if bounds:
+                parts.append(intersect(bounds))  # two bounds on one density: the tighter wins
             if parts:
                 rows[i] = _fuse(parts)
                 live = True

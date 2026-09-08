@@ -58,13 +58,18 @@ def test_both_strands_are_equally_represented(builder):
 
 
 def test_every_type_sits_on_both_strands(builder):
-    """A block type that only ever appears on one strand is the one-strand substrate in disguise."""
+    """A block type that only ever appears on one strand is the one-strand substrate in disguise.
+    A both-stranded locus is TWO genes on opposite strands sharing one type (2026-09-07): their ids carry
+    a role suffix, ``_H`` the host and ``_A`` the antisense, which is not part of the type."""
     spec = builder.load_spec(SPEC)
     by_type: dict[str, set[str]] = {}
     for g in spec.genes:
         parts = g.gene_id.split("_", 1)
         if len(parts) == 2 and parts[0].startswith("gB"):
-            by_type.setdefault(parts[1], set()).add(g.strand)
+            token = parts[1]
+            if token.endswith(("_H", "_A")):  # a both-stranded locus's role suffix is not its type
+                token = token[:-2]
+            by_type.setdefault(token, set()).add(g.strand)
     assert by_type, "no block genes found"
     one_sided = sorted(t for t, s in by_type.items() if s != {"+", "-"})
     assert one_sided == [], one_sided

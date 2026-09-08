@@ -109,7 +109,48 @@ ref_name: test_chr
 # balanced. The chromosome grows to 4.65 Mb and the test configs' fragment budget from 480 k to 720 k so
 # the existing blocks keep their depth. The refused|refused class (an exon inside an intron) is the level
 # message's case and is deferred with it.
-genome_length: 4650000      # the walled block ends at 4,601,000 (last spacer included)
+#
+# ── THE TERMINUS-CLUSTER BLOCK (owner-approved 2026-09-05; the LEVEL LANE's substrate) ─────────────
+# The ladder's reach census found half of its pass-zero error at nodes no message reached, and the
+# mechanism is the EMPTY exon piece: closely spaced transcript ends inside one exon cut it into pieces
+# shorter than a fragment, which hold no contained fragment (their solve is trivial) while their
+# BOUNDARIES carry the crossings — the level lane's path (boundary → empty → boundary). Mirrored from a
+# real ladder locus, MIR99AHG chr21:16,606,994–16,607,141 (+): a shared last exon whose acceptor is
+# followed by TEN transcription ends 126 / 136 / 138 / 140 / 141 / 142 / 143 / 144 / 146 / 147 bp in,
+# while other isoforms continue — nine pieces of 1–10 bp, every one empty, 4,200 crossings per boundary
+# at the ladder's depth and one true gDNA fragment each. Here: host U = the twin shape; ten isoforms
+# T1…T10 share U's first two exons and end in U's last exon at those offsets (on a − gene the cluster
+# sits at the LOW end of the first exon, where a − transcript ends). Under the REPLICATION RULE with ten
+# alternatives the pair total sits one rung up the ladder so the regimes stay integers: block 2 total 100
+# (ab U 90 : T 1 each; ba U 10 : T 9 each; eq U 50 : T 5 each), block 4 total 1000 (×10); unprobed /
+# probed (cap*); slots 88–99 at pitch 37,000 from 4,621,000; the strand alternates within a block and
+# flips between the two blocks, so every type sits on both strands. The chromosome grows to 5.094 Mb
+# and the test configs' fragment budget from 720 k to 840 k (RNA depth per existing transcript −3 %,
+# gDNA density per base +6 %: the two cannot both be held when 6,600 abundance units join 32,328 and
+# 444 kb join 4.65 Mb).
+#
+# ── THE BOTH-STRANDED BLOCK (owner-approved 2026-09-07; docs/dev/AMBIG_DESIGN.md, phase 0) ────────
+# Overlapping transcripts on OPPOSITE strands — the nodes that admit RNA on both strands (AXIOM 0's two
+# bits both set), 14 % of the ladder's chain and 38–50 % of the landed policy's remaining error on the
+# stranded capture-ON rows. Every locus is TWO genes on opposite strands sharing one type token (the
+# render gate's rule that every type sits on both strands is met inside the locus): the host H and the
+# antisense A, ids `gB2_{cap}{type}_{regime}_H` / `_A`. Mirrored from the ladder's loci:
+#   asin     an antisense's two 300 bp exons (1.5 kb intron) inside the host's first intron in transcription
+#            order — TTC28-AS1 in TTC28, MYO18B-AS1 in MYO18B (58 % of the AMBIG error); host on +
+#   asinrev  the same with the host on − (the antisense mirrored within the 17 kb span)
+#   span     an antisense with a 300 bp exon in the host's first intron and a 2 kb exon covering the host's
+#            middle exon with 500 bp overhangs into both introns — PPM1F-AS1 over TOP3B (21 %); host on +
+#   conv     a simple overlap at the ends of two opposite-stranded transcripts (the owner's structure):
+#            TF + exons [s+1000, s+2000) [s+10000, s+16000), TR − exons [s+14000, s+16000) [s+20000, s+21000)
+#            — the 3' ends overlap in [s+14000, s+16000); s+16000 carries TF's TES+ and TR's acceptor on −,
+#            a junction and a terminus on one boundary from different strands (5 %); span 21 kb
+# Regimes (host : antisense), pair total 100: ab 90 : 10 (the realistic lncRNA case), ba 10 : 90 (a
+# near-silent host under an expressed antisense), eq 50 : 50; unprobed and HOST-ONLY probed (`cap`: the
+# probes tile the host's exons and nothing of the antisense — a capture design's enrichment cliff between
+# the two strands inside one node). No nascent on the hosts in this first cut. 24 loci = 48 genes, slots
+# 100–123 at pitch 37,000 from 5,065,000; the chromosome grows to 5.986 Mb and the fragment budget from
+# 840 k to 960 k (gDNA density per base −3 %, RNA depth per existing transcript +8 %).
+genome_length: 5986000      # the both-stranded block ends at 5,937,000 (last spacer included)
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -932,6 +973,431 @@ genes:
       - {t_id: B4_capaltlast_eq_U, exons: [[4584000, 4585000], [4592000, 4593000], [4600000, 4601000]], abundance: 150}
       - {t_id: B4_capaltlast_eq_T, exons: [[4584000, 4585000], [4587000, 4587800]], abundance: 150}
       - {t_id: B4_capaltlast_eq_T2, exons: [[4584000, 4585000], [4587300, 4587600]], abundance: 150}
+
+  # ── THE TERMINUS-CLUSTER BLOCK (2026-09-05): host U + ten isoforms ending 126–147 bp into U's last exon
+  #    (mirrored from MIR99AHG chr21:16,606,994–16,607,141); regimes ab 90:1×10, ba 10:9×10, eq 50:5×10 (block 2), ×10 (block 4)
+  - gene_id: gB2_cluster_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_cluster_ab_U, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4638000]], abundance: 90}
+      - {t_id: B2_cluster_ab_T1, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637126]], abundance: 1}
+      - {t_id: B2_cluster_ab_T2, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637136]], abundance: 1}
+      - {t_id: B2_cluster_ab_T3, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637138]], abundance: 1}
+      - {t_id: B2_cluster_ab_T4, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637140]], abundance: 1}
+      - {t_id: B2_cluster_ab_T5, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637141]], abundance: 1}
+      - {t_id: B2_cluster_ab_T6, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637142]], abundance: 1}
+      - {t_id: B2_cluster_ab_T7, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637143]], abundance: 1}
+      - {t_id: B2_cluster_ab_T8, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637144]], abundance: 1}
+      - {t_id: B2_cluster_ab_T9, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637146]], abundance: 1}
+      - {t_id: B2_cluster_ab_T10, exons: [[4621000, 4622000], [4629000, 4630000], [4637000, 4637147]], abundance: 1}
+  - gene_id: gB2_capcluster_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capcluster_ab_U, exons: [[4658000, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 90}
+      - {t_id: B2_capcluster_ab_T1, exons: [[4658874, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T2, exons: [[4658864, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T3, exons: [[4658862, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T4, exons: [[4658860, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T5, exons: [[4658859, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T6, exons: [[4658858, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T7, exons: [[4658857, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T8, exons: [[4658856, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T9, exons: [[4658854, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+      - {t_id: B2_capcluster_ab_T10, exons: [[4658853, 4659000], [4666000, 4667000], [4674000, 4675000]], abundance: 1}
+  - gene_id: gB2_cluster_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_cluster_ba_U, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4712000]], abundance: 10}
+      - {t_id: B2_cluster_ba_T1, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711126]], abundance: 9}
+      - {t_id: B2_cluster_ba_T2, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711136]], abundance: 9}
+      - {t_id: B2_cluster_ba_T3, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711138]], abundance: 9}
+      - {t_id: B2_cluster_ba_T4, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711140]], abundance: 9}
+      - {t_id: B2_cluster_ba_T5, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711141]], abundance: 9}
+      - {t_id: B2_cluster_ba_T6, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711142]], abundance: 9}
+      - {t_id: B2_cluster_ba_T7, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711143]], abundance: 9}
+      - {t_id: B2_cluster_ba_T8, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711144]], abundance: 9}
+      - {t_id: B2_cluster_ba_T9, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711146]], abundance: 9}
+      - {t_id: B2_cluster_ba_T10, exons: [[4695000, 4696000], [4703000, 4704000], [4711000, 4711147]], abundance: 9}
+  - gene_id: gB2_capcluster_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capcluster_ba_U, exons: [[4732000, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 10}
+      - {t_id: B2_capcluster_ba_T1, exons: [[4732874, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T2, exons: [[4732864, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T3, exons: [[4732862, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T4, exons: [[4732860, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T5, exons: [[4732859, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T6, exons: [[4732858, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T7, exons: [[4732857, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T8, exons: [[4732856, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T9, exons: [[4732854, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+      - {t_id: B2_capcluster_ba_T10, exons: [[4732853, 4733000], [4740000, 4741000], [4748000, 4749000]], abundance: 9}
+  - gene_id: gB2_cluster_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_cluster_eq_U, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4786000]], abundance: 50}
+      - {t_id: B2_cluster_eq_T1, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785126]], abundance: 5}
+      - {t_id: B2_cluster_eq_T2, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785136]], abundance: 5}
+      - {t_id: B2_cluster_eq_T3, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785138]], abundance: 5}
+      - {t_id: B2_cluster_eq_T4, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785140]], abundance: 5}
+      - {t_id: B2_cluster_eq_T5, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785141]], abundance: 5}
+      - {t_id: B2_cluster_eq_T6, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785142]], abundance: 5}
+      - {t_id: B2_cluster_eq_T7, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785143]], abundance: 5}
+      - {t_id: B2_cluster_eq_T8, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785144]], abundance: 5}
+      - {t_id: B2_cluster_eq_T9, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785146]], abundance: 5}
+      - {t_id: B2_cluster_eq_T10, exons: [[4769000, 4770000], [4777000, 4778000], [4785000, 4785147]], abundance: 5}
+  - gene_id: gB2_capcluster_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capcluster_eq_U, exons: [[4806000, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 50}
+      - {t_id: B2_capcluster_eq_T1, exons: [[4806874, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T2, exons: [[4806864, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T3, exons: [[4806862, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T4, exons: [[4806860, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T5, exons: [[4806859, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T6, exons: [[4806858, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T7, exons: [[4806857, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T8, exons: [[4806856, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T9, exons: [[4806854, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+      - {t_id: B2_capcluster_eq_T10, exons: [[4806853, 4807000], [4814000, 4815000], [4822000, 4823000]], abundance: 5}
+  - gene_id: gB4_cluster_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_cluster_ab_U, exons: [[4843000, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 900}
+      - {t_id: B4_cluster_ab_T1, exons: [[4843874, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T2, exons: [[4843864, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T3, exons: [[4843862, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T4, exons: [[4843860, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T5, exons: [[4843859, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T6, exons: [[4843858, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T7, exons: [[4843857, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T8, exons: [[4843856, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T9, exons: [[4843854, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+      - {t_id: B4_cluster_ab_T10, exons: [[4843853, 4844000], [4851000, 4852000], [4859000, 4860000]], abundance: 10}
+  - gene_id: gB4_capcluster_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capcluster_ab_U, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4897000]], abundance: 900}
+      - {t_id: B4_capcluster_ab_T1, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896126]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T2, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896136]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T3, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896138]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T4, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896140]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T5, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896141]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T6, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896142]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T7, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896143]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T8, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896144]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T9, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896146]], abundance: 10}
+      - {t_id: B4_capcluster_ab_T10, exons: [[4880000, 4881000], [4888000, 4889000], [4896000, 4896147]], abundance: 10}
+  - gene_id: gB4_cluster_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_cluster_ba_U, exons: [[4917000, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 100}
+      - {t_id: B4_cluster_ba_T1, exons: [[4917874, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T2, exons: [[4917864, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T3, exons: [[4917862, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T4, exons: [[4917860, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T5, exons: [[4917859, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T6, exons: [[4917858, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T7, exons: [[4917857, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T8, exons: [[4917856, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T9, exons: [[4917854, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+      - {t_id: B4_cluster_ba_T10, exons: [[4917853, 4918000], [4925000, 4926000], [4933000, 4934000]], abundance: 90}
+  - gene_id: gB4_capcluster_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capcluster_ba_U, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4971000]], abundance: 100}
+      - {t_id: B4_capcluster_ba_T1, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970126]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T2, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970136]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T3, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970138]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T4, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970140]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T5, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970141]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T6, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970142]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T7, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970143]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T8, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970144]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T9, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970146]], abundance: 90}
+      - {t_id: B4_capcluster_ba_T10, exons: [[4954000, 4955000], [4962000, 4963000], [4970000, 4970147]], abundance: 90}
+  - gene_id: gB4_cluster_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_cluster_eq_U, exons: [[4991000, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 500}
+      - {t_id: B4_cluster_eq_T1, exons: [[4991874, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T2, exons: [[4991864, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T3, exons: [[4991862, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T4, exons: [[4991860, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T5, exons: [[4991859, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T6, exons: [[4991858, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T7, exons: [[4991857, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T8, exons: [[4991856, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T9, exons: [[4991854, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+      - {t_id: B4_cluster_eq_T10, exons: [[4991853, 4992000], [4999000, 5000000], [5007000, 5008000]], abundance: 50}
+  - gene_id: gB4_capcluster_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capcluster_eq_U, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5045000]], abundance: 500}
+      - {t_id: B4_capcluster_eq_T1, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044126]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T2, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044136]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T3, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044138]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T4, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044140]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T5, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044141]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T6, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044142]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T7, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044143]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T8, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044144]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T9, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044146]], abundance: 50}
+      - {t_id: B4_capcluster_eq_T10, exons: [[5028000, 5029000], [5036000, 5037000], [5044000, 5044147]], abundance: 50}
+  # ── THE BOTH-STRANDED BLOCK (2026-09-07): two genes per locus on opposite strands, one type token —
+  #    asin (host +), asinrev (host −), span, conv; regimes ab 90:10, ba 10:90, eq 50:50; cap = the host alone probed
+  - gene_id: gB2_asin_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_ab_H, exons: [[5065000, 5066000], [5073000, 5074000], [5081000, 5082000]], abundance: 90}
+  - gene_id: gB2_asin_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_ab_A, exons: [[5068000, 5068300], [5069800, 5070100]], abundance: 10}
+  - gene_id: gB2_capasin_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasin_ab_H, exons: [[5102000, 5103000], [5110000, 5111000], [5118000, 5119000]], abundance: 90}
+  - gene_id: gB2_capasin_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasin_ab_A, exons: [[5105000, 5105300], [5106800, 5107100]], abundance: 10}
+  - gene_id: gB2_asin_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_ba_H, exons: [[5139000, 5140000], [5147000, 5148000], [5155000, 5156000]], abundance: 10}
+  - gene_id: gB2_asin_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_ba_A, exons: [[5142000, 5142300], [5143800, 5144100]], abundance: 90}
+  - gene_id: gB2_capasin_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasin_ba_H, exons: [[5176000, 5177000], [5184000, 5185000], [5192000, 5193000]], abundance: 10}
+  - gene_id: gB2_capasin_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasin_ba_A, exons: [[5179000, 5179300], [5180800, 5181100]], abundance: 90}
+  - gene_id: gB2_asin_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_eq_H, exons: [[5213000, 5214000], [5221000, 5222000], [5229000, 5230000]], abundance: 50}
+  - gene_id: gB2_asin_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asin_eq_A, exons: [[5216000, 5216300], [5217800, 5218100]], abundance: 50}
+  - gene_id: gB2_capasin_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasin_eq_H, exons: [[5250000, 5251000], [5258000, 5259000], [5266000, 5267000]], abundance: 50}
+  - gene_id: gB2_capasin_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasin_eq_A, exons: [[5253000, 5253300], [5254800, 5255100]], abundance: 50}
+  - gene_id: gB2_asinrev_ab_H
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_ab_H, exons: [[5287000, 5288000], [5295000, 5296000], [5303000, 5304000]], abundance: 90}
+  - gene_id: gB2_asinrev_ab_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_ab_A, exons: [[5298900, 5299200], [5300700, 5301000]], abundance: 10}
+  - gene_id: gB2_capasinrev_ab_H
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasinrev_ab_H, exons: [[5324000, 5325000], [5332000, 5333000], [5340000, 5341000]], abundance: 90}
+  - gene_id: gB2_capasinrev_ab_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasinrev_ab_A, exons: [[5335900, 5336200], [5337700, 5338000]], abundance: 10}
+  - gene_id: gB2_asinrev_ba_H
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_ba_H, exons: [[5361000, 5362000], [5369000, 5370000], [5377000, 5378000]], abundance: 10}
+  - gene_id: gB2_asinrev_ba_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_ba_A, exons: [[5372900, 5373200], [5374700, 5375000]], abundance: 90}
+  - gene_id: gB2_capasinrev_ba_H
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasinrev_ba_H, exons: [[5398000, 5399000], [5406000, 5407000], [5414000, 5415000]], abundance: 10}
+  - gene_id: gB2_capasinrev_ba_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasinrev_ba_A, exons: [[5409900, 5410200], [5411700, 5412000]], abundance: 90}
+  - gene_id: gB2_asinrev_eq_H
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_eq_H, exons: [[5435000, 5436000], [5443000, 5444000], [5451000, 5452000]], abundance: 50}
+  - gene_id: gB2_asinrev_eq_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_asinrev_eq_A, exons: [[5446900, 5447200], [5448700, 5449000]], abundance: 50}
+  - gene_id: gB2_capasinrev_eq_H
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capasinrev_eq_H, exons: [[5472000, 5473000], [5480000, 5481000], [5488000, 5489000]], abundance: 50}
+  - gene_id: gB2_capasinrev_eq_A
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_capasinrev_eq_A, exons: [[5483900, 5484200], [5485700, 5486000]], abundance: 50}
+  - gene_id: gB2_span_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_ab_H, exons: [[5509000, 5510000], [5517000, 5518000], [5525000, 5526000]], abundance: 90}
+  - gene_id: gB2_span_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_ab_A, exons: [[5514000, 5514300], [5516500, 5518500]], abundance: 10}
+  - gene_id: gB2_capspan_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capspan_ab_H, exons: [[5546000, 5547000], [5554000, 5555000], [5562000, 5563000]], abundance: 90}
+  - gene_id: gB2_capspan_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capspan_ab_A, exons: [[5551000, 5551300], [5553500, 5555500]], abundance: 10}
+  - gene_id: gB2_span_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_ba_H, exons: [[5583000, 5584000], [5591000, 5592000], [5599000, 5600000]], abundance: 10}
+  - gene_id: gB2_span_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_ba_A, exons: [[5588000, 5588300], [5590500, 5592500]], abundance: 90}
+  - gene_id: gB2_capspan_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capspan_ba_H, exons: [[5620000, 5621000], [5628000, 5629000], [5636000, 5637000]], abundance: 10}
+  - gene_id: gB2_capspan_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capspan_ba_A, exons: [[5625000, 5625300], [5627500, 5629500]], abundance: 90}
+  - gene_id: gB2_span_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_eq_H, exons: [[5657000, 5658000], [5665000, 5666000], [5673000, 5674000]], abundance: 50}
+  - gene_id: gB2_span_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_span_eq_A, exons: [[5662000, 5662300], [5664500, 5666500]], abundance: 50}
+  - gene_id: gB2_capspan_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capspan_eq_H, exons: [[5694000, 5695000], [5702000, 5703000], [5710000, 5711000]], abundance: 50}
+  - gene_id: gB2_capspan_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capspan_eq_A, exons: [[5699000, 5699300], [5701500, 5703500]], abundance: 50}
+  - gene_id: gB2_conv_ab_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_ab_H, exons: [[5732000, 5733000], [5741000, 5747000]], abundance: 90}
+  - gene_id: gB2_conv_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_ab_A, exons: [[5745000, 5747000], [5751000, 5752000]], abundance: 10}
+  - gene_id: gB2_capconv_ab_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capconv_ab_H, exons: [[5769000, 5770000], [5778000, 5784000]], abundance: 90}
+  - gene_id: gB2_capconv_ab_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capconv_ab_A, exons: [[5782000, 5784000], [5788000, 5789000]], abundance: 10}
+  - gene_id: gB2_conv_ba_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_ba_H, exons: [[5806000, 5807000], [5815000, 5821000]], abundance: 10}
+  - gene_id: gB2_conv_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_ba_A, exons: [[5819000, 5821000], [5825000, 5826000]], abundance: 90}
+  - gene_id: gB2_capconv_ba_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capconv_ba_H, exons: [[5843000, 5844000], [5852000, 5858000]], abundance: 10}
+  - gene_id: gB2_capconv_ba_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capconv_ba_A, exons: [[5856000, 5858000], [5862000, 5863000]], abundance: 90}
+  - gene_id: gB2_conv_eq_H
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_eq_H, exons: [[5880000, 5881000], [5889000, 5895000]], abundance: 50}
+  - gene_id: gB2_conv_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_conv_eq_A, exons: [[5893000, 5895000], [5899000, 5900000]], abundance: 50}
+  - gene_id: gB2_capconv_eq_H
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B2_capconv_eq_H, exons: [[5917000, 5918000], [5926000, 5932000]], abundance: 50}
+  - gene_id: gB2_capconv_eq_A
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B2_capconv_eq_A, exons: [[5930000, 5932000], [5936000, 5937000]], abundance: 50}
 
 shadow_genes:
   - gene_id: gshadow_U1

@@ -217,6 +217,21 @@ worse than the shipped local solve". The decision-relevant contrast against `Sil
 needs `policy_benchmark.py`. What the measurement DOES settle is the issue's literal question — the
 information is present at `g50`/`g98`-OFF and absent-to-negative at `g05` and at `g98` capture-ON.
 
+### the-lower-bound-noise-ratchet
+
+**Priority: with the enrichment witness.** The level lane's residue at the LOW-gDNA end. A level made
+from a node's own strand profile at an RNA-rich node is a measurement whose mode is noise around zero
+(±0.003 in share at 2,000 crossings); its LOWER SIDE becomes a soft bound at its neighbours, and among
+nodes of one density the tighter of the noisy neighbours wins — a ratchet of noise, not of evidence.
+Measured (2026-09-05): the ladder's `g05 ss.99 OFF` 44,714 → 45,076 (+0.8 % after the intersection form
+recovered two thirds of the product form's +2.4 %), and the rebuilt test chromosome's zero-gDNA control
+`g00 ss.99 ON` 64 → 216, 187 of it at `capcluster_ab`'s nine inner terminus boundaries at share
+0.007–0.011 with no gDNA at all. A TWO-SIDED own-profile level would average the noise away, and
+measured −0.9 % / +1.5 % on `g50 ss.99 ON` / `g98 ss.50 OFF` against lower-only's −4.7 % / −0.5 % — so
+the lower-only law keeps more fragments and this residue. What would remove it without giving up the
+law: the same enrichment witness `two-sided-exon-row` waits for (where the library's gDNA is not
+enriched, a level between nodes of one gene is two-sided). Until then, report it on every zero control.
+
 ### two-sided-exon-row
 `priority: now · kind: problem · stamped: 2026-09-04`
 **What an exon needs before the scan can forward anything on unstranded data, and where it can come
@@ -248,6 +263,22 @@ enriched more than the crossing beside it, the ceiling sits below the truth, and
 mode can witness it. The plateau is honest; the first-pass remedy is the solve's (honest ignorance at a
 node with a one-sided profile and no own evidence) and the landscape's training population — not a
 message. The remaining message-side candidate is a sharper INTRON profile (its own solve).
+⭐ THE LEVEL LANE'S MEASUREMENT (2026-09-05, `DESIGN.md` §6b.12): with every node reached, a TWO-SIDED
+level lane reads −26 % at pass zero on `g50 ss.50 OFF` (the minimum total density of an exon complex
+bounds its gDNA from above under capture-OFF) and +33 % on `g50 ss.99 ON` (the same bound is false under
+capture); the landed lane is LOWER-ONLY and reads nothing at pass zero on unstranded rows. The gate on the
+prize is ONE library-level fact — is this library's gDNA enriched — and its gDNA-specific witness on
+unstranded data is the exons of SILENT genes (no spliced fragment at any junction at this depth): their
+density against the intergenic density is the enrichment spectrum, at pass zero, with no strand channel.
+Where it is flat, the lane may be two-sided. ⭐ OWNER RULING 2026-09-06: the enrichment witness IS the gDNA
+landscape prior, and nodes whose only evidence is a bound do not train it; the message rules finish first.
+⭐ THE CLIFF INSIDE AN EXON (2026-09-05, the terminus-cluster block under sparse probes): ten isoform ends
+126–147 bp into one exon put ten overlapping probes on the cluster and none on the exon's rest; a
+lower bound from the ten-times-probed piece over-claims at the boundaries beside it (`g50 ss.99 ON`
+10,100 → 12,834, all at the three probed cluster genes). The lane's lower-only law assumes the recipient
+is at least as enriched as the source; a probe edge inside an exon complex breaks it, as junction probes
+broke step F's cap. A wall-reading strand witness recovers 57 % at +0.8 % elsewhere (not landed; the
+plan §5h). The enrichment witness this issue waits for is the cure for this too.
 
 ### per-transcript-prior-lane
 `priority: next · kind: build · stamped: 2026-08-31`

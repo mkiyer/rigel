@@ -257,8 +257,9 @@ function of the calibration code that fit it, so caching it would serve a stale 
 ⭐⭐⭐ **A synthetic chromosome the owner designs one structure at a time, described in ONE YAML file.**
 Owner: *"over the course of this method development, we will add transcripts to a 'test chromosome' …
 collectively, the test reference chromosome, test transcript GTF, and test abundances comprise a critical
-method development benchmark."* It was cleared to zero on 2026-08-27 and has grown in four blocks since
-(the twin block 2026-08-28, the mono block and the isoform block 2026-09-02). ⭐⭐ **Since 2026-09-02 the
+method development benchmark."* It was cleared to zero on 2026-08-27 and has grown in six blocks since
+(the twin block 2026-08-28, the mono block and the isoform block 2026-09-02, the walled block 2026-09-03,
+the terminus-cluster block 2026-09-05, the both-stranded block 2026-09-07). ⭐⭐ **Since 2026-09-02 the
 hand-edited file is `scripts/sim/test_reference/test_chr.yaml`** — the `rigel sim` scenario schema
 (`genes → {gene_id, strand, transcripts: [{t_id, exons, abundance, nrna_abundance}]}`, exons 0-based
 half-open) plus `probed` per gene and a `shadow_genes` list; the GTFs, the abundance table, the three
@@ -309,6 +310,40 @@ abundance blocks 2 and 4 = 48 genes. The refused\|refused class (an exon inside 
 case and waits for it. ⚠ With an even number of blocks the strand alternates on the block's ORDINAL,
 or a type sits on one strand and the render gate fires.
 
+⭐⭐ **THE TERMINUS-CLUSTER BLOCK** (owner-approved 2026-09-05) — the LEVEL LANE's substrate. The ladder's
+reach census found half of its pass-zero error at nodes no message reached, and the mechanism is the
+EMPTY exon piece: closely spaced transcript ends inside one exon cut it into pieces shorter than a
+fragment, which hold no contained fragment (their solve is trivial) while their BOUNDARIES carry the
+crossings — the lane's path, boundary → empty → boundary — and the four earlier blocks never make one
+(the census reads 0.2 % there against 51 % on the ladder). The block MIRRORS A REAL LADDER LOCUS (the
+owner's recommendation): MIR99AHG, chr21:16,606,994–16,607,141 (+), a shared last exon whose acceptor is
+followed by TEN transcription ends 126 / 136 / 138 / 140 / 141 / 142 / 143 / 144 / 146 / 147 bp in while
+other isoforms continue — nine pieces of 1–10 bp, every one empty, ~4,200 crossings per boundary at the
+ladder's depth and one true gDNA fragment each. `cluster`: host `U` = the twin shape plus ten isoforms
+`T1…T10` sharing U's first two exons and ending in U's last exon at those offsets (on a − gene the
+cluster sits at the LOW end of the first exon, where a − transcript ends); `capcluster` the same,
+probed; × ab / ba / eq × blocks 2 and 4 = 12 genes. With ten alternatives the pair total sits one rung
+up the ladder so the regimes stay integers (block 2 total 100: ab 90 : 1 × 10, ba 10 : 9 × 10, eq 50 : 5 × 10;
+block 4 × 10). The chromosome grows to 5.094 Mb and every test config's fragment budget from 720 k to
+840 k (RNA depth per existing transcript −3 %, gDNA density per base +6 %: with 6,600 abundance units
+joining 32,328 and 444 kb joining 4.65 Mb the two cannot both be held).
+
+⭐⭐ **THE BOTH-STRANDED BLOCK** (owner-approved 2026-09-07; phase 0 of the both-stranded design, which
+lives in the sandbox until it settles) — the last message-propagation case's substrate: overlapping transcripts on OPPOSITE strands, the nodes that admit
+RNA on both strands (14 % of the ladder's chain, 38–50 % of the landed policy's remaining error on the
+stranded capture-ON rows). Every locus is TWO genes on opposite strands sharing one type, the host `H` and
+the antisense `A` (ids `gB2_{cap}{type}_{regime}_H` / `_A`; the render gate reads the type without the role
+suffix). Mirrored from the ladder's loci: `asin`, an antisense's two 300 bp exons inside the host's first
+intron in transcription order (TTC28-AS1 in TTC28: 58 % of the AMBIG error), with `asinrev` the same on a
+− host; `span`, an antisense exon covering the host's middle exon with 500 bp overhangs into both introns
+(PPM1F-AS1 over TOP3B: 21 %); `conv`, the owner's simple overlap at the ends of two opposite-stranded
+transcripts (TF + exons [s+1000, s+2000) [s+10000, s+16000), TR − exons [s+14000, s+16000) [s+20000, s+21000):
+the 3' ends overlap 2 kb, and one boundary carries TF's TES and TR's acceptor from different strands).
+Regimes host : antisense 90 : 10, 10 : 90, 50 : 50 at pair total 100; unprobed and HOST-ONLY probed (`cap`:
+a capture design's enrichment cliff between the two strands inside one node); no nascent on the hosts in
+this first cut. 24 loci, 48 genes; the chromosome grows to 5.986 Mb and every test config's fragment
+budget from 840 k to 960 k (gDNA density per base −3 %, RNA depth per existing transcript +8 %).
+
 Abundances are molar ladders in half-decade steps with **mature UP the blocks and nascent DOWN**
 (10/30/100/300/1000 against 100/30/10/3/1), i.e. independent levels, exactly as the big ladder draws
 them. ⛔ `test_abundances.tsv` takes no comments — both its readers key on the first line — so that
@@ -325,7 +360,7 @@ scored on every condition between edits, and the ladder is kept for the shipping
 | the FASTA (⚠ `test_chr.fa` carries BOTH contigs), the index, the reads and the caches | ⛔ **DERIVED** — never hand-edited; regenerated by the commands below |
 
 ⛔ **WHY THE FASTA IS DERIVED.** A spliced transcript needs a GT..AG at every intron or the aligner and
-the simulator disagree with the annotation. Generating the chromosome from a fixed seed (the YAML's `genome_length`, 4.65 Mb since the walled
+the simulator disagree with the annotation. Generating the chromosome from a fixed seed (the YAML's `genome_length`, 5.986 Mb since the both-stranded
 block) and injecting a motif at every intron the annotation declares makes that impossible to get wrong; a
 versioned FASTA would need a hand edit on every addition and the first missed one is a silent failure.
 

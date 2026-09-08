@@ -1150,10 +1150,59 @@ def _reference_rows(prepared, ctx):
         memo[key] = out
         return out
 
+    lane = prepared.lane
+    lmemo = {}
+
+    def level_into(s, i):
+        """THE LANE, recursively: nothing unless the face is a lane face; an EMPTY sender forwards the
+        level that reaches it from its far side unchanged; a full sender sends the product of its own
+        level and the level it holds; a full recipient prices the hop (both totals' counting plus the
+        discrepancy beyond it) and takes the level as a lower bound."""
+        from rigel.calibration.messages.transfer_rows import hop_price, priced_level
+
+        key = (s, i)
+        if key in lmemo:
+            return lmemo[key]
+        out = None
+        if lane is not None and (s, i) in lane.faces:
+            far = left[s] if right[s] == i else right[s]
+            held = level_into(far, s) if far >= 0 else None
+            if lane.empty[s]:
+                out = held
+            else:
+                own_s = lane.own_level[s]
+                if own_s is not None:
+                    own_s = np.maximum.accumulate(own_s)  # its lower side
+                parts = [q for q in (own_s, None if held is None else held[0]) if q is not None]
+                if parts:
+                    tight = parts[0] if len(parts) == 1 else np.minimum(parts[0], parts[1])
+                    out = (norm(tight), float(lane.n_u[s]), float(lane.a_g[s]))
+            if out is not None and not lane.empty[i]:
+                v = hop_price(out[1], out[2], lane.n_u[i], lane.a_g[i])
+                out = (priced_level(out[0], lane.u, v), float(lane.n_u[i]), float(lane.a_g[i]))
+        lmemo[key] = out
+        return out
+
     n = len(own)
     rows = np.zeros((n, int(ctx.n_grid)))
     for i in range(n):
         parts = [into(s, i) for s in (left[i], right[i]) if s >= 0]
+        if lane is not None and not lane.empty[i]:
+            from rigel.calibration.messages.transfer_rows import profile_of_level
+
+            bounds = []
+            for s in (left[i], right[i]):
+                lv = level_into(s, i) if s >= 0 else None
+                if lv is not None:
+                    bounds.append(
+                        profile_of_level(
+                            lv[0], lane.u, lane.lam, lane.n_u[i], lane.a_g[i], lane.rho_ref
+                        )
+                    )
+            if bounds:  # two bounds on one density intersect: the pointwise tighter
+                parts.append(
+                    norm(bounds[0] if len(bounds) == 1 else np.minimum(bounds[0], bounds[1]))
+                )
         parts = [p for p in parts if p is not None]
         if parts:
             rows[i] = norm(sum(parts))
@@ -1539,3 +1588,161 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
 def widths_keys(widths):
     """The junction boundaries the recompute served (its width keys are ``(boundary, flank)`` pairs)."""
     return {int(k[0]) if isinstance(k, tuple) else int(k) for k in widths}
+
+
+# ── THE LEVEL LANE (MESSAGE_PLAN step B/C, landed 2026-09-05) ──────────────────────────────────
+
+
+def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_inputs):
+    """THE COMPLETION CONTRACT, structurally: after `prepare`, every directed face (x → y) of the chain
+    carries a composition rule or is a lane face, unless y is an intergenic region (structurally pure
+    gDNA: nothing to impute there). STOP by omission is impossible by construction."""
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _full_policy(sweep_inputs)[0].prepare(ctx)
+    assert prepared.lane is not None and prepared.lane.faces
+    is_bnd = np.asarray(ctx.is_boundary, bool)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+    intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    unserved = [
+        (int(x), int(y))
+        for x in range(int(ctx.n_slots))
+        for y in (left[x], right[x])
+        if y >= 0
+        and not intergenic[y]
+        and (int(x), int(y)) not in prepared.rule
+        and (int(x), int(y)) not in prepared.lane.faces
+    ]
+    assert not unserved, f"faces with no rule and no lane: {unserved[:8]}"
+    # and a lane face never doubles a composition rule (no witness counted twice)
+    assert not (set(prepared.rule) & prepared.lane.faces)
+
+
+def test_a_priced_level_is_a_lower_bound_and_the_hop_widens_it():
+    """`priced_level`: the output is non-decreasing in u (a level that crosses a face says "at least
+    this much gDNA" and nothing more), a larger hop price widens it, and a two-sided input loses only
+    its upper side."""
+    from rigel.calibration.messages.transfer_rows import priced_level
+
+    u = np.linspace(-10, 10, 60)
+    two_sided = -0.5 * ((u - 1.0) / 0.4) ** 2
+    two_sided -= two_sided.max()
+    lower = priced_level(two_sided, u, 0.0)
+    assert np.all(np.diff(lower) >= -1e-12), "not a lower bound"
+    below = u < 0.0
+    np.testing.assert_allclose(lower[below], two_sided[below], atol=1e-9)
+    assert np.all(lower[u > 2.0] > -1e-9), "the upper side was kept"
+    wide = priced_level(two_sided, u, 2.0)
+    assert np.all(np.diff(wide) >= -1e-12)
+    assert wide[np.argmin(np.abs(u + 1.0))] > lower[np.argmin(np.abs(u + 1.0))], "no widening"
+
+
+def test_the_level_coordinates_round_trip_through_a_node_total():
+    """`level_of_profile` and `profile_of_level` are one map read both ways: a composition profile
+    taken to a level at (n, a) and back at the same (n, a) is itself wherever the level lies below
+    the node's total; and the same level read at a node with a LARGER total is a smaller gDNA share
+    (the level is kept, the share is not)."""
+    from rigel.calibration.messages.transfer_rows import level_of_profile, profile_of_level
+
+    lam = np.linspace(-10, 10, 601)  # a fine grid: the round trip interpolates twice
+    u = lam
+    rho_ref, n, a = 0.05, 400.0, 1000.0
+    row = -0.5 * ((lam - np.log(0.3 / 0.7)) / 1.0) ** 2  # a share near 0.3 → 120 gDNA of 400
+    level = level_of_profile(row, lam, u, n, a, rho_ref)
+    back = profile_of_level(level, u, lam, n, a, rho_ref)
+    core = np.abs(lam - np.log(0.3 / 0.7)) < 2.0
+    np.testing.assert_allclose(back[core], (row - row.max())[core], atol=0.05)
+    bigger = profile_of_level(level, u, lam, 4.0 * n, a, rho_ref)
+    assert lam[np.argmax(bigger)] < lam[np.argmax(back)], "a larger total must read a smaller share"
+
+
+def test_bounds_intersect_and_do_not_multiply():
+    """`intersect`: the pointwise tighter of two lower bounds, never their product — two identical soft
+    bounds intersect to themselves (a product would double the penalty), and a tight bound beats a
+    loose one at every density."""
+    from rigel.calibration.messages.transfer_rows import intersect, lower_side
+
+    u = np.linspace(-10, 10, 60)
+    soft = lower_side(-0.5 * ((u - 1.0) / 2.0) ** 2)
+    np.testing.assert_allclose(intersect([soft, soft]), soft, atol=1e-12)
+    tight = lower_side(-0.5 * ((u - 1.0) / 0.5) ** 2)
+    np.testing.assert_allclose(intersect([soft, tight]), tight, atol=1e-12)
+    both = intersect([lower_side(-0.5 * ((u - 3.0) / 1.0) ** 2), soft])
+    assert np.all(both <= soft + 1e-12) and np.all(np.diff(both) >= -1e-12)
+
+
+def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_holds():
+    """THE RATCHET GATE: on a hand-built lane (three full nodes in a row, which the toy does not have),
+    the level a full node emits is the pointwise tighter of its own lower side and the priced level it
+    holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
+    on the ladder. PERTURBATION: an `emit` that multiplies fails here."""
+    from rigel.calibration.messages import Level, Message
+    from rigel.calibration.messages.transfer import _Lane
+    from rigel.calibration.messages.transfer_rows import intersect, lower_side
+
+    u = np.linspace(-10, 10, 60)
+    own = [None, -0.5 * ((u + 1.0) / 1.5) ** 2, None]
+    lane = _Lane(
+        u,
+        u,
+        0.05,
+        np.array([100.0, 120.0, 90.0]),
+        np.array([50.0, 60.0, 45.0]),
+        np.zeros(3, bool),
+        own,
+        {(0, 1), (1, 2)},
+    )
+    held = Message(level_gdna=Level(lower_side(-0.5 * ((u - 0.5) / 0.8) ** 2), 100.0, 50.0))
+    sent = lane.emit(1, held)
+    want = intersect([lower_side(own[1]), held.level_gdna.profile])
+    np.testing.assert_allclose(sent.profile, want, atol=1e-12)
+    product = lower_side(own[1]) + held.level_gdna.profile
+    assert np.max(np.abs(sent.profile - (product - product.max()))) > 0.5, "the sum: the ratchet"
+    assert (sent.n, sent.a) == (120.0, 60.0)
+
+
+def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
+    from scipy.special import polygamma
+
+    from rigel.calibration.messages.transfer_rows import hop_price
+
+    counting = float(polygamma(1, 50.5) + polygamma(1, 200.5))
+    assert abs(hop_price(50, 100.0, 200, 400.0) - counting) < 1e-12, (
+        "equal densities: counting only"
+    )
+    d = np.log(8.0) ** 2 - (1 / 50 + 1 / 200)
+    assert abs(hop_price(50, 100.0, 200, 50.0) - (counting + d)) < 1e-12, "the excess over counting"
+    assert hop_price(50, 100.0, 200, 50.0) == hop_price(50, 100.0, 200, 50.0)
+
+
+def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
+    """THE EMPTY NODE IS TRANSPARENT: the toy's inside pieces have no total, so what the boundary beyond
+    such a piece holds from it must be exactly what the piece received — same profile, same (n, a) of
+    the last full node — priced only at the full recipient. PERTURBATION: a policy whose empty nodes
+    price the hop fails this gate."""
+    from rigel.calibration.messages.transfer_rows import hop_price, priced_level
+
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _full_policy(sweep_inputs)[0].prepare(ctx)
+    _drive_the_backbone(prepared, ctx)
+    lane = prepared.lane
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    checked = 0
+    for backward, nbr in ((False, left), (True, right)):
+        held = prepared.held[backward]
+        for e in np.flatnonzero(lane.empty):
+            s = int(nbr[e])
+            if s < 0 or held[e] is None or held[e].level_gdna is None:
+                continue
+            x = int(right[e] if not backward else left[e])
+            if x < 0 or held[x] is None or held[x].level_gdna is None or lane.empty[x]:
+                continue
+            got, sent = held[x].level_gdna, held[e].level_gdna
+            v = hop_price(sent.n, sent.a, lane.n_u[x], lane.a_g[x])
+            np.testing.assert_allclose(
+                got.profile, priced_level(sent.profile, lane.u, v), atol=1e-9
+            )
+            assert (got.n, got.a) == (float(lane.n_u[x]), float(lane.a_g[x]))
+            checked += 1
+    assert checked > 0, "no level crossed an empty node on the toy: the gate proved nothing"

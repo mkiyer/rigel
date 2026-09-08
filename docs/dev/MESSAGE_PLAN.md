@@ -155,7 +155,14 @@ from the 12–25-fragment crossing count; the crossing count becomes the pair's 
 ratchet. The plateau above the wall is the intron's own high side and is the intron's own solve to
 sharpen (parked), unless a bounded taper marginal replaces the flat top; both are A/B'd after A–E.
 
-**G. Rule 4's premise.** The per-pair discrepancy rule of rules 9–10 applied to rule 4 (and 3): where
+**G. Rule 4's premise — MEASURED NEUTRAL, not landed (2026-09-04).** The per-pair width on rule 4
+(`rule4_proto.py`: the boundary's own strand mode against the exon's mapped through the splice-out law,
+the excess over counting widening the pair's message) fires at 2–65 faces per condition and moves the
+eight stranded rows by −0.2…+1.0 %; applied both ways −2.2…+2.7 %. The premise bias under capture is a
+systematic OFFSET (1.3–2.2×) that a per-pair width cannot see — the same conclusion as the refused pooled
+shift. Nothing to land; recorded.
+
+**G (as first planned). Rule 4's premise.** The per-pair discrepancy rule of rules 9–10 applied to rule 4 (and 3): where
 the exon's mapped composition and the boundary's own strand composition disagree beyond counting,
 widen this pair's messages by the excess; on unstranded data there is no second witness and the rule
 stays at counting width.
@@ -259,26 +266,308 @@ every time.
 
 Identical to §5c (the committed step-A policy) by construction. Suite: 3,757 passed / 8 xfail / 0 failed.
 
-## 6. THE ORDER, and the method every step keeps
+### 5h. THE LEVEL LANE — the census that re-ranked the plan, and the one mechanism that closes the holes (2026-09-04)
 
-1. **A** — rule 8 re-specified as the level rule, both terminus kinds. Fixes a misspecified rule and
-   opens the level family with the case that has the most substrate.
-2. **E** — rule 5 as a level, the two forms A/B'd. The zero controls.
-3. **F + G** — rules 3 and 4 refined. The ratchet and the premise.
-4. **B** — strand-change faces and termini both ways.
-5. **C** — the empty chain pieces (grow `nest`).
-6. **D** — junction plus terminus (grow `instart`).
-7. **H** — the AMBIG ruling and the both-stranded locus.
-8. The SHIP LIST: the 0.8.0-metric pricing under `transfer` (`calibration_vs_oracle.py`,
-   `solvability_audit.py`), the flip, the obsolescence pass (`relay.py`, `variance.py`,
-   `rna_anchor.py`, the instruments and tests that name the relay), `preflight --full`, goldens, docs.
+**The census (`reach_census.py`, `why_unreached.py`, `empty_census.py`, ladder, pass zero).** On the
+ladder — not the test chromosome — the landed policy leaves HALF the pass-zero error at nodes no message
+reaches at all:
 
-Every step: stage 0 on certified truth → the simplest LOCAL form, no constant, nothing pooled →
-prototype through `policy_prototype.py` (`--by-class`, all three probe panels, `pass0_score.py`'s
-pass-zero beside the full pipeline, halves apart) → the ladder → `src/` with a fail-first gate per law
-and every perturbation watched firing → the per-slot identity of the landed form against the
-prototype. One rule per step; a ruling made mid-way triggers a sweep of every earlier rule carrying
-the same premise.
+| ladder row | whole-library \|err\| | unreached (SILENCE both sides) | one side | both sides |
+|---|---|---|---|---|
+| g50 ss.50 OFF (in scope) | 1,394,354 | **716,190 (51.4 %)** at 28,436 nodes | 398,348 (28.6 %) | 270,128 (19.4 %) |
+| g50 ss.99 ON (in scope) | 331,677 | **197,026 (59.4 %)** at 30,743 nodes | 59,668 (18.0 %) | 74,933 (22.6 %) |
+
+On the test chromosome the same census reads 0.2 % / 4.4 % unreached: its genes are apart and its
+exons are whole, so it does not exercise the hole. **The mechanism is the EMPTY REGION.** 13,478 of the
+ladder's 70,176 nodes have no total — 12,486 of them exon pieces (52 % of all exon nodes): 7,123 with
+ZERO gDNA opportunity (a piece shorter than a fragment, cut by closely spaced termini and splice sites
+inside one exon complex) and 5,363 dark (opportunity, no fragment). Every empty run has length ONE (a
+region between two boundaries), and 5,403 of them sit between two exon|exon boundaries. Every rule's
+licence asks the flank for a total or an opportunity (`a_g[o] > 0`, `n_u[i] > 0` — `probe_item5.py`),
+so item 5 and the level rule both STOP at 2,697 same-strand terminus exon|exon boundaries, and the
+boundaries on both sides of an empty piece hear nothing: `B exon|exon [TES+/TSS−/…]`, same-strand
+flanks, orientation resolved, NO-RULE both faces — 24 % of the in-scope unstranded row's pass-zero error
+by themselves, sitting at honest ignorance (½ of their count) with a true gDNA share near 0.1. The
+stranded capture-ON row's unreached mass is the AMBIG (+−) exon complex — the both-stranded locus
+(step H) — whose own channel is dead and whose only witnesses are the single-strand nodes at its ends.
+
+**The design: a level is an ABSOLUTE quantity, so it needs no map and no knowledge of its recipient.**
+`Message.level_gdna` becomes a PROFILE over `u = log(rho / rho_ref)` on the solve grid (the same `K`
+and window as `lam`; `rho_ref` = the library's structurally pure gDNA density, Σ count / Σ opportunity
+over intergenic regions — a coordinate choice, not a constant), carried with the last full node's
+`(n, a)` and its class. Two coordinate changes, both at a node with a total `(n, a)`:
+
+* **own composition → level:** `u(lam) = log(sigma(lam) · n / (a · rho_ref))`; above the node's total
+  the level falls as the total's Poisson tail (`edge_level_row`'s form — the total bounds the level).
+* **level → composition at the recipient:** the same map read backwards, widened by the HOP's price
+  (the owner's rule 8: both totals' counting plus the abundance discrepancy beyond counting, per hop,
+  nothing pooled), and made ONE-SIDED by the class pair — a level from an unprobed class (intergenic,
+  intron, intron|exon boundary) into the exon class is a LOWER bound (step E's law: the interior may be
+  enriched over its edge, never depleted); exon → unprobed an UPPER bound; the same class two-sided.
+
+Three laws then close every hole at once: **(1) the level rule is the DEFAULT of every directed face
+without a composition rule** (strand-change faces, termini both ways, the AMBIG complex, the inside of
+termini, the edge — rule 5 and rule 8 become two instances of the one conversion, `edge_level_row` and
+`level_map_lambda`/`level_row`/`level_bound_row` retire); **(2) an EMPTY node is transparent** — it holds
+levels only and forwards them unchanged (a few base pairs of the same gDNA density); **(3) a full node
+emits the PRODUCT of its own level and the priced level it holds** — forward-backward's rule — so the
+intergenic region's whole count reaches the exon complex through the gene edge, hop by hop, each hop
+priced at reception. A face with a composition rule sends composition only (the map already carries
+the level), so no witness is counted twice. On unstranded data the honest content that reaches an exon
+complex at pass zero is a lower bound from the nearest structurally pure gDNA and each node's own total
+as an upper bound — a one-sided profile — and the point estimate a one-sided profile yields (the plateau's
+median) is the ESTIMATOR's question, owed with the landscape's training population, not the message's:
+the census is judged pass zero and full, halves apart.
+
+**The first cut before the lane (`level_default_proto.py`): step A's level rule registered at every
+boundary → region face without a rule** found ZERO such faces on the test chromosome and 3,585–4,907 on
+the ladder's rows, moving them by −0.5…+1.5 % — because the faces that matter lead into EMPTY regions,
+which that rule's licence (a recipient total) refuses. That is what forced the lane.
+
+**v1 measured (ladder, full pipeline, `level_lane_proto.py` / `level_lane_arms.py`, 2026-09-05).**
+
+| arm | g50 ss.99 ON (stranded, in scope) | g98 ss.50 OFF (unstranded, in scope) |
+|---|---|---|
+| `transfer` (landed) | 232,392 | 126,391 |
+| lane v1: two-sided by class, products, every total's bound emitted | **310,211 (+33 %)** | 132,397 (+4.8 %) |
+| no products | 265,720 | 129,519 |
+| no bound claims | 230,239 | 128,321 |
+| **every level LOWER-ONLY** (products on) | **221,545 (−4.7 %)** | **125,746 (−0.5 %)** |
+| lower-only, no products, no bounds | 229,070 | 126,036 |
+
+The harm sits exactly at the classes the lane newly reaches (`R exon (walled)` 43,190 → 61,136,
+`B exon|exon [term]` 65,575 → 93,080, `[sj]` 48,303 → 78,199 on the ON row) and every bit of it is the
+UPPER side: a total's bound from a low-total piece of an exon complex, multiplied along the chain, says
+"gDNA is at most this" to a probed neighbour — darkness under capture read as absence, step E's refuted
+upper side at the scale of a whole complex. **THE LAW, measured: a level that crosses a face says "at
+least this much gDNA" and nothing more.** Lower-only levels win on the stranded capture-ON row (the
+AMBIG complexes take lower bounds from the single-strand nodes at their ends) and hold everywhere else.
+
+**The prize the law forgoes, priced.** On the in-scope UNSTRANDED row `g50 ss.50 OFF` at PASS ZERO the
+two-sided lane reads 1,394,354 → **1,037,431 (−26 %)** — `B exon|exon [term]` 419,460 → 232,586, walled
+exons 428,178 → 332,190 — and the lower-only lane reads 1,393,350 (nothing): under capture-OFF the
+minimum total density of an exon complex truly bounds its gDNA from above, and a lower bound at an
+RNA-rich node is dampened to nothing by rule 8's discrepancy price (the totals disagree by the RNA).
+Full pipeline both read 144.3–145.1k against 144,571: the landscape repairs the first pass either way,
+while training on it. So the first-pass gain on unstranded data is real, large, and gated on ONE fact
+the message layer cannot see: whether this library's gDNA is enriched. That is not a message question —
+it is the ENRICHMENT WITNESS (`ISSUES: two-sided-exon-row`), and there is a gDNA-specific one on
+unstranded data: the exons of SILENT genes (no spliced fragment at any of their junctions at this depth)
+carry pure gDNA, so their density against the intergenic density is the library's gDNA enrichment
+spectrum, measurable at pass zero with no strand channel. Where that spectrum is flat, every level is
+two-sided; where it is not, lower-only — a library-level fact, learned, never a gate (the owner's
+ruling on capture). Parked behind the architecture with the landscape's training population.
+
+**v2 refused; the landing form is v1 lower-only (2026-09-05).** Re-expressing rules 5 and 8 through the
+lane (`level_lane_v2.py`) broke the zero-gDNA controls on the test chromosome — `g00 ss.50 ON` 22,299 →
+26,594 (1.193×), `g00 ss.70 ON` 1.147× — because rule 8's total bound and its two-sided own-profile level
+are what pull a terminus's inside to zero when the truth is zero, and they measured safe at that one
+face; the culprit was rule 8's replacement, not the edge's (`lane_v2_edge` reads the same). A middle
+form — an own measurement keeps both sides for its FIRST hop, forwarded levels lower-only (`lane_b`) —
+held the g00 controls but harmed `g98 ss.70 ON` 1.023× with the rules kept and 1.060× with them replaced,
+and on the ladder read 226,666 / 127,063 / 17,763 against lower-only's 221,545 / 125,746 / 17,777 on
+`g50 ss.99 ON` / `g98 ss.50 OFF` / `g00 ss.99 ON`. The nearest-witness form (no products) measured equal
+on the panels and 229,070 on the ON row. The intergenic REGION's whole count as a level made no
+difference on any panel and was dropped (unannotated transcription contaminates it; the gene edge's
+crossing is the structural source). So: lower-only, products, empties transparent, no intergenic
+levels, rules 5 and 8 as landed. Landed in `src/` 2026-09-05, byte-identical to the prototype on 29/30
+test conditions; the prototype's sixteen-row ladder: unstranded 7/8 at or below the landed policy
+(worst 1.001×, best 0.972× at `g98 ss.50 ON`), stranded 6/8 (worst 1.024× at `g05 ss.99 OFF`, best
+0.913× at `g98 ss.99 ON`), the four g00 rows identical.
+
+**The residue the landing left, dissected (`lane_delta.py`, 2026-09-05): the RATCHET.** The landed lane's
+one in-scope harm is `g05 ss.99 OFF` 44,714 → 45,798 (+1,084 fragments, 509 slots moved). 766 of them sit
+at terminus exon|exon boundaries and the worst are a CHAIN of nine consecutive terminus boundaries in one
+highly expressed complex — 4,200 crossings each, ONE true gDNA fragment each — every one moved 2 → 29.
+The mechanism: each full node emits own × held, so nine soft one-sided claims (each node's own strand
+mode is noise around zero, ±0.003 in share; its lower side is a half-nat rise) multiply along the chain
+into a hard bound at the noisiest node's mode: the product of CENSORED likelihoods ratchets upward. A
+two-sided product would converge to the truth; a lower-only product converges to the maximum of the
+upward noise. Under the lane's own law a level is a BOUND, and two bounds on one density combine by
+INTERSECTION — the pointwise minimum of two non-decreasing log-profiles, the tighter wins at each
+density, nothing sharpens — not by product. `lane_isect.py` measured that form against the products form:
+`g05 ss.99 OFF` 45,798 → 45,076 (two thirds of the harm recovered; 44,714 before the lane), `g50 ss.99 ON`
+220,674 → 220,404, `g98 ss.50 OFF` 125,797 → 125,753, `g00 ss.99 ON` identical, and every row of the test
+and sparse panels identical (no chain of full nodes exists there — which is also why the toy's gates
+could not see the ratchet, so the landed form carries a hand-built three-node gate). LANDED: `emit` is the
+intersection (`transfer_rows.intersect`, `lower_side`), and at the solve the two sides' levels intersect
+before the constraint joins the composition evidence. The residual +0.8 % on `g05 ss.99 OFF` is the
+tightest noisy witness of the chain — one node's 1-sd over-claim, no longer nine multiplied.
+
+**THE LANDED FORM ON THE LADDER (`policy_benchmark.py --panel ladder --by-class`, 2026-09-05; the
+pre-lane column is commit `2315b5af`'s policy).**
+
+| ladder row | silent | relay | transfer before the lane | transfer WITH the lane | vs before |
+|---|---|---|---|---|---|
+| g00 ss.50 OFF | 1,254,145 | 58,840 | 195,268 | 195,268 | 1.000× |
+| g00 ss.50 ON | 454,560 | 152,534 | 230,800 | 230,800 | 1.000× |
+| g05 ss.50 OFF | 50,435 | 75,048 | 51,003 | 50,948 | 0.999× |
+| g05 ss.50 ON | 518,535 | 349,481 | 225,825 | 223,499 | 0.990× |
+| g50 ss.50 OFF | 155,660 | 189,133 | 144,571 | 144,288 | 0.998× |
+| g50 ss.50 ON | 6,141,095 | 1,801,961 | 1,264,540 | 1,235,011 | 0.977× |
+| g98 ss.50 OFF | 165,259 | 219,158 | 126,391 | 125,753 | 0.995× |
+| g98 ss.50 ON | 12,030,888 | 2,433,908 | 2,214,300 | 2,152,433 | 0.972× |
+| **unstranded** | | | **8/8 at or below the pre-lane policy**, worst 1.000× | below silence 7/8 (`g05 ss.50 OFF` 1.01×, as before) | |
+| g00 ss.99 OFF | 30,606 | 7,421 | 17,814 | 17,814 | 1.000× |
+| g00 ss.99 ON | 20,787 | 17,980 | 17,777 | 17,777 | 1.000× |
+| g05 ss.99 OFF | 44,519 | 51,047 | 44,714 | 45,076 | 1.008× |
+| g05 ss.99 ON | 85,294 | 97,957 | 81,407 | 80,416 | 0.988× |
+| g50 ss.99 OFF | 125,634 | 155,496 | 116,580 | 116,165 | 0.996× |
+| g50 ss.99 ON | 260,629 | 409,168 | 232,392 | 220,404 | 0.948× |
+| g98 ss.99 OFF | 126,467 | 208,306 | 95,467 | 93,430 | 0.979× |
+| g98 ss.99 ON | 298,597 | 456,838 | 221,971 | 201,578 | 0.908× |
+| **stranded** | | | **7/8 at or below the pre-lane policy**, worst 1.008× (`g05 ss.99 OFF`, the tightest noisy witness) | below silence 7/8 | |
+
+Pass zero on the two key rows (`pass0_score.py`): `g50 ss.50 OFF` 1,394,354 → 1,393,639 (a lower bound at
+an RNA-rich node is priced to nothing — the unstranded first pass is the enrichment witness's, above);
+`g50 ss.99 ON` 331,677 → **290,822 (−12 %)**, walled exons 90,343 → 77,167 at pass zero and 43,190 → 40,121
+through the pipeline. Panels: the test chromosome, junction-probed and sparse-probed panels read
+identity to 1.003× on every row but the sparse panel's `g00 ss.70 ON` (3,135 → 3,300: one gene type,
+one node pair, a neighbour's own 3-sd strand error carried as a lower bound). Suite 3,764 passed / 8 xfail.
+
+**THE TERMINUS-CLUSTER BLOCK'S FIRST READING (2026-09-05, the rebuilt test chromosome).** The block
+mirrors MIR99AHG's ten transcript ends 126–147 bp into a shared last exon (twelve genes: `cluster` /
+`capcluster` × ab / ba / eq × blocks 2 and 4); the index cuts the exon into nine pieces of 1–10 bp,
+every one empty, on both strands. What it showed at once:
+
+* **The census now sees the hole on the test chromosome**: 4.0 % of the pass-zero error on
+  `g50 ss.50 OFF` (8,006 fragments at 124 terminus exon|exon boundaries) and 1.5 % on `g50 ss.99 ON`
+  sit at nodes no message reaches — the cluster's INNER boundaries. Item 5's composition reaches the
+  two outer ones from the outside exons and stops: a node that holds a COMPOSITION has nothing to send
+  across a lane face, and its inside face into the first empty piece has no composition rule.
+* **Completing the reach measured harmful and is REFUSED** (`lane_convert.py`: at a full node a held
+  level is read as a composition for a composition rule and a held composition as a level for a lane
+  face; rules into empty recipients dropped). The census reads 0 % unreached with it, and the rows read:
+  test `g50 ss.50 OFF` 13,009 → 13,471 (+3.6 %), `g50 ss.99 ON` 7,690 → 7,637; ladder `g50 ss.50 OFF`
+  144,288 → 148,516 (+2.9 %), `g50 ss.99 ON` 220,404 → 217,085 (−1.5 %), `g98 ss.50 OFF` +1.0 %,
+  `g05 ss.99 OFF` 45,076 → 46,532 (+3.2 %), g00 identical. Dropping the rules into empties ALONE
+  (`lane_dropdead.py`) reads identical on the test chromosome and +0.2…+5.4 % on the ladder: a
+  composition already crosses a dark exon through the composition rules on both of its faces (rung 2 in,
+  item 1 out — the maps read the boundaries' numbers, not the empty's), and that path is worth 5 % on
+  `g98 ss.50 OFF`. So: THE LAW HOLDS FOR THE LANE TOO — what a node holds as a composition is never
+  re-issued as a level (step A's law, measured). The information that WOULD reach the inner boundaries is
+  a lower bound at an RNA-rich node with weak own evidence, and that is what harms: the reach is
+  complete by construction, the message the lower-only law permits is not worth sending there.
+* **The zero control's residue has a name now**: `g00 ss.99 ON` reads 64 → 216 on the rebuilt panel, 187
+  of it at `capcluster_ab`'s nine inner boundaries, each at share 0.007–0.011 with 2,000 crossings and no
+  gDNA at all — each boundary's OWN strand mode is noise around zero (±0.003), its lower side becomes a
+  soft bound at its neighbours, and the tighter of two noisy neighbours wins: the NOISE RATCHET of
+  lower-only levels among RNA-rich nodes of one density (`ISSUES: the-lower-bound-noise-ratchet`). A
+  two-sided own-profile level would average the noise away — `lane_nb` measured −0.9 % on `g50 ss.99 ON`
+  and +1.5 % on `g98 ss.50 OFF` against lower-only's −4.7 % / −0.5 % — so lower-only keeps more
+  fragments and this residue.
+* Standings on the rebuilt benign panel (new reads, every number moved; `policy_benchmark.py --panel
+  test`): unstranded 16/20 rows below silence (worst 1.23× at `g50 ss.50 OFF`, the recorded one-sided
+  first-pass weakness), stranded 7/10 (worst 3.38× at `g00 ss.99 ON`: 64 → 216, above). Cluster types at
+  `g50 ss.99 ON`: `capcluster_eq` 699 → 584, `capcluster_ba` 280 → 404, unprobed clusters identical.
+
+* **The SPARSE-probed panel shows the lane's limit, and it is the owner's call.** With one 125-bp probe
+  centred on every annotated exon, the ten isoforms' 126–147-bp last exons put TEN overlapping probes on
+  the cluster and none on the rest of the exon: an enrichment cliff INSIDE one exon complex. On
+  `g50 ss.99 ON` (stranded, in scope) the row reads silent 10,100 / transfer 12,834 (1.27×), all of it at
+  the three probed cluster genes (`capcluster_ab` 530 → 1,783, `_ba` 658 → 1,395, `_eq` 834 → 1,771;
+  the lane switched off reads 10,025): the − gene's inner boundaries, true share 0.85, are pushed to
+  0.92–0.95 by a lower bound from the ten-times-probed piece beside them — the interior is NOT enriched
+  over that source, the bound is false, and the totals cannot show it (`lane_witness.py`: the strand
+  witness carried as a scalar sees only the agreeing neighbour and recovers 1 %). Reading the arriving
+  bound's WALL against the recipient's own strand mode (`lane_witness2.py`: the owner's rule, a widening
+  only) recovers 57 % of it — 12,834 → 11,285 — at +0.8 % on the ladder's `g98 ss.99 ON` (201,578 →
+  203,178) and +0.8 % on the sparse panel's, everything else identical: 1,550 fragments back on one
+  adversarial row against 1,600 lost on one in-scope ladder row. NOT landed; recorded. The same physics
+  refused step F under junction probes: no local witness prices capture's enrichment of one piece over
+  its neighbour. The owner's domain call: whether probe designs that target isoform-specific ends are a
+  case to protect, at that price, before the enrichment witness exists.
+
+### 5i. THE ABLATION — what each level mechanism is worth, by node class (2026-09-05)
+
+`level_ablation.py` switches one mechanism off at a time on the landed policy: the lane, rule 5 (the
+edge's count reaches nothing by any path), rule 8 (nothing crosses a terminus's inside face), and all
+three (composition rules only). Read on the ladder with `--by-class`, full pipeline; the delta is
+"removed − landed", so a positive number is what the mechanism EARNS at that class.
+
+| ladder row | lane | rule 5 (edge) | rule 8 (terminus inside) | all three |
+|---|---|---|---|---|
+| g50 ss.50 OFF (unstranded, in scope) | +283 (terminus boundaries +260) | **−661** (edge exons −569, licensed exons −470; introns +173, intron boundaries +218) | +80 | −297 |
+| g98 ss.50 OFF (unstranded, in scope) | +638 (terminus boundaries +605) | +2,092 (edge exons +695, introns +498, intron boundaries +450) | −2 | +2,742 |
+| g00 ss.50 OFF (zero control) | 0 | 0 | **+45,873** (walled exons +18,457, terminus boundaries +14,087, sj boundaries +7,091) | +45,873 |
+| g50 ss.99 OFF (stranded, in scope) | +415 | +331 | −49 | +710 |
+| g50 ss.99 ON (stranded, in scope) | **+11,988** (terminus boundaries +5,163, walled exons +3,069, sj boundaries +2,676) | +36 | −743 (walled −974) | +11,527 |
+| g98 ss.99 ON (stranded, in scope) | **+20,393** (terminus boundaries +13,281, sj boundaries +3,318, walled +1,972) | +300 | +3,671 (intron boundaries +1,331, sj +1,257) | +24,929 |
+| g05 ss.99 OFF (stranded, in scope) | −362 (walled −241: the noise ratchet) | −50 | −54 | −381 |
+
+Pass zero on the two key rows: the levels together take `g50 ss.50 OFF` from 1,484,499 to 1,393,639
+(−6 %, walled exons 480,727 → 428,294 by rule 8's pass-zero bound, licensed exons 214,762 → 196,309),
+while the edge's own destinations read 4 % WORSE with it (edge exons 73,524 → 76,754: the plateau above
+a lower bound); the lane takes `g50 ss.99 ON` from 331,784 to 290,822 (−12 %). On the test chromosome
+(`ablation_test_pass0.out`) the signs on the unstranded capture-OFF rows flip — the edge costs 8 % of
+`g50 ss.50 OFF` through the pipeline, rule 8 costs 16 % of `g00 ss.50 OFF` through the pipeline while
+helping at pass zero — the recorded toy-versus-panel disagreement, and the landscape retrain is what
+flips it. The ladder decides.
+
+What it says. THE LANE is the message layer's largest single win: 5 % and 9 % of the two stranded
+capture-ON rows, 12 % at pass zero, entirely at the classes the census named — the AMBIG and probed
+exon complexes' walled exons and exon|exon boundaries, which held no message before; it earns nothing
+on unstranded rows (a lower bound at an RNA-rich node is priced to nothing) and costs the noise ratchet
+at low-gDNA stranded rows and the sparse cliff. RULE 8 is what holds the zero-gDNA control (19 % of
+that row: its UPPER side pulls a terminus's inside to zero when the truth is zero — which is why it
+cannot become lower-only) and is ± elsewhere. RULE 5 helps at high gDNA, where the lower bound sits
+near the truth and the plateau above it is short, and HURTS at mid-gDNA unstranded rows, where the
+plateau above the wall is what the estimate reads — the one-sided profile's point estimate, the same
+mechanism as rung 2's licensed-exon weakness (`R exon (licensed)`: silent 7,480 / landed 10,196 on
+`g50 ss.50 OFF`, 9,784 with no levels at all — mostly the composition face map's plateau).
+
+**Where the wall is.** Not in the plumbing: every face has a rule, every node is reached or refuses a
+message that measured harmful. It is informational. On unstranded data no local measurement says
+whether a neighbour's gDNA density equals this node's (capture-OFF: uniform) or exceeds it (capture-ON:
+a probe edge), so every message must be one-sided, and a one-sided profile's point estimate lands
+above its wall. Three things, none a message: the estimator at nodes whose only evidence is a bound;
+the ENRICHMENT WITNESS (silent-gene exons against the intergenic density on unstranded data; exon
+against intron gDNA densities on stranded) that licenses two-sided levels where the library is not
+enriched; and the landscape's training population, which today learns from the plateau.
+
+**Order as it was planned.** v1 (`level_lane_proto.py`): the lane on the faces that have no rule today, the landed rules
+untouched — the increment from reaching the unreached, on the ladder's four key rows, then the panels.
+v2: rules 5 and 8 re-expressed through the lane (byte-identical or better), the old level rows deleted.
+Then the RNA levels (`level_rna_pos/neg`) for the AMBIG complex by the same two conversions (step H).
+
+## 6. The order of work (re-ranked 2026-09-06 by the AMBIG census; owner rulings 2026-09-06)
+
+⭐ **Owner rulings, 2026-09-06.** (1) THE ENRICHMENT WITNESS IS THE gDNA LANDSCAPE PRIOR — the second
+pass is where a level becomes two-sided where the library is not enriched; it is not a message rule.
+(2) Nodes that cannot be solved — whose only evidence is a bound — DO NOT TRAIN the landscape. (3) The
+message propagation rules are finished FIRST; the landscape (the estimator at bound-only nodes, the
+training population) comes after.
+
+**What remains of the rules, by measured mass** (`ambig_census.py`, the landed policy, full pipeline):
+
+| case | ladder nodes | share of the remaining error | status |
+|---|---|---|---|
+| **H. THE AMBIG COMPLEX** — both strands admitted: the RNA levels per strand and the tilt | 9,912 (14 % of nodes) | **38 % of `g50 ss.99 ON`, 50 % of `g98 ss.99 ON`**, 16.5 % of `g50 ss.99 OFF`, 13.5 % of `g50 ss.50 OFF` — at the overlapping loci's exon\|exon boundaries and walled exons | gDNA reached by the lane (lower bound); the RNA split unimputed |
+| **D. sj+terminus** — one boundary carrying a junction and a terminus | 386 | 0.5–0.7 % of any row | the lane serves the level; the composition part refused by `outside_flank` |
+| strand-change faces, termini both ways, the empty piece, the walled classes, the dark exon between licensed faces | — | — | ✅ served (the lane; the composition rules across a dark exon) |
+
+1. **H. THE AMBIG COMPLEX** — the last lane and the largest remaining case. ⭐ DESIGNED (`AMBIG_DESIGN.md`,
+   owner-approved 2026-09-07/08; phase 0 built; phase 1 approved as written there). ⭐ THE DESIGN: `docs/dev/AMBIG_DESIGN.md` (2026-09-06). `level_rna_pos` /
+   `level_rna_neg` as ABSOLUTE profiles over the log RNA density per strand (the gDNA lane's two
+   conversions, with the strand's own opportunity `a_r`); a single-strand node's own strand profile
+   gives its live strand's RNA density (`(1 − f) · total / a_r`), which continues across a face where
+   that strand's population is unchanged; an AMBIG recipient converts the two arriving RNA levels and
+   its gDNA level through its own total into a constraint on its TILT (its second degree of freedom),
+   which its own strand mode alone cannot fix (the gDNA share cancels from the strand mean). The
+   substrate: a BOTH-STRANDED block on the test chromosome mirroring a real ladder locus, as the
+   cluster did (owner authors; the ladder's overlapping loci are the deciding measurement). Judged at
+   its destinations, halves apart, pass zero beside the pipeline.
+2. **D. sj+terminus** — small and self-contained: `outside_flank` resolves the orientation from the
+   terminus flag with a junction present (the junction does not change which flank is inside); item
+   5's outside map gains the junction's leaving flux as item 7's does; rule 8's inside level is
+   unchanged. `instart` on the test chromosome is its structure.
+3. **The ship protocol** (`MESSAGE_RUNGS.md`'s checklist): the default flip, `silent` / `relay`
+   retired. The four g00 rows where the relay still leads (its two-sided reading of a dark edge) are
+   the LANDSCAPE's to win under ruling (2): trained on intergenic and intron nodes at g00 it reads
+   zero, and the second pass pulls every exon there.
+4. **Then the landscape** (the owner's points 1 and 3): the estimator at bound-only nodes and the
+   training population — the −26 % first pass on unstranded data, the cluster's inner boundaries,
+   the noise ratchet, the sparse cliff all wait for it.
 
 ## 7. On "43–45 % of the error is the intron class"
 

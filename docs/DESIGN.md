@@ -2134,6 +2134,65 @@ A slot with **no admissible strand** has no RNA to place: `_compose` returns `(0
 is `f_g` alone, which is the honest statement and not a closure failure — and nothing dispatches such a
 slot to a ψ solve in the first place.
 
+⭐⭐⭐ **THE LEVEL LANE — gDNA IS ALWAYS CONVEYED, AS A LOWER BOUND (landed 2026-09-05).** The ladder
+census (`policy_prototype.py`'s reach view, re-derived by the scratch instruments named in the plan)
+found that HALF the pass-zero error on the ladder sat at nodes no message reached — 51 % on
+`g50 ss.50 OFF`, 59 % on `g50 ss.99 ON` — and that the mechanism is the EMPTY NODE: 52 % of the ladder's
+exon pieces have no total (a piece shorter than a fragment cut by closely spaced termini and splice
+sites inside one exon complex, or a dark piece), every rule's licence asks its flank for a total, so the
+boundaries on both sides of such a piece heard nothing. The test chromosome's genes are apart and its
+exons whole, so it reads 0.2 % there and never showed it. The ruling that closes it:
+
+* **A LEVEL IS ABSOLUTE.** `Message.level_gdna` is a PROFILE over ``u = log(rho / rho_ref)`` on the solve
+  grid (``rho_ref`` the library's structurally pure gDNA density, a coordinate choice), with the last
+  full node's total and opportunity. It needs no map and no knowledge of its recipient, which is what
+  lets it cross a node with no total; it is a profile and not a Gaussian pair because what travels on it
+  is one-sided. A node's own composition profile becomes a level through its own total
+  (`level_of_profile`), and a held level becomes the recipient's composition profile through ITS total
+  (`profile_of_level`) — one map read both ways.
+* **THE LANE IS THE DEFAULT RULE OF EVERY DIRECTED FACE WITHOUT A COMPOSITION RULE** — strand-change
+  faces, termini pointing both ways, the AMBIG complex, and every face into or out of an empty node.
+  STOP by omission is now impossible by construction (gated); a face with a composition rule sends
+  composition only, so no witness is counted twice. The only faces without a rule lead into intergenic
+  regions (structurally pure gDNA: nothing to impute) or off the chain's ends.
+* **AN EMPTY NODE IS TRANSPARENT** — it holds levels only and forwards them unchanged (a few bases of
+  the same gDNA density). **A FULL NODE EMITS THE INTERSECTION** of its own level's lower side and the
+  priced level it holds — the pointwise tighter of two bounds, never their product. ⛔ The product form
+  (forward-backward's rule for measurements) RATCHETS: on the ladder's `g05 ss.99 OFF` a chain of nine
+  consecutive terminus boundaries, 4,200 crossings and ONE true gDNA fragment each, moved 2 → 29 apiece,
+  because nine soft one-sided claims multiplied into a hard bound at the noisiest node's mode (a product
+  of censored likelihoods converges to the maximum of the upward noise, where a two-sided product would
+  converge to the truth). Bounds intersect; the intersection form recovers two thirds of that harm
+  (45,798 → 45,076 against 44,714 before the lane), is at or better on the other ladder rows and
+  identical on every test-chromosome row. **THE RECIPIENT PRICES THE HOP** — both totals' counting plus
+  the abundance discrepancy beyond it, the owner's rule 8 applied per hop, nothing pooled — **AND TAKES
+  THE LEVEL AS A LOWER BOUND.**
+* ⛔ **A LEVEL THAT CROSSES A FACE SAYS "AT LEAST THIS MUCH gDNA" AND NOTHING MORE.** Every upper side
+  was measured and refused: two-sided by class with every total's bound emitted, +33 % on
+  `g50 ss.99 ON` (the classes the lane newly reaches: walled exons 43k → 61k, terminus exon|exon
+  boundaries 66k → 93k); the upper side kept for an own measurement's first hop only, +6 % on
+  `g98 ss.70 ON`. Each is darkness under capture read as absence — a low-total piece of an exon complex
+  telling a probed neighbour "at most this" — step E's refused upper side at the scale of a whole
+  complex. Lower-only wins 4.7 % on that row (12 % at pass zero) and holds everywhere else.
+* ⛔ **WHAT A NODE HOLDS AS A COMPOSITION IS NEVER RE-ISSUED AS A LEVEL** (step A's law, measured for
+  the lane on the terminus-cluster block, 2026-09-05): reading a held composition as a level at a lane
+  face — which completes the reach to every node — harmed three in-scope ladder rows by 1–3 %, because
+  the message it lets through is a lower bound at an RNA-rich node with weak own evidence. A composition
+  already crosses a dark exon through the composition rules on both of its faces, and that path is
+  worth 5 % on `g98 ss.50 OFF`; the lane serves what those rules do not.
+* ⛔ **RULES 5 AND 8 STAY AS LANDED.** Re-expressing them through the lane (lower-only) broke the
+  zero-gDNA controls (`g00 ss.50 ON` +19 %): rule 8's total bound and its two-sided own-profile level
+  are what pull a terminus's inside to zero when the truth is zero, and they measured safe at that one
+  face. The lane serves the faces they do not; two mechanisms because two measured laws.
+* ⭐ **THE PRIZE THE LAW FORGOES IS PRICED, AND IT IS THE ENRICHMENT WITNESS'S.** The two-sided lane read
+  −26 % at PASS ZERO on the in-scope unstranded row (`g50 ss.50 OFF`: 1,394,354 → 1,037,431; terminus
+  exon|exon boundaries 419k → 233k) — under capture-OFF the minimum total density of an exon complex
+  truly bounds its gDNA from above — and lower-only reads nothing there, because a lower bound at an
+  RNA-rich node is dampened to nothing by rule 8's own price. The message layer cannot see whether the
+  library's gDNA is enriched; the exons of SILENT genes can (pure gDNA against the intergenic density,
+  measurable at pass zero with no strand channel). That is `ISSUES: two-sided-exon-row`'s, after the
+  architecture, with the landscape's training population.
+
 ## 7. Where the error is, structurally
 
 Two measurements that shape every design choice above, both worth keeping because they are about the

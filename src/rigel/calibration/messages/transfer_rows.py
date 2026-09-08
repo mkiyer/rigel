@@ -38,6 +38,13 @@ __all__ = [
     "outside_flank",
     "splice_out_row",
     "transport_row",
+    "hop_price",
+    "intersect",
+    "level_of_profile",
+    "lower_side",
+    "poisson_level",
+    "priced_level",
+    "profile_of_level",
 ]
 
 EPS = 1.0e-9
@@ -238,3 +245,78 @@ def edge_level_row(lam, n_b, n_e, a_g_b, a_g_e):
     sig = 1.0 / (1.0 + np.exp(-lam))
     c = sig * float(n_e) * float(a_g_b) / float(a_g_e)
     return np.where(c >= n_b, 0.0, n_b * np.log(np.maximum(c, 1e-300) / n_b) - (c - n_b))
+
+
+# ── THE LEVEL LANE: a gDNA level as an absolute profile over u = log(rho / rho_ref) ──────────────
+
+
+def poisson_level(u, n, a, rho_ref):
+    """A structurally pure gDNA count ``n`` on gDNA opportunity ``a`` — the gene edge's crossing — as a
+    level profile: the Poisson log-likelihood of the count at each density, max-normalised. A zero
+    count is a profile falling with the density (nothing below zero is claimed)."""
+    c = float(rho_ref) * np.exp(np.asarray(u, np.float64)) * float(a)
+    n = float(n)
+    row = n * np.log(np.maximum(c, 1e-300)) - c if n > 0.0 else -c
+    return row - row.max()
+
+
+def level_of_profile(row, lam, u, n, a, rho_ref):
+    """A node's own composition profile (over ``lam``) read as a LEVEL profile (over ``u``) through the
+    node's own total: the density ``rho`` implies the gDNA share ``rho a / n``, so the level profile is
+    the composition profile read at that share; above the total the share is impossible and the level
+    falls as the total's Poisson tail (the total bounds the level)."""
+    row = np.asarray(row, np.float64)
+    lam = np.asarray(lam, np.float64)
+    c = float(rho_ref) * np.exp(np.asarray(u, np.float64)) * float(a)
+    n = float(n)
+    f = np.clip(c / n, EPS, 1.0 - EPS)
+    out = np.interp(np.log(f / (1.0 - f)), lam, row - row.max())
+    out = out + np.where(c >= n, n * np.log(np.maximum(c, 1e-300) / n) - (c - n), 0.0)
+    return out - out.max()
+
+
+def lower_side(profile):
+    """A profile's LOWER SIDE: non-decreasing in ``u``, max-normalised — the claim "at least this much",
+    which is all a level that crosses a face may say (the interior may be enriched over the source,
+    never depleted; every upper side measured harmful on the stranded capture-ON rows)."""
+    p = np.maximum.accumulate(np.asarray(profile, np.float64))
+    return p - p.max()
+
+
+def intersect(bounds):
+    """Two or more bounds on ONE density combine by INTERSECTION: the pointwise minimum of their
+    log-profiles (the tighter bound wins at each density), max-normalised. Bounds intersect, they do
+    not multiply — a product of one-sided claims sharpens where nothing was measured."""
+    out = None
+    for b in bounds:
+        b = np.asarray(b, np.float64)
+        out = b if out is None else np.minimum(out, b)
+    return None if out is None else out - out.max()
+
+
+def priced_level(profile, u, v):
+    """What a recipient with a total holds after a hop: the level's lower side, widened by the hop's
+    price ``v``."""
+    p = lower_side(profile)
+    return blur_row(p, u, v) if v > 0.0 else p
+
+
+def profile_of_level(profile, u, lam, n, a, rho_ref):
+    """A held level read as THIS node's composition profile through its own total — `level_of_profile`'s
+    map read backwards, a pure coordinate change: ``u(lam) = log(sigma(lam) n / (a rho_ref))``."""
+    p = np.asarray(profile, np.float64)
+    lam = np.asarray(lam, np.float64)
+    u_of_lam = np.log(1.0 / (1.0 + np.exp(-lam)) * float(n) / (float(a) * float(rho_ref)))
+    out = np.interp(u_of_lam, np.asarray(u, np.float64), p, left=p[0], right=p[-1])
+    return out - out.max()
+
+
+def hop_price(n_s, a_s, n_x, a_x):
+    """One hop's price, the owner's rule 8 per hop: both totals' counting (``trigamma(n + 1/2)`` each)
+    plus the abundance discrepancy between the two nodes beyond what counting explains,
+    ``max(0, log(r)^2 - (1/n_s + 1/n_x))`` with ``r`` the ratio of their total densities. A discrepancy
+    is never attributed (capture, new transcription, noise): it widens."""
+    n_s, n_x = float(n_s), float(n_x)
+    v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_x + 0.5))
+    r = (n_x / float(a_x)) / (n_s / float(a_s))
+    return v + max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))

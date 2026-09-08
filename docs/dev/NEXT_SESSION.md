@@ -1,48 +1,71 @@
-# NEXT SESSION — STEPS A AND E ARE LANDED; NEXT IS F+G, RULES 3 AND 4 REFINED (handoff, 2026-09-04)
+# NEXT SESSION — PHASE 1 OF THE BOTH-STRANDED LOCUS IS APPROVED; BUILD IT (handoff, 2026-09-08)
 
-    ⚠ A DEV DOC, and a HANDOFF. It says where things stand and how to start, not what is settled —
-    rulings are `DESIGN.md`, the ranked list `ROADMAP.md`, the open problems `ISSUES.md`, the
-    case-by-case state `MESSAGE_RUNGS.md`'s COMPLETION CHECKLIST. MOVE anything that settles.
+⭐⭐⭐ **THE REFERENCE IS `docs/dev/AMBIG_DESIGN.md`** — the design, the census that sized it, phase 0's
+findings, the owner's rulings (2026-09-06/07/08) and the phase table. Read it whole before touching
+anything. This file is the state; that file is the plan.
 
-## WHAT HAPPENED ON 2026-09-04
+## WHAT STANDS (2026-09-08)
 
-The owner asked for the message layer's ARCHITECTURE to be solidified — two phases, `propagate` and
-`solve`, the naming debt paid — and ruled the same day: retire the foundation scaffold, re-found the
-skeleton as designed, judge every idea at pass zero and with the prior apart, finish the architecture
-end to end before the landscape prior. **Both stages LANDED** (`DESIGN.md` §6b.12; the record is
-`TWO_PHASE_BACKBONE.md` §8): the two-phase backbone with the relay byte-identical and the foundation
-scaffold gone; and `messages/transfer.py` rebuilt as claims + rules + the passes, bit-identical to the
-prototype's formal arm, which wins both halves of the ladder against the one-hop policy (7/8 + 7/8, at
-pass zero and through the pipeline). The prerequisite the previous handoff named — the certified-flux
-row into exons — was derived, stage-0'd, prototyped and REFUTED as a level by probe placement
-(`ISSUES: the-certified-flux-row-as-a-level`); what remains of it is `ISSUES: two-sided-exon-row`.
+1. **The level lane is landed** (`DESIGN.md` §6b.12; uncommitted): the gDNA level as an absolute
+   profile, the default rule of every face without a composition rule, lower-only, bounds intersect;
+   ladder unstranded 8/8 at or below the pre-lane policy, stranded 7/8 (`g50 ss.99 ON` 0.948×,
+   `g98 ss.99 ON` 0.908×); suite 3,765 / 8 xfail.
+2. **Two blocks joined the test chromosome** (uncommitted): the TERMINUS-CLUSTER block (2026-09-05, the
+   empty pieces) and the BOTH-STRANDED block (2026-09-07: `asin`, `asinrev`, `span`, the owner's `conv`;
+   24 two-gene loci, host-only `cap` twins). 193 genes, 5.986 Mb, budget 960 k; all seven panels
+   re-simulated, cached and certified 30/30; preflight green; the superseded derived sets are under
+   `~/Downloads/rigel_runs/test_reference_STALE_*`. ⛔ `git checkout` of the YAML restores the COMMITTED
+   chromosome and drops every uncommitted block — never do it; regenerate from the generators if needed.
+3. **Phase 0's two findings** (`AMBIG_DESIGN.md` §4a): the both-stranded stretches are unreached at pass
+   zero because a held composition is never re-issued as a level (the fix is that levels ALWAYS travel,
+   a composition alongside where a map exists); and the spanning host's junctions inside the antisense's
+   exon need a TWO-SIDED RNA level from their own intron (rung 1's own law: one shared unspliced
+   population). Both are steps of phase 1.
+4. **The owner's rulings for phase 1 (2026-09-08)**: the three levels travel TOGETHER in one message
+   (components present only where measured; empties forwarded); the certified flux joins phase 1 as an
+   RNA source; ONE representation everywhere — profiles on the solve grid, a held level evaluated at the
+   density each cell implies, no Gaussian summary anywhere in the transfer policy; the bar is about one
+   percent of a row.
 
-## WHERE THE POLICY STANDS (uncommitted in the working tree — the owner drives commits)
+## PHASE 1 — the order, each step a falsification gate watched firing, then an A/B against the landed policy, halves apart, pass zero beside the pipeline
 
-`policy_benchmark.py --panel test --policies silent relay transfer` (30 conditions): the stranded half
-at or below silence on 17/20 (worst 1.10×), the relay above silence on every stranded row; the
-unstranded half — the deferred capture-ON rows 0.05–0.18× silence, the in-scope `g50 ss.50 OFF`
-12,328 vs silent 9,349 (the one-sided exon profile compounding, the open problem), the zero controls
-0.35× / 0.66× silence where the relay's anchor still leads (8,623 / 6,372). The ladder table is
-`landed_ladder.out` (session scratchpad; §6e of the note by construction).
+1. **Levels always travel.** The gDNA lane emits on every face (a composition alongside where a map
+   exists); the solve reads the composition from a side that sent both, the level otherwise. Gate: a
+   stretch's entrance forwards; a node holding both from one side reads the composition. Judged on the
+   ladder's sixteen rows and the three panels — it changes the gDNA lane's reach everywhere.
+2. **The RNA lanes' faces and plumbing, no sources yet.** Per-strand faces from the flag bits (a junction
+   of + stops RNA+ and not RNA−); two-sided only between an intron and its own boundary. Byte-identical.
+3. **The sources.** (a) own strand profiles read as RNA levels of the live strand, priced by the strand's
+   own counts; (b) the certified flux at an exon's junctions as that strand's RNA level at the exon. Gates:
+   the coordinate round trip; the hop price by strand counts; no echo; the flux level is a lower bound at
+   the route rate's Poisson width, one hop for the spliced claim itself.
+4. **Delivery at AMBIG nodes** as per-strand rows evaluated on the ``(λ, θ)`` cube (the analogue of
+   `lam_rows`; the relay's Gaussian RNA channels are not used). Gate: THE BRACKET THEOREM on a hand-built
+   node — three lower bounds and the strand equation give a two-sided gDNA share, any one removed opens a
+   side. Judged first at the spanning loci's boundaries, then everything.
 
-## THE NEXT CASES — `MESSAGE_PLAN.md` §6, in order (owner review, 2026-09-04)
+Then phases 2–5 as the design's table has them (single-strand recipients, the remaining structures,
+the tilt ruling). Prototype outside `src/` first (`policy_prototype.py --module`), A/B, only then `src/`.
 
-A. ✅ LANDED 2026-09-04 — THE LEVEL RULE at every terminus face (`DESIGN.md` §6b.12; the record in
-   `MESSAGE_PLAN.md` §5b): a level is made from the sender's MEASUREMENT only, shape-preserving
-   through the level-kept map, per-pair widths, the crossing total's upper bound without a claim;
-   item 6's map, cap and pooled spread deleted; every rule now receives (own claim, what is held).
-E. ✅ DONE 2026-09-04 — rule 5 as a level, ONE-SIDED (`edge_level_row`: the exact Poisson below the
-   edge's level, nothing above, a zero count vacuous): every upper side was refused by the sparse panel
-   and the ladder (`ISSUES: the-edge-upper-side`); the code is rung 3's formula re-derived, byte-identical
-   to step A's standings. The zero controls are the landscape's to win (`MESSAGE_PLAN.md` §5d).
-F. ⛔ REFUSED 2026-09-04 — a cap on rule 3's plateau (priced by the pair's discrepancies) fixes the
-   first pass on unstranded rows and harms weakly stranded junction-probed rows 12 %; the plateau is the
-   honest form (`MESSAGE_PLAN.md` §5 F). G. rule 4's per-pair discrepancy (a widening only) — measure;
-B. strand-change faces and termini both ways; C. the empty chain pieces (`nest`); D. junction plus
-terminus (`instart`); H. the AMBIG ruling; then the ship list.
-⚠ Residue decisions are deferred until no rule is missing. ⚠ Report class error both as fragments and
-relative to the class's own mass (`MESSAGE_PLAN.md` §7).
+## WHERE THE POLICY STANDS (the level lane UNCOMMITTED in the working tree — the owner drives commits)
+
+Ten composition messages plus THE LEVEL LANE. Every directed face of the chain now carries a
+composition rule or the lane, or leads into structural pure gDNA or off the chain — the completion
+contract's "no skipped boundary or region" is a GATE, not a hope. What is still owed before the default
+flips: the sj+terminus composition (D), the AMBIG complex's RNA levels and tilt (H), the terminus-cluster
+block that lets the test chromosome see empty pieces, and the ship protocol. The unstranded FIRST PASS
+(the plateau's median at one-sided nodes; the −26 % a two-sided lane would give) is the enrichment
+witness's and the landscape's, after the architecture (`ISSUES: two-sided-exon-row`).
+
+## THE NEXT CASES — `MESSAGE_PLAN.md` §6 (owner rulings 2026-09-06: the enrichment witness IS the landscape prior; bound-only nodes do not train it; the rules finish first)
+
+1. **H. THE AMBIG COMPLEX** — ⭐ designed 2026-09-06, `docs/dev/AMBIG_DESIGN.md` (the RNA level lanes, the bracket theorem, the `asin`/`span` blocks, five phases, five owner decisions); the RNA levels per strand and the tilt: 9,912 AMBIG nodes carry 38 % of
+   the remaining error on `g50 ss.99 ON` and 50 % on `g98 ss.99 ON` (`ambig_census.py`). Needs a
+   both-stranded block on the test chromosome mirroring a real ladder locus (the owner authors).
+2. **D. sj+terminus** — 386 boundaries, 0.5–0.7 % of any row; `outside_flank` with a junction present,
+   item 5's map with the leaving flux.
+3. **The ship protocol** — default flip, `silent`/`relay` retired; the g00 rows are the landscape's.
+4. **Then the landscape** — the estimator at bound-only nodes and the training population.
 
 ## HOW TO START
 

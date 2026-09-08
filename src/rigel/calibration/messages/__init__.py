@@ -162,6 +162,22 @@ class PsiMessage:
         )
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class Level:
+    """A population's LEVEL as a message lane: ``profile`` is a max-normalised log-profile over
+    ``u = log(rho / rho_ref)`` — the population's density in counts per base of its opportunity,
+    relative to the library's structurally pure gDNA density ``rho_ref`` — on the solve grid
+    (``K`` points, the ``lam`` window: a coordinate choice, no constant). ``n`` and ``a`` are the
+    total and the opportunity of the last node WITH a total the claim passed through: the next
+    recipient prices its hop from them (both totals' counting, and the abundance discrepancy beyond
+    it — the owner's rule 8, per hop, nothing pooled). An EMPTY node (no total) forwards a level
+    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density."""
+
+    profile: np.ndarray
+    n: float
+    a: float
+
+
 @dataclass(frozen=True, slots=True)
 class Message:
     """What one node holds from one neighbour after a pass — the transfer policy's message.
@@ -177,17 +193,22 @@ class Message:
       free, so it crosses a face by a derived map and never carries a level across a capture cliff.
     * ``tilt`` — the RNA+ versus RNA− PROFILE over ψ's tilt grid (the angle ``arcsin(tau)``), the
       second degree of freedom at a node where both strands are live.
-    * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a rate claim ``(log rate, log-variance)``
-      per population, in counts per base of that population's opportunity, for faces composition
-      cannot cross: gDNA is genomically continuous across ANY face; a strand's RNA continues across a
-      face where that strand's population is unchanged (an AMBIG region's two degrees of freedom are
-      imputed by exactly these).
+    * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a LEVEL claim per population
+      (:class:`Level`: a PROFILE over the log density relative to the library's structurally pure gDNA
+      density, on the same grid as ``lam``), for faces composition cannot cross: gDNA is genomically
+      continuous across ANY face; a strand's RNA continues across a face where that strand's
+      population is unchanged (an AMBIG region's two degrees of freedom are imputed by exactly these).
+      A level is ABSOLUTE — it needs no map and no knowledge of its recipient, which is what lets it
+      cross a node that has no total at all — and it is a profile, not a Gaussian pair, because the
+      claims that travel on it are one-sided (a level says "at least this much gDNA"; measured
+      2026-09-05: every upper side harmed the stranded capture-ON rows) and a Gaussian summary of a
+      one-sided profile invents a value.
 
     ⭐ :data:`SILENCE` — every lane ``None`` — is a MESSAGE, delivered: the neighbour spoke and had
     nothing to say. A node with no neighbour on a side holds :data:`NO_NEIGHBOUR` instead, which is not
     a message (the owner's ruling, 2026-09-04: a hop that carries nothing still arrives, explicitly
-    uninformative). ⚠ Today's rules fill ``composition`` only; the tilt profile is the AMBIG ruling's
-    and the level lanes are the level rule's to fill (`MESSAGE_RUNGS.md`'s ship audit, items 1 and 4).
+    uninformative). ⚠ Today's rules fill ``composition`` and ``level_gdna``; the tilt profile and the
+    RNA levels are the AMBIG ruling's to fill.
 
     ⚠ The relay policy predates this type and holds its own per-node state tuple; the backbone treats
     what a kernel returns as opaque and only insists that a real hop returns SOMETHING.
@@ -195,9 +216,9 @@ class Message:
 
     composition: np.ndarray | None = None
     tilt: np.ndarray | None = None
-    level_gdna: tuple[float, float] | None = None
-    level_rna_pos: tuple[float, float] | None = None
-    level_rna_neg: tuple[float, float] | None = None
+    level_gdna: Level | None = None
+    level_rna_pos: Level | None = None
+    level_rna_neg: Level | None = None
 
     LANES = ("composition", "tilt", "level_gdna", "level_rna_pos", "level_rna_neg")
 
