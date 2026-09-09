@@ -49,7 +49,7 @@ from .region_geometry import (
     region_rna_geometry,
 )
 from .region_init import build_region_init
-from .signature import coarse_type_array
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
 from .structural_claims import build_structural_claims, interface_masks
 from .simplex_logodds import (
     CompositionPriors,
@@ -167,6 +167,23 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
                 "stream must deliver one row per slot on the solve grid"
             )
         counts.note("flux_rows_finite", ~np.isfinite(rows).all(axis=1), np.ones(ctx.n_slots, bool))
+    # ── the cube channel: a (K, K_t) row per AMBIG slot, or absent ──────────────────────────────────
+    if msg.cube_rows is not None:
+        amb = np.asarray(ctx.free_pos, bool) & np.asarray(ctx.free_neg, bool)
+        for slot, row in msg.cube_rows.items():
+            row = np.asarray(row)
+            if not (0 <= int(slot) < ctx.n_slots) or not amb[int(slot)]:
+                raise ValueError(
+                    f"cube_rows carries slot {slot}, which is not an AMBIG slot — a cube exists only "
+                    "where both strands are live"
+                )
+            if row.ndim != 2 or row.shape[0] != int(ctx.n_grid):
+                raise ValueError(
+                    f"cube_rows[{slot}] has shape {row.shape}; expected ({ctx.n_grid}, K_t) — one row "
+                    "over the (λ, θ) cube on the solve grid"
+                )
+        bad = np.array([not np.isfinite(np.asarray(r)).all() for r in msg.cube_rows.values()], bool)
+        counts.note("cube_rows_finite", bad, np.ones(bad.shape[0], bool))
     n_rna_channels = 0 if msg.rna_mode is None else len(msg.rna_mode)
     counts.note(
         "message_has_three_components",
@@ -341,7 +358,9 @@ def solve_chain(
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
 
-    def _psi(g_arr, msg: PsiMessage, *, fg_ref, fpos_ref, fneg_ref, extra_lam_rows=None):
+    def _psi(
+        g_arr, msg: PsiMessage, *, fg_ref, fpos_ref, fneg_ref, extra_lam_rows=None, cube_rows=None
+    ):
         """The per-slot solve (the log-density log-odds backend). Phase A calls it with a silent message;
         the final call passes the combine's four channels.
 
@@ -392,6 +411,8 @@ def solve_chain(
             fg_ref=fg_ref,
             fpos_ref=fpos_ref,
             fneg_ref=fneg_ref,
+            # ⭐ the CUBE channel: the RNA level lanes delivered at AMBIG slots, final solve only
+            cube_rows=cube_rows,
         )
 
     # ── the SOLVE gate. Structural, from the signature, never from the counts ──────────────────────────
@@ -423,6 +444,12 @@ def solve_chain(
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_region = (np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)
+    # the signature's two EXON bits per slot — a strand's opportunity geometry, which the RNA level
+    # lanes read to tell a strand's intron from its exon inside an overlapping locus
+    _sig = np.asarray(region_arrays.signature).astype(np.int64)[_ri]
+    _is_region = np.asarray(chain.kind) == REGION
+    exon_pos = _is_region & ((_sig & BIT_EXON_POS) > 0)
+    exon_neg = _is_region & ((_sig & BIT_EXON_NEG) > 0)
     # the stage-0 interface masks the message layer consumes — computed by the module that
     # owns the concept and carried here under policy-neutral names (the backbone's vocabulary
     # firewall keeps every message-composition concept out of this file)
@@ -477,6 +504,8 @@ def solve_chain(
         ss_intron_boundary=_ss_b,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
+        exon_pos=exon_pos,
+        exon_neg=exon_neg,
         boundary_flags=statics.boundary_flags,
         geometry=geometry,
         order=order_list,
@@ -490,6 +519,7 @@ def solve_chain(
         logodds_window=float(logodds_window),
         solve_grid=solve_grid,
         capture=_capture,
+        n_tilt=None if n_tilt is None else int(n_tilt),
     )
 
     prepared = (policy if policy is not None else SilentPolicy()).prepare(ctx)
@@ -518,6 +548,7 @@ def solve_chain(
         fpos_ref=f_pos,
         fneg_ref=f_neg,
         extra_lam_rows=msg.lam_rows,
+        cube_rows=msg.cube_rows,
     )
 
     # ── THE WRITE-BACK — only SOLVABLE slots ──────────────────────────────────────────────────────────

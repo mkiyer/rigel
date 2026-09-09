@@ -34,6 +34,7 @@ __all__ = [
     "edge_level_row",
     "face_is_licensed",
     "face_map_lambda",
+    "junction_exon_side",
     "junction_flanks",
     "outside_flank",
     "splice_out_row",
@@ -45,6 +46,13 @@ __all__ = [
     "poisson_level",
     "priced_level",
     "profile_of_level",
+    "count_price",
+    "cube_row",
+    "flux_level",
+    "read_column",
+    "rna_level_of_profile",
+    "rna_row_of_level",
+    "strand_bits",
 ]
 
 EPS = 1.0e-9
@@ -95,12 +103,14 @@ def boundary_shares_strand(fp_b, fn_b, fp_i, fn_i) -> bool:
 def outside_flank(flags_b, left, right):
     """The flank of a TERMINUS boundary that the terminating transcripts do NOT cover — the one whose
     population is exactly what crosses the boundary, spliced crossing included — and the covered
-    (INSIDE) flank, as ``(outside, inside)``; ``(None, None)`` when the termini point both ways, when
-    no terminus sits here, or when a splice junction shares the boundary (the sj+terminus case is its
-    own item). The orientation is read off the flag alone: TSS+ and TES− bodies extend genomic-right,
-    so the outside is the LEFT flank; TES+ and TSS− extend left, so it is the RIGHT."""
+    (INSIDE) flank, as ``(outside, inside)``; ``(None, None)`` when the termini point both ways or when
+    no terminus sits here. The orientation is read off the terminus flag alone: TSS+ and TES− bodies
+    extend genomic-right, so the outside is the LEFT flank; TES+ and TSS− extend left, so it is the
+    RIGHT. ⭐ A splice junction sharing the boundary does not change which flank is inside (the
+    sj+terminus case, 2026-09-08: a transcript starting or ending exactly at another isoform's exon
+    edge — RUNX1's short isoform, LARGE1's ending isoform); its flux is placed by `junction_exon_side`."""
     f = int(flags_b)
-    if not (f & TERMINUS) or (f & SJ_FLAGS):
+    if not (f & TERMINUS):
         return None, None
     to_right, to_left = bool(f & _BODY_RIGHT), bool(f & _BODY_LEFT)
     if to_right and not to_left:
@@ -108,6 +118,21 @@ def outside_flank(flags_b, left, right):
     if to_left and not to_right:
         return right, left
     return None, None
+
+
+def junction_exon_side(flags_b, left, right):
+    """The flank on a junction's EXON side: a DONOR bit marks the intron's low end (the intron lies right,
+    the exon left), an ACCEPTOR bit its high end; ``None`` when junctions leave both ways or none is
+    present. At an sj+terminus boundary the junction's measured flux belongs to the population of this
+    flank — the RNA that splices in or out here — and is placed there: in item 5's outside map when
+    this flank is the outside, in the terminus rule's totals' disagreement when it is the inside."""
+    f = int(flags_b)
+    don, acc = bool(f & (_DON_POS | _DON_NEG)), bool(f & (_ACC_POS | _ACC_NEG))
+    if don and not acc:
+        return left
+    if acc and not don:
+        return right
+    return None
 
 
 #: a DONOR bit marks the intron's LOW end on either strand (the flags are genomic-order), so the
@@ -320,3 +345,120 @@ def hop_price(n_s, a_s, n_x, a_x):
     v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_x + 0.5))
     r = (n_x / float(a_x)) / (n_s / float(a_s))
     return v + max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
+
+
+# ── THE RNA LEVEL LANES (the both-stranded locus, phase 1, 2026-09-08) ──────────────────────────
+
+#: a strand's four boundary bits, its junction bits and its terminus bits, by strand key
+strand_bits = {
+    "pos": (
+        _TSS_POS | _TES_POS | _DON_POS | _ACC_POS,
+        _DON_POS | _ACC_POS,
+        _TSS_POS | _TES_POS,
+    ),
+    "neg": (
+        _TSS_NEG | _TES_NEG | _DON_NEG | _ACC_NEG,
+        _DON_NEG | _ACC_NEG,
+        _TSS_NEG | _TES_NEG,
+    ),
+}
+
+
+def count_price(n_s, a_s, n_x, a_x):
+    """One hop's price by the lane's OWN witness counts — `hop_price`'s form on a strand's counts
+    rather than the totals (the owner's rule 8 per hop; the totals are the wrong witness for an RNA
+    lane, since entering an overlap the total jumps because the OTHER strand joins while this
+    strand's density is unchanged): both counts' counting, ``trigamma(n + 1/2)`` each, plus the
+    discrepancy of the two count densities beyond counting. A zero count on either side has no
+    density ratio, so counting is the whole price (``trigamma(1/2)`` is finite)."""
+    n_s, n_x = float(n_s), float(n_x)
+    v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_x + 0.5))
+    if n_s > 0.0 and n_x > 0.0:
+        r = (n_x / float(a_x)) / (n_s / float(a_s))
+        v += max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
+    return v
+
+
+def rna_level_of_profile(row, lam, u, n, a_r, rho_ref):
+    """A single-strand node's own composition profile (over ``lam``) read as its live strand's RNA
+    LEVEL (over ``u = log(rho_s / rho_ref_s)``) through the node's own total: the RNA density
+    ``rho_s`` implies the RNA share ``rho_s a_r / n``, hence ``f_g = 1 − rho_s a_r / n`` and the ``lam``
+    the profile is read at; above the total the share is impossible and the level falls as the
+    total's Poisson tail. `level_of_profile` with ``1 − sigma`` in place of ``sigma``. ⚠ Near
+    ``f_r → 1`` the coordinate saturates at the total and several ``lam`` cells share one ``u`` cell —
+    the same grid limit the gDNA level has at ``f_g → 1``."""
+    row = np.asarray(row, np.float64)
+    lam = np.asarray(lam, np.float64)
+    c = float(rho_ref) * np.exp(np.asarray(u, np.float64)) * float(a_r)
+    n = float(n)
+    f_r = np.clip(c / n, EPS, 1.0 - EPS)
+    out = np.interp(np.log((1.0 - f_r) / f_r), lam, row - row.max())
+    out = out + np.where(c >= n, n * np.log(np.maximum(c, 1e-300) / n) - (c - n), 0.0)
+    return out - out.max()
+
+
+def rna_row_of_level(profile, u, lam, n, a_r, rho_ref):
+    """A held RNA level read as THIS single-strand node's composition row — `rna_level_of_profile`'s map
+    read backwards, a pure coordinate change: ``u_s(lam) = log((1 − sigma(lam)) n / (a_r rho_ref))``. A
+    lower-only level (non-decreasing in u) is NON-INCREASING in lam: "at least this much RNA" is "at most
+    this much gDNA", the upper side of the gDNA share, the partner a gDNA floor needs (phase 2 of the
+    both-stranded locus, 2026-09-08)."""
+    p = np.asarray(profile, np.float64)
+    lam = np.asarray(lam, np.float64)
+    f_r = 1.0 / (1.0 + np.exp(lam))
+    u_of_lam = np.log(f_r * float(n) / (float(a_r) * float(rho_ref)))
+    out = np.interp(u_of_lam, np.asarray(u, np.float64), p, left=p[0], right=p[-1])
+    return out - out.max()
+
+
+def flux_level(u, count, rate, rho_ref, v=0.0):
+    """THE CERTIFIED FLUX at one of an exon's junctions as that strand's RNA level at the exon (the
+    owner's rulings 2026-09-08: spliced fragments are RNA of a KNOWN strand, measured, never solved —
+    one hop, boundary → exon; the junction's rate is an ESTIMATE of the exon's abundance, priced by
+    the node pair's disagreement): the spliced count's Poisson profile at each hypothesised density
+    on the route rate's own opportunity ``count / rate``, widened by the hop's price ``v``, then its
+    LOWER SIDE — the two-sided estimate over-claimed at the probe cliff (the sparse-probe panel's zero
+    control 94 → 448, measured 2026-09-08), so the exon takes "at least the RNA its junction's
+    isoforms carry" and nothing above. A zero count claims nothing (``None``)."""
+    count, rate = float(count), float(rate)
+    if not (count > 0.0 and rate > 0.0):
+        return None
+    pl = poisson_level(u, count, count / rate, rho_ref)
+    return lower_side(blur_row(pl, u, v) if v > 0.0 else pl)
+
+
+def read_column(col, kappa):
+    """The genome-strand column strand ``col``'s RNA READS on: its own when the library reads sense
+    (``kappa >= 1/2``, or no fitted strand model), the other under an antisense protocol. A junction's
+    route rate is in transcript-strand terms, so the exon count it is priced against must be the
+    count of the reads that strand's RNA produces — measured 2026-09-08: the wrong column read a
+    90 % transcript as 10 % and blurred its floor to nothing."""
+    return int(col) if (kappa is None or float(kappa) >= 0.5) else 1 - int(col)
+
+
+def cube_row(profiles, u, lam, theta, n, a_r, rho_refs):
+    """The held RNA levels of an AMBIG node as ONE row over ψ's ``(lam, theta)`` cube: at each cell the
+    strand's share ``f_s = (1 − sigma)(1 ± tau)/2`` implies the density ``f_s n / a_r``, and the held
+    profile is read at ``log(rho_s / rho_ref_s)`` — the map `profile_of_level` applies on the λ axis,
+    with the tilt inside. A one-sided profile stays one-sided (the map is monotone in each share), so
+    "at least this much RNA+" arrives as a wall in the cube and no parametric summary is made.
+    ``profiles`` is ``{"pos": profile, "neg": profile}`` (either may be absent), ``rho_refs`` the two
+    lanes' coordinates."""
+    lam = np.asarray(lam, np.float64)
+    theta = np.asarray(theta, np.float64)
+    sig = 1.0 / (1.0 + np.exp(-lam))
+    tau = np.sin(theta)
+    f_act = (1.0 - sig)[:, None]
+    shares = {
+        "pos": f_act * (1.0 + tau)[None, :] / 2.0,
+        "neg": f_act * (1.0 - tau)[None, :] / 2.0,
+    }
+    out = np.zeros((lam.shape[0], theta.shape[0]))
+    for name, prof in profiles.items():
+        if prof is None:
+            continue
+        prof = np.asarray(prof, np.float64)
+        with np.errstate(divide="ignore"):
+            u_s = np.log(shares[name] * float(n) / float(a_r)) - np.log(float(rho_refs[name]))
+        out += np.interp(u_s, np.asarray(u, np.float64), prof, left=prof[0], right=prof[-1])
+    return out - out.max()

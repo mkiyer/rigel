@@ -150,7 +150,24 @@ ref_name: test_chr
 # the two strands inside one node). No nascent on the hosts in this first cut. 24 loci = 48 genes, slots
 # 100–123 at pitch 37,000 from 5,065,000; the chromosome grows to 5.986 Mb and the fragment budget from
 # 840 k to 960 k (gDNA density per base −3 %, RNA depth per existing transcript +8 %).
-genome_length: 5986000      # the both-stranded block ends at 5,937,000 (last spacer included)
+#
+# ── THE sj+terminus BLOCK (owner-approved 2026-09-08; the case D of the message plan) ────────────
+# ONE boundary carrying a splice junction AND a transcript terminus of the SAME strand — 386 on the
+# ladder, 1–2 % of an in-scope row's error, almost all of it at the exon INSIDE the terminus, which
+# today receives only the gDNA lane's lower bound (the terminus rule refuses a junction, the junction
+# rules refuse a terminus). Two families, mirrored from the ladder: a transcript that STARTS at an
+# internal exon's edge (RUNX1's two-exon isoform ENST00000468726 starts where exon 4 of the long isoform
+# begins, chr21:35,065,072 −: TSS−+DON−) and one that ENDS at an internal exon's edge (LARGE1's isoform
+# ending where exon 7 of twenty others begins, chr22:33,381,918 −: TES−+ACC−); the + strand carries the
+# mirror families TSS++ACC+ and TES++DON+. Host U = the twin shape; S = U's exons 2–3 in transcription
+# order, starting at exon 2's transcript-5' edge; E = U's exons 1–2, ending at exon 2's transcript-3'
+# edge — so every gene makes BOTH families, one at each boundary of exon 2, and a − gene makes the − forms.
+# Under the REPLICATION RULE with two alternatives: ab U 9 : S 1 : E 1, ba 1 : 9 : 9, eq 5 : 5 : 5, blocks
+# B2 (×3) and B4 (×30); unprobed / probed (cap*); 12 genes, slots from 5,957,000 at pitch 37,000, the
+# strand alternating within a block and flipping between them. The chromosome grows to 6.401 Mb and the
+# fragment budget from 960 k to 1,030 k (2,970 abundance units join 41,965: RNA depth per existing
+# transcript +0.2 %, gDNA density per base +0.3 %).
+genome_length: 6401000      # the sj+terminus block's last gene ends at 6,381,000; the 20 kb spacer follows
 seed: 20260819
 blank:
   ref_name: test_blank
@@ -1398,6 +1415,96 @@ genes:
     probed: false
     transcripts:
       - {t_id: B2_capconv_eq_A, exons: [[5930000, 5932000], [5936000, 5937000]], abundance: 50}
+
+  # ── THE sj+terminus BLOCK (owner-approved 2026-09-08): host U = the twin shape + TWO isoforms whose
+  #    terminus sits exactly on one of U's junctions — S starts at exon 2's transcript-5' edge (RUNX1's
+  #    short isoform, chr21:35,065,072), E ends at exon 2's transcript-3' edge (LARGE1's isoform ending at
+  #    chr22:33,381,918); on a − gene the roles swap exon sets. Regimes ab 9:1:1, ba 1:9:9, eq 5:5:5,
+  #    blocks B2 (×3) and B4 (×30); unprobed / probed (cap); slots from 5,957,000 at pitch 37,000
+  - gene_id: gB2_sjterm_ab
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_sjterm_ab_U, exons: [[5957000, 5958000], [5965000, 5966000], [5973000, 5974000]], abundance: 27}
+      - {t_id: B2_sjterm_ab_S, exons: [[5965000, 5966000], [5973000, 5974000]], abundance: 3}
+      - {t_id: B2_sjterm_ab_E, exons: [[5957000, 5958000], [5965000, 5966000]], abundance: 3}
+  - gene_id: gB2_capsjterm_ab
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capsjterm_ab_U, exons: [[5994000, 5995000], [6002000, 6003000], [6010000, 6011000]], abundance: 27}
+      - {t_id: B2_capsjterm_ab_S, exons: [[5994000, 5995000], [6002000, 6003000]], abundance: 3}
+      - {t_id: B2_capsjterm_ab_E, exons: [[6002000, 6003000], [6010000, 6011000]], abundance: 3}
+  - gene_id: gB2_sjterm_ba
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_sjterm_ba_U, exons: [[6031000, 6032000], [6039000, 6040000], [6047000, 6048000]], abundance: 3}
+      - {t_id: B2_sjterm_ba_S, exons: [[6039000, 6040000], [6047000, 6048000]], abundance: 27}
+      - {t_id: B2_sjterm_ba_E, exons: [[6031000, 6032000], [6039000, 6040000]], abundance: 27}
+  - gene_id: gB2_capsjterm_ba
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capsjterm_ba_U, exons: [[6068000, 6069000], [6076000, 6077000], [6084000, 6085000]], abundance: 3}
+      - {t_id: B2_capsjterm_ba_S, exons: [[6068000, 6069000], [6076000, 6077000]], abundance: 27}
+      - {t_id: B2_capsjterm_ba_E, exons: [[6076000, 6077000], [6084000, 6085000]], abundance: 27}
+  - gene_id: gB2_sjterm_eq
+    strand: "+"
+    probed: false
+    transcripts:
+      - {t_id: B2_sjterm_eq_U, exons: [[6105000, 6106000], [6113000, 6114000], [6121000, 6122000]], abundance: 15}
+      - {t_id: B2_sjterm_eq_S, exons: [[6113000, 6114000], [6121000, 6122000]], abundance: 15}
+      - {t_id: B2_sjterm_eq_E, exons: [[6105000, 6106000], [6113000, 6114000]], abundance: 15}
+  - gene_id: gB2_capsjterm_eq
+    strand: "-"
+    probed: true
+    transcripts:
+      - {t_id: B2_capsjterm_eq_U, exons: [[6142000, 6143000], [6150000, 6151000], [6158000, 6159000]], abundance: 15}
+      - {t_id: B2_capsjterm_eq_S, exons: [[6142000, 6143000], [6150000, 6151000]], abundance: 15}
+      - {t_id: B2_capsjterm_eq_E, exons: [[6150000, 6151000], [6158000, 6159000]], abundance: 15}
+  - gene_id: gB4_sjterm_ab
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_sjterm_ab_U, exons: [[6179000, 6180000], [6187000, 6188000], [6195000, 6196000]], abundance: 270}
+      - {t_id: B4_sjterm_ab_S, exons: [[6179000, 6180000], [6187000, 6188000]], abundance: 30}
+      - {t_id: B4_sjterm_ab_E, exons: [[6187000, 6188000], [6195000, 6196000]], abundance: 30}
+  - gene_id: gB4_capsjterm_ab
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capsjterm_ab_U, exons: [[6216000, 6217000], [6224000, 6225000], [6232000, 6233000]], abundance: 270}
+      - {t_id: B4_capsjterm_ab_S, exons: [[6224000, 6225000], [6232000, 6233000]], abundance: 30}
+      - {t_id: B4_capsjterm_ab_E, exons: [[6216000, 6217000], [6224000, 6225000]], abundance: 30}
+  - gene_id: gB4_sjterm_ba
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_sjterm_ba_U, exons: [[6253000, 6254000], [6261000, 6262000], [6269000, 6270000]], abundance: 30}
+      - {t_id: B4_sjterm_ba_S, exons: [[6253000, 6254000], [6261000, 6262000]], abundance: 270}
+      - {t_id: B4_sjterm_ba_E, exons: [[6261000, 6262000], [6269000, 6270000]], abundance: 270}
+  - gene_id: gB4_capsjterm_ba
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capsjterm_ba_U, exons: [[6290000, 6291000], [6298000, 6299000], [6306000, 6307000]], abundance: 30}
+      - {t_id: B4_capsjterm_ba_S, exons: [[6298000, 6299000], [6306000, 6307000]], abundance: 270}
+      - {t_id: B4_capsjterm_ba_E, exons: [[6290000, 6291000], [6298000, 6299000]], abundance: 270}
+  - gene_id: gB4_sjterm_eq
+    strand: "-"
+    probed: false
+    transcripts:
+      - {t_id: B4_sjterm_eq_U, exons: [[6327000, 6328000], [6335000, 6336000], [6343000, 6344000]], abundance: 150}
+      - {t_id: B4_sjterm_eq_S, exons: [[6327000, 6328000], [6335000, 6336000]], abundance: 150}
+      - {t_id: B4_sjterm_eq_E, exons: [[6335000, 6336000], [6343000, 6344000]], abundance: 150}
+  - gene_id: gB4_capsjterm_eq
+    strand: "+"
+    probed: true
+    transcripts:
+      - {t_id: B4_capsjterm_eq_U, exons: [[6364000, 6365000], [6372000, 6373000], [6380000, 6381000]], abundance: 150}
+      - {t_id: B4_capsjterm_eq_S, exons: [[6372000, 6373000], [6380000, 6381000]], abundance: 150}
+      - {t_id: B4_capsjterm_eq_E, exons: [[6364000, 6365000], [6372000, 6373000]], abundance: 150}
 
 shadow_genes:
   - gene_id: gshadow_U1

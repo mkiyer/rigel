@@ -2193,6 +2193,145 @@ exons whole, so it reads 0.2 % there and never showed it. The ruling that closes
   measurable at pass zero with no strand channel). That is `ISSUES: two-sided-exon-row`'s, after the
   architecture, with the landscape's training population.
 
+### 6b.13 ⭐⭐⭐ THE RNA LEVEL LANES — the both-stranded locus, phase 1 (owner rulings 2026-09-08; landed 2026-09-08)
+
+The last propagation case: REGIONS and BOUNDARIES that admit RNA on both strands. Their composition
+has two degrees of freedom and their own strand split pins only a LINE in ``(f_g, f_+)`` (the Schur
+cancellation the local solve applies), so the gDNA share there comes from the messages and the prior
+alone. ⭐ **THE KEY FACT: a message about one strand's RNA level IS a message about the gDNA share** —
+``½ f_g + κ f_+ + (1 − κ) f_− = p_+`` links them, so a LOWER bound on RNA+ is an UPPER bound on the
+gDNA share: the side the gDNA lane cannot give, and every upper side refused so far could not give
+honestly. THE BRACKET THEOREM (gated on a hand-built node, both κ): three lower bounds — gDNA, RNA+,
+RNA− — plus the node's own strand counts give a two-sided gDNA share; removing any one opens a side.
+The owner's four rulings (2026-09-08): the three levels travel TOGETHER in one message (components
+only where measured, empties forwarded); the certified flux joins as an RNA source; ONE representation
+everywhere — profiles on the solve grid, a held level evaluated at the density each cell implies, no
+Gaussian summary anywhere in the transfer policy; the bar is about one percent of a row.
+
+* **THE LANES.** `Message.level_rna_pos` / `level_rna_neg`: a strand's level as a profile over
+  ``u_s = log(ρ_s / ρ_ref,s)`` (``ρ_ref,s`` the library's strand-``s`` unspliced density over its
+  single-strand exons — a coordinate). **FACES from the flag bits, per strand**: strand ``s``'s level
+  crosses a face iff the boundary carries none of ``s``'s four bits and both nodes admit ``s``; across
+  ``s``'s OWN junction it enters ``s``'s intron (the unspliced crossing IS the intron's population) and
+  not ``s``'s exon; a terminus of ``s`` stops ``s`` both ways. ⭐ **The intron test is PER STRAND**: a
+  region that admits ``s`` and carries no exon of ``s`` is ``s``'s intron whatever the other strand does
+  there — the h-intron ∩ a-exon piece of an overlapping locus is the host's intron and the antisense's
+  exon at once, and the coarse exon signature stopped the host's level one hop short of its own
+  acceptor, the very node the case is about (`StepContext.exon_pos` / `exon_neg` carry the two bits).
+  **TWO-SIDED only between an intron of ``s`` and its own boundary** (rung 1: one shared unspliced
+  population), and there the hop charges COUNTING ALONE — the difference in the two nodes' strand
+  counts is gDNA's half and the other strand, never this population's change (the discrepancy term
+  there blurred the sharp upper side the whole design exists to deliver: 0.70 → 0.775 against 0.78 at
+  the span host's acceptor). Lower-only everywhere else, priced by the strand's OWN counts
+  (`count_price`: the totals are the wrong witness, since entering an overlap the total jumps while
+  this strand's density is unchanged). Emission as the gDNA lane's: an empty node forwards, a full node
+  the intersection of its own level and what it holds.
+* **THE SOURCES.** A single-strand node's own claim read as its live strand's RNA level
+  (`rna_level_of_profile`: the composition profile at ``1 − σ``, the total's Poisson tail above); and
+  the certified flux at each of an exon's junctions as that strand's level at the exon (`flux_level`:
+  the spliced count's Poisson likelihood on the route rate's own opportunity, lower side; the spliced
+  law kept — one hop, boundary → exon, read AT the exon's own solve and emitted onward as its own
+  level; a junction boundary has no RNA level of its own). ⭐ **The junction's rate is an ESTIMATE of
+  the exon's abundance, priced by THE NODE PAIR (owner ruling 2026-09-08)**: the junction's spliced
+  count at its route rate against the exon's count of that strand per RNA opportunity — read on the
+  genome-strand column the strand's RNA READS on (`read_column`; under an antisense protocol a −
+  transcript's reads sit on the + column) — both counts' counting plus their disagreement beyond it
+  (`count_price`), so a probe across the junction beside an unprobed exon disagrees and the estimate
+  goes weak; one price whether the exon has one junction or two. ⛔ It stays LOWER-SIDED: the two-sided
+  estimate over-claimed at the probe cliff (the sparse-probe panel's zero control 94 → 448, `g05 ss.99
+  ON` +4–6 %), as every upper side has. ⛔ The pair's TOTAL abundance is the wrong witness for an RNA
+  lane: at an overlap the exon's total holds the other transcript's RNA and the rule charged it as
+  uncertainty (a correct floor softened 25-fold; pass zero `g05 ss.99 OFF` +7 %). Measured 2026-09-08,
+  the working record in the sandbox.
+* **THE DELIVERY AT AMBIG NODES** (`PsiMessage.cube_rows`, `cube_row`): the held levels per strand
+  (both sides intersected, the exon's own flux level with them) as ONE row over ψ's ``(λ, θ)`` cube —
+  at each cell ``f_s = (1 − σ)(1 ± τ)/2``, the density ``f_s n / a_r``, the profile read at
+  ``log(ρ_s / ρ_ref,s)``: `profile_of_level`'s map with the tilt inside; a one-sided profile stays
+  one-sided (gated), so "at least this much RNA+" is a wall in the cube and nothing parametric is made.
+  The backbone adds the row inside the AMBIG solve, final solve only, like `lam_rows`; absent, byte-
+  identical (gated). **The tilt needs no lane**: both strands' bounds constrain it through the shares,
+  and a tilt profile from the same witnesses would count them twice.
+* ⭐ **THE UPPER SIDE AT SINGLE-STRAND NODES (phase 2, landed 2026-09-08; `rna_row_of_level`,
+  `_ceilings`).** At a single-strand node an RNA level of its live strand says "at most this much
+  gDNA": the held level read as a λ row through ``f_s = 1 − σ`` (a lower-only level in u is
+  non-increasing in λ — a ceiling), bounds intersected, the row joining the node's other witnesses.
+  ⭐ **Read ONLY from a face that sent no composition** — a held level on that side, and the node's
+  own junction flux at that face — because a licensed face's splice-in map ALREADY carries the flux as
+  its cap (`face_map_lambda`'s ``s``) and a composition already carries its sender's witnesses; the
+  gDNA lane's own solve rule. The naive form that reads every level and every flux counts them twice:
+  the weak-κ zero control 42 → 1,540 (36×), stranded `g05 ss.99 ON` +9 %, `g50 ss.99 ON` +7.5 % at pass
+  zero. Where the rule lets the ceiling through is where rung 2 is silent — every junction crossing
+  empty (the zero-gDNA rows, 470–530 exons), a depleted face under capture, a terminus-only or walled
+  exon with a junction flux. Measured on the test chromosome against the policy before it, full
+  pipeline: unstranded 6/8, 7/8, 6/8 rows won (worst in scope 1.000×), stranded 14/16 on every panel
+  (worst 1.005×); the unstranded zero control `g00 ss.50 OFF` 10,786 → 9,207 (−15 %; −54 % at pass
+  zero, where it cleans the landscape prior's training population — `ISSUES:
+  gdna-landscape-trains-on-false-positives`'s mechanism, from the other side). Ladder, full pipeline against the policy before it: stranded 6/6 non-zero rows won, worst 1.000× (`g98 ss.99 ON` 0.994×); unstranded 4/6, every in-scope capture-OFF row won (`g05` 0.997×, `g50` 0.995×, `g98` 0.999×), the two losses in the DEFERRED stratum (`g05 ss.50 ON` 1.012×, `g50 ss.50 ON` 1.011×); the g00 rows identical; at pass zero every non-zero row of both halves won (`g05 ss.50 OFF` 0.958×, `g05 ss.50 ON` 0.939×). The naive form on the ladder: stranded `g05 ss.99 ON` 1.026× — refused.
+* ⛔ **"LEVELS ALWAYS TRAVEL" FOR THE gDNA LANE IS REFUSED BY THE BAR, PENDING THE UPPER SIDE** (phase
+  0's first finding proposed it; measured alone 2026-09-08). The gDNA lane emitting on every face
+  (a composition alongside where a map exists; the solve reading the composition from a side that sent
+  both) reaches the AMBIG stretches — and wins every capture-ON ladder row (unstranded × ON −15 to
+  −17 %, the deferred stratum; stranded × ON −1 to −3 %) — but a one-sided floor arriving at a node
+  with NO CHANNEL of its own for the gDNA share is a tilt, not a floor: the hop price's discrepancy
+  term blurs a step into a slope across the grid, and a monotone likelihood on a flat local posterior
+  moves the median up the line. Ladder `g05 ss.99 OFF` +7 %, `g05 ss.50 OFF` +8 % (AMBIG walled exons
+  and exon|exon boundaries at near-zero true gDNA); the test chromosome's `g00 ss.70 OFF` +7.6 % (one
+  exon's strand profile at κ = 0.7 reading noise as gDNA, made a floor for its whole gene through the
+  FORWARD faces an empty boundary could not cross). Stacked with the RNA lanes it still loses those
+  rows (1.12×, 1.03×). The gDNA lane keeps the landed faces; the reach waits for phase 2's ceiling at
+  single-strand recipients (``1 − f_g ≥ b_s``), which is the partner a floor needs.
+* ⭐ **MEASURED AT LANDING** (the RNA lanes on the landed gDNA lane, against the landed policy, full
+  pipeline, halves apart): the ladder wins every non-zero row of BOTH halves (unstranded 6/6, worst
+  1.000×; stranded 6/6, worst 0.994×; `g98 ss.99 ON` 201,578 → 176,703, `g05 ss.99 ON` −1 %; at pass
+  zero the stranded rows −6 to −18 %); the three test panels: stranded 12/16, 16/16, 14/16 (worst
+  1.007×), unstranded 8/8, 5/8, 7/8 (worst 1.005×), the zero controls at or below the landed policy.
+  At the design's target, `capspan_eq_H` on `g50 ss.99 ON`: the two junction boundaries 290 / 307 → 7
+  / 2 fragments, the walled host exon 271 → 126 (the landscape gives its lower side, the flux its
+  upper, ~6 points under truth from the flux floor's over-read). The measurement's working record is
+  in the sandbox.
+* ⛔ **A BOTH-STRANDED NODE EMITTING ITS gDNA LEVEL IS REFUSED AS BUILT** (owner's ruling that a
+  determined gDNA level may propagate; measured 2026-09-08): the node's own strand counts on the cube
+  plus the RNA levels it holds, marginalised over the tilt, read as its gDNA level and emitted like any
+  other — right on a hand-built node, and on the chain +2.6 % on `g05 ss.70 OFF` on all three panels,
+  up to +13.7 % on the sparse panel's `g05 ss.99 ON`, +4…+38 % on the weak-κ zero controls: at κ = 0.7
+  and low gDNA the bracket has little leverage, the emitted level is noise, and a noisy level travels
+  as a floor. `ISSUES: ambig-node-as-a-gdna-source` carries the record and the conditions under which
+  it could be re-opened.
+
+### 6b.14 ⭐⭐ THE sj+terminus BOUNDARY — the terminus decides the side, the junction places its flux (owner-approved 2026-09-08; landed 2026-09-08)
+
+One boundary carrying a splice junction AND a transcript terminus of the same strand: a transcript that
+STARTS at an internal exon's edge (RUNX1's two-exon isoform begins where exon 4 of the long isoform begins)
+or ENDS at one (LARGE1's isoform ends where exon 7 of twenty others begins). 386 on the ladder, 384 of them
+same-strand, two thirds intron|exon. Until this ruling both rules that could serve the exon inside the
+terminus refused it — the terminus rule (§6b.12's rule 8) because a junction was present, the junction
+rules (rung 2, item 7) because a terminus was — so the inside exon held only the gDNA lane's lower bound.
+
+* **THE RULE.** `outside_flank` reads the orientation from the terminus bit alone (a junction does not
+  change which flank the terminating transcripts cover); rule 8 serves the inside exon and item 5 the
+  outside exon exactly as at a plain terminus. The junction's measured flux is placed where the junction's
+  exon is (`junction_exon_side`): added to the OUTSIDE flank's population in item 5's map when that flank is
+  the outside (item 7's arithmetic), and to the boundary's total in rule 8's TOTALS' disagreement when the
+  junction's exon is the inside — the RNA joining at the junction is measured, only the terminus's own
+  transcription is not. ⛔ The flux is not a crossing: rule 8's strand-mode prediction keeps the crossing's
+  own scaling (with the flux in it, one boundary's prediction moved sixteenfold and its price with it).
+* **WHAT THE CASE IS WORTH, measured at its destinations.** The first census over-sized it by counting
+  the outside INTRON's error, which is the intron class's ordinary error and already served by the
+  identity rule; the case-specific part — the boundary plus the inside exon — is 0.6 % of an in-scope row
+  and sits at the counting floor of 10–40 crossings (about one fragment per boundary). The rule is neutral
+  there (`g50 ss.99 OFF` 679 → 687, `g50 ss.50 OFF` 808 → 807), 2 % better locally on `g50 ss.99 ON`,
+  14 % better locally on the unstranded zero row (the inside exons 182 → 63). Whole library, the ladder:
+  every row within 0.3 % and the zero rows −2.5 % / −3.4 %; the three test panels within 1.002× on every
+  stranded row; the flux placement is what keeps the junction-probed panel's stranded capture-ON rows at
+  1.003× (the plain orientation fix alone cost 2 % there). Under sparse probing the deferred
+  `g98 ss.50 ON` row loses 4.8 %: rule 8's total bound at a depleted face, the cliff §6b.12 recorded at
+  plain termini, now at these faces too — reported, not a target.
+* **THE SUBSTRATE.** The test chromosome's sj+terminus block (`sjterm` · `capsjterm`, 2026-09-08): host
+  plus an isoform starting at exon 2's transcript-5' edge and one ending at its 3' edge, so every gene
+  makes both families and a − gene the − forms; the block's boundaries carry 10–20 crossings and move by a
+  few fragments under the rule, which is the ladder's picture in miniature. The completion contract's
+  "no skipped boundary" now holds at these faces by a composition or level rule rather than the lane.
+
 ## 7. Where the error is, structurally
 
 Two measurements that shape every design choice above, both worth keeping because they are about the

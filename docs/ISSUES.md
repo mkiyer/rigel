@@ -232,6 +232,38 @@ the lower-only law keeps more fragments and this residue. What would remove it w
 law: the same enrichment witness `two-sided-exon-row` waits for (where the library's gDNA is not
 enriched, a level between nodes of one gene is two-sided). Until then, report it on every zero control.
 
+### flux-floor-dispersion
+`priority: with the transport-dispersion decomposition · kind: question · stamped: 2026-09-08 (re-stamped after the owner's ruling)`
+
+The certified flux at an exon's junction is that strand's RNA level at the exon, an ESTIMATE of the
+exon's abundance priced by the node pair (the junction's count at its rate against the exon's own
+count of that strand per RNA opportunity, `count_price`; `DESIGN.md` §6b.13). The route rate scatters
+around the exon's true body density BEYOND counting (stage 0, 2026-09-04: median −3 %, 5–9 % at depth;
+nine readings on the block 0–40 % over), and the pair's price sees that scatter only where the exon's own
+strand count disagrees with the rate — at a gDNA-rich exon it does (gDNA's half inflates the count and
+the price widens, the conservative direction), at a pure-RNA exon it does not, and a lucky over-read
+there is a sharp floor a few points too high. The floor is lower-sided (the two-sided estimate refused
+at the cliff, §6b.13), so only over-reads cost. The instrument is `transport_dispersion.py`; the relay's
+answer was a POOLED left-tail centre fit, refused with the relay's pooling.
+
+### ambig-node-as-a-gdna-source
+`priority: after phase 2 · kind: decision, measured once · stamped: 2026-09-08`
+
+The owner ruled that a determined gDNA level may propagate (2026-09-08). Built as: a both-stranded
+node's own strand counts on the ``(λ, θ)`` cube plus the RNA levels it holds from its far side and its
+own flux estimate, marginalised over the tilt, read as its gDNA level through its total, emitted like any
+measured level (lower side across a face, priced by the totals' disagreement). Gated right on a
+hand-built node (the mode at the bracketed density; nothing emitted without an RNA profile; no echo).
+⛔ REFUSED AS BUILT on the chain: +2.6 % on `g05 ss.70 OFF` on all three test panels (11,247 → 11,534),
+up to +13.7 % on the sparse panel's `g05 ss.99 ON`, +4…+38 % on the weak-κ zero controls; on the LADDER
+`g05 ss.50 OFF` 1.745×, `g05 ss.99 OFF` 1.619×, `g05 ss.99 ON` 1.465× through the pipeline. At κ = 0.7 and
+low gDNA the bracket has little leverage, so the emitted level's mode is noise, and a noisy level travels
+as a floor — `the-lower-bound-noise-ratchet` from a new source. The target it was for (the walled host
+exon of a `span` locus under host-only capture, 0.586 against 0.645 through the pipeline) gains ~100
+fragments; the cost elsewhere is larger. Re-open with a gate on the emitted level's own width (emit
+only where the bracket is tighter than the node's counting) once phase 2's ceiling is in place; until
+then the walled overlap exon keeps its lower side from the landscape prior.
+
 ### two-sided-exon-row
 `priority: now · kind: problem · stamped: 2026-09-04`
 **What an exon needs before the scan can forward anything on unstranded data, and where it can come
@@ -534,6 +566,31 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### levels-always-travel-for-the-gdna-lane — DERIVED (phase 0's finding 1), PROTOTYPED, gated, A/B'd on three panels and the ladder, REFUSED BY THE BAR pending the upper side (2026-09-08). Do not rebuild the gDNA lane on every face before single-strand recipients read the RNA ceiling.
+
+The gDNA lane emitting on EVERY directed face (a composition alongside where a map exists; the solve
+reading the composition from a side that sent both) reaches the AMBIG stretches the landed lane starves
+(9 of 9 nodes on `span_ab` against 1 of 9) and wins every capture-ON ladder row (unstranded × ON −15 to
+−17 %, stranded × ON −1 to −3 %; `capspan` on `g50 ss.99 ON` 957 → 641). It loses the ladder's
+`g05 ss.99 OFF` +7.1 % (106,559 → 113,250 at pass zero; 45,076 → 48,295 full) and `g05 ss.50 OFF` +7.8 %
+(50,948 → 54,926), the test chromosome's `g00 ss.70 OFF` +7.6 % (9,340 → 10,052) and `g50 ss.50 OFF`
++3.6 %, all one mechanism: a one-sided floor at a node with no channel of its own for the gDNA share is
+a TILT, not a floor — the hop price's discrepancy term (an intron against an exon, log r ≈ 4–8) blurs a
+step into a slope across the grid, and a monotone likelihood on a flat local posterior moves the median
+up the line. On the ladder the floors land on AMBIG walled exons and exon|exon boundaries at near-zero
+true gDNA (slot 37345: 10,188 fragments, truth 0, 3,673 → 3,934); on the test chromosome's weak-κ zero
+row on one exon's strand profile reading noise as gDNA (f_g ≈ 0.08 at 2,631 fragments), made a floor for
+its whole gene through the FORWARD faces an empty boundary could not cross. Stacked with the RNA lanes
+delivered at AMBIG nodes it still loses those rows (`g05 ss.50 OFF` 1.124×, `g05 ss.99 OFF` 1.031×).
+The RNA lanes alone, on the landed gDNA lane, win every non-zero ladder row of both halves — landed.
+Re-judged with phase 2's ceiling in place (2026-09-08, `lat2`): WORSE — `g25 ss.50 OFF` 1.59×,
+`g05 ss.70 ON` 1.18×, the junction panel's `g25 ss.70 ON` 1.69× through the pipeline, the weak-κ zero
+control 1.8–3.4×. The ceiling reaches only faces without a composition, so it opposes none of the floors
+the wider gDNA lane adds at licensed exons, and the two together train the prior on sharper false
+brackets. The gDNA lane keeps its landed faces. What would re-open this is a ceiling that reaches the
+same exons the floors reach without counting the flux twice — the two-sided exon row
+(`two-sided-exon-row`), not this step.
 
 ### the-edge-upper-side — DERIVED, PROTOTYPED, A/B'd on three panels and the ladder, REFUSED (2026-09-04). Do not rebuild an upper side on the edge's level, nor a zero-count claim.
 

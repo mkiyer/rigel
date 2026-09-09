@@ -49,8 +49,8 @@ outdir: /Users/mkiyer/Downloads/rigel_runs/test_reference/scenarios_probes_spars
 
 simulation:
   # ⭐ small on purpose — the point of this reference is a SECONDS-long loop
-  n_total_fragments: 960000
-  n_rna_fragments: 960000
+  n_total_fragments: 1030000
+  n_rna_fragments: 1030000
   sim_seed: 42
   # ⛔ IDENTICAL to the gdna block below: equal fragment lengths force calibration to be exercised
   # rather than letting the EM split the origins on length alone (`docs/TESTING.md` §0).

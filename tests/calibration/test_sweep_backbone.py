@@ -60,6 +60,8 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         ss_intron_boundary=np.zeros(N, bool),
         free_pos=fp,
         free_neg=fn,
+        exon_pos=np.zeros(N, bool),
+        exon_neg=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.int64),
         geometry=None,
         order=list(range(N)),
@@ -483,3 +485,58 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
         f"the only licensed 'capture' is the diagnostics hook — the parameter and the StepContext field "
         f"that carries it. Found {cap}"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE CUBE CHANNEL (the both-stranded locus, 2026-09-08): a (K, K_t) row per AMBIG slot, final solve only
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_the_cube_channel_is_checked_per_ambig_slot_and_shape():
+    """`_check_message`: a cube row at an AMBIG slot of shape ``(K, K_t)`` passes; a row at a
+    single-strand slot is REFUSED (a cube exists only where both strands are live); a row that is not
+    ``(n_grid, ·)`` is REFUSED; a non-finite row is REFUSED by the backbone's assertion."""
+    ctx = _ctx(free_pos=np.ones(N, bool), free_neg=np.array([i % 2 == 0 for i in range(N)]))
+    K = int(ctx.n_grid)
+    ok = _counts(PsiMessage(cube_rows={0: np.zeros((K, 7))}), ctx)
+    assert ok["cube_rows_finite"] == {"violations": 0, "eligible": 1}
+    with pytest.raises(ValueError, match="not an AMBIG slot"):
+        _counts(PsiMessage(cube_rows={1: np.zeros((K, 7))}), ctx)
+    with pytest.raises(ValueError, match="expected"):
+        _counts(PsiMessage(cube_rows={0: np.zeros((K + 1, 7))}), ctx)
+    with pytest.raises(AssertionError, match="cube_rows_finite"):
+        _counts(PsiMessage(cube_rows={0: np.full((K, 7), np.nan)}), ctx)
+
+
+def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present():
+    """`_solve_regions_logodds_all(cube_rows=...)`: ``None`` and ``{}`` are byte-identical to the path
+    without the argument; a wall against low ``f_+`` at one AMBIG slot raises that slot's ``f_pos`` and
+    leaves every other slot byte-identical."""
+    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all, _tilt_grid
+
+    m, K, Kt = 4, 40, 24
+    u_pos = np.array([50.0, 50.0, 50.0, 50.0])
+    u_neg = np.array([50.0, 50.0, 50.0, 50.0])
+    ap = np.ones(m, bool)
+    an = np.array([True, True, False, True])
+    kw = dict(kappa=0.99, od_g=0.0, od_r=0.0, n_grid=K, L=10.0, n_tilt=Kt)
+    base = _solve_regions_logodds_all(u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), **kw)
+    for empty in (None, {}):
+        again = _solve_regions_logodds_all(
+            u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows=empty, **kw
+        )
+        assert np.array_equal(again.gdna_frac, base.gdna_frac)
+        assert np.array_equal(again.rna_pos_frac, base.rna_pos_frac)
+    lam = np.linspace(-10.0, 10.0, K)
+    tau = np.sin(_tilt_grid(Kt))
+    f_pos = (1.0 - 1.0 / (1.0 + np.exp(-lam)))[:, None] * (1.0 + tau)[None, :] / 2.0
+    wall = np.where(f_pos < 0.3, -50.0, 0.0)  # "at least 30 % RNA+"
+    walled = _solve_regions_logodds_all(
+        u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m), cube_rows={1: wall}, **kw
+    )
+    assert walled.rna_pos_frac[1] > base.rna_pos_frac[1] + 0.05
+    for i in (0, 2, 3):
+        assert (
+            walled.gdna_frac[i] == base.gdna_frac[i]
+            and walled.rna_pos_frac[i] == base.rna_pos_frac[i]
+        )

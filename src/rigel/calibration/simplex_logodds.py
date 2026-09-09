@@ -756,6 +756,7 @@ def _solve_ambig_logodds(
     lam_imp_prec=None,
     theta_imp_mode=None,
     theta_imp_prec=None,
+    cube=None,
 ) -> RegionDeconv:
     """The 2-D ``(λ, θ)`` solve for AMBIG regions (both strands live). Grids the gDNA-vs-RNA-total log-odds
     ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt`` or
@@ -825,6 +826,11 @@ def _solve_ambig_logodds(
     #    [:, :, None] broadcast makes it constant across the tilt, so θ is integrated out cleanly. ──
     if lam_logprior is not None:
         psi += np.asarray(lam_logprior, F)[:, :, None]
+    # ── ⭐ THE CUBE CHANNEL: the RNA level lanes delivered where both strands are live — one
+    #    (K, K_t) log-profile per region, added to ψ like the λ-factor but WITH the tilt inside (a
+    #    strand's level is read at the density each cell's share implies). ``None`` ⇒ byte-identical. ──
+    if cube is not None:
+        psi += np.asarray(cube, F)
     # ── ⭐ the FRAGMENT-LENGTH λ-factor. θ-independent — the length channels do not depend on the strand
     #    tilt at all — so it broadcasts across the cube and θ integrates out cleanly. ⭐ **That
     #    independence is precisely why this source speaks on an AMBIG region where the strand term cannot**:
@@ -937,6 +943,7 @@ def _solve_regions_logodds_all(
     fg_ref=None,
     fpos_ref=None,
     fneg_ref=None,
+    cube_rows=None,
 ) -> RegionDeconv:
     """The full per-region log-odds dispatcher (Phase 3 #1): routes single-strand regions to the 1-D
     ``λ`` solve (:func:`_solve_regions_logodds`) and AMBIG regions to the 2-D ``(λ, τ)`` solve
@@ -946,7 +953,9 @@ def _solve_regions_logodds_all(
     log-fraction Gaussian messages + the global prior — evaluated on the ``σ(λ)`` log-odds grid.
 
     All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
-    ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class."""
+    ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class.
+    ``cube_rows`` is ``{slot: (K, K_t) row}`` for AMBIG slots (the RNA level lanes' delivery), gathered
+    per AMBIG block and added to that block's ψ; ``None`` or an absent slot changes nothing."""
     m = int(np.asarray(u_pos).shape[0])
     ap_all = np.asarray(allow_pos, bool)
     an_all = np.asarray(allow_neg, bool)
@@ -1035,8 +1044,20 @@ def _solve_regions_logodds_all(
         # — bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
         amb_idx = np.where(amb)[0]
         rows = _block_rows(int(n_grid) * (int(n_tilt) if n_tilt else int(n_grid)), 4)
+        Kt = int(n_tilt) if n_tilt else int(n_grid)
         for s0 in range(0, amb_idx.size, rows):
             bidx = amb_idx[s0 : s0 + rows]
+            cube = None
+            if cube_rows:
+                hit = [
+                    (j, cube_rows[int(slot)])
+                    for j, slot in enumerate(bidx)
+                    if int(slot) in cube_rows
+                ]
+                if hit:
+                    cube = np.zeros((bidx.size, int(n_grid), Kt))
+                    for j, row in hit:
+                        cube[j] = row
             _scatter(
                 bidx,
                 _solve_ambig_logodds(
@@ -1062,6 +1083,7 @@ def _solve_regions_logodds_all(
                     lam_imp_prec=_s(lam_imp_prec, bidx),
                     theta_imp_mode=_s(theta_imp_mode, bidx),
                     theta_imp_prec=_s(theta_imp_prec, bidx),
+                    cube=cube,
                 ),
             )
     return RegionDeconv(

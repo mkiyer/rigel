@@ -543,7 +543,7 @@ training population) comes after.
 | case | ladder nodes | share of the remaining error | status |
 |---|---|---|---|
 | **H. THE AMBIG COMPLEX** — both strands admitted: the RNA levels per strand and the tilt | 9,912 (14 % of nodes) | **38 % of `g50 ss.99 ON`, 50 % of `g98 ss.99 ON`**, 16.5 % of `g50 ss.99 OFF`, 13.5 % of `g50 ss.50 OFF` — at the overlapping loci's exon\|exon boundaries and walled exons | gDNA reached by the lane (lower bound); the RNA split unimputed |
-| **D. sj+terminus** — one boundary carrying a junction and a terminus | 386 | 0.5–0.7 % of any row | the lane serves the level; the composition part refused by `outside_flank` |
+| **D. sj+terminus** — one boundary carrying a junction and a terminus | 386 | 0.5–0.7 % of any row | ✅ 2026-09-08 (`DESIGN.md` §6b.14): the terminus decides the side, the flux is placed at the junction's exon flank; neutral in scope, −14 % locally on the unstranded zero row |
 | strand-change faces, termini both ways, the empty piece, the walled classes, the dark exon between licensed faces | — | — | ✅ served (the lane; the composition rules across a dark exon) |
 
 1. **H. THE AMBIG COMPLEX** — the last lane and the largest remaining case. ⭐ DESIGNED (`AMBIG_DESIGN.md`,

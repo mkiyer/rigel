@@ -191,7 +191,7 @@ Gaussian-lane `Message` and the `message` policy are RETIRED (same ruling).
 |---|---|
 | `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
-| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` ⭐ THE LEVEL LANE (2026-09-05, `DESIGN.md` §6b.12): `Message.level_gdna` is an ABSOLUTE profile over the log gDNA density, the default rule of EVERY directed face without a composition rule (strand changes, termini both ways, the AMBIG complex, every face into or out of an EMPTY node — 52 % of the ladder's exon pieces have no total), forwarded unchanged by empties, emitted by a full node as the INTERSECTION of its own lower side and what it holds (bounds intersect, they do not multiply: the product form ratcheted), priced per hop at the recipient, and taken as a LOWER BOUND only (every upper side measured harmful under capture); STOP by omission is gated impossible. |
+| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` ⭐ THE LEVEL LANE (2026-09-05, `DESIGN.md` §6b.12): `Message.level_gdna` is an ABSOLUTE profile over the log gDNA density, the default rule of EVERY directed face without a composition rule (strand changes, termini both ways, the AMBIG complex, every face into or out of an EMPTY node — 52 % of the ladder's exon pieces have no total), forwarded unchanged by empties, emitted by a full node as the INTERSECTION of its own lower side and what it holds (bounds intersect, they do not multiply: the product form ratcheted), priced per hop at the recipient, and taken as a LOWER BOUND only (every upper side measured harmful under capture); STOP by omission is gated impossible. ⭐ THE RNA LEVEL LANES (2026-09-08, `DESIGN.md` §6b.13): `level_rna_pos` / `level_rna_neg` per strand, faces from the flag bits (the intron test PER STRAND: `StepContext.exon_pos`/`exon_neg`), two-sided only between an intron and its own boundary (counting-only price there), sources = a single-strand node's own claim read at ``1 − σ`` and the certified flux at an exon's junctions (an ESTIMATE priced by the junction–exon pair's strand disagreement, kept lower-sided), delivered at AMBIG nodes as ONE row over ψ's (λ, θ) cube (`PsiMessage.cube_rows`; the tilt needs no lane) and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no composition (a licensed face's map already carries the flux as its cap). THE BRACKET THEOREM is gated. Ladder at landing: every non-zero row of both halves won. ⭐ THE sj+terminus BOUNDARY (2026-09-08, `DESIGN.md` §6b.14): the terminus decides the side, the junction's flux is placed at its exon's flank; the case is 0.6 % of a row at the counting floor and the rule is neutral in scope. ⛔ "Levels always travel" for the gDNA lane is REFUSED by the bar until phase 2's ceiling (`ISSUES: levels-always-travel-for-the-gdna-lane`). |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
@@ -226,22 +226,24 @@ python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
 owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
 up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
 
-⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND SIX BLOCKS** (owner rulings 2026-08-28 / 2026-09-02 / 2026-09-03 / 2026-09-05 / 2026-09-07).
+⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND SEVEN BLOCKS** (owner rulings 2026-08-28 / 2026-09-02 / 2026-09-03 / 2026-09-05 / 2026-09-07 / 2026-09-08).
 `scripts/sim/test_reference/test_chr.yaml` — the `rigel sim` scenario schema plus `probed` and
 `shadow_genes` — is the ONE hand-edited file; the GTFs, abundances, three capture panels and the FASTA
 are RENDERED from it by `build_test_reference.py` (a suite gate refuses a drifted render). It carries the
 ANCHORED TWIN BLOCK (5 types × 5 abundance blocks: `clean` · `nasc` · `cap` · `capnasc` · `silent` — the
 message layer's own controls), the MONO BLOCK (single-exon, edge-only: `mono` · `capmono` · the two
 silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart`
-and `altss` present, `nest` · `instart` queued in `docs/dev/MESSAGE_RUNGS.md`'s order, every multi-isoform
+and `altss` present, `nest` queued in `docs/dev/MESSAGE_RUNGS.md`'s order, every multi-isoform
 structure REPLICATED across A ≫ B, A ≪ B, A ≈ B), the WALLED BLOCK (four transcript groups whose exon
 pieces have NO licensed face — `chain` · `tssalt` · `tandem` · `altlast` — the scan's stress test, designed
 from the ladder's walled-exon census), the TERMINUS-CLUSTER BLOCK (`cluster` · `capcluster`: ten transcript
 ends 126–147 bp into a shared last exon, mirrored from MIR99AHG on the ladder — the EMPTY exon pieces
 the level lane crosses, which no earlier block makes), the BOTH-STRANDED BLOCK (`asin` · `asinrev` · `span` ·
 `conv`: two genes per locus on opposite strands, the host and its antisense, mirrored from the ladder's
-overlapping loci — the AMBIG nodes' substrate, `docs/dev/AMBIG_DESIGN.md`), and 8 SHADOW transcripts the
-index never sees: 193 genes at a 960 k-fragment budget per condition. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
+overlapping loci — the AMBIG nodes' substrate, `docs/dev/AMBIG_DESIGN.md`), the sj+terminus BLOCK (`sjterm` ·
+`capsjterm`: a transcript starting at an internal exon's edge and one ending at one, mirrored from RUNX1 and
+LARGE1 — one boundary carrying a junction and a terminus of the same strand, the message plan's case D), and 8
+SHADOW transcripts the index never sees: 205 genes at a 1,030 k-fragment budget per condition. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
 representation (a sign error is invisible on one strand); both-stranded loci are a later step.
 ⛔ After editing the YAML, everything derived MUST be rebuilt or the benchmark scores a stale
 annotation — `docs/TESTING.md` §0a has the full recipe and `panel.py status` names the next stage.
@@ -321,16 +323,22 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,765 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-06 after THE LEVEL LANE landed and `docs/dev/AMBIG_DESIGN.md` was added). Account it from **3,757**
-— the count after steps A and E — by **+7** for the lane's seven gates and **+1** for the new `docs/dev/`
-file (jargon only): the seven gates (every directed face served or structural pure gDNA; a priced level is a
-lower bound and the hop widens it; the level coordinates round-trip; bounds intersect and do not multiply;
-a full node emits the intersection — the ratchet gate; the hop price's form; an empty node forwards
-unchanged), all added to the EXISTING `tests/calibration/test_transfer_policy.py` (no file was
-added or removed, so no parametrised gate moved). ⛔ **RE-DERIVE, NEVER ADJUST** — the table below
-gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution (3,773
-collected).
+⭐ **THE STANDING BASELINE: 0 failed / 3,781 passed / 0 skipped / 8 xfail** (re-derived
+2026-09-08 after THE RNA LEVEL LANES, the single-strand CEILING and the sj+terminus rule landed). Account
+it from **3,765** — the count after the level lane — by **+16**: fourteen gates in the EXISTING
+`tests/calibration/test_transfer_policy.py` (the faces from the flag bits per strand with the
+junction-bits perturbation; the RNA coordinate round trip; the hop priced by the strand's own counts;
+the flux level as a lower bound priced by the node pair, with `read_column`; the sources at
+single-strand nodes and the flux at the exon only; the no-echo perturbation on the RNA lanes; the
+two-sided hop's whole profile at counting-only price; a lower-only profile one-sided on the cube; THE
+BRACKET THEOREM; the cube delivery as the intersected held levels plus the own flux; the ceiling row
+and its round trip; the ceiling read only from a face that sent no composition; the flux kept per
+face with a licensed face keeping the ceiling out; the sj+terminus boundary placing the flux where the
+junction's exon is) and two in the EXISTING `tests/calibration/test_sweep_backbone.py` (the cube
+channel checked per AMBIG slot and shape; the solver's cube inert when absent and walling the tilt when
+present). No file was added or removed, so no parametrised gate moved. ⛔ **RE-DERIVE, NEVER ADJUST** —
+the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
+attribution (3,789 collected: 51 → 67 in the two gate files).
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the

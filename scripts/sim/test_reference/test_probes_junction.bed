@@ -198,3 +198,15 @@ test_chr	5702938	5710063	junction_B2_capspan_eq_H_sj1	0	.	5702938	5710063	0	2	62
 test_chr	5769938	5778063	junction_B2_capconv_ab_H_sj0	0	.	5769938	5778063	0	2	62,63	0,8062
 test_chr	5843938	5852063	junction_B2_capconv_ba_H_sj0	0	.	5843938	5852063	0	2	62,63	0,8062
 test_chr	5917938	5926063	junction_B2_capconv_eq_H_sj0	0	.	5917938	5926063	0	2	62,63	0,8062
+test_chr	5994938	6002063	junction_B2_capsjterm_ab_U_sj0	0	.	5994938	6002063	0	2	62,63	0,7062
+test_chr	6002938	6010063	junction_B2_capsjterm_ab_U_sj1	0	.	6002938	6010063	0	2	62,63	0,7062
+test_chr	6068938	6076063	junction_B2_capsjterm_ba_U_sj0	0	.	6068938	6076063	0	2	62,63	0,7062
+test_chr	6076938	6084063	junction_B2_capsjterm_ba_U_sj1	0	.	6076938	6084063	0	2	62,63	0,7062
+test_chr	6142938	6150063	junction_B2_capsjterm_eq_U_sj0	0	.	6142938	6150063	0	2	62,63	0,7062
+test_chr	6150938	6158063	junction_B2_capsjterm_eq_U_sj1	0	.	6150938	6158063	0	2	62,63	0,7062
+test_chr	6216938	6224063	junction_B4_capsjterm_ab_U_sj0	0	.	6216938	6224063	0	2	62,63	0,7062
+test_chr	6224938	6232063	junction_B4_capsjterm_ab_U_sj1	0	.	6224938	6232063	0	2	62,63	0,7062
+test_chr	6290938	6298063	junction_B4_capsjterm_ba_U_sj0	0	.	6290938	6298063	0	2	62,63	0,7062
+test_chr	6298938	6306063	junction_B4_capsjterm_ba_U_sj1	0	.	6298938	6306063	0	2	62,63	0,7062
+test_chr	6364938	6372063	junction_B4_capsjterm_eq_U_sj0	0	.	6364938	6372063	0	2	62,63	0,7062
+test_chr	6372938	6380063	junction_B4_capsjterm_eq_U_sj1	0	.	6372938	6380063	0	2	62,63	0,7062

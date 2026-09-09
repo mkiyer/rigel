@@ -50,6 +50,18 @@ ever crosses a capture cliff and no constant is anywhere. The policy has three p
     plus the abundance discrepancy beyond it) and takes it as a LOWER bound — a level that crosses a
     face says "at least this much gDNA" and nothing more. The only faces with no rule at all lead into
     intergenic regions (structurally pure gDNA) or off the chain.
+  - THE RNA LEVEL LANES (2026-09-08, the both-stranded locus): one lane per strand, its FACES from
+    the flag bits (strand ``s`` crosses a face iff the boundary carries none of ``s``'s bits and both
+    nodes admit ``s``; across ``s``'s own junction it enters ``s``'s INTRON — the intron test is per
+    strand, from ``StepContext.exon_pos`` / ``exon_neg`` — and not ``s``'s exon; a terminus of ``s``
+    stops ``s``), TWO-SIDED only between an intron of ``s`` and its own boundary (one shared unspliced
+    population: the whole profile, counting-only price), lower-only and priced by the strand's own
+    counts everywhere else. SOURCES: a single-strand node's own claim read as its live strand's RNA
+    level; the certified flux at each of an exon's junctions as that strand's level at the exon (one
+    hop, boundary → exon; two junctions pay their pair's disagreement beyond counting). DELIVERED at
+    AMBIG nodes only, as one row over ψ's (λ, θ) cube (`PsiMessage.cube_rows`): a lower bound on RNA+
+    is an upper bound on the gDNA share through the node's own strand counts — the side the gDNA lane
+    cannot give (THE BRACKET THEOREM, gated). The tilt needs no lane of its own.
 
 * **The two passes and the solve** (``propagate`` / ``solve``): a node SENDS two things apart — its
   own claim (a measurement) and what it holds from its far side (an imputation) — and the recipient's
@@ -81,15 +93,24 @@ from typing import Callable
 import numpy as np
 from scipy.special import polygamma
 
-from ..simplex_logodds import strand_row_logodds
+from ..simplex_logodds import _tilt_grid, strand_row_logodds
 from . import SILENCE, Level, Message, PsiMessage, StepContext
 from .transfer_rows import (
     EPS,
+    SJ_FLAGS,
     blur_row,
     boundary_shares_strand,
+    count_price,
+    cube_row,
     edge_level_row,
+    flux_level,
+    read_column,
+    rna_level_of_profile,
+    rna_row_of_level,
+    strand_bits,
     face_is_licensed,
     face_map_lambda,
+    junction_exon_side,
     junction_flanks,
     level_bound_row,
     level_map_lambda,
@@ -286,6 +307,10 @@ class TransferPolicy:
             o, i = outside_flank(flags[b], lo, hi_)
             if o is None:
                 continue
+            # the sj+terminus boundary (2026-09-08): a junction sharing the terminus does not change
+            # which flank is inside; its measured flux belongs to the flank on the junction's exon side
+            ex_side = junction_exon_side(flags[b], lo, hi_) if int(flags[b]) & SJ_FLAGS else None
+            flux_b = float(flux[b]) if ex_side is not None else 0.0
             if (
                 is_exon[lo]
                 and is_exon[hi_]
@@ -294,14 +319,17 @@ class TransferPolicy:
                 and a_g[b] > 0
                 and a_g[o] > 0
             ):
+                # the outside flank holds the crossing plus, when the junction's exon lies outside, the
+                # isoform that splices out there — item 7's arithmetic
+                s_out = n_s[b] + (flux_b if ex_side == o else 0.0)
 
-                def out5(row, b=b, o=o):
-                    return splice_out_row(row, lam, n_u[b], n_s[b], a_g[b], a_g[o])
+                def out5(row, b=b, o=o, s=s_out):
+                    return splice_out_row(row, lam, n_u[b], s, a_g[b], a_g[o])
 
-                le5 = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[o], a_g[o], n_s[b] / a_g[b])
+                le5 = face_map_lambda(lam, n_u[b], a_g[b], a_g[b], a_g[o], a_g[o], s_out / a_g[b])
 
-                def back5(row, le=le5, b=b):
-                    return transport_row(row, lam, le, n_u[b], n_s[b])
+                def back5(row, le=le5, b=b, s=s_out):
+                    return transport_row(row, lam, le, n_u[b], s)
 
                 rule[(int(o), int(b))] = _composed(out5)
                 rule[(int(b), int(o))] = _composed(back5)
@@ -315,9 +343,14 @@ class TransferPolicy:
             density_b = n_u[b] / a_g[b]
             total_b = n_u[b] + n_s[b]
             # the pair's discrepancies, each the excess of a disagreement over its counting:
-            # (i) the totals per opportunity, the dampening the owner ruled
-            r = (n_u[i] / a_g[i]) / (total_b / a_g[b])
-            v_pair = max(0.0, float(np.log(r)) ** 2 - (1.0 / n_u[i] + 1.0 / total_b))
+            # (i) the totals per opportunity, the dampening the owner ruled — the boundary's total gains
+            # the junction's flux when the junction's exon is the inside (the RNA joining there is
+            # measured; only the terminus's own transcription is not)
+            total_i = total_b + (flux_b if ex_side == i else 0.0)
+            r = (n_u[i] / a_g[i]) / (total_i / a_g[b])
+            v_pair = max(0.0, float(np.log(r)) ** 2 - (1.0 / n_u[i] + 1.0 / total_i))
+            # (ii) predicts the inside's share from the crossing alone: the flux is not a crossing
+            r_mode = (n_u[i] / a_g[i]) / (total_b / a_g[b])
             # (ii) the two strand modes, where both channels are live (data only, as item 7)
             if self._strand is not None and tau[b] > 0.0 and tau[i] > 0.0:
                 kappa = self._strand[0]
@@ -334,7 +367,9 @@ class TransferPolicy:
                     modes.append((f, v_log / (1.0 - f) ** 2))
                 if ok:
                     (f_b, v_b), (f_i, v_i) = modes
-                    f_pred = min(f_b / r, 1.0 - 1e-9)  # the level kept: the boundary's share over r
+                    f_pred = min(
+                        f_b / r_mode, 1.0 - 1e-9
+                    )  # the level kept: the boundary's share over r
                     d = np.log(f_i / (1.0 - f_i)) - np.log(f_pred / (1.0 - f_pred))
                     v_pair += max(0.0, float(d * d) - (v_b + v_i + 1.0 / n_u[i] + 1.0 / total_b))
             v_level = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5)) + v_pair
@@ -425,7 +460,113 @@ class TransferPolicy:
                 if y >= 0 and not is_intergenic[y] and (int(x), int(y)) not in rule
             }
             lane = _Lane(u, lam, rho_ref, n_u, a_g, empty, own_level, faces)
-        return _PreparedTransfer(own, rule, K, lane)
+        rna = None if lane is None else self._rna_lanes(ctx, lane, own, is_intron, is_intergenic)
+        cube = _CubeSite(
+            fp & fn,
+            n_u,
+            a_r,
+            int(ctx.n_tilt) if ctx.n_tilt else K,
+            {"pos": fp, "neg": fn},
+            left,
+            right,
+        )
+        return _PreparedTransfer(own, rule, K, lane, rna, cube)
+
+    # ── THE RNA LEVEL LANES (the both-stranded locus, phase 1; owner rulings 2026-09-08) ─────────
+    def _rna_lanes(self, ctx, lane, own, is_intron, is_intergenic):
+        """One lane per strand: FACES from the flag bits (strand ``s``'s level crosses a face iff the
+        boundary carries none of ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN
+        junction it enters ``s``'s intron — the crossing IS the intron's unspliced population — and
+        not ``s``'s exon; a terminus of ``s`` stops ``s`` both ways), TWO-SIDED only between an intron
+        of ``s`` and its own boundary (rung 1's one shared unspliced population; ⭐ the intron test is
+        PER STRAND — a region that admits ``s`` and carries no exon of ``s`` is ``s``'s intron whatever
+        the other strand does there), and SOURCES: a single-strand node's own claim read as its live
+        strand's RNA level, and the certified flux at each of an exon's junctions as that strand's level
+        at the exon (two junctions charged the pair's own disagreement beyond counting; one, counting
+        alone). The coordinate ``rho_ref_s`` is the library's strand-``s`` unspliced density over its
+        single-strand exons. Nothing pooled, no constant."""
+        n = ctx.n_slots
+        is_bnd = np.asarray(ctx.is_boundary, bool)
+        is_exon = np.asarray(ctx.is_exon_region, bool)
+        fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
+        exon_of = {"pos": np.asarray(ctx.exon_pos, bool), "neg": np.asarray(ctx.exon_neg, bool)}
+        left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+        flags = np.asarray(ctx.boundary_flags, np.uint16)
+        n_u = np.asarray(ctx.n_slot, np.float64)
+        a_r = np.asarray(ctx.eff_rna, np.float64)
+        cnt = np.asarray(ctx.unspliced_count, np.float64)
+        rr = (np.asarray(ctx.route_rate_lo, np.float64), np.asarray(ctx.route_rate_hi, np.float64))
+        sc = (np.asarray(ctx.sj_count_lo, np.float64), np.asarray(ctx.sj_count_hi, np.float64))
+        empty = ~(n_u > 0.0) | ~(a_r > 0.0)
+        single = ~(fp & fn)
+        kappa = None if self._strand is None else float(self._strand[0])
+        lanes = {}
+        for name, free, col in (("pos", fp, 0), ("neg", fn, 1)):
+            all_bits, _sj_bits, term_bits = strand_bits[name]
+            intron_s = ~is_bnd & free & ~exon_of[name]
+            faces, two_sided = set(), set()
+            for x in range(n):
+                for y in (left[x], right[x]):
+                    if y < 0 or is_intergenic[y] or not (free[x] and free[y]):
+                        continue
+                    b = x if is_bnd[x] else y
+                    i = y if is_bnd[x] else x
+                    f = int(flags[b])
+                    if not (f & all_bits):
+                        faces.add((int(x), int(y)))
+                        if intron_s[i]:
+                            two_sided.add((int(x), int(y)))
+                    elif not (f & term_bits) and intron_s[i]:
+                        faces.add((int(x), int(y)))
+                        two_sided.add((int(x), int(y)))
+            sel = is_exon & free & single & (a_r > 0.0)
+            rho_ref = float(cnt[sel, col].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
+            own_level: list = [None] * n
+            flux_of: list = [None] * n
+            if rho_ref > 0.0:
+                for x in np.flatnonzero(~empty & free):
+                    parts = []
+                    if single[x] and own[x] is not None and np.ptp(own[x]) > EPS:
+                        parts.append(
+                            rna_level_of_profile(own[x], lane.lam, lane.u, n_u[x], a_r[x], rho_ref)
+                        )
+                    if is_exon[x]:
+                        # the junction's estimate of the exon's RNA abundance, priced by THE NODE PAIR
+                        # (owner ruling 2026-09-08): the junction's spliced count at its route rate
+                        # against the exon's own count of that strand per RNA opportunity — read on the
+                        # genome-strand column strand-s RNA READS on (its own at kappa >= 1/2, the other
+                        # under an antisense protocol; the rate is in transcript-strand terms). Both
+                        # counts' counting plus their disagreement beyond it; a probed junction beside
+                        # an unprobed exon disagrees and goes weak. Kept LOWER-SIDED: the two-sided
+                        # estimate over-claimed at the probe cliff (measured 2026-09-08).
+                        col_read = read_column(col, kappa)
+                        for b in (left[x], right[x]):
+                            if b < 0 or not is_bnd[b]:
+                                continue
+                            hi = 1 if left[x] == b else 0
+                            c_j, r_j = float(sc[hi][b, col]), float(rr[hi][b, col])
+                            if not (c_j > 0.0 and r_j > 0.0):
+                                continue
+                            v = count_price(c_j, c_j / r_j, cnt[x, col_read], a_r[x])
+                            fl = flux_level(lane.u, c_j, r_j, rho_ref, v)
+                            parts.append(fl)
+                            if flux_of[x] is None:
+                                flux_of[x] = {}
+                            flux_of[x][int(b)] = fl
+                    if parts:
+                        own_level[x] = intersect(parts)
+            lanes[name] = _RnaLane(
+                lane.u,
+                rho_ref,
+                cnt[:, col],
+                a_r,
+                empty,
+                own_level,
+                frozenset(faces),
+                frozenset(two_sided),
+                flux_of,
+            )
+        return lanes
 
 
 class _Lane:
@@ -475,23 +616,99 @@ class _Lane:
         )
 
 
-class _PreparedTransfer:
-    """One sweep's working object: every node's own claim, the rules, the lane, the two passes' state."""
+class _RnaLane:
+    """ONE strand's RNA level lane: the coordinate ``u = log(rho_s / rho_ref_s)`` on the solve grid,
+    each node's strand count (the lane's own witness) and RNA opportunity, its emptiness, its own
+    level, the directed faces the lane serves and the faces it crosses TWO-SIDED."""
 
-    def __init__(self, own, rule: dict, n_grid: int, lane: _Lane | None = None):
+    __slots__ = ("u", "rho_ref", "count", "a", "empty", "own_level", "faces", "two_sided", "flux")
+
+    def __init__(self, u, rho_ref, count, a, empty, own_level, faces, two_sided, flux=None):
+        self.u, self.rho_ref = u, float(rho_ref)
+        self.count, self.a, self.empty = count, a, empty
+        self.own_level, self.faces, self.two_sided = own_level, faces, two_sided
+        #: per node, ``{boundary: level}`` — the junction's priced estimate of the exon's RNA, kept per
+        #: FACE so the solve can tell which face's composition already carries it
+        self.flux = [None] * len(own_level) if flux is None else flux
+
+    def emit(self, s: int, x: int, far: Level | None) -> Level | None:
+        """An empty node forwards; a full node the INTERSECTION of its own level and what it holds —
+        the own level WHOLE across a two-sided face (its boundary shares its population exactly), its
+        lower side everywhere else. Bounds intersect, they do not multiply."""
+        if self.empty[s]:
+            return far
+        own = self.own_level[s]
+        if own is not None and (int(s), int(x)) not in self.two_sided:
+            own = lower_side(own)
+        parts = [p for p in (own, None if far is None else far.profile) if p is not None]
+        if not parts:
+            return None
+        return Level(intersect(parts), float(self.count[s]), float(self.a[s]))
+
+    def receive(self, level: Level, s: int, x: int) -> Level:
+        """What a FULL recipient holds. Across a TWO-SIDED face the whole profile stands and the hop
+        charges counting alone: an intron and its own boundary share one unspliced population (rung
+        1's identity), so the difference in their strand counts is gDNA's half and the other strand,
+        never this population's change. Everywhere else the level is a lower bound priced by the
+        strand's own counts (`count_price`)."""
+        two = (int(s), int(x)) in self.two_sided
+        if two:
+            v = float(polygamma(1, float(level.n) + 0.5) + polygamma(1, float(self.count[x]) + 0.5))
+            p = level.profile
+        else:
+            v = count_price(level.n, level.a, self.count[x], self.a[x])
+            p = lower_side(level.profile)
+        p = blur_row(p, self.u, v) if v > 0.0 else p
+        return Level(p, float(self.count[x]), float(self.a[x]))
+
+
+_RNA_FIELD = {"pos": "level_rna_pos", "neg": "level_rna_neg"}
+
+
+class _CubeSite:
+    """What the cube delivery reads at a node: the AMBIG mask, every node's total and RNA
+    opportunity, and the tilt grid's size."""
+
+    __slots__ = ("ambig", "n_u", "a_r", "n_tilt", "free", "left", "right")
+
+    def __init__(self, ambig, n_u, a_r, n_tilt, free=None, left=None, right=None):
+        self.ambig, self.n_u, self.a_r, self.n_tilt = ambig, n_u, a_r, int(n_tilt)
+        self.free, self.left, self.right = free, left, right
+
+
+class _PreparedTransfer:
+    """One sweep's working object: every node's own claim, the rules, the gDNA lane, the two RNA
+    lanes, the two passes' state."""
+
+    def __init__(
+        self,
+        own,
+        rule: dict,
+        n_grid: int,
+        lane: _Lane | None = None,
+        rna: dict | None = None,
+        cube: "_CubeSite | None" = None,
+    ):
         self.own = own
         self.rule = rule
         self.lane = lane
+        self.rna = rna
+        self.cube = cube
         self._K = int(n_grid)
         self.held: dict = {False: None, True: None}
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
     def propagate(self, *, backward: bool):
-        if self.own is None or not (self.rule or (self.lane and self.lane.faces)):
+        if self.own is None or not (
+            self.rule
+            or (self.lane and self.lane.faces)
+            or (self.rna and any(r.faces for r in self.rna.values()))
+        ):
             return None  # nothing to say anywhere: every node holds SILENCE
         held: list = [None] * len(self.own)
         self.held[bool(backward)] = held
         lane = self.lane
+        rna = self.rna
 
         def receive(s: int, i: int):
             """``s`` sends two things apart — its own claim and what it holds from its far side (written
@@ -510,9 +727,19 @@ class _PreparedTransfer:
                 level = lane.emit(s, far)
                 if level is not None and not lane.empty[i]:
                     level = lane.receive(level, i)
-            if comp is None and level is None:
+            fields = {}
+            if rna:
+                for name, rl in rna.items():
+                    if (int(s), int(i)) not in rl.faces:
+                        continue
+                    lv = rl.emit(s, i, None if far is None else getattr(far, _RNA_FIELD[name]))
+                    if lv is not None and not rl.empty[i]:
+                        lv = rl.receive(lv, s, i)
+                    if lv is not None:
+                        fields[_RNA_FIELD[name]] = lv
+            if comp is None and level is None and not fields:
                 return SILENCE
-            msg = Message(composition=comp, level_gdna=level)
+            msg = Message(composition=comp, level_gdna=level, **fields)
             held[i] = msg
             return msg
 
@@ -540,4 +767,74 @@ class _PreparedTransfer:
             if parts:
                 rows[i] = _fuse(parts)
                 live = True
-        return PsiMessage(lam_rows=rows) if live else PsiMessage.silent()
+        live = self._ceilings(from_left, from_right, rows) or live
+        cube = self._cube_rows(from_left, from_right)
+        if not live and not cube:
+            return PsiMessage.silent()
+        return PsiMessage(lam_rows=rows if live else None, cube_rows=cube or None)
+
+    def _ceilings(self, from_left, from_right, rows) -> bool:
+        """THE UPPER SIDE AT SINGLE-STRAND NODES (phase 2, 2026-09-08): an RNA level of the node's live
+        strand says "at most this much gDNA". Read ONLY from a face that sent no composition — a held
+        level on that side, and the node's own junction flux at that face — because a licensed face's
+        splice-in map already carries the flux as its cap and a composition already carries its
+        sender's witnesses (reading them again counted them twice: the weak-κ zero control 42 → 1,540).
+        Bounds intersect; the row joins the node's other witnesses. Returns whether anything was added."""
+        rna, site, lane = self.rna, self.cube, self.lane
+        if not rna or site is None or site.free is None:
+            return False
+        added = False
+        for name, rl in rna.items():
+            field = _RNA_FIELD[name]
+            for i in np.flatnonzero(site.free[name] & ~site.ambig & ~rl.empty):
+                bounds = []
+                for side, m in ((site.left[i], from_left[i]), (site.right[i], from_right[i])):
+                    if m is None or m.composition is not None:
+                        continue
+                    lv = getattr(m, field)
+                    if lv is not None:
+                        bounds.append(lv.profile)
+                    fx = rl.flux[i]
+                    if fx is not None and int(side) in fx:
+                        bounds.append(fx[int(side)])
+                if not bounds:
+                    continue
+                row = rna_row_of_level(
+                    intersect(bounds), rl.u, lane.lam, site.n_u[i], site.a_r[i], rl.rho_ref
+                )
+                if np.ptp(row) <= EPS:
+                    continue
+                rows[i] = _fuse([rows[i], row]) if np.ptp(rows[i]) > EPS else row
+                added = True
+        return added
+
+    def _cube_rows(self, from_left, from_right) -> dict:
+        """THE DELIVERY AT AMBIG NODES: the held RNA levels — both sides intersected, plus the node's
+        OWN flux level (the spliced claim's one hop, boundary → exon, read at the exon; an AMBIG node
+        has no own strand claim, so its own level is the flux alone) — as one row over ψ's cube. The
+        tilt needs no lane of its own: both strands' bounds constrain it through the shares."""
+        rna, site = self.rna, self.cube
+        if not rna or site is None:
+            return {}
+        n_u, a_r = site.n_u, site.a_r
+        pos, neg = rna["pos"], rna["neg"]
+        lam = self.lane.lam
+        theta = _tilt_grid(site.n_tilt)
+        rho = {"pos": pos.rho_ref, "neg": neg.rho_ref}
+        out = {}
+        for i in np.flatnonzero(site.ambig & ~pos.empty):
+            profiles = {}
+            for name, rl in (("pos", pos), ("neg", neg)):
+                field = _RNA_FIELD[name]
+                bounds = [
+                    getattr(m, field).profile
+                    for m in (from_left[i], from_right[i])
+                    if m is not None and getattr(m, field) is not None
+                ]
+                if rl.own_level[i] is not None:
+                    bounds.append(lower_side(rl.own_level[i]))
+                if bounds:
+                    profiles[name] = intersect(bounds)
+            if profiles:
+                out[int(i)] = cube_row(profiles, pos.u, lam, theta, n_u[i], a_r[i], rho)
+        return out

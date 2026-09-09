@@ -136,6 +136,14 @@ class PsiMessage:
     #: sums them into the FINAL solve only: never phase-A, never the own-evidence precision —
     #: that citizenship is the entire difference from the intron factory's factor.
     lam_rows: np.ndarray | None = None
+    #: ⭐ THE CUBE CHANNEL (the both-stranded locus, 2026-09-08): ``{slot: (K, K_t) row}`` for AMBIG
+    #: slots only — a max-normalised log-profile over ψ's ``(λ, θ)`` cube, the delivery of the RNA
+    #: LEVEL lanes at a node where both strands are live (each held strand level read at the density
+    #: every cell implies: ``f_s = (1 − σ)(1 ± τ)/2``, ``ρ_s = f_s n / a_r``). The backbone adds it
+    #: to ψ inside the AMBIG solve, FINAL solve only, like ``lam_rows``; ``None`` or an absent slot is
+    #: byte-identical to the path before this field. A single-strand slot has no cube and may not
+    #: appear here.
+    cube_rows: dict | None = None
 
     @classmethod
     def silent(cls) -> PsiMessage:
@@ -158,6 +166,7 @@ class PsiMessage:
                 "theta_prec",
                 "rna_one_sided",
                 "lam_rows",
+                "cube_rows",
             )
         )
 
@@ -204,11 +213,17 @@ class Message:
       2026-09-05: every upper side harmed the stranded capture-ON rows) and a Gaussian summary of a
       one-sided profile invents a value.
 
+    ⭐ THE RNA LANES ARE FILLED (2026-09-08, the both-stranded locus, phase 1): a single-strand node's
+    own claim read as its live strand's RNA level, and the certified flux at an exon's junctions as that
+    strand's level at the exon; per-strand faces from the flag bits; two-sided only between an intron
+    and its own boundary; delivered at AMBIG nodes on ψ's cube (`PsiMessage.cube_rows`). The tilt lane
+    stays unused: the two RNA levels constrain the tilt inside the cube, and a tilt profile from the
+    same witnesses would count them twice.
+
     ⭐ :data:`SILENCE` — every lane ``None`` — is a MESSAGE, delivered: the neighbour spoke and had
     nothing to say. A node with no neighbour on a side holds :data:`NO_NEIGHBOUR` instead, which is not
     a message (the owner's ruling, 2026-09-04: a hop that carries nothing still arrives, explicitly
-    uninformative). ⚠ Today's rules fill ``composition`` and ``level_gdna``; the tilt profile and the
-    RNA levels are the AMBIG ruling's to fill.
+    uninformative).
 
     ⚠ The relay policy predates this type and holds its own per-node state tuple; the backbone treats
     what a kernel returns as opaque and only insists that a real hop returns SOMETHING.
@@ -301,6 +316,13 @@ class StepContext:
     ss_intron_boundary: np.ndarray  # the claimed ss-intron boundary class (structural_claims)
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
+    #: the region signature's two EXON bits per slot (False at a boundary) — a strand's OPPORTUNITY
+    #: geometry, not a population: a REGION that admits strand ``s`` and carries no exon of ``s`` is
+    #: strand ``s``'s INTRON whatever the other strand does there (the h-intron ∩ a-exon piece of an
+    #: overlapping locus is the host strand's intron and the antisense's exon at once). The coarse
+    #: ``is_exon_region`` cannot say this, and the RNA level lanes need it (2026-09-08).
+    exon_pos: np.ndarray
+    exon_neg: np.ndarray
     boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
     geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
     order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
@@ -320,6 +342,9 @@ class StepContext:
     logodds_window: float
     solve_grid: np.ndarray
     capture: dict | None = None  # the diagnostics hook; inert in production
+    #: the AMBIG cube's tilt-grid size ``K_t`` (``None`` ⇒ ``n_grid``, as the solver reads it) — what a
+    #: policy needs to lay a ``cube_rows`` row on the grid ψ will evaluate it on
+    n_tilt: int | None = None
 
     @property
     def n_slots(self) -> int:

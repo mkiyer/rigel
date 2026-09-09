@@ -1,101 +1,93 @@
-# NEXT SESSION — PHASE 1 OF THE BOTH-STRANDED LOCUS IS APPROVED; BUILD IT (handoff, 2026-09-08)
+# NEXT SESSION — PHASES 1 AND 2 OF THE BOTH-STRANDED LOCUS AND THE sj+terminus RULE ARE LANDED; THE SHIP PROTOCOL IS NEXT (handoff, 2026-09-08)
 
-⭐⭐⭐ **THE REFERENCE IS `docs/dev/AMBIG_DESIGN.md`** — the design, the census that sized it, phase 0's
-findings, the owner's rulings (2026-09-06/07/08) and the phase table. Read it whole before touching
-anything. This file is the state; that file is the plan.
+⭐⭐⭐ **THE REFERENCE IS `docs/dev/AMBIG_DESIGN.md`** — §3 the design; §4a phase 0; §4b phase 1 as built and
+measured; §4c the owner's two corrections measured; §4d phase 2. The rulings of record are `DESIGN.md`
+§6b.13. Read them whole. This file is the state.
 
-## WHAT STANDS (2026-09-08)
+## WHAT STANDS (2026-09-08, end of session; the working tree is UNCOMMITTED — the owner drives commits)
 
-1. **The level lane is landed** (`DESIGN.md` §6b.12; uncommitted): the gDNA level as an absolute
-   profile, the default rule of every face without a composition rule, lower-only, bounds intersect;
-   ladder unstranded 8/8 at or below the pre-lane policy, stranded 7/8 (`g50 ss.99 ON` 0.948×,
-   `g98 ss.99 ON` 0.908×); suite 3,765 / 8 xfail.
-2. **Two blocks joined the test chromosome** (uncommitted): the TERMINUS-CLUSTER block (2026-09-05, the
-   empty pieces) and the BOTH-STRANDED block (2026-09-07: `asin`, `asinrev`, `span`, the owner's `conv`;
-   24 two-gene loci, host-only `cap` twins). 193 genes, 5.986 Mb, budget 960 k; all seven panels
-   re-simulated, cached and certified 30/30; preflight green; the superseded derived sets are under
-   `~/Downloads/rigel_runs/test_reference_STALE_*`. ⛔ `git checkout` of the YAML restores the COMMITTED
-   chromosome and drops every uncommitted block — never do it; regenerate from the generators if needed.
-3. **Phase 0's two findings** (`AMBIG_DESIGN.md` §4a): the both-stranded stretches are unreached at pass
-   zero because a held composition is never re-issued as a level (the fix is that levels ALWAYS travel,
-   a composition alongside where a map exists); and the spanning host's junctions inside the antisense's
-   exon need a TWO-SIDED RNA level from their own intron (rung 1's own law: one shared unspliced
-   population). Both are steps of phase 1.
-4. **The owner's rulings for phase 1 (2026-09-08)**: the three levels travel TOGETHER in one message
-   (components present only where measured; empties forwarded); the certified flux joins phase 1 as an
-   RNA source; ONE representation everywhere — profiles on the solve grid, a held level evaluated at the
-   density each cell implies, no Gaussian summary anywhere in the transfer policy; the bar is about one
-   percent of a row.
+1. **The base is committed**: `8a2c68e2` on `message-layer`. Everything below is in the working tree.
+2. **LANDED in `src/` today, in this order, each gated and A/B'd before it went in:**
+   * THE RNA LEVEL LANES (phase 1, steps 2–4): per-strand faces from the flag bits with the intron test
+     per strand (`StepContext.exon_pos`/`exon_neg`); two-sided only between an intron and its own
+     boundary (counting-only price); the sources; delivery at both-stranded nodes on ψ's cube
+     (`PsiMessage.cube_rows`). The ladder: every non-zero row of both halves won.
+   * THE FLUX AS A PRICED ESTIMATE (the owner's correction): the junction's route rate is an estimate of
+     the exon's RNA abundance priced by the junction–exon pair's disagreement in the STRAND's abundance
+     (`count_price`, the count read on the column κ points to, `read_column`), kept lower-sided
+     (`flux_level(..., v)`). The ladder: stranded worst 1.000×, unstranded worst 1.011×.
+   * THE CEILING AT SINGLE-STRAND NODES (phase 2): an RNA level of the live strand read as a ceiling on
+     the gDNA share (`rna_row_of_level`, `_ceilings`), ONLY from a face that sent no composition — a
+     licensed face's splice-in map already carries the flux as its cap. Test chromosome: stranded 14/16
+     on every panel (worst 1.005×), unstranded 6–7/8 (worst in scope 1.000×), the unstranded zero control
+     −15 % (−54 % at pass zero). Ladder: see §4d's line.
+   * THE sj+terminus RULE (`DESIGN.md` §6b.14): the orientation helper reads the terminus alone, the
+     junction's flux is placed at its exon's flank (`junction_exon_side`), rule 8's mode prediction keeps
+     the crossing's scaling. Neutral in scope (the case is 0.6 % of a row at the counting floor of 10–40
+     crossings), −14 % locally on the unstranded zero row, every ladder row within 0.3 %. ⚠ The first
+     census over-sized it by counting the outside intron's error, which is the intron class's own.
+   * THE sj+terminus BLOCK on the test chromosome (`sjterm` · `capsjterm`, 12 genes, RUNX1's and LARGE1's
+     patterns on both strands; 205 genes, 6.401 Mb, budget 1,030 k); all seven panels re-simulated,
+     cached and certified 30/30 (one transient oracle-validation failure on the sparse panel when three
+     panels built at once; a resumable retry passed). The superseded derived set is at
+     `~/Downloads/rigel_runs/test_reference_STALE_193genes_2026-09-08/`.
+   **Suite 3,781 / 8 xfail, +16 gates re-derived (`CLAUDE.md`).** The landed source reproduces each
+   prototype arm to the fragment on the conditions checked.
+3. **REFUSED today, each recorded with its numbers** (`ISSUES.md`): "levels always travel" for the gDNA
+   lane (twice: alone, and re-judged on top of the ceiling — 1.59× on `g25 ss.50 OFF`); the two-sided flux
+   estimate (over-claims at a probe cliff); the total abundance as the flux's witness (charges the other
+   transcript's RNA at an overlap); a both-stranded node emitting its determined gDNA level (ladder
+   `g05` rows 1.4–1.7×); the naive ceiling that reads every level and every flux (counts the flux twice,
+   the weak-κ zero control 36×).
+4. **The prototypes and their instruments** are in this session's scratchpad and copied to
+   `~/Downloads/rigel_runs/prototypes/2026-09-08_phase1/` (`lanes_proto.py`, `p1b_proto.py`, `p2_proto.py`,
+   `lat2_proto.py`, `pass0b.py` — pass zero beside the pipeline — `halves_pass0.py`, `join_halves.py`, the
+   gate scripts, the chain dumps). ⛔ They subclass `TransferPolicy`; compare `src` against `src` from
+   here. Worth promoting to `scripts/design/`: `pass0b.py` (+4 collected cases, a docstring the gates
+   accept).
+5. **Before committing**: `preflight.py` green; `ruff` clean; the goldens unmoved (the shipped default is
+   still the relay); no upward import.
 
-## PHASE 1 — the order, each step a falsification gate watched firing, then an A/B against the landed policy, halves apart, pass zero beside the pipeline
+## WHAT THE MEASUREMENTS EXPOSED AND LEFT OPEN
 
-1. **Levels always travel.** The gDNA lane emits on every face (a composition alongside where a map
-   exists); the solve reads the composition from a side that sent both, the level otherwise. Gate: a
-   stretch's entrance forwards; a node holding both from one side reads the composition. Judged on the
-   ladder's sixteen rows and the three panels — it changes the gDNA lane's reach everywhere.
-2. **The RNA lanes' faces and plumbing, no sources yet.** Per-strand faces from the flag bits (a junction
-   of + stops RNA+ and not RNA−); two-sided only between an intron and its own boundary. Byte-identical.
-3. **The sources.** (a) own strand profiles read as RNA levels of the live strand, priced by the strand's
-   own counts; (b) the certified flux at an exon's junctions as that strand's RNA level at the exon. Gates:
-   the coordinate round trip; the hop price by strand counts; no echo; the flux level is a lower bound at
-   the route rate's Poisson width, one hop for the spliced claim itself.
-4. **Delivery at AMBIG nodes** as per-strand rows evaluated on the ``(λ, θ)`` cube (the analogue of
-   `lam_rows`; the relay's Gaussian RNA channels are not used). Gate: THE BRACKET THEOREM on a hand-built
-   node — three lower bounds and the strand equation give a two-sided gDNA share, any one removed opens a
-   side. Judged first at the spanning loci's boundaries, then everything.
+* **A probed junction over-reads the exon body 20–40×, and at a gDNA-rich exon no local witness sees it**
+  (`ISSUES: flux-floor-dispersion`). Phase 1's flux at both-stranded exons pays this on the junction
+  panel (`capspan_eq_H`'s host exon 0.988 → 0.640 at `g98 ss.99 ON`, ~175 fragments; the row still wins).
+  The exposure of the single-strand ceiling is the deferred stratum (capture-OFF has no over-read; the
+  strand channel defends stranded single-strand exons). What would see it: a witness of the junction's
+  own enrichment — the owner's owed transport-dispersion decomposition (`transport_dispersion.py`).
+* **The rung-2 face map already carries the flux as a cap** (`face_map_lambda`'s ``s``). Any RNA-side
+  message at a licensed exon must not add the flux again. This is why phase 2 reaches only faces without
+  a composition, and why "levels always travel" cannot be rescued by the ceiling: the floors it adds land
+  on licensed exons, where the ceiling may not go. The remaining unstranded plateau at licensed exons is
+  `ISSUES: two-sided-exon-row`'s (the intron row's missing upper side), not a lane's.
+* **The flux estimate's scatter beyond counting where the pair agrees** (stage 0: 5–9 % at depth) is
+  unpriced; a lucky over-read is a sharp floor a few points too high (`capspan_eq_H`'s host exon 0.586
+  against 0.645). Same instrument as above.
 
-Then phases 2–5 as the design's table has them (single-strand recipients, the remaining structures,
-the tilt ruling). Prototype outside `src/` first (`policy_prototype.py --module`), A/B, only then `src/`.
+## WHAT IS NEXT — the owner's call, in the tracker's order (`MESSAGE_RUNGS.md`)
 
-## WHERE THE POLICY STANDS (the level lane UNCOMMITTED in the working tree — the owner drives commits)
-
-Ten composition messages plus THE LEVEL LANE. Every directed face of the chain now carries a
-composition rule or the lane, or leads into structural pure gDNA or off the chain — the completion
-contract's "no skipped boundary or region" is a GATE, not a hope. What is still owed before the default
-flips: the sj+terminus composition (D), the AMBIG complex's RNA levels and tilt (H), the terminus-cluster
-block that lets the test chromosome see empty pieces, and the ship protocol. The unstranded FIRST PASS
-(the plateau's median at one-sided nodes; the −26 % a two-sided lane would give) is the enrichment
-witness's and the landscape's, after the architecture (`ISSUES: two-sided-exon-row`).
-
-## THE NEXT CASES — `MESSAGE_PLAN.md` §6 (owner rulings 2026-09-06: the enrichment witness IS the landscape prior; bound-only nodes do not train it; the rules finish first)
-
-1. **H. THE AMBIG COMPLEX** — ⭐ designed 2026-09-06, `docs/dev/AMBIG_DESIGN.md` (the RNA level lanes, the bracket theorem, the `asin`/`span` blocks, five phases, five owner decisions); the RNA levels per strand and the tilt: 9,912 AMBIG nodes carry 38 % of
-   the remaining error on `g50 ss.99 ON` and 50 % on `g98 ss.99 ON` (`ambig_census.py`). Needs a
-   both-stranded block on the test chromosome mirroring a real ladder locus (the owner authors).
-2. **D. sj+terminus** — 386 boundaries, 0.5–0.7 % of any row; `outside_flank` with a junction present,
-   item 5's map with the leaving flux.
-3. **The ship protocol** — default flip, `silent`/`relay` retired; the g00 rows are the landscape's.
-4. **Then the landscape** — the estimator at bound-only nodes and the training population.
-
-## HOW TO START
-
-* Read `MESSAGE_PLAN.md` first (the ten rules' status, the level rule, the order), then
-  `TWO_PHASE_BACKBONE.md` §0 (the words), §3 (the skeleton as landed), §6d–§6f, §8–§9.
-* The prototypes and logs are in the 2026-09-04 session scratchpad
-  (`/private/tmp/claude-503/-Users-mkiyer-proj-rigel/d7adfcc1-…/scratchpad/`): `bp_proto.py`,
-  `flux_proto.py`, `flux_stage0.py`, `bp_identity.py`, `pass0_score.py`, `halves.py` and every `.out`.
-  ⚠ Scratchpads are per session: `flux_stage0.py`, `bp_identity.py` and `pass0_score.py` are worth
-  promoting into `scripts/design/` (each adds +4 collected cases and needs a docstring the gates accept).
-* Every A/B: `policy_prototype.py --panel test|test_junction|test_sparse --all --by-class`, the halves
-  apart, pass zero beside the full pipeline, then the ladder. ⛔ Never quote one panel.
-* The suite baseline after the landing is in `CLAUDE.md`; re-derive, never adjust.
-
-## OWNER DECISIONS OUTSTANDING FROM BEFORE (recorded, not re-litigated)
-
-Item 2's `g05 ss.99 ON` residue; item 5's +46 at `g05 OFF`; item 6's +1.2 % inside exons at `g50 ON`;
-item 7's low-gDNA capture-ON rows on the benign and junction panels and `g50 ss.99 ON` benign/sparse.
-The pre-walled panels are parked at `~/Downloads/rigel_runs/test_reference/pre_walled/` (14 GB).
+1. **The ship protocol**: the default flip, `silent`/`relay` retired, the obsolescence pass (the relay's
+   certified-flux stream is now inside the transfer policy as the flux level; `rna_anchor.py`'s pooled
+   fits retire with it), goldens, `MANUAL.md`, `CLAUDE.md`.
+2. **The landscape**: the estimator at bound-only nodes and the training population
+   (`ISSUES: gdna-landscape-trains-on-false-positives`); phase 2 already cleaned the zero rows' pass-zero
+   error by half, which is that population.
+3. **The remaining both-stranded structures** (`div`; the antisense's nascent variant on `asin`) and the
+   tilt ruling (phase 5: the `theta` channel retired from the contract; today it is unused by construction).
 
 ## THE LESSONS THIS SESSION PAID FOR
 
-* **A level carried between locales is refuted by probe placement alone, and the tool never sees the
-  probe panel** — `DESIGN.md` §6b.9's founding refusal, re-measured at 4–17× on the adversarial panels
-  after a clean stage 0 and a 9/10 win on the exon-probed one. Run all three panels before believing
-  any mechanism that reads a rate across a face.
-* **A count-based row has no resolution at a three-fragment exon, and the refit prior trains on its
-  false modes** (`ISSUES: gdna-landscape-trains-on-false-positives`): the ladder's zero control turned
-  a +13 % test-chromosome loss into 3.3×.
-* **Today's `prepare` ORDER was an implicit propagation rule** (the walled block's terminus chains):
-  a pass replaces it, and the per-slot identity gate is the instrument that finds such rules.
-* **The relay's pooled transport-centre fit refuses on small substrates and misfires where it accepts**;
-  it is not a drop-in for the transfer policy.
+* **Check the closest refusal before extending a mechanism.** The flux-as-level refusal named the junction
+  panel; measuring there first turned up both the 20–40× over-read and the face map's cap, and the
+  no-double-count rule came from the second.
+* **A witness must be read in the frame the claim is in.** The junction rate is in transcript-strand terms;
+  a genome-strand count compared with it must be the column that strand's RNA reads on (κ ≈ 0.01 here).
+* **The identity hop charges counting alone; the total is the wrong witness for a strand's lane at an
+  overlap; a one-sided bound at a channel-free node is a tilt.** Three prices, each measured before it was
+  believed.
+* **Never `sed -i` a log a running process writes; never `sleep` in a foreground command; a waiter's own
+  command line must not contain the pattern it waits on (it matched itself for half an hour).**
+* **Judge a case at its destination class, not its neighbourhood.** The sj+terminus census summed the
+  flanks' error and read the intron's ordinary error as the case's; at the boundary and the inside exon
+  the case was already at the counting floor.

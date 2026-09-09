@@ -294,7 +294,8 @@ probed and unprobed, × the five blocks. Present: `altstart` (T starts inside U'
 exon\|exon TERMINUS boundary; 10 genes; U by the mature ladder, T by the ANTI-ladder 100/30/10/3/1) and
 `altss` (T splices out at an alternative DONOR 600 bp into U's middle exon; 30 genes under the
 REPLICATION RULE — owner, 2026-09-02: every multi-isoform structure is replicated across A ≫ B 9:1,
-A ≪ B 1:9 and A ≈ B 1:1). Queued, each added on the day it becomes the target: `nest`, `instart`. A −
+A ≪ B 1:9 and A ≈ B 1:1). Queued, each added on the day it becomes the target: `nest` (`instart`'s case is
+the sj+terminus block's `S` isoform, 2026-09-08). A −
 gene's geometry is mirrored within the span so each type keeps its meaning.
 
 ⭐⭐ **THE WALLED BLOCK** (owner-approved 2026-09-03) — the SCAN's stress test: transcript groups on the
@@ -343,6 +344,22 @@ Regimes host : antisense 90 : 10, 10 : 90, 50 : 50 at pair total 100; unprobed a
 a capture design's enrichment cliff between the two strands inside one node); no nascent on the hosts in
 this first cut. 24 loci, 48 genes; the chromosome grows to 5.986 Mb and every test config's fragment
 budget from 840 k to 960 k (gDNA density per base −3 %, RNA depth per existing transcript +8 %).
+
+⭐⭐ **THE sj+terminus BLOCK** (owner-approved 2026-09-08; the message plan's case D) — one boundary carrying
+a splice junction AND a transcript terminus of the same strand: 386 on the ladder, 1–2 % of an in-scope
+row's error, nearly all of it at the exon INSIDE the terminus, which until this case received only the gDNA
+lane's lower bound (the terminus rule refused a junction and the junction rules refused a terminus). Two
+families, mirrored from the ladder: a transcript that STARTS at an internal exon's edge (RUNX1's two-exon
+isoform starts where exon 4 of the long isoform begins, chr21:35,065,072 −) and one that ENDS at an internal
+exon's edge (LARGE1's isoform ends where exon 7 of twenty others begins, chr22:33,381,918 −). Host `U` = the
+twin shape; `S` = U's exons 2–3 in transcription order, starting at exon 2's transcript-5' edge; `E` = U's
+exons 1–2, ending at exon 2's transcript-3' edge — so every gene makes both families, one at each edge of
+exon 2, and a − gene makes the − forms (the four ladder families TSS+·ACC+, TES+·DON+, TSS−·DON−, TES−·ACC−
+are all present, one per gene per strand). Under the replication rule with two alternatives: `ab` U 9 : S 1 :
+E 1, `ba` 1 : 9 : 9, `eq` 5 : 5 : 5, the second and fourth abundance blocks (×3 and ×30); unprobed and probed (`cap*`); 12 genes
+(`sjterm`, `capsjterm`), the strand alternating within a block and flipping between them. The chromosome
+grows to 6.401 Mb and every test config's fragment budget from 960 k to 1,030 k (2,970 abundance units
+join 41,965: RNA depth per existing transcript +0.2 %, gDNA density per base +0.3 %).
 
 Abundances are molar ladders in half-decade steps with **mature UP the blocks and nascent DOWN**
 (10/30/100/300/1000 against 100/30/10/3/1), i.e. independent levels, exactly as the big ladder draws
@@ -408,8 +425,9 @@ structure carries nascent RNA before you read a number off it.
 
 ⚠ **THE `nrna:` BLOCK IN `configs/test_reference.yaml` IS DEAD BY DESIGN.** `abundance.mode: file` makes
 the rendered TSV the one source of both weights, so the ladder's `mode: sparse` draw never runs here.
-Editing that block changes nothing. ⭐ Depth is `n_total_fragments: 720000` per condition since the
-walled block (480 k since the isoform block, 200 k before it — raised each time to hold per-transcript
+Editing that block changes nothing. ⭐ Depth is `n_total_fragments: 1030000` per condition since the
+sj+terminus block (960 k since the both-stranded block, 840 k since the cluster block, 720 k since the
+walled block, 480 k since the isoform block, 200 k before it — raised each time to hold per-transcript
 depth as the chromosome's molar mass grew).
 
 ### ⭐⭐⭐ THE COMMANDS — from a hand-edited GTF to a scored benchmark
