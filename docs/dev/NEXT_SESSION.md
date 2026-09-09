@@ -1,16 +1,18 @@
-# NEXT SESSION — THE SHIP PROTOCOL IS DONE: `transfer` IS THE DEFAULT AND THE RELAY IS DELETED (2026-09-09); THE REFACTORING AND THE OPEN QUESTIONS ARE NEXT (handoff)
+# NEXT SESSION — THE SHIP PROTOCOL IS DONE AND COMMITTED (`0395160a`, 2026-09-09); THE FOUR PRIORITIES FOR 0.8.0 ARE RANKED BELOW (handoff)
 
 ⭐⭐⭐ **THE REFERENCES:** `docs/dev/AMBIG_DESIGN.md` §4e (today's finding, the price of the two-sided hop,
 every form with its numbers), `DESIGN.md` §6b.13 (the ruling of record), `docs/dev/MESSAGE_RUNGS.md` (the ship
 protocol's checklist). This file is the state.
 
-## WHAT STANDS (2026-09-09, end of session; the working tree is UNCOMMITTED — the owner drives commits)
+## WHAT STANDS (2026-09-09; committed as `0395160a` on `message-layer`)
 
-1. **The base is committed**: `d68cd0bf` on `message-layer` (phases 1–2, the sj+terminus rule and block).
-   Everything below is in the working tree.
-2. **THE DEFAULT IS FLIPPED**: `CalibrationConfig.message_policy = "transfer"`. `rna_anchor` stays `True`
-   but is inert (live iff the policy is relay). Judged on the ladder (`policy_benchmark.py --panel ladder
-   --policies silent relay transfer`, 09:24 today):
+1. **Committed**: `0395160a` (the flip, the split witness, the retirement) on top of `d68cd0bf` (phases 1–2,
+   the sj+terminus rule and block). The benchmark page for the committed tree is published (the owner has
+   the link); its inputs are `~/Downloads/rigel_runs/benchmarks/2026-09-09_ship/`.
+2. **THE DEFAULT IS FLIPPED**: `CalibrationConfig.message_policy = "transfer"` (`config.rna_anchor` was
+   inert from that moment and was deleted with the relay the same day, item 8). Judged on the ladder
+   (`policy_benchmark.py --panel ladder --policies silent relay transfer`, 09:24 today, the last run that
+   could still name the relay):
 
    | | vs silence | worst row | vs relay |
    |---|---|---|---|
@@ -51,9 +53,9 @@ protocol's checklist). This file is the state.
      `ISSUES: two-sided-exon-row` (the wall that closes it is refused, below); the two anchor tests that
      assumed the relay default now name the relay; `calibration_vs_oracle.py --message-policy`;
      `config.py`'s propagation docstring cut to the shipped state; the goldens regenerated.
-   **Suite: 0 failed / 3,783 passed / 7 xfail, 3,790 collected** (from 3,781 / 8 xfail: +1 gate in
-   `test_transfer_policy.py`, the two-case antisense xfail now green, the toy gate xfailed; run on the final
-   tree after the goldens' regeneration, and written into `CLAUDE.md`'s baseline line).
+   **Suite at the flip: 0 failed / 3,783 passed / 7 xfail, 3,790 collected** (from 3,781 / 8 xfail: +1 gate
+   in `test_transfer_policy.py`, the two-case antisense xfail now green, the toy gate xfailed). ⚠ Superseded
+   the same day by the retirement's count in item 11, which is what `CLAUDE.md`'s baseline line carries.
 4. **REFUSED today, each with its numbers** (`docs/dev/AMBIG_DESIGN.md` §4e; `ISSUES.md`): the pair's price on
    the column counts (`pair2`: junction panel `g25 ss.99 ON` 1.240×, ladder `g98 ss.99 ON` 1.079×); the lower
    side everywhere and two-sided only at own junction bits (both ~1.21× on `g98 ss.99 ON`); a dilation of the
@@ -69,12 +71,10 @@ protocol's checklist). This file is the state.
    0.03 → 14.3 (a nested exon at κ = 0.31 whose flux ceiling reads f_g ≤ 0.38 where the flux says ≤ 0 —
    `ISSUES: flux-price-witness-units`); `combo_extreme` 321 → 264 gDNA with 120 → 181 nascent.
 6. **`preflight.py --full` read 17/18 self-tests green** on the flipped tree; the one failure was
-   `ladder_arm_ab.py`, a relay-era instrument whose arms rebind the relay's globals: pinned to
-   `message_policy="relay"` (its docstring says so; it retires or is re-pointed in stage D), and its six
-   flux-delivery arms (`msgfree_*`, `msgscale_*`) re-pointed from the retired `_PreparedRelay.deliver` to
-   the two-phase `solve` — they had been dead since the backbone landed on 2026-09-04, which no `--full`
-   run had been asked since. Its self-test rerun after the fix reads "every arm reaches the solver"
-   (12:44), so `preflight.py --full` is 18/18 on this tree.
+   `ladder_arm_ab.py`, a relay-era instrument whose arms rebind the relay's globals — repaired for the
+   flip's measurements (its six flux-delivery arms had been dead since the backbone landed on 2026-09-04,
+   which no `--full` run had been asked since) and then DELETED in the retirement (item 10). The lesson
+   stands: run `preflight.py --full` after every default flip, not only after a deletion.
 7. **The prototypes and A/B logs**: `~/Downloads/rigel_runs/prototypes/2026-09-09_ship/` (`two_sided_proto.py`
    with every arm, `wall_proto.py`, `fluxw_proto.py`, `cube_dump.py` — the cube delivery around one slot under
    two arms — `arm_vs_arm.py`, `pass0b.py`, `halves_pass0.py`, the `*_pass0_*.out` logs). ⛔ They subclass
@@ -124,20 +124,87 @@ protocol's checklist). This file is the state.
     licence — kept as the derivation the face map and the level lane satisfy, an owner call whether to
     move them under a record heading.
 
-## WHAT IS NEXT — the owner's order (`ROADMAP.md` rank 1)
+## WHAT IS NEXT — the owner's four priorities (2026-09-09), each with its first concrete step
 
-1. **The refactoring the retirement made possible**: `transfer.py`'s `prepare` as named rule builders
-   (rung 1 / item 2 / rung 2 / item 1; rule 5; item 5 and the level rule; item 7; the gDNA lane; the RNA
-   lanes) and ONE lane class for the gDNA and RNA lanes; `Message.tilt` (unused by construction); the
-   split of `test_transfer_policy.py` (42 gates) by rung. Byte-identity gated by `rename_identity.py
-   --check` on the two frozen references after each step.
-2. **The open message-side questions, each its own step** — `ISSUES: flux-source-skipped-at-an-empty-exon-piece`
-   (small; prototype on the terminus-cluster and sj+terminus blocks), `ISSUES: flux-price-witness-units`
-   (the unstranded half's floors; needs a bounded witness at both-stranded exons),
-   `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`, `ISSUES: ambig-node-as-a-gdna-source`.
-3. **The landscape's training population** (`ISSUES: gdna-landscape-trains-on-false-positives`) — the
-   zero-gDNA rows the retired relay led on are its.
-4. **The remaining both-stranded structures** (`div`, the antisense's nascent variant, `nest`).
+### 1. Code review and cleanup, now that one policy ships (`ROADMAP.md` rank 1)
+
+Gate every step with `rename_identity.py --check` on the two frozen references
+(`~/Downloads/rigel_runs/arms/retire_identity_*.json`: `g05 ss.99 ON`, `g05 ss.50 OFF`) and the suite; a
+cleanup that moves a bit is not a cleanup. Found by this session's census (`module_census.py`, greps):
+
+* **`transfer.py` (904 lines)**: `prepare` is one 300-line function building every rule inline. Split it
+  into named builders, one per shipped message (rung 1 / item 2 / rung 2 / item 1 at the intron|exon face;
+  rule 5 at the edge; item 5 and the level rule at a terminus; item 7 at the alternative splice site; the
+  gDNA lane; the RNA lanes), each returning the rules it registers, so a reader can find a message by
+  its name. Fold `_Lane` and `_RnaLane` into ONE lane class (they differ by the witness and the sidedness
+  rule — parameters, not classes). `Message.tilt` is unused by construction — delete the lane.
+* **Plumbing the relay left behind**: 15 of `StepContext`'s 41 fields are read by neither the transfer
+  policy nor the backbone (`mass`, `inv_abundance`, `inv_sj_lo/hi`, `eff_gdna`, `eff_sj`,
+  `route_count_lo/hi`, `left/right_interface_certified`, `ss_intron_boundary`, `geometry`, `order`,
+  `solve_grid`, `capture`); `RegionInit`'s `rho_*` and `prec_*` fields are read nowhere outside
+  `region_init` (they were the relay's own precisions); `region_geometry.terminus_flank_gain` has no
+  importer and `region_total_density` only a test; `gdna_strand.binomial_scale` is exported and
+  imported by nothing. ⚠ Check `tests/` and `scripts/` readers before each deletion (the census counts
+  only `src/`).
+* **Vocabulary**: `relay_pool_ab.py` (the OFF/ON A/B) and `solvability_audit.py`'s `relay_only` /
+  `relay_delta` labels name a policy that no longer exists — `rename_census.py --sense relay` first,
+  then one stage, `rename_identity.py --check` after. `sweep.py`'s docstring still says "one combine".
+* **Tests**: `test_transfer_policy.py` is 42 gates in 2,510 lines — split by message (the faces and rules;
+  the gDNA lane; the RNA lanes and the cube; the ceilings) so a failing gate names its subject. 21 relay
+  mentions remain in test docstrings (`test_zero_count_is_a_measurement.py`, `test_ambig_scenario.py`,
+  `test_pass0_vs_oracle.py`, …) — history to rewrite as the shipped state.
+* **Docs**: `docs/dev/` is 3,128 lines of thread records (`MESSAGE_PLAN` 582, `TWO_PHASE_BACKBONE` 525,
+  `AMBIG_DESIGN` 524, `PLAN_measured_prior` 366, `message_notes` 308, `MESSAGE_RUNGS` 241,
+  `COMPOSITION_TRANSFER_STAGE01` 216, `BASELINE_2026-09-01`, `HONEST_PRECISION`, `rename`) — apply the MOVE
+  RULE: a settled ruling to `DESIGN.md`, a refusal with its number to `ISSUES.md` CLOSED, a lesson to
+  `TRAPS.md`, then delete. `DESIGN.md` (2,403 lines) carries sections about deleted mechanisms (§6b.2 the
+  anchored evidence factor "BUILT AND SHIPPED ON", §6b.3 now a marked record, §6b.7 superseded, §6b.10 the
+  scan seam) — converge it on the shipped state, one section at a time, keeping each ruling's numbers.
+  `EQUATIONS.md` §3.5–§3.6 derive the retired reframe and licence. `TRAPS.md` (1,597 lines) cites deleted
+  instruments in a few entries — re-point the citations, keep the lessons. `TESTING.md` §0b lists the
+  toy harness family; `SUCCESS.md`'s run order names instruments — both re-read against the table in
+  `CLAUDE.md`.
+
+### 2. Improving the message policy (`ROADMAP.md` rank 2)
+
+The debug loop, on the worst IN-SCOPE rows of the published page: the ladder's `g05 ss.50 OFF` (1.01× —
+the one unstranded row not won) and the by-class tables, where the largest remaining classes are the
+walled exons and the exon|exon boundaries. Each candidate is one prototype arm (`policy_prototype.py
+--module`) A/B'd on the three panels and the ladder, halves apart, pass zero beside the pipeline:
+
+1. `ISSUES: flux-source-skipped-at-an-empty-exon-piece` — small and exact: build the junction's flux level
+   at an EMPTY exon piece too (the price is counting alone there); the terminus-cluster and sj+terminus
+   blocks are its substrate. Gate: an empty piece beside a lit junction emits a lower-sided level.
+2. `ISSUES: flux-price-witness-units` — the unstranded half's flux floors pay a 0.7-nat blur that is a unit
+   mismatch, not a disagreement; needs a bounded witness at both-stranded exons (the split's asymmetry
+   as a floor on the strand's count, the column count as a cap) and a price only outside the band.
+3. `ISSUES: two-sided-exon-row` — the unstranded plateau at licensed exons; the enrichment witness.
+4. `ISSUES: flux-floor-dispersion` (the owed transport-dispersion decomposition,
+   `transport_dispersion.py`) and `ISSUES: ambig-node-as-a-gdna-source` (re-open with a width gate).
+5. The remaining both-stranded structures on the test chromosome (`div`, the antisense's nascent variant,
+   `nest`), one YAML block each, rebuilt per `docs/TESTING.md` §0a.
+
+### 3. The gDNA landscape prior (`ROADMAP.md` rank 3)
+
+`ISSUES: gdna-landscape-trains-on-false-positives` owns the four zero-gDNA rows the retired relay led on
+(the ladder's `g00` rows: silence 1.25 M / 455 k / 31 k / 21 k fragments; transfer 150 k / 168 k / 15 k /
+16 k). The owner's ruling of 2026-09-06 stands: the enrichment witness IS the landscape prior, and nodes
+whose only evidence is a bound must not train it. First step: census the training population per node
+class on the zero rows (which slots train the prior, with what evidence), then the estimator at bound-only
+nodes; `ISSUES: measured-prior-rung-4` and `ISSUES: landscape-trains-on-real-substrate` carry the plan
+(`docs/dev/PLAN_measured_prior.md` is its sandbox record). Instruments: `abundance_landscape_census.py`,
+`landscape_head_to_head.py`, `calibration_walk.py` (rung E, the refits alone).
+
+### 4. The post-calibration, pre-EM setup (`ROADMAP.md` rank 4)
+
+`priors.py` (`assemble_priors`, `LocusPriors`), `result.py`, `derive.py`: the calibration result turned into
+what the EM reads. The instrument is `prior_vs_oracle.py` (five arms separating calibration's error from
+the assembler's), read beside `calibration_vs_oracle.py`'s ruler column (`ruler_n_moved`). The open entries:
+`ISSUES: prior-fidelity-vs-deliverable`, `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: g00-shrinkage-upstream-repair`,
+`ISSUES: capture-blind-gdna-divisor`, `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`, and the
+crossing→fragment conversion (`boundary_q_population.py`, bounded). `EQUATIONS.md` §9b is the EM's RNA
+prior and why a synthetic nascent entity gets none. First step: re-run `prior_vs_oracle.py` on the
+committed tree so the assembler's own error is re-recorded under the shipped policy before anything moves.
 
 ## THE LESSONS THIS SESSION PAID FOR
 

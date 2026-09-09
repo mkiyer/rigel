@@ -73,6 +73,9 @@ RUNS = Path.home() / "Downloads" / "rigel_runs"
 #: the two substrates, each: (index dir, the dir holding `oracle_cache/<condition>/`)
 PANELS = {
     "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
+    # the same chromosome under the two other probe designs (`docs/TESTING.md` §0a)
+    "test_junction": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_junction"),
+    "test_sparse": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_sparse"),
     "ladder": (RUNS / "suite" / "rigel_index", RUNS / "suite" / "ladder"),
 }
 

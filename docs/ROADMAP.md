@@ -82,31 +82,35 @@ roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local 
 propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
 is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
 
-1. ⭐⭐⭐ **THE TRANSFER POLICY'S NEXT STEPS (the ship protocol is done: the default flipped and the relay
-   retired on 2026-09-09).** The judgement instruments are `policy_benchmark.py --panel ladder` and, on the
-   0.8.0 metric, `calibration_vs_oracle.py --message-policy`. In order: (a) the refactoring the retirement
-   made possible — `transfer.py`'s named rule builders and one lane class, `Message.tilt` (unused by
-   construction), the split of the gate file; (b) the open message-side questions, each its own step,
-   prototyped and A/B'd before `src/`: `ISSUES: flux-source-skipped-at-an-empty-exon-piece` (small, the
-   terminus-cluster and sj+terminus blocks are its substrate), `ISSUES: flux-price-witness-units` (the
-   unstranded half's floors), `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
-   `ISSUES: ambig-node-as-a-gdna-source`; (c) the landscape's training population
-   (`ISSUES: gdna-landscape-trains-on-false-positives`), which owns the zero-gDNA rows; (d) the remaining
-   both-stranded structures (`div`, the antisense's nascent variant, `nest`).
-2. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
+1. ⭐⭐⭐ **CODE AND DOC CLEANUP ON THE ONE SHIPPED POLICY (owner priority 1, 2026-09-09).** `transfer.py`'s
+   `prepare` as named message builders and one lane class; the relay's leftover plumbing (15 unread
+   `StepContext` fields, `RegionInit`'s unread precisions, two orphaned geometry functions); the
+   `relay`-named labels renamed after a census; `test_transfer_policy.py` split by message; the sandbox
+   pruned by the MOVE RULE and `DESIGN.md` converged on the shipped state. Every step gated bit-identical
+   by `rename_identity.py --check` on the two frozen references.
+2. ⭐⭐⭐ **IMPROVE THE MESSAGE POLICY (owner priority 2).** The debug loop on the worst in-scope rows of the
+   benchmark page, one prototype arm at a time: `ISSUES: flux-source-skipped-at-an-empty-exon-piece`,
+   `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
+   `ISSUES: ambig-node-as-a-gdna-source`; then the remaining both-stranded structures (`div`, the
+   antisense's nascent variant, `nest`).
+3. ⭐⭐ **THE gDNA LANDSCAPE PRIOR (owner priority 3).** `ISSUES: gdna-landscape-trains-on-false-positives`
+   owns the zero-gDNA rows; the training population and the estimator at bound-only nodes first
+   (`ISSUES: measured-prior-rung-4`, `ISSUES: landscape-trains-on-real-substrate`).
+4. ⭐⭐ **THE POST-CALIBRATION, PRE-EM SETUP (owner priority 4).** `priors.py` / `result.py` / `derive.py`
+   against `prior_vs_oracle.py` and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
+   `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: g00-shrinkage-upstream-repair`, `ISSUES: capture-blind-gdna-divisor`,
+   `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`.
+5. ⭐ **The calibration build thread** (part of priority 3): `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
-3. ⭐ **Re-price the vertex atom AFTER the message layer is repaired, never before** — `EQUATIONS.md`
+6. ⭐ **Re-price the vertex atom AFTER the message layer is repaired, never before** — `EQUATIONS.md`
    §9a.1/§9d.4 already carry the derivation and the spike with no new constant; what is owed is the
    whole-ladder `vertex_ceiling.py` and a release-metric equivalent, against a solver that keeps what
    it is given.
 
-Then, in standing order: `ISSUES: per-transcript-prior-lane` (the largest in-scope end-to-end lever,
-now with a measured target population) · `ISSUES: performance-memory-bounded-solve` (owner: mandatory
-before 0.8.0) · the ruler pair `ISSUES: u-ruler-arm` + `ISSUES: g00-shrinkage-upstream-repair` · the
-capture-ON length pair `ISSUES: capture-blind-gdna-divisor` + `ISSUES: eb-shrinkage-magic-ess` · the
-message-vs-prior questions `ISSUES: refit-vs-message-arbitration`,
-`ISSUES: prior-fidelity-vs-deliverable`.
+Then, in standing order: `ISSUES: performance-memory-bounded-solve` (owner: mandatory before 0.8.0) ·
+the message-vs-prior question `ISSUES: refit-vs-message-arbitration` (the pre-EM entries above sit under
+priority 4).
 
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
 `alt-splice-rung-unverified` · `transfer-variance-premise` · `nascent-stress-sensitivity` ·
