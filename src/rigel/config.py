@@ -378,7 +378,7 @@ class CalibrationConfig:
     #: pre-factory pass-0.
     #:
     #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
-    #: (``messages.relay`` — ``I_factory``). Before that the factory shifted an intron's own
+    #: (``I_factory``, in the retired relay). Before that the factory shifted an intron's own
     #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
     #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
     #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite (⚠ DELETED — see
@@ -388,92 +388,35 @@ class CalibrationConfig:
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
 
-    #: ⭐⭐⭐ **THE CERTIFIED-FLUX STREAM — DEFAULT ON (owner, 2026-08-24; ruled A MESSAGE
-    #: 2026-08-25).** Anchors the RNA side of the unspliced count where hybrid capture cannot
-    #: mis-scale it: certified splice flux at complete-flank exons, the adjacent intron's
-    #: excess-over-background (nascent) rate at eligible ss-intron boundaries
-    #: (`calibration.rna_anchor` — the derivation and the recorded residuals live in its module
-    #: docstring). ⛔ **It is a MESSAGE, not own evidence**: a one-hop imputation the RELAY
-    #: delivers (`PsiMessage.lam_rows`), summed into the FINAL solve only — never phase-A, never
-    #: the own-evidence precision — so it is live iff ``message_propagation`` is on and
-    #: ``message_policy`` is ``"relay"``, and the silent CONTROL never carries it. ⛔ ``False`` ⇒
-    #: the evidence is never prepared and every path is byte-identical — gated by
-    #: ``tests/calibration/test_rna_anchor.py``'s explosive reach tests in both directions.
-    rna_anchor: bool = True
-
-    #: ⭐⭐⭐ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT ON**
-    #: (owner, 2026-08-18), after ~11 days muted. ``False`` installs ``messages.silent.SilentPolicy``, ψ
-    #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the
-    #: fitted gDNA prior and the intron factory. ``True`` installs
-    #: ``messages.relay.RelayPolicy``, every operator behind its own named switch.
-    #:
-    #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** Measured 2026-08-07 on the 36-condition ladder —
-    #: ⚠ RETIRED, rebuilt at 16 conditions on 2026-08-13, so the numbers below stand as recorded and are
-    #: not reproducible as written. Muting the message layer is a net IMPROVEMENT on THREE OF THE FOUR
-    #: STRATA::
-    #:
-    #:     stranded   x capture ON    -58.3 %   16/16 conditions better
-    #:     stranded   x capture OFF   -43.7 %   16/16 better
-    #:     unstranded x capture OFF   -32.1 %   14/16 better
-    #:     unstranded x capture ON   +154.8 %    0/16 better
-    #:
-    #: ⭐ **THE ``/16`` IS SCORED ROWS, NOT CONDITIONS, AND BOTH LABELS ARE CORRECT** (settled 2026-08-17
-    #: by reading ``scripts/design/arm_score.py``, not by inference). Its rows are keyed
-    #: ``(condition, axis)`` and every per-stratum line predicates on ``not is_g00(k)`` — the zero control
-    #: gets its own line. So a 36-condition ladder is 9 rungs x 2 ss x 2 capture, of which one rung is the
-    #: control: **8 scored conditions x 2 axes = 16 rows per stratum**, exactly. ⚠ On the 16-condition
-    #: ladder the same arithmetic gives **6**, so a future re-price reads ``n/6`` and that is not a
-    #: regression in coverage — it is a smaller panel.
-    #:
-    #: ⛔⛔ **AND THE PRICE IS CONCENTRATED, LARGE, AND ON THE ZERO CONTROL.** The panel total is +99.9 %
-    #: worse because that one stratum carries 73 % of the error — and end-to-end it is worse than the
-    #: panel suggests. On golden scenarios whose TRUTH IS ZERO gDNA, the false-positive gDNA mass goes::
-    #:
-    #:     antisense_contained   0.029  ->  89.93     (~3,100x)
-    #:     antisense_overlap     0.005  ->   9.58     (~1,900x)
-    #:     single_exon_clean     0.008  ->   0.104
-    #:     multi_exon_spliced    0.001  ->   0.031
-    #:
-    #: ⭐ Both AMBIG loci, which is exactly where ``κ = ½`` makes the strand λ-term identically 0 so the
-    #: slot has NO own composition evidence and a message is the only source there is.
-    #:
-    #: ⚠ **So this default is a STUDY CONFIGURATION**, and turning it back on is one word — every
-    #: operator inside ``RelayPolicy`` remains individually switchable.
-    #:
-    #: ⛔ **The planned way out has been MEASURED AND REFUSED.** This comment used to say the exit was to
-    #: give that slot its own θ-independent evidence via a fragment-length composition channel. That
-    #: channel was built, priced on the drained arm and DELETED (2026-08-10): its answer is not a function
-    #: of the fragment-length gap at all — closing the gap to 1e-9 bp leaves it reporting 0.59-0.72 on
-    #: libraries whose truth is 0.00-0.57 — because a Gaussian log-likelihood is asymptotically LINEAR in
-    #: the composition, so its argmax is a SIGN saturated at a grid endpoint. See `TRAPS.md`.
-    #: ⭐⭐⭐ **WHY IT IS BACK ON (owner, 2026-08-18).** The mute was always a STUDY configuration and the
-    #: numbers above are stale in two independent ways — the 36-condition ladder they were measured on was
-    #: RETIRED on 2026-08-13, and many unrelated improvements have landed since. ⭐ What re-opened it: on
-    #: the scoped pass-0 exon population the relay is the ONLY thing that solves a slot with no own
-    #: evidence. On unstranded capture-OFF those exons have ``fg_strand == fg_loc`` exactly and a mean
-    #: |error| of **0.500** — ψ's uninformative ½, i.e. no own evidence at all — and the relay takes them
-    #: to **0.000087**. Whole-chain at the ``g00`` control it is **3,777,038 → 70,246 fragments** (0.019×).
-    #: ⛔ **IT IS NOT UNIFORMLY BETTER AND THAT IS THE DEBUGGING TARGET, NOT A REASON TO RE-MUTE**: on
-    #: STRANDED CONTAMINATED data it is worse whole-chain — ``g98 ss0.99 capture_off`` 156,767 → 255,263
-    #: (1.628×), ``g98 ss0.99 capture_on`` 281,487 → 728,103 (2.587×). The relay's win is concentrated
-    #: where the local solve is BLIND (unstranded, and every zero-gDNA control); its loss is where the
-    #: strand channel already had the answer.
-    #: ⚠ **Flipping this default is a CONFIG DEFAULT FLIP** — the trigger that once left six instruments
-    #: dead while the suite stayed green, because the TEST readers install the policy themselves. Run the
-    #: instruments, not just the suite (`TRAPS: a-green-suite-hid-five-dead-instruments`).
+    #: ⭐⭐⭐ **MESSAGE PROPAGATION — what one neighbour tells another, on the two-phase backbone
+    #: (prepare → propagate → solve). DEFAULT ON** (owner, 2026-08-18). ``True`` installs the policy
+    #: ``message_policy`` names; ``False`` installs ``messages.silent.SilentPolicy`` — ψ carries each
+    #: slot's OWN evidence alone (its two strand counts, its spliced count, the fitted gDNA prior and
+    #: the intron factory), the measured floor every policy is judged against. ⭐ Messages exist for
+    #: the slots whose own solve has no composition channel — unstranded data and the both-stranded
+    #: (AMBIG) slots, where the strand likelihood is flat and the local answer is a default rather
+    #: than a measurement; on stranded data a sighted exon's own solve is excellent and a message can
+    #: mostly only disturb it. The standing is re-derived by ``scripts/design/policy_benchmark.py``,
+    #: the two halves read apart and never pooled.
+    #: ⚠ **Flipping this default, or ``message_policy``, is a CONFIG DEFAULT FLIP** — the trigger that
+    #: once left six instruments dead while the suite stayed green, because the TEST readers install
+    #: the policy themselves. Run the instruments, not just the suite
+    #: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
     message_propagation: bool = True
 
-    #: **Which policy `message_propagation = True` installs** — `"relay"` (the shipped
-    #: :class:`~rigel.calibration.messages.relay.RelayPolicy`, every operator behind its own
-    #: switch), `"silent"` (:class:`~rigel.calibration.messages.silent.SilentPolicy`, the
-    #: measured floor — the same policy `message_propagation = False` installs) or `"transfer"`
-    #: (:class:`~rigel.calibration.messages.transfer.TransferPolicy`, the composition-transfer
-    #: rebuild — the owner's rulings of 2026-09-01 onward).
+    #: **Which policy `message_propagation = True` installs** — ⭐ `"transfer"` (THE SHIPPED
+    #: DEFAULT since 2026-09-09: :class:`~rigel.calibration.messages.transfer.TransferPolicy`, the
+    #: composition-transfer rebuild on the two-phase backbone — the owner's rulings of 2026-09-01
+    #: onward; the ship judgement is `policy_benchmark.py --panel ladder`: it beats silence on 7 of 8
+    #: rows of EACH half (the other two within 1 %) and the relay on 13 of 16, that relay leading only
+    #: on three zero-gDNA rows that are the landscape's; on the 0.8.0 metric it has the lowest
+    #: composition error on every in-scope stratum, `calibration_vs_oracle.py --message-policy`) or
+    #: `"silent"` (:class:`~rigel.calibration.messages.silent.SilentPolicy`, the measured floor — the
+    #: same policy `message_propagation = False` installs). The relay it replaced, and the relay's
+    #: certified-flux anchor, were retired on 2026-09-09; git carries them.
     #: ⛔ An unknown name RAISES: an arm that silently runs a policy other than the one it names
     #: is a benchmark that cannot be trusted.
-    #: ⚠ The A/B between the policies is THIS one value, which is what keeps development off the
-    #: relay — `RelayPolicy` is not modified, so nothing that works can break.
-    message_policy: str = "relay"
+    message_policy: str = "transfer"
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA

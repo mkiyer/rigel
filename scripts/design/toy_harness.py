@@ -116,52 +116,31 @@ def _sibling(name: str):
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
-# ⭐⭐⭐ THE RELAY'S DIAGNOSTIC BANKS — AND WHETHER THIS RUN HAS ANY
+# ⭐⭐⭐ THE MESSAGE SETTING IS PART OF THE ARM, AND IT IS STAMPED
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 #
-# ⛔⛔ **`_uni` HAS EXACTLY ONE WRITER AND IT IS BEHIND A CONFIG FLAG.** `messages/relay.py` appends it,
-# so it exists only under `RelayPolicy`; with `CalibrationConfig.message_propagation` False,
-# which installs `SilentPolicy`. Five instruments read `capture["_uni"]` unconditionally and therefore
-# died with `KeyError: '_uni'` the day that default flipped, while the SUITE stayed green because the
-# test readers install the policy themselves. That is `TRAPS: a-green-suite-hid-five-dead-instruments`
-# recurring, and this block is the shared repair so it cannot recur once per instrument.
-#
-# ⭐ The precedent is `ladder_arm_ab.py`: the message setting is PART OF THE ARM, it is STAMPED into the
-# output, and an arm the policy cannot express is REFUSED up front rather than reported as a null result
-# (`TRAPS: an-ablation-that-never-ran`). So every reader of these banks takes `--messages {off,on}`,
-# prints `messages_stamp()`, and either degrades its relay-derived column with `relay_live()` or calls
-# `require_relay()`.
+# ⛔ Five instruments once died with `KeyError` the day a policy default flipped, while the SUITE stayed
+# green because the test readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-
+# instruments`). So every reader of a calibration capture takes `--messages {off,on}`, prints
+# `messages_stamp()`, and reads its policy off the config it ran — never off a bank a policy may or may
+# not publish. (The relay's per-slot banks and their readers retired with the relay, 2026-09-09.)
 
 #: ⭐ what the tool SHIPS, re-derived rather than written down — the honest default for an instrument
-#: whose headline question does not involve the relay at all.
+#: whose headline question does not involve the message layer at all.
 MESSAGES_SHIPPED: bool = bool(CalibrationConfig().message_propagation)
-
-#: ⭐⭐ The `_uni_static` keys that are NOT the relay's to own: `head.py` copies them straight off its
-#: `StepContext`, and `sweep.py` — the backbone, which runs under EVERY policy — already publishes the
-#: same arrays at the top level of the capture under different names. So these four survive the mute,
-#: and `relay_static()` serves them from the policy-independent source.
-#: ⛔ The mapping is ASSERTED, never assumed: where both names are present (any `--messages on` run)
-#: `relay_static()` requires byte-identity, so an alias that stops being an alias fails loudly instead
-#: of quietly substituting a different quantity.
-_STATIC_FROM_BACKBONE: dict[str, str] = {
-    "M": "mass_global",  # head.py: M = ctx.mass  ·  sweep.py: mass=mass_global
-    "E_g": "eff_global",  # head.py: E_g = ctx.eff_gdna_global  ·  sweep.py: eff_gdna_global=eff_global
-    "E_r": "eff_rna",  # head.py: E_r = ctx.eff_rna  ·  sweep.py: eff_rna=ER
-    "tau_own": "_tau0_lam",  # head.py: tau_own = ni.tau_lam  ·  sweep.py: _tau0_lam=own.tau_lam
-}
 
 
 def add_messages_flag(ap, *, default: bool) -> None:
     """Give an instrument the `--messages {off,on}` flag, with ITS OWN honest default.
 
     ⭐ `default=MESSAGES_SHIPPED` for an instrument whose measurement is policy-independent — it then
-    runs the configuration the tool ships. `default=True` for one whose measurement IS the relay, which
-    is a deliberate departure from the shipped config and is stamped as such on every run."""
+    runs the configuration the tool ships. `default=True` for one whose measurement IS the message
+    layer, stamped as such on every run."""
     ap.add_argument(
         "--messages",
         choices=("off", "on"),
         default="on" if default else "off",
-        help=f"belief propagation across objects. This instrument defaults to "
+        help=f"message propagation across objects. This instrument defaults to "
         f"{'on' if default else 'off'}; the SHIPPED CalibrationConfig is "
         f"{'on' if MESSAGES_SHIPPED else 'off'}. Stamped into the output either way.",
     )
@@ -173,93 +152,29 @@ def messages_on(args) -> bool:
 
 
 def with_messages(config: CalibrationConfig, messages: bool) -> CalibrationConfig:
-    """The same config with the relay switched. ⭐ No monkeypatching: `calibrate` selects
-    `RelayPolicy` vs `SilentPolicy` off this one field."""
+    """The same config with propagation switched. ⭐ No monkeypatching: `calibrate` installs the policy
+    `message_policy` names when on, `SilentPolicy` when off."""
     return dataclasses.replace(config, message_propagation=bool(messages))
+
+
+def policy_name(config: CalibrationConfig) -> str:
+    """The policy `calibrate` installs for this config, by its name."""
+    return config.message_policy if config.message_propagation else "silent"
 
 
 def messages_stamp(messages: bool) -> str:
     """The line every one of these instruments prints, so a reader can never mistake which
     configuration produced the numbers below it."""
-    if messages:
-        note = (
-            "  ⛔ NOT the shipped config (shipped is OFF) — RelayPolicy installed"
-            if not MESSAGES_SHIPPED
-            else "  (the shipped config)"
-        )
-        return f"   messages = ON   ·   policy = RelayPolicy{note}"
-    note = (
-        "  (the shipped config)"
-        if not MESSAGES_SHIPPED
-        else "  ⛔ NOT the shipped config (shipped is ON)"
-    )
-    return (
-        f"   messages = OFF  ·   policy = SilentPolicy{note}\n"
-        f"   ⛔ ψ carries each slot's OWN evidence alone. Every relay-derived column below reads "
-        f"'—' because the relay SENT NOTHING — not because it sent a zero."
-    )
-
-
-def relay_live(capture) -> bool:
-    """Did a relay run in THIS capture? — read off the artifact, not off the config.
-
-    ⭐ The artifact is the honest witness: `head.py` is the only writer of `_uni`, so its presence is
-    the relay's own signature. An instrument that trusted its own `--messages` flag instead would lie
-    the day a caller forgot to thread the config through (`TRAPS: an-ablation-that-never-ran`)."""
-    return bool(capture.get("_uni"))
-
-
-def relay_channels(capture) -> dict | None:
-    """The LAST relay fuse's per-slot channels (`cg`, `cm_g`, `cm_p`, `cm_n`, `c_tau`, `mo_*`, …), or
-    `None` when the relay was muted. ⛔ `None` means *no claim was made*; it does not mean zero."""
-    return capture["_uni"][-1] if relay_live(capture) else None
-
-
-def relay_static(capture) -> dict:
-    """`_uni_static`, with the four backbone-owned entries backfilled so they survive the mute.
-
-    ⛔ Every key `head.py` alone publishes (`og`, `pg_own`, `rho_lo`, `rho_hi`, `struct_lock`, …) is
-    absent under `SilentPolicy` and stays absent — a caller that needs one must `require_relay()`."""
-    st = dict(capture.get("_uni_static", {}))
-    for head_key, backbone_key in _STATIC_FROM_BACKBONE.items():
-        if backbone_key not in capture:
-            continue
-        alias = np.asarray(capture[backbone_key], np.float64)
-        if head_key in st:
-            # the alias, FALSIFIED on every run that has both names
-            np.testing.assert_array_equal(
-                np.asarray(st[head_key], np.float64),
-                alias,
-                err_msg=f"_uni_static[{head_key!r}] is no longer capture[{backbone_key!r}] — "
-                f"`_STATIC_FROM_BACKBONE` in toy_harness.py is stale and must be re-derived",
-            )
-        else:
-            st[head_key] = alias
-    return st
-
-
-def require_relay(capture, *, what: str) -> dict:
-    """The measurement IS the relay, so refuse rather than report a null result.
-
-    ⭐ Same contract as `ladder_arm_ab.py`'s up-front refusal of an arm the policy cannot express: a
-    section that cannot run must say so in the reader's own vocabulary, not print zeros."""
-    uni = relay_channels(capture)
-    if uni is None:
-        raise SystemExit(
-            f"⛔ {what} is a MESSAGE-LAYER measurement and this run has message_propagation=False "
-            f"(SilentPolicy), so the relay published no `_uni` banks at all.\n"
-            f"   Re-run with `--messages on`. ⚠ That is NOT the shipped configuration "
-            f"(CalibrationConfig.message_propagation = {MESSAGES_SHIPPED}) and the stamp will say so."
-        )
-    return uni
-
-
-def relay_silent_note(what: str) -> str:
-    """The one-line banner a DEGRADED section prints in place of its relay-derived numbers."""
-    return (
-        f"   ⛔ {what} NEEDS THE RELAY AND THE RELAY IS MUTED (SilentPolicy, the shipped config).\n"
-        f"      Not measured here, and NOT a zero measurement. `--messages on` to measure it."
-    )
+    shipped = CalibrationConfig()
+    pol = policy_name(dataclasses.replace(shipped, message_propagation=bool(messages)))
+    if messages == MESSAGES_SHIPPED:
+        note = "  (the shipped config)"
+    else:
+        note = f"  ⛔ NOT the shipped config (shipped is {'ON' if MESSAGES_SHIPPED else 'OFF'})"
+    line = f"   messages = {'ON ' if messages else 'OFF'}  ·   policy = {pol}{note}"
+    if not messages:
+        line += "\n   ⛔ ψ carries each slot's OWN evidence alone: no message was sent, so nothing was delivered."
+    return line
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -770,7 +685,7 @@ def report(r: ToyResult) -> None:
         print("   " + "-" * 118)
         print(f"   {len(live)} objects with truth · Σ|err| = {e.sum():,.0f} fragments · "
               f"mass-weighted |Δf_g| = {float((d * w).sum() / w.sum()):.4f}")
-    print("   ⭐ loc = the message-free local solve; pred = after the relay. If they differ, the")
+    print("   ⭐ loc = the message-free local solve; pred = after the messages. If they differ, the")
     print("      messages moved it. sd is the declared sd of log f_g; tau is the own-evidence")
     print("      precision on the log-odds (0 = this object has no answer of its own).")
 
@@ -1036,7 +951,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "deep_exon": ToySpec(
         name="deep_exon",
-        what_it_probes="⭐ TRAPS: a-purity-filter-is-a-length-filter: a LARGE, RNA-rich exon beside an intron — the relay pins these to ~0.85",
+        what_it_probes="⭐ TRAPS: a-purity-filter-is-a-length-filter: a LARGE, RNA-rich exon beside an intron — the retired relay pinned these to ~0.85",
         genome_length=80_000,
         genes=[_gene("g1", "+", [(20_000, 34_000), (40_000, 43_000)], 3000.0)],
         n_rna_fragments=120_000,
@@ -1167,7 +1082,7 @@ def sweep_density(
     print("   ⭐ THE CHAIN under test:  intergenic → boundary → EXON → boundary → intergenic. With no intron")
     print("      and no sj, the exon's only route to an answer is the two boundaries, so a wrong")
     print("      exon here is a message-passing failure and nothing else.")
-    print("   ⭐ loc = the message-free local solve; pred = after the relay. loc ≈ pred means the")
+    print("   ⭐ loc = the message-free local solve; pred = after the messages. loc ≈ pred means the")
     print("      messages did nothing; loc far from truth with pred near it means they carried it.")
 
 

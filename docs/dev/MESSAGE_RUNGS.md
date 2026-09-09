@@ -207,7 +207,9 @@ Each rung-4 item is one YAML structure (`panel.py` rebuilds all seven panels in 
 message, prototyped through `policy_prototype.py`, scored NODE-LOCALLY at the slots it serves and
 whole-library, falsified by reversing its orientation, laddered both halves apart.
 
-**The ship protocol, once the holes are closed or ruled accepted:**
+**The ship protocol** (⭐ DONE 2026-09-09, all four steps: the default is `transfer`, the relay and its
+baggage are deleted, `preflight --full` and the goldens re-derived; the record is `docs/dev/NEXT_SESSION.md`
+and the identity gate's two frozen references):
 
 1. Price the rebuild on the 0.8.0 metric — `calibration_vs_oracle.py` and `solvability_audit.py`
    under `transfer`, per stratum (never yet done; the policy benchmark is the fragment-count view).

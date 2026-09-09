@@ -91,7 +91,6 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
-from scipy.special import polygamma
 
 from ..simplex_logodds import _tilt_grid, strand_row_logodds
 from . import SILENCE, Level, Message, PsiMessage, StepContext
@@ -100,31 +99,32 @@ from .transfer_rows import (
     SJ_FLAGS,
     blur_row,
     boundary_shares_strand,
+    count_logvar,
     count_price,
     cube_row,
     edge_level_row,
-    flux_level,
-    read_column,
-    rna_level_of_profile,
-    rna_row_of_level,
-    strand_bits,
     face_is_licensed,
     face_map_lambda,
+    flux_level,
+    hop_price,
+    intersect,
     junction_exon_side,
     junction_flanks,
     level_bound_row,
     level_map_lambda,
-    level_row,
-    outside_flank,
-    splice_out_row,
-    transport_row,
-    hop_price,
-    intersect,
     level_of_profile,
+    level_row,
     lower_side,
+    outside_flank,
     poisson_level,
     priced_level,
     profile_of_level,
+    read_column,
+    rna_level_of_profile,
+    rna_row_of_level,
+    splice_out_row,
+    strand_bits,
+    transport_row,
 )
 
 __all__ = ["TransferPolicy"]
@@ -372,7 +372,7 @@ class TransferPolicy:
                     )  # the level kept: the boundary's share over r
                     d = np.log(f_i / (1.0 - f_i)) - np.log(f_pred / (1.0 - f_pred))
                     v_pair += max(0.0, float(d * d) - (v_b + v_i + 1.0 / n_u[i] + 1.0 / total_b))
-            v_level = float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5)) + v_pair
+            v_level = float(count_logvar(n_u[b]) + count_logvar(n_u[i])) + v_pair
             m_level = level_map_lambda(lam, density_b, a_g[i], n_u[i])
             bound = level_bound_row(lam, density_b, a_g[i], n_u[i], v_level)
 
@@ -436,9 +436,13 @@ class TransferPolicy:
         # level it holds; the recipient prices the hop and takes the level as a LOWER bound.
         empty = ~(n_u > 0.0) | ~(a_g > 0.0)
         pure = is_intergenic & (a_g > 0.0)
-        if a_g[pure].sum() > 0.0:
-            rho_ref = float(n_u[pure].sum() / a_g[pure].sum())
-        else:
+        # the lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE for a
+        # log axis, so any positive density serves; when the intergenic count is zero (a zero-gDNA
+        # library with no intergenic reads) the library-wide density stands in — measured 2026-09-09:
+        # with the coordinate at zero the gDNA lane AND the RNA lanes that hang off it were never built,
+        # and a both-stranded overlap at zero gDNA read 0.95 gDNA against a truth of 0.
+        rho_ref = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
+        if not rho_ref > 0.0:
             rho_ref = float(n_u[a_g > 0.0].sum() / max(a_g[a_g > 0.0].sum(), EPS))
         lane = None
         if rho_ref > 0.0:
@@ -500,9 +504,21 @@ class TransferPolicy:
         empty = ~(n_u > 0.0) | ~(a_r > 0.0)
         single = ~(fp & fn)
         kappa = None if self._strand is None else float(self._strand[0])
+        # the split is a witness of a strand's RNA only where the library's strand channel is live —
+        # the derived deadband's verdict, already on the context: a κ within its noise of ½ zeroes the
+        # strand precision of every single-strand exon (`tau_lam` there is the strand term alone; at an
+        # intron the factory's density precision joins it, so introns cannot stand for the channel)
+        tau = np.asarray(ctx.own.tau_lam, np.float64)
+        split_live = kappa is not None and bool(np.any(tau[is_exon & (fp != fn)] > 0.0))
         lanes = {}
         for name, free, col in (("pos", fp, 0), ("neg", fn, 1)):
             all_bits, _sj_bits, term_bits = strand_bits[name]
+            # the lane's WITNESS is the count of the reads strand-``s`` RNA produces: its own genome-strand
+            # column when the library reads sense, the other under an antisense protocol (`read_column`;
+            # measured 2026-09-09 at κ ≈ 0.01: the own column held a handful of reads at every
+            # single-strand exon, every hop was priced as counting on nothing, and the floors arrived
+            # blurred to nothing at a zero-gDNA overlap that then read 0.35 gDNA)
+            col_read = read_column(col, kappa)
             intron_s = ~is_bnd & free & ~exon_of[name]
             faces, two_sided = set(), set()
             for x in range(n):
@@ -520,7 +536,9 @@ class TransferPolicy:
                         faces.add((int(x), int(y)))
                         two_sided.add((int(x), int(y)))
             sel = is_exon & free & single & (a_r > 0.0)
-            rho_ref = float(cnt[sel, col].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
+            rho_ref = (
+                float(cnt[sel, col_read].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
+            )
             own_level: list = [None] * n
             flux_of: list = [None] * n
             if rho_ref > 0.0:
@@ -539,7 +557,6 @@ class TransferPolicy:
                         # counts' counting plus their disagreement beyond it; a probed junction beside
                         # an unprobed exon disagrees and goes weak. Kept LOWER-SIDED: the two-sided
                         # estimate over-claimed at the probe cliff (measured 2026-09-08).
-                        col_read = read_column(col, kappa)
                         for b in (left[x], right[x]):
                             if b < 0 or not is_bnd[b]:
                                 continue
@@ -558,13 +575,14 @@ class TransferPolicy:
             lanes[name] = _RnaLane(
                 lane.u,
                 rho_ref,
-                cnt[:, col],
+                cnt[:, col_read],
                 a_r,
                 empty,
                 own_level,
                 frozenset(faces),
                 frozenset(two_sided),
                 flux_of,
+                cnt[:, 1 - col_read] if split_live else None,
             )
         return lanes
 
@@ -621,15 +639,41 @@ class _RnaLane:
     each node's strand count (the lane's own witness) and RNA opportunity, its emptiness, its own
     level, the directed faces the lane serves and the faces it crosses TWO-SIDED."""
 
-    __slots__ = ("u", "rho_ref", "count", "a", "empty", "own_level", "faces", "two_sided", "flux")
+    __slots__ = (
+        "u",
+        "rho_ref",
+        "count",
+        "a",
+        "empty",
+        "own_level",
+        "faces",
+        "two_sided",
+        "flux",
+        "other",
+    )
 
-    def __init__(self, u, rho_ref, count, a, empty, own_level, faces, two_sided, flux=None):
+    def __init__(
+        self, u, rho_ref, count, a, empty, own_level, faces, two_sided, flux=None, other=None
+    ):
         self.u, self.rho_ref = u, float(rho_ref)
         self.count, self.a, self.empty = count, a, empty
         self.own_level, self.faces, self.two_sided = own_level, faces, two_sided
         #: per node, ``{boundary: level}`` — the junction's priced estimate of the exon's RNA, kept per
         #: FACE so the solve can tell which face's composition already carries it
         self.flux = [None] * len(own_level) if flux is None else flux
+        #: the OTHER genome-strand column's count per node, where the library's strand channel is live
+        #: (the derived deadband): the split's asymmetry ``count − other`` is the node's own estimate of
+        #: this strand's RNA count, the witness the hop's price compares (`None`: the column count is)
+        self.other = other
+
+    def witness(self, y: int):
+        """The strand's RNA count at ``y`` and its Poisson variance, read from the column split: the
+        asymmetry ``count − other`` (gDNA splits evenly, so it cancels; the other strand's RNA reads on
+        the other column) over the protocol's strand contrast ``|1 − 2κ|`` — a factor common to every
+        node, so it cancels from every ratio the price takes and is left out. A non-positive asymmetry
+        is a DARK node: no RNA of this strand is measurable there."""
+        c_r, c_o = float(self.count[y]), float(self.other[y])
+        return c_r - c_o, c_r + c_o
 
     def emit(self, s: int, x: int, far: Level | None) -> Level | None:
         """An empty node forwards; a full node the INTERSECTION of its own level and what it holds —
@@ -643,23 +687,43 @@ class _RnaLane:
         parts = [p for p in (own, None if far is None else far.profile) if p is not None]
         if not parts:
             return None
-        return Level(intersect(parts), float(self.count[s]), float(self.a[s]))
+        rna_count = rna_var = None
+        if self.other is not None:
+            rna_count, rna_var = self.witness(s)
+        return Level(intersect(parts), float(self.count[s]), float(self.a[s]), rna_count, rna_var)
 
     def receive(self, level: Level, s: int, x: int) -> Level:
-        """What a FULL recipient holds. Across a TWO-SIDED face the whole profile stands and the hop
-        charges counting alone: an intron and its own boundary share one unspliced population (rung
-        1's identity), so the difference in their strand counts is gDNA's half and the other strand,
-        never this population's change. Everywhere else the level is a lower bound priced by the
-        strand's own counts (`count_price`)."""
-        two = (int(s), int(x)) in self.two_sided
-        if two:
-            v = float(polygamma(1, float(level.n) + 0.5) + polygamma(1, float(self.count[x]) + 0.5))
-            p = level.profile
-        else:
+        """What a FULL recipient holds: across a TWO-SIDED face the whole profile (an intron and its
+        own boundary share one unspliced population), everywhere else its lower side — and on EVERY
+        face the hop's price: both column counts' counting plus the disagreement, beyond its own
+        counting, between the two nodes' estimates of THIS STRAND's abundance. ⭐ The witness is the
+        column split's asymmetry (`witness`), not the column count: the column holds gDNA's half, which
+        jumps with every probe edge whether or not this strand's RNA is there, while the asymmetry
+        is this strand's RNA alone. So a dark recipient (no measurable RNA of the strand) agrees with
+        a dark claim and the claim arrives whole — the perfectly dark host intron's "no RNA of mine
+        here" that resolves the tilt at an antisense exon's boundaries under capture (the test
+        chromosome's probed span loci, ~2,000 fragments a row) — while a lit recipient disagrees with a
+        claim from a dimmer node by the cliff between them and blurs it away (the ladder's `g05 ss.99
+        ON`, 2026-09-09: a + intron at 0.005 fragments per base whose nascent RNA the − gene's probe
+        captured 170-fold, carried whole under a counting-only exemption, read a 93 % RNA junction as
+        86 % gDNA). Where the library's strand channel is dead the column count is the witness
+        (`count_price`). Measured against the exemption and against `count_price` on the column
+        counts, three panels and the ladder, halves apart, both frames."""
+        v = float(count_logvar(level.n) + count_logvar(self.count[x]))
+        if self.other is None or level.rna_count is None:
             v = count_price(level.n, level.a, self.count[x], self.a[x])
-            p = lower_side(level.profile)
+        else:
+            n_s, v_s = float(level.rna_count), float(level.rna_count_var)
+            n_x, v_x = self.witness(x)
+            if n_s > 0.0 and n_x > 0.0:
+                r = (n_x / float(self.a[x])) / (n_s / float(level.a))
+                v += max(0.0, float(np.log(r)) ** 2 - (v_s / (n_s * n_s) + v_x / (n_x * n_x)))
+        p = level.profile if (int(s), int(x)) in self.two_sided else lower_side(level.profile)
         p = blur_row(p, self.u, v) if v > 0.0 else p
-        return Level(p, float(self.count[x]), float(self.a[x]))
+        rna_count = rna_var = None
+        if self.other is not None:
+            rna_count, rna_var = self.witness(x)
+        return Level(p, float(self.count[x]), float(self.a[x]), rna_count, rna_var)
 
 
 _RNA_FIELD = {"pos": "level_rna_pos", "neg": "level_rna_neg"}

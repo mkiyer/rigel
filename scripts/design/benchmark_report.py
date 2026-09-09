@@ -170,7 +170,7 @@ def render(rows: list[dict], per_transcript: dict, axis: str = "ALL") -> str:
         if not arm_rows:
             continue
         label = {"off": "SilentPolicy (no message propagation)",
-                 "on": "RelayPolicy (message propagation)",
+                 "on": "the shipped policy (message propagation ON)",
                  "currency": "CurrencyPolicy (the Stage-3 rebuild, under development)",
                  }.get(arm, arm or "single arm")
         parts.append(f"<h2>{html.escape(label)}</h2>")

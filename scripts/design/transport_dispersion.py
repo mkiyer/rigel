@@ -34,8 +34,8 @@ from rigel.calibration.region_geometry import (  # noqa: E402
     build_region_geometry,
     build_region_statics,
 )
-from rigel.calibration.rna_anchor import build_route_table  # noqa: E402
 from rigel.calibration.sj_opportunity import crossing_probability_from_index  # noqa: E402
+from rigel.calibration.effective_length import crossing_eff_length  # noqa: E402
 from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
     build_sj_geometry_arrays,
@@ -58,6 +58,36 @@ DEFAULT_CONDITIONS = [
 ]
 
 _EPS = 1e-12
+
+
+
+class RouteTable:
+    """Per-junction flux and crossing opportunity, indexed by the region each route serves: ``into[r]``
+    / ``outof[r]`` list the sj indices whose destination / source region is ``r`` — the routes through
+    r's left / right flank. The routes at a flank are DISJOINT (each molecule crosses exactly one), which
+    is why their rates SUM. (Once `rna_anchor.build_route_table`, retired with the relay 2026-09-09; the
+    instrument keeps the fifteen lines it needs.)"""
+
+    def __init__(self, flux, opportunity, into, outof):
+        self.flux, self.opportunity, self.into, self.outof = flux, opportunity, into, outof
+
+
+def build_route_table(sj_geometry, substrate, rna_fl_pmf) -> RouteTable:
+    """Each junction's certified flux (genome-strand columns summed) and its crossing opportunity
+    under the RNA pmf, keyed by the regions it serves."""
+    flux = np.asarray(substrate.sj.count, np.float64).sum(axis=1)
+    opp = np.asarray(
+        crossing_eff_length(rna_fl_pmf, sj_geometry.reach_lo, sj_geometry.reach_hi), np.float64
+    )
+    into: dict = {}
+    outof: dict = {}
+    src = np.asarray(sj_geometry.src_region, np.int64)
+    dst = np.asarray(sj_geometry.dst_region, np.int64)
+    for j in range(src.shape[0]):
+        if opp[j] > 0.0:
+            into.setdefault(int(dst[j]), []).append(j)
+            outof.setdefault(int(src[j]), []).append(j)
+    return RouteTable(flux=flux, opportunity=opp, into=into, outof=outof)
 
 
 def flank(routes_j, flux, opp, col, matched):

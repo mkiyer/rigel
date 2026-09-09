@@ -167,43 +167,48 @@ excellent and a message can mostly only disturb it. The goal is: **perform well 
 while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
 against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart.
 
-⭐⭐⭐ **THE REBUILD (`transfer`) MEETS BOTH BARS AND IS NOT FINISHED; THE DEFAULT DOES NOT FLIP UNTIL
-IT IS (owner ruling, 2026-09-02).** Ten messages ship (`DESIGN.md` §6b.4–§6b.9 carry every ruling;
-the ladder standings are re-derived by `policy_benchmark.py --panel ladder --policies silent relay
-transfer`). What remains is the tracker's COMPLETION CHECKLIST in the sandbox: the multi-hop SCAN (the
-next case), sj+terminus, the level message where composition cannot cross (strand changes, termini
-both ways, walled exons), the AMBIG tilt and the both-stranded locus, then the ship protocol. ⭐ Accepted
-errors and owner decisions are recorded where they were made (the zero-gDNA edge residual, §6b.6–§6b.8's
-residues) and are not re-litigated. ⚠ The relay's old defects still ship meanwhile, and its recorded
-facts stand (`calibration_walk.py` rung E vs F; the unearned `calib` column). `ROADMAP.md` rank 1
-carries the order of work; `ISSUES: gdna-landscape-trains-on-false-positives` is the systemic issue this
-thread exposed.
+⭐⭐⭐ **THE TRANSFER POLICY IS THE SHIPPED DEFAULT, AND THE RELAY IS GONE (the ship protocol, 2026-09-09;
+`CalibrationConfig.message_policy = "transfer"`).** The completion contract's cases are handled (the ten
+messages, the level lane, the RNA level lanes at both-stranded nodes, the ceiling at single-strand nodes,
+sj+terminus; `DESIGN.md` §6b.4–§6b.14 carry every ruling) and the ladder judged the flip: the standings
+line below is re-derived by `policy_benchmark.py --panel ladder`. ⛔ The retired relay kept three of the
+four ZERO-gDNA rows (`g00 ss.50 OFF/ON`, `g00 ss.99 OFF`), where the transfer policy leaves the walled
+exons and both-stranded pieces to the landscape prior (`ISSUES: gdna-landscape-trains-on-false-positives`)
+— a recorded, accepted price of the flip, visible in the goldens (`antisense_contained_ss90` 0.04 → 51.9
+false gDNA fragments of 1,000 at one both-stranded region with no witness of its second strand;
+`strand_ss65_multi_iso` 0.03 → 14.3 at a nested exon, `ISSUES: flux-price-witness-units`). ⭐ The relay,
+its variance toolbox, its certified-flux anchor, `RelaySwitches`, `config.rna_anchor`, the Gaussian
+channels on `PsiMessage` and the backbone's two coordinate assertions, eight relay-era test files and nine
+relay-era instruments were deleted the same day, bit-identity of the shipped path gated by
+`rename_identity.py` on two ladder rows; git carries them. ⭐ Accepted errors and owner decisions are
+recorded where they were made and are not re-litigated.
 
-⭐⭐ **THREE POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
-is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES). ⭐⭐⭐ **They all
+⭐⭐ **TWO POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
+is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES). ⭐⭐⭐ **Both
 run on the TWO-PHASE backbone (owner ruling 2026-09-04, `DESIGN.md` §6b.12)**: `prepare` (every node's
 own claim) → `propagate(backward)` returning `receive(source, destination)`, which the backbone runs as
 a forward pass then a backward pass, every node ending with one message from each neighbour it has
-(`SILENCE` is a message, `NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`. The foundation spec's
-Gaussian-lane `Message` and the `message` policy are RETIRED (same ruling).
+(`SILENCE` is a message, `NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`, which hands ψ two row
+channels and nothing else (`PsiMessage.lam_rows`, `cube_rows`). The foundation spec's Gaussian-lane
+`Message` and the `message` policy were RETIRED by the same ruling; the relay's Gaussian channels on
+`PsiMessage` retired with the relay.
 
 | policy | |
 |---|---|
-| `relay` | ⭐ **THE SHIPPED DEFAULT** (`RelayPolicy`) — frozen. ⛔ Do not repair it bug by bug (owner, 2026-08-18); its defects are constraints on any replacement, chief among them `TRAPS: zero-the-precision-with-the-value` |
 | `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
-| `transfer` | ⭐⭐ **THE REBUILD — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` ⭐ THE LEVEL LANE (2026-09-05, `DESIGN.md` §6b.12): `Message.level_gdna` is an ABSOLUTE profile over the log gDNA density, the default rule of EVERY directed face without a composition rule (strand changes, termini both ways, the AMBIG complex, every face into or out of an EMPTY node — 52 % of the ladder's exon pieces have no total), forwarded unchanged by empties, emitted by a full node as the INTERSECTION of its own lower side and what it holds (bounds intersect, they do not multiply: the product form ratcheted), priced per hop at the recipient, and taken as a LOWER BOUND only (every upper side measured harmful under capture); STOP by omission is gated impossible. ⭐ THE RNA LEVEL LANES (2026-09-08, `DESIGN.md` §6b.13): `level_rna_pos` / `level_rna_neg` per strand, faces from the flag bits (the intron test PER STRAND: `StepContext.exon_pos`/`exon_neg`), two-sided only between an intron and its own boundary (counting-only price there), sources = a single-strand node's own claim read at ``1 − σ`` and the certified flux at an exon's junctions (an ESTIMATE priced by the junction–exon pair's strand disagreement, kept lower-sided), delivered at AMBIG nodes as ONE row over ψ's (λ, θ) cube (`PsiMessage.cube_rows`; the tilt needs no lane) and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no composition (a licensed face's map already carries the flux as its cap). THE BRACKET THEOREM is gated. Ladder at landing: every non-zero row of both halves won. ⭐ THE sj+terminus BOUNDARY (2026-09-08, `DESIGN.md` §6b.14): the terminus decides the side, the junction's flux is placed at its exon's flank; the case is 0.6 % of a row at the counting floor and the rule is neutral in scope. ⛔ "Levels always travel" for the gDNA lane is REFUSED by the bar until phase 2's ceiling (`ISSUES: levels-always-travel-for-the-gdna-lane`). |
+| `transfer` | ⭐⭐⭐ **THE SHIPPED DEFAULT (2026-09-09) — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` ⭐ THE LEVEL LANE (2026-09-05, `DESIGN.md` §6b.12): `Message.level_gdna` is an ABSOLUTE profile over the log gDNA density, the default rule of EVERY directed face without a composition rule (strand changes, termini both ways, the AMBIG complex, every face into or out of an EMPTY node — 52 % of the ladder's exon pieces have no total), forwarded unchanged by empties, emitted by a full node as the INTERSECTION of its own lower side and what it holds (bounds intersect, they do not multiply: the product form ratcheted), priced per hop at the recipient, and taken as a LOWER BOUND only (every upper side measured harmful under capture); STOP by omission is gated impossible. ⭐ THE RNA LEVEL LANES (2026-09-08, `DESIGN.md` §6b.13): `level_rna_pos` / `level_rna_neg` per strand, faces from the flag bits (the intron test PER STRAND: `StepContext.exon_pos`/`exon_neg`), two-sided only between an intron and its own boundary, EVERY hop priced by the pair's disagreement in the strand's abundance read from the column SPLIT's asymmetry (2026-09-09: the counting-only exemption carried a lit intron's upper side across a 170-fold probe cliff; the column count as witness blurred a dark intron's claim at the same cliff; the split tells them apart), sources = a single-strand node's own claim read at ``1 − σ`` and the certified flux at an exon's junctions (an ESTIMATE priced by the junction–exon pair's strand disagreement, kept lower-sided), delivered at AMBIG nodes as ONE row over ψ's (λ, θ) cube (`PsiMessage.cube_rows`; the tilt needs no lane) and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no composition (a licensed face's map already carries the flux as its cap). THE BRACKET THEOREM is gated. Ladder at landing: every non-zero row of both halves won. ⭐ THE sj+terminus BOUNDARY (2026-09-08, `DESIGN.md` §6b.14): the terminus decides the side, the junction's flux is placed at its exon's flank; the case is 0.6 % of a row at the counting floor and the rule is neutral in scope. ⛔ "Levels always travel" for the gDNA lane is REFUSED by the bar until phase 2's ceiling (`ISSUES: levels-always-travel-for-the-gdna-lane`). |
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
 `docs/dev/HONEST_PRECISION.md` carries what was derived, measured and REFUTED — read it before
 re-proposing a mechanism, so a refuted experiment is not repeated.
 
-⭐⭐ **THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE)** stays in the
-relay (`RelaySwitches.certified_flux`, delivered as `PsiMessage.lam_rows`, final solve only — never
-phase-A, never own-evidence precision); `config.rna_anchor` is live iff propagation is on and the
-policy is relay. `DESIGN.md` §6b.3. ⭐ The owner's clarified SPLICED law is skeleton-enforced: spliced
-fragments are MEASURED at boundaries, never solved, strictly ONE-HOP (a law the retired foundation spec
-enforced at runtime; the transfer policy keeps it by construction — a flux enters a map, never a lane).
+⭐⭐ **THE CERTIFIED FLUX IS A MESSAGE (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE), and the
+transfer policy carries it** as an RNA level of the junction's strand at the exon, priced by the
+junction–exon pair (`DESIGN.md` §6b.13); the relay's separate certified-flux stream and `rna_anchor.py`
+retired with the relay (`DESIGN.md` §6b.3 keeps the ruling's record). ⭐ The owner's clarified SPLICED law
+is kept by construction: spliced fragments are MEASURED at boundaries, never solved, strictly ONE-HOP — a
+flux enters a map or a level at the adjacent exon, never a lane of its own.
 
 ## ⭐⭐⭐ RUNNING THE BENCHMARKS
 
@@ -218,7 +223,7 @@ python scripts/design/policy_benchmark.py --panel test
 
 # THE SHIPPING JUDGEMENT — the 16-condition ladder, minutes
 python scripts/design/policy_benchmark.py --panel ladder
-python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
+python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
 ```
 
 ⭐⭐ **THE TEST CHROMOSOME SWEEPS 30 CONDITIONS** — gDNA `g00 g05 g25 g50 g98` × strand
@@ -259,7 +264,7 @@ the table near the end of this file, grouped by the question each one answers.
 
 ⭐ **The vocabulary rename is in flight.** Landed: `graft` → SPLICE IN, the operator sense of the old
 peel token → SPLICE OUT, the deconvolution verb → `deconvolve`, `mass_pin` → `mass_rescale`,
-`HeadPolicy` → `RelayPolicy`, `lend` → `may_share_composition`, `s2t` → `hop_logvar`. ⛔ **Still to do and
+`HeadPolicy` → `RelayPolicy` (since retired), `lend` → `may_share_composition`, `s2t` → `hop_logvar`. ⛔ **Still to do and
 DEFERRED for a measured reason: `arm` has THREE senses** — an experiment arm, a component arm (the sense
 the owner ruled becomes `component`), and `__ARM_NEON` in the C++ scanner — across 1,358 sites. It needs
 its own `rename_census.py --sense` pass, never a tail-end sweep. ⛔ Run `rename_census.py --sense <token>`
@@ -323,22 +328,22 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,781 passed / 0 skipped / 8 xfail** (re-derived
-2026-09-08 after THE RNA LEVEL LANES, the single-strand CEILING and the sj+terminus rule landed). Account
-it from **3,765** — the count after the level lane — by **+16**: fourteen gates in the EXISTING
-`tests/calibration/test_transfer_policy.py` (the faces from the flag bits per strand with the
-junction-bits perturbation; the RNA coordinate round trip; the hop priced by the strand's own counts;
-the flux level as a lower bound priced by the node pair, with `read_column`; the sources at
-single-strand nodes and the flux at the exon only; the no-echo perturbation on the RNA lanes; the
-two-sided hop's whole profile at counting-only price; a lower-only profile one-sided on the cube; THE
-BRACKET THEOREM; the cube delivery as the intersected held levels plus the own flux; the ceiling row
-and its round trip; the ceiling read only from a face that sent no composition; the flux kept per
-face with a licensed face keeping the ceiling out; the sj+terminus boundary placing the flux where the
-junction's exon is) and two in the EXISTING `tests/calibration/test_sweep_backbone.py` (the cube
-channel checked per AMBIG slot and shape; the solver's cube inert when absent and walling the tilt when
-present). No file was added or removed, so no parametrised gate moved. ⛔ **RE-DERIVE, NEVER ADJUST** —
+⭐ **THE STANDING BASELINE: 0 failed / 3,595 passed / 0 skipped / 4 xfail** (re-derived
+2026-09-09 after the relay retired). Account it from **3,790 collected / 3,783 passed / 7 xfail** — the
+count after the default flipped — by **−191 collected**: 130 in the eight relay-era test files deleted
+with the relay (`test_enrichment_frame` 38, `test_gdna_scale_rule` 13, `test_relay_mass_rescale` 10,
+`test_rna_anchor` 23, `test_splice_flux_reframe` 12, `test_terminus_population_licence` 11,
+`test_lambda_message` 3, `test_message_sidedness` 4, plus their two parametrised gate cases each), 45
+parametrised gate cases for the three deleted `src/rigel/calibration/` modules (`messages/relay`,
+`messages/variance`, `rna_anchor`: 3 each) and the nine deleted `scripts/design/` instruments (4 each:
+`ladder_arm_ab`, `arm_score`, `arm_sweep`, `reframe_walk`, `transfer_variance_audit`, `toy_ceiling`,
+`toy_dissect`, `toy_trace_error`, `psi_channel_ablation`), and 16 in the edited gate files
+(`test_sweep` −5 relay-operator gates, `test_sweep_backbone` −10 channel and switch gates +1 λ-rows gate,
+`test_region_init` −2, the relay's corner-variance xfail pair). The 4 xfails: `test_region_init`'s
+struct_lock pair, the toy harness's intron-independence gate, the antisense t2 prior-assembly casualty.
+⛔ **RE-DERIVE, NEVER ADJUST** —
 the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
-attribution (3,789 collected: 51 → 67 in the two gate files).
+attribution.
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
@@ -373,7 +378,7 @@ FLIP** — `preflight.py --full` does it in one command. A green suite has hidde
 (`TRAPS: a-green-suite-hid-five-dead-instruments`), because the tests install what the shipped default
 does not.
 
-⭐⭐ **THE 8 xfails ARE NOT ONE KIND OF THING.** Some are the recorded price of a config default; the rest
+⭐⭐ **THE 4 xfails ARE NOT ONE KIND OF THING.** Some are the recorded price of a config default; the rest
 are executable records of proven defects whose fixes are panel-negative alone — for those, "fix the test"
 is a category error, because the test is right and the code is wrong. ⛔ An xfail is closed by REPAIRING
 the thing or by asserting the invariant STRUCTURALLY, never by widening a bound.
@@ -392,21 +397,20 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | | |
 |---|---|
 | **⭐⭐⭐ START A SESSION HERE** | |
-| `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with all five partitions, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test` and costs **~1 hour measured** (7.5 CPU-hours, dominated by `ladder_arm_ab.py`) — run it after a deposit-rule change or a default flip, never every session. `--self-test` 8/8 |
+| `design/preflight.py` | ⭐⭐⭐ **CAN THIS SESSION RUN AND REGENERATE EVERYTHING? — one command, one verdict, before anything else.** Checks the toolchain (the `rigel` env, the native extension, the CLI), both references, both panels (scan caches, oracle caches with all five partitions, the certified `slot_truth`) and that every `scripts/design/` instrument IMPORTS. ⛔ It changes nothing and measures nothing — every check is a read or an import, and a ✘ prints the exact command that regenerates the missing artifact. ⭐ **The default is ~2 s**; `--full` adds every instrument's `--self-test` (minutes since the relay-era arm harness retired on 2026-09-09) — run it after a deposit-rule change or a default flip, never every session. `--self-test` 8/8 |
 | **⭐⭐⭐ THE POLICY BENCHMARK — where a message-policy change is judged** | |
 | `design/policy_prototype.py` | ⭐⭐⭐ **HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness every message rung is developed on before `src/`. Installs a class from `--module` in place of the shipped policy for the `transfer` arm; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
-| `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for any of `silent` / `relay` / `message` / `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
+| `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
-| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 21/21 |
+| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries; `--message-policy` prices a policy on this metric (the ship protocol's first item). ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 21/21 |
 | `design/object_composition.py` | ⭐⭐⭐ **MUST ψ's Beta REFERENCE BE ONE LIBRARY-WIDE NUMBER, OR CAN EACH OBJECT SUPPLY ITS OWN?** `m_i` per object from the two densities, scored as misplaced fragments against the shipped ½, per stratum. `--self-test` 25/25 |
 | `design/abundance_landscape_census.py` | ⭐⭐⭐ **WHAT DOES THE TOTAL-DENSITY FIELD LOOK LIKE, PER CONDITION?** Fits `calibration.abundance_landscape` on the cached wall-exact totals — every mode's basin mass, `rho_0`, the anchor gap in nats, the per-class enrichment. `--self-test` 13/13 |
 | `design/landscape_head_to_head.py` | ⭐⭐⭐ **HOW GOOD IS THE TOTAL-DENSITY LANDSCAPE, AND WHAT IS ITS BANDWIDTH REALLY?** The axis offset, a held-out predictive likelihood, and `--grid-sweep`. ⛔ `span_R` and the mode count are grid artefacts. `--self-test` 42/42 |
-| `design/transfer_variance_audit.py` | ⭐⭐⭐ **WHERE DOES THE MESSAGE TRANSFER VARIANCE COME FROM, AND COULD THE `AbundanceLandscape` SUPPLY A BETTER ONE?** An audit: it proposes nothing and changes nothing. `--self-test` 20/20 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 11/11 |
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
-| `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/relay at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, split into pure-gDNA and RNA-bearing slots and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context is `calibration_vs_oracle.py`. ⚠ The `--dissect` survey died with `FanOutPolicy` (2026-08-24); its verdicts live in `DESIGN.md` §6b.2. `--self-test` 6/6 |
+| `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/transfer at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, split into pure-gDNA and RNA-bearing slots and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context is `calibration_vs_oracle.py`. ⚠ The `--dissect` survey died with `FanOutPolicy` (2026-08-24); its verdicts live in `DESIGN.md` §6b.2. `--self-test` 6/6 |
 | `design/relay_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
 | `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `relay_pool_ab.py --out`. `--self-test` 10/10 |
 | `design/transport_dispersion.py` | ⭐⭐⭐ **WHERE DOES THE FLANK-TRANSPORT DISPERSION COME FROM? — the decomposition against certified truth, no solver.** Pair disagreement vs common-mode center, each charged with counting (flank AND truth side), the length curve, structure and capture. ⛔ Fit nothing on shallow pairs; the truth count's own trigamma must be subtracted before quoting any certified scatter |
@@ -440,17 +444,10 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/toy_panel.py` | ⭐⭐ **HOW DOES ONE TOY SPEC BEHAVE ACROSS EVERY CACHED CONDITION AND AN RNA-DENSITY LADDER, scored per object?** It names which object carries the error and whether the messages helped it. ⚠ 13 s per condition — shard with `--conditions` |
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from per-fragment truth by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run it on any new toy spec first |
 | `design/verify_capture.py` | ⭐⭐ **WHAT DOES HYBRID CAPTURE DO ON IDENTICAL GEOMETRY, probes ON vs OFF?** The gDNA landscape, the length selection and the sj depletion, each gated on the direction the knobs predict |
-| `design/toy_trace_error.py` | ⭐⭐⭐ **WHERE DOES ONE SCENARIO'S ERROR COME FROM, END TO END?** Every object ranked by error mass, the four init sources, the relay hop by hop with its licence state, then a ψ channel ablation |
 | `design/zero_controls.py` | ⭐⭐⭐ **DOES THE TOOL HOLD AT ZERO RNA AND AT ZERO gDNA? — the owner requires both on every experiment.** The truth is a constant, so every deviation is a false positive. ⛔ Flags any EMPTY object: a degenerate zero arm tests nothing |
-| `design/reframe_walk.py` | ⭐⭐⭐ **WHAT DOES THE REFRAME DO AT EVERY HOP, IN BOTH DIRECTIONS, on one two-exon transcript?** `r` as used, `r` as the predecessor's single total would give it, and what truth says — so each decision is a number |
-| `design/toy_dissect.py` | ⭐⭐ **WHICH CHANNEL IS ALIVE AT EACH SLOT OF ONE SCENARIO?** The solver's own ladder beside `cm_g` / `c_tau` / `cg`, so a dead channel is visible as a zero rather than inferred |
 | `design/certified_rna_audit.py` | ⭐⭐⭐ **IS THE CERTIFIED-RNA CHANNEL WIRED?** Audits whether the bank is populated, whether it has a divisor and whether a precision is emitted — any one failing looks identical. ⛔ Scores the MASS, never `f_g` |
 | `design/certified_q_census.py` | ⭐⭐ **CAN A CERTIFIED COUNT SPEAK ABOUT THE UNSPLICED SPLIT? — the answer is NO, and this measures why**, straight off the origin-split oracle with no solver. ⭐ Its two extreme rungs are the two zero controls |
 | `design/vertex_ceiling.py` | ⭐⭐ **WHAT IS PINNING ORACLE TRUTH AT ONE OBJECT CLASS WORTH ON THE REAL LADDER?** A `noop` arm must be byte-identical, and `--arm ref_c=A,B` drives ψ's two Beta reference exponents. ⛔ It prices missing information, not headroom |
-| `design/toy_ceiling.py` | ⭐⭐ **WHAT IS A DIFFERENT OWN BELIEF AT ONE OBJECT CLASS WORTH, re-solving the whole chain?** Six arms share one simulation, and `--arms base noop` is its own falsification — those two must be byte-identical |
-| `design/psi_channel_ablation.py` | ⭐⭐⭐ **WHICH ψ CHANNEL PUT THE ERROR THERE?** Every argument of the final ψ combine recorded, then re-solved with one imputed channel nulled at a time. ⛔ The as-is arm must reproduce the run bit-identically, write-back included |
-| `design/arm_score.py` · `design/arm_sweep.py` | ⭐⭐ **HOW DO TWO `ladder_arm_ab` ARMS COMPARE, AND HOW DOES A WHOLE FAMILY SWEEP? — per stratum.** ⛔ Never pooled: the panel total hides a sign flip between strata. Both print the deliverable's error beside pass-0's |
-| `design/ladder_arm_ab.py` | ⭐⭐ **DOES THE SAME OVERRIDE STILL HELP ON THE REAL LADDER?** ⛔⛔ Run it before writing a mechanism into `src/` — four times a toy-positive change has been panel-negative. `--messages {off,on}` is part of the arm. `--self-test` 25/25 |
 | `design/length_ceiling.py` | ⭐ **WHAT IS A PERFECT LENGTH MODEL WORTH ON THE LADDER, ONE fl PMF AT A TIME?** ⚠ This is the OPPORTUNITY model's fl PMF, not the length-likelihood composition channel deferred past 0.8.0 |
 | `design/toy_harness.py` | ⭐⭐ **HOW DOES A MINI CHROMOSOME YOU DEFINE CALIBRATE — in 0.1–5 s, with every object's answer beside its truth?** (`docs/TESTING.md` §0b) The priors a toy cannot fit are harvested from a real cached condition; `--list` for the ladder |
 | **the substrate — are the panel and the index sound?** | |

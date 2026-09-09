@@ -8,7 +8,7 @@ grid ``λ`` on a FIXED ``[−L, L]`` window (no region-adaptivity) and read out 
 ``f_g = σ(λ)``. ``O(m·K)`` per region (vs the lattice's ``O(m·K²)`` 2-simplex), so it is genome-scale
 tractable.
 
-The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the imputation messages``, where each **arm** is
+The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the λ-factor rows``, where each **arm** is
 that component group's fitted log-rate prior when we have one, else the **Jeffreys reference**
 ``+½·log f`` (``_JEFFREYS_REF``). Derivation, review, and the resolved design:
  (§10 is authoritative).
@@ -79,39 +79,6 @@ _EPS = 1.0e-9
 # IS this reference. Licensed as the "structural Jeffreys" prior; §10.5
 # records the known cost — it forbids the simplex vertices, where some truth genuinely lives.
 _JEFFREYS_REF = 0.5
-
-#: ⛔⛔ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND, AND ψ HAS ALWAYS APPLIED IT AS A TWO-SIDED GAUSSIAN.**
-#: the message policy states the premise in its own words — ``rho_R(exon) >= rho_nu(B) + rho_mu(B)``, because
-#: the exon may also hold molecules that never touch that boundary — "and it uses it as an equality". Three
-#: operators price that inequality as a VARIANCE and none prices it as a DIRECTION, which is `TRAPS.md`
-#: TRAPS: a-variance-cannot-fix-a-bias: a variance cannot move a mode toward truth.
-#: ⭐ ``True`` selects the one-sided form: no penalty when the destination holds MORE RNA than the bound,
-#: full penalty when it holds less. ⛔ ``False`` is today's behaviour and is BYTE-IDENTICAL by
-#: construction — :func:`_rna_residual` then returns its input difference unmodified.
-#: Set by ``ladder_arm_ab.py --arm onesided_rna``.
-ONE_SIDED_RNA = [False]
-
-
-def _rna_residual(log_f, mode, one_sided=None):
-    """The residual the RNA imputed-message penalty is built on — ONE HOME for both ψ paths.
-
-    Returns ``log_f - mode``, or its negative part when :data:`ONE_SIDED_RNA` is set. The message asserts
-    ``log_f >= mode`` (the destination holds AT LEAST the RNA the bound accounts for), so only
-    ``log_f < mode`` is a contradiction and only that side may be penalised.
-
-    ⚠ Dtype is preserved deliberately: the AMBIG cube is float32 and the 1-D path float64, and the clamp
-    must not promote either. ⛔ With the flag off this is exactly ``log_f - mode``, which is what makes
-    the default byte-identical rather than approximately so.
-    """
-    d = log_f - mode
-    if one_sided is None:
-        if not ONE_SIDED_RNA[0]:
-            return d
-        return np.minimum(d, d.dtype.type(0.0))
-    # per-slot (stage 4d): the mask arrives already broadcast to ``d``'s leading axis; ``where``
-    # preserves the dtype, so the AMBIG cube's float32 path stays float32.
-    return np.where(one_sided, np.minimum(d, d.dtype.type(0.0)), d)
-
 
 # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5]. A pure STATE-SPACE bracket: the widest f_g the grid can
 # represent, NOT an accuracy knob — but that is a PROPERTY OF A PROPER ψ, not of this constant. It holds
@@ -537,19 +504,13 @@ def _local_loglik_logodds(
     f_pos_ref,
     f_neg_ref,
     priors: "CompositionPriors | None" = None,
-    gdna_imp_mode=None,
-    gdna_imp_prec=None,
-    rna_imp_mode=None,
-    rna_imp_prec=None,
-    rna_one_sided=None,
     lam_logprior=None,
-    lam_imp_mode=None,
-    lam_imp_prec=None,
 ):
-    """ψ over the log-odds grid for single-strand regions (strand mixture, the two arms, imputation), evaluated
-    at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``. Returns ``(m, K)``.
+    """ψ over the log-odds grid for single-strand regions (strand mixture, the two arms, the λ-factor
+    rows), evaluated at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``. Returns ``(m, K)``.
 
-    ψ = strand + ``_gdna_arm`` + ``_rna_arm`` + messages. **No Jacobian** — on the two-group axis the log-rate
+    ψ = strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor rows (the intron factory's and the message
+    layer's, pre-summed). **No Jacobian** — on the two-group axis the log-rate
     conversions cancel ``log σ'(λ)`` exactly (module docstring §2). Both arms are ALWAYS written: a fitted
     ``logP`` if we have one, else the ``_JEFFREYS_REF`` reference. Omitting one is not neutral.
 
@@ -599,34 +560,6 @@ def _local_loglik_logodds(
     #    introns against the intergenic background; zero on non-intron regions ⇒ a no-op there. ──
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)
-    # ── imputation messages: LOG-FRACTION Gaussians (the overhaul). The mode is a log-FRACTION target
-    #    (``log`` of the imputed fraction, built in ``_scan``); evaluated against ``log f_c(λ)``. No clip —
-    #    an off-grid target (source denser than the dst can hold) is a bounded monotone pull toward the
-    #    boundary, governed by precision (D-plan P6, verify-don't-clip). ──
-    log_fg = _log_fg(lam)[None, :]  # log f_g = log σ(λ)
-    log_fact = _log1m_fg(lam)[None, :]  # log(1−f_g) = log f_active (the single live strand)
-    if gdna_imp_mode is not None and gdna_imp_prec is not None:
-        m_ = np.asarray(gdna_imp_mode, np.float64)[:, None]
-        p_ = np.asarray(gdna_imp_prec, np.float64)[:, None]
-        psi = psi - 0.5 * p_ * (log_fg - m_) ** 2
-    if rna_imp_mode is not None and rna_imp_prec is not None:
-        # single-strand: the live strand carries f_active = 1−f_g; the per-strand precision gates which
-        # message applies (the dead strand's prec is 0 → no-op). Both evaluate against log f_active.
-        _os = None if rna_one_sided is None else np.asarray(rna_one_sided, bool)[:, None]
-        for ms, ps in ((rna_imp_mode[0], rna_imp_prec[0]), (rna_imp_mode[1], rna_imp_prec[1])):
-            psi = (
-                psi
-                - 0.5
-                * np.asarray(ps, np.float64)[:, None]
-                * _rna_residual(log_fact, np.asarray(ms, np.float64)[:, None], _os) ** 2
-            )
-    # ── the SINGLE-λ composition message (the the-single-lambda-combine rank-1 fix): ONE Gaussian on the log-odds grid variable λ
-    #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
-    # Enrichment-invariant: λ carries no reframe. ──
-    if lam_imp_mode is not None and lam_imp_prec is not None:
-        lm_ = np.asarray(lam_imp_mode, np.float64)[:, None]
-        lp_ = np.asarray(lam_imp_prec, np.float64)[:, None]
-        psi = psi - 0.5 * lp_ * (lam[None, :] - lm_) ** 2
     # ── NO change-of-variable Jacobian, and that is deliberate: a fitted `logP` is a density in LOG-rate,
     #    so its conversion to a linear-rate density (−log f_c, up to a constant) cancels log σ'(λ) exactly,
     #    ONCE PER COMPONENT — which is why the cancellation keeps holding as each arm acquires a fitted
@@ -653,14 +586,7 @@ def _solve_regions_logodds(
     n_grid,
     L: float = _DEFAULT_L,
     priors: "CompositionPriors | None" = None,
-    gdna_imp_mode=None,
-    gdna_imp_prec=None,
-    rna_imp_mode=None,
-    rna_imp_prec=None,
-    rna_one_sided=None,
     lam_logprior=None,
-    lam_imp_mode=None,
-    lam_imp_prec=None,
 ) -> RegionDeconv:
     """The log-odds 1-D per-region solve for SINGLE-STRAND regions.
 
@@ -685,14 +611,7 @@ def _solve_regions_logodds(
         f_pos_ref,
         f_neg_ref,
         priors=priors,
-        gdna_imp_mode=gdna_imp_mode,
-        gdna_imp_prec=gdna_imp_prec,
-        rna_imp_mode=rna_imp_mode,
-        rna_imp_prec=rna_imp_prec,
-        rna_one_sided=rna_one_sided,
         lam_logprior=lam_logprior,
-        lam_imp_mode=lam_imp_mode,
-        lam_imp_prec=lam_imp_prec,
     )
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
@@ -746,16 +665,7 @@ def _solve_ambig_logodds(
     L: float = _DEFAULT_L,
     n_tilt: int | None = None,
     priors: "CompositionPriors | None" = None,
-    gdna_imp_mode=None,
-    gdna_imp_prec=None,
-    rna_imp_mode=None,
-    rna_imp_prec=None,
-    rna_one_sided=None,
     lam_logprior=None,
-    lam_imp_mode=None,
-    lam_imp_prec=None,
-    theta_imp_mode=None,
-    theta_imp_prec=None,
     cube=None,
 ) -> RegionDeconv:
     """The 2-D ``(λ, θ)`` solve for AMBIG regions (both strands live). Grids the gDNA-vs-RNA-total log-odds
@@ -805,7 +715,6 @@ def _solve_ambig_logodds(
     #    floored at one pseudo-fragment 1/(n+1) (TRAPS: no-prior-means-haldane: the τ=±1 boundaries have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
     log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
-    log_fg32 = log_fg_grid.astype(F)  # (K,) f32 for the cube message
     frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]  # (m,1,1) f32
     # ``log ∘ max ≡ max ∘ log``, BITWISE, because numpy's float32 ``log`` is monotone — verified
     # exhaustively over ALL 1,065,353,217 float32 values in [0,1], which is the entire domain both
@@ -835,35 +744,6 @@ def _solve_ambig_logodds(
     #    tilt at all — so it broadcasts across the cube and θ integrates out cleanly. ⭐ **That
     #    independence is precisely why this source speaks on an AMBIG region where the strand term cannot**:
     #    the Schur complement that zeroes a rank-1-in-θ term does not apply to a term with no θ. ──
-    # ── gDNA LOG-fraction message on log f_g (τ-independent) ──
-    if gdna_imp_mode is not None and gdna_imp_prec is not None:
-        mo = np.asarray(gdna_imp_mode, F)[:, None, None]
-        pr = np.asarray(gdna_imp_prec, F)[:, None, None]
-        psi -= F(0.5) * pr * (log_fg32[None, :, None] - mo) ** 2
-    # ── per-strand RNA LOG-fraction messages on log f_pos/log f_neg (τ-dependent — inside the cube) ──
-    if rna_imp_mode is not None and rna_imp_prec is not None:
-        for log_f, ms, ps in (
-            (log_fpos, rna_imp_mode[0], rna_imp_prec[0]),
-            (log_fneg, rna_imp_mode[1], rna_imp_prec[1]),
-        ):
-            _os = None if rna_one_sided is None else np.asarray(rna_one_sided, bool)[:, None, None]
-            psi -= (
-                F(0.5)
-                * np.asarray(ps, F)[:, None, None]
-                * _rna_residual(log_f, np.asarray(ms, F)[:, None, None], _os) ** 2
-            )
-    # ── the SINGLE-λ composition message on λ DIRECTLY (θ-INDEPENDENT — it lives on the λ axis, which is
-    #    exactly what makes the tilt a nuisance): one Gaussian, ψ counts the g-vs-R DOF ONCE. ──
-    if lam_imp_mode is not None and lam_imp_prec is not None:
-        lm_ = np.asarray(lam_imp_mode, F)[:, None, None]
-        lp_ = np.asarray(lam_imp_prec, F)[:, None, None]
-        psi -= F(0.5) * lp_ * (lam.astype(F)[None, :, None] - lm_) ** 2
-    # ── the TILT message on θ (λ-INDEPENDENT — the separate strand-tilt DOF an AMBIG region needs; not part of
-    #    the g-vs-R double-count): a Gaussian on the θ = arcsin(τ) grid. ──
-    if theta_imp_mode is not None and theta_imp_prec is not None:
-        tm_ = np.asarray(theta_imp_mode, F)[:, None, None]
-        tp_ = np.asarray(theta_imp_prec, F)[:, None, None]
-        psi -= F(0.5) * tp_ * (theta.astype(F)[None, None, :] - tm_) ** 2
     # θ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
     psi_lam = _lse(psi, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
@@ -930,16 +810,7 @@ def _solve_regions_logodds_all(
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     priors: "CompositionPriors | None" = None,
-    gdna_imp_mode=None,
-    gdna_imp_prec=None,
-    rna_imp_mode=None,
-    rna_imp_prec=None,
-    rna_one_sided=None,
     lam_logprior=None,
-    lam_imp_mode=None,
-    lam_imp_prec=None,
-    theta_imp_mode=None,
-    theta_imp_prec=None,
     fg_ref=None,
     fpos_ref=None,
     fneg_ref=None,
@@ -949,11 +820,12 @@ def _solve_regions_logodds_all(
     ``λ`` solve (:func:`_solve_regions_logodds`) and AMBIG regions to the 2-D ``(λ, τ)`` solve
     (:func:`_solve_ambig_logodds`), scattering both into full-length arrays. G1 / zero-mass regions
     report 0 (``sweep.solve_chain`` keeps their signature-binary init via the ``solvable`` write-back). A
-    drop-in for the lattice ``_local_loglik``+``_region_marginals`` pair: same ψ terms — the log-density
-    log-fraction Gaussian messages + the global prior — evaluated on the ``σ(λ)`` log-odds grid.
+    drop-in for the lattice ``_local_loglik``+``_region_marginals`` pair: the same ψ terms — the strand
+    mixture, the two arms, the λ-factor rows and the global prior — evaluated on the ``σ(λ)`` log-odds
+    grid.
 
     All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
-    ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class.
+    ``lam_logprior`` is ``(m, K)``. Each is sub-indexed per class.
     ``cube_rows`` is ``{slot: (K, K_t) row}`` for AMBIG slots (the RNA level lanes' delivery), gathered
     per AMBIG block and added to that block's ψ; ``None`` or an absent slot changes nothing."""
     m = int(np.asarray(u_pos).shape[0])
@@ -1028,14 +900,7 @@ def _solve_regions_logodds_all(
                     n_grid=k_ss,
                     L=L,
                     priors=(priors or _NO_PRIORS).select(bidx).regrid(n_grid, k_ss, L),
-                    gdna_imp_mode=_s(gdna_imp_mode, bidx),
-                    gdna_imp_prec=_s(gdna_imp_prec, bidx),
-                    rna_imp_mode=_sp(rna_imp_mode, bidx),
-                    rna_imp_prec=_sp(rna_imp_prec, bidx),
-                    rna_one_sided=_s(rna_one_sided, bidx),
                     lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
-                    lam_imp_mode=_s(lam_imp_mode, bidx),
-                    lam_imp_prec=_s(lam_imp_prec, bidx),
                 ),
             )
     if bool(amb.any()):
@@ -1073,16 +938,7 @@ def _solve_regions_logodds_all(
                     L=L,
                     n_tilt=n_tilt,
                     priors=(priors or _NO_PRIORS).select(bidx),
-                    gdna_imp_mode=_s(gdna_imp_mode, bidx),
-                    gdna_imp_prec=_s(gdna_imp_prec, bidx),
-                    rna_imp_mode=_sp(rna_imp_mode, bidx),
-                    rna_imp_prec=_sp(rna_imp_prec, bidx),
-                    rna_one_sided=_s(rna_one_sided, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
-                    lam_imp_mode=_s(lam_imp_mode, bidx),
-                    lam_imp_prec=_s(lam_imp_prec, bidx),
-                    theta_imp_mode=_s(theta_imp_mode, bidx),
-                    theta_imp_prec=_s(theta_imp_prec, bidx),
                     cube=cube,
                 ),
             )

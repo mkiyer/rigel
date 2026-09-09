@@ -52,7 +52,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .messages.relay import RelayPolicy
 from .messages.silent import SilentPolicy
 from .messages.transfer import TransferPolicy
 from .region_chain import BOUNDARY, REGION
@@ -66,7 +65,6 @@ from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import count_observable_masks
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .rna_anchor import build_route_table, prepare_flux_evidence
 from .density_deconv import (
     GdnaBackground,
     density_lambda_factor,
@@ -602,59 +600,31 @@ def calibrate(
             )
         return _intron_priors[key]
 
-    # ⭐⭐⭐ THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: the anchor IS a message). The
-    # spliced-fragment anchor no longer rides the local λ-factor — it is a one-hop imputation, so
-    # it belongs to the message layer: `prepare_flux_evidence` packages the observations once
-    # (route table included) and the RELAY delivers the claim as `PsiMessage.lam_rows`, which the
-    # backbone sums into the FINAL solve only. Phase-A and the own-evidence precision never see
-    # it, and the silent CONTROL is a control again. `docs/DESIGN.md` §6b.3 carries the ruling.
-    _flux_evidence: list = []
+    # Every message's price is SELF-CONTAINED in the sweep: each hop charges the two nodes' counting
+    # and the pair's own disagreement, all derived from counts and opportunities inside the pass.
+    # There is nothing to fit here.
 
-    def _flux_at():
-        if not _flux_evidence:
-            _flux_evidence.append(
-                prepare_flux_evidence(
-                    chain,
-                    statics,
-                    geometry,
-                    region_arrays,
-                    build_route_table(sj, substrate, rna_fl_pmf),
-                )
-            )
-        return _flux_evidence[0]
-
-    # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
-    # (strand + count, from `region_init.build_region_init`), degraded by the reframe's scale variance
-    # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
-    # effective lengths inside the pass. There is nothing to fit here.
-
-    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region message
-    # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
-    # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
-    # ⭐ ONE policy instance for every phase: the relay carries the certified-flux evidence and a
-    # grid-keyed rows memo, so constructing it per sweep would rebuild the rows every refit.
+    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region
+    # message internals. Inert in production.
+    # ⭐ ONE policy instance for every phase: the transfer policy carries a grid-keyed memo of the
+    # intron factory's rows, so constructing it per sweep would rebuild them every refit.
     # ⛔ THE POLICY NAME MUST SELECT THE POLICY. An unreadable knob is worse than no knob: an
-    # arm that silently runs a different policy than it names is the defect
-    # `relay_pool_ab.py`'s own assertion exists to catch, so an unknown name RAISES here.
-    if not config.message_propagation:
-        policy = SilentPolicy()
-    elif config.message_policy == "relay":
-        policy = RelayPolicy(flux=_flux_at() if config.rna_anchor else None)
-    elif config.message_policy == "silent":
+    # arm that silently runs a different policy than it names is a benchmark that cannot be
+    # trusted, so an unknown name RAISES here.
+    if not config.message_propagation or config.message_policy == "silent":
         policy = SilentPolicy()
     elif config.message_policy == "transfer":
-        # the intron -> intron|exon boundary composition transfer (rung 1 of the rebuild). Its
-        # evidence IS the intron factory's own memoized rows, so the policy consumes
-        # `_intron_prior_at` directly — grid-keyed exactly like the relay's flux rows, and
-        # `None` (factory off / uninformative background) makes it byte-identical to silence.
+        # the composition-transfer policy on the two-phase backbone. Its own claims include the
+        # intron factory's memoized rows, so the policy consumes `_intron_prior_at` directly —
+        # grid-keyed — and `None` (factory off / uninformative background) makes it byte-identical
+        # to silence.
         policy = TransferPolicy(
             _intron_prior_at,
             strand=(rna_sense_frac, gdna_strand_overdispersion, rna_strand_overdispersion),
         )
     else:
         raise ValueError(
-            f"unknown message_policy {config.message_policy!r} — "
-            f"expected 'relay', 'silent' or 'transfer'"
+            f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
         )
 
     def _sweep(prior):
@@ -745,7 +715,7 @@ def calibrate(
     # and it survived only because its consumers never touched the solve: the QC report's density panel,
     # `_debug["gdna_prior"]`, and a toy-injection field. Its older second role (supplying the message
     # σ²_transfer by projection) had already been retired: that was a density-uniformity proxy, invalid
-    # under capture, and the solver derives σ²_transfer itself (`messages.variance.transfer_logvar`).
+    # under capture, and the message layer prices every hop from its own two nodes.
     # ⭐ **What replaced it is the `AbundanceLandscape` fitted above**, on the wall-exact measured totals
     # over each region's own LENGTH — a geometry rather than a model in the divisor. Measured head to
     # head on all 16 ladder conditions: the depleted level lands 4.8–21× closer to certified gDNA truth,

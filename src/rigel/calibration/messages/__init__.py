@@ -6,16 +6,19 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — tw
 ``N E N E … N`` chain, one combine, one ψ solve, one write-back, and five assertions. Everything about
 *what a message says* is a policy, and it lives here.
 
-Three policies exist; `CalibrationConfig.message_policy` selects which one
-`message_propagation = True` installs (the default is `"relay"`):
+Two policies exist; `CalibrationConfig.message_policy` selects which one
+`message_propagation = True` installs (the default is `"transfer"`, since 2026-09-09):
 
-* :class:`~.relay.RelayPolicy` — ⭐ **THE SHIPPED POLICY** — every operator the evolved solver carried,
-  each behind a NAMED switch, so ``ladder_arm_ab.py`` can price them ONE AT A TIME instead of as a block.
+* :class:`~.transfer.TransferPolicy` — ⭐ **THE SHIPPED POLICY**: every message a composition profile
+  carried across one face by a derived map, or a population's LEVEL carried where composition cannot
+  cross, each hop priced by the two nodes' counting and their own disagreement (the owner's rulings of
+  2026-09-01 onward; `transfer_rows` holds the pure row constructors).
 * :class:`~.silent.SilentPolicy` — sends nothing; the OFF state and the measured floor. Five boundaries
   long: a reader who holds ``sweep.py`` plus ``silent.py`` in their head holds the entire working system.
-* :class:`~.transfer.TransferPolicy` — the REBUILD: every message a composition profile carried across
-  one face by a derived map (the owner's rulings of 2026-09-01 onward).
-* :mod:`~.variance` — the shared variance arithmetic the relay draws on. Not a policy; a toolbox.
+
+The relay policy this package shipped until 2026-09-09 — every operator of the evolved solver behind a
+named switch, with its variance toolbox and its certified-flux anchor — was retired with the flip; git
+carries it, and its recorded defects stand as constraints on any replacement.
 
 ⭐⭐⭐ **THE TWO PHASES (owner ruling 2026-09-04).** Phase 1, PROPAGATE: a forward pass then a backward
 pass; at each hop the RECIPIENT receives what its neighbour sends — the sender's own claim composed with
@@ -23,12 +26,6 @@ what the sender holds from its far side — and decides to STOP, FORWARD or MODI
 change; when both passes end every node holds one message from each neighbour it has. Phase 2, SOLVE:
 every node once, from its own evidence, the two held messages and the gDNA hyperprior. The backbone owns
 the passes and the solve's shape; a policy owns what a message says and what a recipient does with it.
-
-⭐⭐ **WHY THE SPLIT IS SHAPED THIS WAY, and it is a measurement rather than a taste.** The message layer
-at the prior-free pass is worth **+0.2 %** of the shipped answer while moving that pass's own error by
-**77.5 %**; muted everywhere it is a net *harm* on three of the four strata and its entire value sits in
-one. So the operators in ``relay.py`` are not load-bearing as a group — they have to be priced
-individually, and a switch per operator is the only way to do that.
 
 The interface
 -------------
@@ -51,16 +48,14 @@ resolves what otherwise reads as a contradiction between this contract and two s
     listening. Deciding how much of an arriving claim to BELIEVE is the RECIPIENT's job, and a
     recipient necessarily reads its own belief to do it.
 
-So a destination that receives a composition wildly at odds with what its own data says may DISCOUNT
-it, and that is reception rather than a message built from the destination — `RelayPolicy` does it
-(``relay.py``'s λ-stream `mismatch_deflate`; the deleted `FanOutPolicy` carried a receiver-side
-instance of the same law, the recorded precedent for legal receiver transforms).
+So a destination that receives a claim wildly at odds with what its own data says may DISCOUNT it,
+and that is reception rather than a message built from the destination — the transfer policy's hop
+price does exactly this: the recipient's own counts price the arriving claim's width (the retired
+relay's `mismatch_deflate` and the deleted `FanOutPolicy` were earlier instances of the same law).
 ⛔ **The line the trap actually draws is that a claim's VALUE may never be built from the
 destination's belief**, because that manufactures agreement out of nothing; all nine of its costumes
-did exactly that. A reception step is safe when it can only ever **LOWER a precision and never move a
-mode** — it can discard information, never invent it. ⚠ That invariant is what makes a receiver-side
-transform reviewable, and it is the same one the whole shipped relay obeys: every precision transform
-there is ``p -> p/(1 + p*v) <= p``, and the only rises are additive fusions of INDEPENDENT witnesses.
+did exactly that. A reception step is safe when it can only ever **WIDEN a claim and never move its
+mode** — it can discard information, never invent it.
 
 :class:`StepContext` splits its fields under exactly those three headings, and the heading is what turns
 TRAPS: a-message-from-the-destinations-belief from a discipline into something a reader — and the backbone — can check. The backbone enforces the
@@ -90,51 +85,27 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class PsiMessage:
-    """What the two neighbours jointly tell ψ about this slot, and **nothing else**.
+    """What the two neighbours jointly tell ψ about this slot, and **nothing else** — two row channels,
+    each a max-normalised log-profile on the solve grid, each ``None`` when the policy has no claim:
 
-    Four Gaussian channels, each a ``(mode, precision)`` pair, each in ITS OWN COORDINATE
-    (plus the certified-flux row channel ``lam_rows``, documented on its field) — which is the whole
-    reason the modes are stated separately rather than read back off a fused density:
+    * ``lam_rows`` — ``(n_slots, K)`` over ψ's log-odds grid ``λ``, added into the FINAL solve only
+      (never phase-A, never the own-evidence precision);
+    * ``cube_rows`` — ``{slot: (K, K_t) row}`` over the ``(λ, θ)`` cube, for AMBIG slots only, added
+      inside the AMBIG solve the same way.
 
-    ==================  =====================================  ==============================
-    channel             coordinate of the mode                 grid domain
-    ==================  =====================================  ==============================
-    ``gdna_*``          ``log`` of the gDNA SHARE of the mass  ``(-inf, 0]`` for a real share
-    ``rna_*``           the same, per strand — a 2-tuple       ``(-inf, 0]`` per strand
-    ``lam_*``           ``lambda = log(f_g / f_R)``            ``[-L, +L]``, L = logodds_window
-    ``theta_*``         the tilt ANGLE ``arcsin(tau)``         ``[-pi/2, +pi/2]`` exactly
-    ==================  =====================================  ==============================
-
-    ⛔⛔ **THE COORDINATE IS NOT A DETAIL — it is TRAPS: off-grid-message-mode, which cost 74 % of a zero control's
-    error.** A mode delivered outside its grid's domain is not a weak claim, it is a PIN AT THE BOUNDARY:
-    the penalty ``-1/2 p (x - m)^2`` with ``m`` off-grid is monotone across every grid point, so it has no
-    interior minimum and precision buys a corner rather than a location. The backbone asserts the domain
-    for exactly this reason.
-
-    ``None`` in any field means "this channel says nothing", and a fully-``None`` message is
+    A profile on ψ's own grid cannot be delivered off-grid and cannot claim an over-unit share, which is
+    what retired the backbone's two coordinate assertions with the relay's Gaussian channels
+    (2026-09-09; TRAPS: off-grid-message-mode is the lesson they guarded). A fully-``None`` message is
     :meth:`silent` — the floor the whole message layer is priced against.
     """
 
-    gdna_mode: np.ndarray | None = None
-    gdna_prec: np.ndarray | None = None
-    rna_mode: tuple[np.ndarray, np.ndarray] | None = None
-    rna_prec: tuple[np.ndarray, np.ndarray] | None = None
-    lam_mode: np.ndarray | None = None
-    lam_prec: np.ndarray | None = None
-    theta_mode: np.ndarray | None = None
-    theta_prec: np.ndarray | None = None
-    #: ⭐ per-slot SIDEDNESS of the RNA channel (stage 4d): where True, the claim is the ONE-SIDED
-    #: "at least this much RNA" bound — only the contradiction side penalises (`_rna_residual`'s
-    #: clamp). ``None`` ⇒ every claim two-sided, byte-identical to the path before this field, and the
-    #: process-global ``ONE_SIDED_RNA`` toggle it generalizes still applies then.
-    rna_one_sided: np.ndarray | None = None
-    #: ⭐⭐ THE CERTIFIED-FLUX STREAM (owner ruling 2026-08-25: the anchor IS a message) — an
-    #: ``(n_slots, K)`` λ-factor row array in ψ's general evidence currency (θ-independent, finite,
-    #: an all-zero row is inert), or ``None`` for no claim. The sender publishes its spliced-flux
-    #: observation; these rows are the RECIPIENT's arithmetic (route-sum + the NB marginal at
-    #: claimed exons, the guarded Gaussian at eligible boundaries — `rna_anchor`). The backbone
-    #: sums them into the FINAL solve only: never phase-A, never the own-evidence precision —
-    #: that citizenship is the entire difference from the intron factory's factor.
+    #: ⭐⭐ THE λ ROWS — an ``(n_slots, K)`` λ-factor row array in ψ's general evidence currency
+    #: (θ-independent, finite, an all-zero row is inert), or ``None`` for no claim: what the two held
+    #: messages say about a slot's composition, delivered as a row over the solve grid (the transfer
+    #: policy's `solve` sums the held profiles per slot into it). The backbone adds the rows into the
+    #: FINAL solve only: never phase-A, never the own-evidence precision — that citizenship is the
+    #: entire difference from the intron factory's factor (the owner's ruling of 2026-08-25, made for
+    #: the retired relay's certified-flux stream, which travelled on this same channel).
     lam_rows: np.ndarray | None = None
     #: ⭐ THE CUBE CHANNEL (the both-stranded locus, 2026-09-08): ``{slot: (K, K_t) row}`` for AMBIG
     #: slots only — a max-normalised log-profile over ψ's ``(λ, θ)`` cube, the delivery of the RNA
@@ -147,28 +118,12 @@ class PsiMessage:
 
     @classmethod
     def silent(cls) -> PsiMessage:
-        """No claim on any channel. ⭐ Byte-identical to muting ψ's four imputed arguments, which is what
-        makes :class:`~.silent.SilentPolicy` the measured floor rather than a new code path."""
+        """No claim on either channel — what :class:`~.silent.SilentPolicy` delivers, the measured floor."""
         return cls()
 
     @property
     def is_silent(self) -> bool:
-        return all(
-            getattr(self, f) is None
-            for f in (
-                "gdna_mode",
-                "gdna_prec",
-                "rna_mode",
-                "rna_prec",
-                "lam_mode",
-                "lam_prec",
-                "theta_mode",
-                "theta_prec",
-                "rna_one_sided",
-                "lam_rows",
-                "cube_rows",
-            )
-        )
+        return self.lam_rows is None and self.cube_rows is None
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -180,11 +135,19 @@ class Level:
     total and the opportunity of the last node WITH a total the claim passed through: the next
     recipient prices its hop from them (both totals' counting, and the abundance discrepancy beyond
     it — the owner's rule 8, per hop, nothing pooled). An EMPTY node (no total) forwards a level
-    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density."""
+    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density.
+
+    ``rna_count`` / ``rna_count_var`` are an RNA lane's witness of ITS strand's abundance at that same
+    last full node — the strand's RNA count read from the node's column split (its asymmetry over the
+    protocol's strand contrast) and that estimate's Poisson variance — the pair the next recipient's
+    price compares with its own split (2026-09-09). ``None`` on the gDNA lane and where the library's
+    strand channel is dead (the derived deadband), where the column count is the witness."""
 
     profile: np.ndarray
     n: float
     a: float
+    rna_count: float | None = None
+    rna_count_var: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,8 +188,8 @@ class Message:
     a message (the owner's ruling, 2026-09-04: a hop that carries nothing still arrives, explicitly
     uninformative).
 
-    ⚠ The relay policy predates this type and holds its own per-node state tuple; the backbone treats
-    what a kernel returns as opaque and only insists that a real hop returns SOMETHING.
+    The backbone treats what a kernel returns as opaque and only insists that a real hop returns
+    SOMETHING.
     """
 
     composition: np.ndarray | None = None

@@ -64,6 +64,7 @@ Usage::
     python scripts/design/calibration_vs_oracle.py                    # the whole ladder
     python scripts/design/calibration_vs_oracle.py --conditions NAME  # one condition
     python scripts/design/calibration_vs_oracle.py --jobs 4
+    python scripts/design/calibration_vs_oracle.py --message-policy silent   # price a policy
     python scripts/design/calibration_vs_oracle.py --self-test        # no I/O
 """
 
@@ -1023,6 +1024,14 @@ def main() -> int:
         help="override CalibrationConfig.background_abundance for BOTH arms (P and O), so the run "
         "prices that estimator swap against oracle calibration. Default: the shipped config.",
     )
+    ap.add_argument(
+        "--message-policy",
+        choices=("silent", "relay", "transfer"),
+        default=None,
+        help="override CalibrationConfig.message_policy for BOTH arms (`silent` also turns "
+        "message_propagation off, the same policy the flag installs), so the run prices a message "
+        "policy on the 0.8.0 metric. Default: the shipped config.",
+    )
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no I/O")
     args = ap.parse_args()
 
@@ -1052,6 +1061,10 @@ def main() -> int:
             cmd = [sys.executable, str(Path(__file__).resolve()),
                    "--suite", str(args.suite), "--index", str(args.index),
                    "--oracle-cache", str(cache), "--json", str(out), "--conditions", *sh]
+            if args.background_abundance is not None:
+                cmd += ["--background-abundance", args.background_abundance]
+            if args.message_policy is not None:
+                cmd += ["--message-policy", args.message_policy]
             procs.append((subprocess.Popen(cmd), out))
         merged: list[dict] = []
         for proc, out in procs:
@@ -1076,6 +1089,18 @@ def main() -> int:
             ),
         )
         print(f"⭐ background_abundance = {args.background_abundance!r} on BOTH arms")
+    if args.message_policy is not None:
+        # the same rule: one payload, one tool, the policy on BOTH arms
+        pipeline_config = dataclasses.replace(
+            pipeline_config,
+            calibration=dataclasses.replace(
+                pipeline_config.calibration,
+                message_policy=args.message_policy,
+                message_propagation=args.message_policy != "silent",
+            ),
+        )
+        if args.json is None:
+            print(f"⭐ message_policy = {args.message_policy!r} on BOTH arms")
     if args.json is None:
         print(f"index + region arrays loaded in {time.perf_counter() - t0:.2f} s", flush=True)
 

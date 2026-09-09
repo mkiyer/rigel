@@ -336,13 +336,25 @@ def profile_of_level(profile, u, lam, n, a, rho_ref):
     return out - out.max()
 
 
+def count_logvar(count) -> np.ndarray:
+    """``Var(log rho)`` for a Poisson rate seen as ``count`` events over an opportunity — exactly, at
+    every count including zero: under the Jeffreys prior the rate's posterior is ``Gamma(count + 1/2,
+    E)``, whose log has variance ``trigamma(count + 1/2)``, independent of the opportunity ``E`` (it
+    moves the location and cannot sharpen the claim). This IS the ``1/n`` it replaces (they agree to
+    0.1 % from ``n = 10``); the whole difference is at small counts, and at ``n = 0`` it is ``pi^2/2 =
+    4.93`` (an sd of 2.2 nats) instead of infinity — a zero count is a measurement, not an absence.
+    ⭐ THE ONE HOME of the counting term: every hop price here and `region_init`'s own precision read
+    it, so there is one definition and nothing to keep in step."""
+    return polygamma(1, np.asarray(count, np.float64) + 0.5)
+
+
 def hop_price(n_s, a_s, n_x, a_x):
-    """One hop's price, the owner's rule 8 per hop: both totals' counting (``trigamma(n + 1/2)`` each)
-    plus the abundance discrepancy between the two nodes beyond what counting explains,
+    """One hop's price, the owner's rule 8 per hop: both totals' counting (`count_logvar` each) plus
+    the abundance discrepancy between the two nodes beyond what counting explains,
     ``max(0, log(r)^2 - (1/n_s + 1/n_x))`` with ``r`` the ratio of their total densities. A discrepancy
     is never attributed (capture, new transcription, noise): it widens."""
     n_s, n_x = float(n_s), float(n_x)
-    v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_x + 0.5))
+    v = float(count_logvar(n_s) + count_logvar(n_x))
     r = (n_x / float(a_x)) / (n_s / float(a_s))
     return v + max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
 
@@ -372,7 +384,7 @@ def count_price(n_s, a_s, n_x, a_x):
     discrepancy of the two count densities beyond counting. A zero count on either side has no
     density ratio, so counting is the whole price (``trigamma(1/2)`` is finite)."""
     n_s, n_x = float(n_s), float(n_x)
-    v = float(polygamma(1, n_s + 0.5) + polygamma(1, n_x + 0.5))
+    v = float(count_logvar(n_s) + count_logvar(n_x))
     if n_s > 0.0 and n_x > 0.0:
         r = (n_x / float(a_x)) / (n_s / float(a_s))
         v += max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))

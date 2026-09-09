@@ -38,51 +38,27 @@ silently produces the same symptom:
 (a)  is the BANK populated?          ``spliced_count`` > 0 where the geometry says it must be
 (b)  does it have a DIVISOR?         ``eff_rna`` > 0, since there is no ``eff_sj`` at a
                                      terminus BOUNDARY to price it against
-(c)  is a PRECISION EMITTED?         the relay's own RNA measurement precision (``cm_p``/``cm_n``)
-                                     — a bank with a divisor and no precision is inert
+(c)  does the MESSAGE LAYER READ IT?  the transfer policy builds a FLUX LEVEL at an exon from the
+                                     certified flux at its junction (`_RnaLane.flux`, priced by the
+                                     junction–exon pair); a bank with a divisor that no policy reads
+                                     is inert. Read off the policy's own prepared object through a spy
+                                     on its `prepare`, never off a config flag
 ===  ====================================================================================
 
 ---
 
-⛔⛔⛔ **THE VERDICT THAT USED TO BE HERE — "24 of 24 grid cells … (c) FAILS, ``cm_p = cm_n = 0``" — IS
-WITHDRAWN, AND ITS NUMBERS ARE NOT REPLACED BY GUESSES (2026-08-17).** It cannot be reproduced by this
-file and it is not honestly repairable into one, for three separate reasons:
-
-* **The grid is not 24 cells.** The defaults are ``--ta 0 30 300 3000`` × ``--tb`` the same, with the
-  silent ``(0, 0)`` corner skipped — **15** cells.
-* **It named columns this instrument does not print.** ``TRUE gDNA`` / ``PRED gDNA`` per cell; see the
-  MASS paragraph above.
-* ⛔⛔ **It was measured BEFORE ``message_propagation`` was defaulted OFF, and check (c) is a RELAY
-  quantity.** ``cm_p`` / ``cm_n`` are the relay's own RNA measurement precisions and exist only under
-  ``RelayPolicy``. Reporting "(c) FAILS, precisions are 0" against a run in which the relay was never
-  installed would be `TRAPS: an-ablation-that-never-ran`, so under the mute this file now reports (c)
-  **UNANSWERABLE** and exits non-zero rather than passing OR failing.
-
-⭐⭐ **WHAT A FRESH RUN SAYS, 2026-08-17, both policies, the full 15-cell default grid** — quoted from the
-output, not remembered:
-
-* ``--messages on`` (this file's default, and the only setting in which (c) has content): **rc 0**, and
-  *"✅ every populated ``boundary_spliced`` bank has a divisor AND emits a precision."* A precision IS
-  emitted — e.g. at TA = 3000 / TB = 3000, ``cm_p`` reads 0.1988 at @9,050 and 0.2026 at @9,100. ⚠
-  ``cm_n`` is 0.0 at every row of that run, which is the NEGATIVE-strand channel on a two-plus-strand
-  toy and is not evidence about the certified channel.
-* ``--messages off`` (**the shipped config**): **rc 1**, and (c) is UNANSWERABLE on every populated bank
-  in all 15 cells — ``cm_p`` / ``cm_n`` print as ``—`` because the relay published nothing.
-
-⛔ **So the ONE claim the old verdict rested on — that the certified channel is inert — is now a claim
-about the SHIPPED MUTE, not about the channel's wiring, and this file can no longer be used to make it.**
-What survives unchanged is (a) and (b): ``boundary_spliced`` is populated at both terminus/contiguity
-BOUNDARIES and carries ``eff_rna`` = 202.8 as its divisor on every populated row of both runs.
+⛔ **Check (c) changed meaning with the message policy (2026-09-09).** Until the relay retired it read
+the relay's own RNA measurement precisions; under the shipped transfer policy the certified flux enters
+as an RNA LEVEL at the exon beside the junction, so (c) now asks whether that level was built. Under
+``--messages off`` (``SilentPolicy``) no policy prepares anything, so (c) is UNANSWERABLE there — reported
+as such and exiting non-zero, never as a pass or a failure of the channel.
 
 ⭐ **@9,050 is still the diagnostic and @9,100 still its control, and the geometry is why.** Both carry
-certified RNA; @9,100's flanks include the 1,900 bp exon [9,100, 11,000) which the relay can speak from.
+certified RNA; @9,100's flanks include the 1,900 bp exon [9,100, 11,000), which has a density to speak from.
 @9,050's flanks are the two **50 bp** regions [9,000, 9,050) and [9,050, 9,100) — both below one mean
-fragment length, so neither has a resolvable density (`TRAPS: density-below-one-fragment-length`) and a
-muted relay has nothing to offer. ⚠ Under ``--messages off`` every one of those objects reads ``pred_fg``
-0.4947–0.5012 — the uninformative reference — against ``true_fg`` 0.0006–0.0032; under ``--messages on``
-the same objects move (0.0394 at TA = 3000 / TB = 30, 0.2603 at TA = 3000 / TB = 3000). ⛔ **The object's
-own certified-RNA fragments are not what moves it in either case** — ψ has no spliced term at all — so
-the answer is still set by whether a NEIGHBOUR happens to be informative.
+fragment length, so neither has a resolvable density (`TRAPS: density-below-one-fragment-length`).
+⛔ **The object's own certified-RNA fragments do not enter its own solve** — ψ has no spliced term at
+all — so a boundary's answer is set by what its neighbours carry to it.
 
 ⭐ **The grid is the experiment, not a sweep for its own sake.** At @9,100 the certified channel is TB's
 alone while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves the two independently and a
@@ -163,10 +139,8 @@ def main() -> int:
     ap.add_argument("--tb", nargs="*", type=float, default=[0.0, 30.0, 300.0, 3000.0])
     ap.add_argument("--n-rna", type=int, default=200_000)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_cert_audit"))
-    # ⭐ DEFAULTS TO `on`, AND THAT IS THE HONEST DEFAULT HERE: check (c) — "is a precision emitted" —
-    # reads `cm_p`/`cm_n`, which ARE the relay's own RNA measurement precisions. Under the shipped mute
-    # they do not exist, so the instrument's headline question has no content and (c) can only be
-    # reported UNANSWERED. The stamp says on every run that this is not the shipped configuration.
+    # ⭐ DEFAULTS TO `on`: check (c) — "does the message layer read the bank" — is a question about
+    # the policy, and under a mute there is no policy to ask. The stamp says which configuration ran.
     TH.add_messages_flag(ap, default=True)
     args = ap.parse_args()
 
@@ -192,9 +166,47 @@ def main() -> int:
           "  — any one failing gives the same symptom")
 
     fails: list[str] = []
-    #: ⭐ banks where (a) and (b) pass and (c) was NEVER ASKED, because the relay is muted. Kept apart
-    #: from `fails` so a config flag can never be reported as a defect in the certified-RNA channel.
+    #: ⭐ banks where (a) and (b) pass and (c) was NEVER ASKED, because the messages are muted. Kept
+    #: apart from `fails` so a config flag can never be reported as a defect in the certified-RNA channel.
     unasked: list[str] = []
+
+    # ⭐ THE SPY: `calibrate` looks its policy class up in its own module at call time, so a subclass
+    # bound there records the prepared object — the lanes and the flux levels — without patching the
+    # solve. (`policy_prototype.py` installs prototype arms through the same binding.)
+    CAL = sys.modules["rigel.calibration.calibrate"]
+    from rigel.calibration.messages.transfer import TransferPolicy  # noqa: PLC0415
+
+    seen: dict = {}
+
+    class _Spy(TransferPolicy):
+        def prepare(self, ctx):
+            prepared = TransferPolicy.prepare(self, ctx)
+            seen["ctx"], seen["prepared"] = ctx, prepared
+            return prepared
+
+    CAL.TransferPolicy = _Spy
+
+    def flux_read_at(boundary_slot: int) -> str | None:
+        """How the shipped policy READS the certified bank at this boundary: ``"level"`` (a flux level
+        built at an adjacent exon from the junction's flux), ``"map"`` (a composition rule at one of
+        the boundary's faces — rung 2's splice-in map carries the junction flux as its cap, item 5's
+        terminus maps carry the spliced crossing), ``"NO"`` (populated and unread), or ``None`` when
+        no policy prepared anything (muted)."""
+        prepared = seen.get("prepared")
+        if prepared is None or prepared.own is None:
+            return None
+        ctx = seen["ctx"]
+        b = int(boundary_slot)
+        for x in (int(ctx.left[b]), int(ctx.right[b])):
+            if x < 0:
+                continue
+            for lane in (prepared.rna or {}).values():
+                fx = lane.flux[x]
+                if fx is not None and b in fx:
+                    return "level"
+        if any(b in key for key in prepared.rule):
+            return "map"
+        return "NO"
     for ta in args.ta:
         for tb in args.tb:
             if ta == 0.0 and tb == 0.0:
@@ -224,17 +236,9 @@ def main() -> int:
                 print("     grid cell above: the partition genuinely differs from the production scan.")
                 return 1
             cap = r.capture
-            st = TH.relay_static(cap)  # E_r survives the mute — the BACKBONE publishes it
-            # ⛔ `_uni` exists only under `RelayPolicy`, and CHECK (c) IS a relay quantity: `cm_p`/`cm_n`
-            # are the relay's own RNA measurement precisions. Muted, (c) is UNANSWERABLE, never FAILED —
-            # see the `_UNASKED` note below. This file used to die here with `KeyError: '_uni'`.
-            uni = TH.relay_channels(cap)
             spl = np.asarray(cap["spliced"], float)
             jun = np.asarray(cap["mature"], float)
-            E_r = np.asarray(st["E_r"], float)
-            nan_slots = np.full(int(r.chain.n_slots), float("nan"))
-            cm_p = np.asarray(uni["cm_p"], float) if uni is not None else nan_slots
-            cm_n = np.asarray(uni["cm_n"], float) if uni is not None else nan_slots
+            E_r = np.asarray(cap["eff_rna"], float)
             fg = np.asarray(cap["f_g"], float)
             loc = np.asarray(cap["fg_loc"], float)
             cnt = np.asarray(cap["count"], float).sum(axis=1)
@@ -261,7 +265,7 @@ def main() -> int:
             #    fraction. `object_rows` publishes `err` = |PRED gDNA − TRUE gDNA| in FRAGMENTS and `mass`
             #    = the object's own true total, so both are printed and the rule is executable again.
             print(f"   {'object':<28}{'n':>8}{'spliced':>9}{'sj':>10}{'E_r':>8}"
-                  f"{'cm_p':>10}{'cm_n':>8}{'true_fg':>9}{'fg_loc':>8}{'pred_fg':>9}{'Δ':>9}"
+                  f"{'flux read':>10}{'true_fg':>9}{'fg_loc':>8}{'pred_fg':>9}{'Δ':>9}"
                   f"{'Δgdna':>10}{'mass':>10}   audit")
             print("   " + "-" * 146)
             for row in rows:
@@ -269,7 +273,7 @@ def main() -> int:
                 if cnt[s] <= 0 and spl[s] <= 0:
                     continue
                 S, J, er = float(spl[s]), float(jun[s]), float(E_r[s])
-                pp, pn = float(cm_p[s]), float(cm_n[s])
+                read = flux_read_at(s) if S > 0 else None
                 tf = row["true_fg"]
                 d = fg[s] - tf if tf == tf else float("nan")
                 # ⭐ the audit: only meaningful where the bank IS populated.
@@ -278,35 +282,24 @@ def main() -> int:
                 elif er <= 0:
                     note = "⛔⛔ (b) certified RNA with NO DIVISOR — cannot become a density"
                     fails.append(f"TA={ta} TB={tb} {row['type']} {row['where']}: spliced>0, E_r=0")
-                elif uni is None:
-                    # ⛔⛔ NOT A FAILURE. `cm_p`/`cm_n` are the RELAY's precisions and the relay is muted,
-                    # so no precision was ASKED FOR. Calling this "(c) FAILS" would manufacture a verdict
-                    # against the certified-RNA channel out of a message-layer config flag — the exact
-                    # false finding `TRAPS: an-ablation-that-never-ran` warns about.
-                    # ⛔⛔ THE TEST IS `uni is None` — THE RELAY'S OWN ARTIFACT — AND NOT `cm_p != cm_p`.
-                    #   Keying on NaN conflates two different verdicts: muted (`_uni` absent, nothing was
-                    #   asked) and INSTALLED-BUT-PUBLISHED-A-NON-NUMBER, which is a (c) FAILURE. A NaN
-                    #   under `RelayPolicy` would have printed "the relay is MUTED", which is false, and
-                    #   filed a real wiring defect under `unasked` where nothing reads it. ⭐ Same
-                    #   discipline as `toy_harness.relay_live`: trust the artifact, never the flag —
-                    #   and here, never a sentinel value the artifact might legitimately carry.
-                    note = "⚠ (c) UNANSWERABLE — the relay is MUTED, no precision was asked for"
+                elif read is None:
+                    # ⛔⛔ NOT A FAILURE. No policy prepared anything (the messages are muted), so
+                    # nothing was ASKED to read the bank. Calling this "(c) FAILS" would manufacture a
+                    # verdict against the certified-RNA channel out of a message-layer config flag —
+                    # the false finding `TRAPS: an-ablation-that-never-ran` warns about.
+                    note = "⚠ (c) UNANSWERABLE — the messages are MUTED, no policy read the bank"
                     unasked.append(f"TA={ta} TB={tb} {row['type']} {row['where']}")
-                elif not (pp > 0.0 or pn > 0.0):
-                    # ⚠ Written as `not (… > 0)` rather than `<= 0` so a NaN published by an INSTALLED
-                    #   relay lands here — no usable precision is no usable precision.
-                    note = "⛔⛔ (c) certified RNA, divisor OK, but NO PRECISION EMITTED — inert"
-                    fails.append(f"TA={ta} TB={tb} {row['type']} {row['where']}: spliced>0, prec=0")
+                elif read == "NO":
+                    note = "⛔⛔ (c) certified RNA, divisor OK, but NO rule or level reads it — inert"
+                    fails.append(f"TA={ta} TB={tb} {row['type']} {row['where']}: spliced>0, unread")
                 else:
                     note = f"✅ certified RNA live (rho_R = {S / er:.4g})"
                 f = lambda v, w=9, p=4: (f"{v:>{w}.{p}f}" if v == v else f"{'—':>{w}}")  # noqa: E731
-                # ⛔ `cm_p`/`cm_n` MUST render as `—` and never as `nan` when the relay is muted. The
-                #   run stamp promises "reads '—' because the relay SENT NOTHING — not because it sent
-                #   a zero", and a printed `nan` says the relay produced one, which is a different and
-                #   wrong story. This column went through a raw `.4g` until 2026-08-17.
-                g = lambda v, w: (f"{v:>{w}.4g}" if v == v else f"{'—':>{w}}")  # noqa: E731
+                # ⛔ the flux column renders `—` when the messages are muted: nothing was asked, which
+                #   is a different story from "the policy built no level".
+                rd = "—" if read is None else read
                 print(f"   {row['type'] + ' ' + row['where']:<28}{cnt[s]:>8,.0f}{S:>9,.0f}"
-                      f"{J:>10,.0f}{er:>8.1f}{g(pp, 10)}{g(pn, 8)}{f(tf)}{f(loc[s], 8)}"
+                      f"{J:>10,.0f}{er:>8.1f}{rd:>10}{f(tf)}{f(loc[s], 8)}"
                       f"{f(fg[s])}{f(d, 9, 4)}{row['err']:>10,.0f}{row['mass']:>10,.0f}   {note}")
 
     print(f"\n{'=' * 148}")
@@ -319,13 +312,13 @@ def main() -> int:
         # ⛔ The exit code must NOT be 0 here: (a) and (b) passed but (c) — this instrument's whole
         # verdict — was never asked. A green exit would let a muted run stand in for an audit.
         print(f"⚠⚠ (a) and (b) PASS, and (c) IS UNANSWERED on {len(unasked)} populated bank(s): the")
-        print("   relay is MUTED, so `cm_p`/`cm_n` do not exist. ⛔ This is NOT a pass and NOT a")
+        print("   messages are MUTED, so no policy read the bank. ⛔ This is NOT a pass and NOT a")
         print("   failure of the certified-RNA channel. Re-run with `--messages on` to audit (c).")
         for f_ in unasked[:30]:
             print(f"     - {f_}")
     else:
-        print("✅ every populated `boundary_spliced` bank has a divisor AND emits a precision.")
-        print("   ⚠ That is (a)+(b)+(c) only. It does NOT say the precision is the RIGHT SIZE, nor that")
+        print("✅ every populated `boundary_spliced` bank has a divisor AND the policy reads it (a map or a level).")
+        print("   ⚠ That is (a)+(b)+(c) only. It does NOT say the level is the RIGHT SIZE, nor that")
         print("     ψ uses it for the object's OWN belief — ψ has no spliced term at all")
         print("     (`tests/calibration/test_vertex_reference.py`'s certified-RNA-blindness gate pins that).")
     print("=" * 148)

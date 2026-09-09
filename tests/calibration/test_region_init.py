@@ -3,7 +3,7 @@
 One test per information source of — MEASURED (Poisson
 precision), INTRON FACTORY, STRAND DECONVOLUTION, UNSOLVED default (100% gDNA, ZERO precision) — plus the
 pure precision arithmetic (`own_composition_logvar`, `own_precision`). These pin the self-solve that seeds
-the unified pass-0 relay.
+the sweep.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 
 from rigel.calibration.region_chain import REGION
-from rigel.calibration.messages.variance import composition_logvar, count_logvar
 from rigel.calibration.region_geometry import g1_locked, init_beliefs
 from _synthetic import make_chain_parts
 from rigel.calibration.region_init import (
@@ -444,79 +443,3 @@ def test_struct_lock_is_exactly_g1_locked_on_the_region_axis():
         np.asarray(parts.chain.kind) == REGION
     )
     assert list(np.asarray(ni.struct_lock, bool)) == list(want)
-
-
-#: ⛔⛔⛔ THE SECOND, LARGER DEFECT — AND THE PERTURBATION OF THE THREE ABOVE IS WHAT FOUND IT.
-#: Scoping ``struct_lock`` to G1 was expected to restore the composition half of ``Var(log ρ_tot)`` at an
-#: empty exon. It does not, and the reason is a CORNER DEGENERACY that has nothing to do with
-#: ``struct_lock``: an evidence-free slot's default belief is ``f_g = 1`` exactly (the unsolved 100 %-gDNA
-#: init), and ``region_sweep`` caps ``Var(f_g)`` at ``f_g(1−f_g)`` — **which is 0 at the corner.** So
-#: ``logvar_tot`` at every evidence-free slot is ``count_logvar(n)`` and nothing else, and with
-#: ``count_logvar`` finite there is now NO damping there at all. The ``1/n = ∞`` that the 39 % win removed
-#: had been the only thing damping those hops.
-#:
-#: ⭐ The derived repair needs no tuned constant: with ``τ_λ = 0`` there is no evidence, so ``Var(f_g)`` is
-#: the variance of ψ's OWN reference — ``Beta(½, ½)`` (`simplex_logodds._JEFFREYS_REF`) — which is exactly
-#: **1/8**, and is nonzero wherever the point estimate sits. ``f_g(1−f_g)`` is a BERNOULLI variance and is
-#: the right scale only away from the corner; at the corner it asserts a composition known exactly on a slot
-#: with no data. ⭐ And the coefficient it multiplies, ``[(1/E_g − 1/E_r)/B]²``, diverges as ``E_g``
-#: collapses — so the restored damping is largest exactly at the SHORT capture-depleted slots the stranded ×
-#: capture-ON regression lives on.
-_CORNER_VAR_XFAIL = pytest.mark.xfail(
-    strict=True,
-    reason="Var(f_g) is capped at f_g(1-f_g), which is 0 at the f_g=1 default of an evidence-free slot, "
-    "so logvar_tot carries no composition term there and the hop is undamped.",
-)
-
-
-@_CORNER_VAR_XFAIL
-def test_an_evidence_free_slot_is_not_certain_of_its_composition():
-    """⭐⭐ THE OBSERVABLE: ``Var(f_g)`` at a slot with ``τ_λ = 0`` must be the reference prior's variance,
-    not zero.
-
-    ⛔ Gated as a strict inequality against ``0``, and separately against the STRUCTURALLY certain twin in
-    the same fixture, so it cannot be satisfied by making everything uncertain: the intergenic region is
-    genuinely TRAPS: no-magic-numbers and must still be exactly certain.
-
-    ⚠ This reads `sweep.solve_chain`'s expression, restated here because it is a LOCAL there. That is a
-    second home for one predicate (TRAPS: a-test-that-redefines) and is the reason the repair must move it into a named
-    function beside `own_composition_logvar` when it lands."""
-    ni, parts = _empty_exon_scenario()
-    ig, am = 0, 4  # the intergenic REGION (truly TRAPS: no-magic-numbers) and the EMPTY AMBIG exon
-    fg = np.asarray(ni.f_g, float)
-    tau = np.asarray(ni.tau_lam, float)
-    assert tau[am] == 0.0 and fg[am] == 1.0  # evidence-free, and parked at the corner
-    fgfr = fg * (1.0 - fg)
-    var_fg = np.where(
-        np.asarray(ni.struct_lock, bool),
-        0.0,
-        np.where(tau > 1e-9, np.minimum(fgfr * fgfr / np.maximum(tau, 1e-9), fgfr), fgfr),
-    )
-    assert var_fg[ig] == 0.0  # structural certainty is real and must survive
-    assert var_fg[am] > 0.0, "an evidence-free slot declares Var(f_g) = 0 at the f_g = 1 corner"
-
-
-@_CORNER_VAR_XFAIL
-def test_an_evidence_free_slot_pays_a_composition_transfer_variance():
-    """⭐⭐⭐ AND THE CONSEQUENCE, in the currency the relay actually spends: ``σ²_transfer``.
-
-    ``region_sweep`` hands that ``Var(f_g)`` to `enrichment_frame.composition_logvar`, whose output IS
-    ``σ²_transfer`` (via `transfer_logvar`). With the composition term at 0 the evidence-free slot pays only
-    ``count_logvar(n)``, so every message it touches crosses at ``1/(1/p + trigamma(½))`` — which is why a
-    zero-mass slot went from a relay BARRIER to a CONDUIT when ``1/n`` was replaced.
-
-    ⛔ The intergenic twin must still pay counting alone: it is composition-CERTAIN by structure, and a
-    repair that damps it too would be widening the gate rather than fixing the defect."""
-    ni, parts = _empty_exon_scenario()
-    ig, am = 0, 4
-    E_g = np.asarray(parts.geometry.eff_gdna, float)
-    E_r = np.asarray(parts.geometry.eff_rna, float)
-    n = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
-    fg = np.asarray(ni.f_g, float)
-    fgfr = fg * (1.0 - fg)
-    var_fg = np.where(np.asarray(ni.struct_lock, bool), 0.0, fgfr)  # tau = 0 at both slots
-    lv = composition_logvar(fg, E_g, E_r, var_fg, n)
-    assert lv[ig] == count_logvar(np.array([n[ig]]))[0]  # certain ⇒ counting only, unchanged
-    assert lv[am] > count_logvar(np.array([n[am]]))[0], (
-        "an evidence-free slot pays no composition transfer variance, so its hops are undamped"
-    )

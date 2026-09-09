@@ -9,13 +9,13 @@ every rung the solver already exposes, so the ladder is:
     A  fg_init      the initialisation belief (before any solve)
     B  fg_strand    the strand likelihood alone
     C  fg_loc       the message-free LOCAL solve (strand + density; the reference LOCATION was deleted 2026-08-24), refits 0
-    D  f_g          refits 0,      messages ON     -> C→D is what the RELAY does at pass-0
+    D  f_g          refits 0,      messages ON     -> C→D is what the MESSAGES do at pass-0
     E  f_g          shipped refits, messages OFF   -> C→E is what the LANDSCAPE refit does alone
     F  f_g          shipped refits, messages ON    -> the SHIPPED tool
 
-⚠ "messages ON" includes the certified-flux stream since 2026-08-25 (the anchor is a MESSAGE,
-delivered by the relay): C→D bundles the stream with the neighbour claims. To separate them use
-`ladder_arm_ab --arm anchor_off` / `backbone_parity --arm-b no_certified_flux`.
+⚠ "messages ON" is the shipped transfer policy, certified flux included (it enters as an RNA level
+and through the splice-in maps): C→D bundles every message. To see one mechanism apart, prototype it
+(`policy_prototype.py --module`) and compare per slot (`backbone_parity.py --arm-b module:...`).
 
 ⛔ **TRUTH COMES ONLY FROM THE CERTIFIED TABLE** (`calibration_oracle.py`'s ``slot_truth.npz``) — this
 file recomputes nothing about truth and REFUSES to run on a condition whose table is missing, because a
@@ -23,8 +23,8 @@ walk against an uncertified truth debugs the wrong thing. The table's ``field_ce
 printed with every run: ``true_f_g`` is composition-certified either way; densities are only comparable
 when the field gate passed.
 
-⛔ Every arm asserts what ran: ``_uni`` is written only under ``RelayPolicy``, and a muted arm must
-reproduce ``f_g == fg_loc`` bit for bit (TRAPS: an-ablation-that-never-ran).
+⛔ Every arm asserts what ran: the backbone stamps the policy's name into the capture, and a muted arm
+must reproduce ``f_g == fg_loc`` bit for bit (TRAPS: an-ablation-that-never-ran).
 
 Errors are ``Sum |f_g - true_f_g| * mass`` in FRAGMENTS, total and per stratum, never pooled across
 strata in the verdict line. The per-stage DELTA column is the point of the file: the stage whose delta
@@ -81,9 +81,10 @@ def run_arm(payload, kw, *, refits: int | None, messages: bool) -> dict:
     calibrate(payload=payload, config=cfg, _debug=debug,
               **{k: v for k, v in kw.items() if k != "payload"})
     cap = debug["capture"]
-    if ("_uni" in cap) != messages:
-        raise AssertionError(f"messages={messages} but the relay "
-                             f"{'ran' if '_uni' in cap else 'did not run'} — inert or leaking arm")
+    want = cfg.message_policy if messages else "silent"
+    if cap.get("policy_name") != want:
+        raise AssertionError(f"messages={messages} but the policy that ran is "
+                             f"{cap.get('policy_name')!r}, not {want!r} — inert or leaking arm")
     if not messages and not np.array_equal(np.asarray(cap["f_g"]), np.asarray(cap["fg_loc"])):
         raise AssertionError("muted arm's final belief differs from its local solve — not muted")
     return cap

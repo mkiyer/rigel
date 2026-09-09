@@ -29,7 +29,7 @@ and a change is only real once the ladder agrees.
 EM and re-scans nothing: every condition is read from its cached scan.
 
     python scripts/design/policy_benchmark.py --panel test
-    python scripts/design/policy_benchmark.py --panel ladder --policies silent relay
+    python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer
     python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nrna_file_capture_off
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
 
@@ -76,14 +76,11 @@ PANELS = {
     "ladder": (RUNS / "suite" / "rigel_index", RUNS / "suite" / "ladder"),
 }
 
-#: policy name -> the `CalibrationConfig` fields that install it. `rna_anchor` is live only
-#: under the relay (`DESIGN.md` §6b.3), so the other arms carry it False and say so.
+#: policy name -> the `CalibrationConfig` fields that install it. The relay was retired on
+#: 2026-09-09 (git carries it and its recorded ladder standings).
 POLICIES = {
-    "silent": dict(message_propagation=False, rna_anchor=False),
-    "relay": dict(message_propagation=True, message_policy="relay", rna_anchor=True),
-    # rung 1 of the message rebuild: the intron -> intron|exon boundary composition transfer
-    # (messages/transfer.py). Not in the default arm list yet — name it with --policies.
-    "transfer": dict(message_propagation=True, message_policy="transfer", rna_anchor=False),
+    "silent": dict(message_propagation=False),
+    "transfer": dict(message_propagation=True, message_policy="transfer"),
 }
 
 
@@ -191,7 +188,7 @@ def _stranded(condition: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--panel", choices=sorted(PANELS), default="test")
-    ap.add_argument("--policies", nargs="+", default=["silent", "relay", "transfer"])
+    ap.add_argument("--policies", nargs="+", default=["silent", "transfer"])
     ap.add_argument("--conditions", nargs="+", default=None, help="default: all cached")
     ap.add_argument(
         "--by-class",

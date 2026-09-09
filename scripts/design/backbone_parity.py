@@ -11,26 +11,22 @@ most structure, then run the panel. ⛔ It is also the honest answer to TRAPS: a
 ablation is small and the joint one is large, go one stage upstream* — because an aggregate cannot tell a
 switch that moves nothing from one that moves two slots in opposite directions.
 
-⛔⛔ **THE VERDICT THIS DOCSTRING USED TO CARRY IS NO LONGER REPRODUCIBLE, AND SAYING SO IS THE POINT.**
-It read: *"``RelayPolicy`` reproduced the shipped answer on 421,056 output elements and 18,245,830
-diagnostic elements, zero differences"*. That was ``RelayPolicy`` against **the solver the backbone
-replaced**, and that solver is DELETED — there is no second arm to put on the other side, so no invocation
-of this file can produce the number again. ⛔ Do not re-attach it to any arm pair this file still offers:
-``head`` vs ``silent`` is an ABLATION and is expected to DIFFER. ⭐ What would reproduce it is a checkout
-of the tree that still held the predecessor; nothing here will.
+⛔⛔ **THE VERDICT THIS DOCSTRING ONCE CARRIED IS NO LONGER REPRODUCIBLE, AND SAYING SO IS THE POINT.**
+It read: *"the relay reproduced the shipped answer on 421,056 output elements and 18,245,830 diagnostic
+elements, zero differences"*. That was the relay against the solver the backbone replaced; both are
+deleted (the relay retired 2026-09-09), so no invocation of this file can produce the number again.
 
-⭐⭐ **What the machinery is FOR now** is pricing the switches one at a time — ``--arm-a head
---arm-b no_<switch>`` — and the two structural claims that survive without the predecessor: ``noop``-shaped
-arm pairs must be byte-identical, and an arm the policy cannot express must be visible as such rather than
-scored as inert.
+⭐⭐ **What the machinery is FOR now**: ``transfer`` against ``silent`` is the per-slot view of what the
+shipped policy does to a real chain; ``transfer`` against a PROTOTYPE arm (``module:<file.py>:<arm>``, the
+same ``ARMS`` file `policy_prototype.py` loads) is the per-slot view of ONE mechanism, element by element,
+where an aggregate cannot tell a mechanism that moves nothing from one that moves two slots in opposite
+directions. A prototype identical to the shipped policy must score byte-identical here.
 
-⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** With
-``message_propagation = False`` (the SHIPPED default is ``True``) ``SilentPolicy`` is installed; every other instrument that
-reads relay state therefore needs a flag to say which policy it ran under. Here the policy **IS** the arm —
-it is named on both sides of every comparison and printed before each run — so a ``--messages`` flag would
-be a second, contradictable source for the same fact. ⚠ The one calibration run at the top exists ONLY to
-capture ``solve_chain``'s inputs, which are built before any policy is consulted, so it is correctly left
-on the shipped config.
+⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** The policy
+**IS** the arm — it is named on both sides of every comparison and printed before each run — so a
+``--messages`` flag would be a second, contradictable source for the same fact. ⚠ The one calibration run
+at the top exists ONLY to capture ``solve_chain``'s inputs and the shipped policy instance (its intron-row
+memo and strand model), which are built before any policy is consulted.
 
 What it compares
 ----------------
@@ -49,11 +45,11 @@ comparisons".
 
 Usage
 -----
-    # the live invariant: SilentPolicy is the message-free floor
+    # what the shipped policy does to one real chain, per slot
     python scripts/design/backbone_parity.py --suite .../ladder --index .../rigel_index
 
-    # what ONE operator does, per slot
-    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b no_splice_out
+    # what ONE prototype mechanism does, per slot
+    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b module:proto.py:my_arm
 
 ⚠ Both arms run in ONE process against ONE set of inputs, which is what makes this an identity test rather
 than a reproducibility test.
@@ -71,7 +67,6 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from rigel.calibration import sweep as SW  # noqa: E402
-from rigel.calibration.messages.relay import RelayPolicy, RelaySwitches  # noqa: E402
 from rigel.calibration.messages.silent import SilentPolicy  # noqa: E402
 
 #: capture keys that CANNOT match by construction, with the reason. ⛔ Keep this set EMPTY unless the
@@ -167,8 +162,8 @@ def main() -> int:
     ap.add_argument("--condition", default="gdna_g50_ss_0.50_nrna_mid_capture_on")
     ap.add_argument("--oracle-cache", type=Path, default=None)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_backbone_parity"))
-    ap.add_argument("--arm-a", default="head", help="'head', 'silent', or 'no_<switch>'")
-    ap.add_argument("--arm-b", default="silent", help="'head', 'silent', or 'no_<switch>'")
+    ap.add_argument("--arm-a", default="transfer", help="'transfer', 'silent', or 'module:<file.py>:<arm>'")
+    ap.add_argument("--arm-b", default="silent", help="'transfer', 'silent', or 'module:<file.py>:<arm>'")
     args = ap.parse_args()
 
     from rigel.config import CalibrationConfig, PipelineConfig  # noqa: PLC0415
@@ -228,34 +223,31 @@ def main() -> int:
         )
         return out, cap
 
-    # ⭐ the CAPTURED policy is the shipped relay, and since 2026-08-25 it CARRIES the
-    # certified-flux evidence — every relay arm here must carry the same evidence, or `head` is
-    # not the shipped policy and `no_certified_flux` is vacuous (both arms flux-less scored
-    # byte-identical — exactly the inert-arm failure this file's doctrine forbids; found by the
-    # 2026-08-25 audit).
-    _shipped_flux = getattr(g["kw"].get("policy"), "_flux", None)
+    # ⭐ the CAPTURED policy is the shipped transfer policy with its intron-row memo and strand model;
+    # a prototype arm is built on the same two, so the two arms differ by the mechanism alone.
+    _shipped = g["kw"].get("policy")
 
     def policy_for(spec: str):
-        """``head`` | ``silent`` | ``no_<switch>``. ⛔ An unknown switch name RAISES rather than being
-        silently ignored — an arm that turns nothing off scores identical and reads as "inert" (TRAPS: an-ablation-that-never-ran)."""
+        """``transfer`` | ``silent`` | ``module:<file.py>:<arm>``. ⛔ An unknown arm RAISES rather than
+        being silently ignored — an arm that changes nothing scores identical and reads as inert
+        (TRAPS: an-ablation-that-never-ran)."""
         if spec == "silent":
             return SilentPolicy()
-        if spec == "head":
-            return RelayPolicy(flux=_shipped_flux)
-        if spec.startswith("no_"):
-            name = spec[3:]
-            if name not in RelaySwitches().names():
+        if spec == "transfer":
+            if _shipped is None or getattr(_shipped, "name", None) == "silent":
                 raise SystemExit(
-                    f"⛔ no such switch {name!r}. Available: {', '.join(RelaySwitches().names())}"
+                    "⛔ the captured shipped policy is not the transfer policy — run under the shipped config"
                 )
-            if name == "certified_flux" and _shipped_flux is None:
-                raise SystemExit(
-                    "⛔ no_certified_flux: the captured shipped policy carries NO flux evidence, so "
-                    "this arm would turn nothing off and score byte-identical (TRAPS: an-ablation-that-never-ran). "
-                    "Run with a config whose rna_anchor is ON."
-                )
-            return RelayPolicy(RelaySwitches(**{name: False}), flux=_shipped_flux)
-        raise SystemExit(f"⛔ unknown arm {spec!r} — use 'head', 'silent' or 'no_<switch>'")
+            return _shipped
+        if spec.startswith("module:"):
+            _, path, arm = spec.split(":", 2)
+            from scripts.design import policy_prototype as PP  # noqa: PLC0415
+
+            arms = PP.load_arms(Path(path))
+            if arm not in arms:
+                raise SystemExit(f"⛔ {path} defines no arm {arm!r}; it has {sorted(arms)}")
+            return arms[arm](_shipped._rows_at, strand=_shipped._strand)
+        raise SystemExit(f"⛔ unknown arm {spec!r} — use 'transfer', 'silent' or 'module:<file.py>:<arm>'")
 
     pa, pb = policy_for(args.arm_a), policy_for(args.arm_b)
     if pa.name == pb.name:

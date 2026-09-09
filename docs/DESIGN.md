@@ -1264,7 +1264,7 @@ argument about what a message should say were interleaved. It is now two things,
 
 | | | |
 |---|---|---|
-| `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, splices in, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
+| `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **four assertions** (five until the relay's Gaussian channels retired, 2026-09-09). | It knows nothing about capture, splices in, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
 | `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five lines. | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/relay.py` | `RelayPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
 | `messages/variance.py` | was `enrichment_frame.py` — the policy's variance toolbox | ⚠ `count_logvar` is also imported by `region_init`; it has ONE home and this is it |
@@ -1313,54 +1313,35 @@ shipped policy and it is a named, measured DEBT rather than an oversight**: `bel
 reframe's frame pair, so the frame at a hop is a function of the destination's belief, at slots carrying
 **57–77 % of library mass**.
 
-#### The five assertions, and why they live in the backbone
+#### The backbone's assertions, and why they live in the backbone
 
 ⭐⭐ **A future policy can be as wrong as it likes and still cannot commit any of these** — each has shipped
 at least once.
 
-| the backbone asserts | it would have caught | on HEAD, `g50 ss0.50 capture_on`, pass-0 |
-|---|---|---|
-| `deliver` sees only the two NEIGHBOUR states | **TRAPS: a-message-from-the-destinations-belief — nine recurrences in nine costumes** | structural — inexpressible, not checked |
-| every message mode lies inside its coordinate's own grid | **TRAPS: off-grid-message-mode** — the tilt bug, 74 % of `g00`'s error | ✅ tilt **0 / 4,795** · ⛔ gDNA **15,240 / 50,984 (29.9 %)** · RNA+ 15.0 % · RNA− 14.0 % · λ 0.46 % |
-| every delivered share is in `[0, 1]` | the over-unit certified-RNA claim | ⛔ **3,013 / 15,629 (19.3 %)**, and the SUM ⛔ **31,174 / 50,984 (61.1 %)** |
-| `\|T\| ≤ 3` | **AXIOM 0**, made executable | ✅ 0 / 70,176, and **9,912** slots reach 3 so it is not vacuous |
-| the write-back touches only `solvable` slots | the basis mismatch that made an TRAPS: byte-identity-gate read `max\|Δ\| = 1.0` | ✅ 0 / 32,817 |
+| the backbone asserts | it would have caught |
+|---|---|
+| the kernel sees only the two NEIGHBOUR states | **TRAPS: a-message-from-the-destinations-belief — nine recurrences in nine costumes** (structural — inexpressible, not checked) |
+| every delivered row is one row per slot on the solve grid, finite | a row array off the grid, or a NaN reaching ψ |
+| `\|T\| ≤ 3` | **AXIOM 0**, made executable (on the ladder's `g50 ss0.50 capture_on`: 0 / 70,176, and 9,912 slots reach 3 so it is not vacuous) |
+| the write-back touches only `solvable` slots | the basis mismatch that made a TRAPS: byte-identity-gate read `max\|Δ\| = 1.0` |
 
-⭐⭐⭐ **AND THE ASSERTIONS PAID FOR THEMSELVES ON THEIR FIRST RUN — six of the ten counts above are new
-facts about the shipped message layer.** The two that matter most:
+⭐ **Two more assertions guarded the retired relay's Gaussian channels and retired with them (2026-09-09):**
+every message mode inside its coordinate's own grid (**TRAPS: off-grid-message-mode** — the tilt bug, 74 %
+of `g00`'s error; on the relay it counted gDNA modes off the low side of the log-share grid at 29.9 % of
+live slots, the `_EPS = 1e-9` floor 10.72 nats below the grid's end) and every delivered share in `[0, 1]`
+(the over-unit certified-RNA claim; the relay violated it at 19.3 % of live claims and the share SUM at
+61.1 %, waived with those measurements in `sweep._KNOWN_VIOLATIONS`). The transfer policy delivers
+max-normalised profiles on ψ's own grid (`PsiMessage.lam_rows`, `cube_rows`), which cannot be off-grid and
+claim no share, so the two predicates have nothing to check; the lessons stay in `TRAPS.md`.
 
-* ⛔⛔ **61.1 % of live message packets assert that the three components TOGETHER account for MORE fragments
-  than the slot observed.** That is the identity `Σ_c ρ_c·E_c = M` the mass pin exists to restore, and the
-  pin is licensed in only two states, so everywhere else the residual is *delivered* rather than fixed. ⭐ It
-  is consistent with a number already in the tree — `messages/variance.py` records the over-claim on 52–71 %
-  of regions — but nothing had surfaced it as a **checkable invariant**, so nothing could rank it.
-* ⛔ **29.9 % of live gDNA level modes are outside ψ's own log-share grid**, whose domain is
-  `[log σ(−L), log σ(+L)] = [−10.000045, −4.54e-5]` and **not** `(−inf, 0]`. The cause is the `_EPS = 1e-9`
-  floor: `log(1e-9) = −20.723`, **10.72 nats** below the low end. ⚠ **This is not 29.9 % of the error, and
-  the difference from TRAPS: off-grid-message-mode is the honest part**: TRAPS: off-grid-message-mode's tilt pinned at the *wrong* corner, whereas a low-side
-  share pins at "as little of this component as the grid can express", which at a slot that genuinely holds
-  almost none of it is the *right* answer. What is certain is TRAPS: off-grid-message-mode's mechanism — no interior minimum, so
-  precision buys a CORNER rather than a location. Whether the corner is right is **unmeasured**.
-
-⚠ **The low-side check is the one the first draft of this section did not have**, and it was found by an
-adversarial read rather than by the panel: the gates were already passing byte-identically, so nothing about
-the restructure would ever have surfaced it. ⭐ `share_sum_at_most_one` is a SUPERSET of
-`share_in_unit_interval` by construction — report both, never add them.
-
-⛔⛔ **AN ASSERTION THE SHIPPED POLICY VIOLATES IS WAIVED WITH ITS MEASUREMENT, NEVER WIDENED.** The two
-that fire are recorded in `sweep._KNOWN_VIOLATIONS` with the number beside each, and `test_sweep_backbone.py`
-asserts that every waiver carries a written reason. Widening the predicate to fit the defect is how a gate
-becomes vacuous (TRAPS: perturb-every-gate/TRAPS: a-gate-that-reconstructs); a waiver keeps the count VISIBLE and rankable.
+⛔⛔ **AN ASSERTION THE SHIPPED POLICY VIOLATES IS WAIVED WITH ITS MEASUREMENT, NEVER WIDENED.** The
+waiver table (`sweep._KNOWN_VIOLATIONS`) is EMPTY since the relay retired, and `test_sweep_backbone.py`
+asserts that any future entry carries a written reason. Widening the predicate to fit the defect is how a
+gate becomes vacuous (TRAPS: perturb-every-gate/TRAPS: a-gate-that-reconstructs); a waiver keeps the count
+VISIBLE and rankable.
 
 ⭐ **Each assertion also reports how many slots were ELIGIBLE for it**, because TRAPS: could-the-arm-have-fired: an assertion reporting
 zero violations where its predicate can never fire is not evidence of anything.
-
-⚠ **One tolerance in the family is derived and not tuned** (TRAPS: no-magic-numbers): the grid-domain check allows
-one **grid SPACING** beyond the outermost grid point, because within one spacing the penalty's minimum is
-still that boundary CELL — for the tilt, the legitimate answer "all RNA on one strand". It is load-bearing:
-the shipped tilt mode overshoots `π/2` by **2 ULP** at 63 of 4,795 live slots, being a convex mean of two
-messages that AGREE on `τ = ±1`, and TRAPS: off-grid-message-mode's real overshoot is **57 spacings** — four orders of magnitude
-apart, so no threshold is being bought.
 
 ---
 
@@ -1531,6 +1512,13 @@ by **2.6–3.6×** because it sits at the EDGE of the probe footprint.
 
 ### 6b.3 ⭐⭐⭐ THE ANCHOR IS A MESSAGE — the citizenship ruling and the integration (owner, 2026-08-25)
 
+⚠ **THE RECORD OF A RETIRED INTEGRATION (2026-09-09).** The ruling stands — the certified flux is a
+message, one hop, boundary → exon, never own evidence — and the transfer policy keeps it as the FLUX
+LEVEL (§6b.13: the junction's rate as the exon's RNA level, priced by the junction–exon pair, delivered on
+`PsiMessage.lam_rows` like every other claim). The relay, its certified-flux stream, `rna_anchor.py`,
+`RelaySwitches` and `config.rna_anchor` were deleted with the relay's retirement; git carries them. What
+follows is kept as the ruling's derivation and the measurements that were made on it.
+
 ⭐⭐⭐ **The ruling.** The spliced-fragment anchor is message propagation — a one-hop imputation from
 the flank boundary into the exon — and it may not exist as an appendage beside the message
 framework. The SENDER publishes its spliced-fragment observation unchanged; the RECIPIENT decides
@@ -1558,7 +1546,7 @@ FINAL solve only, so phase-A (`build_region_init`) and the own-evidence precisio
 (`density_factor_precision`) never see an imputation. `calibrate` prepares the evidence once
 (`rna_anchor.prepare_flux_evidence`, route table included) and constructs ONE relay instance with
 it; the relay's grid-keyed memo builds the rows (`rna_anchor.flux_rows`) per bracket.
-`config.rna_anchor` gates the stream: live iff `message_propagation ∧ message_policy == "relay"`.
+`config.rna_anchor` gated the stream: live iff `message_propagation ∧ message_policy == "relay"`.
 ⛔ **The behavioural consequences are deliberate**: the silent arm reverts to the pre-anchor
 CONTROL (its panel rows regress by construction — that is the control being restored); anchored
 slots lose own-evidence status, which changes the mismatch-deflation inputs and the refit
@@ -2219,13 +2207,34 @@ Gaussian summary anywhere in the transfer policy; the bar is about one percent o
   exon at once, and the coarse exon signature stopped the host's level one hop short of its own
   acceptor, the very node the case is about (`StepContext.exon_pos` / `exon_neg` carry the two bits).
   **TWO-SIDED only between an intron of ``s`` and its own boundary** (rung 1: one shared unspliced
-  population), and there the hop charges COUNTING ALONE — the difference in the two nodes' strand
-  counts is gDNA's half and the other strand, never this population's change (the discrepancy term
-  there blurred the sharp upper side the whole design exists to deliver: 0.70 → 0.775 against 0.78 at
-  the span host's acceptor). Lower-only everywhere else, priced by the strand's OWN counts
-  (`count_price`: the totals are the wrong witness, since entering an overlap the total jumps while
-  this strand's density is unchanged). Emission as the gDNA lane's: an empty node forwards, a full node
-  the intersection of its own level and what it holds.
+  population); lower-only everywhere else. ⭐ **EVERY hop pays the pair's price, and the witness of
+  the strand's abundance is the column SPLIT's asymmetry (`_RnaLane.witness`, 2026-09-09)**: both
+  column counts' counting plus the disagreement, beyond its own counting, between the two nodes'
+  estimates of this strand's RNA — ``count − other`` on each (gDNA splits evenly and cancels; the
+  other strand's RNA reads on the other column; the protocol's contrast ``|1 − 2κ|`` is common to
+  both and drops out of the ratio), carried with the level across empty nodes. A node with no
+  asymmetry is DARK, and two dark nodes agree whatever their column densities do. ⛔ Two earlier
+  forms are refused with numbers: (a) the two-sided faces charging COUNTING ALONE (landed 2026-09-08,
+  on the argument that the strand-count difference there is gDNA's half — chosen while the lanes read
+  the wrong column, which had over-priced every hop) carried a lit intron's sharp upper side across a
+  probe cliff unpriced: the ladder's `g05 ss.99 ON`, a + intron at 0.005 fragments per base whose
+  nascent RNA the − gene's probe captures 170-fold, read a 93 % RNA junction (170 fragments) as 86 %
+  gDNA (the landed policy on the corrected witness column against the committed one: the row 1.043×, the capture-ON zero controls 1.21× and 1.07×);
+  (b) the pair's price on the COLUMN counts (`count_price`, the lower faces' landed form) on every
+  face fixes that row (0.940×) and the zero controls (0.71×/0.75×) but blurs a perfectly dark host
+  intron's "no RNA of mine here" across the same cliff — gDNA's half jumps there whether or not the
+  strand's RNA does — which is the one claim that resolves the tilt at an antisense exon's boundaries
+  under capture: the junction panel's `g25 ss.99 ON` 1.240× and `g50 ss.99 ON` 1.196× through the
+  pipeline, all at the probed span loci, and the ladder's `g98 ss.99 ON` 1.079× (`g50 ss.99 ON`
+  1.000×). The split witness keeps both: the span loci to the fragment, `g05 ss.99 ON` 0.955×, the
+  capture-ON zero controls 0.77× / 0.71×, `g98 ss.99 ON` 1.016× (diffuse, real antisense loci whose dark claims a cliff
+  now prices). A dilation of the whole profile by the totals' ratio (the exact envelope under an
+  origin-blind enrichment, a new operator) and the lower side alone on every face were measured
+  too and lose as (b) does or worse (the dilation 1.138× and the lower side 1.208× on `g98 ss.99 ON`;
+  the working record in the sandbox). Where the library's strand
+  channel is dead (the derived deadband, `tau_lam` zero everywhere) the column count is the witness.
+  Emission as the gDNA lane's: an empty node forwards, a full node the intersection of its own level
+  and what it holds.
 * **THE SOURCES.** A single-strand node's own claim read as its live strand's RNA level
   (`rna_level_of_profile`: the composition profile at ``1 − σ``, the total's Poisson tail above); and
   the certified flux at each of an exon's junctions as that strand's level at the exon (`flux_level`:

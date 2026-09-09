@@ -882,13 +882,14 @@ def _region_region_type(chain, region_arrays):
 # implemented — REGION/BOUNDARY x off-probe / half-covered / fully-covered — with the pooled rate
 # ``Σcount/ΣE`` per class supplying ``r_g = rate[class(dst)]/rate[class(src)]``.
 #
-# ⭐⭐ **MEASURED INERT, AND THE REASON IS AN OPERATOR THAT ALREADY EXISTS.** The relay's MASS PIN
-# (the scan's ``Σ_c rho_c·E_c = M``) rescales the running level to each object's OWN observed total,
+# ⭐⭐ **MEASURED INERT, AND THE REASON IS AN OPERATOR THAT ALREADY EXISTED.** The retired relay's MASS
+# PIN (the scan's ``Σ_c rho_c·E_c = M``) rescaled the running level to each object's OWN observed total,
 # and at a structurally pure-gDNA object that total IS its gDNA density — measured at its own capture
 # stratum. So the landscape is already carried, per object and locally, by the pure-gDNA population's own
 # measurements; a pooled class ratio only re-derives it, worse. A/B on the ladder: **byte-identical off
 # capture**, and 1.2 % of one class on one capture-ON condition (``region/exon`` mwae 0.2719 → 0.2686).
 # That does not pay for five constants, a helper and two gates.
 #
-# ⭐ The rule that remains is therefore one boundary and is in `messages.relay`: a gDNA LEVEL crosses a
-# composition-unlicensed hop **unscaled**. Capture-OFF is not a case — it is the same expression.
+# ⭐ The rule that remains is therefore one boundary, and the transfer policy's level lane carries it: a
+# gDNA LEVEL crosses a composition-unlicensed hop **unscaled**. Capture-OFF is not a case — it is the
+# same expression.

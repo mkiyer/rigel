@@ -427,6 +427,56 @@ Pass zero: unstranded 8/8, 8/8, 7/8 and stranded 16/16, 14/16, 13/16, the unstra
 0.43–0.46×. The naive form (`ceil_all`): `g00 ss.70 ON` 36.6× through the pipeline, `g05 ss.99 ON`
 +8.9 % — refused. **Ladder,** full pipeline against the policy before it: stranded 6/6 non-zero rows won, worst 1.000× (`g98 ss.99 ON` 0.994×); unstranded 4/6, every in-scope capture-OFF row won (`g05` 0.997×, `g50` 0.995×, `g98` 0.999×), the two losses in the DEFERRED stratum (`g05 ss.50 ON` 1.012×, `g50 ss.50 ON` 1.011×); the g00 rows identical; at pass zero every non-zero row of both halves won (`g05 ss.50 OFF` 0.958×, `g05 ss.50 ON` 0.939×). The naive form on the ladder: stranded `g05 ss.99 ON` 1.026× — refused.
 
+### 4e. The ship protocol's first finding — the price of the two-sided hop, re-measured with the corrected witness column (2026-09-09, `two_sided_proto.py`, arms on the landed policy)
+
+**How it surfaced.** Flipping the default to `transfer` and dissecting the ladder's `g05 ss.99 ON` (1.043×
+against the committed policy after the two lane fixes — the coordinate fallback at zero intergenic
+reads and the witness read on the column κ points to) led to one both-stranded boundary on chr21:
+MIR99AHG's intron (+, nascent RNA at 0.005 fragments per base over 14 kb) overlapping a small − gene
+whose exons are probed; capture ON enriches the + nascent RNA 170-fold inside the − gene's probed exon
+(66 → 634 fragments per piece). The + intron's own level travels two-sided along its intron through the −
+gene's boundaries (they carry no + bits, and every piece is +'s intron), and the landed rule charged those
+hops COUNTING ALONE — with the corrected witness column, sharp counting: the intron's upper side
+"ρ_+ ≤ 0.005" arrived whole at the junction boundary (170 fragments, 93 % RNA, all +), the cube read
+"at most 0.7 % + RNA here", and the solve explained a 165:5 column split as 86 % gDNA (truth 6.5 %;
+0.026 with the old blurred witness). The exemption had been chosen on 2026-09-08 while the lanes read the
+wrong column, which priced every hop as counting on nothing — the measurement it rested on was stale.
+
+**The forms, halves apart, both frames, three panels and the ladder, against the landed policy:**
+
+| form | the lit cliff (ladder `g05 ss.99 ON`, full) | the dark cliff (junction panel `g25`/`g50 ss.99 ON`, full) | ladder `g98 ss.99 ON` | capture-ON zero controls (ladder, full) |
+|---|---|---|---|---|
+| landed: whole profile, counting alone on two-sided faces | 82,772 (1.000) | 6,582 / 9,238 (1.000) | 172,537 (1.000) | 237,664 / 21,429 (1.000; the stranded one ABOVE silence's 20,787) |
+| `pair2`: whole profile, `count_price` on the column counts everywhere | 0.940× | 1.240× / 1.196× | 1.079× | 0.706× / 0.749× |
+| `lower`: lower side everywhere, `count_price` | 0.946× | 1.264× / 1.326× | 1.208× | 0.696× / 0.730× |
+| `own2`: two-sided only at the strand's own junction bits | 0.946× | 1.264× / 1.326× | 1.207× | 0.696× / 0.730× |
+| `dilate`: whole profile dilated by the totals' ratio (the exact envelope under origin-blind enrichment) | 0.941× | 1.241× / 1.224× | 1.138× | 0.709× / 0.752× |
+| `net2`: split witness, a dark node's witness at its own noise | 0.951× | 1.138× / 1.075× | 1.062× | — |
+| ⭐ `net` / `netw` (LANDED): split witness, counting on the column counts, disagreement on the asymmetries where both are positive, carried across empties | **0.955×** | **1.000× / 1.000×** | **1.016×** | **0.994× / 0.767×** |
+
+The dark cliff is the test chromosome's probed `capspan` loci (six exon|exon junction boundaries of the
+antisense's exon inside the probed host exon, 770–1,200 fragments each, truth 0.54–0.92 gDNA): the host
+intron is perfectly dark, its "no + RNA here" arrives whole under the landed rule and resolves the
+symmetric column split as gDNA; any price that sees gDNA's half jump 73–147× at the probe edge blurs
+that claim to "at most 21–27 % + RNA", which no longer pins the tilt, and the pipeline puts the boundary
+at 0.06–0.55. The dilation's honest envelope shows why: the host intron (115 fragments on 3,777 bases)
+can only say ρ_+ ≤ 0.003, and ×147 is vacuous — the landed sharpness there was the luck of a simulated
+intron with exactly zero + RNA. **The split witness is the form that tells the two cliffs apart at the
+recipient**: the dark boundary's split (400:367) has no asymmetry and agrees with a dark claim; the lit
+boundary's split (165:5) is 163 fragments of + RNA against the intron's 70 on 62× the opportunity, a
+170-fold disagreement, and the claim dissolves. Its remaining cost is diffuse: `g98 ss.99 ON` +1.6 % over
+432 slots (the largest +184 fragments), both-stranded walled exons and junction boundaries of real
+antisense loci (HORMAD2-AS1/MTMR3, TTC28-AS1, HLCS-AS1) whose dim claims a cliff now prices. The
+unstranded half is within 0.5 % everywhere (the deferred `g50 ss.50 ON` 1.005×); on the three test panels
+the form is within 0.1 % on every full-pipeline row and the zero controls are unmoved. Where the
+library's strand channel is dead (the derived deadband) the column count stays the witness.
+
+**Also measured and refused on the way** (the record is `ISSUES: two-sided-exon-row`): the WALL above
+rung 2's face-map ceiling, which closes the toy harness's intron-independence gate under the transfer
+default (0.848 → 0.123 dry) and wins the ladder's unstranded capture-OFF rows at pass zero by 8–15 %,
+and loses the stranded half 0/6 through the pipeline (`g50 ss.99 ON` 1.142×) and the probe panels'
+capture-ON rows 1.4–2.5× — step F's cap re-derived and re-refused; the gate is a strict xfail.
+
 ## 5. The implementation plan
 
 | phase | what lands | gates (falsification first, each watched firing) | judged by |

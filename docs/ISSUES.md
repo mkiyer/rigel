@@ -246,6 +246,49 @@ there is a sharp floor a few points too high. The floor is lower-sided (the two-
 at the cliff, §6b.13), so only over-reads cost. The instrument is `transport_dispersion.py`; the relay's
 answer was a POOLED left-tail centre fit, refused with the relay's pooling.
 
+### flux-price-witness-units
+`priority: next · kind: problem · stamped: 2026-09-09`
+
+The flux level's price (`DESIGN.md` §6b.13) compares the junction's route rate — in WHOLE-STRAND units — with
+the exon's COLUMN count per RNA opportunity (`count_price(c_j, c_j / r_j, cnt[x, col_read], a_r[x])`). A
+column holds ``(1 − κ)`` of the strand's RNA (plus gDNA's half and the other strand's leak), so at
+κ = 0.31 every flux floor pays a systematic ``log(1 − κ)² ≈ 0.14`` nats² that is no disagreement, and on
+unstranded data (κ = ½, the column is half of everything) ``0.48`` nats² — a 0.7-nat blur on every flux
+floor of the half where a policy must WIN. The record: the golden scenario `strand_ss65_multi_iso`'s nested
+exon (t1's exon inside t2's intron, no gDNA, 96 fragments) reads 0.152 gDNA through the pipeline (0.32 at
+pass zero) under `transfer` against the relay's 0.000: its ceiling from the junction's flux reads
+``f_g ≤ 0.38`` where the flux itself says ≤ 0 — 0.42 nats² of price, of which the κ term is a third and the
+rest the rate's 12 % over-read of the exon's total. ⛔ The obvious repair is NOT a clean win: a prototype
+with the exon's witness in the strand's units (the column split's asymmetry where the channel is live,
+the total where it is dead; `fluxw_proto.py`, 2026-09-09) read WORSE at pass zero on the test chromosome
+(`g05 ss.50 OFF` +12.6 %, `g05 ss.99 ON` +20 %; the full pipeline within 0.1 %), because the split's
+asymmetry is ``R_s − R_s'`` and reads ZERO at an equal-abundance overlap exon — the both-stranded exons the
+lanes were built for lost their flux floor to a counting-on-nothing price — and because a sharper flux
+floor exposes the rate's own over-read (`flux-floor-dispersion`). What the price needs is a witness that
+is the strand's RNA count at single-strand exons (the asymmetry, or the total less nothing) and a bounded
+one at both-stranded exons (the asymmetry is a floor on ``R_s``, the column an upper bound), charged only
+where the rate falls outside the bound — designed and A/B'd as its own step, halves apart. ⚠ The same
+asymmetry witness on the HOP price (landed 2026-09-09, `_RnaLane.witness`) has the same blind spot: at
+a node where both strands are lit it under-reads the weaker strand, so a dim claim about that strand
+can arrive sharper than it should; on the ladder no such case moved a row (the dark host intron beside a
+lit antisense exon is the case that occurs, and there the claim is true).
+
+### flux-source-skipped-at-an-empty-exon-piece
+`priority: next · kind: problem · stamped: 2026-09-09`
+
+The transfer policy builds a junction's flux level only at a NON-EMPTY exon (`_rna_lanes` iterates
+``~empty & free``), so a junction whose exon piece has no unspliced fragment and no RNA opportunity of its
+own — a 50-base piece between a junction and a terminus, the shape `certified_rna_audit.py`'s
+`tes_readthrough` rung makes at @9,050 (15,441 spliced crossings, 22 unspliced) — sends no RNA level at
+all, and the exon beyond the piece never hears the flux as a level (the piece's other face is a terminus
+of the second transcript, across which only the level lanes travel). The junction's flux is still read
+by rung 2's face map at that boundary, so the bank is not inert, but the level lane's own rule for
+empties — forward what you hold — has nothing to forward from a source that was never made. The source
+needs no count of its own: `flux_level` prices the junction's count against the exon's witness, and an
+empty witness pays counting alone. Build it, gate it (an empty exon piece beside a lit junction emits a
+lower-sided level; a silent junction does not), and measure it on the test chromosome's terminus-cluster
+and sj+terminus blocks first, where empty pieces are the case.
+
 ### ambig-node-as-a-gdna-source
 `priority: after phase 2 · kind: decision, measured once · stamped: 2026-09-08`
 
@@ -311,6 +354,21 @@ lower bound from the ten-times-probed piece over-claims at the boundaries beside
 is at least as enriched as the source; a probe edge inside an exon complex breaks it, as junction probes
 broke step F's cap. A wall-reading strand witness recovers 57 % at +0.8 % elsewhere (not landed; the
 plan §5h). The enrichment witness this issue waits for is the cure for this too.
+⭐ THE WALL, RE-DERIVED AND RE-REFUSED AT THE SHIP PROTOCOL (2026-09-09): with `transfer` the shipped
+default, the toy harness's gate `test_the_harness_REPRODUCES_the_intron_composition_dependence` (an
+unstranded two-exon transcript at 60 % gDNA beside a pure-gDNA intron, capture OFF) reads the exon at
+|Δf_g| 0.848 dry against 0.098 wet — the relay passed it because its reframe carried a two-sided
+Gaussian. The mechanism is step F's: `transport_row` extends the intron's row FLAT above the face map's
+ceiling, so a channel-free exon holds two floors (the edge's level and rung 2's plateau) and no ceiling,
+and sits at ψ's measured intron reference, which on a dry chromosome is pure gDNA. A WALL above the
+ceiling priced by the junction–exon pair's disagreement (`count_price`, the flux level's own price)
+closes the gate (0.123 / 0.126) and wins the LADDER's target rows at pass zero (`g05 ss.50 OFF` 0.921×,
+`g50 ss.50 OFF` 0.847×) and is REFUSED where step F's cap was: through the pipeline the stranded half
+0/6 (`g50 ss.99 ON` 1.142×, `g98 ss.99 OFF` 1.079×, `g98 ss.99 ON` 1.057×), the deferred rows 1.15–1.43×,
+the junction and sparse panels' capture-ON stranded rows 1.4–2.5×. The junction–exon pair does not see
+the cliff the level crossed (intron → junction), and at `g98 OFF` the flux's own scatter puts the wall
+below the truth on exons whose gDNA is the row. The gate is a strict xfail citing this entry; the plateau
+stays honest; the remedy is the enrichment witness above, not a wall.
 
 ### per-transcript-prior-lane
 `priority: next · kind: build · stamped: 2026-08-31`
@@ -453,15 +511,6 @@ Does any in-scope verdict depend on the nascent STRESS level? The ladder runs `o
 worst in-scope scenario at the realistic level and check whether any RANK moves. A verdict that only
 holds at stress is a robustness finding and must be labelled as one.
 
-### relay-od-r-discontinuity
-`priority: later · kind: defect · stamped: 2026-08-30`
-The relay is discontinuous in `od_r` at ~1e−5 (`g98 ss0.50 capture-OFF`: error 217,531 at
-`od_r ≤ 1e−7`, 212,581 at 1e−5 — a threshold in the relay/anchor path, not a response;
-`TRAPS: a-constant-parked-a-value-off-a-knife-edge`). In the ANCHOR, not the strand estimator.
-⭐ BOUNDED: a 1e−5 nudge across all 30 test conditions moves 1/30 rows more than 0.5 % per policy (worst
-1.65 %), so do not believe a single-row policy difference below ~2 %, and a relay comparison crossing
-the edge is not attributable.
-
 ### f32-strand-tilt-at-half
 `priority: later · kind: defect · stamped: 2026-08-2x`
 At κ = ½ the strand mean is ½ identically, but the AMBIG cube evaluates the sum in float32 and departs
@@ -566,6 +615,16 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### relay-od-r-discontinuity — a defect of the RETIRED relay's anchor path, CLOSED with the relay (2026-09-09). Do not rebuild the anchor to look for it.
+
+The relay was discontinuous in `od_r` at ~1e−5 (`g98 ss0.50 capture-OFF`: error 217,531 at `od_r ≤ 1e−7`,
+212,581 at 1e−5 — a threshold in the relay/anchor path, not a response; `TRAPS: a-constant-parked-a-value-off-a-knife-edge`).
+Bounded at the time: a 1e−5 nudge across all 30 test conditions moved 1/30 rows more than 0.5 % per policy
+(worst 1.65 %). The relay, its anchor and the path that carried the threshold were deleted on 2026-09-09;
+the transfer policy has no such constant (its hop prices are counting terms and measured disagreements).
+The lesson survives as the trap. ⚠ The bound's other half stands for any policy: do not believe a
+single-row policy difference below ~2 % without the noise floor re-recorded in the same session.
 
 ### levels-always-travel-for-the-gdna-lane — DERIVED (phase 0's finding 1), PROTOTYPED, gated, A/B'd on three panels and the ladder, REFUSED BY THE BAR pending the upper side (2026-09-08). Do not rebuild the gDNA lane on every face before single-strand recipients read the RNA ceiling.
 

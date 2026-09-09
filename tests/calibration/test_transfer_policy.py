@@ -94,7 +94,7 @@ def sweep_inputs(tmp_path_factory):
     try:
         calibrate_mod.calibrate(
             payload=payload,
-            config=CalibrationConfig(rna_anchor=True, message_propagation=True),
+            config=CalibrationConfig(message_propagation=True),
             region_arrays=ra,
             strand_model=strand_model,
             gdna_fl_pmf=fl.gdna_pmf,
@@ -416,10 +416,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
         calibrate_mod.calibrate(
             payload=sweep_inputs["payload"],
             config=_dc.replace(
-                CalibrationConfig(),
-                message_propagation=True,
-                message_policy="transfer",
-                rna_anchor=False,
+                CalibrationConfig(), message_propagation=True, message_policy="transfer"
             ),
             **sweep_inputs["calibrate_kw"],
         )
@@ -2088,28 +2085,131 @@ def test_PERTURBATION_an_rna_level_never_returns_to_its_source(sweep_inputs):
     )
 
 
-def test_the_two_sided_hop_keeps_the_whole_profile_and_charges_counting_alone():
-    """`_RnaLane.receive`: across a two-sided face the profile keeps its upper side and the price is the
-    two counts' counting only; across any other face it is lower-sided and priced by `count_price`."""
+def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
+    """`_RnaLane.receive`: across a two-sided face the profile keeps its upper side; across any other
+    face it is lower-sided. ⛔ BOTH pay the pair's price (`count_price`: both counts' counting plus
+    the disagreement of the strand's two count densities beyond it) — no face is exempt. Where the
+    pair agrees the price is counting alone (the identity hop's natural price); where it disagrees by a
+    cliff the upper side is blurred away (2026-09-09: a lit intron's sharp upper side crossed a 170-fold
+    probe cliff unpriced under a counting-only exemption and read a 93 % RNA junction as 86 % gDNA)."""
     from rigel.calibration.messages import Level
     from rigel.calibration.messages.transfer import _RnaLane
     from rigel.calibration.messages.transfer_rows import blur_row, count_price, lower_side
 
     u = np.linspace(-10.0, 10.0, 60)
     prof = -0.5 * ((u - 0.0) / 0.4) ** 2
+    # the pair AGREES (one density on both sides): the price is counting alone and the upper side stands
+    count = np.array([30.0, 300.0])
+    a = np.array([300.0, 3000.0])
+    lane = _RnaLane(u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, {(0, 1)})
+    two = lane.receive(Level(prof, 30.0, 300.0), 0, 1)
+    v_agree = float(polygamma(1, 30.5) + polygamma(1, 300.5))
+    assert abs(count_price(30.0, 300.0, 300.0, 3000.0) - v_agree) < 1e-12
+    np.testing.assert_allclose(two.profile, blur_row(prof, u, v_agree), atol=1e-9)
+    assert two.profile.max() - two.profile[-1] > 1.0  # the upper side survives
+    # the pair DISAGREES by a cliff (the strand's density 800x higher at the recipient): the whole
+    # profile still crosses, but at the pair's price, not counting alone
     count = np.array([3.0, 229.0])
     a = np.array([2200.0, 200.0])
-    lane = _RnaLane(u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, {(0, 1)})
-    two = lane.receive(Level(prof, 3.0, 2200.0), 0, 1)
-    v_two = float(polygamma(1, 3.5) + polygamma(1, 229.5))
-    np.testing.assert_allclose(two.profile, blur_row(prof, u, v_two), atol=1e-9)
-    assert two.profile.max() - two.profile[-1] > 1.0  # the upper side survives
+    cliff = _RnaLane(u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, {(0, 1)})
+    two_cliff = cliff.receive(Level(prof, 3.0, 2200.0), 0, 1)
+    v_pair = count_price(3.0, 2200.0, 229.0, 200.0)
+    v_counting = float(polygamma(1, 3.5) + polygamma(1, 229.5))
+    assert v_pair > v_counting + 10.0  # log(800)^2 ~ 45 nats^2 beyond counting
+    np.testing.assert_allclose(two_cliff.profile, blur_row(prof, u, v_pair), atol=1e-9)
+    assert not np.allclose(two_cliff.profile, blur_row(prof, u, v_counting), atol=1e-3), (
+        "the exemption is back: the two-sided face charged counting alone across a cliff"
+    )
+    # any other face: the lower side at the same price
     open_lane = _RnaLane(u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, set())
     one = open_lane.receive(Level(prof, 3.0, 2200.0), 0, 1)
-    v_one = count_price(3.0, 2200.0, 229.0, 200.0)
-    assert v_one > v_two
-    np.testing.assert_allclose(one.profile, blur_row(lower_side(prof), u, v_one), atol=1e-9)
+    np.testing.assert_allclose(one.profile, blur_row(lower_side(prof), u, v_pair), atol=1e-9)
     assert np.all(np.diff(one.profile) >= -1e-9)
+
+
+def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
+    """`_RnaLane.receive` with the other column given (the library's strand channel live): the price's
+    disagreement term reads each node's estimate of THIS strand's RNA from its column split's asymmetry
+    (`witness`), not from the column count. (i) Two DARK nodes (no asymmetry) agree whatever their
+    column densities do — the whole profile crosses a two-sided face at counting alone, where the
+    column witness would have blurred it by a 100-fold cliff; (ii) two LIT nodes at a cliff disagree
+    by the ratio of their asymmetries per opportunity, beyond the asymmetries' own Poisson counting;
+    (iii) the witness travels with the level across an EMPTY node, so the next full recipient prices
+    against the last full node and not the empty; (iv) with no other column the column count is the
+    witness (`count_price`). Falsified by making the column count the witness again (i fires) and by
+    the counting-only exemption (ii fires)."""
+    from rigel.calibration.messages import Level
+    from rigel.calibration.messages.transfer import _RnaLane
+    from rigel.calibration.messages.transfer_rows import blur_row, count_price, lower_side
+
+    u = np.linspace(-10.0, 10.0, 60)
+    prof = -0.5 * ((u - 0.0) / 0.4) ** 2
+    # (i) dark → dark across a 100-fold column-density cliff: counting alone, the whole profile
+    count = np.array([5.0, 367.0])  # this strand's read column
+    other = np.array([8.0, 400.0])  # the other column: no asymmetry on either node
+    a = np.array([277.0, 223.0])
+    lane = _RnaLane(
+        u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, {(0, 1)}, None, other
+    )
+    sent = Level(prof, 5.0, 277.0, 5.0 - 8.0, 13.0)
+    got = lane.receive(sent, 0, 1)
+    v_counting = float(polygamma(1, 5.5) + polygamma(1, 367.5))
+    np.testing.assert_allclose(got.profile, blur_row(prof, u, v_counting), atol=1e-9)
+    assert got.profile.max() - got.profile[-1] > 1.0, "the dark claim's upper side must survive"
+    v_column = count_price(5.0, 277.0, 367.0, 223.0)
+    assert v_column > v_counting + 5.0
+    assert not np.allclose(got.profile, blur_row(prof, u, v_column), atol=1e-3), (
+        "the column count is the witness again: two dark nodes were charged a cliff"
+    )
+    assert got.rna_count == 367.0 - 400.0 and got.rna_count_var == 767.0
+    # (ii) lit → lit at a cliff: the asymmetries' ratio per opportunity, beyond their counting
+    count = np.array([69.0, 198.0])
+    other = np.array([0.0, 10.0])
+    a = np.array([14054.0, 227.0])
+    lit = _RnaLane(
+        u, 0.5, count, a, np.zeros(2, bool), [None, None], {(0, 1)}, {(0, 1)}, None, other
+    )
+    got = lit.receive(Level(prof, 69.0, 14054.0, 69.0, 69.0), 0, 1)
+    n_s, v_s, n_x, v_x = 69.0, 69.0, 188.0, 208.0
+    r = (n_x / 227.0) / (n_s / 14054.0)
+    v_lit = float(polygamma(1, 69.5) + polygamma(1, 198.5)) + max(
+        0.0, np.log(r) ** 2 - (v_s / n_s**2 + v_x / n_x**2)
+    )
+    assert v_lit > 20.0  # log(170)^2 ~ 26 nats^2
+    np.testing.assert_allclose(got.profile, blur_row(prof, u, v_lit), atol=1e-9)
+    assert not np.allclose(
+        got.profile, blur_row(prof, u, float(polygamma(1, 69.5) + polygamma(1, 198.5))), atol=1e-3
+    ), "the exemption is back: a lit claim crossed a cliff at counting alone"
+    # (iii) the witness rides across an EMPTY node
+    count = np.array([69.0, 0.0, 198.0])
+    other = np.array([0.0, 0.0, 10.0])
+    a = np.array([14054.0, 50.0, 227.0])
+    empty = np.array([False, True, False])
+    chain = _RnaLane(
+        u, 0.5, count, a, empty, [prof, None, None], {(0, 1), (1, 2)}, set(), None, other
+    )
+    first = chain.emit(0, 1, None)
+    assert first.rna_count == 69.0 and first.rna_count_var == 69.0
+    forwarded = chain.emit(1, 2, first)
+    assert forwarded is first, "an empty node forwards the level and its witness unchanged"
+    at_two = chain.receive(forwarded, 1, 2)
+    np.testing.assert_allclose(at_two.profile, blur_row(lower_side(prof), u, v_lit), atol=1e-9)
+    # (iv) no other column: the column count is the witness
+    dead = _RnaLane(
+        u,
+        0.5,
+        np.array([69.0, 198.0]),
+        np.array([14054.0, 227.0]),
+        np.zeros(2, bool),
+        [None, None],
+        {(0, 1)},
+        {(0, 1)},
+    )
+    got = dead.receive(Level(prof, 69.0, 14054.0), 0, 1)
+    np.testing.assert_allclose(
+        got.profile, blur_row(prof, u, count_price(69.0, 14054.0, 198.0, 227.0)), atol=1e-9
+    )
+    assert got.rna_count is None
 
 
 def test_a_lower_only_profile_stays_one_sided_on_the_cube():

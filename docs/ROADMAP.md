@@ -35,10 +35,12 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
   `ISSUES: the-rna-length-law-fix` (CLOSED). Watch item: `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: robust to the annotation (`EQUATIONS.md` §6a–§6c, `DESIGN.md` §3.3a);
   on real data read `clamped_at_ceiling` and `effective_seeds`, never the bare value.
-- **The message layer**: `relay` ships (propagation ON); `silent` is the measured floor; `transfer` is
-  the rebuild, on the two-phase backbone (`DESIGN.md` §6b.12; the foundation scaffold retired 2026-09-04). The bar: **win on unstranded, minimal harm on stranded, never pooled** —
-  `policy_benchmark.py`. ⛔ **The harm half is NOT met**: messages ADD error at the worst in-scope
-  conditions, and the relay's declared precision is not earned on most rows — rank 1 below.
+- **The message layer**: `transfer` SHIPS (the default since 2026-09-09; propagation ON), on the
+  two-phase backbone with the level lanes (`DESIGN.md` §6b.12–§6b.14); `silent` is the measured floor;
+  the relay and its baggage are deleted (2026-09-09; git carries them). The bar: **win on unstranded,
+  minimal harm on stranded, never pooled** — `policy_benchmark.py --panel ladder`. The retired relay
+  kept three zero-gDNA rows, which are the landscape's
+  (`ISSUES: gdna-landscape-trains-on-false-positives`) — rank 1 below.
 - **ψ**: the composition closes structurally on every published object (`test_composition_closes.py`);
   the reference location is DELETED (owner, 2026-08-24; the surviving form is `DESIGN.md` §6b.1); the
   λ-bracket widening is built and ships OFF — `ISSUES: psi-lambda-bracket-unshipped`.
@@ -70,8 +72,8 @@ frame, and every in-scope baseline was re-derived on the whole ladder with a sam
 ⭐ The facts a ranking can lean on, each with the instrument that re-derives it: the worst IN-SCOPE
 scenario differs between the two rankers — `calibration_vs_oracle.py` and `solvability_audit.py`
 disagree because they weigh objects differently, so dissect BOTH before choosing one; the error is
-almost entirely gDNA UNDER-called at near-pure objects, on every stratum; and the relay hurts the
-solvable set on most contaminated conditions while winning the blind rows and all four zero controls.
+almost entirely gDNA UNDER-called at near-pure objects, on every stratum; and the shipped policy leaves
+the zero-gDNA controls' walled and both-stranded pieces to the landscape prior.
 
 ⛔ **Two local repairs were run to a verdict on 2026-09-01 and BOTH are refused** — the arcsine
 magnitude coordinate (`ISSUES.md` CLOSED / REFUSED carries the full record) and, priced in the same
@@ -80,24 +82,17 @@ roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local 
 propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
 is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
 
-1. ⭐⭐⭐ **FINISH THE `transfer` POLICY, THEN FLIP THE DEFAULT (owner ruling, 2026-09-02).** Ten
-   messages ship (`DESIGN.md` §6b.4–§6b.9): rungs 1–3, the exon and boundary own-row messages, the
-   terminus boundary from both flanks, the alternative splice site — each priced by the owner's
-   discrepancy rule, nothing pooled. On the ladder the policy beats silence on 15/16 rows and the
-   relay on 12/16 (`policy_benchmark.py --panel ladder --policies silent relay transfer`); the rows the
-   relay still wins are the zero-gDNA controls, where the transfer policy leaves the walled exons and
-   exon|exon boundaries to the landscape prior. ⭐ **Next is THE SCAN** (the tracker's phase C): the
-   policy's forward/backward step kernels on the backbone's two scans, carrying each node's arrivals one
-   hop further through the licences already derived, each hop priced by the discrepancy rule (strand
-   witnesses where they exist, the abundance discrepancy where they do not) — the mechanism that reaches
-   the walled exons and serves unstranded data at all. Then sj+terminus, the level message at strand
-   changes and termini both ways, the AMBIG tilt and the both-stranded locus (rung 5), then the ship
-   protocol (the 0.8.0-metric pricing under `transfer`, `preflight --full`, the flip). ⛔ Owner ruling
-   (`DESIGN.md` §0c.0e): the policy is finished only when EVERY case is handled, and the thread does not
-   switch away until then; every other priority below is parked behind it. ⛔ Start every case with the
-   simplest local form of the owner's rule; pooling and global models are for after the tool works end
-   to end (`ISSUES: the-pooled-hop-step`). The tracker, the handoff and the thread record live in the
-   sandbox on `message-layer`; the exposed systemic issue is `ISSUES: gdna-landscape-trains-on-false-positives`.
+1. ⭐⭐⭐ **THE TRANSFER POLICY'S NEXT STEPS (the ship protocol is done: the default flipped and the relay
+   retired on 2026-09-09).** The judgement instruments are `policy_benchmark.py --panel ladder` and, on the
+   0.8.0 metric, `calibration_vs_oracle.py --message-policy`. In order: (a) the refactoring the retirement
+   made possible — `transfer.py`'s named rule builders and one lane class, `Message.tilt` (unused by
+   construction), the split of the gate file; (b) the open message-side questions, each its own step,
+   prototyped and A/B'd before `src/`: `ISSUES: flux-source-skipped-at-an-empty-exon-piece` (small, the
+   terminus-cluster and sj+terminus blocks are its substrate), `ISSUES: flux-price-witness-units` (the
+   unstranded half's floors), `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
+   `ISSUES: ambig-node-as-a-gdna-source`; (c) the landscape's training population
+   (`ISSUES: gdna-landscape-trains-on-false-positives`), which owns the zero-gDNA rows; (d) the remaining
+   both-stranded structures (`div`, the antisense's nascent variant, `nest`).
 2. ⭐ **The calibration build thread**: `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
@@ -115,7 +110,7 @@ message-vs-prior questions `ISSUES: refit-vs-message-arbitration`,
 
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
 `alt-splice-rung-unverified` · `transfer-variance-premise` · `nascent-stress-sensitivity` ·
-`relay-od-r-discontinuity` · `f32-strand-tilt-at-half` · `hygiene-ledger` ·
+`f32-strand-tilt-at-half` · `hygiene-ledger` ·
 `oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` · `drain-contaminates-certified-rna` (parked 2026-09-01: the ceiling refused the in-solve correction; two recorded follow-ups) · `the-cancelling-pair`
 (refused twice) · `crossing-pool-contrast` (blocked) · `parked-capture-pilot-sign` ·
 `pure-rna-mirror-asymmetry` · `capture-degeneracy-standing-risk`.

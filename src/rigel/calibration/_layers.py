@@ -115,12 +115,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         (
             "density_model",
             "density_deconv",
-            # `rna_anchor` is the certified-flux stream's arithmetic (owner design 2026-08-24;
-            # ruled A MESSAGE 2026-08-25): the sender-side evidence bundle and the recipient-side
-            # rows, anchored on certified splice flux + adjacent-intron nascent rates. It reuses
-            # `density_deconv`'s NegBinomial SIDEWAYS and reads layer-3 geometry/claims DOWN; the
-            # RELAY (layer 6) imports it DOWN to deliver the claim as `PsiMessage.lam_rows`.
-            "rna_anchor",
             "landscape",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
             # `landscape`'s estimator SIDEWAYS and reads `total_abundance` (layer 3) DOWN.
@@ -137,13 +131,11 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "sweep",
             "messages",
             # `messages/__init__` is the two-phase protocol (owner ruling 2026-09-04: prepare /
-            # propagate → receive / solve) and the message type; `messages/silent` and
-            # `messages/relay` are the frozen baselines every policy is measured against.
-            "messages/variance",
+            # propagate → receive / solve) and the message type; `messages/silent` is the measured
+            # floor every policy is judged against; `messages/transfer` is the shipped
+            # composition-transfer policy (owner rulings 2026-09-01 onward) and
+            # `messages/transfer_rows` its pure row constructors, the one home of the counting term.
             "messages/silent",
-            "messages/relay",
-            # `messages/transfer` is the composition-transfer policy (the ground-up rebuild,
-            # owner rulings 2026-09-01/02) and `messages/transfer_rows` its pure row constructors.
             "messages/transfer_rows",
             "messages/transfer",
         ),
@@ -167,7 +159,7 @@ _OF: dict[str, int] = {m: num for num, _t, members in LAYERS for m in members}
 
 
 def layer_of(module: str) -> int | None:
-    """The layer of a module, by its package-relative name (``"sweep"``, ``"messages/relay"``).
+    """The layer of a module, by its package-relative name (``"sweep"``, ``"messages/transfer"``).
 
     ``None`` means UNPLACED, which the gate treats as a failure rather than as a default — a module with no
     declared home is exactly the flat-pile state this file exists to end.

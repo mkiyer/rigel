@@ -1,4 +1,4 @@
-"""THE RELAY A/B, PER POOL, PER OBJECT, AGAINST ORIGIN-SPLIT TRUTH — message propagation OFF vs ON.
+"""THE MESSAGE-LAYER A/B, PER POOL, PER OBJECT, AGAINST ORIGIN-SPLIT TRUTH — message propagation OFF vs ON.
 
 ⭐⭐⭐ **WHAT REGRESSIONS DOES MESSAGE PROPAGATION CAUSE, AND WHERE?** One row per condition per arm,
 **NEVER COLLAPSED** — the panel total hides a sign flip between strata
@@ -33,8 +33,8 @@ empty pool for a pool that was measured and found small.
 
 ⛔ Both arms are run IN ONE PROCESS off the SAME cached payload, so the only thing that differs is
 ``CalibrationConfig.message_propagation`` — no re-scan, no second truth source, no reseeding.
-⛔ The relay arm ASSERTS IT RAN: ``_uni`` is written only under ``RelayPolicy``, and the muted arm must
-reproduce ``f_g == fg_loc`` exactly. An arm that silently did not switch is
+⛔ Each arm ASSERTS WHAT RAN: the backbone stamps the policy's name into the capture, and the muted arm
+must reproduce ``f_g == fg_loc`` exactly. An arm that silently did not switch is
 TRAPS: an-ablation-that-never-ran, which has already cost this project a 314-second run reported as
 "all arms byte-identical".
 
@@ -44,9 +44,8 @@ Usage::
     python scripts/design/relay_pool_ab.py --conditions NAME ...
     python scripts/design/relay_pool_ab.py --self-test           # no I/O
 
-⚠ SINCE 2026-08-25 the certified-flux stream is a MESSAGE (relay-only): the "off" arm
-(SilentPolicy) carries NO anchor, so the off/on delta includes the stream and is not comparable
-with numbers recorded before commit cb2268f1.
+⚠ The "on" arm is the shipped policy (`transfer` since 2026-09-09; the relay before it — numbers
+recorded under the relay are the relay's and are not comparable with a run today).
 """
 
 from __future__ import annotations
@@ -105,7 +104,7 @@ def pool_truth(parts, region_arrays, chain) -> dict[str, np.ndarray]:
     return {k: OC.slot_counts(parts[k], region_arrays, chain) for k in POOLS}
 
 
-def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=None) -> np.ndarray:
+def arm(payload, kw, *, messages: bool, policy: str = "transfer", injected_priors=None) -> np.ndarray:
     """One arm's per-slot ``f_g``. ⛔ Returns the FINAL belief, which is what `assemble_priors` reads.
 
     ⭐ ``injected_priors`` is for a TOY reference — a chromosome small enough to have no library-level
@@ -125,14 +124,14 @@ def arm(payload, kw, *, messages: bool, policy: str = "relay", injected_priors=N
         call["injected_priors"] = injected_priors
     calibrate(payload=payload, config=cfg, _debug=debug, **call)
     cap = debug["capture"]
-    # ⛔ THE ARM RAN, AND BOTH DIRECTIONS ARE CHECKED. `_uni` is written only at messages/relay.py,
-    #    i.e. only under RelayPolicy; and muted, ψ carries each slot's own evidence alone, so the
-    #    final belief must BE the message-free local solve, bit for bit.
-    relay_ran = "_uni" in cap
-    if relay_ran != (messages and policy == "relay"):
+    # ⛔ THE ARM RAN, AND BOTH DIRECTIONS ARE CHECKED: the backbone stamps the policy that ran into
+    #    the capture; and muted, ψ carries each slot's own evidence alone, so the final belief must BE
+    #    the message-free local solve, bit for bit.
+    want = policy if messages else "silent"
+    if cap.get("policy_name") != want:
         raise AssertionError(
-            f"messages={messages} policy={policy} but the relay {'ran' if relay_ran else 'did not run'} "
-            "— this arm is not the arm it claims to be (`_uni` is written only under RelayPolicy)."
+            f"messages={messages} policy={policy} but the policy that ran is {cap.get('policy_name')!r} "
+            "— this arm is not the arm it claims to be."
         )
     f_g = np.asarray(cap["f_g"], np.float64)
     if not messages:
@@ -171,8 +170,8 @@ def score(f_g: np.ndarray, truth: dict[str, np.ndarray], sel: np.ndarray) -> dic
 #: arms. ⛔ the "currency" arm was DELETED with CurrencyPolicy (owner tear-down 2026-08-27);
 #: caller and artifact keeps its exact shape.
 ARMS: dict[str, tuple[bool, str]] = {
-    "off": (False, "relay"),
-    "on": (True, "relay"),
+    "off": (False, "transfer"),
+    "on": (True, "transfer"),
 }
 
 

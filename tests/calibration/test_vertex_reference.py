@@ -5,9 +5,10 @@ opposite signs (``simplex_logodds._JEFFREYS_REF``): ``+C·log f_g`` bounds the `
 ``+C·log(1−f_g)`` bounds ``f_g → 1``. On the λ axis that pair is exactly Beta(½,½), whose tail is
 ``−C·|λ|``.
 
-⭐⭐ Every composition MESSAGE is written on ``log f_c``, and near the vertex ``log f_c ≈ −e^{−|λ|}``. So a
-Gaussian message of precision ``p`` contributes ``−½p·e^{−2|λ|}``, whose gradient decays exponentially
-while the reference's stays flat at ``C``. Setting them equal:
+⭐⭐ A claim written on ``log f_c`` — the coordinate the retired relay's Gaussian channels used, and one a
+λ-row can still carry — has, near the vertex, ``log f_c ≈ −e^{−|λ|}``. So a Gaussian claim of precision
+``p`` on that coordinate contributes ``−½p·e^{−2|λ|}``, whose gradient decays exponentially while the
+reference's stays flat at ``C``. Setting them equal:
 
     λ*  =  ½ · log(p / C)
 
@@ -35,8 +36,13 @@ G6   ⛔ ψ is BLIND to the certified-RNA channel — the observable a fix must 
 ===  =========================================================================================
 
 ⭐ G5 is why G1 is a falsification and not a truism: without it, G1 reads as "a grid cannot represent a
-vertex", which is false — the grid reaches ``σ(±10) = 4.5e-5`` and a λ-message gets there at par. The
-COORDINATE is the price, not the lattice.
+vertex", which is false — the grid reaches ``σ(±10) = 4.5e-5`` and a claim written on λ gets there at par.
+The COORDINATE is the price, not the lattice.
+
+⚠ Since 2026-09-09 every message reaches ψ as a ROW on the solve grid (``lam_logprior`` here is the same
+socket the backbone feeds), so each claim below is delivered as the row its coordinate implies: a
+Gaussian on ``log f_g``, on ``log(1 − f_g)``, or on ``λ`` itself. The transfer policy's rows are of the
+third kind, which is what G5 says is the honoured coordinate.
 """
 
 from __future__ import annotations
@@ -82,17 +88,26 @@ def _lam(f):
     return np.log(f / (1.0 - f))
 
 
+def _rows(fn, n: int = 2):
+    """``n`` copies of one claim as a λ-row on the coarse solve grid — the socket every message uses."""
+    lam, _ = _logodds_grid(int(_BASE["n_grid"]), float(_BASE["L"]))
+    row = np.asarray(fn(lam), np.float64)
+    return dict(lam_logprior=np.tile(row[None, :], (n, 1)))
+
+
 def _msg_up(p):
-    """A gDNA message claiming ``f_g = 1`` — mode ``log f_g = 0`` — at precision ``p``."""
-    return dict(gdna_imp_mode=np.zeros(2), gdna_imp_prec=np.full(2, float(p)))
+    """A claim written on ``log f_g`` that ``f_g = 1`` — mode ``log f_g = 0`` — at precision ``p``."""
+    return _rows(lambda lam: -0.5 * float(p) * SL._log_fg(lam) ** 2)
 
 
 def _msg_dn(p):
-    """An RNA message claiming ``f_g = 0`` — mode ``log(1−f_g) = 0`` — at precision ``p``."""
-    return dict(
-        rna_imp_mode=(np.zeros(2), np.zeros(2)),
-        rna_imp_prec=(np.full(2, float(p)), np.zeros(2)),
-    )
+    """A claim written on ``log(1 − f_g)`` that ``f_g = 0`` — mode ``0`` — at precision ``p``."""
+    return _rows(lambda lam: -0.5 * float(p) * SL._log1m_fg(lam) ** 2)
+
+
+def _msg_lam(lam_t, p):
+    """The same kind of claim written on ``λ`` itself: a Gaussian at ``lam_t`` with precision ``p``."""
+    return _rows(lambda lam: -0.5 * float(p) * (lam - float(lam_t)) ** 2)
 
 
 # ── G1 — the price law ──────────────────────────────────────────────────────────────────────────────
@@ -129,7 +144,7 @@ def test_G1b_the_price_law_is_the_SAME_at_the_other_vertex():
 
 
 def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent():
-    """⭐⭐ ψ built directly on the λ grid with a ``log f_g`` message: every non-reference term is flat in
+    """⭐⭐ ψ built directly on the λ grid with a claim written on ``log f_g``: every non-reference term is flat in
     the far tail (κ=½ ⇒ bit-flat strand; the message's gradient decays as ``e^{−2λ}``), so ``dψ/dλ``
     must equal ``−_JEFFREYS_REF``. The whole mechanism in one number.
 
@@ -150,8 +165,7 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
         np.full(1, 0.5),
         np.full(1, 0.5),
         np.zeros(1),
-        gdna_imp_mode=np.zeros(1),
-        gdna_imp_prec=np.full(1, 1e3),
+        lam_logprior=(-0.5 * 1e3 * SL._log_fg(lam) ** 2)[None, :],
     )
     p = psi[0]
     lo, hi = int(0.90 * lam.size), lam.size - 1
@@ -262,7 +276,7 @@ def test_G5_the_SAME_claim_delivered_on_lambda_is_honoured_AT_PAR():
     ⛔ This is what forbids "the grid cannot represent a vertex" as a diagnosis."""
     target = 1.0 - 1e-4
     lam_t = float(_lam(np.array([target]))[0])
-    on_lambda = float(_solve(lam_imp_mode=np.full(2, lam_t), lam_imp_prec=np.full(2, 1e3))[0])
+    on_lambda = float(_solve(**_msg_lam(lam_t, 1e3))[0])
     on_log_fg = float(_solve(**_msg_up(1e3))[0])
     assert on_lambda > 0.999, on_lambda
     assert on_log_fg < 0.995, on_log_fg

@@ -226,7 +226,10 @@ and ×1.50 at a crossing, so a large violation is accumulated drift, never one h
 **3.4 Why an integer count must be stored.** `Var(log ρ_c) = 1/(f_c·n) ≡ Var(log f_c) + 1/n`, exactly.
 Mass sums fractional per-fragment shares, so `1/mass` is not a counting variance.
 
-**3.5 ⭐⭐ The reframe is a COMPOSITION IMPUTATION, and a gDNA LEVEL crosses unscaled.** Substituting
+**3.5 ⭐⭐ The reframe is a COMPOSITION IMPUTATION, and a gDNA LEVEL crosses unscaled.** ⚠ The reframe was the
+retired relay's transport (deleted 2026-09-09); the derivation stands because it is what the transfer policy's
+splice-in FACE MAP (`DESIGN.md` §6b.4) and LEVEL LANE (§6b.12) were built to satisfy: a composition crosses
+only where the population is shared, and a gDNA level crosses unscaled everywhere else. Substituting
 `ρ_c(src) = φ_c(src)·ρ_tot(src)` into the reframe `r = ρ_tot(dst)/ρ_tot(src)` gives what it actually
 delivers:
 
@@ -1568,19 +1571,12 @@ and the only remaining source is the objects either side of it along the chain:
 ⛔⛔⛔ **IMPUTING A QUANTITY AT ONE OBJECT FROM ITS NEIGHBOURS ALONG A CHAIN IS MESSAGE PASSING, AND THERE
 IS NO SECOND MECHANISM.** Any scheme that gives an exon a gDNA level from the objects around it *is* a
 message, whatever it is called; re-deriving it under a new name is this project's most repeated wasted
-turn. ⭐ **The mechanism is already BUILT**: `messages/relay.py`'s SPLICE IN is exactly the
-BOUNDARY → EXON hop — only an EXON receives it; what it carries is a MEASUREMENT (a COUNT) and not an
-imputation; it carries its own precision; its transfer variance is 0; and it is deliberately not `τ`-gated, so it
-survives unstranded data where the strand channel is dead (§5.2). It sits behind
-`CalibrationConfig.message_propagation = False`.
-⚠ **The recorded price of switching it on is not evidence about the fixed relay**: it was measured with a
-named, confirmed defect live — the composition licence checks transcript TERMINI (`terminus_flank_gain`)
-and **not** `mrna_active` flipping, which is precisely the predicate saying the RNA population differs
-across an exon↔intron hop, so a correct pure-gDNA claim is transported into the adjacent exon and drives it
-to a confident wrong vertex (formerly a strict xfail in the reference-location gate file, which died
-with the 2026-08-24 deletion — `DESIGN.md` §6b.1/§0c.2 carry the record) — and on the retired
-36-condition ladder. **Re-price;
-never inherit.**
+turn. ⭐ **The mechanism is BUILT and SHIPS**: the transfer policy's splice-in face map is exactly the
+BOUNDARY → EXON hop for a composition (`DESIGN.md` §6b.4), and its gDNA level lane is the hop for a level
+where composition cannot cross (§6b.12) — each hop priced by the two nodes' counting and their own
+disagreement, nothing pooled. (The relay's SPLICE IN, which carried this before, retired with the relay on
+2026-09-09; its recorded price is the relay's and is not evidence about the transfer policy. **Re-price;
+never inherit.**)
 ⭐ **What this section supplies is the DISTRIBUTION the imputation is over, not a new transport.**
 
 ### 9d.2 ⛔⛔ WHY BOTH OBVIOUS IMPUTATIONS FAIL UNDER CAPTURE — the field is neither smooth nor scalar

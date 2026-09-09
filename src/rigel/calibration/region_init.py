@@ -23,10 +23,10 @@ sources below:
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
 Layer: LAYER 6. It imports DOWN to `region_chain` (0), `region_geometry` and `simplex_logodds` (3) and
-`density_deconv` (5), and SIDEWAYS to `messages/variance` (6, for ``count_logvar``) — never `sweep`, so it
-sits cleanly beneath the backbone that consumes :func:`build_region_init`. ⚠ This line read *"imports only
-lower layers"* and omitted `messages/variance` and `region_chain` until 2026-08-17; the sideways import is
-legal (`_layers`: down or sideways, never up) and the census re-derives the whole graph.
+`density_deconv` (5), and SIDEWAYS to `messages/transfer_rows` (6, for ``count_logvar``, the one home of the
+counting term) — never `sweep`, so it sits cleanly beneath the backbone that consumes
+:func:`build_region_init`. The sideways import is legal (`_layers`: down or sideways, never up) and the
+census re-derives the whole graph.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .density_deconv import density_factor_precision
-from .messages.variance import count_logvar
+from .messages.transfer_rows import count_logvar
 from .region_chain import REGION, RegionChain
 from .region_geometry import RegionGeometry, RegionStatics, region_gdna_geometry
 from .simplex_logodds import _logodds_grid, _solve_regions_logodds_all
@@ -81,7 +81,7 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class RegionInit:
-    """The per-slot message-free self-solve (length ``n_slots``) — the pass-0 relay's starting beliefs.
+    """The per-slot message-free self-solve (length ``n_slots``) — the sweep's starting beliefs.
 
     ⚠ **The first axis is the unified region+boundary CHAIN, not the region axis.** This line said
     ``n_regions`` until 2026-08-17: :func:`build_region_init` reads `RegionGeometry`, whose every array is
@@ -347,16 +347,13 @@ def build_region_init(
     #    and still-true claim: it pairs ``f_g`` with ``1 − f_g``, which close by construction — which is
     #    also why the published masses (`sweep`'s ``f_g*count`` / ``(1-f_g)*count``) conserved fragments
     #    exactly and the defect never reached them, NOR the EM prior, NOR `derive`.
-    #    ⚠ ``rho_pos``/``rho_neg`` still have exactly one production consumer, `messages/relay.py`, and
-    #    `message_propagation` is OFF, so that pair is dormant today either way.
-    #    ⚠ What the relay's mass pin enforces is a different frame (`region_total_density`); and the
-    #    relay fuses in LINEAR density space
-    #    (the scan's inverse-variance fuse), so ``rho = 0`` is perfectly expressible. A zero density was never the
+    #    ⚠ ``rho = 0`` is perfectly expressible in a linear density fuse; a zero density was never the
     #    problem — an INFINITE precision on it was (TRAPS: a-zero-count-is-a-measurement).
     #    ⛔ A first version of this fix also moved the location to the ``Gamma(a+½, E)`` posterior mean
     #    ``(a+½)/E``. That is right for one rate in isolation and WRONG here: three components each
-    #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2, which `test_relay_mass_rescale` caught
-    #    as ``R_own = 0.5 + 1/M``. The half belongs to the rate's VARIANCE, not to a share of a total.
+    #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2 (the retired relay's mass-rescale
+    #    gate caught it as ``R_own = 0.5 + 1/M``). The half belongs to the rate's VARIANCE, not to a
+    #    share of a total.
     #
     # ⛔ What DID change is the ``live`` predicate: STRUCTURAL (opportunity, strand admissibility), never
     #    the count. A zero count is a measurement; only a zero opportunity is an absence of data.

@@ -1,12 +1,10 @@
-"""HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY? — silent / relay at the
+"""HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY? — silent / transfer at the
 stage-0 substrate's claimed populations, judged on NOTHING else (the owner's rule).
 
 ⛔ **`FanOutPolicy` and the `--dissect`/`--sweep` survey were DELETED 2026-08-24** with the policy
-they dissected: the certified-flux stream (`calibration.rna_anchor`, ruled A MESSAGE 2026-08-25 and
-delivered by the RELAY — never own evidence) answers the claimed slots, and the fan-out was measured
-DOMINATED on every row. The survey's verdicts stand in `DESIGN.md` §6b.2 and the git history.
-⚠ Since 2026-08-25 the `silent` arm carries NO anchor (silent is the pre-anchor control), so the
-silent-vs-relay contrast here measures the message layer INCLUDING the certified-flux stream.
+they dissected; the survey's verdicts stand in `DESIGN.md` §6b.2 and the git history. The relay and its
+certified-flux stream retired on 2026-09-09: the `transfer` column is the shipped policy, under which the
+certified flux enters as an RNA level and through the splice-in maps, and `silent` is the measured floor.
 
 Two claimed populations, each scored as misplaced gDNA fragments ``Σ|est_gdna − true_gdna|`` against
 certified `slot_truth`, per condition and per policy, split into PURE-gDNA and RNA-BEARING slots (by certified truth) and never pooled
@@ -65,7 +63,7 @@ from rigel.scan_cache import read_scan_cache  # noqa: E402
 #: the two policies, as configs — the SHIPPED config with exactly one axis varied.
 POLICIES = {
     "silent": lambda: CalibrationConfig(message_propagation=False),
-    "relay": lambda: CalibrationConfig(),
+    "transfer": lambda: CalibrationConfig(),
 }
 
 
