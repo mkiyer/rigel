@@ -193,44 +193,6 @@ vertices). ⭐ **The candidates worth prototyping**: a REPARAMETERISATION away f
 `L`-invariance and the Berger–Bernardo cancellation BEFORE any panel number) and extending the density
 CHANNEL (`density_deconv.density_lambda_factor`, already a likelihood, ships at ss-intron REGIONs).
 
-### message-value-for-blind-slots
-`priority: now · kind: question · stamped: 2026-08-27`
-**The decisive message-policy question, answerable with no solver**: is the information a blind
-unstranded or AMBIG slot needs actually PRESENT in its neighbours? The anchored twin block was designed
-for exactly this. The measurement that survived the 2026-08-27 tear-down: propagation is net-harmful
-wherever the local solve HAS evidence, and its value concentrates where the solve is BLIND — so the
-follow-up is whether a policy that speaks ONLY into destinations with no own evidence beats one that
-speaks everywhere. Score split by destination-had-own-composition-evidence on `policy_benchmark.py`,
-never pooled, substrate named on every claim. ⭐ The laws a policy must obey are NAMED TRAPS rules
-(`zero-the-precision-with-the-value`, `an-imputation-must-cost-something-every-hop`,
-`off-grid-message-mode`, single-source-may-only-reduce — the foundation spec enforces the last at
-runtime). ⚠ Re-baseline first: all policy numbers predate the strand-estimator and fragment-length work.
-
-⭐⭐ **FIRST MEASUREMENT, 2026-09-01 — no solver, certified `slot_truth` only, both substrates.** For
-each slot, answer with its two chain neighbours' mass-weighted TRUE `f_g` (an ORACLE message: no
-estimation error, no transport loss, no precision bug) and score it against the best CONSTANT answer;
-`skill = 1 − err_neighbour/err_constant`, so **skill ≤ 0 means no policy built on neighbour transport
-can win there, however well engineered**. Read the in-gene column (`R exon`, `R intron`,
-`B exon|exon`, `B exon|intron` — where an unstranded library has no channel):
-
-* **The ladder: 7/12 defined rows positive, median +0.295.** Strongly positive at mid-contamination
-  (`g50` +0.53…+0.69) and at `g98` capture-OFF (+0.52); **NEGATIVE at every `g05` row**
-  (−0.44…−0.93); ≈0 at `g98` capture-ON (−0.001, +0.068).
-* **⛔ The anchored twin block: only 6/24 defined rows positive, median −1.635**, and catastrophically
-  negative at low gDNA (`g05` −12…−28, `g25` −1.9…−4.6). ⚠ **The two substrates DISAGREE in sign**
-  (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`) — the ladder is the shipping judgement.
-* The pattern on both: neighbour information exists at MID-to-HIGH contamination and is actively
-  MISLEADING at low contamination, where "almost all RNA" is already an excellent global answer that
-  a noisy neighbour can only degrade. The four `g00` rows are UNDEFINED (constant truth ⇒ the best
-  constant is exact), not zero.
-
-⚠ **Read the baseline honestly**: the comparator is the best constant *computed from truth*, which is
-an oracle-informed and therefore STRONG baseline — a real policy does not know it either. So a
-negative row says "the neighbour is a worse predictor than a good global prior", not "messages are
-worse than the shipped local solve". The decision-relevant contrast against `SilentPolicy` still
-needs `policy_benchmark.py`. What the measurement DOES settle is the issue's literal question — the
-information is present at `g50`/`g98`-OFF and absent-to-negative at `g05` and at `g98` capture-ON.
-
 ### the-lower-bound-noise-ratchet
 
 **Priority: with the enrichment witness.** The level lane's residue at the LOW-gDNA end. A level made
@@ -521,12 +483,6 @@ genome scale (a small multiple on `sweep_n_grid`) and the end-to-end thermometer
 that priced it (`ladder_arm_ab.py`) retired with the relay (2026-09-09); re-derive as a
 `policy_prototype.py --module` arm on the window, judged by `calibration_vs_oracle.py`.
 
-### alt-splice-rung-unverified
-`priority: later · kind: question · stamped: 2026-08-2x`
-Do we solve ALTERNATIVE SPLICING correctly? The `alt_splice` toy rung exists and is unverified
-(`toy_harness.py --list`). Cheap, and the only structure where several splice junctions share a
-BOUNDARY — in scope on all three shipping strata.
-
 ### transfer-variance-premise
 `priority: later · kind: question · stamped: 2026-08-2x`
 Does the message transfer variance correctly price a ratio built on a handful of counts? — PARTLY
@@ -565,8 +521,8 @@ Each its own commit (`TRAPS: one-thing-varied`), none moving the 0.8.0 metric:
 `anchor_opportunity_census`, `calibration_truth_ab`), migrate as touched per the frame ruling
 (`DESIGN.md` §4.3; a claim spanning frames must say so); the index's duplicate map
 (an ALIAS MAP `dropped_t_id → kept_t_id`, not re-admission); `mass_*_boundary` → `count_*_boundary`
-(crossing INCIDENCES); restore the moment tests deleted with the length channel; the ledger of dead
-surface and stale sibling references; the stale comment at `pipeline.py:416` (the drain's fl models are
+(crossing INCIDENCES); restore the moment tests deleted with the length channel; the stale comment at
+`pipeline.py:416` (the drain's fl models are
 pass one's, not "the SAME pool the calibrator reads" — line 382 has it right). ⚠ The duplicate map needs
 an index rebuild but not a panel re-scan — verify with `rescan_panels.py`; `reach` is covered by no
 other hash.
@@ -882,7 +838,11 @@ handing an object the exact answer changes what it BROADCASTS and the relay over
 ⛔ That is a stronger statement than §9a's "value of missing information", and it is why the next
 thread is the MESSAGE LAYER and not the prior: if a perfect local answer cannot survive propagation,
 no local improvement can pay off. ⚠ Three conditions, on `vertex_ceiling`'s pass-0-flavoured metric —
-re-price the atom on the whole ladder AFTER the message layer is repaired, not before.
+re-price the atom on the whole ladder AFTER the message layer is repaired, not before. ⭐ **RE-PRICED 2026-09-09 under the shipped policy** (`vertex_ceiling.py`, re-pointed to the two-phase
+solve and to the PARAMETER-vertex population; its docstring carries the whole-ladder table): the vertex
+information is worth at most 1 % on every stranded in-scope row, 2–7 % of the unstranded capture-OFF rows,
+25–35 % of the deferred stratum — the WASH above was the relay's over-propagation plus a population that
+priced chance, and the atom is `ROADMAP.md` rank 4.
 
 | | closed by | verdict |
 |---|---|---|

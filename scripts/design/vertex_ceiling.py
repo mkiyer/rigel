@@ -54,16 +54,37 @@ reads as "no effect", which is publishable and wrong.
 ⛔⛔⛔ **RE-POINTED 2026-09-09 — read this before the 2026-08-05 record below.** Under the transfer policy
 the relay-era pin (a rewrite of `RegionInit.f_*`) was INERT: the two-phase backbone reads those fields
 into its diagnostics capture only. The pin now enters where the solve reads — the pinned node's OWN
-CLAIM and its ψ row, both a delta at the truth (`_install_vertex_pin`) — and two things were measured
-the day it was re-pointed, on `g50 ss.50 OFF` at the shipped configuration: (1) with the REALIZED-vertex
-population the instrument used to classify by, the arm made the region axis 23 % WORSE (Σ|err| 728 k →
-894 k; confidently-wrong objects 432 → 3,127) while every pinned slot went to zero error — 22,201
-evidence-free slots whose few crossings happened to be all gDNA, pinned as certain and propagated, drove
-their RNA-rich neighbours from 0.46 to 0.64 at a truth of 0.01 (`_parameter_vertex` records it); (2)
-with the PARAMETER-vertex population that replaces it (silent genes, nascent-free introns, the zero-gDNA
-row: 1,104 objects per sweep on that row) `vertex_free` improves every column, by 0.4 % of the region
-axis (728,378 → 725,752) and 0.2 % of the boundary axis, `noop` byte-identical. ⭐ Every number in the
-2026-08-05 record is therefore doubly historical: the retired 36-row ladder, the relay, and a population
+CLAIM and its ψ row, both a delta at the truth (`_install_vertex_pin`). ⭐ **The population is the
+PARAMETER vertex** (`_parameter_vertex`: every region of a silent gene no expressed gene overlaps, every
+intron of a gene with no nascent fragment, every counted object of a zero-gDNA row). The REALIZED vertex
+the instrument used to classify by (truth exactly 0 or 1 per object) priced CHANCE: on `g50 ss.50 OFF`
+most of its 22,201 evidence-free vertex slots were boundaries of 6–19 crossings that all happened to be
+gDNA; pinned as certain and propagated they drove RNA-rich exon neighbours from 0.46 to 0.64 at a truth
+of 0.01 and made the region axis 23 % WORSE (Σ|err| 728 k → 894 k) while every pinned slot went to zero
+error. With the parameter vertex the same row improves on every column (region 728,378 → 725,752).
+
+⭐⭐ **THE CEILING UNDER THE SHIPPED POLICY (2026-09-09; the 16-row ladder, `base` vs `vertex_free`,
+`noop` byte-identical; the FINAL solve's Σ|err| ratio `vertex_free / base`):**
+
+=====================================  ===================  ===================  ===================
+row                                    pins per sweep       region axis          boundary axis
+=====================================  ===================  ===================  ===================
+``g00`` (all four)                     8,900–16,000         0.000–0.004          0.000
+``g05 ss.99 OFF / ON``                 11 / 18              1.000 / 0.999        1.000 / 0.999
+``g50 ss.99 OFF / ON``                 44 / 48              1.000 / 0.999        1.000 / 0.999
+``g98 ss.99 OFF / ON``                 104 / 236            0.999 / 0.991        0.998 / 0.988
+``g05 ss.50 OFF``                      448                  0.983                0.995
+``g50 ss.50 OFF``                      1,104                0.978                0.986
+``g98 ss.50 OFF``                      2,111                0.931                0.956
+``g05 / g50 / g98 ss.50 ON`` (deferred)  445 / 993 / 2,631  0.648 / 0.742 / 0.765  0.883 / 0.920 / 0.910
+=====================================  ===================  ===================  ===================
+
+Reading: the vertex information is worth at most 1 % on every stranded in-scope row (the strand term
+already reaches the vertex), 2–7 % of the unstranded capture-OFF rows rising with gDNA — silent genes'
+regions and nascent-free introns, the landscape prior's training population, not a message's — and
+25–35 % of the DEFERRED stratum; the zero rows are total by construction. Pass zero reads the same way
+(unstranded OFF 0.996–0.999), so the gain arrives through the refit prior. ⭐ Every number in the
+2026-08-05 record is therefore triply historical: the retired 36-row ladder, the relay, and a population
 that priced chance. Re-derive with the arms below before quoting a ceiling.
 
 ⛔⛔⛔ **WHAT IT MEASURED, 2026-08-05 — and the verdict is NOT A BUILD. READ THIS FIRST.**

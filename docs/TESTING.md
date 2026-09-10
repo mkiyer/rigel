@@ -571,7 +571,7 @@ one calibrate (~30 s) and is deliberately **not cached**: the bundle is a functi
 code that fit it, so a stored copy would go stale on exactly the changes the harness exists to test.
 ⭐ Harvest once per session and run many toys against it (`harvest()` then `run_toy()` in a loop).
 
-### ⭐⭐⭐ `spliced_exons` — the CURRENT TARGET RUNG, and the one to understand first
+### ⭐⭐⭐ `spliced_exons` — the rung to understand first
 
 **Owner's spec: ONE gene, ONE transcript, `TA+ (1,000, 2,000) (9,000, 10,000)` on 12 kb.** Deliberately
 `nested_exons`' **twin** — same chromosome, same gene boundaries — with an INTRON and an SJ where the
@@ -610,7 +610,7 @@ carried entirely by messages.
 ⭐⭐ **The two FACES of an `intron|exon` BOUNDARY** — the derivation this rung exists to land is
 `EQUATIONS.md` §3.6. Read it before touching the solver.
 
-### ⭐⭐⭐ `splice_both_strands` — the rung the SPLICE-FLUX REFRAME must be derived against
+### ⭐⭐⭐ `splice_both_strands` — the both-stranded rung: overlapping exons AND introns, two sj pointing opposite ways
 
 **Owner's spec, 2026-08-05.** Four transcripts, both strands, overlapping exons AND overlapping introns,
 two sj pointing opposite ways, on the same 12 kb chromosome:

@@ -174,7 +174,7 @@ panel MEASURES; it does not say what the panel PREVENTS. Where a doc still carri
 it is incomplete rather than wrong.
 
 ⭐ **What calibration is left with is exactly STRAND and DENSITY** — plus belief propagation across
-objects, which is ON (`RelayPolicy`, §0c.2) — and on an unstranded library it is density
+objects, which is ON (the transfer policy, §6b.12) — and on an unstranded library it is density
 alone, since the strand λ-term is exactly 0 at κ = ½ (§7 below). That is the substrate the three in-scope
 strata are optimised on.
 
@@ -349,11 +349,12 @@ memorise into a rule to apply:
 *is* the currency question, asked once per hop type. No licence hierarchy, no three-case rule, no
 per-strand patch.
 
-⛔ **THE SHIPPED RELAY HAS THIS BACKWARDS, AND THAT IS WHY IT IS BEING REPLACED RATHER THAN REPAIRED.**
-`RelayPolicy` transports a COMPOSITION by default (the reframe `r = rho_tot(dst)/rho_tot(src)`) and bolts
-population licences on top — but the population is exactly what changes at the `exon|exon` boundaries that
-carry the largest destination mass on the panel. Every licence bug of 2026-08-18 was an attempt to REPAIR a
-currency CHOICE instead of changing it.
+⛔ **THE RETIRED RELAY HAD THIS BACKWARDS, AND THAT IS WHY IT WAS REPLACED RATHER THAN REPAIRED.**
+`RelayPolicy` transported a COMPOSITION by default (the reframe `r = rho_tot(dst)/rho_tot(src)`) and
+bolted population licences on top — but the population is exactly what changes at the `exon|exon`
+boundaries that carry the largest destination mass on the panel. Every licence bug of 2026-08-18 was an
+attempt to REPAIR a currency CHOICE instead of changing it. The transfer policy (§6b.12) carries a
+composition only across a licensed face and a LEVEL everywhere else.
 
 ⭐⭐⭐ **AND THE POPULATION OF A MESSAGE IS DIRECTION-DEPENDENT** (owner, 2026-08-18) — *"always answer the
 question: what crosses INTO this region?"*
@@ -466,7 +467,13 @@ subsumes much of what message propagation is doing.
   imputation is the only source of information there is. Strand specificity would solve those, and often
   is not available — which is exactly why the next best thing has to work, and has to be weak.
 
-### 0c.0e ⭐⭐⭐ THE COMPLETION CONTRACT OF THE MESSAGE POLICY — owner ruling, 2026-09-02
+### 0c.0e ⭐⭐⭐ THE COMPLETION CONTRACT OF THE MESSAGE POLICY — owner ruling, 2026-09-02; FULFILLED 2026-09-09
+
+⭐ **FULFILLED.** Every case below is handled by the transfer policy (§6b.4–§6b.14: the ten messages,
+the level lane, the RNA level lanes and the cube, the ceiling, sj+terminus, the empty-piece flux source),
+the acceptance criterion was met on the test chromosome, the ladder and every panel (the ship protocol,
+2026-09-09), the default flipped, the relay retired, and the thread merged. The contract stays as the
+definition every future message change is held to.
 
 **The policy is finished when every case is handled, and not before.** No message may stay nullified and
 no boundary or region may be skipped: for every node type and every boundary case the policy must pass
@@ -483,12 +490,12 @@ the part of the message that survives is passed, never the whole message dropped
 **The acceptance criterion.** On the test chromosome, the ladder and every panel the project builds,
 each case either improves accuracy or leaves it stable with minimal harm where a small disadvantage is
 measured — the two halves judged apart, never pooled, node-locally at the destinations beside the
-whole-library number. When that holds for the whole checklist (the tracker in the sandbox carries it),
-the default flips, the other policies retire, and the tool shrinks around one cornerstone.
+whole-library number. When that holds for the whole checklist, the default flips, the other policies
+retire, and the tool shrinks around one cornerstone — which is what happened on 2026-09-09.
 
-**The focus rule.** Until then this thread is the work; other high-priority problems (the landscape
-prior's false-positive training first among them) are LOGGED in the tracker's parked-priorities list and
-taken up after — switching away is what has kept this policy elusive.
+**The focus rule** (kept as method): while a thread like this is the work, other high-priority problems
+are LOGGED (today, as `ISSUES.md` entries with a priority) and taken up after — switching away is what
+had kept this policy elusive.
 
 ### 0c.1 ⭐⭐⭐ THE MECHANISM IS BUILT AND SHIPS — do not build it again
 
@@ -1692,7 +1699,8 @@ the outside map's territory); an EMPTY outside piece a dozen bases long whose fa
 splice site 7 / 8 / 6 %; empty with a gene edge 6 / 3 / 1 %. In a chain of termini each boundary is
 the inside flank of the previous one, so composition reaches none but the outermost from either side;
 what crosses a dozen bases is the gDNA LEVEL, continuous under one probe footprint, which would bound
-the inner boundary's gDNA share from above — a derivation owed to the chain item, not built. And the
+the inner boundary's gDNA share from above — a derivation never built, refused with every other upper
+side (`ISSUES: message-layer-open-cases`). And the
 terminus boundaries' error on the contaminated rows is 1.8 % of their mass, the resolution of their
 own evidence plus the prior, not blindness: the lever for this class and for the zero controls is
 `ISSUES: gdna-landscape-trains-on-false-positives`. Gates: `tests/calibration/test_transfer_policy.py`
@@ -1904,7 +1912,8 @@ NEUTRAL (the composed transport: 5/8 better in each half, worst 1.008×) and REF
 +1.3 % in scope, +8 % on sparse probes — an uncertified enrichment sign at an exon|exon terminus).
 The owner's reset: finish the intron|exon face's nullified messages first, one at a time, then the
 exon|exon boundaries one structure per step. The pieces re-entered as §6b.4–§6b.8; the composed
-transport's multi-hop form is THE SCAN, the next case; the level bound is owed as the tracker's phase A.
+transport's multi-hop form became THE SCAN and then the two-phase backbone (§6b.12); the level bound
+became THE LEVEL RULE (§6b.12).
 
 ### 6b.10 ⭐⭐⭐ THE SCAN SEAM — the ledger, the two passes, and a zero point that costs nothing (landed inert 2026-09-03)
 
@@ -1953,19 +1962,18 @@ THE NODE THAT RECEIVED, never a filter applied at the node that spoke.
 
 ⭐⭐⭐ **And the propagation is FORMAL FORWARD-BACKWARD: when it ends, EVERY node has received TWO
 messages, one from each neighbour, except the two nodes at a chain's ends, which receive one.** That
-is the definition of done for the scan, and it is stronger than what ships today: the ten one-hop
-messages leave most nodes hearing from one side or from neither, and a node with no message from a
-side is not a node that was told "nothing" — it is a node the policy never spoke to. ⛔ Under this
+is the definition of done for the passes, and it is what ships since §6b.12 landed: before it, the ten
+one-hop messages left most nodes hearing from one side or from neither, and a node with no message
+from a side was not a node that was told "nothing" — it was a node the policy never spoke to. ⛔ Under this
 ruling a hop that carries nothing must still ARRIVE, as an explicitly uninformative message, so the
 solve can tell silence from ignorance and every node is solved from two honest messages (the
 completion contract, §0c.0e).
 
 **What this settles about the seam (§6b.10) and what it opens.** The seam's kernel already runs at the
 receiving node — the backbone calls ``step(source, destination)`` and the policy's arithmetic happens
-as the row crosses — so the mechanism is in the right place; what is owed is the FORM: a message per
-side at every node, the recipient's three decisions stated explicitly rather than implied by whether a
-map exists, and the pricing of each decision. ⛔ The budget stays 0 until that form is built and
-priced, so nothing about the shipped answer changes meanwhile.
+as the row crosses — so the mechanism was in the right place; what was still owed was the FORM: a
+message per side at every node, the recipient's three decisions stated explicitly rather than implied
+by whether a map exists, and the pricing of each decision. That form is §6b.12, and it ships.
 
 ### 6b.12 ⭐⭐⭐ THE SKELETON IS RE-FOUNDED ON THE OWNER'S TWO PHASES, AND EVERY POLICY IDEA IS JUDGED AT PASS ZERO AND WITH THE PRIOR, APART (owner rulings, 2026-09-04)
 
@@ -2038,7 +2046,7 @@ pass — so a first-pass error poisons the prior and the prior returns it everyw
 pipeline, side by side. ⛔ A refutation or a win read only through the full pipeline is not
 attributed: it may be the prior's response. ⭐ The first pass does not have to solve every node; it
 has to solve ENOUGH nodes confidently to train a landscape that solves the rest in the second pass —
-which nodes train it is the landscape's own owed work, taken up AFTER the message architecture works
+which nodes train it is the landscape's own work, taken up now that the message architecture is finished
 end to end, becomes the default and the older policies retire (the owner's order, 2026-09-04).
 
 ### 6b.13 ⭐⭐⭐ THE RNA LEVEL LANES — the both-stranded locus, phase 1 (owner rulings 2026-09-08; landed 2026-09-08)

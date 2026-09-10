@@ -147,17 +147,14 @@ something one layer up is telling you the thing belongs lower — a TYPE almost 
 graph from the AST, flags any upward import, and flags docstrings naming a sibling with no import. ⚠ A layer
 is not a claim that its modules are the right SIZE; layer 4 being five modules for one concept is open.
 
-## ⛔ THE MESSAGE LAYER — where it stands, in one place
+## ⭐⭐⭐ THE MESSAGE LAYER — the shipped design, in one place
 
-⭐⭐⭐ **THE COMPLETION CONTRACT (owner ruling, 2026-09-02; `DESIGN.md` §0c.0e).** The policy is finished
-when EVERY case is handled — no nullified message, no skipped boundary or region; multi-hop through
-chains with per-hop dampening; gDNA always conveyed where composition cannot cross; every node solved
-from two honest messages — ⭐ formally, FORWARD-BACKWARD, where the sender just sends and THE RECIPIENT
-decides to forward, modify or stop, and every node ends holding a message from each neighbour
-(`DESIGN.md` §6b.11, owner 2026-09-04) — and it either improves or stays stable with minimal harm on the test
-chromosome, the ladder and every panel. ⛔ **This thread does not switch away until then**: other
-priorities go to the PARKED-PRIORITIES LOG in the tracker (the sandbox), and the checklist there is the
-definition of done.
+⭐⭐⭐ **THE TRANSFER POLICY SHIPS (`CalibrationConfig.message_policy = "transfer"`, the default since
+2026-09-09; `message_propagation = True` since 2026-08-18).** The message layer's development is
+FINISHED and merged: the owner's completion contract (`DESIGN.md` §0c.0e — every case handled, nothing
+nullified, forward-backward with the recipient deciding, every node solved from two honest messages) is
+fulfilled, and `DESIGN.md` §6b.4–§6b.14 carry every ruling with its measurement. ⛔ Accepted errors and
+owner decisions are recorded where they were made and are not re-litigated.
 
 ⭐⭐⭐ **WHAT MESSAGE PROPAGATION IS FOR, AND THE BAR IT IS JUDGED BY (owner, 2026-08-27).** Messages
 exist for the slots whose own solve has no composition channel — **unstranded data and AMBIG slots**,
@@ -165,50 +162,31 @@ where the strand likelihood is flat and the local answer is a default rather tha
 ⛔ **WE DO NOT EXPECT TO BEAT `SilentPolicy`.** On strand-specific data a sighted exon's own solve is
 excellent and a message can mostly only disturb it. The goal is: **perform well on UNSTRANDED data
 while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
-against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart.
+against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart. ⭐ Where
+it stands (2026-09-09, the ladder): `transfer` beats silence 7/8 on each half; every in-scope row's
+misplaced gDNA is under 2.5 % of its fragments; the remaining in-scope error sits on the intron's own
+solve, on exon|intron boundaries at their counting floor, and on near-pure objects at g98 (the vertex
+atom, `ROADMAP.md`) — diminishing returns for messages in scope.
 
-⭐⭐⭐ **THE TRANSFER POLICY IS THE SHIPPED DEFAULT, AND THE RELAY IS GONE (the ship protocol, 2026-09-09;
-`CalibrationConfig.message_policy = "transfer"`).** The completion contract's cases are handled (the ten
-messages, the level lane, the RNA level lanes at both-stranded nodes, the ceiling at single-strand nodes,
-sj+terminus; `DESIGN.md` §6b.4–§6b.14 carry every ruling) and the ladder judged the flip: the standings
-line below is re-derived by `policy_benchmark.py --panel ladder`. ⛔ The retired relay kept three of the
-four ZERO-gDNA rows (`g00 ss.50 OFF/ON`, `g00 ss.99 OFF`), where the transfer policy leaves the walled
-exons and both-stranded pieces to the landscape prior (`ISSUES: gdna-landscape-trains-on-false-positives`)
-— a recorded, accepted price of the flip, visible in the goldens (`antisense_contained_ss90` 0.04 → 51.9
-false gDNA fragments of 1,000 at one both-stranded region with no witness of its second strand;
-`strand_ss65_multi_iso` 0.03 → 14.3 at a nested exon, `ISSUES: flux-price-witness-units`). ⭐ The relay,
-its variance toolbox, its certified-flux anchor, `RelaySwitches`, `config.rna_anchor`, the Gaussian
-channels on `PsiMessage` and the backbone's two coordinate assertions, eight relay-era test files and nine
-relay-era instruments were deleted the same day, bit-identity of the shipped path gated by
-`rename_identity.py` on two ladder rows; git carries them. ⭐ Accepted errors and owner decisions are
-recorded where they were made and are not re-litigated.
-
-⭐⭐ **TWO POLICIES, selected by one config value** (`CalibrationConfig.message_policy`; propagation
-is ON, `message_propagation = True` since 2026-08-18, and an unknown policy name RAISES). ⭐⭐⭐ **Both
-run on the TWO-PHASE backbone (owner ruling 2026-09-04, `DESIGN.md` §6b.12)**: `prepare` (every node's
-own claim) → `propagate(backward)` returning `receive(source, destination)`, which the backbone runs as
-a forward pass then a backward pass, every node ending with one message from each neighbour it has
-(`SILENCE` is a message, `NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`, which hands ψ two row
-channels and nothing else (`PsiMessage.lam_rows`, `cube_rows`). The foundation spec's Gaussian-lane
-`Message` and the `message` policy were RETIRED by the same ruling; the relay's Gaussian channels on
-`PsiMessage` retired with the relay.
+⭐⭐ **TWO POLICIES, selected by one config value** (an unknown name RAISES), both on the TWO-PHASE
+backbone (`DESIGN.md` §6b.11–§6b.12): `prepare` (every node's OWN CLAIM) → `propagate(backward)`
+returning `receive(source, destination)`, which the backbone runs as a forward pass then a backward
+pass, every node ending with one message from each neighbour it has (`SILENCE` is a message,
+`NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`, which hands ψ two row channels and nothing
+else (`PsiMessage.lam_rows`, `cube_rows`).
 
 | policy | |
 |---|---|
-| `silent` | ⭐ **THE MEASURED FLOOR** (`SilentPolicy`) — frozen. The same policy `message_propagation = False` installs |
-| `transfer` | ⭐⭐⭐ **THE SHIPPED DEFAULT (2026-09-09) — COMPOSITION TRANSFER, ON THE TWO PHASES** (`messages/transfer.py`, rows in `messages/transfer_rows.py`; owner rulings 2026-09-01…04). `prepare` states every node's OWN CLAIM (an intron's factory profile, an exon's or boundary's strand profile where the derived deadband declares it live, an edge's gDNA count) and a RULE per directed face — absent = STOP, the identity = FORWARD, a map = MODIFY — which ARE the ten shipped messages (`DESIGN.md` §6b.4–§6b.9 carry every ruling); `propagate` composes what a node holds from its far side with its own claim and applies the recipient's rule; `solve` adds the two held profiles. A claim travels as far as the faces admit it, each hop charging its rule's counting width and, where two witnesses exist, the pair's own discrepancy — nothing pooled. ⭐ Measured before landing (2026-09-04): wins BOTH halves of the ladder against the one-hop policy it replaces, 7/8 and 7/8, at pass zero and through the pipeline; on the probe panels the stranded half is within 4–8 % and the unstranded half mixed, because a forwarded exon profile is one-sided (`ISSUES: two-sided-exon-row`). ⛔ Judge a message at its DESTINATIONS beside the whole-library number, halves apart, pass zero beside the full pipeline (§6b.12). Standing shadows: the recorded owner decisions in the tracker and `ISSUES: gdna-landscape-trains-on-false-positives` ⭐ THE LEVEL LANE (2026-09-05, `DESIGN.md` §6b.12): `Message.level_gdna` is an ABSOLUTE profile over the log gDNA density, the default rule of EVERY directed face without a composition rule (strand changes, termini both ways, the AMBIG complex, every face into or out of an EMPTY node — 52 % of the ladder's exon pieces have no total), forwarded unchanged by empties, emitted by a full node as the INTERSECTION of its own lower side and what it holds (bounds intersect, they do not multiply: the product form ratcheted), priced per hop at the recipient, and taken as a LOWER BOUND only (every upper side measured harmful under capture); STOP by omission is gated impossible. ⭐ THE RNA LEVEL LANES (2026-09-08, `DESIGN.md` §6b.13): `level_rna_pos` / `level_rna_neg` per strand, faces from the flag bits (the intron test PER STRAND: `StepContext.exon_pos`/`exon_neg`), two-sided only between an intron and its own boundary, EVERY hop priced by the pair's disagreement in the strand's abundance read from the column SPLIT's asymmetry (2026-09-09: the counting-only exemption carried a lit intron's upper side across a 170-fold probe cliff; the column count as witness blurred a dark intron's claim at the same cliff; the split tells them apart), sources = a single-strand node's own claim read at ``1 − σ`` and the certified flux at an exon's junctions (an ESTIMATE priced by the junction–exon pair's strand disagreement, kept lower-sided), delivered at AMBIG nodes as ONE row over ψ's (λ, θ) cube (`PsiMessage.cube_rows`; the tilt needs no lane) and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no composition (a licensed face's map already carries the flux as its cap). THE BRACKET THEOREM is gated. Ladder at landing: every non-zero row of both halves won. ⭐ THE sj+terminus BOUNDARY (2026-09-08, `DESIGN.md` §6b.14): the terminus decides the side, the junction's flux is placed at its exon's flank; the case is 0.6 % of a row at the counting floor and the rule is neutral in scope. ⛔ "Levels always travel" for the gDNA lane is REFUSED by the bar until phase 2's ceiling (`ISSUES: levels-always-travel-for-the-gdna-lane`). |
+| `silent` | ⭐ **THE MEASURED FLOOR** (`messages/silent.py`) — frozen. The same policy `message_propagation = False` installs |
+| `transfer` | ⭐⭐⭐ **THE SHIPPED DEFAULT** (`messages/transfer.py`; the pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims` (every node's own claim: an intron's factory profile, a live exon's or boundary's strand profile), `_splice_faces` (the intron|exon face: forward both ways, the splice-in map with the certified flux as its cap, the splice-out map), `_edge_level` (the edge's one-sided level), `_terminus_rules` (the outside map and THE LEVEL RULE into the inside), `_alternative_splice_site` (both flanks, priced per pair), `_gdna_lane` (the level lane on every face without a composition rule, lower-only, empties forwarding), `_rna_lanes` (one lane per strand: sources from own claims and the certified flux at junctions — at an empty piece too — delivered on the cube at AMBIG nodes and as a ceiling at single-strand nodes). Every hop pays its pair's counting plus the disagreement beyond it, the witness being the column split's asymmetry where the strand channel is live (`_LevelLane`) |
 
-⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
-with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
-`ISSUES: the-message-policy-campaign` carries what was derived, measured and REFUTED — read it before
-re-proposing a mechanism, so a refuted experiment is not repeated.
-
-⭐⭐ **THE CERTIFIED FLUX IS A MESSAGE (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE), and the
-transfer policy carries it** as an RNA level of the junction's strand at the exon, priced by the
-junction–exon pair (`DESIGN.md` §6b.13); the relay's separate certified-flux stream and `rna_anchor.py`
-retired with the relay (`DESIGN.md` §6b.3 keeps the ruling's record). ⭐ The owner's clarified SPLICED law
-is kept by construction: spliced fragments are MEASURED at boundaries, never solved, strictly ONE-HOP — a
-flux enters a map or a level at the adjacent exon, never a lane of its own.
+⭐ **The certified flux is a MESSAGE** (owner ruling 2026-08-25): spliced fragments are MEASURED at
+boundaries, never solved, strictly ONE HOP — a flux enters a map or a level at the adjacent exon, never
+a lane of its own (`DESIGN.md` §6b.13). ⚠ The retired relay's zero-gDNA leads are the landscape prior's
+to win (`ISSUES: gdna-landscape-trains-on-false-positives`), a recorded, accepted price of the flip
+visible in two goldens. ⚠ Two earlier policy campaigns were torn down with their numbers
+(`ISSUES: the-message-policy-campaign`, 2026-08-27; the relay's records in `DESIGN.md` §6b.2–§6b.3) —
+read them before re-proposing a mechanism, so a refuted experiment is not repeated.
 
 ## ⭐⭐⭐ RUNNING THE BENCHMARKS
 
@@ -444,7 +422,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/zero_controls.py` | ⭐⭐⭐ **DOES THE TOOL HOLD AT ZERO RNA AND AT ZERO gDNA? — the owner requires both on every experiment.** The truth is a constant, so every deviation is a false positive. ⛔ Flags any EMPTY object: a degenerate zero arm tests nothing |
 | `design/certified_rna_audit.py` | ⭐⭐⭐ **IS THE CERTIFIED-RNA CHANNEL WIRED?** Audits whether the bank is populated, whether it has a divisor and whether a precision is emitted — any one failing looks identical. ⛔ Scores the MASS, never `f_g` |
 | `design/certified_q_census.py` | ⭐⭐ **CAN A CERTIFIED COUNT SPEAK ABOUT THE UNSPLICED SPLIT? — the answer is NO, and this measures why**, straight off the origin-split oracle with no solver. ⭐ Its two extreme rungs are the two zero controls |
-| `design/vertex_ceiling.py` | ⭐⭐ **WHAT IS PINNING ORACLE TRUTH AT ONE OBJECT CLASS WORTH ON THE REAL LADDER?** A `noop` arm must be byte-identical, and `--arm ref_c=A,B` drives ψ's two Beta reference exponents. ⛔ It prices missing information, not headroom |
+| `design/vertex_ceiling.py` | ⭐⭐ **WHAT IS KNOWING THE TRUTH AT THE PARAMETER-VERTEX OBJECTS WORTH ON THE REAL LADDER?** The pin is the node's own claim plus its ψ row (re-pointed to the two-phase solve, 2026-09-09); the population is the PARAMETER vertex (silent genes, nascent-free introns, the zero rows — never the realized vertex, which priced chance), so it needs `--oracle-cache`. A `noop` arm must be byte-identical, and `--arm ref_c=A,B` drives ψ's two Beta reference exponents. ⛔ It prices missing information, not headroom |
 | `design/length_ceiling.py` | ⭐ **WHAT IS A PERFECT LENGTH MODEL WORTH ON THE LADDER, ONE fl PMF AT A TIME?** ⚠ This is the OPPORTUNITY model's fl PMF, not the length-likelihood composition channel deferred past 0.8.0 |
 | `design/toy_harness.py` | ⭐⭐ **HOW DOES A MINI CHROMOSOME YOU DEFINE CALIBRATE — in 0.1–5 s, with every object's answer beside its truth?** (`docs/TESTING.md` §0b) The priors a toy cannot fit are harvested from a real cached condition; `--list` for the ladder |
 | **the substrate — are the panel and the index sound?** | |

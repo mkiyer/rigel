@@ -7,19 +7,21 @@ treat anything in this directory as settled.
 ## The two rules
 
 1. ⛔ **Nothing outside `docs/dev/` may cite anything inside it.** Not the source, not a test, not one of
-   the eight permanent docs. A citation is what turns a note into a dependency, and a dependency is what
+   the permanent docs (`CLAUDE.md`'s doc map names them). A citation is what turns a note into a dependency, and a dependency is what
    makes a temporary file permanent. `tests/test_docs_boundary.py` enforces this.
 
 2. ⛔⛔ **When a finding settles, MOVE it out and delete it here, in the same edit.** Not copy — move.
 
    | the finding is… | its permanent home |
    |---|---|
-   | a current measured number | `docs/ROADMAP.md` |
-   | a mistake not to repeat | `docs/TRAPS.md` |
+   | an open problem, or a refusal with its measurement | `docs/ISSUES.md` (a NAMED entry) |
+   | a claim about the current state | `docs/ROADMAP.md`, naming the instrument that re-derives it |
+   | a mistake not to repeat | `docs/TRAPS.md` (a NAMED rule) |
    | a decision that is settled | `docs/DESIGN.md` |
    | a derivation the code depends on | `docs/EQUATIONS.md` |
    | how performance is judged | `docs/SUCCESS.md` |
    | a panel, a harness, a gate | `docs/TESTING.md` |
+   | an instrument's verdict | the instrument's own docstring |
 
 ## Why the rules exist
 

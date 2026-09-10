@@ -60,63 +60,55 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 - **Reading rules**: rank per stratum; quote `mwae_all`/Σ|err| and the SHIPPED column, never
   `solv%`/pass-0 (`TRAPS: the-intermediate-is-not-the-deliverable`).
 
-## ⭐⭐⭐ NEXT — the recommended order (audited 2026-09-01)
+## ⭐⭐⭐ NEXT — the recommended order (audited 2026-09-09, the day the message layer merged)
 
 **The method stays the owner's dissection loop** (2026-08-20): run the panel → worst IN-SCOPE scenario →
 rank its objects by error mass (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → gated
 fix → **add the offending transcripts to the test chromosome** → re-run → repeat.
 
-⭐ **The measurement frame is settled and the baselines are current** — the ruling is `DESIGN.md`
-§4.3 (only wave-3 bank-readers remain: `ISSUES: hygiene-ledger`), `slot_truth` is certified in that
-frame, and every in-scope baseline was re-derived on the whole ladder with a same-session noise floor.
-⭐ The facts a ranking can lean on, each with the instrument that re-derives it: the worst IN-SCOPE
-scenario differs between the two rankers — `calibration_vs_oracle.py` and `solvability_audit.py`
-disagree because they weigh objects differently, so dissect BOTH before choosing one; the error is
-almost entirely gDNA UNDER-called at near-pure objects, on every stratum; and the shipped policy leaves
-the zero-gDNA controls' walled and both-stranded pieces to the landscape prior.
+⭐ **The message layer is FINISHED** (`transfer` ships; the rulings `DESIGN.md` §6b.4–§6b.14; the
+cleanup on the one policy done and gated bit-identical). ⭐ The facts this ranking leans on, each with the
+instrument that re-derives it: every in-scope stratum's per-object composition error is about one
+percent (`calibration_vs_oracle.py`) and every in-scope row misplaces under 2.5 % of its fragments
+(`policy_benchmark.py --panel ladder --by-class`), so messages are at diminishing returns in scope;
+the remaining in-scope error sits on the intron's own solve (the largest class by mass, 1–2 % of its
+own fragments), on exon|intron boundaries at their counting floor, and on near-pure objects at high gDNA
+(the vertex atom, rank 4); the zero-gDNA rows' false positives are the landscape prior's
+(`ISSUES: gdna-landscape-trains-on-false-positives`); and the two rankers still disagree on the worst
+IN-SCOPE scenario because they weigh objects differently, so dissect BOTH before choosing one.
 
-⛔ **Two local repairs were run to a verdict on 2026-09-01 and BOTH are refused** — the arcsine
-magnitude coordinate (`ISSUES.md` CLOSED / REFUSED carries the full record) and, priced in the same
-session, a PERFECT vertex answer at every reachable object with the whole chain re-solved, which nets
-roughly a wash. ⭐⭐ **That is what re-ranked the list below: a correct local answer does not survive
-propagation, so no local repair — coordinate, prior, or atom — can pay off until the message layer
-is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceiling.py`.
-
-1. ⭐⭐⭐ **CODE AND DOC CLEANUP ON THE ONE SHIPPED POLICY (owner priority 1, 2026-09-09).** `transfer.py`'s
-   `prepare` as named message builders and one lane class; the relay's leftover plumbing (15 unread
-   `StepContext` fields, `RegionInit`'s unread precisions, two orphaned geometry functions); the
-   `relay`-named labels renamed after a census; `test_transfer_policy.py` split by message; the sandbox
-   pruned by the MOVE RULE and `DESIGN.md` converged on the shipped state. Every step gated bit-identical
-   by `rename_identity.py --check` on the two frozen references.
-2. ⭐⭐⭐ **IMPROVE THE MESSAGE POLICY (owner priority 2).** The debug loop on the worst in-scope rows of the
-   benchmark page, one prototype arm at a time:
-   `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
-   `ISSUES: ambig-node-as-a-gdna-source`; then the remaining both-stranded structures (`div`, the
-   antisense's nascent variant, `nest`).
-3. ⭐⭐ **THE gDNA LANDSCAPE PRIOR (owner priority 3).** `ISSUES: gdna-landscape-trains-on-false-positives`
-   owns the zero-gDNA rows; the training population and the estimator at bound-only nodes first
-   (`ISSUES: measured-prior-rung-4`, `ISSUES: landscape-trains-on-real-substrate`).
-4. ⭐⭐ **THE POST-CALIBRATION, PRE-EM SETUP (owner priority 4).** `priors.py` / `result.py` / `derive.py`
+1. ⭐⭐⭐ **THE gDNA LANDSCAPE PRIOR (owner priority 3, now first).** It owns the largest remaining in-scope
+   numbers — the zero rows' false positives and the walled and terminus classes' residuals — and the
+   vertex ceiling (rank 4) says its training population is where the in-scope value sits. The training
+   population per node class on the zero rows first, then the estimator at bound-only nodes
+   (`ISSUES: gdna-landscape-trains-on-false-positives`, `ISSUES: measured-prior-rung-4`,
+   `ISSUES: landscape-trains-on-real-substrate`, under the `ISSUES: reference-prior-refuted-at-concept-level`
+   constraint).
+2. ⭐⭐ **THE POST-CALIBRATION, PRE-EM SETUP (owner priority 4).** `priors.py` / `result.py` / `derive.py`
    against `prior_vs_oracle.py` and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
    `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: g00-shrinkage-upstream-repair`, `ISSUES: capture-blind-gdna-divisor`,
-   `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`.
-5. ⭐ **The calibration build thread** (part of priority 3): `ISSUES: measured-prior-rung-4` under the
-   `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
-   `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
-6. ⭐ **The vertex atom, PRICED under the shipped policy (2026-09-09, `vertex_ceiling.py`, re-pointed to
+   `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`. First step: re-run `prior_vs_oracle.py` so the
+   assembler's own error is re-recorded under the shipped policy before anything moves.
+3. ⭐ **IMPROVE THE MESSAGE POLICY (owner priority 2), only where a row is above the bar.** One prototype
+   arm at a time through `policy_prototype.py --module`, judged on the three panels and the ladder, halves
+   apart, pass zero beside the pipeline: `ISSUES: flux-price-witness-units` (the open defect the landed
+   flux level shares), `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
+   `ISSUES: ambig-node-as-a-gdna-source`, `ISSUES: message-layer-open-cases` (the substrate: `div`, the
+   antisense's nascent variant, `nest`).
+4. ⭐ **The vertex atom, PRICED under the shipped policy (2026-09-09, `vertex_ceiling.py`, re-pointed to
    the two-phase solve and to the PARAMETER-vertex population)**: worth within 1 % on every stranded
    in-scope row, a few percent of the unstranded capture-OFF rows rising with gDNA, and a quarter to a
    third of the DEFERRED stratum. The in-scope value sits on silent genes' regions and nascent-free
-   introns — the landscape prior's training population (rank 3) — and arrives through the refit prior,
-   not at pass zero; `EQUATIONS.md` §9a.1/§9d.4 carry the derivation and the spike with no new constant.
-   Re-derive with `vertex_ceiling.py --arm base|vertex_free --oracle-cache …` and `--compare`.
+   introns — rank 1's training population — and arrives through the refit prior, not at pass zero;
+   `EQUATIONS.md` §9a.1/§9d.4 carry the derivation and the spike with no new constant. Re-derive with
+   `vertex_ceiling.py --arm base|vertex_free --oracle-cache …` and `--compare`.
 
 Then, in standing order: `ISSUES: performance-memory-bounded-solve` (owner: mandatory before 0.8.0) ·
 the message-vs-prior question `ISSUES: refit-vs-message-arbitration` (the pre-EM entries above sit under
-priority 4).
+rank 2).
 
 **Later / parked** (each has its entry): `expand-the-gdna-spectrum` · `psi-lambda-bracket-unshipped` ·
-`alt-splice-rung-unverified` · `transfer-variance-premise` · `nascent-stress-sensitivity` ·
+`transfer-variance-premise` · `nascent-stress-sensitivity` ·
 `f32-strand-tilt-at-half` · `hygiene-ledger` ·
 `oracle-effective-length-diagnostic` · `flgap-panels-stale-nascent-model` · `rename-the-drain` · `drain-contaminates-certified-rna` (parked 2026-09-01: the ceiling refused the in-solve correction; two recorded follow-ups) · `the-cancelling-pair`
 (refused twice) · `crossing-pool-contrast` (blocked) · `parked-capture-pilot-sign` ·

@@ -210,9 +210,10 @@ and **quantify**.
                                              ▼
                               ┌──────────────────────────────────┐
                               │  Stage 2: gDNA/RNA Calibration   │
-                              │  Bipartite region↔boundary       │
-                              │  belief-propagation sweep        │
-                              │  Py:  node_chain → bp_solver     │
+                              │  The region↔boundary chain,      │
+                              │  two-phase belief propagation    │
+                              │  Py:  calibration/sweep.py +     │
+                              │       calibration/messages/      │
                               └──────────────┬───────────────────┘
                                              │ per-locus Dirichlet prior
                                              ▼
@@ -248,27 +249,32 @@ probability `0.5`.
 
 ### gDNA/RNA calibration
 
-Before per-locus EM, Rigel deconvolves each genomic **node**'s unspliced
-fragment mass into the 2-simplex `(f_rna₊, f_rna₋, f_g)` — sense-RNA /
-antisense-RNA / gDNA. Calibration models *only* RNA-vs-gDNA; nascent-vs-mature
+Before per-locus EM, Rigel deconvolves each genomic object's unspliced
+fragment mass into the composition simplex `(f_rna₊, f_rna₋, f_g)` — sense-RNA /
+antisense-RNA / gDNA. The objects are the annotation's REGIONS (genomic
+intervals) and BOUNDARIES (the positions between them), which alternate along
+one chain per reference. Calibration models *only* RNA-vs-gDNA; nascent-vs-mature
 is separated downstream by the per-locus EM.
 
-The deconvolution is a **belief-propagation sweep** over a bipartite
-region↔boundary node chain. `node_chain` builds the chain from the accumulator
-payload; `bp_solver.node_sweep` runs a single forward-backward pass (exact on
-the chain, which is a forest of linear paths). Following the
-**count-zero-information** principle, a fragment count carries no intrinsic
-gDNA/RNA signal — a node's composition is set by exactly three sources:
+The solve is a **two-phase belief propagation** over that chain
+(`rigel.calibration.sweep`, the backbone): every object states its own claim,
+a forward pass and a backward pass carry messages between neighbours with the
+RECIPIENT deciding what to do with each, and every object is then solved once
+from its own evidence, the two messages it holds and the prior. What a message
+says is a **policy** (`rigel.calibration.messages`); the shipped one is the
+**composition transfer** (`transfer`): a neighbour's composition crosses a
+splice face by a derived map, and where composition cannot cross — a transcript
+terminus, a strand change — the gDNA and per-strand RNA LEVELS still do, as
+one-sided bounds, every hop priced by the two objects' counting and their own
+disagreement beyond it. Three sources set an object's composition:
 
-1. a **strand likelihood** — the Beta-Binomial tilt of the per-strand counts
-   (the only intrinsic gDNA/RNA signal; the count enters only as overdispersed
-   Fisher information);
-2. **cross-node imputation** — neighbour density messages at a belief-free
-   Poisson disagreement variance, fit once; gDNA flows genomically, while
-   per-strand RNA flows only where that strand is continuous across an edge
-   (the transcript-structure gate);
-3. the **global gDNA prior** — the population baseline plus a trained Phase-2
-   gDNA-density KDE.
+1. its **strand likelihood** — the Beta-Binomial tilt of its per-strand counts,
+   the one intrinsic gDNA/RNA signal (identically zero on unstranded data);
+2. its **messages** — the certified splice flux at its junctions and its
+   neighbours' claims, delivered as profiles on the solve grid;
+3. the **gDNA landscape prior** — the population's gDNA density, fitted on the
+   solved objects and refit over a few sweeps, plus the intron factory (each
+   intron's density against the intergenic background).
 
 Calibration fits the library hyperparameters (`gdna_density_global`,
 `rna_sense_frac`, and the gDNA/RNA strand Beta-Binomial overdispersions) plus
