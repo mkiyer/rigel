@@ -1,14 +1,17 @@
-"""THE BACKBONE — two directional scans, one combine, one ψ solve, one write-back, five assertions.
+"""THE BACKBONE — the self-solve, two directional passes, one ψ solve, one write-back, four assertions.
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
-antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), by ONE forward pass and ONE backward
-pass. The chain is a forest of linear paths, so that is exact belief propagation, not an iteration.
+antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), on the TWO-PHASE shape (owner
+ruling 2026-09-04): every node's own claim (`prepare`), a forward pass then a backward pass in which each
+RECIPIENT receives what its neighbour sends (`propagate`), and ONE solve per node from its own evidence,
+the two held messages and the prior (`solve`). The chain is a forest of linear paths, so that is exact
+belief propagation, not an iteration.
 
-⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, SPLICE IN, REFRAMES, PINS OR ENRICHMENT — those words do not
+⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, SPLICE IN, LEVELS, LANES OR ENRICHMENT — those words do not
 appear in it, and that is the design rather than a tidiness.** Everything about *what a message says* is a
-:mod:`~.messages` policy. What is left here is the shape of the solve and the five invariants no policy may
+:mod:`~.messages` policy. What is left here is the shape of the solve and the four invariants no policy may
 break:
 
 ===================================================  ====================================================
@@ -21,11 +24,10 @@ the write-back touches only ``solvable`` slots       the basis mismatch that mad
 ===================================================  ====================================================
 
 ⭐⭐ **The assertions live HERE, not in the policy, and that is the entire point.** A future policy can be
-as wrong as it likes and still cannot commit any of these — each of which has shipped at least once.
-(Two more assertions guarded the retired relay's Gaussian channels — a mode inside its coordinate's grid,
-**TRAPS: off-grid-message-mode**, and every delivered share in ``[0, 1]``; the channels retired with the
-relay on 2026-09-09 and the transfer policy delivers profiles on the solve grid, which cannot commit
-either.)
+as wrong as it likes and still cannot commit any of these — each of which has shipped at least once. (A
+profile delivered on the solve grid cannot sit off-grid or claim an over-unit share, so the two assertions
+that guarded Gaussian message channels — **TRAPS: off-grid-message-mode** — retired with those channels
+on 2026-09-09.)
 
 Two gates on this slot in the pipeline
 --------------------------------------
@@ -53,7 +55,6 @@ from .region_geometry import (
 )
 from .region_init import build_region_init
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
-from .structural_claims import build_structural_claims, interface_masks
 from .simplex_logodds import (
     CompositionPriors,
     _logodds_grid,
@@ -121,7 +122,7 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
                 f"lam_rows has shape {rows.shape}; expected ({ctx.n_slots}, K) — a policy must "
                 "deliver one row per slot on the solve grid"
             )
-        counts.note("flux_rows_finite", ~np.isfinite(rows).all(axis=1), np.ones(ctx.n_slots, bool))
+        counts.note("lam_rows_finite", ~np.isfinite(rows).all(axis=1), np.ones(ctx.n_slots, bool))
     # ── the cube channel: a (K, K_t) row per AMBIG slot, or absent ──────────────────────────────────
     if msg.cube_rows is not None:
         amb = np.asarray(ctx.free_pos, bool) & np.asarray(ctx.free_neg, bool)
@@ -199,7 +200,6 @@ def solve_chain(
 
     EG = np.asarray(geometry.eff_gdna, np.float64)
     ER = np.asarray(geometry.eff_rna, np.float64)
-    ESP = np.asarray(geometry.eff_sj, np.float64)  # [n, 2] by TRANSCRIPT strand
     SPL = np.asarray(geometry.sj_count, np.float64)  # [n, 2] by TRANSCRIPT strand
     CNT = np.asarray(geometry.unspliced_count, np.float64)  # [n, 2] by GENOME strand
     # the unspliced count is BOTH the density numerator and the Poisson n — one number, not a fractional
@@ -294,11 +294,6 @@ def solve_chain(
     _is_region = np.asarray(chain.kind) == REGION
     exon_pos = _is_region & ((_sig & BIT_EXON_POS) > 0)
     exon_neg = _is_region & ((_sig & BIT_EXON_NEG) > 0)
-    # the stage-0 interface masks the message layer consumes — computed by the module that
-    # owns the concept and carried here under policy-neutral names (the backbone's vocabulary
-    # firewall keeps every message-composition concept out of this file)
-    _if_left, _if_right, _ss_b = interface_masks(build_structural_claims(chain, statics))
-
     # ── (A) the per-slot message-free SELF-SOLVE — the four init sources ──────────────────────────────
     own = build_region_init(
         chain,
@@ -320,21 +315,13 @@ def solve_chain(
 
     ctx = StepContext(
         # observations
-        mass=mass_global,
-        inv_abundance=np.asarray(geometry.inv_abundance, np.float64),
-        inv_sj_lo=np.asarray(geometry.inv_sj_lo, np.float64),
-        inv_sj_hi=np.asarray(geometry.inv_sj_hi, np.float64),
-        eff_gdna_global=eff_global,
-        eff_rna=ER,
         eff_gdna=EG,
-        eff_sj=ESP,
+        eff_rna=ER,
         sj_count=SPL,
         sj_count_lo=np.asarray(geometry.sj_count_lo, np.float64),
         sj_count_hi=np.asarray(geometry.sj_count_hi, np.float64),
         route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
         route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
-        route_count_lo=np.asarray(geometry.route_count_lo, np.int64),
-        route_count_hi=np.asarray(geometry.route_count_hi, np.int64),
         unspliced_count=CNT,
         n_slot=n_slot,
         spliced_slot=spliced_slot,
@@ -343,26 +330,17 @@ def solve_chain(
         right=right,
         is_boundary=np.asarray(chain.kind) != REGION,
         is_exon_region=is_exon_region,
-        left_interface_certified=_if_left,
-        right_interface_certified=_if_right,
-        ss_intron_boundary=_ss_b,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
         exon_pos=exon_pos,
         exon_neg=exon_neg,
         boundary_flags=statics.boundary_flags,
-        geometry=geometry,
-        order=order_list,
-        left_list=left.tolist(),
-        right_list=right.tolist(),
         # beliefs — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)
         own=own,
         belief_fg=f_g,
         # the solve's own scalars
         n_grid=int(n_grid),
         logodds_window=float(logodds_window),
-        solve_grid=solve_grid,
-        capture=_capture,
         n_tilt=None if n_tilt is None else int(n_tilt),
     )
 
@@ -373,8 +351,8 @@ def solve_chain(
     # forward-backward. It is not an iterative scheme, and a source comment's shorthand once crossed
     # into a design doc as if it were one. When both passes end every node holds one message from each
     # neighbour it has (owner ruling 2026-09-04): the recipient's kernel wrote it, or SILENCE stands.
-    from_left = _pass(order_list, ctx.left_list, prepared, backward=False)
-    from_right = _pass(order_list[::-1], ctx.right_list, prepared, backward=True)
+    from_left = _pass(order_list, left.tolist(), prepared, backward=False)
+    from_right = _pass(order_list[::-1], right.tolist(), prepared, backward=True)
 
     # ── PHASE 2, SOLVE: (D) the policy's half — the two held messages into ψ's channels ──────────────
     msg = prepared.solve(from_left, from_right)

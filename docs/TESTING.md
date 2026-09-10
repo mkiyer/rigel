@@ -1031,6 +1031,16 @@ an annotation" is not "is genomic" (TRAPS: annotated-is-not-genomic).
 against** — keyed on `graph_hash`, `reach_digest` and `payload_schema_digest`. Any accumulator change
 invalidates every cache by design, so re-run step 5.
 
+⚠ **`RIGEL_SCRATCH` must be EXPORTED before a sweep, or the instruments write their per-condition work
+under `/tmp`.** Every instrument with a work directory defaults it to `$RIGEL_SCRATCH/<name>` and falls
+back to `/tmp` when the variable is unset. A ladder rebuild left ~22 GB of prewarm splits in
+`/tmp/rigel_pass0_oracle` that way (2026-08-21), and a self-test that does not clean its work directory
+compounds it (73 GB found under `/tmp/rigel_ladder_ceiling/_self_test` the same day) — check `/tmp`
+after any instrument sweep, and read a full disk as this before anything else. ⚠ A widened BANK is a
+CHANGED bank to `rescan_panels.py` (shape `(n,) → (n, 2)` fails byte-identity): name it with
+`--expect-changed <bank>`, which keeps the gate's teeth on every other bank; the certifier, not the
+rescan report, is the validity authority for a payload the refused first pass had already written.
+
 ---
 
 ## 3. The simulator's own gates — G-S1…G-S6

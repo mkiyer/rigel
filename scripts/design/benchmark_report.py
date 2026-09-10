@@ -7,7 +7,7 @@ pick scenarios. DON'T POOL SCENARIOS. WE NEED TO SEE EVERY SCENARIO. ONLY POOL A
 full benchmark and for individual transcripts on the test chromosome."* This renders exactly that: one
 row per scenario per arm, the pooled total LAST and clearly marked as the summary of rows already shown.
 
-⛔ **IT ADDS NO MEASUREMENT AND SCORES NOTHING.** The numbers come from `relay_pool_ab.py --out`, which
+⛔ **IT ADDS NO MEASUREMENT AND SCORES NOTHING.** The numbers come from `message_pool_ab.py --out`, which
 is the one scorer for this table; duplicating a scorer is how a baseline and a ceiling drift apart. This
 file is a RENDERER — hand it a TSV and it draws it.
 
@@ -26,7 +26,7 @@ object contributes twice. That is the point of it, and `net` is printed beside i
 
 Usage::
 
-    python scripts/design/relay_pool_ab.py --suite S --index I --oracle-cache O --out rows.tsv
+    python scripts/design/message_pool_ab.py --suite S --index I --oracle-cache O --out rows.tsv
     python scripts/design/benchmark_report.py rows.tsv -o benchmark.html
     python scripts/design/benchmark_report.py rows.tsv --transcripts T/scenarios -o benchmark.html
     python scripts/design/benchmark_report.py --self-test
@@ -245,7 +245,7 @@ def self_test() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("rows", nargs="?", type=Path, help="the TSV from `relay_pool_ab.py --out`")
+    ap.add_argument("rows", nargs="?", type=Path, help="the TSV from `message_pool_ab.py --out`")
     ap.add_argument("-o", "--out", type=Path, default=Path("benchmark.html"))
     ap.add_argument("--axis", default="ALL", choices=("ALL", "REGION", "BOUNDARY"))
     ap.add_argument("--transcripts", type=Path, default=None,
@@ -255,7 +255,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
     if args.rows is None:
-        ap.error("a rows TSV is required (from `relay_pool_ab.py --out`)")
+        ap.error("a rows TSV is required (from `message_pool_ab.py --out`)")
     rows = read_rows(args.rows)
     per = transcript_truth(args.transcripts) if args.transcripts else {}
     args.out.write_text(render(rows, per, args.axis))

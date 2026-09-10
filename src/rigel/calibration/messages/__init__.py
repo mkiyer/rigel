@@ -2,8 +2,8 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
-The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — two directional scans over the
-``N E N E … N`` chain, one combine, one ψ solve, one write-back, and five assertions. Everything about
+The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — the self-solve, two directional
+passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and four assertions. Everything about
 *what a message says* is a policy, and it lives here.
 
 Two policies exist; `CalibrationConfig.message_policy` selects which one
@@ -135,7 +135,9 @@ class Level:
     total and the opportunity of the last node WITH a total the claim passed through: the next
     recipient prices its hop from them (both totals' counting, and the abundance discrepancy beyond
     it — the owner's rule 8, per hop, nothing pooled). An EMPTY node (no total) forwards a level
-    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density.
+    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density — unless it is
+    itself a flux SOURCE on an RNA lane, whose level travels with the flux's witness (the spliced count
+    on the route rate's opportunity).
 
     ``rna_count`` / ``rna_count_var`` are an RNA lane's witness of ITS strand's abundance at that same
     last full node — the strand's RNA count read from the node's column split (its asymmetry over the
@@ -157,14 +159,11 @@ class Message:
     ⭐ **THE LANES (owner ruling 2026-09-04).** A node's unknown is its COMPOSITION on the simplex
     ``(f_g, f_+, f_-)`` — two degrees of freedom where both strands are live, one where a single strand
     is — and, where composition cannot cross a face, the LEVELS of the three populations. So a message
-    carries up to five lanes, every one optional (``None`` = nothing on this lane, which is how a
-    single-stranded chain pays nothing for the tilt):
+    carries up to four lanes, every one optional (``None`` = nothing on this lane):
 
     * ``composition`` — the gDNA-versus-RNA PROFILE: a max-normalised log-likelihood over the solve
       grid of the destination's gDNA share (``lam = log f_g/(1-f_g)``, ``K = n_grid`` points). Scale-
       free, so it crosses a face by a derived map and never carries a level across a capture cliff.
-    * ``tilt`` — the RNA+ versus RNA− PROFILE over ψ's tilt grid (the angle ``arcsin(tau)``), the
-      second degree of freedom at a node where both strands are live.
     * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a LEVEL claim per population
       (:class:`Level`: a PROFILE over the log density relative to the library's structurally pure gDNA
       density, on the same grid as ``lam``), for faces composition cannot cross: gDNA is genomically
@@ -176,12 +175,12 @@ class Message:
       2026-09-05: every upper side harmed the stranded capture-ON rows) and a Gaussian summary of a
       one-sided profile invents a value.
 
-    ⭐ THE RNA LANES ARE FILLED (2026-09-08, the both-stranded locus, phase 1): a single-strand node's
-    own claim read as its live strand's RNA level, and the certified flux at an exon's junctions as that
-    strand's level at the exon; per-strand faces from the flag bits; two-sided only between an intron
-    and its own boundary; delivered at AMBIG nodes on ψ's cube (`PsiMessage.cube_rows`). The tilt lane
-    stays unused: the two RNA levels constrain the tilt inside the cube, and a tilt profile from the
-    same witnesses would count them twice.
+    ⭐ THE RNA LANES (2026-09-08, the both-stranded locus, phase 1): a single-strand node's own claim
+    read as its live strand's RNA level, and the certified flux at an exon's junctions as that strand's
+    level at the exon; per-strand faces from the flag bits; two-sided only between an intron and its
+    own boundary; delivered at AMBIG nodes on ψ's cube (`PsiMessage.cube_rows`). ⛔ The tilt — the
+    RNA+ versus RNA− degree of freedom at a both-stranded node — has NO lane: the two RNA levels
+    constrain it inside the cube, and a tilt profile from the same witnesses would count them twice.
 
     ⭐ :data:`SILENCE` — every lane ``None`` — is a MESSAGE, delivered: the neighbour spoke and had
     nothing to say. A node with no neighbour on a side holds :data:`NO_NEIGHBOUR` instead, which is not
@@ -193,12 +192,11 @@ class Message:
     """
 
     composition: np.ndarray | None = None
-    tilt: np.ndarray | None = None
     level_gdna: Level | None = None
     level_rna_pos: Level | None = None
     level_rna_neg: Level | None = None
 
-    LANES = ("composition", "tilt", "level_gdna", "level_rna_pos", "level_rna_neg")
+    LANES = ("composition", "level_gdna", "level_rna_pos", "level_rna_neg")
 
     @property
     def is_silent(self) -> bool:
@@ -213,40 +211,24 @@ NO_NEIGHBOUR = None
 
 @dataclass(frozen=True, slots=True)
 class StepContext:
-    """Everything a policy may read, under the three headings that make TRAPS: a-message-from-the-destinations-belief legible.
+    """Everything a policy may read, under the three headings that make
+    TRAPS: a-message-from-the-destinations-belief legible.
 
     ⛔ **The headings are load-bearing.** ``observations`` and ``geometry`` may be indexed at either end of
     a hop; ``beliefs`` may be indexed at the SOURCE only. A policy that reads a ``beliefs`` field at the
-    destination is committing TRAPS: a-message-from-the-destinations-belief, and the field's heading is what makes that visible in review.
+    destination is committing TRAPS: a-message-from-the-destinations-belief, and the field's heading is
+    what makes that visible in review. The shipped policy reads ``belief_fg`` once, at ``prepare``, for
+    the variance freeze of each node's OWN strand profile — a source-side read by construction, since
+    the profile is the node's claim before any hop.
 
-    ⚠ **One field in ``beliefs`` is read at the destination by the shipped policy and it is a KNOWN,
-    MEASURED DEBT, not an oversight**: ``belief_fg`` reaches the reframe's frame pair, so the frame at a
-    hop is a function of the destination's belief. The operator ledger prices it — slots where a *solved*
-    belief rather than the ``{0,0,1}`` default sets the frame carry **57–77 % of library mass** — and it is
-    named here so the next reader finds it recorded rather than discovers it again.
+    Every field here has a reader in the transfer policy or the backbone; the relay's per-face
+    plumbing (its masses, reciprocal-opportunity totals, per-face opportunities, route counts,
+    interface masks and the geometry object itself) retired with it on 2026-09-09.
     """
 
     # ── OBSERVATIONS — readable at either end of a hop ────────────────────────────────────────────────
-    mass: np.ndarray  # per-slot gDNA-support mass (the rescale's and the share's denominator)
-    #: ⭐⭐ the RECIPROCAL-OPPORTUNITY TOTAL (counts/bp). At a BOUNDARY slot its expectation is the
-    #: density EXACTLY for any fragment-length distribution and ANY composition; ⛔ at a REGION slot it
-    #: is ``rho * P(w <= ell)`` — truncated by a per-component pmf functional
-    #: (TRAPS: a-cancellation-is-conditional-on-its-support), so a REGION↔BOUNDARY ratio carries that
-    #: factor. ⛔ Still never ``mass / effective_length``: that divisor is a function of the composition
-    #: being solved for, so a "total abundance" built from it is circular and swings with the
-    #: gDNA-vs-RNA length gap (`region_geometry.RegionGeometry.inv_abundance`).
-    inv_abundance: np.ndarray
-    #: the sj flux's model-free abundance per FACE, ``[n, 2]`` BY TRANSCRIPT STRAND — sum the strands
-    #: and add to ``inv_abundance`` for a face's TOTAL, or read one column for that strand's
-    #: CERTIFIED-RNA measurement (a spliced fragment cannot be gDNA).
-    #: ⛔ A face total without it compares an exon (which holds mature RNA) against a boundary (which
-    #: cannot) and reads the difference as enrichment.
-    inv_sj_lo: np.ndarray
-    inv_sj_hi: np.ndarray
-    eff_gdna_global: np.ndarray  # the matching gDNA opportunity
-    eff_rna: np.ndarray  # per-slot RNA effective length
-    eff_gdna: np.ndarray  # per-slot gDNA effective length (per-face geometry, diagnostics)
-    eff_sj: np.ndarray  # [n, 2] sj opportunity by TRANSCRIPT strand
+    eff_gdna: np.ndarray  # per-slot gDNA opportunity (the capture-blind effective length)
+    eff_rna: np.ndarray  # per-slot RNA opportunity
     sj_count: np.ndarray  # [n, 2] sj fragment count by TRANSCRIPT strand (both faces)
     #: the same flux split by which genomic END of its sj this boundary is — the count that
     #: matches `route_rate_lo`/`route_rate_hi`, so a per-face rate is priced on its own count
@@ -257,8 +239,6 @@ class StepContext:
     #: ~k×, so consumers of a face's RATE read these, never the ratio
     route_rate_lo: np.ndarray
     route_rate_hi: np.ndarray
-    route_count_lo: np.ndarray  # [n, 2] routes per face (the route-structure class key)
-    route_count_hi: np.ndarray
     unspliced_count: (
         np.ndarray
     )  # [n, 2] unspliced count by GENOME strand — the density numerator AND n
@@ -272,11 +252,6 @@ class StepContext:
     is_exon_region: (
         np.ndarray
     )  # a REGION whose region signature is EXON — the SPLICE IN's destination
-    left_interface_certified: np.ndarray  # exon slots whose LEFT interface is certified —
-    # every route arriving there carries certified flux and no terminus admits unseen
-    # molecules (structural_claims.interface_masks; the sender-side publication licence)
-    right_interface_certified: np.ndarray
-    ss_intron_boundary: np.ndarray  # the claimed ss-intron boundary class (structural_claims)
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
     #: the region signature's two EXON bits per slot (False at a boundary) — a strand's OPPORTUNITY
@@ -286,25 +261,17 @@ class StepContext:
     #: ``is_exon_region`` cannot say this, and the RNA level lanes need it (2026-09-08).
     exon_pos: np.ndarray
     exon_neg: np.ndarray
-    boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
-    geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
-    order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
-    left_list: list  # ``left`` as a Python list: the scan reads it one element at a time
-    right_list: list
+    #: the terminus and junction bits per BOUNDARY slot (0 at a region): which faces composition may
+    #: cross, the outside flank of a terminus, the junction's exon side (`transfer_rows`)
+    boundary_flags: np.ndarray
 
-    # ── BELIEFS — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief) ──────────────────────────────────────────────────────────────
-    own: (
-        object  # RegionInit: the message-free self-solve — rho_*, prec_*, tau_lam, struct_lock, f_*
-    )
-    belief_fg: (
-        np.ndarray
-    )  # the INCOMING belief. ⚠ the frame pair reads it at BOTH ends — the debt above
+    # ── BELIEFS — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief) ───────────────────
+    own: object  # RegionInit: the message-free self-solve — f_*, tau_lam
+    belief_fg: np.ndarray  # the INCOMING belief: the variance freeze of a node's own strand profile
 
-    # ── the solve's own scalars and fitted library constants (neither observation nor belief) ─────────
+    # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
     n_grid: int
     logodds_window: float
-    solve_grid: np.ndarray
-    capture: dict | None = None  # the diagnostics hook; inert in production
     #: the AMBIG cube's tilt-grid size ``K_t`` (``None`` ⇒ ``n_grid``, as the solver reads it) — what a
     #: policy needs to lay a ``cube_rows`` row on the grid ψ will evaluate it on
     n_tilt: int | None = None

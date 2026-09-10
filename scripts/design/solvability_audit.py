@@ -40,7 +40,7 @@ sure and wrong?" without anyone choosing a number.
 
 ⭐ **THE ABLATION LADDER IS FREE.** ``_debug["capture"]`` already carries the same solve at three
 depths — ``fg_strand`` (strand likelihood alone), ``fg_loc`` (the message-free local self-solve: strand
-+ intron factory + reference) and ``f_g`` (final, after the relay). Nothing is re-solved, so the rungs
++ intron factory + reference) and ``f_g`` (final, after the messages). Nothing is re-solved, so the rungs
 are the solver's own arithmetic rather than a reimplementation of it. Comparing them says WHICH channel
 moved an object off truth, and in particular recovers the class the old tooling called
 ``P1_OVERRULED``: strand had it right and confident, and the full solve overrode it.
@@ -138,9 +138,8 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     intergenic↔exon boundary, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
     at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
     ignorance. Those objects are the opposite of ignorant: they are structurally certain, and right.
-    ⚠⚠ **This is NOT ``region_init.strand_evidence``'s ``struct_lock``, which is region-only ON PURPOSE** —
-    that one governs whether a slot may EMIT certainty into its messages, and excludes G1 boundaries because
-    a boundary's crossing mass is RNA-contaminated. Two questions, one word; see ``g1_locked``.
+    ⚠ The relay-era region-only mask of the same name (``region_init``'s ``struct_lock``) retired on
+    2026-09-09; ``g1_locked`` is the one home.
 
     ⚠ **The τ tests here stay at the solver's own ``_EPS``**, so "has a channel" means what
     ``own_composition_logvar`` means by it. Strength is a separate question and it is reported as a
@@ -154,8 +153,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
             f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
-    # G1, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes
-    # and why `region_init.struct_lock` is deliberately NOT.
+    # G1, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
     lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
     fac = density_factor_precision(capture.get("intron_prior"), lam_grid)
@@ -260,7 +258,7 @@ def undetermined_overreach_rows(a: dict) -> list[tuple]:
 
         "Its only failure mode is the opposite one: claiming a precision it has not earned."
 
-    An undetermined object at ``f_g = 0.83`` is **not** honest ignorance. It is the relay and the
+    An undetermined object at ``f_g = 0.83`` is **not** honest ignorance. It is the messages and the
     population reference asserting an answer where the object had none, and because the class is
     excluded from every error total, the assertion is invisible. Measured cost of that blindness on the
     gDNA ladder: on ``gdna_g25_ss_0.50_nrna_none_capture_off``, **87 exon regions are driven to
@@ -395,7 +393,7 @@ def report(m, a: dict, config=None) -> None:
     print("   ⛔⛔ AND THE UNDETERMINED CLASS'S OWN FAILURE MODE — it is EXCLUDED from every error")
     print("      total above, so this is the only place it can be seen. Its correct answer is f_g = ½")
     print("      at sd = ∞; a row far from ½, and worse a row far from ½ CLAIMING precision, is the")
-    print("      relay asserting an answer the object never had. ⚠ 0.0 % scored means 0.0 % reported.")
+    print("      messages asserting an answer the object never had. ⚠ 0.0 % scored means 0.0 % reported.")
     print(f"   {'|f_pred − ½|':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'mean |f−½|':>11} "
           f"{'claims sd':>10}")
     for label, n, mass, e, mean_off, prec_share in undetermined_overreach_rows(a):
@@ -434,7 +432,7 @@ def report(m, a: dict, config=None) -> None:
 
     print()
     print("   ⭐ THE ABLATION LADDER on the solvable set — which channel moved it off truth?")
-    print("      strand-only -> local (strand+factory+reference) -> FINAL (after the relay)")
+    print("      strand-only -> local (strand+factory+reference) -> FINAL (after the messages)")
     lad, f_true = a["ladder"], a["f_true"]
     print(f"     {'rung':<28} {'mass-wtd |Δf_g| vs truth':>26}")
     for name, key in (("strand only", "fg_strand"), ("local (message-free)", "fg_loc"),
@@ -539,7 +537,7 @@ def summarise(a: dict) -> dict:
     """The one-line-per-condition summary the debug loop's step 1-2 reads.
 
     ⭐ Every field is about the SOLVABLE population, because that is the only population pass-0 is
-    accountable for. ``relay_delta`` is the one to watch across a panel: it is ``final − local`` on
+    accountable for. ``message_delta`` is the one to watch across a panel: it is ``final − local`` on
     the solvable objects, so a POSITIVE value means the message layer moved objects that had their
     own answer AWAY from truth — the class the retired tooling called ``P1_OVERRULED``, and the one
     that matters out of proportion to its size because the hyperprior is fitted on exactly these
@@ -592,7 +590,7 @@ def summarise(a: dict) -> dict:
         "calibration_ratio": realised / claimed if claimed and claimed > 0 else float("nan"),
         "local_mwae": local,
         "final_mwae": final,
-        "relay_delta": final - local,
+        "message_delta": final - local,
         **return_extra,
     }
 
@@ -604,20 +602,20 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print("=" * 124)
     print("   ⛔ Objects with no own evidence are EXCLUDED: in pass-0 they are correctly saying they")
     print("      cannot be solved without a prior. Scoring them buries everything that matters.")
-    print("   ⭐ relay_delta = final − local on the solvable set. POSITIVE means the message layer")
+    print("   ⭐ message_delta = final − local on the solvable set. POSITIVE means the message layer")
     print("      moved objects that HAD their own answer away from truth.")
     print("   ⛔⛔ READ `weak%` BEFORE `mwae`. `solv%` counts what the SOLVER treats as evidenced, and")
     print("      that admits a strand arm whose own statement is 10³ nats wide against a ±10-nat grid")
     print("      (TRAPS a-threshold-on-a-fitted-residue). `weak%` is the share of the scored ERROR sitting on objects with")
     print("      sd(λ) ≥ 10 nats — i.e. on objects that had no answer of their own after all. A row")
-    print("      with weak% near 100 is reporting the relay and the reference, not a solve.")
+    print("      with weak% near 100 is reporting the messages and the reference, not a solve.")
     print()
     print("   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four")
     print("      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,")
     print("      and it flips on fitting noise (TRAPS deadband-from-the-wrong-sample). `mwae_all` and `Σ|err|` are over every")
     print("      LIVE object, so nothing the solver does to its own confidence can touch them.")
     print(f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
-          f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'relay Δ':>9} "
+          f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'msg Δ':>9} "
           f"{'mwae_all':>9} {'Σ|err|':>11}")
     print("   " + "-" * 125)
     for name, truth, s in rows:
@@ -626,7 +624,7 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
             f"{s['weak_evidence_err_share']:>5.1%} "
             f"{s['solvable_mwae']:>7.4f} {s['conf_wrong_err']:>11,.0f} "
             f"{s['calibration_ratio']:>6.2f} {s['local_mwae']:>7.4f} {s['final_mwae']:>7.4f} "
-            f"{s['relay_delta']:>+9.4f} {s['all_mwae']:>9.4f} {s['abs_err']:>11,.0f}"
+            f"{s['message_delta']:>+9.4f} {s['all_mwae']:>9.4f} {s['abs_err']:>11,.0f}"
         )
     # ⛔ ZERO-gDNA ROWS ARE NEVER AVERAGED IN. Truth is 0 exactly there, so every log-space
     # discrepancy is measured against the grid floor and any change that lowers the estimate
@@ -639,9 +637,9 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
         print("     excluded from the aggregates (truth = 0 exactly ⇒ the comparison is one-sided).")
     if not scored:
         return
-    hurt = [r for r in scored if r[2]["relay_delta"] > 0]
-    print(f"\n   ⭐ the relay HURTS the solvable set on {len(hurt)}/{len(scored)} CONTAMINATED "
-          f"conditions   (mean Δ {np.mean([r[2]['relay_delta'] for r in scored]):+.4f})")
+    hurt = [r for r in scored if r[2]["message_delta"] > 0]
+    print(f"\n   ⭐ the messages HURT the solvable set on {len(hurt)}/{len(scored)} CONTAMINATED "
+          f"conditions   (mean Δ {np.mean([r[2]['message_delta'] for r in scored]):+.4f})")
     over = [r for r in scored if r[2]["calibration_ratio"] > 1.0]
     print(f"   ⭐ the declared precision is NOT earned (ratio > 1) on {len(over)}/{len(scored)}")
 

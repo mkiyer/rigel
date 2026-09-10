@@ -262,7 +262,7 @@ composition may be imputed across a step iff **both** hold:
 and `T(BOUNDARY) = T(right)` fails iff a transcript's body **begins** at the BOUNDARY, `T(BOUNDARY) = T(left)` iff one
 **ends** there. So a transcript **terminus** is exactly what makes one flank's population larger, the test
 is an **equality** per `(BOUNDARY, side)` pair (both directions of mismatch corrupt `φ_g`), and it is per-step
-rather than per-object. `region_geometry.terminus_flank_gain`.
+rather than per-object. `transfer_rows.outside_flank` is the one home.
 
 ⛔⛔ **WRITE IT IN GENOMIC TERMS, NEVER IN TSS/TES.** TSS/TES is transcript-relative and the strand flips
 it:
@@ -281,7 +281,7 @@ observations, never its beliefs — so the pin is licensed in exactly the two st
 `S`: **(i)** the message supplied the composition (§3.5b, nothing is filled in), or **(ii)** the
 destination is a **structurally pure-gDNA object**, where there is no unsupplied component and `f_g = 1` is
 structure, so `S = ρ_g·E_g` and the pin hands the object its own **measured** `M/E_g`.
-⭐ Case (ii) is how the capture landscape reaches an exon at all — a G1 BOUNDARY has `prec_g = 0` and cannot
+⭐ Case (ii) is how the capture landscape reached an exon in the relay — a G1 BOUNDARY had no own precision and could not
 originate a level through the fuse, so the pin is its only channel. Unlicensed, the pin was TRAPS: a-message-from-the-destinations-belief at full
 strength: `k = 1/(φ_msg + R_own)`, fixed point `(1−R_own)·ρ_tot`, and `R_own` is **exactly ½** at a slot
 with no composition evidence — so it drove the delivered gDNA *fraction* to ½ regardless of the truth.
@@ -569,7 +569,9 @@ solvable mwae 0.0413 → 0.0426, confidently-wrong 20,173 → 22,336. ⭐ The id
 failed — improving that BOUNDARY is simply not worth anything where the tool is wrong. §9a is the general form of that reading.
 
 **3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN BOUNDARY HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
-2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `region_total_density`.)
+2026-08-05; derived and gated the same day. ⚠ The per-flank total it derived was the relay's; the transfer
+policy reads a face's flux from `sj_count_lo` / `sj_count_hi` directly, and the per-flank gates retired with
+the relay.)
 
 §3.6 gives the two faces of an `intron|exon` BOUNDARY as a property of the OBJECT. Made per-STEP it becomes a
 statement about which of the two flanks a hop is talking to, and then it applies at every BOUNDARY with
@@ -667,8 +669,8 @@ at length `w` is `f_pre(w)·(L−w+1)·(w−1)/(L−w+1) = f_pre(w)·(w−1)` an
 Computed exactly from the pmf, `k = 1.000000` at every transcript length. ⛔ The whole gap is the
 length-model mismatch, with no geometric component. TRAPS: two-divisors-opposite-sign.
 
-✅ **This WITHDRAWS the sign correction this section used to carry.** `calibration/messages/variance.py`'s
-`splice_in_premise_logvar` (P1d) asserts
+✅ **This WITHDRAWS the sign correction this section used to carry.** The retired relay's
+`splice_in_premise_logvar` asserted
 `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, a LOWER bound, and that is **right**: the measured ratio of
 **1.103** (no nascent) and **1.049** (with) is `1 + (1−s)(k−1)` with `k` the frame gap above and `s` the
 nascent share of the exon's RNA — the nascent arm is measured in the exon's own frame and dilutes it,
@@ -1004,7 +1006,7 @@ with `N` (0.0011 → 10.68).
 the grid spacing — so `I/tau` runs **0.04 → 52** across the depth range. The analytic form does not only
 shrink uninformative slots, it **amplifies confident ones 40–50×**, faithfully amplifying whatever the
 moments underneath say including their error (§3e). ⭐ It affects ONLY the precision, never the mode
-(`tau_lam` feeds `region_init.own_composition_logvar`; `fg_loc` comes from ψ) — ⛔ which is exactly why it
+(`tau_lam` is the own-evidence precision the retired relay's own-belief variance read; `fg_loc` comes from ψ) — ⛔ which is exactly why it
 was never the repair: the verdict in the banner above is a MODE failure, and a precision that is right
 about a mode that is wrong is worse, not better.
 
@@ -1531,9 +1533,9 @@ once `κ = ½` kills the strand channel, by **0.95 at any depth**, because poste
 against a MEASURED `tau_lam` fall of 3,227× — **~98 % of it is the Jacobian.** The likelihood is genuinely
 that flat on λ at the point the prior chose; nothing was lost and there is nothing to restore.
 
-⛔ And restoring it would not be a small increment. `own_composition_logvar` gives
-`Var(log f_g) = (1−f_g)²/τ_λ`, which at the vertex is `~8e-08`, so `own_precision = 1/(Var + count_logvar)`
-saturates at the COUNT ceiling: **τ = 0.029 and τ = 1e6 both return 850.44 against a ceiling of 850.50.**
+⛔ And restoring it would not be a small increment. The relay's own-belief variance was
+`Var(log f_g) = (1−f_g)²/τ_λ`, which at the vertex is `~8e-08`, so its own precision `1/(Var + count_logvar)`
+saturated at the COUNT ceiling: **τ = 0.029 and τ = 1e6 both return 850.44 against a ceiling of 850.50.**
 Only `τ > 0` does any work, so feeding a prior in is a BOOLEAN gate flip that releases the whole count
 precision — and, carrying no count, it does so at empty slots too (`n = 0` ⇒ `prec_g` 0 → `1/ψ'(½)` =
 0.2026). `TRAPS: a-priors-curvature-is-not-the-datas-information`.

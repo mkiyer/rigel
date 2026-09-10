@@ -304,15 +304,15 @@ class TestAntisenseIntronicMultiExonT2:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="⛔ A PRIOR-ASSEMBLY CASUALTY, NOT A CALIBRATION OR RELAY DEFECT — owner diagnosis, "
-        "2026-08-18. `assemble_priors` pins synthetic nascent RNA at Dirichlet alpha = 0 "
+        reason="⛔ A PRIOR-ASSEMBLY CASUALTY, NOT A CALIBRATION OR MESSAGE-LAYER DEFECT — owner diagnosis, "
+        "2026-08-18, measured under the relay policy of the day. `assemble_priors` pins synthetic nascent RNA at Dirichlet alpha = 0 "
         "(EQUATIONS.md §9b): gDNA gets an additive prior, annotated RNA a multiplicative one, and "
         "nascent must out-evidence both. On this scenario 1,600 true nascent fragments yield only "
-        "~536 called, and with `message_propagation = True` the relay recovers MORE RNA overall "
+        "~536 called, and with `message_propagation = True` the messages recover MORE RNA overall "
         "(536 vs 334 muted; false gDNA 879 vs 1,144) — the recovered mass lands on the annotated "
         "antisense t2 (80 > the 50 limit) because the alpha = 0 rule forbids it landing on nascent. "
-        "Measured: the leak is 80 under every single relay-operator ablation and passes only with "
-        "the relay fully off, while BOTH pool totals are better relay-on — so the test's threshold "
+        "Measured: the leak is 80 under every single message-operator ablation and passes only with "
+        "messages fully off, while BOTH pool totals are better messages-on — so the test's threshold "
         "is a casualty of a change that is net-helpful, and the repair belongs in the prior "
         "assembler's nascent handling, not in calibration.",
     )

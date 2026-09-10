@@ -90,8 +90,8 @@ def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | No
     # (`region_geometry.g1_locked`) rather than being re-derived here. It was `(~solvable) & is_region`,
     # which filed every structurally-locked BOUNDARY — an intergenic<->exon boundary, where RNA cannot cross a
     # gene boundary — as a slot with NO EVIDENCE rather than as one that is certain.
-    # ⚠⚠ NOT the same mask as `region_init.strand_evidence`'s own `struct_lock`, which is region-only ON
-    # PURPOSE (it governs whether a slot may EMIT certainty into its messages). See `g1_locked`.
+    # ⚠ The relay-era region-only mask of the same name (`region_init`'s `struct_lock`) retired 2026-09-09;
+    # `g1_locked` is the one home. See there.
     struct_lock = g1_locked(free_pos, free_neg)
     single_strand = free_pos ^ free_neg
     ambig = free_pos & free_neg

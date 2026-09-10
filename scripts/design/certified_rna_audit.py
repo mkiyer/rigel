@@ -39,7 +39,7 @@ silently produces the same symptom:
 (b)  does it have a DIVISOR?         ``eff_rna`` > 0, since there is no ``eff_sj`` at a
                                      terminus BOUNDARY to price it against
 (c)  does the MESSAGE LAYER READ IT?  the transfer policy builds a FLUX LEVEL at an exon from the
-                                     certified flux at its junction (`_RnaLane.flux`, priced by the
+                                     certified flux at its junction (`_LevelLane.flux`, priced by the
                                      junction–exon pair); a bank with a divisor that no policy reads
                                      is inert. Read off the policy's own prepared object through a spy
                                      on its `prepare`, never off a config flag
@@ -200,8 +200,9 @@ def main() -> int:
         for x in (int(ctx.left[b]), int(ctx.right[b])):
             if x < 0:
                 continue
-            for lane in (prepared.rna or {}).values():
-                fx = lane.flux[x]
+            for name in ("pos", "neg"):
+                lane = prepared.lanes.get(name)
+                fx = None if lane is None else lane.flux[x]
                 if fx is not None and b in fx:
                     return "level"
         if any(b in key for key in prepared.rule):

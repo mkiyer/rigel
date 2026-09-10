@@ -200,7 +200,7 @@ channels and nothing else (`PsiMessage.lam_rows`, `cube_rows`). The foundation s
 
 ⚠ **A LARGE BODY OF POLICY CODE WAS DELETED ON 2026-08-27** (`CurrencyPolicy`, and a unified bridge
 with its mechanism stack) after a campaign that did not reach the bar. Git carries the code and
-`docs/dev/HONEST_PRECISION.md` carries what was derived, measured and REFUTED — read it before
+`ISSUES: the-message-policy-campaign` carries what was derived, measured and REFUTED — read it before
 re-proposing a mechanism, so a refuted experiment is not repeated.
 
 ⭐⭐ **THE CERTIFIED FLUX IS A MESSAGE (owner ruling 2026-08-25: THE ANCHOR IS A MESSAGE), and the
@@ -238,14 +238,14 @@ are RENDERED from it by `build_test_reference.py` (a suite gate refuses a drifte
 ANCHORED TWIN BLOCK (5 types × 5 abundance blocks: `clean` · `nasc` · `cap` · `capnasc` · `silent` — the
 message layer's own controls), the MONO BLOCK (single-exon, edge-only: `mono` · `capmono` · the two
 silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart`
-and `altss` present, `nest` queued in `docs/dev/MESSAGE_RUNGS.md`'s order, every multi-isoform
+and `altss` present, `nest` queued (`ISSUES: message-layer-open-cases`), every multi-isoform
 structure REPLICATED across A ≫ B, A ≪ B, A ≈ B), the WALLED BLOCK (four transcript groups whose exon
 pieces have NO licensed face — `chain` · `tssalt` · `tandem` · `altlast` — the scan's stress test, designed
 from the ladder's walled-exon census), the TERMINUS-CLUSTER BLOCK (`cluster` · `capcluster`: ten transcript
 ends 126–147 bp into a shared last exon, mirrored from MIR99AHG on the ladder — the EMPTY exon pieces
 the level lane crosses, which no earlier block makes), the BOTH-STRANDED BLOCK (`asin` · `asinrev` · `span` ·
 `conv`: two genes per locus on opposite strands, the host and its antisense, mirrored from the ladder's
-overlapping loci — the AMBIG nodes' substrate, `docs/dev/AMBIG_DESIGN.md`), the sj+terminus BLOCK (`sjterm` ·
+overlapping loci — the AMBIG nodes' substrate, `DESIGN.md` §6b.13), the sj+terminus BLOCK (`sjterm` ·
 `capsjterm`: a transcript starting at an internal exon's edge and one ending at one, mirrored from RUNX1 and
 LARGE1 — one boundary carrying a junction and a terminus of the same strand, the message plan's case D), and 8
 SHADOW transcripts the index never sees: 205 genes at a 1,030 k-fragment budget per condition. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
@@ -328,22 +328,19 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,595 passed / 0 skipped / 4 xfail** (re-derived
-2026-09-09 after the relay retired). Account it from **3,790 collected / 3,783 passed / 7 xfail** — the
-count after the default flipped — by **−191 collected**: 130 in the eight relay-era test files deleted
-with the relay (`test_enrichment_frame` 38, `test_gdna_scale_rule` 13, `test_relay_mass_rescale` 10,
-`test_rna_anchor` 23, `test_splice_flux_reframe` 12, `test_terminus_population_licence` 11,
-`test_lambda_message` 3, `test_message_sidedness` 4, plus their two parametrised gate cases each), 45
-parametrised gate cases for the three deleted `src/rigel/calibration/` modules (`messages/relay`,
-`messages/variance`, `rna_anchor`: 3 each) and the nine deleted `scripts/design/` instruments (4 each:
-`ladder_arm_ab`, `arm_score`, `arm_sweep`, `reframe_walk`, `transfer_variance_audit`, `toy_ceiling`,
-`toy_dissect`, `toy_trace_error`, `psi_channel_ablation`), and 16 in the edited gate files
-(`test_sweep` −5 relay-operator gates, `test_sweep_backbone` −10 channel and switch gates +1 λ-rows gate,
-`test_region_init` −2, the relay's corner-variance xfail pair). The 4 xfails: `test_region_init`'s
-struct_lock pair, the toy harness's intron-independence gate, the antisense t2 prior-assembly casualty.
-⛔ **RE-DERIVE, NEVER ADJUST** —
-the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the
-attribution.
+⭐ **THE STANDING BASELINE: 0 failed / 3,593 passed / 0 skipped / 2 xfail, 3,595 collected**
+(re-derived 2026-09-09, after the cleanup on the one shipped policy, the owner's three decisions, and the
+empty-piece flux source's landing with its one gate). Account it from **3,599 collected / 3,595 passed /
+4 xfail** — the count after the relay retired — by **−4 collected**: **+1** the flux source's gate, and
+**−7** test functions retired with the relay's own-precision arithmetic
+(`test_zero_count_is_a_measurement` −2, `test_region_init` −2, `test_region_geometry` −3, the deleted
+`region_total_density` gates), **+14** for the seven `tests/calibration/` files the transfer policy's gate
+file was split into (six `test_transfer_*.py` siblings plus `_transfer_harness.py`, +2 each), **−9** for the
+nine `docs/dev/` records moved out by the MOVE RULE or deleted by the owner (+1 each), and **−3** with
+`RegionInit.struct_lock` (a mask nothing on the shipped path read: one gate on the mask and its strict
+xfail pair, deleted with it). The 2 xfails: the toy harness's intron-independence gate
+(`ISSUES: two-sided-exon-row`), the antisense t2 prior-assembly casualty. ⛔ **RE-DERIVE, NEVER ADJUST** —
+the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution.
 
 ⛔ **ANY failure at all is a regression** — a stronger and
 cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
@@ -378,10 +375,10 @@ FLIP** — `preflight.py --full` does it in one command. A green suite has hidde
 (`TRAPS: a-green-suite-hid-five-dead-instruments`), because the tests install what the shipped default
 does not.
 
-⭐⭐ **THE 4 xfails ARE NOT ONE KIND OF THING.** Some are the recorded price of a config default; the rest
-are executable records of proven defects whose fixes are panel-negative alone — for those, "fix the test"
-is a category error, because the test is right and the code is wrong. ⛔ An xfail is closed by REPAIRING
-the thing or by asserting the invariant STRUCTURALLY, never by widening a bound.
+⭐⭐ **THE 2 xfails ARE EXECUTABLE RECORDS OF PROVEN DEFECTS** whose fixes are elsewhere (the message
+layer's two-sided exon row; the prior assembler's nascent handling) — "fix the test" is a category error,
+because the test is right and the code is wrong. ⛔ An xfail is closed by REPAIRING the thing or by
+asserting the invariant STRUCTURALLY, never by widening a bound.
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
@@ -411,8 +408,8 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
 | `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/transfer at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, split into pure-gDNA and RNA-bearing slots and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context is `calibration_vs_oracle.py`. ⚠ The `--dissect` survey died with `FanOutPolicy` (2026-08-24); its verdicts live in `DESIGN.md` §6b.2. `--self-test` 6/6 |
-| `design/relay_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
-| `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `relay_pool_ab.py --out`. `--self-test` 10/10 |
+| `design/message_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
+| `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `message_pool_ab.py --out`. `--self-test` 10/10 |
 | `design/transport_dispersion.py` | ⭐⭐⭐ **WHERE DOES THE FLANK-TRANSPORT DISPERSION COME FROM? — the decomposition against certified truth, no solver.** Pair disagreement vs common-mode center, each charged with counting (flank AND truth side), the length curve, structure and capture. ⛔ Fit nothing on shallow pairs; the truth count's own trigamma must be subtracted before quoting any certified scatter |
 | `design/hop_currency.py` | ⭐⭐⭐ **WHICH CURRENCY DOES EACH HOP TYPE CARRY — A LEVEL OR A COMPOSITION?** Every adjacent pair keyed by `object class × {sj, term}`, the source's true value transported both ways and scored against a Monte-Carlo noise floor. `--self-test` 36/36 |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. `--suite` runs the panel |

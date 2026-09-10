@@ -124,7 +124,7 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         6,
         "the solve — what one neighbour tells another",
-        # ⭐ The backbone and the message policy. `sweep` owns the shape of the solve and five assertions;
+        # ⭐ The backbone and the message policy. `sweep` owns the shape of the solve and four assertions;
         # `messages/` owns every argument about what a message should say. `DESIGN.md` §6.1.
         (
             "region_init",

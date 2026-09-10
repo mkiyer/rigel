@@ -35,14 +35,10 @@ Contents:
   the sharing is `coarse_type_array`'s, and `gdna_density_prior` is a module DELETED at `9b0f7419` whose
   successor is `landscape`. Retiring the helper is a source change and is left to the owner.
 
-Layering: LAYER 3. It imports DOWN to `region_chain` and `signature` (0), `splice_graph` (1) and
-`effective_length` (2), and SIDEWAYS to `simplex_logodds` (3) — never `sweep` (layer 6) or `landscape`
-(layer 5), so it sits cleanly below both. ⚠ This line read "(all lower layers)" until 2026-08-17, which
-is wrong about `simplex_logodds`: `_layers` puts it in layer 3 beside this module, so that import is
-sideways, which its own rule (down or sideways, never up) allows. ⚠ `splice_graph` is imported for the
-four TERMINUS FLAG BITS alone, which
-:func:`terminus_flank_gain` has to know the meaning of; the module already carried the flags array
-through `RegionStatics` without knowing what any bit meant.
+Layering: LAYER 3. It imports DOWN to `region_chain` and `signature` (0) and `effective_length` (2),
+and SIDEWAYS to `simplex_logodds` (3) — never `sweep` (layer 6) or `landscape` (layer 5), so it sits
+cleanly below both. The flags array travels through `RegionStatics` without this module knowing what
+any bit means: the terminus and junction bits are read by `messages.transfer_rows`.
 """
 
 from __future__ import annotations
@@ -63,36 +59,19 @@ from .signature import (
     nrna_active_strands,
 )
 from .simplex_logodds import _solve_regions_logodds_all
-from .splice_graph import FLAG_TES_NEG, FLAG_TES_POS, FLAG_TSS_NEG, FLAG_TSS_POS
 
 __all__ = [
     "RegionGeometry",
     "build_region_geometry",
     "region_gdna_geometry",
-    "region_total_density",
     "RegionBelief",
     "RegionStatics",
     "build_region_statics",
     "init_beliefs",
     "g1_locked",
-    "terminus_flank_gain",
 ]
 
 _EPS = 1.0e-9
-
-
-def _rate(numerator: np.ndarray, divisor: np.ndarray) -> np.ndarray:
-    """``numerator / divisor``, and **0 where the divisor is 0** — never a floored division.
-
-    ⛔ and `effective_length`'s own contract: an object with no opportunity
-    for a component must emit nothing, at zero precision. The predecessor floored every divisor to
-    ``_EPS`` instead, which is what produced densities of ~1e9 on the **12.4 %** of fine-partition regions
-    where the contained effective length collapses to exactly 0 — turning "no data" into a confident
-    wrong answer, and seeding false gDNA into the neighbouring exons.
-    """
-    d = np.asarray(divisor, np.float64)
-    live = d > 0.0
-    return np.where(live, np.asarray(numerator, np.float64) / np.where(live, d, 1.0), 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +111,8 @@ class RegionGeometry:
     #: float64[n_slots] — the gDNA divisor. Contained placements at a REGION, crossing placements at an BOUNDARY.
     eff_gdna: np.ndarray
     #: float64[n_slots] — the RNA divisor, the same frames on the RNA length pmf.
-    #: ⚠ Both are **0 where there is no opportunity**, never floored — see :func:`_rate`.
+    #: ⚠ Both are **0 where there is no opportunity**, never floored: a consumer divides only where
+    #: the divisor is positive, and an object with no opportunity for a component emits nothing.
     eff_rna: np.ndarray
     #: float64[n_slots, 2] — ``boundary_spliced``: molecules that crossed this boundary CONTIGUOUSLY having
     #: spliced somewhere else in the same molecule. By GENOME strand. **Certified RNA — gDNA cannot
@@ -152,17 +132,15 @@ class RegionGeometry:
     eff_sj: np.ndarray
     #: ⭐⭐ float64[n_slots, 2] — the SAME flux, split by WHICH GENOMIC END of its sj this BOUNDARY is.
     #: ``_lo`` is the flux of sj whose genomic-LOW end is here; ``_hi`` the genomic-HIGH end's.
-    #: ⛔ **This split is what makes the reframe's total well defined**, and the reason is that the two
-    #: halves belong to DIFFERENT FLANKS of the same BOUNDARY. A molecule that splices at this position has
-    #: its body in the exon on ONE side of it — the low side if this is the sj's low end, the high
-    #: side if this is its high end — and it never enters the other flank at all. So the total this BOUNDARY
-    #: presents to its low neighbour must count ``_lo`` and not ``_hi``, and vice versa
-    #: (:func:`region_total_density`). Summing them, as ``sj_count`` above does, is right for the
-    #: SPLICE IN — which is about the whole flux leaving this boundary — and wrong for the reframe.
+    #: ⛔ **The two halves belong to DIFFERENT FLANKS of the same BOUNDARY**: a molecule that splices at
+    #: this position has its body in the exon on ONE side of it — the low side if this is the sj's low
+    #: end, the high side if this is its high end — and it never enters the other flank at all. So the
+    #: flux a face carries is ``_lo`` toward the low neighbour and ``_hi`` toward the high one, which is
+    #: how the transfer policy reads them; summing them, as ``sj_count`` above does, is right for a
+    #: claim about the whole flux leaving this boundary.
     #: ⚠ Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
     #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
-    #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
-    #: (`test_splice_flux_reframe`).
+    #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error.
     #: ⭐⭐ **THE RECIPROCAL-OPPORTUNITY TOTAL, counts/bp — model-free AT A BOUNDARY, truncated AT A
     #: REGION.** The accumulator deposits ``1/A(w)`` per fragment, so ``E[sum] = rho * P(A > 0)``
     #: (`tests/native/_accumulator_reference.py`): at a BOUNDARY ``A = w−1`` and ``P(w ≥ 2) = 1`` on any
@@ -442,7 +420,6 @@ def region_rna_geometry(geometry: RegionGeometry):
     ⭐ **The count is the SAME object total ``M``, and only the divisor differs.** ψ splits one
     unspliced population, so ``rho_r = (1-f_g)*M/E_r`` exactly as ``rho_g = f_g*M/E_g`` — which is what
     makes ``sum_c rho_c*E_c = M`` hold and ``f_g`` a COUNT share rather than a density share.
-    :func:`region_total_density` already pairs ``1-f_g`` with ``eff_rna`` for the same reason.
 
     ⚠ Returning the pair rather than just ``eff_rna`` is deliberate: a caller that took the count from
     one helper and the divisor from another could silently mix bases, and the two helpers exist so the
@@ -450,68 +427,6 @@ def region_rna_geometry(geometry: RegionGeometry):
     """
     return np.asarray(geometry.unspliced_count, np.float64).sum(axis=1), np.asarray(
         geometry.eff_rna, np.float64
-    )
-
-
-def region_total_density(geometry: RegionGeometry, f_g):
-    """⭐⭐⭐ The LAZY, composition-aware total density — **as a PAIR, one per FLANK**::
-
-        ρ_unspliced = f_g · (M/E_g)  +  (1−f_g) · (M/E_r)        gDNA-FL for gDNA, RNA-FL for RNA
-        ρ_lo        = ρ_unspliced + Σ_s sj_count_lo_s / eff_sj_lo_s
-        ρ_hi        = ρ_unspliced + Σ_s sj_count_hi_s / eff_sj_hi_s
-
-    Returns ``(rho_lo, rho_hi)``: the total to use when this slot is compared against its genomic-LOW
-    neighbour, and the one for its genomic-HIGH neighbour. ⚠ **Equal at every REGION** — a REGION stores
-    only CONTAINED fragments and a contained fragment used no sj, so both banks are 0 there and the
-    pair degenerates to ``ρ_unspliced``. The distinction exists only at an BOUNDARY.
-
-    ⛔⛔ **WHY IT IS A PAIR, AND WHY ONE NUMBER PER SLOT CANNOT BE RIGHT.** The reframe
-    ``r = ρ_tot(dst)/ρ_tot(src)`` is a COMPOSITION imputation, so its numerator and denominator must be
-    totals over the SAME component set — the intersection of what the two slots can carry. At an BOUNDARY the
-    sj flux is the density of molecules that SPLICE at this position, and such a molecule's body
-    lies in the exon on exactly ONE side of it: the low side if this BOUNDARY is the sj's genomic-LOW
-    end, the high side if it is the genomic-HIGH end. It never enters the other flank. So:
-
-        against the LOW neighbour  → count the flux of sj that START here    (ρ_lo)
-        against the HIGH neighbour → count the flux of sj that END here      (ρ_hi)
-
-    Using one sj-inclusive total on both sides — which is what the predecessor's second return
-    value did, on every hop, in both directions and both twins — inflates the side facing the INTRON by
-    exactly ``ρ_J/ρ_unspliced``: measured **1.28×** and **1.43×** at the two ``intron|exon`` BOUNDARIES of a
-    two-exon toy, against a TRUTH ratio the split reproduces to 3 %. ⚠ It inflates each hop of a
-    two-hop pair in opposite directions and therefore CANCELS in a compounded ratio, which is why no
-    endpoint or aggregate check saw it. Using the unspliced-only total on both sides is the other
-    mistake, and it was measured worse: at an BOUNDARY→EXON step the exon genuinely contains the spliced
-    population and the term belongs.
-
-    ⭐ This is the two-faces flank rule (gated by `test_splice_flux_reframe`), made per-step and per-sj rather than per-object: the
-    INTRON face is whichever flank is not the exonic side of the sj, and the EXON face is the other.
-
-    ⛔ Written in GENOMIC terms, never donor/acceptor or TSS/TES. The index's ``FLAG_DONOR_s`` marks the
-    genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
-    biological ACCEPTOR — a predicate phrased biologically flips sign with the strand and a genomic one
-    does not. Gated on a ``−``-strand sj specifically (`test_splice_flux_reframe`).
-
-    This is NEVER a pure-gDNA precompute — ``f_g`` is the best current composition; gDNA-FL alone
-    (``f_g = 1``) is only the fallback where composition is genuinely unknown.
-
-    ⚠ **``spliced_count`` is deliberately NOT in either total.** It is a contiguous crossing, so it does
-    belong in the level in principle — but the predecessor's ``mass_spliced`` entered only the strand
-    solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename.
-    """
-    mass, eff_g = region_gdna_geometry(geometry)
-    fg = np.clip(np.asarray(f_g, dtype=np.float64), 0.0, 1.0)
-    rho_unspl = mass * (
-        _rate(fg, eff_g) + _rate(1.0 - fg, np.asarray(geometry.eff_rna, np.float64))
-    )
-
-    def _flux(count, eff):
-        c, e = np.asarray(count, np.float64), np.asarray(eff, np.float64)
-        return _rate(c[:, 0], e[:, 0]) + _rate(c[:, 1], e[:, 1])
-
-    return (
-        rho_unspl + _flux(geometry.sj_count_lo, geometry.eff_sj_lo),
-        rho_unspl + _flux(geometry.sj_count_hi, geometry.eff_sj_hi),
     )
 
 
@@ -566,67 +481,15 @@ def g1_locked(free_pos, free_neg) -> np.ndarray:
     applies to **both axes** — an intergenic region and an intergenic↔exon boundary are both TRAPS: no-magic-numbers, because
     RNA cannot cross a gene boundary any more than it can occupy intergenic space.
 
-    ⚠⚠ **DO NOT CONFUSE THIS WITH ``region_init.strand_evidence``'s ``struct_lock``, which is
-    deliberately REGION-ONLY.** They are two different quantities that happen to share a word:
-
-    * *this* one answers "is the belief pinned and certain?" — a question about the belief, so both axes;
-    * ``struct_lock`` answers "may this slot EMIT composition certainty into its messages?" and
-      excludes G1 boundaries on purpose: a boundary is structurally gDNA but sits between RNA-carrying exons, so
-      its crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA
-      emitter. ``strand_evidence``'s own docstring carries that reasoning.
-
-    It lives here, beside the code that applies it, so the instruments that classify objects by it read
-    ONE definition rather than each re-deriving it — two homes for one predicate is how a region-only
-    variant survived in two scripts and a test at the same time.
+    ⭐ THE ONE DEFINITION. It lives here, beside the code that applies it, so the instruments that
+    classify objects by it read one predicate rather than each re-deriving it — two homes for one
+    predicate is how a region-only variant (the retired relay's ``struct_lock``, every zero-count REGION,
+    which nothing on the shipped path read; deleted 2026-09-09) survived in two scripts and a test at the
+    same time. ⚠ A boundary that is structurally gDNA still sits between RNA-carrying exons, so its
+    crossing mass is RNA-contaminated: the predicate says the COMPOSITION is certain, not that the count
+    is clean.
     """
     return ~np.asarray(free_pos, bool) & ~np.asarray(free_neg, bool)
-
-
-#: A transcript's genomic **LOW** end. On ``+`` that terminus is the TSS, on ``−`` it is the TES — and
-#: pairing the bits by which genomic end they mark, rather than by TSS/TES, is the whole point.
-_RNA_LOW_END = np.uint16(FLAG_TSS_POS | FLAG_TES_NEG)
-#: A transcript's genomic **HIGH** end: the TES on ``+``, the TSS on ``−``.
-_RNA_HIGH_END = np.uint16(FLAG_TES_POS | FLAG_TSS_NEG)
-
-
-def terminus_flank_gain(boundary_flags) -> tuple[np.ndarray, np.ndarray]:
-    """``(right_gains, left_gains)`` — which FLANK of each BOUNDARY carries RNA the BOUNDARY itself cannot see.
-
-    An BOUNDARY is a single genomic position and it counts the fragments spanning it CONTIGUOUSLY, so the
-    transcripts it can see are exactly the ones continuous across it::
-
-        T(BOUNDARY)  =  T(REGION_left)  ∩  T(REGION_right)
-
-    A transcript whose body BEGINS at the BOUNDARY is in the right flank and not in the BOUNDARY, so
-    ``T(BOUNDARY) = T(right)`` fails; one that ENDS there breaks the left equality the same way. Those are
-    equalities and not containments: a composition imputation between two objects needs them to be
-    measuring the same population, and ``phi_R`` too high or too low both corrupt ``phi_g``.
-
-    ⛔⛔ **WRITTEN IN GENOMIC TERMS, AND THAT IS NOT A STYLE CHOICE — TSS/TES DOES NOT DETERMINE THE
-    SIDE, BECAUSE THE STRAND FLIPS IT.** A ``+`` transcript's body extends toward higher coordinates from
-    its TSS; a ``−`` transcript's extends that way from its TES. So the bits are paired by which genomic
-    END they mark and the arrays are named for the FLANK. Gated on two mirror-image annotations —
-    identical geometry, opposite strands — where the flank answer is the same and the TSS bit alone points
-    at the opposite BOUNDARIES (`test_terminus_population_licence`).
-
-    ⚠ **OR over both strands, deliberately.** A composition is a claim about the whole pair
-    {gDNA, RNA+, RNA−}, so a population break on either strand breaks it.
-
-    ⚠ **The two masks are INDEPENDENT, not complements** — a transcript can end where another begins, and
-    then neither flank matches. ``0`` (no graph supplied) means no terminus and so both flanks match.
-
-    ⛔ **TERMINI ONLY: DONOR/ACCEPTOR are excluded on purpose.** A splice site also changes the population
-    — RNA splices out or in — but there the flux is MEASURED (``sj_count``) and the SPLICE IN and the
-    SPLICE OUT exist to route it. A terminus has no flux to measure: a transcript simply begins. That is the
-    boundary between the two treatments.
-
-    ``boundary_flags`` may be on either axis — the per-contiguous-boundary array from
-    :func:`~rigel.calibration.splice_graph.build_boundary_flags_array`, or :class:`RegionStatics`'s per-slot
-    copy of it (``0`` at REGION slots, which reads as "no terminus" and is correct: a REGION is not a
-    position and breaks no population).
-    """
-    flags = np.asarray(boundary_flags, dtype=np.uint16)
-    return (flags & _RNA_LOW_END) != 0, (flags & _RNA_HIGH_END) != 0
 
 
 def _type_belief(free_pos, free_neg, deconv, mass_unspl):

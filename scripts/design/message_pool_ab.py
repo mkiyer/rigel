@@ -40,12 +40,12 @@ TRAPS: an-ablation-that-never-ran, which has already cost this project a 314-sec
 
 Usage::
 
-    python scripts/design/relay_pool_ab.py                       # the whole ladder, both arms
-    python scripts/design/relay_pool_ab.py --conditions NAME ...
-    python scripts/design/relay_pool_ab.py --self-test           # no I/O
+    python scripts/design/message_pool_ab.py                       # the whole ladder, both arms
+    python scripts/design/message_pool_ab.py --conditions NAME ...
+    python scripts/design/message_pool_ab.py --self-test           # no I/O
 
-⚠ The "on" arm is the shipped policy (`transfer` since 2026-09-09; the relay before it — numbers
-recorded under the relay are the relay's and are not comparable with a run today).
+⚠ The "on" arm is the shipped policy (`transfer` since 2026-09-09). Numbers recorded before that
+date under the retired relay are the relay's and are not comparable with a run today.
 """
 
 from __future__ import annotations
@@ -225,7 +225,7 @@ def report(rows: list[dict], axis: str) -> None:
         return
     print()
     print("=" * 168)
-    print(f"⭐⭐ RELAY A/B — axis = {axis}.  Counts in FRAGMENTS, against the origin-split oracle.")
+    print(f"⭐⭐ MESSAGE A/B (propagation OFF vs ON) — axis = {axis}.  Counts in FRAGMENTS, against the origin-split oracle.")
     print("=" * 168)
     # ⭐ THE TRUTH IS THREE POOLS AND THE ESTIMATE IS TWO, and the table says so rather than hiding it:
     #   `nrna_true` / `mrna_true` are printed with no estimate beside them because calibration has none

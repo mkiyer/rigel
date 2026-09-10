@@ -58,7 +58,7 @@ def test_a_reference_with_NO_regions_contributes_NOTHING():
 
 def test_references_do_not_BLEED_into_each_other():
     """⛔ The last region of one reference must not be adjacent to the first of the next. A chain that
-    wrapped would relay density across a chromosome boundary, which is exactly the class of error that
+    wrapped would carry density across a chromosome boundary, which is exactly the class of error that
     survives every aggregate check."""
     chain = _chain([3, 2])
     last_of_first = 2 * 3 - 2  # the final REGION slot of reference 0

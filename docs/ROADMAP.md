@@ -25,7 +25,7 @@ length alone and mask calibration bugs (`TRAPS: a-length-gap-bypasses-calibratio
 
 - **Library gDNA fraction**: accurate on the three in-scope strata, structurally BLIND on the deferred
   one (at κ = ½ no channel reaches an AMBIG slot; the θ-independent-channel search is CLOSED) —
-  `solvability_audit.py`, `relay_pool_ab.py`.
+  `solvability_audit.py`, `message_pool_ab.py`.
 - **Transcript assignment**: a sixth to a fifth of RNA fragments misassigned even under a perfect prior —
   calibration and assignment are two problems in two files — `quant_accuracy.py` (the thermometer).
 - **Stage A (the accumulator)**: DONE; the fragment ledger closes exactly — `calibration_oracle.py`.
@@ -89,7 +89,7 @@ is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceili
    pruned by the MOVE RULE and `DESIGN.md` converged on the shipped state. Every step gated bit-identical
    by `rename_identity.py --check` on the two frozen references.
 2. ⭐⭐⭐ **IMPROVE THE MESSAGE POLICY (owner priority 2).** The debug loop on the worst in-scope rows of the
-   benchmark page, one prototype arm at a time: `ISSUES: flux-source-skipped-at-an-empty-exon-piece`,
+   benchmark page, one prototype arm at a time:
    `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: ambig-node-as-a-gdna-source`; then the remaining both-stranded structures (`div`, the
    antisense's nascent variant, `nest`).
@@ -103,10 +103,13 @@ is fixed.** Re-derive with `calibration_walk.py` (rung E vs F) and `vertex_ceili
 5. ⭐ **The calibration build thread** (part of priority 3): `ISSUES: measured-prior-rung-4` under the
    `ISSUES: reference-prior-refuted-at-concept-level` constraint, with
    `ISSUES: landscape-trains-on-real-substrate` as its payoff check.
-6. ⭐ **Re-price the vertex atom AFTER the message layer is repaired, never before** — `EQUATIONS.md`
-   §9a.1/§9d.4 already carry the derivation and the spike with no new constant; what is owed is the
-   whole-ladder `vertex_ceiling.py` and a release-metric equivalent, against a solver that keeps what
-   it is given.
+6. ⭐ **The vertex atom, PRICED under the shipped policy (2026-09-09, `vertex_ceiling.py`, re-pointed to
+   the two-phase solve and to the PARAMETER-vertex population)**: worth within 1 % on every stranded
+   in-scope row, a few percent of the unstranded capture-OFF rows rising with gDNA, and a quarter to a
+   third of the DEFERRED stratum. The in-scope value sits on silent genes' regions and nascent-free
+   introns — the landscape prior's training population (rank 3) — and arrives through the refit prior,
+   not at pass zero; `EQUATIONS.md` §9a.1/§9d.4 carry the derivation and the spike with no new constant.
+   Re-derive with `vertex_ceiling.py --arm base|vertex_free --oracle-cache …` and `--compare`.
 
 Then, in standing order: `ISSUES: performance-memory-bounded-solve` (owner: mandatory before 0.8.0) ·
 the message-vs-prior question `ISSUES: refit-vs-message-arbitration` (the pre-EM entries above sit under

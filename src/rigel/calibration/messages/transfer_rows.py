@@ -44,9 +44,7 @@ __all__ = [
     "level_of_profile",
     "lower_side",
     "poisson_level",
-    "priced_level",
     "profile_of_level",
-    "count_price",
     "cube_row",
     "flux_level",
     "read_column",
@@ -69,7 +67,8 @@ _MARGINAL_NODES = norm.ppf((np.arange(9) + 0.5) / 9.0)
 
 def blur_row(row, lam, v):
     """The delta-method counting width: a Gaussian blur of variance ``v`` along ``lam`` applied to a
-    max-normalised log-row (the kernel `transport_row`, `level_row` and item 7's pair width share)."""
+    max-normalised log-row (the kernel `transport_row`, `level_row` and the alternative splice site's
+    pair width share)."""
     out = np.asarray(row, np.float64) - np.max(row)
     if v > 0.0 and lam.shape[0] > 1:
         dlam = float(lam[1] - lam[0])
@@ -124,7 +123,7 @@ def junction_exon_side(flags_b, left, right):
     """The flank on a junction's EXON side: a DONOR bit marks the intron's low end (the intron lies right,
     the exon left), an ACCEPTOR bit its high end; ``None`` when junctions leave both ways or none is
     present. At an sj+terminus boundary the junction's measured flux belongs to the population of this
-    flank — the RNA that splices in or out here — and is placed there: in item 5's outside map when
+    flank — the RNA that splices in or out here — and is placed there: in the terminus's outside map when
     this flank is the outside, in the terminus rule's totals' disagreement when it is the inside."""
     f = int(flags_b)
     don, acc = bool(f & (_DON_POS | _DON_NEG)), bool(f & (_ACC_POS | _ACC_NEG))
@@ -319,13 +318,6 @@ def intersect(bounds):
     return None if out is None else out - out.max()
 
 
-def priced_level(profile, u, v):
-    """What a recipient with a total holds after a hop: the level's lower side, widened by the hop's
-    price ``v``."""
-    p = lower_side(profile)
-    return blur_row(p, u, v) if v > 0.0 else p
-
-
 def profile_of_level(profile, u, lam, n, a, rho_ref):
     """A held level read as THIS node's composition profile through its own total — `level_of_profile`'s
     map read backwards, a pure coordinate change: ``u(lam) = log(sigma(lam) n / (a rho_ref))``."""
@@ -349,14 +341,21 @@ def count_logvar(count) -> np.ndarray:
 
 
 def hop_price(n_s, a_s, n_x, a_x):
-    """One hop's price, the owner's rule 8 per hop: both totals' counting (`count_logvar` each) plus
-    the abundance discrepancy between the two nodes beyond what counting explains,
-    ``max(0, log(r)^2 - (1/n_s + 1/n_x))`` with ``r`` the ratio of their total densities. A discrepancy
-    is never attributed (capture, new transcription, noise): it widens."""
+    """One hop's price on the lane's WITNESS counts — the owner's rule per hop, nothing pooled: both
+    counts' counting (`count_logvar` each) plus the discrepancy of the two count densities beyond
+    what counting explains, ``max(0, log(r)^2 - (1/n_s + 1/n_x))`` with ``r`` the ratio of the
+    densities ``n_x / a_x`` and ``n_s / a_s``. A discrepancy is never attributed (capture, new
+    transcription, noise): it widens. The gDNA lane prices on the two nodes' totals; an RNA lane on
+    the strand's own counts, because the totals are the wrong witness for it (entering an overlap the
+    total jumps because the OTHER strand joins while this strand's density is unchanged). A zero count
+    on either side has no density ratio, so counting is the whole price (``trigamma(1/2)`` is
+    finite)."""
     n_s, n_x = float(n_s), float(n_x)
     v = float(count_logvar(n_s) + count_logvar(n_x))
-    r = (n_x / float(a_x)) / (n_s / float(a_s))
-    return v + max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
+    if n_s > 0.0 and n_x > 0.0:
+        r = (n_x / float(a_x)) / (n_s / float(a_s))
+        v += max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
+    return v
 
 
 # ── THE RNA LEVEL LANES (the both-stranded locus, phase 1, 2026-09-08) ──────────────────────────
@@ -374,21 +373,6 @@ strand_bits = {
         _TSS_NEG | _TES_NEG,
     ),
 }
-
-
-def count_price(n_s, a_s, n_x, a_x):
-    """One hop's price by the lane's OWN witness counts — `hop_price`'s form on a strand's counts
-    rather than the totals (the owner's rule 8 per hop; the totals are the wrong witness for an RNA
-    lane, since entering an overlap the total jumps because the OTHER strand joins while this
-    strand's density is unchanged): both counts' counting, ``trigamma(n + 1/2)`` each, plus the
-    discrepancy of the two count densities beyond counting. A zero count on either side has no
-    density ratio, so counting is the whole price (``trigamma(1/2)`` is finite)."""
-    n_s, n_x = float(n_s), float(n_x)
-    v = float(count_logvar(n_s) + count_logvar(n_x))
-    if n_s > 0.0 and n_x > 0.0:
-        r = (n_x / float(a_x)) / (n_s / float(a_s))
-        v += max(0.0, float(np.log(r)) ** 2 - (1.0 / n_s + 1.0 / n_x))
-    return v
 
 
 def rna_level_of_profile(row, lam, u, n, a_r, rho_ref):

@@ -125,12 +125,12 @@ def test_ambig_no_false_gdna_from_nascent(tmp_path):
     MEASURED PRICE OF THE MUTE rather than a defect: an AMBIG slot has NO own composition evidence —
     κ = ½ makes the strand λ-term identically 0 and the Schur complement on a both-strand region is
     exactly 0 — so muted it falls back to ψ's uninformative reference and read **f_g = 0.458 against a
-    truth of 0**, where it reads < 0.08 with the relay live.
+    truth of 0**, where it reads < 0.08 with messages live.
 
-    ⚠ The xfail named two exits — (a) turn the relay back on, (b) give an AMBIG slot its own
+    ⚠ The xfail named two exits — (a) turn message propagation back on, (b) give an AMBIG slot its own
     θ-independent composition channel. **(a) is what happened**; (b) was priced and refused
-    (`TRAPS: a-linear-likelihood-emits-a-sign`), so this test is now the standing detector that the relay
-    keeps doing the job the mute could not."""
+    (`TRAPS: a-linear-likelihood-emits-a-sign`), so this test is now the standing detector that the
+    message layer keeps doing the job the mute could not."""
     # gDNA=0 + nascent: the AMBIG region must NOT read the nascent/mature RNA as gDNA. The pre-fix
     # over-call was ~0.12; the gradient combine + strand-cleaned boundary imputation drives it to ~0.
     frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nrna_abundance=30.0)

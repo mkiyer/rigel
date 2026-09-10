@@ -244,7 +244,7 @@ has **sd(λ) = 1,377 nats against a solver that represents λ only on ±10**. Me
 panel table carries a **`weak%`** column — the share of the scored error above 10 nats. ⛔ **A better
 threshold is not available and was refuted:** τ is *continuous* across the region on 4 of 5 ladder
 conditions, so any floor would be a tuned constant. ⭐⭐ **Read `weak%` before `mwae`.** A row with
-`weak%` near 100 is reporting the relay and the reference, not a solve.
+`weak%` near 100 is reporting the messages and the reference, not a solve.
 
 ⚠ And `locked` is the **G1 / structurally pure-gDNA** class on *both* axes (`region_geometry.g1_locked`),
 never `~solvable & is_region` — a structurally-locked *boundary* is certain, not ignorant. ⛔ It is
@@ -275,14 +275,14 @@ value and it is not free either (TRAPS: specificity-and-sense-are-complements). 
 an argument for the length channel — that is deferred post-0.8.0 by ruling, not by measurement.
 
 ⭐⭐ **The cross-tab is the point.** Objects **undetermined by C_info** *and* carried **entirely by the
-relay** have no answer of their own at all — whatever pass-0 reports there came from neighbours and the
+messages** have no answer of their own at all — whatever pass-0 reports there came from neighbours and the
 population prior. That cell is reported with its mass share and its error share, and it needs no
 confidence threshold because it is a cell of a partition rather than a cutoff.
 
 The two classifications, both mutually exclusive and exhaustive (gated: the mass *and* the error
 decompose over each exactly):
 
-* **the solver's own** — `own_evidence` / `relay_only` / `struct_lock`, reproducing `region_init`'s
+* **the solver's own** — `own_evidence` / `message_only` / `struct_lock`, reproducing `region_init`'s
   definitions and cross-checked against `composition_evidence_census.py`'s;
 * **C_info's** — `identified` / `undet_no_separation` / `undet_out_of_range` / `absent`.
 
@@ -301,8 +301,8 @@ invented here** — what this file fixes is *which* quantity is being judged, on
 
 1. ⭐⭐ **`P − O` is small on all three in-scope strata**, and the residual that remains is *attributed* —
    to the assembler (`O − Fo`), to the composition, or to a class that is provably undetermined. ⛔ It is
-   not done while the residual sits on objects `C_info` calls **identified**: measured, **36.2 % of the
-   relay's error** does (`ROADMAP.md`).
+   not done while the residual sits on objects `C_info` calls **identified**: measured under the retired
+   relay, **36.2 % of its error** did (`solvability_audit.py` re-derives it for the shipped policy).
 2. ⭐⭐ **The zero controls read zero.** `zero_controls.py` on both arms, and the `g00` rung of the
    ladder. ⛔ Today the shipped prior claims **2,067,637 gDNA fragments in libraries containing none**,
    and **1,707,321 of them are at unstranded × capture-OFF — an IN-SCOPE stratum that reads healthy on

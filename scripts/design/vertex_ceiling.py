@@ -14,10 +14,17 @@ both. Before designing anything, hand those objects the exact answer, **re-solve
 read what the headroom actually is.
 
 ⭐ **A RE-SOLVE, NOT A SUBSTITUTION** (TRAPS: substitution-understates-a-source). A vertex object is mostly a message SOURCE — its
-value is what it CARRIES — and substituting its answer after the fact does not propagate. So the pin goes
-in at ``region_init.build_region_init``, the per-object message-free self-solve, and the relay then runs on
-top of it. That is also the one place a mechanism can be expressed without touching either relay twin,
-so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-observable-per-site).
+value is what it CARRIES — and substituting its answer after the fact does not propagate. ⭐ **Where the
+pin goes, under the two-phase transfer policy (re-pointed 2026-09-09):** a node's neighbours receive its
+OWN CLAIM (`messages.transfer._claims`) and never its belief, and the node itself answers through ψ from
+its own evidence, the two held messages and the delivered rows. So the pin is two things, both from the
+oracle's truth: the pinned node's claim becomes a DELTA at the true composition on the solve grid (what
+every rule and lane carries onward — the level lanes read it through the node's own total), and the same
+delta is delivered into ψ's final solve at that node as a `lam_rows` row (what the node answers). The
+vertex-truth population is classified from `region_init`'s ``tau_lam`` in a wrapper on
+``sweep.build_region_init``, which is where the truth is mapped onto slots. ⛔ The relay-era pin rewrote
+`RegionInit.f_*`, which the two-phase backbone reads only into its diagnostics capture — under the shipped
+policy that arm was INERT (found 2026-09-09) and its comparator would have reported it "did not fire".
 
 **THE ARMS.**
 
@@ -25,8 +32,8 @@ so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-ob
 |---|---|---|
 | ``base`` | nothing | the baseline, re-recorded from the current tree in the same run (TRAPS: re-record-the-baseline) |
 | ``noop`` | pins the truth at ZERO objects | ⭐ the harness's own falsification — MUST be byte-identical to ``base`` |
-| ``vertex_free`` | pins oracle truth at every vertex-truth object with **no own composition evidence** | ⭐⭐ **THE CEILING.** The population a vertex fix can reach |
-| ``vertex_all`` | pins oracle truth at **every** vertex-truth object | a looser upper bound — includes objects that have their own evidence |
+| ``vertex_free`` | pins the truth at every PARAMETER-vertex object (`_parameter_vertex`) with **no own composition evidence** | ⭐⭐ **THE CEILING.** The population a vertex fix can reach. Needs ``--oracle-cache`` (the certified `slot_truth`) |
+| ``vertex_all`` | pins the truth at **every** parameter-vertex object | a looser upper bound — includes objects that have their own evidence |
 | ``ref_c=<C>`` | sets ψ's reference exponent to ``C`` instead of ½ | ⭐ the mechanism prototype (TRAPS: panel-before-src — the panel arm before ``src/``) |
 
 ⚠ ``vertex_free``'s "no own evidence" test is ``tau_lam <= 1e-4``, and that is a CLASSIFICATION FOR A
@@ -43,6 +50,21 @@ reads as "no effect", which is publishable and wrong.
 ⚠ **TRAPS: could-the-arm-have-fired — the pin count per condition is printed.** An arm with zero opportunities is not a control.
 
 ---
+
+⛔⛔⛔ **RE-POINTED 2026-09-09 — read this before the 2026-08-05 record below.** Under the transfer policy
+the relay-era pin (a rewrite of `RegionInit.f_*`) was INERT: the two-phase backbone reads those fields
+into its diagnostics capture only. The pin now enters where the solve reads — the pinned node's OWN
+CLAIM and its ψ row, both a delta at the truth (`_install_vertex_pin`) — and two things were measured
+the day it was re-pointed, on `g50 ss.50 OFF` at the shipped configuration: (1) with the REALIZED-vertex
+population the instrument used to classify by, the arm made the region axis 23 % WORSE (Σ|err| 728 k →
+894 k; confidently-wrong objects 432 → 3,127) while every pinned slot went to zero error — 22,201
+evidence-free slots whose few crossings happened to be all gDNA, pinned as certain and propagated, drove
+their RNA-rich neighbours from 0.46 to 0.64 at a truth of 0.01 (`_parameter_vertex` records it); (2)
+with the PARAMETER-vertex population that replaces it (silent genes, nascent-free introns, the zero-gDNA
+row: 1,104 objects per sweep on that row) `vertex_free` improves every column, by 0.4 % of the region
+axis (728,378 → 725,752) and 0.2 % of the boundary axis, `noop` byte-identical. ⭐ Every number in the
+2026-08-05 record is therefore doubly historical: the retired 36-row ladder, the relay, and a population
+that priced chance. Re-derive with the arms below before quoting a ceiling.
 
 ⛔⛔⛔ **WHAT IT MEASURED, 2026-08-05 — and the verdict is NOT A BUILD. READ THIS FIRST.**
 
@@ -158,8 +180,9 @@ P0 = _sibling("pass0_vs_oracle.py")
 
 from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
+from rigel.calibration.messages import PsiMessage  # noqa: E402
+from rigel.calibration.messages import transfer as TR  # noqa: E402
 from rigel.calibration.region_chain import REGION  # noqa: E402
-from rigel.calibration.region_geometry import region_gdna_geometry  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
@@ -175,24 +198,14 @@ _TAU_FREE = 1.0e-4
 _CTX: dict = {}
 #: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
 _FIRED: dict = {
-    "init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "psi_mean": 0, "conditions": 0,
+    "init": 0, "pinned": 0, "claimed": 0, "delivered": 0, "ref_g": 0, "ref_r": 0, "psi_mean": 0,
+    "conditions": 0,
 }
+#: the pin's shape on the solve grid: everything but the cell nearest the truth is impossible
+_PIN_WALL = -1.0e6
 
 
 # ── the plumbing: get the oracle's per-object truth and the geometry to `build_region_init` ────────────
-
-
-def _wrap_oracle():
-    """Stash the origin-split oracle. It is built BEFORE any arm calibrates, so its per-object truth
-    is available to the self-solve — which is what makes a re-solve ceiling possible at all."""
-    orig = P0.load_or_build_oracle
-
-    def wrapper(*a, **kw):
-        oracle = orig(*a, **kw)
-        _CTX["oracle"] = oracle
-        return oracle
-
-    P0.load_or_build_oracle = wrapper
 
 
 def _wrap_solve_chain():
@@ -237,72 +250,142 @@ def _install_psi_mean():
     del real
 
 
-def _truth_fg_per_slot(chain):
-    """The ORACLE's true ``f_g`` per SLOT, and the mass behind it.
+def _pin_row(lam, f_true: float) -> np.ndarray:
+    """A DELTA at the true composition on the solve grid: zero at the cell nearest ``logit(f_true)``
+    (a vertex lands on the grid's end cell) and a wall everywhere else — a claim that is certain, in
+    the currency every rule, lane and ψ read (a max-normalised log-profile over ``lam``)."""
+    lam = np.asarray(lam, np.float64)
+    f = float(np.clip(f_true, _EPS, 1.0 - _EPS))
+    target = float(np.clip(np.log(f / (1.0 - f)), lam[0], lam[-1]))
+    row = np.full(lam.shape[0], _PIN_WALL)
+    row[int(np.argmin(np.abs(lam - target)))] = 0.0
+    return row
 
-    ⚠ ``RegionInit``'s arrays are indexed by SLOT (the chain's alternating REGION/BOUNDARY sequence), while the
-    oracle's masses are per OBJECT on two separate axes — so the mapping goes through
-    ``chain.kind``/``chain.obj_idx`` rather than being assumed."""
-    oracle = _CTX.get("oracle")
-    ra = _CTX.get("region_arrays")
-    if oracle is None or ra is None:
-        return None, None
-    ov = oracle.override_masses(ra)
-    g = {
-        "region": np.asarray(ov["mass_gdna_region"], np.float64),
-        "boundary": np.asarray(ov["mass_gdna_boundary"], np.float64),
-    }
-    r = {
-        "region": np.asarray(ov["mass_rna_region"], np.float64),
-        "boundary": np.asarray(ov["mass_rna_boundary"], np.float64),
-    }
+
+class _PinnedPolicy(TR.TransferPolicy):
+    """The shipped policy with the pinned nodes' ψ rows replaced by the delta at their truth: the
+    node's own answer becomes the truth, whatever its evidence and its neighbours say. (What the node
+    SENDS is pinned in `_claims`, see `_install_vertex_pin`.)"""
+
+    name = "transfer"  # what the capture stamps: the instruments' "the arm ran" witness reads it
+
+    def prepare(self, ctx):
+        prepared = super().prepare(ctx)
+        pins = _CTX.get("pins") or {}
+        if not pins:
+            return prepared
+        lam = np.linspace(-float(ctx.logodds_window), float(ctx.logodds_window), int(ctx.n_grid))
+        n = int(ctx.n_slots)
+        orig_solve = prepared.solve
+
+        def solve(from_left, from_right):
+            msg = orig_solve(from_left, from_right)
+            rows = np.zeros((n, lam.shape[0])) if msg.lam_rows is None else np.array(msg.lam_rows, np.float64)
+            for i, f_true in pins.items():
+                rows[int(i)] = _pin_row(lam, f_true)
+                _FIRED["delivered"] += 1
+            return PsiMessage(lam_rows=rows, cube_rows=msg.cube_rows)
+
+        prepared.solve = solve
+        return prepared
+
+
+def _parameter_vertex(chain, index, ra, slot_truth: dict, library_f_gdna: float):
+    """The PARAMETER-vertex population per slot, and its true composition: objects whose composition IS
+    a vertex by construction, never objects whose few fragments landed on one by chance.
+
+    ⛔ **Why the realized vertex is the wrong population, measured 2026-09-09 on `g50 ss.50 OFF`:** of
+    22,201 evidence-free slots whose realized truth was exactly 0 or 1, most were boundaries of 6–19
+    crossings that all happened to be gDNA in a half-gDNA library. Pinned as CERTAIN and propagated
+    through the transfer policy's rules, they drove their RNA-rich exon neighbours from 0.46 to 0.64
+    (truth 0.01) and the region axis 23 % WORSE (Σ|err| 728 k → 894 k) while the pinned slots
+    themselves went to zero error — chance, priced as information.
+
+    Three sources, each a parameter: (i) every region of a SILENT gene (no RNA fragment of any kind in
+    any of its regions) that no expressed gene overlaps, ``f_g = 1``; (ii) every intron region of a
+    gene with NO nascent fragment in any of its introns that no nascent-bearing gene overlaps (mature
+    RNA cannot be contained in an intron, so its only RNA is nascent), ``f_g = 1``; (iii) every live
+    slot of a ZERO-gDNA library, ``f_g = 0``. A boundary joins (i)/(ii) when both its flanks do."""
+    n = int(chain.n_slots)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     is_region = kind == REGION
-    n = int(chain.n_slots)
-    tg = np.zeros(n)
-    tr = np.zeros(n)
-    for axis, msk in (("region", is_region), ("boundary", ~is_region)):
-        idx = np.flatnonzero(msk)
-        if idx.size == 0:
+    n_rna = np.asarray(slot_truth["n_mrna"], np.float64) + np.asarray(slot_truth["n_nrna"], np.float64)
+    n_nas = np.asarray(slot_truth["n_nrna"], np.float64)
+    stratum = np.asarray(slot_truth["stratum"]).astype(str)
+    count = np.asarray(slot_truth["count"], np.float64)
+    f_true = np.full(n, np.nan)
+    if library_f_gdna <= 0.0:
+        f_true[count > 0.0] = 0.0
+        return f_true
+    starts = np.asarray(ra.start, np.int64)
+    ends = np.asarray(ra.end, np.int64)
+    ref_id = np.asarray(ra.ref_id)
+    # per REGION slot: covered by an expressed gene? by a nascent-bearing gene? by any gene?
+    region_slot = np.full(starts.shape[0], -1, np.int64)
+    region_slot[obj[is_region]] = np.flatnonzero(is_region)
+    covered = np.zeros(n, bool)
+    expressed_cover = np.zeros(n, bool)
+    nascent_cover = np.zeros(n, bool)
+    genes = index.g_df
+    if "is_synthetic" in genes.columns:
+        genes = genes[~genes["is_synthetic"].astype(bool)]
+    for g in genes.itertuples(index=False):
+        rid = index.ref_name_to_id.get(g.ref)
+        if rid is None:
             continue
-        o = np.clip(obj[idx], 0, g[axis].shape[0] - 1)
-        tg[idx] = g[axis][o]
-        tr[idx] = r[axis][o]
-    tot = tg + tr
-    with np.errstate(invalid="ignore", divide="ignore"):
-        fg = np.where(tot > 0.0, tg / np.maximum(tot, _EPS), np.nan)
-    return fg, tot
+        inside = np.flatnonzero((ref_id == rid) & (starts >= int(g.start)) & (ends <= int(g.end)))
+        slots = region_slot[inside]
+        slots = slots[slots >= 0]
+        if slots.size == 0:
+            continue
+        covered[slots] = True
+        if n_rna[slots].sum() > 0.0:
+            expressed_cover[slots] = True
+        if n_nas[slots].sum() > 0.0:
+            nascent_cover[slots] = True
+    silent = is_region & covered & ~expressed_cover
+    dark_intron = is_region & (stratum == "R intron") & covered & ~nascent_cover
+    at_one = (silent | dark_intron) & (count > 0.0)
+    f_true[at_one] = 1.0
+    left, right = np.asarray(chain.left, np.int64), np.asarray(chain.right, np.int64)
+    for b in np.flatnonzero(~is_region & (count > 0.0)):
+        lo, hi = left[b], right[b]
+        if lo >= 0 and hi >= 0 and at_one[lo] and at_one[hi]:
+            f_true[b] = 1.0
+    return f_true
 
 
 def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
-    """⭐⭐ THE CEILING ARM. Overwrite ``f_g`` with the ORACLE's exact answer at every object whose truth
-    sits on a **vertex** of the composition simplex (``f_g`` exactly 0 or exactly 1), declare that belief
-    certain, and let the relay re-solve on top of it.
+    """⭐⭐ THE CEILING ARM. At every object whose truth sits on a **vertex** of the composition simplex
+    (``f_g`` exactly 0 or exactly 1): make its OWN CLAIM the oracle's exact answer (a delta on the
+    solve grid, what its neighbours receive through every rule and lane) and deliver the same delta
+    into ψ at the node (what it answers), then let the two passes and the solve run on top of it.
 
     ⭐ Only the VERTEX population is pinned. An interior object keeps its own answer, so this prices the
     vertex and nothing else — which is the whole point of a channel ceiling.
 
     ⚠ ``evidence_free_only`` restricts the pin to objects with no own composition evidence
     (``tau_lam <= _TAU_FREE``). That is the population a vertex fix can actually reach; the unrestricted
-    arm is the looser bound."""
+    arm is the looser bound.
+
+    Three patches, each a live target of the self-test: ``sweep.build_region_init`` (the classification —
+    the truth mapped onto slots and the evidence filter — runs there, once per sweep, before the policy
+    prepares); ``messages.transfer._claims`` (the pinned claims); ``calibrate.TransferPolicy`` (the
+    pinned ψ rows)."""
     orig = NI.build_region_init
+    orig_claims = TR._claims
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         _FIRED["init"] += 1
-        true_fg, true_mass = _truth_fg_per_slot(chain)
-        if true_fg is None:
+        _CTX["pins"] = {}
+        slot_truth, index, ra = _CTX.get("slot_truth"), _CTX.get("index"), _CTX.get("region_arrays")
+        if slot_truth is None or index is None or ra is None:
             return ni
-        f_g = np.array(ni.f_g, np.float64)
-        f_pos = np.array(ni.f_pos, np.float64)
-        f_neg = np.array(ni.f_neg, np.float64)
+        true_fg = _parameter_vertex(chain, index, ra, slot_truth, float(_CTX.get("library_f_gdna", 1.0)))
         tau = np.array(ni.tau_lam, np.float64)
-        lock = np.array(ni.struct_lock, bool)
-
-        at_vertex = np.isfinite(true_fg) & (true_mass > 0.0) & (
-            (true_fg <= 0.0) | (true_fg >= 1.0)
-        )
+        at_vertex = np.isfinite(true_fg)
         if evidence_free_only:
             at_vertex &= tau <= _TAU_FREE
         if force_empty:
@@ -312,65 +395,19 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
             at_vertex[:] = False
         tgt = np.flatnonzero(at_vertex)
         _FIRED["pinned"] += int(tgt.size)
-        if tgt.size == 0:
-            return ni
+        _CTX["pins"] = {int(i): float(true_fg[i]) for i in tgt}
+        return ni
 
-        # ── the pin: the exact composition, and the RNA half split across whichever strands are live.
-        #    ⭐ A vertex is the one place this needs no share model: at f_g = 1 there is no RNA to
-        #    split, and at f_g = 0 the split is the object's own strand freedom. ──
-        new_fg = true_fg[tgt]
-        rna = np.maximum(0.0, 1.0 - new_fg)
-        fp_ok = np.asarray(statics.free_pos, bool)[tgt]
-        fn_ok = np.asarray(statics.free_neg, bool)[tgt]
-        tot = f_pos[tgt] + f_neg[tgt]
-        k = fp_ok.astype(np.float64) + fn_ok.astype(np.float64)
-        share_p = np.where(
-            tot > _EPS, f_pos[tgt] / np.maximum(tot, _EPS), np.where(k > 0, fp_ok / np.maximum(k, 1.0), 0.0)
-        )
-        share_n = np.where(
-            tot > _EPS, f_neg[tgt] / np.maximum(tot, _EPS), np.where(k > 0, fn_ok / np.maximum(k, 1.0), 0.0)
-        )
-        f_g[tgt] = new_fg
-        f_pos[tgt] = rna * share_p
-        f_neg[tgt] = rna * share_n
-        # ⭐ CERTAIN, the same way a structurally pure-gDNA object is certain — via `struct_lock`, which
-        #   `own_composition_logvar` already reads. A ceiling must hand over the answer AND the
-        #   confidence, or the relay simply argues it back (TRAPS: substitution-understates-a-source).
-        lock[tgt] = True
-
-        v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
-        M, E_g = region_gdna_geometry(geometry)
-        M = np.asarray(M, np.float64)
-        E_g = np.asarray(E_g, np.float64)
-        E_r = np.asarray(geometry.eff_rna, np.float64)
-        n_region = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
-        rho_g = np.maximum(
-            np.where((M > _EPS) & (E_g > _EPS), f_g * M / np.maximum(E_g, _EPS), 0.0), 0.0
-        )
-        prec_g = NI.own_precision(n_region, v_fg, rho_g > _EPS)
-        touched = np.zeros(f_g.shape[0], bool)
-        touched[tgt] = True
-
-        def _rna(frac, free_s, rho_old):
-            raw = np.where(
-                (M > _EPS) & (E_r > _EPS) & np.asarray(free_s, bool),
-                frac * M / np.maximum(E_r, _EPS),
-                0.0,
-            )
-            live = (n_region > 0.0) & (raw > _EPS) & ((rho_old > 0.0) | touched)
-            rho = np.where(live, raw, 0.0)
-            return rho, NI.own_precision(n_region, v_fr, rho > _EPS)
-
-        rho_pos, prec_pos = _rna(f_pos, statics.free_pos, np.asarray(ni.rho_pos, np.float64))
-        rho_neg, prec_neg = _rna(f_neg, statics.free_neg, np.asarray(ni.rho_neg, np.float64))
-        return NI.RegionInit(
-            f_g=f_g, f_pos=f_pos, f_neg=f_neg,
-            rho_g=rho_g, rho_pos=rho_pos, rho_neg=rho_neg,
-            prec_g=prec_g, prec_pos=prec_pos, prec_neg=prec_neg,
-            struct_lock=lock, tau_lam=tau,
-        )
+    def claims(c):
+        own = orig_claims(c)
+        for i, f_true in (_CTX.get("pins") or {}).items():
+            own[int(i)] = _pin_row(c.lam, f_true)
+            _FIRED["claimed"] += 1
+        return own
 
     SW.build_region_init = wrapper
+    TR._claims = claims
+    CAL.TransferPolicy = _PinnedPolicy
 
 
 def _install_ref_exponent(a_value: float, b_value: float | None = None):
@@ -503,7 +540,8 @@ def _compare(paths: list[Path]) -> int:
 def _patch_targets():
     return (
         (CAL, "solve_chain", SW),
-        (P0, "load_or_build_oracle", None),
+        (CAL, "TransferPolicy", TR),
+        (TR, "_claims", None),
         (NI, "build_region_init", None),
         (SW, "build_region_init", NI),
         (SW, "CompositionPriors", SL),
@@ -631,6 +669,87 @@ def self_test() -> int:
                    and _FIRED["pinned"] == before["pinned"]))
     restore()
 
+    # ── ⑥ the re-pointed pin: a delta on the grid, the claim pinned, the ψ row delivered ─────────────
+    lam21 = np.linspace(-10.0, 10.0, 21)
+    top, bottom, mid = _pin_row(lam21, 1.0), _pin_row(lam21, 0.0), _pin_row(lam21, 0.5)
+    checks.append(("the pin row is a delta: at the top cell for f_g = 1, the bottom for 0, the centre for ½",
+                   top[-1] == 0.0 and bottom[0] == 0.0 and mid[10] == 0.0
+                   and np.sum(top == 0.0) == 1 and np.all(top[:-1] == _PIN_WALL)))
+    # the claims wrapper pins exactly the slots the sweep wrapper classified, and nothing else
+    from types import SimpleNamespace
+
+    NI.build_region_init = lambda chain, statics, geometry, **kw: sentinel
+    TR._claims = lambda c: [None] * c.n
+    _install_vertex_pin(True)
+    _CTX["pins"] = {2: 1.0}
+    before = dict(_FIRED)
+    own = TR._claims(SimpleNamespace(lam=lam21, n=4))
+    checks.append(("the pinned slot's claim is the delta at its truth; every other claim is untouched",
+                   own[2] is not None and np.array_equal(own[2], top)
+                   and own[0] is None and own[1] is None and own[3] is None
+                   and _FIRED["claimed"] == before["claimed"] + 1))
+    # the pinned policy delivers the delta into ψ at the pinned slot, on top of a silent solve
+    pol = CAL.TransferPolicy(lambda g, w: None)
+    prepared = pol.prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0))
+    msg = prepared.solve([None] * 4, [None] * 4)
+    checks.append(("the pinned policy delivers the delta as the slot's ψ row (fires `delivered`)",
+                   msg.lam_rows is not None and msg.lam_rows.shape == (4, 21)
+                   and np.array_equal(msg.lam_rows[2], top) and not msg.lam_rows[0].any()
+                   and _FIRED["delivered"] == before["delivered"] + 1))
+    # ⛔ PERTURBATION: with no pins the policy is the shipped one — silent stays silent
+    _CTX["pins"] = {}
+    checks.append(("with nothing pinned the policy's solve is untouched (silent stays silent)",
+                   CAL.TransferPolicy(lambda g, w: None)
+                   .prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0))
+                   .solve([None] * 4, [None] * 4).is_silent))
+    restore()
+    checks.append(("…and every patch target is restored after the pin",
+                   not [a for m, a, d in _patch_targets() if not _target_live(m, a, d)]))
+
+    # ── ⑥b the population is the PARAMETER vertex ────────────────────────────────────────────────────
+    import pandas as pd
+
+    # regions 0..6 on one reference: A(silent gene: exon,intron,exon) | B(expressed, nascent on) | C(expressed, nascent OFF: exon,intron,exon)
+    # chain: R0 B0 R1 B1 R2 B2 R3 B3 R4 B4 R5 B5 R6  (13 slots, regions at even indices)
+    kind = np.array([REGION if i % 2 == 0 else 1 - REGION for i in range(13)])
+    objx = np.array([i // 2 for i in range(13)])
+    chain = SimpleNamespace(n_slots=13, kind=kind, obj_idx=objx,
+                            left=np.array([-1] + list(range(12))), right=np.array(list(range(1, 13)) + [-1]))
+    ra_ = SimpleNamespace(start=np.arange(7) * 100, end=np.arange(1, 8) * 100, ref_id=np.zeros(7, int))
+    gdf = pd.DataFrame({"ref": ["c"] * 3, "start": [0, 300, 400], "end": [300, 400, 700],
+                        "g_id": ["A", "B", "C"], "is_synthetic": [False] * 3})
+    index_ = SimpleNamespace(g_df=gdf, ref_name_to_id={"c": 0})
+    strat = np.array(["R exon", "B", "R intron", "B", "R exon", "B", "R exon", "B", "R exon", "B", "R intron", "B", "R exon"])
+    count = np.ones(13) * 10.0
+    n_mrna = np.zeros(13)
+    n_nrna = np.zeros(13)
+    n_mrna[6] = 5.0            # gene B's exon (slot 6) is expressed …
+    n_nrna[6] = 1.0            # … with nascent
+    n_mrna[8] = 4.0  # gene C's exons expressed …
+    n_mrna[12] = 3.0  # … and its intron (slot 10) has no nascent
+    st = dict(n_mrna=n_mrna, n_nrna=n_nrna, stratum=strat, count=count)
+    f = _parameter_vertex(chain, index_, ra_, st, 0.5)
+    checks.append(("silent gene A: every region and its interior boundaries are at f_g = 1",
+                   all(f[i] == 1.0 for i in (0, 1, 2, 3, 4))))
+    checks.append(("expressed gene B with nascent: nothing pinned",
+                   np.isnan(f[6]) and np.isnan(f[5]) and np.isnan(f[7])))
+    checks.append(("expressed gene C without nascent: its INTRON is at 1, its exons are not",
+                   f[10] == 1.0 and np.isnan(f[8]) and np.isnan(f[12]) and np.isnan(f[9]) and np.isnan(f[11])))
+    # ⛔ PERTURBATION: one nascent fragment in C's intron un-pins it
+    st2 = dict(st, n_nrna=np.where(np.arange(13) == 10, 1.0, n_nrna))
+    checks.append(("one nascent fragment in the intron un-pins it (chance is not the population)",
+                   np.isnan(_parameter_vertex(chain, index_, ra_, st2, 0.5)[10])))
+    # ⛔ PERTURBATION: an expressed gene overlapping the silent one un-pins the shared regions
+    gdf2 = pd.concat([gdf, pd.DataFrame({"ref": ["c"], "start": [0], "end": [200], "g_id": ["D"], "is_synthetic": [False]})])
+    st3 = dict(st, n_mrna=np.where(np.arange(13) == 0, 2.0, n_mrna))
+    f3 = _parameter_vertex(chain, SimpleNamespace(g_df=gdf2, ref_name_to_id={"c": 0}), ra_, st3, 0.5)
+    checks.append(("RNA inside a silent gene's span (an overlapping gene's) un-pins its EXONS — a slot's RNA "
+                   "is not attributable, so the classification is conservative — while its nascent-free INTRON stays at 1",
+                   np.isnan(f3[0]) and f3[2] == 1.0 and np.isnan(f3[4])))
+    # the zero-gDNA library: every counted slot at 0
+    f0 = _parameter_vertex(chain, index_, ra_, st, 0.0)
+    checks.append(("a zero-gDNA library pins every counted slot at f_g = 0", bool(np.all(f0 == 0.0))))
+
     # ── ⑦ the comparator: byte-identical must be LABELLED, and differently for `noop` ────────────────
     def _rows(arm, bump=0.0):
         return "".join(
@@ -692,7 +811,6 @@ def main() -> int:
     if not args.arm or not args.out:
         ap.error("--arm and --out are required unless --compare or --self-test is given")
 
-    _wrap_oracle()
     _wrap_solve_chain()
     arm = args.arm
     expect_fire: list[str] = []
@@ -702,10 +820,10 @@ def main() -> int:
         expect_fire = ["psi_mean"]
     elif arm == "vertex_free":
         _install_vertex_pin(True)
-        expect_fire = ["pinned"]
+        expect_fire = ["pinned", "claimed", "delivered"]
     elif arm == "vertex_all":
         _install_vertex_pin(False)
-        expect_fire = ["pinned"]
+        expect_fire = ["pinned", "claimed", "delivered"]
     elif arm == "noop":
         # ⭐ the harness's OWN falsification: the same wrapper, pinning nothing. Must be byte-identical
         #   to `base`, and if it is not, the wrapper itself is changing the answer (TRAPS: byte-identity-gate).
@@ -720,6 +838,7 @@ def main() -> int:
         ap.error(f"unknown arm {arm!r}")
 
     index = TranscriptIndex.load(str(args.index))
+    _CTX["index"] = index
     config = CalibrationConfig()
     names = args.conditions or sorted(
         p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
@@ -730,6 +849,16 @@ def main() -> int:
             before = dict(_FIRED)
             cond = args.suite / name
             truth = P0.truth_f_gdna(cond) or 0.0
+            _CTX["library_f_gdna"] = float(truth)
+            _CTX["slot_truth"] = None
+            if arm in ("vertex_free", "vertex_all", "noop"):
+                st = (args.oracle_cache or Path("/nonexistent")) / name / "slot_truth.npz"
+                if not st.is_file():
+                    raise SystemExit(
+                        f"⛔ the vertex population is the PARAMETER vertex and needs the certified "
+                        f"slot_truth: pass --oracle-cache (missing {st})"
+                    )
+                _CTX["slot_truth"] = dict(np.load(st, allow_pickle=True))
             m = P0.measure_condition(
                 bam=str(cond / "sim_oracle.bam"), index=index, pipeline_config=PipelineConfig(),
                 calibration_config=config, work_dir=args.work_dir / "rigel_pass0_oracle", tag=name,

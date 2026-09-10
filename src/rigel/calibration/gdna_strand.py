@@ -248,18 +248,6 @@ def between_seed_variance(overdispersion: float, mean: float = 0.5) -> float:
     return 3.0 * r * r * (2.0 * r + q * (1.0 - 7.0 * r)) / (q * (1.0 + r) * (1.0 + 2.0 * r)) - r * r
 
 
-def binomial_scale(total: np.ndarray, mean: float = 0.5) -> np.ndarray:
-    """``b_s = c_s·Var(od̂_s | ρ = 0) = (2·n·pq + 1 − 6·pq)/(n − 1)`` — the sampling half of a seed's variance,
-    pre-multiplied by its pair scale so it can sit beside ``c_s·V∞`` in :func:`influence_weights`.
-
-    ⭐ At μ = ½ it is exactly ``½`` for every depth (which is why the gDNA weight reads ``1/(½ + c_s·V∞)``);
-    away from ½ it depends on ``n``, so the RNA component must be given its own.
-    """
-    n = np.asarray(total, dtype=np.float64)
-    pq = float(mean) * (1.0 - float(mean))
-    return np.where(n > 1.0, (2.0 * n * pq + 1.0 - 6.0 * pq) / np.maximum(n - 1.0, 1.0), np.inf)
-
-
 def influence_weights(
     pair_scale: np.ndarray,
     overdispersion: float,

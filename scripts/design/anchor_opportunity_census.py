@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """⭐⭐⭐ IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.
 
-⛔ **THE QUESTION.** A structurally pure-gDNA REGION (intergenic, ``struct_lock``) with **zero** counts now
+⛔ **THE QUESTION.** A structurally pure-gDNA REGION (intergenic, ``g1_locked``) with **zero** counts now
 forms and transmits the claim ``rho_g = 0`` at precision ``1/trigamma(1/2) = 0.2026`` (TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero).
 Off capture that is the strongest true statement in a gDNA-free library. **Under capture an empty
 intergenic region may mean "no probe here" rather than "no gDNA here"** — and the relay's currency is a
@@ -19,9 +19,10 @@ model — i.e. the TRUE post-capture gDNA pmf — so the divisor is the solver's
 exact pmf `SUCCESS.md` calls the ceiling. A census that wrote its own opportunity would be measuring a
 different program.
 
-⛔⛔ **THE POPULATION IS `g1_locked` ∧ REGION, AND IT IS *NOT* ``strand_evidence``'s ``struct_lock``.** This
-docstring and the comment at the mask both said "exactly ``struct_lock``" until 2026-08-11 and the two
-masks differ by **15–23×**:
+⛔⛔ **THE POPULATION IS `g1_locked` ∧ REGION, AND IT IS *NOT* the solver's ``locked`` mask** (the slots
+that keep their signature-binary init; the relay-era ``struct_lock`` of the same extent retired 2026-09-09).
+This docstring and the comment at the mask both said "exactly ``struct_lock``" until 2026-08-11 and the
+two masks differ by **15–23×**:
 
 ============================================  ==========  =======================================
 mask                                          size        what it is
@@ -29,15 +30,15 @@ mask                                          size        what it is
 ``anchor`` — what this instrument measures         1,312   ``g1_locked ∧ REGION``: RNA is inadmissible
                                                            on both strands, so the composition is
                                                            structurally certain
-``struct_lock`` — what the solver actually    14,875 to    ``~((free_pos|free_neg) ∧ n_region>0) ∧
-locks (`region_init.py`)                            30,423   REGION`` — which is ``g1_locked`` **∪ every
+``lock`` — what the solver keeps at its init   14,875 to    ``~((free_pos|free_neg) ∧ n_region>0) ∧
+(`region_init.py`'s ``locked``)                     30,423   REGION`` — which is ``g1_locked`` **∪ every
                                                            zero-count REGION**, empty exons and
                                                            introns included
 ============================================  ==========  =======================================
 
-⭐ ``anchor`` is the mask the docstring of ``struct_lock`` *describes* ("scoped to true intergenic REGION
-regions") and the one the standing xfail wants it rescoped to. The shipped code grants certainty to
-**13,563–29,111 further slots** whose ``f_g`` is a default belief and whose evidence is nothing at all.
+⭐ ``anchor`` is the structurally certain population; the solver's ``locked`` mask also holds
+**13,563–29,111 further slots** whose ``f_g`` is a default belief and whose evidence is nothing at all —
+unsolved, never certain.
 
 ⛔ **So this instrument's 346× verdict is a statement about 1,312 anchors, not about the population the
 solver locks.** It is not thereby wrong — the anchors are what the question is about — but its SCOPE was
@@ -160,7 +161,7 @@ def measure(parts, index, ra, sj, boundary_flags) -> dict:
     live = eff_g > 0.0
     rho_g = np.where(live, n_g / np.where(live, eff_g, 1.0), 0.0)
 
-    # ⛔ THE ANCHOR POPULATION IS ``g1_locked ∧ REGION`` — NOT ``strand_evidence``'s ``struct_lock``, which
+    # ⛔ THE ANCHOR POPULATION IS ``g1_locked ∧ REGION`` — NOT the solver's ``locked`` mask, which
     # is 15-23x larger. See the module docstring's table; both claimed "exactly struct_lock" until
     # 2026-08-11 and neither mask matched it.
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
@@ -185,7 +186,7 @@ def measure(parts, index, ra, sj, boundary_flags) -> dict:
     # the mask the SOLVER actually locks, so the scope of every verdict below is printed beside it
     # rather than asserted in prose (`region_init.py`: `locked = ~solvable`, `solvable = (fp|fn) & n>0`).
     mass = n_g + n_r
-    struct_lock = (~((fp | fn) & (mass > 0.0))) & is_region
+    solver_locked = (~((fp | fn) & (mass > 0.0))) & is_region
 
     left, right = np.asarray(chain.left, np.int64), np.asarray(chain.right, np.int64)
     empty = anchor & (n_g <= 0.0)
@@ -203,8 +204,8 @@ def measure(parts, index, ra, sj, boundary_flags) -> dict:
         n_anchor=int(anchor.sum()),
         # ⭐ the two population sizes, side by side. `n_lock_extra` is the count of slots the solver
         # treats as composition-CERTAIN and this instrument never looked at.
-        n_lock=int(struct_lock.sum()),
-        n_lock_extra=int((struct_lock & ~anchor).sum()),
+        n_lock=int(solver_locked.sum()),
+        n_lock_extra=int((solver_locked & ~anchor).sum()),
         n_empty=int(empty.sum()),
         eff_empty=float(eff_g[empty].sum()),
         eff_anchor=float(eff_g[anchor].sum()),
@@ -270,7 +271,7 @@ def main() -> int:
 
     print("\n" + "=" * 136)
     print(
-        "⛔ SCOPE: `anchor` is `g1_locked & REGION`; `lock` is the solver's own `struct_lock`, which also\n"
+        "⛔ SCOPE: `anchor` is `g1_locked & REGION`; `lock` is the solver's own `locked` mask, which also\n"
         "   contains every ZERO-COUNT region (empty exons and introns). Every verdict on a row is a\n"
         "   statement about the `anchor` column only — `lock/anch` is the factor by which the solver\n"
         "   locks more than this instrument measured.\n"

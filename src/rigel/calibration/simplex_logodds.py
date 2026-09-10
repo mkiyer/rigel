@@ -258,7 +258,7 @@ def _posterior_median_fg(post, lam, fg):
     * at ``κ = ½`` the strand term is bit-flat, so EVERY slot is in that state and the snap was a constant
       ±0.0423 (``n_grid`` 60) that did not shrink with depth — it was the whole closure defect there;
     * and it propagates: `_compose` builds the RNA fractions from ``1 − f_g``, so a snapped ``f_g`` snaps
-      the whole composition. `test_relay_mass_rescale`'s ``R_own = 0.5`` is what caught it.
+      the whole composition. The retired relay's mass-rescale gate (``R_own = 0.5``) is what caught it.
 
     ⚠ **NOT the "sub-grid MODE" this docstring used to refuse**, and the distinction is the point: a mode
     is an argmax and can chase a single spike, which is what would under-call a skewed or vertex-near

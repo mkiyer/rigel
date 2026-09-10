@@ -147,7 +147,18 @@ monkeypatch into a silent no-op;
 ③ the counter is not enough, because the config is part of the arm's definition: under one shipped
 default, 22 of 26 arms fired on tens of thousands of slots and still scored byte-identical to base —
 so require a diff against a base run under the SAME config, prove each arm INERT under one policy
-and MOVED under the other, and stamp the setting into every row.
+and MOVED under the other, and stamp the setting into every row;
+④ an arm that fired can still be a HYBRID: a "purely local" prototype arm reported to the owner
+(2026-09-03) re-set one hop's width to the pooled value after its local block, so it was local on one
+hop and pooled on the other — found only by logging the widths each implementation APPLIED (96
+non-zero widths summing to 57.8 against 184 summing to 10.8). Before reporting an arm, log what it
+applies, not what its flags say;
+⑤ an arm can remove MORE than it names: a prototype that popped rules "by face" at every terminus
+boundary also popped the edge's level at every gene edge (an intergenic|exon face carries a terminus
+flag), so "removing the abundance map helps 10 %" was partly "removing the edge level helps"
+(2026-09-04). The clean attribution is source against source — the landed policy with only the one
+rule removed — and the per-slot identity gate of the landed form against the prototype is not
+optional.
 
 **a-green-suite-hid-five-dead-instruments. An instrument is alive only under the configuration it is
 RUN in, and a green suite says nothing about it — the suite's own tests may install a policy the
@@ -858,9 +869,8 @@ one line:* "the relay was measured bad, so it is off" — the +154.8 % price was
 named,
 confirmed licence bug live on a retired ladder, so re-price rather than inherit; "the mechanism does
 not
-exist yet" — it is built and switched off, `messages/relay.py`'s SPLICE IN (BOUNDARY → EXON) is
-exactly that
-hop, behind `CalibrationConfig.message_propagation`; "a simplex vertex is unreachable, so the
+exist yet" — it is built and SHIPS: the transfer policy's splice-in face map (BOUNDARY → EXON,
+`messages/transfer._splice_faces`) is exactly that hop, on by default since 2026-09-09; "a simplex vertex is unreachable, so the
 shortfall is
 irreducible" — that theorem requires a prior with a DENSITY and says nothing about one with an ATOM;
 "an
@@ -1091,7 +1101,7 @@ JACOBIAN (`[f(1−f)]²` alone predicts 3,154× of it, so the likelihood genuine
 the term
 acts as a boolean gate flip rather than a contribution (τ = 0.029 and τ = 1e6 both return 850.44
 against a
-ceiling of 850.50), and it credits DATA-FREE slots (`n = 0` goes `prec_g` 0 → 0.2026).
+ceiling of 850.50), and it credits DATA-FREE slots (`n = 0` went from silent to a precision of 0.2026 under the retired relay's own-belief arithmetic).
 
 ⭐ *The rule:* before adding any term to a precision, ask whether it scales with the DATA. If it does
 not,

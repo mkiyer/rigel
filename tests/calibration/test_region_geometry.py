@@ -33,7 +33,6 @@ from rigel.calibration.region_geometry import (
     RegionGeometry,
     build_region_geometry,
     region_gdna_geometry,
-    region_total_density,
 )
 from rigel.calibration.splice_graph import SpliceJunctionGeometry
 from rigel.calibration.substrate import CalibrationSubstrate
@@ -593,79 +592,6 @@ def test_region_gdna_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
     mass, eff = region_gdna_geometry(geometry)
     np.testing.assert_array_equal(mass, geometry.unspliced_count.sum(axis=1))
     np.testing.assert_array_equal(eff, geometry.eff_gdna)
-
-
-def test_region_total_density_is_the_SUM_of_component_densities_each_in_its_own_frame(
-    geometry, parts
-):
-    """rho = f_g*(M/E_g) + (1-f_g)*(M/E_r), each component in its OWN length frame, plus the flank's own
-    sj flux. Never one shared divisor.
-
-    ⭐ `region_total_density` returns a PAIR — the total for the genomic-LOW flank and the one for the
-    genomic-HIGH flank — so the unspliced part is what the two have in COMMON, and each side adds only
-    its own half of the flux. At a REGION both banks are 0, so both returns are the unspliced sum exactly.
-    """
-    _, _, _, chain, _ = parts
-    f_g = np.full(chain.n_slots, 0.25)
-    rho_lo, rho_hi = region_total_density(geometry, f_g)
-    mass = geometry.unspliced_count.sum(axis=1)
-    unspliced = mass * (
-        0.25 / np.where(geometry.eff_gdna > 0, geometry.eff_gdna, np.inf)
-        + 0.75 / np.where(geometry.eff_rna > 0, geometry.eff_rna, np.inf)
-    )
-    region_slots = np.asarray(chain.kind) == REGION
-    np.testing.assert_allclose(rho_lo[region_slots], unspliced[region_slots])
-    np.testing.assert_allclose(rho_hi[region_slots], unspliced[region_slots])
-    assert np.all(rho_lo >= unspliced) and np.all(rho_hi >= unspliced)
-    # ⛔ and the two halves must ACCOUNT FOR THE WHOLE flux — no sj may fall between them
-    whole = np.zeros(int(chain.n_slots))
-    for s in (0, 1):
-        c, e = geometry.sj_count[:, s], geometry.eff_sj[:, s]
-        whole += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
-    np.testing.assert_allclose((rho_lo - unspliced) + (rho_hi - unspliced), whole)
-
-
-def test_a_zero_opportunity_object_emits_ZERO_DENSITY_not_infinity(parts):
-    """⛔ The other half of trap 23. With the divisor no longer floored, the consumer must divide by
-    zero *safely* — a region that cannot hold the component has no density, not an infinite one."""
-    _, region_arrays, substrate, chain, sj = parts
-    huge = spike_pmf(150)
-    g = build_region_geometry(chain, substrate, region_arrays, sj, huge, huge)
-    rho_u, rho_w = region_total_density(g, np.full(chain.n_slots, 0.5))
-    assert np.all(np.isfinite(rho_u))
-    assert np.all(np.isfinite(rho_w))
-    region_slots = np.asarray(chain.kind) == REGION
-    assert np.all(rho_u[region_slots] == 0.0)
-
-
-def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
-    """rho_mature = sum over transcript strands of count/E, each strand in its own frame — and a strand
-    with no flux contributes nothing rather than a 0/0.
-
-    ⭐ Per FLANK: the LOW-flank total carries the flux of sj whose genomic-low end is this boundary and
-    the HIGH-flank total the rest, so the pooling over strands is checked inside each side separately."""
-    _, _, _, chain, _ = parts
-    rho_lo, rho_hi = region_total_density(geometry, np.zeros(chain.n_slots))
-    # with f_g = 0 and E_r > 0 the unspliced part is common to both, so the DIFFERENCE isolates the flux
-    for side, other, count, eff in (
-        (rho_lo, rho_hi, geometry.sj_count_lo, geometry.eff_sj_lo),
-        (rho_hi, rho_lo, geometry.sj_count_hi, geometry.eff_sj_hi),
-    ):
-        expected = np.zeros(int(chain.n_slots))
-        for s in (0, 1):
-            c, e = count[:, s], eff[:, s]
-            expected += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
-        other_flux = np.zeros(int(chain.n_slots))
-        for s in (0, 1):
-            c, e = (
-                (geometry.sj_count_hi, geometry.eff_sj_hi)
-                if side is rho_lo
-                else (geometry.sj_count_lo, geometry.eff_sj_lo)
-            )
-            other_flux += np.where(
-                (c[:, s] > 0) & (e[:, s] > 0), c[:, s] / np.where(e[:, s] > 0, e[:, s], 1.0), 0.0
-            )
-        np.testing.assert_allclose(side - (other - other_flux), expected)
 
 
 def test_spliced_count_and_sj_count_are_DIFFERENT_POPULATIONS(geometry, parts):

@@ -62,6 +62,10 @@ TOKENS = {
     "junction": None,  # ⛔ AMBIGUOUS: bare `junction` is banned, `splice_junction`/`sj` are not
     "donor": None,  # ⛔ AMBIGUOUS: splice donor vs the toy harness's source condition
     "acceptor": None,
+    #: the message policy retired on 2026-09-09. A surviving site is history (a docstring recording
+    #: what was measured against it), a doc, or a label that still names it for a live mechanism —
+    #: only the last is a defect, and the per-site dump is how the three are told apart.
+    "relay": None,
 }
 
 #: ⭐ Names that are CORRECT and must survive the rename. Each is here for a measured reason, not taste.

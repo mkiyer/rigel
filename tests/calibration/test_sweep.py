@@ -225,7 +225,7 @@ def test_gdna_sweep_factor1_intergenic_anchors():
 
 
 def test_interior_anchor_is_immovable_and_produces_no_nan():
-    """The `struct_lock` interior-anchor regression (HANDOFF_5 §6). A composition-CERTAIN region has
+    """The interior-anchor regression. A composition-CERTAIN (`g1_locked`) region has
     ``Var(log f_c) = 0``, so any code path that forms a fusion weight as ``1/Var`` produces ``∞`` and cascades
     a nan through the whole chain. Pin both halves of the contract on the factor-1 chain, whose two intergenic
     REGIONs are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
@@ -233,7 +233,7 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
     1. **no nan anywhere** — beliefs and variances stay finite (``∞`` is the honest 'unsolved' state and is
        allowed on a variance; nan never is);
     2. **the anchor is IMMOVABLE** — it reads back the true ρ exactly beside an AMBIG neighbour that is
-       itself wrong by 22 %: a struct_lock region is never `solvable`, so its ψ output is discarded and its
+       itself wrong by 22 %: a `g1_locked` region is never `solvable`, so its ψ output is discarded and its
        own count stands."""
     rho = 0.5
     rho_g = _factor1_uniform_rho()

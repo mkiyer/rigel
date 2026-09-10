@@ -40,7 +40,7 @@ that already exists, and they are reported separately:
 "worse" than P on an object its neighbours rescued. ⛔ ``C_info − P`` is therefore NOT a gap and is
 not reported as one. The useful statement is the reverse, and it is the point of the whole script:
 **objects that C_info says are undetermined but that P answers anyway are objects whose answer came
-entirely from the relay** — the class that carried 92 % of all error in the last full sweep.
+entirely from the messages and the prior** — the class that carried 92 % of all error in the last full sweep.
 
 SCORING RULES, NON-NEGOTIABLE
 -----------------------------
@@ -136,7 +136,7 @@ AXES = ("region", "boundary")
 #: ⭐ WHERE DID THE ANSWER COME FROM? The solver's own three-way partition of a slot, reproducing
 #: ``region_init``'s definitions. Mutually exclusive and exhaustive — a gate asserts the mass and the
 #: error both decompose over them exactly.
-SOLVER_CLASSES = ("own_evidence", "relay_only", "struct_lock")
+SOLVER_CLASSES = ("own_evidence", "message_only", "struct_lock")
 
 #: ⭐ IS THE ANSWER THERE AT ALL? The 2x2's identification status per object. ``absent`` is a class,
 #: not a filter: an object with no mass has no answer to get right or wrong, and folding it into any
@@ -263,15 +263,12 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
       pure-gDNA intergenic region as a solver failure.
       ⛔ **BOTH AXES** — :func:`~rigel.calibration.region_geometry.g1_locked`. This was
       ``(~solvable) & (kind == REGION)``, so every structurally-locked BOUNDARY — an intergenic↔exon boundary,
-      where RNA cannot cross a gene boundary — was filed as ``relay_only``, i.e. as an object whose
+      where RNA cannot cross a gene boundary — was filed as ``message_only``, i.e. as an object whose
       answer came from its neighbours, when nothing was ever asked of it and its ``f_g = 1`` is the
       pinned init.
-      ⚠⚠ **AND IT IS NOT THE SAME MASK AS ``region_init.strand_evidence``'s ``struct_lock``**, which is
-      region-only ON PURPOSE. That one answers "may this slot EMIT composition certainty into its
-      messages?" and excludes G1 boundaries because a boundary is structurally gDNA yet sits between
-      RNA-carrying exons, so certainty there compounds into a phantom-gDNA emitter. Two questions, one
-      word; ``g1_locked``'s docstring holds the distinction.
-    * ``relay_only`` — no own composition evidence at all (``tau_lam`` at zero and not locked). Its
+      ⚠ The relay-era region-only mask of the same name (``region_init``'s ``struct_lock``) retired
+      on 2026-09-09; ``g1_locked`` is the one home.
+    * ``message_only`` — no own composition evidence at all (``tau_lam`` at zero and not locked). Its
       gDNA/RNA split is decided entirely by neighbour messages and the population prior.
     * ``own_evidence`` — everything else: the strand Beta-Binomial, the intron factory's density
       deconvolution, or the length channel had something to say here.
@@ -290,10 +287,10 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
     """
     tau = np.asarray(capture["_tau0_lam"], np.float64)
     struct_lock = g1_locked(capture["free_pos"], capture["free_neg"])
-    relay_only = (tau <= eps) & (~struct_lock)
+    message_only = (tau <= eps) & (~struct_lock)
     return {
-        "own_evidence": ~(struct_lock | relay_only),
-        "relay_only": relay_only,
+        "own_evidence": ~(struct_lock | message_only),
+        "message_only": message_only,
         "struct_lock": struct_lock,
     }
 
@@ -713,7 +710,7 @@ def measure_condition(
     }
 
     # ⭐ THE CROSS-TAB. Not a threshold on confidence — a threshold would be a magic number and this
-    # needs none. "Undetermined by C_info × answered by the relay" is a cell of a partition, and its
+    # needs none. "Undetermined by C_info × answered by the messages" is a cell of a partition, and its
     # error share is the statement.
     cross = {}
     p0 = arms["pass0"]
@@ -868,7 +865,7 @@ def _report_classes(measurements: list[ConditionMeasurement]) -> None:
     print("═" * 112)
     print("⭐ WHERE THE ERROR IS — pass-0, by the SOLVER's own three-way partition of each object")
     print("═" * 112)
-    print("   own_evidence: strand / intron factory / length spoke here.  relay_only: nothing did — "
+    print("   own_evidence: strand / intron factory / length spoke here.  message_only: nothing did — "
           "the answer\n   came from neighbours and the population prior.  struct_lock: composition "
           "CERTAIN, nothing to decide.")
     for m in measurements:
@@ -924,7 +921,7 @@ def _report_info(measurements: list[ConditionMeasurement]) -> None:
 def _report_cross(measurements: list[ConditionMeasurement]) -> None:
     print()
     print("═" * 112)
-    print("⭐⭐ THE CELL THIS SCRIPT EXISTS TO FIND — undetermined by C_info × answered by the RELAY")
+    print("⭐⭐ THE CELL THIS SCRIPT EXISTS TO FIND — undetermined by C_info × answered by the MESSAGES")
     print("═" * 112)
     print("   An object with no own evidence AND no identifiable 2×2 has no answer of its own at "
           "all: whatever\n   pass-0 reports there came entirely from its neighbours and the "
@@ -943,7 +940,7 @@ def _report_cross(measurements: list[ConditionMeasurement]) -> None:
                     s = m.cross[axis][(i, s_name)]
                     if s.n_scored == 0:
                         continue
-                    star = "⭐" if (i in undetermined and s_name == "relay_only") else "  "
+                    star = "⭐" if (i in undetermined and s_name == "message_only") else "  "
                     print(
                         f"   {'':<5} {star} {i + ' × ' + s_name:<37} "
                         f"{s.mass / whole.mass:>10.1%} {s.abs_err:>13,.0f} "

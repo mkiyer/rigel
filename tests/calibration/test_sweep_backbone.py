@@ -19,7 +19,6 @@ import pytest
 from rigel.calibration import sweep as SW
 from rigel.calibration.messages import NO_NEIGHBOUR, SILENCE, Message, PsiMessage, StepContext
 from rigel.calibration.messages.silent import SilentPolicy
-from rigel.calibration.simplex_logodds import _logodds_grid
 
 
 N = 8
@@ -30,23 +29,14 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
     ones = np.ones(N)
     fp = np.ones(N, bool) if free_pos is None else np.asarray(free_pos, bool)
     fn = np.zeros(N, bool) if free_neg is None else np.asarray(free_neg, bool)
-    lam, grid = _logodds_grid(n_grid, 10.0)
     return StepContext(
-        mass=ones * 100.0,
-        inv_abundance=ones * 0.5,
-        inv_sj_lo=np.zeros((N, 2)),
-        inv_sj_hi=np.zeros((N, 2)),
-        eff_gdna_global=ones * 200.0,
-        eff_rna=ones * 200.0,
         eff_gdna=ones * 200.0,
-        eff_sj=np.ones((N, 2)) * 200.0,
+        eff_rna=ones * 200.0,
+        sj_count=np.zeros((N, 2)),
         sj_count_lo=np.zeros((N, 2)),
         sj_count_hi=np.zeros((N, 2)),
-        sj_count=np.zeros((N, 2)),
         route_rate_lo=np.zeros((N, 2)),
         route_rate_hi=np.zeros((N, 2)),
-        route_count_lo=np.zeros((N, 2), dtype=np.int64),
-        route_count_hi=np.zeros((N, 2), dtype=np.int64),
         unspliced_count=np.ones((N, 2)) * 5.0,
         n_slot=ones * 10.0,
         spliced_slot=np.zeros(N),
@@ -54,23 +44,15 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         right=np.append(np.arange(1, N), -1),
         is_boundary=np.arange(N) % 2 == 1,
         is_exon_region=np.zeros(N, bool),
-        left_interface_certified=np.zeros(N, bool),
-        right_interface_certified=np.zeros(N, bool),
-        ss_intron_boundary=np.zeros(N, bool),
         free_pos=fp,
         free_neg=fn,
         exon_pos=np.zeros(N, bool),
         exon_neg=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.int64),
-        geometry=None,
-        order=list(range(N)),
-        left_list=list(range(-1, N - 1)),
-        right_list=[*range(1, N), -1],
         own=None,
         belief_fg=ones,
         n_grid=n_grid,
         logodds_window=10.0,
-        solve_grid=grid,
     )
 
 
@@ -117,8 +99,8 @@ def test_every_node_holds_a_message_from_each_neighbour_it_has():
     on the open side — which is not a message and not SILENCE."""
     ctx = _ctx()
     left, right = list(ctx.left), list(ctx.right)
-    fl = SW._pass(list(ctx.order), left, _Echo().prepare(ctx), backward=False)
-    br = SW._pass(list(ctx.order)[::-1], right, _Echo().prepare(ctx), backward=True)
+    fl = SW._pass(list(range(ctx.n_slots)), left, _Echo().prepare(ctx), backward=False)
+    br = SW._pass(list(range(ctx.n_slots))[::-1], right, _Echo().prepare(ctx), backward=True)
     for i in range(N):
         if left[i] >= 0:
             assert fl[i].level_gdna[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
@@ -136,8 +118,8 @@ def test_the_passes_run_in_chain_order_and_read_one_side_each():
     mirror — so what a source holds from its far side is written before it is asked to send."""
     ctx = _ctx()
     pol = _Echo()
-    SW._pass(list(ctx.order), list(ctx.left), pol.prepare(ctx), backward=False)
-    SW._pass(list(ctx.order)[::-1], list(ctx.right), pol.prepare(ctx), backward=True)
+    SW._pass(list(range(ctx.n_slots)), list(ctx.left), pol.prepare(ctx), backward=False)
+    SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), pol.prepare(ctx), backward=True)
     assert pol.hops[False] == [(i - 1, i) for i in range(1, N)]
     assert pol.hops[True] == [(i + 1, i) for i in range(N - 2, -1, -1)]
 
@@ -153,7 +135,7 @@ def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
 
     ctx = _ctx()
     with pytest.raises(AssertionError, match="ARRIVE as SILENCE"):
-        SW._pass(list(ctx.order), list(ctx.left), _Mute().prepare(ctx), backward=False)
+        SW._pass(list(range(ctx.n_slots)), list(ctx.left), _Mute().prepare(ctx), backward=False)
 
 
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
@@ -165,19 +147,18 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
         def propagate(self, *, backward: bool):
             return None
 
-    fl = SW._pass(list(ctx.order), list(ctx.left), _Quiet().prepare(ctx), backward=False)
+    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), _Quiet().prepare(ctx), backward=False)
     assert fl[0] is NO_NEIGHBOUR and all(m is SILENCE for m in fl[1:])
     assert SILENCE.is_silent and Message(level_gdna=(0.0, 1.0)).is_silent is False
 
 
 def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
-    """THE LANES (owner ruling 2026-09-04): a kernel that fills every lane — both composition profiles
+    """THE LANES (owner ruling 2026-09-04): a kernel that fills every lane — the composition profile
     and the three level claims — hands them to the solve untouched, and a message with any one lane is
     not silent. The backbone carries; it never reads a lane."""
     ctx = _ctx()
     full = Message(
         composition=np.zeros(3),
-        tilt=np.zeros(2),
         level_gdna=(-2.0, 0.1),
         level_rna_pos=(-3.0, 0.2),
         level_rna_neg=(-4.0, 0.3),
@@ -189,8 +170,8 @@ def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
 
     pol = _Full()
     prepared = pol.prepare(ctx)
-    fl = SW._pass(list(ctx.order), list(ctx.left), prepared, backward=False)
-    br = SW._pass(list(ctx.order)[::-1], list(ctx.right), prepared, backward=True)
+    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
+    br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
     prepared.solve(fl, br)
     got_l, got_r = pol.held
     for i in range(N):
@@ -200,7 +181,7 @@ def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
             assert got_r[i] is full
     assert not full.is_silent and Message().is_silent
     for lane in Message.LANES:
-        one = Message(**{lane: np.zeros(2) if lane in ("composition", "tilt") else (0.0, 1.0)})
+        one = Message(**{lane: np.zeros(2) if lane == "composition" else (0.0, 1.0)})
         assert not one.is_silent, f"a message with only {lane} read as silence"
 
 
@@ -209,8 +190,8 @@ def test_the_solve_receives_the_two_held_lists_at_the_recipient():
     ctx = _ctx()
     pol = _Echo()
     prepared = pol.prepare(ctx)
-    fl = SW._pass(list(ctx.order), list(ctx.left), prepared, backward=False)
-    br = SW._pass(list(ctx.order)[::-1], list(ctx.right), prepared, backward=True)
+    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
+    br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
     prepared.solve(fl, br)
     assert pol.held == (fl, br)
 
@@ -229,14 +210,14 @@ def test_lambda_rows_are_checked_for_shape_and_finiteness():
     ctx = _ctx()
     K = int(ctx.n_grid)
     ok = _counts(PsiMessage(lam_rows=np.zeros((N, K))), ctx)
-    assert ok["flux_rows_finite"] == {"violations": 0, "eligible": N}
+    assert ok["lam_rows_finite"] == {"violations": 0, "eligible": N}
     with pytest.raises(ValueError, match="lam_rows has shape"):
         _counts(PsiMessage(lam_rows=np.zeros((N + 1, K))), ctx)
     with pytest.raises(ValueError, match="lam_rows has shape"):
         _counts(PsiMessage(lam_rows=np.zeros(N)), ctx)
     bad = np.zeros((N, K))
     bad[2, 0] = np.nan
-    with pytest.raises(AssertionError, match="flux_rows_finite"):
+    with pytest.raises(AssertionError, match="lam_rows_finite"):
         _counts(PsiMessage(lam_rows=bad), ctx)
 
 
@@ -339,7 +320,7 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
     """⭐⭐⭐ **THE STRUCTURAL CLAIM OF THE WHOLE RESTRUCTURE, as a test.** The backbone owns the shape of the
-    solve and the five assertions; every message-composition choice is a policy. If one of these concepts
+    solve and the four assertions; every message-composition choice is a policy. If one of these concepts
     reappears in ``sweep.py``, an operator has leaked back into the backbone and the next reader can no
     longer hold the working system in their head.
 
@@ -348,8 +329,8 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
     that reason is vacuous, and this one failed exactly that way when first written.
 
     ⚠ **``capture`` has ONE licensed occurrence and it is not the biology**: ``_capture`` is the diagnostics
-    hook every instrument passes by keyword, and it carried that name in the shipped solver. Hybrid capture —
-    the thing the message layer argues about — appears nowhere."""
+    hook every instrument passes by keyword (the context no longer carries it: no policy read it). Hybrid
+    capture — the thing the message layer argues about — appears nowhere."""
     import ast
     import inspect
 
@@ -369,15 +350,16 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
         "flank",
         "damp",
         "mismatch",
+        "level",
+        "lane",
     )
     leaked = {w: sorted(i for i in ident if w in i) for w in banned}
     assert not any(leaked.values()), (
         f"policy concepts leaked into the backbone's identifiers: {leaked}"
     )
     cap = sorted(i for i in ident if "capture" in i)
-    assert cap == ["_capture", "capture"], (
-        f"the only licensed 'capture' is the diagnostics hook — the parameter and the StepContext field "
-        f"that carries it. Found {cap}"
+    assert cap == ["_capture"], (
+        f"the only licensed 'capture' is the diagnostics hook, the parameter. Found {cap}"
     )
 
 

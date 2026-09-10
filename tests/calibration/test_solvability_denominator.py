@@ -1,7 +1,7 @@
 """⛔⛔ THE RANKING COLUMN MUST NOT BE GAMEABLE BY THE SOLVER KNOWING LESS — TRAPS: honesty-metrics-reward-ignorance, TRAPS: deadband-from-the-wrong-sample.
 
 `solvability_audit`'s headline scores the SOLVABLE population, and "solvable" is a BOOLEAN on a
-CONTINUOUS quantity: `own_composition_logvar` treats any `tau_lam > 1e-9` as own evidence. On an
+CONTINUOUS quantity: `has_own_composition_evidence` treats any `tau_lam` above a guard as own evidence. On an
 unstranded library the strand arm carries a genuinely nonzero but physically nil precision —
 measured `I ≈ Var(κ̂)·N_eff/(p(1−p))`, i.e. roughly the region's depth over the library's spliced
 depth — so that boolean flips on fitting noise at some conditions and not others.
@@ -31,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.region_init import has_own_composition_evidence, own_composition_logvar
+from rigel.calibration.region_init import has_own_composition_evidence
 
 
 def _fixture(n=400, seed=3):
@@ -64,22 +64,21 @@ def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
     the predicate is a production concept and ``scripts/`` is deliberately not importable.
 
     ⛔ Three instruments used to each restate ``_EPS = 1.0e-9`` beside a comment saying it must
-    match the solver. Changing the solver would have moved none of them."""
-    tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
-    got = has_own_composition_evidence(tau)
-    # it is EXACTLY the predicate `own_composition_logvar` applies — read off that function, not
-    # restated here: where it says "no evidence" the variance is infinite.
-    v_fg, v_fr = own_composition_logvar(np.full(tau.shape, 0.4), tau, np.zeros(tau.shape, bool))
-    assert np.array_equal(got, np.isfinite(v_fg))
-    assert np.array_equal(got, np.isfinite(v_fr))
+    match the solver. Changing the solver would have moved none of them. The instruments import the
+    home (`composition_evidence_census`, `pass0_vs_oracle` — gated in ``test_pass0_vs_oracle``), and
+    on every value the solver publishes — exactly zero where the deadband or the AMBIG gate silenced
+    the channel, a Fisher information otherwise — the home agrees with the transfer policy's own
+    liveness test on a node's strand channel, ``tau_lam > 0``."""
+    tau = np.array([0.0, 1e-4, 1.0, 850.0])
+    assert np.array_equal(has_own_composition_evidence(tau), tau > 0.0)
 
 
-def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_solver():
-    """⚠ The falsification for TRAPS: a-message-from-the-destinations-belief — if a consumer picked its own region_bound, the identity above breaks."""
+def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
+    """⚠ The falsification: a consumer that picked its own floor disagrees with the home on a τ that
+    spans the guard, so a restated number cannot pass for the imported predicate."""
     tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
     theirs = tau > 1e-6  # a plausible, wrong, home-made floor
-    v_fg, _ = own_composition_logvar(np.full(tau.shape, 0.4), tau, np.zeros(tau.shape, bool))
-    assert not np.array_equal(theirs, np.isfinite(v_fg))
+    assert not np.array_equal(theirs, has_own_composition_evidence(tau))
 
 
 # ── D1/D3 — the two fixed-denominator fields ────────────────────────────────────────────────────

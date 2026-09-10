@@ -378,7 +378,7 @@ class CalibrationConfig:
     #: pre-factory pass-0.
     #:
     #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
-    #: (``I_factory``, in the retired relay). Before that the factory shifted an intron's own
+    #: (``I_factory``). Before that the factory shifted an intron's own
     #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
     #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
     #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite (⚠ DELETED — see

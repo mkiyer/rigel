@@ -4,8 +4,8 @@
 The loop is: run the panel → measure the full error table → take the worst conditions → **dissect
 them to individual regions/boundaries** → find the mechanism → fix → start again.
 ``pass0_vs_oracle.py`` does the table and ranks CLASSES; this does the last step, which no instrument
-covered. A class share says *where* the error lives; it cannot say *why*, and "the relay" is a name
-for a set of objects, not a mechanism.
+covered. A class share says *where* the error lives; it cannot say *why*, and "message-only" is a
+name for a set of objects, not a mechanism.
 
 ⭐ **RANKED BY ERROR MASS, NEVER BY MEAN ERROR.** A 1 bp region holding two fragments can carry a
 ``|Δf_g|`` of 1.0 and be worth two fragments of error; an exon holding 40,000 at ``|Δf_g| = 0.05``
@@ -26,7 +26,7 @@ divided by, the classes from ``pass0_vs_oracle`` (one definition, not a second c
 from ``_debug["capture"]``. A dissection tool that recomputes its own version of the solver's inputs
 is debugging a different program.
 
-⚠ **THE NEIGHBOUR COLUMNS ARE THE POINT ON RELAY-ONLY OBJECTS.** An object with no own evidence takes
+⚠ **THE NEIGHBOUR COLUMNS ARE THE POINT ON MESSAGE-ONLY OBJECTS.** An object with no own evidence takes
 its answer from its neighbours, so its error is only interpretable beside theirs. For a REGION the
 neighbours are the two flanking BOUNDARY slots and vice versa — the chain is ``N E N E … N`` per
 reference, so "neighbour" is unambiguous and needs no graph traversal.
@@ -262,7 +262,7 @@ def report(m, d: dict, axis: str, arm: str, top: int) -> None:
     print("   fg_loc = the MESSAGE-FREE local self-solve; pred_fg = after the sweep. ⭐ If the two")
     print("   agree, the messages are innocent and the local solve is the defect — and vice versa.")
     print("   rho = N / E_g, the region's own density in the gDNA frame (vs the intergenic background).")
-    print("   nb err = the two ADJACENT chain slots' gDNA mass errors. ⭐ On a relay-only object this")
+    print("   nb err = the two ADJACENT chain slots' gDNA mass errors. ⭐ On a message-only object this")
     print("   is the whole explanation: it has no evidence of its own, so its answer came from these.")
 
 

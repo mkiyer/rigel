@@ -168,8 +168,8 @@ def build_region_chain(
                 kind[slot] = BOUNDARY
                 obj_idx[slot] = boundary_base + i
                 slot += 1
-        # link consecutive slots WITHIN this reference; the two terminals keep -1, so a sweep cannot
-        # relay across a reference boundary
+        # link consecutive slots WITHIN this reference; the two terminals keep -1, so no message can
+        # cross a reference boundary
         ref_slots = np.arange(first_slot, slot, dtype=np.int64)
         left[ref_slots[1:]] = ref_slots[:-1]
         right[ref_slots[:-1]] = ref_slots[1:]

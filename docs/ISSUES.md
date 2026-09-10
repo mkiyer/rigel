@@ -91,6 +91,20 @@ never a tail-end sweep. ⚠ Candidate verbs and their collisions: *resolve* (col
 assignment), *settle*, *place*, *adjudicate* — the owner picks. The QC dataclass and the
 `payload.drain is not None` frame test rename with it.
 
+### rename-row-and-face
+`priority: later · kind: decision · stamped: 2026-09-09 (moved from the owner's sandbox note of 2026-08)`
+Two more terms the owner flagged as obscure beside `drain` (`ISSUES: rename-the-drain`). **"row"**:
+the calibration solver's word for a slot's max-normalised log-profile over the solve grid — a
+message's composition claim, ψ's `lam_rows`, the intron factory's per-slot factor. The owner: "This
+is obscure. It is not a biological term. It typically refers to rows of a table. We need to understand
+and then rename this term." ⚠ It IS a row of a ``(n_slots, K)`` array, which is where the word came
+from; a candidate is *profile*, which the transfer policy's docstrings already use for the same
+object. **"face"**: the transfer policy's word for one DIRECTED side of a boundary — the pair
+``(source, destination)`` a rule is keyed by, distinct from the boundary itself (one boundary carries
+two faces). The owner: "a 'face' is a synonym for boundary, but we should try to keep the terminology
+standardized." ⚠ Both are `rename_census.py --sense` passes with `rename_identity.py --freeze/--check`,
+like the drain; the owner picks the words.
+
 ### drain-contaminates-certified-rna
 `priority: later (PARKED by owner, 2026-09-01 — diminishing returns; the ceiling refused the in-solve correction) · kind: defect · stamped: 2026-08-31`
 **The second-pass drain deposits some TRUE-gDNA fragments into the certified-RNA banks** — the
@@ -273,22 +287,6 @@ a node where both strands are lit it under-reads the weaker strand, so a dim cla
 can arrive sharper than it should; on the ladder no such case moved a row (the dark host intron beside a
 lit antisense exon is the case that occurs, and there the claim is true).
 
-### flux-source-skipped-at-an-empty-exon-piece
-`priority: next · kind: problem · stamped: 2026-09-09`
-
-The transfer policy builds a junction's flux level only at a NON-EMPTY exon (`_rna_lanes` iterates
-``~empty & free``), so a junction whose exon piece has no unspliced fragment and no RNA opportunity of its
-own — a 50-base piece between a junction and a terminus, the shape `certified_rna_audit.py`'s
-`tes_readthrough` rung makes at @9,050 (15,441 spliced crossings, 22 unspliced) — sends no RNA level at
-all, and the exon beyond the piece never hears the flux as a level (the piece's other face is a terminus
-of the second transcript, across which only the level lanes travel). The junction's flux is still read
-by rung 2's face map at that boundary, so the bank is not inert, but the level lane's own rule for
-empties — forward what you hold — has nothing to forward from a source that was never made. The source
-needs no count of its own: `flux_level` prices the junction's count against the exon's witness, and an
-empty witness pays counting alone. Build it, gate it (an empty exon piece beside a lit junction emits a
-lower-sided level; a silent junction does not), and measure it on the test chromosome's terminus-cluster
-and sj+terminus blocks first, where empty pieces are the case.
-
 ### ambig-node-as-a-gdna-source
 `priority: after phase 2 · kind: decision, measured once · stamped: 2026-09-08`
 
@@ -306,6 +304,29 @@ exon of a `span` locus under host-only capture, 0.586 against 0.645 through the 
 fragments; the cost elsewhere is larger. Re-open with a gate on the emitted level's own width (emit
 only where the bracket is tighter than the node's counting) once phase 2's ceiling is in place; until
 then the walled overlap exon keeps its lower side from the landscape prior.
+
+### message-layer-open-cases
+`priority: next · kind: question · stamped: 2026-09-09 (moved from the sandbox tracker when it was deleted)`
+The completion contract's checklist reads ✅ on every row (the ten messages, the level lane, the RNA
+level lanes, the ceiling, sj+terminus — `DESIGN.md` §6b.4–§6b.14); what the tracker still carried as
+open, each a candidate for the debug loop of `ROADMAP.md` rank 2 and none a hole: **(a) the exon solve
+with every face speaking** — an exon's two faces' arrivals are summed at the solve (`_fuse`); whether
+the two-witness sum is priced right where both faces carry the SAME intron's claim through two maps is
+unmeasured (`ISSUES: transfer-variance-premise` is the neighbouring question); **(b) the factory on a
+region carrying BOTH exon and intron bits** — the intron factory runs only where no exon bit is set
+(a mixed region is an exon by ruling); whether the density-against-background measurement is valid
+there, and under capture, is open "when first needed"; **(c) the chain of termini** — an empty outside
+piece (median 12 bp on the ladder) whose far face is another terminus, half the ladder's
+terminus-boundary error by the 2026-09-02 census: the level lane now crosses the empty piece
+lower-sided; the short-range gDNA-level continuity under one probe footprint as an UPPER bound was
+refused with every other upper side (`ISSUES: the-edge-upper-side`,
+`ISSUES: levels-always-travel-for-the-gdna-lane`) and the prior serves these slots to ~1.8 % of mass;
+**(d) the substrate** — `nest` (a region walled by two termini; measured 2026-09-02: the refit prior
+already serves it, 0.666 vs 0.630), `div` and the antisense's nascent variant, one YAML block each
+(`docs/TESTING.md` §0a). ⚠ The rung-4 prototype's refusals are `DESIGN.md` §6b.9's record; the two
+session census instruments it used (an exon|exon boundary census by flag class, a directed reachability
+census, a terminus pair-gap measurement on certified truth) are gone and re-derivable from
+`slot_truth.npz` plus the chain in an afternoon — promote one only when a case above needs it.
 
 ### two-sided-exon-row
 `priority: now · kind: problem · stamped: 2026-09-04`
@@ -338,6 +359,17 @@ enriched more than the crossing beside it, the ceiling sits below the truth, and
 mode can witness it. The plateau is honest; the first-pass remedy is the solve's (honest ignorance at a
 node with a one-sided profile and no own evidence) and the landscape's training population — not a
 message. The remaining message-side candidate is a sharper INTRON profile (its own solve).
+⛔ FORMS ALREADY REFUSED on the test chromosome (2026-09-03, whole-library, licensed exons in
+brackets; the scan's prototype): a TWO-SIDED POISSON row (the crossing count's likelihood under the
+exon's hypothesised share, marginalised over the intron row) fixes capture-OFF (`g50 ss.50 OFF`
+11,242 [4,071] → 8,945 [1,874]) and is catastrophic capture-ON (`g50 ss.99 ON` 6,367 → 15,558):
+under capture the exon interior's gDNA exceeds what its tapered edge crossing implies, and the plateau
+was tolerating exactly that; an ABUNDANCE-BOUNDED row (the crossing fixes the level up to an
+enrichment step bounded by the exon's total against what the crossing and flux predict) keeps the OFF
+wins and still fails at `g50`/`g05` ON (12,333 / 3,090 against 6,367 / 2,293) — a bound on the TOTAL
+is blind to the gDNA's enrichment where RNA dominates the total, which is most probed exons; a FLUX
+CAP (the route rate × the exon's RNA opportunity as the exon's RNA) claims 19 % gDNA at the zero
+control's exons (16,819 → 121,263) — the route rate under-states the contained RNA systematically.
 ⭐ THE LEVEL LANE'S MEASUREMENT (2026-09-05, `DESIGN.md` §6b.12): with every node reached, a TWO-SIDED
 level lane reads −26 % at pass zero on `g50 ss.50 OFF` (the minimum total density of an exon complex
 bounds its gDNA from above under capture-OFF) and +33 % on `g50 ss.99 ON` (the same bound is false under
@@ -485,8 +517,9 @@ comparable. Re-simulating them is the owner's call, not a prerequisite anyone sh
 derives the correct bracket with no chosen constant (predicted matches measured on every stratum).
 Built, gated, priced: nearly every in-scope condition improves, one dense capture-ON rung regresses
 marginally, `g05` improves on both strand settings. **Ships OFF** pending two unpriced costs: memory at
-genome scale (a small multiple on `sweep_n_grid`) and the end-to-end thermometer. Re-derive with
-`ladder_arm_ab.py` / `arm_sweep.py`.
+genome scale (a small multiple on `sweep_n_grid`) and the end-to-end thermometer. ⚠ The arm harness
+that priced it (`ladder_arm_ab.py`) retired with the relay (2026-09-09); re-derive as a
+`policy_prototype.py --module` arm on the window, judged by `calibration_vs_oracle.py`.
 
 ### alt-splice-rung-unverified
 `priority: later · kind: question · stamped: 2026-08-2x`
@@ -497,9 +530,12 @@ BOUNDARY — in scope on all three shipping strata.
 ### transfer-variance-premise
 `priority: later · kind: question · stamped: 2026-08-2x`
 Does the message transfer variance correctly price a ratio built on a handful of counts? — PARTLY
-answered by `transfer_variance_audit.py`: the shipped `transfer_logvar` is a counting term plus a
-composition term, so every term shrinks as either slot deepens and a deeply-counted transport arrives
-essentially undamped. The obvious substitute is refuted in both directions (the landscape's per-slot
+answered under the retired relay (its audit instrument retired with it, 2026-09-09): its transfer
+variance was a counting term plus a composition term, so every term shrank as either slot deepened and
+a deeply-counted transport arrived essentially undamped. The transfer policy prices every hop by both
+witnesses' counting plus the pair's own disagreement beyond it (`transfer_rows.hop_price`), which is
+the per-hop premise this entry asked for; whether it is right where a pair agrees by coincidence is the
+open half. The obvious substitute is refuted in both directions (the landscape's per-slot
 posterior is TIGHTER than counting variance; its population spread over-states a fitted premise ~10×).
 What survives is a per-hop-type premise; the honest seed is that under capture the posterior LOOSENS
 (mode-membership ambiguity). `EQUATIONS.md` §3.5d.
@@ -547,7 +583,7 @@ calibration's own path ranks higher.
 RNA-contaminated crossing mass as gDNA — neither half has an honest price alone
 (`TRAPS: a-cancelling-defect-pair`); five xfails go green iff the pair lands; priceable only with
 `--messages on` (`TRAPS: an-ablation-that-never-ran`). ⛔ RE-PRICED 2026-08-26 with the measured intron
-reference as replacement load (`ladder_arm_ab --arm stage1_pair{,_onesided}`) — **STILL REFUSED**:
+reference as replacement load (the relay-era arm harness's `stage1_pair{,_onesided}` arms) — **STILL REFUSED**:
 marginal to the reference alone it worsens two of three in-scope strata; wins confined to `g00`.
 **The analysis, kept whole:** the certified-RNA channel is a LOWER BOUND delivered two-sided; making it
 one-sided (`−½·p·max(0, mo − log f)²`, no new constant) is the only mechanism the zero-gDNA control has
@@ -616,6 +652,27 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
 
+### the-empty-flux-source-at-the-junctions-counting-alone — the sharper price of the empty-piece flux source, PROTOTYPED, A/B'd on the ladder, REFUSED (2026-09-09); the source itself LANDED at the counting price. Do not rebuild the sharper price without the witness-units repair.
+
+`flux-source-skipped-at-an-empty-exon-piece` (CLOSED by landing, 2026-09-09): the transfer policy now
+builds a junction's flux level at an EMPTY exon piece too (`transfer._rna_lanes`), priced by `hop_price`
+on the piece's zero count — both counts' counting, the rule every hop pays — and the piece emits it with
+the flux's own witness (the pooled spliced count on the pooled route opportunity), so the next full node
+prices the hop as a full exon prices its flux. ⭐ THE SUBSTRATE: on the ladder over half of all
+junction-adjacent exon pieces are empty (2,100–2,200 per strand; a piece shorter than a fragment has no
+contained opportunity) but only ~70 per strand have any lane face — a face carrying none of the strand's
+bits, the OTHER strand's boundary — and those reach the AMBIG exon|exon boundaries of the overlapping
+loci; the test chromosome has none (its junction-adjacent pieces are full), so only the ladder can judge
+it. LANDED FORM, the ladder through the pipeline: every in-scope row within 0.5 % (worst `g98 ss.99 ON`
+1.0048×, 175,321 → 176,162), the stranded zero controls 0.977× / 0.958× (14,658 → 14,324; 16,043 →
+15,365), the unstranded 0.997× / 0.994×; pass zero 6/8 on both halves, worst 1.0051×. ⛔ REFUSED: the
+SHARPER price — the junction's counting ALONE at a piece with no RNA opportunity ("nothing to witness
+with") — wins the zero controls more (0.944× / 0.970×) and costs the stranded capture-ON rows 1.0179×
+(`g98 ss.99 ON`, +3,144 at the AMBIG exon|exon boundaries) and 1.0091× (`g50 ss.99 ON`): a sharp RNA
+floor from a probed junction over-reading the exon body reaches a gDNA-rich node whose recipient price
+reads the column count (`flux-price-witness-units`), the landed flux level's own open defect on a new
+source. The zero count's counting is what keeps it inside the bar.
+
 ### relay-od-r-discontinuity — a defect of the RETIRED relay's anchor path, CLOSED with the relay (2026-09-09). Do not rebuild the anchor to look for it.
 
 The relay was discontinuous in `od_r` at ~1e−5 (`g98 ss0.50 capture-OFF`: error 217,531 at `od_r ≤ 1e−7`,
@@ -643,6 +700,17 @@ row on one exon's strand profile reading noise as gDNA (f_g ≈ 0.08 at 2,631 fr
 its whole gene through the FORWARD faces an empty boundary could not cross. Stacked with the RNA lanes
 delivered at AMBIG nodes it still loses those rows (`g05 ss.50 OFF` 1.124×, `g05 ss.99 OFF` 1.031×).
 The RNA lanes alone, on the landed gDNA lane, win every non-zero ladder row of both halves — landed.
+⚠ THE FIRST REFUSAL (2026-09-05, the terminus-cluster block): completing the reach by re-reading what a
+node holds across KINDS — a held level read as a composition for a composition rule, a held composition
+as a level for a lane face, rules into empty recipients dropped — reads 0 % unreached in the census
+and worse rows: test `g50 ss.50 OFF` 13,009 → 13,471 (+3.6 %); ladder `g50 ss.50 OFF` 144,288 → 148,516
+(+2.9 %), `g05 ss.99 OFF` 45,076 → 46,532 (+3.2 %), `g98 ss.50 OFF` +1.0 %, `g50 ss.99 ON` −1.5 %, g00
+identical. Dropping the rules into empties ALONE reads identical on the test chromosome and
++0.2…+5.4 % on the ladder: a composition already crosses a dark exon through the composition rules on
+both of its faces (the maps read the boundaries' numbers, not the empty's), worth 5 % on
+`g98 ss.50 OFF`. So the law holds for the lane too — what a node holds as a composition is never
+re-issued as a level; the information that would reach a cluster's inner boundaries is a lower bound at
+an RNA-rich node with weak own evidence, and that is what harms.
 Re-judged with phase 2's ceiling in place (2026-09-08, `lat2`): WORSE — `g25 ss.50 OFF` 1.59×,
 `g05 ss.70 ON` 1.18×, the junction panel's `g25 ss.70 ON` 1.69× through the pipeline, the weak-κ zero
 control 1.8–3.4×. The ceiling reaches only faces without a composition, so it opposes none of the floors
@@ -677,11 +745,20 @@ rule (`the-pooled-hop-step`, 2026-09-03) refused exactly this for item 7 and was
 value kept, precision dampened; (3) the composition currency where the ruling is a level; (4) only
 exon|exon termini served. Measured on the pass-form policy: removing it improved the in-scope
 unstranded row (`g50 ss.50 OFF` 12,328 → 11,044) and `g25 ss.50 ON` (28,414 → 19,854) and was within
-0–4.8 % on stranded rows. The replacement (`MESSAGE_PLAN.md` step A): the level rule from the
-boundary's MEASUREMENT only, shape-preserving through the level-kept map, per-pair widths, the crossing
-total's upper bound without a claim. ⚠ Two forms were tried and refuted on the way and are recorded
-there: a Gaussian summary of a one-sided profile (invents a value), and a level made from what the
-boundary holds (forwards an imputation).
+0–4.8 % on stranded rows. The replacement (the owner's design, 2026-09-04, `DESIGN.md` §6b.12): the
+level rule from the boundary's MEASUREMENT only, shape-preserving through the level-kept map, per-pair
+widths, the crossing total's upper bound without a claim. ⚠ Two forms were tried and refuted on the
+way: (i) a Gaussian summary of the boundary's outgoing profile as the level — on unstranded data that
+profile is the one-sided curve it holds from the outside exon, and summarising a plateau into (mean,
+variance) invents a value the sender never claimed (`g50 ss.50 OFF` 12,328 → 13,911); (ii) the
+shape-preserving form made from what the boundary HOLDS — helps unstranded rows but forwards the
+imputation (11,503, still behind no-rule at 11,044) and costs 3–5 % on stranded capture-ON rows. The
+law that settled it: a level is made from the sender's measurement (its own claim and its total),
+never from what it holds. The dampening earns its place: removing it costs 47 % on `g50 ss.99 ON`.
+Stage 0 on certified truth (test chromosome and four ladder rows): across terminus faces the inside
+region's gDNA density matches the boundary's off capture (median log ratio +0.06 to +0.20, the spread
+counting on 13–60 crossings) and shows the taper under capture where the inside exon is probed (+0.44
+to +0.89 at exon|intron termini); the totals' discrepancy bounds the gDNA error in 75–100 % of pairs.
 
 ### the-certified-flux-row-as-a-level — DERIVED, STAGE 0 ON TRUTH, PROTOTYPED, A/B'd on three probe panels and the ladder, REFUTED by probe placement (2026-09-04). Do not rebuild a flux LEVEL into an exon without a per-face transport.
 
@@ -876,6 +953,51 @@ coordinates, MAX collapse; the full table stays in the dev sandbox until a consu
 ⛔ The knob was DELETED after pricing (converge-and-delete); the full implementation is one commit
 before the deletion (`a2b81b34`). Re-opening this requires a policy whose DELIVERABLE improves under a
 better level channel — none exists today.
+
+### the-message-policy-campaign — SIX MECHANISMS BUILT, MEASURED AND REFUTED; the campaign closed 2026-08-27. Do not re-run these without new evidence.
+
+⭐ Moved from the sandbox record when it was deleted (2026-09-09). A campaign to replace the relay
+with a derived message policy ran for several sessions and did not reach the bar; the code every row
+describes was DELETED on 2026-08-27 and git carries it. ⛔ **The bar it missed is the one the transfer
+policy was later judged by: NOT to beat `SilentPolicy`** — on strand-specific data a sighted exon's own
+solve is excellent and a message can mostly only disturb it; the goal is to perform on UNSTRANDED data
+while doing minimal harm on stranded data. The campaign repeatedly optimised a pooled total, which
+hides a sign flip between the two halves. ⭐ The one measurement that survived everything: propagation
+is net-harmful wherever the local solve HAS its own evidence, and its value concentrates where that
+solve is BLIND — the reason the two halves are judged against different bars.
+
+| mechanism | what happened |
+|---|---|
+| **A composition-transporting policy** (`CurrencyPolicy`) | Best zero controls ever measured, but lost every in-scope contaminated stratum to silence. Deleted. |
+| **The gDNA-continuity rule** (an unsupplied source's gDNA level crosses unscaled) | Built THREE ways — a static per-slot licence (a value RATCHET, gDNA densities to 3.9e+32, from breaking the knob's telescoping cancellation), a running-state licence (killed the ratchet, still lost capture-ON), and a fuse-based pure-gDNA re-anchor lattice (too weak — a fuse negotiates where the relay's mass rescale overwrites). Halved one row, lost others. Only safe beside a scan-time mass rescale. ⭐ The transfer policy's LEVEL LANE is this rule rebuilt as a one-sided profile with a priced hop (`DESIGN.md` §6b.12) — a different mechanism, judged separately. |
+| **The premise's exon-end scoping** | The dispersion decomposition proves intron-end hops carry no COMPOSITION cost, yet scoping the charge to exon-end hops REGRESSED the panel: freeing intron chains before a measured LEVEL charge exists releases un-priced level drift. Restoring the pooled charge recovered `g98 ss.50 ON` 4.37 M → 2.44 M. |
+| **A class-keyed method-of-moments fit on the observed log-ratio** (as the runtime law for the transport variance) | Tracks truth at intron and plain classes, REFUTED at sj classes: the route-summed flux cancels the visible step exactly where the true error is largest (0.08 observed vs 4.4 true). |
+| **A totals-form pair fit** (for the same variance) | Refuted by construction — the knob consumes the totals, so transported totals agree by the (1−w) algebra and carry almost no information. |
+| **`FanOutPolicy`** | Measured dominated once the certified-flux anchor gave its destinations own evidence. Deleted 2026-08-24. |
+
+**Derivations the campaign left, recorded so they are not re-derived.** (i) The conservation identity
+is a COUNT identity, ``Σ_c ρ_c·E_c = M`` — each component's density weighted by its OWN opportunity,
+summing to the slot's observed unspliced count; summing raw densities against the reciprocal-opportunity
+total is a DIFFERENT identity, exact at boundaries and WRONG at regions, where that total reads
+``ρ·P(w ≤ ℓ)`` — measured on the ladder, the median exon's P is 0.452 and the 5th percentile 0.044, so it
+was up to 23× too low at half of all exon slots. (ii) Two variance kinds: a reframe's cost multiplies
+every lane of a message identically (a LEVEL statement) while each component also carries its own (a
+COMPOSITION statement); spending the shared part as per-component variance converts a common-mode
+level error into a composition error — the pathology where a near-zero gDNA claim eats an unstranded
+slot's unexplained RNA mass. (iii) The transport dispersion decomposed against certified truth (four
+`g50` corners, noise subtracted): intron↔boundary hops are FREE; all structural error lives on
+exon↔boundary hops and is predominantly COMMON-MODE, exploding under capture, from two derivable sources
+— the truncation frame term ``log(1/P(w ≤ ℓ))`` (pure geometry) and the capture step (common-mode
+because probes bind gDNA and RNA alike). `transport_dispersion.py` is the instrument;
+`ISSUES: flux-floor-dispersion` is the open thread.
+
+**Method lessons** (the durable ones have named homes in `TRAPS.md`): attribute before iterating — three
+laws landed together, the panel regressed, and only an attribution factorial (each law removed alone, all
+16 conditions) named the carrier; a cancelling defect pair reads as success
+(`TRAPS: a-cancelling-defect-pair`) — fixing the conservation identity made low-gDNA WORSE because the
+truncated total had been suppressing claims at short exons and hiding phantom gDNA; and layering fixes on
+fixes is how a policy becomes unmaintainable — the campaign ended with three conservation operators behind
+flags, two of which were provably limits of the third.
 
 ### the-doubt-graveyard — ELEVEN MECHANISMS PRICED, ELEVEN REFUSED. Do not rebuild these.
 
