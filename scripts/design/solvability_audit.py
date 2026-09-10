@@ -142,7 +142,8 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     2026-09-09; ``g1_locked`` is the one home.
 
     ⚠ **The τ tests here stay at the solver's own ``_EPS``**, so "has a channel" means what
-    ``own_composition_logvar`` means by it. Strength is a separate question and it is reported as a
+    ``region_init.has_own_composition_evidence`` (``tau_lam`` above the guard) means by it. Strength is a
+    separate question and it is reported as a
     curve over ``SD_LAMBDA_DECADES`` — see that constant for why a threshold cannot answer it.
     """
     tau = np.asarray(capture["_tau0_lam"], np.float64)

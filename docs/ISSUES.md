@@ -36,46 +36,24 @@ it if the decision is taken up). Cost of leaving it: the message over-claims gDN
 probed boundaries by ~`a` in the ratio, bounded by saturation at pure gDNA.
 
 ### gdna-landscape-trains-on-false-positives
-`priority: now · kind: defect+question · stamped: 2026-09-02 (owner: "figure out the implications")`
-**At zero-gDNA conditions the fitted gDNA landscape is trained ENTIRELY on pass-1 false
-positives, and the refit loop then entrenches them** — the prior that exists to rescue blind
-slots is taught by the blind slots. Measured (test chromosome, `landscape_poison_study` in the
-session scratchpad; re-derive by spying `_fit_gdna_hyperprior`'s inputs against `slot_truth`):
-at `g00 ss.50` **100 % of the training gDNA-mass** sits on slots whose certified gDNA is zero.
-Two mechanism facts: the training gate (`fp ^ fn`) is an ANNOTATION test that cannot see κ = ½
-(unstranded exons train at full membership), and `_reliability` consumes the SOLVED posterior's
-`var_gdna` — small at blind slots — rather than the own-composition variance
-(`own_composition_logvar`, ∞ at τ = 0) that would catch them; measured mean weight 0.90–0.93.
-⛔ **The naive fix is REFUTED (2026-09-02): excluding κ-dead exons from training destroys the
-bootstrap** — the blind slots' training values carry the MESSAGE ROWS' corrections after sweep
-1, and re-fitting on them is how local true evidence generalizes population-wide (whole-library
-`g50 ss.50 ON` regressed 2,691 → 56,422 under the exclusion; the stranded control was
-byte-identical). So the open question is a robustness mechanism that discounts PURE-ECHO
-training mass without starving message-corrected mass — candidates to derive, not assume:
-sweep-aware weighting (sweep-1's blind values are echo; later sweeps' are message-informed),
-own-OR-DELIVERED-evidence weighting, or capping the landscape's claim strength by its
-evidence-bearing mass. ⚠ Downstream symptom already priced: `silent`'s residual `g00 ss.50 OFF`
-whole-library error (~1.25 M on the ladder) is largely this loop; the transfer policy's rows
-break it wherever they deliver. ⚠ A second, separate defect found by the same study: a
-consumer reading `log_rho[-1] − log_rho[0]` as "the landscape's span" reads the GRID (built
-from `mass/eff` — what is expressible), not the fitted mass's support.
-⭐ **A second exposure (item 2 of the message rungs, 2026-09-02).** On the ladder at `g05 ss.99 ON`
-the boundary → intron message improves 5,144 near-empty introns (7,300 fragments in all) by 26 % at
-their own slots, and the refit prior then moves the thin boundary class — which receives nothing —
-by +1,104 (1.9 %), for a whole-library 1.005× against silence. The two were told apart only by
-scoring the message at its DESTINATIONS (node-local) beside the whole-library number; the reversed
-row moved the same boundary class by a different amount in the same direction, so the boundary
-movement is the prior's response to changed training beliefs, not the message's sign. Same regime
-as rung 1's recorded +169. `DESIGN.md` §6b.5 carries the measurement.
-⭐⭐ **A third exposure, and the re-ranking (item 5, 2026-09-02; owner: "an important priority").** The
-by-class census (`policy_benchmark.py --by-class`) puts 62 % of the stranded capture-ON error and 85 %
-of the zero controls' at exon|exon boundaries and the exons they wall — and item 5, the message built
-for them, moved their error by ±1 % on the contaminated rows (they sit at the resolution of their own
-evidence plus the prior, 1.8 % of mass) and −4.6 % at the `g00 ss.50 OFF` zero control, whose error IS
-this prior's false-positive training (silent 327k → the messages 97k → nothing further). The
-messages have done what messages can at these slots; the prior is the lever. ⛔ PARKED behind the
-message policy's completion (owner ruling 2026-09-02, `DESIGN.md` §0c.0e): first in the parked list,
-taken up the moment the checklist reads ✅.
+`priority: next · kind: question · stamped: 2026-09-02 · the defect CLOSED 2026-09-10 (`DESIGN.md` §7.1); what stays open is below`
+**What settled** (the record is `DESIGN.md` §7.1; the arms `ISSUES: the-landscape-training-population-arms`;
+the instrument `landscape_training_census.py`): the entry's "trained ENTIRELY on false positives and
+entrenched" was right about the population and wrong about the direction; the owner's ruling of 2026-09-06
+(a node whose only evidence is a bound does not train the prior) landed as `RegionBelief.informed`; the
+estimator's own tail (location-free kernels spread uniformly under their wall) landed as the E-step on
+those kernels; the grid spans every region and boundary (owner, 2026-09-10). The ladder's zero controls
+went from ~150k invented fragments to a few hundred under both policies, in scope 0.95–1.00×.
+**WHAT STAYS OPEN.** (a) The deferred stratum reads 1.01–1.02× under the E-step at `g50` / `g98 ss.50 ON`
+and the stranded capture-ON rows 1.004×: under capture a short dark region's mass is placed on BOTH modes
+of the previous fit in proportion, which hands the enriched mode mass from regions that are truly
+depleted — within the bar, reported. (b) The zero-RNA controls move ±4 % both ways (`g05 ss.99 ON` +4.4 %,
+`g98 ss.50 OFF` −1.4 %): the pure-gDNA slots under the reshaped prior, `ROADMAP.md`'s vertex-atom
+population. (c) The Beta(½,½) reference's ½-nat/λ slope still decides a blind slot against whatever prior
+range remains (`ISSUES: reference-prior-refuted-at-concept-level`). ⛔ Measured-refused here (keep):
+excluding κ-dead exons (2026-09-02, `g50 ss.50 ON` 2,691 → 56,422); admitting AMBIG into the final fit
+(2026-07-28, worse 25/32); precision as admission; a kernel-width precision; every discount that reaches
+the delivered rows and the all-kernel E-step (2026-09-10, the CLOSED entry).
 
 ### rename-the-drain
 `priority: later · kind: decision · stamped: 2026-08-31 (owner: "might consider")`
@@ -339,8 +317,9 @@ capture); the landed lane is LOWER-ONLY and reads nothing at pass zero on unstra
 prize is ONE library-level fact — is this library's gDNA enriched — and its gDNA-specific witness on
 unstranded data is the exons of SILENT genes (no spliced fragment at any junction at this depth): their
 density against the intergenic density is the enrichment spectrum, at pass zero, with no strand channel.
-Where it is flat, the lane may be two-sided. ⭐ OWNER RULING 2026-09-06: the enrichment witness IS the gDNA
-landscape prior, and nodes whose only evidence is a bound do not train it; the message rules finish first.
+Where it is flat, the lane may be two-sided. ⭐ The OWNER RULING of 2026-09-06 on this (the enrichment
+witness IS the gDNA landscape prior; bound-only nodes do not train it) lives in
+`ISSUES: gdna-landscape-trains-on-false-positives`, where it is being worked.
 ⭐ THE CLIFF INSIDE AN EXON (2026-09-05, the terminus-cluster block under sparse probes): ten isoform ends
 126–147 bp into one exon put ten overlapping probes on the cluster and none on the exon's rest; a
 lower bound from the ten-times-probed piece over-claims at the boundaries beside it (`g50 ss.99 ON`
@@ -399,14 +378,22 @@ carries the column. Admissible at capture-OFF only; read `ruler_n_moved`, never 
 aggregate barely moves while most transcripts are redistributed.
 
 ### g00-shrinkage-upstream-repair
-`priority: next · kind: defect · stamped: 2026-08-2x`
+`priority: NOW · kind: defect · stamped: 2026-08-2x · re-priced 2026-09-10: the composition repair is done and the defect stands`
 At the zero-gDNA control the shipped effective-length shrinkage contracts the large majority of
-transcripts where the correct factor is exactly 1.000, capture-OFF included, with `rho_ref` fabricated
-from false-positive gDNA. ⛔ It is a SYMPTOM: feed the SHIPPED function correct composition arrays and it
-returns the correct factor at `g00` and on the deferred stratum alike — **repair the COMPOSITION it
-reads, not the function**. `priors.py` imports `_global_reference_density` from `capture_eff_length.py`,
-so one repair serves both consumers. `calibration_vs_oracle.py` is the only instrument whose patch point
-is upstream of the ruler, which is why nothing else has ever priced this.
+transcripts where the correct factor is exactly 1.000, capture-OFF included: `calibration_vs_oracle.py`
+③ reads the ruler's factor **0.150 against the oracle's 1.000** on the `g00` rows, `Σ|Δ len|` 996M bp over
+51,543 transcripts. ⛔ The entry used to say "repair the COMPOSITION it reads, not the function". The
+composition IS repaired (2026-09-10, `DESIGN.md` §7.1: the zero rows carry 828 invented gDNA fragments of
+18M) and the factor is unchanged, because `capture_eff_length._global_reference_density` DETECTS a
+reference from any five slots with positive gDNA mass — the rightmost peak of a mass-weighted KDE over
+whatever tiny false masses remain — while the oracle's exact zeros return `None` and no contraction. So
+the repair is the DETECTOR: the ruler must ask whether the library carries an enriched gDNA mode at all
+(the enrichment detector `measured-prior-rung-4` names, a BOOLEAN — `TRAPS: a-total-density-ratio`), not
+whether five regions have nonzero mass. `priors.py` imports the same function, so one repair serves both
+consumers. ⚠ The same page reads factor P 0.954 / 0.967 against O 0.923 / 0.926 on the in-scope
+capture-OFF strata (P/O 1.033 / 1.043) where the instrument's own contract says the factor is exactly 1.000
+off capture: either the contract line is stale or both arms contract off capture — decide which before
+building. `calibration_vs_oracle.py` is the only instrument whose patch point is upstream of the ruler.
 
 ### capture-blind-gdna-divisor
 `priority: next · kind: defect · stamped: 2026-08-31`
@@ -448,14 +435,6 @@ dissection ran at a retired rung; confirm on a second stratum before closing. �
 prior-injection arm left the effective-length shrinkage unsubstituted, so part of "a better prior does
 not show up" may be the RULER (`ISSUES: u-ruler-arm`, `ISSUES: g00-shrinkage-upstream-repair`).
 `TRAPS: the-intermediate-is-not-the-deliverable`.
-
-### landscape-trains-on-real-substrate
-`priority: next · kind: measurement · stamped: 2026-08-2x`
-Confirm `_fit_gdna_hyperprior` then trains on data rather than on the prior: it trains on
-`belief.f_g·mass` over expressed REGIONs INCLUDING exons, so too strong a reference means it learns the
-prior back. Measure the no-evidence share of training mass before and after with
-`composition_evidence_census.py`; do not accept a change that moves only it. Nothing to build — this is
-`measured-prior-rung-4`'s payoff check.
 
 ### expand-the-gdna-spectrum
 `priority: later · kind: decision · stamped: 2026-08-2x`
@@ -607,6 +586,27 @@ column. ⚠ **PANEL STAMP**: a row measured on "all 36 conditions" or quoting `g
 `g90` predates the ladder retired 2026-08-13; the verdict stands as a record — re-opening one means
 re-running it on the current panel. ⚠ "the RNA fragment-length model" row below is the accumulator's FL
 *geometry* (ships in 0.8.0); the length-channel retirement is of a CALIBRATION COMPOSITION channel.
+
+### landscape-trains-on-real-substrate — CLOSED 2026-09-10, superseded. The question was whether the prior "learns itself back" through the no-evidence share of its training mass; that share is now ZERO by construction (`RegionBelief.informed`, gated), and `landscape_training_census.py` reports the population per evidence class on any condition.
+
+### the-landscape-training-population-arms — DERIVED, PROTOTYPED, A/B'd on the test chromosome (30) and the ladder (16), halves apart, both zero controls on every row; two landed (the population rule, the E-step on location-free kernels), six REFUSED (2026-09-10). Do not rebuild a discount that reaches the delivered rows, nor an E-step on counted kernels.
+The harness (`landscape_arms.py`, under `~/Downloads/rigel_runs/prototypes/2026-09-10_landscape/` with every
+arm's output) patched `_fit_gdna_hyperprior` outside `src/`,
+`noop` byte-identical, a shuffled exclusion of the same count as the attribution control. Whole-library
+|gDNA − truth|, ratio to the previous default.
+| arm | what | ladder zero controls (ss.50 OFF / ON / ss.99 OFF / ON) | in scope | deferred | verdict |
+|---|---|---|---|---|---|
+| `no_echo` | a slot with no evidence, or a bound only, does not train | 0.742 / 0.753 / 0.962 / 0.966 | within 0.1 % on every row | 0.98–1.01 | ⭐ LANDED (`DESIGN.md` §7.1) |
+| `no_echo_1sided` | also a one-sided delivered composition row | 0.512 / 0.660 / 0.748 / 0.910 | ≤ 1 % either way | ⛔ 1.90 / 1.28 / 1.20 | REFUSED: the probed exons' one-sided rows are the enriched mode's witness |
+| `own_var` | the own-evidence variance (`tau_lam` + the row's precision) as `_reliability`'s `v` | 0.737 / 0.742 / 0.956 / 0.959 | ⛔ `g05 ss.50 OFF` 1.058; test chromosome `g05 ss.70 ON` 1.24, `g50 ss.70 ON` 1.12 | ⛔ 2.20 / 3.27 / 3.57 | REFUSED |
+| `sweep1_no_echo` | `no_echo` at the first fit only | 0.890 / 0.892 / 0.994 / 0.995 | 1.000 | 1.00 | REFUSED: weaker than the rule at every refit |
+| `shuffle` | `no_echo`'s excluded count on random non-anchor slots | 0.914 / 0.789 / 0.978 / 0.968 | 1.000–1.002 | 1.01–1.07 | the control: wins the zero rows (every non-anchor slot is false there) and nothing in scope |
+| `refits6` | `calib_refit_iters` 3 → 6, no patch | 0.822 / 0.805 / 0.987 / 0.991 | 1.000; test chromosome unstranded ON 0.85–0.91 | 0.96–0.98 | NOT TAKEN: 0.725 with the rule against 0.742 without, at twice the refit cost (`ISSUES: performance-memory-bounded-solve`) |
+| `row_kernel` (unit weight / reliability weight) | a delivered-row slot's own λ-likelihood, mapped to the density grid, as its kernel | test chromosome only: `g00 ss.50 ON` 437× / 0.95 | `g25 ss.50 OFF` 5.40 / 1.57; `g25 ss.50 ON` 2.10 / 0.95 | `g50 ss.50 ON` 1.62 / 1.00 | REFUTED: the sum of per-slot likelihoods is the flat-prior posterior, not a density; a bound spreads uniform mass under itself |
+| `oracle_values` (weights as trained / var 0) | the CEILING: the population trained at certified gDNA | 0.686 / — / 0.956 / — (var 0: 0.749 / — / 1.113 / —) | `g05 ss.50 OFF` 1.016 / 1.061 | `g50 ss.50 ON` 0.964 / 0.753 | a price, not a mechanism: the values fix recovers most of it |
+| `estep_zero` (ratios to the landed population fix) | the E-step on the kernels with no location (count < 1): kernel × the previous refit's landscape | **0.006 / 0.002 / 0.038 / 0.018** | unstranded OFF 0.952 / 0.973 / 0.988; stranded OFF 0.986 / 0.994 / 0.997; stranded ON 0.980 / 1.004 / 1.004 | 0.960 / 1.020 / 1.011 | ⭐ LANDED (`DESIGN.md` §7.1); the test chromosome wins or ties all 30 rows |
+| `estep_all` | the E-step on every kernel | 0.006 / 0.002 / 0.038 / 0.018 | `g05 ss.99 OFF` 1.000, `g50 ss.99 ON` 1.018, `g98 ss.99 ON` 1.047; test chromosome `g25 ss.50 OFF` 1.091 | 0.956 / 1.045 / 1.012 | REFUSED: a counted minority competed away by the bulk, the δ-pin EM predecessor's failure |
+| `estep_mirror` | the control: the previous landscape reversed on the grid | test chromosome capture-ON zero rows 1.48 / 12.7 / 8.9 | neutral on capture-OFF rows (the mirrored bulk lands in the depleted zone by the grid's asymmetry) | — | the control discriminates where it can: the placement is what acts |
 
 ### the-empty-flux-source-at-the-junctions-counting-alone — the sharper price of the empty-piece flux source, PROTOTYPED, A/B'd on the ladder, REFUSED (2026-09-09); the source itself LANDED at the counting price. Do not rebuild the sharper price without the witness-units repair.
 

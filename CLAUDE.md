@@ -163,10 +163,9 @@ where the strand likelihood is flat and the local answer is a default rather tha
 excellent and a message can mostly only disturb it. The goal is: **perform well on UNSTRANDED data
 while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
 against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart. ⭐ Where
-it stands (2026-09-09, the ladder): `transfer` beats silence 7/8 on each half; every in-scope row's
-misplaced gDNA is under 2.5 % of its fragments; the remaining in-scope error sits on the intron's own
-solve, on exon|intron boundaries at their counting floor, and on near-pure objects at g98 (the vertex
-atom, `ROADMAP.md`) — diminishing returns for messages in scope.
+it stands is `ROADMAP.md`'s state section, never this file (2026-09-10: the landscape prior now solves a
+gDNA-free library nearly alone, so the zero rows sit at a few hundred fragments under BOTH policies and
+the "beats silence" count is read on the contaminated rows).
 
 ⭐⭐ **TWO POLICIES, selected by one config value** (an unknown name RAISES), both on the TWO-PHASE
 backbone (`DESIGN.md` §6b.11–§6b.12): `prepare` (every node's OWN CLAIM) → `propagate(backward)`
@@ -306,17 +305,14 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,593 passed / 0 skipped / 2 xfail, 3,595 collected**
-(re-derived 2026-09-09, after the cleanup on the one shipped policy, the owner's three decisions, and the
-empty-piece flux source's landing with its one gate). Account it from **3,599 collected / 3,595 passed /
-4 xfail** — the count after the relay retired — by **−4 collected**: **+1** the flux source's gate, and
-**−7** test functions retired with the relay's own-precision arithmetic
-(`test_zero_count_is_a_measurement` −2, `test_region_init` −2, `test_region_geometry` −3, the deleted
-`region_total_density` gates), **+14** for the seven `tests/calibration/` files the transfer policy's gate
-file was split into (six `test_transfer_*.py` siblings plus `_transfer_harness.py`, +2 each), **−9** for the
-nine `docs/dev/` records moved out by the MOVE RULE or deleted by the owner (+1 each), and **−3** with
-`RegionInit.struct_lock` (a mask nothing on the shipped path read: one gate on the mask and its strict
-xfail pair, deleted with it). The 2 xfails: the toy harness's intron-independence gate
+⭐ **THE STANDING BASELINE: 0 failed / 3,609 passed / 0 skipped / 2 xfail, 3,611 collected**
+(re-derived 2026-09-10, after the landscape prior's training population and the E-step on its
+location-free kernels landed and the superseded measured-prior plan retired). Account it from
+**3,595 collected / 3,593 passed / 2 xfail** — the merge-day count — by **+15 collected**: **+4** the
+`scripts/design/landscape_training_census.py` instrument (imports, says-what-it-is-for, jargon,
+docs-boundary), **+2** the `tests/calibration/test_landscape_training_population.py` file (jargon,
+docs-boundary), **+10** its gates, **−1** for `docs/dev/PLAN_measured_prior.md` (jargon only) and **+1**
+for `docs/dev/CLEANUP_SESSION_PROMPT.md` (jargon only; the next session's kickoff, delete it when used). The 2 xfails: the toy harness's intron-independence gate
 (`ISSUES: two-sided-exon-row`), the antisense t2 prior-assembly casualty. ⛔ **RE-DERIVE, NEVER ADJUST** —
 the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution.
 
@@ -383,6 +379,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/landscape_head_to_head.py` | ⭐⭐⭐ **HOW GOOD IS THE TOTAL-DENSITY LANDSCAPE, AND WHAT IS ITS BANDWIDTH REALLY?** The axis offset, a held-out predictive likelihood, and `--grid-sweep`. ⛔ `span_R` and the mode count are grid artefacts. `--self-test` 42/42 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 11/11 |
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
+| `design/landscape_training_census.py` | ⭐⭐⭐ **WHICH SLOTS TRAIN THE gDNA LANDSCAPE PRIOR, WITH WHAT EVIDENCE, AND HOW MUCH OF THAT TRAINING IS FALSE?** Spies each refit's `fit_landscape` inputs and each sweep's held messages; per refit, per node class and per evidence class (anchor · locked · own:strand · own:factory · delivered:composition · delivered:bound · none), the weight the estimator summed, the gDNA trained and its share on certified-zero slots, with both zero controls from the final answer; `--estimator` re-fits the last population at the certified values. ⛔ Reads `Σw`, never the trained mass, on a `g00` row. `--self-test` 17/17 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
 | `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/transfer at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, split into pure-gDNA and RNA-bearing slots and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context is `calibration_vs_oracle.py`. ⚠ The `--dissect` survey died with `FanOutPolicy` (2026-08-24); its verdicts live in `DESIGN.md` §6b.2. `--self-test` 6/6 |

@@ -1,102 +1,71 @@
-# NEXT SESSION — THE MESSAGE LAYER IS MERGED TO `main` (2026-09-09); START FROM `ROADMAP.md`'s RANKING (handoff)
+# NEXT SESSION — the tool re-measured under the landscape prior's two landings (2026-09-10, uncommitted on `main`); NEXT IS THE RULER AT ZERO gDNA (handoff)
 
-⭐⭐⭐ **THE REFERENCES:** `CLAUDE.md` (the scope, the message layer's shipped design in one place, the
-instrument table, the standing baseline), `ROADMAP.md` (the ranking, audited on the merge day),
-`ISSUES.md` (every open case with a priority; every refusal with its number), `DESIGN.md` §6b.4–§6b.14
-(every ruling of the shipped policy with its measurement). This file is the state.
+⭐⭐⭐ **THE REFERENCES:** `CLAUDE.md` (the scope, the instrument table, the standing baseline),
+`ROADMAP.md` (the state and the ranking, both re-audited 2026-09-10), `ISSUES.md` (every open case;
+`the-landscape-training-population-arms` in CLOSED / REFUSED with every arm's number), `DESIGN.md` §7.1
+(the prior's three rulings and their measurements). This file is the state.
 
-## WHAT STANDS (2026-09-09; `main`)
+## WHAT STANDS (2026-09-10; the working tree, NOT committed — the owner drives commits)
 
-1. **`message-layer` is merged to `main` (a fast-forward).** The `transfer` policy is the shipped default;
-   the relay and its baggage are gone (git carries them); the cleanup on the one shipped policy is done;
-   the empty-piece flux source is landed; `vertex_ceiling.py` measures again. The owner's ruling: this
-   closes the development of the new message policy — future work proceeds from `main`.
-2. **THE SUITE: 0 failed / 3,593 passed / 2 xfail, 3,595 collected** (`CLAUDE.md`'s baseline line carries
-   the accounting). The 2 xfails: the toy harness's intron-independence gate (`ISSUES: two-sided-exon-row`)
-   and the antisense t2 prior-assembly casualty (rank 2's territory). `preflight.py --full`: everything
-   present, 16/16 instrument self-tests. `module_census.py`: no upward import, no dead public surface.
-3. **THE IDENTITY REFERENCES for the next cleanup** are the post-landing pair
-   `~/Downloads/rigel_runs/arms/fluxsrc_identity_{gdna_g05_ss_0.99_nrna_mid_capture_on,gdna_g05_ss_0.50_nrna_mid_capture_off}.json`
-   (`rename_identity.py --check --condition … --reference …`). The `retire_identity_*` pair is the
-   pre-landing tree and is history.
-4. **THE MEASURED STATE OF THE MESSAGE LAYER on the merge day (re-derive with the instrument named,
-   never quote):** `calibration_vs_oracle.py` (mass-weighted |Δ gDNA share| per object, region / boundary
-   axis) — stranded × OFF 0.0067 / 0.0104, stranded × ON 0.0104 / 0.0149, unstranded × OFF 0.0088 / 0.0124,
-   the `g00` zero controls 0.0081 / 0.0077, the DEFERRED unstranded × ON 0.0742 / 0.1166.
-   `policy_benchmark.py --panel ladder --by-class` — transfer beats silence 7/8 on each half (worst
-   1.01× / 1.00×); the misplaced gDNA as a share of every non-intergenic fragment is 0.6–2.4 % on every
-   in-scope contaminated row; by class, the intron 1–2.3 % of its own fragments off capture (the largest
-   class by mass, 43–45 % of the absolute error), exon|intron boundaries 4–8 % (about one fragment each,
-   the counting floor), every exon and exon|exon class ≤ 2.5 % except the `g98` capture-OFF rows at 4–9 %
-   (near-pure gDNA under-called: the vertex atom). ⭐ The owner's reading (2026-09-09): messages are at
-   diminishing returns in scope (the bar was 3 %); move on to the landscape prior.
-5. **THE VERTEX CEILING under the shipped policy** (`vertex_ceiling.py`'s docstring carries the
-   whole-ladder table; `ROADMAP.md` rank 4): at most 1 % on every stranded in-scope row, 2–7 % of the
-   unstranded capture-OFF rows rising with gDNA, 25–35 % of the deferred stratum; the zero rows are total
-   by construction. The in-scope value sits on silent genes' regions and nascent-free introns — the
-   landscape prior's training population — and arrives through the refit prior, not at pass zero.
+1. **Two mechanisms landed on the gDNA landscape prior, one gate file** (`DESIGN.md` §7.1;
+   `tests/calibration/test_landscape_training_population.py`, 10 gates, nine perturbations watched fire):
+   a node whose only evidence is a bound does not train it (`RegionBelief.informed`); its location-free
+   kernels (count < 1) are placed by the previous refit's landscape (`landscape._estep_kernels`); its grid
+   spans every region and boundary (`fit_landscape(domain=…)`, the owner's ruling). The ladder's zero
+   controls went from ~150k invented fragments to a few hundred; in scope 0.95–1.00×.
+2. **THE SUITE: 0 failed / 3,609 passed / 2 xfail, 3,611 collected** (`CLAUDE.md` carries the +16
+   accounting; `docs/dev/PLAN_measured_prior.md` retired as superseded, git carries it).
+   `preflight.py --full` 17/17. Goldens regenerated; the magnitude is in `DESIGN.md` §7.1.
+3. **THE NEW INSTRUMENT:** `scripts/design/landscape_training_census.py` (row in `CLAUDE.md`'s table).
+4. **THE RECORDS:** the prototype harness and every arm's output under
+   `~/Downloads/rigel_runs/prototypes/2026-09-10_landscape/`; the four instrument re-runs under
+   `~/Downloads/rigel_runs/arms/2026-09-10_post_landscape/` (`calibration_vs_oracle.txt`, `walk/`,
+   `v_base.jsonl` + `v_free.jsonl` + `v_compare.txt`, `qa_base.jsonl` + `qa_oracle.jsonl` + `qa_report.txt`).
 
-## WHAT IS NEXT — `ROADMAP.md`'s ranking, each with its first concrete step
+## THE STATE, RE-MEASURED (every number below is from those four runs; re-derive, never quote onward)
 
-1. **THE gDNA LANDSCAPE PRIOR** (`ISSUES: gdna-landscape-trains-on-false-positives`; the owner's ruling of
-   2026-09-06 in its entry: the enrichment witness IS the landscape prior, and nodes whose only evidence is
-   a bound do not train it). First step: census the training population per node class on the zero rows
-   (which slots train the prior, with what evidence), then the estimator at bound-only nodes —
-   `abundance_landscape_census.py`, `landscape_head_to_head.py`, `calibration_walk.py` (the refits rung
-   alone). `docs/dev/PLAN_measured_prior.md` is the thread's sandbox record.
-2. **THE POST-CALIBRATION, PRE-EM SETUP** (`priors.py` / `result.py` / `derive.py` against
-   `prior_vs_oracle.py` and `calibration_vs_oracle.py`'s ruler column). First step: re-run
-   `prior_vs_oracle.py` so the assembler's own error is re-recorded under the shipped policy before
-   anything moves.
-3. **THE MESSAGE POLICY, only where a row is above the bar** — one prototype arm at a time through
-   `policy_prototype.py --module`, three panels and the ladder, halves apart, pass zero beside the
-   pipeline: `ISSUES: flux-price-witness-units` first (the open defect the landed flux level shares: the
-   column count as the witness at a gDNA-rich node), then `two-sided-exon-row`, `flux-floor-dispersion`,
-   `ambig-node-as-a-gdna-source`, `message-layer-open-cases`. ⛔ Prototypes subclass the shipped
-   `TransferPolicy` (`_LevelLane`, `prepared.lanes[...]`) and are compared `src` against `src` across a
-   landing; the ship-day prototypes under `~/Downloads/rigel_runs/prototypes/2026-09-09_ship/` still
-   name the pre-cleanup `_Lane`/`_RnaLane` and need a one-line rename before they import.
-4. **THE VERTEX ATOM** — priced (above); a mechanism for it is the landscape's, not a message's.
+* **`calibration_vs_oracle.py`, the 0.8.0 metric** (mass-weighted |Δ gDNA share| per object, region /
+  boundary): stranded OFF 0.0067 / 0.0103, stranded ON 0.0102 / 0.0150, unstranded OFF 0.0085 / 0.0122
+  — unchanged from the merge day within a few ten-thousandths; the `g00` zero controls **0.0000 / 0.0000**
+  (828 and 921 fragments of 18M and 26M; they were 0.0081 / 0.0077); the deferred stratum 0.0717 / 0.1185.
+  ⭐ **The RULER** (③): factor P 0.150 against O 1.000 on the `g00` rows — 996M bp over 51,543 transcripts —
+  and P/O 1.033 / 1.043 on the in-scope capture-OFF strata where the instrument's own contract says 1.000.
+* **`calibration_walk.py`** (C = local solve; the refit alone; messages on top): at every zero row the
+  prior alone reaches a few hundred fragments and messages add a few hundred of noise; in scope the prior
+  does most of the work and messages still remove 13k–129k on the stranded capture-ON and `g98` rows; on
+  the deferred stratum the refit alone is +2.6M / +6.3M and the messages −4.9M / −9.9M (unchanged).
+* **`vertex_ceiling.py`** (`vertex_free` against `base`, the final answer): within 1 % on every stranded
+  in-scope row; 2 % / 2 % / 7 % of the unstranded capture-OFF rows at `g05` / `g50` / `g98`; 24–39 % of the
+  deferred stratum; the zero rows 325 → 13. Unchanged in scope from the merge day.
+* **`quant_accuracy.py`, the thermometer** (misassigned fragments, transcript level, `base` → `oracle`
+  prior): stranded OFF 1.03×, stranded ON 0.98×, unstranded OFF 1.02× — a perfect prior is worth nothing
+  in scope; the deferred stratum 0.73×; the `g00` rows 9.64M under both arms, the largest of any stratum
+  and untouched by the prior — the ruler.
+* **`policy_benchmark.py --by-class`** (the final table, `ladder_final.txt` in the prototype record):
+  unstranded OFF `g50` — the intron class 46 % of the row at 2.3 % of its own fragments; stranded ON `g50`
+  — exon|exon boundaries 49 % and walled exons 19 %. Same shape as the merge day.
 
-Then `ISSUES: performance-memory-bounded-solve` (owner: mandatory before 0.8.0).
+## WHAT IS NEXT — the owner's decision (2026-09-10): a CODE REVIEW, CODE CLEANUP AND DOCUMENTATION CLEANUP session comes first; its kickoff prompt is `docs/dev/CLEANUP_SESSION_PROMPT.md`. After it, `ROADMAP.md`'s ranking, re-audited
 
-## FOUND, NOT CHANGED — proposals for rank 3 (each would move a number, so each is a measurement)
+1. **THE RULER AT ZERO gDNA** (`ISSUES: g00-shrinkage-upstream-repair`, re-priced: the composition it reads
+   is now right and the factor is still 0.15, because `capture_eff_length._global_reference_density`
+   detects a reference from any five slots with positive mass). The fix is the detector. First step:
+   settle whether the instrument's "exactly 1.000 off capture" contract is stale (both P and O read
+   0.92–0.97 there), then derive the enrichment test, prototype outside `src/`, judge on ③ per stratum.
+2. The rest of the pre-EM setup (rank 2; re-run `prior_vs_oracle.py` first).
+3. The intron's own solve on unstranded capture-OFF (rank 3); the vertex atom (rank 4); the message
+   policy above the bar (rank 5).
 
-* **An edge boundary's own strand profile is overwritten by the edge level's marker.** `_claims` gives a
-  single-strand boundary with a live channel its strand profile; `_edge_level` then sets `own[b] = zeros`
-  at every intergenic|exon edge as the level claim's marker, so the RNA lanes never read an edge
-  boundary's strand profile as an RNA source (the gDNA lane is unaffected: a gene edge's level is its
-  Poisson count). Preserved exactly.
-* **Two liveness predicates.** The policy's test of a node's strand channel is `tau_lam > 0` (`_Chain`);
-  the instruments' one home is `has_own_composition_evidence` = `tau_lam > 1e-9`. They agree on every
-  value observed and the one-home gate asserts it on a vector; a ladder census of `0 < tau_lam ≤ 1e-9`
-  would close it for good.
-* `PsiMessage.lam_rows`' docstring still narrates the retired relay's certified-flux stream as the
-  channel's origin; harmless history, one paragraph.
-* A few rung/item labels remain in `DESIGN.md` §6b.10–§6b.13's bodies and in `ISSUES.md`'s older
-  entries; the owner's decision covered §6b.4–§6b.9.
+## THE LESSONS THIS SESSION PAID FOR
 
-## THE LESSONS THE LAST SESSION PAID FOR
-
-* **A census before a prototype.** The empty-piece flux source's own example (the sj+terminus piece)
-  cannot be reached by the lane at all — a strand's RNA level stops at that strand's own terminus by the
-  face rule — and the test chromosome had no substrate for it; the census said where it could act (the
-  AMBIG exon|exon boundaries of the overlapping loci, ~70 pieces per strand on the ladder) and which panel
-  could judge it (the ladder only) before a line of mechanism was written.
-* **An instrument's population is part of its measurement.** The vertex ceiling classified by the
-  REALIZED vertex and priced chance: tiny boundaries whose few crossings were all gDNA by luck, pinned as
-  certain and propagated, made the region axis 23 % worse. The PARAMETER vertex — a vertex by
-  construction of the scenario — is the population a ceiling means.
-* **A pin must enter where the solve reads.** Under the two-phase design a node's neighbours receive its
-  OWN CLAIM and the node answers through ψ; rewriting a belief the backbone reads only into its
-  diagnostics capture is inert, and the instrument's own comparator would have called it "did not fire".
-* **A price at a source with no witness follows the hop's own rule.** The zero count's counting
-  (`hop_price` at n = 0) kept the empty-piece source inside the bar on every in-scope row; the sharper
-  price (the junction's counting alone) failed it by 1.8 % on a stranded capture-ON row. Nothing new was
-  invented: the existing rule already said what a zero witness pays.
-* **Two references, one per half, make a refactor provable one stage at a time.** Five cleanup stages,
-  ten identity checks, zero bits moved; the one fold that could have moved a bit (`count_price` into
-  `hop_price`) was proved safe by the gDNA lane's counts being positive, not by the suite.
-* **Delete a thread record only after grepping its numbers in the permanent docs.** Three of the eight
-  sandbox records deleted had refusals whose numbers lived nowhere else; the MOVE RULE turned those into
-  ISSUES entries instead of losses.
+* **Re-measure the whole page, not the number you changed.** The composition metric said "done"; the
+  ruler on the same page said the largest in-scope defect on the metric is now somewhere else entirely.
+* **An open entry's prescription can be completed and its defect survive.** "Repair the composition, not
+  the function" was followed to 828 fragments and the factor did not move; the entry is re-priced, not
+  closed, and the repair moved to the detector.
+* **A census in the estimator's own currency before a mechanism; a decomposition by contributor before a
+  derivation.** Both mechanisms this session followed from a table naming who carried the mass.
+* **A prototype's evidence class is not the src predicate until it is checked slot by slot** (1,476 own-flux
+  ceilings; 137k against 111k). **Diff the goldens column by column** (the tiny toys, not the ladder,
+  exposed the grid collapse and the guard). **A shuffle or a mirror control only discriminates where the
+  population it acts on is mixed.** **zsh arrays are 1-indexed** — check every sharded table's row count.

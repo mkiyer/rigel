@@ -2379,3 +2379,53 @@ because a wrong value with a tight variance outvotes correct neighbours and anch
 ⚠ On real cfRNA most confident-gDNA regions have **zero** counts (64–94 % across libraries), and genome-wide
 80.5 % of regions carry no fragments at all. A density-space estimator floors at `1/E` and discards most of
 the evidence.
+
+### 7.1 ⭐⭐⭐ THE LANDSCAPE PRIOR — who trains it, where its kernels go, and what axis it lives on (owner rulings 2026-09-06 and 2026-09-10; landed 2026-09-10)
+
+**Three rulings, one gate file** (`tests/calibration/test_landscape_training_population.py`; the arms and
+their numbers `ISSUES: the-landscape-training-population-arms`; the instrument
+`landscape_training_census.py`):
+
+1. **A node whose only evidence is a bound, or which has none, does not train the prior.**
+   `RegionBelief.informed` — an own composition channel (`has_own_composition_evidence`), structural
+   certainty (`g1_locked`), or a COMPOSITION row received from a neighbour — is published by
+   `sweep.solve_chain` from the held messages and selected on by `calibrate._fit_gdna_hyperprior`; a level
+   lane, a ceiling and a cube row are bounds; the zero-count anchor trains regardless. ⛔ "Any non-flat
+   λ-row" is NOT the predicate: `PsiMessage.lam_rows` fuses compositions and bounds (1,476 own-flux
+   ceilings at the unstranded zero control; 137k against 111k).
+2. **The grid spans every region and boundary the prior is read at** (`fit_landscape(domain=…)`), so the
+   training cut changes which kernels are summed and never the axis; the `_MIN_TRAIN` guard measures the
+   annotation-admitted population. Found on the gDNA-free golden toys, where the cut left the anchors
+   alone: the grid collapsed to the floor (14 → 95 invented fragments of 1,000) and the guard refused the
+   refit (52 → 201). Free on the ladder (byte-identical on 14 rows; the full domain widens the step ≤ 10 %).
+3. **The E-step on the kernels that have no location** (`landscape._estep_kernels`). A region trained at
+   less than one fragment is centred at its wall (the estimator's `max(count, 1)`), its Poisson kernel is
+   flat below the wall, and normalised to unit mass it spreads that mass UNIFORMLY under the wall — a
+   likelihood used as a density. At the unstranded zero control that put 1.0 % of the landscape's mass
+   above −1 decade on the 1,310 anchors shorter than 100 bp and 0.6 % on the zero-count exons, and a
+   blind exon's median was decided by that tail against ψ's Beta(½,½) reference's ½-nat/λ slope. The refit
+   loop's previous landscape now places those kernels (kernel × P_prev, renormalised); COUNTED kernels
+   keep their own location, so an enriched minority cannot be competed away (the δ-pin EM predecessor's
+   failure, reproduced by the all-kernel form). Nothing chosen.
+
+**The mechanism the entry had wrong.** The anchor holds 46–94 % of the estimator's weight on every ladder
+row and the refit loop DE-entrenches (false gDNA trained 777k → 158k → 71k across the three refits at
+`g00 ss.50 OFF`); on every contaminated row the false-positive training weight was ≤ 1.5 %. The
+zero-row residual was the landscape's tail, not entrenchment.
+
+**Measured** (the ladder, whole-library |gDNA − truth| in fragments; `policy_benchmark.py`): the zero
+controls **149,552 → 674** and **166,837 → 283** (unstranded OFF / ON), **14,324 → 529** and
+**15,365 → 262** (stranded), the rule and the E-step together; every in-scope contaminated row
+0.95–1.00× of the merge-day default; the deferred rows 0.96–1.02×; the zero-RNA controls within ±4 %.
+The test chromosome: within 0.3 % of the default under the rule alone, wins or ties all 30 rows with the
+E-step. ⚠ Under both, `silent`'s zero controls fell to a few hundred fragments as well (the prior alone
+solves a gDNA-free library), so `policy_benchmark.py`'s "beats silence" count reads 6/8 per half with
+every losing row a zero control at that floor; every contaminated row still favours `transfer`.
+
+⛔ **Refused, with numbers** (the CLOSED entry): every reading of "a bound" that reaches the DELIVERED rows
+(`no_echo_1sided`, `own_var`: the deferred stratum 1.2–3.6×, `own_var` in-scope `g05 ss.50 OFF` 1.06×) —
+under capture the probed exons' one-sided rows ARE the enriched mode's witness, the refuted κ-dead
+exclusion of 2026-09-02 re-derived; the likelihood-kernel estimator (`row_kernel`, 2× to 437×); the
+all-kernel E-step (`estep_all`, a counted minority competed away, 1.02–1.09×); six refits (`refits6`, moot
+under the E-step). The oracle-values ceiling before the E-step was 0.686× at the zero control; the E-step
+passed it, because the ceiling priced the values on the old estimator.

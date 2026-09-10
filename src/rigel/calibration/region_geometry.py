@@ -461,6 +461,15 @@ class RegionBelief:
     var_pos: np.ndarray
     var_neg: np.ndarray
     var_gdna: np.ndarray
+    #: ⭐ DOES THIS SLOT HOLD A COMPOSITION? — an own composition channel, structural certainty, or a
+    #: COMPOSITION row received from a neighbour; a level, a ceiling or a cube row is a BOUND and does
+    #: not count (owner ruling 2026-09-06: a node whose only evidence is a bound does not train the
+    #: landscape prior; landed 2026-09-10). Published by `sweep.solve_chain` from the held messages;
+    #: ``None`` on a belief no solve has produced (`init_beliefs`), which the landscape's selector reads
+    #: as the annotation alone. A bound-only slot settles where the prior puts it inside the admitted
+    #: half-line, so training the prior on it is training it on its own echo
+    #: (gate: `tests/calibration/test_landscape_training_population.py`).
+    informed: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------

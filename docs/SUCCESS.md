@@ -248,8 +248,9 @@ conditions, so any floor would be a tuned constant. ⭐⭐ **Read `weak%` before
 
 ⚠ And `locked` is the **G1 / structurally pure-gDNA** class on *both* axes (`region_geometry.g1_locked`),
 never `~solvable & is_region` — a structurally-locked *boundary* is certain, not ignorant. ⛔ It is
-deliberately **not** the same mask as `region_init`'s region-only `struct_lock`, which governs message
-*emission* (TRAPS: two-masks-one-name).
+deliberately **not** a region-only mask: `region_init`'s relay-era region-only `struct_lock` (which
+governed message *emission*) retired on 2026-09-09, and `g1_locked` is the one home
+(TRAPS: two-masks-one-name).
 
 ### The instrument — `scripts/design/pass0_vs_oracle.py`
 
@@ -282,8 +283,9 @@ confidence threshold because it is a cell of a partition rather than a cutoff.
 The two classifications, both mutually exclusive and exhaustive (gated: the mass *and* the error
 decompose over each exactly):
 
-* **the solver's own** — `own_evidence` / `message_only` / `struct_lock`, reproducing `region_init`'s
-  definitions and cross-checked against `composition_evidence_census.py`'s;
+* **the solver's own** — `own_evidence` / `message_only` / `struct_lock`, from
+  `region_init.has_own_composition_evidence` (`tau_lam`) and `region_geometry.g1_locked`, cross-checked
+  against `composition_evidence_census.py`'s;
 * **C_info's** — `identified` / `undet_no_separation` / `undet_out_of_range` / `absent`.
 
 ⛔ **Every arm, T included, is UNDRAINED, and that is forced.** The second pass's multinomial is scored

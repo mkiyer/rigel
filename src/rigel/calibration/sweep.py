@@ -50,10 +50,11 @@ from .region_geometry import (
     RegionBelief,
     RegionGeometry,
     RegionStatics,
+    g1_locked,
     region_gdna_geometry,
     region_rna_geometry,
 )
-from .region_init import build_region_init
+from .region_init import build_region_init, has_own_composition_evidence
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
 from .simplex_logodds import (
     CompositionPriors,
@@ -405,6 +406,24 @@ def solve_chain(
     f_g, f_pos, f_neg = out_fg, out_fpos, out_fneg
     var_g, var_pos, var_neg = out_vg, out_vpos, out_vneg
 
+    # ── THE INFORMED PREDICATE — does this slot hold a COMPOSITION, or only a bound? ─────────────
+    # An own composition channel (the solver's own precision), structural certainty, or a
+    # COMPOSITION row received from a neighbour (`Message.composition`). A level lane, a ceiling
+    # (the RNA lanes' or the node's own flux's) and a cube row are BOUNDS: one-sided, so the value the
+    # solve settles on within the admitted half-line is the prior's, and a slot with nothing at all
+    # believes the prior outright. Neither trains the landscape (`calibrate._fit_gdna_hyperprior`):
+    # the owner's ruling of 2026-09-06 ("nodes whose only evidence is a bound do not train it"),
+    # landed 2026-09-10. ⛔ Read off the HELD MESSAGES, not `msg.lam_rows`, which fuses compositions
+    # and bounds into one row: the bound-only slots with a non-flat row (1,476 own-flux ceilings at
+    # the ladder's unstranded zero control) are what the ruling excludes — keeping them read 137k
+    # against the ruling's 111k there.
+    held_composition = np.zeros(n_slot.shape[0], dtype=bool)
+    for held in (from_left, from_right):
+        for i, m in enumerate(held):
+            if m is not None and m.composition is not None:
+                held_composition[i] = True
+    informed = has_own_composition_evidence(own.tau_lam) | g1_locked(fp, fn) | held_composition
+
     if _capture is not None:  # inert diagnostic hook
         # strand-ONLY local belief (no global prior, no messages) — to split the local error into the
         # strand likelihood vs the global gDNA prior contribution. Same solver, global=None.
@@ -473,6 +492,7 @@ def solve_chain(
             fneg_init=_fn_init,
             intron_prior=intron_prior,
             lam_rows=msg.lam_rows,
+            held_composition=held_composition,
             solvable_mask=solvable,
         )
 
@@ -483,6 +503,7 @@ def solve_chain(
         var_pos=var_pos,
         var_neg=var_neg,
         var_gdna=var_g,
+        informed=informed,
     )
 
 

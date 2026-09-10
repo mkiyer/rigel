@@ -296,6 +296,39 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     return np.where(anchor, 1.0, ref / (v + ref))
 
 
+def _estep_kernels(kernels: np.ndarray, count: np.ndarray, grid: np.ndarray, prev) -> np.ndarray:
+    """⭐⭐ THE E-STEP ON THE KERNELS THAT HAVE NO LOCATION (landed 2026-09-10). A region trained at
+    less than one fragment has no location of its own — the estimator already centres it at its
+    resolution wall (``max(count, 1)``) — and its Poisson kernel is flat below that wall. Summed
+    normalised to unit mass, such a kernel spreads that mass UNIFORMLY under the wall, which is the
+    flat-prior posterior and not a population statement: SHORT empty regions (a wall at exon densities)
+    deposited 1.0 % of the landscape's mass above −1 decade at the ladder's unstranded zero control, the
+    delivered exons — zero-count too on a zero row — another 0.6 %, and that tail is what a blind exon's
+    posterior median was decided against (`DESIGN.md` §7.1).
+
+    The refit loop already holds the previous fit, and the deconvolution's E-step places a
+    location-free kernel where the population is: ``kernel × P_prev(ρ)``, renormalised. A COUNTED kernel
+    keeps its own location — it is not touched — so an enriched minority cannot be competed away by the
+    bulk (the failure the δ-pin EM predecessor had, and the failure the all-kernel form reproduces:
+    `ISSUES: the-landscape-training-population-arms`, ``estep_all``). ``prev`` is ``None`` at the first
+    fit, where nothing changes. Measured on the ladder: the zero controls 111,011 → 674 and
+    125,649 → 283 fragments (unstranded OFF / ON), 13,782 → 529 and 14,847 → 262 (stranded); every
+    in-scope contaminated row 0.95–1.00×; the deferred rows 0.96–1.02×. A mirrored previous landscape
+    (the control) sends the capture-ON zero rows 9–13× worse: what acts is WHERE the previous fit puts
+    the mass. No constant enters: the one-fragment floor is the estimator's own."""
+    if prev is None:
+        return kernels
+    p_prev = np.exp(
+        np.interp(grid * _LN10, prev.log_rho, prev.logP, left=prev.logP[0], right=prev.logP[-1])
+    )
+    m = count < 1.0
+    if not m.any():
+        return kernels
+    k = kernels[m] * p_prev[None, :]
+    kernels[m] = k / np.maximum(k.sum(1, keepdims=True), _EPS)
+    return kernels
+
+
 def _render(
     kernels: np.ndarray, weights: np.ndarray, widths: np.ndarray, grid: np.ndarray
 ) -> np.ndarray:
@@ -322,7 +355,16 @@ def _render(
 
 
 def fit_landscape(
-    count, mass, eff, var, *, anchor, strength: float = 1.0, knn_scale: float = _KNN_SCALE
+    count,
+    mass,
+    eff,
+    var,
+    *,
+    anchor,
+    strength: float = 1.0,
+    knn_scale: float = _KNN_SCALE,
+    domain: tuple | None = None,
+    prev: "DensityLandscape | None" = None,
 ) -> "DensityLandscape | None":
     """Fit the landscape from pass-0's per-region deconvolved gDNA. Returns ``None`` if it cannot be fit.
 
@@ -330,6 +372,18 @@ def fit_landscape(
     region's total unspliced mass ``M`` (which bounds the achievable density and so fixes the grid top),
     ``eff`` the effective length, ``var`` the belief's ``Var(log f_g)``, and ``anchor`` the zero-mass
     structural regions (see :func:`_reliability`). Substrate selection is the caller's job — it needs the chain.
+
+    ⭐ ``domain`` — ``(mass, eff)`` of the population the prior will be READ at, when that is wider than
+    the population it is FITTED on. :func:`_grid` spans the data's own support and :meth:`logprior` clamps
+    flat beyond it, which is right only while the two populations coincide; once the training population
+    is a subset (2026-09-10: a slot with no composition does not train), a consumer above the training
+    set's top density would read a flat prior and fall to ψ's reference. Measured: a gDNA-free toy whose
+    five exons are all blind trained the six anchors alone, the grid collapsed to one decade at the floor,
+    and the invented gDNA rose 14 → 95 fragments of 1,000. With ``domain`` the grid is the consumers',
+    the kernels the training set's.
+
+    ⭐ ``prev`` — the previous refit's landscape, or ``None`` at the first fit: the E-step on the
+    location-free kernels (:func:`_estep_kernels`).
 
     The estimator is a weighted sum of zero-native per-region kernels at the population resolution; there is
     no EM, no competition between components and no iteration, so it is deterministic and every region's
@@ -346,11 +400,18 @@ def fit_landscape(
     count, mass, eff, anchor = np.maximum(count[live], 0.0), mass[live], eff[live], anchor[live]
     var = np.asarray(var, dtype=np.float64)[live]
 
-    grid = _grid(mass, eff)
+    if domain is None:
+        grid = _grid(mass, eff)
+    else:
+        d_mass = np.asarray(domain[0], dtype=np.float64)
+        d_eff = np.asarray(domain[1], dtype=np.float64)
+        d_live = np.isfinite(d_mass) & np.isfinite(d_eff) & (d_eff > _EPS)
+        grid = _grid(d_mass[d_live], d_eff[d_live]) if d_live.any() else _grid(mass, eff)
     centres = np.clip(np.log10(np.maximum(count, 1.0)) - np.log10(eff), grid[0], grid[-1])
     widths = knn_widths(centres, float(grid[1] - grid[0]), knn_scale)
     weights = _reliability(count, var, anchor)
-    density = _render(_poisson_kernels(count, eff, grid), weights, widths, grid)
+    kernels = _estep_kernels(_poisson_kernels(count, eff, grid), count, grid, prev)
+    density = _render(kernels, weights, widths, grid)
     total = float(density.sum())
     if not (total > 0.0 and np.isfinite(total)):
         return None

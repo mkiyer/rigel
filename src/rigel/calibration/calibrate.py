@@ -215,7 +215,7 @@ _MIN_TRAIN = 5
 
 
 def _fit_gdna_hyperprior(
-    chain, belief, statics, region_arrays, mass_global, eff_global, *, strength
+    chain, belief, statics, region_arrays, mass_global, eff_global, *, strength, prev=None
 ):
     """Select the training substrate from the chain and fit the :class:`DensityLandscape` on the initial solve's
     deconvolved gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
@@ -271,9 +271,36 @@ def _fit_gdna_hyperprior(
     anchor = (
         isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
     )
-    sel = (expressed & ((fp ^ fn) | (~fp & ~fn))) | anchor
-    if int(sel.sum()) < _MIN_TRAIN:
+    sel = expressed & ((fp ^ fn) | (~fp & ~fn))
+    # ⭐ A SLOT WHOSE ONLY EVIDENCE IS A BOUND, OR WHICH HAS NONE, DOES NOT TRAIN THE PRIOR (owner
+    # ruling 2026-09-06; landed 2026-09-10, `RegionBelief.informed`). Its value is where the prior puts
+    # it — outright, or inside the half-line a level or ceiling admits — so re-fitting on it re-seeds
+    # the landscape's tail at the density its own total implies. Measured on the ladder: the zero
+    # controls 0.74× / 0.75× (unstranded) and 0.96× / 0.97× (stranded), every in-scope contaminated
+    # row within 0.1 %, a shuffled exclusion of the same count winning nothing in scope.
+    # ⛔ The readings that reach the DELIVERED rows — a one-sided row as a bound, the own-evidence
+    # variance as the weight — lose the deferred stratum 1.2–3.6×: those rows are the enriched mode's
+    # witness under capture (the refuted κ-dead exclusion of 2026-09-02, re-derived). The anchor
+    # trains regardless: it is a structural statement, not a solve.
+    # ⭐ THE GRID IS THE CONSUMERS' DOMAIN — EVERY slot the prior is read at, regions and boundaries
+    # alike (owner ruling 2026-09-10: the grid must encompass the full range of every region's and
+    # boundary's total abundance) — so that the composition cut changes which kernels are summed and
+    # never the axis (`fit_landscape`'s ``domain``: a gDNA-free toy whose exons are all blind otherwise
+    # trained its anchors alone, the grid collapsed to the floor, and every exon read a flat prior).
+    # Measured (`domain_census`, the session of 2026-09-10): on the ladder the annotation-selected
+    # population's span already covered every slot on 14 of 16 rows and the full domain widens the
+    # step by ≤ 10 % on the other two; on the test chromosome by ≤ 1 %.
+    domain_sel = np.asarray(eff_global, dtype=np.float64) > 1.0e-9
+    # ⛔ The substrate guard measures the population the annotation admits, as it did before the cut:
+    # "is there enough of a population to fit a prior for" is not the training set's question. Measured
+    # on a gDNA-free toy with an antisense overlap: guarding the cut population (four anchors, under
+    # `_MIN_TRAIN`) refused the refit and left the AMBIG region at its prior-free 36 % gDNA — 52 → 201
+    # invented fragments of 1,000; `fit_landscape` still refuses a training set under two.
+    if int((sel | anchor).sum()) < _MIN_TRAIN:
         return None
+    if belief.informed is not None:
+        sel &= np.asarray(belief.informed, dtype=bool)
+    sel |= anchor
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
     return fit_landscape(
         np.asarray(belief.f_g, dtype=np.float64)[sel] * mass,
@@ -282,6 +309,12 @@ def _fit_gdna_hyperprior(
         np.asarray(belief.var_gdna, dtype=np.float64)[sel],
         anchor=anchor[sel],
         strength=strength,
+        # the previous refit's landscape: the E-step on the location-free kernels (`landscape._estep_kernels`)
+        prev=prev,
+        domain=(
+            np.asarray(mass_global, dtype=np.float64)[domain_sel],
+            np.asarray(eff_global, dtype=np.float64)[domain_sel],
+        ),
     )
 
 
@@ -759,6 +792,7 @@ def calibrate(
             mass_global,
             eff_global,
             strength=config.gdna_prior_strength,
+            prev=gdna_hyperprior,  # None at the first fit; the fit before, after
         )
         if gdna_hyperprior is None:
             break

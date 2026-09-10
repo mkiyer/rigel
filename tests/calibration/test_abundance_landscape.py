@@ -393,7 +393,7 @@ def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_rai
     ⛔ It is NOT a silent fallback: the skip is logged at WARNING, and the object is ``None`` rather
     than a quietly-different estimate. ⚠ 65 test callers (toys and unit fixtures that never wanted a
     QC panel) hit exactly this path — measured before the flip, which is why the flip could not land
-    as `PLAN_measured_prior.md` §3d wrote it.
+    as the measured-prior plan first wrote it (a retired dev record; git carries it).
 
     ⛔⛔ **`background_abundance` KEEPS ITS REFUSAL and that asymmetry is the whole point**: that pair
     feeds ψ, so a missing input there would silently change a number the solve consumes. This object
