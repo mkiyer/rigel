@@ -141,7 +141,11 @@ transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `qua
 `priority: next · kind: build · 2026-08-17 (mandatory before 0.8.0)`
 The grid solve in memory-bounded parallel chunks, with an advanced CLI flag spanning one object at a time to
 many; optimise on high-depth real RNA-seq, not cfRNA. Calibration scales with the index and the EM with the
-data (`TRAPS: toys-rank-hotspots-backwards`). `scripts/profiling/`.
+data (`TRAPS: toys-rank-hotspots-backwards`). Measured 2026-09-11 on an 18.6M-fragment library: the four
+sweeps are 80% of the run and the held messages set the 32 GB peak, on one core. The passes couple slots
+only within a reference and ψ is per slot, so a per-reference split stays bit-identical if the three
+genome-wide scalars in `prepare` (the gDNA lane's and each RNA lane's reference density, and whether the
+strand split is live) are computed once over the whole chain. `profiling/profiler.py`, `profiling/sweep_replay.py`.
 
 ### u-ruler-arm
 `priority: next · kind: measurement · 2026-08`

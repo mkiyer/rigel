@@ -1234,13 +1234,9 @@ def mature_wall_distances_kernel(
     total = np.repeat(csum[last] - np.r_[0, csum[last[:-1]]], np.diff(np.r_[first, t.size]))
 
     # the regions each exon covers: exon endpoints are region bounds, so the cover is exact
-    lo0, hi0 = ref_off[ref], ref_off[ref + 1]
-    lo = np.empty(t.size, dtype=np.int64)
-    hi = np.empty(t.size, dtype=np.int64)
-    for i in range(t.size):  # per-exon searchsorted inside one reference's slice
-        s0, s1 = int(lo0[i]), int(hi0[i])
-        lo[i] = s0 + int(np.searchsorted(ends[s0:s1], a[i], side="right"))
-        hi[i] = s0 + int(np.searchsorted(starts[s0:s1], b[i], side="left"))
+    from .region_arrays import overlapping_region_runs
+
+    lo, hi = overlapping_region_runs(ref, a, b, starts, ends, ref_off)
     bad = (
         (hi <= lo)
         | (starts[np.minimum(lo, n_regions - 1)] != a)

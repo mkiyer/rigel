@@ -160,8 +160,8 @@ def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
     and the failure message can name both directions at once.
     """
     readme = (SCRIPTS / "README.md").read_text()
-    # Tree-qualified, like `CLAUDE.md`'s `design/…` rows: a bare basename would let the README's
-    # mention of `design/scan_profile.py` satisfy the row for a different instrument of the same name.
+    # Tree-qualified, like `CLAUDE.md`'s `design/…` rows: a bare basename would let a README mention of
+    # a `design/` file satisfy the row for a different instrument of the same name.
     listed = frozenset(re.findall(r"`profiling/([a-z0-9_]+\.py)`", readme))
     on_disk = frozenset(p.name for p in _instruments(PROFILING_DIR))
     assert on_disk, (

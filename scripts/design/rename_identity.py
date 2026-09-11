@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Is this rename stage numerically a no-op? Every stage proven bit-identical to a frozen reference.
 
-A rename must change no number, and this makes that claim falsifiable. `--freeze` runs the whole
+A rename, or any refactor or speed-up, must change no number, and this makes that claim falsifiable. `--freeze` runs the whole
 pipeline once on one condition and reduces it to digests; `--check` runs it again after a stage and
 compares. It compares content, never names, because the names are the thing changing: the content
 multiset (the sorted `dtype|shape|sha256` of every payload and calibration array, field names discarded,
@@ -21,6 +21,7 @@ Usage::
     python scripts/design/rename_identity.py --freeze             # capture the reference, once
     python scripts/design/rename_identity.py --check --stage s1   # after every stage
     python scripts/design/rename_identity.py --check --suite DIR --index DIR --condition NAME
+    python scripts/design/rename_identity.py --freeze --bam real.bam --index DIR --reference REF.json
 """
 
 from __future__ import annotations
@@ -73,9 +74,12 @@ def content_multiset(obj) -> list[str]:
     return sorted(out)
 
 
-def capture(suite: Path, index_dir: Path, condition: str) -> dict:
-    """Run the whole pipeline once, deterministically, and reduce it to comparable digests."""
-    bam = str(suite / condition / "sim_oracle.bam")
+def capture(suite: Path, index_dir: Path, condition: str, bam: Path | None = None) -> dict:
+    """Run the whole pipeline once, deterministically, and reduce it to comparable digests.
+
+    ``bam`` names any BAM directly (a real library); without it the BAM is the panel condition's oracle.
+    """
+    bam = str(bam) if bam is not None else str(suite / condition / "sim_oracle.bam")
     index = TranscriptIndex.load(str(index_dir))
     base = PipelineConfig()
     cfg = dataclasses.replace(
@@ -206,6 +210,8 @@ def main() -> int:
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--condition", default=DEFAULT_CONDITION)
+    ap.add_argument("--bam", type=Path, default=None,
+                    help="a BAM to capture directly (a real library); the label is its library directory")
     ap.add_argument("--reference", type=Path, default=REFERENCE)
     ap.add_argument("--stage", default="", help="label recorded with a --check, for the log")
     args = ap.parse_args()
@@ -215,7 +221,8 @@ def main() -> int:
     if not (args.freeze or args.check):
         raise SystemExit("one of --freeze / --check / --self-test is required")
 
-    now = capture(args.suite, args.index, args.condition)
+    condition = args.condition if args.bam is None else args.bam.resolve().parent.parent.name
+    now = capture(args.suite, args.index, condition, bam=args.bam)
 
     if args.freeze:
         if args.reference.is_file():

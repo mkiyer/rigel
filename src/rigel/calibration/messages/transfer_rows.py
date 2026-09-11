@@ -11,7 +11,7 @@ width is derived from counts, never a constant.
 from __future__ import annotations
 
 import numpy as np
-from scipy.special import polygamma
+from scipy.special import zeta
 from scipy.stats import norm
 
 from ..splice_graph import (
@@ -76,7 +76,9 @@ def blur_row(row, lam, v):
         x = np.arange(-half, half + 1) * dlam
         kern = np.exp(-0.5 * x * x / v)
         kern /= kern.sum()
-        pr = np.convolve(np.pad(np.exp(out), half, mode="edge"), kern, mode="valid")
+        e = np.exp(out)
+        edged = np.concatenate((np.full(half, e[0]), e, np.full(half, e[-1])))  # an edge pad
+        pr = np.convolve(edged, kern, mode="valid")
         out = np.log(np.maximum(pr, 1.0e-300))
     return out - out.max()
 
@@ -184,7 +186,7 @@ def transport_row(row, lam, lam_e_of_u, n_u, n_s):
     r = np.asarray(row, np.float64)
     lam_u_of_x = np.interp(lam, np.asarray(lam_e_of_u, np.float64), lam, left=lam[0], right=lam[-1])
     out = np.interp(lam_u_of_x, lam, r - r.max())
-    v = float(polygamma(1, float(n_u) + 0.5) + polygamma(1, float(n_s) + 0.5))
+    v = float(zeta(2, float(n_u) + 0.5) + zeta(2, float(n_s) + 0.5))
     return blur_row(out, lam, v)
 
 
@@ -202,7 +204,7 @@ def splice_out_row(row_e, lam, n_u, n_s, a_g_b, a_g_e):
     if not (n_u > 0.0 and a_g_b > 0.0 and a_g_e > 0.0) or np.ptp(r) <= EPS:
         return np.zeros_like(lam)
     r = r - r.max()
-    sd = float(np.sqrt(polygamma(1, float(n_s) + 0.5) + polygamma(1, float(n_u) + 0.5)))
+    sd = float(np.sqrt(zeta(2, float(n_s) + 0.5) + zeta(2, float(n_u) + 0.5)))
     acc = np.zeros_like(lam)
     for z in _MARGINAL_NODES:
         s = float(n_s) / float(a_g_b) * float(np.exp(z * sd))
@@ -336,8 +338,9 @@ def count_logvar(count) -> np.ndarray:
     moderate counts; the whole difference is at small ones, and at ``n = 0`` it is ``pi^2/2`` rather
     than infinity — a zero count is a measurement, not an absence. THE ONE HOME of the counting term:
     every hop price here and `region_init`'s own precision read it, so there is one definition and
-    nothing to keep in step."""
-    return polygamma(1, np.asarray(count, np.float64) + 0.5)
+    nothing to keep in step. Trigamma is the Hurwitz zeta ``zeta(2, x)``, evaluated directly: SciPy's
+    ``polygamma(1, x)`` computes the same value through a Python-level product around it."""
+    return zeta(2, np.asarray(count, np.float64) + 0.5)
 
 
 def hop_price(n_s, a_s, n_x, a_x):

@@ -85,27 +85,43 @@ def _region_locus_shares(
     for blocks in blocks_by_ref.values():
         blocks.sort()
 
-    starts = region_arrays.start
-    ends = region_arrays.end
+    starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_offsets = region_arrays.ref_offsets
     for ref_id in range(int(region_arrays.n_refs)):
         blocks = blocks_by_ref.get(ref_id)
         if not blocks:
             continue
         lo, hi = int(ref_offsets[ref_id]), int(ref_offsets[ref_id + 1])
-        block_starts = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
-        for r in range(lo, hi):
+        # The regions partition the reference, so each block overlaps one contiguous run of them: the
+        # first region ending after the block starts through the last starting before it ends. Visiting
+        # each region's overlapping blocks in sorted-block order keeps every float sum in the same order
+        # as a scan over all earlier blocks, while touching only the pairs that overlap.
+        b_start = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
+        b_end = np.fromiter((b[1] for b in blocks), dtype=np.int64, count=len(blocks))
+        first = lo + np.searchsorted(ends[lo:hi], b_start, side="right")
+        last = lo + np.searchsorted(starts[lo:hi], b_end, side="left")
+        width = np.maximum(last - first, 0)
+        pair_block = np.repeat(np.arange(len(blocks), dtype=np.int64), width)
+        pair_region = np.repeat(first, width) + (
+            np.arange(int(width.sum()), dtype=np.int64) - np.repeat(np.cumsum(width) - width, width)
+        )
+        order = np.argsort(pair_region, kind="stable")
+        pair_region, pair_block = pair_region[order], pair_block[order]
+        cut = np.flatnonzero(np.diff(pair_region)) + 1
+        for run in np.split(np.arange(pair_region.size), cut):
+            if run.size == 0:
+                continue
+            r = int(pair_region[run[0]])
             r_start = int(starts[r])
             r_end = int(ends[r])
             r_len = r_end - r_start
             if r_len <= 0:
                 continue
-            cand_hi = int(np.searchsorted(block_starts, r_end, side="left"))
             raw: dict[int, float] = {}
-            for b_start, b_end, lid in blocks[:cand_hi]:
-                if b_end <= r_start:
-                    continue
-                overlap = min(b_end, r_end) - max(b_start, r_start)
+            for j in pair_block[run]:
+                bs, be, lid = blocks[int(j)]
+                overlap = min(be, r_end) - max(bs, r_start)
                 if overlap > 0:
                     raw[lid] = raw.get(lid, 0.0) + overlap / r_len
             total = sum(raw.values())

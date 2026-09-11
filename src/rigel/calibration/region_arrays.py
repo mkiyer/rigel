@@ -37,6 +37,7 @@ from .signature import transcript_strand_class
 __all__ = [
     "RegionArrays",
     "boundary_region_indices",
+    "overlapping_region_runs",
     "region_right_boundary",
 ]
 
@@ -177,3 +178,34 @@ def boundary_region_indices(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     right = region_right_boundary(ref_id)
     lo = np.flatnonzero(right >= 0).astype(np.int64)
     return lo, lo + 1
+
+
+def overlapping_region_runs(
+    ref_id: np.ndarray,
+    start: np.ndarray,
+    end: np.ndarray,
+    region_start: np.ndarray,
+    region_end: np.ndarray,
+    ref_offsets: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(lo, hi)`` per interval — the run of partition regions ``[lo, hi)`` that ``[start, end)`` overlaps.
+
+    The regions tile each reference in order, so an interval overlaps one contiguous run of them: the
+    first region ending after ``start`` through the last starting before ``end``. ``hi <= lo`` means the
+    interval overlaps nothing. An interval whose ``ref_id`` is negative (a reference the partition does
+    not carry) returns ``lo = hi = 0``. One ``searchsorted`` per reference present, not per interval.
+    """
+    ref_id = np.asarray(ref_id, dtype=np.int64)
+    start = np.asarray(start, dtype=np.int64)
+    end = np.asarray(end, dtype=np.int64)
+    region_start = np.asarray(region_start, dtype=np.int64)
+    region_end = np.asarray(region_end, dtype=np.int64)
+    ref_offsets = np.asarray(ref_offsets, dtype=np.int64)
+    lo = np.zeros(ref_id.shape[0], dtype=np.int64)
+    hi = np.zeros(ref_id.shape[0], dtype=np.int64)
+    for r in np.unique(ref_id[ref_id >= 0]):
+        rows = np.flatnonzero(ref_id == r)
+        lo0, hi0 = int(ref_offsets[r]), int(ref_offsets[r + 1])
+        lo[rows] = lo0 + np.searchsorted(region_end[lo0:hi0], start[rows], side="right")
+        hi[rows] = lo0 + np.searchsorted(region_start[lo0:hi0], end[rows], side="left")
+    return lo, hi

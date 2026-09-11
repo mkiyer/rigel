@@ -523,6 +523,15 @@ def _alternative_splice_site(c: _Chain, rule: dict) -> None:
             rule[(int(b), int(x))] = _composed(back7)
 
 
+def _neighbour_pairs(c: "_Chain") -> tuple[np.ndarray, np.ndarray]:
+    """Every directed ``(node, neighbour)`` pair of the chain as two aligned ``int64`` arrays, the left
+    neighbours first; a reference terminal (``-1``) has no pair."""
+    x = np.concatenate((np.arange(c.n, dtype=np.int64), np.arange(c.n, dtype=np.int64)))
+    y = np.concatenate((c.left, c.right))
+    keep = y >= 0
+    return x[keep], y[keep]
+
+
 def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
     """THE LEVEL LANE: the default of every directed face that has no composition rule. A gDNA level
     is absolute (a profile over ``u = log(rho / rho_ref)``), so it needs no map and no recipient: it
@@ -545,21 +554,20 @@ def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
         return None
     u = c.lam
     gene_edge = np.zeros(c.n, bool)
-    for b in np.flatnonzero(c.is_bnd):
-        lo, hi_ = c.left[b], c.right[b]
-        gene_edge[b] = (lo >= 0 and c.is_intergenic[lo]) or (hi_ >= 0 and c.is_intergenic[hi_])
+    bnd = np.flatnonzero(c.is_bnd)
+    lo, hi_ = c.left[bnd], c.right[bnd]
+    gene_edge[bnd] = ((lo >= 0) & c.is_intergenic[np.maximum(lo, 0)]) | (
+        (hi_ >= 0) & c.is_intergenic[np.maximum(hi_, 0)]
+    )
     own_level: list = [None] * c.n
     for x in np.flatnonzero(~empty & ~c.is_intergenic):
         if gene_edge[x]:
             own_level[x] = poisson_level(u, c.n_u[x], c.a_g[x], rho_ref)
         elif own[x] is not None and np.ptp(own[x]) > EPS:
             own_level[x] = level_of_profile(own[x], c.lam, u, c.n_u[x], c.a_g[x], rho_ref)
-    faces = {
-        (int(x), int(y))
-        for x in range(c.n)
-        for y in (c.left[x], c.right[x])
-        if y >= 0 and not c.is_intergenic[y] and (int(x), int(y)) not in rule
-    }
+    x, y = _neighbour_pairs(c)
+    keep = ~c.is_intergenic[y]
+    faces = set(zip(x[keep].tolist(), y[keep].tolist())).difference(rule)
     return _LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, faces)
 
 
@@ -598,21 +606,20 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
         # prices every hop as counting on an empty witness and blurs every floor away.
         col_read = read_column(col, kappa)
         intron_s = ~c.is_bnd & free & ~c.exon_of[name]
-        faces, two_sided = set(), set()
-        for x in range(c.n):
-            for y in (c.left[x], c.right[x]):
-                if y < 0 or c.is_intergenic[y] or not (free[x] and free[y]):
-                    continue
-                b = x if c.is_bnd[x] else y
-                i = y if c.is_bnd[x] else x
-                f = int(c.flags[b])
-                if not (f & all_bits):
-                    faces.add((int(x), int(y)))
-                    if intron_s[i]:
-                        two_sided.add((int(x), int(y)))
-                elif not (f & term_bits) and intron_s[i]:
-                    faces.add((int(x), int(y)))
-                    two_sided.add((int(x), int(y)))
+        # a face crosses when its boundary carries none of the strand's bits; across the strand's own
+        # (non-terminus) bits it still enters the strand's intron, and every face into that intron is
+        # two-sided
+        x, y = _neighbour_pairs(c)
+        ok = ~c.is_intergenic[y] & free[x] & free[y]
+        b = np.where(c.is_bnd[x], x, y)
+        i = np.where(c.is_bnd[x], y, x)
+        f = c.flags[b].astype(np.int64)
+        crossing = (f & all_bits) == 0
+        into_own_intron = ~crossing & ((f & term_bits) == 0) & intron_s[i]
+        on_face = ok & (crossing | into_own_intron)
+        on_two = ok & ((crossing & intron_s[i]) | into_own_intron)
+        faces = set(zip(x[on_face].tolist(), y[on_face].tolist()))
+        two_sided = set(zip(x[on_two].tolist(), y[on_two].tolist()))
         sel = c.is_exon & free & single & (a_r > 0.0)
         rho_ref = float(cnt[sel, col_read].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
         own_level: list = [None] * c.n
@@ -839,7 +846,9 @@ class _PreparedTransfer:
             return None  # nothing to say anywhere: every node holds SILENCE
         held: list = [None] * len(self.own)
         self.held[bool(backward)] = held
-        lanes = tuple(self.lanes.values())
+        # each lane's faces, message field and emptiness, unpacked once rather than per node
+        lanes = tuple((ln, ln.faces, ln.field, ln.empty.tolist()) for ln in self.lanes.values())
+        rule_of, own = self.rule.get, self.own
 
         def receive(s: int, i: int):
             """``s`` sends two things apart — its own claim and what it holds from its far side (written
@@ -848,21 +857,22 @@ class _PreparedTransfer:
             faces include this one carries its population's level; absent all (a structural pure-gDNA
             neighbour) STOP."""
             far = held[s]
+            face = (int(s), int(i))
             comp = None
-            fn = self.rule.get((int(s), int(i)))
+            fn = rule_of(face)
             if fn is not None:
-                out = fn(self.own[s], None if far is None else far.composition)
-                if out is not None and np.ptp(out) > EPS:
+                out = fn(own[s], None if far is None else far.composition)
+                if out is not None and out.max() - out.min() > EPS:
                     comp = _norm(out)
             fields = {}
-            for lane in lanes:
-                if (int(s), int(i)) not in lane.faces:
+            for lane, faces, field, empty in lanes:
+                if face not in faces:
                     continue
-                lv = lane.emit(s, i, None if far is None else getattr(far, lane.field))
-                if lv is not None and not lane.empty[i]:
+                lv = lane.emit(s, i, None if far is None else getattr(far, field))
+                if lv is not None and not empty[i]:
                     lv = lane.receive(lv, s, i)
                 if lv is not None:
-                    fields[lane.field] = lv
+                    fields[field] = lv
             if comp is None and not fields:
                 return SILENCE
             msg = Message(composition=comp, **fields)

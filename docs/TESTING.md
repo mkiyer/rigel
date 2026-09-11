@@ -629,7 +629,7 @@ condition and never cfRNA. The cfRNA libraries on disk are sparse and small, so 
 the structures whose cost the performance work is about (the grid solve, the per-slot arrays, the
 fragment buffer). This leaves `TRAPS: real-data-is-a-test-input` and the accuracy panel (the ladder)
 untouched. The instruments are `scripts/profiling/profiler.py` (whole pipeline, wall clock and per-phase
-peak RSS) and `scripts/profiling/scan_profile.py` (the scan alone); set `OMP_NUM_THREADS` deliberately.
+peak RSS; `--scan-only` for the scan alone) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared bit for bit); set `OMP_NUM_THREADS` deliberately.
 `ISSUES: performance-memory-bounded-solve` carries the work.
 
 A both-strand stress test needs ample single-stranded regions (the population prior trains on them).

@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .region_arrays import region_right_boundary
+from .region_arrays import overlapping_region_runs, region_right_boundary
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -76,62 +76,56 @@ def _transcript_region_incidence(
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     name_to_id = index.ref_name_to_id
-    r_t: list[np.ndarray] = []
-    r_r: list[np.ndarray] = []
-    b_t: list[np.ndarray] = []
-    b_r: list[np.ndarray] = []
-    j_t: list[int] = []  # splice-junction boundary: transcript
-    j_l: list[int] = []  # left-flank region (the previous exon's LAST region)
-    j_r: list[int] = []  # right-flank region (this exon's FIRST region)
-    seen: set[int] = set()
-    prev_last: dict[int, int] = {}  # t → last region of its previous (genomically earlier) exon
 
-    def _add(t: int, ref_name: object, a: int, b: int) -> "tuple[int, int] | None":
-        rid = name_to_id.get(str(ref_name))
-        if rid is None:
-            return None
-        lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
-        # regions overlapping [a, b): first with end_r > a (contains/after a) through last with start_r < b.
-        lo = lo0 + int(np.searchsorted(ends[lo0:hi0], a, side="right"))
-        hi = lo0 + int(np.searchsorted(starts[lo0:hi0], b, side="left"))
-        if hi > lo:
-            r_r.append(np.arange(lo, hi, dtype=np.int64))
-            r_t.append(np.full(hi - lo, int(t), dtype=np.int64))
-            if (
-                hi - 1 > lo
-            ):  # interior boundaries r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
-                b_r.append(np.arange(lo, hi - 1, dtype=np.int64))
-                b_t.append(np.full(hi - 1 - lo, int(t), dtype=np.int64))
-            return lo, hi
-        return None
+    def _ranges(ref, a, b):
+        """Per row, the region run ``[lo, hi)`` overlapping ``[a, b)``; ``valid`` is False for a reference
+        the partition does not carry or an empty run."""
+        rid = pd.Series(np.asarray(ref)).astype(str).map(name_to_id).fillna(-1).to_numpy(np.int64)
+        lo, hi = overlapping_region_runs(rid, a, b, starts, ends, ref_off)
+        return lo, hi, (rid >= 0) & (hi > lo)
 
+    def _expand(first, width, label):
+        """Row ``k`` emits ``first[k] .. first[k] + width[k] - 1`` labelled ``label[k]``, rows in order."""
+        ramp = np.arange(int(width.sum()), dtype=np.int64) - np.repeat(
+            np.cumsum(width) - width, width
+        )
+        return np.repeat(label, width), np.repeat(first, width) + ramp
+
+    # A region is in a component's set if its exon (mRNA) or full span (nRNA) overlaps it; an interior
+    # boundary r in [lo, hi-1) is crossed without a splice. Rows emit in exon order, then the synthetic
+    # spans, exactly the order the per-transcript arrays are consumed in.
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
     # genomic order per transcript so consecutive rows of one transcript are ADJACENT exons — the pairs
     # whose SPLICE JUNCTION must be stitched (the intron between them carries no gDNA ⇒ it is not a
     # genomic-adjacent boundary; its crossing mass is imputed downstream from the flanking EXON densities).
     ex = ex.sort_values(["t_index", "start"], kind="stable")
-    for t, ref_name, a, b in zip(ex["t_index"], ex["ref"], ex["start"], ex["end"], strict=True):
-        t = int(t)
-        res = _add(t, ref_name, int(a), int(b))
-        seen.add(t)
-        if res is not None:
-            lo, hi = res
-            if t in prev_last:  # exon→exon sj to this transcript's previous exon
-                j_t.append(t)
-                j_l.append(prev_last[t])
-                j_r.append(lo)
-            prev_last[t] = hi - 1
+    ex_t = ex["t_index"].to_numpy(np.int64)
+    lo, hi, ok = _ranges(ex["ref"], ex["start"].to_numpy(np.int64), ex["end"].to_numpy(np.int64))
+    parts = [(ex_t[ok], lo[ok], hi[ok])]
+    # an exon→exon junction joins consecutive valid exons of one transcript: the previous exon's last
+    # region and this exon's first
+    vt, vlo, vhi = ex_t[ok], lo[ok], hi[ok]
+    joined = np.flatnonzero(vt[1:] == vt[:-1]) + 1
+    j_t, j_l, j_r = vt[joined], vhi[joined - 1] - 1, vlo[joined]
 
     tdf = index.t_df
     if tdf is not None and "is_synthetic" in tdf.columns:
         syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
-        for t, ref_name, a, b in zip(
-            syn["t_index"], syn["ref"], syn["start"], syn["end"], strict=True
-        ):
-            if int(t) in seen:
-                continue
-            _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
+        syn = syn[~np.isin(syn["t_index"].to_numpy(np.int64), ex_t)]
+        s_t = syn["t_index"].to_numpy(np.int64)
+        s_lo, s_hi, s_ok = _ranges(
+            syn["ref"], syn["start"].to_numpy(np.int64), syn["end"].to_numpy(np.int64)
+        )
+        parts.append(
+            (s_t[s_ok], s_lo[s_ok], s_hi[s_ok])
+        )  # single-exon spans (nRNA): no splice junctions
+
+    t_all = np.concatenate([p[0] for p in parts])
+    lo_all = np.concatenate([p[1] for p in parts])
+    hi_all = np.concatenate([p[2] for p in parts])
+    r_t, r_r = _expand(lo_all, hi_all - lo_all, t_all)
+    b_t, b_r = _expand(lo_all, np.maximum(hi_all - 1 - lo_all, 0), t_all)
 
     e = np.empty(0, dtype=np.int64)
     # The boundary axis is emitted as a BOUNDARY index, not a left-region index. A boundary is a
@@ -139,15 +133,14 @@ def _transcript_region_incidence(
     # returning the left region instead forces every caller through a region-shaped copy, which
     # reads as an attribution of the boundary's mass to a region and is not one.
     right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
-    b_boundaries = right_boundary[np.concatenate(b_r)] if b_r else e
     return (
-        np.concatenate(r_t) if r_t else e,
-        np.concatenate(r_r) if r_r else e,
-        np.concatenate(b_t) if b_t else e,
-        b_boundaries,
-        np.asarray(j_t, dtype=np.int64) if j_t else e,
-        np.asarray(j_l, dtype=np.int64) if j_l else e,
-        np.asarray(j_r, dtype=np.int64) if j_r else e,
+        r_t,
+        r_r,
+        b_t,
+        right_boundary[b_r] if b_r.size else e,
+        j_t.astype(np.int64) if j_t.size else e,
+        j_l.astype(np.int64) if j_l.size else e,
+        j_r.astype(np.int64) if j_r.size else e,
     )
 
 
@@ -179,8 +172,12 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
     wt = m[ok]
     grid = np.linspace(float(x.min()) - 1.0, float(x.max()) + 1.0, 512)
     wn = wt / wt.sum()
-    d = (grid[:, None] - x[None, :]) / _KDE_BW
-    km = (wn[None, :] * np.exp(-0.5 * d * d)).sum(1)  # mass-weighted log-density KDE
+    # the mass-weighted log-density KDE, one grid point at a time: the same elementwise terms and the
+    # same per-point sum as a (grid × regions) matrix, without holding that matrix
+    km = np.empty(grid.shape[0], dtype=np.float64)
+    for g in range(grid.shape[0]):
+        d = (grid[g] - x) / _KDE_BW
+        km[g] = (wn * np.exp(-0.5 * d * d)).sum()
     pk = np.where((km[1:-1] >= km[:-2]) & (km[1:-1] > km[2:]))[0] + 1
     if pk.size == 0:
         mode = grid[int(np.argmax(km))]
