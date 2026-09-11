@@ -1,6 +1,6 @@
 """The region/boundary chain the belief-propagation sweep traverses.
 
-Gate: ``tests/calibration/test_region_chain.py``.
+Gate: ``tests/calibration/test_region_geometry.py``.
 
 The calibration graph is a linear bipartite chain of REGION and BOUNDARY slots interleaved in
 genomic order. A reference with ``k`` regions owns exactly ``k - 1`` interior boundaries, so its

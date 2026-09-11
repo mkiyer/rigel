@@ -1,13 +1,11 @@
-"""Phase-0 report-substrate contract for ``rigel quant`` outputs.
+"""The report substrate ``rigel quant`` writes, and the contract the report builder reads it under.
 
-Guards the v2 ``summary.json`` schema and the externalized
-``fragment_lengths.feather`` companion:
-
-* the fragment-length section is stats-only (no raw per-bin histograms bloat);
-* the raw histograms live in a tidy ``(category, length, count)`` feather that
-  reconciles with the summary observation counts;
-* the splice-type breakdown (incl. implicit / artifact) and the strand
-  contamination diagnostic are surfaced.
+The v2 ``summary.json`` keeps the fragment-length section stats-only, so the raw per-bin histograms
+do not bloat it; those live in a tidy ``(category, length, count)`` companion feather, whose per
+category sums must reconcile with the summary's own observation counts. The reported categories are
+the anchor, the two models and the five pure pools, and the modelled aggregates must be exact sums
+of the primitives beneath them — two files describing one library have to agree, or the report
+shows two truths. The splice-type breakdown and the strand-contamination diagnostic are surfaced.
 """
 
 import argparse
@@ -33,9 +31,9 @@ SEED = 42
 def _fl_models(max_size: int = 1000):
     """An ``FLModels`` built straight from pool histograms, the shape production produces.
 
-    ⚠ Built through the EB kernel rather than through ``build_fl_models``, because that entry point
-    takes a payload — which is the point of TRAPS: pure-and-length-censored.1 and is exactly what a unit test of the REPORT does
-    not want to fabricate.
+    Built through the EB kernel rather than through ``build_fl_models``, because that entry point takes
+    a whole payload, which is exactly what a unit test of the REPORT does not want to fabricate
+    (`TRAPS: pure-and-length-censored`).
     """
     from rigel.calibration.fl import _fl_models_from_histograms
     from rigel.scan_payload import (
@@ -94,13 +92,12 @@ def test_fragment_length_report_splits_lean_summary_from_histograms():
 
 
 def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE_POOLS():
-    """⭐ TRAPS: pure-and-length-censored.3's output contract, and it is a DIFFERENT set than before TRAPS: pure-and-length-censored.
+    """The report's output contract: the anchor, the two models, and the five pure pools.
 
-    The per-``SpliceType`` histograms (``unspliced``, ``spliced_annot``, …) are gone: they were the
-    scanner's, measured by two rules that were neither each other nor the accumulator's ``L``. What
-    replaces them is the five pure pools, which are a structural gDNA/RNA classification in the one
-    frame — and the two ``*_exon`` rows are ON-TARGET gDNA, reported here for the first time
-    (``calibration.fl.splash_fl_mass`` was built to be surfaced and never was).
+    There is no per-``SpliceType`` histogram (``unspliced``, ``spliced_annot``, …) in the set. Those
+    were the scanner's, measured by two rules that were neither each other nor the accumulator's ``L``;
+    the five pure pools are a structural gDNA/RNA classification in one frame, and the two ``*_exon``
+    rows are ON-TARGET gDNA, which nothing else surfaces (`TRAPS: pure-and-length-censored`).
     """
     summary, _ = cli._fragment_length_report(_fl_models())
     assert set(summary) == {
@@ -116,12 +113,12 @@ def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE
 
 
 def test_the_modelled_pools_are_SUMS_OF_the_reported_pure_pools():
-    """⚠ The aggregates and the primitives must reconcile, or the report shows two truths.
+    """The aggregates and the primitives must reconcile, or the report shows two truths.
 
     ``rna`` IS ``pool_rna_spliced``; ``gdna`` is the two CONTAINED rows and deliberately excludes the
-    two crossing ones. That exclusion is the whole point of ``splash`` being separate — the shipped
-    model once summed four differently-tilted pools and read a gDNA mean of 146.05 where the pure
-    intergenic pool says 88.0.
+    two crossing ones. That exclusion is the whole point of ``splash`` being separate: summing four
+    differently-tilted pools reports a gDNA mean far above what the pure intergenic pool measures
+    (`TRAPS: pure-and-length-censored`).
     """
     summary, _ = cli._fragment_length_report(_fl_models())
     n = {k: v["n_observations"] for k, v in summary.items()}

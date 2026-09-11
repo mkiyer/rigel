@@ -1,4 +1,10 @@
-"""Tests for rigel.types — foundational data types."""
+"""`rigel.types` — the value types every other module is written in terms of.
+
+`Strand`, `Interval`, `GenomicInterval`, `IntervalType`, `AnnotatedInterval` and `MergeOutcome`:
+their construction, comparison, arithmetic and edge cases. The last block checks that the integer
+values of the shared enums are the same in Python and in C++, which nothing else can catch — the two
+sides pass these as plain ints, so a divergence is a silent relabelling rather than an error.
+"""
 
 import pytest
 

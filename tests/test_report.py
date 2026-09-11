@@ -1,10 +1,13 @@
-"""Tests for the `rigel report` HTML builder (Phase 1).
+"""The `rigel report` HTML builder, from a synthesized substrate rather than a pipeline run.
 
-Fast, pipeline-free: they synthesize a minimal-but-realistic report substrate
-(v2 ``summary.json`` + companion feathers) in a temp dir and exercise the loader,
-view model, and full HTML build. Vega-specific assertions are conditional on
-``vl-convert-python`` being installed so the suite passes with the ``[dev]``
-extra alone.
+A minimal but realistic substrate — a v2 ``summary.json`` and its companion feathers — is written
+to a temp directory, and the loader, the view model, the chart specifications and the full HTML
+build run against it. The report must be self-contained, inlining its runtime, and must honour a
+custom output path. The capture diagnostics are checked against an `AbundanceLandscape` fixture
+with two modes and against a unimodal one, since a panel that only ever reads the two tallest peaks
+of a curve would look right on the first and invent structure on the second. Vega-specific
+assertions are conditional on ``vl-convert-python``, so the suite passes with the ``[dev]`` extra
+alone.
 """
 
 import importlib.util
@@ -237,13 +240,10 @@ def test_genome_track_spec_bins_per_ref():
 
 
 def test_capture_diagnostics_from_abundance_landscape_labels_modes():
-    """⭐ The QC panel is built from the `AbundanceLandscape`'s CENSUS, not from the top two maxima of
-    a curve. On the bimodal fixture the depleted mode must be the one the pooled intergenic ANCHOR
-    falls in — an independent measurement — and the separation must be the census's own mode ratio.
-
-    ⛔ This replaces `from_prior`, which read a `DensityNPMLE`. The census is strictly more
-    informative: basins rather than the two tallest peaks, a real `n_train`, and a REAL rug (the
-    npmle carried no training points at all, so the report's rug was always empty)."""
+    """The QC panel is built from the `AbundanceLandscape`'s CENSUS, not from the top two maxima of a
+    curve. On the bimodal fixture the depleted mode must be the one the pooled intergenic ANCHOR falls
+    in — an independent measurement — and the separation must be the census's own mode ratio, so a
+    panel re-derived from the curve rather than read off the census disagrees here."""
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent / "calibration"))
@@ -266,7 +266,7 @@ def test_capture_diagnostics_from_abundance_landscape_labels_modes():
     assert diag.n_modes == len(al.modes)
     # the true separation of the fixture's two populations, recovered
     assert diag.separation_nats == pytest.approx(np.log(rho_hi / rho_lo), rel=0.25)
-    # ⭐ a REAL rug — the thing the npmle could never supply
+    # a real rug: the training points themselves, not a summary of them
     assert diag.rug_log_rho.size > 0
     assert diag.rug_log_rho.size == diag.rug_kind.size
     assert set(np.unique(diag.rug_kind)) <= {0, 1, 2, 3}

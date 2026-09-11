@@ -1,24 +1,14 @@
-"""STAGE 0 OF THE FIRST-PASS REDESIGN — the structural claims, falsified clause by clause.
+"""The structural claims — the slots the annotation alone constrains, falsified clause by clause.
 
-`rigel.calibration.structural_claims` derives, from the chain and the statics alone, the set of slots
-whose UNSPLICED population is structurally constrained by the annotation — the first pass's training
-and solving substrate. Four classes, each carrying a CLAIM the panel's certified slot truth can test
-with no solver:
-
-* ``intergenic``          — no RNA strand admissible (``g1_locked``, both kinds): truth must have
-                            ``n_nrna == n_mrna == 0``.
-* ``ss_intron_region``    — exactly one strand admissible, no exon membership: no contiguous mature
-                            RNA fits inside, so truth must have ``n_mrna == 0``.
-* ``ss_intron_boundary``  — exactly one strand continuous, no contiguous exon across: an unspliced
-                            crossing has no mature term, so truth must have ``n_mrna == 0``.
-* ``solvable_exon``       — single-stranded exonic REGION with at least one flanking BOUNDARY that is
-                            a splice site with no contiguous exon across it. The claim is the FLANK's.
-
-⭐ The fixture is DESIGNED so every clause has a positive and a negative case: a clean two-exon
-transcript (locus A), a single-exon transcript whose flanks are termini (locus B), an antisense
-overlap making every slot AMBIG (locus C), and a retained-intron isoform making mature RNA contiguous
-across a donor (locus D). Each test is one gate; the perturbation sweep breaks one clause of the fixed
-code at a time and watches exactly that gate fire.
+`rigel.calibration.structural_claims` derives, from the chain and the statics alone, the slots whose
+unspliced population is structurally constrained: the first pass's training and solving substrate.
+Four classes, each carrying a claim certified slot truth can test with no solver — ``intergenic``
+(no RNA strand admissible, so ``n_nrna == n_mrna == 0``), ``ss_intron_region`` (one strand and no
+exon membership, so no contiguous mature RNA fits and ``n_mrna == 0``), ``ss_intron_boundary`` (one
+strand continuous and no contiguous exon across, so an unspliced crossing has no mature term) and
+``solvable_exon`` (a single-stranded exonic region with a flanking splice-site boundary that has no
+contiguous exon across it, where the claim is the flank's). The fixture gives every clause a
+positive and a negative case, and the perturbation sweep breaks one clause at a time.
 """
 
 from __future__ import annotations
@@ -41,7 +31,7 @@ from rigel.calibration.splice_graph import (
 from rigel.calibration.structural_claims import build_structural_claims
 from rigel.types import Strand
 
-from conftest import build_test_index
+from _index_builder import build_test_index
 
 #: Locus A (+): tA splices [1000,1500) — both exons flank a splice site with nothing contiguous
 #: across, so both are solvable and the intron between them is single-stranded.
@@ -79,7 +69,7 @@ chr3\ttest\texon\t701\t1000\t.\t+\t.\tgene_id "gH"; transcript_id "tH2";
 
 #: The partition the GTF above must produce — a fixture-shape guard, so every hand-enumerated
 #: expectation below is anchored to verified geometry rather than to an assumption about the builder.
-#: ⭐ Locus E (chr2, +) starts at base 1, so its first exon's LEFT flank is a reference terminal
+#: Locus E (chr2, +) starts at base 1, so its first exon's LEFT flank is a reference terminal
 #: (``chain.left == -1``) — the case that falsifies the flank gather's sentinel.
 EXPECTED_BOUNDS = {
     "chr1": [
@@ -232,7 +222,7 @@ def test_solvable_exon_names_its_licensing_flank(built):
 def test_ambig_is_excluded_everywhere(built):
     """Locus C: the antisense overlap makes both strands admissible, and an AMBIG slot has no channel —
     it appears in NO class (the deferred stratum's blindness, excluded from the training substrate).
-    ⭐ The shared intron [3800,3900) carries NO exon membership, so only the single-strandedness clause
+    The shared intron [3800,3900) carries no exon membership, so only the single-strandedness clause
     stands between it and ``ss_intron_region`` — the slot that catches an XOR→OR regression."""
     chain, _statics, claims = built
     r, b = _region_slots(chain), _boundary_slots(chain)

@@ -28,7 +28,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   both arms (the ruler, below) — `quant_accuracy.py` (the thermometer).
 - **Stage A (the accumulator)**: done; the fragment ledger closes exactly — `calibration_oracle.py`.
 - **Fragment lengths**: closed, both halves — gDNA by the two-pool contrast (`calibration/fl.py`,
-  `gdna_density.py`; gates `test_fl_realized.py`, `test_gdna_density.py`), RNA sound as shipped
+  `gdna_density.py`; gates `test_fl.py`, `test_gdna_density.py`), RNA sound as shipped
   (`ISSUES: the-rna-length-law-fix`, CLOSED). Watch: `ISSUES: capture-degeneracy-standing-risk`.
 - **gDNA strand overdispersion**: robust to the annotation (`EQUATIONS.md` §6a–§6c, `DESIGN.md` §3.3a);
   on real data read `clamped_at_ceiling` and `effective_seeds`, never the bare value.
@@ -41,7 +41,7 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
 - **The gDNA landscape prior**: done for 0.8.0 (`DESIGN.md` §7.1); the zero controls are solved on the
   metric (`calibration_vs_oracle.py`; `landscape_training_census.py` re-derives the population) and the
   in-scope per-object composition error did not move.
-- **ψ**: the composition closes structurally on every published object (`test_composition_closes.py`);
+- **ψ**: the composition closes structurally on every published object (`test_vertex_reference.py`);
   the reference location is deleted (`DESIGN.md` §6b.1); the λ-bracket widening is built and ships off
   — `ISSUES: psi-lambda-bracket-unshipped`.
 - **The prior assembler**: with perfect masses its own error is negligible — `prior_vs_oracle.py`,

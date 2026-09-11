@@ -1,26 +1,16 @@
-"""The per-contiguous-boundary RNA REACH, on the accumulator's boundary axis — S5.g's input.
+"""The per-contiguous-boundary RNA reach, built on the accumulator's own boundary axis.
 
-    Ruling: · Equation:
-
-⭐ **What reach is for.** A crossing molecule must fit in what remains of **its own template** either
-side of the boundary. gDNA's template is the chromosome, so its reach is unbounded — that is physics, not a
-choice. RNA's template ends where its transcript ends, so near a terminus the admissible placements
-collapse and the crossing divisor with them. Ignoring that over-calls gDNA by a measured **11.0 %**
-genome-wide and by **+0.36** in the last region before a polyA site.
-
-⚠ **PER STRAND, and per SIDE**: reach is "maximised over transcripts
-independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
-different places give a boundary two different RNA reaches, and averaging them would describe neither.
-
-⚠ **A contiguous boundary's reach is GENOMIC, unlike a sj's, which is EXONIC.** A sj is used
-only by a spliced molecule, so what remains either side of it is exonic. A contiguous boundary is crossed by
-*nascent* RNA too, which is genomic — taking the exonic reach there would declare an intronic nascent
-fragment impossible (`splice_graph.SpliceJunctionGeometry`).
-
-⚠ **A reach of 0 is MEANINGFUL, not a sentinel**. It says there is no template
-of that strand at that boundary at all, so RNA of that strand has zero opportunity — which is what makes
-`crossing_eff_length` return 0 and the consuming `_rate` emit nothing rather than a floored value
-(trap 23). Measured on the chr22 pilot index: **40.6 %** POS and **42.9 %** NEG.
+Reach is how much of its OWN template a crossing molecule has left either side of a boundary. gDNA's
+template is the chromosome, so its reach is unbounded — physics, not a modelling choice — while RNA's
+template ends where its transcript ends, so near a terminus the admissible placements collapse and the
+crossing divisor collapses with them. Ignoring that over-calls gDNA, and worst exactly where a first or
+last exon is. The gates here hold the four properties that make the array usable: it is maximised over
+transcripts independently PER SIDE and PER STRAND, since two transcripts of opposite strand ending in
+different places give one boundary two different reaches and an average would describe neither; it is
+laid out element-for-element on the boundary axis the flags use; it is GENOMIC, unlike a sj's exonic
+reach, because nascent RNA crosses a contiguous boundary and an exonic reach would declare an intronic
+nascent fragment impossible; and a reach of 0 is the ANSWER rather than a sentinel, saying that strand
+has no template here at all, so the divisor returns 0 and the rate emits nothing instead of a floor.
 """
 
 from __future__ import annotations
@@ -34,7 +24,7 @@ from rigel.calibration.splice_graph import (
     build_region_partition_arrays,
 )
 
-from conftest import build_test_index
+from _index_builder import build_test_index
 
 #: chr1: t0 is a two-exon POS transcript [200,400)+[700,900); t1 is a NEG transcript [1000,1200) whose
 #: reach therefore differs from t0's at every boundary between them. chr2 keeps the per-reference offsets
@@ -58,9 +48,9 @@ def index(tmp_path_factory):
 def _boundary_positions(index) -> np.ndarray:
     """Genomic position of every contiguous boundary, in boundary order — the independent coordinate.
 
-    A reference contributing ``c`` region_bounds owns ``c − 1`` regions and ``c − 2`` interior boundaries, and boundary
-    ``e`` sits at region_bound ``e + 1``. Derived from the PARTITION, not from the reach builder, so the two
-    cannot agree by sharing a helper.
+    A reference contributing ``c`` cut points owns ``c − 1`` regions and ``c − 2`` interior boundaries,
+    and boundary ``e`` sits at cut point ``e + 1``. Derived from the PARTITION, not from the reach
+    builder, so the two cannot agree by sharing a helper.
     """
     positions, region_bound_offsets, _types = build_region_partition_arrays(index)
     out = []
@@ -77,7 +67,7 @@ def _boundary_positions(index) -> np.ndarray:
 
 
 def test_one_entry_per_boundary_on_the_SAME_axis_as_the_flags(index):
-    """⭐ The reach array and the flags array must be the same axis, element for element — both are
+    """The reach array and the flags array must be the same axis, element for element — both are
     per contiguous boundary, and a consumer indexes them with one index."""
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     n_boundaries = build_boundary_flags_array(index).shape[0]
@@ -90,7 +80,7 @@ def test_the_strand_axis_is_POS_then_NEG(index):
     """Column 0 is the POS-strand transcript's reach, column 1 the NEG's — the same ordering the
     accumulator's two columns and ``SpliceJunctionGeometry``'s strand join use.
 
-    ⚠ On this fixture chr1 carries a POS transcript at [200,900) and a NEG one at [1000,1200), which
+    On this fixture chr1 carries a POS transcript at [200,900) and a NEG one at [1000,1200), which
     are disjoint — so there are boundaries where exactly one column is non-zero, and a transposed strand
     axis moves the non-zero to the wrong boundary rather than merely permuting a pair.
     """
@@ -103,16 +93,17 @@ def test_the_strand_axis_is_POS_then_NEG(index):
 
 
 def test_reach_is_ZERO_where_the_strand_carries_no_transcript(index):
-    """⚠ Zero is the ANSWER, not a missing value. A boundary with no POS-strand template gives POS-RNA no
-    opportunity, and the consuming divisor must return 0 so the rate emits nothing (trap 23)."""
+    """Zero is the ANSWER, not a missing value. A boundary with no POS-strand template gives POS-RNA no
+    opportunity, and the consuming divisor must return 0 so the rate emits nothing at all rather than
+    a floored value."""
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     assert int((reach_lo[:, 0] == 0).sum()) > 0
     assert np.all(reach_lo >= 0) and np.all(reach_hi >= 0)
 
 
 def test_reach_matches_the_INDEX_keyed_by_src_region(index):
-    """The values are the edges_df reach columns of the boundary whose ``src`` is the boundary's left region —
-    read back from the frame directly rather than re-derived."""
+    """The values are the edges_df reach columns of the boundary whose ``src`` is the boundary's left
+    region — read back from the frame directly rather than re-derived."""
     boundaries = index.edges_df
     contiguous = boundaries[boundaries["kind"] == 0]
     by_src = {
@@ -134,8 +125,7 @@ def test_reach_matches_the_INDEX_keyed_by_src_region(index):
 
 
 def test_a_single_region_reference_contributes_no_entry(tmp_path_factory):
-    """A reference with one region owns no boundary, so it contributes nothing — the invariant the ``k + 1``
-    boundary axis could not state."""
+    """A reference with one region owns no boundary, so it contributes nothing to the axis."""
     one = build_test_index(
         tmp_path_factory,
         'chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g"; transcript_id "t";\n',
@@ -152,11 +142,11 @@ def test_a_single_region_reference_contributes_no_entry(tmp_path_factory):
 
 
 def test_the_taper_COLLAPSES_the_divisor_near_a_terminus(index):
-    """⭐ The whole point of TRAPS: prove-the-substrate, as a number rather than an assertion.
+    """TRAPS: prove-the-substrate, as a number rather than an assertion.
 
-    ``crossing_eff_length`` at unbounded reach is ``mu − 1``; at a real reach it is far smaller near a
-    transcript end. records 199.0 at R=550 against 50.0 at R=50 on RNA N(200,50)
-    — a **4×** error if the mean is used blindly at a first exon.
+    ``crossing_eff_length`` at unbounded reach is ``mu − 1``, and at a real reach it is far smaller
+    near a transcript end — so using the mean blindly at a first exon is a large multiplicative error,
+    not a refinement.
     """
     from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length
 
@@ -168,7 +158,7 @@ def test_the_taper_COLLAPSES_the_divisor_near_a_terminus(index):
     reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     tapered = crossing_eff_length(pmf, reach_lo[:, 0], reach_hi[:, 0])
     assert np.all(tapered <= unbounded + 1e-9)
-    # ⚠ Strictly smaller somewhere, or the taper is inert on this fixture and proves nothing.
+    # Strictly smaller somewhere, or the taper is inert on this fixture and proves nothing.
     assert np.any(tapered < unbounded - 1e-9)
     # and exactly 0 where the strand has no template at all
     assert np.all(tapered[(reach_lo[:, 0] == 0) & (reach_hi[:, 0] == 0)] == 0.0)

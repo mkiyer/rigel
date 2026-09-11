@@ -1,49 +1,17 @@
-"""assemble_priors — the EM pseudocounts must be CONSERVED FRAGMENT COUNTS, not object-incidence sums.
+"""`assemble_priors`: the EM pseudocounts must be CONSERVED FRAGMENT COUNTS, not incidence sums.
 
-⭐ **THE DEFECT THESE TESTS PIN.** ``gdna_prior_count`` / ``rna_prior_count`` are handed to the EM as
-**additive pseudocounts in fragment units** — ``G = n_gdna + a_g`` in ``apply_grouped_prior_update`` —
-where ``n_gdna`` is a count of fragments. But a fragment deposits on ``max(K, 1)`` objects, ``K`` being
-the number of contiguous boundaries it crosses, so summing per-object masses does NOT give a fragment count::
-
-    incidences(w) = max( 1 , (w-1)/s )        for a partition of spacing s
-
-Counts are conserved exactly where every region is longer than every fragment, and become a
-**length-weighted** count where they are not — and 56.7 % of human regions are shorter than one 200 bp
-fragment. Because the weighting is by length, it does not cancel between two components with different
-mean lengths: measured on the chr22 pilot, gDNA deposits 1.031 incidences per fragment and RNA ≈1.17,
-so the prior's g:r ratio under-calls gDNA by 13–19 %.
-
-⭐⭐ **THE FIX, AND IT IS A READ-OUT RATHER THAN A DERIVATION.** The region term is already a fragment
-count — a contained fragment deposits on exactly one region. Only the crossing term is converted, by the
-accumulator's own conserved ``mass / count`` at that boundary::
-
-    prior_c = SUM_locus share · [ mass_c_region[r] + SUM_{e owned by r} mass_c_boundary[e] · q[e] ]
-
-    q[e] = boundary_mass_per_crossing = [ min(w−1,a) + min(w−1,b) ] / 2(w−1)    under a uniform field
-
-⛔ **The predecessor rule was ``rho_c = SUM m / SUM A ; prior_c = rho_c · span_bp``**, and these tests
-used to target it. It reached fragment units by dividing out the opportunity and re-integrating over the
-genomic span, which on a finite reference of span ``S`` counts the ``w−1`` start positions no fragment
-can occupy: the truth is ``rho·(S−w+1)``, not ``rho·S``. Both numbers appear below and they differ by
-4.1 % on this fixture — small, systematic, and in fragment units it is simply wrong.
-
-⛔⛔ **ONE ``q`` FOR TWO COMPONENTS IS A COMPOSITIONAL BIAS, AND THESE TESTS PIN IT AS A NUMBER RATHER
-THAN TOLERATE IT.** The accumulator sees the two populations mixed, so ``q`` is the MIXTURE's share.
-Rescaling both components by it conserves the locus TOTAL exactly to the fragment while tilting the g:r
-SPLIT — which is why `test_the_total_prior_is_the_true_fragment_count_on_every_tiling` passes on every
-tiling and `test_each_component_is_its_true_fragment_count_where_the_two_shares_agree` is restricted to
-the tilings where ``q_g == q_r``. A total-mass gate cannot see this
-(`TRAPS: conservation-misses-mis-attribution`), and neither can a substrate where the two components
-share a length distribution (`TRAPS: an-equal-length-panel-defeats-the-lift`) — the sweep below reads
-EXACTLY 1.000000 at ``mu_g == mu_r`` and 0.56–1.59× away from it. The repair is a per-component ``q``
-and it is not built; until it is, the biased value is the specified value and is asserted to 1e-9.
-
-⛔ **These tests are deterministic, not simulated.** Every mass below is the accumulator's deposition law
-evaluated exactly through the SPECIFICATION, so a failure is a defect and never noise. That is a
-deliberate departure from the plan's original end-to-end phrasing of T1/T2: rebuilding an index with
-extra region_bounds also moves the transcript set, the reach and every effective length, so it would not isolate
-the partition. The end-to-end conservation check against ``region_start_count`` is T3, and it lives in
-`scripts/design/prior_units_check.py`.
+``gdna_prior_count`` / ``rna_prior_count`` reach the EM as additive pseudocounts in fragment units,
+but a fragment deposits on ``max(K, 1)`` objects, ``K`` being the contiguous boundaries it crosses —
+so a sum of per-object masses is a fragment count only where every region is longer than every
+fragment, and a large share of real regions is not. The region term needs no conversion, a contained
+fragment depositing on exactly one region; only the crossing term is converted, by the accumulator's
+own conserved ``mass / count`` share at that boundary. That share is ONE number for both components,
+because the accumulator sees them mixed, and it is a compositional bias rather than an approximation:
+rescaling both by the mixture's share conserves the locus TOTAL exactly while tilting the g:r SPLIT —
+invisible to a total-mass gate (`TRAPS: conservation-misses-mis-attribution`), and equally invisible
+on an equal-length substrate (`TRAPS: an-equal-length-panel-defeats-the-lift`). Until a per-component
+share is built the biased value IS the specified value, so it is asserted exactly. Every mass below
+is the deposition law enumerated through the SPECIFICATION, so a failure is a defect, never noise.
 """
 
 from __future__ import annotations
@@ -109,14 +77,14 @@ def _enumerate(region_len, w):
 def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
     """The share the ACCUMULATOR itself would deposit on this tiling, by brute-force enumeration.
 
-    ⛔ **Not derived from the answer these tests check.** Every fragment of each component's length is
+    Not derived from the answer these tests check. Every fragment of each component's length is
     deposited at every start position through the SPECIFICATION, and the share is read off its own
     conserved-mass bank as ``mass / count``. Enumerating every start at unit weight IS the analytic
     uniform field the masses above model — for a point-mass pmf the two agree exactly — so the fixture
     stays one self-consistent library rather than two models that have to be argued equal
     (``TRAPS: a-test-that-redefines``).
 
-    ⚠ **ONE share for BOTH components, which is what ``assemble_priors`` uses.** The accumulator sees the
+    ONE share for BOTH components, which is what ``assemble_priors`` uses. The accumulator sees the
     two populations mixed and cannot tell them apart, so the pooled share is
     ``(rho_g·m_g + rho_r·m_r) / (rho_g·c_g + rho_r·c_r)``. Where the two components share a mean length
     that is exact; where they do not it is an approximation, and these tests are where that shows.
@@ -157,20 +125,20 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
 def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
     """A CalibrationResult for ONE reference tiled by ``region_len``, under a UNIFORM field.
 
-    ⭐⭐ **EVERY BANK IS ENUMERATED THROUGH THE SPECIFICATION, not evaluated analytically.** The masses
-    and the conserved share must describe ONE population or the fixture is internally inconsistent —
-    and that inconsistency is not hypothetical. The predecessor of this docstring used the analytic
-    infinite-chromosome forms ``rho·E[(len−w+1)+]`` and ``rho·E[w−1]`` for the masses while the share
-    came from a finite-reference enumeration. On the fine tiling the two disagreed by **10 %** and read
-    as a defect in ``assemble_priors`` (2026-08-08).
+    EVERY BANK IS ENUMERATED THROUGH THE SPECIFICATION, not evaluated analytically. The masses and the
+    conserved share must describe ONE population or the fixture is internally inconsistent, and that
+    inconsistency is not hypothetical: taking the masses from the analytic infinite-chromosome forms
+    ``rho·E[(len−w+1)+]`` and ``rho·E[w−1]`` while the share comes from a finite-reference enumeration
+    puts the two well apart on the fine tiling, and it reads as a defect in ``assemble_priors``.
 
-    ⚠ For a point-mass pmf, enumerating every start at unit weight IS the analytic uniform field, so
-    nothing is lost — the fixture is still exact, deterministic arithmetic with no distributional slack.
+    For a point-mass pmf, enumerating every start at unit weight IS the analytic uniform field, so
+    nothing is lost — the fixture is still exact, deterministic arithmetic with no distributional
+    slack.
 
-    ⛔ **And the target moved with the rule.** The old assembler produced ``rho·span``; the new one
-    produces the CONSERVED FRAGMENT COUNT, which on a finite reference of span ``S`` is ``rho·(S−w+1)``
-    — the number of fragments that fit. ``rho·span`` counted ``w−1`` start positions no fragment can
-    occupy, and was the approximation the density conversion happened to produce.
+    The target is the CONSERVED FRAGMENT COUNT, which on a finite reference of span ``S`` is
+    ``rho·(S−w+1)``, the number of fragments that fit. ``rho·span`` — what dividing out the
+    opportunity and re-integrating over the genomic span produces — counts ``w−1`` start positions no
+    fragment can occupy.
     """
     region_len = np.asarray(region_len, dtype=np.float64)
     n = region_len.shape[0]
@@ -260,7 +228,7 @@ def _priors_for(tiling, rho_g, rho_r, pmf_g, pmf_r):
 def _truth_and_prediction(tiling, rho_g, rho_r, pmf_g, pmf_r):
     """``(truth_g, truth_r, pred_g, pred_r, q_g, q_r)`` for one tiling — from the SPECIFICATION only.
 
-    ⛔ **Neither number is read back off ``assemble_priors``** (`TRAPS: a-test-that-redefines`). Both
+    Neither number is read back off ``assemble_priors`` (`TRAPS: a-test-that-redefines`). Both
     are re-derived from the reference accumulator's own banks:
 
     * **truth** — the conserved fragment count each component really deposited, ``SUM contained_c +
@@ -294,8 +262,8 @@ def _truth_and_prediction(tiling, rho_g, rho_r, pmf_g, pmf_r):
 # --- T1: the conserved count ----------------------------------------------------------------------
 
 # 1200 bp of reference, tiled four ways. The library is IDENTICAL in all four; only the bookkeeping
-# grid moves. ⭐ The 100 bp tiling is finer than the 200 bp RNA fragment, which is the regime where
-# 56.7 % of human regions live and where the raw incidence sum diverges hardest.
+# grid moves. The 100 bp tiling is finer than the 200 bp RNA fragment, which is where most human
+# regions live and where the raw incidence sum diverges hardest.
 _SPAN = 1200
 _MU_G, _MU_R = 50, 200
 _TILINGS = {
@@ -304,27 +272,27 @@ _TILINGS = {
     "fine   (12 x 100)": [100] * 12,
     "ragged (mixed)": [37, 400, 63, 300, 1, 199, 200],
 }
-# ⭐ The tilings where every region exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
+# The tilings where every region exceeds BOTH fragment lengths, so ``min(w−1, flank) == w−1`` on every
 # boundary and ``q_g == q_r == 1``: the pooled share is then each component's own and the split is exact.
 _SHARES_AGREE = ["coarse (1 x 1200)", "medium (3 x 400)"]
-# ⚠ Not 1e-9: the conserved-mass bank is fixed-point at 2^-32 per fragment, so a 1,001-fragment total
+# Not 1e-9: the conserved-mass bank is fixed-point at 2^-32 per fragment, so a 1,001-fragment total
 # carries ~2e-11 of relative rounding. Anything above 1e-10 here would be a real error.
 _FIXED_POINT_RTOL = 1e-8
 
 
 @pytest.mark.parametrize("name", list(_TILINGS))
 def test_the_total_prior_is_the_true_fragment_count_on_every_tiling(name):
-    """⭐⭐ THE CONSERVATION GATE. The same physical library, re-tiled, deposits the same TOTAL — and it
-    is the right total: the number of fragments that FIT, ``rho_g·(S−mu_g+1) + rho_r·(S−mu_r+1)``.
+    """The conservation gate. The same physical library, re-tiled, deposits the same TOTAL — and it is
+    the right total: the number of fragments that FIT, ``rho_g·(S−mu_g+1) + rho_r·(S−mu_r+1)``.
 
-    The raw incidence sum grows as the tiling is refined (every new boundary adds a crossing to every
-    fragment that spans it), so it fails here by construction. The retired ``rho_c·span_bp`` form fails
-    too, by the ``w−1`` start positions no fragment can occupy — 4.1 % on this fixture.
+    A raw incidence sum grows as the tiling is refined, every new boundary adding a crossing to every
+    fragment that spans it, so it fails here by construction; a ``rho_c·span_bp`` form fails too, by
+    the ``w−1`` start positions no fragment can occupy.
 
-    ⛔⛔ **AND THIS GATE IS BLIND TO THE DEFECT THE NEXT TWO TESTS EXIST FOR**
-    (`TRAPS: conservation-misses-mis-attribution`). Rescaling both components by one pooled share
-    conserves the total EXACTLY while tilting the split: on the fine tiling this passes at 1e-11 while
-    the gDNA side alone is 19.9 % low. Never read this test as "the prior is right".
+    This gate is BLIND to the defect the next two tests exist for
+    (`TRAPS: conservation-misses-mis-attribution`): rescaling both components by one pooled share
+    conserves the total exactly while tilting the split, so on the fine tiling this passes while the
+    gDNA side alone is a fifth low. Never read it as "the prior is right".
     """
     rho_g, rho_r = 0.03, 0.05
     p = _priors_for(_TILINGS[name], rho_g, rho_r, _point_pmf(_MU_G), _point_pmf(_MU_R))
@@ -333,18 +301,18 @@ def test_the_total_prior_is_the_true_fragment_count_on_every_tiling(name):
     assert total == pytest.approx(fit, rel=_FIXED_POINT_RTOL), (
         f"{name}: total {total:.9f} against {fit:.9f} fragments that fit"
     )
-    # ⛔ and it is NOT the retired rho·span, which is the same on every tiling and 4.1 % too big
+    # and it is NOT rho·span, which is the same on every tiling and a few per cent too big
     assert not np.isclose(total, (rho_g + rho_r) * _SPAN, rtol=1e-3)
 
 
 @pytest.mark.parametrize("name", _SHARES_AGREE)
 def test_each_component_is_its_true_fragment_count_where_the_two_shares_agree(name):
-    """⭐ And where the pooled share IS each component's own (``q_g == q_r``), the SPLIT is exact too.
+    """And where the pooled share IS each component's own (``q_g == q_r``), the SPLIT is exact too.
 
-    ⚠ Stronger than the total alone — a form uniformly wrong by a constant factor passes the
-    conservation gate and fails this one. ⛔ Restricted to two of the four tilings on purpose: this is
-    the substrate condition an equal-length panel satisfies by construction, which is exactly why such
-    a panel cannot see the bias (`TRAPS: an-equal-length-panel-defeats-the-lift`).
+    Stronger than the total alone: a form uniformly wrong by a constant factor passes the
+    conservation gate and fails this one. Restricted to two of the four tilings on purpose — that is
+    the substrate condition an equal-length panel satisfies by construction, which is exactly why
+    such a panel cannot see the bias (`TRAPS: an-equal-length-panel-defeats-the-lift`).
     """
     rho_g, rho_r = 0.03, 0.05
     tiling = _TILINGS[name]
@@ -361,26 +329,26 @@ def test_each_component_is_its_true_fragment_count_where_the_two_shares_agree(na
     ("name", "gdna_bias"), [("fine   (12 x 100)", -0.199), ("ragged (mixed)", -0.026)]
 )
 def test_the_split_carries_exactly_the_POOLED_SHARE_bias(name, gdna_bias):
-    """⛔⛔ WHERE THE TWO SHARES DISAGREE THE SPLIT IS WRONG, AND THIS PINS THE WRONG VALUE EXACTLY.
+    """Where the two shares disagree the split is wrong, and this pins the wrong value exactly.
 
     The accumulator cannot tell the two populations apart, so ``boundary_mass_per_crossing`` is the
-    MIXTURE's share and both components are rescaled by it. The measured consequence, with the library
-    physically unchanged and only the bookkeeping grid moved:
+    MIXTURE's share and both components are rescaled by it. With the library physically unchanged and
+    only the bookkeeping grid moved, the split goes:
 
     ==================  ==========  ==========  ==========
     tiling              gDNA        RNA         total
     ==================  ==========  ==========  ==========
     coarse / medium     exact       exact       exact
-    fine (12 x 100)     **−19.9 %** **+13.7 %** exact
-    ragged (mixed)      **−2.6 %**  **+1.8 %**  exact
+    fine (12 x 100)     −19.9 %     +13.7 %     exact
+    ragged (mixed)      −2.6 %      +1.8 %      exact
     ==================  ==========  ==========  ==========
 
-    ⭐ gDNA is the SHORTER component here (50 bp against 200), so its own ``q_g`` is the larger and the
+    gDNA is the SHORTER component here (50 bp against 200), so its own ``q_g`` is the larger and the
     pooled share drags it DOWN. Reverse the lengths and the sign reverses — that is the sweep below.
 
-    ⚠ **The biased value is the SPECIFIED value until a per-component ``q`` is built**, so it is
-    asserted to 1e-9 rather than tolerated with a loose bound. The recorded percentages are asserted
-    too, so the bias cannot silently drift or silently vanish.
+    The biased value is the SPECIFIED value until a per-component ``q`` is built, so it is asserted
+    to 1e-9 rather than tolerated with a loose bound, and the gDNA column above is asserted with it
+    so the bias can neither drift nor silently vanish.
     """
     rho_g, rho_r = 0.03, 0.05
     tiling = _TILINGS[name]
@@ -401,21 +369,20 @@ def test_the_split_carries_exactly_the_POOLED_SHARE_bias(name, gdna_bias):
 
 @pytest.mark.parametrize("mu_g", [50, 100, 150, 200, 300, 400])
 def test_the_prior_ratio_moves_with_the_length_ratio_by_exactly_the_pooled_share(mu_g):
-    """⭐ THE COMPOSITION TEST. Fixed true g:r; sweep the two components' mean lengths against each
-    other. ⛔ **The prior's ratio MOVES, by 0.56× to 1.59×**, and this pins where it lands.
+    """The composition test: fixed true g:r, sweeping the two components' mean lengths against each
+    other. The prior's ratio MOVES by a factor either way, and this pins where it lands.
 
-    ⛔ Swept in BOTH directions (``mu_g`` from 0.25x to 2x the RNA mean) — owner ruling: there is no rule
-    that RNA is longer than gDNA, and assuming one is how a tool overfits to cfRNA. The direction is the
+    Swept in BOTH directions (``mu_g`` from 0.25x to 2x the RNA mean), because there is no rule that
+    RNA is longer than gDNA and assuming one is how a tool overfits to cfRNA. The direction is the
     finding: the SHORTER component is under-called and the longer one over-called, because a longer
     fragment is censored harder by a 100 bp flank and so carries the smaller share.
 
-    ⚠ **The distortion is NOT ``q_r/q_g`` at the locus level, and the theorem's mixture-independence
-    does not survive contact with contained mass.** Only the CROSSING term passes through the share; the
-    contained term is already a fragment count and is untouched, so the locus-level tilt is diluted by
-    each component's contained fraction — and since the pooled share itself depends on the mixture, the
-    dilution does too. Measured at ``mu_g = 50``, where gDNA is 53 % contained: 0.837× at ``rho`` 0.02 /
-    0.06 but 0.665× at 0.05 / 0.01, against a pure-crossing ``q_r/q_g`` of 0.5025. At ``mu_g = 100``,
-    where gDNA is 1 % contained, both read ≈0.56 and the pure-crossing limit is nearly recovered.
+    The distortion is NOT ``q_r/q_g`` at the locus level, and mixture-independence does not survive
+    contact with contained mass. Only the CROSSING term passes through the share; the contained term
+    is already a fragment count and is untouched, so the locus-level tilt is diluted by each
+    component's contained fraction — and since the pooled share itself depends on the mixture, the
+    dilution does too. That is why the expectation is recomputed per arm rather than stated as a
+    constant, and why the gate is the direction plus the recomputed value.
     """
     rho_g, rho_r = 0.02, 0.06
     tiling = _TILINGS["fine   (12 x 100)"]
@@ -435,16 +402,13 @@ def test_the_prior_ratio_moves_with_the_length_ratio_by_exactly_the_pooled_share
 
 
 def test_the_ratio_IS_exact_where_the_two_components_share_a_length():
-    """⛔⛔ **AND AT EQUAL LENGTHS THE BIAS IS EXACTLY ZERO — which is why a panel built that way cannot
-    measure it** (`TRAPS: an-equal-length-panel-defeats-the-lift`). The ladder's realised gDNA/RNA gap is
-    +1.5–2.1 %; the `flgap` PAIR existed because of this boundary. ⛔ **It no longer exists** — both
-    panels went on 2026-08-13 and their configs and the two instruments that read them on 2026-08-17 — so
-    NOTHING ON DISK MEASURES THE GAPPED SIDE, and this gate is now the only executable statement of the
-    equal-length half. Re-deriving the other half means DESIGNING a length-gap panel, not restoring a
-    deleted file (`EQUATIONS.md` §3b).
+    """At equal lengths the bias is exactly zero, which is why a panel built that way cannot measure it
+    (`TRAPS: an-equal-length-panel-defeats-the-lift`). The ladder gives its two components equal
+    fragment lengths by design, so this gate is the executable statement of the equal-length half and
+    the gapped half needs a length-gap panel to be measured at all.
 
-    ⭐ Asserted at two very different mixtures, because "exact" here must not depend on the mixing ratio:
-    when ``q_g == q_r`` the pooled share equals both regardless of ``phi``.
+    Asserted at two very different mixtures, because "exact" here must not depend on the mixing
+    ratio: when ``q_g == q_r`` the pooled share equals both regardless of ``phi``.
     """
     tiling = _TILINGS["fine   (12 x 100)"]
     for rho_g, rho_r in ((0.02, 0.06), (0.05, 0.01)):
@@ -459,9 +423,9 @@ def test_the_ratio_IS_exact_where_the_two_components_share_a_length():
 
 
 def test_zero_rna_opportunity_gives_zero_rna_prior():
-    """⛔: an object with no opportunity for a component must emit NOTHING
-    at zero precision — never a floored division. Every region here is shorter than one RNA fragment and
-    the RNA crossing opportunity is zeroed, so the RNA support is identically 0.
+    """An object with no opportunity for a component must emit NOTHING at zero precision, never a
+    floored division. Every region here is shorter than one RNA fragment and the RNA crossing
+    opportunity is zeroed, so the RNA support is identically 0.
     """
     pmf_g, pmf_r = _point_pmf(20), _point_pmf(400)
     tiling = [50] * 4  # every region < 400 bp ⇒ contained_eff_length(RNA) == 0
@@ -470,38 +434,35 @@ def test_zero_rna_opportunity_gives_zero_rna_prior():
     p = assemble_priors(cal, _regions_tiling(tiling), _one_locus(int(np.sum(tiling))))
     assert np.all(np.isfinite(p.rna_prior_count))
     np.testing.assert_allclose(p.rna_prior_count, [0.0])
-    # ⭐ and the gDNA side is EXACT here, not merely finite: with rho_r = 0 the library is one
+    # and the gDNA side is EXACT here, not merely finite: with rho_r = 0 the library is one
     # component, so the pooled share IS the gDNA's own and there is nothing to bias the split.
     np.testing.assert_allclose(p.gdna_prior_count, [0.03 * (np.sum(tiling) - 20 + 1)], rtol=1e-9)
 
 
 def test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_divisor():
-    """⛔⛔ **A DELIBERATE REVERSAL, AND HALF OF A PAIR.** This test used to be
-    ``..._is_dropped_from_BOTH_sides`` and asserted **0.0**. It asserts the mass now, because the rule
-    the drop existed for is gone from this path.
+    """Stray mass on a zero-opportunity object is KEPT by the prior, and this is half of a pair.
 
-    ``mass > 0`` with ``support == 0`` is an ordinary configuration, not a corner: ``contained_eff_length``
-    is exactly 0 wherever a region is shorter than that component's shortest fragment, which on the chr22
-    pilot against its own measured pure pools is **21.7 % of regions for RNA** and 18.7 % for gDNA. The
-    solver can still put mass there — ``f_g`` is an inference, not a fact.
+    ``mass > 0`` with ``support == 0`` is an ordinary configuration rather than a corner:
+    ``contained_eff_length`` is exactly 0 wherever a region is shorter than that component's shortest
+    fragment, which is a large minority of regions in a real index for both components, and the
+    solver can still put mass there because ``f_g`` is an inference and not a fact.
 
-    ⭐ **What changed.** The drop existed because ``rho = SUM m / SUM S`` is a rate, and mass in the
-    numerator with no exposure in the denominator inflates it — with ``mass / max(support, 1e-9)`` the
-    inflation reaching ~1e9. **The prior no longer divides by anything.** ``mass_c_region[r]`` is
-    ``f_c(r)·contained_count[r]`` and a contained fragment deposits on exactly one region, so the mass IS
-    the count; dropping it would silently lose fragments the accumulator really deposited. The
-    catastrophe is now structurally unreachable here rather than guarded, and the assertion says so: the
-    prior is exactly the deposited 4 × 2.5, which is neither 0 nor any multiple of 1e9.
+    Dropping it would be right for a RATE — ``rho = SUM m / SUM S`` with mass in the numerator and no
+    exposure in the denominator inflates without bound — but the prior no longer divides by anything.
+    ``mass_c_region[r]`` is ``f_c(r)·contained_count[r]``, and a contained fragment deposits on
+    exactly one region, so the mass IS the count and dropping it would silently lose fragments the
+    accumulator really deposited. The inflation is structurally unreachable here rather than guarded,
+    and the assertion says so: the prior is exactly the deposited 4 × 2.5.
 
-    ⛔ **The guard is still LIVE where a divisor still lives — the eff-length** — and that half is
+    The guard is still LIVE where a divisor still lives, the eff-length, and that half is
     `test_priors.test_stray_mass_on_a_zero_opportunity_boundary_is_dropped_from_the_eff_len`, which
-    perturbs it and measures the +19.97 / +44.93 bp it holds back. ⚠ Do not delete one without the
-    other: alone, either one reads as a rule about the whole file.
+    perturbs it and measures the bp it holds back. Do not delete one without the other: alone, either
+    one reads as a rule about the whole file.
     """
     pmf_g, pmf_r = _point_pmf(20), _point_pmf(400)
     tiling = [50] * 4
     cal = _zero_rna_opportunity(_uniform_library(tiling, 0.03, 0.0, pmf_g, pmf_r))
-    # ⭐ the change from the test above: put REAL mass on the zero-opportunity RNA objects
+    # the difference from the test above: put REAL mass on the zero-opportunity RNA objects
     stray = dataclasses.replace(cal, mass_rna_region=np.full(4, 2.5))
     regions, loci = _regions_tiling(tiling), _one_locus(int(np.sum(tiling)))
     p = assemble_priors(stray, regions, loci)

@@ -1,8 +1,23 @@
-"""gDNA / RNA FL distributions: the five PURE pools + the smooth-EB build.
+"""gDNA / RNA fragment-length laws: the pure pools, the smooth-EB build, and the two estimands.
 
-The pools are 's, and purity is the whole point: a length model is
-fitted only from populations known to be ONE component, so nothing is ever estimated from the fragments
-it will later explain.
+Purity is the whole point of the pools: a length model is fitted only from populations known to be ONE
+component, so nothing is ever estimated from the fragments it will later explain. The partition gates
+hold the pool accessors exhaustive and disjoint, the build gates hold that a sparse pool shrinks
+smoothly toward the global anchor with no threshold anywhere, and the accessor gates hold the raw
+empirical views the QC report reads. Above them sit two estimands of the gDNA law: ``gdna_pmf``, the
+UNIFORM-FRAME law that the chemistry makes and the opportunity and prior mathematics assume, and
+``gdna_realized_pmf``, the LIBRARY-CENSUS law a sequenced gDNA fragment follows with capture selection
+included, which is what the EM's per-fragment scorer conditions on. They coincide off capture and
+split under it, and handing either consumer the other's estimand misassigns transcripts in bulk — so
+the ROUTING is gated as hard as the estimator: geometry stays bit-identical whether or not the
+realized law is computed, the realized law falls back to the uniform one exactly when it cannot be
+estimated, and the on-target correction vanishes identically with no enrichment excess.
+
+PERTURBATION (`TRAPS: perturb-every-gate`): leaking the realized law into ``gdna_pmf``, breaking the
+fallback, and dropping the excess's ``-1`` each fire two gates. Removing the estimator's early
+no-density guard fires NOTHING — at ``rho_off = 0`` every mass term multiplies to zero and the
+mass-zero decline catches it downstream — so that guard is kept for its diagnostic string and its
+near-unreachable unbracketed-fit branch, and this note stands in place of a gate that cannot fire.
 """
 
 from __future__ import annotations
@@ -47,7 +62,7 @@ def _pools(n_bins: int = 5) -> np.ndarray:
 
 
 def test_the_pool_indices_ARE_the_specifications_FragmentPool():
-    """⛔ The three-way contract: the reference enum, the C++ enum and these constants are one axis.
+    """The three-way contract: the reference enum, the C++ enum and these constants are one axis.
 
     A silent disagreement here re-labels every pool — the gDNA model would be fitted from the RNA pool
     and nothing would look wrong. Checked against the executable specification itself, not a written-out
@@ -64,23 +79,23 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
 
 
 def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
-    """⭐ All four, because the contained pair alone measures the SHORT HALF of one population.
+    """All four, because the contained pair alone measures the SHORT HALF of one population.
 
-    Under hybrid capture the surviving off-target gDNA sits beside a probe, and a fragment beside a probe
-    *reaches* the exon boundary — so it stops being contained and becomes crossing. Fitting from the
-    contained pair alone reads ~15 % short under capture; all four, each divided by its own opportunity,
-    read −0.01 % off capture and +7.9 % under it.
+    Under hybrid capture the surviving off-target gDNA sits beside a probe, and a fragment beside a
+    probe *reaches* the exon boundary — so it stops being contained and becomes crossing. Fitting from
+    the contained pair alone therefore reads short under capture, while all four, each divided by its
+    own opportunity, stay close to truth in both regimes.
 
-    ⛔ **This histogram is only meaningful paired with the matching divisor.** The four pools tilt in
-    opposite directions, so the raw sum is biased LONG — that is the 146.05-against-88.0 defect
-    (`docs/TRAPS.md` opposite-tilts-must-not-pool). Nothing in the tool consumes this sum on its own.
+    This histogram is only meaningful paired with the matching divisor: the four pools tilt in
+    opposite directions, so the raw sum is biased long (TRAPS: opposite-tilts-must-not-pool). Nothing
+    in the tool consumes this sum on its own.
     """
     g = gdna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(g, [0.0, 0.0, 701.0, 903.0, 0.0])
 
 
 def test_gdna_contained_fl_mass_is_the_pair_and_is_the_NO_DIVISOR_FALLBACK():
-    """⚠ The honest fallback, not the convenient one.
+    """The honest fallback, not the convenient one.
 
     With no annotation offered there is no opportunity function, and pooling the four raw would be
     measurably WORSE than either the contained pair or the de-tilted four. So "no divisor" falls back to
@@ -100,7 +115,7 @@ def test_gdna_fl_mass_excludes_the_RNA_pool():
 
 def test_rna_fl_mass_is_the_ANNOTATED_SJ_pool_alone():
     """gDNA cannot be spliced, so an observed annotated sj certifies RNA — and only that pool
-    does. ⚠ ``sj_implicit`` fragments are already excluded by the accumulator, because a splice that was
+    does. ``sj_implicit`` fragments are already excluded by the accumulator, because a splice that was
     never sequenced is a product of the very model this pool is used to fit."""
     r = rna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
@@ -114,13 +129,13 @@ def test_the_splash_pools_are_reachable_SEPARATELY_for_QC():
 
 
 def test_the_two_COMPONENT_accessors_partition_every_pool():
-    """⛔ Teeth on the partition itself: no pool double-counted, none unreachable.
+    """Teeth on the partition itself: no pool double-counted, none unreachable.
 
     ``gdna_fl_mass`` and ``rna_fl_mass`` are the two COMPONENT accessors and they must be exhaustive and
     disjoint — a pool no accessor returns is silently discarded evidence, and one two accessors return is
     double-counted. Both are invisible in any single-accessor test.
 
-    ⚠ ``gdna_contained_fl_mass`` and ``splash_fl_mass`` are named **subsets** of the gDNA side, not
+    ``gdna_contained_fl_mass`` and ``splash_fl_mass`` are named SUBSETS of the gDNA side, not
     members of the partition; the test below pins that they tile it exactly.
     """
     payload = SimpleNamespace(pool_lengths=_pools())
@@ -138,7 +153,7 @@ def test_the_two_COMPONENT_accessors_partition_every_pool():
 
 
 def test_the_gdna_subsets_TILE_the_gdna_side_exactly():
-    """⭐ contained + splash == all four, on every pool individually.
+    """contained + splash == all four, on every pool individually.
 
     This is what keeps "the crossing pools are reported separately" and "the crossing pools are fitted"
     from drifting apart: they are the same rows seen twice, not two different definitions.
@@ -190,7 +205,7 @@ def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
 
 
 def test_build_fl_just_below_5000_is_not_a_cliff():
-    # Decision 5: 4999 vs 5001 differ only marginally (no GOOD/WEAK jump).
+    # 4999 vs 5001 differ only marginally — there is no GOOD/WEAK jump to land on.
     glob = _spike(100, 1.0e6)
     lo = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 4999.0), max_size=1000
@@ -262,3 +277,221 @@ def test_accessors_return_empirical_models():
     assert gdna_m.n_observations == 40
     # to_dict() works (drives the summary QC report).
     assert gdna_m.to_dict()["summary"]["mode"] == 325
+
+
+# ── the two estimands of the gDNA length law, and the routing guarantee between them ─────────
+
+
+def _models(**kw):
+    rng = np.random.default_rng(5)
+    g = rng.random(101)
+    r = rng.random(101)
+    return _fl_models_from_histograms(
+        global_counts=g + r, rna_counts=r, gdna_counts=g, max_size=100, **kw
+    )
+
+
+# ── the field exists and is never None: the scorer must be able to read it unconditionally ───────
+
+
+def test_the_realized_law_is_always_present():
+    m = _models()
+    assert m.gdna_realized_pmf is not None
+    assert m.gdna_realized_pmf.shape == m.gdna_pmf.shape
+
+
+def test_without_a_realized_estimate_the_two_estimands_coincide_exactly():
+    """The fallback is one law, byte-equal, so a consumer that reads the realized field on an
+    off-capture or input-starved build gets the uniform law rather than an absent one."""
+    m = _models()
+    np.testing.assert_array_equal(m.gdna_realized_pmf, m.gdna_pmf)
+
+
+def test_a_supplied_realized_histogram_is_shrunk_like_its_sibling():
+    rng = np.random.default_rng(9)
+    realized = rng.random(101) * 50
+    m = _models(gdna_realized_counts=realized)
+    assert not np.array_equal(m.gdna_realized_pmf, m.gdna_pmf)
+    assert m.gdna_realized_pmf.min() > 0.0  # EB-shrunk toward the global anchor, like gdna_pmf
+    assert m.gdna_realized_pmf.sum() == pytest.approx(1.0)
+
+
+def test_the_uniform_law_is_bit_identical_with_and_without_the_realized_input():
+    """The routing guarantee: computing the realized law must not perturb `gdna_pmf` by one ULP.
+    Every geometry consumer reads that field, and geometry eating the wrong estimand is the large
+    end-to-end regression this whole split exists to prevent."""
+    rng = np.random.default_rng(9)
+    a = _models()
+    b = _models(gdna_realized_counts=rng.random(101) * 50)
+    np.testing.assert_array_equal(a.gdna_pmf, b.gdna_pmf)
+    np.testing.assert_array_equal(a.rna_pmf, b.rna_pmf)
+    np.testing.assert_array_equal(a.global_pmf, b.global_pmf)
+
+
+# ── the realized estimator's own invariants, on constructed payloads ─────────────────────────────
+
+
+def _payload_fixture(boundary_excess: float):
+    """A two-reference toy: intergenic/intron/exon regions with uniform-consistent contained counts,
+    and intron|exon + intergenic|exon boundaries whose counts carry ``boundary_excess`` TIMES the
+    uniform expectation. At 1.0 the boundaries say "no capture"."""
+    from _fl_realized_fixture import build_fixture
+
+    return build_fixture(boundary_excess)
+
+
+def test_no_enrichment_excess_means_no_on_target_correction():
+    """The closure property: boundaries consistent with the uniform field ⇒ the (eps−1)+ term is
+    identically zero and the realized law is the sampled blend alone."""
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    assert diag.applied
+    assert diag.ontarget_share == pytest.approx(0.0, abs=1e-9)
+
+
+def test_enriched_boundaries_raise_the_on_target_share():
+    """At 50x enrichment the fixture's own arithmetic puts the excess classes near
+    ``rho·49·E_contained(200)·2`` of a ~2.6k total — about 0.27. Gate the ORDER, derived, not a guess:
+    well clear of the no-excess case's exact 0, and the boundary share alive beside it."""
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=50.0)
+    counts, _uniform_out, diag = _realized_gdna_counts(payload, opp, rl, rt, rna_pmf, uniform)
+    assert diag.applied
+    assert diag.ontarget_share > 0.2
+    assert diag.boundary_share > 0.05
+
+
+def test_the_on_target_correction_rises_smoothly_with_enrichment():
+    """The capture SPECTRUM, not a switch: the correction is EXACTLY 0 with no excess and rises
+    monotonically from there. Its weight is its OWN resolution — how far an exon's enrichment sits
+    from 1 against its own sampling error — and NOT the strata-split weight `lam`, which asks whether
+    the two strata's LAWS differ. That is a different question, and gating on it suppresses a
+    correction that is genuinely resolved."""
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    shares = [
+        _realized_gdna_counts(*_payload_fixture(boundary_excess=x))[2].ontarget_share
+        for x in (1.0, 2.0, 5.0, 10.0, 25.0, 50.0)
+    ]
+    assert shares[0] == 0.0
+    assert all(b > a for a, b in zip(shares, shares[1:]))
+
+
+def test_an_unresolved_enrichment_weight_collapses_with_its_precision():
+    """The excess's own weight, gated at the MECHANISM rather than end to end, and the reason is worth
+    recording. PERTURBATION: every way of starving the enrichment's precision in the fixture —
+    thinning the boundaries, or the whole library at fixed enrichment — also trips an EARLIER guard,
+    so the end-to-end share reads 0 whether or not this weight exists and cannot isolate it. What can
+    be isolated is the weight itself, which is where the logic lives.
+
+    The two arms below hold the same enrichment ratio on a well-populated crossing pool and on an
+    almost empty one, and the weight must go to ~1 and to ~0 respectively. The ratio alone would fire
+    identically at both.
+    """
+    from rigel.calibration.fl import _resolution_weight
+
+    eps = 10.0
+    strong = _resolution_weight((eps - 1.0) ** 2, eps * eps / 98.0)
+    weak = _resolution_weight((eps - 1.0) ** 2, eps * eps / 1e-3)
+    assert strong > 0.95
+    assert weak < 0.01
+    # and it is monotone in the evidence, with no step anywhere along it
+    ws = [_resolution_weight((eps - 1.0) ** 2, eps * eps / n) for n in np.logspace(-4, 4, 200)]
+    assert all(b >= a for a, b in zip(ws, ws[1:]))
+    assert max(abs(b - a) for a, b in zip(ws, ws[1:])) < 0.05
+
+
+def test_zero_gdna_declines_rather_than_fabricating_a_law():
+    from rigel.calibration.fl import _realized_gdna_counts
+
+    payload, opp, rl, rt, rna_pmf, uniform = _payload_fixture(boundary_excess=1.0)
+    import dataclasses
+
+    rc = np.zeros_like(np.asarray(payload.region_contained_count))
+    pl = np.asarray(payload.pool_lengths, dtype=np.float64).copy()
+    pl[:4] = 0.0
+    starved = dataclasses.replace(payload, region_contained_count=rc, pool_lengths=pl)
+    counts, _uniform_out, diag = _realized_gdna_counts(starved, opp, rl, rt, rna_pmf, uniform)
+    assert counts is None and not diag.applied
+
+
+# ── the CONVERGENCE law: no cliffs, and the two estimands merge when the split is unresolvable ───
+
+
+def test_resolution_weight_is_a_smooth_signal_to_noise_ratio():
+    """`lam = S/(S+N)`: 0 when the split is pure noise, 1 when noise vanishes, ½ at S = N, and
+    MONOTONE in between. No threshold, so there is no value of the data at which behaviour jumps."""
+    from rigel.calibration.fl import _resolution_weight
+
+    assert _resolution_weight(0.0, 1.0) == 0.0
+    assert _resolution_weight(1.0, 0.0) == 1.0
+    assert _resolution_weight(1.0, 1.0) == pytest.approx(0.5)
+    prev = -1.0
+    for s in np.linspace(0.0, 10.0, 60):
+        lam = _resolution_weight(float(s), 1.0)
+        assert 0.0 <= lam <= 1.0 and lam >= prev
+        prev = lam
+
+
+def test_the_estimands_converge_when_the_boundary_stratum_is_starved():
+    """The capture-OFF side: sparse boundary data must not let the two laws diverge. The difference is
+    unmeasurable there, so the honest answer is that they agree."""
+    from rigel.calibration.fl import _couple_estimands
+
+    rng = np.random.default_rng(3)
+    g_c = np.abs(rng.random(60)) + 0.01
+    g_c /= g_c.sum()
+    g_b = np.roll(g_c, 6)  # a real shift, but measured on almost nothing
+    uni, real, lam = _couple_estimands(g_c, 1e6, g_b, 1e-3)
+    assert lam < 1e-3
+    # The guarantee is that the residual disagreement is BOUNDED BY lam times the split, not that it
+    # is bitwise zero — asserting equality would be asserting more than the mathematics gives.
+    assert float(np.abs(uni - real).sum()) <= lam * float(np.abs(g_b - g_c).sum()) + 1e-12
+
+
+def test_the_estimands_converge_when_the_CONTAINED_stratum_is_starved():
+    """The infinite-capture side: with no off-target data the chemistry law is not estimable, so it
+    must borrow the only law that IS rather than hold a stale value."""
+    from rigel.calibration.fl import _couple_estimands
+
+    rng = np.random.default_rng(4)
+    g_c = np.abs(rng.random(60)) + 0.01
+    g_c /= g_c.sum()
+    g_b = np.roll(g_c, 6)
+    uni, real, lam = _couple_estimands(g_c, 1e-3, g_b, 1e6)
+    assert lam < 1e-3
+    assert float(np.abs(uni - real).sum()) <= lam * float(np.abs(g_b - g_c).sum()) + 1e-12
+    # and the common law it converged on is the well-measured one, not the starved one
+    assert float(np.abs(uni - g_b).sum()) < float(np.abs(uni - g_c).sum())
+
+
+def test_a_well_measured_split_keeps_the_two_estimands_apart():
+    from rigel.calibration.fl import _couple_estimands
+
+    rng = np.random.default_rng(5)
+    g_c = np.abs(rng.random(60)) + 0.01
+    g_c /= g_c.sum()
+    g_b = np.roll(g_c, 6)
+    uni, real, lam = _couple_estimands(g_c, 1e7, g_b, 1e7)
+    assert lam > 0.99
+    # lam -> 1 recovers the uncoupled behaviour, to within (1 - lam) times the split
+    assert float(np.abs(uni - g_c).sum()) <= (1.0 - lam) * float(np.abs(g_b - g_c).sum()) + 1e-12
+    assert float(np.abs(uni - real).sum()) > 0.1
+
+
+def test_there_is_no_cliff_anywhere_along_the_capture_spectrum():
+    """The anti-cliff gate: sweep the boundary stratum's mass over eight orders of magnitude and
+    assert the uniform law moves CONTINUOUSLY — a binary decline would show as a step."""
+    from rigel.calibration.fl import _couple_estimands
+
+    rng = np.random.default_rng(6)
+    g_c = np.abs(rng.random(60)) + 0.01
+    g_c /= g_c.sum()
+    g_b = np.roll(g_c, 6)
+    masses = np.logspace(-4, 4, 200)
+    unis = np.array([_couple_estimands(g_c, 1e3, g_b, float(m))[0] for m in masses])
+    steps = np.abs(np.diff(unis, axis=0)).sum(axis=1)
+    assert steps.max() < 0.05, f"a step of {steps.max():.3f} is a cliff, not a fade"

@@ -79,7 +79,7 @@ The five identities that keep it done, all gated:
 | | | |
 |---|---|---|
 | C++ vs the executable specification | byte-identical | `tests/native/test_accumulator_spec.py` |
-| the same BAM at 1/2/4/8 workers | bit-identical, every bank | `test_accumulator_worker_determinism.py` |
+| the same BAM at 1/2/4/8 workers | bit-identical, every bank | `tests/test_scan_order_independence.py` |
 | `Σ node_start_count == deposited` | exact | same |
 | `deposited + deferred + dropped_* == offered` | exact, deferred non-empty | same |
 | the origin partitions sum to the full payload | exact, every channel | `tests/calibration/_oracle.py` |

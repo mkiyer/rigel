@@ -1,34 +1,15 @@
-"""
-test_golden_output.py — Bit-exact regression tests for pipeline output stability.
+"""The pipeline's numerical output does not drift, on a battery of diverse oracle scenarios.
 
-PURPOSE
--------
-After C++ or type-narrowing changes, this test suite verifies that the
-pipeline produces **identical** numerical output on a battery of diverse
-oracle scenarios.  Each scenario captures the full transcript-level,
-gene-level, and locus-level output DataFrames plus scalar aggregates,
-serialized to a golden CSV file.  Any drift is flagged immediately.
-
-USAGE
------
-Normal run (compare against golden files):
-    pytest tests/test_golden_output.py -v
-
-Regenerate golden files after an intentional change:
-    pytest tests/test_golden_output.py -v --update-golden
-
-Only run a specific scenario:
-    pytest tests/test_golden_output.py -v -k "multi_isoform_3tx"
-
-DESIGN
-------
-- Uses oracle BAM (no minimap2/samtools dependency)
-- Fixed seeds for complete reproducibility
-- Captures every numerical column from get_counts_df, get_gene_counts_df,
-  get_loci_df, plus gdna_em_count, nrna_em_count scalars
-- Comparison is bit-exact (atol=0) on float64 representation
-- Golden files stored in tests/golden/ as feather files for lossless
-  float round-trip; human-readable TSV mirrors alongside for diffing
+Each scenario runs from a fixed-seed oracle BAM, so no aligner is needed, and captures every numerical
+column of the transcript-, gene- and locus-level frames plus the scalar aggregates, against a golden
+stored in `tests/golden/` as feather for a lossless float round trip with a TSV mirror for diffing.
+Count columns are compared bit-exactly; derived float quantities are compared to a tolerance, because
+the native EM is compiled with fast maths and its iterative solve amplifies ULP-level platform
+differences — pinning one thread removes reduction-order noise on a single machine but not across
+them. The scenarios cover single- and multi-exon genes, multi-isoform EM, antisense overlap, gDNA
+contamination, nascent RNA, imperfect strand specificity and many loci, so a change in any of those
+shows up as a diff rather than as a number nobody was watching. `--update-golden` regenerates the
+files, and reading the diff before doing that is the point of having them.
 """
 
 import json
@@ -52,19 +33,19 @@ PIPELINE_SEED = 42
 N_FRAGS = 1000  # enough to exercise EM meaningfully
 
 # Tolerance for golden comparison.
-# Rigel's native EM / effective-length path is compiled with -ffast-math and
+# The native EM / effective-length path is compiled with -ffast-math and
 # -ffp-contract=fast and uses SIMD exp (fast_exp.h). Pinning n_threads=1 (below)
 # removes OpenMP reduction-order noise, so results are deterministic on a *single*
 # machine — but NOT bit-identical across machines: FMA contraction, SIMD lane
-# width, and libm/BLAS versions differ between the developer's Mac (where goldens
-# are generated) and the CI runners (Ubuntu/macOS × py3.12/3.13). The iterative
-# solver amplifies those ULP-level input differences to ~1e-8 relative on derived
-# quantities such as em_effective_length, so a bit-exact golden is unachievable.
-# Near-zero quantities (e.g. gdna with no contamination, ~1e-296) also wander by
-# several percent in relative terms while remaining scientifically meaningless.
-# rtol=1e-6 sits ~2 orders of magnitude below any real regression (algorithmic
-# changes move meaningful values by >=1e-3) yet absorbs cross-platform float
-# noise; atol=1e-10 absorbs noise on effectively-zero quantities.
+# width, and libm/BLAS versions differ between the machine where the goldens are
+# generated and the CI runners. The iterative solver amplifies those ULP-level
+# input differences to ~1e-8 relative on derived quantities such as
+# em_effective_length, so a bit-exact golden is unachievable. Near-zero quantities
+# (gdna with no contamination, ~1e-296) also wander by several percent in relative
+# terms while remaining scientifically meaningless. rtol=1e-6 sits ~2 orders of
+# magnitude below any real regression — an algorithmic change moves meaningful
+# values by >=1e-3 — yet absorbs cross-platform float noise; atol=1e-10 absorbs
+# noise on effectively-zero quantities.
 RTOL = 1e-6
 ATOL = 1e-10
 

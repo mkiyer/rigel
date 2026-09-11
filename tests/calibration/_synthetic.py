@@ -19,7 +19,7 @@ from rigel.scan_payload import (
     ScanQC,
 )
 
-#: ⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The accumulator deposits
+#: ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The accumulator deposits
 #: ``1/placements`` directly — there is no scale and nothing to decode, so this fixture builds the same
 #: number the accumulator would.
 
@@ -27,9 +27,9 @@ from rigel.scan_payload import (
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     """A 1-reference, 3-region payload + aligned :class:`RegionArrays`, with every bank distinct.
 
-    chr1 is region_bound at 0/100/200/300, so it owns **3 regions and 2 contiguous boundaries** — the axes are off by one
-    per reference, and a fixture that used the same length for both would hide an axis mix-up. One
-    sj boundary exists so the third axis is non-trivial.
+    chr1 is cut at 0/100/200/300, so it owns 3 regions and 2 contiguous boundaries — the axes are off
+    by one per reference, and a fixture that used the same length for both would hide an axis mix-up.
+    One sj boundary exists so the third axis is non-trivial.
 
     Regions: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
     share a value, so a consumer reading the wrong one cannot pass by coincidence::
@@ -52,21 +52,21 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     def inv(counts, placements):
         """The fixed-point sum a bank of ``counts`` fragments at one placement count would deposit.
 
-        ⚠ ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
+        ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
         """
         return np.asarray(counts, np.float64).sum(axis=1) / placements
 
     def lengths(counts, length):
-        """⚠ ONE column, for the same reason :func:`inv` is."""
+        """ONE column, for the same reason :func:`inv` is."""
         return (np.asarray(counts, np.uint64).sum(axis=1) * np.uint64(length)).astype(np.uint64)
 
     def mass(counts, per_crossing=2):
         """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each.
 
-        ⚠ ONE value per boundary — the two strand columns are SUMMED, because the mass has no strand axis.
-        ⭐ And it is a plausible state rather than an arbitrary array: a crossing's share is at most one
-        fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment that
-        crosses two boundaries, which is what the multi-boundary geometry this fixture describes produces.
+        ONE value per boundary — the two strand columns are SUMMED, because the mass has no strand
+        axis. And it is a plausible state rather than an arbitrary array: a crossing's share is at most
+        one fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment
+        that crosses two boundaries, which is what this fixture's multi-boundary geometry produces.
         """
         return np.asarray(counts, np.float64).sum(axis=1) / per_crossing
 
@@ -78,9 +78,9 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         region_contained_count=contained,
         region_contained_inv_opportunity_sum=inv(contained, 50),
-        # ⭐ per genome strand since 2026-08-21; every value distinct from every other bank's so a
-        # consumer reading the wrong one cannot pass by coincidence. Ledger: ΣS == ΣE (== deposited
-        # in a real scan; this fixture's qc uses its own totals).
+        # per genome strand; every value distinct from every other bank's so a consumer reading the
+        # wrong one cannot pass by coincidence. Ledger: ΣS == ΣE (== deposited in a real scan; this
+        # fixture's qc uses its own totals).
         region_start_count=np.array([[6, 5], [7, 5], [9, 4]], dtype=np.uint32),
         region_end_count=np.array([[5, 6], [8, 4], [10, 3]], dtype=np.uint32),
         region_span_count=np.array([[0, 1], [2, 0], [0, 0]], dtype=np.uint32),
@@ -91,12 +91,12 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         boundary_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
-        # ⭐ TWO COLUMNS, and they SUM to what the one-column bank held (1.3), so every
-        # expectation downstream of the substrate's fold is unchanged by the strand split.
+        # TWO COLUMNS, and they SUM to what the one-column bank held (1.3), so every expectation
+        # downstream of the substrate's fold is unchanged by the strand split.
         sj_mass=np.asarray(sj, np.float64) / 10.0,
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
-        # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
+        # Nothing was deferred here, and that is a real state, not a stub: this fixture has no
         # annotated intron in any mate gap. The two empty spellings live on the classes so a
         # hand-built payload cannot get the `[0]`-not-`[]` offset boundary wrong.
         deferred=DeferredFragments.empty(),
@@ -130,7 +130,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
 def make_synthetic_sj():
     """The :class:`SpliceJunctionGeometry` matching :func:`make_synthetic_payload`'s one sj boundary.
 
-    ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a sj
+    It must exist, and match. The payload declares ``n_sj = 1``; ``calibrate`` refuses a sj
     axis of a different length, because an axis addressing a different graph would place every splice
     on the wrong boundary and nothing downstream would fault on it.
 
@@ -161,8 +161,8 @@ def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
 def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
     """A real :class:`StrandModels` with a chosen κ and observation count.
 
-    The calibrator now reads BOTH halves of the RNA strand Beta-Binomial from the per-sj SJ
-    strand table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
+    The calibrator reads BOTH halves of the RNA strand Beta-Binomial from the per-sj SJ strand
+    table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
     supply a real table rather than duck-type two scalars. Observations are spread evenly over
     ``n_sj`` motif-POS sj, sense/antisense split to give exactly ``p_r1_sense``.
     """
@@ -191,7 +191,7 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_sj: int = 1):
 
 
 # ---------------------------------------------------------------------------
-# The S5.e chain fixture — hand-built numbers on the region / boundary / sj axes.
+# The chain fixture — hand-built numbers on the region / boundary / sj axes.
 # ---------------------------------------------------------------------------
 
 
@@ -217,11 +217,11 @@ def make_chain_parts(
     ref_names=None,
     boundary_flags=None,
 ):
-    """A chain + substrate + geometry + statics over ``signatures``, on the S5.e axes.
+    """A chain + substrate + geometry + statics over ``signatures``, on the region / boundary / sj axes.
 
-    ⭐ **The axes are off by one per reference and that is the point of the helper**: a reference with
-    ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with **no terminal slots**. Every
-    per-object argument is broadcast, so a test states only the numbers it cares about.
+    The axes are off by one per reference and that is the point of the helper: a reference with ``k``
+    regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with no terminal slots.
+    Every per-object argument is broadcast, so a test states only the numbers it cares about.
 
     ``sj`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
     row on the sj axis and is placed on the boundaries it leaves and enters.

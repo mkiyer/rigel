@@ -1,18 +1,12 @@
-"""Tests for robust BAM auxiliary tag parsing in the C++ scanner.
+"""The C++ scanner reads BAM auxiliary tags the way real aligners write them.
 
-Exercises the strand-tag parsing path (``read_sj_strand`` / ``try_tag``
-in bam_scanner.cpp) and the ``detect_sj_strand_tag`` helper through
-Python integration tests.  No C/C++ unit test framework is needed
-because the native module is fully exposed via nanobind.
-
-Tag type scenarios covered:
-- XS tag written as BAM type 'A' (single char)  — standard STAR output
-- XS tag written as BAM type 'Z' (string)       — pysam default for strings
-- ts tag as type 'A' and 'Z'                     — minimap2 convention
-- Missing strand tags entirely
-- Numeric tags (NH, NM) as various integer subtypes
-- Mixed tag presence across reads (auto-detection)
-- Read-strand flipping for the 'ts' tag on reverse reads
+One aligner writes ``XS`` as a single character and another as a string; ``ts`` follows a different
+convention again and must be flipped on a reverse read; ``NH`` and ``NM`` arrive as any of several
+integer subtypes. The same library tagged two ways must produce the same strand model, tag
+auto-detection must pick the right one when both are present and fall back when the first is
+absent, an unparseable value must read as no strand rather than as a strand, and a library with no
+strand tags at all must yield zero spliced observations and refuse calibration rather than invent
+one. Driven through Python, because the native module is fully exposed and needs no C++ harness.
 """
 
 from pathlib import Path

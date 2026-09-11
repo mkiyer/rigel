@@ -1,71 +1,59 @@
-# NEXT SESSION — the tool re-measured under the landscape prior's two landings (2026-09-10, uncommitted on `main`); NEXT IS THE RULER AT ZERO gDNA (handoff)
+# NEXT SESSION — the state after the cleanup session (2026-09-10/11)
 
-⭐⭐⭐ **THE REFERENCES:** `CLAUDE.md` (the scope, the instrument table, the standing baseline),
-`ROADMAP.md` (the state and the ranking, both re-audited 2026-09-10), `ISSUES.md` (every open case;
-`the-landscape-training-population-arms` in CLOSED / REFUSED with every arm's number), `DESIGN.md` §7.1
-(the prior's three rulings and their measurements). This file is the state.
+A handoff, provisional like everything in this directory. The references are `CLAUDE.md` (scope,
+instruments, baseline), `docs/ROADMAP.md` (the ranking) and `docs/ISSUES.md` (every open case).
 
-## WHAT STANDS (2026-09-10; the working tree, NOT committed — the owner drives commits)
+## What stands
 
-1. **Two mechanisms landed on the gDNA landscape prior, one gate file** (`DESIGN.md` §7.1;
-   `tests/calibration/test_landscape_training_population.py`, 10 gates, nine perturbations watched fire):
-   a node whose only evidence is a bound does not train it (`RegionBelief.informed`); its location-free
-   kernels (count < 1) are placed by the previous refit's landscape (`landscape._estep_kernels`); its grid
-   spans every region and boundary (`fit_landscape(domain=…)`, the owner's ruling). The ladder's zero
-   controls went from ~150k invented fragments to a few hundred; in scope 0.95–1.00×.
-2. **THE SUITE: 0 failed / 3,609 passed / 2 xfail, 3,611 collected** (`CLAUDE.md` carries the +16
-   accounting; `docs/dev/PLAN_measured_prior.md` retired as superseded, git carries it).
-   `preflight.py --full` 17/17. Goldens regenerated; the magnitude is in `DESIGN.md` §7.1.
-3. **THE NEW INSTRUMENT:** `scripts/design/landscape_training_census.py` (row in `CLAUDE.md`'s table).
-4. **THE RECORDS:** the prototype harness and every arm's output under
-   `~/Downloads/rigel_runs/prototypes/2026-09-10_landscape/`; the four instrument re-runs under
-   `~/Downloads/rigel_runs/arms/2026-09-10_post_landscape/` (`calibration_vs_oracle.txt`, `walk/`,
-   `v_base.jsonl` + `v_free.jsonl` + `v_compare.txt`, `qa_base.jsonl` + `qa_oracle.jsonl` + `qa_report.txt`).
+The code review, code cleanup and documentation cleanup is done: four phases, no mechanism change.
+Both ladder identity conditions read bit-identical after every step that touched `src/`, and the goldens
+did not move. The first three phases are commit `3f7c5591`; the fourth (the tests) is its own commit.
 
-## THE STATE, RE-MEASURED (every number below is from those four runs; re-derive, never quote onward)
+| | before | after |
+|---|---|---|
+| permanent docs + `CLAUDE.md` + `README.md` | 10,645 lines | 6,046 lines |
+| `scripts/design/` | 68 files, 29,038 lines | 43 instruments + `_shared.py`, 19,463 lines |
+| `src/rigel/` Python | 38,295 lines, 202 dates, 9 doc citations | 37,665 lines, none of either |
+| `tests/` | 165 files, 53,867 lines | 129 files, 52,151 lines; the same 2,670 tests |
 
-* **`calibration_vs_oracle.py`, the 0.8.0 metric** (mass-weighted |Δ gDNA share| per object, region /
-  boundary): stranded OFF 0.0067 / 0.0103, stranded ON 0.0102 / 0.0150, unstranded OFF 0.0085 / 0.0122
-  — unchanged from the merge day within a few ten-thousandths; the `g00` zero controls **0.0000 / 0.0000**
-  (828 and 921 fragments of 18M and 26M; they were 0.0081 / 0.0077); the deferred stratum 0.0717 / 0.1185.
-  ⭐ **The RULER** (③): factor P 0.150 against O 1.000 on the `g00` rows — 996M bp over 51,543 transcripts —
-  and P/O 1.033 / 1.043 on the in-scope capture-OFF strata where the instrument's own contract says 1.000.
-* **`calibration_walk.py`** (C = local solve; the refit alone; messages on top): at every zero row the
-  prior alone reaches a few hundred fragments and messages add a few hundred of noise; in scope the prior
-  does most of the work and messages still remove 13k–129k on the stranded capture-ON and `g98` rows; on
-  the deferred stratum the refit alone is +2.6M / +6.3M and the messages −4.9M / −9.9M (unchanged).
-* **`vertex_ceiling.py`** (`vertex_free` against `base`, the final answer): within 1 % on every stranded
-  in-scope row; 2 % / 2 % / 7 % of the unstranded capture-OFF rows at `g05` / `g50` / `g98`; 24–39 % of the
-  deferred stratum; the zero rows 325 → 13. Unchanged in scope from the merge day.
-* **`quant_accuracy.py`, the thermometer** (misassigned fragments, transcript level, `base` → `oracle`
-  prior): stranded OFF 1.03×, stranded ON 0.98×, unstranded OFF 1.02× — a perfect prior is worth nothing
-  in scope; the deferred stratum 0.73×; the `g00` rows 9.64M under both arms, the largest of any stratum
-  and untouched by the prior — the ruler.
-* **`policy_benchmark.py --by-class`** (the final table, `ladder_final.txt` in the prototype record):
-  unstranded OFF `g50` — the intron class 46 % of the row at 2.3 % of its own fragments; stranded ON `g50`
-  — exon|exon boundaries 49 % and walled exons 19 %. Same shape as the merge day.
+The suite: **0 failed / 3,404 passed / 2 xfail, 3,406 collected**. The identity references frozen at
+the start of the session are `~/Downloads/rigel_runs/arms/cleanup_identity_<condition>.json` for
+`gdna_g05_ss_0.50_nrna_mid_capture_off` and `gdna_g05_ss_0.99_nrna_mid_capture_on`.
 
-## WHAT IS NEXT — the owner's decision (2026-09-10): a CODE REVIEW, CODE CLEANUP AND DOCUMENTATION CLEANUP session comes first; its kickoff prompt is `docs/dev/CLEANUP_SESSION_PROMPT.md`. After it, `ROADMAP.md`'s ranking, re-audited
+Structural changes a reader will meet: `strand_deconv` is folded into `gdna_strand`; the scripts load
+each other through `scripts/design/_shared.py`; the tests take shared builders from
+`tests/_index_builder.py` and `tests/_em_harness.py` (never `from conftest import …`, which is
+ambiguous once a sub-directory has its own conftest) and the transfer-policy fixture from
+`tests/calibration/conftest.py`; eight groups of test files were merged, with every test id kept.
 
-1. **THE RULER AT ZERO gDNA** (`ISSUES: g00-shrinkage-upstream-repair`, re-priced: the composition it reads
-   is now right and the factor is still 0.15, because `capture_eff_length._global_reference_density`
-   detects a reference from any five slots with positive mass). The fix is the detector. First step:
-   settle whether the instrument's "exactly 1.000 off capture" contract is stale (both P and O read
-   0.92–0.97 there), then derive the enrichment test, prototype outside `src/`, judge on ③ per stratum.
-2. The rest of the pre-EM setup (rank 2; re-run `prior_vs_oracle.py` first).
-3. The intron's own solve on unstranded capture-OFF (rank 3); the vertex atom (rank 4); the message
-   policy above the bar (rank 5).
+## Owner decisions this session left open
 
-## THE LESSONS THIS SESSION PAID FOR
+1. **Deleted numbers with no home.** The agents cut measurements out of docstrings (bandwidth sweeps,
+   old panel readings, profiling records, the v8 no-merge partition's justification in `splice_graph.py`,
+   the `sweep_logodds_window` A/B, the closure failure rate in `result.py`). Git carries every one; none
+   is recorded in `DESIGN.md` or `ISSUES.md`. Say which, if any, should be.
+2. **A duplicate gate.** `test_an_ambig_flank_cannot_seed` and `test_an_AMBIG_flank_cannot_seed` in
+   `tests/calibration/test_gdna_strand_fit.py` pin one rule on one fixture; the second is strictly
+   stronger. The merge kept both because no test was to be lost.
+3. **The two xfail reason strings** narrate history (a date, "the relay policy of the day"). They are
+   executable records and were not touched.
+4. **Not done, by judgement:** `splice_graph.py` and `index.py` are each four concepts and were not
+   split; `strand_balance` stays separate from `gdna_strand` (a location estimand beside a dispersion
+   one, and part of the pinned public surface); `cli._fragment_length_report` stays in the CLI (the
+   `report/` package is behind an optional extra); `sim/net_flow.analyze_net_flow` is kept as that
+   module's documented entry point.
 
-* **Re-measure the whole page, not the number you changed.** The composition metric said "done"; the
-  ruler on the same page said the largest in-scope defect on the metric is now somewhere else entirely.
-* **An open entry's prescription can be completed and its defect survive.** "Repair the composition, not
-  the function" was followed to 828 fragments and the factor did not move; the entry is re-priced, not
-  closed, and the repair moved to the detector.
-* **A census in the estimator's own currency before a mechanism; a decomposition by contributor before a
-  derivation.** Both mechanisms this session followed from a table naming who carried the mass.
-* **A prototype's evidence class is not the src predicate until it is checked slot by slot** (1,476 own-flux
-  ceilings; 137k against 111k). **Diff the goldens column by column** (the tiny toys, not the ladder,
-  exposed the grid collapse and the guard). **A shuffle or a mirror control only discriminates where the
-  population it acts on is mixed.** **zsh arrays are 1-indexed** — check every sharded table's row count.
+## Worth knowing
+
+- Earlier bulk renames damaged ordinary English in prose ("region_bounds" for *cuts*, "boundaries up"
+  for *lines up*, "an boundary", "Region dependency" for *Node*). The ones found are fixed; run
+  `rename_census.py --sense` before any future rename.
+- A test that matches an assertion message by regex breaks when the message is reworded; one did in
+  this session (the SILENCE gate in `test_sweep_backbone.py`) and was re-pointed at the sentence, not
+  widened.
+
+## What is next
+
+`ROADMAP.md`'s ranking is unchanged by the cleanup: rank 1 is the ruler at zero gDNA
+(`ISSUES: g00-shrinkage-upstream-repair`), then the rest of the pre-EM setup, the intron's own solve on
+unstranded capture-OFF, the vertex atom, and the message policy only where a row is above the bar.

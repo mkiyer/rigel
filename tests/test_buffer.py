@@ -1,7 +1,10 @@
-"""Tests for rigel.buffer -- FragmentBuffer with native C++ accumulator.
+"""`rigel.buffer` — the fragment buffer the EM reads, over the native accumulator.
 
-All buffer append tests use C++ ResolvedFragment objects produced by
-FragmentResolver.resolve_fragment(), exercising the real native code path.
+The buffered fragment record and the accumulator behind it, basic append and iteration, `frag_id`
+assignment, the fragment classes, spilling to disk and reading back, the summary, chunked iteration
+and the resolved-fragment surface. Every append goes through a C++ `ResolvedFragment` produced by
+`FragmentResolver.resolve_fragment`, so these exercise the real native path rather than a Python
+stand-in that could diverge from it.
 """
 
 import threading

@@ -7,7 +7,7 @@ truth column, so every way of getting them wrong produces a *plausible* number �
 column, an injection that never fired, a false-positive channel that is invisible because the rows are
 filtered out before scoring. These gates are those ways.
 
-⛔ **EACH GATE CARRIES ITS OWN PERTURBATION.** A gate that has never been watched to fire has not been
+Each gate carries its own perturbation: a gate that has never been watched to fire has not been
 written yet.
 """
 
@@ -29,7 +29,7 @@ _MODULES: dict = {}
 
 
 def _load_sibling(name: str):
-    """Import a ``scripts/design/`` instrument by path. ⚠ Registered in ``sys.modules`` BEFORE
+    """Import a ``scripts/design/`` instrument by path. Registered in ``sys.modules`` before
     execution, or ``@dataclass`` fails resolving its own ``__module__``."""
     import sys
 
@@ -105,11 +105,11 @@ def toy_oracle(toy, tmp_path_factory):
 def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
     """One full ``run_pipeline`` under one arm; returns ``(counts_df, fired)``.
 
-    ⛔ **The seed is PINNED and that is not tidiness.** ``EMConfig.seed`` ships as ``None`` with
-    ``assignment_mode="sample"``, so the EM's hard assignment is an unseeded categorical draw: two
-    back-to-back runs of the IDENTICAL pipeline differ here on 4 transcripts by up to 43 fragments
-    (measured). Without the pin the byte-identity gate below could never pass and its failure would
-    say nothing about the injection.
+    The seed is pinned, and that is not tidiness. ``EMConfig.seed`` ships as ``None`` with
+    ``assignment_mode="sample"``, so the EM's hard assignment is an unseeded categorical draw and
+    two back-to-back runs of the identical pipeline return different transcript counts. Without the
+    pin the byte-identity gate below could never pass, and its failure would say nothing about the
+    injection.
     """
     from rigel.pipeline import run_pipeline
 
@@ -127,29 +127,30 @@ def _quant(toy, arm, oracle, seed=QA.DEFAULT_EM_SEED):
 
 
 def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipeline(toy, toy_oracle):
-    """⛔ TRAPS: byte-identity-gate, and this is the harness's own falsification. The injection reaches the EM, whose
-    per-locus draw is order-sensitive; if the wrapper perturbed anything at all — even the order a
-    float was summed in — every ``oracle`` number would be that perturbation plus the effect.
+    """TRAPS: byte-identity-gate, and this is the harness's own falsification. The injection reaches
+    the EM, whose per-locus draw is order-sensitive; if the wrapper perturbed anything at all — even
+    the order a float was summed in — every ``oracle`` number would be that perturbation plus the
+    effect.
 
-    ⭐ **``noop`` is not an early return.** It builds O in full and discards it, so this gate covers
-    the whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation makes it take one field
-    and asserts the result stops matching — proving the comparison could have failed.
+    ``noop`` is not an early return: it builds O in full and discards it, so this gate covers the
+    whole wrapper path and not an ``if`` (TRAPS: could-the-arm-have-fired). The perturbation makes
+    it take one field and asserts the result stops matching, proving the comparison could have
+    failed.
     """
     base, base_fired = _quant(toy, "base", None)
     noop, noop_fired = _quant(toy, "noop", toy_oracle)
     assert base_fired["n"] >= 1 and noop_fired["n"] >= 1
 
-    # ⭐⭐ TWO STANDARDS, AND THEY ARE THE NUMERIC CONVENTION. Every COUNT column is integer-derived and
-    # must match EXACTLY — measured over 8 shipped multi-threaded runs, their run-to-run spread is
-    # 0.000e+00, because integer addition is associative. `posterior_mean` is float-derived and wanders
-    # by **1.503e-15** (~7 ulp) between identical runs, because the conserved-mass banks are float64 and
-    # the per-worker merge order is a data-dependent race.
+    # Two standards, and they are the numeric convention. Every count column is integer-derived and
+    # must match exactly, because integer addition is associative. `posterior_mean` is float-derived
+    # and wanders by a few ulp (~1e-15) between identical runs, because the conserved-mass banks are
+    # float64 and the per-worker merge order is a data-dependent race.
     #
-    # ⛔ The tolerance is DERIVED and GATED, not chosen: it sits ~6 orders above that measured spread
-    # (headroom for a library far deeper than this toy, since re-association scales with the number of
-    # additions) and ~9 orders below the injection it must catch — and the perturbation arm below proves
-    # it is still tight enough, because taking ONE oracle field must break the comparison.
-    # ⚠ Owner ruling 2026-08-11: the tool is not bit-reproducible and tests validate within a tolerance.
+    # The tolerance is derived and gated, not chosen: it sits ~6 orders above that spread (headroom
+    # for a library far deeper than this toy, since re-association scales with the number of
+    # additions) and ~9 orders below the injection it must catch — and the perturbation arm below
+    # proves it is still tight enough, because taking one oracle field must break the comparison.
+    # The tool is not bit-reproducible, so tests validate within a tolerance rather than on bits.
     exact = [c for c in base.columns if c != "posterior_mean"]
     pd.testing.assert_frame_equal(base[exact], noop[exact], check_exact=True)
     pd.testing.assert_series_equal(
@@ -169,15 +170,15 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
 
 
 def test_the_UNSEEDED_shipped_config_is_not_reproducible_and_that_is_why_the_seed_is_pinned(toy):
-    """⛔⛔ **A PROPERTY OF THE SHIPPED TOOL, PINNED HERE BECAUSE EVERY A/B ABOVE DEPENDS ON IT.**
-    ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so two runs of the
-    identical pipeline on the identical BAM return different transcript counts. Any end-to-end arm
-    comparison run on the default config therefore reports sampling noise on top of its effect, and a
-    byte-identity ``noop`` is impossible.
+    """A property of the shipped tool, pinned here because every A/B above depends on it.
+    ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so two runs of
+    the identical pipeline on the identical BAM return different transcript counts. Any end-to-end
+    arm comparison run on the default config therefore reports sampling noise on top of its effect,
+    and a byte-identity ``noop`` is impossible.
 
-    ⭐ This asserts BOTH halves: unseeded runs differ, and the same runs with a pinned seed do not. If
-    the default ever becomes deterministic the first half fails — which is a result to record, not a
-    test to widen (TRAPS: waive-with-a-measurement).
+    This asserts both halves: unseeded runs differ, and the same runs with a pinned seed do not. If
+    the default ever becomes deterministic the first half fails — which is a result to record, not
+    a test to widen (TRAPS: waive-with-a-measurement).
     """
     from rigel.pipeline import run_pipeline
 
@@ -202,11 +203,11 @@ def test_the_UNSEEDED_shipped_config_is_not_reproducible_and_that_is_why_the_see
 def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
     tmp_path, monkeypatch
 ):
-    """⛔ TRAPS: an-ablation-that-never-ran. "The perfect prior changed nothing" is a publishable conclusion, so the
-    one thing that must not be able to produce it is a wrapper that was never called — which happens
-    for real when ``quant_from_buffer`` returns early on an empty unit set.
+    """TRAPS: an-ablation-that-never-ran. "The perfect prior changed nothing" is a publishable
+    conclusion, so the one thing that must not be able to produce it is a wrapper that was never
+    called — which happens for real when ``quant_from_buffer`` returns early on an empty unit set.
 
-    ⚠ ``run_pipeline`` is stubbed to a no-op, which is exactly the shape of that early return: the
+    ``run_pipeline`` is stubbed to a no-op, which is exactly the shape of that early return: the
     pipeline completes, the wrapper is installed, and ``assemble_priors`` is never reached.
     """
     cond = tmp_path / "c1"
@@ -225,11 +226,11 @@ def test_an_injection_that_never_fires_RAISES_rather_than_reporting_no_effect(
 
 
 def test_each_oracle_arm_replaces_ITS_field_and_leaves_the_other_two_shipped(toy, toy_oracle):
-    """⭐ The three single-array arms exist to say WHICH of the prior's three numbers carries the
+    """The three single-array arms exist to say which of the prior's three numbers carries the
     value, and that only works if each one is surgical. This drives the wrapper directly with two
     recognisably different priors and checks, field by field, that exactly the named ones moved.
 
-    ⛔ The perturbation is the whole point of the loop: every arm is checked against every field, so
+    The perturbation is the whole point of the loop: every arm is checked against every field, so
     an arm that quietly replaced all three (or none) fails on the fields it should not have touched.
     """
     import rigel.calibration.priors as PRIORS
@@ -282,13 +283,13 @@ class _FakeCal:
 
 
 def test_the_scorer_reads_the_realised_fragment_column_and_a_molar_one_would_be_visible():
-    """⛔ The panel ships TWO truth tables and they are different quantities. The per-condition
+    """The panel ships two truth tables and they are different quantities. The per-condition
     ``truth_abundances.tsv`` gives the realised OBSERVED fragment count; the suite-level
     ``truth_abundances_nrna_none.tsv`` gives the pre-capture MOLAR abundance. Scoring a fragment
     estimate against a molar truth charges the tool for hybrid capture, which it never claims to
     invert.
 
-    ⭐ The perturbation feeds the scorer a molar-scaled truth (the same shape, a different unit) and
+    The perturbation feeds the scorer a molar-scaled truth (the same shape, a different unit) and
     asserts the error explodes — so a future edit that reaches for the wrong file cannot pass quietly.
     """
     truth = pd.DataFrame(
@@ -322,11 +323,11 @@ def test_the_scorer_reads_the_realised_fragment_column_and_a_molar_one_would_be_
 
 
 def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
-    """⭐ ``fp_mass`` (estimate on a transcript the simulator gave zero fragments) and ``fn_mass``
+    """``fp_mass`` (estimate on a transcript the simulator gave zero fragments) and ``fn_mass``
     (real RNA assigned nowhere) are different failures with different fixes, and a single ``Σ|Δ|``
-    cannot separate them. ⛔ The perturbation flips one transcript from silent to expressed and
-    asserts its mass MOVES OUT of ``fp_mass`` — a scorer that keyed on the estimate rather than on
-    the truth would keep it there.
+    cannot separate them. The perturbation flips one transcript from silent to expressed and asserts
+    its mass moves out of ``fp_mass`` — a scorer that keyed on the estimate rather than on the truth
+    would keep it there.
     """
     truth = pd.DataFrame({"transcript_id": ["a", "b", "c"], "mrna_abundance": [100.0, 0.0, 50.0]})
     quant = pd.DataFrame(
@@ -353,7 +354,7 @@ def test_false_positive_and_false_negative_mass_are_separate_and_reconcile():
 
 
 def test_the_GENE_row_collapses_isoform_ambiguity_and_still_sees_real_gene_error():
-    """⭐⭐ The gene row exists to answer "is the surviving transcript error isoform ambiguity, or
+    """The gene row exists to answer "is the surviving transcript error isoform ambiguity, or
     something else?" — and it can only answer that if swapping mass BETWEEN a gene's own isoforms is
     invisible to it while moving mass OUT of the gene is not. Both halves are asserted here, because a
     gene scorer that saw neither would also report zero on the first case.
@@ -385,17 +386,15 @@ def test_the_GENE_row_collapses_isoform_ambiguity_and_still_sees_real_gene_error
 
 
 def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_not():
-    """⛔⛔ **THIS IS A DEFECT THAT SHIPPED IN THIS FILE AND WAS CAUGHT BY A SANITY CHECK, NOT BY A
-    GATE.** ``n_intergenic`` counts fragments that reached no locus; they never enter the EM, so
-    ``gdna_em_count`` excludes them. Off capture, gDNA is genome-uniform and MORE THAN HALF of it is
-    intergenic — measured at `g50 ss0.50 capture_off`, 2,601,271 intergenic against 2,330,992
-    EM-assigned. The first version of this scorer left them out of the numerator while RNA stayed in
-    the denominator: it read **0.3151 against a truth of 0.5000** and fabricated a "systematic
-    off-capture EM under-call" that does not exist. With them it reads **0.4933**.
+    """``n_intergenic`` counts fragments that reached no locus; they never enter the EM, so
+    ``gdna_em_count`` excludes them. Off capture, gDNA is genome-uniform and more than half of it is
+    intergenic, so a library gDNA fraction that leaves them out of the numerator while RNA stays in
+    the denominator reads far low against truth and fabricates a systematic off-capture EM
+    under-call that does not exist.
 
-    ⭐ The fixture reproduces that exact shape, and asserts BOTH views: the deliverable includes the
-    intergenic fragments, the EM-only diagnostic does not, and they must not be equal — otherwise one
-    of the two is not being computed.
+    The fixture reproduces that shape and asserts both views: the deliverable includes the
+    intergenic fragments, the EM-only diagnostic does not, and they must not be equal — otherwise
+    one of the two is not being computed.
     """
     mrna, gdna_em, intergenic = 5_000_000.0, 2_330_992.0, 2_601_271.0
     quant = pd.DataFrame({"transcript_id": ["a"], "count": [mrna]})
@@ -403,9 +402,9 @@ def test_the_library_gDNA_fraction_COUNTS_INTERGENIC_and_the_EM_only_view_does_n
     summary = {"origin_counts": {"gdna": 5_000_000, "mrna": 5_000_000, "nrna": 0}}
     lib = QA.score_library(result, quant, summary)
 
-    # ⚠ the expectations are DERIVED from the fixture's own inputs, not pasted from a run. The first
-    # version pasted 0.4932 off the real `g50` condition, whose mRNA total is not this one's, and
-    # failed for a reason that had nothing to do with the behaviour under test.
+    # the expectations are DERIVED from the fixture's own inputs, never pasted from a run: a number
+    # copied off a real condition describes that condition's mRNA total and not this fixture's, and
+    # then fails for a reason that has nothing to do with the behaviour under test.
     want_deliverable = (gdna_em + intergenic) / (mrna + gdna_em + intergenic)
     want_em_only = gdna_em / (mrna + gdna_em)
     assert lib["gdna_frac_true"] == pytest.approx(0.5)
@@ -450,9 +449,9 @@ class _FakeResult:
 
 
 def test_the_count_metrics_do_not_move_when_the_length_model_does():
-    """⛔ TRAPS: price-the-halves-separately. The count rows must be free of the fragment-length model, or this
-    instrument would silently price the length models too and neither number would be attributable.
-    The perturbation changes ONE transcript's effective length by 100x."""
+    """TRAPS: price-the-halves-separately. The count rows must be free of the fragment-length model,
+    or this instrument would silently price the length models too and neither number would be
+    attributable. The perturbation changes one transcript's effective length by 100x."""
     truth = pd.DataFrame({"transcript_id": ["a", "b"], "mrna_abundance": [100.0, 50.0]})
     quant = pd.DataFrame(
         {
@@ -477,9 +476,9 @@ def test_the_count_metrics_do_not_move_when_the_length_model_does():
 
 
 def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
-    """⛔ TRAPS: byte-identity-gate's first recorded lie was an arm with ZERO rows scoring "32/32 IDENTICAL"
-    because the comparison looped over one arm's keys. Here the equivalent is a shard that died: the
-    surviving rows would aggregate into a stratum total that reads like a complete panel."""
+    """TRAPS: byte-identity-gate — an arm with zero rows scores "all identical" when the comparison
+    loops over one arm's keys. Here the equivalent is a shard that died: the surviving rows would
+    aggregate into a stratum total that reads like a complete panel."""
     import json
 
     full = tmp_path / "full.jsonl"
@@ -497,7 +496,7 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
             "mard": 0.0,
             "gdna_frac_true": 0.5,
             "gdna_frac_est": 0.5,
-            # ⭐ the POOL-LEVEL fields table ⑥ reads. They are part of the `library` row's real schema,
+            # the pool-level fields table ⑥ reads. They are part of the `library` row's real schema,
             # so a fixture without them was testing the report against a row shape that never ships.
             "gdna_est": 1.0,
             "gdna_true": 1.0,
@@ -521,7 +520,7 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
 
 
 def test_a_missing_or_stale_oracle_cache_ABORTS(toy, tmp_path):
-    """⛔ The oracle arms exist to inject TRUTH. Falling back to anything else — a rescan under a
+    """The oracle arms exist to inject truth. Falling back to anything else — a rescan under a
     different scan config, an empty payload — would inject something else under the name ``oracle``.
     ``read_scan_cache`` already refuses a payload whose ``reach_digest`` does not describe this index;
     this asserts the refusal is propagated rather than swallowed."""

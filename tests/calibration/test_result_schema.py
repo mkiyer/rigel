@@ -1,10 +1,12 @@
-"""CalibrationResult.__post_init__ intrinsic invariants — the THREE-AXIS schema (S5.f).
+"""``CalibrationResult.__post_init__`` — the intrinsic invariants of the three-axis schema.
 
-⭐ **Three axes, and they are different lengths on purpose.** ``n_regions``, ``n_boundaries`` and
-``n_sj`` are independent (``E = N − n_refs``, ``J`` unrelated to either), so every fixture here
-uses three DIFFERENT lengths. A fixture that used one length for all three could not tell an
-axis mix-up from a correct result, which is exactly how the predecessor's per-region ``left``/``right``
-pair survived being pooled straight back together.
+``n_regions``, ``n_boundaries`` and ``n_sj`` are independent axes (``E = N − n_refs``, and ``J`` is
+unrelated to either), so every fixture here uses three different lengths on purpose: with one
+length for all three a fixture cannot tell an axis mix-up from a correct result. The gates hold
+each array's shape against its own axis, the dtype rule, the value bounds on the three-way
+composition, the deliberate absence of a closure assertion, the per-face names the schema must not
+grow back, and the conserved sj mass — a derived property rather than a stored field, so an arm
+that replaces the incidence array cannot leave a stale mass beside it.
 """
 
 from __future__ import annotations
@@ -29,12 +31,12 @@ def _valid_kwargs() -> dict:
         mass_gdna_boundary=np.zeros(N_BOUNDARIES),
         mass_rna_boundary=boundary.copy(),
         mass_rna_spliced_boundary=np.zeros(N_BOUNDARIES),
-        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # Geometry, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones(N_BOUNDARIES),
-        # ⛔ These two must NOT be equal, and a `ones`/`ones` pair is what they were. `count_rna_sj`
-        # is an INCIDENCE count and `sj_mass_per_crossing` converts it to the conserved mass; with
+        # These two must not be equal, and a `ones`/`ones` pair would make them so. `count_rna_sj`
+        # is an incidence count and `sj_mass_per_crossing` converts it to the conserved mass; with
         # the conversion at the identity no gate in this file could tell the two quantities apart, so
         # the fixture could not fail the one confusion the pair exists to prevent
         # (`TRAPS: could-the-arm-have-fired` — a fixture is an arm). Conserved mass = [2.0, 1.5].
@@ -45,9 +47,9 @@ def _valid_kwargs() -> dict:
         gdna_boundary_eff_len=boundary.copy(),
         rna_region_eff_len=region.copy(),
         rna_boundary_eff_len=boundary.copy(),
-        # ⭐ The three-way composition ψ solves, per object. ⛔ NOT renormalised — see the field
-        # docstring: it fails to close on ~25 % of both axes on real data, so a fixture that pretends
-        # otherwise would be asserting something the shipped solver does not produce.
+        # The three-way composition ψ solves, per object. Not renormalised — it fails to close on a
+        # substantial minority of both axes on real data, so a fixture that pretends otherwise would
+        # be asserting something the shipped solver does not produce.
         gdna_frac_region=np.zeros(N_REGIONS),
         rna_pos_frac_region=region.copy(),
         rna_neg_frac_region=np.zeros(N_REGIONS),
@@ -109,7 +111,7 @@ def test_a_library_with_no_sj_constructs():
     ],
 )
 def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
-    """⛔ The one defect this gate exists for: an array keyed to the WRONG axis. With E = N − n_refs
+    """The one defect this gate exists for: an array keyed to the wrong axis. With E = N − n_refs
     the two lengths differ by only a handful genome-wide, so a mis-keyed array is a plausible shape
     and a shape check is the only thing that catches it before the numbers go silently wrong."""
     for wrong in (N_REGIONS, N_BOUNDARIES, N_SJ):
@@ -161,8 +163,8 @@ def test_rejects_non_finite_array():
 
 
 def test_accepts_an_integer_count_array():
-    """⚠ The accumulator's primary per-object observable is an integer COUNT, so an exact integer
-    array is a BETTER input here than a float one. ``count_rna_sj`` is the sharpest case: it is
+    """The accumulator's primary per-object observable is an integer count, so an exact integer
+    array is a better input here than a float one. ``count_rna_sj`` is the sharpest case: it is
     the sj flux verbatim, never deconvolved, so it arrives integral."""
     for dtype in (np.int64, np.int32, np.uint32, np.uint64):
         kw = _valid_kwargs()
@@ -218,18 +220,16 @@ def test_rejects_negative_axis_length(field):
 
 
 def test_the_per_face_fields_are_gone():
-    """⛔ ``gdna_boundary_len`` has NO successor, and neither do the ``left``/``right`` mass pairs.
+    """``gdna_boundary_len`` has no successor, and neither do the ``left``/``right`` mass pairs.
 
-    ``gdna_boundary_len`` was ``E[min(ℓ,L)]/2`` — a per-FACE divisor, halved because a boundary had two
-    sides that were then summed back together. S5.c deleted the quantity and S5.e deleted the faces;
-    its replacement is the per-boundary ``gdna_boundary_eff_len``, ONE number at a 0-bp boundary with no ½ in it.
-    Anything still naming the old fields is reading a convention that no longer exists
-
+    ``gdna_boundary_len`` was ``E[min(ℓ,L)]/2``: a per-face divisor, halved because a boundary was
+    treated as two sides that were then summed back together. A boundary is one object, so its
+    divisor is the per-boundary ``gdna_boundary_eff_len`` — one number at a 0-bp boundary, with no ½
+    in it. Anything naming the old fields is reading a convention the schema does not have.
     """
-    # ⛔⛔ TWO NAMES LEFT THIS LIST ON 2026-08-13, and the reason matters: `gdna_region_eff_len` and
-    # `n_regions` were banned as the PREDECESSOR's names, and the vocabulary ruling RE-ADOPTS exactly
-    # those words — they are live fields now. The words were never the defect; the per-FACE convention
-    # was, and everything still listed below names that convention rather than a vocabulary.
+    # What is banned is the per-FACE convention, not a vocabulary: `gdna_region_eff_len` and
+    # `n_regions` are live field names. Everything listed below names the convention — a divisor or a
+    # mass belonging to one side of a boundary — rather than a word that fell out of fashion.
     fields = set(CalibrationResult.__dataclass_fields__)
     assert not fields & {
         "gdna_boundary_len",
@@ -244,7 +244,7 @@ def test_the_per_face_fields_are_gone():
 
 
 def test_mass_rna_spliced_has_no_region_twin():
-    """⚠ Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
+    """Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
     used NO sj, so a region's contained population cannot hold a spliced molecule. A
     ``mass_rna_spliced_region`` field would be a channel that cannot exist."""
     assert "mass_rna_spliced_boundary" in CalibrationResult.__dataclass_fields__
@@ -266,9 +266,9 @@ def test_mass_rna_spliced_has_no_region_twin():
     ],
 )
 def test_a_composition_component_above_one_is_REFUSED(name):
-    """⭐ Each of the three is a FRACTION of its object's unspliced population, so it is bounded by 1.
-    ⚠ Non-negativity and finiteness come from the shared axis check; this is the upper bound, which is
-    the half a "sum of shares" schema cannot get from the axis check alone."""
+    """Each of the three is a fraction of its object's unspliced population, so it is bounded by 1.
+    Non-negativity and finiteness come from the shared axis check; this is the upper bound, the half
+    a "sum of shares" schema cannot get from the axis check alone."""
     kw = _valid_kwargs()
     arr = np.asarray(kw[name], dtype=np.float64).copy()
     arr[0] = 1.5
@@ -278,14 +278,13 @@ def test_a_composition_component_above_one_is_REFUSED(name):
 
 
 def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
-    """⛔⛔ **PINNING A DECISION, NOT A BEHAVIOUR.** ``f_g + f_pos + f_neg`` fails to reach 1 on ~25 % of
-    both axes on real data — measured 74.72 % / 77.24 % closing, the rest with median 0.978 and a p5 of
-    0.869 — because ``sweep``'s write-back clips the three posterior means INDEPENDENTLY and an
-    unsolvable slot keeps an init instead.
+    """This pins a decision, not a behaviour. ``f_g + f_pos + f_neg`` fails to reach 1 on a
+    substantial minority of both axes on real data, because ``sweep``'s write-back clips the three
+    posterior means independently and an unsolvable slot keeps an init instead.
 
-    ⭐ The schema therefore does NOT assert closure, and this test exists so that nobody adds the
-    assertion without first fixing ψ, and nobody "repairs" the symptom by renormalising the arrays at
-    publication — which would make a 15 %-short object indistinguishable from a solved one.
+    ⛔ The schema therefore does not assert closure, and this test exists so that nobody adds the
+    assertion without first fixing ψ, and nobody "repairs" the symptom by renormalising the arrays
+    at publication — which would make a short-closing object indistinguishable from a solved one.
     """
     kw = _valid_kwargs()
     kw["gdna_frac_region"] = np.full(N_REGIONS, 0.25)
@@ -297,42 +296,42 @@ def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
 
 
 # ---------------------------------------------------------------------------
-# ⭐⭐ The CONSERVED sj mass — the third axis's incidence→fragment conversion.
+# The conserved sj mass — the third axis's incidence→fragment conversion.
 # ---------------------------------------------------------------------------
 
 
 def test_the_conserved_sj_mass_is_the_incidence_TIMES_its_own_conversion():
-    """⭐ The arithmetic, on a fixture where the two are 2–4× apart so the gate can fail."""
+    """The arithmetic, on a fixture where the two are far enough apart that the gate can fail."""
     res = CalibrationResult(**_valid_kwargs())
     np.testing.assert_allclose(res.sj_conserved_mass, [2.0, 1.5])
 
 
 def test_the_sj_INCIDENCE_is_NOT_the_sj_MASS():
-    """⛔⛔ **THE TRAP THIS PROPERTY EXISTS FOR.** ``count_rna_sj`` is named like a mass and is an
-    incidence count — a fragment deposits ``+1`` on every sj it uses, measured **2.0719×** per
-    unit of conserved mass on ``g00 ss0.99 capture_off``. This fires the moment anyone "simplifies" the
-    property to return the incidence array, which is the specific edit that looks correct.
+    """The confusion this property exists for: ``count_rna_sj`` is named like a mass and is an
+    incidence count — a fragment deposits ``+1`` on every sj it uses, so on real data it runs well
+    over twice the conserved mass. This fires the moment anyone "simplifies" the property to return
+    the incidence array, which is the specific edit that looks correct.
     """
     res = CalibrationResult(**_valid_kwargs())
     incidence = np.asarray(res.count_rna_sj, dtype=np.float64)
     assert not np.allclose(res.sj_conserved_mass, incidence), (
         "sj_conserved_mass returned the INCIDENCE count — the conversion was dropped"
     )
-    # ⭐ And the direction is fixed, not merely different: an incidence over-counts, never under-counts,
+    # And the direction is fixed, not merely different: an incidence over-counts, never under-counts,
     # because a fragment using K sj books K of them and one unit of mass.
     assert np.all(incidence >= res.sj_conserved_mass - 1e-12)
 
 
 def test_a_sj_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
-    """⛔ ``mass_per_crossing`` is deliberately **1.0** where nothing crossed — the identity, so a
-    deconvolution's mass at an unobserved boundary is rescaled by 1 rather than deleted. Multiplying it by
-    the zero incidence is what turns that identity back into the ``0`` that is correct here.
+    """``mass_per_crossing`` is deliberately 1.0 where nothing crossed — the identity, so a
+    deconvolution's mass at an unobserved boundary is rescaled by 1 rather than deleted. Multiplying
+    it by the zero incidence is what turns that identity back into the ``0`` that is correct here.
 
-    ⚠ This is the gate that fires if the property ever grows a ``where(count > 0, …)`` branch that
-    falls back to the conversion factor, which would publish **1.0 units of RNA mass at a sj no
-    fragment ever used** — a false positive on the axis that is certified RNA by construction. ⛔ Not a
-    corner case: **4,636 of 13,482** sj are zero-count on ``g00 ss0.99 capture_off``, so that
-    fallback would invent mass on a third of the axis.
+    This is the gate that fires if the property ever grows a ``where(count > 0, …)`` branch falling
+    back to the conversion factor, which would publish one unit of RNA mass at a sj no fragment ever
+    used — a false positive on the axis that is certified RNA by construction. Zero-count sj are a
+    large minority of the axis on real data, not a corner case, so that fallback would invent mass
+    at scale.
     """
     kw = _valid_kwargs()
     kw["count_rna_sj"] = np.array([0.0, 6.0])
@@ -343,9 +342,9 @@ def test_a_sj_NOTHING_crossed_has_ZERO_conserved_mass_not_the_identity():
 
 
 def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
-    """⛔ The sj term used to be spelled out a second time inside ``library_rna_fragments``. Two
-    spellings of one conversion is how a caller reading the property and a caller reading the library
-    count come to disagree, so this pins that moving one moves the other.
+    """``library_rna_fragments`` must read the property rather than re-spell the conversion. Two
+    spellings of one conversion is how a caller reading the property and a caller reading the
+    library count come to disagree, so this pins that moving one moves the other.
     """
     kw = _valid_kwargs()
     before = CalibrationResult(**kw)
@@ -360,7 +359,7 @@ def test_library_rna_fragments_READS_the_property_so_there_is_ONE_home():
 
 
 def test_the_conserved_mass_survives_the_oracle_arms_dataclass_replace():
-    """⭐⭐ **WHY IT IS A PROPERTY AND NOT A STORED FIELD.** ``count_rna_sj`` is in
+    """Why it is a property and not a stored field. ``count_rna_sj`` is in
     ``prior_vs_oracle.OVERRIDE_FIELDS``: an arm swaps it with ``dataclasses.replace``. A stored array
     would survive that swap and go on describing the array it replaced —
     ``TRAPS: a-hash-that-misses-its-artifact`` in dataclass form.

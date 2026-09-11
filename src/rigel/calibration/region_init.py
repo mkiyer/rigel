@@ -62,7 +62,7 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
     depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
     The consumer's defence is a FIXED-DENOMINATOR score, not a tighter bound here
     (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
-    ``test_solvability_denominator.py``).
+    ``test_solvability_audit.py``).
 
     The home is production, rather than each instrument restating the constant beside a comment saying
     it must match the solver, because the predicate is a production concept and ``scripts/`` is

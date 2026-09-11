@@ -1,21 +1,15 @@
-"""Regression tests for ``capture_eff_length`` — the exon→region incidence must cover every exon.
+"""``capture_eff_length``: the exon→region incidence must cover every region containing an exon.
 
-The bug (fixed 2026-06-14): ``_exon_region_incidence`` read the lower region index from region
-**starts** (``searchsorted(starts, a, side='left')``), which skips the region that *contains* an
-exon's left boundary whenever that boundary falls in a region's interior. Region boundaries do NOT always
-coincide with exon boundaries — ``build_region_partition`` merges adjacent **same-signature** segments,
-so a shorter alternative-transcript exon starts interior to a merged region. The off-by-one dropped
-fully-contained exons/spans entirely (factor=1, no contraction) and produced ``len_t < exonic``,
-which is geometrically impossible (a transcript's regions must contain its exons). The fix reads the
-lower bound from region **ends** (containment semantics).
-
-⚠ **The shipped partition can no longer PRODUCE this geometry.** Every exon boundary is a region
-interface in the splice graph, so an index never yields a region with an interior exon boundary. The
-guarded property is nonetheless a property of the FUNCTION — ``_transcript_region_incidence`` must map
-an exon to every region containing it, whatever the partition — and it is one that was found by
-reasoning rather than by a test. So the coarse partition is built HERE, by hand
-(:func:`_coarsened`), rather than taken from an index that would no longer supply one. Losing that
-fixture would silently retire the regression.
+``_transcript_region_incidence`` has to map an exon to every region that CONTAINS it, whatever
+partition it is handed — reading the lower bound from region starts instead of region ends skips the
+region holding an exon's left boundary whenever that boundary falls in a region's interior, which
+drops fully contained exons and produces the geometrically impossible ``len_t < exonic``. The shipped
+partition can no longer produce that geometry, because every exon boundary is a region interface in
+the splice graph, so the coarse partition is built here by hand (:func:`_coarsened`) rather than taken
+from an index: losing that fixture would silently retire the guard. The rest of the file holds what
+the contraction itself must do — factor 1 under a uniform field, contraction but never expansion
+under capture, no nascent/mature inversion once splice-junction boundaries are imputed, and a crossing
+object reading its own density with no factor to get wrong.
 """
 
 from __future__ import annotations
@@ -36,7 +30,7 @@ from rigel.calibration.region_arrays import (
 )
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
-from conftest import build_test_index
+from _index_builder import build_test_index
 
 #: The gDNA crossing effective length every boundary carries. In production this is
 #: ``crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) = mu_g − 1``, the SAME number at every
@@ -45,19 +39,16 @@ _CROSSING_EFF = 180.0
 
 
 def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> CalibrationResult:
-    """⭐ **THE fixture — there is only one now.** A deposition-faithful result for an arbitrary
-     per-region gDNA DENSITY field: every object's mass is ``ρ × its own effective support``, on both axes.
+    """THE fixture, and there is only one: a deposition-faithful result for an arbitrary per-region
+    gDNA DENSITY field, where every object's mass is ``ρ × its own effective support`` on both axes.
 
-     ⛔ **Three near-identical builders used to live here** — ``_uniform_field_cal``, ``_field_cal`` and
-     ``_boundary_faithful_cal`` — and they differed in exactly one thing: whether ``gdna_boundary_len`` was
-     the halved per-side density length ``E[min(ℓ,L)]/2`` or the un-halved ``E[min(ℓ,L)]``. Two of them
-     stored the un-halved length AND deposited half the mass, which cancelled a spurious ½ in
-     ``_pooled_boundary_arrays`` and hid an exact factor of 2 from every assertion in this file for months
-    A contiguous boundary is a 0-bp boundary with ONE mass and ONE support, so
-     there is no face, no half, and nothing for three fixtures to disagree about.
+    One builder rather than several is itself the guard. A contiguous boundary is a 0-bp boundary with
+    ONE mass and ONE support, so there is no face, no half and nothing for two fixtures to disagree
+    about — and a disagreement of exactly that shape, a per-side length halved in one place and not
+    another, can cancel a spurious ½ and hide a factor of 2 from every assertion in this file.
 
-     ⚠ A boundary's density is its **left flank's**. With a varying field the two flanks disagree, so the
-     fixture must SAY which it means rather than average them into a number that is neither.
+    A boundary's density is its LEFT flank's. With a varying field the two flanks disagree, so the
+    fixture must SAY which it means rather than average them into a number that is neither.
     """
     d = np.asarray(density, dtype=np.float64)
     region_eff = np.asarray(region_eff, dtype=np.float64)
@@ -72,7 +63,7 @@ def _cal(region_arrays: RegionArrays, density, region_eff, boundary_eff) -> Cali
         mass_gdna_boundary=d[lo] * boundary_eff,
         mass_rna_boundary=ez.copy(),
         mass_rna_spliced_boundary=ez.copy(),
-        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones_like(ez),
@@ -211,12 +202,12 @@ def test_merged_region_interior_exon_is_mapped(misaligned_index):
 
 
 def test_incidence_is_correct_on_the_v8_partition_too(misaligned_index):
-    """The LIVE path (plan W1b): production builds this geometry with ``from_index``, on the v8 region
-    partition, where the alternative exon start at 150 is a region_bound rather than a region interior.
+    """The LIVE path: production builds this geometry with ``from_index``, on a region partition where
+    the alternative exon start at 150 is a region interface rather than a region interior.
 
-    The three tests above pin the function against a partition that still has interior exon boundaries;
-    this one pins it against the partition it actually runs on. Both properties must hold, and only
-    one of them is now reachable from an index.
+    The three tests above pin the function against a partition that still has interior exon
+    boundaries; this one pins it against the partition it actually runs on. Both properties must hold,
+    and only one of them is reachable from an index.
     """
     idx = misaligned_index
     ra = RegionArrays.from_index(idx)
@@ -242,7 +233,7 @@ def test_transcript_factor_one_under_uniform_gdna(misaligned_index):
     The density-correct effective-support divisor (gdna_region_eff_len for regions, the averaged
     per-side density length ½·(E[min(ℓ,L_r)]+E[min(ℓ,L_{r+1})]) for the pooled boundaries) makes every region's
     density ρ, so the Laplace-smoothed IPR over any transcript's region set returns its full effective
-    support (factor 1). With the genomic region_size_bp divisor a short exon would fabricate a
+    support (factor 1). With the genomic ``region_size_bp`` divisor a short exon would fabricate a
     contraction even here — this pins that it does not."""
     idx = misaligned_index
     ra = RegionArrays.from_index(idx)
@@ -273,12 +264,13 @@ def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
     assert np.any(eff < fl - 1e-6)  # at least one transcript genuinely contracts
 
 
-# --- nascent<mature inversion guard (2026-07-09): splice-junction boundaries ---------------------------
+# --- nascent<mature inversion guard: splice-junction boundaries ---------------------------------------
 # A multi-exon mRNA and a single-exon nascent parent covering the SAME genomic span. A nascent's genomic
-# region set STRICTLY CONTAINS its mature child's, so its EM effective length can never be shorter. Before
-# the sj-boundary fix, a multi-exon mRNA's span_full (with splice junctions DROPPED) fell below its
-# contiguous FL-marginal length, and the fl/span_full ratio (growing with exon count) inflated the mature's
-# eff_em ABOVE its nascent parent's under capture — the physically impossible inversion. These pin the fix.
+# region set STRICTLY CONTAINS its mature child's, so its EM effective length can never be shorter. With
+# the splice junctions DROPPED a multi-exon mRNA's span_full falls below its contiguous FL-marginal
+# length, and the fl/span_full ratio (growing with exon count) inflates the mature's eff_em ABOVE its
+# nascent parent's under capture — a physically impossible inversion. Imputing the sj boundaries is what
+# closes the gap, and these pin it.
 
 # six 500bp exons + a single-exon nascent covering the whole 1000..6500 span (genomic order per transcript
 # so the incidence pairs adjacent exons into splice junctions).
@@ -304,7 +296,7 @@ def _tidx(idx, tid: str) -> int:
 def _field_cal(
     region_arrays: RegionArrays, density: np.ndarray, frag: float = _CROSSING_EFF
 ) -> CalibrationResult:
-    """An arbitrary per-region gDNA DENSITY field with an **FL-marginal** region support
+    """An arbitrary per-region gDNA DENSITY field with an FL-MARGINAL region support
     (``region_eff = size − frag``). That makes a multi-exon mRNA's sj-dropped ``span_full`` fall
     BELOW its contiguous FL-marginal length — the exact gap the sj boundaries close. Uniform density ⇒
     every object's m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
@@ -332,10 +324,10 @@ def test_sj_incidence_multiexon_only(multiexon_index):
 def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     """THE regression guard: under capture on a single exon, eff_em(nascent) >= eff_em(mature).
 
-    Without the sj boundaries a 6-exon mRNA's fl/span_full ≈ 1.5 inflated its eff_em above its nascent
-    parent's (an inversion, since the nascent's region set strictly contains the mature's). The imputed
-    sj boundaries close the gap. Also asserts the mature genuinely CONTRACTS (the fix must not silently
-    disable capture contraction)."""
+    Without the sj boundaries a 6-exon mRNA's fl/span_full ratio inflates its eff_em above its nascent
+    parent's, which is an inversion because the nascent's region set strictly contains the mature's.
+    The imputed sj boundaries close the gap. Also asserts the mature genuinely CONTRACTS, since a
+    guard that silently disabled capture contraction would pass the inequality trivially."""
     idx = multiexon_index
     ra = RegionArrays.from_index(idx)
     n = ra.n_regions
@@ -392,32 +384,25 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 
 
 # ---------------------------------------------------------------------------
-# The crossing-object density — what survives of the TRAPS: prefer-shares-to-differences factor-2 guard.
+# The crossing-object density — the TRAPS: prefer-shares-to-differences factor-2 guard.
 # ---------------------------------------------------------------------------
 #
-# ⛔ **TRAPS: prefer-shares-to-differences' two falsification tests are DELETED, and the reason is that the defect is now
-# unrepresentable.** TRAPS: prefer-shares-to-differences was: ``gdna_boundary_len`` IS the halved per-side density length
-# ``E[min(ℓ,L)]/2``, the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face, so a pooled boundary
-# holds ``ρ·(gbl_r + gbl_{r+1})`` — and dividing that by the AVERAGE read **2ρ**. Every quantity in
-# that sentence is gone with the faces. There is no per-side length to halve, no pair of faces to sum,
-# and no choice between a sum and an average: a contiguous boundary is a 0-bp boundary with one mass and one
-# support ().
-#
-# ⚠ **The PROPERTY they protected is still real**, and is kept below: a crossing object under a uniform
-# field must read ρ, and a boundary genuinely below the reference density must contract rather than clip.
-# What is retired is the specific arithmetic that could break it.
+# The arithmetic that once made a factor of 2 available here is unrepresentable now: a contiguous
+# boundary is a 0-bp boundary with one mass and one support, so there is no per-side length to halve,
+# no pair of faces to sum, and no choice between a sum and an average. The PROPERTY that guarded is
+# still real and is kept below — a crossing object under a uniform field must read ρ, and a boundary
+# genuinely below the reference density must contract rather than clip.
 
 
 def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
-    """⭐ The surviving half of TRAPS: prefer-shares-to-differences. A boundary's mass over its own support is the true density — exactly,
-    with no factor to get wrong. Verified end-to-end at 1.994 / 2.002 / 1.981 × truth when the old
-    average-vs-sum defect was live, so this is where that regression would reappear."""
+    """One half of TRAPS: prefer-shares-to-differences. A boundary's mass over its own support is the
+    true density — exactly, with no factor to get wrong — so a factor-of-2 regression in the crossing
+    arithmetic reappears here first."""
     ra = RegionArrays.from_index(multiexon_index)
     rho = 0.037
     cal = _field_cal(ra, np.full(ra.n_regions, rho))
-    # ⭐ Read straight off the BOUNDARY axis. It used to go through `_left_keyed_boundary_arrays`, a region-shaped
-    # copy that existed only because the incidence helper emitted a left-region index; that helper now
-    # emits an boundary index and the copy is deleted, so a boundary's density is read where it lives.
+    # Read straight off the BOUNDARY axis: the incidence helper emits a boundary index, so a
+    # boundary's density is read where it lives rather than through a region-shaped copy.
     boundary_mass = np.asarray(cal.mass_gdna_boundary, dtype=np.float64)
     boundary_support = np.asarray(cal.gdna_boundary_eff_len, dtype=np.float64)
     live = boundary_support > 0.0
@@ -426,14 +411,14 @@ def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
 
 
 def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
-    """⭐ TRAPS: prefer-shares-to-differences' other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is still there and still hides
-    anything that reads a density too HIGH.
+    """TRAPS: prefer-shares-to-differences' other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is
+    still there and still hides anything that reads a density too HIGH.
 
     Put the true boundary density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the
     reference and must contract; read at any inflated multiple it lands above, clips to 1, and
     contributes no contraction at all — silent on exactly the boundaries the shrinkage exists to act on.
 
-    ⚠ The ρ_ref anchor sits on the LAST region, not the first. A boundary takes its LEFT flank's density
+    The ρ_ref anchor sits on the LAST region, not the first. A boundary takes its LEFT flank's density
     (:func:`_cal`), so anchoring on region 0 would put boundary 0 itself at ρ_ref and the assertion would
     fail on the fixture rather than on the code.
     """
@@ -454,7 +439,7 @@ def test_a_boundary_below_the_reference_density_CONTRACTS_rather_than_clipping(m
     )
 
 
-# --- the boundary axis is an BOUNDARY index, and only a MULTI-reference index can prove it -------------
+# --- the boundary axis is a BOUNDARY index, and only a MULTI-reference index can prove it -------------
 
 _TWO_REF_GTF = "".join(
     f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
@@ -473,18 +458,17 @@ def two_ref_index(tmp_path_factory):
 
 
 def test_the_boundary_incidence_is_an_BOUNDARY_index_not_a_left_region_index(two_ref_index):
-    """⭐⭐ **THE GATE A SINGLE-REFERENCE FIXTURE CANNOT PROVIDE, AND THE PERTURBATION THAT FOUND IT.**
+    """The gate a single-reference fixture cannot provide.
 
-    ``region_right_boundary`` numbers boundaries over adjacent same-reference region pairs, so on ONE reference
-    ``boundary(r) == r`` and a left-region index is indistinguishable from an boundary index. Every existing
-    fixture here is single-reference, so substituting one for the other changed nothing and the
-    conversion was effectively untested — found by injecting exactly that substitution
-    (``TRAPS: perturb-every-gate``).
+    ``region_right_boundary`` numbers boundaries over adjacent same-reference region pairs, so on ONE
+    reference ``boundary(r) == r`` and a left-region index is indistinguishable from a boundary index.
+    PERTURBATION: substituting one for the other changes nothing on any single-reference fixture here,
+    which is how the conversion came to be untested (``TRAPS: perturb-every-gate``).
 
-    ⛔ On a second reference the two axes diverge by one per preceding reference boundary, and indexing
-    a per-boundary array with a region index then reads **the wrong boundary's mass** — silently, since both are
-    in range. This pins the axis: every emitted boundary index must be a valid boundary whose flanking
-    regions are the ones the transcript actually crosses.
+    On a second reference the two axes diverge by one per preceding reference boundary, and indexing a
+    per-boundary array with a region index then reads THE WRONG BOUNDARY'S MASS — silently, since both
+    are in range. This pins the axis: every emitted boundary index must be a valid boundary whose
+    flanking regions are the ones the transcript actually crosses.
     """
     ra = RegionArrays.from_index(two_ref_index)
     _rt, _rr, bt, br, *_ = _transcript_region_incidence(two_ref_index, ra)
@@ -492,7 +476,7 @@ def test_the_boundary_incidence_is_an_BOUNDARY_index_not_a_left_region_index(two
     assert br.size, "the fixture produced no interior boundaries"
     assert br.max() < lo.shape[0], "a boundary index outside the boundary axis"
 
-    # ⭐ the discriminating claim: each emitted boundary's flanks are same-reference neighbours, and the
+    # the discriminating claim: each emitted boundary's flanks are same-reference neighbours, and the
     # transcript that emitted it overlaps BOTH of them.
     ref_id = np.asarray(ra.ref_id)
     np.testing.assert_array_equal(ref_id[lo[br]], ref_id[hi[br]])

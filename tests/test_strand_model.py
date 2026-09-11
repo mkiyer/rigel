@@ -1,4 +1,11 @@
-"""Tests for rigel.strand_model — the strand model and its per-sj SJ strand table."""
+"""`rigel.strand_model` — the 2x2 sense/antisense counts, the per-sj table underneath them, and the
+posterior they imply.
+
+The counts and their accumulation; the per-sj strand table, which is what the overdispersion fit
+reads and which the 2x2 is only the marginal of; the posterior over a fragment's strand; the derived
+properties; and the container that holds one model per population. A model that kept only the 2x2
+would satisfy every marginal check and silently disable the dispersion estimate.
+"""
 
 import numpy as np
 import pytest
@@ -75,7 +82,7 @@ class TestSJStrandTable:
         assert t.contingency() == (0, 0, 0, 0)
 
     def test_marginal_is_the_2x2(self):
-        """⭐ THE correctness argument: the 2×2 is exactly the table's marginal."""
+        """The correctness argument: the 2x2 is exactly the table's marginal."""
         t = _table([(Strand.POS, 3, 7), (Strand.POS, 10, 2), (Strand.NEG, 5, 4)])
         pos_pos, pos_neg, neg_pos, neg_neg = t.contingency()
         assert pos_pos == 3 + 10  # sense on motif-POS sj

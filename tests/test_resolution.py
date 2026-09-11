@@ -1,9 +1,17 @@
-"""Tests for rigel.resolution — chimera detection and fragment resolution."""
+"""`rigel.resolution` — turning an aligned pair into a fragment with a candidate transcript set.
+
+Intrachromosomal chimera detection by transcript-set disjointness; fragment resolution end to end;
+the overlap profile and the filtering it drives; discrimination on implied fragment length; the
+intronic base-pair accumulation; and the rule that COMPATIBILITY is checked before anything is
+called a chimera, so a contiguous inward-facing genomic molecule spanning two unrelated transcripts
+stays an ordinary fragment. Several gates are run twice, once against the Python reference and once
+against the C++ kernel the scanner actually executes, because the two can disagree silently.
+"""
 
 import textwrap
 
 import pytest
-from conftest import build_test_index
+from _index_builder import build_test_index
 
 from rigel.types import ChimeraType, MergeOutcome, Strand, GenomicInterval
 from rigel.splice import SpliceType
@@ -22,12 +30,12 @@ from _resolution_reference import (
 class TestDetectIntrachromosomalChimera:
     """Transcript-set disjointness detection for intrachromosomal chimeras.
 
-    ⚠ ``max_fragment_length`` is passed EXPLICITLY on every call, and the value is part of each case.
-    Since 2026-08-19 compatibility is checked before a candidate is called a chimera
-    (`TestGenomicCompatibilityIsCheckedBeforeChimera`), so a SAME-STRAND candidate is only a chimera when
-    its implied fragment length exceeds the limit — those cases pass a limit BELOW their own span so they
-    still exercise the disjointness mechanism. The DIFFERENT-STRAND and already-``None`` cases are decided
-    before the compatibility check and the value cannot reach them."""
+    ``max_fragment_length`` is passed EXPLICITLY on every call, and the value is part of each case.
+    Compatibility is checked before a candidate is called a chimera
+    (`TestGenomicCompatibilityIsCheckedBeforeChimera`), so a SAME-STRAND candidate is only a chimera
+    when its implied fragment length exceeds the limit — those cases pass a limit BELOW their own
+    span so they still exercise the disjointness mechanism. The DIFFERENT-STRAND and already-``None``
+    cases are decided before the compatibility check and the value cannot reach them."""
 
     def test_single_block_none(self):
         """One annotated block cannot be chimeric."""
@@ -639,33 +647,30 @@ class TestIntronicBpAccumulation:
 
 
 # =====================================================================
-# ⭐⭐⭐ COMPATIBILITY BEFORE CHIMERA — owner ruling, 2026-08-19
+# COMPATIBILITY BEFORE CHIMERA
 # =====================================================================
 
 
 class TestGenomicCompatibilityIsCheckedBeforeChimera:
-    """⛔⛔ **A CONTIGUOUS GENOMIC MOLECULE IS NOT A CHIMERA, HOWEVER MANY TRANSCRIPTS IT SPANS.**
+    """A contiguous genomic molecule is not a chimera, however many transcripts it spans.
 
-    Transcript-set disjointness alone called ``CHIMERA_CIS_STRAND_SAME`` on ordinary gDNA: a genomic
+    Transcript-set disjointness alone calls ``CHIMERA_CIS_STRAND_SAME`` on ordinary gDNA: a genomic
     fragment is contiguous and routinely covers two transcripts that share nothing, which is what the
-    annotation looks like there rather than evidence of a rearrangement. Every such fragment was a proper
-    inward-facing pair with no junction anywhere in it — a ``100M``/``100M`` ``NH:i:1`` pair — so there was
-    no splice evidence for a chimera to be inferred FROM.
+    annotation looks like there rather than evidence of a rearrangement. Such a fragment is a proper
+    inward-facing pair with no junction anywhere in it, so there is no splice evidence for a chimera
+    to be inferred FROM.
 
-    ⭐ **The rule (owner):** a fragment is a chimera only if the mates are genomically INCOMPATIBLE —
-    a different reference, an orientation that is not facing inward, or an implied fragment length beyond
-    the library's ``max_frag_length``. Compatibility is checked FIRST.
+    The rule: a fragment is a chimera only if the mates are genomically INCOMPATIBLE — a different
+    reference, an orientation that is not facing inward, or an implied fragment length beyond the
+    library's ``max_frag_length``. Compatibility is checked FIRST.
 
-    ⚠ **Measured cost of the old predicate**, on ``gdna_g98_ss_0.99_nrna_none_capture_off``: **4,087**
-    gDNA fragments dropped per condition — 0.04 % of fragments carrying **2.4 % of every boundary
-    crossing**, because the predicate fires exactly where transcripts are short and dense, which is
-    exactly where a fragment crosses many boundaries (3.66 crossings lost each, against 1.65 for an
-    average crosser). That is the whole boundary-crossing deficit that failed FIELD certification on the
-    8 dense capture-OFF conditions.
+    Dropping those fragments is not a rounding error, because the predicate fires exactly where
+    transcripts are short and dense, which is exactly where a fragment crosses many boundaries: a
+    small fraction of fragments carries a large fraction of all boundary crossings.
 
-    ⭐ The orientation half needs no new predicate: ``build_fragment`` keys blocks by
-    ``(ref_id, ref_strand)`` with R2's orientation flipped, so both mates of an inward-facing pair carry
-    the SAME ``strand`` and ``unique_strands.size() == 1`` already MEANS "facing inward".
+    The orientation half needs no new predicate: ``build_fragment`` keys blocks by
+    ``(ref_id, ref_strand)`` with R2's orientation flipped, so both mates of an inward-facing pair
+    carry the SAME ``strand`` and ``unique_strands.size() == 1`` already MEANS "facing inward".
     """
 
     #: two blocks, disjoint transcript sets, same strand — implied fragment span 100..1100 = 1000 bp
@@ -676,20 +681,20 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
     T_SETS = [frozenset({0, 1}), frozenset({2, 3})]
 
     def test_a_compatible_pair_is_not_a_chimera(self):
-        """⭐ Same reference, facing inward, span within the maximum ⇒ an ordinary genomic molecule."""
+        """Same reference, facing inward, span within the maximum: an ordinary genomic molecule."""
         assert (
             _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=2000)
             is None
         ), "a contiguous, inward-facing, in-range genomic fragment was called a chimera"
 
     def test_an_impossible_span_is_still_a_chimera(self):
-        """⛔ The length half of the rule: beyond ``max_frag_length`` no molecule explains the pair."""
+        """The length half of the rule: beyond ``max_frag_length`` no molecule explains the pair."""
         result = _detect_intrachromosomal_chimera(self.BLOCKS, self.T_SETS, max_fragment_length=500)
         assert result is not None, "a 1,000 bp span passed a 500 bp limit"
         assert result[0] == ChimeraType.CIS_STRAND_SAME
 
     def test_the_span_is_the_OUTER_extent_not_the_gap(self):
-        """⚠ The quantity is the implied FRAGMENT LENGTH — outermost start to outermost end — not the
+        """The quantity is the implied FRAGMENT LENGTH — outermost start to outermost end — not the
         ``chimera_gap`` between the blocks. The two differ by the blocks' own lengths (here 1000 vs 800),
         and using the gap would admit a fragment 200 bp longer than the library can contain."""
         assert (
@@ -698,7 +703,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         ), "the gap (800) was used where the implied fragment length (1000) is the rule"
 
     def test_an_outward_facing_pair_is_a_chimera_at_any_span(self):
-        """⛔ The orientation half: opposite ``strand`` on the two components means the mates do not face
+        """The orientation half: opposite ``strand`` on the two components means the mates do not face
         inward, and no fragment length rescues that."""
         blocks = (
             GenomicInterval("chr1", 100, 200, Strand.POS),
@@ -709,7 +714,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         assert result[0] == ChimeraType.CIS_STRAND_DIFF
 
     def test_the_NATIVE_resolver_agrees(self, tmp_path_factory):
-        """⭐⭐ The C++ kernel, not the reference — this is the path the scanner actually runs.
+        """The C++ kernel, not the reference — this is the path the scanner actually runs.
 
         Two transcripts 200 bp apart sharing nothing. A gDNA fragment covering one block in each is a
         perfectly ordinary molecule and must resolve with ``chimera_type == NONE``."""
@@ -732,8 +737,9 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         )
 
     def test_the_NATIVE_resolver_measures_the_SPAN_not_the_gap(self, tmp_path_factory):
-        """⛔ The native twin of ``test_the_span_is_the_OUTER_extent_not_the_gap``, and it exists because
-        breaking the C++ to use ``min_gap`` fired NO native gate (verified by perturbation).
+        """The native twin of ``test_the_span_is_the_OUTER_extent_not_the_gap``.
+
+        PERTURBATION: changing the C++ to use ``min_gap`` fires no other native gate.
 
         Blocks (100,200) and (1000,1100): implied fragment length **1000**, gap between them **800**. At a
         limit of 900 the fragment is impossible and the gap is not — so a gap-based rule rescues a molecule
@@ -757,7 +763,7 @@ class TestGenomicCompatibilityIsCheckedBeforeChimera:
         )
 
     def test_the_NATIVE_resolver_still_refuses_an_impossible_span(self, tmp_path_factory):
-        """⛔ The control: the same geometry with a limit the span cannot meet stays a chimera, so the
+        """The control: the same geometry with a limit the span cannot meet stays a chimera, so the
         gate above is not passing because the rescue is unconditional."""
         gtf = textwrap.dedent("""\
             chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "gA"; transcript_id "tA"; gene_name "GA"; gene_type "protein_coding"; tag "basic";

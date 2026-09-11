@@ -1,7 +1,7 @@
 """The shared harness of the transfer policy's gate files (`test_transfer_*.py`): ONE real
 `solve_chain` call captured from a calibrate run on the toy — the backbone-parity pattern, so every
 gate re-runs the sweep with a different policy on byte-identical inputs — plus the policy, context
-and pass builders they share. ⚠ Not a test module: `capture_sweep_inputs` is what each gate file's
+and pass builders they share. Not a test module: `capture_sweep_inputs` is what each gate file's
 ``sweep_inputs`` fixture returns, and nothing here asserts."""
 
 from __future__ import annotations

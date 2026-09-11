@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-"""
-Test: opposite-strand overlapping transcripts with gDNA/nRNA parameter sweep.
+"""Two transcripts on opposite strands, overlapping, swept across gDNA and nascent settings.
 
-Scenario: 20kb genome with two transcripts on opposite strands.
-  T1: + strand, exons (1000,1500), (3000,3500), (8000,10000)
-  T2: - strand, exons (6000,7000), (12000,13000), (15000,15500)
-
-Questions answered:
-  1. When do gDNA candidates get emitted into the EM?
-  2. With zero gDNA/nRNA, are the two transcripts independent?
-  3. After adding nRNA/gDNA, do they share equivalence classes?
-  4. Does changing fragment order change results?
+With neither gDNA nor nascent RNA the two transcripts are independent and must be solved as
+separate loci; adding nascent entities, or adding gDNA candidates, makes them share equivalence
+classes and therefore one locus, which is the coupling the EM has to handle rather than avoid. Each
+of the four settings is then re-run with the fragments permuted: the answer must not depend on the
+order the buffer happened to be filled in, and an opposite-strand overlap is where an order
+dependence would first show, because that is where a unit's candidate set stops being obvious.
 """
 
 import logging

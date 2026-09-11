@@ -1,21 +1,12 @@
-"""⭐⭐ THE SANDBOX BOUNDARY — `docs/dev/` may exist freely; nothing may DEPEND on it.
+"""The sandbox boundary: `docs/dev/` may exist freely and nothing outside it may depend on it.
 
-    Owner ruling, 2026-08-07: *"our docs system and rules is too strict. we need to be allowed to generate
-    working docs. this is how i communicate with collaborators. we need a sandbox for docs as we are
-    developing new features. they are not considered reliable."*
-
-⭐ So working docs are **encouraged**, and the previous rule ("if you open a working doc, that is a bug")
-is withdrawn. What is enforced instead is the one property whose loss actually caused harm.
-
-⛔⛔ **A DEV DOC MUST NEVER BECOME THE STATE.** Two working docs once reached **1,181 boundaries between them —
-larger than DESIGN + ROADMAP + SUCCESS combined** — and a new session was pointed at one as "THE STATE".
-The failure was never that they existed. It was that nothing was ever MOVED out of them, so the provisional
-copy became authoritative while the permanent docs went stale beside it.
-
-⭐ **The mechanism of that failure is a CITATION.** A note nobody cites can be as wrong and as long as it
-likes; it costs nothing and can be deleted at any time. The moment a permanent doc, a docstring or a test
-points *into* the sandbox, the note has become load-bearing and cannot be deleted without breaking
-something. That is the only thing this file forbids.
+Working docs are encouraged, and a note's length, staleness or wrongness is harmless. What is not
+harmless is a dev doc quietly becoming the state — which has happened, with a new session pointed at a
+provisional note while the permanent docs went stale beside it. The mechanism of that failure is a
+citation: a note nobody cites costs nothing and can be deleted at any time, but the moment a permanent
+doc, a docstring or a test points into the sandbox the note is load-bearing. That single property, plus
+the shape of the allowlist that carves out the files whose job is to describe the sandbox, is all this
+file holds.
 """
 
 from __future__ import annotations
@@ -41,11 +32,10 @@ _MAY_NAME_IT = frozenset(
     }
 )
 
-#: ⭐ The allowlist is EXCLUDED from the parametrisation rather than skipped inside it. A generated case
-#: that skips is a case that DID NOT RUN, and two of them sat in the suite tally reading as "2 skipped" —
-#: indistinguishable from a test that could not run for an environmental reason. The exemption is still
-#: explicit, and it is now gated by :func:`test_every_ALLOWLISTED_file_actually_names_the_sandbox`, so it
-#: cannot quietly become a blanket.
+#: The allowlist is EXCLUDED from the parametrisation rather than skipped inside it. A generated case that
+#: skips is a case that did not run, and reads in the tally as indistinguishable from one that could not
+#: run for an environmental reason. The exemption stays explicit and is gated by
+#: :func:`test_every_ALLOWLISTED_file_actually_names_the_sandbox`, so it cannot quietly become a blanket.
 SEARCHED = [
     p
     for p in sorted(
@@ -55,15 +45,15 @@ SEARCHED = [
         if p.suffix in (".py", ".md", ".h", ".cpp") and p.is_file() and DEV not in p.parents
     )
     + [ROOT / "CLAUDE.md"]
-    # ⛔ The exclusion is applied to the WHOLE list, CLAUDE.md included. Filtering only the globbed part
-    # left the one file that is appended by hand still in — and it is allowlisted, so it failed.
+    # The exclusion is applied to the WHOLE list, CLAUDE.md included: filtering only the globbed part
+    # leaves the one hand-appended file under the gate, and it is allowlisted, so it fails.
     if str(p.relative_to(ROOT)) not in _MAY_NAME_IT
 ]
 
 
 @pytest.mark.parametrize("path", SEARCHED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_nothing_outside_the_sandbox_cites_into_it(path: pathlib.Path):
-    """⛔ A citation is what turns a working note into a dependency. Everything else about a dev doc —
+    """A citation is what turns a working note into a dependency. Everything else about a dev doc —
     length, staleness, being wrong — is harmless and is explicitly permitted."""
     rel = str(path.relative_to(ROOT))
     hits = sorted(set(_CITES_DEV.findall(path.read_text(errors="ignore"))))
@@ -76,13 +66,10 @@ def test_nothing_outside_the_sandbox_cites_into_it(path: pathlib.Path):
 
 
 def test_every_ALLOWLISTED_file_actually_names_the_sandbox():
-    """⛔ An exemption nobody re-checks becomes a blanket. Each allowlisted file is exempt because its JOB
-    is to describe the sandbox — so each one must actually do that. A file that does not need the
-    exemption should be back under the gate above.
-
-    ⭐ This replaces two ``pytest.skip`` calls, and it is strictly stronger than they were: a skip cannot
-    fail, so an allowlist entry for a deleted or repurposed file would have sat there indefinitely reading
-    as "2 skipped".
+    """An exemption nobody re-checks becomes a blanket. Each allowlisted file is exempt because its job
+    is to describe the sandbox, so each one must actually do that; a file that does not need the
+    exemption belongs back under the gate above. Stronger than skipping the allowlisted cases would be,
+    because a skip cannot fail and an entry for a deleted or repurposed file would sit there forever.
     """
     for rel in sorted(_MAY_NAME_IT):
         path = ROOT / rel
@@ -97,7 +84,7 @@ def test_every_ALLOWLISTED_file_actually_names_the_sandbox():
 
 
 def test_the_sandbox_exists_and_says_what_it_is_for():
-    """⚠ An empty unexplained directory is an invitation to guess at the rules."""
+    """An empty unexplained directory is an invitation to guess at the rules."""
     assert DEV.is_dir(), "docs/dev/ is the sanctioned sandbox and should exist"
     readme = DEV / "README.md"
     assert readme.is_file(), "docs/dev/README.md must state the two rules"
@@ -106,10 +93,9 @@ def test_the_sandbox_exists_and_says_what_it_is_for():
 
 
 def test_the_permanent_set_is_still_nine_files():
-    """⭐ The sandbox is additive. It must not become a tenth permanent doc by accretion — if something in
-    `docs/dev/` has become something everyone reads, that is the signal to promote it, not to bless it.
-    ⚠ ISSUES.md joined by owner decision, 2026-08-31: the issue log (open + closed/refused), split out of
-    ROADMAP.md so the roadmap stays the short ranked view."""
+    """The sandbox is additive, and must not become a tenth permanent doc by accretion — if a working
+    note has become something everyone reads, that is the signal to promote it, not to bless it. Adding
+    to the permanent set is an owner decision, which is why the list is written out here."""
     top = sorted(p.name for p in (ROOT / "docs").glob("*.md"))
     assert top == [
         "DESIGN.md",

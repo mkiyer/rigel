@@ -25,7 +25,7 @@ what makes the gDNA space, where a template is a whole chromosome, tractable at 
 per-fragment-width results are memoised, and that memo is bounded by construction: it holds exactly
 one ``(space, keys, lengths)`` population and clears when the population changes, so it grows to at
 most the number of distinct fragment widths and every entry is one a later call reads back
-(``tests/test_sim_capture_partition.py::TestNoUnboundedCache``). Nothing else is cached, because
+(``tests/test_sim_capture.py::TestNoUnboundedCache``). Nothing else is cached, because
 every other ``(key, fragment width)`` pair is visited exactly once per run.
 """
 
@@ -133,7 +133,7 @@ class CaptureSampler:
         #: ``(space, keys, lengths)`` population at a time and a call with a different population
         #: clears it, so its size is at most the number of distinct fragment widths and every entry
         #: is one a later condition reads back
-        #: (`tests/test_sim_capture_partition.py::TestNoUnboundedCache`).
+        #: (`tests/test_sim_capture.py::TestNoUnboundedCache`).
         self._partition_memo: dict[tuple, np.ndarray] = {}
         self._partition_memo_population: tuple | None = None
 
@@ -271,7 +271,7 @@ class CaptureSampler:
         Results are memoised per width within one template population (see ``_partition_memo``), and
         nothing else is cached here: each ``(key, fragment length)`` pair is visited exactly once per
         call, so a per-pair cache would be pure growth with no reuse
-        (`tests/test_sim_capture_partition.py::TestNoUnboundedCache`).
+        (`tests/test_sim_capture.py::TestNoUnboundedCache`).
         """
         keys = list(keys)
         lengths = np.asarray(lengths, dtype=np.int64)

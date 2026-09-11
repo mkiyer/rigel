@@ -1,12 +1,12 @@
-"""⛔⛔ WHAT A CERTIFIED-RNA COUNT MAY AND MAY NOT CLAIM — the licence, as brute-force arithmetic.
+"""What a certified-RNA count may and may not claim about a slot's composition.
 
-A spliced fragment cannot be gDNA, so ``boundary_spliced`` (and ``sj_count``) are **certified RNA**: the one
-observation in the tool that needs no deconvolution. The standing proposal is to turn that into per-slot
-composition evidence by adding a coefficient ``S`` to ψ's RNA arm — ``(½ + S)·log(1 − f_g)`` in place of
-the bare Jeffreys reference ``½·log(1 − f_g)``.
-
-**Half of that derivation is right and half of it is not**, and these gates pin exactly where the boundary is.
-The model is one population of contiguous crossings at one boundary, split by whether a splice was VISIBLE::
+A spliced fragment cannot be gDNA, so ``boundary_spliced`` (and ``sj_count``) are certified RNA: the
+one observation in the tool that needs no deconvolution. The standing proposal is to turn it into
+per-slot composition evidence by adding a coefficient ``S`` to ψ's RNA arm — ``(½ + S)·log(1 − f_g)``
+in place of the bare Jeffreys reference ``½·log(1 − f_g)``. Half of that derivation holds and half of
+it does not, and these gates pin exactly where the line falls, as brute-force arithmetic against
+scipy's own pmfs. The model is one population of contiguous crossings at one boundary, split by
+whether a splice was VISIBLE::
 
     E[S | f_g, q]  =  (q / (1 − q)) · (1 − f_g) · M
 
@@ -14,25 +14,19 @@ The model is one population of contiguous crossings at one boundary, split by wh
                  \\___ retained ___/    \\_______ dropped _______/
 
 ===  ==========================================================================================
-C1   ⭐ SOUND — the retained coefficient is the RAW COUNT, and no opportunity ratio can reach it
-C2   ⛔ NOT SOUND — with ``q`` unknown the profile likelihood in ``f_g`` is EXACTLY FLAT on [0,1)
-C2b  ⛔ and ``S = 0`` is flat on the CLOSED interval, so a zero count is not vertex evidence either
-C3   ⛔ the raw-count term is one-sided and UNBOUNDED — at ``S = 1000`` it answers ~0 whatever the truth
-C4   ⭐ SOUND — reference + term is exactly Beta(½, ½+S), so ``S = 0`` recovers today's ψ identically
-C5   ⛔ ``density_factor_precision`` must NOT price this factor — on a monotone factor it reads the WINDOW
+C1   SOUND — the retained coefficient is the RAW COUNT, and no opportunity ratio can reach it
+C2   NOT SOUND — with ``q`` unknown the profile likelihood in ``f_g`` is EXACTLY FLAT on [0,1)
+C2b  and ``S = 0`` is flat on the CLOSED interval, so a zero count is not vertex evidence either
+C3   the raw-count term is one-sided and UNBOUNDED — at ``S = 1000`` it answers ~0 whatever the truth
+C4   SOUND — reference + term is exactly Beta(½, ½+S), so ``S = 0`` recovers today's ψ identically
+C5   ``density_factor_precision`` must NOT price this factor — on a monotone factor it reads the WINDOW
 ===  ==========================================================================================
 
-⭐ **The measured consequence, which is why this file exists rather than a mechanism**
-(measured on the retired 36-condition ladder against origin-split truth; the instrument was retired with
-its verdict recorded): the realised
-``q`` has a mass-weighted median of **0.19–0.71** with 60–98 % of the mass below 0.9, so the dropped term
-is the same size as the retained one. Scored against truth the raw-count term is **worse than the
-uninformative reference on 12 of 36 conditions**, worst **+0.4578** mwae at ``g90 ss0.50 capture_on``. Its
-benefit tracks the ANSWER (−0.49 where the truth is all-RNA, +0.45 where it is all-gDNA), not the
-evidence — TRAPS: honesty-metrics-reward-ignorance's shape.
-
-⚠ ψ is still blind to the channel and ``test_vertex_reference.py``'s certified-RNA-blindness gate is therefore still GREEN and still
-correct. It is the observable a fix must move; nothing here moves it.
+The realised ``q`` is nowhere near small enough for the dropped term to be a correction, so a build
+that keeps only the retained one is making an assumption about ``q`` rather than reading evidence, and
+it is worst exactly where a slot is gDNA-rich — TRAPS: honesty-metrics-reward-ignorance's shape. ψ is
+blind to this channel and ``test_vertex_reference.py``'s certified-RNA-blindness gate is green
+accordingly: that is the observable a fix must move, and nothing here moves it.
 """
 
 from __future__ import annotations
@@ -45,9 +39,10 @@ from scipy.stats import beta as _Beta, poisson as _Poisson
 from rigel.calibration.density_deconv import density_factor_precision
 from rigel.calibration.simplex_logodds import _JEFFREYS_REF, _logodds_grid
 
-#: ⛔ Every gate below scores against ``scipy.stats``' OWN Poisson / Beta rather than a log-pmf written
-#: here. A gate that re-derives the thing it is checking cannot detect drift in it (TRAPS: a-test-that-redefines), and
-#: the whole claim under test is an algebraic decomposition of exactly this pmf.
+#: Every gate below scores against ``scipy.stats``' OWN Poisson / Beta rather than a log-pmf written
+#: here. A gate that re-derives the thing it is checking cannot detect drift in it
+#: (TRAPS: a-test-that-redefines), and the whole claim under test is an algebraic decomposition of
+#: exactly this pmf.
 _C_GRID = (1e-4, 0.03, 1.0, 40.0)
 _M_GRID = (5.0, 900.0, 20000.0)
 
@@ -62,14 +57,15 @@ def _residual(S, c, M, lam):
 
 @pytest.mark.parametrize("S", [1.0, 7.0, 500.0])
 def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIVISORS_are(S):
-    """⭐ ``E[S] = c·(1−f_g)·M`` for SOME positive ``c``, and every opportunity ratio between the certified
-    bank's divisor and the unspliced bank's lives inside ``c``. A multiplicative factor on the MEAN is an
-    ADDITIVE CONSTANT in log space, so it cannot touch the coefficient of ``log(1−f_g)``.
+    """``E[S] = c·(1−f_g)·M`` for SOME positive ``c``, and every opportunity ratio between the
+    certified bank's divisor and the unspliced bank's lives inside ``c``. A multiplicative factor on
+    the MEAN is an ADDITIVE CONSTANT in log space, so it cannot touch the coefficient of
+    ``log(1−f_g)``.
 
-    ⛔ **This is why TRAPS: two-divisors-opposite-sign's trap is structurally absent here, not merely avoided.** TRAPS: two-divisors-opposite-sign is two
-    divisors built from one pmf responding to it with OPPOSITE SIGN; here neither ``eff_rna`` nor
-    ``eff_sj`` appears in the retained term at all, so there is nothing for them to disagree about.
-    The sj half's missing "frame statement" is therefore answered: **it does not need one.**
+    This is why TRAPS: two-divisors-opposite-sign is structurally absent here rather than merely
+    avoided. That trap is two divisors built from one pmf responding to it with OPPOSITE SIGN; here
+    neither ``eff_rna`` nor ``eff_sj`` appears in the retained term at all, so there is nothing for
+    them to disagree about, and the sj half needs no frame statement.
 
     The gate: strip ``S·log(1−f_g)`` off scipy's exact Poisson log-pmf, and what remains must be
     ``−c·M·(1−f_g)`` plus a λ-free constant — for every ``c``, every ``M``, and every ``S``. Adding the
@@ -87,8 +83,9 @@ def test_C1_the_retained_coefficient_is_the_RAW_count_whatever_the_two_banks_DIV
 
 
 def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
-    """⚠ The falsification for C1. ``c·S`` — an opportunity-scaled count, which is the other candidate
-    §2f offered — leaves a λ-dependent remainder, so the gate above is not a truism about subtraction."""
+    """PERTURBATION for C1: ``c·S``, an opportunity-scaled count, is the other candidate the derivation
+    offers, and it leaves a λ-dependent remainder — so the gate above is not a truism about
+    subtraction."""
     lam = np.linspace(-6.0, 6.0, 4001)
     S, c, M = 7.0, 0.03, 900.0
     bad = _Poisson.logpmf(S, c * (1.0 - expit(lam)) * M) - (c * S) * log_expit(-lam)
@@ -102,20 +99,20 @@ def test_C1_perturbation_an_OPPORTUNITY_SCALED_coefficient_FIRES():
 @pytest.mark.parametrize("S", [1.0, 3.0, 40.0, 1000.0])
 @pytest.mark.parametrize("M", [4.0, 350.0, 20000.0])
 def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
-    """⛔⛔ **THE GATE THAT FORBIDS THE RAW-COUNT TERM.**
+    """The gate that forbids the raw-count term.
 
-    ``q`` — the chance a crossing RNA fragment shows a *visible* splice — is not a small correction; it
-    is a free parameter spanning (0,1), and ``q/(1−q)`` therefore spans (0, ∞). So for **any** ``f_g < 1``
-    there is a ``q`` making ``E[S]`` exactly ``S``, and the profile likelihood ``sup_q log P(S | f_g, q)``
-    is the SAME number at every ``f_g`` in [0,1).
+    ``q`` — the chance a crossing RNA fragment shows a *visible* splice — is not a small correction;
+    it is a free parameter spanning (0,1), and ``q/(1−q)`` therefore spans (0, ∞). So for ANY
+    ``f_g < 1`` there is a ``q`` making ``E[S]`` exactly ``S``, and the profile likelihood
+    ``sup_q log P(S | f_g, q)`` is the SAME number at every ``f_g`` in [0,1). The certified count
+    therefore carries exactly ONE BIT about the unspliced split — "f_g ≠ 1" — and everything the
+    ``S·log(1−f_g)`` coefficient claims beyond that bit is an assumption about ``q`` rather than
+    evidence.
 
-    ⭐ **The certified count therefore carries exactly ONE BIT about the unspliced split: "f_g ≠ 1".**
-    Everything the ``S·log(1−f_g)`` coefficient claims beyond that bit is an assumption about ``q``,
-    not evidence — which is exactly why it measured +0.4578 mwae at ``g90 capture_on``.
-
-    ⚠ Brute force over a dense grid of the natural nuisance parameter ``ratio = q/(1−q)`` — log-spaced
-    over 26 decades, so it reaches every mean the model can produce — and scored with scipy's own
-    Poisson, not the analytic argument, so the gate would catch an error in the argument itself.
+    Brute force over a dense grid of the natural nuisance parameter ``ratio = q/(1−q)``, log-spaced
+    over 26 decades so it reaches every mean the model can produce, and scored with scipy's own
+    Poisson rather than the analytic argument, so the gate would catch an error in the argument
+    itself.
     """
     fg = np.array([0.0, 0.05, 0.4, 0.5, 0.9, 0.99, 0.99999])
     exact = float(_Poisson.logpmf(S, S))  # the unconstrained Poisson maximum
@@ -125,15 +122,16 @@ def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
         p = np.array([_Poisson.logpmf(S, ratio * (1.0 - f) * M).max() for f in fg])
         return float(p.max() - p.min()), float(np.abs(p - exact).max())
 
-    # ⭐ Stated as CONVERGENCE, not as a loosened tolerance: the claim is exact for continuous ``q``, so
-    #   on a grid the only residual is the quadratic gap at the maximum — which must fall ~4x per halved
-    #   spacing. A constant residual would mean the profile really is tilted (TRAPS: byte-identity-gate).
+    # Stated as CONVERGENCE, not as a loosened tolerance: the claim is exact for continuous ``q``, so
+    #   on a grid the only residual is the quadratic gap at the maximum — which must fall ~4x per
+    #   halved spacing. A constant residual would mean the profile really is tilted
+    #   (TRAPS: byte-identity-gate).
     coarse, coarse_err = spread(30001)
     fine, fine_err = spread(120001)
     assert fine < 1e-4 and fine_err < 1e-4, (fine, fine_err)
-    # ⚠ 4x the grid density; the ideal quadratic gain is 16x and the measured one is 9.6-9.9x (the
-    #   maximum does not sit on a grid point). Gated at 4x — far above the 1.0 a genuinely tilted
-    #   profile would give, and far below what is observed.
+    # 4x the grid density; the ideal quadratic gain is 16x and the realised one is lower because the
+    #   maximum does not sit on a grid point. Gated at 4x — far above the 1.0 a genuinely tilted
+    #   profile would give, and far below what a quadratic residual actually achieves.
     assert fine < 0.25 * coarse, (coarse, fine)
     assert fine_err < 0.25 * coarse_err, (coarse_err, fine_err)
     # and the ONE BIT it does carry: f_g = 1 exactly is excluded — a mean of 0 cannot produce S ≥ 1.
@@ -141,8 +139,8 @@ def test_C2_with_q_UNKNOWN_the_profile_likelihood_in_f_g_is_EXACTLY_FLAT(S, M):
 
 
 def test_C2_perturbation_FIXING_q_restores_an_interior_maximum_and_FIRES():
-    """⚠ The falsification for C2, and the constructive half of it: the flatness is a statement about
-    ``q`` being unknown, NOT about the observation being worthless. Pin ``q`` and the same likelihood
+    """PERTURBATION for C2, and the constructive half of it: the flatness is a statement about ``q``
+    being unknown, NOT about the observation being worthless. Pin ``q`` and the same likelihood
     acquires a sharp interior maximum at the true split — so the channel is blocked on an opportunity
     model, not on physics."""
     M, q_true, fg_true = 360.0, 0.25, 0.6
@@ -156,13 +154,13 @@ def test_C2_perturbation_FIXING_q_restores_an_interior_maximum_and_FIRES():
 
 @pytest.mark.parametrize("M", [4.0, 350.0, 20000.0])
 def test_C2b_a_ZERO_certified_count_is_flat_on_the_CLOSED_interval_so_it_is_NOT_vertex_evidence(M):
-    """⛔ **AND THIS INVERTS THE HOPE THAT OPENED THE INVESTIGATION.** ``test_vertex_reference``'s certified-RNA-blindness gate argues
-    that at a silent gene the certified channel is "exactly zero, which is the strongest possible evidence
-    for the vertex". It is not: with ``q`` free, ``S = 0`` is perfectly explained at **every** ``f_g``
-    *including* ``f_g = 1`` — take ``q → 0``. The information in this channel lives entirely in ``S > 0``
-    and it points AWAY from the ``f_g → 1`` vertex, never toward it.
+    """A zero certified count is not evidence for the gDNA vertex, which inverts the natural hope.
 
-    ⭐ So the vertex population (a measured negative) gets nothing from here either.
+    The argument that at a silent gene the certified channel is "exactly zero, which is the strongest
+    possible evidence for the vertex" does not hold: with ``q`` free, ``S = 0`` is perfectly explained
+    at every ``f_g``, ``f_g = 1`` included — take ``q → 0``. The information in this channel lives
+    entirely in ``S > 0``, and it points AWAY from the ``f_g → 1`` vertex, never toward it, so the
+    vertex population gets nothing from here.
     """
     ratio = np.exp(np.linspace(-30.0, 30.0, 240001))
     profile = np.array(
@@ -178,11 +176,10 @@ def test_C2b_a_ZERO_certified_count_is_flat_on_the_CLOSED_interval_so_it_is_NOT_
 
 @pytest.mark.parametrize("S,ceiling", [(10.0, 0.07), (100.0, 8e-3), (1000.0, 8e-4)])
 def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
-    """⛔ The term can only lower ``f_g``, never raise it, and it does so without limit — the answer is
-    ``Beta(½, ½+S)``'s median regardless of how much gDNA the slot actually holds. ``M`` never enters.
-
-    ⭐ That is the mechanism behind the panel measurement: 2,565 BOUNDARIES at ``g90 capture_on`` carrying
-    **98.3 %** of the certified-bearing mass have a true ``f_g`` of 0.84, and this answers 0.04.
+    """The term can only lower ``f_g``, never raise it, and it does so without limit — the answer is
+    ``Beta(½, ½+S)``'s median regardless of how much gDNA the slot actually holds, and ``M`` never
+    enters. That is the mechanism behind the panel result: at a gDNA-rich boundary carrying a large
+    certified count the term answers near zero against a truth near one.
     """
     med = float(_Beta.ppf(0.5, 0.5, 0.5 + S))
     assert med < ceiling, (S, med)
@@ -197,13 +194,13 @@ def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
 
 @pytest.mark.parametrize("S", [0.0, 1.0, 10.0, 100.0])
 def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
-    """⭐ ψ's two arms on the λ axis, ``½·log f_g + (½+S)·log(1−f_g)``, are the log-density of
+    """ψ's two arms on the λ axis, ``½·log f_g + (½+S)·log(1−f_g)``, are the log-density of
     ``f_g ~ Beta(½, ½+S)`` — the Jacobian ``df_g/dλ = σ(λ)σ(−λ)`` supplies the missing ``−1`` on each
     exponent exactly. So the certified count is the *Bayes update of the reference*, and ``S = 0``
     returns today's Beta(½,½) identically: whatever a future build does with this channel, it needs no
     new normalisation and no ``S = 0`` branch.
 
-    ⛔ It is the COEFFICIENT that is unlicensed (C2), not the algebra."""
+    It is the COEFFICIENT that is unlicensed (C2), not the algebra."""
     lam, fg = _logodds_grid(1 << 16, 20.0)
     lp = _JEFFREYS_REF * log_expit(lam) + (_JEFFREYS_REF + S) * log_expit(-lam)
     w = np.exp(lp - lp.max())
@@ -216,8 +213,8 @@ def test_C4_psi_reference_plus_the_term_is_EXACTLY_Beta_half_half_plus_S(S):
 
 
 def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor():
-    """⛔⛔ The obvious wiring — ``tau_lam += density_factor_precision(cert, lam_grid)``, exactly as
-    ``tau_len`` is wired — is out of contract for this factor and the tell is measurable.
+    """The obvious wiring — ``tau_lam += density_factor_precision(cert, lam_grid)``, exactly as
+    ``tau_len`` is wired — is out of contract for this factor, and the tell is measurable.
 
     ``density_factor_precision`` reads ``1/Var_λ`` under the NORMALIZED factor. For a peaked factor that
     is the Laplace precision and it is a property of the factor: gated below at exactly 1.0 and 25.0,
@@ -225,7 +222,7 @@ def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor(
     peak and no scale — so its normalized variance is the window's, and the reported "precision" moves by
     orders of magnitude with ``L``.
 
-    ⭐ ``simplex_logodds``' own stated acceptance test is **L-invariance**; a τ that scales with ``L`` is
+    ``simplex_logodds``' own stated acceptance test is L-invariance; a τ that scales with ``L`` is
     disqualified by it. The honest λ-axis information of the term is analytic and window-free —
     ``I = −∂²/∂λ²[S·log σ(−λ)] = S·f_g·(1−f_g)`` — which is what `strand_evidence` returns for its own
     channel; that is the form a future build must use.
@@ -239,7 +236,7 @@ def test_C5_density_factor_precision_reads_the_GRID_WINDOW_on_a_MONOTONE_factor(
         )
     assert np.allclose(got_peak, 25.0, rtol=1e-6), got_peak  # a real factor: L-invariant
     assert max(got_cert) / min(got_cert) > 100.0, got_cert  # the certified one: it IS the window
-    # ⭐ and the analytic form it should be replaced by has no grid in it at all: evaluated at a given
+    # and the analytic form it should be replaced by has no grid in it at all: evaluated at a given
     #   composition it is one number, identical whatever window the solver happens to be gridded on.
     i_cert = lambda f: 1e4 * f * (1.0 - f)  # noqa: E731
     assert i_cert(0.5) == pytest.approx(2500.0, rel=0.0, abs=0.0)

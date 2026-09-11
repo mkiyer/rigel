@@ -1,21 +1,47 @@
-"""Comprehensive tests for TranscriptIndex.load() correctness.
-
-Verifies that every data structure produced by load() is correct after
-the vectorized optimization (replacing pandas groupby/itertuples with
-numpy sort + boundary detection).
-
-Uses the shared mini_index fixture from conftest.py:
-  g1 (+): t0 exons (99,200),(299,400),(499,600)  — 3 exons
-          t1 exons (99,200),(499,600)              — 2 exons
-  g2 (-): t2 exons (999,1100),(1199,1300)          — 2 exons
-  genome: chr1 = 2000bp
+"""`rigel.index` end to end — what `TranscriptIndex.load()` produces, what it refuses, the
+duplicate-transcript guard the reader applies, and the layout iterator underneath the interval and
+region tables. The first block verifies every structure `load()` builds: the transcript and gene
+tables and their derived arrays, collapsed and exon intervals, splice junctions, the fragment
+resolver, and the build/load round trip on a larger index and on edge cases. The second gates the
+validation `load()` performs on a hand-written index directory. The third gates the duplicate-exon-
+structure guard in `read_transcripts` and its collapse flag. The fourth gates
+`_iter_reference_layout`, which both `intervals.feather` and `regions.feather` are derived from.
 """
 
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
-from rigel.index import TranscriptIndex
-from rigel.types import GenomicInterval, IntervalType
+from rigel.index import (
+    BOUNDARIES_FEATHER,
+    INDEX_FORMAT_VERSION,
+    INTERVALS_FEATHER,
+    MANIFEST_JSON,
+    REF_LENGTHS_FEATHER,
+    REGIONS_FEATHER,
+    SJ_FEATHER,
+    TRANSCRIPTS_FEATHER,
+    TranscriptIndex,
+    _GenicSpan,
+    _IntergenicSpan,
+    _iter_reference_layout,
+    build_index_artifacts,
+    read_transcripts,
+)
+from rigel.transcript import Transcript
+from rigel.types import GenomicInterval, Interval, IntervalType, Strand
+
+# The first block drives `conftest.py`'s shared `mini_index` fixture, whose geometry the numbers
+# below are read off:
+#   g1 (+): t0 exons (99,200),(299,400),(499,600)  — 3 exons
+#           t1 exons (99,200),(499,600)              — 2 exons
+#   g2 (-): t2 exons (999,1100),(1199,1300)          — 2 exons
+#   genome: chr1 = 2000bp
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -334,7 +360,7 @@ class TestBuildLoadRoundTrip:
     def round_trip_index(self, tmp_path):
         """Build and load an index from GENCODE-style GTF."""
         import pysam
-        from conftest import MINI_GTF
+        from _index_builder import MINI_GTF
 
         gtf_path = tmp_path / "test.gtf"
         gtf_path.write_text(MINI_GTF)
@@ -354,7 +380,7 @@ class TestBuildLoadRoundTrip:
     def test_two_loads_produce_same_data(self, tmp_path):
         """Loading twice from the same dir should yield identical structures."""
         import pysam
-        from conftest import MINI_GTF
+        from _index_builder import MINI_GTF
 
         gtf_path = tmp_path / "test.gtf"
         gtf_path.write_text(MINI_GTF)
@@ -438,7 +464,7 @@ class TestLargerIndex:
     @pytest.fixture(scope="class")
     def complex_index(self, tmp_path_factory):
         """Build an index with 10 genes, ~30 transcripts, overlapping exons."""
-        from conftest import build_test_index
+        from _index_builder import build_test_index
 
         # Build a more complex GTF with multiple genes and overlapping exons
         lines = []
@@ -582,7 +608,7 @@ class TestEdgeCases:
     @pytest.fixture
     def single_exon_index(self, tmp_path_factory):
         """Index with only single-exon transcripts (no splice junctions)."""
-        from conftest import build_test_index
+        from _index_builder import build_test_index
 
         gtf = (
             "chr1\ttest\texon\t100\t500\t.\t+\t.\t"
@@ -613,3 +639,399 @@ class TestEdgeCases:
 
     def test_single_exon_resolver_exists(self, single_exon_index):
         assert single_exon_index.resolver is not None
+
+
+# ── What ``TranscriptIndex.load()`` REFUSES — validation on a hand-written index directory ───────
+
+
+def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
+    idx_dir = tmp_path / "idx"
+    idx_dir.mkdir(parents=True, exist_ok=True)
+
+    t_df.to_feather(idx_dir / TRANSCRIPTS_FEATHER)
+
+    # Manifest with current format_version (load() refuses anything else).
+    (idx_dir / MANIFEST_JSON).write_text(
+        json.dumps(
+            {
+                "format_version": INDEX_FORMAT_VERSION,
+                "rigel_version": "test",
+            }
+        )
+    )
+
+    # ref_lengths.feather: a single 1000-bp chr1.
+    pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(idx_dir / REF_LENGTHS_FEATHER)
+
+    # The splice graph: one INTERGENIC region tiling chr1, zero boundaries. Required at load, so the
+    # fixture must supply it — the point of this fixture is to isolate the transcript-table
+    # validation that each test below exercises, not to also fail on a missing partition.
+    _, regions, boundaries = build_index_artifacts([], {"chr1": 1000})
+    regions.to_feather(idx_dir / REGIONS_FEATHER)
+    boundaries.to_feather(idx_dir / BOUNDARIES_FEATHER)
+
+    iv_df = pd.DataFrame(
+        {
+            "ref": ["chr1"],
+            "start": [0],
+            "end": [1000],
+            "strand": [0],
+            "interval_type": [2],
+            "t_index": [-1],
+        }
+    )
+    iv_df.to_feather(idx_dir / INTERVALS_FEATHER)
+
+    sj_df = pd.DataFrame(
+        columns=[
+            "ref",
+            "start",
+            "end",
+            "strand",
+            "interval_type",
+            "t_index",
+        ]
+    )
+    sj_df.to_feather(idx_dir / SJ_FEATHER)
+    return idx_dir
+
+
+def test_load_raises_on_t_index_mismatch(tmp_path: Path):
+    t_df = pd.DataFrame(
+        {
+            "ref": ["chr1", "chr1"],
+            "start": [100, 200],
+            "end": [150, 260],
+            "strand": [1, 1],
+            "length": [50, 60],
+            "t_id": ["t1", "t2"],
+            "g_id": ["g1", "g1"],
+            "t_index": [0, 2],
+            "g_index": [0, 0],
+            "g_name": ["G1", "G1"],
+            "g_type": ["pc", "pc"],
+            "is_basic": [True, True],
+            "is_mane": [False, False],
+            "is_ccds": [False, False],
+            "abundance": [None, None],
+        }
+    )
+    idx_dir = _write_minimal_index(tmp_path, t_df)
+
+    with pytest.raises(ValueError, match="t_index"):
+        TranscriptIndex.load(idx_dir)
+
+
+def test_load_raises_when_t_index_missing(tmp_path: Path):
+    t_df = pd.DataFrame(
+        {
+            "ref": ["chr1"],
+            "start": [100],
+            "end": [150],
+            "strand": [1],
+            "length": [50],
+            "t_id": ["t1"],
+            "g_id": ["g1"],
+            "g_index": [0],
+            "g_name": ["G1"],
+            "g_type": ["pc"],
+            "is_basic": [True],
+            "is_mane": [False],
+            "is_ccds": [False],
+            "abundance": [None],
+        }
+    )
+    idx_dir = _write_minimal_index(tmp_path, t_df)
+
+    with pytest.raises(ValueError, match="missing 't_index'"):
+        TranscriptIndex.load(idx_dir)
+
+
+# ── The duplicate-transcript guard in ``read_transcripts``, and its collapse flag ────────────────
+
+
+def _write_gtf(path: Path, lines: list[str]) -> None:
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _gtf_line(
+    feature: str, start: int, end: int, strand: str, gid: str, tid: str, ref: str = "chr1"
+) -> str:
+    return (
+        f"{ref}\ttest\t{feature}\t{start}\t{end}\t.\t{strand}\t.\t"
+        f'gene_id "{gid}"; transcript_id "{tid}";'
+    )
+
+
+def test_duplicate_exon_structure_raises(tmp_path: Path):
+    """Two transcripts with identical exon coordinates must raise ValueError."""
+    gtf = tmp_path / "dup.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
+            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            # Identical exon set, different transcript_id
+            _gtf_line("transcript", 100, 500, "+", "G1", "T2"),
+            _gtf_line("exon", 100, 200, "+", "G1", "T2"),
+            _gtf_line("exon", 400, 500, "+", "G1", "T2"),
+        ],
+    )
+    with pytest.raises(ValueError, match=r"identical exon coordinates"):
+        read_transcripts(gtf)
+
+
+def test_same_intron_chain_different_utrs_allowed(tmp_path: Path):
+    """Transcripts that share an intron chain but differ in UTR boundaries
+    are biologically realistic and must not trigger the guard."""
+    gtf = tmp_path / "utrs.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
+            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            # Same intron (200,400) but different 5' and 3' UTR
+            _gtf_line("transcript", 120, 480, "+", "G1", "T2"),
+            _gtf_line("exon", 120, 200, "+", "G1", "T2"),
+            _gtf_line("exon", 400, 480, "+", "G1", "T2"),
+        ],
+    )
+    txs = read_transcripts(gtf)
+    assert len(txs) == 2
+    assert {t.t_id for t in txs} == {"T1", "T2"}
+
+
+def test_different_strand_not_a_duplicate(tmp_path: Path):
+    """Identical coords on opposite strands are distinct transcripts."""
+    gtf = tmp_path / "strand.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
+            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            _gtf_line("transcript", 100, 500, "-", "G2", "T2"),
+            _gtf_line("exon", 100, 200, "-", "G2", "T2"),
+            _gtf_line("exon", 400, 500, "-", "G2", "T2"),
+        ],
+    )
+    txs = read_transcripts(gtf)
+    assert len(txs) == 2
+
+
+def test_duplicate_message_lists_offending_ids(tmp_path: Path):
+    gtf = tmp_path / "dup.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "ALPHA"),
+            _gtf_line("exon", 100, 500, "+", "G1", "ALPHA"),
+            _gtf_line("transcript", 100, 500, "+", "G1", "BETA"),
+            _gtf_line("exon", 100, 500, "+", "G1", "BETA"),
+        ],
+    )
+    with pytest.raises(ValueError) as excinfo:
+        read_transcripts(gtf)
+    msg = str(excinfo.value)
+    assert "ALPHA" in msg
+    assert "BETA" in msg
+
+
+def test_duplicate_error_mentions_collapse_flag(tmp_path: Path):
+    """The error should point users at the --collapse-duplicate-transcripts escape hatch."""
+    gtf = tmp_path / "dup.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+            _gtf_line("exon", 100, 500, "+", "G1", "T1"),
+            _gtf_line("transcript", 100, 500, "+", "G1", "T2"),
+            _gtf_line("exon", 100, 500, "+", "G1", "T2"),
+        ],
+    )
+    with pytest.raises(ValueError, match=r"--collapse-duplicate-transcripts"):
+        read_transcripts(gtf)
+
+
+def test_collapse_keeps_lexicographically_smallest_id(tmp_path: Path):
+    """With collapse enabled, a duplicate group keeps only the lexicographically
+    smallest transcript ID; distinct transcripts are untouched and t_index is
+    reassigned contiguously."""
+    gtf = tmp_path / "collapse.gtf"
+    _write_gtf(
+        gtf,
+        [
+            # duplicate pair (identical exons), IDs deliberately out of lexical order
+            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000002"),
+            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000002"),
+            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000002"),
+            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000001"),
+            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000001"),
+            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000001"),
+            # a distinct transcript (different exons) — must survive
+            _gtf_line("transcript", 1000, 1500, "+", "G2", "ENST00000009"),
+            _gtf_line("exon", 1000, 1500, "+", "G2", "ENST00000009"),
+        ],
+    )
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"ENST00000001", "ENST00000009"}
+    # dropped transcript is gone; kept indices are contiguous 0..N-1
+    assert sorted(t.t_index for t in txs) == [0, 1]
+
+
+def test_collapse_three_way_group_keeps_one(tmp_path: Path):
+    """A 3-way duplicate group collapses to the single lexicographically smallest ID."""
+    gtf = tmp_path / "collapse3.gtf"
+    lines: list[str] = []
+    for tid in ("ENST0000C", "ENST0000A", "ENST0000B"):
+        lines += [
+            _gtf_line("transcript", 100, 500, "+", "G1", tid),
+            _gtf_line("exon", 100, 200, "+", "G1", tid),
+            _gtf_line("exon", 400, 500, "+", "G1", tid),
+        ]
+    _write_gtf(gtf, lines)
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"ENST0000A"}
+
+
+def test_collapse_is_noop_without_duplicates(tmp_path: Path):
+    """collapse=True must not drop transcripts that are merely similar (shared intron,
+    different UTRs)."""
+    gtf = tmp_path / "nodup.gtf"
+    _write_gtf(
+        gtf,
+        [
+            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
+            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            _gtf_line("transcript", 120, 480, "+", "G1", "T2"),
+            _gtf_line("exon", 120, 200, "+", "G1", "T2"),
+            _gtf_line("exon", 400, 480, "+", "G1", "T2"),
+        ],
+    )
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"T1", "T2"}
+
+
+# ── ``rigel.index._iter_reference_layout`` — the tiling both feathers are derived from ───────────
+#
+# The layout iterator is the single source of truth for ``intervals.feather`` and
+# ``regions.feather`` alike, so what it yields must be a perfect tiling of every reference:
+# alternating INTERGENIC / GENIC spans, no overlaps, no gaps, synthetic nRNAs excluded.
+
+
+def _mk_tx(
+    t_idx: int, ref: str, strand: Strand, exons: list[tuple[int, int]], is_synthetic: bool = False
+) -> Transcript:
+    """Construct a minimal Transcript for layout tests."""
+    return Transcript(
+        ref=ref,
+        strand=strand,
+        exons=[Interval(s, e) for s, e in exons],
+        t_id=f"t{t_idx}",
+        g_id=f"g{t_idx}",
+        t_index=t_idx,
+        g_index=t_idx,
+        is_synthetic=is_synthetic,
+    )
+
+
+def _assert_tiles(spans, ref_length: int):
+    """Assert that ``spans`` exactly tile [0, ref_length) with alternating types."""
+    assert spans, "expected at least one span"
+    cursor = 0
+    last_type = None
+    for s in spans:
+        assert s.start == cursor, f"gap or overlap before {s} (cursor={cursor})"
+        assert s.end > s.start
+        cur_type = type(s).__name__
+        assert cur_type != last_type, f"two adjacent {cur_type} spans"
+        last_type = cur_type
+        cursor = s.end
+    assert cursor == ref_length, f"layout ends at {cursor}, expected {ref_length}"
+
+
+def test_empty_reference_yields_single_intergenic():
+    spans = list(_iter_reference_layout(1000, []))
+    assert spans == [_IntergenicSpan(0, 1000)]
+
+
+def test_zero_length_reference_yields_nothing():
+    assert list(_iter_reference_layout(0, [])) == []
+
+
+def test_single_transcript_in_middle_three_spans():
+    t = _mk_tx(0, "chr1", Strand.POS, [(100, 200), (300, 400)])
+    spans = list(_iter_reference_layout(1000, [t]))
+    _assert_tiles(spans, 1000)
+    assert len(spans) == 3
+    assert spans[0] == _IntergenicSpan(0, 100)
+    assert isinstance(spans[1], _GenicSpan)
+    assert (spans[1].start, spans[1].end) == (100, 400)
+    assert spans[1].transcripts == (t,)
+    assert spans[2] == _IntergenicSpan(400, 1000)
+
+
+def test_transcript_at_left_boundary_no_left_intergenic():
+    t = _mk_tx(0, "chr1", Strand.POS, [(0, 200)])
+    spans = list(_iter_reference_layout(500, [t]))
+    _assert_tiles(spans, 500)
+    assert len(spans) == 2
+    assert isinstance(spans[0], _GenicSpan)
+    assert spans[1] == _IntergenicSpan(200, 500)
+
+
+def test_transcript_at_right_boundary_no_right_intergenic():
+    t = _mk_tx(0, "chr1", Strand.POS, [(800, 1000)])
+    spans = list(_iter_reference_layout(1000, [t]))
+    _assert_tiles(spans, 1000)
+    assert len(spans) == 2
+    assert spans[0] == _IntergenicSpan(0, 800)
+    assert isinstance(spans[1], _GenicSpan)
+
+
+def test_overlapping_transcripts_strand_agnostic_coalesce():
+    """Two transcripts on opposite strands that overlap → one genic span."""
+    t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 300)])
+    t2 = _mk_tx(1, "chr1", Strand.NEG, [(250, 500)])
+    spans = list(_iter_reference_layout(1000, sorted([t1, t2], key=lambda x: (x.start, x.end))))
+    _assert_tiles(spans, 1000)
+    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    assert len(genic) == 1
+    assert (genic[0].start, genic[0].end) == (100, 500)
+    assert {t.t_index for t in genic[0].transcripts} == {0, 1}
+
+
+def test_disjoint_transcripts_yield_separate_genic_spans():
+    t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
+    t2 = _mk_tx(1, "chr1", Strand.POS, [(500, 700)])
+    spans = list(_iter_reference_layout(1000, [t1, t2]))
+    _assert_tiles(spans, 1000)
+    assert len(spans) == 5  # int, gen, int, gen, int
+    assert sum(isinstance(s, _GenicSpan) for s in spans) == 2
+
+
+def test_synthetic_excluded_from_layout():
+    """Synthetic nRNAs must not coalesce or extend genic spans."""
+    real = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
+    syn = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
+    spans = list(_iter_reference_layout(1000, sorted([real, syn], key=lambda x: (x.start, x.end))))
+    _assert_tiles(spans, 1000)
+    # The synthetic [150,800) must NOT extend the real [100,200) genic span.
+    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    assert len(genic) == 1
+    assert (genic[0].start, genic[0].end) == (100, 200)
+    assert genic[0].transcripts == (real,)
+
+
+def test_touching_transcripts_coalesce():
+    """t1.end == t2.start → coalesced into one genic span (touching boundary)."""
+    t1 = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
+    t2 = _mk_tx(1, "chr1", Strand.POS, [(200, 300)])
+    spans = list(_iter_reference_layout(1000, [t1, t2]))
+    _assert_tiles(spans, 1000)
+    genic = [s for s in spans if isinstance(s, _GenicSpan)]
+    assert len(genic) == 1
+    assert (genic[0].start, genic[0].end) == (100, 300)

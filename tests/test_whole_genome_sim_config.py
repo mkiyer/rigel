@@ -1,4 +1,13 @@
-"""Tests for whole-genome simulator configuration and abundance helpers."""
+"""The whole-genome simulator's configuration and its nascent-abundance helpers.
+
+The YAML parser and its refusals, the fragment-share solve that turns a panel's stated nascent
+FRAGMENT share into the molecular ratio the engine needs, and the sparse nascent model: nascent lives
+on the index's nRNA entities, the on/off draw is per gene SPAN rather than per isoform, the level is
+log-uniform over the configured range, and it is drawn independently of the mature level. Most of
+these properties are only observable statistically, so each gate states the band it uses and where
+that band comes from, and several exist because a perturbation to the mechanism passed every other
+gate in the file.
+"""
 
 import numpy as np
 import pytest
@@ -41,13 +50,12 @@ def _entity(transcript_id: str, start: int, end: int, t_index: int) -> Transcrip
 
 
 def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
-    """⭐⭐ Nascent molecules live on the index's nRNA ENTITIES, and under the SPARSE model the entity
-    is also the unit of the on/off draw (owner, 2026-08-22) — one gene span is transcribed or it is
-    not, however many isoforms share it. A span whose only contributor is SILENT gets nothing, single-
-    exon transcripts contribute nothing, and the contributors themselves end at ``nrna_abundance = 0``.
-    ⛔ Drawing per CONTRIBUTOR instead would make a 5-isoform gene 41 % likely to carry nascent at
-    ``on_fraction = 0.1``, so the intron slots calibration reads would be four times less sparse than
-    configured."""
+    """Nascent molecules live on the index's nRNA ENTITIES, and under the sparse model the entity is
+    also the unit of the on/off draw — one gene span is transcribed or it is not, however many
+    isoforms share it. A span whose only contributor is SILENT gets nothing, single-exon transcripts
+    contribute nothing, and the contributors themselves end at ``nrna_abundance = 0``. Drawing per
+    CONTRIBUTOR instead compounds the probability over the isoforms, so the intron slots calibration
+    reads would be several times less sparse than configured."""
     multi_a = _transcript("multi_a", 100.0, [(0, 100), (200, 300)])
     multi_b = _transcript("multi_b", 200.0, [(400, 500), (700, 800)])
     single = _transcript("single", 300.0, [(900, 1200)])
@@ -70,7 +78,7 @@ def test_sparse_nascent_pools_onto_entities_and_the_SPAN_is_the_unit():
 
 
 def test_a_multi_exon_contributor_with_no_entity_is_a_defect_not_a_skip():
-    """⛔ Every multi-exon transcript of a rigel index links to an entity; a transcript list that does
+    """Every multi-exon transcript of a rigel index links to an entity; a transcript list that does
     not is not the index's, and pooling onto a missing entity raises rather than dropping molecules."""
     from rigel.sim.whole_genome import apply_nrna_ratio
 
@@ -81,10 +89,10 @@ def test_a_multi_exon_contributor_with_no_entity_is_a_defect_not_a_skip():
 
 
 def test_fragment_share_solves_the_molecular_ratio_from_the_annotation():
-    """⭐⭐ **A PANEL STATES THE NASCENT FRAGMENT SHARE; THE MOLECULAR RATIO IS DERIVED** (owner,
-    2026-08-19). A nascent ENTITY spans a whole gene while a mature transcript is spliced, so the two
-    are NOT interchangeable: with a 10x length ratio a molecular ratio of 0.25 is nowhere near a 25 %
-    fragment share, and the panel's meaning would move silently.
+    """A panel states the nascent FRAGMENT share, and the molecular ratio is derived from it. A
+    nascent ENTITY spans a whole gene while a mature transcript is spliced, so the two are NOT
+    interchangeable: at a 10x length ratio a molecular ratio of 0.25 is nowhere near a 25 % fragment
+    share, and the panel's meaning would move silently.
 
     PERTURBATIONS: (a) the solved share must be REACHED — feeding the solved ratio back through the
     weights reproduces the target; (b) the naive reading (ratio = share) must NOT reach it, or the
@@ -121,7 +129,7 @@ def test_fragment_share_solves_the_molecular_ratio_from_the_annotation():
 
 
 def test_fragment_share_refuses_an_unreachable_target():
-    """⛔ With no expressed multi-exon transcript there is no nascent opportunity, and a nonzero share
+    """With no expressed multi-exon transcript there is no nascent opportunity, and a nonzero share
     is unreachable — that must raise, not silently produce a nascent-free library."""
     from rigel.sim.whole_genome import apply_nrna_fragment_share
     from rigel.sim.wgs_config import SimulationParams
@@ -133,7 +141,7 @@ def test_fragment_share_refuses_an_unreachable_target():
 
 
 def test_the_fl_pmf_is_the_one_the_engine_draws_from():
-    """⚠ The share solve integrates over the fragment-length pmf. If that pmf were not the engine's,
+    """The share solve integrates over the fragment-length pmf. If that pmf were not the engine's,
     the solved ratio would be right about a distribution nothing samples.
 
     PERTURBATION: the analytic pmf must match a large SAMPLE from `truncated_normal_frag_lengths`,
@@ -190,7 +198,7 @@ def test_sparse_requires_abundance_ranges(tmp_path):
 
 
 def test_a_log_uniform_range_may_not_touch_zero(tmp_path):
-    """⛔ A log-uniform draw has no zero end, so ``[0, x]`` is not "no nascent" — it is undefined.
+    """A log-uniform draw has no zero end, so ``[0, x]`` is not "no nascent" — it is undefined.
     Absence is expressed by ``on_fraction``, which is the model's own switch."""
     config_path = tmp_path / "sim.yaml"
     config_path.write_text(
@@ -222,13 +230,12 @@ def _sparse_population(n: int, *, seed: int = 3) -> tuple[list[Transcript], list
 
 
 def test_the_on_fraction_leaves_most_gene_spans_at_EXACTLY_zero():
-    """⭐⭐ **SPARSITY IS THE MODEL AND NOTHING GATED IT** — the retired mode's only behavioural test ran
-    at full eligibility, where the Bernoulli draw cannot be observed at all.
+    """Sparsity is the model, and it is only observable below full eligibility: at
+    ``on_fraction = 1.0`` the Bernoulli draw cannot be seen at all.
 
-    Nascent RNA is absent from most gene spans and present in a minority (owner, 2026-08-22), so
-    ``on_fraction = 0.1`` must leave ~90 % of eligible spans at nascent EXACTLY zero — not small, zero
-    — while the rest carry a real level. The band is the binomial's own five sigma, derived rather than
-    tuned.
+    Nascent RNA is absent from most gene spans and present in a minority, so ``on_fraction = 0.1``
+    must leave about 90 % of eligible spans at nascent EXACTLY zero — not small, zero — while the
+    rest carry a real level. The band is the binomial's own five sigma, derived rather than tuned.
     """
     n, frac = 400, 0.1
     contributors, entities = _sparse_population(n)
@@ -258,11 +265,10 @@ def test_on_fraction_zero_transcribes_NOTHING_and_one_transcribes_EVERY_ELIGIBLE
 
 
 def test_the_level_is_LOG_uniform_over_the_range_not_linear():
-    """⭐ Where nascent is present its level spans decades — very low in some spans, high in others
-    (owner, 2026-08-22). ⛔ A LINEAR draw on (1, 1000) would put **90 % of its mass in the top decade**
-    and could not express "very low"; a log-uniform draw spreads the ORDERS OF MAGNITUDE evenly, so the
-    decade occupancies are near-equal. That is the property gated here, and it is what distinguishes
-    the two draws.
+    """Where nascent is present its level spans decades — very low in some spans, high in others.
+    A LINEAR draw on (1, 1000) puts 90 % of its mass in the top decade and cannot express "very low";
+    a log-uniform draw spreads the ORDERS OF MAGNITUDE evenly, so the decade occupancies are
+    near-equal. That is the property gated here, and it is what distinguishes the two draws.
     """
     lo, hi = 1.0, 1000.0
     contributors, entities = _sparse_population(600)
@@ -281,10 +287,10 @@ def test_the_level_is_LOG_uniform_over_the_range_not_linear():
 
 
 def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
-    """⛔⛔ **THE DECISION THIS MODE EXISTS FOR** (owner, 2026-08-22): the nascent level must be drawn
-    INDEPENDENTLY of the mature level, so ``nascent > mature`` is a real case the tool has to survive.
-    The retired ratio modes set ``nascent = mature x ratio``, which makes the two perfectly rank-
-    correlated and puts a ceiling under the interesting case.
+    """The decision this mode exists for: the nascent level is drawn INDEPENDENTLY of the mature
+    level, so ``nascent > mature`` is a real case the tool has to survive. A ratio model setting
+    ``nascent = mature x ratio`` makes the two perfectly rank-correlated and puts a ceiling under
+    exactly that case.
 
     Two things are asserted: the rank correlation between the mature and nascent levels is ~0 (a
     ratio model reads 1.0), and spans where nascent EXCEEDS mature actually occur.
@@ -310,14 +316,14 @@ def test_the_nascent_LEVEL_IS_INDEPENDENT_OF_THE_MATURE_LEVEL():
 
 
 def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
-    """⛔⛔ **THE UNIT OF SPARSITY, GATED WHERE IT IS ACTUALLY OBSERVABLE.** With ``k`` isoforms sharing
-    one gene span, a per-CONTRIBUTOR draw gives that span ``1 - (1 - p)^k`` chance of carrying nascent
-    — at ``p = 0.1`` and ``k = 5`` that is **41 %**, four times the configured sparsity — while a
+    """The unit of sparsity, gated where it is actually observable. With ``k`` isoforms sharing one
+    gene span, a per-CONTRIBUTOR draw gives that span a ``1 - (1 - p)^k`` chance of carrying nascent
+    — at ``p = 0.1`` and ``k = 5`` that is 41 %, four times the configured sparsity — while a
     per-SPAN draw gives exactly ``p``. The intron slots calibration reads belong to the span, so the
     per-span reading is the one that makes the configured number mean what it says.
 
-    ⚠ This gate exists because a perturbation to per-contributor drawing passed every other test in
-    this file: the shared-span test runs at ``on_fraction = 1.0``, where the two are indistinguishable
+    PERTURBATION: switching to per-contributor drawing passes every other test in this file, because
+    the shared-span test runs at ``on_fraction = 1.0`` where the two are indistinguishable
     (`TRAPS: perturb-every-gate`).
     """
     n_spans, k, p = 300, 5, 0.1
@@ -350,10 +356,10 @@ def test_the_on_off_DRAW_IS_PER_SPAN_NOT_PER_ISOFORM():
 
 
 def test_the_SEED_actually_drives_the_draw():
-    """⛔ **THE SEED WAS PARSED, ASSERTED AND UNUSED-ABLE.** Every other gate here is statistical, so
-    replacing `default_rng(seed)` with `default_rng(42)` passed all of them — and the orchestrator adds
-    `seed + nrna_index` precisely so a multi-range sweep gets DIFFERENT on-sets, which would have
-    collapsed to one pattern silently (`TRAPS: perturb-every-gate`).
+    """PERTURBATION: every other gate here is statistical, so replacing `default_rng(seed)` with a
+    constant seed passes all of them. The orchestrator adds `seed + nrna_index` precisely so a
+    multi-range sweep gets DIFFERENT on-sets, which would otherwise collapse to one pattern silently
+    (`TRAPS: perturb-every-gate`).
 
     Two seeds must disagree, and one seed must reproduce itself exactly.
     """
@@ -372,9 +378,9 @@ def test_the_SEED_actually_drives_the_draw():
 
 
 def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too():
-    """⛔ The entity-defect rule was gated only through `apply_nrna_ratio`, so replacing the sparse
-    path's own raise with `continue` passed every test. A transcript list without entities is not a
-    rigel index's, and dropping its molecules silently is the failure the rule exists to stop."""
+    """PERTURBATION: with the rule gated only through `apply_nrna_ratio`, replacing the sparse path's
+    own raise with `continue` passes every test. A transcript list without entities is not a rigel
+    index's, and dropping its molecules silently is the failure the rule exists to stop."""
     orphan = _transcript("orphan", 100.0, [(0, 100), (200, 300)])
     orphan.t_index = 0  # nrna_t_index stays unset/-1: no entity
     with pytest.raises(ValueError, match="nascent entity"):
@@ -382,10 +388,10 @@ def test_a_multi_exon_contributor_with_no_ENTITY_raises_in_the_SPARSE_path_too()
 
 
 def test_the_FUNCTION_validates_its_own_range_and_fraction_not_just_the_PARSER():
-    """⛔⛔ **THE PARSER IS NOT THE ONLY DOOR.** `suite.py` builds `NRNAConfig` from argv and validates
-    neither the range nor the fraction, so `apply_sparse_nrna`'s own guards are the only thing standing
-    between `--nrna-abundance-ranges '0,100'` and `log(0) = -inf` inside the draw. Deleting either
-    guard passed all 13 gates before this one existed."""
+    """The parser is not the only door. `suite.py` builds `NRNAConfig` from argv and validates
+    neither the range nor the fraction, so `apply_sparse_nrna`'s own guards are all that stands
+    between `--nrna-abundance-ranges '0,100'` and `log(0) = -inf` inside the draw. PERTURBATION:
+    deleting either guard passes every other gate in this file."""
     rows = sum(_sparse_population(4), [])
     for bad, why in [
         ((0.0, 100.0), "zero lower end has no log"),

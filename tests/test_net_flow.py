@@ -1,9 +1,11 @@
-"""Unit tests for the net fragment-flow deconvolution math (rigel.sim.net_flow).
+"""The net fragment-flow deconvolution in `rigel.sim.net_flow` — where a misassigned fragment WENT.
 
-Uses the canonical worked example: one locus with isoforms T1/T2/T3 + a gDNA component,
-truth = 10 fragments each, and the tool observes T1=12, T2=2, T3=8, gDNA=18. The net-flow
-reduction must (a) satisfy observed-expected = Σ net inflow, (b) sum to zero over the locus,
-and (c) decompose each transcript's surplus/deficit into gDNA-source vs RNA-isoform-source.
+One worked locus with three isoforms and a gDNA component, at a truth of ten fragments each against
+an observation that moves mass between them. The reduction must reproduce both marginals, satisfy
+`observed − expected == sum of net inflow` per transcript, sum to zero over the locus, and split
+each transcript's surplus or deficit into the part sourced from gDNA and the part sourced from
+another isoform. An accuracy table can say a transcript is wrong; only this says where the mass
+came from.
 """
 
 from rigel.sim.net_flow import FlowData, _flow_marginals, _net_flow_rows

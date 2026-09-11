@@ -1,13 +1,12 @@
 """Falsification gates for ``scripts/design/toy_harness.py``.
 
-⛔ **A TOY HARNESS THAT IS SILENTLY NOT USING THE DONOR'S CONDITIONS IS WORSE THAN NO HARNESS**, because
-every conclusion drawn from it would be about a library nobody has. So the gates here are mostly about
-one question — *is the donor actually reaching the toy?* — asked four different ways.
-
-⭐ The donor is a scenario the gates BUILD, not a panel condition: the 36-condition ladder exists on one
-machine, and a gate that silently skips is a gate that has never run.
-
-⛔ Each gate carries its own perturbation.
+A toy harness that is silently not using the donor's conditions is worse than no harness, because
+every conclusion drawn from it would be about a library nobody has. So the gates here are mostly
+about one question — is the donor actually reaching the toy? — asked four different ways: the
+donor's global fits, its two fragment-length models, the gDNA depth the toy is simulated at, and
+the origin-split truth every row is scored against. The donor is a scenario the gates build rather
+than a panel condition, because a panel exists on one machine and a gate that silently skips is a
+gate that has never run. Each gate carries its own perturbation.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ TH = _sibling("toy_harness.py")
 def donor(tmp_path_factory):
     """A population-ish donor: enough genes and depth that the library-level priors actually fit.
 
-    ⚠ It must be UNSTRANDED (``ss_0.50`` in the name, which is where the harness reads it from) and
+    It must be unstranded (``ss_0.50`` in the name, which is where the harness reads it from) and
     must carry gDNA — with no gDNA there is no intergenic population to measure a density from, and
     :func:`toy_harness.harvest` would have nothing to match the toy to.
     """
@@ -110,7 +109,7 @@ def spec():
 
 
 def test_the_DONORS_GLOBALS_ARE_INJECTED_and_not_silently_refitted(donor, spec, tmp_path):
-    """⛔ The whole premise. A toy cannot fit a strand balance, an enrichment landscape or an
+    """The whole premise. A toy cannot fit a strand balance, an enrichment landscape or an
     intergenic background, so if the injection is not wired the toy quietly fits its own — from a
     handful of regions — and every conclusion is about a library that does not exist.
 
@@ -135,13 +134,13 @@ def test_the_DONORS_GLOBALS_ARE_INJECTED_and_not_silently_refitted(donor, spec, 
 
 
 def test_the_LENGTH_MODELS_come_from_the_DONOR_not_from_the_toy(donor, spec, tmp_path):
-    """⭐ The two fragment-length pmfs are ``calibrate`` kwargs rather than part of the priors bundle,
+    """The two fragment-length pmfs are ``calibrate`` kwargs rather than part of the priors bundle,
     so they are a separate wiring that can be forgotten independently.
 
-    PERTURBATION: replace the donor's gDNA pmf by a narrow spike far from the RNA one and require the
-    answer to move — at equal means the length channel carries exactly zero information
-    (TRAPS: equal-lengths-carry-no-composition), so a harness that ignored these would be indistinguishable from one that used
-    them unless the two pmfs are pulled apart.
+    PERTURBATION: replace the donor's gDNA pmf by a narrow spike far from the RNA one and require
+    the answer to move — at equal means the length channel carries exactly zero information
+    (TRAPS: equal-lengths-carry-no-composition), so a harness that ignored these would be
+    indistinguishable from one that used them unless the two pmfs are pulled apart.
     """
     size = donor.gdna_fl_pmf.shape[0]
     spike = np.zeros(size, np.float64)
@@ -160,10 +159,10 @@ def test_the_LENGTH_MODELS_come_from_the_DONOR_not_from_the_toy(donor, spec, tmp
 
 
 def test_the_toys_gDNA_DEPTH_IS_DERIVED_from_the_donor_and_actually_LANDS(donor, spec, tmp_path):
-    """⭐⭐ ``calibrate``'s own note: the injected enrichment landscape is an ABSOLUTE log-density
-    model, so a toy at the wrong depth projects onto the wrong cells and is a different library, not a
-    small one. The harness therefore derives the toy's gDNA count from the donor's measured density
-    per base — and this gate checks the density it actually REALISES, not the count it asked for.
+    """The injected enrichment landscape is an absolute log-density model, so a toy at the wrong
+    depth projects onto the wrong cells and is a different library rather than a small one. The
+    harness therefore derives the toy's gDNA count from the donor's measured density per base, and
+    this gate checks the density it actually realises, not the count it asked for.
 
     PERTURBATION: a toy simulated at 10x the donor's rate must land measurably off, or the check is
     blind to depth.
@@ -184,7 +183,7 @@ def test_the_toys_gDNA_DEPTH_IS_DERIVED_from_the_donor_and_actually_LANDS(donor,
 
 
 def test_there_is_NO_gDNA_KNOB_on_the_spec(donor):
-    """⛔ The gDNA level must not be settable per toy: it is pinned by the donor, and a spec field for
+    """The gDNA level must not be settable per toy: it is pinned by the donor, and a spec field for
     it would be a foot-gun that silently invalidates the injected enrichment landscape."""
     fields = set(TH.ToySpec.__dataclass_fields__)
     for banned in ("gdna_fraction", "n_gdna_fragments", "gdna_rate", "gdna_abundance"):
@@ -198,9 +197,9 @@ def test_there_is_NO_gDNA_KNOB_on_the_spec(donor):
 
 def test_TRUTH_is_the_ORIGIN_SPLIT_and_sums_to_the_full_payload(donor, spec, tmp_path):
     """The per-object truth must be the production accumulator run on the BAM split by true origin —
-    the identity that makes it trustworthy at all (`SUCCESS.md` TRAPS: self-checking-validator). ``OracleTruth.from_bam`` validates
-    sum-to-full and RAISES, so this gate checks the harness actually goes through it rather than
-    approximating truth from an abundance table.
+    the identity that makes it trustworthy at all (TRAPS: self-checking-validator).
+    ``OracleTruth.from_bam`` validates sum-to-full and raises, so this gate checks the harness
+    actually goes through it rather than approximating truth from an abundance table.
 
     PERTURBATION: a corrupted partition must make the same construction fail.
     """
@@ -223,11 +222,11 @@ def test_TRUTH_is_the_ORIGIN_SPLIT_and_sums_to_the_full_payload(donor, spec, tmp
 
 
 def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
-    """⭐ The point of a toy is that you can read every row. A report that dropped objects would hide
+    """The point of a toy is that you can read every row. A report that dropped objects would hide
     exactly the one being interrogated.
 
-    PERTURBATION: the row set must cover every chain slot, and the region/boundary split must be non-trivial
-    — a toy with no boundaries could not exercise the boundary classes at all.
+    PERTURBATION: the row set must cover every chain slot, and the region/boundary split must be
+    non-trivial — a toy with no boundaries could not exercise the boundary classes at all.
     """
     r = TH.run_toy(spec, donor, tmp_path / "h")
     rows = TH.object_rows(r)
@@ -256,40 +255,18 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     ),
 )
 def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, tmp_path):
-    """⭐⭐ The substantive gate, **REWRITTEN 2026-08-04 because the defect it pinned was fixed** — which
-    is what its predecessor instructed ("rewrite this gate to pin the NEW behaviour rather than deleting
-    it"), and the record of both states is the point.
+    """The substantive gate: what is inside the intron must not set the exon's answer.
 
-    **What it used to pin.** An exon with no own evidence inherited its composition from the intron
-    beside it, so a **pure-gDNA** intron (no nascent RNA) dragged an essentially-pure-RNA exon toward
-    gDNA while a nascent-bearing intron did not. Measured against the `g25` ladder donor: exon
-    ``|Δf_g|`` **0.156 dry vs 0.005 wet, a factor of 31**; against the six-gene synthetic donor this
-    fixture builds, 0.209 vs 0.167. Only the direction and ordering were assertable, because the
-    magnitude is donor-dependent and the harness itself surfaced that.
+    An exon with no own evidence can inherit its composition from the intron beside it, so a
+    pure-gDNA intron (no nascent RNA) drags an essentially-pure-RNA exon toward gDNA while a
+    nascent-bearing one does not. The two arms here differ in one field (``nrna_abundance``), and
+    the exon's mass-weighted ``|Δf_g|`` must agree between them to within a factor of two. That is
+    an independence, and it is a stronger statement than the ordering it replaces, which a defect
+    could satisfy by dragging the exon in the expected direction. Both arms must also be small,
+    because an independence can equally be won by making both of them bad.
 
-    ⭐⭐⭐ **IT WAS A STRICT xfail FROM 2026-08-05 TO 2026-08-18 AND IS GREEN AGAIN — BUT READ HOW, BECAUSE
-    IT IS NOT THE ROUTE THE xfail PREDICTED.** The recorded reason was: correcting the sj leak removes ONE
-    error from a compensating PAIR (`TRAPS: a-cancelling-defect-pair`) — an evidence-free exon is fed
-    through `intron → BOUNDARY → exon`, the two hops' errors cancelled under the old sj-inclusive total,
-    and the second hop still carried its own defect (a correct composition ratio applied to a LEVEL). It
-    failed at **2.19× against its 2.0 bound**, and the bound was KEPT rather than widened so it would stay
-    the detector for that mechanism. ⚠ It went green when `message_propagation` was turned back ON
-    (owner, 2026-08-18) — the messages change the second hop — and **NOT** by the pair being fixed jointly,
-    which is still open (`ISSUES: the-cancelling-pair`). ⛔ So do not read this passing as evidence
-    that the pair is resolved; read it as the detector having moved into the messages-on regime with it.
-
-    ⭐⭐ **What it pins now: the dependence is GONE.** The mechanism was the reframe imputing the
-    source's composition share onto the destination's observed total (`EQUATIONS.md` §3.5), and a
-    factory-solved intron reports ``f_g ≈ 1``, hence zero RNA density, hence zero RNA precision — so it
-    can no longer lend a composition and its gDNA LEVEL crosses unscaled instead. Measured on this
-    fixture: **0.0107 dry vs 0.0112 wet, a factor of 1.04**, down from 1.25 here and 31 on the ladder.
-
-    ⚠ **So the assertion inverts from an ORDERING to an INDEPENDENCE**, and that is the stronger
-    statement: what is inside the intron must not set the exon's answer. Both arms must also be SMALL —
-    the ordering could equally be destroyed by making both bad.
-
-    PERTURBATION: the two arms still differ in ONE field (``nrna_abundance``) and must differ in outcome
-    at all; a byte-identical result would mean the nascent axis is not reaching the simulation.
+    PERTURBATION: the two arms must differ in outcome at all; a byte-identical result would mean
+    the nascent axis is not reaching the simulation.
     """
     dry = TH.run_toy(replace(spec, name="dry", nrna_abundance=0.0), donor, tmp_path / "i")
     wet = TH.run_toy(replace(spec, name="wet", nrna_abundance=40.0), donor, tmp_path / "j")
@@ -315,18 +292,18 @@ def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, t
     assert e_dry != pytest.approx(e_wet, rel=1e-6), (
         "the nascent axis changed nothing; nrna_abundance is not reaching the simulation"
     )
-    # ⭐⭐ THE INDEPENDENCE — what is inside the INTRON must not set the EXON's answer. The retired
-    # ordering assertion (`e_dry > e_wet`) is what this replaces; a return to it means the composition
-    # imputation is reaching the exon again.
+    # THE INDEPENDENCE — what is inside the intron must not set the exon's answer. An ordering
+    # assertion (`e_dry > e_wet`) is the weaker statement this replaces: a re-appearing ordering
+    # means the composition imputation is reaching the exon again.
     assert max(e_dry, e_wet) / max(min(e_dry, e_wet), 1e-9) < 2.0, (
         f"exon |Δf_g| is {e_dry:.4f} with a pure-gDNA intron and {e_wet:.4f} with a nascent-bearing "
         f"one — a factor of {max(e_dry, e_wet) / max(min(e_dry, e_wet), 1e-9):.2f}. The exon's answer "
         "is tracking the intron's composition again (it was 31x on the ladder donor before "
         "`EQUATIONS.md` §3.5)"
     )
-    # ⭐ …and BOTH arms must be small, or the independence was won by making both wrong. The retired
-    # gate's own dry-arm figure on this fixture was 0.209, so 0.05 is a decade of headroom below it and
-    # a decade above what the two arms now read.
+    # …and both arms must be small, or the independence was won by making both wrong. 0.05 sits
+    # about a decade above what the two arms read and well below the error an exon tracking its
+    # intron's composition produces on this fixture.
     assert max(e_dry, e_wet) < 0.05, (
         f"the exon error is not small on either arm ({e_dry:.4f} / {e_wet:.4f}); the independence may "
         "have been bought by degrading both"

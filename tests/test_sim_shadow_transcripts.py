@@ -1,5 +1,4 @@
-"""SHADOW TRANSCRIPTS — unannotated transcription the simulator draws from and the index never sees
-(owner design, 2026-08-29).
+"""SHADOW TRANSCRIPTS — unannotated transcription the simulator draws from and the index never sees.
 
 The gate on the MERGE: shadows are appended to the index's transcript list for SIMULATION with
 ``t_index`` continuing after the index's rows, no nascent, and are REFUSED if the index already knows

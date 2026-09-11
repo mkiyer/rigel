@@ -1,10 +1,13 @@
-"""CI guard for the calibration oracle (``tests/calibration/_oracle.py``).
+"""The CI guard for the calibration oracle (``tests/calibration/_oracle.py``).
 
-The oracle's correctness rests on ONE identity: partitioning the sim BAM by true fragment origin and running
-the production accumulator on each partition reproduces the full payload (the accumulator deposits each
-fragment independently, so the per-origin parts must sum to the whole). This test builds a tiny gDNA + mRNA
-+ nascent scenario and asserts that identity holds — if the accumulator ever changes in a way that breaks
-per-fragment linearity, this fails loudly rather than letting a silently-wrong oracle percolate.
+The oracle's correctness rests on ONE identity: partitioning the sim BAM by true fragment origin and
+running the production accumulator on each partition reproduces the full payload, because the
+accumulator deposits each fragment independently. A tiny gDNA + mRNA + nascent scenario is built here
+and that identity asserted on every bank, so an accumulator change that breaks per-fragment linearity
+fails loudly instead of letting a silently wrong truth source percolate into every instrument. The
+remaining gates cover the perfect-calibration lever built from the same partitions, and the two
+FRAMES the validator recognises: a spliced deposit in the gdna partition is impossible before the
+drain and a recorded fact after it, while sum-to-full must keep raising in both.
 """
 
 import dataclasses
@@ -48,10 +51,10 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc"
     )
 
-    # ⭐ EVERY bank on all three axes sums to full EXACTLY. Every bank is integer-VALUED; six of them
-    # are float64 since the one-numeric-convention ruling, and float addition across scanner threads
-    # lands at 112.99999999999999 on one run and 113.0 on the next (measured 7e-15 here, 2026-08-19) —
-    # so ROUND before the integer cast. A real one-fragment loss survives rounding; 1e-14 does not.
+    # EVERY bank on all three axes sums to full EXACTLY. Every bank is integer-VALUED, but six of them
+    # are float64, and float addition across scanner threads lands a hair under an integer on one run
+    # and exactly on it the next — so ROUND before the integer cast. A real one-fragment loss survives
+    # rounding; a 1e-14 re-association does not.
     for bank in _BANKS:
         full = np.rint(np.asarray(getattr(orc.full, bank), np.float64)).astype(np.int64)
         parts = np.rint(
@@ -63,7 +66,7 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
     assert np.asarray(orc.parts["gdna"].boundary_spliced_count, np.int64).sum() == 0
     assert np.asarray(orc.parts["gdna"].sj_count, np.int64).sum() == 0
 
-    # ⚠ The scenario must actually EXERCISE the RNA-only banks, or "gDNA is zero there" is vacuous.
+    # The scenario must actually EXERCISE the RNA-only banks, or "gDNA is zero there" is vacuous.
     assert np.asarray(orc.full.sj_count, np.int64).sum() > 0
 
     # every read accounted for; gDNA and mRNA partitions both non-empty (scenario has both).
@@ -77,7 +80,7 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
 def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario, tmp_path):
     """The override masses must equal the full object count — checked **per axis**, not pooled.
 
-    ⚠ Pooling the two axes into one total would let an error on the region axis cancel an equal and
+    Pooling the two axes into one total would let an error on the region axis cancel an equal and
     opposite one on the boundary axis, which is exactly the class of mistake a three-axis schema makes
     possible. ``E`` and ``N`` differ by only ``n_refs``, so such a cancellation is not far-fetched.
     """
@@ -109,7 +112,7 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
 
 
 def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_path):
-    """⭐ The perfect-calibration lever must actually construct. ``override_masses`` returns exactly the
+    """The perfect-calibration lever must actually construct. ``override_masses`` returns exactly the
     fields ``dataclasses.replace`` needs, so a rename in the schema that it missed would surface here
     rather than in whatever A/B first tried to use it."""
     import dataclasses
@@ -132,7 +135,7 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         mass_gdna_boundary=np.zeros(e),
         mass_rna_boundary=np.zeros(e),
         mass_rna_spliced_boundary=np.zeros(e),
-        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a boundary whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         boundary_mass_per_crossing=np.ones(e),
@@ -165,7 +168,7 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
 def _as_drained(payload):
     """The same payload MARKED as drained — a zero-filled DrainQC, which is what frame detection reads.
 
-    ⚠ A marking, not a drain: the banks are untouched, so sum-to-full still holds and the tests below
+    A marking, not a drain: the banks are untouched, so sum-to-full still holds and the tests below
     vary exactly one thing — which FRAME the validator believes it is in.
     """
     from rigel.scan_payload import DrainQC
@@ -175,7 +178,7 @@ def _as_drained(payload):
 
 
 def test_undrained_frame_still_refuses_gdna_spliced_deposits(oracle_scenario, tmp_path):
-    """⛔ Perturbation of the exact-zeros gate: in PASS-ONE (undrained) frame a spliced deposit in the
+    """PERTURBATION of the exact-zeros gate: in the PASS-ONE (undrained) frame a spliced deposit in the
     gdna partition is physically impossible and must still RAISE. The injection keeps sum-to-full
     intact (full and part move together) so the exact-zeros gate — not sum-to-full — is what fires."""
     orc = OracleTruth.from_bam(
@@ -188,10 +191,10 @@ def test_undrained_frame_still_refuses_gdna_spliced_deposits(oracle_scenario, tm
 
 
 def test_drained_frame_records_the_leak_instead_of_refusing(oracle_scenario, tmp_path):
-    """⭐ In the DRAINED frame the same deposits are a FACT of production's tally — the whole-library
-    drain genuinely draws a spliced hypothesis for some true-gDNA fragments (measured lift-independent:
-    flgap_rna_short showed the leak at ZERO ambiguity) — so the oracle must RECORD them, per bank,
-    instead of refusing to describe the frame the calibrator actually reads."""
+    """In the DRAINED frame the same deposits are a FACT of production's tally — the whole-library
+    drain genuinely draws a spliced hypothesis for some true-gDNA fragments, independently of any
+    lift ambiguity — so the oracle must RECORD them, per bank, instead of refusing to describe the
+    frame the calibrator actually reads."""
     orc = OracleTruth.from_bam(
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_dz"
     )
@@ -204,7 +207,7 @@ def test_drained_frame_records_the_leak_instead_of_refusing(oracle_scenario, tmp
 
 
 def test_drained_frame_still_enforces_sum_to_full(oracle_scenario, tmp_path):
-    """⛔ The frame changes ONE gate. Sum-to-full is the lift's end-to-end identity and must keep
+    """The frame changes ONE gate. Sum-to-full is the lift's end-to-end identity and must keep
     raising in the drained frame — a tolerant exact-zeros gate must not have loosened its neighbour."""
     orc = OracleTruth.from_bam(
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc_ds"

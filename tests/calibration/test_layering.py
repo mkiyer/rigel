@@ -1,20 +1,14 @@
-"""⭐⭐⭐ THE LAYERING IS ENFORCED, NOT DOCUMENTED — because a documented layering rots silently.
+"""The calibration package's layering is enforced here rather than merely written down.
 
-The calibration package had 35 modules and no stated shape. Measured from the AST it was never a knot —
-**no import cycles, and 18 of 35 modules with exactly one importer** — it was a **FLAT PILE of peers**, and a
-flat pile is the one structure that cannot tell you where to add anything.
-
-`rigel.calibration._layers` names the layers that were already in the boundaries. This file makes them true:
-
-* **every module has a declared home** — an unplaced module fails, because "nobody decided where this goes"
-  is exactly the state being ended;
-* **no import points UP a layer** — the rule that makes the ordering mean something;
-* **the declaration matches the tree** — a layer naming a module that does not exist fails too.
-
-⛔ **Why a test and not a docstring.** The census that produced this found **13 module docstrings naming a
-sibling with no import boundary in either direction** — prose about the code, inside the code, that nothing
-gated. A layering written only in prose would join them within a release. `scripts/design/module_census.py`
-prints the same graph for a human; this file is what stops it drifting.
+`rigel.calibration._layers` names the layers that are already in the import graph, and this file holds
+three properties true of them: every module has a declared home, because an unplaced module is one
+nobody decided the place of; no import points UP a layer, which is the rule that makes the ordering
+mean anything; and the declaration matches the tree, so a layer naming a module that does not exist
+fails as well. Without the enforcement the package is a flat pile of peers rather than a knot
+(TRAPS: a-flat-pile-is-not-a-knot) — it has no cycles, but neither does it tell you where to add
+anything. A layering written only in prose would rot the way module docstrings naming a sibling they
+never import already do; `scripts/design/module_census.py` prints the same graph for a human, and this
+file is what stops it drifting.
 """
 
 from __future__ import annotations
@@ -37,9 +31,10 @@ def _name(p: pathlib.Path) -> str:
 def _runtime_imports(p: pathlib.Path) -> set[str]:
     """Sibling modules imported at RUNTIME.
 
-    ⭐ Imports inside ``if TYPE_CHECKING:`` are excluded deliberately: an annotation cannot form a cycle and
-    does not constrain the layering. ⚠ They are not ignorance — the census reports them, and one of them is
-    how ``capture_eff_length`` annotates a type from layer 7. That is a hint, not a violation.
+    Imports inside ``if TYPE_CHECKING:`` are excluded deliberately: an annotation cannot form a cycle
+    and does not constrain the layering. They are not ignored either — `module_census.py` reports them,
+    and one of them is how ``capture_eff_length`` annotates a type from layer 7. That is a hint, not a
+    violation.
     """
     tree = ast.parse(p.read_text())
     guarded: set[int] = set()
@@ -62,9 +57,9 @@ SHORT = {_name(p).split("/")[-1]: _name(p) for p in ALL_FILES}
 
 
 def test_every_module_has_a_declared_home():
-    """⛔ An unplaced module is a new file nobody decided the home of — which is the flat pile returning one
-    file at a time. Adding a module means adding it to `_layers.LAYERS`, and that is the point: it forces
-    the question "which layer is this?" at the moment it is answerable."""
+    """An unplaced module is a new file nobody decided the home of — the flat pile returning one file at
+    a time. Adding a module means adding it to `_layers.LAYERS`, and that is the point: it forces the
+    question "which layer is this?" at the moment it is answerable."""
     unplaced = sorted(n for n in (_name(p) for p in ALL_FILES) if layer_of(n) is None)
     assert not unplaced, (
         f"modules with no declared layer: {unplaced}. Add each to rigel.calibration._layers.LAYERS — "
@@ -92,14 +87,12 @@ def test_the_layers_are_numbered_in_order():
 
 @pytest.mark.parametrize("path", ALL_FILES, ids=_name)
 def test_no_import_points_UP_a_layer(path):
-    """⛔⛔ **THE RULE.** An import may point DOWN a layer or SIDEWAYS within one. Never UP.
+    """⛔ The rule: an import may point DOWN a layer or SIDEWAYS within one, never UP.
 
-    ⭐ It found two real violations on the tree as it stood, and both were the SAME defect wearing two
-    costumes: a TYPE defined too high. ``RegionDeconv`` — one slot's deconvolution result, the pie
-    ``(f_pos, f_neg, f_g)`` that is the tool's central datum — was defined in the STRAND family at layer 4
-    and imported by `region_geometry` and `simplex_logodds` at layer 3 and by `sweep` at layer 6. Three layers
-    reached upward for it. The repair is the one a layering violation always asks for: **the type belongs at
-    the bottom, not with the code that happened to define it first.** It is now layer 0.
+    An upward import is almost always a TYPE defined too high — ``RegionDeconv``, one slot's
+    deconvolution result ``(f_pos, f_neg, f_g)``, is the example, reached for by three layers below the
+    strand family that first defined it. The repair a layering violation asks for is the same every
+    time: the type belongs at the bottom, not with the code that happened to define it first.
     """
     me = _name(path)
     mine = layer_of(me)
@@ -117,9 +110,9 @@ def test_no_import_points_UP_a_layer(path):
 
 
 def test_the_layering_is_not_vacuous():
-    """⛔ TRAPS: could-the-arm-have-fired applied to this file: a layering with everything in one layer, or with no boundaries
-    between layers, would pass every test above and constrain nothing. So assert the ordering is doing
-    work — several layers, and real downward boundaries crossing them."""
+    """TRAPS: could-the-arm-have-fired applied to this file: a layering with everything in one layer, or
+    with no imports crossing between layers, would pass every test above and constrain nothing. So
+    assert the ordering is doing work — several layers, and real downward imports crossing them."""
     assert len(LAYERS) >= 5, "a layering with too few layers cannot express a direction"
     crossing = 0
     for p in ALL_FILES:

@@ -1,8 +1,9 @@
-"""Simulator gDNA strand overdispersion (docs/em_strand/03 §3).
+"""The simulator's gDNA strand overdispersion knob.
 
-Confirms the `gdna_strand_overdispersion` knob (a) converts to the internal Beta
-concentration correctly and (b) produces per-region sense rates with the intended
-overdispersion — so the suite can generate overdispersed-gDNA conditions for the BB fit.
+`gdna_strand_overdispersion` must convert to the internal Beta concentration correctly and produce
+per-region sense rates with the overdispersion it asked for, so the suite can generate the
+overdispersed-gDNA conditions the Beta-Binomial strand fit is developed against. A knob that
+converted wrongly would leave every such condition quietly at the default dispersion.
 """
 
 from __future__ import annotations

@@ -1,4 +1,10 @@
-"""Tests for rigel.sim — simulation framework components."""
+"""The simulation framework's building blocks, below the whole-genome engine.
+
+The mutable genome a scenario edits and the reverse complement it relies on; the gene generator,
+whose isoform counts must stay inside their configured bounds and whose antisense fraction must be
+the one requested; and the gene builder, both on its own and against a real `TranscriptIndex`, since
+a scenario whose genes the index reads differently is a truth source that does not describe the BAM.
+"""
 
 import pytest
 

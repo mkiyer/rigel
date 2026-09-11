@@ -183,8 +183,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,477 passed / 0 skipped / 2 xfail, 3,479 collected** (re-derived
-2026-09-11 after the source cleanup, which retired `calibration/strand_deconv.py` at −3). The 2 xfails are executable records of proven defects whose fixes are elsewhere
+**The standing baseline: 0 failed / 3,404 passed / 0 skipped / 2 xfail, 3,406 collected** (re-derived
+2026-09-11 after the test cleanup: 38 test files merged away at −2 each, three shared modules added at
++2 each, one zero-test file and one used `docs/dev/` prompt deleted; the 2,670 non-meta tests unchanged). The 2 xfails are executable records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
@@ -197,8 +198,7 @@ confirm with `pytest --collect-only -q | grep <stem>`:
 | adding one… | moves collected by | which cases |
 |---|---|---|
 | `src/rigel/calibration/` module | **+3** | jargon, docs-boundary, and layering *if declared in `_layers.py`* |
-| `tests/calibration/` file | **+2** | jargon, docs-boundary |
-| top-level `tests/` file | **+3** | jargon, docs-boundary, scripts-index |
+| `tests/` file (any directory) | **+2** | jargon, docs-boundary |
 | `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
 | `docs/dev/` file | **+1** | jargon only |
 | top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |

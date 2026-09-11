@@ -1,12 +1,12 @@
-"""⭐ TRAPS: pure-and-length-censored — there is ONE definition of fragment length in this tree, and one place that measures it.
+"""There is ONE definition of fragment length in this tree, and one place that measures it.
 
- found **three** live definitions of "fragment length", two of them
-summed into a single array called ``global_model`` and used as the empirical-Bayes anchor for pools
-measured by the third. This module is the standing gate that they do not come back.
-
-⛔ **A partial delete that still compiles is the failure mode**, which is why the gate is a search over
-the source rather than a behavioural assertion: the scanner could keep recording a second histogram
-forever without any test noticing, exactly as it did.
+Three live definitions once coexisted, two of them summed into a single array and used as the
+empirical-Bayes anchor for pools measured by the third — a frame mismatch nothing downstream could
+see (`TRAPS: pure-and-length-censored`). This is the standing gate that they do not come back. A
+partial delete that still compiles is the failure mode, which is why the gate is a search over the
+source rather than a behavioural assertion: the scanner can keep recording a second histogram forever
+without any test noticing. The converse is gated too, because the surviving singular scorer differs
+from the deleted plural container by one character.
 """
 
 from __future__ import annotations
@@ -37,10 +37,9 @@ DELETED_BY_C2 = {
 }
 
 
-#: A tombstone — a comment that records the deletion and why — is not a live reference, and this
-#: codebase keeps them deliberately. ⚠ The exemption is a LITERAL, exact marker rather than "any
-#: comment": a stale comment that merely *mentions* a deleted symbol is precisely how the next reader
-#: concludes it still exists, and three such were found and fixed when this gate first ran.
+#: A tombstone — a comment that records the deletion and why — is not a live reference. The exemption
+#: is a LITERAL, exact marker rather than "any comment": a stale comment that merely MENTIONS a
+#: deleted symbol is precisely how the next reader concludes it still exists.
 TOMBSTONE = "DELETED by TRAPS: pure-and-length-censored"
 
 
@@ -52,7 +51,7 @@ def _sources() -> list[Path]:
 def test_the_scanners_fragment_length_machinery_is_GONE(name: str) -> None:
     """No occurrence of *name* survives anywhere under ``src/`` — comments included.
 
-    ⚠ Comments are deliberately in scope. A dangling reference to a deleted subsystem is how the next
+    Comments are deliberately in scope. A dangling reference to a deleted subsystem is how the next
     reader concludes it still exists.
     """
     why = DELETED_BY_C2[name]
@@ -71,7 +70,7 @@ def test_the_scanners_fragment_length_machinery_is_GONE(name: str) -> None:
 
 
 def test_the_singular_model_SURVIVES() -> None:
-    """⛔ The converse, and it is not a formality.
+    """The converse, and it is not a formality.
 
     ``FragmentLengthModel`` and ``FragmentLengthModels`` differ by one character. The singular is the
     scorer — ``pipeline`` builds the RNA and gDNA scoring models and every transcript's effective
@@ -88,8 +87,8 @@ def test_the_singular_model_SURVIVES() -> None:
 def test_the_deleted_names_are_gone_from_the_BUILT_extension_too() -> None:
     """The C++ is compiled, so a stale source name could still be shipping.
 
-    ⚠ Greps over ``src/`` cannot see a stale build. This asserts the scan result itself no longer
-    carries the observation block — the thing the Python side used to replay.
+    A grep over ``src/`` cannot see a stale build, so this asserts the scan result itself carries no
+    observation block for the Python side to replay.
     """
     from rigel.native import BamScanner  # noqa: F401  — import is the check that the build is current
 

@@ -1,18 +1,15 @@
-"""Gates for the ABUNDANCE LANDSCAPE — the pre-pass-0 total-density field and its mode census.
+"""The abundance landscape: the pre-pass-0 total-density field and the mode census read off it.
 
-The quantity under test: `fit_abundance_landscape` fits the reused population estimator
-(`landscape.fit_landscape`) on the wall-exact measured totals from `total_abundance`, then reads a
-MODE CENSUS off it — every local maximum with its basin, the depleted mode (the basin containing the
-pooled intergenic anchor rate), the enriched mode (the largest-mass basin strictly above it), the span
-`R`, and a per-region enriched-basin responsibility `w_i`. Written BEFORE the implementation and
-verified failing; the fixtures are synthetic Poisson populations whose truth is stated by hand, so
-every assertion is absolute.
-
-⛔ NO significance threshold exists anywhere in the census, and these gates enforce the consequences
-of that design rather than a constant: basins must PARTITION the density (Σ basin_mass = 1), a
-unimodal fit must report NO enriched mode with `span_R` exactly 1 and `w ≡ 0`, and the anchor
-consistency verdict must use the depleted mode's own fitted width as its tolerance — the density's
-statement of its resolution, never a chosen number.
+`fit_abundance_landscape` fits the population estimator (`landscape.fit_landscape`) on the wall-exact
+measured totals from `total_abundance` and then reports every local maximum with its basin, the
+depleted mode (the basin containing the pooled intergenic anchor rate), the enriched mode (the
+largest-mass basin strictly above it), the span `R`, and a per-region enriched-basin responsibility
+`w_i`. The fixtures are synthetic Poisson populations whose truth is stated by hand, so every
+assertion here is absolute rather than a recorded output. What the gates mostly hold is that no
+significance threshold exists anywhere in the census: basins must PARTITION the density
+(Σ basin_mass = 1), a unimodal fit must report NO enriched mode with `span_R` exactly 1 and `w ≡ 0`,
+and the anchor-consistency verdict must use the depleted mode's own fitted width as its tolerance —
+the density's own statement of its resolution, never a chosen number.
 """
 
 from __future__ import annotations
@@ -144,13 +141,12 @@ def test_w_separates_the_two_populations():
 
 
 def test_the_anchor_agrees_with_the_depleted_mode_and_the_flag_can_FAIL():
-    """⚠ TWO wrong fixtures preceded this one, and the lesson is the census's own robustness: any
-    COHERENT anchor pool — large or tiny — drags a local maximum along with it via its own kernels,
-    and "the basin containing the anchor" then follows it, so a coherent shift can NEVER flip the
-    flag. What the flag actually guards is an INCOHERENT anchor population: anchors whose pooled
-    rate is unrepresentative of any of them (a heterogeneous pool), landing in a basin whose peak
-    is far away. That is also the honest real-data failure — an intergenic pool contaminated in
-    both directions — so the fixture states it directly."""
+    """Getting this fixture right depends on the census's own robustness: any COHERENT anchor pool,
+    large or tiny, drags a local maximum along with it through its own kernels, and "the basin
+    containing the anchor" then follows it — so a coherent shift can NEVER flip the flag. What the
+    flag guards is an INCOHERENT anchor population: anchors whose pooled rate is unrepresentative of
+    any of them, landing in a basin whose peak is far away. That is also the honest real-data failure
+    — an intergenic pool contaminated in both directions — so the fixture states it directly."""
     counts, lengths, sig, *_ = bimodal_parts()
     sub, ra, mask = parts(counts, lengths, sig)
     al = fit_abundance_landscape(sub, ra, mask)
@@ -273,9 +269,9 @@ def test_the_START_and_END_banks_are_both_consumed_where_both_walls_clear():
 def test_the_fit_is_EXACTLY_fit_landscape_on_the_selected_pair_with_var_zero():
     """Pins every argument of the underlying fit at once: the side-selected (counts, exposure) pair,
     mass ≡ count (the total's own ceiling), var ≡ 0 (a direct measurement has no deconvolution
-    ambiguity) and the zero-count anchor rule. ⚠ Added because a var-perturbation (fabricating
-    ambiguity) moved NO existing gate: the fixtures were too well-separated for a uniform
-    down-weighting to move a mode. Byte-equality with an independent call is immune to that."""
+    ambiguity) and the zero-count anchor rule. PERTURBATION: a var-perturbation that fabricates
+    ambiguity moves NO other gate here — the fixtures are too well separated for a uniform
+    down-weighting to move a mode — and byte-equality with an independent call is immune to that."""
     from rigel.calibration.landscape import fit_landscape
     from rigel.calibration.total_abundance import region_counts_and_exposure
 
@@ -294,15 +290,14 @@ def test_w_matches_an_INDEPENDENT_posterior_recomputation():
     region's kernel TIMES the fitted density, normalised on the grid, integrated over the enriched
     basin — asserted TIGHT, so any formula drift fires.
 
-    ⚠ A MEASURED PROPERTY, found while trying to make a kernel-only perturbation fail this oracle:
-    for every TRAINED region, kernel-only and posterior responsibilities agree to ~5e-16 — on every
-    fixture buildable, including deliberate valley straddlers, because the census partitions at
-    density MINIMA and a training region's own kernel raises the density at its centre, so the cuts
-    avoid it and its kernel mass stays within one basin. Even two isolated wide-kernel regions form
-    their own micro-basin rather than straddle. So the landscape factor in `w` is a formula
-    commitment (it matters for any FUTURE non-training query), not a behavioural difference on the
-    training population — and the kernel-only perturbation is behaviour-preserving there, which is
-    why no gate can or should fire on it."""
+    PERTURBATION: dropping the landscape factor and using the kernel alone cannot be made to fail
+    this oracle, and that is a property of the census rather than a hole. For every TRAINED region
+    the two agree to floating point on every fixture that can be built, valley straddlers included,
+    because the census partitions at density MINIMA and a training region's own kernel raises the
+    density at its centre — so the cuts avoid it and its kernel mass stays inside one basin, and even
+    two isolated wide-kernel regions form their own micro-basin rather than straddle. The landscape
+    factor in `w` is therefore a formula commitment that matters for a FUTURE non-training query, not
+    a behavioural difference on the training population."""
     from scipy.stats import poisson
 
     from rigel.calibration.total_abundance import region_counts_and_exposure
@@ -325,8 +320,9 @@ def test_w_matches_an_INDEPENDENT_posterior_recomputation():
 def test_the_anchor_picks_depleted_and_enriched_stays_ABOVE_it_with_three_modes():
     """THREE modes, anchors at the MIDDLE one, the LARGEST basin at the bottom: a depleted-by-mass
     rule picks the bottom (wrong), and an enriched-anywhere rule picks the bottom too (span < 1).
-    ⚠ Added because on two-mode fixtures the anchor basin IS the largest and everything above the
-    depleted basin IS the enriched mode, so neither perturbation could fire."""
+    PERTURBATION: on a two-mode fixture the anchor basin IS the largest and everything above the
+    depleted basin IS the enriched mode, so neither of those two perturbations can fire there — this
+    third mode is what gives them something to break."""
     rng = np.random.default_rng(5)
     n_low, n_mid, n_hi = 900, 200, 120
     lengths = np.concatenate([np.full(n_low, 20_000), np.full(n_mid, 10_000), np.full(n_hi, 1_000)])
@@ -380,24 +376,17 @@ def _calibrate_parts():
 
 
 def test_without_the_wall_inputs_the_landscape_is_SKIPPED_LOUDLY_and_nothing_raises(caplog):
-    """⛔⛔ **THIS GATE WAS INVERTED ON 2026-08-21, DELIBERATELY, AND THE REASON MATTERS.** It used to
-    assert that ``abundance_landscape=True`` RAISES without the wall arrays. That was right while the
-    flag was opt-in and off by default; it is wrong now that the flag is ON by default, because the
-    landscape is the SOLE source of the QC report's density panel since the NPMLE was retired.
+    """With `abundance_landscape` on by default, a caller that supplies no wall arrays gets no panel
+    rather than an exception — the landscape feeds only the QC report's density panel, and a toy or a
+    unit fixture that never wanted one should not have to disable the flag to run.
 
-    ⭐ The refusal's own stated reason was *"refusing rather than fitting on unmasked totals, which
-    would carry the wall bias the mask exists to exclude"* — and the alternative to refusing was never
-    "fit unmasked", it is "do not fit". Nothing here fits on unmasked totals either way. What changed
-    is only whether a caller with no wall arrays gets an exception or no panel.
+    Nothing fits on unmasked totals either way: the choice is between refusing and not fitting, and
+    the mask's wall bias is excluded under both. The skip is not a silent fallback — it is logged at
+    WARNING and the object is ``None`` rather than a quietly different estimate.
 
-    ⛔ It is NOT a silent fallback: the skip is logged at WARNING, and the object is ``None`` rather
-    than a quietly-different estimate. ⚠ 65 test callers (toys and unit fixtures that never wanted a
-    QC panel) hit exactly this path — measured before the flip, which is why the flip could not land
-    as the measured-prior plan first wrote it (a retired dev record; git carries it).
-
-    ⛔⛔ **`background_abundance` KEEPS ITS REFUSAL and that asymmetry is the whole point**: that pair
-    feeds ψ, so a missing input there would silently change a number the solve consumes. This object
-    is read by the report and the debug bundle and by nothing in the solve. The next gate asserts that
+    `background_abundance` keeps its refusal, and that asymmetry is the point: that pair feeds ψ, so
+    a missing input there would silently change a number the solve consumes, whereas this object is
+    read by the report and the debug bundle and by nothing in the solve. The next gate asserts that
     refusal is still live, so the two cannot be conflated."""
     import logging
 
@@ -562,9 +551,9 @@ def test_split_basins_is_the_shipped_rule_importable_on_its_own():
     # an anchor INSIDE the upper basin makes IT depleted and leaves nothing above
     dep4, enr4 = split_basins((lo, hi), 0.5)
     assert dep4 is hi and enr4 is None
-    # TWO basins above with unequal masses: enriched must be the LARGER one. ⚠ This case exists
-    # because the self-consistency assertions above cannot see a rule change that applies to both
-    # sides at once — a min/max flip passed them (found by perturbation, 2026-08-21).
+    # TWO basins above with unequal masses: enriched must be the LARGER one. PERTURBATION: the
+    # self-consistency assertions above cannot see a rule change that applies to both sides at once —
+    # a min/max flip passes every one of them, and only this case catches it.
     mid = AbundanceMode(log_rho=0.0, basin_mass=0.30, width=0.2, lo=-2.0, hi=1.5)
     top = AbundanceMode(log_rho=2.5, basin_mass=0.10, width=0.2, lo=1.5, hi=4.0)
     base = AbundanceMode(log_rho=-4.0, basin_mass=0.60, width=0.3, lo=-6.0, hi=-2.0)

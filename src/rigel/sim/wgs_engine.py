@@ -553,7 +553,7 @@ class WholeGenomeSimulator:
         # leaves half the rows dead. `eff` is still built at full length with zeros in the dead rows,
         # so `weights`, `probs` and therefore the `rng.choice` draw are bit-identical to computing
         # every row — a speed change, not a behaviour change, pinned by
-        # `tests/test_sim_capture_partition.py`.
+        # `tests/test_sim_capture.py`.
         live = np.flatnonzero(abundances > 0)
         live_keys = live.tolist()
         live_lengths = lengths[live]
@@ -610,7 +610,7 @@ class WholeGenomeSimulator:
         # Only rows with nonzero abundance can carry a fragment, and the capture-aware effective
         # length is the expensive term, so it is evaluated on the live rows only; `eff` is still full
         # length with zeros in the dead rows, so the draw is bit-identical to computing every row
-        # (`tests/test_sim_capture_partition.py`).
+        # (`tests/test_sim_capture.py`).
         live = np.flatnonzero((self._mrna_abund > 0) | (self._nrna_abund > 0))
         live_keys = live.tolist()
         live_lengths = self._t_lengths[live]

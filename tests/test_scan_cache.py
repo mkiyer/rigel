@@ -1,26 +1,16 @@
 """Scan once, calibrate many times — and refuse a cache whose index has moved underneath it.
 
-    TODO item 2 (the cached substrate)
-
-⭐ **WHY THIS EXISTS.** Scanning is the expensive step and calibration is the one being iterated on: a
-real cfRNA run is index load ~8 s, BAM scan ~2 s, **calibration ~66 s**,
-and a 5 M-fragment simulated condition costs far more than that to scan. Caching the scan's output took a
-24-condition sweep from ~13 min to ~9 s on the old path. This is that, rebuilt against the S4 payload.
-
-⛔ **THE KEY IS THE WHOLE POINT, AND IT NEEDS THREE PARTS, NOT ONE.**
-
-* ``graph_hash`` — regions plus the sj CSR. The payload already carries it, so the tally self-keys.
-* ⭐ **a REACH digest.** logs that ``reach`` is consumed by calibration and is covered by
-  **neither** ``partition_hash`` **nor** ``graph_hash`` — correctly, since neither the scan nor the
-  accumulator reads it — and that the gap "becomes live the moment something caches a calibration
-  output". A cache *loaded against an index* is that moment. The 2026-07-30 index rebuild moved ~38 % of
-  human contiguous reaches while **both** hashes stayed byte-identical, so a reach-blind key would have
-  loaded a stale cache against a moved index and verified clean.
-* **the scan config**, because two scans of one BAM under different settings are different tallies.
-
-⚠ Anything derivable from the index is **rebuilt on load, never stored** — `RegionArrays.from_index` is
-0.11 s and `build_boundary_flags_array` is 0.04 s against an 8.45 s index load that happens anyway.
-Storing them is how a cache goes stale against the thing it describes.
+Scanning is the expensive step and calibration is the one being iterated on, so a cached scan is what
+turns a multi-condition sweep from minutes into seconds. The cache is only worth having if a stale one
+is refused, and the key needs four parts to manage it: ``graph_hash`` for the regions and the sj CSR,
+which the payload already carries so the tally self-keys; a REACH digest, because ``reach`` is consumed
+by calibration and covered by neither ``partition_hash`` nor ``graph_hash`` — an index rebuild can move
+a large fraction of contiguous reaches with both of those byte-identical; the scan config, because two
+scans of one BAM under different settings are different tallies; and a payload-schema digest that folds
+in the DEPOSIT RULE, since a rule change moves no field name at all. Anything derivable from the index
+is rebuilt on load and never stored, because storing it is how a cache goes stale against the thing it
+describes. The round-trip gates compare arrays as arrays at whatever depth they sit, and each refusal
+is tested by tampering with exactly one part of the key.
 """
 
 from __future__ import annotations
@@ -52,7 +42,7 @@ SEED = 1234
 def scanned(tmp_path_factory):
     """A REAL scan of a tiny oracle BAM: the payload, strand model and FL histograms it produced.
 
-    ⚠ A real scan rather than a hand-built payload on purpose — the cache's whole job is to reproduce
+    A real scan rather than a hand-built payload on purpose — the cache's whole job is to reproduce
     what the scanner emitted, including the per-sj strand table and the five length pools, and a
     fixture that never ran the scanner could not catch a field the writer forgot.
     """
@@ -106,18 +96,17 @@ def round_trip(scanned, tmp_path: Path) -> tuple:
 
 
 class TestTheCachedTallyIsTheSCANNEDTally:
-    """Byte-identity, field by field. ⚠ This is the gate that can run TODAY — `calibrate()` cannot,
-    because `substrate.py` still reads payload fields S4 deleted, so an end-to-end calibration
-    comparison is blocked on S5. Input identity is the strongest available statement."""
+    """Byte-identity, field by field: the cached inputs must be the scanned inputs, array for array and
+    dtype for dtype."""
 
     def test_every_payload_array_survives_the_round_trip_byte_identical(self, scanned, tmp_path):
-        """⭐ Field by field, and ONE LEVEL DOWN — a nested bank's arrays are the point, not its repr.
+        """Field by field, and ONE LEVEL DOWN — a nested bank's arrays are the point, not its repr.
 
-        ⛔ This compared nested banks with ``dataclasses.asdict(after) == dataclasses.asdict(before)``,
-        which is a plain ``==`` over whatever they hold. That was adequate while every nested bank held only
-        counters; ``DeferredFragments`` holds thirteen arrays, and the comparison first raised, then — had
-        the arrays been scalars — would have compared two truncated string reprs and passed. Arrays are
-        compared as arrays, with their dtype, at whatever depth they sit.
+        Comparing nested banks with ``dataclasses.asdict(after) == dataclasses.asdict(before)`` is a
+        plain ``==`` over whatever they hold, which is adequate only while every nested bank holds
+        counters alone. ``DeferredFragments`` holds thirteen arrays, and that comparison either raises
+        or, on a stringified bank, compares two truncated reprs and passes. Arrays are compared as
+        arrays, with their dtype, at whatever depth they sit.
         """
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original: AccumulatorPayload = scanned[3]
@@ -144,9 +133,9 @@ class TestTheCachedTallyIsTheSCANNEDTally:
             compare(getattr(original, field.name), getattr(cache.payload, field.name), field.name)
 
     def test_THE_SIDE_BUFFER_SURVIVES_THE_ROUND_TRIP_AND_IS_NOT_EMPTY(self, scanned, tmp_path):
-        """⭐ **S2's gate.** Byte-identity over an empty bank is free, so the fixture must defer something.
+        """Byte-identity over an empty bank is free, so the fixture must defer something.
 
-        ⛔ And the bank must come back as a ``DeferredFragments``, not as whatever JSON happened to hold.
+        And the bank must come back as a ``DeferredFragments``, not as whatever JSON happened to hold.
         The write path splits a nested dataclass by the type of each sub-field precisely because
         ``json.dumps(..., default=str)`` would stringify an ndarray to a TRUNCATED repr — silently, and the
         second pass would then drain coordinates parsed out of text.
@@ -168,7 +157,7 @@ class TestTheCachedTallyIsTheSCANNEDTally:
         assert cache.payload.gap_resolution == original.gap_resolution
 
     def test_the_strand_model_survives_including_its_per_sj_table(self, scanned, tmp_path):
-        """⚠ The 2x2 is the MARGINAL of the per-sj table; the dispersion fit needs the table
+        """The 2x2 is the MARGINAL of the per-sj table; the dispersion fit needs the table
         itself, so a cache that kept only the 2x2 would silently disable the dispersion estimate."""
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original = scanned[4]
@@ -191,16 +180,15 @@ class TestTheCachedTallyIsTheSCANNEDTally:
     def test_THE_FL_HISTOGRAMS_ARE_THE_PAYLOAD_AND_ARE_NOT_CACHED_SEPARATELY(
         self, scanned, tmp_path
     ):
-        """⭐ TRAPS: pure-and-length-censored: there is nothing left to cache beside the payload.
+        """`TRAPS: pure-and-length-censored`: there is nothing to cache beside the payload.
 
-        The cache used to carry a second FL block — the scanner's own histogram, stored so it could
-        serve as the empirical-Bayes anchor, plus a ``fl_rna_counts`` field (**TRAPS: no-prior-means-haldane**) that was written,
-        read back, and consumed by nothing. Both are gone. Every fragment-length histogram is a FIELD
-        of the payload now, so caching the payload caches them, in one frame, by construction.
+        Every fragment-length histogram is a FIELD of the payload, so caching the payload caches them
+        all, in one frame, by construction. A second FL block beside it would be a second frame, and
+        the two would be free to disagree.
 
-        ⚠ ``build_fl_models`` still stays the single source of truth for the derived pmfs, which are
-        still not cached — freezing its output would mean a change to the FL model silently does not
-        apply to cached scans.
+        ``build_fl_models`` stays the single source of truth for the derived pmfs, which are
+        deliberately NOT cached — freezing its output would mean a change to the FL model silently does
+        not apply to cached scans.
         """
         import dataclasses
 
@@ -231,8 +219,8 @@ class TestTheKeyRefusesAMovedIndex:
             read_scan_cache(cache_dir, scanned[0])
 
     def test_a_changed_REACH_is_refused(self, scanned, tmp_path):
-        """⭐ The one neither existing hash covers. A rebuild moved ~38 % of human contiguous reaches
-        with `partition_hash` AND `graph_hash` byte-identical — this is the check that notices."""
+        """The one neither existing hash covers: an index rebuild can move a large fraction of
+        contiguous reaches with `partition_hash` AND `graph_hash` byte-identical, and this notices."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
         manifest["reach_digest"] = "0" * 16
@@ -241,13 +229,12 @@ class TestTheKeyRefusesAMovedIndex:
             read_scan_cache(cache_dir, scanned[0])
 
     def test_a_cache_from_a_DIFFERENT_ACCUMULATOR_SCHEMA_is_refused(self, scanned, tmp_path):
-        """⛔ The gap none of the other three keys covers: the ACCUMULATOR's own field list.
+        """The gap none of the other three keys covers: the ACCUMULATOR's own field list.
 
         `graph_hash` describes the index, `reach_digest` the reaches, `scan_config_digest` the scan
-        settings — none of them moves when the accumulator changes. S5.a made that concrete by adding
-        `length_sum` to every population; without this key a cache written the day before would be
-        accepted and then die deep in `_payload_from_parts` with a bare `KeyError`, which reads as a bug
-        rather than as a stale cache.
+        settings — none of them moves when the accumulator gains or loses a bank. Without this key such
+        a cache is accepted and then dies deep in `_payload_from_parts` with a bare `KeyError`, which
+        reads as a bug rather than as a stale cache.
         """
         cache_dir, _cache = round_trip(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
@@ -281,7 +268,7 @@ class TestTheKeyRefusesAMovedIndex:
         assert payload_schema_digest() == before
 
     def test_the_deposit_digest_is_STABLE_across_calls_and_across_PROCESSES(self):
-        """⭐ A key that wobbles refuses every cache, which is as useless as one that never moves.
+        """A key that wobbles refuses every cache, which is as useless as one that never moves.
 
         Across processes as well as calls: every channel is an integer and integer addition is
         associative, so this is deterministic by construction rather than by luck.
@@ -306,12 +293,12 @@ class TestTheKeyRefusesAMovedIndex:
         assert other == first, f"digest differs across processes: {other} != {first}"
 
     def test_the_deposit_digest_ENTERS_the_schema_digest(self):
-        """⛔⛔ **THE WIRING, and without it the digest is a number nobody consults.**
+        """The wiring, without which the digest is a number nobody consults.
 
         ``payload_schema_digest`` hashes field NAMES and column counts, and a deposit-RULE change moves
-        neither — so a cache written under the old rule was accepted by the key and silently served OLD
-        VALUES to NEW CODE. That is ``TRAPS: a-hash-that-misses-its-artifact`` in the key written to
-        prevent it, for the FOURTH time. This asserts the deposit digest is actually folded in.
+        neither — so a cache written under the old rule is accepted by the key and silently serves old
+        values to new code, which is `TRAPS: a-hash-that-misses-its-artifact` inside the key written to
+        prevent it. This asserts the deposit digest is actually folded in.
         """
         from rigel import scan_cache
 
@@ -328,12 +315,12 @@ class TestTheKeyRefusesAMovedIndex:
         assert scan_cache.payload_schema_digest() == before
 
     def test_a_changed_DEPOSIT_RULE_moves_the_digest(self):
-        """⭐⭐⭐ **THE CLAIM ITSELF: the digest is a function of BEHAVIOUR, not of names.**
+        """The claim itself: the digest is a function of BEHAVIOUR, not of names.
 
-        Perturbs the deposit rule in the executable specification — which the C++ is held byte-identical
-        to — and asserts the digest computed over it moves. ⛔ Every field name, dtype and shape is
-        untouched by the perturbation, so ``payload_schema_digest``'s name/column half cannot see it;
-        only a behavioural hash can.
+        PERTURBATION: the deposit rule in the executable specification — which the C++ is held
+        byte-identical to — is perturbed, and the digest computed over it must move. Every field name,
+        dtype and shape is untouched, so ``payload_schema_digest``'s name/column half cannot see the
+        change; only a behavioural hash can.
         """
         from tests.native._accumulator_reference import Accumulator, Partition
 
@@ -358,7 +345,7 @@ class TestTheKeyRefusesAMovedIndex:
         assert reference_deposit_digest(Accumulator, Partition) == before
 
     def test_the_deposit_digest_AGREES_between_the_NATIVE_and_the_SPECIFICATION(self):
-        """⛔ The key certifies what the PRODUCTION scanner deposited, so it is computed from the C++.
+        """The key certifies what the PRODUCTION scanner deposited, so it is computed from the C++.
 
         If the two ever drifted, the key would be certifying an artifact nothing writes. This is the
         gate that makes reading the native side safe.
@@ -375,16 +362,13 @@ class TestTheKeyRefusesAMovedIndex:
         )
 
     def test_the_schema_digest_moves_when_a_BANK_CHANGES_SHAPE(self):
-        """⛔⛔ **The gap this key had until 2026-08-08, and it is the one it exists to close.**
+        """A bank's COLUMN COUNT is part of the key, and a name-only digest cannot see it.
 
-        A bank moving from two genome-strand columns to one keeps its name, its dtype and its axis — so a
-        name-only digest does not move. And nothing downstream catches it: ``_bank`` validates the C++
-        dict in ``from_scan_result``, while ``_payload_from_parts`` puts the ``.npz`` arrays STRAIGHT
-        into the payload with no shape check. A stale cache would have been accepted by the key and then
-        failed with a shape error pointing nowhere near its cause — ``TRAPS: a-hash-that-misses-its-artifact``.
-
-        ⚠ Measured: collapsing five length moments to ``[n]`` left the digest at ``a025995ea3ce7d4f``,
-        byte for byte.
+        A bank moving from two genome-strand columns to one keeps its name, its dtype and its axis, and
+        nothing downstream catches it either: ``_bank`` validates the C++ dict in ``from_scan_result``,
+        while ``_payload_from_parts`` puts the ``.npz`` arrays STRAIGHT into the payload with no shape
+        check. A stale cache is then accepted by the key and fails with a shape error pointing nowhere
+        near its cause (`TRAPS: a-hash-that-misses-its-artifact`).
         """
         from rigel.scan_cache import payload_schema_digest
 
@@ -402,21 +386,18 @@ class TestTheKeyRefusesAMovedIndex:
         assert payload_schema_digest() == before
 
     def test_the_schema_digest_moves_when_a_NESTED_BANK_FIELD_moves(self):
-        """⭐ **The defect this key was written to prevent, and for a long time did not.**
+        """A digest over ``AccumulatorPayload``'s top-level field names alone cannot see a change
+        INSIDE a nested bank: renaming a ``ScanQC`` field lets a stale cache be accepted by the key and
+        then fail deep in ``_payload_from_parts`` with a bare ``TypeError``, which is precisely the
+        failure the key exists to prevent.
 
-        The digest hashed ``AccumulatorPayload``'s top-level field names ALONE, so a change *inside* a
-        nested bank was invisible to it: renaming a ``ScanQC`` field let a stale cache be **accepted by the
-        key** and then fail deep in ``_payload_from_parts`` with a bare ``TypeError`` — precisely the
-        failure mode the docstring above says the key exists to prevent. Two statements about one contract,
-        disagreeing (the same shape as ``check_scan_config``'s).
+        The stakes are highest at ``DeferredFragments``, which puts thirteen array names inside one
+        payload field, every one of them an ``.npz`` key, so an unrecursed digest waves through a cache
+        missing an entire bank.
 
-        ⛔ S1 made the stakes much higher rather than lower: ``DeferredFragments`` puts **thirteen** array
-        names inside one payload field and every one of them is an ``.npz`` key, so an unrecursed digest
-        would wave through a cache missing an entire bank.
-
-        ⚠ Tested one level down on each of the three nested banks, because "it recurses" is not the claim —
-        the claim is that each specific bank is covered, and a recursion that skipped one would still
-        recurse.
+        Tested one level down on each of the three nested banks, because "it recurses" is not the
+        claim: the claim is that each specific bank is covered, and a recursion that skipped one would
+        still recurse.
         """
         from rigel.scan_cache import _payload_field_types, _schema_names, payload_schema_digest
 
@@ -459,10 +440,10 @@ class TestTheKeyRefusesAMovedIndex:
 
     @pytest.mark.parametrize("column", REACH_COLUMNS)
     def test_the_reach_digest_depends_on_EVERY_reach_column(self, scanned, column):
-        """⛔ Teeth on the digest itself, one column at a time.
+        """PERTURBATION: teeth on the digest itself, one column at a time.
 
-        The first version perturbed only `reach_lo_pos`, so a digest that covered just the POS pair
-        passed — half the reach unguarded. Per strand and per side, each column must move it.
+        Perturbing a single column lets a digest that covers only that strand's pair pass, leaving half
+        the reach unguarded. Per strand and per side, each column must move the digest.
         """
         index = scanned[0]
         before = reach_digest(index)
@@ -475,7 +456,7 @@ class TestTheKeyRefusesAMovedIndex:
         assert reach_digest(index) == before
 
     def test_a_cache_whose_graph_hash_disagrees_with_the_INDEX_is_refused(self, scanned, tmp_path):
-        """⛔ Distinct from the manifest-tampering test above, which trips the self-consistency check
+        """Distinct from the manifest-tampering test above, which trips the self-consistency check
         first and so never reaches the index comparison. Move the manifest AND the payload together —
         a cache that is internally consistent but describes a different index."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
@@ -504,7 +485,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert np.array_equal(inputs["boundary_flags"], build_boundary_flags_array(index))
 
     def test_the_index_derived_names_are_ones_calibrate_accepts(self, scanned):
-        """⭐ Read off `calibrate`'s signature, never written out here — a renamed parameter fails this
+        """Read off `calibrate`'s signature, never written out here — a renamed parameter fails this
         test rather than silently escaping the cache."""
         import inspect
 
@@ -515,12 +496,8 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert offered <= accepted, f"not accepted by calibrate(): {offered - accepted}"
 
     def test_calibration_inputs_offers_every_argument_calibrate_needs(self, scanned, tmp_path):
-        """✅ Unblocked by S5.b — `fl.py` now reads the payload's five pure pools.
-
-        It was a strict xfail while `gdna_fl_mass` still reached for `payload.fl_pool_mass`, the field
-        S4 replaced. Strict, so that it would FAIL the moment it started working rather than sit green
-        and forgotten.
-        """
+        """The builder must offer every argument `calibrate` has no usable default for, or a cached
+        scan cannot drive calibration at all — which is the one thing the cache exists for."""
         import inspect
 
         from rigel.calibration.calibrate import calibrate
@@ -529,9 +506,9 @@ class TestNothingDerivableFromTheIndexIsStored:
         inputs = calibration_inputs(cache, scanned[0])
         accepted = set(inspect.signature(calibrate).parameters)
         assert set(inputs) <= accepted, f"not accepted by calibrate(): {set(inputs) - accepted}"
-        # ⚠ EVERY argument without a usable default, not a hand-kept list. `sj` was added to
-        # `calibrate` at S5.f and this helper was not updated — a hand-kept `required` set cannot catch
-        # that, because the omission is invisible until something calls it.
+        # EVERY argument without a usable default, not a hand-kept list: an argument added to
+        # `calibrate` while this helper is not updated is invisible to a hand-kept `required` set,
+        # because the omission only shows up when something calls it.
         required = {
             name
             for name, param in inspect.signature(calibrate).parameters.items()
@@ -541,7 +518,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert inputs["gdna_fl_pmf"].sum() == pytest.approx(1.0, abs=1e-9)
 
     def test_calibration_inputs_ACTUALLY_DRIVE_calibrate(self, scanned, tmp_path):
-        """⭐ The signature check above cannot see a MIS-SIZED argument, only a missing name.
+        """The signature check above cannot see a MIS-SIZED argument, only a missing name.
 
         `sj` must address the same graph the payload was scanned on; an axis of the wrong length
         places every splice on the wrong boundary. Calling `calibrate` for real is the only check that
@@ -556,10 +533,10 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert result.n_sj == cache.payload.n_sj
 
     def test_calibration_inputs_hand_calibrate_the_DRAINED_frame(self, scanned, tmp_path):
-        """⭐ THE FRAME RULING (owner, 2026-08-31; `DESIGN.md` §4.3):
-        production drains the side buffer before calibrating, so the instrument-facing input builder
-        must hand out the DRAINED payload — and publish the lift box that puts cached ORACLE
-        partitions into the same frame (`calibration._oracle.lift_drain_parts`)."""
+        """Production drains the side buffer before calibrating, so the instrument-facing input builder
+        hands out the DRAINED payload — and publishes the lift box that puts cached ORACLE partitions
+        into the same frame (`calibration._oracle.lift_drain_parts`). An instrument reading the
+        undrained frame would score a different library from the one production calibrates."""
         _cache_dir, cache = round_trip(scanned, tmp_path)
         # the cache stores pass one, by design (write_scan_cache refuses a drained payload)
         assert cache.payload.drain is None
@@ -576,7 +553,7 @@ class TestNothingDerivableFromTheIndexIsStored:
         assert {"undrained", "choices", "region_types", "sj"} <= set(lift)
         assert lift["undrained"].drain is None
 
-        # ⭐ determinism at the production seed: the same cache must reproduce the same frame
+        # determinism at the production seed: the same cache must reproduce the same frame
         # byte-identically, or two instruments would score two different libraries.
         again = calibration_inputs(cache, scanned[0])["payload"]
         np.testing.assert_array_equal(
@@ -590,13 +567,9 @@ class TestNothingDerivableFromTheIndexIsStored:
 
 
 def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path):
-    """✅ Unblocked by S5.f — `calibrate()` runs, so the population-prior seed path is live.
-
-    ⚠ It was a **strict** xfail naming S5 as the blocker. Strict is what made it honest: the moment it
-    started working it would have failed loudly rather than sitting green and forgotten. ⛔ It was in
-    fact still xfailing at S5.f for a DIFFERENT reason than the one recorded — `calibration_inputs` had
-    not been given `sj` — which is exactly why a stale xfail reason is worth nothing.
-    """
+    """A cached scan is enough to run `calibrate()` and reach the population-prior seed path, which is
+    the end the cache exists to serve: if the priors cannot be extracted from a cache, the cached
+    substrate does not actually shorten the loop it was built for."""
     from rigel.calibration.calibrate import calibrate
     from rigel.config import CalibrationConfig
 
@@ -606,15 +579,16 @@ def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path
     assert debug["calibration_priors"] is not None
 
 
-# ══ P3 · the drain and the cache ════════════════════════════════════════════════════════════════════
+# ══ the drain and the cache ═════════════════════════════════════════════════════════════════════════
 
 
 def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
-    """⛔ The digest recursed exactly ONE level until 2026-08-02, and `DrainQC` nests a `GapCensus` inside
-    itself — so `drain__census_before__*` was invisible to the key. That is X8's defect one level down.
+    """`DrainQC` nests a `GapCensus` inside itself, so a digest that recurses exactly one level cannot
+    see `drain__census_before__*` at all — the same blindness as a digest that does not recurse, one
+    level down.
 
-    ⚠ **And `drain` is `DrainQC | None`**, for which `dataclasses.is_dataclass` is False, so a plain check
-    dropped the whole bank rather than just its nesting. Both halves are gated here.
+    And `drain` is `DrainQC | None`, for which `dataclasses.is_dataclass` is False, so a plain check
+    drops the whole bank rather than just its nesting. Both halves are gated here.
     """
     from rigel.scan_cache import _schema_names
 
@@ -631,12 +605,12 @@ def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
 
 
 def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
-    """⛔ The cache holds a SCAN. Caching a drained payload would bake one draw into it and destroy the
-    property the whole second-pass design rests on — that one scan can be drained repeatedly at different
-    seeds without re-reading the BAM (and P5/P6 both need it).
+    """The cache holds a SCAN. Caching a drained payload would bake one draw into it and destroy the
+    property the second-pass design rests on: that one scan can be drained repeatedly at different
+    seeds without re-reading the BAM.
 
-    ⚠ It would also serialise `DrainQC.census_before` through `json.dumps(default=str)` as a stringified
-    repr, silently — X9's defect one level down.
+    It would also serialise `DrainQC.census_before` through `json.dumps(default=str)` as a stringified
+    repr, silently.
     """
     import dataclasses
 
@@ -669,7 +643,7 @@ def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
 
 
 def test_an_UNDRAINED_payload_still_round_trips_with_the_new_field(scanned, tmp_path):
-    """⚠ The other side of the refusal: adding the field must not break the ordinary path, and `drain` must
+    """The other side of the refusal: the field must not break the ordinary path, and `drain` must
     come back as `None` rather than as the string ``"None"``."""
     from rigel.scan_cache import read_scan_cache, write_scan_cache
 

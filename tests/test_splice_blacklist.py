@@ -1,22 +1,11 @@
-"""
-Tests for splice-junction artifact blacklist ingestion.
+"""Ingesting the splice-junction artifact blacklist, and the aggregation rules it applies.
 
-The blacklist is now sourced from an alignable Zarr store via
-``AlignableStore.splice_blacklist()`` — a list of dicts.  These tests
-exercise the records-based aggregator
-(:func:`rigel.splice_blacklist.load_splice_blacklist_from_records`) with
-in-memory dicts so the test suite does not require alignable to be
-installed.  The Zarr-opening wrapper
-:func:`load_splice_blacklist_from_zarr` is a thin call into alignable
-and is covered by integration tests / manual runs.
-
-Aggregation rules:
-
-* Filter rows by ``count >= min_count`` (default 2).
-* Group by ``(chrom, intron_start, intron_end)`` and take ``max`` of
-  ``max_anchor_left`` and ``max_anchor_right`` across surviving rows.
-* Strand is always ``'.'`` in alignable output and is not carried
-  through to the Rigel representation.
+Rows below ``min_count`` are dropped; the survivors are grouped by ``(chrom, intron_start,
+intron_end)`` and take the ``max`` of the two anchor lengths, so a junction seen at several read
+lengths keeps its longest anchor; strand is not carried through, because the source always reports
+it as unknown. The gates run the records-based aggregator over in-memory dicts, so the suite does
+not require the store to be installed, and then check that a blacklist persisted into an index
+loads back into the resolver and that building without one writes nothing.
 """
 
 from __future__ import annotations

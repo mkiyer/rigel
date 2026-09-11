@@ -23,9 +23,9 @@ GRID = np.linspace(0.02, 0.98, 25)
 def _three(u_pos, n, f_g, kappa, od_g, od_r, *, tilt=1.0):
     """ψ's three-component form with ALL the RNA on the ``+`` strand — the single-strand special case.
 
-    ⭐ ``tilt = 1`` means ``f_neg = 0``, which is the structural state of a single-strand region: one strand is
+    ``tilt = 1`` means ``f_neg = 0``, which is the structural state of a single-strand region: one strand is
     not admissible, so the tilt is not a free nuisance and the mixture reduces to two components.
-    ⚠ The variance REFERENCE is passed equal to the live composition, because `strand_loglik` has no
+    The variance reference is passed equal to the live composition, because `strand_loglik` has no
     count-zero-information freeze — it evaluates the variance at the same composition as the mean. Passing a
     different reference would be comparing two different estimators, not two forms of one.
     """
@@ -40,13 +40,12 @@ def _three(u_pos, n, f_g, kappa, od_g, od_r, *, tilt=1.0):
 def test_the_three_component_form_collapses_onto_the_two_component_reference(
     sense, antisense, kappa, od_g, od_r
 ):
-    """⭐⭐ **THE GUARD, as the source described it.** With one RNA strand dead the mixture has two
-    components, so ψ's form must equal the reference — not approximately, to floating-point identity of the
-    same algebra.
+    """With one RNA strand dead the mixture has two components, so ψ's form must equal the reference — not
+    approximately, to floating-point identity of the same algebra.
 
-    ⚠ Both are log-likelihoods up to an additive constant in the DATA (neither normalises the binomial
-    coefficient), so they are compared **after removing a per-call constant offset**: what has to match is
-    the SHAPE over the gDNA grid, which is the whole information content. A constant offset cannot move a
+    Both are log-likelihoods up to an additive constant in the data (neither normalises the binomial
+    coefficient), so they are compared after removing a per-call constant offset: what has to match is the
+    shape over the gDNA grid, which is the whole information content. A constant offset cannot move a
     posterior; a shape difference can.
     """
     n = sense + antisense
@@ -65,7 +64,7 @@ def test_the_three_component_form_collapses_onto_the_two_component_reference(
 
 
 def test_PERTURBATION_a_wrong_mixture_rate_BREAKS_the_collapse():
-    """⛔ TRAPS: perturb-every-gate's second half: the gate above is worth nothing until it is shown to fire.
+    """The gate above is worth nothing until it is shown to fire (TRAPS: perturb-every-gate).
 
     The mixture plus-strand rate is ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``. Perturb the gDNA arm's rate from ½ —
     the one number that makes gDNA *unstranded* — and the collapse must fail."""
@@ -74,7 +73,7 @@ def test_PERTURBATION_a_wrong_mixture_rate_BREAKS_the_collapse():
     f_rna = 1.0 - GRID
 
     def bad(u_pos, nn, f_g, f_pos, f_neg, kap, od_g, od_r, *_ref):
-        p = 0.55 * f_g + kap * f_pos + (1.0 - kap) * f_neg  # ⛔ 0.55, not ½
+        p = 0.55 * f_g + kap * f_pos + (1.0 - kap) * f_neg  # 0.55, not ½
         var = np.maximum(nn * p * (1.0 - p), 1e-9)
         return -0.5 * (u_pos - nn * p) ** 2 / var - 0.5 * np.log(var)
 
@@ -97,8 +96,8 @@ def test_PERTURBATION_giving_the_dead_strand_mass_BREAKS_the_collapse():
 
 
 def test_at_kappa_one_half_the_strand_says_nothing_about_composition():
-    """⭐ The domain fact both forms must encode: on a genuinely unstranded library the strand channel
-    carries **exactly zero** information about the gDNA fraction — the mixture rate is ½ whatever ``f_g``
+    """The domain fact both forms must encode: on a genuinely unstranded library the strand channel
+    carries exactly zero information about the gDNA fraction — the mixture rate is ½ whatever ``f_g``
     is, so the log-likelihood is FLAT over the grid. That is why an unstranded slot has no own composition
     evidence and why the message layer's whole value sits in that stratum."""
     n = 40.0

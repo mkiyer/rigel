@@ -1,4 +1,11 @@
-"""Tests for pipeline routing counters and multimapper shadow behavior."""
+"""How the pipeline routes a fragment into EM units, and what it counts on the way.
+
+A spliced multimapper gets no nascent shadow entities while an unspliced one does, because only the
+unspliced fragment could have come from unspliced RNA; a multimapper's gDNA likelihood normalises by
+the full `NH` rather than by the hits that survived filtering; the route counters are exclusive, so
+each unit is counted once and the totals mean something; and the `NM` penalty discriminates between
+a multimapper's hits when enabled and is exactly inert when not.
+"""
 
 from dataclasses import dataclass
 
@@ -146,8 +153,8 @@ def _make_env(index):
     strand_models = StrandModels(
         exonic_spliced=StrandModel.from_labels([int(Strand.POS)] * 20, [int(Strand.POS)] * 20)
     )
-    # ⚠ Only the SIZE was ever read from the container this replaces — an int, threaded through
-    # several frames as an object. TRAPS: pure-and-length-censored deleted the container.
+    # Only the SIZE is needed here — an int, rather than a whole length-model container threaded
+    # through several frames as an object.
     max_frag_size = 1000
     estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))
     stats = PipelineStats()

@@ -1,13 +1,12 @@
-"""calibrate(): the acyclic single-pass calibrator — schema + structural invariants.
+"""`calibrate()`: the schema and the structural invariants of one single-pass calibration.
 
-These pin the *mechanics* (a valid result, conservation on each axis, bounded masses, sane exposure,
-κ_rna provenance, the confidence knob). Converged *biology* (paralog rescue, exon→RNA) needs realistic
-data and is covered by the scenario suite.
-
-⭐ **Every expected number here is arithmetic on ``_synthetic.make_synthetic_payload``'s banks**, not a
-recorded output — so a change in the solver moves the composition but never the totals, and a change in
-the AXES fails immediately. The fixture's three axes are deliberately three different lengths
-(3 regions / 2 boundaries / 1 sj).
+These pin the mechanics — a valid result, conservation on each axis, bounded masses, a sane exposure,
+κ_rna's provenance, the confidence knob. Converged biology (paralog rescue, exon→RNA) needs realistic
+data and is covered by the scenario suite instead. Every expected number here is arithmetic on
+``_synthetic.make_synthetic_payload``'s banks rather than a recorded output, so a change in the solver
+moves the composition but never the totals, and a change in the AXES fails immediately. The fixture's
+three axes are deliberately three different lengths (3 regions / 2 boundaries / 1 sj), because equal
+lengths would let an axis mix-up pass.
 """
 
 from __future__ import annotations
@@ -73,40 +72,38 @@ def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
 
 
 def test_sj_flux_is_exported_VERBATIM_and_never_deconvolved():
-    """⭐ The third axis (owner ruling, 2026-07-30). A sj boundary is pure mature RNA by
-    construction, so there is nothing to split: the result carries ``sj_count`` summed over the
-    genome-strand columns, exactly.
+    """The third axis. A sj boundary is pure mature RNA by construction, so there is nothing to
+    split: the result carries ``sj_count`` summed over the genome-strand columns, exactly.
 
-    ⚠ It is two orders of magnitude away from ``mass_rna_spliced_boundary`` on real data at the same boundary
-    — 13 vs 0/6 even in this toy — which is why folding the two into one "mature" number names
-    nothing.
+    It is a different population from ``mass_rna_spliced_boundary`` — a molecule that JUMPED rather
+    than one that crossed contiguously — and the two are far apart in magnitude even in this toy, so
+    folding them into one "mature" number would name nothing.
     """
     result = _run()
     np.testing.assert_array_equal(result.count_rna_sj, SJ_FLUX)
 
 
 def test_the_conserved_sj_mass_recovers_the_ACCUMULATORS_OWN_sj_mass_BANK():
-    """⭐⭐ ``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as
+    """``sj_conserved_mass`` is ``sj_count × (sj_mass / sj_count)``, so it must come back as
     ``sj_mass`` itself — the bank the scanner wrote, not an approximation of it.
 
-    ⛔ **This is the gate that says the published quantity is the CONSERVED one.** The fixture's
-    sj carries 13 incidences and ``sj_mass`` 1.3, a **10×** gap, so the two cannot be confused by
-    coincidence — which they could on real data at a boundary where every fragment used one sj. On
-    ``g00 ss0.99 capture_off`` the same round trip agrees with the bank to 9.1e-13.
+    This is the gate that says the published quantity is the CONSERVED one. The fixture's sj carries
+    13 incidences against an ``sj_mass`` of 1.3, so the two cannot be confused by coincidence — which
+    they could on real data at a boundary where every fragment used exactly one sj.
     """
     payload, _ = make_synthetic_payload()
     result = _run()
-    # ⭐ SUMMED over the strand columns: `sj_mass` went per strand on 2026-08-13 and `substrate` folds
-    # it, because the incidence→fragment conversion has no strand in it. This gate therefore now pins
-    # the FOLD as well as the conversion — and the fixture's columns are unequal (0.9 / 0.4), so a fold
-    # that took one column or their mean cannot pass.
+    # SUMMED over the strand columns: `sj_mass` is per strand and `substrate` folds it, because the
+    # incidence→fragment conversion has no strand in it. This gate therefore pins the FOLD as well as
+    # the conversion — and the fixture's columns are unequal (0.9 / 0.4), so a fold that took one
+    # column or their mean cannot pass.
     np.testing.assert_allclose(
         result.sj_conserved_mass, payload.sj_mass.sum(axis=1), rtol=0, atol=1e-12
     )
     assert payload.sj_mass[0, 0] != payload.sj_mass[0, 1], (
         "the fixture cannot separate the fold rules"
     )
-    # ⚠ Could this have failed? The incidence is 10× the mass here, so passing by accident is not
+    # Could this have failed? The incidence is 10× the mass here, so passing by accident is not
     # available (`TRAPS: could-the-arm-have-fired`).
     assert not np.allclose(payload.sj_mass.sum(axis=1), SJ_FLUX)
 
@@ -123,7 +120,7 @@ def test_masses_bounded_by_their_own_totals():
 
 def test_an_intergenic_region_is_ALL_gDNA():
     """Region 2 carries no exon or intron bit, so no RNA can be contained in it — a structural lock,
-    not an inference. ⚠ ``mass_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
+    not an inference. ``mass_rna_region[2] == 0`` exactly; a floored or smoothed answer here would be
     manufacturing RNA where the annotation says none exists."""
     result = _run()
     assert result.mass_rna_region[2] == 0.0
@@ -134,7 +131,7 @@ def test_an_intergenic_region_is_ALL_gDNA():
 
 
 def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
-    """⭐ Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50:
+    """Arithmetic, not a recorded number. Every region is 100 bp and the gDNA pmf is a delta at 50:
 
         contained  E_f[(100 − 50 + 1)+]                    = 51   — starts that FIT inside
         crossing   E_f[min(w−1, R_lo, R_hi, ...)] at R = ∞  = 49   — offsets that SPAN the boundary
@@ -190,9 +187,9 @@ def test_density_and_supports_sane():
 
 def test_a_mismatched_sj_axis_is_REFUSED():
     """⛔ A sj axis built against a different graph would place every splice on the wrong boundary,
-    and nothing downstream would fault on it — the shape is plausible either way. Refuse at the door
-    (476,719 of 476,732 real fragments once vanished inside a deposit
-    while every golden test passed)."""
+    and nothing downstream would fault on it — the shape is plausible either way, and almost a whole
+    library's fragments can vanish inside a deposit with every golden test still green. So refuse at
+    the door."""
     with pytest.raises(ValueError, match="sj axis"):
         _run(sj=None)  # the payload declares one sj; an empty axis is not it
 

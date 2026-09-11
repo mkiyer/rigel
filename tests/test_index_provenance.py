@@ -1,25 +1,16 @@
 """An index must be rebuildable from its own manifest — sources, their hashes, and the build flags.
 
-    TODO item 1   ·   Ledger: "An index cannot be rebuilt from its own manifest" (2026-07-30)
-
-⛔ WHY THIS EXISTS. `manifest.json` recorded `format_version` and `rigel_version` and nothing else — not
-the FASTA, not the GTF, not the flags. Rebuilding the human index meant *inferring* the source by matching
-region counts, and `--collapse-duplicate-transcripts` was discovered from a build failure. An artifact that
-cannot be reproduced from its own provenance is one nobody can safely re-derive later.
-
-⚠ **This is not.** That trap forbids storing a hash of an artifact *beside*
-that artifact, because the two can drift apart and the stale hash then verifies clean. These hashes are of
-**external inputs the index cannot recompute from itself** — the genome and the annotation are not in the
-index. Provenance, not a cache key. `partition_hash` and `graph_hash` remain computed on demand.
-
-The teeth are in three places, and each is a different failure this catches:
-
-* the expected flag set is read off `inspect.signature(TranscriptIndex.build)`, never written out here, so
-  a new build parameter that does not reach the manifest fails this file rather than silently escaping it;
-* the digests are re-derived by a **different algorithm** (whole-file read here, streamed chunks in the
-  implementation) —;
-* a one-byte edit to the GTF must move its recorded digest, which is what separates hashing the *content*
-  from recording the *path*.
+A manifest recording only a format and a tool version leaves the source to be INFERRED, by matching
+region counts and by discovering a build flag from a failure. This is not
+`TRAPS: a-hash-that-misses-its-artifact`, which forbids storing a hash BESIDE the artifact it
+describes: these hashes are of external inputs the index cannot recompute from itself, so they are
+provenance rather than a cache key, and `partition_hash` and `graph_hash` stay computed on demand.
+The teeth are in three places. The expected flag set is read off
+`inspect.signature(TranscriptIndex.build)` and never written out here, so a new build parameter that
+does not reach the manifest fails this file rather than escaping it. The digests are re-derived by a
+DIFFERENT algorithm — whole file here, streamed chunks in the implementation — so a chunking bug
+cannot be reproduced by the check. And a one-byte edit to the GTF must move its recorded digest,
+which is what separates hashing the CONTENT from recording the PATH.
 """
 
 from __future__ import annotations
@@ -120,12 +111,12 @@ class TestSources:
 
 
 class TestTheDigestItself:
-    """⛔ Added after perturbation: the build-level tests above could NOT see either of these.
+    """PERTURBATION: the build-level tests above cannot see either of these defects.
 
-    Every fixture here is ~2 KB against a 1 MB read chunk, and every fixture path is already absolute —
-    so a digest loop that read only the first chunk, and a record that stored the raw input string,
-    both passed all eight tests. On the real 1.6 GB GTF the first would hash one megabyte of a 1.6 GB
-    file, and the second would record `../refs/genes.gtf`.
+    Every fixture here is ~2 KB against a 1 MB read chunk, and every fixture path is already
+    absolute — so a digest loop that reads only the first chunk, and a record that stores the raw
+    input string, both pass every test above. On a real multi-gigabyte GTF the first hashes one
+    megabyte of it and the second records a relative path that means nothing later.
     """
 
     def test_the_digest_covers_a_file_larger_than_one_read_chunk(self, tmp_path: Path) -> None:
@@ -198,10 +189,10 @@ class TestBuildFlags:
     def test_every_build_parameter_that_is_not_a_source_reaches_the_manifest(
         self, sources: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """⭐ The expected set is read off the signature, so a NEW parameter fails here by construction.
+        """The expected set is read off the signature, so a NEW parameter fails here by construction.
 
-        A hand-written list in this file would drift the moment someone adds a build knob — which is the
-        exact way the manifest got thin in the first place.
+        A hand-written list in this file would drift the moment someone adds a build knob, which is
+        exactly how a manifest ends up recording less than the build used.
         """
         fasta, gtf = sources
         manifest = build_and_read_manifest(fasta, gtf, tmp_path / "idx")

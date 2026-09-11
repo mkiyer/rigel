@@ -1,4 +1,9 @@
-"""Tests for rigel.splice — splice classification enums."""
+"""The splice classification vocabulary shared by the C++ scanner and the Python side.
+
+`SpliceType` and its census field names, the strand column each type maps to, and the column subsets
+built on them. A category added in one language and forgotten in the other reads as a zero rather
+than as an error, so the enum and its derived names are pinned here.
+"""
 
 from pathlib import Path
 

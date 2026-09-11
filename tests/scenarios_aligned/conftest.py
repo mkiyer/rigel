@@ -1,8 +1,10 @@
-"""
-Shared fixtures and helpers for aligner-dependent scenario tests.
+"""Shared fixtures and helpers for the aligner-dependent scenario tests.
 
-These tests require minimap2 and samtools in PATH.  They use
-``Scenario.build()`` (FASTQ → alignment) rather than ``build_oracle()``.
+These scenarios go through ``Scenario.build()`` — FASTQ, then a real alignment — rather than
+``build_oracle()``, so they need minimap2 and samtools on PATH and they see the losses and the
+multimapping an oracle BAM cannot produce. The alignment-rate helper is separate from the oracle
+suite's for that reason: a real aligner may lose reads, and the threshold that means "working" here
+would be a hidden failure there.
 """
 
 import logging

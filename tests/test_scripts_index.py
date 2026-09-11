@@ -1,33 +1,15 @@
-"""⭐⭐ THE INSTRUMENT SHELF HAS AN INDEX, AND THE INDEX IS CHECKED — because a hand-written one drifts.
+"""The instrument shelf's index is checked in both directions, because a hand-written one drifts.
 
-`scripts/design/` is **59 instruments** (re-derived 2026-08-17, after the two dark `flgap` instruments
-were deleted), and it is the project's debug loop rather than sprawl. The problem was never the count. It
-was that the only index — a table in `CLAUDE.md` — is hand-maintained, and by the time it was measured it
-had **drifted by eight entries**, which `CLAUDE.md` itself had to admit in prose.
-
-⚠ Even that one figure is hand-carried prose, so re-derive rather than trust
-(`TRAPS: re-record-the-baseline`): `ls scripts/design/*.py | wc -l`. It is at least *constrained* — the
-two gates below force `rows(CLAUDE.md) + UNDOCUMENTED_DEBT == on disk`, so a wrong count here is visible
-from inside this file. ⛔ **A LINE COUNT IS NOT, AND ONE WAS CARRIED HERE UNTIL IT WENT STALE TWICE.**
-The predecessor read "49 instruments, 15,904 boundaries" and its successor "59 instruments, 25,180 lines",
-which was already wrong by five within the session that measured it — every prose edit to any instrument
-moves it and nothing consumes it, so it has been dropped rather than re-measured. ⚠ "boundaries" in the
-first of those was a bulk rename landing on the word *lines* in its ordinary-English sense, which is the
-two-senses hazard `rename_census.py` exists to flag.
-
-⛔ **An index nobody can trust is worse than none**, because a reader takes its silence as "that script
-does not exist" and rebuilds it. This file makes the table's two promises true:
-
-* every instrument on disk appears in the table, so nothing is invisible;
-* every row of the table names a file that exists, so nothing points at a ghost.
-
-⭐ Same shape as `tests/calibration/test_layering.py`: state the structure once, then let a test hold it,
-rather than a convention everyone means to keep.
-
-⚠ **It deliberately does NOT check the description.** Whether a row's prose is accurate is a judgement a
-test cannot make, and pretending otherwise would be a gate that reads as coverage and is not
-(`TRAPS: a-gate-that-reconstructs`). What it checks is presence in both directions, which is exactly the
-part that rots silently.
+The only index of `scripts/design/` is a table in `CLAUDE.md`, maintained by hand, and an index nobody
+can trust is worse than none: a reader takes its silence as "that script does not exist" and rebuilds
+the instrument. These gates make the table's two promises true — every instrument on disk has a row, so
+nothing is invisible, and every row names a file that exists, so nothing points at a ghost — and they
+hold the same two promises for `scripts/profiling/` against `scripts/README.md`. Every script in all
+three trees must also import and carry a module docstring, since an instrument that raises on import is
+still indexed and still documented. No count of instruments or of lines is carried here: re-derive one
+(`TRAPS: re-record-the-baseline`). The gates deliberately do not judge whether a row's prose is
+ACCURATE — a test cannot, and pretending otherwise would read as more coverage than it has
+(`TRAPS: a-gate-that-reconstructs`).
 """
 
 from __future__ import annotations
@@ -46,9 +28,9 @@ DESIGN_DIR = SCRIPTS / "design"
 #: rows look like ``| `design/toy_panel.py` | … |``
 _ROW = re.compile(r"`design/([a-z0-9_]+\.py)`")
 
-#: ⛔ Instruments that predate the current campaign, were never run in it, and are documented as drift
-#: rather than silently tolerated. ⚠ Each is a DECISION owed: promote it to the table or delete it. Adding
-#: to this list is not a fix — it is a way of saying "not yet", and the list should only ever shrink.
+#: Instruments that predate the current campaign, were never run in it, and are recorded as drift rather
+#: than silently tolerated. Each is a DECISION owed: promote it to the table or delete it. Adding to this
+#: list is not a fix — it is a way of saying "not yet", and the list should only ever shrink.
 UNDOCUMENTED_DEBT: frozenset[str] = frozenset()
 
 #: the instruments — every design/ file except the package marker and the `_`-prefixed helper modules,
@@ -62,28 +44,20 @@ IN_TABLE = frozenset(_ROW.findall(CLAUDE.read_text()))
 
 SIM_DIR = SCRIPTS / "sim"
 
-#: ⛔⛔ **THE THIRD TREE, GATED SINCE 2026-08-17 — AND THE REASON IS TWO ROTS, NOT A PREFERENCE.**
-#: `scripts/profiling/` was covered by NO gate while `design/` and `sim/` were, and it rotted **twice**
-#: with the one defect class the gate here already catches: `pyspy_driver.py` read ``sys.argv[1]`` at
-#: import time (found 2026-08-11) and `scan_profile.py` imported two names `profiler.py` did not export,
-#: so even ``--help`` raised (found 2026-08-17). Both times the defect was identical to one this file
-#: had been catching for months in the next directory along, and only its REACH differed
-#: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-#: ⭐ The owner's decision, recorded in `scripts/README.md`: extend the gate rather than delete the tree,
-#: because the performance work before 0.8.0 needs it.
+#: The third tree. `scripts/profiling/` was covered by no gate while `design/` and `sim/` were, and it
+#: rotted twice with the one defect class the gates here already catch — a driver reading ``sys.argv[1]``
+#: at import time, and an instrument importing two names its helper did not export, so even ``--help``
+#: raised. Only the gate's REACH differed (`TRAPS: a-green-suite-hid-five-dead-instruments`), so the
+#: remedy was to extend it rather than delete the tree.
 PROFILING_DIR = SCRIPTS / "profiling"
 
-#: ⛔⛔ **INSTRUMENTS THAT DO NOT IMPORT, EACH WITH THE REASON AND THE DECISION OWED.** Same contract as
+#: Instruments that do not import, each with the reason and the decision owed. Same contract as
 #: ``UNDOCUMENTED_DEBT``: adding to this is not a fix, it is a way of saying "not yet", and the list
-#: should only ever SHRINK. ⚠ A name here is still gated — the test asserts it fails for the RECORDED
-#: reason, so a script that starts working, or breaks a NEW way, both fail loudly.
-#: ⭐ **EMPTY, AND IT SHOULD STAY THAT WAY.** An entry here is a script the gate KNOWS is dead; it buys
-#: time to repair one, and nothing else. ⛔ The gate refuses a STALE entry as loudly as a broken script,
-#: because an exemption that outlives its defect hides the next real break — which is exactly how five
-#: dead instruments once sat behind a green suite (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-#: ⚠ `prior_units_check.py` was the last entry, exempted on the deleted `_component_region_arrays`, and
-#: it was repaired on 2026-08-17 — at which point THIS gate fired on the stale exemption, which is the
-#: behaviour it was written for.
+#: should only ever shrink. A name here is still gated — the test asserts it fails for the RECORDED
+#: reason, so a script that starts working, and one that breaks a NEW way, both fail loudly. Empty, and
+#: it should stay that way: the gate refuses a stale entry as loudly as a broken script, because an
+#: exemption that outlives its defect hides the next real break
+#: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
 BROKEN_ON_IMPORT: dict[str, str] = {}
 
 
@@ -107,21 +81,15 @@ def _case_id(path: pathlib.Path) -> str:
 
 @pytest.mark.parametrize("path", ALL_SCRIPTS, ids=_case_id)
 def test_every_instrument_still_imports(path):
-    """⛔⛔ **A `src/` DELETION KILLS INSTRUMENTS SILENTLY, AND NOTHING HERE COULD SEE IT.**
+    """A `src/` deletion kills instruments silently, and nothing else here can see it.
 
-    This file's own docstring claimed "measured 2026-08-07, **every one of them imports cleanly**" — a
-    measurement taken once, by hand, and never gated. By 2026-08-11 it was false for **five** scripts and
-    the suite was green the whole time: three died when the fixed-point layer (`INV_LENGTH_SCALE`,
-    `inv_length_quantum`) went at `94d283c0`, one when `enrichment_frame` went at `0d9d422b`, one on
-    `_component_region_arrays`. Two commits, five dead instruments, 3,235 passing tests.
+    Being indexed and having a docstring are both true of a script that raises on line 1, so importing
+    is the cheapest check that an instrument is still connected to the code it measures — and it is the
+    one that rots, since a deletion in `src/` is green everywhere else
+    (`TRAPS: a-green-suite-hid-five-dead-instruments`).
 
-    ⭐ The other tests here check that a script is INDEXED and has a DOCSTRING — both true of a script
-    that raises on boundary 1. Importing is the cheapest possible check that it is still connected to the
-    code it measures, and it is the one that rots.
-
-    ⚠ Import only, never execution: an instrument's numbers need its substrate, and this is a
-    connectivity gate, not a claim that the script is CORRECT. `TRAPS: a-gate-that-reconstructs` —
-    a gate that reads as more coverage than it has is worse than none.
+    Import only, never execution: an instrument's numbers need its substrate, so this is a connectivity
+    gate rather than a claim that the script is CORRECT (`TRAPS: a-gate-that-reconstructs`).
     """
     import importlib.util
     import sys
@@ -131,10 +99,9 @@ def test_every_instrument_still_imports(path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
 
-    # ⛔⛔ REPRODUCE WHAT `python scripts/design/x.py` DOES, OR THE GATE TESTS A DIFFERENT PROGRAM.
-    # Two things the naive spelling gets wrong, and both were measured as FALSE FAILURES on six
-    # instruments that run perfectly (`TRAPS: a-gate-that-reconstructs` — a gate that rebuilds its
-    # subject tests the rebuild):
+    # Reproduce what `python scripts/design/x.py` does, or the gate tests a different program. Two
+    # things the naive spelling gets wrong, both of which read as false failures on instruments that run
+    # perfectly (`TRAPS: a-gate-that-reconstructs` — a gate that rebuilds its subject tests the rebuild):
     #   * the module must be in `sys.modules` BEFORE `exec_module`, or a dataclass resolving its own
     #     `__module__` gets `None` and raises `'NoneType' object has no attribute '__dict__'`;
     #   * the script's OWN directory is `sys.path[0]` under a real invocation, which is how the
@@ -167,7 +134,7 @@ def test_every_instrument_still_imports(path):
 
 
 def test_every_instrument_is_in_the_index_or_named_as_debt():
-    """⛔ A script nobody indexed is a script the next session rebuilds."""
+    """A script nobody indexed is a script the next session rebuilds."""
     missing = sorted(ON_DISK - IN_TABLE - UNDOCUMENTED_DEBT)
     assert not missing, (
         f"{len(missing)} instruments are not in CLAUDE.md's table and are not listed as known debt: "
@@ -185,15 +152,15 @@ def test_the_index_does_not_point_at_ghosts():
 
 
 def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
-    """⛔ **THE THIRD TREE HAS ITS OWN INDEX, AND IT IS `scripts/README.md` RATHER THAN `CLAUDE.md`.**
+    """The third tree has its own index, and it is `scripts/README.md` rather than `CLAUDE.md`.
 
     `CLAUDE.md`'s table indexes `scripts/design/`; the profiling drivers are indexed in the README's
     `profiling/` row instead, so this checks the same two promises there — nothing on disk is invisible,
-    and no row points at a ghost. ⚠ One test rather than two parametrised ones, because the tree is
-    small and the failure message can name both directions at once.
+    and no row points at a ghost. One test rather than two parametrised ones, because the tree is small
+    and the failure message can name both directions at once.
     """
     readme = (SCRIPTS / "README.md").read_text()
-    # ⚠ TREE-QUALIFIED, like `CLAUDE.md`'s `design/…` rows: a bare basename would let the README's
+    # Tree-qualified, like `CLAUDE.md`'s `design/…` rows: a bare basename would let the README's
     # mention of `design/scan_profile.py` satisfy the row for a different instrument of the same name.
     listed = frozenset(re.findall(r"`profiling/([a-z0-9_]+\.py)`", readme))
     on_disk = frozenset(p.name for p in _instruments(PROFILING_DIR))
@@ -210,7 +177,7 @@ def test_the_profiling_tree_is_indexed_in_the_scripts_readme():
 
 
 def test_the_documented_debt_is_real_debt():
-    """⚠ The debt list may only name files that EXIST and are NOT in the table. A stale entry there would
+    """The debt list may only name files that EXIST and are NOT in the table. A stale entry there would
     let a real gap hide behind a name that has already been dealt with."""
     gone = sorted(f for f in UNDOCUMENTED_DEBT if f not in ON_DISK)
     assert not gone, f"debt entries for deleted files — remove them: {gone}"
@@ -223,11 +190,8 @@ def test_the_documented_debt_is_real_debt():
 
 @pytest.mark.parametrize("path", ALL_SCRIPTS, ids=_case_id)
 def test_every_instrument_says_what_it_is_for(path):
-    """⛔ A module docstring is the only thing a reader has before running it. An instrument with none is
-    unusable without reading its argument parser.
-
-    ⚠ It covers all three trees, where it used to cover `design/` alone — the same reach the import gate
-    was given on 2026-08-17, and for the same reason.
+    """A module docstring is the only thing a reader has before running an instrument. One with none is
+    unusable without reading its argument parser. All three trees, the same reach as the import gate.
     """
     doc = ast.get_docstring(ast.parse(path.read_text()))
     assert doc and len(doc.strip()) > 60, (
@@ -237,8 +201,8 @@ def test_every_instrument_says_what_it_is_for(path):
 
 
 def test_the_index_is_not_vacuous():
-    """⚠ `TRAPS: could-the-arm-have-fired` applied here: if the row regex matched nothing, every test above
-    would pass while checking nothing at all."""
+    """`TRAPS: could-the-arm-have-fired` applied here: if the row regex matched nothing, every test
+    above would pass while checking nothing at all."""
     assert len(IN_TABLE) >= 30, (
         f"only {len(IN_TABLE)} rows parsed from CLAUDE.md — the table format moved"
     )

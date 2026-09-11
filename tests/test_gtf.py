@@ -1,4 +1,9 @@
-"""Tests for GTF parse modes (strict vs warn-skip)."""
+"""GTF parsing has two modes, and each must behave as its name promises.
+
+Strict raises on a malformed record and names the line number, because an annotation that silently
+loses rows produces an index nobody can account for. Warn-and-skip continues past the same record,
+and the choice reaches `Transcript.read_gtf` rather than stopping at the parser.
+"""
 
 from pathlib import Path
 

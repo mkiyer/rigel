@@ -1,24 +1,17 @@
 """``lift_choices`` — carrying a second-pass hypothesis choice from the WHOLE library onto a SUBSET.
 
-⛔ **THE IDENTITY THIS PROTECTS.** Splitting a BAM by fragment origin and re-scanning reconstructs the
-pass-one payload exactly, because pass one deposits each fragment independently — which is what makes an
-origin-split oracle a valid truth source. The second pass breaks it: its multinomial is scored against the
-*whole* payload's densities, so ``Sum(partitions) != whole`` if each partition is drained on its own.
-
-⭐ The repair is to score and draw ONCE on the whole library and replay each fragment's chosen hypothesis
-inside whichever partition holds it. These gates pin the three properties that makes rest on:
-
-===  ===============================================================================================
-L1   a partition that IS the whole gets its own choices back, exactly
-L2   a proper subset gets exactly the choices its records drew on the whole — checked per record,
-     not in aggregate, because an aggregate cannot see two records swapping
-L3   the partitions PARTITION: every whole-library choice is consumed exactly once across a
-     complete split.  ⭐ This is the identity itself
-===  ===============================================================================================
-
-Plus the two failure modes, both of which must be loud rather than silent: a record the whole does not
-hold (L4), and a wrong-length choice array (L5). And L6 pins the ambiguity COUNT, because a duplicate key
-split across origins is the one case the lift cannot resolve and the count is what bounds it.
+Splitting a BAM by fragment origin and re-scanning reconstructs the pass-one payload exactly, because
+pass one deposits each fragment independently, and that is what makes an origin-split oracle a valid
+truth source. The second pass breaks it: its multinomial is scored against the WHOLE payload's
+densities, so draining each partition on its own gives ``sum(partitions) != whole``. The repair is to
+score and draw once on the whole library and replay each fragment's chosen hypothesis inside whichever
+partition holds it, and these gates pin what that rests on: a partition that IS the whole gets its own
+choices back exactly; a proper subset gets the choices its records drew on the whole, checked per
+record because an aggregate cannot see two records swapping; a complete split consumes every choice
+exactly once, which is the identity itself. Both failure modes must be loud rather than silent — a
+record the whole does not hold, and a wrong-length choice array — and the ambiguity COUNT is pinned
+too, because a duplicate key split across origins is the one case the lift cannot resolve and the
+count is what bounds the error.
 """
 
 from __future__ import annotations
@@ -33,7 +26,7 @@ from rigel.second_pass import lift_choices
 def _bank(records, n_hyp_each=2):
     """A ``DeferredFragments`` holding ``records`` = list of (ref, start, end, astrand, sjstrand).
 
-    ⚠ Built in the bank's own canonical order — sorted on the record key — because that order is the
+    Built in the bank's own canonical order — sorted on the record key — because that order is the
     contract ``lift_choices`` reads. Every record gets ``n_hyp_each`` hypotheses, which is what makes a
     LOCAL hypothesis index meaningful and transferable."""
     recs = sorted(records)
@@ -63,11 +56,10 @@ class _P:
         self.deferred = bank
 
 
-#: Distinct records in canonical order. ⭐⭐ **THE LAST TWO PAIRS DIFFER ONLY IN `align_strand` AND ONLY
-#: IN `sj_strand`.** That is deliberate and it is what gives the key-completeness gate teeth: with every
-#: record differing in (ref, start, end) already, dropping a trailing key field changes nothing and the
-#: fixture is invariant under a weaker identity — which is exactly the hole perturbation P1 found in the
-#: first version of this file (TRAPS: perturb-every-gate's "one length bin" shape).
+#: Distinct records in canonical order. The last two pairs differ ONLY in `align_strand` and ONLY in
+#: `sj_strand`, which is what gives the key-completeness gate teeth: if every record already differed in
+#: (ref, start, end), dropping a trailing key field would change nothing and the fixture would be
+#: invariant under a weaker identity (`TRAPS: perturb-every-gate`).
 _RECS = [
     (0, 100, 300, 0, 0),
     (0, 400, 700, 0, 1),
@@ -90,7 +82,7 @@ def test_L1_a_partition_that_is_the_whole_gets_its_own_choices_back():
 
 
 def test_L2_a_proper_subset_gets_exactly_the_choices_ITS_records_drew():
-    """⭐ Checked PER RECORD against the whole's own choice for the same key. An aggregate check (same
+    """Checked PER RECORD against the whole's own choice for the same key. An aggregate check (same
     multiset of choices) would pass with two records swapped, which is precisely the bug that would
     misattribute one origin's mass to another."""
     keep = [_RECS[0], _RECS[2], _RECS[4], _RECS[6]]
@@ -104,7 +96,7 @@ def test_L2_a_proper_subset_gets_exactly_the_choices_ITS_records_drew():
 
 
 def test_L3_a_complete_split_consumes_every_choice_EXACTLY_ONCE():
-    """⭐⭐ THE IDENTITY. Two disjoint partitions covering the whole must, between them, use each
+    """The identity. Two disjoint partitions covering the whole must, between them, use each
     whole-library choice once — which is what makes ``Sum(partitions) == whole`` after the drain."""
     a = [_RECS[0], _RECS[3], _RECS[5]]
     b = [_RECS[1], _RECS[2], _RECS[4], _RECS[6]]
@@ -117,7 +109,7 @@ def test_L3_a_complete_split_consumes_every_choice_EXACTLY_ONCE():
 
 
 def test_L4_a_record_the_whole_does_NOT_hold_RAISES():
-    """⛔ Silence here would be the worst outcome: a partition scanned from a different BAM, or a payload
+    """Silence here would be the worst outcome: a partition scanned from a different BAM, or a payload
     pair that drifted, would quietly produce a plausible tally. It must be an error."""
     whole = _P(_bank(_RECS[:3]))
     part = _P(_bank([_RECS[5]]))
@@ -134,15 +126,15 @@ def test_L5_a_wrong_length_choice_array_RAISES():
 
 
 def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
-    """⭐ THE ONE AMBIGUITY, and the gate is that it is REPORTED rather than hidden.
+    """The one ambiguity, and the gate is that it is REPORTED rather than hidden.
 
     Two records with the same key are identical records (``DeferredFragments``' own guarantee), so no
     partition can know which of them it holds. The deposits are interchangeable; the ORIGIN attribution is
     not. So the count is returned and it bounds the truth error exactly — a caller that drops it is the
     defect this gate exists to make visible.
 
-    ⚠ Note the count is per RECORD of the partition, so a partition holding one of a duplicate pair reports
-    1 — it cannot report 'half a fragment', and rounding up is the safe direction for a bound."""
+    The count is per RECORD of the partition, so a partition holding one of a duplicate pair reports 1
+    — it cannot report half a fragment, and rounding up is the safe direction for a bound."""
     dup = (0, 100, 300, 0, 0)
     recs = [dup, dup, (0, 500, 700, 0, 0)]
     whole = _P(_bank(recs))
@@ -150,9 +142,9 @@ def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
     # each partition takes ONE of the identical pair — neither can know which
     lifted, ambiguous = lift_choices(whole, [_P(_bank([dup])), _P(_bank([dup]))], ch)
     assert ambiguous == 2, ambiguous
-    # ⭐⭐ AND THE QUEUE IS CONSUMED ACROSS PARTITIONS, WHICH IS THE IDENTITY ITSELF. The duplicate group's
-    #    two choices are {0, 1}; if the state were per-call both partitions would take run[0] and one entry
-    #    would go unused. Perturbation P2 found exactly that in the first version of this file.
+    # And the queue is consumed ACROSS partitions, which is the identity itself. The duplicate group's
+    #    two choices are {0, 1}; PERTURBATION: make the state per-call and both partitions take run[0]
+    #    while one entry goes unused, which every other gate here passes.
     assert sorted([int(lifted[0][0]), int(lifted[1][0])]) == [0, 1]
     # and a partition of DISTINCT records reports none
     l3, a3 = lift_choices(whole, [_P(_bank([recs[2]]))], ch)
@@ -161,12 +153,13 @@ def test_L6_duplicate_keys_split_across_partitions_are_COUNTED():
 
 
 def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
-    """⭐⭐ KEY COMPLETENESS. ``_RECS`` contains two pairs that differ ONLY in ``align_strand`` and ONLY in
-    ``sj_strand``, so a lift that ignored a trailing field would collapse each pair into one queue and hand
-    the same choice to both — detected here as a mismatch against the whole's own per-record choice.
+    """Key completeness. ``_RECS`` contains two pairs that differ ONLY in ``align_strand`` and ONLY in
+    ``sj_strand``, so a lift that ignored a trailing field would collapse each pair into one queue and
+    hand the same choice to both — detected here as a mismatch against the whole's own per-record
+    choice.
 
-    ⛔ Written because perturbation P1 (truncate the key to four fields) passed every other gate: with all
-    records differing in (ref, start, end), the fixture was invariant under a weaker identity."""
+    PERTURBATION: truncating the key to four fields passes every other gate, because a fixture whose
+    records all differ in (ref, start, end) is invariant under the weaker identity."""
     whole = _P(_bank(_RECS))
     lifted, ambiguous = lift_choices(whole, [whole], _CHOICES)
     assert ambiguous == 0, (
@@ -184,12 +177,12 @@ def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
 
 
 def test_L8_partitions_holding_MORE_copies_of_a_key_than_the_whole_RAISES():
-    """⛔ THE OVER-CONSUMPTION GUARD. Two partitions each holding a record whose key is UNIQUE in the whole
-    is not a partition of one scan — it is two scans, or a double-counted fragment. Without the guard the
-    second partition would silently re-use the first's choice, and ``Sum(partitions) > whole``.
+    """The over-consumption guard. Two partitions each holding a record whose key is UNIQUE in the
+    whole is not a partition of one scan — it is two scans, or a double-counted fragment. Without the
+    guard the second partition silently re-uses the first's choice and ``sum(partitions) > whole``.
 
-    ⭐ Written because perturbation P5 (delete the guard) passed every other gate: no fixture over-consumed,
-    so the guard was never reached (TRAPS: could-the-arm-have-fired — count the opportunities the change had to fire)."""
+    PERTURBATION: deleting the guard passes every other gate, because no other fixture over-consumes
+    and the guard is never reached (`TRAPS: could-the-arm-have-fired`)."""
     only = (0, 100, 300, 0, 0)
     whole = _P(_bank([only, (0, 500, 700, 0, 0)]))
     ch = np.array([0, 1], np.int64)

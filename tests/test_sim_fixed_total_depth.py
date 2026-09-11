@@ -1,14 +1,12 @@
 """Falsification gates for the FIXED-TOTAL depth mode (``simulation.n_total_fragments``).
 
-⭐ **WHY THE MODE EXISTS.** The panel's gDNA axis is a *rate*: ``n_gdna = rate x n_rna``, on top of a
-fixed RNA depth. That cannot reach the high-gDNA end of the real spectrum — a 98 % gDNA library is
-``rate = 49``, i.e. 490 M fragments at a 10 M RNA depth. Real libraries do not work that way either: a
-sequencing run has a fixed **total** budget and the gDNA fraction decides how it is *split*, so holding
-the total and varying the split is both feasible and the more faithful model. Owner ruling, 2026-08-03:
-10 M total per condition is the ceiling, and the RNA-side accuracy loss at high gDNA is accepted.
-
-⛔ Each gate below carries its own perturbation, because a gate that has never been watched to fire has
-not been written yet.
+The panel's gDNA axis is a RATE — ``n_gdna = rate x n_rna`` on top of a fixed RNA depth — which
+cannot reach the high-gDNA end of the real spectrum: a 98 % gDNA library is ``rate = 49``, so 490 M
+fragments at a 10 M RNA depth. Real libraries do not work that way either, since a sequencing run has
+a fixed TOTAL budget and the gDNA fraction decides how it is SPLIT. This mode holds the total and
+varies the split, which is both feasible and the more faithful model; the RNA-side accuracy loss at
+high gDNA is accepted. Each gate below carries its own perturbation, because a gate that has never
+been watched to fire has not been written yet.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ import pytest
 from rigel.sim.orchestrator import resolve_depths
 from rigel.sim.wgs_config import SimulationParams
 
-#: The ladder the panel uses. ⚠ Rates, not fractions: ``f_gdna = rate / (1 + rate)``.
+#: The ladder the panel uses. Rates, not fractions: ``f_gdna = rate / (1 + rate)``.
 LADDER = [0.0, 0.010101, 0.052632, 0.111111, 0.333333, 1.0, 3.0, 9.0, 49.0]
 TOTAL = 10_000_000
 
@@ -47,7 +45,7 @@ def test_the_total_is_CONSERVED_EXACTLY_at_every_rung():
 
 def test_the_realised_gDNA_FRACTION_tracks_the_rung():
     """The point of the ladder is to sweep ``f_gdna``, so the realised fraction must be the requested
-    one. ⚠ Checked against ``rate/(1+rate)``, which is what the rate MEANS — not against the label.
+    one. Checked against ``rate/(1+rate)``, which is what the rate MEANS — not against the label.
 
     PERTURBATION: a ladder that produced a constant fraction would still conserve the total, so the
     gate above cannot catch it. This one requires the fractions to span the range they claim.
@@ -67,9 +65,9 @@ def test_the_realised_gDNA_FRACTION_tracks_the_rung():
 
 def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
     """With nascent enabled the total must still hold: nRNA comes out of the RNA share, it is not
-    added on top. ⭐ Since 2026-08-19 that is STRUCTURAL — the nascent entities are rows of the one
-    RNA multinomial — so the gate is on the ENGINE: every fragment the RNA draw assigns, mature or
-    nascent, is one of the ``n_rna`` the budget gave it.
+    added on top. That is STRUCTURAL — the nascent entities are rows of the one RNA multinomial — so
+    the gate is on the ENGINE: every fragment the RNA draw assigns, mature or nascent, is one of the
+    ``n_rna`` the budget gave it.
 
     PERTURBATION: the same draw with the entity's nascent abundance zeroed must put strictly more
     fragments on the mature row — if nascent were ignored, this gate is vacuous.
@@ -135,7 +133,7 @@ def test_the_nascent_split_is_INSIDE_the_RNA_budget_not_on_top(tmp_path):
 
 
 def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
-    """⛔ The mode must be opt-in. Every existing config omits ``n_total_fragments``, and those panels
+    """The mode must be opt-in. Every existing config omits ``n_total_fragments``, and those panels
     must simulate exactly what they simulated before — a depth change would silently invalidate every
     stored number measured against them.
 
@@ -153,7 +151,7 @@ def test_omitting_the_total_leaves_the_LEGACY_path_byte_identical():
 
 
 def test_a_total_too_small_for_the_rung_RAISES_rather_than_rounding_to_zero():
-    """⛔ At rate 49 a 100-fragment total leaves 2 RNA fragments; at some point the RNA side rounds to
+    """At rate 49 a 100-fragment total leaves 2 RNA fragments; at some point the RNA side rounds to
     zero and the condition silently stops being an RNA-seq library at all. That must fail loudly —
     a mis-stated depth must raise, never quietly produce nothing.
 

@@ -1,14 +1,23 @@
-"""Diagnostic scenarios: isoform collapse and unspliced low-strand.
-
-These are focused regression tests for specific algorithm behaviors
-rather than full sweep-based scenarios.
+"""Focused end-to-end regression scenarios for particular algorithm behaviours,
+rather than the full parameter sweeps the other scenario files run: minor-isoform
+count collapse when one isoform is a strict exonic subset of another, read
+retention for unspliced and spliced genes as strand specificity falls, and a
+pure-mRNA control library in which the pipeline must attribute nearly every
+fragment to RNA and call almost no gDNA.
 """
 
 from rigel.config import EMConfig, PipelineConfig, BamScanConfig
 from rigel.pipeline import run_pipeline
 from rigel.sim import Scenario, run_benchmark
 
-from .conftest import sim_config, SIM_SEED, PIPELINE_SEED
+from .conftest import sim_config, gdna_config, SIM_SEED, PIPELINE_SEED
+
+N_FRAGMENTS = 1000
+GENOME_LENGTH = 10_000
+TRANSCRIPT_ABUNDANCE = 100.0  # Dominant transcript
+
+
+# ── isoform collapse when one isoform is an exonic subset of the other ─
 
 
 class TestIsoformCollapse:
@@ -93,6 +102,9 @@ class TestIsoformCollapse:
             )
         finally:
             sc.cleanup()
+
+
+# ── unspliced and spliced genes as strand specificity falls ────────────
 
 
 class TestUnsplicedLowStrand:
@@ -180,3 +192,87 @@ class TestUnsplicedLowStrand:
             )
         finally:
             sc.cleanup()
+
+
+# ── a pure-mRNA library must not be over-absorbed into gDNA ────────────
+
+
+def _build_scenario(tmp_path):
+    """Build the 10kb scenario with one 2-exon transcript."""
+    scenario = Scenario(
+        "gdna_diag",
+        genome_length=GENOME_LENGTH,
+        seed=SIM_SEED,
+        work_dir=tmp_path,
+    )
+    scenario.add_gene(
+        gene_id="G1",
+        strand="+",
+        transcripts=[
+            {
+                "t_id": "T1",
+                "exons": [(1000, 2000), (4000, 5000)],
+                "abundance": TRANSCRIPT_ABUNDANCE,
+            },
+        ],
+    )
+    return scenario
+
+
+def _run_diagnostic(
+    tmp_path,
+    *,
+    gdna_abundance: float = 0,
+    nrna_abundance: float = 0,
+    strand_specificity: float = 1.0,
+    n_fragments: int = N_FRAGMENTS,
+    label: str = "",
+):
+    """Run the full pipeline and return detailed diagnostic info.
+
+    Returns (bench, pipeline_result, scenario_result, diagnostics_dict).
+    """
+    scenario = _build_scenario(tmp_path)
+    sc = sim_config(strand_specificity=strand_specificity)
+    gdna = gdna_config(gdna_abundance)
+
+    result = scenario.build_oracle(
+        n_fragments=n_fragments,
+        sim_config=sc,
+        gdna_config=gdna,
+        nrna_abundance=nrna_abundance,
+    )
+
+    config = PipelineConfig(
+        em=EMConfig(seed=PIPELINE_SEED),
+        scan=BamScanConfig(sj_strand_tag="auto"),
+    )
+    pr = run_pipeline(result.bam_path, result.index, config=config)
+    bench = run_benchmark(result, pr, scenario_name=label or "gdna_diag")
+    return bench, pr, result
+
+
+class TestGDNADiagnosis:
+    """Regression: a pure-mRNA library must not siphon mRNA into gDNA.
+
+    One 2-exon transcript T1(+) on a 10 kb random genome: exon 1 at [1000, 2000),
+    exon 2 at [4000, 5000), intron [2000, 4000). The 4000 bp span is 40% of the
+    genome, so an over-absorbing gDNA model has plenty of room to show itself.
+    """
+
+    def test_pure_mrna_baseline(self, tmp_path):
+        """Pure mRNA (no gDNA, no nRNA, perfect strand).
+
+        The control case: every fragment is mRNA for T1, so the pipeline
+        should attribute ~all fragments to T1 and call ~0 gDNA / nRNA.
+        """
+        bench, pr, result = _run_diagnostic(
+            tmp_path,
+            gdna_abundance=0,
+            nrna_abundance=0,
+            strand_specificity=1.0,
+            label="pure_mRNA_ss1.0",
+        )
+        t1 = next(t for t in bench.transcripts if t.t_id == "T1")
+        assert t1.abs_diff <= 5, f"T1 mRNA: expected={t1.expected}, observed={t1.observed:.0f}"
+        assert bench.n_gdna_pipeline <= 3, f"Spurious gDNA: {bench.n_gdna_pipeline:.0f}"

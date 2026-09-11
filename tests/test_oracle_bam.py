@@ -1,4 +1,11 @@
-"""Tests for sim BAM coordinate helpers (rigel.sim.bam) + WholeGenomeSimulator oracle-BAM orientation."""
+"""The simulator's coordinate helpers, and the orientation of the oracle BAM they write.
+
+Projecting a transcript-space interval back to genomic blocks, projecting a pre-mRNA interval, the
+CIGAR those blocks imply, and the take-from-left/right helpers that trim a fragment to its two
+reads. Then the whole-genome simulator's oracle BAM, whose mate orientation and strand flags are
+what every truth-scoring instrument reads a fragment's origin from — an inverted pair there is a
+truth source that disagrees with itself.
+"""
 
 import pysam
 

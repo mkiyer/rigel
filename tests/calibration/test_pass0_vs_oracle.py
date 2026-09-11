@@ -5,15 +5,14 @@ contains, and where it does not, was the information destroyed by the accumulato
 solver? Every number it prints is a difference between two per-object arrays, so every way of getting
 that wrong is a way of getting a *plausible* answer. These gates are the ways.
 
-⛔ **EACH GATE HERE CARRIES ITS OWN PERTURBATION**, in the same test, because a gate that has never
-been watched to fire has not been written yet (``test_accumulator_worker_determinism`` learned this the
-expensive way, and so did the four-pool gDNA model at 8 perturbations / 1 blind gate). Reading a gate
-is not evidence; each test below breaks the thing it guards and asserts the guard notices.
+EACH GATE HERE CARRIES ITS OWN PERTURBATION, in the same test, because a gate that has never been
+watched to fire has not been written yet (TRAPS: perturb-every-gate). Reading a gate is not evidence;
+each test below breaks the thing it guards and asserts the guard notices.
 
-⚠ The scenario is a single-reference toy. That is enough for the SCORING logic these gates cover — it
-is arithmetic over two per-object arrays — and it is deliberately NOT enough to judge the deposit path
-(a single-reference index hides ref-id-space mismatches). The deposit path has its own gates in
-``tests/native/`` and its truth-scored instruments run on the panel.
+The scenario is a single-reference toy. That is enough for the SCORING logic these gates cover — it
+is arithmetic over two per-object arrays — and it is deliberately NOT enough to judge the deposit
+path, since a single-reference index hides ref-id-space mismatches. The deposit path has its own
+gates in ``tests/native/`` and its truth-scored instruments run on the panel.
 """
 
 from __future__ import annotations
@@ -35,12 +34,12 @@ from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 def _load_sibling(name: str):
     """Import a ``scripts/design/`` instrument by path.
 
-    ⚠ ``scripts/`` is not a package and must not become one — it is a toolkit of instruments, not an
+    ``scripts/`` is not a package and must not become one — it is a toolkit of instruments, not an
     importable library, and putting an ``__init__.py`` in it would make every script a public API
     surface with a compatibility obligation. Loading by path keeps the dependency one-directional:
     the test knows about the script, the script knows nothing about the test.
 
-    ⚠ The module goes into ``sys.modules`` BEFORE it is executed. ``@dataclass`` resolves its own
+    The module goes into ``sys.modules`` BEFORE it is executed. ``@dataclass`` resolves its own
     class's ``__module__`` through that table, so a module that is not registered fails at class
     definition with an ``AttributeError`` on ``None`` — nothing to do with the script.
     """
@@ -68,15 +67,15 @@ P0 = _load_sibling("pass0_vs_oracle.py")
 def toy(tmp_path_factory):
     """gDNA + mature + nascent, with spliced reads (``calibrate`` refuses a library without them).
 
-    ⭐ Two structures here are load-bearing, and without them two gates below are vacuous:
+    Two structures here are load-bearing, and without them two gates below are vacuous:
 
-    * **staggered isoform boundaries.** ``boundary_spliced`` — a molecule that crossed a contiguous boundary
-      having spliced *elsewhere* — can only be deposited where a region_bound falls INSIDE another
-      transcript's exon. A single-isoform gene has no such region_bound, so its spliced-boundary bank is
-      identically zero and GATE 2's perturbation removes nothing.
-    * **a region shorter than the minimum fragment length.** ``region_contained`` requires the fragment
-      to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY objects
-      — everything else here is covered ~100x deep — and GATE 6 is about exactly those.
+    * staggered isoform boundaries. ``boundary_spliced`` — a molecule that crossed a contiguous
+      boundary having spliced *elsewhere* — can only be deposited where a region bound falls INSIDE
+      another transcript's exon. A single-isoform gene has no such bound, so its spliced-boundary
+      bank is identically zero and GATE 2's perturbation removes nothing.
+    * a region shorter than the minimum fragment length. ``region_contained`` requires the fragment
+      to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY
+      objects — everything else here is covered deeply — and GATE 6 is about exactly those.
     """
     wd = tmp_path_factory.mktemp("p0_orc")
     sc = Scenario("p0", genome_length=9000, seed=17, work_dir=wd / "sim")
@@ -85,8 +84,8 @@ def toy(tmp_path_factory):
         "+",
         [
             {"t_id": "t1", "exons": [(600, 1100), (1800, 2300)], "abundance": 60},
-            # ⚠ the stagger must sit CLOSE to the sj: the fragment has to reach the boundary
-            # contiguously AND reach the sj, so a region_bound 700 bp away is one no fragment spans.
+            # the stagger must sit CLOSE to the sj: the fragment has to reach the boundary
+            # contiguously AND reach the sj, so a bound 700 bp away is one no fragment spans.
             {"t_id": "t1b", "exons": [(1000, 1100), (1800, 1900)], "abundance": 30},
         ],
     )
@@ -120,10 +119,9 @@ def toy(tmp_path_factory):
 def measured(toy, tmp_path_factory):
     """One full run of the instrument on the toy — the object every gate below interrogates.
 
-    ⭐ The two ``truth`` pmfs handed in are DELIBERATELY separated far beyond anything the toy
-    realises. C_input's job here is to prove the lever is wired, and a lever that changes nothing
-    proves nothing (a capture A/B once "passed" with the feature removed because its two arms shared
-    no random input).
+    The two ``truth`` pmfs handed in are DELIBERATELY separated far beyond anything the toy realises.
+    C_input's job here is to prove the lever is wired, and a lever that changes nothing proves
+    nothing (TRAPS: could-the-arm-have-fired).
     """
     return P0.measure_condition(
         bam=str(toy.bam_path),
@@ -147,12 +145,12 @@ def _spike_pmf(mean: int, size: int) -> np.ndarray:
 
 
 def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_path, monkeypatch):
-    """⭐ The cache exists so a solver-debugging campaign can re-measure the panel without re-splitting
+    """The cache exists so a solver-debugging campaign can re-measure the panel without re-splitting
     every BAM. Three things must hold or it is a liability rather than a saving:
 
     1. a warm run must not touch the BAM at all;
     2. it must reproduce the cold build's arrays exactly;
-    3. ⛔ it must STILL run sum-to-full — a cached oracle that skipped validation would be a silently
+    3. it must STILL run sum-to-full — a cached oracle that skipped validation would be a silently
        wrong truth source feeding every number downstream.
 
     PERTURBATION (1): make ``_split_bam`` raise, so a warm run that touched the BAM cannot pass.
@@ -181,7 +179,7 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
             np.asarray(cold.parts[origin].region_contained_count),
         )
 
-    # ⛔ the cached path is NOT exempt from sum-to-full
+    # the cached path is NOT exempt from sum-to-full
     npz = cache / "t" / "gdna" / "payload.npz"
     data = {k: v for k, v in np.load(npz).items()}
     data["region_contained_count"] = data["region_contained_count"].copy()
@@ -192,18 +190,18 @@ def test_the_oracle_cache_hits_and_the_cached_path_is_STILL_VALIDATED(toy, tmp_p
 
 
 def test_a_cache_that_does_not_describe_this_SCAN_is_rebuilt_not_reused(toy, tmp_path, monkeypatch):
-    """⛔ A cache keyed to a different scan configuration is a different tally. It must be REBUILT,
+    """A cache keyed to a different scan configuration is a different tally. It must be REBUILT,
     never silently reused — and never propagated as an error either, since a miss is normal.
 
     PERTURBATION: populate the cache under the default scan config, then ask for it under a changed
     one and require the BAM to be re-split.
 
-    ⚠ ``full`` is re-scanned under the changed config too, and that is not tidying — the first draft
-    of this test reused the default-config ``full`` and sum-to-full rejected the result outright.
-    That is the identity doing its job (two scan configs are two different tallies), but it meant the
-    test was asserting the wrong thing. It also shows the guarantee is belt-and-braces: the cache KEY
-    refuses a stale partition, and the IDENTITY independently refuses a ``full`` that does not match
-    the partitions, even when the key was bypassed.
+    ``full`` is re-scanned under the changed config too, and that is not tidying: reusing the
+    default-config ``full`` makes sum-to-full reject the result outright, because two scan configs
+    are two different tallies, and the test would then be asserting the wrong thing. It also shows
+    the guarantee is belt-and-braces — the cache KEY refuses a stale partition, and the IDENTITY
+    independently refuses a ``full`` that does not match the partitions, even when the key was
+    bypassed.
     """
     import _oracle
 
@@ -276,7 +274,7 @@ def test_a_corrupted_partition_ABORTS_the_measurement(toy, tmp_path, monkeypatch
 def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     """``check_same_basis`` must hold between T and the payload it claims to partition, **per axis**.
 
-    ⚠ Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
+    Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
     one axis cancelling an equal and opposite one on the other is not far-fetched.
 
     PERTURBATION: drop the spliced term from ``mass_rna_boundary``. That is the exact schema mistake
@@ -333,12 +331,12 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
 
 
 def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
-    """⭐ The config lever the instrument relies on must be the same quantity ``_debug`` exposes —
+    """The config lever the instrument relies on must be the same quantity ``_debug`` exposes —
     checked ONCE, here, so the instrument can use the lever and nothing has to spelunk. Two ways of
     obtaining one quantity is how two modules come to disagree about it.
 
-    PERTURBATION: ask for ONE refit iteration. The refit is the whole point of Phase 2, so a single
-    iteration must move the answer; if it does not, the lever is inert and this test is vacuous.
+    PERTURBATION: ask for ONE refit iteration. A single iteration must move the answer; if it does
+    not, the lever is inert and this test is vacuous.
     """
     from rigel.calibration.sweep import chain_region_deconv
 
@@ -400,9 +398,9 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
 
 
 def test_an_object_with_no_mass_is_ABSENT_not_a_confident_zero(measured):
-    """⭐ "No data" must be inert, never "100 % gDNA" — and its mirror, never "0 % gDNA", is just as
-    wrong. Most regions in any real index carry no fragments at all, so a scorer that turns 0/0 into a
-    number reports a beautiful answer for the majority of the genome.
+    """No data must be inert: never "100 % gDNA", and never its mirror "0 % gDNA" either. Most regions
+    in any real index carry no fragments at all, so a scorer that turns 0/0 into a number reports a
+    beautiful answer for the majority of the genome.
 
     PERTURBATION: the mass-weighted mean is *blind* to this by construction (a zero-mass object gets
     zero weight), so the gate is on the COUNT of scored objects and on the class shares — which is
@@ -445,9 +443,10 @@ def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
 
     tau = np.asarray(cap["_tau0_lam"], np.float64)
     is_region = np.asarray(chain.kind) == P0.REGION
-    # ⛔ TRAPS: no-magic-numbers, on BOTH axes — `_type_belief` locks the class without consulting the axis. The earlier
-    # `(~solvable) & is_region` filed every structurally-locked BOUNDARY as `message_only`, i.e. as an object
-    # whose answer came from its neighbours, when nothing was ever asked of it.
+    # A structurally pure-gDNA object exists on BOTH axes — `_type_belief` locks the class without
+    # consulting the axis. A `(~solvable) & is_region` filter files every structurally-locked BOUNDARY
+    # as `message_only`, i.e. as an object whose answer came from its neighbours, when nothing was
+    # ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
     # the SOLVER's own predicate — imported, not restated
     census_no_ev = ~has_own_composition_evidence(tau) & (~census_lock)
@@ -470,10 +469,9 @@ def test_the_solver_classes_are_the_solvers_own_predicate(measured, toy):
         "defect — the scenario needs a G1 BOUNDARY carrying mass (an intergenic<->exon boundary)"
     )
 
-    # ⭐ AND this partition must stay the SOLVER's gate, not a judgement about scoreability. The
-    # audit answers the second question with a CURVE over sd(λ) = 1/√τ and no region_bound at all (a floor was
-    # derived, implemented and refuted — τ is continuous). If a threshold ever appears here, the two
-    # questions have been collapsed into one.
+    # AND this partition must stay the SOLVER's gate, not a judgement about scoreability. The audit
+    # answers the second question with a CURVE over sd(λ) = 1/√τ and no cut at all, because τ is
+    # continuous. If a threshold ever appears here, the two questions have been collapsed into one.
     sa = _load_sibling("solvability_audit.py")
     assert not hasattr(sa, "own_evidence_tau_floor"), (
         "a resolving-power THRESHOLD is back in the audit; it was refuted because tau is continuous "
@@ -520,7 +518,7 @@ def test_the_classes_PARTITION_the_mass_and_the_error(measured):
 
 
 def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE(measured):
-    """⭐ The library-level number looks an order of magnitude better than the per-object answer
+    """The library-level number looks far better than the per-object answer
     because a large under-call sits next to a large over-call. Reporting only the net is what makes
     that invisible, so the two directions are separate fields and their relationship is an identity.
 

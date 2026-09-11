@@ -1,14 +1,13 @@
-"""The BACKBONE's four assertions, and the contract that keeps the shipped policy the shipped policy.
+"""The backbone's four assertions, and the contract that keeps the shipped policy the shipped policy.
 
-⛔⛔ **TRAPS: perturb-every-gate IS THE WHOLE SHAPE OF THIS FILE.** Writing a gate before the fix is half the discipline;
-the other half is breaking the fixed code and watching each gate fire. So every assertion here has a
-matching PERTURBATION test that constructs a policy committing exactly that defect and asserts the backbone
-refuses it. A gate with no firing perturbation has not been written yet — it has been typed.
-
-⭐ The per-condition byte-identity of the restructure against the shipped solver is NOT gated here, because
-it needs a real 70,176-slot chain and a BAM. It is
-``scripts/design/backbone_parity.py`` (421,056 output elements and 18,245,830 diagnostic elements, zero
-differences when the restructure landed).
+The four: every node ends the two passes holding one message from each neighbour it has; every
+delivered row is one row per slot on the solve grid and finite; a slot's population set has at most
+three members; and the write-back touches only solvable slots. TRAPS: perturb-every-gate is the
+shape of the whole file — each assertion has a matching perturbation test that constructs a policy
+committing exactly that defect and asserts the backbone refuses it, because a gate with no firing
+perturbation has not been written yet, it has been typed. Byte-identity against the shipped solver
+per condition is not gated here: it needs a real chain and a BAM, and it is
+``scripts/design/backbone_parity.py``.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ def _counts(msg: PsiMessage, ctx: StepContext | None = None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# ASSERTION 1 — THE TWO PHASES (owner ruling 2026-09-04): every node holds a message from each neighbour
+# ASSERTION 1 — THE TWO PHASES: every node holds a message from each neighbour
 # it has; a real hop must ARRIVE; a missing neighbour is not silence; the kernel sees indices only.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -94,7 +93,7 @@ class _Echo:
 
 
 def test_every_node_holds_a_message_from_each_neighbour_it_has():
-    """⭐⭐ The ruling made executable: after the two passes every interior node holds TWO messages, one
+    """After the two passes every interior node holds two messages, one
     naming its low neighbour and one its high; the chain's two end nodes hold ONE and ``NO_NEIGHBOUR``
     on the open side — which is not a message and not SILENCE."""
     ctx = _ctx()
@@ -153,9 +152,9 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
 
 
 def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
-    """THE LANES (owner ruling 2026-09-04): a kernel that fills every lane — the composition profile
-    and the three level claims — hands them to the solve untouched, and a message with any one lane is
-    not silent. The backbone carries; it never reads a lane."""
+    """The lanes: a kernel that fills every lane — the composition profile and the three level
+    claims — hands them to the solve untouched, and a message with any one lane is not silent. The
+    backbone carries; it never reads a lane."""
     ctx = _ctx()
     full = Message(
         composition=np.zeros(3),
@@ -198,9 +197,6 @@ def test_the_solve_receives_the_two_held_lists_at_the_recipient():
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 # ASSERTION 2 — every delivered ROW is one row per slot on the solve grid, and finite.
-# (The coordinate and share gates that stood here guarded the retired relay's Gaussian channels —
-# TRAPS: off-grid-message-mode — and retired with them on 2026-09-09; a profile on ψ's own grid cannot
-# be delivered off-grid nor claim an over-unit share.)
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -223,7 +219,7 @@ def test_lambda_rows_are_checked_for_shape_and_finiteness():
 
 def test_a_waiver_is_never_silent():
     """Every waived assertion carries a written reason, so a reader learns the defect rather than the
-    exemption. ⛔ An empty reason would be a widened predicate wearing a waiver's clothes."""
+    exemption. An empty reason would be a widened predicate wearing a waiver's clothes."""
     for name, why in SW._KNOWN_VIOLATIONS.items():
         assert len(why) > 80, f"{name}'s waiver does not say what the defect is"
 
@@ -234,10 +230,11 @@ def test_a_waiver_is_never_silent():
 
 
 def test_the_population_set_is_at_most_three_because_it_is_a_function_of_two_bits():
-    """⭐⭐ ``T(slot) = {gDNA} u {RNA+ if free_pos} u {RNA- if free_neg}``, so ``|T| = 1 + free_pos +
-    free_neg`` and it is in ``{1, 2, 3}`` for every possible input. **There are THREE populations and there
-    is no fourth** — "mature" and "nascent" are not species, and RNA inside an intron is RNA that has not
-    spliced at that position. This is structural rather than something to remember, and that is the point."""
+    """``T(slot) = {gDNA} u {RNA+ if free_pos} u {RNA- if free_neg}``, so ``|T| = 1 + free_pos +
+    free_neg`` and it is in ``{1, 2, 3}`` for every possible input. There are three populations and
+    there is no fourth: "mature" and "nascent" are not species, and RNA inside an intron is RNA that
+    has not spliced at that position. Structural rather than something to remember, which is the
+    point."""
     for fp in (True, False):
         for fn in (True, False):
             ctx = _ctx(free_pos=np.full(N, fp), free_neg=np.full(N, fn))
@@ -247,9 +244,9 @@ def test_the_population_set_is_at_most_three_because_it_is_a_function_of_two_bit
 
 
 def test_PERTURBATION_a_fourth_population_is_REFUSED():
-    """⛔ AXIOM 0's tell, executable: a population set with more than three members. A derivation once
-    opened with ``{gDNA, nascent+, nascent-, mature+, mature-}`` and every table built on it came out
-    wrong."""
+    """Axiom 0's tell, executable: a population set with more than three members. A derivation that
+    opens with ``{gDNA, nascent+, nascent-, mature+, mature-}`` produces a wrong table every
+    time."""
     counts = SW.AssertionCounts()
     with pytest.raises(AssertionError, match="population_at_most_three"):
         counts.note("population_at_most_three", np.array([4, 4, 5]) > 3, np.ones(3, bool))
@@ -261,12 +258,14 @@ def test_PERTURBATION_a_fourth_population_is_REFUSED():
 
 
 def test_PERTURBATION_a_writeback_outside_solvable_is_REFUSED():
-    """⛔ The silent version of this made an TRAPS: byte-identity-gate identity gate read ``max|delta| = 1.0``: a replay compared
-    the solve's raw output against the shipped belief, and the two differ by exactly this mask. Reproducing
-    a pipeline stage means reproducing its WRITE-BACK.
+    """Getting this wrong reads as a byte-identity failure of ``max|delta| = 1.0``
+    (TRAPS: byte-identity-gate): a replay compares the solve's raw output against the shipped
+    belief, and the two differ by exactly this mask. Reproducing a pipeline stage means reproducing
+    its write-back.
 
-    ⭐ A locked slot — one with no admissible RNA strand — is never solved and keeps its signature-binary
-    init, because RNA cannot cross a gene boundary so its unspliced mass is purely gDNA."""
+    A locked slot — one with no admissible RNA strand — is never solved and keeps its
+    signature-binary init, because RNA cannot cross a gene boundary so its unspliced mass is purely
+    gDNA."""
     untouched = np.array([False, True, True, False])
     changed = np.array([False, False, True, False])
     counts = SW.AssertionCounts()
@@ -287,9 +286,9 @@ def test_a_writeback_confined_to_solvable_is_accepted():
 
 
 def test_message_propagation_is_a_config_switch_and_defaults_ON():
-    """⛔⛔ **THE LARGEST BEHAVIOUR SWITCH IN THE TOOL, AND IT MUST BE A WRITTEN DECISION.** Which policy
-    ships can never be inherited from a function default that an edit could silently change: the config
-    names it (``message_policy``, ``"transfer"`` since 2026-09-09), ``calibrate`` reads it, and both the
+    """The largest behaviour switch in the tool, and it must be a written decision. Which policy
+    ships can never be inherited from a function default that an edit could silently change: the
+    config names it (``message_policy``, ``"transfer"``), ``calibrate`` reads it, and both the
     shipped policy and the measured floor are reachable from the one call site."""
     import inspect
 
@@ -309,7 +308,7 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
 
 
 def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
-    """⭐ ``SilentPolicy`` is ``solve_chain``'s PARAMETER default (the shipped config installs the
+    """``SilentPolicy`` is ``solve_chain``'s parameter default (the shipped config installs the
     transfer policy), and it is the MEASURED floor every policy is judged against: win on unstranded
     data, minimal harm on stranded data, never pooled."""
     prepared = SilentPolicy().prepare(_ctx())
@@ -319,18 +318,18 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
-    """⭐⭐⭐ **THE STRUCTURAL CLAIM OF THE WHOLE RESTRUCTURE, as a test.** The backbone owns the shape of the
-    solve and the four assertions; every message-composition choice is a policy. If one of these concepts
-    reappears in ``sweep.py``, an operator has leaked back into the backbone and the next reader can no
-    longer hold the working system in their head.
+    """The structural claim of the split, as a test. The backbone owns the shape of the solve and
+    the four assertions; every message-composition choice is a policy. If one of these concepts
+    reappears in ``sweep.py``, an operator has leaked back into the backbone and the next reader can
+    no longer hold the working system in their head.
 
-    ⚠ **It checks IDENTIFIERS, from the AST — not the file's text.** Grepping the source would match the
-    module docstring, which names these very words in order to say they are absent; a test that passes for
-    that reason is vacuous, and this one failed exactly that way when first written.
+    It checks identifiers, from the AST, and not the file's text. Grepping the source would match a
+    docstring naming these very words in order to say they are absent, and a test that passes for
+    that reason is vacuous.
 
-    ⚠ **``capture`` has ONE licensed occurrence and it is not the biology**: ``_capture`` is the diagnostics
-    hook every instrument passes by keyword (the context no longer carries it: no policy read it). Hybrid
-    capture — the thing the message layer argues about — appears nowhere."""
+    ``capture`` has one licensed occurrence and it is not the biology: ``_capture`` is the
+    diagnostics hook every instrument passes by keyword. Hybrid capture — the thing the message
+    layer argues about — appears nowhere."""
     import ast
     import inspect
 
@@ -364,7 +363,7 @@ def test_the_backbone_does_not_know_what_a_message_is_about():
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
-# THE CUBE CHANNEL (the both-stranded locus, 2026-09-08): a (K, K_t) row per AMBIG slot, final solve only
+# THE CUBE CHANNEL (the both-stranded locus): a (K, K_t) row per AMBIG slot, final solve only
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 

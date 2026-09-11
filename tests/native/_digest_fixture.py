@@ -8,7 +8,7 @@ that. This module is the same fixture over the executable specification, and it 
 * the specification's rule can be PERTURBED in-process, which the compiled one cannot, so this is how
   "a changed deposit rule moves the digest" is actually falsified.
 
-⛔ The fixture is duplicated deliberately and the duplication is GATED: if the two drift, the agreement
+The fixture is duplicated deliberately and the duplication is GATED: if the two drift, the agreement
 test fails loudly. Importing the src fixture and re-running it here would test nothing, because both
 sides would then share whatever mistake it contained.
 """
@@ -23,9 +23,9 @@ REGION_BOUNDS = [0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400]
 REGION_TYPES = [0, 2, 2, 1, 2, 2, 1, 2]
 SJ = [(0, 260, 1000, 1), (0, 1120, 2000, 1)]
 
-#: Contained / one boundary / three boundaries / spliced-both-cross / spliced-neither-crosses / two sj and
-#: boundaries / one sj and one boundary. ⭐ Every branch of the deposit rule appears at least once, so a
-#: change confined to any single branch still moves the digest.
+#: Contained / one boundary / three boundaries / spliced-both-cross / spliced-neither-crosses / two sj
+#: and boundaries / one sj and one boundary. Every branch of the deposit rule appears at least once, so
+#: a change confined to any single branch still moves the digest.
 FRAGMENTS = (
     (10, 50, ()),
     (30, 150, ()),

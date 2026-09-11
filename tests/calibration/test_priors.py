@@ -1,29 +1,14 @@
-"""assemble_priors — acyclic CalibrationResult → per-locus EM prior.
+"""``assemble_priors`` — the acyclic ``CalibrationResult`` as a per-locus EM prior, and the locus
+projection it stands on.
 
-⭐⭐ **A REGION OWNS THE FRAGMENTS CONTAINED IN IT; AN BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT.** A locus
-collects both — its regions by genomic overlap, its boundaries by touching those regions — and no boundary's mass is
-ever folded into a region's total. The rule itself is gated in `test_boundary_locus_projection.py`; this file
-gates what ``assemble_priors`` builds on top of it.
-
-The object set is a per-region CONTAINED object at effective support ``S_r = E_f[(L_r − w + 1)+] =
-gdna_region_eff_len`` plus a per-boundary CROSSING object at ``S_e = E_f[w − 1] = gdna_boundary_eff_len``. The
-bedrock invariant these tests pin: under a UNIFORM gDNA field (every object's mass = ρ·S) every
-object's ``min(m/ρ_ref, S)`` returns ``S``, so ``gdna_eff_len == span == ΣS`` exactly — an unenriched
-library contracts NOTHING (factor 1). Using the genomic ``region_size_bp`` as the divisor instead would
-understate short-region density and fabricate a contraction; the dedicated tests below prove the method
-uses the EFFECTIVE support, not the genomic length.
-
-⭐ **THE UNIFORM-FIELD FIXTURE IS NOW THREE BOUNDARIES, AND THAT IS THE EVIDENCE.** It used to carry a
-ten-boundary note explaining that ``gdna_boundary_len`` was ALREADY the halved per-side density length
-``E[min(ℓ,L)]/2``, that each face therefore deposited ``ρ·gdna_boundary_len``, and that an earlier
-version of the fixture had stored the UN-halved length while depositing half the mass — cancelling
-exactly, and hiding a factor of 2 from every assertion in this file for months
-A contiguous boundary is a 0-bp boundary with one mass and one support, so a
-uniform field is just ``mass = ρ·support`` on both axes and there is no ½ left to get wrong.
-
-⚠ **Every span below is byte-identical to the pre-S5.f value** (640 / 650 / 700 / 400 / 850). The
-schema changed; the geometry did not. A number that moved here would mean the port re-derived
-something rather than re-keying it.
+A region owns the fragments contained in it; a boundary owns the fragments that cross it. A locus
+collects both — its regions by genomic overlap, its boundaries by touching those regions, so a
+locus of ``k`` contiguous regions carries ``k + 1`` boundaries including its two outer ones — and
+no boundary's mass is ever folded into a region's total. The second half of this file gates that
+projection; the first half gates what ``assemble_priors`` builds on it, whose bedrock invariant is
+that under a uniform gDNA field every object's ``min(m/ρ_ref, S)`` returns its own effective
+support ``S``, so ``gdna_eff_len == span == ΣS`` exactly and an unenriched library contracts
+nothing. Dividing by the genomic ``region_size_bp`` instead fabricates a contraction.
 """
 
 from __future__ import annotations
@@ -31,8 +16,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.priors import assemble_priors, contended_boundaries
-from rigel.calibration.region_arrays import RegionArrays
+from rigel.calibration.priors import (
+    _boundary_locus_shares,
+    _region_locus_shares,
+    assemble_priors,
+    contended_boundaries,
+)
+from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.result import CalibrationResult
 from rigel.calibration.signature import BIT_EXON_POS
 from rigel.config import CalibrationConfig
@@ -56,13 +46,13 @@ def _result(
     """Build a result on the three axes. One reference with ``n`` regions owns exactly ``n − 1`` boundaries.
 
     ``boundary_*`` default to zeros, so a caller that cares only about contained mass writes only the region
-    arrays — but the boundary axis is still the RIGHT LENGTH, because an boundary axis inconsistent with its
+    arrays — but the boundary axis is still the RIGHT LENGTH, because a boundary axis inconsistent with its
     own region axis is a mis-shaped fixture, not a "no boundaries" one.
 
-    ⭐ **The RNA supports default to the gDNA ones**, so a test that is about projection, conservation
-    or re-keying — not about the length tilt — keeps both components on one support and its ``g:r``
-    ratio is unchanged from the pre-P1 fixture. The tilt itself is exercised where it belongs, in
-    `test_prior_units.py`, by giving the two components genuinely different opportunities.
+    The RNA supports default to the gDNA ones, so a test about projection, conservation or
+    re-keying — not about the length tilt — keeps both components on one support and its ``g:r``
+    ratio is unaffected by it. The tilt is exercised where it belongs, in `test_prior_units.py`, by
+    giving the two components genuinely different opportunities.
     """
     ng = np.asarray(region_g, dtype=np.float64)
     n = ng.shape[0]
@@ -86,7 +76,7 @@ def _result(
             if boundary_spliced is None
             else np.asarray(boundary_spliced, dtype=np.float64)
         ),
-        # ⭐ GEOMETRY, not a split. 1.0 is the identity — a boundary whose flanks both exceed every
+        # Geometry, not a split. 1.0 is the identity — a boundary whose flanks both exceed every
         # fragment length, where one crossing IS one fragment. A test exercising K-inflation overrides it.
         boundary_mass_per_crossing=(
             np.ones_like(ez)
@@ -189,16 +179,16 @@ def test_factor_one_under_uniform_gdna():
     ra = _regions([0, 120, 320], [120, 320, 400])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 400)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
-    # ⭐ The prior is a CONSERVED FRAGMENT COUNT read out of the bank: the contained mass ρ·Σregion_eff
+    # The prior is a CONSERVED FRAGMENT COUNT read out of the bank: the contained mass ρ·Σregion_eff
     # (8.0) plus the crossing mass ρ·Σboundary_eff (4.8) rescaled by q, which this fixture sets to the
     # identity 1.0 — flanks exceeding every fragment length, where one crossing IS one fragment.
-    # ⚠ It replaces `ρ · span_bp` = 8.0, the retired density rule: that reached fragment units by
-    # dividing the mass by its own opportunity and re-integrating, and dropped the 4.8 of crossing
-    # fragments entirely, because a 0-bp boundary contributes no genomic span to integrate over.
+    # The wrong answer it must not equal is `ρ · span_bp` = 8.0, a density rule that reaches fragment
+    # units by dividing the mass by its own opportunity and re-integrating: it drops the 4.8 of
+    # crossing fragments entirely, because a 0-bp boundary contributes no genomic span to integrate.
     np.testing.assert_allclose(
         priors.gdna_prior_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9
     )
-    assert not np.isclose(priors.gdna_prior_count[0], rho * 400.0)  # ⛔ not the retired ρ·span_bp
+    assert not np.isclose(priors.gdna_prior_count[0], rho * 400.0)  # not the ρ·span_bp density rule
 
 
 def test_factor_one_holds_for_any_density():
@@ -235,9 +225,8 @@ def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
     """The precondition for the per-object ``min()`` factor-1 identity, asserted on the objects
     themselves rather than on a folded total.
 
-    ⛔ It used to read through ``_component_region_arrays``, which summed each boundary's mass into a flank
-    region before dividing — so it could only ever check the FOLD's density, never a boundary's own. Regions and
-    boundaries are peers now, so each axis is checked on its own axis.
+    Summing each boundary's mass into a flank region before dividing would check the fold's density
+    and never a boundary's own. Regions and boundaries are peers, so each axis is checked on its own.
     """
     region_eff = np.array([120.0, 200.0, 80.0])
     boundary_eff = np.array([120.0, 120.0])
@@ -251,11 +240,11 @@ def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
 
 
 def test_single_locus_projects_both_components():
-    # ⭐ The priors are CONSERVED FRAGMENT COUNTS. No crossing mass here, so both are the contained
+    # The priors are CONSERVED FRAGMENT COUNTS. No crossing mass here, so both are the contained
     # mass alone — one deposit per contained fragment, nothing to convert:
-    #   gDNA: Σm = 4.5      (the retired ρ·span rule gave 4.5/750 · 450 = 2.7)
-    #   RNA : Σm = 12.0     (the retired rule gave 7.2)
-    # ⚠ The g:r RATIO is 0.375 either way, because a common divisor cancels from a ratio. That is
+    #   gDNA: Σm = 4.5      (a ρ·span density rule would give 4.5/750 · 450 = 2.7)
+    #   RNA : Σm = 12.0     (and 7.2)
+    # The g:r RATIO is 0.375 either way, because a common divisor cancels from a ratio. That is
     # exactly why the ratio is NOT what discriminates the two rules — the totals are.
     cal = _result(
         region_g=[1.0, 2.0, 1.5],
@@ -277,8 +266,8 @@ def test_single_locus_projects_both_components():
 def test_gdna_mass_conservation_regions_plus_boundaries():
     # CONSERVATION OF MASS. total gDNA = Σ region mass + Σ boundary mass, every object counted exactly once.
     #   regions = [2,3,1] (Σ=6); boundaries = [2,3] (Σ=5)  ⇒  total gDNA = 11.
-    # ⭐ The predecessor reached 11 by summing FOUR half-arrays — right[0]+left[1] and right[1]+left[2],
-    # with the two terminal sides zeroed by hand. There are no halves and no terminals now.
+    # Two axes summed once each: there are no per-face half-arrays and no terminal slots to zero by
+    # hand, so there is no half of a boundary that can be counted twice or not at all.
     cal = _result(
         region_g=[2.0, 3.0, 1.0],
         region_r=[0.0, 0.0, 0.0],
@@ -288,9 +277,9 @@ def test_gdna_mass_conservation_regions_plus_boundaries():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    # ⭐ OBJECT conservation is what this test is named for: the locus covers every region, so it collects
+    # OBJECT conservation is what this test is named for: the locus covers every region, so it collects
     # every region AND every boundary, and the prior is their total — nothing dropped, nothing double-counted.
-    # ⛔⛔ AND HERE THE PRIOR EQUALS THE RAW SUM — 11.0 — WHICH IS NOT EVIDENCE THAT IT *IS* A RAW SUM.
+    # And here the prior equals the raw sum, 11.0, which is NOT evidence that it *is* a raw sum.
     # This fixture's q is the identity 1.0, so incidence and fragment coincide by construction and this
     # test CANNOT tell the two rules apart. The discrimination lives in the q ≠ 1 test below and in
     # `test_prior_units.py`; asserting 11.0 here would otherwise read as a ruling that it is a raw sum.
@@ -305,7 +294,7 @@ def test_gdna_mass_conservation_regions_plus_boundaries():
 
 
 def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
-    """⭐⭐ **THE ONE TEST IN THIS FILE THAT SEPARATES A CONSERVED COUNT FROM A RAW INCIDENCE SUM.**
+    """The one test in this file that separates a conserved count from a raw incidence sum.
 
     Every other fixture here leaves ``boundary_mass_per_crossing`` at the identity 1.0, where one crossing
     IS one fragment and the two rules coincide — so they all pass under either. This one sets ``q`` to
@@ -314,7 +303,7 @@ def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
         gDNA = 3 (contained, one deposit each) + 4·0.5 + 8·0.25 = 7.0     raw sum would be 15.0
         RNA  = 6                               + 4·0.5 + 4·0.25 = 9.0     raw sum would be 14.0
 
-    ⛔ The CONTAINED term must NOT be rescaled — a contained fragment touches exactly one region and is
+    The CONTAINED term must not be rescaled — a contained fragment touches exactly one region and is
     already a count. Rescaling it too would give 3·? and is the other wrong answer this pins out.
     """
     cal = _result(
@@ -330,7 +319,7 @@ def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
     np.testing.assert_allclose(priors.gdna_prior_count, [7.0])
     np.testing.assert_allclose(priors.rna_prior_count, [9.0])
-    assert not np.isclose(priors.gdna_prior_count[0], 15.0)  # ⛔ not the raw incidence sum
+    assert not np.isclose(priors.gdna_prior_count[0], 15.0)  # not the raw incidence sum
     assert not np.isclose(priors.rna_prior_count[0], 14.0)
 
 
@@ -338,10 +327,9 @@ def test_spliced_mass_withheld_from_rna_prior():
     # A spliced fragment has no gDNA candidate in the EM (gDNA does not splice) → it is guaranteed-RNA
     # and assigned directly, so it must NOT load rna_prior_count. Region RNA [3,4,5] (Σ=12) plus boundary RNA
     # [4,4] of which [1,3] is spliced ⇒ RNA mass = 12 + (4−1) + (4−3) = 16 (NOT 20).
-    # ⭐ q is the identity here, so the conserved fragment count is that 16 unchanged; gDNA is its
-    # contained 4.5 (no crossing mass). The retired ρ·span rule read 6.4 and 1.8.
-    # The WITHHOLDING is what this test pins, and it survives the units change intact: without it the
-    # RNA mass would be 20 and the prior 20.0.
+    # q is the identity here, so the conserved fragment count is that 16 unchanged; gDNA is its
+    # contained 4.5 (no crossing mass). The WITHHOLDING is what this test pins: without it the RNA
+    # mass would be 20 and the prior 20.0.
     cal = _result(
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
@@ -358,12 +346,12 @@ def test_spliced_mass_withheld_from_rna_prior():
 
 
 def test_the_sj_flux_does_NOT_enter_the_rna_prior():
-    """⭐ The ruling, pinned. A sj fragment is certified RNA in exactly the sense a spliced
-    crossing is withheld for — it has no gDNA candidate in the EM — so counting it would load the RNA
-    side of a split that arbitrates only UNSPLICED fragments. A locus whose RNA is fully spliced SHOULD
-    get a near-zero ``rna_prior_count``: its unspliced fragments really are gDNA or nascent.
+    """A sj fragment is certified RNA in exactly the sense a spliced crossing is withheld for — it
+    has no gDNA candidate in the EM — so counting it would load the RNA side of a split that
+    arbitrates only unspliced fragments. A locus whose RNA is fully spliced should get a near-zero
+    ``rna_prior_count``: its unspliced fragments really are gDNA or nascent.
 
-    ⚠ The result carries the flux for QC (`test_calibrate`); ``assemble_priors`` must ignore it, and
+    The result carries the flux for QC (`test_calibrate`); ``assemble_priors`` must ignore it, and
     that is a deliberate asymmetry rather than an oversight.
     """
     base = _result(
@@ -407,15 +395,15 @@ def test_intergenic_region_dropped():
 
 
 def test_a_locus_keeps_the_outer_boundary_against_its_INTERGENIC_flank():
-    """⭐ A locus's far-LEFT outer boundary has an intergenic left flank — a region the projection DROPS.
+    """A locus's far-left outer boundary has an intergenic left flank — a region the projection drops.
 
-    A fragment crossing that boundary overlaps the locus, so it is one of its EM candidates and its mass
-    must load the locus's prior. ⛔ The old assembler folded a boundary's mass into ONE flank region and so
-    lost this boundary into the dropped intergenic flank — it needed an explicit intergenic RE-KEY to get it
-    back. There is nothing to re-key now: the boundary touches region 1, so it is the locus's boundary.
+    A fragment crossing that boundary overlaps the locus, so it is one of its EM candidates and its
+    mass must load the locus's prior. Folding a boundary's mass into one flank region loses this
+    boundary into the dropped intergenic flank, and then needs an explicit intergenic re-key to get
+    it back; there is nothing to re-key when the boundary is its own object touching region 1.
 
-    ⚠ The discrimination is UNCHANGED in strength: were the outer boundary dropped, the locus would see 3
-    rather than 10 — a 70 % under-count with no shape error anywhere.
+    Were the outer boundary dropped the locus would see 3 rather than 10 — a large under-count with
+    no shape error anywhere to give it away.
     """
     # region 0 intergenic, regions 1-2 exonic ⇒ boundary 0 is the far-LEFT outer boundary, boundary 1 is interior.
     cal = _result(
@@ -500,8 +488,8 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(_blind_boundary_cal(0.0), ra, [_ml(0, [(0, 0, 300)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [400.0])  # effective span = 300 + 2·50
-    # ⭐ boundaries 2+3 = 5 crossing fragments (q is the identity). The point stands — crossing-only mass IS
-    # still counted where calibration is contained-blind (it is > 0). The retired rule read 3.75.
+    # boundaries 2+3 = 5 crossing fragments (q is the identity). The point stands — crossing-only mass
+    # IS still counted where calibration is contained-blind (it is > 0).
     np.testing.assert_allclose(priors.gdna_prior_count, [5.0])
 
 
@@ -524,25 +512,25 @@ def _stray_on_a_dead_boundary_cal(stray: float) -> CalibrationResult:
 
 
 def test_stray_mass_on_a_zero_opportunity_boundary_is_dropped_from_the_eff_len():
-    """⭐ **THE P1e PERTURBATION, RELOCATED TO WHERE THE DIVISOR STILL LIVES.** Its other half is
+    """Mass on a zero-opportunity object is dropped from the effective length. Its other half is
     `test_prior_units.test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_divisor`,
-    which asserts the opposite for the PRIOR — deliberately, because a count has nothing to divide by.
-    The eff-length still divides by ρ_ref and still pools, so here the drop is load-bearing.
+    which asserts the opposite for the prior — deliberately, because a count has nothing to divide
+    by. The eff-length still divides by ρ_ref and still pools, so here the drop is load-bearing.
 
-    ``mass > 0`` with ``support == 0`` is an ordinary configuration: ``contained_eff_length`` is exactly
-    0 wherever an object is shorter than that component's shortest fragment (21.7 % of chr22 regions for
-    RNA, 18.7 % for gDNA), and the solver can still put mass there because ``f_g`` is an inference.
+    ``mass > 0`` with ``support == 0`` is an ordinary configuration: ``contained_eff_length`` is
+    exactly 0 wherever an object is shorter than that component's shortest fragment, which is a
+    fifth of the regions on a real chromosome, and the solver can still put mass there because
+    ``f_g`` is an inference.
 
-    ⛔ Two wrong answers this pins out, both measured by injecting them:
+    Two wrong answers this pins out, both checked by injecting them:
 
-    * ``mass / max(support, 1e-9)`` — a density of ~1e9, which is how a "no data" default of 100 % gDNA
-      once seeded false gDNA into neighbouring exons;
-    * mass kept in the numerator with its support omitted from the denominator — ``ρ`` inflated with no
-      exposure to pay for it. **Both sides of a pooled rate, or neither.**
+    * ``mass / max(support, 1e-9)`` — a density of ~1e9, which is how a "no data" default of 100 %
+      gDNA seeds false gDNA into neighbouring exons;
+    * mass kept in the numerator with its support omitted from the denominator — ``ρ`` inflated with
+      no exposure to pay for it. Both sides of a pooled rate, or neither.
 
-    Either one moves the eff-length by **+19.97 bp** at ``stray = 20`` and **+44.93 bp** at
-    ``stray = 5000``, where it pins against the 850 bp boundary ceiling. With the drop it does not move at
-    all, and this test sweeps 250× of stray mass to say so.
+    Either one moves the eff-length by tens of bp here, up against the boundary ceiling. With the
+    drop it does not move at all, and this test sweeps 250× of stray mass to say so.
     """
     ra = _regions(
         list(range(0, 700, 100)), list(range(100, 800, 100)), signature=[0] + [BIT_EXON_POS] * 6
@@ -552,7 +540,7 @@ def test_stray_mass_on_a_zero_opportunity_boundary_is_dropped_from_the_eff_len()
     for stray in (20.0, 5000.0):
         loud = assemble_priors(_stray_on_a_dead_boundary_cal(stray), ra, ml)
         np.testing.assert_allclose(loud.gdna_eff_len, [quiet], rtol=1e-12)
-        # ⛔ non-vacuity: the eff-len is genuinely contracted below the boundary ceiling the undropped
+        # non-vacuity: the eff-len is genuinely contracted below the boundary ceiling the undropped
         # mass would push it to, so "unchanged" is a real constraint and not both arms at the clamp.
         assert quiet < 850.0
         # ...and the stray mass is NOT silently discarded everywhere — the prior still counts it.
@@ -610,13 +598,13 @@ def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
 
 
 def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
-    """⭐⭐ **THE GATE THE ``min()`` DOCSTRING CLAIMED AND NOTHING ENFORCED**, found by perturbation.
+    """The contraction is per object, which is what the ``min()`` docstring claims.
 
-    ``elen`` contracts each object separately — ``Σ min(m_n/ρ_ref, S_n)`` — and the docstring has long
-    said that folding them into one ``min()`` over the summed mass would UNDER-contract *"a captured
-    exon whose boundary runs into a depleted intron"*. Nothing tested it.
+    ``elen`` contracts each object separately — ``Σ min(m_n/ρ_ref, S_n)`` — because folding them
+    into one ``min()`` over the summed mass under-contracts a captured exon whose boundary runs into
+    a depleted intron.
 
-    ⛔ **A single-density fixture cannot**: under a uniform field every object sits exactly at ``ρ_ref``,
+    A single-density fixture cannot see the difference: under a uniform field every object sits at ``ρ_ref``,
     both forms return ``span``, and the locus-level clamp to ``span`` hides any excess anyway. The
     discriminating shape needs one object ABOVE ``ρ_ref`` and one BELOW, so the enriched object's excess
     would compensate the depleted one's deficit under a fold and cancel — while per object the excess is
@@ -647,5 +635,153 @@ def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
     contained_ev = 10.0
     w = contained_ev / (contained_ev + 1.0)
     np.testing.assert_allclose(eff, w * per_object + (1.0 - w) * span, rtol=1e-9)
-    # ⛔ the folded form would read min((10+250)/1, 150) = 150 ⇒ eff == span ⇒ NO contraction at all
+    # the folded form would read min((10+250)/1, 150) = 150 ⇒ eff == span ⇒ NO contraction at all
     assert eff < span - 1.0, "the enriched boundary paid for the depleted region — the fold is back"
+
+
+# ── the locus projection underneath: a locus collects REGIONS and BOUNDARIES alike ────────────
+
+
+def _regions_from_bounds(bounds, signature=None, ref_id=None) -> RegionArrays:
+    """Regions tiling one (or more) references from the given region_bound positions."""
+    bounds = np.asarray(bounds, dtype=np.int64)
+    starts, ends = bounds[:-1], bounds[1:]
+    n = starts.shape[0]
+    rid = np.zeros(n, dtype=np.int32) if ref_id is None else np.asarray(ref_id, np.int32)
+    n_refs = int(rid.max()) + 1 if n else 1
+    offsets = np.searchsorted(rid, np.arange(n_refs + 1)).astype(np.int32)
+    return RegionArrays(
+        ref_id=rid,
+        start=starts,
+        end=ends,
+        signature=(
+            np.full(n, BIT_EXON_POS, dtype=np.uint8)
+            if signature is None
+            else np.asarray(signature, np.uint8)
+        ),
+        strand_class=np.zeros(n, dtype=np.int8),
+        region_size_bp=(ends - starts).astype(np.float64),
+        ref_offsets=offsets,
+        n_refs=n_refs,
+    )
+
+
+def _dense(idx, lid, share, n_boundaries, n_loci) -> np.ndarray:
+    """The (boundary, locus) share triples as a dense matrix — readable assertions, small fixtures only."""
+    out = np.zeros((n_boundaries, n_loci), dtype=np.float64)
+    out[np.asarray(idx, np.int64), np.asarray(lid, np.int64)] = share
+    return out
+
+
+# --- the rule -------------------------------------------------------------------------------------
+
+
+def test_a_locus_of_k_regions_carries_k_plus_1_boundaries():
+    """The rule, stated as a count. 5 regions; the locus is the middle 3, flanked by intergenic.
+
+    Its boundaries are the 4 touching those 3 regions: the two interior ones and the two outer ones.
+    A form that kept only interior boundaries would give 2, and a left-keying form with no re-key
+    would keep only one outer boundary and give 3.
+    """
+    ra = _regions_from_bounds([0, 100, 200, 300, 400, 500])
+    ml = [_ml(0, [(0, 100, 400)])]  # regions 1,2,3
+    e, lid, w = _boundary_locus_shares(ra, ml, 1)
+    assert sorted(e.tolist()) == [0, 1, 2, 3], "expected the 4 boundaries touching regions 1-3"
+    np.testing.assert_allclose(w, 1.0)
+    assert set(lid.tolist()) == {0}
+
+
+def test_an_boundary_between_two_intergenic_regions_belongs_to_no_locus():
+    """The complement, and it is what makes the rule a rule rather than "keep everything".
+
+    A fragment crossing a boundary with no locus region on either side overlaps no transcript, so it is a
+    candidate nowhere and must load no prior.
+    """
+    ra = _regions_from_bounds([0, 100, 200, 300, 400])
+    ml = [_ml(0, [(0, 300, 400)])]  # region 3 only
+    e, lid, _w = _boundary_locus_shares(ra, ml, 1)
+    assert sorted(e.tolist()) == [2], "only the boundary touching region 3 may be kept"
+    assert set(lid.tolist()) == {0}
+
+
+def test_a_region_touching_ONE_locus_gives_it_everything():
+    """The share is an allocation, not an overlap fraction — easy to misread, and load-bearing.
+
+    ``_region_locus_shares`` normalises across the loci a region touches, so a region overlapping
+    exactly one locus contributes all its mass there however small the overlap. That is what makes
+    the projection conserve: a region's mass is never partially discarded, only distributed.
+    """
+    ra = _regions_from_bounds([0, 100, 200])
+    ml = [_ml(0, [(0, 0, 160)])]  # region 1 = [100,200) overlaps by only 60 bp
+    r_idx, _lid, r_w = _region_locus_shares(ra, ml, 1)
+    got = dict(zip(r_idx.tolist(), r_w.tolist()))
+    assert got[0] == pytest.approx(1.0)
+    assert got[1] == pytest.approx(1.0), "a 60 % overlap with the ONLY locus still allocates 100 %"
+
+
+def test_an_boundary_takes_the_MAX_share_of_its_two_flanks():
+    """A region genuinely split BETWEEN two loci has fractional shares; its boundaries take the larger.
+
+    ``max``, not a sum and not a mean: if a region is part of a locus then its two boundaries are
+    part of that locus, so a boundary inherits the stronger of its two flanks' memberships.
+
+    region 0 = [0,100) lies wholly in locus 0; region 1 = [100,200) is split 50/50 between loci 0 and 1.
+    The single boundary between them is therefore ``max(1.0, 0.5) = 1.0`` in locus 0 and
+    ``max(0.0, 0.5) = 0.5`` in locus 1.
+    """
+    ra = _regions_from_bounds([0, 100, 200])
+    ml = [_ml(0, [(0, 0, 150)]), _ml(1, [(0, 150, 200)])]
+    r_idx, r_lid, r_w = _region_locus_shares(ra, ml, 2)
+    got = dict(zip(zip(r_idx.tolist(), r_lid.tolist()), r_w.tolist()))
+    assert got[(0, 0)] == pytest.approx(1.0)
+    assert got[(1, 0)] == pytest.approx(0.5) and got[(1, 1)] == pytest.approx(0.5)
+    e, lid, w = _boundary_locus_shares(ra, ml, 2)
+    assert e.tolist() == [0, 0]
+    assert dict(zip(lid.tolist(), w.tolist())) == {0: pytest.approx(1.0), 1: pytest.approx(0.5)}
+
+
+def test_a_contended_boundary_carries_no_mass():
+    """The claim the rule rests on, as a measurement rather than an assumption.
+
+    Two adjacent regions in different multi-loci would give their shared boundary to both, so its
+    shares sum to 2. That is unreachable for a boundary that carries mass: any fragment crossing it
+    overlaps transcripts in both loci, is a candidate in both, and the union-find would already have
+    merged them into one multi-locus.
+
+    So the assertion is not "it cannot happen" but "where it happens, the mass is zero" — and the
+    projection reports such boundaries rather than silently renormalising them.
+    """
+    ra = _regions_from_bounds([0, 100, 200])
+    ml = [_ml(0, [(0, 0, 100)]), _ml(1, [(0, 100, 200)])]  # adjacent, no intergenic between
+    e, lid, w = _boundary_locus_shares(ra, ml, 2)
+    assert e.tolist() == [0, 0], "the contended boundary reaches both loci"
+    assert sorted(lid.tolist()) == [0, 1]
+    assert float(w.sum()) == pytest.approx(2.0), "shares sum above 1 — the reportable configuration"
+
+
+def test_two_references_do_not_share_an_boundary():
+    """A boundary exists only between two regions of the SAME reference; the axis must not straddle refs."""
+    ra = _regions_from_bounds([0, 100, 200, 0, 100, 200][:4], ref_id=[0, 0, 1])
+    lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
+    assert lo.tolist() == [0], "one boundary, inside reference 0 only"
+    assert hi.tolist() == [1]
+
+
+def test_empty_loci_returns_empty():
+    ra = _regions_from_bounds([0, 100, 200])
+    e, lid, w = _boundary_locus_shares(ra, [], 0)
+    assert e.size == lid.size == w.size == 0
+
+
+def test_the_region_projection_is_unchanged_by_the_refactor():
+    """``_project_regions_to_loci`` must keep its exact behaviour: the region half does not change
+    when the boundary half does. It is expressed through ``_region_locus_shares``, so this pins that
+    the shared helper introduced no drift — shares normalise across the loci a region touches, and a
+    region touching none is dropped.
+    """
+    from rigel.calibration.priors import _project_regions_to_loci
+
+    ra = _regions_from_bounds([0, 100, 200, 300])
+    ml = [_ml(0, [(0, 0, 50)]), _ml(1, [(0, 50, 100)])]  # region 0 split 50/50, regions 1-2 outside
+    out = _project_regions_to_loci(ra, ml, 2, {"m": np.array([10.0, 99.0, 99.0])})
+    np.testing.assert_allclose(out["m"], [5.0, 5.0])

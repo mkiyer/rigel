@@ -1,20 +1,16 @@
-"""Effective lengths: ONE placements formula, per component, per frame.
-
-
+"""Effective lengths: ONE placement formula, per component, per frame.
 
 An effective length is the expected number of admissible fragment START POSITIONS — the divisor that
-turns an observed count into a start density. There is one formula per frame and nothing else:
+turns an observed count into a start density — and there is one formula per frame and nothing else::
 
     contained   E_f[ (region_len − w + 1)+ ]
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]
 
-⭐ **The crossing formula covers BOTH boundary kinds and both components.** Mean fragment length is its
-large-reach limit, not a separate case: gDNA's template is the chromosome, so its reaches are unbounded
-and its divisor collapses to ``mu − 1``. RNA's template ends where its transcript ends.
-
-⚠ Every test here enumerates integer start positions rather than restating the closed form. An earlier
-version of this file computed the "brute force" from the same algebra as the implementation, so the pair
-agreed while BOTH were off by one.
+The crossing formula covers BOTH boundary kinds and both components: mean fragment length is its
+large-reach limit rather than a separate case, since gDNA's template is the chromosome and its
+reaches are unbounded, while RNA's template ends where its transcript ends. Every test here
+ENUMERATES integer start positions instead of restating the closed form, because a "brute force"
+written from the same algebra as the implementation agrees with it while both are off by one.
 """
 
 from __future__ import annotations
@@ -78,10 +74,11 @@ def test_contained_is_the_enumerated_start_count(region_len, w):
 
 
 def test_contained_at_a_region_exactly_one_fragment_long_is_ONE_not_zero():
-    """⚠ The ``+1`` is the discrete count of start positions, not a correction factor.
+    """The ``+1`` is the discrete count of start positions, not a correction factor.
 
-    Dropping it makes the divisor exactly 0 when a region is one fragment long — a division by zero that
-    was floored to an epsilon and produced densities of ~1e9 on 12.4 % of fine-partition regions.
+    Dropping it makes the divisor exactly 0 when a region is one fragment long — a division by zero
+    that a floor turns into an absurd density on every short region of a fine partition, and short
+    regions are a large share of one.
     """
     assert contained_eff_length(np.array([100.0]), _spike(100))[0] == pytest.approx(1.0)
 
@@ -113,7 +110,7 @@ def test_crossing_is_the_enumerated_placement_count(w, reach_lo, reach_hi):
 def test_crossing_at_UNBOUNDED_reach_is_the_mean_length_minus_one():
     """gDNA's template is the chromosome, so it never tapers — and then the divisor is just ``mu − 1``.
 
-    ⭐ This is why mean fragment length is the large-reach LIMIT of the placement formula rather than a
+    This is why mean fragment length is the large-reach LIMIT of the placement formula rather than a
     separate gDNA case: one formula, one code path, no branch on component.
     """
     pmf = _normal_pmf(200.0, 50.0)
@@ -132,8 +129,9 @@ def test_crossing_is_SYMMETRIC_in_the_two_reaches():
 def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
     """An object with no opportunity for a component must emit NOTHING, never a floored division.
 
-    a "no data" default of 100 % gDNA was actively seeding false gDNA
-    into neighbouring exons. Zero is the correct answer here and must survive as zero.
+    A floored divisor turns "this component cannot be here" into a rate, and a slot that then defaults
+    to all-gDNA seeds false gDNA into its neighbours through the messages. Zero is the correct answer
+    here and must survive as zero.
     """
     pmf = _normal_pmf(200.0, 50.0)
     assert crossing_eff_length(pmf, np.array([0.0]), np.array([500.0]))[0] == 0.0
@@ -141,12 +139,11 @@ def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
 
 
 def test_crossing_reproduces_the_MEASURED_taper_table():
-    """⭐ An independent cross-check: 's published table, RNA N(200,50).
+    """An independent cross-check of the taper against values derived outside this file, RNA N(200,50).
 
-    ⚠ That table mixes two conventions and this test pins both. The first four entries are SYMMETRIC
-    (both reaches = R); the last, captioned "at a first exon", is ONE-SIDED — a first exon is short on
-    one side and long on the other. Recomputing them here is what revealed that; the numbers agree to
-    the precision the document quotes.
+    They mix two conventions and this test pins both: the first four are SYMMETRIC (both reaches = R),
+    while the last, at a first exon, is ONE-SIDED — a first exon is short on one side and long on the
+    other, and reading it as symmetric gives a different number entirely.
     """
     pmf = _normal_pmf(200.0, 50.0)
 
@@ -182,18 +179,17 @@ def test_crossing_is_vectorised_over_objects_and_agrees_elementwise():
 
 
 # ---------------------------------------------------------------------------
-# what died
+# one answer per question: the per-face divisors must stay gone
 # ---------------------------------------------------------------------------
 
 
 def test_the_THREE_OLD_DIVISORS_ARE_GONE():
-    """The mass-era divisors described a deposit rule that no longer exists.
+    """A divisor for a deposit rule that no longer exists must not survive beside the one that does.
 
-    ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``) and
-    ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous boundary no
-    longer has faces — it is a 0-bp boundary with one set of numbers. Keeping them would leave two answers
-    for one question, which is how an exact factor of 2 survived 29 tests.
-    trap 2).
+    ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``)
+    and ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous
+    boundary has no faces — it is a 0-bp boundary with one set of numbers. Two answers for one
+    question is how an exact factor of 2 survives a whole file of assertions.
     """
     for dead in (
         "boundary_side_eff_length",

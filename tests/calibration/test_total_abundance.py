@@ -101,9 +101,9 @@ def test_w_max_is_READ_from_the_support_end_of_deposited_lengths():
 
 
 def test_w_max_REFUSES_an_empty_histogram_AND_SAYS_WHY():
-    """The refusal must NAME the quantity. Dropping the check leaves numpy's own "zero-size array to
-    reduction operation" — still a ValueError, so an unmatched ``raises`` would pass on an ungated
-    implementation (measured: that perturbation did not fire until this match was added)."""
+    """The refusal must name the quantity. Dropping the check leaves numpy's own "zero-size array
+    to reduction operation" — still a ValueError, so an unmatched ``raises`` passes on an ungated
+    implementation and the perturbation never fires."""
     with pytest.raises(ValueError, match="deposited_lengths"):
         w_max_from_deposited_lengths(np.zeros(300, dtype=np.uint32))
 
@@ -263,11 +263,11 @@ def test_a_mature_covered_region_MUST_carry_the_matching_exon_bit():
 
 
 def test_the_nascent_licence_keeps_a_ZERO_reach_from_binding_where_NO_transcript_exists():
-    """⭐ A reach of 0 is an ANSWER — no template of that strand crosses there — and 40.6 % / 42.9 %
-    of contiguous boundaries have none. At a region the annotation admits no RNA at, that zero must
-    NOT enter the minimum: the only template there is the contig, so the slot stays exact. At an
-    intron region, where the annotation does admit nascent RNA, the same zero binds. Dropping the
-    licence collapses the two."""
+    """A reach of 0 is an answer — no template of that strand crosses there — and it is the answer
+    at a large fraction of contiguous boundaries. At a region the annotation admits no RNA at, that
+    zero must not enter the minimum: the only template there is the contig, so the slot stays
+    exact. At an intron region, where the annotation does admit nascent RNA, the same zero binds.
+    Dropping the licence collapses the two."""
     ra, lo, hi = gdna_only_parts(signatures=(0, 0, 0, 0))
     lo[:] = 0.0
     hi[:] = 0.0  # no template crosses any boundary of this reference
@@ -515,7 +515,7 @@ def test_the_config_flag_REFUSES_an_unknown_value():
 
 
 def test_measured_total_REFUSES_without_the_wall_inputs():
-    """⛔ It must refuse, not fall back: a background rate that silently changed estimator because an
+    """It must refuse, not fall back: a background rate that silently changed estimator because an
     argument was missing is worse than either estimator."""
     from _synthetic import make_gdna_fl_pmf, make_strand_models
 
@@ -536,7 +536,7 @@ def test_measured_total_REFUSES_without_the_wall_inputs():
 
 
 def test_the_shipped_default_is_BIT_IDENTICAL_and_the_flag_is_NOT_INERT():
-    """⭐ Both halves matter. The default must reproduce the tree before the flag existed, and the
+    """Both halves matter. The default must reproduce the tree before the flag existed, and the
     non-default must MOVE something — an arm that cannot move a number has not been tested
     (`TRAPS: an-ablation-that-never-ran`)."""
     from _synthetic import make_gdna_fl_pmf, make_strand_models
@@ -569,7 +569,7 @@ def test_the_shipped_default_is_BIT_IDENTICAL_and_the_flag_is_NOT_INERT():
         d_low=z.copy(), d_high=z.copy(), covered=np.zeros((n_r, 2), dtype=bool)
     )
     reach = (np.full((2, 2), 5000.0), np.full((2, 2), 5000.0))
-    # ⚠ Asserted on the FITTED BACKGROUND rather than on the deliverable, and the reason is honest:
+    # Asserted on the FITTED BACKGROUND rather than on the deliverable, and the reason is honest:
     # this fixture has three regions and ONE intergenic one, so the pooled floor cannot move a
     # deconvolution no matter which pair it is fitted from. What the flag controls at this level is
     # WHICH PAIR the background was fitted from, and that is exactly what is checked here; whether the
@@ -581,10 +581,9 @@ def test_the_shipped_default_is_BIT_IDENTICAL_and_the_flag_is_NOT_INERT():
     base = run("contained", _debug=d_base)
     swapped = run("measured_total", mature_walls=walls, boundary_reach=reach, _debug=d_swap)
     assert np.isfinite(base.gdna_density_global) and np.isfinite(swapped.gdna_density_global)
-    # ⭐ Asserted on `intron_background` — the intergenic gDNA background that REACHES ψ (via the intron
-    # λ-factor). ⚠ It used to assert on the aggregate `background` field, which was deleted 2026-08-21
-    # as a second implementation of this same pool that no caller consumed; pointing the gate at the
-    # LIVE consumer is what it should have done from the start.
+    # Asserted on `intron_background` — the intergenic gDNA background that REACHES ψ, via the
+    # intron λ-factor. An aggregate field no caller consumes is a second implementation of the same
+    # pool, so the gate points at the live consumer instead.
     bg_base = d_base["calibration_priors"].intron_background
     bg_swap = d_swap["calibration_priors"].intron_background
     assert bg_base is not None and bg_swap is not None, "the intron background was never fitted"

@@ -1,15 +1,20 @@
-"""The gDNA background rate: the closed form, the bracket, and the one-sided guarantee.
+"""The gDNA background rate, and which counts are gDNA counts at all.
 
-⛔ **The gates here are perturbation gates, not smoke tests** (`TRAPS: perturb-every-gate`). Each was run
-against a deliberately broken implementation and watched to fail: a `poisson_lower_mean` that drops the
-`floor` (9 fire), a `region_lengths_from_partition` that diffs straight through the reference junctions
-(2 fire), a `contained_opportunity` that forgets the `+1` (2 fire), and a bisection that returns the
-pooled rate instead of the one-sided root (1 fires).
+The rate blocks gate the closed form `poisson_lower_mean`, the pooled rate, the contamination-robust
+one-sided root, the contained opportunity and the per-reference region lengths. The last block gates
+`density_model.count_observable_masks`, the selector deciding which counts are gDNA counts at all and
+seeding the gDNA strand-overdispersion fit; its rule is signature arithmetic and nothing else. A
+REGION is count-observable iff it carries no exon bit, because an exon's contained count holds
+unspliced mature RNA; a contiguous BOUNDARY is count-observable iff its two flanks SHARE no exon bit,
+because one exon strand continuing across the boundary is what lets unspliced mature RNA cross it,
+and two exons on opposite strands share no bit, so nothing continues and the crossing count is gDNA.
 
-⚠ **A fifth perturbation fired NOTHING and that is recorded rather than hidden**: bracketing the bisection
-from exactly `0.0` passes every test here, because `F(0+) < 0` walks the bracket off the boundary by
-itself. The guard against it was speculative, so it was deleted and the test that claimed to cover it was
-replaced by `test_the_returned_rate_is_actually_a_root`, which checks the property instead of the guard.
+PERTURBATION (`TRAPS: perturb-every-gate`): a `poisson_lower_mean` that drops the `floor` fires 9
+gates, a `region_lengths_from_partition` that diffs straight through the reference junctions fires 2,
+a `contained_opportunity` that forgets the `+1` fires 2, and a bisection returning the pooled rate
+instead of the one-sided root fires 1. Bracketing the bisection from exactly `0.0` fires NOTHING,
+because `F(0+) < 0` walks the bracket off the boundary by itself — so that guard is speculative, and
+`test_the_returned_rate_is_actually_a_root` checks the property instead.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import numpy as np
 import pytest
 from scipy.stats import poisson
 
+from rigel.calibration.density_model import count_observable_masks
 from rigel.calibration.gdna_density import (
     contained_opportunity,
     one_sided_rate,
@@ -25,6 +31,13 @@ from rigel.calibration.gdna_density import (
     pooled_log_rate,
     region_lengths_from_partition,
 )
+from rigel.calibration.signature import (
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    BIT_INTRON_NEG,
+    BIT_INTRON_POS,
+)
+
 
 LAMS = (0.05, 0.3, 1.0, 2.7, 10.0, 55.5, 200.0, 999.0)
 
@@ -54,7 +67,7 @@ def test_poisson_lower_mean_is_zero_at_zero_and_finite_at_scale():
 
 
 def test_dropping_the_floor_breaks_the_identity():
-    """⛔ The PERTURBATION: ``lam**(lam+1)/Gamma(lam+1)`` (no ``floor``) is a different function."""
+    """PERTURBATION: ``lam**(lam+1)/Gamma(lam+1)``, with no ``floor``, is a different function."""
     from scipy.special import gammaln
 
     lam = 2.7
@@ -89,7 +102,7 @@ def test_uncontaminated_poisson_recovers_its_own_rate():
 
 
 def test_contamination_moves_the_pooled_rate_but_not_the_one_sided_one():
-    """⭐ THE POINT OF THE MODULE. Same gDNA, half the objects given a large additive contaminant."""
+    """The point of the module: same gDNA, half the objects given a large additive contaminant."""
     rng = np.random.default_rng(3)
     e = rng.uniform(50.0, 5000.0, size=4000)
     rho = 0.02
@@ -133,7 +146,7 @@ def test_adding_a_contaminant_never_lowers_the_estimate():
 
 
 def test_zero_counts_declines_rather_than_fabricating_a_rate():
-    """⛔ A zero-gDNA library has no gDNA density. It must SAY so, not return a number."""
+    """A zero-gDNA library has no gDNA density. It must SAY so, not return a number."""
     e = np.full(100, 500.0)
     fit = one_sided_rate(np.zeros(100), e)
     assert not fit.informative and fit.rate == 0.0
@@ -144,11 +157,12 @@ def test_no_exposure_declines():
 
 
 def test_the_returned_rate_is_actually_a_root():
-    """⭐ The property, not the algorithm: ``F(rate) = 0``, re-derived here rather than trusting bisection.
+    """The property, not the algorithm: ``F(rate) = 0``, re-derived here rather than trusting the
+    bisection.
 
-    ⚠ This REPLACED a test asserting only ``rate > 0``, which was named for the degenerate root at zero
-    and could not fail — bracketing from exactly 0.0 passes it, because ``F(0+) < 0`` walks the bracket
-    off the boundary by itself. A gate no perturbation can fire is not a gate.
+    PERTURBATION: asserting only ``rate > 0`` cannot fail, because bracketing from exactly 0.0 passes
+    it — ``F(0+) < 0`` walks the bracket off the boundary by itself. A gate no perturbation can fire
+    is not a gate, so the root is checked directly.
     """
     rng = np.random.default_rng(2)
     e = rng.uniform(100.0, 1000.0, size=500)
@@ -202,8 +216,8 @@ def test_a_region_shorter_than_every_fragment_has_no_contained_opportunity():
 
 
 def test_region_lengths_are_differenced_per_reference():
-    """⛔ THE PERTURBATION, and the bug this gate exists for: two references, and a straight
-    ``np.diff`` manufactures a PHANTOM region spanning the junction between them."""
+    """PERTURBATION, and the defect this gate exists for: with two references a straight ``np.diff``
+    manufactures a PHANTOM region spanning the junction between them."""
     # ref A: bounds 0,100,300 -> regions of 100 and 200. ref B: bounds 0,50 -> one region of 50.
     bounds = np.array([0, 100, 300, 0, 50], dtype=np.int64)
     offsets = np.array([0, 3, 5], dtype=np.int64)
@@ -225,3 +239,56 @@ def test_region_lengths_match_the_naive_diff_on_a_single_reference():
     bounds = np.array([0, 10, 45, 70], dtype=np.int64)
     offsets = np.array([0, 4], dtype=np.int64)
     assert region_lengths_from_partition(bounds, offsets, 3).tolist() == np.diff(bounds).tolist()
+
+
+# ── which counts are gDNA counts: the count-observable masks ─────────────────────────────────
+
+
+def _masks(signatures, ref_id=None):
+    sig = np.asarray(signatures, dtype=np.uint8)
+    ref = (
+        np.zeros(sig.shape[0], dtype=np.int64)
+        if ref_id is None
+        else np.asarray(ref_id, dtype=np.int64)
+    )
+    return count_observable_masks(sig, ref)
+
+
+def test_an_exon_region_is_not_count_observable_and_intron_and_intergenic_are():
+    """The region rule, on all four kinds: intergenic (0) and intron are gDNA counts; either exon strand,
+    or an exon overlapping an intron, is not."""
+    region, _ = _masks(
+        [
+            0,
+            BIT_INTRON_POS,
+            BIT_INTRON_NEG,
+            BIT_EXON_POS,
+            BIT_EXON_NEG,
+            BIT_EXON_POS | BIT_INTRON_NEG,
+        ]
+    )
+    np.testing.assert_array_equal(region, [True, True, True, False, False, False])
+
+
+def test_a_boundary_is_observable_unless_an_EXON_STRAND_CONTINUES_across_it():
+    """The boundary rule is SHARING, not presence. exon+|exon+ shares a bit — mature RNA crosses, not
+    observable. exon+|intron+ shares none — the exon ends there, so the crossing count is gDNA."""
+    _, boundary = _masks([BIT_EXON_POS, BIT_EXON_POS, BIT_INTRON_POS, 0])
+    np.testing.assert_array_equal(boundary, [False, True, True])
+
+
+def test_two_exons_on_OPPOSITE_strands_share_no_bit_so_the_boundary_IS_observable():
+    """The tell that the rule is `sig[lo] & sig[hi] & EXON_BITS` and not `either flank is an exon`: no
+    single exon strand continues across an exon+|exon− junction, so no unspliced mature RNA crosses
+    it."""
+    _, boundary = _masks([BIT_EXON_POS, BIT_EXON_NEG])
+    np.testing.assert_array_equal(boundary, [True])
+
+
+def test_masks_are_on_their_own_axes_and_no_boundary_straddles_a_reference():
+    """N regions, and E = N − (number of references) boundaries: two single-region references own ZERO
+    boundaries between them, so nothing can leak across a reference edge."""
+    region, boundary = _masks([BIT_INTRON_POS, BIT_INTRON_POS, BIT_EXON_POS], ref_id=[0, 1, 1])
+    assert region.shape == (3,)
+    assert boundary.shape == (1,)  # only the (1, 2) pair inside reference 1
+    np.testing.assert_array_equal(boundary, [True])  # intron+ | exon+ shares no bit

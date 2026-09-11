@@ -607,8 +607,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 
 `CLAUDE.md` is the home of the standing pass count and accounts every delta: re-derive it, never adjust
 it, because several gates are parametrised over the files on disk. Any failure is a regression.
-`tests/scenarios_aligned/test_paralogs.py::test_gdna_sweep[gdna_100]` is a real EM unidentifiability
-(`TRAPS: identical-paralogs-are-bimodal`); if it fails again, do not fix it by moving a seed.
+`tests/scenarios_aligned/test_multimap_counting.py::TestParalogMultimapping::test_gdna_sweep[gdna_100]`
+is a real EM unidentifiability (`TRAPS: identical-paralogs-are-bimodal`); if it fails again, do not fix
+it by moving a seed.
 
 The goldens run under the default sampling mode (`EMConfig.seed = None`, `assignment_mode = "sample"`),
 and two runs of the identical pipeline on the identical BAM return different transcript counts

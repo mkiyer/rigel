@@ -1,4 +1,12 @@
-"""CLI parser tests."""
+"""The command line is the only interface most runs have, so every flag must reach the config it
+names.
+
+`rigel index`'s GTF parse mode defaults to strict and can be switched to warn-and-skip; `rigel
+quant`'s defaults, its boolean flags and the resolution of its arguments into a `PipelineConfig` are
+gated flag by flag, and the config survives a write/read round trip unchanged. A flag parsed into a
+field nothing reads is invisible at runtime, which is why these are checked against the resolved
+config rather than against the parser's namespace.
+"""
 
 import textwrap
 

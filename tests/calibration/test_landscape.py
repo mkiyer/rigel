@@ -1,6 +1,11 @@
-"""Unit tests for the population gDNA-density hyperprior (`calibration.landscape`).
+"""The population gDNA-density hyperprior (`calibration.landscape`), one property per test.
 
-One test per property the design actually rests on, so a regression names itself.
+What the fit has to survive is a library whose truth is a uniform depleted level plus a
+capture-enriched minority: the minority must stay a mode rather than being smoothed into the bulk,
+the grid must span exactly what ψ can represent and nothing else, a zero-count region must decay
+downward instead of inventing a location at 1/E, an imprecise region must be damped rather than
+dropped, and the kernel widths must come from the local neighbour spacing so they widen on their own
+as regions thin out. Each gate holds one of those, so a regression names itself.
 """
 
 import numpy as np
@@ -59,8 +64,8 @@ def test_grid_is_the_domain_logprior_is_asked_about():
 
 
 def test_zero_count_anchor_is_native_and_low():
-    """A region with no gDNA must say 'ρ is anything below the wall' — a downward decay, NOT an invented
-    location at 1/E. It is also the depleted anchor, and dropping it costs +0.26/+0.61 EMD."""
+    """A region with no gDNA must say "ρ is anything below the wall" — a downward decay, NOT an
+    invented location at 1/E. It is also the depleted anchor, so dropping it moves the whole fit."""
     eff = np.full(200, 500.0)
     ls = fit_landscape(
         np.zeros(200), np.full(200, 1000.0), eff, np.full(200, np.inf), anchor=np.ones(200, bool)
@@ -111,8 +116,8 @@ def test_anchor_is_trusted_outright():
 
 
 def test_knn_width_never_below_the_grid_step():
-    """Forced by the axis: a kernel narrower than one cell is a delta at the wrong height, which is what
-    turned the enriched half of the landscape into a comb (roughness 46.9 vs a smooth bump's 2-4)."""
+    """Forced by the axis: a kernel narrower than one cell is a delta at the wrong height, and the
+    enriched half of the landscape becomes a comb of them rather than a bump."""
     a = np.linspace(-3.0, 2.0, 500)
     step = 0.02
     assert (knn_widths(a, step) >= step).all()
@@ -120,9 +125,10 @@ def test_knn_width_never_below_the_grid_step():
 
 
 def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
-    """Not "the far boundary of a 2k window" — that hands the WIDEST kernel in the fit to the most ISOLATED
-    region, which is backwards and was measured as the false-positive channel on zero-gDNA libraries. Checked
-    against brute force on samples deliberately built as a bulk plus outliers."""
+    """Not "the far boundary of a 2k window" — that hands the WIDEST kernel in the fit to the most
+    ISOLATED region, which is backwards, and on a zero-gDNA library it is the channel that
+    manufactures a false enriched mode. Checked against brute force on samples deliberately built as
+    a bulk plus outliers."""
     rng = np.random.default_rng(0)
     for _ in range(20):
         n = int(rng.integers(8, 300))

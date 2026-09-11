@@ -1,28 +1,15 @@
-"""⭐ P4 — the second pass is WIRED IN, ahead of calibration, and the gDNA pools do not move.
+"""The second pass is wired in ahead of calibration, and the gDNA length pools do not move.
 
-     (where the drain sits) and its P4
-    Measurement: — the tail and the anchor, scored on the pilot against truth
-
-§2's structural claim is that the drain runs **between the scan and calibration**, which is what lets
-calibration run exactly once on the complete tally. Two things follow that are worth gating rather than
-assuming: that calibration really does see the drained tally, and that the drain's own seed is its own.
-
-⭐ **THE gDNA CONTROL IS EXACT, AND IT IS STRUCTURAL.** Not "moves by less than something" — the four
-gDNA length pools move by **exactly zero**, and there is a derivation:
-
-* a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are region_bounds;
-* if the drain picks ∅ the molecule crosses **both** those boundaries, making it a multi-boundary crossing — and
-   gives a multi-boundary crossing **no pool**, because it is a gDNA/RNA mixture;
-* if the drain picks a spliced path the fragment used an annotated sj, so it is ``RNA_SPLICED``.
-
-So the drain can only ever touch ``RNA_SPLICED``, and measured on all 8 pilot conditions it does: 100 % of
-the ``pool_lengths`` delta lands there and the four gDNA rows are byte-identical.
-
-⚠ **This is NOT TRAPS: pure-and-length-censored.6's gDNA control, and the difference matters.** There the fix could not reach a fragment
-with no introns, so *any* movement was a bug. Here the drain reaches fragments it is supposed to reach —
-on a gdna100 library a real gDNA fragment whose mate gap spans an annotated intron is genuinely ambiguous
-and was genuinely held. What this gate says is that a drained fragment never lands in a pool that is
-supposed to be **pure**, whichever hypothesis won.
+The drain runs BETWEEN the scan and calibration, which is what lets calibration run exactly once on
+the complete tally. Two things follow that are worth gating rather than assuming: that calibration
+really does see the drained tally, and that the drain's seed is its own rather than the EM's. The
+gDNA control is EXACT and structural — the four gDNA length pools move by exactly zero, not by less
+than some tolerance — because a held fragment's gap contains an annotated intron whose endpoints are
+region boundaries, so choosing the empty path makes the molecule a multi-boundary crossing, which
+gets no pool at all as a gDNA/RNA mixture, while choosing a spliced path uses an annotated sj and
+makes it ``RNA_SPLICED``. The drain therefore reaches fragments it is SUPPOSED to reach — a real
+gDNA fragment whose mate gap spans an annotated intron is genuinely ambiguous — and what the gate
+says is that a drained fragment never lands in a pool that is supposed to be pure.
 """
 
 from __future__ import annotations
@@ -42,7 +29,7 @@ from rigel.scan_payload import (
 
 SEED = 4242
 
-#: The four pools that are pure gDNA by construction. ⭐ Named from the schema rather than by index, so a
+#: The four pools that are pure gDNA by construction. Named from the schema rather than by index, so a
 #: reordering of the pool axis cannot silently point this gate at the RNA row.
 GDNA_POOLS = (
     POOL_DNA_INTERGENIC,
@@ -58,7 +45,7 @@ def scenario():
     from rigel.sim import ReadSimConfig, Scenario
 
     sc = Scenario("p4", genome_length=20_000, seed=SEED)
-    # ⚠ Two isoforms differing in ONE internal intron is what makes a mate gap ambiguous, and it is the
+    # Two isoforms differing in ONE internal intron is what makes a mate gap ambiguous, and it is the
     # only geometry that fills the side buffer at all.
     sc.add_gene(
         "gA",
@@ -110,8 +97,8 @@ def scanned(scenario):
 
 
 def test_the_fixture_actually_HOLDS_fragments(scanned):
-    """⚠ Non-vacuity, first. With an empty side buffer the drain is a documented no-op and every gate below
-    would compare a payload with itself."""
+    """Non-vacuity, first. With an empty side buffer the drain is a documented no-op and every gate
+    below would compare a payload with itself."""
     _index, _strand, payload, _cfg = scanned
     assert payload.deferred.n_fragments > 0, (
         "the scenario must produce ambiguous mate gaps or there is nothing for P4 to gate; two isoforms "
@@ -121,16 +108,16 @@ def test_the_fixture_actually_HOLDS_fragments(scanned):
 
 
 def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
-    """⭐ **THE P4 CONTROL, and it is EXACT.** The four pure-gDNA pools are byte-identical after the drain.
+    """The control, and it is EXACT: the four pure-gDNA pools are byte-identical after the drain.
 
-    ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region_bounds, so a
-    chosen ∅ crosses two boundaries — a multi-boundary crossing, which deliberately gives
-    **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated sj, so
-    it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pool that is supposed to be pure.
+    Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are region
+    boundaries, so a chosen empty path crosses two boundaries — a multi-boundary crossing, which
+    deliberately gets no pool because it is a gDNA/RNA mixture — and a chosen spliced path used an
+    annotated sj, so it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pure pool.
 
-    ⚠ **An impure pool is worse than a missing one** (§8), and these four pools are what the gDNA
-    fragment-length model is fitted from. A drained RNA fragment landing in ``DNA_INTRONIC`` would fit the
-    gDNA length model partly from RNA, and nothing downstream would look wrong.
+    An impure pool is worse than a missing one, and these four are what the gDNA fragment-length model
+    is fitted from: a drained RNA fragment landing in ``DNA_INTRONIC`` would fit the gDNA length model
+    partly from RNA, and nothing downstream would look wrong.
     """
     index, strand_models, payload, cfg = scanned
     drained = _drain_side_buffer(payload, index, strand_models, seed=cfg.second_pass_seed)
@@ -143,7 +130,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
             f"{int(after[pool].sum() - before[pool].sum())} fragments. A drained fragment can only be a "
             f"multi-boundary crossing (no pool) or an annotated splice (RNA_SPLICED)."
         )
-    # ⭐ And the delta is not zero everywhere — otherwise the gate above passes because nothing happened.
+    # And the delta is not zero everywhere — otherwise the gate above passes because nothing happened.
     assert after[POOL_RNA_SPLICED].sum() > before[POOL_RNA_SPLICED].sum(), (
         "the drain must have deposited spliced fragments into RNA_SPLICED, or this fixture drained nothing "
         "and the control above is vacuous"
@@ -151,12 +138,12 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
 
 
 def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
-    """⭐ §2's structural claim: the drain runs BEFORE calibration, so calibration runs once on the whole
+    """The structural claim: the drain runs BEFORE calibration, so calibration runs once on the whole
     tally. Gated through ``run_pipeline`` rather than by reading the wiring.
 
-    ⚠ The observable is the fragment-length model, because that is what the drained mass actually changes —
-    the held fragments are the LONG ones, so the anchor an undrained calibration would see is biased short.
-    Measured on the pilot: the anchor's mean error against truth goes from −1.6 % to **+0.00 %**.
+    The observable is the fragment-length model, because that is what the drained mass actually
+    changes — the held fragments are the LONG ones, so the anchor an undrained calibration sees is
+    biased short.
     """
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.sj_opportunity import crossing_probability_from_index
@@ -179,8 +166,9 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        # ⭐ TRAPS: divide-by-a-probability's de-tilt is part of production's route to the RNA pmf, so it is part of this
-        # reproduction; it is the same array for both arms, so it cannot decide which one matches.
+        # `TRAPS: divide-by-a-probability`: the de-tilt is part of production's route to the RNA pmf,
+        # so it is part of this reproduction. It is the same array for both arms, so it cannot decide
+        # which one matches.
         fl = build_fl_models(
             payload,
             sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
@@ -202,11 +190,10 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
 
 
 def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
-    """⛔ Two independent RNG consumers must not share one field. If the drain read ``em.seed``, an EM A/B
-    would silently re-draw every held fragment — so the arms would differ in the tally as well as in the
-    estimator, and the comparison would be meaningless.
-
-    ⭐ Also §5.2's reproducibility, at the config level: one seed, one answer.
+    """Two independent RNG consumers must not share one field. If the drain read ``em.seed``, an EM
+    A/B would silently re-draw every held fragment, so the arms would differ in the tally as well as
+    in the estimator and the comparison would mean nothing. And reproducibility at the config level:
+    one seed, one answer.
     """
     index, strand_models, payload, _cfg = scanned
 
@@ -220,7 +207,7 @@ def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
     assert not np.array_equal(first.deposited_lengths, other.deposited_lengths), (
         "a different drain seed must actually change the draw, or the seed is not reaching it"
     )
-    # ⭐ The EM's seed is a different field and cannot reach the drain: PipelineConfig carries both, and
+    # The EM's seed is a different field and cannot reach the drain: PipelineConfig carries both, and
     # only `second_pass_seed` is passed to `_drain_side_buffer` in `run_pipeline`.
     assert _config(em=EMConfig(seed=999)).second_pass_seed == PipelineConfig().second_pass_seed, (
         "changing the EM seed must not change the drain's seed"
@@ -228,8 +215,8 @@ def test_the_DRAIN_SEED_is_its_own_and_is_NOT_the_EM_seed(scanned):
 
 
 def test_an_EMPTY_side_buffer_is_a_documented_no_op(scanned):
-    """⚠ A library with no annotated intron in any mate gap is a real state, not an error. The payload must
-    come back untouched and still report ``drain is None``, so "pass one only" keeps one spelling."""
+    """A library with no annotated intron in any mate gap is a real state, not an error. The payload
+    must come back untouched and still report ``drain is None``, so "pass one only" has one spelling."""
     import dataclasses
 
     from rigel.scan_payload import DeferredFragments, GapCensus

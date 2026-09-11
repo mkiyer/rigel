@@ -1,18 +1,13 @@
-"""Tests for transcript-space fragment length computation.
+"""``compute_frag_lengths`` projects a fragment's genomic endpoints into transcript space, and the
+implied length is the distance between them.
 
-Validates that compute_frag_lengths() correctly projects fragment genomic
-endpoints to transcript coordinate space and computes FL as the distance.
-
-Tests cover:
-  - Basic spliced and unspliced fragments
-  - Transcript boundary overhang (before first exon, past last exon)
-  - Endpoint overhang into internal introns
-  - Internal intronic overhang (safe — not at endpoints)
-  - Both-end overhang
-  - Multi-intron gap correction (large unsequenced gap spanning multiple introns)
-  - nRNA (single-exon) candidates
-  - Negative-strand transcripts
-  - Multiple candidate transcripts with different exon structure
+Spliced and unspliced fragments; overhang past either end of the transcript and into an internal
+intron, where an endpoint in an intron is a different case from a fragment merely spanning one;
+both ends overhanging at once; a large unsequenced mate gap spanning one, two or three introns, so
+the correction has to remove every intron in the gap rather than the first; nascent single-exon
+candidates, whose length is the genomic span; negative-strand transcripts, where the projection is
+reversed; and several candidates of different exon structure, which imply DIFFERENT lengths for the
+same fragment. That last point is why the length is per candidate and not per fragment.
 """
 
 import textwrap
@@ -21,7 +16,7 @@ import pytest
 
 from rigel.types import Strand, GenomicInterval
 from _resolution_reference import make_fragment, resolve_fragment
-from conftest import build_test_index
+from _index_builder import build_test_index
 
 
 def _t_map(index):

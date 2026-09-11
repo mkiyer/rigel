@@ -1,18 +1,14 @@
-"""The four gDNA length pools' opportunity functions, against a BRUTE-FORCE ENUMERATING ORACLE.
+"""`rigel.calibration.gdna_opportunity`'s four length pools, against a brute-force enumerating oracle.
 
-    `rigel.calibration.gdna_opportunity`
-
-⭐ **The oracle enumerates; the code computes.** Every closed form here is checked against a loop that
-walks every start position on a small partition and asks the *deposit rule's own question* — "is this
-fragment contained in exactly one region?", "does it cross exactly one boundary?" — so the divisor is verified
-against the selection it is meant to invert, not against a re-derivation of itself.
-`docs/TRAPS.md` trap 1: a validator that calls the builder's own helper validates nothing.
-
-⚠ **The rule the oracle implements is `_accumulator_reference.FragmentPool`'s, verbatim:**
-
-* contained in exactly one region -> typed by that region's coarse type (intergenic / intronic only)
-* crossing exactly one boundary -> typed by the sorted pair of flanking region types
-* anything else — an exonic contained fragment, a multi-boundary crossing — enters **no** pool
+The oracle enumerates and the code computes: every closed form here is checked against a loop that
+walks every start position on a small partition and asks the deposit rule's OWN question — "is this
+fragment contained in exactly one region?", "does it cross exactly one boundary?" — so each divisor is
+verified against the selection it is meant to invert rather than against a re-derivation of itself
+(TRAPS: self-checking-validator). The rule the oracle implements is
+`tests/native/_accumulator_reference.py`'s ``FragmentPool``, verbatim: contained in exactly one region
+types the fragment by that region's coarse type (intergenic or intronic only); crossing exactly one
+boundary types it by the sorted pair of flanking region types; and anything else — an exonic contained
+fragment, a multi-boundary crossing — enters no pool at all.
 """
 
 from __future__ import annotations
@@ -36,8 +32,8 @@ TYPE_INTERGENIC, TYPE_INTRON, TYPE_EXON = 0, 1, 2
 def enumerate_pools(region_bounds: list[int], types: list[int], width: int) -> dict:
     """Walk every start position on one reference and classify it exactly as the deposit rule does.
 
-    ``region_bounds`` is the reference's region_bound axis, ascending, first 0 and last ``L_ref``. ``types`` is one coarse
-    type per region, so ``len(types) == len(region_bounds) - 1``.
+    ``region_bounds`` is the reference's cut-point axis, ascending, first 0 and last ``L_ref``.
+    ``types`` is one coarse type per region, so ``len(types) == len(region_bounds) - 1``.
     """
     reference_length = region_bounds[-1]
     boundaries = region_bounds[1:-1]  # interior boundaries only
@@ -67,8 +63,8 @@ def region_lengths_of(region_bounds: list[int]) -> np.ndarray:
 
 # ── the partitions the oracle is run over ───────────────────────────────────────────────────────
 
-#: Deliberately awkward: a 1 bp region (legal, and 15,687 exist in the human index), a region shorter than
-#: the widest fragment, adjacent same-type regions, and both flank pairs present.
+#: Deliberately awkward: a 1 bp region (legal, and common in a real index), a region shorter than the
+#: widest fragment, adjacent same-type regions, and both flank pairs present.
 PARTITIONS = [
     ([0, 40, 41, 90, 200], [TYPE_INTERGENIC, TYPE_EXON, TYPE_INTRON, TYPE_EXON]),
     ([0, 10, 60, 61, 62, 130], [TYPE_INTRON, TYPE_EXON, TYPE_INTRON, TYPE_EXON, TYPE_INTERGENIC]),
@@ -123,7 +119,7 @@ class TestAgainstTheEnumeratingOracle:
     @pytest.mark.parametrize("region_bounds,types", PARTITIONS)
     @pytest.mark.parametrize("width", WIDTHS)
     def test_every_start_is_accounted_for(self, region_bounds, types, width):
-        """⭐ The pools plus the unpooled remainder must exhaust every admissible start.
+        """The pools plus the unpooled remainder must exhaust every admissible start.
 
         This is the one assertion that would catch an opportunity function that is individually
         plausible and collectively wrong — double-counting a start, or losing one at a boundary.
@@ -150,7 +146,7 @@ class TestAgainstTheEnumeratingOracle:
 
 
 class TestTheTiltsAreOpposite:
-    """⛔ The reason the four pools cannot be pooled raw, asserted rather than asserted-in-prose."""
+    """The reason the four pools cannot be pooled raw, asserted rather than stated in prose."""
 
     def test_contained_opportunity_falls_with_length_and_crossing_rises(self):
         lengths = np.array([500, 1200, 80, 3000], dtype=np.int64)
@@ -165,7 +161,7 @@ class TestTheTiltsAreOpposite:
         assert np.all(np.diff(crossing[2:301]) > 0)
 
     def test_a_short_region_caps_the_crossing_opportunity(self):
-        """⭐ Where a flank is shorter than the fragment, the crossing count STOPS growing — that is the
+        """Where a flank is shorter than the fragment, the crossing count STOPS growing — that is the
         `(w-1-a)+` term, and it is why `(w-1)` alone is not the opportunity."""
         crossing = crossing_opportunity(
             np.array([30], dtype=np.int64), np.array([40], dtype=np.int64), 300
@@ -177,7 +173,7 @@ class TestTheTiltsAreOpposite:
 
 class TestTheCombination:
     def test_combined_probability_is_the_opportunity_weighted_average(self):
-        """⭐ `(sum count)/(sum A)` IS `sum(A_p f_p)/sum(A_p)` — the identity the design rests on."""
+        """`(sum count)/(sum A)` IS `sum(A_p f_p)/sum(A_p)` — the identity the design rests on."""
         rng = np.random.default_rng(0)
         max_width = 60
         pools = [rng.random(max_width + 1) * 1000 + 1 for _ in range(4)]
@@ -198,7 +194,7 @@ class TestTheCombination:
 
 class TestWiredIntoTheModel:
     def test_the_fallback_is_the_CONTAINED_pair_not_the_raw_four(self):
-        """⛔ Without a divisor the gDNA pool must fall back to the two contained pools.
+        """Without a divisor the gDNA pool must fall back to the two contained pools.
 
         Pooling the four raw is measurably WORSE than either the contained pair or the de-tilted four,
         so "no annotation offered" must not silently pick it.
@@ -229,12 +225,12 @@ class TestWiredIntoTheModel:
         assert float((models.gdna_pmf * np.arange(max_size + 1)).sum()) < 7.0
 
     def test_the_divisor_moves_the_gdna_pool_and_preserves_its_evidence_weight(self):
-        """⭐ The four-pool arm uses all 850 fragments, and the EB weight reflects that.
+        """The four-pool arm uses all 850 fragments, and the EB weight reflects that.
 
-        ⚠ **The RNA pool here spans SEVERAL lengths on purpose.** `detilt_pool` renormalises back to the
-        pool's own total, so a **single-bin** histogram is invariant under any divisor whatsoever — and a
-        one-bin RNA pool made this test blind to the gDNA divisor leaking into the RNA one. Found by
-        perturbation, not review.
+        PERTURBATION: the RNA pool here spans SEVERAL lengths on purpose. `detilt_pool` renormalises
+        back to the pool's own total, so a single-bin histogram is invariant under any divisor
+        whatsoever — and with a one-bin RNA pool this test cannot see the gDNA divisor leaking into
+        the RNA one.
         """
         from types import SimpleNamespace
 
@@ -273,9 +269,9 @@ class TestWiredIntoTheModel:
         assert plain.rna_pmf == pytest.approx(detilted.rna_pmf)
 
     def test_EVERY_production_caller_of_build_fl_models_passes_THE_GDNA_DIVISOR(self):
-        """⛔ Same gate as the sj divisor's, for the same reason: optional means silently absent.
+        """Same gate as the sj divisor's, for the same reason: optional means silently absent.
 
-        ⚠ Source-level on purpose — a runtime check would need a full pipeline run per call site, and
+        Source-level on purpose — a runtime check would need a full pipeline run per call site, and
         the failure this guards against is somebody adding a fourth caller.
         """
         import ast
@@ -302,7 +298,7 @@ class TestWiredIntoTheModel:
 
 class TestFromTheIndex:
     def test_the_four_pools_are_built_off_the_index_partition(self, mini_index):
-        """⭐ The index path, gated on the one invariant that must hold on any real partition:
+        """The index path, gated on the one invariant that must hold on any real partition:
 
         the four pools are disjoint selections of the same start positions, so their sum can never
         exceed the total number of admissible starts. A divisor that violates that is over-counting.

@@ -1,7 +1,10 @@
-"""Unit tests for the generic density-deconvolution primitive (intron factory = special case).
+"""The generic density-deconvolution primitive, of which the intron factory is one special case.
 
-Phase 1 = the factor math: the NegBinom log-pmf, and the per-intron λ-factor's mode / precision / regimes.
-The end-to-end fit-vs-oracle validation lives in scripts/scratch (cached ambig scenarios), not here.
+What is gated here is the factor arithmetic: the NegBinom log-pmf against scipy's own, and the
+per-intron λ-factor's mode, precision and limiting regimes — a confident background deconvolve, the
+no-nascent and nascent-rich extremes, the sharpening with count, the widening with overdispersion,
+and the flat factor an empty pool must produce. The background posterior itself is held at the end,
+where the interesting failure lives: a fit that goes confident on a pool with no counts in it.
 """
 
 from __future__ import annotations
@@ -97,9 +100,9 @@ def test_regime_nascent_present_peels_to_background():
 def test_regime_dna_free_pins_low():
     """Σg = 0 (DNA-free): the posterior sits at ½/ΣE with honest width ⇒ the factor pulls f_g to ~0.
 
-    ⭐ Through :func:`fit_gdna_background` rather than a hand-built background, because the DNA-free
-    regime is exactly where the hand-built wall and the real fit used to diverge (the 2026-08-18
-    detonation) — this regime test must exercise the real path."""
+    Through :func:`fit_gdna_background` rather than a hand-built background, because the DNA-free
+    regime is exactly where a hand-built wall and the real fit can diverge — this regime test must
+    exercise the real path."""
     bg = fit_gdna_background(np.zeros(200), np.full(200, 5_000.0))  # a genuinely empty pool
     C = np.array([2.0])  # a sparse intron, ρ_obs = 2/1000 = 2e-3
     fac = density_lambda_factor(bg, C, np.array([1000.0]), _GRID)
@@ -156,20 +159,20 @@ def test_factor_shape_and_finiteness():
     assert np.allclose(fac.max(axis=1), 0.0)
 
 
-# ---- ⭐⭐⭐ the SMOOTH background posterior — the 2026-08-18 zero-gDNA catastrophe, pinned ----
+# ---- the SMOOTH background posterior, and why it may not branch at zero counts ----
 #
-# The shipped fit branched: pooled MLE at Σg>0, a "resolution wall" mean(1/E) fallback at Σg=0. That
-# wall is a mean of reciprocals and is OWNED by the smallest regions of the partition
-# (TRAPS: a-mean-of-ratios-inherits-the-partition): measured on the ladder, ONE intergenic sliver
-# (E=0.0074 bp) carried 35 % of it and the wall landed at 0.2985/bp on a library whose true background
-# was EXACTLY 0 — so the intron factory confidently manufactured mu = 0.2985*E phantom gDNA and 80 % of
-# all nascent intron mass was called gDNA. The repair is the conjugate posterior
-# rho_bg ~ Gamma(Sumg + 1/2, SumE): ONE formula, no branch, no wall, honest width, and its Sumg >> 1
-# limit is the shipped pooled rate exactly. These four tests are the falsification set for that repair.
+# A fit that branches — a pooled MLE at Sumg>0 and a "resolution wall" mean(1/E) fallback at Sumg=0 —
+# puts a mean of reciprocals on the zero-count path, and that is OWNED by the smallest regions of the
+# partition (TRAPS: a-mean-of-ratios-inherits-the-partition): a single sub-fragment-length intergenic
+# sliver can carry a third of it, so the wall lands at a real per-base rate on a library whose true
+# background is EXACTLY 0, the intron factory manufactures phantom gDNA from it, and most nascent
+# intron mass is called gDNA. The conjugate posterior rho_bg ~ Gamma(Sumg + 1/2, SumE) is one formula
+# with no branch and no wall, it has an honest width, and its Sumg >> 1 limit is the pooled rate
+# exactly. These four tests are the falsification set for it.
 
 
 def test_the_background_location_is_sliver_invariant():
-    """⛔ THE BUG, PINNED: one fragment-length intergenic sliver must not move the background."""
+    """One fragment-length intergenic sliver must not move the background."""
     E = np.full(50, 10_000.0)
     g = np.zeros(50)
     clean = fit_gdna_background(g, E)
@@ -181,7 +184,7 @@ def test_the_background_location_is_sliver_invariant():
 
 
 def test_the_background_is_smooth_through_zero_counts():
-    """⛔ One observed fragment may move the location by ~(1+1/2)/(0+1/2) = 3x — never by orders."""
+    """One observed fragment may move the location by ~(1+1/2)/(0+1/2) = 3x — never by orders."""
     E = np.full(50, 10_000.0)
     at0 = fit_gdna_background(np.zeros(50), E)
     g1 = np.zeros(50)
@@ -191,16 +194,16 @@ def test_the_background_is_smooth_through_zero_counts():
 
 
 def test_an_empty_pool_is_not_confident():
-    """⛔ Σg=0 says "around 1/(2ΣE), and I genuinely do not know" — the factor must neither place the
-    deconvolve away from ~0 on a dense intron NOR carry populated-pool precision. The shipped path read
-    tau ~ 3e8 here and called 80 % of nascent gDNA."""
+    """Σg=0 says "around 1/(2ΣE), and I genuinely do not know" — the factor must neither place the
+    deconvolve away from ~0 on a dense intron NOR carry populated-pool precision. A branching fit
+    reads an enormous precision here and calls most nascent intron mass gDNA."""
     from rigel.calibration.density_deconv import density_factor_precision
 
     E = np.full(500, 10_000.0)
     empty = fit_gdna_background(np.zeros(500), E)
-    # ⛔ the information HALF of the contract, pinned directly: an empty region is not a unit of
-    #   Fisher information, so 500 empty regions carry exactly the Jeffreys ½ — never 500. A break
-    #   that restores ``Σg + n0`` here changes no factor peak (the location is already tiny), so the
+    # the information HALF of the contract, pinned directly: an empty region is not a unit of Fisher
+    #   information, so 500 empty regions carry exactly the Jeffreys ½ — never 500. PERTURBATION:
+    #   restoring ``Σg + n0`` here changes no factor peak (the location is already tiny), so the
     #   behavioural gates below cannot see it; this line is the one that fires.
     assert empty.size == pytest.approx(0.5), empty.size
     C, Eg = np.array([10_000.0]), np.array([5_000.0])
@@ -214,7 +217,7 @@ def test_an_empty_pool_is_not_confident():
 
 
 def test_the_populated_limit_is_the_pooled_rate():
-    """⭐ Σg ≫ 1 reduces to the shipped pooled MLE exactly: ln((Σg+1/2)/ΣE) − ln(Σg/ΣE) ~ 1/(2Σg)."""
+    """Σg ≫ 1 reduces to the shipped pooled MLE exactly: ln((Σg+1/2)/ΣE) − ln(Σg/ΣE) ~ 1/(2Σg)."""
     g = np.full(100, 10_000.0)
     E = np.full(100, 20_000.0)
     bg = fit_gdna_background(g, E)

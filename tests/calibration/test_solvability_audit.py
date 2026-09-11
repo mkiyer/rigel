@@ -1,11 +1,14 @@
-"""Falsification gates for ``scripts/design/solvability_audit.py``.
+"""Falsification gates for ``solvability_audit.py`` — its population and its ranking column.
 
-⛔ **THE INSTRUMENT EXISTS BECAUSE THE OBVIOUS MEASUREMENT WAS WRONG.** Scoring every object that
-carries mass counts an object correctly saying "I cannot be solved without a prior" as an error, and on
-the hard condition that buried a 0.0456 answer inside a 0.3150 one. Every gate below guards one of the
-ways that mistake, or a neighbouring one, can come back.
-
-⛔ Each gate carries its own perturbation.
+Scoring every object that carries mass counts an object correctly saying "I cannot be solved
+without a prior" as an error, which on a hard condition buries a small answer inside a much larger
+one. The first half guards the ways that mistake can come back: the excluded population, the
+own-evidence channels, the log space the discrepancy lives in, the solver's own grid as the clip,
+and the continuous-τ curve that replaces a threshold nobody can place. The second half guards the
+complementary failure, that a headline must not be gameable by the solver knowing less
+(TRAPS: honesty-metrics-reward-ignorance): ``all_mwae`` and ``abs_err`` are defined over the live
+population, so shrinking the solvable set must leave them bit-identical while every existing
+headline field moves. Each gate carries its own perturbation.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.region_chain import REGION
+from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.config import CalibrationConfig, PipelineConfig
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
 
@@ -60,7 +64,7 @@ def audited(tmp_path_factory):
             frag_std=30,
             frag_min=80,
             frag_max=400,
-            # ⭐ UNSTRANDED on purpose: at kappa = 1/2 the strand channel is exactly silent,
+            # UNSTRANDED on purpose: at kappa = 1/2 the strand channel is exactly silent,
             # which is what CREATES the undetermined population this instrument is about.
             # A stranded toy has strand evidence everywhere and GATE 1 is vacuous on it.
             read_length=90,
@@ -83,7 +87,7 @@ def audited(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def audited_stranded(tmp_path_factory):
-    """⭐ The STRANDED twin. The two populations this instrument distinguishes need OPPOSITE
+    """The STRANDED twin. The two populations this instrument distinguishes need OPPOSITE
     libraries to exist at all: the undetermined class requires kappa = 1/2 (strand silent), and a
     slot carrying two channels at once requires strand to be live. One scenario cannot show both,
     and asserting both against one fixture is how a gate ends up vacuous."""
@@ -122,7 +126,7 @@ def audited_stranded(tmp_path_factory):
 
 
 def test_the_UNDETERMINED_population_is_excluded_and_is_NOT_EMPTY(audited):
-    """⛔ The whole point. Undetermined and determined must partition the live objects with no overlap
+    """The whole point. Undetermined and determined must partition the live objects with no overlap
     and no gap, and the undetermined set must be non-empty or the instrument is measuring nothing that
     the naive all-objects score did not already measure.
 
@@ -152,10 +156,9 @@ def test_the_own_evidence_CHANNELS_partition_and_match_the_undetermined_set(
     """Solvability is "some own-evidence channel can speak here", so ``none`` must be exactly the
     undetermined set and the union of the rest exactly the determined set.
 
-    ⚠ The channels themselves OVERLAP and must not be asserted to partition — ``tau_lam`` is the SUM
-    of the strand and factory arms, so a single-stranded intron region has both. A first draft of this
-    gate asserted a partition and failed on exactly those regions; the instrument was corrected to
-    describe them as overlapping capabilities and to warn that per-channel mass double-counts.
+    The channels themselves OVERLAP and must not be asserted to partition — ``tau_lam`` is the sum
+    of the strand and factory arms, so a single-stranded intron region has both. They are
+    overlapping capabilities, and per-channel mass therefore double-counts.
 
     PERTURBATION: require the overlap to be NON-EMPTY, so the gate fails if the two definitions ever
     silently become exclusive again.
@@ -168,7 +171,7 @@ def test_the_own_evidence_CHANNELS_partition_and_match_the_undetermined_set(
     np.testing.assert_array_equal(
         (ch["locked"] | ch["strand"] | ch["factory"]) & live, a["determined"]
     )
-    # ⭐ the overlap itself needs the STRANDED twin: at kappa = 1/2 strand is silent everywhere, so
+    # the overlap itself needs the STRANDED twin: at kappa = 1/2 strand is silent everywhere, so
     # no slot on `audited` can carry two channels and the assertion would be vacuous there.
     sch = audited_stranded[1]["channels"]
     assert (sch["strand"] & sch["factory"]).sum() > 0, (
@@ -181,8 +184,8 @@ def test_the_own_evidence_CHANNELS_partition_and_match_the_undetermined_set(
 
 
 def test_the_discrepancy_is_LOG_space_because_var_gdna_IS(audited):
-    """⛔ ``var_gdna`` is ``Var(log f_g)`` while its name says "fraction variance". A linear error over
-    a log-space variance is the defect that once moved a suite total 0.046 → 1.007 and inverted a
+    """``var_gdna`` is ``Var(log f_g)`` while its name says "fraction variance". A linear error over
+    a log-space variance moves a suite total by more than an order of magnitude and inverts a
     per-class ranking, so this gate pins the space explicitly.
 
     PERTURBATION: the LINEAR form must give a materially different answer — if the two agreed, the
@@ -202,7 +205,7 @@ def test_the_discrepancy_is_LOG_space_because_var_gdna_IS(audited):
 
 
 def test_truth_is_clipped_to_the_SOLVERS_OWN_GRID_not_an_epsilon(audited):
-    """⛔ Truth is exactly 0 at a pure-RNA object and exactly 1 at a structurally-pure-gDNA one — both
+    """Truth is exactly 0 at a pure-RNA object and exactly 1 at a structurally-pure-gDNA one — both
     common — and ``log 0`` is not a number. The clip must be the solver's own λ-grid support, because
     that is the best answer the solver could ever have given.
 
@@ -223,7 +226,7 @@ def test_truth_is_clipped_to_the_SOLVERS_OWN_GRID_not_an_epsilon(audited):
 
 
 def test_a_CERTAIN_slot_that_is_wrong_is_infinitely_confident_not_a_division_by_zero(audited):
-    """⭐ ``sd == 0`` is the solver calling an object CERTAIN. If it is also wrong that is the worst
+    """``sd == 0`` is the solver calling an object CERTAIN. If it is also wrong that is the worst
     possible case, and it must sort to the top rather than crash or silently become 0.
 
     PERTURBATION: certain AND right must be 0, not inf — otherwise every locked object would be
@@ -241,7 +244,7 @@ def test_a_CERTAIN_slot_that_is_wrong_is_infinitely_confident_not_a_division_by_
 
 
 def test_the_ladders_FINAL_rung_IS_the_arm_it_claims_to_be(audited):
-    """⭐ The ladder's conclusions are differences between rungs, so a projection error would invent a
+    """The ladder's conclusions are differences between rungs, so a projection error would invent a
     channel effect out of nothing. The FINAL rung must be byte-equal to the arm's own per-object
     fraction — that is the check that the whole projection is right.
 
@@ -265,28 +268,28 @@ def test_the_ladders_FINAL_rung_IS_the_arm_it_claims_to_be(audited):
 
 
 def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(audited):
-    """⛔⛔ **A precision above zero is not evidence, and no threshold can say where evidence starts.**
+    """A precision above zero is not evidence, and no threshold can say where evidence starts.
 
     ``tau_lam`` is a Fisher precision on ``λ = log(f_g/f_R)``, so an object's own statement has sd
     ``1/√τ`` nats against a solver that represents only ``λ ∈ [−L, +L]``. The strand arm carries
-    ``I(f_g) ∝ (2κ−1)²`` (`EQUATIONS.md` §5.2), **exactly zero at κ = ½** — but κ is FITTED, so on a
-    genuinely unstranded library it misses ½ by a few 1e-4 and τ lands at ~1e-7 rather than at 0. The
-    ``τ > 1e-9`` region_bound then scores that object as SOLVABLE while its own statement has sd ~10³ nats.
+    ``I(f_g) ∝ (2κ−1)²``, exactly zero at κ = ½ — but κ is fitted, so on a genuinely unstranded
+    library it misses ½ by a few 1e-4 and τ lands at ~1e-7 rather than at 0. A ``τ > 1e-9`` guard
+    then scores that object as solvable while its own statement has sd ~10³ nats.
 
-    ⛔ **AND A BETTER THRESHOLD IS NOT THE FIX — that was tried and REFUTED.** A resolving-power floor
-    at ``1/(2L)²`` was derived and implemented, and its own insensitivity gate killed it: τ is
-    CONTINUOUS across that region on 4 of 5 ladder conditions, so no interval is empty and any floor
-    is a tuned constant. Only the unstranded capture-OFF row is bimodal, and there the two clusters
-    are the silent strand arm (~1e-7) and the live intron factory (~1e-1).
+    A better threshold is not the fix: a resolving-power floor at ``1/(2L)²`` was derived,
+    implemented, and killed by its own insensitivity gate, because τ is continuous across that
+    region on nearly every ladder condition, so no interval is empty and any floor is a tuned
+    constant. Only an unstranded capture-OFF row is bimodal, and there the two clusters are the
+    silent strand arm and the live intron factory.
 
-    ⭐ So the instrument reports the CURVE. This gate pins that it covers the population exactly and
+    So the instrument reports the curve. This gate pins that it covers the population exactly and
     resolves the two extremes into different rows — which is all a curve has to do.
 
     PERTURBATION: a single-decade band must NOT reproduce the curve's discrimination, proving the
     decades are load-bearing rather than decoration.
     """
     m, a, cfg = audited
-    # ⛔ BEHAVIOURAL, not by name: the channel test must BE the solver's own gate, so that "has a
+    # BEHAVIOURAL, not by name: the channel test must BE the solver's own gate, so that "has a
     # channel" and "the evidence is strong enough to score" stay two separate questions. A threshold
     # smuggled in here would silently re-partition every stratum table in the project.
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
@@ -298,7 +301,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
         err_msg="channel_masks no longer asks the solver's own question; a strength threshold has "
         "been introduced where a curve belongs",
     )
-    # ⚠ …and on a CONSTRUCTED τ that actually spans the region, because the fixture's own-evidence
+    # …and on a CONSTRUCTED τ that actually spans the region, because the fixture's own-evidence
     # slots all sit at one strength and a floor placed below them would be invisible here.
     probe_tau = np.array([0.0, 1e-8, 1e-7, 1e-5, 1e-3, 2e-3, 1e-2, 1e-1, 1.0])
     probe = {
@@ -316,7 +319,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
         "because tau is continuous across this region, so any floor is a tuned constant",
     )
 
-    # ⚠ and the capture must be checked against the chain it claims to describe: a mismatch would
+    # and the capture must be checked against the chain it claims to describe: a mismatch would
     # shift every mask by one slot, which is invisible in aggregate.
     with pytest.raises(ValueError, match="different partitions"):
         SA.channel_masks(probe, type("C", (), {"n_slots": probe_tau.size + 1})(), cfg)
@@ -335,7 +338,7 @@ def test_own_evidence_STRENGTH_is_reported_as_a_CURVE_because_tau_is_CONTINUOUS(
         "which is the entire population the curve exists to make visible"
     )
 
-    # ⭐ THE DISCRIMINATION is a property of the banding, so it is tested on a CONSTRUCTED sd(λ) that
+    # THE DISCRIMINATION is a property of the banding, so it is tested on a CONSTRUCTED sd(λ) that
     # spans the two populations the ladder shows. A 9 kb toy has three own-evidence slots, all at the
     # same strength, so asserting separation on the fixture would only prove the toy is small.
     synth = {
@@ -397,11 +400,11 @@ def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audit
 
 
 def test_a_STRUCTURALLY_LOCKED_BOUNDARY_is_as_DETERMINED_as_a_locked_region(audited):
-    """⛔ ``locked`` was ``~solvable & (kind == REGION)``, so a G1 **boundary** — an intergenic↔exon boundary,
-    where RNA cannot cross a gene boundary and the solver pins ``{0,0,1}`` at ``Var(log f_g) = 0`` —
-    fell into ``none`` and was EXCLUDED from the scored population as "honest ignorance". It is the
-    opposite: it is structurally certain, and correct. Structural certainty is a property of the
-    signature, not of which axis the object lives on.
+    """A ``locked`` mask written as ``~solvable & (kind == REGION)`` drops a G1 boundary — an
+    intergenic-exon boundary, where RNA cannot cross a gene boundary and the solver pins ``{0,0,1}``
+    at ``Var(log f_g) = 0`` — into ``none``, excluding it from the scored population as "honest
+    ignorance". It is the opposite: structurally certain, and correct. Structural certainty is a
+    property of the signature, not of which axis the object lives on.
 
     PERTURBATION: the fixture must actually contain locked boundaries, and folding them in must move the
     scored mass — otherwise the gate is vacuous.
@@ -433,14 +436,13 @@ def test_a_STRUCTURALLY_LOCKED_BOUNDARY_is_as_DETERMINED_as_a_locked_region(audi
 
 
 def test_the_UNDETERMINED_class_is_checked_for_the_ONE_thing_it_can_get_wrong(audited):
-    """⛔⛔ The undetermined population is excluded from every error total — correctly, because
-    ``f_g ≈ ½`` at zero precision is a true statement about itself. But `SUCCESS.md` names the failure
-    mode that exclusion leaves open ("claiming a precision it has not earned") and **nothing was
-    checking it**, so a 395,251-fragment systematic error on ``gdna_g25_ss_0.50_nrna_none_capture_off``
-    — 87 exon regions driven to ``f_g = 0.829`` against a truth of 0.009 — was invisible, at 0.0 %
-    scored, on a condition whose reported mwae is 0.0170.
+    """The undetermined population is excluded from every error total — correctly, because
+    ``f_g ≈ ½`` at zero precision is a true statement about itself. The failure mode that exclusion
+    leaves open is an object claiming a precision it has not earned: a large systematic error can
+    sit inside the class, with exon regions driven to ``f_g ≈ 0.83`` against a truth near zero,
+    while the condition reports a small mwae and scores 0.0 % of it.
 
-    ⭐ The check needs no threshold: the class's correct answer is ½, so bucket it by ``|f_pred − ½|``
+    The check needs no threshold: the class's correct answer is ½, so bucket it by ``|f_pred − ½|``
     and report the error and the claimed precision per bucket.
 
     PERTURBATION: the buckets must cover the class exactly and must SEPARATE a moved object from an
@@ -461,7 +463,7 @@ def test_the_UNDETERMINED_class_is_checked_for_the_ONE_thing_it_can_get_wrong(au
         "objects moved furthest, which are the whole point"
     )
 
-    # ⭐ separation, on a CONSTRUCTED class spanning all four bands: ½ at sd = ∞ is the CORRECT
+    # separation, on a CONSTRUCTED class spanning all four bands: ½ at sd = ∞ is the CORRECT
     # answer; 0.83 with a FINITE sd is the defect. They must not share a row.
     synth = {
         "undetermined": np.ones(5, bool),
@@ -505,3 +507,127 @@ def test_the_z_BANDS_account_for_every_solvable_object(audited):
         sum(mass for _, _, mass, _ in rows), float(a["total"][det].sum()), rtol=1e-9
     )
     assert SA.Z_BANDS[-1][1] == np.inf, "the top band must be unbounded or certain-wrong is dropped"
+
+
+# ── the ranking column must not be gameable by the solver knowing less ────────────────────────
+
+
+def _fixture(n=400, seed=3):
+    """A synthetic scored population: truth, prediction, mass, and a τ spanning the noise region."""
+    rng = np.random.default_rng(seed)
+    total = rng.uniform(10.0, 5000.0, n)
+    f_true = rng.uniform(0.0, 1.0, n)
+    f_pred = np.clip(f_true + rng.normal(0.0, 0.15, n), 0.0, 1.0)
+    err = np.abs(f_pred - f_true) * total
+    # τ spanning six decades either side of the 1e-9 boolean, which is the whole point
+    tau = 10.0 ** rng.uniform(-14.0, 2.0, n)
+    return dict(
+        total=total,
+        f_true=f_true,
+        f_pred=f_pred,
+        err=err,
+        tau=tau,
+        live=np.ones(n, bool),
+        z=rng.normal(0.0, 3.0, n),
+        gap=rng.normal(0.0, 0.4, n),
+    )
+
+
+# ── one home for the evidence predicate ─────────────────────────────────────────────────────────
+
+
+def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
+    """TRAPS: a-test-that-redefines: a gate that re-derives a definition cannot detect drift in it, so the
+    definition must live in ONE place with every consumer importing it. The home is production —
+    the predicate is a production concept and ``scripts/`` is deliberately not importable.
+
+    An instrument restating ``_EPS = 1.0e-9`` beside a comment saying it must match the solver does
+    not move when the solver does. The instruments import the home
+    (`pass0_vs_oracle` — gated in ``test_pass0_vs_oracle``), and
+    on every value the solver publishes — exactly zero where the deadband or the AMBIG gate silenced
+    the channel, a Fisher information otherwise — the home agrees with the transfer policy's own
+    liveness test on a node's strand channel, ``tau_lam > 0``."""
+    tau = np.array([0.0, 1e-4, 1.0, 850.0])
+    assert np.array_equal(has_own_composition_evidence(tau), tau > 0.0)
+
+
+def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_home():
+    """The falsification: a consumer that picks its own floor disagrees with the home on a τ that
+    spans the guard, so a restated number cannot pass for the imported predicate."""
+    tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
+    theirs = tau > 1e-6  # a plausible, wrong, home-made floor
+    assert not np.array_equal(theirs, has_own_composition_evidence(tau))
+
+
+# ── the two fixed-denominator fields, and what they are worth ───────────────────────────────────
+
+
+def _summarise(fx, det):
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    key = "solvability_audit"
+    if key not in sys.modules:
+        p = Path(__file__).resolve().parents[2] / "scripts" / "design" / "solvability_audit.py"
+        spec = importlib.util.spec_from_file_location(key, p)
+        m = importlib.util.module_from_spec(spec)
+        sys.modules[key] = m
+        spec.loader.exec_module(m)
+    SA = sys.modules[key]
+    n = fx["total"].shape[0]
+    a = dict(
+        determined=det,
+        total=fx["total"],
+        err=fx["f_pred"] - fx["f_true"],
+        live=fx["live"],
+        # z must be WIDE enough that |z| ≥ 2 selects a real subset, or TRAPS: two-gaussians-one-latent's "the gameable columns
+        # moved" control is vacuous — `conf_wrong` would be 0 in both arms and prove nothing (TRAPS: could-the-arm-have-fired).
+        z=fx["z"],
+        sd=np.full(n, 0.5),
+        gap=fx["gap"],
+        sd_lam=np.full(n, 1.0),
+        f_true=fx["f_true"],
+        ladder={"fg_loc": fx["f_pred"], "f_g": fx["f_pred"]},
+    )
+    a["err"] = (fx["f_pred"] - fx["f_true"]) * fx["total"]
+    return SA.summarise(a)
+
+
+def test_D1_D3_summarise_emits_all_mwae_and_abs_err_and_they_are_correct():
+    """``all_mwae`` is Σ(mass·|Δf_g|) / Σ(mass) over every LIVE object; ``abs_err`` is Σ|Δ gDNA
+    mass| in fragments. Brute-forced against the fixture, not against the implementation."""
+    fx = _fixture()
+    det = has_own_composition_evidence(fx["tau"])
+    s = _summarise(fx, det)
+    assert "all_mwae" in s and "abs_err" in s
+    err = np.abs(fx["f_pred"] - fx["f_true"]) * fx["total"]
+    assert s["all_mwae"] == pytest.approx(float(err.sum() / fx["total"].sum()), rel=1e-12)
+    assert s["abs_err"] == pytest.approx(float(err.sum()), rel=1e-12)
+
+
+# ── the property the fixed-denominator pair exists for ──────────────────────────────────────────
+
+
+def test_D2_the_new_columns_are_BIT_IDENTICAL_when_the_solvable_set_SHRINKS():
+    """TRAPS: honesty-metrics-reward-ignorance's destruction control, in miniature: make the solver
+    "know less" by shrinking the determined set, and check which columns move.
+
+    Every existing headline field is defined over the determined population, so all of them move.
+    ``all_mwae`` and ``abs_err`` are defined over the live population, so they must be bit
+    identical — which is precisely what makes them safe to rank a panel on, and without them a
+    single condition can mis-rank the whole ladder by declining to answer more often."""
+    fx = _fixture()
+    wide = has_own_composition_evidence(fx["tau"])
+    narrow = fx["tau"] > 1e-3  # the same solver, declining to answer more often
+    assert narrow.sum() < wide.sum() and narrow.sum() > 0, (wide.sum(), narrow.sum())
+
+    a, b = _summarise(fx, wide), _summarise(fx, narrow)
+    # the fixed-denominator pair: BIT identical
+    assert a["all_mwae"] == b["all_mwae"]
+    assert a["abs_err"] == b["abs_err"]
+    # and the gameable ones genuinely moved, so this is not a vacuous comparison (TRAPS: could-the-arm-have-fired)
+    moved = [
+        k for k in ("solvable_mass_share", "solvable_mwae", "conf_wrong_objects") if a[k] != b[k]
+    ]
+    assert len(moved) == 3, (moved, a, b)

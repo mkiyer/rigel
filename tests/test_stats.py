@@ -1,4 +1,9 @@
-"""Tests for rigel.stats — PipelineStats."""
+"""`PipelineStats` — the counter block the scanner fills and the report reads.
+
+Its fields, their defaults and the arithmetic over them. The counters are how a run accounts for
+every fragment it was offered, so a field that silently defaults rather than being set reads as
+"none of those were seen".
+"""
 
 from rigel.stats import PipelineStats
 

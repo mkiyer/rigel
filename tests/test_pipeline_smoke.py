@@ -1,9 +1,10 @@
-"""Smoke test for the full quantification pipeline.
+"""The whole quantification pipeline runs, and its output is internally consistent.
 
-Runs ``run_pipeline`` end-to-end on a minimal oracle scenario and
-validates that output DataFrames have the expected schema, non-zero
-counts, and internally consistent totals.  This catches import/interface
-breakage that component-level unit tests might miss.
+``run_pipeline`` end to end on a minimal oracle scenario: the transcript, gene and locus frames have
+the expected schema and are non-empty, mature RNA counts are positive, the fragment count agrees
+with the scan, and TPM sums to a million. Also that the scan's read-name batch size does not change
+the answer at its boundaries. None of this is a precision claim — it is the gate that catches
+import and interface breakage between components that each pass their own unit tests.
 """
 
 import pandas as pd

@@ -1,4 +1,11 @@
-"""Tests for shared simulator truth and manifest helpers."""
+"""Per-fragment truth is carried in the read name, and these are the helpers that write and read it.
+
+Parsing an origin back out of a FASTQ or BAM read name for each of mature, nascent and gDNA, with
+and without a reference; counting origins over a whole FASTQ; writing post-capture truth from the
+origins actually observed rather than from what was requested; the condition directory naming; and
+the manifest round trip. Every truth-scoring instrument in the project reads through these, so a
+silent parse failure would make the oracle agree with anything.
+"""
 
 import json
 from dataclasses import dataclass

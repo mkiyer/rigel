@@ -1,23 +1,14 @@
-"""⭐ TRAPS: pure-and-length-censored.5 / TRAPS: an-all-zero-factor-is-inert — the corrected RNA pmf reaches EVERY TRANSCRIPT'S EFFECTIVE LENGTH in the EM.
+"""The payload's RNA pmf reaches EVERY transcript's effective length in the EM, along the chain
+``payload -> build_fl_models -> FLModels.rna_pmf -> FragmentLengthModel.from_pmf ->
+compute_all_transcript_eff_lens -> effective_lengths``.
 
-*"The shrunk pmf is reused for the EM's transcript effective
-lengths, so a frame error in the anchor propagates into every transcript's effective length — not only
-into calibration."* The audit is explicit that this must be **checked, not assumed** — it is the path
-with the largest blast radius and the least visibility, and nothing was asserting it.
-
-The chain under test::
-
-    payload  ──build_fl_models──▶  FLModels.rna_pmf
-                                        │  FragmentLengthModel.from_pmf
-                                        ▼
-                                     rna_fl  ──compute_all_transcript_eff_lens──▶  effective_lengths
-                                                                                        │
-                                                                            every transcript row in the EM
-
-⚠ Re-deriving the expected value through the *same* helper would be —
-a check that cannot fail. What makes this a real gate is that the left-hand side comes out of a full
-``run_pipeline`` and the right-hand side is rebuilt from the PAYLOAD ALONE: if the pipeline fed its
-effective lengths from anything else, or from a differently-built model, the two cannot agree.
+The shrunk pmf is reused for the EM's transcript effective lengths, so a frame error in the anchor
+propagates into every transcript row and not only into calibration — the path with the largest blast
+radius and the least visibility. Re-deriving the expected value through the same call the pipeline
+makes would be a check that cannot fail; what makes this a real gate is that the left-hand side comes
+out of a full ``run_pipeline`` while the right-hand side is rebuilt from the PAYLOAD alone, so a
+pipeline feeding its effective lengths from anything else, or from a differently-built model, cannot
+agree with it (`TRAPS: an-all-zero-factor-is-inert`).
 """
 
 from __future__ import annotations
@@ -63,7 +54,7 @@ def scenario(tmp_path_factory):
 
 
 def _config():
-    # ⚠ `map` — the DETERMINISTIC assignment mode. The EM samples the posterior by default, and an
+    # `map` — the DETERMINISTIC assignment mode. The EM samples the posterior by default, and an
     # equality assertion under `sample` would be measuring the sampler.
     return PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="map", n_threads=1),
@@ -72,7 +63,7 @@ def _config():
 
 
 def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
-    """⭐ TRAPS: an-all-zero-factor-is-inert, verified rather than assumed.
+    """`TRAPS: an-all-zero-factor-is-inert`, verified rather than assumed.
 
     The pipeline's per-transcript effective lengths must be **exactly** what the payload's RNA pmf
     produces. Any other source — a stale model, the scanner's deleted histogram, a default fallback —
@@ -88,19 +79,18 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
 
     # Rebuilt from the payload alone, by the same route production takes but from an independent scan.
     #
-    # ⭐ **THE DRAIN IS PART OF THAT ROUTE as of P4**, and this test is what noticed: the RNA pmf
-    # calibration sees is fitted from the DRAINED tally, so an undrained payload gives a different array
-    # (measured: ~2.7 bp per transcript, every one of them). ⚠ Production's own helper is called rather
-    # than its three steps repeated, so "the same route" cannot quietly stop being true.
+    # The DRAIN is part of that route: the RNA pmf calibration sees is fitted from the DRAINED tally,
+    # so an undrained payload gives a different array on every transcript. Production's own helper is
+    # called rather than its three steps repeated, so "the same route" cannot quietly stop being true.
     _, strand_models, _, payload = scan_and_buffer(
         str(scenario.bam_path), scenario.index, config.scan
     )
     payload = _drain_side_buffer(
         payload, scenario.index, strand_models, seed=config.second_pass_seed
     )
-    # ⭐ TRAPS: divide-by-a-probability: the RNA pool is de-tilted by its own sj opportunity before the model is fitted, so
-    # the reproduction has to include it. Omitting it here would not merely mismatch — it would make
-    # this gate pass on the day production DROPPED the divisor.
+    # `TRAPS: divide-by-a-probability`: the RNA pool is de-tilted by its own sj opportunity before the
+    # model is fitted, so the reproduction has to include it. Omitting it here would not merely
+    # mismatch — it would make this gate pass on the day production dropped the divisor.
     fl_models = build_fl_models(
         payload,
         sj_opportunity=crossing_probability_from_index(scenario.index, int(payload.max_length)),
@@ -114,10 +104,10 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
 
 
 def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
-    """⚠ The equality above is worth nothing unless the quantity is actually sensitive to the pmf.
+    """The equality above is worth nothing unless the quantity is actually sensitive to the pmf.
 
-    A constant array would satisfy it. Perturbing the RNA pmf must change the effective lengths, or
-    TRAPS: an-all-zero-factor-is-inert's blast radius is imaginary and the check is decoration.
+    PERTURBATION: a constant array satisfies it, so shifting the RNA pmf must change the effective
+    lengths — otherwise the blast radius is imaginary and the check above is decoration.
     """
     from rigel.calibration.fl import build_fl_models
 
@@ -143,7 +133,7 @@ def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
 
 
 def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
-    """⚠ A finding, pinned so it is not mistaken for a live safety net.
+    """A finding, pinned so it is not mistaken for a live safety net.
 
     ``pipeline`` guards the effective-length computation with ``if rna_fl.n_observations > 0``. On this
     path ``rna_fl`` always comes from :meth:`FragmentLengthModel.from_pmf`, which sets
@@ -151,7 +141,7 @@ def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
     pmf. The guard reads as "fall back to a default mean if there is no RNA data" and it can never
     take that branch.
 
-    ⛔ That is not a bug to fix here — an empty RNA pool is EB-shrunk all the way to the unconditional
+    That is not a bug to fix here — an empty RNA pool is EB-shrunk all the way to the unconditional
     anchor by ``build_fl_models``, which is a better answer than a hard-coded 200 bp mean, so the
     reachable behaviour is the right one. It is recorded because the guard's *appearance* of a
     fallback is what would let a future empty-pool bug hide behind it.

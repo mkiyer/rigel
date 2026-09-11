@@ -1,29 +1,18 @@
-"""Gates for THE gDNA LANDSCAPE PRIOR'S TRAINING POPULATION (2026-09-10; the owner's ruling of
-2026-09-06: nodes whose only evidence is a bound do not train the prior, `ISSUES:
-gdna-landscape-trains-on-false-positives`).
+"""The gDNA landscape prior's training population: which slots are allowed to train it.
 
-The rule the solver keeps: **a slot that holds no COMPOSITION — no own composition channel, no
-composition row received from a neighbour, not structurally locked — is not in the landscape's
-training population.** A level, a ceiling (a lane's or the node's own flux's) or a cube row is a
-BOUND: the value the solve settles on inside the admitted half-line is the prior's, so training the
-prior on it is training the prior on its own echo. `sweep.solve_chain` publishes the predicate as
-`RegionBelief.informed`, read off the held messages; `calibrate._fit_gdna_hyperprior` selects on it.
-The zero-count anchor trains regardless (it is a structural statement, not a solve). ⚠ "Any non-flat
-λ-row" is NOT the predicate: `PsiMessage.lam_rows` fuses compositions and bounds, and keeping the
-bound-only slots with a row read 137k against the ruling's 111k at the ladder's unstranded zero
-control.
+A slot that holds no COMPOSITION — no own composition channel, no composition row received from a
+neighbour, not structurally locked — is not in the training population. A level, a ceiling (a lane's,
+or the node's own flux's) and a cube row are all BOUNDS: the value the solve settles on inside the
+admitted half-line is the prior's own, so training the prior on it is training the prior on its echo
+(`ISSUES: gdna-landscape-trains-on-false-positives`). `sweep.solve_chain` publishes the predicate as
+`RegionBelief.informed`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
+it; the zero-count anchor trains regardless, being a structural statement rather than a solve. "Any
+non-flat λ-row" is NOT the predicate — `PsiMessage.lam_rows` fuses compositions and bounds together,
+so that reading keeps exactly the bound-only slots this rule excludes.
 
-Measured before landing (the ladder, whole-library |gDNA − truth|; the record `DESIGN.md` §7.1 and
-`ISSUES: the-landscape-training-population-arms`):
-the zero controls 0.742× / 0.753× (unstranded OFF / ON) and 0.962× / 0.966× (stranded), every in-scope
-contaminated row within 0.1 % of the previous default, the deferred rows 0.98–1.01×; a shuffled
-exclusion of the same count wins nothing in scope. Two readings that reach the DELIVERED rows
-(one-sided rows as bounds; the own-evidence variance as the weight) lose the deferred stratum 1.2–3.6×
-and are refused with their numbers in that record.
-
-Falsification (watched): with `informed` forced True everywhere, with the held compositions dropped
-from the predicate, and with "any non-flat row" in place of the held composition, the identity gates
-fail; with the selector ignoring the predicate the population gates fail.
+PERTURBATION, each watched: with `informed` forced True everywhere, with the held compositions
+dropped from the predicate, and with "any non-flat row" in place of the held composition, the
+identity gates fail; with the selector ignoring the predicate, the population gates fail.
 """
 
 from __future__ import annotations
@@ -32,7 +21,6 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 import rigel.calibration.sweep as SW
 from rigel.calibration.messages.silent import SilentPolicy
@@ -40,14 +28,9 @@ from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.signature import RegionType
-from _transfer_harness import _ctx_of, _full_policy, capture_sweep_inputs
+from _transfer_harness import _ctx_of, _full_policy
 
 CAL = sys.modules["rigel.calibration.calibrate"]
-
-
-@pytest.fixture(scope="module")
-def sweep_inputs(tmp_path_factory):
-    return capture_sweep_inputs(tmp_path_factory)
 
 
 def _expected_informed(sweep_inputs, policy, capture):
@@ -233,13 +216,13 @@ def test_a_flat_likelihood_slot_is_not_in_the_training_population(monkeypatch):
     assert part["anchor"].sum() == 1
     # THE GRID IS THE CONSUMERS' DOMAIN: every slot with opportunity, boundaries included, reaches the
     # estimator as ``domain`` — the exon that left the training set is still on the axis the prior is
-    # read at, and so is every boundary (owner ruling 2026-09-10)
+    # read at, and so is every boundary
     assert np.array_equal(part["domain_mass"], np.array([0.0, 5.0, 100.0, 5.0, 80.0, 5.0, 60.0]))
 
 
 def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
-    """With the cut leaving only the anchor, the prior still fits when the DOMAIN has enough
-    substrate: a gDNA-free antisense toy otherwise lost its refit (52 → 201 invented fragments)."""
+    """With the cut leaving only the anchor, the prior still fits as long as the DOMAIN has enough
+    substrate — otherwise a gDNA-free toy loses its refit and invents gDNA in its place."""
     parts = _synthetic_population()
     _, belief, *_ = parts
     monkeypatch.setattr(
@@ -272,16 +255,15 @@ def test_a_belief_without_the_predicate_trains_the_old_population(monkeypatch):
     assert seen["count"].shape == (4,)
 
 
-# ── THE E-STEP ON THE KERNELS THAT HAVE NO LOCATION (landed 2026-09-10) ──────────────────────────────
+# ── THE E-STEP ON THE KERNELS THAT HAVE NO LOCATION ──────────────────────────────────────────────────
 #
 # A region trained at less than one fragment has no location of its own: the estimator already centres
 # it at its resolution wall (``max(count, 1)``), and its Poisson kernel is flat below that wall. Summing
 # such a kernel normalised to unit mass spreads that mass uniformly under the wall — so short empty
-# regions deposit prior mass at exon densities. The refit loop already holds the previous fit, and the
-# deconvolution's E-step places a location-free kernel where the population is: kernel × previous
-# landscape, renormalised. Counted kernels keep their own location (an enriched minority cannot be
-# competed away). Measured on the ladder: the zero controls 111,011 → 674 and 125,649 → 283 fragments
-# (unstranded), 13,782 → 529 and 14,847 → 262 (stranded); every in-scope contaminated row 0.95–1.00×.
+# regions would deposit prior mass at exon densities. The refit loop already holds the previous fit, and
+# the deconvolution's E-step places a location-free kernel where the population is: kernel × previous
+# landscape, renormalised. Counted kernels keep their own location, so an enriched minority cannot be
+# competed away.
 
 
 def _prev_at_floor(grid_log10):

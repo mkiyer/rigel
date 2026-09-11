@@ -1,11 +1,13 @@
 """Falsification gates for ``scripts/design/worst_objects.py`` — step 3 of the debug loop.
 
-The instrument decides **which objects a human then spends hours staring at**. Every way of getting
+The instrument decides which objects a human then spends hours staring at. Every way of getting
 that ranking or its context subtly wrong is a way of sending the reader after the wrong mechanism,
 and none of them would look like a failure — the table would still be full of plausible rows. These
-gates are those ways.
-
-⛔ Each gate carries its own perturbation, in the same test.
+gates are those ways: the ranking is by error mass rather than rate, an object carrying no mass is
+never ranked, the neighbour columns are the adjacent chain slots that actually message the object,
+the concentration curve is a real cumulative curve, the class profile reports the background share
+beside the top share, and the classes are the ones the measurement already scored. Each gate
+carries its own perturbation, in the same test.
 """
 
 from __future__ import annotations
@@ -92,7 +94,7 @@ def _dissect(measured, axis="region", top=25):
 
 
 def test_the_ranking_is_by_error_MASS_and_a_RATE_ranking_would_differ(measured):
-    """⭐ The whole instrument turns on this. A 1 bp region with two fragments can carry ``|Δf_g| = 1``
+    """The whole instrument turns on this. A 1 bp region with two fragments can carry ``|Δf_g| = 1``
     and be worth two fragments of error; ranking by rate puts it above an exon carrying thousands.
 
     PERTURBATION: rank the same objects by ``|Δf_g|`` instead and require a DIFFERENT leader. If the
@@ -119,7 +121,7 @@ def test_the_ranking_is_by_error_MASS_and_a_RATE_ranking_would_differ(measured):
 
 
 def test_an_object_with_NO_MASS_never_appears_in_the_table(measured):
-    """⛔ Most of any real index carries no fragments. A ranking that admitted them would fill with
+    """Most of any real index carries no fragments. A ranking that admitted them would fill with
     ``0/0`` rows whose ``pred_fg`` is NaN and whose error is exactly zero — harmless-looking padding
     that pushes real objects off the end of the list.
 
@@ -137,10 +139,10 @@ def test_an_object_with_NO_MASS_never_appears_in_the_table(measured):
 
 
 def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(measured):
-    """⭐ On an object with no own evidence the neighbour columns are the whole explanation, so they
-    must be the objects that actually message it. The chain is ``N E N E … N``, so a REGION's
-    neighbours are two BOUNDARIES — **not** the regions at ``obj ± 1``, which are two slots away and do not
-    message it directly.
+    """On an object with no own evidence the neighbour columns are the whole explanation, so they
+    must be the objects that actually message it. The chain alternates region and boundary, so a
+    region's neighbours are two boundaries — not the regions at ``obj ± 1``, which are two slots
+    away and do not message it directly.
 
     PERTURBATION: compute the same-axis ``obj ± 1`` errors and require them to DIFFER, so the gate
     would fail if the instrument used that (much more natural-looking) indexing.
@@ -165,7 +167,7 @@ def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(meas
         for side, nb in zip((s - 1, s + 1), r["nb_err"]):
             if np.isnan(nb) or not 0 <= side < kind.shape[0]:
                 continue  # a reference boundary has no neighbour on that side
-            assert kind[side] == WO.BOUNDARY, "a REGION's chain neighbour must be an BOUNDARY slot"
+            assert kind[side] == WO.BOUNDARY, "a REGION's chain neighbour must be a BOUNDARY slot"
             np.testing.assert_allclose(nb, boundary_err[obj_idx[side]], rtol=1e-9, atol=1e-6)
             checked += 1
         # the same-axis alternative must not coincide, or the gate cannot see the difference
@@ -205,8 +207,8 @@ def test_the_concentration_curve_is_MONOTONE_and_reaches_the_whole_error(measure
 
 
 def test_the_profile_reports_BOTH_the_top_share_and_the_background_share(measured):
-    """⭐ "80 % of the worst objects are exons" means nothing if exons are 80 % of everything. The
-    profile must carry both numbers so the ratio is visible.
+    """A claim that 80 % of the worst objects are exons means nothing if exons are 80 % of
+    everything, so the profile must carry both numbers and make the ratio visible.
 
     PERTURBATION: each set of shares must sum to 1 over the class partition — a profile that dropped
     a class, or double-counted one, breaks that identity in a way a single share could hide.
@@ -224,7 +226,7 @@ def test_the_profile_reports_BOTH_the_top_share_and_the_background_share(measure
 
 
 def test_the_classes_are_the_SCORED_ones_not_a_second_computation(measured):
-    """⛔ Two definitions of one class is how they drift. The dissection must consume the masks the
+    """Two definitions of one class is how they drift. The dissection must consume the masks the
     measurement already scored, not recompute its own from the capture.
 
     PERTURBATION: recompute them here from the raw capture and require byte-identity — if the

@@ -1,26 +1,16 @@
-"""G-S1 / G-S2 / G-S6 — gDNA comes from GENOMIC references, from at least two of them, and never
-runs past the end of one.
+"""gDNA comes from GENOMIC references, from at least two of them, and never runs past the end of one.
 
-    `docs/TESTING.md` §1, §3
-
-⛔ **The defect these gates exist for.** The engine used to derive its gDNA reference set from the
-annotation — ``annotated_refs = {t.ref for t in transcripts}`` — which is "has an annotation" standing
-in for "is genomic". Every ERCC spike-in reference carries exactly one transcript, so every ERCC
-reference qualified, and the panel contained gDNA molecules on RNA-only spike-ins: molecules that
-cannot exist. Measured on the panel that produced this file: 0.13 % of gDNA off capture and 1.64 %
-under it, on references whose truth abundance is used as a false-positive control.
-
-⭐ **The fixture is built so that the old proxy would pass it.** The spike-in reference is ANNOTATED —
-it carries a transcript, exactly as an ERCC reference does — so "has an annotation" and "is genomic"
-disagree on it, which is the whole point. A fixture whose RNA-only reference had no annotation would
-be green with the defect present.
-
-⚠ **G-S2 needs at least two genomic references and it is not decoration.** Removing gDNA from the
-spike-ins leaves it on one chromosome, and a single-reference synthetic index once hid a
-reference-id-space mismatch that silently dropped 476,719 of 476,732 real fragments inside
-``deposit()`` while every golden test passed (`docs/TRAPS.md` one-reference-hides-refid-bugs). The gDNA
-intergenic branch is a *different* path through the scanner, so it needs its own non-trivial
-reference-id space.
+Deriving the gDNA reference set from the annotation puts "has an annotation" in place of "is
+genomic", and an RNA-only spike-in reference carrying one transcript then qualifies — so the panel
+holds gDNA molecules on spike-ins, which cannot exist, on exactly the references whose truth
+abundance is the false-positive control (`TRAPS: annotated-is-not-genomic`). The fixture is built so
+that the annotation proxy would PASS it: its spike-in reference is ANNOTATED, so the two readings
+disagree on it, where a fixture whose RNA-only reference had no annotation would be green with the
+defect present. Requiring at least TWO genomic references is not decoration either, because a
+single-reference synthetic index hides a reference-id-space mismatch that drops nearly every
+fragment inside ``deposit()`` while the golden tests pass
+(`TRAPS: one-reference-hides-refid-bugs`), and the gDNA intergenic branch is its own path through
+the scanner.
 """
 
 from __future__ import annotations
@@ -125,7 +115,7 @@ def _simulate_gdna(tmp_path, fasta, transcripts, *, genomic_refs, n_gdna, seed=1
 
 class TestGenomicReferenceSet:
     def test_g_s1_no_gdna_on_an_rna_only_reference(self, tmp_path, mixed_reference):
-        """⭐ G-S1 — an absolute count, from the read names, and the target is exactly 0."""
+        """An absolute count, from the read names, and the target is exactly 0."""
         fasta, transcripts, _lengths = mixed_reference
         origins = _simulate_gdna(
             tmp_path, fasta, transcripts, genomic_refs=GENOMIC_REFS, n_gdna=4_000
@@ -139,7 +129,7 @@ class TestGenomicReferenceSet:
         assert on_spike == [], f"{len(on_spike)} gDNA fragments on an RNA-only reference"
 
     def test_g_s2_every_genomic_reference_carries_gdna(self, tmp_path, mixed_reference):
-        """⭐ G-S2 — at least two genomic references, each with a non-zero deposit census."""
+        """At least two genomic references, each with a non-zero deposit census."""
         fasta, transcripts, _lengths = mixed_reference
         origins = _simulate_gdna(
             tmp_path, fasta, transcripts, genomic_refs=GENOMIC_REFS, n_gdna=4_000
@@ -170,12 +160,12 @@ class TestGenomicReferenceSet:
 
 
 class TestTheClassificationIsAnInput:
-    """⭐ The set is stated, never inferred — and a mis-statement must be loud, not silent."""
+    """The set is stated, never inferred — and a mis-statement must be loud, not silent."""
 
     def test_an_annotated_reference_left_out_of_the_set_gets_no_gdna(
         self, tmp_path, mixed_reference
     ):
-        """The spike-in is annotated, so the deleted `annotated_refs` proxy would have included it."""
+        """The spike-in is annotated, so an annotation-derived reference set would include it."""
         fasta, transcripts, _lengths = mixed_reference
         simulator = WholeGenomeSimulator(
             fasta,
@@ -192,7 +182,7 @@ class TestTheClassificationIsAnInput:
             simulator.close()
 
     def test_an_unknown_reference_name_raises(self, tmp_path, mixed_reference):
-        """⛔ A typo must not silently produce zero gDNA — that is trap 20's failure mode."""
+        """A typo must not silently produce zero gDNA, which is a request answered with nothing."""
         fasta, transcripts, _lengths = mixed_reference
         with pytest.raises(ValueError, match="not in the reference"):
             WholeGenomeSimulator(
@@ -204,7 +194,7 @@ class TestTheClassificationIsAnInput:
             )
 
     def test_requesting_gdna_with_no_genomic_reference_raises(self, tmp_path, mixed_reference):
-        """⛔ Silently writing zero of a requested five million fragments is unrepresentable."""
+        """Silently writing zero of a requested five million fragments is unrepresentable."""
         fasta, transcripts, _lengths = mixed_reference
         simulator = WholeGenomeSimulator(
             fasta,

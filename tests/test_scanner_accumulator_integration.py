@@ -57,10 +57,9 @@ def blacklisted_oracle(tmp_path):
     """The same scenario twice: its index without a splice blacklist, and with one that names
     **every sj the simulator wrote**.
 
-    ⭐ This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
-    asserted over a zero. A gate that can only ever see 0 on the term it was built for is the
-    failure mode TRAPS: a-purity-filter-is-a-length-filter's sixth perturbation found: everything green because nothing made the check
-    matter.
+    This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
+    asserted over a zero. A gate that can only ever see 0 on the term it was built for is green
+    because nothing ever made the check matter (`TRAPS: could-the-arm-have-fired`).
     """
     import pandas as pd
     import pysam
@@ -89,7 +88,7 @@ def blacklisted_oracle(tmp_path):
     )
     result = sc.build_oracle(n_fragments=200, sim_config=sim_config)
 
-    # ⚠ The sj are read back OUT OF THE BAM rather than derived from the exon list above, so
+    # The sj are read back OUT OF THE BAM rather than derived from the exon list above, so
     # the fixture cannot silently blacklist nothing if the simulator's coordinate convention moves.
     introns: set[tuple[str, int, int]] = set()
     with pysam.AlignmentFile(str(result.bam_path), "rb") as bam:
@@ -125,15 +124,14 @@ def blacklisted_oracle(tmp_path):
 def multi_reference_bam(tmp_path):
     """A two-contig index and a BAM holding one fragment whose mates sit on DIFFERENT references.
 
-    ⭐ This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule
-    and a ``FragmentPath`` cannot express it — it carries one extent
-    on one region_bound axis — so the deposit adapter refuses it. ⚠ The predecessor computed a span per
-    reference and deposited **all** of them onto ``exons.front().ref_id``, so one contig's
-    coordinates landed on another's region_bound axis. The refusal is right; being silent about it was not.
+    This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule and a
+    ``FragmentPath`` cannot express it — it carries one extent on one region-bound axis — so the
+    deposit adapter refuses it. Computing a span per reference and depositing all of them onto the
+    first block's ``ref_id`` instead lands one contig's coordinates on another's axis. The refusal is
+    right; being silent about it is not, which is what the counter is for.
 
-    ⚠ It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript,
-    so the fragment is never classified chimeric and is never filtered upstream. That is precisely
-    the route the shipped defect took.
+    It reaches the adapter by the INTERGENIC path: both mates resolve to no candidate transcript, so
+    the fragment is never classified chimeric and is never filtered upstream.
 
     Returns ``(bam_path, index)``.
     """
@@ -176,7 +174,7 @@ def multi_reference_bam(tmp_path):
         # The trans pair: mates on chr1 and chr2, both well clear of the annotation.
         _read("trans", 0, 1500, 1, 1500, True),
         _read("trans", 1, 1500, 0, 1500, False),
-        # ⚠ And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
+        # And one ordinary intergenic pair, so a census that counted NOTHING would not pass by
         # making both sides of the identity zero.
         _read("cis", 0, 2000, 0, 2300, True),
         _read("cis", 0, 2300, 0, 2000, False),
@@ -215,9 +213,10 @@ class TestScannerAccumulatorIntegration:
     def test_payload_shape_matches_index_partition(self, oracle):
         """The payload's three axes must be exactly what the index's partition implies.
 
-        ⭐ ``region_bounds`` are the REGION_BOUND POSITIONS; a reference with ``k`` region_bounds owns ``k − 1`` regions and
-        ``k − 2`` interior boundaries. The predecessor counted ``k`` boundary objects per reference — the
-        ``k − 1`` interiors plus two data-free terminals — which is the axis S5.f retired.
+        ``region_bounds`` are the region-bound POSITIONS: a reference with ``k`` of them owns
+        ``k − 1`` regions and ``k − 2`` interior boundaries. Counting ``k`` boundary objects per
+        reference instead — the interiors plus two data-free terminals — gives an axis two entries
+        too long, and every per-boundary array then addresses the wrong rows.
         """
         index = oracle.index
         region_bounds, ref_region_bound_offsets, region_types = build_region_partition_arrays(index)
@@ -233,13 +232,13 @@ class TestScannerAccumulatorIntegration:
         expected_boundaries = int(np.sum(np.maximum(diffs - 2, 0)))
         assert payload.n_regions == expected_regions
         assert payload.n_boundaries == expected_boundaries
-        # ⚠ E = N − (non-empty refs), stated a second way: the two derivations must agree.
+        # boundaries = regions − (non-empty refs), stated a second way: the two derivations must agree.
         n_live_refs = int(np.sum(diffs > 1))
         assert payload.n_boundaries == payload.n_regions - n_live_refs
 
     def test_fl_pools_emitted(self, oracle):
         """The scan emits the FIVE PURE fragment-length pools, binned at the same L as every other
-        bank. ⚠ The pools are integer counts on a ``(N_FRAGMENT_POOLS, max_length + 1)`` grid — there
+        bank. The pools are integer counts on a ``(N_FRAGMENT_POOLS, max_length + 1)`` grid — there
         is no ``fl_pool_mass`` and no separate ``fl_max_size``, because a pool is a histogram of the
         same molecule length the accumulator deposits by."""
         from rigel.calibration.fl import gdna_fl_mass
@@ -254,24 +253,24 @@ class TestScannerAccumulatorIntegration:
 
     def test_at_least_some_mass_deposited(self, oracle):
         payload = _scan(oracle)
-        # ⭐ ONE tally answers this now: region_start_count is incremented once per ACCEPTED fragment, so
-        # its total IS the deposit count. The predecessor had to add five arrays across two dtypes
-        # because mass was fractional and carried separately from the integer flux.
+        # ONE tally answers this: region_start_count is incremented once per ACCEPTED fragment, so its
+        # total IS the deposit count. Summing five arrays across two dtypes would be the alternative,
+        # and only because mass was once fractional and carried separately from the integer flux.
         assert int(np.asarray(payload.region_start_count).sum()) > 0, "scanner deposited nothing"
         assert int(payload.qc.deposited) == int(np.asarray(payload.region_start_count).sum())
 
 
 class TestFragmentLengthAnchor:
-    """⭐ TRAPS: pure-and-length-censored.1 — the empirical-Bayes anchor is the ACCUMULATOR's unconditional histogram.
+    """The empirical-Bayes anchor is the ACCUMULATOR's unconditional histogram.
 
-    ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. Until TRAPS: pure-and-length-censored.1 that
-    anchor was the **scanner's** histogram, which measures fragment length by two other rules over
-    another population — accumulator-frame pools shrunk toward a scanner-frame anchor, which is
-     in shipped code.
+    ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. An anchor taken
+    from the scanner instead measures fragment length by another rule over another population, so
+    accumulator-frame pools would be shrunk toward a scanner-frame anchor
+    (`TRAPS: pure-and-length-censored`).
 
-    ⚠ These tests use the blacklist fixture on purpose. On the plain oracle the two histograms are
-    **byte-identical** — a perfect BAM with no ambiguity makes definitions A/B and C agree — so a
-    value gate there passes no matter which anchor is wired in. A byte-identical result is no
+    These tests use the blacklist fixture on purpose. On the plain oracle the two histograms are
+    byte-identical — a perfect BAM with no ambiguity makes the competing definitions agree — so a
+    value gate there passes no matter which anchor is wired in, and a byte-identical result is no
     evidence.
     """
 
@@ -283,7 +282,7 @@ class TestFragmentLengthAnchor:
     def test_the_anchor_is_the_accumulators_own_deposited_histogram(self, blacklisted_oracle):
         """The anchor IS ``deposited_lengths``, over exactly the population the pools are drawn from.
 
-        ⭐ "Unconditional GIVEN DEPOSIT" — an anchor over a *wider* population would re-create the
+        "Unconditional GIVEN DEPOSIT" — an anchor over a WIDER population would re-create the
         frame mismatch somewhere new, so ``n_global`` must equal ``qc.deposited`` and not the count
         of everything the scanner classified.
         """
@@ -299,24 +298,21 @@ class TestFragmentLengthAnchor:
             fl.global_pmf, np.asarray(payload.deposited_lengths) / payload.qc.deposited
         )
 
-    # ⛔ `test_the_anchor_is_no_longer_the_scanners_histogram` lived here and was DELETED at TRAPS: pure-and-length-censored.2 —
-    # exactly as its own docstring said it would be. It compared the anchor against the scanner's
-    # histogram, and there is no longer a scanner histogram to compare against. What replaced it is
-    # stronger and structural: tests/test_one_fragment_length_definition.py asserts the whole
-    # machinery is gone from the source, which no comparison of values could establish.
+    # There is no gate comparing the anchor against a scanner histogram, because there is no scanner
+    # histogram: tests/test_one_fragment_length_definition.py asserts the machinery is gone from the
+    # source, which no comparison of values could establish.
 
     def test_a_FOREIGN_ANCHOR_CANNOT_BE_PASSED_AT_ALL(self):
-        """⭐ The real gate for TRAPS: pure-and-length-censored.1 is STRUCTURAL, not a value.
+        """The real gate here is STRUCTURAL, not a value.
 
-        The two tests above pin what ``build_fl_models`` returns; neither can catch a *call site*
-        that hands it the wrong array — and a correct function called with the wrong argument is
-        exactly the defect TRAPS: pure-and-length-censored.1 exists to end. So the public entry point takes the **payload**, and
-        all three histograms are read off that one object in that one frame. There is no
-        ``global_counts`` parameter to get wrong.
+        The two tests above pin what ``build_fl_models`` RETURNS; neither can catch a CALL SITE that
+        hands it the wrong array, and a correct function called with the wrong argument is exactly
+        the mixed-frame defect at issue. So the public entry point takes the PAYLOAD and all three
+        histograms are read off that one object in that one frame: there is no ``global_counts``
+        parameter to get wrong.
 
-        ⚠ is "do not recompute what a sibling already holds". TRAPS: two-gaussians-one-latent is
-        its shipped instance. Making the mixed-frame call *unrepresentable* is a stronger remedy
-        than any assertion about the value it would have produced.
+        Making the mixed-frame call unrepresentable is a stronger remedy than any assertion about
+        the value it would have produced.
         """
         import inspect
 
@@ -332,15 +328,15 @@ class TestFragmentLengthAnchor:
 
 
 class TestSpliceCensus:
-    """⭐ TRAPS: pure-and-length-censored.0 — the per-fragment splice breakdown is SCANNER QC, and it closes the books.
+    """The per-fragment splice breakdown is SCANNER QC, and it closes the books.
 
-    ``rigel report``'s five splice-type counts used to be read off the fragment-length CATEGORY
-    MODELS (``flm.category_models[stype].n_observations``), so they counted only the fragments that
-    contributed a length observation — a population gated by the transcript-space unanimity test and
-    by the single-block rule on the intergenic path, and never stated anywhere. TRAPS: pure-and-length-censored deletes that
-    histogram, so the counts move to where the classification is MADE.
+    Reading `rigel report`'s five splice-type counts off the fragment-length category models counts
+    only the fragments that contributed a length observation — a population gated by the
+    transcript-space unanimity test and by the single-block rule on the intergenic path, and stated
+    nowhere. The counts belong where the classification is MADE
+    (`TRAPS: pure-and-length-censored`).
 
-    ⛔ **Nothing is routed through the accumulator to obtain them.** The accumulator's subject is
+    Nothing is routed through the accumulator to obtain them. The accumulator's subject is
     fragment length; the scanner's subject is what it saw and what it held out. A QC count with no
     algorithmic consumer does not earn a trip through another subsystem's schema.
     """
@@ -348,7 +344,7 @@ class TestSpliceCensus:
     def test_every_splice_type_is_censused(self, oracle):
         """Every :class:`SpliceType` reaches Python, by a name derived in both languages.
 
-        ⚠ The failure mode this exists for is silent: ``pipeline`` copies the scanner's dict onto
+        The failure mode this exists for is silent: ``pipeline`` copies the scanner's dict onto
         ``PipelineStats`` with ``stats_dict.get(key, 0)``, so a C++ key that does not match a Python
         field reads **zero** rather than raising. A category added to the enum and forgotten in
         either language would be reported as "none of those were seen".
@@ -363,7 +359,7 @@ class TestSpliceCensus:
             )
 
     def test_the_census_accounts_for_every_fragment_offered_to_the_accumulator(self, oracle):
-        """⭐ THE INVARIANT: every censused fragment either deposited, was named as a rejection, or
+        """The invariant: every censused fragment either deposited, was named as a rejection, or
         was named as a hold-out. Nothing is lost between the two subsystems.
 
             Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
@@ -375,12 +371,12 @@ class TestSpliceCensus:
         job, and the census is where that decision becomes visible.
 
         ``n_deposit_not_offered`` covers the fragments the deposit adapter cannot express as one
-        molecule on one region_bound axis — chiefly blocks on more than one reference. Those returns were
-        silent before this counter; the identity is what makes them countable.
+        molecule on one region-bound axis — chiefly blocks on more than one reference. Such a return
+        is silent without the counter, and the identity is what makes it countable.
 
-        ⚠ This is the same externally-checkable form as TRAPS: a-purity-filter-is-a-length-filter's ``Σ deposited_lengths == qc.deposited``
-        and a **different statement**: that one says every deposited fragment was binned by length,
-        this one says every classified fragment was accounted for on its way to the deposit.
+        This is the same externally-checkable form as ``sum(deposited_lengths) == qc.deposited`` and
+        a DIFFERENT statement: that one says every deposited fragment was binned by length, this one
+        says every classified fragment was accounted for on its way to the deposit.
         """
         from rigel.splice import SpliceType, census_field
 
@@ -407,7 +403,7 @@ class TestSpliceCensus:
         )
 
     def test_the_census_has_teeth_on_this_fixture(self, oracle):
-        """⚠ The identity above is satisfiable by an all-zero census. This fixture must populate at
+        """The identity above is satisfiable by an all-zero census. This fixture must populate at
         least two categories, so that dropping any single category's increment is detectable — a
         gate that can only fire on data it never sees is not a gate."""
         from rigel.splice import SpliceType, census_field
@@ -421,7 +417,7 @@ class TestSpliceCensus:
         )
 
     def test_the_identity_holds_when_fragments_are_held_out_as_artifacts(self, blacklisted_oracle):
-        """⭐ The identity, on a library where the hold-out term is the DOMINANT one.
+        """The identity, on a library where the hold-out term is the DOMINANT one.
 
         Without this the ``− census[SPLICE_ARTIFACT]`` term is asserted only over zero, and any
         mistake in it — counting artifacts as deposited, as not-offered, or not at all — is
@@ -451,7 +447,7 @@ class TestSpliceCensus:
     def test_the_artifact_census_is_confirmed_by_the_deposit_TOTAL(
         self, oracle, blacklisted_oracle
     ):
-        """⭐ The artifact count, derived a SECOND way — from a subsystem that has never heard of an
+        """The artifact count, derived a SECOND way — from a subsystem that has never heard of an
         artifact.
 
         The same BAM is scanned twice against the same annotation, differing only in whether the
@@ -462,7 +458,7 @@ class TestSpliceCensus:
 
             deposited(no blacklist) − deposited(blacklisted) == census[SPLICE_ARTIFACT]
 
-        ⚠: a check that re-derives the number by the same route
+        A check that re-derives the number by the same route
         checks nothing. This one crosses a subsystem boundary, so a census placed AFTER the hold-out
         return — reading a confident zero for the very category the report names — cannot survive it.
 
@@ -496,10 +492,10 @@ class TestSpliceCensus:
     def test_the_identity_holds_when_a_fragment_cannot_be_expressed_as_one_molecule(
         self, multi_reference_bam
     ):
-        """⭐ The identity, on the term that closes the books over the deposit adapter's own refusals.
+        """The identity, on the term that closes the books over the deposit adapter's own refusals.
 
-        ⚠ Without this fixture ``n_deposit_not_offered`` is zero on both sides everywhere, and
-        deleting the counter entirely leaves the suite green — measured, not supposed.
+        PERTURBATION: without this fixture ``n_deposit_not_offered`` is zero on both sides
+        everywhere, and deleting the counter entirely leaves the suite green.
         """
         from rigel.splice import SpliceType, census_field
 
@@ -529,10 +525,7 @@ class TestSpliceCensus:
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
 
-    # ⛔ `test_the_census_counts_fragments_not_length_observations` lived here and was DELETED at
-    # TRAPS: pure-and-length-censored.2. It asserted the census is a SUPERSET of the fragment-length observation population — true,
-    # and the entire reason the census exists — but its comparand was `n_frag_length_unambiguous`,
-    # which TRAPS: pure-and-length-censored.2 deleted along with the observations it counted. The population statement that
-    # survives is the identity above: every censused fragment either deposits, is a named rejection,
-    # or is a named hold-out. G6's 4.6 % measurement of the difference is recorded in
-    # which is now the only place it exists.
+    # The census being a SUPERSET of the fragment-length observation population is the entire reason
+    # it exists, but there is no separate observation counter left to compare it against. The
+    # population statement that survives is the identity above: every censused fragment either
+    # deposits, is a named rejection, or is a named hold-out.

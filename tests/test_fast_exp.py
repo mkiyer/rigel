@@ -1,8 +1,12 @@
-"""Tests for fast_exp accuracy against std::exp via math.exp.
+"""`fast_exp`, the vectorised exponential the EM's E-step kernel runs, against `math.exp`.
 
-Validates the vectorized fast_exp implementation (NEON + scalar) used
-in the EM E-step kernel against Python's math.exp (which delegates to
-libm, matching std::exp bit-for-bit).
+Accuracy over a uniform sweep of the full range and at the three regimes that behave differently —
+near zero, moderate, deep negative — then the edge cases: exact zero, the cutoff and its
+continuity, negative infinity, odd-length and single-element and empty arrays. The vector and
+scalar paths must agree with each other, since an odd tail is handled by the scalar code, and the
+worst-case error is bounded in ULP rather than by a tolerance anyone picked. `math.exp` delegates
+to libm, which is what the C++ would call, so it is a real reference rather than a second
+approximation.
 """
 
 import math

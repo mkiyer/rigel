@@ -1,19 +1,14 @@
-"""Gates for THE TRANSFER POLICY's shape (`calibration.messages.transfer`): the backbone protocol,
-the silence identity (an evidence-free transfer is byte-identical to `SilentPolicy` through the real
-backbone), the installer, the two passes against an independent recursive reference and the no-echo
-law, the own claims' liveness under the strand deadband, and the completion contract — every
-directed face carries a rule or a lane face, or leads into structural pure gDNA.
+"""Gates for the transfer policy's shape and for the two mechanisms that belong to the policy
+rather than to any one face.
 
-The messages themselves are gated by subject in the sibling files, one per builder:
-`test_transfer_splice_faces.py` (the intron|exon face), `test_transfer_edge_and_terminus.py` (the
-edge's level and the terminus), `test_transfer_alt_splice.py`, `test_transfer_gdna_lane.py`,
-`test_transfer_rna_lanes.py` (the lanes and the cube) and `test_transfer_ceilings.py`; the shared
-fixture and builders are `_transfer_harness.py`.
-
-⚠ Falsification note (2026-09-01, watched): dropping the exon-flank requirement from the pair
-predicate is NOT catchable on this toy — every intron-flanking boundary here also has an exon
-flank — so the perturbation that must fire instead is the SOURCE-SIDE flip (exon as source),
-which the pair gate catches.
+The shape: the backbone protocol; the silence identity, where an evidence-free transfer is
+byte-identical to `SilentPolicy` through the real backbone; the installer and its refusal of an
+unknown name; the two passes against an independent recursive reference; the no-echo law; the own
+claims' liveness under the strand deadband; and the completion contract, that every directed face
+carries a rule or a lane face or leads into structural pure gDNA. The mechanisms: phase 2's
+ceilings, read only from a face that sent no composition, and the gDNA level lane, where a received
+level is a lower bound the hop widens, two bounds intersect rather than multiply, and an empty node
+forwards what it holds. The per-face builders are gated by `test_transfer_faces.py`.
 """
 
 from __future__ import annotations
@@ -31,15 +26,11 @@ from _transfer_harness import (
     _dead_boundaries,
     _drive_the_backbone,
     _full_policy,
+    _rna,
+    _rna_lanes_of,
     _run,
     _with_alt_splice_sites,
-    capture_sweep_inputs,
 )
-
-
-@pytest.fixture(scope="module")
-def sweep_inputs(tmp_path_factory):
-    return capture_sweep_inputs(tmp_path_factory)
 
 
 def test_the_transfer_policy_satisfies_the_backbone_protocol():
@@ -49,10 +40,9 @@ def test_the_transfer_policy_satisfies_the_backbone_protocol():
 
 
 def test_an_evidence_free_transfer_is_byte_identical_to_silence(sweep_inputs):
-    """THE RUNG-0 IDENTITY: with no factory rows to transfer, the policy must reproduce
+    """The rung-0 identity: with no factory rows to transfer, the policy must reproduce
     `SilentPolicy` byte-for-byte through the real backbone — and it must do so by delivering a
-    SILENT message, never zero-filled channel arrays (the measured 1-ULP non-identity of a
-    present-but-zero channel)."""
+    SILENT message, never zero-filled channel arrays, which cost a ULP and break the identity."""
     from rigel.calibration.messages.transfer import TransferPolicy
 
     a = _run(sweep_inputs, SilentPolicy())
@@ -103,7 +93,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
 
 
 def _reference_rows(prepared, ctx):
-    """AN INDEPENDENT IMPLEMENTATION OF THE TWO PASSES — recursive rather than sequential: the message
+    """An independent implementation of the two passes, recursive rather than sequential: the message
     into ``i`` from its neighbour ``s`` is the face's rule applied to ``s``'s own claim composed with
     the message into ``s`` from ``s``'s OTHER neighbour, and the rows are the two messages composed.
     Nothing here reads the policy's pass state; only its claims and rules."""
@@ -135,7 +125,7 @@ def _reference_rows(prepared, ctx):
     lmemo = {}
 
     def level_into(s, i):
-        """THE LANE, recursively: nothing unless the face is a lane face; an EMPTY sender forwards the
+        """The lane, recursively: nothing unless the face is a lane face; an EMPTY sender forwards the
         level that reaches it from its far side unchanged; a full sender sends the product of its own
         level and the level it holds; a full recipient prices the hop (both totals' counting plus the
         discrepancy beyond it) and takes the level as a lower bound."""
@@ -193,7 +183,7 @@ def _reference_rows(prepared, ctx):
 
 
 def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passes(sweep_inputs):
-    """THE PASSES, gated against a second implementation: what the backbone's two sequential passes
+    """The passes, gated against a second implementation: what the backbone's two sequential passes
     deliver equals the recursive definition — the message into a node is the face's rule applied to
     the sender's own claim composed with what reached the sender from ITS far side — on the live toy
     and on the toy with populated inside pieces and alternative splice sites (every rule family live)."""
@@ -206,7 +196,7 @@ def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passe
 
 
 def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
-    """THE NO-ECHO LAW, watched: replace ONE node's own claim by a distinctive profile and re-run the
+    """The no-echo law, watched: replace ONE node's own claim by a distinctive profile and re-run the
     passes — what that node HOLDS from either side must not move (its claim never returns to it),
     while some other node's rows must (the claim did travel). Checked at an intron with two live faces
     and at a strand-live exon."""
@@ -251,7 +241,7 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
 
 
 def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
-    """THE VACUITY LAW for every strand-borne claim (items 1, 2, 5, 6, 7): where the solver's derived
+    """The vacuity law, for every claim carried by the strand channel: where the solver's derived
     deadband declares a node's strand channel dead (``own.tau_lam == 0``), that node's OWN CLAIM is
     absent — an exon's and a boundary's alike — so nothing of its own can travel; and a policy built
     without strand parameters carries no strand claim anywhere."""
@@ -283,7 +273,7 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
 
 
 def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_inputs):
-    """THE COMPLETION CONTRACT, structurally: after `prepare`, every directed face (x → y) of the chain
+    """The completion contract, structurally: after `prepare`, every directed face (x → y) of the chain
     carries a composition rule or is a lane face, unless y is an intergenic region (structurally pure
     gDNA: nothing to impute there). STOP by omission is impossible by construction."""
     ctx = _ctx_of(sweep_inputs)
@@ -307,3 +297,322 @@ def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_input
     assert not unserved, f"faces with no rule and no lane: {unserved[:8]}"
     # and a lane face never doubles a composition rule (no witness counted twice)
     assert not (set(prepared.rule) & lane.faces)
+
+
+# ── phase 2's ceilings: an RNA level as an upper side on a single-strand node's gDNA share ───────
+
+
+def test_an_rna_level_reads_as_a_ceiling_on_the_gdna_share_and_round_trips():
+    """`rna_row_of_level`: a lower-only RNA level (non-decreasing in u) is NON-INCREASING in λ — "at least
+    this much RNA" is "at most this much gDNA"; the level of a profile read back is the profile where the
+    coordinate resolves. PERTURBATION: the gDNA map in its place does not round-trip."""
+    from rigel.calibration.messages.transfer_rows import (
+        level_of_profile,
+        rna_level_of_profile,
+        rna_row_of_level,
+    )
+
+    K = 60
+    lam = np.linspace(-10.0, 10.0, K)
+    u = lam
+    n, a_r, rho = 500.0, 100.0, 0.02
+    floor = np.maximum.accumulate(-0.5 * ((u - 1.0) / 0.3) ** 2)
+    row = rna_row_of_level(floor - floor.max(), u, lam, n, a_r, rho)
+    assert np.all(np.diff(row) <= 1e-9) and row[0] > row[-1] + 5.0
+    prof = -0.5 * ((lam - 1.5) / 0.7) ** 2
+    back = rna_row_of_level(rna_level_of_profile(prof, lam, u, n, a_r, rho), u, lam, n, a_r, rho)
+    f_r = 1.0 / (1.0 + np.exp(lam))
+    u_of = np.log(f_r * n / (a_r * rho))
+    du = np.abs(np.gradient(u_of))
+    inside = (u_of > u[0]) & (u_of < u[-1]) & (du >= 0.5 * (u[1] - u[0]))
+    tol = 0.15 + 0.02 * np.abs(prof[inside])
+    assert np.all(np.abs(back[inside] - prof[inside]) <= tol)
+    wrong = rna_row_of_level(level_of_profile(prof, lam, u, n, a_r, rho), u, lam, n, a_r, rho)
+    assert not np.all(np.abs(wrong[inside] - prof[inside]) <= tol)
+
+
+def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
+    """`_PreparedTransfer._ceilings` on a hand-built single-strand exon: the left face sent a
+    COMPOSITION with an RNA level and a junction flux — nothing of it is read (the face map already
+    carries them); the right face sent an RNA level and no composition, and the exon has a flux at that
+    junction — both are read, intersected, and delivered as a non-increasing row. An AMBIG node, an
+    empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
+    message's composition removed, its level and flux join the intersection and the row changes."""
+    from rigel.calibration.messages import Level, Message
+    from rigel.calibration.messages.transfer import _LevelLane, _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.transfer_rows import intersect, rna_row_of_level
+
+    K = 41
+    lam = np.linspace(-6.0, 6.0, K)
+    u = lam
+    #             0: bnd   1: exon(+)   2: bnd   3: ambig   4: empty exon(+)
+    n_u = np.array([50.0, 400.0, 50.0, 300.0, 0.0])
+    a_r = np.full(5, 100.0)
+    empty = ~(n_u > 0)
+    fp = np.array([True, True, True, True, True])
+    fn = np.array([False, False, False, True, False])
+    left = np.array([-1, 0, 1, 2, 3])
+    right = np.array([1, 2, 3, 4, -1])
+
+    def floor(u_b):
+        return -0.5 * np.maximum(0.0, (u_b - u) / 0.2) ** 2
+
+    flux = [None, {0: floor(0.4), 2: floor(0.1)}, None, None, None]
+    pos = _LevelLane(
+        "pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, set(), total=n_u, flux=flux
+    )
+    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, set(), total=n_u)
+    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, set())
+    site = _SolveSite(fp & fn, {"pos": fp, "neg": fn}, left, right, 20)
+    prep = _PreparedTransfer([None] * 5, {}, K, {"gdna": gd, "pos": pos, "neg": neg}, site)
+    comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
+    held_l = Level(floor(0.8), 25.0, 100.0)
+    held_r = Level(floor(-0.3), 25.0, 100.0)
+    from_left = [None, Message(composition=comp, level_rna_pos=held_l), None, None, None]
+    from_right = [None, Message(level_rna_pos=held_r), None, None, None]
+    rows = np.zeros((5, K))
+    assert prep._ceilings(from_left, from_right, rows)
+    want = rna_row_of_level(intersect([held_r.profile, flux[1][2]]), u, lam, 400.0, 100.0, 0.5)
+    np.testing.assert_allclose(rows[1], want, atol=1e-12)
+    assert np.all(np.diff(rows[1]) <= 1e-9)
+    assert not rows[[0, 2, 3, 4]].any()
+    # the perturbation: the left composition removed → its level and flux join
+    from_left2 = [None, Message(level_rna_pos=held_l), None, None, None]
+    rows2 = np.zeros((5, K))
+    assert prep._ceilings(from_left2, from_right, rows2)
+    want2 = rna_row_of_level(
+        intersect([held_l.profile, flux[1][0], held_r.profile, flux[1][2]]),
+        u,
+        lam,
+        400.0,
+        100.0,
+        0.5,
+    )
+    np.testing.assert_allclose(rows2[1], want2, atol=1e-12)
+    assert not np.allclose(rows2[1], rows[1])
+
+
+def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(sweep_inputs):
+    """On the live toy: every exon with a junction flux carries it PER FACE in the lane; and at every
+    single-strand exon whose faces all sent a composition the delivered row equals the row without the
+    ceiling step (nothing added), so the flux inside a face map is never counted twice."""
+    ctx, prepared = _rna_lanes_of(sweep_inputs)
+    is_exon = np.asarray(ctx.is_exon_region, bool)
+    sc = np.asarray(ctx.sj_count_lo) + np.asarray(ctx.sj_count_hi)
+    per_face = 0
+    for name, lane in _rna(prepared).items():
+        for x in np.flatnonzero(is_exon):
+            fx = lane.flux[x]
+            if fx is None:
+                continue
+            for b, prof in fx.items():
+                assert b in (int(ctx.left[x]), int(ctx.right[x])) and sc[b].sum() > 0
+                assert np.all(np.diff(prof) >= -1e-12)  # a lower bound
+                per_face += 1
+    assert per_face > 0
+    from rigel.calibration.messages import SILENCE
+
+    order = list(range(ctx.n_slots))
+    held = []
+    for nbr, seq, backward in (
+        (np.asarray(ctx.left, np.int64), order, False),
+        (np.asarray(ctx.right, np.int64), order[::-1], True),
+    ):
+        receive = prepared.propagate(backward=backward)
+        got = [None] * len(order)
+        for i in seq:
+            s = int(nbr[i])
+            if s >= 0:
+                got[i] = SILENCE if receive is None else receive(s, i)
+        held.append(got)
+    msg = prepared.solve(*held)
+    rows = np.asarray(msg.lam_rows)
+    without = np.zeros_like(rows)
+    n = len(prepared.own)
+    from rigel.calibration.messages.transfer import _fuse
+    from rigel.calibration.messages.transfer_rows import intersect
+
+    for i in range(n):
+        parts, bounds = [], []
+        for m in (held[0][i], held[1][i]):
+            if m is None:
+                continue
+            if m.composition is not None:
+                parts.append(m.composition)
+            if m.level_gdna is not None and not prepared.lanes["gdna"].empty[i]:
+                bounds.append(prepared.lanes["gdna"].row(m.level_gdna.profile, i))
+        if bounds:
+            parts.append(intersect(bounds))
+        if parts:
+            without[i] = _fuse(parts)
+    site = prepared.site
+    fp, fn = site.free["pos"], site.free["neg"]
+    all_comp = np.array(
+        [
+            all(m is None or m.composition is not None for m in (held[0][i], held[1][i]))
+            for i in range(n)
+        ]
+    )
+    single = (fp ^ fn) & ~site.ambig
+    quiet = single & all_comp
+    assert quiet.sum() > 0
+    np.testing.assert_allclose(rows[quiet], without[quiet], atol=1e-12)
+
+
+# ── the gDNA level lane: a level crosses a face as a lower bound the hop widens ──────────────────
+
+
+def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
+    """`_LevelLane.receive` on the gDNA lane (no two-sided face): what a full recipient holds is
+    non-decreasing in u (a level that crosses a face says "at least this much gDNA" and nothing more),
+    a two-sided input loses only its upper side, and a hop across a density cliff — a larger price —
+    widens it."""
+    from rigel.calibration.messages import Level
+    from rigel.calibration.messages.transfer import _LevelLane
+
+    u = np.linspace(-10, 10, 60)
+    two_sided = -0.5 * ((u - 1.0) / 0.4) ** 2
+    two_sided -= two_sided.max()
+    # one density on both sides: the price is the two totals' counting alone
+    flat = _LevelLane(
+        "gdna",
+        u,
+        u,
+        0.05,
+        np.array([1.0e6, 1.0e6]),
+        np.array([1.0e4, 1.0e4]),
+        np.zeros(2, bool),
+        [None, None],
+        {(0, 1)},
+    )
+    lower = flat.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
+    assert np.all(np.diff(lower) >= -1e-12), "not a lower bound"
+    below = u < 0.0
+    np.testing.assert_allclose(lower[below], two_sided[below], atol=1e-3)
+    assert np.all(lower[u > 2.0] > -1e-9), "the upper side was kept"
+    # a cliff between the two nodes: the discrepancy beyond counting widens the bound
+    cliff = _LevelLane(
+        "gdna",
+        u,
+        u,
+        0.05,
+        np.array([1.0e6, 1.0e6]),
+        np.array([1.0e4, 4.0e4]),
+        np.zeros(2, bool),
+        [None, None],
+        {(0, 1)},
+    )
+    wide = cliff.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
+    assert np.all(np.diff(wide) >= -1e-12)
+    assert wide[np.argmin(np.abs(u + 1.0))] > lower[np.argmin(np.abs(u + 1.0))], "no widening"
+
+
+def test_the_level_coordinates_round_trip_through_a_node_total():
+    """`level_of_profile` and `profile_of_level` are one map read both ways: a composition profile
+    taken to a level at (n, a) and back at the same (n, a) is itself wherever the level lies below
+    the node's total; and the same level read at a node with a LARGER total is a smaller gDNA share
+    (the level is kept, the share is not)."""
+    from rigel.calibration.messages.transfer_rows import level_of_profile, profile_of_level
+
+    lam = np.linspace(-10, 10, 601)  # a fine grid: the round trip interpolates twice
+    u = lam
+    rho_ref, n, a = 0.05, 400.0, 1000.0
+    row = -0.5 * ((lam - np.log(0.3 / 0.7)) / 1.0) ** 2  # a share near 0.3 → 120 gDNA of 400
+    level = level_of_profile(row, lam, u, n, a, rho_ref)
+    back = profile_of_level(level, u, lam, n, a, rho_ref)
+    core = np.abs(lam - np.log(0.3 / 0.7)) < 2.0
+    np.testing.assert_allclose(back[core], (row - row.max())[core], atol=0.05)
+    bigger = profile_of_level(level, u, lam, 4.0 * n, a, rho_ref)
+    assert lam[np.argmax(bigger)] < lam[np.argmax(back)], "a larger total must read a smaller share"
+
+
+def test_bounds_intersect_and_do_not_multiply():
+    """`intersect`: the pointwise tighter of two lower bounds, never their product — two identical soft
+    bounds intersect to themselves (a product would double the penalty), and a tight bound beats a
+    loose one at every density."""
+    from rigel.calibration.messages.transfer_rows import intersect, lower_side
+
+    u = np.linspace(-10, 10, 60)
+    soft = lower_side(-0.5 * ((u - 1.0) / 2.0) ** 2)
+    np.testing.assert_allclose(intersect([soft, soft]), soft, atol=1e-12)
+    tight = lower_side(-0.5 * ((u - 1.0) / 0.5) ** 2)
+    np.testing.assert_allclose(intersect([soft, tight]), tight, atol=1e-12)
+    both = intersect([lower_side(-0.5 * ((u - 3.0) / 1.0) ** 2), soft])
+    assert np.all(both <= soft + 1e-12) and np.all(np.diff(both) >= -1e-12)
+
+
+def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_holds():
+    """The ratchet gate: on a hand-built lane (three full nodes in a row, which the toy does not have),
+    the level a full node emits is the pointwise tighter of its own lower side and the priced level it
+    holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
+    on the ladder. PERTURBATION: an `emit` that multiplies fails here."""
+    from rigel.calibration.messages import Level
+    from rigel.calibration.messages.transfer import _LevelLane
+    from rigel.calibration.messages.transfer_rows import intersect, lower_side
+
+    u = np.linspace(-10, 10, 60)
+    own = [None, -0.5 * ((u + 1.0) / 1.5) ** 2, None]
+    lane = _LevelLane(
+        "gdna",
+        u,
+        u,
+        0.05,
+        np.array([100.0, 120.0, 90.0]),
+        np.array([50.0, 60.0, 45.0]),
+        np.zeros(3, bool),
+        own,
+        {(0, 1), (1, 2)},
+    )
+    held = Level(lower_side(-0.5 * ((u - 0.5) / 0.8) ** 2), 100.0, 50.0)
+    sent = lane.emit(1, 2, held)
+    want = intersect([lower_side(own[1]), held.profile])
+    np.testing.assert_allclose(sent.profile, want, atol=1e-12)
+    product = lower_side(own[1]) + held.profile
+    assert np.max(np.abs(sent.profile - (product - product.max()))) > 0.5, "the sum: the ratchet"
+    assert (sent.n, sent.a) == (120.0, 60.0)
+
+
+def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
+    from scipy.special import polygamma
+
+    from rigel.calibration.messages.transfer_rows import hop_price
+
+    counting = float(polygamma(1, 50.5) + polygamma(1, 200.5))
+    assert abs(hop_price(50, 100.0, 200, 400.0) - counting) < 1e-12, (
+        "equal densities: counting only"
+    )
+    d = np.log(8.0) ** 2 - (1 / 50 + 1 / 200)
+    assert abs(hop_price(50, 100.0, 200, 50.0) - (counting + d)) < 1e-12, "the excess over counting"
+    assert hop_price(50, 100.0, 200, 50.0) == hop_price(50, 100.0, 200, 50.0)
+
+
+def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
+    """The empty node is transparent: the toy's inside pieces have no total, so what the boundary beyond
+    such a piece holds from it must be exactly what the piece received — same profile, same (n, a) of
+    the last full node — priced only at the full recipient. PERTURBATION: a policy whose empty nodes
+    price the hop fails this gate."""
+    from rigel.calibration.messages.transfer_rows import blur_row, hop_price, lower_side
+
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _full_policy(sweep_inputs)[0].prepare(ctx)
+    _drive_the_backbone(prepared, ctx)
+    lane = prepared.lanes["gdna"]
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    checked = 0
+    for backward, nbr in ((False, left), (True, right)):
+        held = prepared.held[backward]
+        for e in np.flatnonzero(lane.empty):
+            s = int(nbr[e])
+            if s < 0 or held[e] is None or held[e].level_gdna is None:
+                continue
+            x = int(right[e] if not backward else left[e])
+            if x < 0 or held[x] is None or held[x].level_gdna is None or lane.empty[x]:
+                continue
+            got, sent = held[x].level_gdna, held[e].level_gdna
+            v = hop_price(sent.n, sent.a, lane.count[x], lane.a[x])
+            want = lower_side(sent.profile)
+            want = blur_row(want, lane.u, v) if v > 0.0 else want
+            np.testing.assert_allclose(got.profile, want, atol=1e-9)
+            assert (got.n, got.a) == (float(lane.count[x]), float(lane.a[x]))
+            checked += 1
+    assert checked > 0, "no level crossed an empty node on the toy: the gate proved nothing"

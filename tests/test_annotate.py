@@ -1,10 +1,11 @@
-"""
-Tests for the annotated BAM output feature (rigel.annotate).
+"""`rigel.annotate` — writing the scanner's per-fragment decisions back out as BAM tags.
 
-Verifies that:
-1. The AnnotationTable collects correct per-fragment metadata.
-2. write_annotated_bam produces a valid BAM with the expected tags.
-3. The annotation pipeline integrates end-to-end with run_pipeline.
+The annotation table itself: what it stores per fragment, how it grows, and the canonical tag values
+for the fragment class and splice type. Then the writer, through a real `run_pipeline`: the
+annotated BAM must be valid, its per-class counts must agree with the run's own, and it must
+preserve every input record and its collation, multimappers included, because an annotated BAM that
+silently drops records is not the same library the numbers describe. The blacklist tag is gated for
+presence, for the blacklisted case and for its absence on a filtered passthrough.
 """
 
 import shutil

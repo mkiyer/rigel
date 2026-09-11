@@ -1,33 +1,19 @@
-"""⭐ An annotated intron in the mate gap is found on EVERY fragment, and never a near-miss for it.
+"""An annotated intron in the mate gap is found on EVERY fragment, and never a near-miss for it.
 
-     (which supersedes)
-    Cause and evidence:
-
-'s TRAPS: pure-and-length-censored left the tool with ONE definition of fragment length — the
-accumulator's ``L``, the total length of the fragment's own path. TRAPS: two-divisors-opposite-sign proved that definition correct
-*given its inputs*. This module is about an input that was **incomplete**: implicit-splice detection ran
-only on fragments the resolver had already called ``SPLICE_UNSPLICED``, so a fragment carrying an
-observed CIGAR-N splice never had its unsequenced mate gap examined and kept that intron inside ``L``.
-
-⚠ **Why a hand-written BAM and not the simulator.** Every number below is a fragment length asserted to
-the base pair, and the point of the gate is that ``L`` is *exactly* the molecule. A simulated library
-gives a distribution; four reads written by hand give an answer. ``deposited_lengths`` is TRAPS: a-purity-filter-is-a-length-filter's
-unconditional histogram — one bin per deposited fragment, indexed by ``L`` — so a four-fragment BAM makes
-``L`` directly readable with no model, no fit and no tolerance.
-
-⛔ **The trap this module also pins** (spec §1): the gap finder walks consecutive aligned blocks and
-emits every hole, so a CIGAR-N intron is a "hole" too. Dropping only gaps that EXACTLY match an observed
-intron is what stops the detector substituting a *different* annotated intron that happens to lie within
-the ±K anchor tolerance — which would merge into one wider interval and make ``L`` too SHORT.
-
-⭐ **WHAT MOVED AT S1, AND WHY IT IS THE SAME GATE.** made the ACCUMULATOR the
-arbiter: a fragment arrives with its hypothesis SET, and if more than one hypothesis survives its ``L`` is
-undetermined and it is **held whole in the side buffer** rather than deposited. Two of the four fragments
-here now take that route, so their ``L`` is no longer readable from ``deposited_lengths`` — it is readable
-from the hypotheses in the bank, which is a **stronger** statement: the old gate said the deposited number
-was 502, this one says the enumeration produced exactly the intron set that yields 502 and never the
-near-miss that yields 500. ⛔ Nothing about the near-match trap is relaxed; it is asserted on coordinates
-instead of on a length.
+The tool has ONE definition of fragment length — the accumulator's ``L``, the total length of the
+fragment's own path — and this module gates one of its inputs. Implicit-splice detection must run on
+every fragment, not only on those the resolver already called unspliced: a fragment carrying an
+observed CIGAR-N splice still has an unsequenced mate gap, and an annotated intron inside that gap
+belongs outside ``L``. The other half of the gate is the near-match trap: the gap finder walks
+consecutive aligned blocks and emits every hole, so a CIGAR-N intron is a hole too, and only dropping
+the gaps that EXACTLY match an observed intron stops the detector substituting a DIFFERENT annotated
+intron that happens to lie within the anchor tolerance — which would normalise into one wider interval
+and make ``L`` too SHORT. Four fragments are written by hand rather than simulated, because every
+number here is a length asserted to the base pair and a simulated library gives a distribution where
+four hand-written reads give an answer. Two of the four deposit and their ``L`` is read straight off
+``deposited_lengths``; the other two are HELD, so their gate is asserted on the enumerated hypothesis
+coordinates instead — a stronger statement than a deposited length, since it says the enumeration
+produced exactly the intended intron set and never the near-miss.
 """
 
 from __future__ import annotations
@@ -42,19 +28,18 @@ from rigel.splice import SpliceType, census_field
 
 GENOME = 70_000
 
-#: ⭐ **TWO CONTIGS, and the second one is load-bearing.** ``g7`` — the disagreeing-isoform gene, the only
-#: one that produces a deferral by structure — lives on **chr2**, so the side buffer must hold a record
+#: TWO CONTIGS, and the second one is load-bearing. ``g7`` — the disagreeing-isoform gene, the only
+#: one that produces a deferral by structure — lives on chr2, so the deferred bank must hold a record
 #: stamped ``ref = 1``.
 #:
-#: ⚠ Measured, not supposed: with everything on one contig, a perturbation giving **every** reference the id
-#: ``0`` passed the entire suite, 1860 tests. A single-contig fixture cannot tell a correct reference stamp
-#: from a constant, and the second pass replays each held record onto that reference's region_bound axis — so a
-#: constant stamp would drain chr2's coordinates onto chr1's partition. That is the defect the predecessor
-#: adapter actually had (`multi_reference_bam`'s docstring in ``test_scanner_accumulator_integration.py``).
+#: PERTURBATION: with everything on one contig, giving every reference the id ``0`` passes the entire
+#: suite. A single-contig fixture cannot tell a correct reference stamp from a constant, and the second
+#: pass replays each held record onto that reference's coordinate axis — so a constant stamp would
+#: drain chr2's coordinates onto chr1's partition.
 #:
 #: g6/t_mixed — three exons, so a fragment can carry an observed splice AND a gap intron.
 #: g7/t_two_{a,b} — two isoforms whose gap introns DISAGREE, which is the deferral case.
-#: (GTF is 1-based inclusive; the 0-based half-open geometry each boundary produces is in the comment.)
+#: (GTF is 1-based inclusive; the 0-based half-open geometry each row produces is in the comment.)
 GTF = (
     # t_mixed exons (62000,62200) (62400,62600) (62800,63000); introns (62200,62400) (62600,62800)
     'chr1\ttest\texon\t62001\t62200\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed";\n'
@@ -70,12 +55,12 @@ GTF = (
     'chr2\ttest\texon\t66701\t67000\t.\t+\t.\tgene_id "g7"; transcript_id "t_two_b";\n'
 )
 
-#: Which reference each gene sits on, so the gates can say which region_bound axis a record must replay onto.
+#: Which reference each gene sits on, so the gates can say which coordinate axis a record replays onto.
 REF_CHR1, REF_CHR2 = 0, 1
 
 # ── the four fragments, and the L each one must produce ────────────────────────────────────────────
 #
-#   name      read1 CIGAR at its start          read2       extent      region_bound                     L
+#   name      read1 CIGAR at its start          read2       extent      introns cut               L
 #   pure      62100  100M 200N 100M             62500 100M  [62100,62600)  (62200,62400)        300
 #   mixed     62100  100M 200N 100M             62900 100M  [62100,63000)  + (62600,62800)      500
 #   near      62100  102M 198N 100M             62900 100M  [62100,63000)  (62202,62400)
@@ -86,18 +71,19 @@ REF_CHR1, REF_CHR2 = 0, 1
 L_PURE = 300
 #: ``mixed`` is the population the spec exists to find: observed splice PLUS a gap intron.
 L_MIXED = 500
-#: ``near`` is the §1 trap: its observed intron is 2 bp inside the annotated donor, so the ANNOTATED
-#: intron lies within K=3 of the observed gap. Substituting it would region_bound 200 bp instead of 198 → 500.
+#: ``near`` is the near-match trap: its observed intron is 2 bp inside the annotated donor, so the
+#: ANNOTATED intron lies within K=3 of the observed gap. Substituting it would cut 200 bp instead of
+#: 198 → 500.
 L_NEAR = 502
 
-#: ⭐ ``near`` and ``ambig`` are DEFERRED, not deposited — for two different reasons, and both are the
+#: ``near`` and ``ambig`` are DEFERRED, not deposited — for two different reasons, and both are the
 #: arbitration rule working rather than a loss:
 #:
 #: * ``near``'s observed CIGAR-N sj is 2 bp off the annotation, so the fragment is
-#:   ``SPLICED_UNANNOT`` and **not certified RNA**. The unspliced (genomic) hypothesis therefore survives
-#:   alongside the spliced one — the molecule may be gDNA or nascent with the gap as real template — and
-# two survivors mean ``L`` is undetermined: ∅ is available whenever no
-#:   *annotated* sj was sequenced.
+#:   ``SPLICED_UNANNOT`` and NOT certified RNA. The unspliced (genomic) hypothesis therefore survives
+#:   alongside the spliced one — the molecule may be gDNA, or RNA that did not splice there, with the
+#:   gap as real template — and two survivors mean ``L`` is undetermined: the genomic path is available
+#:   whenever no ANNOTATED sj was sequenced.
 #: * ``ambig``'s two isoforms imply DIFFERENT introns in the same gap. gDNA cannot be spliced and its
 #:   sj IS annotated, so the molecule is certified RNA and only the structure is open.
 _DEFERRED = 2
@@ -106,9 +92,9 @@ _DEFERRED = 2
 def _covered_length(start: int, end: int, introns) -> int:
     """``L`` by integer SET ARITHMETIC — a different algorithm from the accumulator's segment walk.
 
-    ⚠ Deliberately not the reference's own ``_hypothesis_length``: a
-    validator that calls the implementation's helper validates nothing, and the whole point here is that a
-    hypothesis's intron set yields 502 rather than 500.
+    Deliberately not the specification's own ``_hypothesis_length``: a validator that calls the
+    implementation's helper validates nothing, and the whole point here is that a hypothesis's intron
+    set yields 502 rather than 500.
     """
     covered = set(range(start, end))
     for a, b in introns:
@@ -189,7 +175,7 @@ def gap_intron_bam(gap_intron_index):
         # near — the observed splice lands 2 bp inside the annotated donor
         _read("near", 62100, [(M, 102), (N, 198), (M, 100)], 62900, True),
         _read("near", 62900, [(M, 100)], 62100, False),
-        # ambig — two isoforms imply different introns in the [66500,66900) gap. ⭐ ON CHR2, so the held
+        # ambig — two isoforms imply different introns in the [66500,66900) gap. ON CHR2, so the held
         # record must be stamped ref = 1: a constant stamp would replay these coordinates onto chr1.
         _read("ambig", 66100, [(M, 100), (N, 200), (M, 100)], 66900, True, ref_id=REF_CHR2),
         _read("ambig", 66900, [(M, 100)], 66100, False, ref_id=REF_CHR2),
@@ -219,21 +205,21 @@ def _lengths(payload) -> dict[int, int]:
 
 
 def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payload):
-    """⭐ The spec's U1, read off the tally rather than argued about.
+    """The headline case, read off the tally rather than argued about.
 
     ``mixed`` spans [62100,63000) — 900 bp of genome — and is a 500 bp molecule: 200 bp of it was
     spliced out and sequenced as CIGAR-N, another 200 bp was spliced out and never sequenced at all.
-    Before this work only the first region_bound was made and the fragment measured 700 bp.
+    Cutting only the sequenced intron would measure it at 700 bp.
 
-    ⚠ ``mixed``'s sj IS annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and
-    its single surviving hypothesis DEPOSITS. ``near`` and ``ambig`` are held instead — U3 and U5 below.
+    ``mixed``'s sj IS annotated, so it is certified RNA, the unspliced hypothesis is ruled out, and its
+    single surviving hypothesis DEPOSITS. ``near`` and ``ambig`` are held instead — U3 and U5 below.
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
         "the deposited fragment lengths are not the molecules this BAM determines. 700 bp for `mixed` "
         "means the mate-gap intron was never region_bound (the old SPLICE_UNSPLICED gate) — "
     )
     assert payload.qc.deposited == 2
-    # ⭐ Conservation: nothing is discarded. Four fragments in, two deposited and two held.
+    # Conservation: nothing is discarded. Four fragments in, two deposited and two held.
     assert payload.qc.deferred_undetermined_gap == payload.deferred.n_fragments == _DEFERRED
     assert payload.qc.dropped_too_long == payload.qc.dropped_empty == 0
 
@@ -244,14 +230,14 @@ def test_U1b_the_unspliced_control_is_untouched(payload):
 
 
 def test_the_two_intron_lists_are_DISJOINT_so_the_union_absorbs_nothing(payload):
-    """⭐ The union of observed and implied introns is a union, not a merge.
+    """The union of observed and implied introns is a union, not a merge.
 
-    ``introns_absorbed`` counts introns the accumulator had to normalise away because they overlapped or
-    abutted. The §1 filter's claim is that the implied list can only hold holes the CIGAR did not
-    explain, so unioning the two lists can never produce an overlap — and this counter is where that
-    claim shows up. ⚠ It is also what the adapter's sort protects: the de-duplication before the deposit
-    is an adjacent-pair comparison, so an unsorted union would pass a duplicate through to be absorbed
-    here instead of skipped there.
+    ``introns_absorbed`` counts introns the accumulator had to normalise away because they overlapped
+    or abutted. The exact-match filter's claim is that the implied list can only hold holes the CIGAR
+    did not explain, so unioning the two lists can never produce an overlap — and this counter is where
+    that claim shows up. It is also what the adapter's sort protects: the de-duplication before the
+    deposit is an adjacent-pair comparison, so an unsorted union would pass a duplicate through to be
+    absorbed here instead of skipped there.
     """
     assert payload.qc.introns_absorbed == 0
 
@@ -260,13 +246,13 @@ def test_the_two_intron_lists_are_DISJOINT_so_the_union_absorbs_nothing(payload)
 
 
 def test_U3_a_near_match_does_not_shorten_L(payload):
-    """⛔ ``near``'s observed intron is [62202,62400); the ANNOTATED one is [62200,62400).
+    """``near``'s observed intron is [62202,62400); the ANNOTATED one is [62200,62400).
 
-    They are 2 bp apart and K is 3, so a filter written on *overlap* rather than exact equality lets the
+    They are 2 bp apart and K is 3, so a filter written on OVERLAP rather than exact equality lets the
     annotated intron be emitted for a gap the CIGAR already explained. It then normalises together with
-    the observed one into [62200,62400) and region_bounds 200 bp where the molecule lost 198 — ``L`` too SHORT.
+    the observed one into [62200,62400) and cuts 200 bp where the molecule lost 198 — ``L`` too SHORT.
 
-    ⭐ Asserted on the ENUMERATED COORDINATES, which is stronger than asserting a deposited length. The
+    Asserted on the ENUMERATED COORDINATES, which is stronger than asserting a deposited length. The
     fragment is now held (its sj is unannotated, so the genomic hypothesis survives too), and what the
     bank must show is that the gap the CIGAR explained was left alone: the observed list is exactly the
     fragment's own 198 bp intron, and the one implied intron is the one in the MATE gap and nothing else.
@@ -294,13 +280,13 @@ def test_U3_a_near_match_does_not_shorten_L(payload):
 
 
 def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(payload):
-    """⛔ ``ambig`` carries an observed splice, so it never reached this test before.
+    """``ambig`` carries an observed splice as well as a disputed mate gap.
 
     ``t_two_a`` puts [66600,66800) in the mate gap and ``t_two_b`` puts [66600,66700) there — a 100 bp
     difference in ``L`` for one molecule. There is no answer to deposit, and picking either is picking a
     fragment length at random.
 
-    ⚠ **Not "dropped".** The fragment is retained in full, with both paths and the transcript that supports
+    Not "dropped". The fragment is retained in full, with both paths and the transcript that supports
     each, so the second pass can score them against a fragment-length distribution the first pass did not
     have. A counter alone would size the population; the bank is what makes it recoverable.
     """
@@ -315,7 +301,7 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
     assert [length for _, length in hypotheses] == [500, 600], (
         "a 100 bp difference in L for one molecule"
     )
-    # ⛔ Its own sj IS annotated, so the molecule is certified RNA: the genomic hypothesis is dead and
+    # Its own sj IS annotated, so the molecule is certified RNA: the genomic hypothesis is dead and
     # the open question is purely WHICH STRUCTURE. `near`, whose sj is 2 bp off the annotation, is the
     # other subclass. The two arms are counted apart, and that is what the census is for.
     assert payload.gap_resolution.gap_deferred_which_introns == 1
@@ -337,19 +323,19 @@ def test_U5_a_mixed_fragment_with_disagreeing_candidates_is_DEFERRED_and_HELD(pa
 
 
 def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
-    """⛔ **The stamp the drain replays onto, and nothing else in the suite was checking it.**
+    """The stamp the drain replays onto.
 
-    Each held record carries the reference it came from, because the second pass re-enters ``deposit`` on
-    *that* reference's accumulator — and a coordinate is only meaningful against its own region_bound axis.
+    Each held record carries the reference it came from, because the second pass re-enters ``deposit``
+    on THAT reference's accumulator — and a coordinate is only meaningful against its own axis.
 
-    ⚠ **Measured.** A perturbation giving every reference in the ``AccumulatorSet`` the id ``0`` passed the
-    entire suite, 1860 tests, because every fixture was single-contig or deferred only on reference 0. A
-    constant is indistinguishable from a correct value until two references both hold something. ``g7``
-    lives on chr2 for exactly this reason.
+    PERTURBATION: giving every reference in the ``AccumulatorSet`` the id ``0`` passes the whole suite
+    otherwise, because every other fixture is single-contig or defers only on reference 0. A constant
+    is indistinguishable from a correct value until two references both hold something, which is why
+    ``g7`` lives on chr2.
 
-    ⚠ The extent check is the half that matters most: ``[66100,67000)`` is a perfectly plausible interval on
-    chr1 too, so "the record is stamped 1" and "the record's coordinates lie inside reference 1" are
-    different statements and a wrong stamp fails the second one against the real partition.
+    The extent check is the half that matters most: ``[66100,67000)`` is a perfectly plausible interval
+    on chr1 too, so "the record is stamped 1" and "the record's coordinates lie inside reference 1" are
+    different statements, and a wrong stamp fails the second one against the real partition.
     """
     deferred = payload.deferred
     stamped = sorted(int(deferred.ref[i]) for i in range(deferred.n_fragments))
@@ -377,22 +363,20 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
 
 
 def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
-    """⭐ **TRAPS: a-variance-cannot-fix-a-bias IS DELETED, and this is the two-sided gate that replaces it**.
+    """Pool membership is DETERMINACY, not provenance, and this is the two-sided gate on it.
 
-    TRAPS: a-variance-cannot-fix-a-bias barred a fragment whose splice was *inferred* rather than sequenced, on the grounds that a length
-    partly inferred from the annotation is a product of the model the pool is used to fit. The purity
-    argument was real; its price was measured and it is larger than what it buys. On the chr22 pilot the
-    pool reads **+0.67 % mean / +2.40 % sd** against truth under determinacy and **−9.58 % / −22.46 %**
-    under provenance, because barring inferred lengths preferentially bars the fragments whose mates sit
-    far apart. ⛔ **A purity filter on a length pool is a length filter.**
+    Barring a fragment whose splice was INFERRED rather than sequenced has a real purity argument
+    behind it — a length partly inferred from the annotation is a product of the model the pool is used
+    to fit — but it costs more than it buys, because it preferentially bars the fragments whose mates
+    sit far apart and so shifts the pool's own length distribution
+    (TRAPS: a-purity-filter-is-a-length-filter). What stands in its place is stronger, not weaker: a
+    fragment reaches the pool only when EXACTLY ONE hypothesis survived, so its ``L`` is not in doubt
+    at all, however it was arrived at.
 
-    ⚠ What replaces it is stronger, not weaker: a fragment reaches the pool only when **exactly one
-    hypothesis survived**, so its ``L`` is not in doubt at all — however it was arrived at.
-
-    ⚠ Two-sided on purpose. ``pure`` (splice sequenced end to end) and ``mixed`` (200 bp of its ``L``
-    inferred, but only one possible path) must BOTH be in; ``near`` and ``ambig`` must be out, and they are
-    out because they were **deferred**, not because the pool stopped filling. A one-sided version of this
-    test passes on an accumulator that emits no pool at all.
+    Two-sided on purpose. ``pure`` (splice sequenced end to end) and ``mixed`` (200 bp of its ``L``
+    inferred, but only one possible path) must BOTH be in; ``near`` and ``ambig`` must be out, and they
+    are out because they were DEFERRED, not because the pool stopped filling. A one-sided version of
+    this test passes on an accumulator that emits no pool at all.
     """
     rna = payload.pool_lengths[POOL_RNA_SPLICED]
     assert {int(i): int(rna[i]) for i in np.nonzero(rna)[0]} == {L_PURE: 1, L_MIXED: 1}, (
@@ -411,11 +395,11 @@ def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
 def test_U4_the_splice_census_is_unchanged_by_gap_intron_detection(
     gap_intron_index, gap_intron_bam
 ):
-    """Detection is unconditional; the ``SPLICE_IMPLICIT`` **promotion** stays unspliced-only.
+    """Detection is unconditional; the ``SPLICE_IMPLICIT`` PROMOTION stays unspliced-only.
 
-    ``splice_type`` feeds scoring, the buffer, the strand training and — since TRAPS: pure-and-length-censored — ``rigel report``'s
+    ``splice_type`` feeds scoring, the deferred bank, the strand training and ``rigel report``'s
     census. All four fragments here carry an observed CIGAR-N splice, so all four must be counted as
-    observed splices and **none** as implicit.
+    observed splices and NONE as implicit.
     """
     _, index = gap_intron_index
     stats, _, _, _ = scan_and_buffer(gap_intron_bam, index, BamScanConfig(sj_strand_tag="auto"))

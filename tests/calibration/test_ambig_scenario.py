@@ -1,19 +1,14 @@
-"""Regression lock for the AMBIG (overlapping opposite-strand) calibration fix.
+"""An AMBIG region must not read its own RNA as gDNA, and must still see gDNA when there is gDNA.
 
-The strand-first redesign's headline fix: an **AMBIG** exon region (where a `+` and a `-` transcript
-overlap, so its own strand is undefined) must not read its nascent/mature RNA as gDNA. Before the fix
-it over-called gDNA (~0.12 of the contained mass at gDNA=0+nascent); the per-region gradient combine
-imputes the AMBIG region from its **strand-cleaned** flanking boundaries, dropping that to ~0.
-
-This is an end-to-end calibration test (sim → scan → calibrate) on a controlled toy genome: two
-overlapping opposite-strand transcripts form one AMBIG region (5000-6000), with single-strand flanks and
-separate multi-exon genes so the strand model trains. It locks two behaviours:
-
-  1. gDNA=0 + nascent: the AMBIG region's gDNA fraction is ~0 (no false gDNA from RNA the count clue
-     can't see) — the fix.
-  2. gDNA present, no nascent: the AMBIG region reads substantial gDNA — so (1) is not passing trivially.
-
-See (the count-zero-info theory).
+An AMBIG exon region is one where a `+` and a `-` transcript overlap, so its own strand is undefined
+and the strand channel tells it nothing: on the count alone, RNA it cannot attribute to either strand
+looks exactly like genomic background. The answer has to come from the region's strand-clean flanking
+boundaries, and this file is the end-to-end lock on that (sim → scan → calibrate on a controlled toy
+genome: two overlapping opposite-strand transcripts forming one AMBIG region, single-strand flanks,
+and separate multi-exon genes so the strand model trains). Two behaviours are held together, and
+neither means much alone — at gDNA=0 with nascent RNA present the AMBIG region's gDNA fraction is
+near zero, and with real gDNA and no nascent it reads substantial gDNA, which is what stops the first
+arm from passing trivially by always answering zero.
 """
 
 from __future__ import annotations
@@ -90,9 +85,9 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _st, sm, _buf, pl = scan_and_buffer(bam, idx, scan)
     ra = RegionArrays.from_frame(idx.regions_df, idx.ref_name_to_id)
-    # ⭐ The same call production makes; see tests/calibration/_oracle.py.
+    # The same call production makes; see tests/calibration/_oracle.py.
     fl = build_fl_models(pl)
-    # ⚠ The sj axis and the boundary flags are BOTH required against the same index the payload was
+    # The sj axis and the boundary flags are BOTH required against the same index the payload was
     # scanned on: an axis addressing a different graph would place every splice on the wrong boundary, and
     # calibrate refuses rather than proceeding.
     from rigel.calibration.splice_graph import (
@@ -120,19 +115,17 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
 
 
 def test_ambig_no_false_gdna_from_nascent(tmp_path):
-    """⭐⭐ **GREEN AGAIN SINCE `message_propagation = True` (owner, 2026-08-18), AND IT WENT GREEN BY THE
-    ROUTE ITS OWN xfail NAMED.** It was a strict xfail from 2026-08-07 to 2026-08-18, recording the
-    MEASURED PRICE OF THE MUTE rather than a defect: an AMBIG slot has NO own composition evidence —
-    κ = ½ makes the strand λ-term identically 0 and the Schur complement on a both-strand region is
-    exactly 0 — so muted it falls back to ψ's uninformative reference and read **f_g = 0.458 against a
-    truth of 0**, where it reads < 0.08 with messages live.
+    """This is the standing detector that message propagation keeps supplying an AMBIG slot's answer.
 
-    ⚠ The xfail named two exits — (a) turn message propagation back on, (b) give an AMBIG slot its own
-    θ-independent composition channel. **(a) is what happened**; (b) was priced and refused
-    (`TRAPS: a-linear-likelihood-emits-a-sign`), so this test is now the standing detector that the
-    message layer keeps doing the job the mute could not."""
-    # gDNA=0 + nascent: the AMBIG region must NOT read the nascent/mature RNA as gDNA. The pre-fix
-    # over-call was ~0.12; the gradient combine + strand-cleaned boundary imputation drives it to ~0.
+    An AMBIG slot has no own composition evidence: κ = ½ makes the strand λ-term identically 0, and
+    the Schur complement on a both-strand region is exactly 0. With the messages muted the slot falls
+    back to ψ's uninformative reference and reads roughly half gDNA against a truth of zero, so the
+    bound below is a direct measurement of whether the neighbours are still being heard. Giving the
+    slot its own θ-independent composition channel instead was priced and refused
+    (`TRAPS: a-linear-likelihood-emits-a-sign`).
+    """
+    # gDNA=0 + nascent: the AMBIG region must NOT read the nascent/mature RNA as gDNA. Imputation
+    # from the strand-cleaned flanking boundaries is what drives it to ~0.
     frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nrna_abundance=30.0)
     assert frac < 0.08, (
         f"AMBIG gDNA fraction {frac:.3f} too high at gDNA=0+nascent (the fix should be ~0)"

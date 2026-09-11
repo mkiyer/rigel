@@ -4,7 +4,7 @@ The knob is ``boundary_excess`` — how many times the uniform-field expectation
 boundary's unspliced count carries. 1.0 says "no capture" (the on-target correction must then vanish
 identically); large values say "strong capture".
 
-⚠ Deliberately NOT a real ``AccumulatorPayload``: the realized-law machinery consumes six payload
+Deliberately NOT a real ``AccumulatorPayload``: the realized-law machinery consumes six payload
 fields, and building the full scanner object here would couple this fixture to the scan schema for no
 gain. The dataclass below carries exactly the consumed surface, and a schema change that widens that
 surface will fail these tests loudly at the attribute, which is the right failure.

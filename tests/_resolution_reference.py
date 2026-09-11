@@ -42,7 +42,7 @@ def _detect_intrachromosomal_chimera(
     least one transcript index.  If the non-empty sets form more than
     one connected component, the fragment is a chimera CANDIDATE.
 
-    ⭐⭐⭐ COMPATIBILITY IS CHECKED FIRST (owner, 2026-08-19).  Disjoint
+    COMPATIBILITY IS CHECKED FIRST.  Disjoint
     transcript sets are not evidence of a rearrangement: a genomic
     molecule is contiguous and routinely spans two transcripts that
     share nothing.  A candidate is only a chimera if the mates are
@@ -120,7 +120,7 @@ def _detect_intrachromosomal_chimera(
     else:
         chimera_type = ChimeraType.CIS_STRAND_DIFF
 
-    # ⭐⭐⭐ COMPATIBILITY BEFORE CHIMERA.  One reference is already given (the caller
+    # COMPATIBILITY BEFORE CHIMERA.  One reference is already given (the caller
     # gates on `is_interchromosomal`); facing inward is exactly `len(unique_strands) == 1`,
     # because `build_fragment` keys blocks by (ref, ref_strand) with R2's orientation
     # flipped, so an inward-facing pair lands both mates on ONE strand.  What remains is

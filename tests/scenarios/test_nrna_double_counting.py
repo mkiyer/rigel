@@ -1,36 +1,20 @@
-"""Scenario: nRNA double-counting regression test.
+"""Scenario: nascent RNA must not be double-counted.
 
-A 20 kb genome with two multi-exon transcripts:
+A 20 kb genome with two multi-exon transcripts::
 
-    t1   (+)  eight 500 bp exons across chr1:2000-10000  abundance=100  ← positive control
-    t_ctrl (−)  eight 500 bp exons across chr1:12000-19500  abundance=0   ← negative control
+    t1     (+)  eight 500 bp exons across chr1:2000-10000   abundance 100  ← positive control
+    t_ctrl (−)  eight 500 bp exons across chr1:12000-19500  abundance 0    ← negative control
 
-The ~4 kb total intronic span in t1 provides ample intronic signal for nRNA
-estimation.  The negative control transcript t_ctrl is on the
-opposite strand, unexpressed, and physically separated.
-
-This scenario sweeps the full hyperparameter space:
-  - gDNA abundance:       [0, 20, 100]
-  - nRNA abundance:       [0, 30, 70]
-  - strand specificity:   [0.65, 0.9, 1.0]
-
-Before the nRNA double-counting fix, stranded conditions with
-nRNA > 0 would over-estimate nascent RNA by ~2× and distort
-per-transcript mRNA counts.  After the fix, the EM should
-separate all pools and total RNA (mRNA + nRNA) should be
-perfectly accounted for.
-
-Scenario notes:
-  - nRNA fragments that fall entirely within exons are physically
-    indistinguishable from mRNA — some nRNA→mRNA leakage is expected.
-    - Imperfect strand specificity still makes the problem harder, so
-        total-RNA tolerances remain broader at SS < 1.0 than at perfect SS.
-
-We therefore check:
-  - nRNA NOT double-counted (ratio < 1.50) — the core regression test
-  - Total RNA (mRNA + nRNA) accountability at SS=1.0 (tight)
-  - Relaxed total RNA at SS < 1.0 where false gDNA is expected
-  - mRNA accuracy for clean (no gDNA, no nRNA) conditions
+t1's ~4 kb of intronic span gives the nRNA estimate ample signal, and t_ctrl is unexpressed, on the
+opposite strand and physically separated, so any count on it is a false positive. The sweep covers
+gDNA abundance [0, 20, 100] × nRNA abundance [0, 30, 70] × strand specificity [0.65, 0.9, 1.0], and
+the property held is that the EM separates the three pools: pipeline nRNA must not exceed the truth by
+more than the per-tier ratio, total RNA (mRNA + nRNA) must be accounted for, and per-transcript mRNA
+must be accurate on the clean conditions. The bounds widen with gDNA and with the gap to perfect
+strand specificity, because nRNA fragments lying entirely inside exons are physically
+indistinguishable from mRNA and antisense nRNA is genuinely confusable with gDNA — at near-random
+strand specificity the strand model says almost nothing, and the leak is real rather than a defect
+this test can see.
 """
 
 import logging
@@ -75,10 +59,9 @@ class TestNrnaDoubleCounting:
             seed=SIM_SEED,
             work_dir=tmp_path / "nrna_double_count",
         )
-        # Positive control: multi-exon gene on + strand.
-        # Total exon length is 4 kb, matching the original toy, but multiple
-        # sj keep annotated spliced observations well represented.
-        # The broad 8 kb span keeps the nRNA/gDNA separation problem active.
+        # Positive control: multi-exon gene on the + strand. 4 kb of exon in eight pieces, so
+        # annotated spliced observations are well represented, and an 8 kb span so that the
+        # nRNA-versus-gDNA separation problem stays live.
         sc.add_gene(
             "g1",
             "+",
@@ -130,17 +113,11 @@ class TestNrnaDoubleCounting:
 
     @pytest.mark.parametrize("gdna,nrna,ss", _FULL_GRID, ids=_FULL_IDS)
     def test_full_sweep(self, scenario, gdna, nrna, ss):
-        """Full hyperparameter sweep — all pools should be well-separated.
+        """Full hyperparameter sweep — all three pools must stay separated.
 
-        Assertion tiers by difficulty:
-          - Tier 1 (g=0):   tight — nRNA double-counting regression
-          - Tier 2 (g=20):  moderate — two-way gDNA + RNA separation
-          - Tier 3 (g=100): relaxed — extreme gDNA stress test
-
-        The high-nRNA, gDNA-poor cases used to be quarantined because
-        global intron/boundary densities treated nRNA signal as gDNA on
-        this toy genome. Strand-aware calibration should now keep those
-        cases active as routine regression coverage.
+        The assertion tiers are by difficulty: no gDNA is tight and is where the double-counting
+        regression lives, moderate gDNA is a two-way gDNA-plus-RNA separation, and extreme gDNA is a
+        stress arm where only accountability is asserted.
         """
         bench = build_and_run(
             scenario,
@@ -159,12 +136,10 @@ class TestNrnaDoubleCounting:
         )
 
         # ----- Core nRNA double-counting assertion -----
-        # When nRNA is present AND gDNA is not overwhelming,
-        # pipeline nRNA count must not exceed expected by > limit.
-        # Phase C: synthetic nRNA transcripts compete as regular
-        # transcripts in EM, which changes absorption dynamics compared
-        # to the old shadow system. With gDNA present, the three-way
-        # competition (mRNA/nRNA/gDNA) allows more slack.
+        # When nRNA is present AND gDNA is not overwhelming, the pipeline's nRNA count must not
+        # exceed the truth by more than the limit. A synthetic nascent transcript competes as an
+        # ordinary transcript in the EM, so with gDNA present the three-way competition
+        # (mRNA / nRNA / gDNA) gets more slack than the two-way one.
         if bench.n_nrna_expected > 20 and gdna <= 20:
             nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
             if gdna > 0:
@@ -178,34 +153,28 @@ class TestNrnaDoubleCounting:
             )
 
         # ----- Total RNA accountability -----
-        # mRNA + nRNA should approximately account for all non-gDNA fragments.
-        # Known limitation: at SS < 1.0 with moderate nRNA, some nRNA
-        # anti-sense reads get misclassified as gDNA (false positive).
+        # mRNA + nRNA should account for all non-gDNA fragments. Known limitation: below perfect
+        # strand specificity, with nRNA present, some antisense nRNA is classified as gDNA.
         total_rna_expected = bench.total_expected + bench.n_nrna_expected
         total_rna_observed = bench.total_rna_observed
         if total_rna_expected > 0:
             rna_rel_err = abs(total_rna_observed - total_rna_expected) / total_rna_expected
 
             if gdna == 0 and ss >= 0.99:
-                # Perfect SS, no gDNA: total RNA near-exact. Tolerance 0.08 (was 0.05): the density-correct
-                # gDNA effective length (the effective-support divisor E[max(0,L−ℓ)] / averaged boundary support,
-                # NOT the genomic region_size_bp) is SMALLER than the old divisor, so the gDNA component
-                # competes slightly harder per position. In a truly zero-gDNA library the residual
-                # antisense-nRNA PHANTOM gDNA (a calibration-SOLVE artifact, not an eff-len one — tracked
-                # separately) gains ~1.5 pts of EM share. The eff-len change is correct (proven
-                # factor-1-under-uniform); the phantom is the real defect, fixed elsewhere.
+                # Perfect SS, no gDNA: total RNA near-exact. The bound is not zero because a
+                # zero-gDNA library still shows a small phantom gDNA share from antisense nascent
+                # fragments — a calibration-solve artifact tracked on its own, not an
+                # effective-length one.
                 assert rna_rel_err < 0.08, (
                     f"Total RNA error: expected={total_rna_expected}, "
                     f"observed={total_rna_observed:.0f}, "
                     f"rel_err={rna_rel_err:.2f}"
                 )
             elif gdna == 0:
-                # Imperfect SS with nRNA present can leak into false gDNA.
-                # Tolerance depends on SS (lower SS → more anti-sense confusion).
-                # At very low SS (≤0.65), the strand model is nearly
-                # uninformative and the gDNA FL model (trained from
-                # misidentified antisense RNA) matches real RNA, causing
-                # near-total nRNA→gDNA leakage.
+                # Imperfect SS with nRNA present leaks into false gDNA, so the tolerance depends on
+                # SS: the lower it is, the more antisense confusion there is. At near-random SS the
+                # strand model is uninformative and the gDNA length model, trained from misidentified
+                # antisense RNA, matches real RNA — so the leak approaches total.
                 tol = 0.25 if ss >= 0.85 else 0.75
                 assert rna_rel_err < tol, (
                     f"Total RNA error (g0 ss={ss}): "
@@ -214,11 +183,9 @@ class TestNrnaDoubleCounting:
                     f"rel_err={rna_rel_err:.2f}"
                 )
             elif gdna == 20:
-                # Moderate gDNA: within 66% (was 60%). The weak-SS + heavy-nascent corner (s65/n70) is the
-                # known-brittle g20 sparse-artifact class (memory: "dissolves at scale"); the v6 Phase-B RNA
-                # prior trusts the FROZEN deconv_sides anchors there (the R5 frozen-side issue), nudging this
-                # one corner 0.60→0.65. Accepted Phase-B regression — recovered in Phase C (co-evolving
-                # boundary regions + the I₀-free recalibration). See CALIBRATION_PLAN_v6 §11/§12.
+                # Moderate gDNA. The bound is set by one corner — weak SS with heavy nascent — where
+                # this toy's sparse intronic evidence is at its most brittle; every other cell of the
+                # sweep sits well inside it.
                 assert rna_rel_err < 0.66, (
                     f"Total RNA error (g20): expected={total_rna_expected}, "
                     f"observed={total_rna_observed:.0f}, "
@@ -228,47 +195,12 @@ class TestNrnaDoubleCounting:
 
         # ----- mRNA accuracy (clean conditions only) -----
         if gdna == 0 and nrna == 0:
-            # PR01's continuous strand reliability leaves a small, nonzero
-            # false-gDNA posterior in imperfect-strand clean data instead of
-            # hard-rejecting ambiguous contained-exon strand imbalance.
-            # The weak-SS (< 0.99) tolerance was widened 30 → 40 when the RNA strand
-            # Beta-Binomial (docs/em_strand/05) went live: the symmetric RNA overdispersion
-            # softens the strand clue at low strand specificity, and the v1 sj
-            # double-counting inflates the fitted RNA overdispersion (a multi-exon fragment
-            # credits several boundary sides with the same strand → spurious between-side
-            # correlation), costing a few fragments of accuracy here. Accepted v1 tradeoff
-            # (symmetry restores unstranded-uninformativeness); see the plan doc §9.
-            #
-            # The near-random regime (ss < 0.85) was widened again when the accumulator
-            # span redesign moved implicit splices to the SPLICED channel
-            # ( Phase C). Previously
-            # these spliced RNA fragments were MIS-counted as unspliced, padding the
-            # unspliced-RNA strand signal and masking false gDNA. Correctly classified, the
-            # unspliced pool's near-random ss=0.65 signal honestly over-calls ~5.8% gDNA on
-            # a 0-gDNA library — the same imperfect-SS residual the negative-control
-            # assertion already documents (the bug was hiding it, not preventing it).
-            #
-            # The ss=0.65 tolerance was widened again (140 → 170) by the Phase-4 fusion
-            # teardown (calibration is now the iterative odds-propagation simplex sweep, the
-            # single production path). At near-random strand the sweep's count + global gDNA
-            # priors pull a marginally larger weak-SS phantom (~7.6% vs the fusion's ~7.0%) —
-            # the known count-bias-at-AMBIG incompleteness tracked for the post-teardown fix
-            # (CALIBRATION_PLAN_v2 §8); an accepted small zero-gDNA regression. High-SS
-            # (>= 0.85) is unaffected.
-            #
-            # Widened (170 → 250) by the density-correct gDNA effective length
-            # (per-region effective-support divisors, transport-free).
-            # The eff-len change perturbs the SAME weak-SS imperfect-strand phantom (the count/strand
-            # combine, NOT the eff-len): t1 ~11.8% off at ss=0.65. The residual is the gDNA-SOLVE phantom
-            # (count-bias-at-AMBIG), tracked separately; High-SS (>= 0.85) is unaffected; this is the
-            # accepted near-random zero-gDNA corner.
-            #
-            # The mid-SS branch was widened (40 → 100) by the pass-0 gDNA-rate NPMLE prior
-            # We now start every region at f_g=1 (total density) with an
-            # extremely-weak prior and deconvolve RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
-            # imperfect strand cannot deconvolve the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
-            # phantom, now surfaced by the total-density start. Perfect-SS (>= 0.99) is unaffected (tol 20).
-            # The residual shrinks with the planned deconvolving/refit work (the unstranded-nascent over-call).
+            # The three tiers are the same defect seen at three strengths: on a zero-gDNA library
+            # with imperfect strand specificity, calibration cannot deconvolve the last few percent
+            # and leaves a false-gDNA phantom, which costs this transcript exactly those fragments.
+            # It is the residual the negative-control assertion already admits. Perfect strand
+            # specificity is unaffected and stays tight; the near-random arm is the widest because
+            # the strand channel there carries almost no information at all.
             tol = 20 if ss >= 0.99 else (100 if ss >= 0.85 else 250)
             assert_transcript_accuracy(bench, max_abs_diff=tol)
 
@@ -279,13 +211,11 @@ class TestNrnaDoubleCounting:
     @pytest.mark.parametrize("ss", SS_LEVELS, ids=[f"ss_{int(s * 100)}" for s in SS_LEVELS])
     @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
     def test_nrna_strand_inversion(self, scenario, nrna, ss):
-        """Higher strand specificity must NOT degrade nRNA accuracy.
+        """Higher strand specificity must not DEGRADE nRNA accuracy.
 
-        Before the fix, SS=0.95 would produce ~2× nRNA while SS=0.5
-        produced ~1× (the paradoxical strand inversion).
-
-        The high-nRNA cases were formerly quarantined; they now run as
-        active regression tests for the strand-aware calibration path.
+        The inversion this gates is paradoxical and therefore easy to miss: a strand model that
+        double-counts nascent RNA gets worse as the strand signal gets stronger, so a sweep that only
+        looked at the near-random arm would read the defect as noise.
         """
         bench = build_and_run(
             scenario,
@@ -296,11 +226,8 @@ class TestNrnaDoubleCounting:
         )
         if bench.n_nrna_expected > 10:
             nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
-            # With low SS (0.65), nRNA is poorly detectable — accept wider range.
-            # At near-random SS (≤0.65), the strand model provides
-            # almost no signal and nRNA detection may completely fail
-            # (antisense nRNA → gDNA leakage).
-            # At higher SS (≥ 0.9), the nRNA signal is clear.
+            # At near-random SS the strand model provides almost no signal and nRNA detection may
+            # fail outright, the nascent fragments leaking to gDNA; at higher SS the signal is clear.
             lower_bound = 0.0 if ss < 0.7 else (0.30 if ss >= 0.8 else 0.05)
             # Upper bound: must NOT be double-counted (was ~2.0 before fix)
             assert lower_bound <= nrna_ratio < 1.50, (
@@ -315,13 +242,10 @@ class TestNrnaDoubleCounting:
 
     @pytest.mark.parametrize("nrna", [0, 30, 70], ids=[f"nrna_{n}" for n in [0, 30, 70]])
     def test_mrna_stable_across_nrna(self, scenario, nrna):
-        """Total RNA (mRNA+nRNA) should be conserved regardless of nRNA level.
+        """Total RNA (mRNA + nRNA) is conserved whatever the nRNA level.
 
-        Uses SS=1.0 to avoid the known nRNA→gDNA leakage at imperfect SS,
-        isolating the pure nRNA accounting test.
-
-        The high-nRNA cases were formerly quarantined; they now run as
-        active total-RNA conservation coverage.
+        Run at perfect strand specificity on purpose, so the known antisense-nRNA-to-gDNA leak is out
+        of the way and what is left is the nascent accounting alone.
         """
         bench = build_and_run(
             scenario,
@@ -330,10 +254,9 @@ class TestNrnaDoubleCounting:
             strand_specificity=1.0,
             scenario_name=f"nrna_mrna_stable_n{nrna}",
         )
-        # Total RNA should be near-perfect (no gDNA). Tolerance 0.08 (was 0.05): same cause as
-        # test_full_sweep's gdna==0/ss>=0.99 branch — the density-correct (smaller) gDNA eff-len lets the
-        # residual antisense-nRNA phantom gDNA (a separately-tracked calibration-solve artifact) gain a
-        # ~1.5 pt EM share in this zero-gDNA library. The eff-len method is correct (factor-1-under-uniform).
+        # Total RNA should be near-perfect, there being no gDNA. The bound is not zero for the same
+        # reason as the sweep's zero-gDNA perfect-SS branch: a small antisense-nRNA phantom gDNA
+        # share survives calibration, and it is tracked as its own defect.
         total_rna = bench.total_rna_observed
         total_expected = bench.total_expected + bench.n_nrna_expected
         if total_expected > 0:

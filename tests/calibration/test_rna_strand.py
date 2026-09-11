@@ -1,14 +1,12 @@
-"""Tests for the RNA strand Beta-Binomial overdispersion (docs/em_strand/05).
+"""The RNA strand Beta-Binomial overdispersion: the estimator, and the symmetry it buys.
 
-Two properties:
-
-* **Estimator** — RNA overdispersion drawn at a known level (per splice junction) is recovered by
-  :func:`fit_rna_strand_overdispersion` (its component mean is κ, not ½, so the excess-variance
-  scale must be κ(1−κ), not ¼).
-* **Deconv symmetry** — with the RNA strand modelled as Beta-Binomial too (same default prior as
-  gDNA), an *unstranded* region (κ = ½) is **uninformative**, and a balanced region grows more
-  gDNA-like as the library becomes more stranded. The earlier gDNA-only overdispersion broke this
-  (it pulled balanced unstranded regions toward RNA).
+Two properties are gated. The estimator recovers an overdispersion drawn at a known level per
+splice junction, which turns on the excess-variance scale being κ(1−κ) rather than ¼ — the RNA
+component's mean is κ, not ½, so a ¼ scale biases the estimate by 4κ(1−κ). And the deconvolution is
+symmetric: with the RNA strand modelled as Beta-Binomial too, an unstranded region (κ = ½) is
+uninformative and a balanced region grows more gDNA-like as the library becomes more stranded.
+Modelling only the gDNA strand as Beta-Binomial breaks that — it pulls balanced unstranded regions
+toward RNA, which is a composition claim manufactured out of a nuisance parameter.
 """
 
 from __future__ import annotations
@@ -98,11 +96,11 @@ def test_fit_clamped_to_ceiling():
 
 
 def test_no_spliced_data_falls_back_to_THE_CEILING_not_a_constant():
-    """⭐ 2026-08-30 (owner ruling): the `Beta(14,14)` ⇒ 0.0345 shrinkage target and its derived weight are
-    DELETED. With no spliced pair the RNA fit has measured nothing, and the least-committal answer is the
-    CEILING — the widest strand likelihood the model admits, so the channel says nothing rather than
-    something confident. `calibrate` then reconciles it against the gDNA fit, which usually HAS measured
-    something (`gdna_strand.reconcile_overdispersions`)."""
+    """With no spliced pair the RNA fit has measured nothing, and the least-committal answer is the
+    ceiling — the widest strand likelihood the model admits, so the channel says nothing rather than
+    something confident. A shrinkage target would say something confident. `calibrate` then
+    reconciles it against the gDNA fit, which usually has measured something
+    (`gdna_strand.reconcile_overdispersions`)."""
     model = fit_rna_strand_overdispersion(np.zeros(50), np.zeros(50), 0.9)
     assert model.fallback_used
     assert model.rna_strand_overdispersion == pytest.approx(_MAX_OVERDISPERSION)
@@ -112,8 +110,9 @@ def test_no_spliced_data_falls_back_to_THE_CEILING_not_a_constant():
 
 
 def test_a_SPARSE_fit_is_the_raw_moment_and_says_how_little_it_knows():
-    """⛔ No shrinkage: one thin seed returns its own (noisy) moment inside the physical support, and
-    reports the INFORMATION that lets `calibrate` weigh it against the gDNA fit instead of hiding it."""
+    """No shrinkage: one thin seed returns its own (noisy) moment inside the physical support, and
+    reports the information that lets `calibrate` weigh it against the gDNA fit instead of hiding
+    how little it knows behind a plausible number."""
     model = fit_rna_strand_overdispersion(np.array([7.0]), np.array([10.0]), 0.9)
     assert not model.fallback_used
     assert 0.0 <= model.rna_strand_overdispersion <= _MAX_OVERDISPERSION
@@ -174,8 +173,9 @@ def test_unstranded_is_uninformative_with_symmetric_overdispersion():
 
 
 def test_asymmetric_overdispersion_biases_unstranded_toward_rna():
-    """The OLD asymmetry (gDNA Beta-Binomial, RNA Binomial) spuriously pulls a balanced unstranded
-    region toward RNA — the bug this change fixes. Symmetric overdispersion removes the pull."""
+    """An asymmetric pair (gDNA Beta-Binomial, RNA Binomial) spuriously pulls a balanced unstranded
+    region toward RNA. Symmetric overdispersion removes the pull, which is why the RNA side is
+    modelled at all."""
     od = overdispersion_for_beta(3.0)
     asym = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=0.0)
     symm = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)

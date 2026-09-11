@@ -1,19 +1,14 @@
-"""``build_transcript_path`` — a transcript as an ordered walk over REGION / BOUNDARY / SPLICE JUNCTION.
+"""``build_transcript_path`` — a transcript as an ordered walk over region / boundary / splice junction.
 
-⭐⭐ **THE INCLUDE/EXCLUDE RULE IS THE WHOLE CONTENT OF THE FUNCTION**, so every gate here is one clause
-of it, stated as a property rather than as a recorded output:
-
-* a multi-exon transcript takes its EXONIC regions and not its intronic ones;
-* a single-exon transcript and a synthetic span take every region they cover, introns included;
-* a boundary INTERIOR to an exon is crossed contiguously and is included — even when it exists only
-  because a signature changed there;
-* a transcript's OUTER boundaries are excluded, because the molecule ends at them;
-* a splice donor/acceptor position appears as a SPLICE JUNCTION step, never as a BOUNDARY step;
-* ⭐ the steps run in TRANSCRIPTION order, so a minus-strand path descends in genomic coordinate.
-
-⛔ **The sj join goes through INTRON COORDINATES and never through the flanking region pair.** The
-pair is unique on the shipped partition only because every exon endpoint is forced to be a region bound;
-on a coarsened partition it collides, and it carries no strand.
+The include-exclude rule is the whole content of the function, so every gate is one clause of it: a
+multi-exon transcript takes its exonic regions and not its intronic ones; a single-exon transcript
+and a synthetic span take every region they cover, introns included; a boundary interior to an exon
+is crossed contiguously and included, even when it exists only because a signature changed there; a
+transcript's outer boundaries are excluded, because the molecule ends at them; a splice
+donor/acceptor appears as a splice-junction step and never as a boundary step; and the steps run in
+transcription order, so a minus-strand path descends. The sj join goes through intron coordinates
+and never the flanking region pair, which is unique only on the shipped partition and carries no
+strand.
 """
 
 from __future__ import annotations
@@ -109,8 +104,7 @@ class _Index:
 @pytest.fixture
 def _patched_sj(monkeypatch):
     """The fixture index carries sj boundaries directly, so the CSR builder is stubbed to the
-    identity — this file gates the PATH, not `build_sj_arrays` (which has its own gates and
-    was verified 13,482/13,482 against `sj.feather` on the real index)."""
+    identity — this file gates the path, not `build_sj_arrays`, which has its own gates."""
     import rigel.calibration.splice_graph as SG
 
     class _JA:
@@ -132,9 +126,9 @@ def _kinds(path, t):
 
 
 def test_a_MULTI_EXON_transcript_takes_its_exons_and_a_sj_between_them(tmp_path, _patched_sj):
-    """⭐ The canonical path: region, splice junction, region. ⛔ The INTRON's region is absent — a mature
-    molecule has no intronic bases — and the transcript's two OUTER boundaries are absent, because the
-    molecule ends at them."""
+    """The canonical path: region, splice junction, region. The intron's region is absent — a mature
+    molecule has no intronic bases — and the transcript's two outer boundaries are absent, because
+    the molecule ends at them."""
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]  # pre | exon1 | INTRON | exon2 | post
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000), (9_000, 10_000)]}, strands=[Strand.POS])
     path = build_transcript_path(idx, _Regions(bounds))
@@ -147,9 +141,10 @@ def test_a_MULTI_EXON_transcript_takes_its_exons_and_a_sj_between_them(tmp_path,
 
 
 def test_a_boundary_INTERIOR_to_an_exon_is_crossed_and_included(tmp_path, _patched_sj):
-    """⭐ A boundary exists wherever the partition region_bound — including where only a SIGNATURE changed (an
-    antisense feature overlapping on the other strand). The molecule crosses it contiguously, so it is
-    part of the path. ⛔ Excluding it would drop the only object between two halves of one exon."""
+    """A boundary exists wherever the partition has a region bound, including where only a signature
+    changed (an antisense feature overlapping on the other strand). The molecule crosses it
+    contiguously, so it is part of the path; excluding it would drop the only object between two
+    halves of one exon."""
     bounds = [0, 1_000, 1_500, 2_000, 3_000]  # exon [1000,2000) is split at 1500
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000)]}, strands=[Strand.POS])
     path = build_transcript_path(idx, _Regions(bounds))
@@ -159,7 +154,7 @@ def test_a_boundary_INTERIOR_to_an_exon_is_crossed_and_included(tmp_path, _patch
 
 
 def test_a_SINGLE_EXON_span_keeps_every_region_it_covers_INTRONS_INCLUDED(tmp_path, _patched_sj):
-    """⭐ The synthetic shadow span the index manufactures for a gene: one interval, so every region
+    """The synthetic shadow span the index manufactures for a gene: one interval, so every region
     under it is crossed contiguously — including the ones that are introns of its mature sibling."""
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     idx = _Index(
@@ -191,15 +186,15 @@ def test_a_transcript_with_no_exons_contributes_an_EMPTY_path(tmp_path, _patched
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# ⭐⭐ Transcription order
+# Transcription order
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
-    """⭐⭐ **THE PROPERTY A GENOMIC-ORDER IMPLEMENTATION GETS SILENTLY WRONG.** A minus-strand molecule
-    is transcribed from its HIGH coordinate down, so its path descends. ⚠ Invisible to a consumer that
-    treats the path as a set or averages symmetrically over it — and wrong for every consumer that reads
-    it as a sequence, which is the whole point of a path.
+    """The property a genomic-order implementation gets silently wrong: a minus-strand molecule is
+    transcribed from its high coordinate down, so its path descends. The error is invisible to a
+    consumer that treats the path as a set or averages symmetrically over it, and wrong for every
+    consumer that reads it as a sequence, which is the whole point of a path.
 
     The plus- and minus-strand transcripts here occupy the SAME regions, so only the ORDER can differ.
     """
@@ -216,7 +211,7 @@ def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
     assert [o for k, o in rev if k == STEP_REGION] == [3, 1]
     assert [o for k, o in fwd if k == STEP_REGION] == [1, 3]
     assert rev[0] == (STEP_REGION, 3), "a minus-strand path must START at its highest region"
-    # ⭐ and the two sj ids DIFFER, because strand is part of the sj key — two transcripts on
+    # and the two sj ids differ, because strand is part of the sj key — two transcripts on
     # opposite strands splicing identical coordinates are two slots, which is the redundancy the key
     # keeps deliberately for error checking.
     assert [o for k, o in fwd if k == STEP_SPLICE_SJ] != [o for k, o in rev if k == STEP_SPLICE_SJ]
@@ -228,7 +223,7 @@ def test_a_MINUS_strand_path_runs_in_TRANSCRIPTION_order(tmp_path, _patched_sj):
 
 
 def test_two_transcripts_sharing_one_intron_resolve_to_the_SAME_sj_id(tmp_path, _patched_sj):
-    """⭐ A sj is a property of the genome, not of a transcript: two isoforms splicing the same
+    """A sj is a property of the genome, not of a transcript: two isoforms splicing the same
     intron must land on one slot, because the accumulator tallied their fragments there together."""
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     idx = _Index(
@@ -244,13 +239,12 @@ def test_two_transcripts_sharing_one_intron_resolve_to_the_SAME_sj_id(tmp_path, 
 
 
 def test_an_UNRESOLVABLE_intron_RAISES_rather_than_dropping_a_step(tmp_path, _patched_sj):
-    """⛔⛔ **THE SILENT FAILURE THIS GUARD EXISTS FOR.** The sj key is derived from REGION
-    boundaries, which equal the intron's coordinates only because the partition region_bounds at every exon
-    endpoint — measured 0 of 45,609 violations on the shipped index, but ASSUMED by the derivation.
-
-    If it ever broke, the affected transcript would simply lose a step and its path would still read as
-    a shorter, perfectly well-formed walk. ⭐ So the miss is loud: a shorter path is indistinguishable
-    from a correct one, and that is exactly the class of wrong answer worth refusing.
+    """The silent failure this guard exists for. The sj key is derived from region boundaries, which
+    equal the intron's coordinates only because the partition places a bound at every exon
+    endpoint — an invariant of the shipped index, but one the derivation assumes rather than
+    checks. If it ever broke, the affected transcript would simply lose a step and its path would
+    still read as a shorter, perfectly well-formed walk, indistinguishable from a correct one. So
+    the miss is made loud instead.
     """
     bounds = [0, 1_000, 2_000, 9_000, 10_000, 11_000]
     idx = _Index(tmp_path, bounds, {0: [(1_000, 2_000), (9_000, 10_000)]}, strands=[Strand.POS])

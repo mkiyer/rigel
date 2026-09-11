@@ -1,13 +1,12 @@
-"""Behavioral guards for the accumulator span redesign.
+"""The accumulator deposits the MOLECULE's contiguous genomic spans, not the sequenced read blocks.
 
-(.) The accumulator
-deposits the MOLECULE's contiguous genomic span(s), not the sequenced read blocks:
-  - unspliced  → one [min,max] span (mate gap filled) ⇒ the boundary-crossing
-    density estimator agrees with the exact contained estimator (no over-count);
-  - implicit splice → spliced channel, intron region_bound (not filled);
-  - artifact splice → held out entirely (unrecoverable true span).
-
-Kept small + deterministic (fixed seeds) so they run fast.
+That distinction is what makes the two density estimators agree, so each arm here holds one case of
+it: an unspliced pair becomes one [min, max] span with the mate gap filled, and the boundary-crossing
+estimator then recovers the same uniform density as the exact contained estimator instead of
+over-counting; an implicitly spliced pair (the sj sits in the unsequenced gap, so there is no CIGAR N)
+routes to the sj axis with the intron skipped rather than filled through; and an artifact splice is
+held out of the tally entirely, because its true span is unrecoverable. Each scenario is small and
+seeded so the suite can afford a real sim-scan per arm.
 """
 
 from __future__ import annotations
@@ -30,18 +29,17 @@ from rigel.pipeline import scan_and_buffer
 def _crossing_vs_contained_ratio(bam_path, index) -> float:
     """Return crossing-ρ / contained-ρ over count-observable objects (≈1.0 if unbiased).
 
-    ⭐ **Both are RATIOS OF SUMS**, pooled over their own axis.
-    ``ρ_bg = Σg/ΣE``). The predecessor took the MEAN of the per-boundary fluxes and divided by
-    ``fl_mean``, which is a mean of ratios — a different number whenever the supports differ.
+    Both densities are RATIOS OF SUMS pooled over their own axis (``rho = Σ count / Σ opportunity``).
+    A mean of the per-boundary ratios would be a different number whenever the supports differ, so it
+    would not be comparable with the contained density at all.
 
-    ⭐ **And a boundary is ONE number.** The predecessor averaged a boundary's two faces,
-    ``(right[r] + left[r+1]) / 2``, because the old accumulator split one crossing across them. A
-    contiguous boundary is a 0-bp boundary with one count, so the ½ and the loop over flanks both go.
+    And a boundary is ONE number, not a pair of faces to average: a contiguous boundary is a 0-bp
+    boundary carrying a single crossing count.
     """
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     CalibrationSubstrate._check_alignment(pl, ra)
-    # ⭐ The same call production makes; see tests/calibration/_oracle.py.
+    # The same call production makes; see tests/calibration/_oracle.py.
     flm = build_fl_models(pl)
     gpmf = flm.gdna_pmf
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)
@@ -89,10 +87,10 @@ def test_crossing_density_unbiased(tmp_path):
 
 
 def test_implicit_splice_routes_to_spliced_channel(tmp_path):
-    """An implicitly-spliced fragment (annotated intron inside the mate gap, no
-    CIGAR-N) must deposit on the SPLICED channels (ch2/3) and REGION_BOUND the intron —
-    not fill across it on the unspliced channels. Pre-Phase-C it was mis-channeled
-    as unspliced and filled [min,max], depositing unspliced mass through the intron.
+    """An implicitly spliced fragment — an annotated intron inside the mate gap, so no CIGAR N — must
+    deposit on the spliced axis and SKIP the intron, rather than filling [min, max] across it on the
+    unspliced channels. Filling it would deposit unspliced mass through an intron the molecule never
+    occupied, which reads downstream as intronic gDNA.
     """
     import numpy as np
 
@@ -126,14 +124,15 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     rid = np.asarray(ra.ref_id)
     gene = rid == res.index.ref_name_to_id["implicit_chan"]
 
-    # (1) Implicit splices route to the SJ axis — the molecule JUMPED, it did not cross. ⭐ In
-    #     the new model a splice deposits on its sj boundary ONLY, never on the contiguous boundaries it
-    #     splices over, so the evidence is `sj_count` rather than a spliced channel on a boundary.
+    # (1) Implicit splices route to the SJ axis — the molecule JUMPED, it did not cross. A splice
+    #     deposits on its sj boundary ONLY, never on the contiguous boundaries it splices over, so the
+    #     evidence is `sj_count` rather than a spliced channel on a boundary.
     sj_flux = int(np.asarray(sub.sj.count, np.int64).sum())
     assert sj_flux > 1000, f"expected substantial sj flux, got {sj_flux}"
 
-    # (2) The intron is REGION_BOUND, not filled: the intron REGION carries no contained mass, and neither of the
-    #     boundaries bounding it carries an unspliced crossing — the implicit molecules skip both.
+    # (2) The intron is SKIPPED, not filled: the intron REGION carries no contained mass, and neither
+    #     of the boundaries bounding it carries an unspliced crossing — the implicit molecules skip
+    #     both.
     from rigel.calibration.region_arrays import region_right_boundary
 
     intron = gene & (ctype == 1)
@@ -223,8 +222,8 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
             )
 
     def total_mass(payload) -> float:
-        """Every deposit on every axis. ⭐ ``region_start_count`` is the fragment tally — one per accepted
-        fragment — and is what "mass == n_deposited" means now that mass IS a count."""
+        """Every deposit on every axis. ``region_start_count`` is the fragment tally — one per accepted
+        fragment — and is what "mass == n_deposited" means, mass being a count."""
         return float(np.asarray(payload.region_start_count, np.int64).sum())
 
     cfg = BamScanConfig(sj_strand_tag="XS")

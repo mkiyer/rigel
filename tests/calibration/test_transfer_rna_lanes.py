@@ -1,22 +1,21 @@
-"""THE RNA LEVEL LANES (`transfer._rna_lanes`, one `transfer._LevelLane` per strand) and the cube
-delivery — the both-stranded locus, phase 1 (owner rulings 2026-09-08; each gate written first
-against the prototype and watched firing on its perturbation): the faces from the flag bits per
-strand, the coordinate, the price on the strand's own counts, the flux level, the sources, the
-no-echo law, the two-sided hop at the pair's price, the split witness, a one-sided profile on the
-cube, THE BRACKET THEOREM, and the cube row as the intersected held levels plus the own flux."""
+"""The RNA level lanes (`transfer._rna_lanes`, one `transfer._LevelLane` per strand) and the cube
+delivery — the machinery the both-stranded locus needs.
+
+Each gate was written against the prototype first and watched firing on its perturbation. They
+cover the faces derived from the flag bits per strand, the level coordinate and its round trip, the
+hop priced on the strand's own counts, the flux level, which nodes are sources, the no-echo law,
+the two-sided hop at the pair's price, the split witness that reads a node's estimate of one
+strand's RNA from its column asymmetry, a one-sided profile surviving the map onto the cube, the
+bracket theorem (three lower bounds plus the strand equation give a two-sided gDNA share), and the
+cube row as the intersected held levels plus the node's own flux.
+"""
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from scipy.special import polygamma
 
-from _transfer_harness import _held_rna, _rna, _rna_lanes_of, _strand_intron, capture_sweep_inputs
-
-
-@pytest.fixture(scope="module")
-def sweep_inputs(tmp_path_factory):
-    return capture_sweep_inputs(tmp_path_factory)
+from _transfer_harness import _held_rna, _rna, _rna_lanes_of, _strand_intron
 
 
 def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
@@ -179,8 +178,8 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
             if lv is not None:
                 n_src += 1
                 assert free[x]
-                # an EMPTY source is an exon piece beside a lit junction, its level the flux's alone,
-                # travelling with the flux's witness (2026-09-09)
+                # an EMPTY source is an exon piece beside a lit junction, its level the flux's
+                # alone, travelling with the flux's witness
                 if lane.empty[x]:
                     assert is_exon[x] and lane.flux[x] and lane.flux_witness[x] is not None
                     assert lane.flux_witness[x][0] > 0.0
@@ -195,7 +194,7 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
 
 
 def test_PERTURBATION_an_rna_level_never_returns_to_its_source(sweep_inputs):
-    """THE NO-ECHO LAW on the RNA lanes: sharpen one node's own RNA level to a hard false floor; what
+    """The no-echo law on the RNA lanes: sharpen one node's own RNA level to a hard false floor; what
     that node HOLDS from either side must not move, while some neighbouring slot's held level must."""
     from rigel.calibration.messages import SILENCE
 
@@ -251,11 +250,11 @@ def test_PERTURBATION_an_rna_level_never_returns_to_its_source(sweep_inputs):
 
 def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     """`_LevelLane.receive` on an RNA lane: across a two-sided face the profile keeps its upper side;
-    across any other face it is lower-sided. ⛔ BOTH pay the pair's price (`hop_price`: both counts' counting plus
+    across any other face it is lower-sided. BOTH pay the pair's price (`hop_price`: both counts' counting plus
     the disagreement of the strand's two count densities beyond it) — no face is exempt. Where the
-    pair agrees the price is counting alone (the identity hop's natural price); where it disagrees by a
-    cliff the upper side is blurred away (2026-09-09: a lit intron's sharp upper side crossed a 170-fold
-    probe cliff unpriced under a counting-only exemption and read a 93 % RNA junction as 86 % gDNA)."""
+    pair agrees the price is counting alone (the identity hop's natural price); where it disagrees
+    by a cliff the upper side is blurred away — under a counting-only exemption a lit intron's sharp
+    upper side crosses a probe cliff unpriced and reads a mostly-RNA junction as mostly gDNA."""
     from rigel.calibration.messages import Level
     from rigel.calibration.messages.transfer import _LevelLane
     from rigel.calibration.messages.transfer_rows import blur_row, hop_price, lower_side
@@ -399,11 +398,11 @@ def test_a_lower_only_profile_stays_one_sided_on_the_cube():
 
 
 def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_the_gdna_share():
-    """On a hand-built AMBIG node (truth ``f_g`` 0.5, ``f_+`` 0.3, ``f_−`` 0.2, n = 400): three LOWER
-    bounds — the gDNA level and both RNA levels, each a floor at its truth — plus the node's own strand
-    counts give a TWO-SIDED gDNA share (a 90 % interval narrower than 0.15 that contains the truth), on
-    stranded (κ = 0.99) and unstranded (κ = 0.5) data alike; removing the gDNA bound opens the LOWER
-    side and removing either RNA bound opens the UPPER side."""
+    """On a hand-built AMBIG node (truth ``f_g`` 0.5, ``f_+`` 0.3, ``f_−`` 0.2, n = 400): three lower
+    bounds — the gDNA level and both RNA levels, each a floor at its truth — plus the node's own
+    strand counts give a two-sided gDNA share (a 90 % interval narrower than 0.15 that contains the
+    truth), on stranded (κ = 0.99) and unstranded (κ = 0.5) data alike. Removing the gDNA bound
+    opens the lower side and removing either RNA bound opens the upper side."""
     import rigel.calibration.simplex_logodds as sl
     from rigel.calibration.messages.transfer_rows import cube_row, profile_of_level
 
@@ -570,14 +569,13 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
 
 
 def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
-    """ISSUES: flux-source-skipped-at-an-empty-exon-piece, closed. The junction's flux is a measurement of
-    the exon's RNA whether or not the exon piece holds a fragment of its own: at an EMPTY piece the flux
-    level is built (lower-sided), priced by `hop_price` on the piece's zero count — counting alone, the
-    same rule every hop pays — and EMITTED from the piece with the flux's own witness (the spliced count
-    on the route rate's opportunity), so the next full node prices the hop as `flux_level` is priced at a
-    full exon: the junction's rate against its own strand column. A silent junction builds nothing and
-    the piece forwards as before. Measured on the ladder before landing (2026-09-09): the stranded zero
-    controls 0.96× / 0.97×, every in-scope row within 0.5 %."""
+    """ISSUES: flux-source-skipped-at-an-empty-exon-piece. The junction's flux is a measurement of
+    the exon's RNA whether or not the exon piece holds a fragment of its own: at an empty piece the
+    flux level is built (lower-sided), priced by `hop_price` on the piece's zero count — counting
+    alone, the same rule every hop pays — and emitted from the piece with the flux's own witness
+    (the spliced count on the route rate's opportunity), so the next full node prices the hop as
+    `flux_level` is priced at a full exon: the junction's rate against its own strand column. A
+    silent junction builds nothing and the piece forwards as before."""
     from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.messages.transfer_rows import blur_row, flux_level, hop_price, lower_side
 

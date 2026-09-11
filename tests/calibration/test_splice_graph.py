@@ -1,17 +1,14 @@
-"""The v8 SPLICE GRAPH test matrix — G1-G18, I1-I12, P1-P5.
+"""The splice graph: the build matrix, the validators, the reach, and the sj CSR the deposit reads.
 
-
-
-The graph replaces the v7 region/boundary partition. Its ONE behavioural change is that adjacent
-equal-signature segments are no longer merged, which is what preserves transcript termini — 59.5 % of
-human TSS/TES fall strictly inside a merged v7 region today.
-
-⚠ **The migration gates P2/P2′/P3 are GONE with the partition they compared against.** P3 — "merging
-adjacent equal-signature regions reproduces regions.feather" — was the only independent check on the
-signature computation, and it is replaced by **I3b**: ``validate_graph`` recomputes every region's
-signature from its MIDPOINT by direct interval containment, a different algorithm from the builder's
-cumulative-difference sweep over the same interval sets. **I13** does the same for the flags. Both
-are proven to fire.
+Adjacent equal-signature segments are not merged, which is what preserves transcript termini: under
+a merging rule most human TSS/TES fall strictly inside a region and become invisible. The build
+matrix walks the annotation shapes one at a time; the invariant block asserts that each validator
+fires when its property is violated, the signature and flag validators recomputing from a region's
+midpoint by interval containment — a different algorithm from the builder's sweep, so neither can
+confirm the other's mistake. The last block gates the sj boundaries re-indexed onto the
+accumulator's flat region-bound axis as a CSR, whose one question inside the scan's hot loop is
+whether an observed intron is an annotated sj and which boundary it is: an intron that fails to
+match deposits nothing, so a mis-keyed table silently deletes the whole spliced-RNA signal.
 """
 
 from __future__ import annotations
@@ -35,12 +32,18 @@ from rigel.calibration.splice_graph import (
     FLAG_TES_POS,
     FLAG_TSS_NEG,
     FLAG_TSS_POS,
+    build_region_partition_arrays,
+    build_sj_arrays,
     build_splice_graph,
     validate_graph,
 )
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_POS
 from rigel.transcript import Interval, Transcript
 from rigel.types import Strand
+
+from _index_builder import build_test_index
+from native._accumulator_reference import Partition
+
 
 REF = {"chr1": 2000}
 
@@ -115,7 +118,7 @@ def test_G3_three_exon_transcript():
 
 
 def test_G4_alternative_TSS_inside_another_exon():
-    """⭐ THE case v7's merge deletes: an interior region_bound whose two sides share a signature."""
+    """The case a merging partition deletes: an interior bound whose two sides share a signature."""
     n, e = _graph([_tx([(400, 1000)], t_id="long"), _tx([(600, 1000)], t_id="short")])
     assert (600, 1000) in _regions(n), "the alternative-TSS region_bound at 600 was merged away"
     i = _regions(n).index((400, 600))
@@ -130,7 +133,7 @@ def test_G5_alternative_TES_inside_another_exon():
 
 
 def test_G6_position_is_both_terminus_and_sj():
-    """⭐ TES_s AND DONOR_s on one boundary — the case the 4-bit signature is structurally blind to."""
+    """TES_s AND DONOR_s on one boundary — the case the 4-bit signature is structurally blind to."""
     n, e = _graph([_tx([(400, 800)], t_id="ends"), _tx([(200, 800), (1200, 1500)], t_id="splices")])
     f = _flags_at(n, e, 800)
     assert f & FLAG_TES_POS and f & FLAG_DONOR_POS
@@ -209,7 +212,7 @@ def test_G12_shared_exon_endpoint_across_transcripts():
 
 
 def test_G13_one_bp_region():
-    """A region of length 1 is emitted and walkable — human has 15,687 of them."""
+    """A region of length 1 is emitted and walkable — human has many thousands of them."""
     n, _e = _graph([_tx([(500, 700)], t_id="a"), _tx([(501, 700)], t_id="b")])
     assert (500, 501) in _regions(n)
     assert int(n["length"].min()) == 1
@@ -250,8 +253,8 @@ def test_G17_two_references():
 
 
 def test_G18_coincident_opposite_strand_sj():
-    """Two sj boundaries at the same donor/acceptor, distinct strand. Zero occurrences in GENCODE
-    (verified on the real index), so this exists to prove it WORKS, not because it fires."""
+    """Two sj boundaries at the same donor/acceptor, distinct strand. There are no occurrences in
+    GENCODE, so this exists to prove the case works and not because it fires."""
     n, e = _graph(
         [
             _tx([(300, 500), (900, 1100)], strand=Strand.POS, t_id="p"),
@@ -265,7 +268,7 @@ def test_G18_coincident_opposite_strand_sj():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# The REACH columns (plan TRAPS: a-purity-filter-is-a-length-filter/TRAPS: pure-and-length-censored/TRAPS: divide-by-a-probability) — not in the original matrix, added because the schema is new.
+# The REACH columns — the per-strand exonic and genomic distances each boundary carries.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -295,7 +298,7 @@ def test_reach_on_a_sj_is_the_exonic_length_either_side():
 
 
 def test_reach_is_maximal_over_isoforms_independently_per_side():
-    """TRAPS: two-gaussians-one-latent: a position open on ANY isoform is open. The two isoforms disagree on BOTH sides here."""
+    """A position open on ANY isoform is open. The two isoforms disagree on BOTH sides here."""
     n, e = _graph(
         [
             _tx([(400, 600), (1000, 1100)], t_id="short"),  # lo 200, hi 100
@@ -308,7 +311,7 @@ def test_reach_is_maximal_over_isoforms_independently_per_side():
 
 
 def test_reach_is_per_strand_and_does_not_mix():
-    """⚠ plan TRAPS: pure-and-length-censored: the two strands have different reaches at the SAME endpoints and must not be conflated.
+    """The two strands have different reaches at the same endpoints and must not be conflated.
 
     Both transcripts splice 200→600, so this is also a G18 coincident-sj pair: two boundaries sharing
     ``(src, dst)`` and differing only in strand. Each must carry its OWN reach in its OWN columns and
@@ -328,7 +331,7 @@ def test_reach_is_per_strand_and_does_not_mix():
 
 
 def test_reach_on_a_contiguous_boundary_inside_an_exon():
-    """⭐ plan TRAPS: a-purity-filter-is-a-length-filter/Q1: reaches live on CONTIGUOUS boundaries too, which is where the taper near a TES bites."""
+    """Reaches live on contiguous boundaries too, which is where the taper near a TES bites."""
     n, e = _graph([_tx([(400, 1000)], t_id="a"), _tx([(700, 1000)], t_id="b")])
     ns = _regions(n)
     i = ns.index((400, 700))
@@ -337,7 +340,7 @@ def test_reach_on_a_contiguous_boundary_inside_an_exon():
 
 
 def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
-    """⭐ The reach on a CONTIGUOUS boundary is the genomic distance to the transcript's span ends.
+    """The reach on a CONTIGUOUS boundary is the genomic distance to the transcript's span ends.
 
     Nascent RNA is an ordinary transcript spanning its gene, so RNA opportunity inside an intron is
     real — the intron is where nascent RNA lives. An exonic reach would report 0 here and so declare
@@ -381,11 +384,10 @@ def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():
 def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():
     """A manufactured nRNA span row contributes no region_bound, no flag and no reach.
 
-    ⚠ This test used to build its span with ``is_nrna=True`` alone and assert the *opposite* — that
-    the span region_bounds the partition but sets no flags. That encoded a real bug (see the test below):
-    on a NON-synthetic row ``is_nrna`` means "this real transcript is single-exon", not "this is a
-    manufactured span". The rows that must be excluded are the SYNTHETIC ones, and ``~is_synthetic``
-    excludes exactly them.
+    The filter is ``~is_synthetic`` alone. On a non-synthetic row ``is_nrna`` means "this real
+    transcript is single-exon", not "this is a manufactured span", so using it as part of the
+    exclusion deletes real transcripts (TRAPS: nrna-does-not-mean-synthetic); the test below is what
+    that costs.
     """
     real = _tx([(400, 600), (1000, 1200)], t_id="real")
     span = _tx([(300, 1500)], t_id="span", is_nrna=True, is_synthetic=True)
@@ -488,14 +490,14 @@ def test_I3b_FIRES_on_a_corrupted_signature():
 
 
 def test_a_single_exon_transcript_is_a_REAL_transcript_with_REAL_termini():
-    """⛔ THE BUG plan TRAPS: specificity-and-sense-are-complements' second filter caused, pinned.
+    """What the second filter costs (TRAPS: nrna-does-not-mean-synthetic).
 
-    TRAPS: specificity-and-sense-are-complements specified the flags and reaches as ``~is_synthetic & ~is_nrna``, reasoning that "an nRNA span's
-    ends are not real transcript termini". True — but on a NON-synthetic row ``is_nrna`` does not mean
-    "manufactured span": it means **the transcript is single-exon, so mature ≡ nascent**. Measured on
-    the human annotation, all **26,475** ``is_nrna & ~is_synthetic`` rows have ``n_exons == 1`` and
-    none is a ``RIGEL_NRNA_*`` row, so the extra clause deleted **52,104 distinct real terminus
-    positions** — the exact visibility the whole v8 partition exists to buy.
+    Specifying the flags and reaches as ``~is_synthetic & ~is_nrna`` reasons that an nRNA span's ends
+    are not real transcript termini. True — but on a non-synthetic row ``is_nrna`` does not mean
+    "manufactured span": it means the transcript is single-exon, so mature is nascent. On the human
+    annotation every such row is single-exon and none is a manufactured one, so the extra clause
+    deletes tens of thousands of real terminus positions — the exact visibility the unmerged
+    partition exists to buy.
     """
     single = _tx([(300, 1500)], t_id="single_exon", is_nrna=True)  # is_synthetic is False
     txs = [_tx([(400, 600), (1000, 1200)], t_id="real"), single]
@@ -588,7 +590,7 @@ def test_TD1_rebuilds_are_byte_identical(tmp_path_factory):
     """Determinism is an INVARIANT, not an observation: the output is a pure function of
     (transcripts, ref_lengths) — np.unique sorts, ids come from position, boundaries from an explicit
     total order. No dict iteration, no hashing, no parallel reduction."""
-    from conftest import build_test_index
+    from _index_builder import build_test_index
 
     a = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_det_a")
     b = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_det_b")
@@ -601,7 +603,7 @@ def test_TD1_rebuilds_are_byte_identical(tmp_path_factory):
 
 def test_index_build_writes_and_loads_the_graph(tmp_path_factory):
     """R1: the graph lands on disk, reloads, and re-validates."""
-    from conftest import build_test_index
+    from _index_builder import build_test_index
 
     idx = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_int")
     assert idx.regions_df is not None and idx.edges_df is not None
@@ -612,13 +614,11 @@ def test_index_build_writes_and_loads_the_graph(tmp_path_factory):
 
 
 def test_graph_is_REQUIRED_at_load(tmp_path_factory):
-    """⚠ INVERTED at W1b, deliberately. Through W1a the graph was OPTIONAL — nothing read it, so an
-    index without one stayed fully usable and the arm was reversible. W1b made it THE partition the
-    scanner deposits into, so an index without it cannot serve a scan, and loading one anyway is the
-    worst available failure: calibration running on the merged v7 geometry while the caller believes
-    it is on v8. It must raise, and say what to do.
+    """The graph is the partition the scanner deposits into, so an index without one cannot serve a
+    scan. Loading one anyway is the worst available failure: calibration running on a merged
+    geometry while the caller believes it is on the unmerged one. It must raise, and say what to do.
     """
-    from conftest import build_test_index
+    from _index_builder import build_test_index
 
     idx = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_opt")
     for fname in ("regions.feather", "edges.feather"):
@@ -628,9 +628,9 @@ def test_graph_is_REQUIRED_at_load(tmp_path_factory):
 
 
 def test_strand_coincident_sj_warn_but_still_work():
-    """⚠ Biologically impossible: splice motifs are non-palindromic, so the same (donor, acceptor)
-    cannot be a valid intron on both strands (a GT..AG intron reverse-complements to CT..AC). Measured:
-    ZERO in GENCODE. One in a GTF means the ANNOTATION is wrong.
+    """Biologically impossible: splice motifs are non-palindromic, so the same (donor, acceptor)
+    cannot be a valid intron on both strands (a GT..AG intron reverse-complements to CT..AC), and
+    there are none in GENCODE. One in a GTF means the annotation is wrong.
 
     The graph must (a) still be CORRECT — two distinct boundaries, kept apart by the strand in the sort key —
     and (b) SAY SO, because silence would let a bad annotation propagate into every downstream density.
@@ -653,3 +653,284 @@ def test_no_warning_on_a_biologically_normal_annotation():
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # any warning fails the test
         validate_graph(regions, boundaries, REF, transcripts=txs)
+
+
+# ── the sj boundaries as a CSR on the accumulator's flat region-bound axis ────────────────────
+
+
+#: chr1 t0 splices 400->700 and 900->1200; t1 shares t0's DONOR at 400 but lands at 1000, so region_bound 400
+#: has fan-out 2 — the alternative-3'-splice-site case a naive one-sj-per-region_bound table would drop.
+#: chr2 carries a NEG-strand sj, which keeps the per-reference offsets and the strand honest.
+#: chr3 is a NESTED pair with the OUTER intron on the minus strand: intron [400,1400) NEG encloses
+#: [600,1000) POS. It is the fixture that makes the slot ordering falsifiable. Everywhere else in this
+#: module — and on both real indexes — donor order, acceptor order and strand order happen to agree, so
+#: every permutation of the sort key produces the identical answer and the contract test proves nothing.
+#: Nesting breaks donor-vs-acceptor (400 < 600 but 1400 > 1000) and the strand assignment breaks
+#: donor-vs-strand (the smaller donor is the NEG one). Verified: three separate key permutations each turn
+#: ``test_the_csr_slot_order_matches_the_reference_accumulator`` red only because chr3 is here.
+GTF = """\
+chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
+chr1\ttest\texon\t701\t900\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
+chr1\ttest\texon\t1201\t1400\t.\t+\t.\tgene_id "g1"; transcript_id "t0";
+chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
+chr1\ttest\texon\t1001\t1200\t.\t+\t.\tgene_id "g1"; transcript_id "t1";
+chr2\ttest\texon\t301\t500\t.\t-\t.\tgene_id "g2"; transcript_id "t2";
+chr2\ttest\texon\t801\t1000\t.\t-\t.\tgene_id "g2"; transcript_id "t2";
+chr3\ttest\texon\t201\t400\t.\t-\t.\tgene_id "g5"; transcript_id "t5";
+chr3\ttest\texon\t1401\t1600\t.\t-\t.\tgene_id "g5"; transcript_id "t5";
+chr3\ttest\texon\t201\t600\t.\t+\t.\tgene_id "g6"; transcript_id "t6";
+chr3\ttest\texon\t1001\t1200\t.\t+\t.\tgene_id "g6"; transcript_id "t6";
+"""
+
+REFS = {"chr1": 2000, "chr2": 2000, "chr3": 2000}
+
+#: A STRAND-COINCIDENT PAIR: two genes on opposite strands whose intron coordinates are byte-identical.
+#: It is the ONLY configuration in which the two builders' slot orderings can differ, so it is the
+#: discriminating case for the ordering contract — and the index warns about it, correctly, which is why it
+#: gets its own fixture instead of polluting every test above with the warning.
+COINCIDENT_GTF = """\
+chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g3"; transcript_id "t3";
+chr1\ttest\texon\t801\t1000\t.\t+\t.\tgene_id "g3"; transcript_id "t3";
+chr1\ttest\texon\t201\t400\t.\t-\t.\tgene_id "g4"; transcript_id "t4";
+chr1\ttest\texon\t801\t1000\t.\t-\t.\tgene_id "g4"; transcript_id "t4";
+"""
+
+
+@pytest.fixture(scope="module")
+def index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, GTF, name="s1_sj", refs=REFS)
+
+
+@pytest.fixture(scope="module")
+def coincident_index(tmp_path_factory):
+    with pytest.warns(RuntimeWarning, match="strand-coincident"):
+        return build_test_index(
+            tmp_path_factory, COINCIDENT_GTF, name="s1_coincident", refs={"chr1": 2000}
+        )
+
+
+def _region_bound_index(region_bounds, offsets, ref_id, position):
+    """The flat region_bound index of ``position`` on reference ``ref_id``, or -1 if it is not a region_bound."""
+    lo, hi = int(offsets[ref_id]), int(offsets[ref_id + 1])
+    k = lo + int(np.searchsorted(region_bounds[lo:hi], position))
+    return k if k < hi and int(region_bounds[k]) == position else -1
+
+
+def _lookup(arrays, boundary_left, boundary_right):
+    """What the deposit's inner loop does: scan the donor's CSR slice for the acceptor.
+
+    Returns the sj-boundary id, which is the CSR slot itself, paired with its strand — or ``None``.
+    One to three iterations at human scale: a donor bound's fan-out is close to one.
+
+    It returns ``k``, not ``edge_row[k]``. ``edge_row`` is the key for joining back to ``edges_df`` and
+    is not an index into any sj bank; see :class:`SpliceJunctionArrays`.
+    """
+    if boundary_left < 0 or boundary_right < 0:
+        return None
+    for k in range(int(arrays.offsets[boundary_left]), int(arrays.offsets[boundary_left + 1])):
+        if int(arrays.boundary_right[k]) == boundary_right:
+            return k, int(arrays.strand[k])
+    return None
+
+
+def test_the_csr_addresses_the_flat_region_bound_axis(index):
+    """One slot per region_bound, and the totals close against the boundary table."""
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    n_sj = int((index.edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ).sum())
+    assert arrays.offsets.shape == (region_bounds.shape[0] + 1,)
+    assert int(arrays.offsets[0]) == 0
+    assert int(arrays.offsets[-1]) == n_sj
+    assert arrays.boundary_right.shape == arrays.edge_row.shape == arrays.strand.shape
+    assert arrays.boundary_right.shape == (n_sj,)
+    assert int(offsets[-1]) == region_bounds.shape[0]
+
+
+def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
+    """The four annotated introns, looked up the way the deposit will look them up."""
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    expected = [
+        (0, 400, 700, Strand.POS),  # t0 intron 1
+        (0, 900, 1200, Strand.POS),  # t0 intron 2
+        (0, 400, 1000, Strand.POS),  # t1, sharing t0's donor
+        (1, 500, 800, Strand.NEG),  # t2 on chr2
+    ]
+    for ref_id, start, end, strand in expected:
+        hit = _lookup(
+            arrays,
+            _region_bound_index(region_bounds, offsets, ref_id, start),
+            _region_bound_index(region_bounds, offsets, ref_id, end),
+        )
+        assert hit is not None, f"intron [{start},{end}) on ref {ref_id} not found"
+        slot, got_strand = hit
+        assert 0 <= slot < arrays.boundary_right.shape[0]
+        row = index.edges_df.iloc[int(arrays.edge_row[slot])]  # the JOIN, not the id
+        assert int(row["kind"]) == EDGE_KIND_SJ
+        assert got_strand == int(strand)
+
+
+def test_a_shared_donor_keeps_BOTH_sj(index):
+    """Alternative 3' splice site: region_bound 400 on chr1 is the donor of two distinct sj.
+
+    A table storing one sj per region_bound would silently drop one of them, and the loss would be
+    invisible — the dropped intron would simply be treated as unannotated.
+    """
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    donor = _region_bound_index(region_bounds, offsets, 0, 400)
+    lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
+    assert hi - lo == 2
+    landed = sorted(int(region_bounds[arrays.boundary_right[k]]) for k in range(lo, hi))
+    assert landed == [700, 1000]
+
+
+def test_a_region_bound_that_is_not_a_LEFT_BOUNDARY_has_an_empty_slice(index):
+    """Most region_bounds are not left_boundaries — measured 70.4 % on both the toy and the human annotation. The slice
+    must be empty rather than absent, so the deposit needs no special case."""
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    for ref_id, position in ((0, 200), (0, 1400), (1, 300)):  # TSS / TES, never a donor
+        region_bound = _region_bound_index(region_bounds, offsets, ref_id, position)
+        assert region_bound >= 0, f"{position} should be a region_bound on ref {ref_id}"
+        assert int(arrays.offsets[region_bound + 1]) - int(arrays.offsets[region_bound]) == 0
+
+
+def test_an_unannotated_intron_does_not_match(index):
+    """A coordinate pair that is not an annotated sj must miss, even when both of its endpoints
+    happen to be region bounds — the miss is what routes the fragment to the unspliced channel."""
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    # 700 and 900 are both region_bounds on chr1, but [700,900) is an EXON, not an intron
+    assert (
+        _lookup(
+            arrays,
+            _region_bound_index(region_bounds, offsets, 0, 700),
+            _region_bound_index(region_bounds, offsets, 0, 900),
+        )
+        is None
+    )
+    # and a position that is not a region_bound at all
+    assert _region_bound_index(region_bounds, offsets, 0, 401) == -1
+
+
+def test_the_csr_round_trips_to_the_boundary_table(index):
+    """Re-derive the sj set from the CSR and compare with ``edges_df`` — the two agree only if the
+    region-id → region_bound-index shift is right on every reference, which is the one thing that can silently
+    break when a reference has no regions."""
+    arrays = build_sj_arrays(index)
+    region_bounds, offsets, _ = build_region_partition_arrays(index)
+    donor = np.repeat(np.arange(region_bounds.shape[0]), np.diff(arrays.offsets))
+    from_csr = np.stack(
+        [
+            region_bounds[donor],
+            region_bounds[arrays.boundary_right],
+            arrays.strand.astype(np.int64),
+        ],
+        axis=1,
+    )
+
+    boundaries = index.edges_df
+    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
+    regions = index.regions_df
+    src, dst = boundaries["src"].to_numpy(np.int64)[sj], boundaries["dst"].to_numpy(np.int64)[sj]
+    from_boundaries = np.stack(
+        [
+            regions["end"].to_numpy(np.int64)[src],  # the intron starts where src ENDS
+            regions["start"].to_numpy(np.int64)[dst],  # and ends where dst BEGINS
+            boundaries["strand"].to_numpy(np.int8)[sj].astype(np.int64),
+        ],
+        axis=1,
+    )
+    order = lambda a: a[np.lexsort(a.T[::-1])]  # noqa: E731
+    assert np.array_equal(order(from_csr), order(from_boundaries))
+
+
+def _reference_partition(index):
+    """The same graph, built through the reference accumulator's OWN constructor.
+
+    Deliberately independent of :func:`build_sj_arrays`: this route names each sj by its
+    genomic ``(ref, intron_start, intron_end, strand)`` and lets ``Partition.from_region_bounds`` resolve both
+    endpoints with its own ``searchsorted``, where the builder walks region ids and applies a per-reference
+    ``region_bound_base − region_base`` shift. Only the *definition* of a sj is shared.
+    """
+    region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
+    boundaries, regions = index.edges_df, index.regions_df
+    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
+    src = boundaries["src"].to_numpy(np.int64)[sj]
+    dst = boundaries["dst"].to_numpy(np.int64)[sj]
+    strand = boundaries["strand"].to_numpy(np.int8)[sj]
+    region_end, region_start = (
+        regions["end"].to_numpy(np.int64),
+        regions["start"].to_numpy(np.int64),
+    )
+    ref_of_region = regions["ref_name"].to_numpy()
+    ref_id = {name: i for i, name in enumerate(index.ref_names)}
+
+    sj = [
+        # the intron starts where src ENDS and ends where dst BEGINS
+        (ref_id[ref_of_region[s]], int(region_end[s]), int(region_start[d]), int(st))
+        for s, d, st in zip(src, dst, strand)
+    ]
+    n_refs = len(index.ref_names)
+    return Partition.from_region_bounds(
+        [
+            region_bounds[region_bound_offsets[r] : region_bound_offsets[r + 1]]
+            for r in range(n_refs)
+        ],
+        # a reference contributing c region_bounds owns c-1 regions, so r earlier references own region_bound_offsets[r]-r
+        region_types=[
+            region_types[region_bound_offsets[r] - r : region_bound_offsets[r + 1] - r - 1]
+            for r in range(n_refs)
+        ],
+        sj=sj,
+    )
+
+
+@pytest.mark.parametrize("fixture", ["index", "coincident_index"])
+def test_the_csr_slot_order_matches_the_reference_accumulator(fixture, request):
+    """THE CONTRACT: the sj-boundary id IS the CSR slot, so both builders must emit the slots in the
+    SAME order — otherwise every sj row permutes and the native build's byte-identity gate compares
+    two different labellings of one graph.
+
+    This had never been tested. The two orderings disagreed once during S2 — ``(acceptor, donor)``
+    against ``(strand, acceptor, donor)`` — and nothing would have caught it: the spec matrix exercises
+    only ``Partition.from_region_bounds``, and the real-data shim builds its ``Partition`` straight from
+    ``build_sj_arrays``, so the two sorts were never compared to each other.
+
+    What this test does and does not cover, measured by perturbing the builder's key:
+
+    * promoting ``strand`` to the primary key, or swapping donor/acceptor priority → caught, but only
+      because of chr3's nested pair (see ``GTF``).
+    * *dropping* ``strand`` from the builder's key → NOT caught, and cannot be. ``edges_df`` emits a
+      strand-coincident pair POS-before-NEG whichever order the GTF lists the genes in, and ``np.lexsort``
+      is stable, so both routes start from an already-correct tie order. The builder's ``strand`` key is
+      therefore *defensive* — keep it, because it makes the contract explicit instead of resting on
+      ``edges_df``'s internal sort, but do not expect this test to defend it.
+    * ``from_region_bounds``'s ``strand`` key is load-bearing, since a caller may pass sj in any order,
+      and it is pinned by ``test_a_sj_id_is_a_function_of_the_PARTITION_not_of_argument_order`` in
+      the spec matrix.
+    """
+    index = request.getfixturevalue(fixture)
+    arrays = build_sj_arrays(index)
+    reference = _reference_partition(index)
+
+    assert np.array_equal(reference.sj_offsets, arrays.offsets)
+    assert np.array_equal(reference.sj_boundary_right, arrays.boundary_right)
+    assert np.array_equal(reference.sj_strand, arrays.strand)
+
+
+def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):
+    """Two genes on opposite strands sharing their intron coordinates exactly.
+
+    Both must survive as separate sj boundaries, in the same CSR slice and ordered by strand — that
+    adjacency is the only thing that makes the ordering contract above falsifiable, since every other
+    sj is already separated by its donor or its acceptor.
+    """
+    arrays = build_sj_arrays(coincident_index)
+    region_bounds, offsets, _ = build_region_partition_arrays(coincident_index)
+    donor = _region_bound_index(region_bounds, offsets, 0, 400)
+    lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
+    assert hi - lo == 2, "the strand-coincident pair collapsed to one sj boundary"
+    assert [int(region_bounds[arrays.boundary_right[k]]) for k in range(lo, hi)] == [800, 800]
+    assert [int(arrays.strand[k]) for k in range(lo, hi)] == [int(Strand.POS), int(Strand.NEG)]

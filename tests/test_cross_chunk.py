@@ -1,9 +1,9 @@
-"""Cross-chunk regression test for StreamingScorer.
+"""Chunking the fragment buffer must not change the answer.
 
-Verifies that splitting fragments across multiple buffer chunks
-produces identical quantification output to processing in a single
-chunk.  This catches chunk-boundary bugs in the C++ scoring and
-EM data preparation path.
+The same library is quantified in one chunk and in several, and the transcript, gene and locus
+frames, the stats and the gDNA and nascent EM totals must all agree. Chunk boundaries are where the
+C++ scoring and EM data preparation carry state across a call, so a bug there produces a plausible
+answer that depends on a buffer size nobody chose deliberately.
 """
 
 import numpy as np

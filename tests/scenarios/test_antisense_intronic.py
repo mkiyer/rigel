@@ -1,16 +1,17 @@
-"""Scenario: Antisense single-exon gene embedded in multi-exon gene intron.
+"""Scenario: an antisense gene nested inside a multi-exon gene's intron.
 
-Topology (PVT1 / LINC02912 model):
+The topology is modelled on PVT1 / LINC02912::
 
     g1 (POS): exons [(1000,1200), (2000,2200), (5000,5600)]
-       → intronic spans: 1200–2000 and 2200–5000
-    g2 (NEG): single exon [(3000,3800)] inside g1's second intron
+       → intronic spans 1200–2000 and 2200–5000
+    g2 (NEG): a single exon [(3000,3800)] inside g1's second intron
 
-Key properties exercised:
- - g2 is single-exon → nRNA prior must be zeroed
- - Intronic g1 nRNA fragments overlap g2 exon → gene-ambiguous
- - Strand model must prevent wrong-strand nRNA assignment
- - Multiple isoform variants stress EM disambiguation
+g2 is unexpressed in every arm, so every count it receives is a false positive, and the fragments
+that could produce one are real: g1's intronic nascent fragments overlap g2's exon exactly, so they
+are gene-ambiguous on position alone and only the strand model separates them. The file runs that
+against four stresses — a single-exon g2, where the nascent prior is zeroed, a multi-exon g2, where it
+is not and the strand model is the only defence, five g1 isoforms, which put isoform ambiguity on top
+of gene ambiguity, and reduced strand specificity, which is what takes the separating channel away.
 """
 
 import pytest
@@ -104,18 +105,14 @@ class TestAntisenseIntronicOverlap:
 
     @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
     def test_strand_sweep_with_nrna(self, request, scenario, ss):
-        """nRNA + reduced strand specificity.
+        """Nascent RNA at reduced strand specificity, which is where the separating channel weakens.
 
-        ⭐⭐ **REPAIRED 2026-09-09 BY THE RNA LEVEL LANES — the xfail this carried since 2026-08-11 is
-        closed by repairing the thing, not by widening the bound.** `t2`'s truth is 0 and it must stay
-        0. The defect it recorded: an antisense nested in an intron at reduced strand specificity leaked
-        RNA into `t2` and, worse, sent intronic fragments to gDNA in a library that contained none —
-        measured per fragment at SS=0.65 (2000 fragments: 1466 nascent, 534 mRNA, 0 gDNA simulated),
-        the zero-prior arm landed 629 nascent fragments on gDNA and 108 on `t2`; the relay held it only
-        through the nascent prior's sink. With the transfer policy as the shipped default (its RNA level
-        lanes carry the host's nascent level into the nested exon and the antisense's own level out of
-        it, `DESIGN.md` §6b.13) the `t2` leak is **0.00 at SS = 0.65, 0.9 and 1.0**. The bound stays where
-        it was (5 at SS ≥ 0.9, 20 below) so a regression shows.
+        `t2`'s truth is 0 and it must stay 0. The failure this holds off is not only a leak into `t2`
+        but the same fragments being called gDNA in a library that contains none: at low strand
+        specificity the intronic nascent fragments are ambiguous in position and nearly ambiguous in
+        strand, so whatever the solver cannot place on the host lands somewhere wrong. The bound is
+        left tight (5 at SS ≥ 0.9, 20 below) rather than tracking the current answer, so a regression
+        shows.
         """
         bench = build_and_run(
             scenario,
@@ -218,12 +215,9 @@ class TestAntisenseIntronicMultiIsoform:
         assert_accountability(bench)
         assert_negative_control(bench, strand_specificity=0.9)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
-        # ⚠ STEP-1 DEBT — restore to 10 when the symmetric prior (Step 2, logP_r) lands.
-        # Removing the improper `+0.5·λ` prior ramp deliberately removed
-        # the crude gDNA-abundance stand-in it was providing, WITHOUT yet supplying the real one. Calibration
-        # is knowingly under-calling gDNA in this interim (suite-wide: over-call 7.83 M → 1.36 M, but
-        # under-call 1.78 M → 15.73 M), and a little of that surplus RNA lands on the wrong isoform: 17/2000
-        # here (0.85 %). This limit is a TRIPWIRE, not a target — Step 2 must bring it back under 10.
+        # A TRIPWIRE, not a target. Calibration under-calls gDNA on this scenario, and a little of the
+        # surplus RNA lands on the wrong isoform, so the limit admits under a percent of the library
+        # rather than zero. Tightening it is the job of the prior work, not of this bound.
         assert t2.observed <= 20, (
             f"T2 mRNA leak: {t2.observed:.0f} at SS=0.9 (Step-1 interim limit=20)"
         )
@@ -249,10 +243,8 @@ class TestAntisenseIntronicMultiIsoform:
 
 
 class TestAntisenseIntronicMultiExonT2:
-    """g2 is multi-exon → its nRNA prior is NOT zeroed.
-
-    The strand model ALONE must prevent wrong-strand nRNA assignment.
-    """
+    """g2 is multi-exon, so its nascent prior is NOT zeroed and the strand model alone has to prevent
+    a wrong-strand nascent assignment."""
 
     @pytest.fixture
     def scenario(self, tmp_path):

@@ -1,13 +1,15 @@
-"""THE TEST CHROMOSOME HAS ONE SOURCE — `scripts/sim/test_reference/test_chr.yaml` — AND THE
-CHECKED-IN RENDERS MUST MATCH IT (owner ruling, 2026-09-02).
+"""The test chromosome has one source — `scripts/sim/test_reference/test_chr.yaml` — and the
+checked-in renders must match it.
 
 `test_chr.gtf`, `test_shadow.gtf`, `test_abundances.tsv` and the three probe panels are DERIVED by
-`scripts/sim/build_test_reference.py` from the YAML and versioned beside it so a reader sees the
+`scripts/sim/build_test_reference.py` from the YAML and versioned beside it, so a reader sees the
 annotation without running anything. A hand edit to a render, or a YAML edit without re-running the
-builder, leaves the benchmark describing two different chromosomes — this gate refuses both.
+builder, leaves the benchmark describing two different chromosomes, and this refuses both. The
+substrate's own rules are gated here too: every gene carries an explicit strand, the two strands are
+equally represented, and no block type sits on one strand only.
 
-Falsified by writing: a hand-edited render is caught (the builder's own self-test perturbs it), and the
-strand-balance rule below is watched firing on an all-plus chromosome.
+PERTURBATION: a hand-edited render is caught by the builder's own self-test, and the strand-balance
+rule is watched firing on an all-plus chromosome.
 """
 
 from __future__ import annotations
@@ -49,8 +51,8 @@ def test_every_checked_in_render_matches_the_yaml(builder):
 
 
 def test_both_strands_are_equally_represented(builder):
-    """⭐ Owner, 2026-09-02: every gene carries an explicit strand and the chromosome keeps equal
-    representation, so a sign error in a strand-dependent rule cannot hide on a one-strand substrate."""
+    """Every gene carries an explicit strand and the chromosome keeps equal representation, so a sign
+    error in a strand-dependent rule cannot hide on a one-strand substrate."""
     spec = builder.load_spec(SPEC)
     pos = sum(1 for g in spec.genes if g.strand == "+")
     neg = len(spec.genes) - pos
@@ -59,8 +61,8 @@ def test_both_strands_are_equally_represented(builder):
 
 def test_every_type_sits_on_both_strands(builder):
     """A block type that only ever appears on one strand is the one-strand substrate in disguise.
-    A both-stranded locus is TWO genes on opposite strands sharing one type (2026-09-07): their ids carry
-    a role suffix, ``_H`` the host and ``_A`` the antisense, which is not part of the type."""
+    A both-stranded locus is TWO genes on opposite strands sharing one type: their ids carry a role
+    suffix, ``_H`` the host and ``_A`` the antisense, which is not part of the type."""
     spec = builder.load_spec(SPEC)
     by_type: dict[str, set[str]] = {}
     for g in spec.genes:

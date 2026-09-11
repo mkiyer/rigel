@@ -1,4 +1,11 @@
-"""Region signature encoding — pack/derive/strand-class."""
+"""The region signature — packing, deriving and the strand classes read off it.
+
+A signature is four bits (exon/intron × +/−) and every downstream strand question is a function of
+them, so these gates hold the encoding itself: the bit layout, the range check, the coarse strand a
+signature collapses to, the vectorised twin agreeing with the scalar form, the one shared numbering
+with ``rigel.types.Strand``, and the nascent/mature active-strand classifiers a boundary's
+taxonomy is then built from.
+"""
 
 from __future__ import annotations
 
@@ -74,8 +81,8 @@ def test_transcript_strand_class_array():
 
 
 def test_strand_convention_unified():
-    """TS_* is ONE convention with RegionStrand (== rigel.types.Strand): NONE=0,
-    POS=1, NEG=2, AMBIG=3. (Regression: TS_NEG was historically -1, TS_AMBIG 2.)"""
+    """``TS_*`` is one convention with ``RegionStrand`` (== ``rigel.types.Strand``): NONE=0, POS=1,
+    NEG=2, AMBIG=3. Two numberings for one concept is how a sign error becomes invisible."""
     from rigel.types import Strand
 
     assert (TS_NONE, TS_POS, TS_NEG, TS_AMBIG) == (0, 1, 2, 3)
