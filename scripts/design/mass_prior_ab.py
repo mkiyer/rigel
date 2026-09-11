@@ -1,35 +1,26 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **THE PRIOR AS A CONSERVED FRAGMENT COUNT** — plan 5.5 against the oracle, on real conditions.
-
-**The question.** ``assemble_priors`` hands the EM a per-locus FRAGMENT COUNT, but ``boundary_unspliced_count``
-is ``+1`` on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them. The shipped
-assembler repairs that with ``rho = Sum m / Sum S`` integrated over the locus span, and under capture the
-repair over-calls by **+15.1 %** with a PERFECT deconvolution fed in (``prior_vs_oracle.py``, arm ``O``
-against arm ``F``). The accumulator now carries the count directly — ``boundary_unspliced_mass``, which sums
-to one per fragment — so the assembler can stop manufacturing one from a density.
-
-This instrument scores that change end to end, against the same ``O`` and ``F`` arms, on a deterministic
-subsample of real ladder conditions.
-
-⛔ **IT MEASURES THE SHIPPED BANK. IT DOES NOT RE-DERIVE IT.** An earlier version of this file walked the
-deposit rule itself in Python, because the bank did not exist yet; that walk is gone
-(``TRAPS: converge-and-delete``) and with it the caveat that made it awkward — it enumerated no gap
-hypotheses, so it deposited the ~1.5 % of fragments production HOLDS. The rule's own gates live in
-``tests/native/test_conserved_mass.py`` (16 of them, four independent claims) and the C++ is gated on
-byte-identity to the specification. Here there is one fragment stream: production's.
-
-⭐ **WHAT IS STILL A PROTOTYPE** is the ASSEMBLER — :func:`assemble_priors_mass`. Plan 5.5 is not yet in
-``src/``; this scores it before it goes there (``TRAPS: panel-before-src``).
-
-⛔ **THE SUBSTRATE CHECK COMES FIRST.** A subsample that does not reproduce the defect cannot show it
-gone (``TRAPS: can-the-benchmark-resolve-it``), so the shipped assembler is re-scored on the SAME
-subsample as its own control rather than compared to the panel's recorded number
-(``TRAPS: re-record-the-baseline``).
+"""Can the prior be a conserved fragment count rather than one manufactured from a density?
+``assemble_priors`` hands the EM a per-locus fragment count, but ``boundary_unspliced_count`` is +1
+on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them and the shipped
+assembler repairs that by integrating a density over the locus span. The accumulator also carries
+``boundary_unspliced_mass``, which sums to one per fragment, so the boundary term can be rescaled
+by each boundary's ``mass / count`` share instead. This instrument prices that prototype assembler
+(:func:`assemble_priors_mass`, not in `src/`) against the origin-split oracle on a deterministic
+subsample of real ladder conditions: the shipped assembler fed the oracle's own masses is re-scored
+on the same subsample as its own control (a subsample that does not reproduce the defect cannot
+show it gone), ``share == 1`` is the ablation that must be clearly worse under capture, and each
+component rescaled by its own origin's share is a ceiling the oracle alone can compute, pricing the
+one-pooled-share assumption. It measures the shipped bank and does not re-derive the deposit rule
+(`tests/native/test_conserved_mass.py` gates that). The subsample is keyed on the qname hash so the
+whole and all three origin partitions select the same molecules. Read the RNA arm against its
+reference: `F_rna` is spliced-inclusive and an upper bound, so read the net there, not the rate.
+Other instruments import `assemble_priors_mass`, `boundary_share` and `subsample_bam`.
 
 Usage::
 
-    python scripts/design/mass_prior_ab.py                       # one capture-ON, one capture-OFF
+    python scripts/design/mass_prior_ab.py                                   # one capture-ON, one capture-OFF ladder row
     python scripts/design/mass_prior_ab.py --conditions A B --fragments 500000
+    python scripts/design/mass_prior_ab.py --suite ... --index ... --work-dir /path/to/scratch
 """
 
 from __future__ import annotations
@@ -51,19 +42,14 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# ⛔ THERE IS NOTHING TO DECODE. This module used to divide every mass bank by
-# ``substrate.INV_LENGTH_SCALE`` (2^32) because the banks were FIXED POINT. The whole fixed-point layer
-# was deleted at `94d283c0` under ONE NUMERIC CONVENTION — a count is an integer, a fraction is float64,
-# and nothing decodes a bank — so the scale factor is gone and the banks are already in real units.
-# ⚠ The recorded verdicts in this docstring are unchanged by that: they were computed from the same
-# quantity, one representation earlier.
+# the banks are in real units — a count is an integer, a fraction is float64 — so nothing here decodes one
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: One of each capture arm, at a gDNA level where both components are abundant. ⛔ Not ``g00`` (no gDNA
-#: to get wrong) and not ``g98`` (no RNA left). ⭐ STRANDED, because the ``O`` arm is fed oracle masses
+#: One of each capture arm, at a gDNA level where both components are abundant: not ``g00`` (no gDNA
+#: to get wrong) and not ``g98`` (no RNA left). Stranded, because the ``O`` arm is fed oracle masses
 #: and is therefore calibration-independent — nothing is bought by running it on the blind stratum.
 DEFAULT_CONDITIONS = (
     "gdna_g50_ss_0.99_nrna_mid_capture_on",
@@ -74,14 +60,13 @@ DEFAULT_CONDITIONS = (
 def subsample_bam(source: str, out: Path, target: int, total_fragments: int) -> tuple[int, float]:
     """Write a deterministic qname-hash subsample of a name-sorted BAM. Returns ``(reads, rate)``.
 
-    ⭐ **Keyed on the QNAME, so it COMMUTES with the origin split.** Both mates share a qname and the
-    origin is a function of the qname, so the same predicate applied to the whole and to each of the
-    three partitions selects the same molecules — which is exactly what ``OracleTruth``'s sum-to-full
-    identity needs. A positional or reservoir subsample would commute with nothing.
+    Keyed on the qname, so it commutes with the origin split: both mates share a qname and the origin
+    is a function of the qname, so the same predicate applied to the whole and to each of the three
+    partitions selects the same molecules — what ``OracleTruth``'s sum-to-full identity needs. A
+    positional or reservoir subsample would commute with nothing.
 
-    ⚠ ``a_g / truth`` is a RATIO, so it is scale-invariant and a subsample preserves it. What a
-    subsample does NOT preserve is anything with a fixed floor, which is why the shipped assembler is
-    re-scored here rather than compared to the panel's number.
+    ``a_g / truth`` is a ratio, so a subsample preserves it; anything with a fixed floor it does not,
+    which is why the shipped assembler is re-scored here rather than compared to the panel's number.
     """
     import pysam
 
@@ -101,12 +86,12 @@ def subsample_bam(source: str, out: Path, target: int, total_fragments: int) -> 
 def boundary_share(payload) -> np.ndarray:
     """``boundary_unspliced_mass / boundary_unspliced_count`` per boundary — the mean conserved share of a crossing.
 
-    ⭐ This is the whole of plan 5.5's new input: one dimensionless scalar per boundary that converts an
-    object-incidence total into a fragment count. It is 1.0 at a boundary whose flanking regions both exceed
-    every fragment length (a crossing fragment can only cross that one boundary) and falls toward the region
-    spacing where they do not — which is the K-inflation, per boundary.
+    One dimensionless scalar per boundary that converts an object-incidence total into a fragment
+    count. It is 1.0 at a boundary whose flanking regions both exceed every fragment length (a crossing
+    fragment can only cross that one boundary) and falls toward the region spacing where they do not —
+    the K-inflation, per boundary.
 
-    ⛔ Boundaries with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
+    Boundaries with no crossing get 1.0, the identity: there is no mass there to rescale, and a 0 would
     delete whatever mass the calibration put on a boundary the accumulator never saw.
     """
     mass = np.asarray(payload.boundary_unspliced_mass, np.float64)
@@ -117,28 +102,25 @@ def boundary_share(payload) -> np.ndarray:
 
 
 def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_source):
-    """⭐⭐⭐ **PLAN 5.5** — the prior as a CONSERVED FRAGMENT COUNT, with no density conversion::
+    """The prior as a conserved fragment count, with no density conversion::
 
         a_g(locus) = Sum_r share(r) * mass_gdna_region[r]
                    + Sum_l share(l) * mass_gdna_boundary[l] * (boundary_unspliced_mass[l] / boundary_count[l])
 
     and the same on the RNA masses, spliced withheld exactly as the shipped assembler withholds it.
 
-    ⭐ ``mass_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
-    fragment — so the region term needs no arithmetic at all. Only the boundary term is rescaled, from the
-    K-inflated incidence count onto the conserved mass. ``rho = Sum m / Sum S``, ``span_bp`` and the
-    support-weighted pooling are all GONE: the count is in the bank, so nothing manufactures one.
+    ``mass_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
+    fragment — so the region term needs no arithmetic; only the boundary term is rescaled, from the
+    K-inflated incidence count onto the conserved mass. No density, span or support-weighted pooling
+    enters: the count is in the bank, so nothing manufactures one.
 
-    ⛔ **``gdna_eff_len`` is carried over unchanged** from ``eff_len_source``. Plan 5.5 changes the two
-    pseudocounts and nothing else; re-deriving the third array would vary two things at once
-    (``TRAPS: one-thing-varied``).
-
-    ⚠ **Nothing is dropped for zero opportunity.** There is no denominator here — the mass IS the count
-    — so dropping such mass would simply lose fragments the accumulator really deposited.
-
-    ⭐ **Regions and boundaries are projected on their own axes**, matching the shipped assembler: a region owns
-    the fragments contained in it, an boundary owns the fragments that cross it, and a locus collects the
-    boundaries that touch its regions. No boundary is folded onto a flank region.
+    ``gdna_eff_len`` is carried over unchanged from ``eff_len_source``: this changes the two
+    pseudocounts and nothing else, so re-deriving the third array would vary two things at once.
+    Nothing is dropped for zero opportunity — there is no denominator here, the mass is the count, so
+    dropping such mass would lose fragments the accumulator really deposited. Regions and boundaries
+    are projected on their own axes, matching the shipped assembler: a region owns the fragments
+    contained in it, a boundary owns the fragments that cross it, and a locus collects the boundaries
+    that touch its regions.
     """
     from rigel.calibration.priors import (
         LocusPriors,
@@ -179,8 +161,8 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
 
 
 def _condition_fragments(suite: Path, condition: str) -> int:
-    """The condition's own true fragment total, from its truth summary. ⛔ Never counted from the BAM:
-    that is a two-minute pass to learn a number the simulator already wrote down."""
+    """The condition's own true fragment total, from its truth summary — never counted from the BAM,
+    a two-minute pass to learn a number the simulator already wrote down."""
     summary = json.loads((suite / condition / "truth_summary.json").read_text())
     return int(sum(summary["origin_counts"].values()))
 
@@ -267,11 +249,11 @@ def report(rows, args) -> bool:
             return g.gdna_prior_count, n.rna_prior_count
 
         pooled_g, pooled_r = assemble(share, share)
-        # ⛔ THE ABLATION: share == 1 everywhere is the RAW per-object incidence sum — the K-inflated
-        # count the whole change exists to remove. If it is not clearly worse under capture, the share
-        # array is not what produced the row above it (``TRAPS: an-ablation-that-never-ran``).
+        # the ablation: share == 1 everywhere is the raw per-object incidence sum — the K-inflated
+        # count the change exists to remove. If it is not clearly worse under capture, the share array
+        # is not what produced the row above it (`TRAPS: an-ablation-that-never-ran`).
         raw_g, _ = assemble(np.ones_like(share), np.ones_like(share))
-        # ⭐ THE PLAN-8-Q4 CEILING: each component rescaled by its OWN origin's share. NOT implementable
+        # the own-share ceiling: each component rescaled by its OWN origin's share. Not implementable
         # — the origin split is the oracle — so it prices the one-pooled-share assumption, not a proposal.
         rna_parts = {k: v for k, v in r.oracle.parts.items() if k != "gdna"}
         split_g, split_r = assemble(
@@ -323,9 +305,9 @@ def _pooled_share(payloads) -> np.ndarray:
 
 
 def _report_q4(rows) -> None:
-    """⭐ **PLAN 8 Q4** — is ONE share per boundary unbiased for the gDNA component?
+    """Is one share per boundary unbiased for the gDNA component?
 
-    Plan 5.5 rescales both components at a boundary by the same ``mass/count``, which assumes the gDNA
+    The conserved-count assembler rescales both components at a boundary by the same ``mass/count``, which assumes the gDNA
     crossings and the RNA crossings there have the same mean conserved share. The origin-split oracle
     carries both separately, so the assumption is a measurement: the bias is
     ``Sum_l count_g[l]*share_pooled[l] - Sum_l mass_g[l]``, in fragments.

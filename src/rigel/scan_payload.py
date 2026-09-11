@@ -2,14 +2,14 @@
 
     Spec: ``tests/native/_accumulator_reference.py``
 
-The C++ scanner returns ``result["calibration"]`` as a dict of **flat** ndarrays
+The C++ scanner returns ``result["calibration"]`` as a dict of flat ndarrays
 (``BamScanner::build_result``); this module reshapes the two-column banks and validates the schema.
 Everything downstream reads only this object.
 
-⭐ **THE FIELD NAMES ARE THE SPECIFICATION'S ``Tally`` FIELD NAMES, CHARACTER FOR CHARACTER**, and so are
-the C++ payload keys. One quantity, one name, in all three places — so there is no mapping table anywhere
-that could drift. `tests/test_accumulator_payload.py` checks the schema against ``Tally`` itself rather
-than against a written-out list, for the same reason.
+The field names are the specification's ``Tally`` field names, character for character, and so are the
+C++ payload keys: one quantity, one name, in all three places, so no mapping table exists that could
+drift. ``tests/test_accumulator_payload.py`` checks the schema against ``Tally`` itself rather than
+against a written-out list, for the same reason.
 
 THE AXES — three of them, off by one from each other per reference::
 
@@ -22,8 +22,8 @@ none owns neither, which is legal. SpliceJunction boundaries are their own axis,
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 sj-boundary id simply BE its slot.
 
-WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64.**
-There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
+WHAT THE NUMBERS MEAN — one numeric convention: a count is an integer, a fraction is float64. There is
+no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
     count           Sum 1                    integer   — exact, and reproduces across worker counts
     inv_*_sum       Sum 1/A(w)               float64   A = ell−w+1 contained in a region (the
@@ -31,45 +31,28 @@ There is no fixed point and no scale constant, so nothing anywhere decodes a ban
                                                        0-bp boundary or sj (`inv_length_sum`)
     mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
 
-⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
-exact rational arithmetic on the reciprocal-opportunity theorem the fixed point it replaced missed the
-answer by 7.0e-10 … 2.0e-07 while float64 misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer.
-⚠ **What it costs is bit-identity across worker counts**, since float addition is not associative: the
-integer banks still reproduce exactly, the float ones agree to ~1e-15. Owner ruling 2026-08-11 — tests
-validate the float banks within a DERIVED tolerance. `TRAPS: integer-channels-reproduce`.
+float64 is the accurate choice and not a concession: against exact rational arithmetic on the
+reciprocal-opportunity theorem it lands some five orders of magnitude closer than the fixed point it
+replaced. What it costs is bit-identity across worker counts, since float addition is not associative —
+the integer banks reproduce exactly, the float ones agree to ~1e-15, and the tests validate a float bank
+within a DERIVED tolerance (`TRAPS: integer-channels-reproduce`).
 
-⚠ **The reciprocal banks are NOT called ``density`` on purpose, and the two rules carry two names.**
-At a boundary the opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor
-``P(w ≥ 2) = 1`` — an exact, model-free density (``inv_length_sum``). At a region the deposit
-``1/(ell−w+1)`` cancels its opportunity only ON its support, so ``E[Σ] = ρ·P(w ≤ ell)`` — a per-component
-truncation, a density SHAPE and not a level (``inv_opportunity_sum``;
-TRAPS: a-cancellation-is-conditional-on-its-support). One word for two rules is the defect this naming
-avoids (TRAPS: two-masks-one-name).
+The reciprocal banks are not called ``density``, and the two rules carry two names. At a boundary the
+opportunity ``w−1`` and the deposit ``1/(w−1)`` cancel with support factor ``P(w ≥ 2) = 1`` — an exact,
+model-free density (``inv_length_sum``). At a region the deposit ``1/(ell−w+1)`` cancels its opportunity
+only ON its support, so ``E[Σ] = ρ·P(w ≤ ell)`` — a per-component truncation, a density SHAPE and not a
+level (``inv_opportunity_sum``; TRAPS: a-cancellation-is-conditional-on-its-support). One word for two
+rules is the defect this naming avoids (TRAPS: two-masks-one-name).
 
-⛔⛔ **RETRACTED, AND DELETED WITH ITS BANKS (2026-08-13).** This paragraph read: *"``length_sum`` exists
-because the other two are blind to one real case. At an boundary the count row is ``(mu_g − 1, mu_r − 1)``
-and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when gDNA and RNA share a
-mean fragment length the pair carries zero information about the split, at any depth. ``length_sum`` is
-an independent tilt and removes that blind spot."*
-⭐ **The premise is right and the conclusion does not follow.** At ``mu_g = mu_r = mu`` the third row is
-``(mu, mu)`` — proportional to ``(1, 1)``, exactly like the other two — so the 3x2 system is still rank
-one and ``length_sum`` removes nothing. It is an independent tilt only when the means already differ,
-which is precisely when the first two rows are already sufficient. `TRAPS: equal-lengths-carry-no-composition`
-says the same thing from the other side, and `TRAPS: a-linear-likelihood-emits-a-sign` carries the
-measurement that closed the whole θ-independent-length programme on 2026-08-10.
-⚠ **It survived because nothing consumed it**: the banks reached ``PopulationView.length_sum`` and
-stopped, so no test could disagree with the claim. A justification with no consumer is a claim with no
-gate — `TRAPS: a-guard-outlives-its-divisor`, in prose form.
+The trailing ``2`` on every bank is the genome strand — ``Strand.POS`` then ``Strand.NEG``, without
+exception. Sense/antisense is transcript-relative, derived by the consumer from the sj's own strand, and
+never stored. ``sj_mass`` is the one mass that also carries the strand axis; see ``SpliceJunction::mass``
+for the premise behind that and why it does not reach the other two masses.
 
-The trailing ``2`` on every bank is the **genome strand** — ``Strand.POS`` then ``Strand.NEG``, without
-exception. Sense/antisense is transcript-relative, derived by the consumer from the sj's own
-strand, and never stored. ⭐ ``sj_mass`` joined them on 2026-08-13 and is the only mass that has: see
-``SpliceJunction::mass`` for the premise that changed and why it did not reach the other two masses.
-
-⚠ **OWNERSHIP: this object holds VIEWS, and it is the keep-alive.** ``np.ascontiguousarray(x, dtype=D)`` is
-a **no-op** when the array already has dtype ``D``, so nothing here copies — the buffers belong to
-capsules owned by the C++ side. Someone "adding a cast for safety" would silently double peak memory
-against a 1.04 M-region partition. Do not.
+OWNERSHIP: this object holds VIEWS, and it is the keep-alive. ``np.ascontiguousarray(x, dtype=D)`` is a
+no-op when the array already has dtype ``D``, so nothing here copies — the buffers belong to capsules
+owned by the C++ side. ⛔ Adding "a cast for safety" would silently double peak memory against a
+million-region partition.
 """
 
 from __future__ import annotations
@@ -81,26 +64,26 @@ from typing import Any
 import numpy as np
 
 
-#: The two columns of every bank ARE the two genome strands. ⚠ `Strand` has four values — OR semantics
+#: The two columns of every bank ARE the two genome strands. `Strand` has four values — OR semantics
 #: make POS|NEG == AMBIGUOUS, and NONE means no strand — so only two of them name a column, and a fragment
 #: carrying neither is rejected by the accumulator rather than filed under one.
 N_STRAND_COLUMNS = 2
 
-#: Five fragment-length pools, each pure by construction (design §8). The order is
+#: Five fragment-length pools, each pure by construction. The order is
 #: `rigel::accumulator::FragmentPool` and `_accumulator_reference.FragmentPool`.
 N_FRAGMENT_POOLS = 5
 
-#: The pool axis, named. ⚠ **These live here, with the schema, and not in the consumer that indexes by
-#: them** — they are the accumulator's own enum in a third language, and a consumer holding a private
+#: The pool axis, named. These live here, with the schema, and not in the consumer that indexes by
+#: them — they are the accumulator's own enum in a third language, and a consumer holding a private
 #: copy is how three files end up disagreeing about which row is which. A disagreement here would fit the
 #: gDNA length model from the RNA pool and nothing downstream would look wrong;
 #: `tests/calibration/test_fl.py` pins them against the executable specification's enum itself.
 #:
-#: Purity is the point (design §8): the two DNA_* contained pools are ~99 % gDNA on real data, and
-#: RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be spliced. ⭐ The two
+#: Purity is the point: the two DNA_* contained pools are near-pure gDNA on real data, and
+#: RNA_SPLICED used an ANNOTATED sj with the splice OBSERVED — gDNA cannot be spliced. The two
 #: *_EXON "splash" pools are the only ON-TARGET gDNA population, so they are named rather than folded
-#: into the gDNA model: on-target gDNA runs ~42 bp shorter than off-target (§8.2), and the shipped model
-#: read a gDNA mean of 146.05 against the pure intergenic pool's 88.0 precisely by pooling them in.
+#: into the gDNA model: on-target gDNA runs tens of bp shorter than off-target, and pooling them in
+#: biases the fitted gDNA mean far above the pure intergenic pool's.
 #: There is deliberately NO pool for an exonic contained fragment or a multi-boundary crossing — those are
 #: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
 POOL_DNA_INTERGENIC = 0  # contained in an intergenic region — pure gDNA
@@ -112,10 +95,10 @@ POOL_RNA_SPLICED = 4  # used an annotated sj, splice OBSERVED — pure RNA
 
 @dataclass(frozen=True, slots=True)
 class ScanQC:
-    """The denominators design §10.3 requires the accumulator to emit.
+    """The denominators the accumulator is required to emit.
 
-    Not optional and not derivable afterwards: **every conservation statement downstream must be able to
-    name what it excluded.** Typed rather than a dict so that a misspelled denominator fails at this
+    Not optional and not derivable afterwards: every conservation statement downstream must be able to
+    name what it excluded. Typed rather than a dict so that a misspelled denominator fails at this
     boundary instead of silently reading as zero somewhere far away.
 
     The field names are the specification's own ``Tally.qc`` keys.
@@ -125,7 +108,7 @@ class ScanQC:
     dropped_too_long: int  # L above --max-fragment-length
     dropped_empty: int  # no path left after clipping to the reference
     dropped_strand_undefined: int  # align_strand named no column, so there was none to credit
-    #: ⭐ >1 surviving hypothesis, so the fragment's gap is undetermined. ⚠ NOT dropped — it is held
+    #: >1 surviving hypothesis, so the fragment's gap is undetermined. NOT dropped — it is held
     #: WHOLE for the second pass, and the identity is `deposited + deferred + dropped_* == offered`.
     deferred_undetermined_gap: int
     unannotated_introns: int  # observed introns with no annotated sj
@@ -146,18 +129,18 @@ class ScanQC:
 
 @dataclass(frozen=True, slots=True)
 class GapCensus:
-    """⭐ The umbrella census: how each fragment whose gap needed resolving was resolved.
+    """The umbrella census: how each fragment whose gap needed resolving was resolved.
 
-    Every fragment for which the enumeration produced at least one **spliced** hypothesis is counted here —
+    Every fragment for which the enumeration produced at least one spliced hypothesis is counted here —
     its ``L`` depends on whether a gap intron is cut. The subclasses are exhaustive and mutually exclusive,
     and the three ``gap_deferred_*`` are exactly ``qc.deferred_undetermined_gap``.
 
-    ⛔ **Its own axis, and NOT a splice type.** The umbrella region_bounds ACROSS the splice census: a certified-RNA
+    Its own axis, and NOT a splice type. It cuts ACROSS the splice census: a certified-RNA
     ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as much as an
     ``UNSPLICED`` one does, so putting these on ``splice_type`` would need two labels per fragment and would
     break TRAPS: pure-and-length-censored's property that the splice census sums to the library.
 
-    ⛔ **There is no ``gap_resolved_unspliced``, and that is not an omission.** A spliced hypothesis cuts
+    There is no ``gap_resolved_unspliced``, and that is not an omission. A spliced hypothesis cuts
     bases the unspliced one keeps, so ``L_spliced <= L_unspliced`` always, and the one arbitration filter is
     ``L <= max_fragment_length``. If the unspliced path survives the filter then every spliced path does
     too — so the unspliced path can never be the sole survivor, and the class it would name is unreachable.
@@ -166,22 +149,22 @@ class GapCensus:
     The field names are the specification's own ``Tally.gap_resolution`` keys.
     """
 
-    #: One hypothesis survived, and it necessarily region_bounds something: the gap intron is real and ``L``
-    #: excludes it. ⚠ Classifies the ARBITRATION, not the deposit — such a fragment can still be rejected
+    #: One hypothesis survived, and it necessarily cuts something: the gap intron is real and ``L``
+    #: excludes it. Classifies the ARBITRATION, not the deposit — such a fragment can still be rejected
     #: afterwards as ``TOO_LONG``, which is a different question with its own counter.
     gap_resolved_spliced: int
-    #: ⛔ The unspliced path against exactly one spliced path. The open question is **RNA or gDNA** — one
+    #: The unspliced path against exactly one spliced path. The open question is RNA or gDNA — one
     #: bit, and it is the composition question calibration exists to answer.
     gap_deferred_rna_or_gdna: int
-    #: ⛔ Two or more spliced paths and no unspliced one: gDNA cannot be spliced, so the molecule is
-    #: certified RNA and the open question is purely **which structure**.
+    #: Two or more spliced paths and no unspliced one: gDNA cannot be spliced, so the molecule is
+    #: certified RNA and the open question is purely which structure.
     gap_deferred_which_introns: int
-    #: ⛔ Both questions at once.
+    #: Both questions at once.
     gap_deferred_both: int
 
     @classmethod
     def zeros(cls) -> "GapCensus":
-        """No fragment had a gap to resolve. ⚠ The ONE spelling of that, so a hand-built payload cannot
+        """No fragment had a gap to resolve. The ONE spelling of that, so a hand-built payload cannot
         invent a second — and it is a real state: a library with no annotated intron in any mate gap."""
         return cls(**{field.name: 0 for field in dataclasses.fields(cls)})
 
@@ -206,29 +189,28 @@ class GapCensus:
 
 @dataclass(frozen=True, slots=True)
 class DrainQC:
-    """⭐ **What the second pass's DRAIN did** — the audit trail of how the final tally was reached.
+    """What the second pass's DRAIN did — the audit trail of how the final tally was reached.
 
-     The drain replays each held fragment with one chosen hypothesis, so
-    after it **nothing is held**: the payload's bank is empty, ``qc.deferred_undetermined_gap`` is 0 and
-    the three ``gap_deferred_*`` are 0. ⭐ That is deliberate — it keeps *"the counter and the fragments it
-    counts are the same population"* absolute, so a drained payload needs no exception at the door. Pass
-    one's numbers do not vanish; they live here.
+    The drain replays each held fragment with one chosen hypothesis, so after it nothing is held: the
+    payload's bank is empty, ``qc.deferred_undetermined_gap`` is 0 and the three ``gap_deferred_*`` are 0.
+    That keeps "the counter and the fragments it counts are the same population" absolute, so a drained
+    payload needs no exception at the door. Pass one's numbers do not vanish; they live here.
 
-    ⛔ **The drain has its OWN axis and does not extend `GapCensus`.** That census has no
+    The drain has its OWN axis and does not extend `GapCensus`. That census has no
     ``gap_resolved_unspliced`` class because pass-one arbitration cannot produce one — the genomic path is
-    always the longest, so it can never be the sole survivor. ⭐ The drain, however, *chooses*, and it can
-    choose ∅. ``chose_genomic`` / ``chose_spliced`` is the composition the drain assigned and is exactly
-    what the census could not have recorded without resurrecting a class S1 deleted for a proven reason.
+    always the longest, so it can never be the sole survivor. The drain, however, chooses, and it can
+    choose the genomic path. ``chose_genomic`` / ``chose_spliced`` is the composition the drain assigned,
+    which is exactly what the census cannot record without an unreachable class.
     """
 
-    #: Pass one's ``qc.deferred_undetermined_gap`` — ⭐ the denominator the conservation is checked against.
+    #: Pass one's ``qc.deferred_undetermined_gap`` — the denominator the conservation is checked against.
     offered: int
     deposited: int
     dropped_too_long: int
     dropped_empty: int
     dropped_strand_undefined: int
-    #: The drain's own census: ∅ against a spliced path. ⚠ Sums to ``offered``, not to ``deposited`` — a
-    #: chosen hypothesis can still be rejected afterwards, which is a different question.
+    #: The drain's own census: the genomic path against a spliced path. Sums to ``offered``, not to
+    #: ``deposited`` — a chosen hypothesis can still be rejected afterwards, a different question.
     chose_genomic: int
     chose_spliced: int
     # Pass one's arbitration census, kept verbatim so the per-class before/after
@@ -241,7 +223,7 @@ class DrainQC:
 
     @property
     def conserved(self) -> bool:
-        """⭐ §6.2's identity: every offered fragment either deposited or was rejected, exactly once."""
+        """Every offered fragment either deposited or was rejected, exactly once."""
         return self.deposited + self.dropped == self.offered
 
     def __post_init__(self) -> None:
@@ -270,39 +252,37 @@ class DrainQC:
         )
 
 
-#: ⭐ Every two-column bank, with the axis it is indexed on and its dtype. ⚠ ONE table: `from_scan_result`
+#: Every two-column bank, with the axis it is indexed on and its dtype. ONE table: `from_scan_result`
 #: validates against it and the drain adds a per-reference delta into it, so a new channel cannot reach one
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("region_contained_count", "region", np.uint32),
-    # ⭐ the START/END/SPAN banks (2026-08-21): the path's first/last covered base and the regions it
+    # the START/END/SPAN banks: the path's first/last covered base and the regions it
     # strictly spans, by align strand. START and END each sum (over both columns) to qc.deposited —
-    # the ledger, twice over. SPAN's opportunity is (w−ℓ−1)₊, a pmf functional per component BY DESIGN.
+    # the ledger, twice over. SPAN's opportunity is (w−ℓ−1)₊, a pmf functional per component by design.
     ("region_start_count", "region", np.uint32),
     ("region_end_count", "region", np.uint32),
     ("region_span_count", "region", np.uint32),
     ("boundary_unspliced_count", "boundary", np.uint32),
     ("boundary_spliced_count", "boundary", np.uint32),
     ("sj_count", "sj", np.uint32),
-    # ⭐⭐ THE ONE MASS WITH A STRAND, and the only non-integer row in this table. `accumulator.h`'s
-    # one-value ruling was reversed on the SJ axis alone (owner, 2026-08-12) because its premise
-    # changed: an artifactual sj accumulates SYMMETRICALLY on both strands like gDNA, so the
-    # existing strand model can detect one — given a per-strand observable. `SpliceJunction::mass` carries
-    # the full reversal. ⛔ The columns are `sj_count`'s columns, so `mass[c]/count[c]` is a per-strand
-    # mean. ⚠ The ruling still STANDS for `boundary_unspliced_mass`, which has no such consumer.
+    # THE ONE MASS WITH A STRAND, and the only non-integer row in this table. A mass is otherwise stored
+    # as one value per slot; the SJ axis is the exception because an artifactual sj accumulates
+    # symmetrically on both strands like gDNA, so the existing strand model can detect one — given a
+    # per-strand observable. `SpliceJunction::mass` carries the argument. The columns are `sj_count`'s
+    # columns, so `mass[c]/count[c]` is a per-strand mean. One value per slot still holds for
+    # `boundary_unspliced_mass`, which has no such consumer.
     ("sj_mass", "sj", np.float64),
 )
 
 
-#: ⭐ The single-column additive banks, with the axis and dtype `from_scan_result` validates them on.
-#: ⚠ Kept beside `BANK_AXES` rather than folded into it: that table's contract is "every TWO-column
+#: The single-column additive banks, with the axis and dtype `from_scan_result` validates them on.
+#: Kept beside `BANK_AXES` rather than folded into it: that table's contract is "every TWO-column
 #: bank", and widening it to mean "every bank" would silently give the mass a strand column in every
 #: loop that reads it.
 SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
-    # ⭐⭐⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. Every row here is a
+    # One numeric convention: a count is an integer, a fraction is float64. Every row here is a
     # fraction, so every row is float64; there is no fixed point and no scale constant to decode.
-    # ⚠ The two `*_length_sum` banks were the integer exception and are GONE (2026-08-13) — see the
-    # module docstring for why their stated justification did not survive measurement.
     ("region_contained_inv_opportunity_sum", "region", np.float64),
     ("boundary_unspliced_inv_length_sum", "boundary", np.float64),
     ("sj_inv_length_sum", "sj", np.float64),
@@ -310,10 +290,10 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
     ("boundary_spliced_mass", "boundary", np.float64),
 )
 
-#: ⭐ **EVERY additive array channel, with the axis it is indexed on** — the two-column banks plus the
+#: EVERY additive array channel, with the axis it is indexed on — the two-column banks plus the
 #: three that are not banks. ``"library"`` means the axis is library-wide rather than per reference.
 #:
-#: ⚠ Derived from `BANK_AXES` rather than restated, because the drain must add every additive channel and
+#: Derived from `BANK_AXES` rather than restated, because the drain must add every additive channel and
 #: miss none. `region_start_count` and `deposited_lengths` are the two externally-checkable invariants (each
 #: sums to `qc.deposited`), so a drain that skipped either would be caught — but `pool_lengths` would just
 #: go quietly short, and nothing downstream would look wrong.
@@ -325,21 +305,21 @@ ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
 )
 
 
-#: The deferred bank's arrays, in the order :meth:`Tally.deferred_arrays` emits them. ⚠ Read off the
+#: The deferred bank's arrays, in the order :meth:`Tally.deferred_arrays` emits them. Read off the
 #: dataclass below rather than written out twice; the tuple exists because the validation needs an order.
 _DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand")
 
 
 @dataclass(frozen=True, slots=True)
 class DeferredFragments:
-    """⭐ **THE SIDE BUFFER.** Fragments whose gap has more than one surviving explanation, held WHOLE.
+    """THE SIDE BUFFER: fragments whose gap has more than one surviving explanation, held WHOLE.
 
     A fragment's unsequenced mate gap may hold no intron, one, or several, and *which* cannot be observed —
     the bases are not there. Deciding needs a fragment-length distribution that does not exist until the
     first pass is over, so the first pass does not guess: it enumerates, and when more than one hypothesis
     survives it holds the fragment here.
 
-    ⭐ **The FRAGMENT is stored, never its consequences.** Object ids are large, derived, and would have to
+    The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to
     be kept consistent with the partition; the fragment is small and replays exactly. The second pass
     re-enters ``Accumulator::deposit`` with the chosen hypothesis, so there is one tally path and
     byte-identity with the specification is preserved for free.
@@ -348,13 +328,13 @@ class DeferredFragments:
     two offset arrays at each level. Offsets are cumulative and always start at 0, so an empty bank is
     ``[0]`` and never ``[]``, and ``n_fragments`` is ``len(offsets) - 1``.
 
-    ⛔ **THIS IS THE ONE BANK WHOSE ORDER IS OBSERVABLE.** Every other is a sum of integers and integer
+    This is the ONE bank whose order is observable. Every other is a sum of integers and integer
     addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is a
     list, so the C++ export **sorts it on the record's own content** before it crosses the ABI — otherwise
     the same BAM would give a different byte sequence at 1, 2, 4 and 8 workers with identical contents. Two
     records that tie on that key are identical records, so no tie-break is needed or possible.
 
-    ⚠ Every array is ``int64``, including the two strand columns, which are ``int32`` everywhere else in the
+    Every array is ``int64``, including the two strand columns, which are ``int32`` everywhere else in the
     scanner. One dtype for one bank: the parity gate compares dtypes, and a narrowing conversion at the
     boundary compares equal by value.
     """
@@ -367,7 +347,7 @@ class DeferredFragments:
     observed_intron_offsets: np.ndarray  # int64[n + 1] — in PAIRS, into observed_introns
     observed_introns: (
         np.ndarray
-    )  # int64[2 * n_observed] — flat (start, end); region_bound under EVERY hypothesis
+    )  # int64[2 * n_observed] — flat (start, end); cut under EVERY hypothesis
     hypothesis_offsets: np.ndarray  # int64[n + 1] — into the per-hypothesis arrays below
     hypothesis_sj_strand: (
         np.ndarray
@@ -387,7 +367,7 @@ class DeferredFragments:
 
     @classmethod
     def empty(cls) -> "DeferredFragments":
-        """Nothing was deferred. ⚠ Offsets are cumulative and start at 0, so every offset array is ``[0]``
+        """Nothing was deferred. Offsets are cumulative and start at 0, so every offset array is ``[0]``
         and never ``[]`` — spelled once here so a hand-built payload cannot get that boundary wrong."""
         return cls.from_dict(
             {
@@ -402,7 +382,7 @@ class DeferredFragments:
     def from_dict(cls, deferred: dict[str, Any]) -> "DeferredFragments":
         """Validate and adopt the flat arrays the C++ emits.
 
-        ⚠ The two nested CSRs are re-derived rather than trusted, exactly as ``ref_region_offsets`` is. An
+        The two nested CSRs are re-derived rather than trusted, exactly as ``ref_region_offsets`` is. An
         offset array of the right LENGTH can still be inconsistent, and the second pass indexes every one
         of these — a truncated bank would score a fragment against another fragment's hypotheses, which is
         a wrong answer that looks entirely plausible.
@@ -471,7 +451,7 @@ class DeferredFragments:
                     f"deferred[{name!r}] has {arrays[name].shape[0]} entries but there are "
                     f"{n_hypotheses} hypotheses, so it must have {n_hypotheses + 1}"
                 )
-        # ⭐ A fragment is deferred BECAUSE two or more hypotheses survived, so a record carrying fewer
+        # A fragment is deferred BECAUSE two or more hypotheses survived, so a record carrying fewer
         # than two is a bank that lost them — and the second pass would then "choose" from a set of one and
         # deposit an answer nothing supported.
         runs = np.diff(arrays["hypothesis_offsets"])
@@ -516,9 +496,9 @@ class AccumulatorPayload:
     region_contained_count: (
         np.ndarray
     )  # uint32[n_regions, 2] — the whole path lies inside the region
-    #: ⭐ float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
-    #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
-    #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
+    #: float64[n_regions] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
+    #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer sums
+    #: the two columns. The COUNTS keep both — the strand model is a Beta-Binomial over them.
     region_contained_inv_opportunity_sum: np.ndarray
     #: uint32[n_regions, 2] — the path's FIRST covered base, by align strand. THE ledger invariant:
     #: Σ over both columns == qc.deposited. Opportunity ℓ for every fragment length; wall-blind only
@@ -538,95 +518,88 @@ class AccumulatorPayload:
     boundary_unspliced_inv_length_sum: (
         np.ndarray
     )  # float64[n_boundaries] — ONE column, strand-agnostic
-    #: ⭐⭐ float64[n_boundaries] — **THE CONSERVED MASS**. ⚠ This line said uint64 and named a fixed point
-    #: at ``INV_LENGTH_SCALE`` until 2026-08-17; the fixed-point layer and that constant went with the ONE
-    #: NUMERIC CONVENTION ruling (`94d283c0`) — a FRACTION is float64, and there is no scale to decode.
-    #: A COUNT and a
+    #: float64[n_boundaries] — THE CONSERVED MASS. A COUNT and a
     #: MASS are two different deposits and one number cannot be both: ``boundary_unspliced_count`` is ``+1``
     #: on every boundary a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
     #: fragment. That is what lets a consumer turn an object-incidence total into a FRAGMENT COUNT
-    #: without manufacturing one from a density. ⛔ ONE column, not two — nothing reads a mass per
+    #: without manufacturing one from a density. ONE column, not two — nothing reads a mass per
     #: strand, and the question it answers has no strand in it.
     boundary_unspliced_mass: np.ndarray
-    #: uint32[n_boundaries, 2] — certified RNA: gDNA cannot be spliced. ⭐ COUNT AND MASS ONLY: nothing
-    #: deconvolves a certified-RNA crossing, so its two length moments had no consumer and are gone.
+    #: uint32[n_boundaries, 2] — certified RNA: gDNA cannot be spliced. COUNT AND MASS ONLY: nothing
+    #: deconvolves a certified-RNA crossing, so its two length moments have no consumer and are not kept.
     boundary_spliced_count: np.ndarray
-    #: ⭐ float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
-    #: one channel that ignores the split. ⛔ A PARTIAL, never a conservation ledger: it sums to
+    #: float64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
+    #: one channel that ignores the split. A PARTIAL, never a conservation ledger: it sums to
     #: ``crossed_block_len / L`` per fragment. A per-BOUNDARY certified-RNA term, commensurate with the
     #: unspliced mass at the same boundary — NOT "the number of spliced fragments here".
     boundary_spliced_mass: np.ndarray
 
     # -- sj boundaries: one exact donor->acceptor jump. Pure RNA by construction --
-    #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
-    #: THEM YET** (owner ruling, 2026-08-08). A sj is stranded by its genomic splicing MOTIF, so
-    #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
+    #: uint32[n_sj, 2] — both genome-strand columns are retained even though every consumer today sums
+    #: them. A sj is stranded by its genomic splicing MOTIF, so the strand of the *fragments* on it looks
+    #: redundant; it is not, because it is the empirical aligner-artifact detector.
     #:
-    #: ⭐ **The reason is aligner-artifact detection.** Aligners emit false-positive ``N`` CIGAR ops from
-    #: plain genomic DNA. ``rigel.splice_blacklist`` catches those the sister tool ``alignable`` has
-    #: enumerated by coordinate — an a-priori list, and far from complete. The EMPIRICAL detector is
-    #: this column: in a stranded library a real sj inherits the global strand specificity, while
-    #: an artifact deposits on BOTH strands and deviates from it. ⚠ Unstranded data cannot use it
-    #: (κ = ½ leaves nothing to deviate from), which is a property of the detector, not a reason to drop
-    #: the column.
+    #: Aligners emit false-positive ``N`` CIGAR ops from plain genomic DNA. ``rigel.splice_blacklist``
+    #: catches those the sister tool ``alignable`` has enumerated by coordinate — an a-priori list, and
+    #: far from complete. The empirical detector is this column: in a stranded library a real sj inherits
+    #: the global strand specificity, while an artifact deposits on BOTH strands and deviates from it.
+    #: Unstranded data cannot use it (κ = ½ leaves nothing to deviate from), which is a property of the
+    #: detector, not a reason to drop the column.
     #:
-    #: ⛔ The discriminating information lives ONLY in the split — a clean sj and an artifactual
+    #: The discriminating information lives ONLY in the split — a clean sj and an artifactual
     #: one carry the same total. Gated by
     #: ``test_the_sj_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
-    #: float64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's sj evidence
-    #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
+    #: float64[n_sj] — read by ``second_pass``, which scores a held fragment's sj evidence with it.
     sj_inv_length_sum: np.ndarray
-    #: float64[n_sj, 2] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
-    #: COMPUTABLE.** A spliced fragment's block containing no interior boundary deposits on neither boundary
-    #: bank, and is not ``contained`` either — its path spans a sj, so it lies in no single region.
-    #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
+    #: float64[n_sj, 2] — the conserved mass's third axis, and what makes a library fragment count
+    #: computable. A spliced fragment's block containing no interior boundary deposits on neither boundary
+    #: bank, and is not ``contained`` either — its path spans a sj, so it lies in no single region. Such a
+    #: fragment would otherwise exist on the incidence axis (``sj_count``) and on no conserved one, which
+    #: on a contaminated library leaves the RNA side's conserved count short by roughly a quarter while
+    #: the gDNA side, which cannot splice, is already exact.
     #:
-    #: ⭐ Measured on the origin-split oracle at ladder g50 capture_off: **1,222,375 of 4,830,713 RNA
-    #: fragments (25.3 %)** are in that population, against **0 of 4,997,761** gDNA fragments — gDNA
-    #: cannot splice, so its conserved count was already exact while RNA's read 0.747x deposited.
-    #:
-    #: ⛔ **It ADDS a boundary class rather than re-apportioning one**: a block that crossed a boundary is
-    #: untouched, so ``boundary_unspliced_mass`` and ``boundary_spliced_mass`` are byte-identical to what they
-    #: were. Gates: ``tests/native/test_conserved_mass.py`` claim 5.
+    #: It ADDS a boundary class rather than re-apportioning one: a block that crossed a boundary is
+    #: untouched, so ``boundary_unspliced_mass`` and ``boundary_spliced_mass`` are unchanged by it.
+    #: Gated by ``tests/native/test_conserved_mass.py``.
     sj_mass: np.ndarray
 
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
 
-    #: uint32[max_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, no purity
-    #: condition.** The five pools above are deliberately CONDITIONED (an impure pool is worse than a
-    #: missing one), so none of them is an unconditional anchor — which is why the empirical-Bayes
-    #: shrinkage in `calibration.fl` took its anchor from the SCANNER, which measures length by two
-    # other rules over another population. This is that anchor, in
-    #: the accumulator's own frame.
-    #: ⚠ "Unconditional GIVEN DEPOSIT": it excludes what the accumulator rejects (too long, ambiguous
+    #: uint32[max_length + 1] — EVERY deposited fragment, binned at its own L, with no purity condition
+    #: (TRAPS: a-purity-filter-is-a-length-filter). The five pools above are deliberately CONDITIONED (an
+    #: impure pool is worse than a missing one), so none of them is an unconditional anchor; this bank is
+    #: the unconditional anchor the empirical-Bayes shrinkage in `calibration.fl` shrinks a pool towards,
+    #: measured in the accumulator's own frame.
+    #: "Unconditional GIVEN DEPOSIT": it excludes what the accumulator rejects (too long, ambiguous
     #: path, strand-undefined, empty), each counted in ``qc``. That is exactly the population the pools
     #: are drawn from, which is what makes it the right anchor rather than merely a convenient one.
     deposited_lengths: np.ndarray
 
-    #: ⭐ **The side buffer** — fragments whose gap has more than one surviving explanation, held WHOLE for
-    #: the second pass. ⚠ NOT a loss: ``deposited + deferred + dropped_* == offered``, and this bank holds
+    #: The side buffer — fragments whose gap has more than one surviving explanation, held WHOLE for
+    #: the second pass. NOT a loss: ``deposited + deferred + dropped_* == offered``, and this bank holds
     #: the fragments ``qc.deferred_undetermined_gap`` counts.
     deferred: DeferredFragments
-    #: ⭐ How each gap was resolved — its own axis, cutting across the splice census.
+    #: How each gap was resolved — its own axis, cutting across the splice census.
     gap_resolution: GapCensus
 
     qc: ScanQC
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
     n_refs: int
 
-    #: ⭐ Provenance, and it must cover **regions AND boundaries**. The payload is boundary-keyed by construction —
-    #: its sj axis is meaningless against a different sj CSR — and `index.partition_hash`
-    #: deliberately covers `regions.feather` only. A 2026-07-29 flag fix rewrote every `edges.feather` while
-    #: leaving every `regions.feather` byte-identical, so a regions-only key would have verified CLEAN against
-    #: a stale cache. `None` when the scanner was driven without an index to hash.
+    #: Provenance, and it must cover regions AND boundaries. The payload is boundary-keyed by
+    #: construction — its sj axis is meaningless against a different sj CSR — whereas
+    #: `index.partition_hash` deliberately covers `regions.feather` only. An index rebuild can rewrite
+    #: every `edges.feather` while leaving every `regions.feather` byte-identical, so a regions-only key
+    #: would verify CLEAN against a stale cache. `None` when the scanner was driven without an index
+    #: to hash.
     graph_hash: str | None = None
 
-    #: ⭐ **Set once the second pass has DRAINED this tally**, and ``None`` while the side buffer is still
-    # held. ⚠ It is the only way to tell the two states apart, because a
+    #: Set once the second pass has DRAINED this tally, and ``None`` while the side buffer is still
+    # held. It is the only way to tell the two states apart, because a
     #: drained payload is deliberately indistinguishable in shape: its bank is empty and its held counters
-    #: are 0 precisely so that *"the counter and the fragments it counts are the same population"* needs no
+    #: are 0 precisely so that "the counter and the fragments it counts are the same population" needs no
     #: exception. Pass one's numbers live in here — see :class:`DrainQC`.
     drain: DrainQC | None = None
 
@@ -649,16 +622,16 @@ class AccumulatorPayload:
         return int(self.sj_count.shape[0])
 
     def with_drain(self, delta: dict[str, np.ndarray], drain: DrainQC) -> "AccumulatorPayload":
-        """⭐ **Pass one plus the drain's delta** — the tally calibration actually consumes.
+        """Pass one plus the drain's delta — the tally calibration actually consumes.
 
-         ``delta`` holds one globally-shaped array per additive channel, as
-        produced by replaying the held fragments through :meth:`Accumulator.deposit`; this method is only
-        the arithmetic and the bookkeeping.
+        ``delta`` holds one globally-shaped array per additive channel, as produced by replaying the held
+        fragments through :meth:`Accumulator.deposit`; this method is only the arithmetic and the
+        bookkeeping.
 
-        ⭐ **The delta arrives as its own object rather than being accumulated in place**, which is what
-        makes the drain's contribution *observable*: both payloads exist, so every channel's before/after
-        is a subtraction rather than a rerun — which is the reason to prefer
-        this shape, and it is also why the drain needs no new C++ — every channel is already exported.
+        The delta arrives as its own object rather than being accumulated in place, which is what makes
+        the drain's contribution observable: both payloads exist, so every channel's before/after is a
+        subtraction rather than a rerun. It is also why the drain needs no new C++ — every channel is
+        already exported.
 
         After this: the bank is empty, the held counters are 0, and ``drain`` says what pass one held.
         """
@@ -683,7 +656,7 @@ class AccumulatorPayload:
                     f"the drain delta for {name!r} has shape {added.shape}, expected {before.shape}"
                 )
             total = before + added
-            # ⛔ Both terms are non-negative integers, so the sum can only fail to be >= either term by
+            # Both terms are non-negative integers, so the sum can only fail to be >= either term by
             # WRAPPING. Counts are uint32 and a real library can approach that; a silent wrap would read
             # as a plausible small number in the one bank every density is computed from.
             if np.any(total < before) or np.any(total < added):
@@ -696,7 +669,7 @@ class AccumulatorPayload:
         return dataclasses.replace(
             self,
             **totals,
-            # ⚠ `deferred_undetermined_gap` goes to 0 with the bank, not kept at pass one's value: the two
+            # `deferred_undetermined_gap` goes to 0 with the bank, not kept at pass one's value: the two
             # must describe one population, and pass one's count is preserved as `drain.offered`.
             qc=dataclasses.replace(
                 self.qc,
@@ -708,8 +681,8 @@ class AccumulatorPayload:
                 ),
                 deferred_undetermined_gap=0,
             ),
-            # ⛔ `gap_resolved_spliced` is pass one's and is NOT extended. The census classifies pass one's
-            # ARBITRATION, and it has no class for a chosen ∅ — see :class:`DrainQC`.
+            # `gap_resolved_spliced` is pass one's and is NOT extended. The census classifies pass one's
+            # ARBITRATION, and it has no class for a chosen genomic path — see :class:`DrainQC`.
             gap_resolution=dataclasses.replace(
                 self.gap_resolution,
                 gap_deferred_rna_or_gdna=0,
@@ -756,9 +729,9 @@ class AccumulatorPayload:
                 f"{region_bounds.shape[0]} entries"
             )
 
-        # ⚠ Re-derived from the region_bound axis rather than trusted. An offset array of the right LENGTH can
-        # still be inconsistent, and every consumer slices by these — a per-reference offset that drifts
-        # is the defect class that once dropped 476,719 of 476,732 fragments while every golden passed.
+        # Re-derived from the region_bound axis rather than trusted. An offset array of the right LENGTH
+        # can still be inconsistent, and every consumer slices by these — a per-reference offset that
+        # drifts can drop nearly the whole library while every golden still passes.
         per_ref_region_bounds = np.diff(offsets["ref_region_bound_offsets"])
         for name, per_ref in (
             ("ref_region_offsets", np.maximum(per_ref_region_bounds - 1, 0)),
@@ -797,7 +770,8 @@ class AccumulatorPayload:
             raise ValueError(
                 f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
             )
-        # ⭐ THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT, checked at the door. Same externally-checkable form as
+        # The TRAPS: a-purity-filter-is-a-length-filter invariant, checked at the door. Same
+        # externally-checkable form as
         # ``sum(region_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
         # was located in space, this one that every fragment was binned by length. A histogram that is
         # the anchor for every FL model in the tool must not be allowed in one fragment short.
@@ -810,7 +784,7 @@ class AccumulatorPayload:
 
         qc = ScanQC.from_dict(cal["qc"])
         deferred = DeferredFragments.from_dict(cal["deferred"])
-        # ⭐ THE CONSERVATION HALF, refused at the door. `qc.deferred_undetermined_gap` says how many
+        # The conservation half, refused at the door. `qc.deferred_undetermined_gap` says how many
         # fragments were held; this bank is supposed to BE them. The identity
         # `deposited + deferred + dropped_* == offered` is worth nothing if the deferred term is a number
         # with no fragments behind it — and a cache can be truncated or partially written, which is
@@ -854,7 +828,7 @@ def _offsets(cal: dict[str, Any], name: str, n_refs: int) -> np.ndarray:
 def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
     """One two-column bank, reshaped from the flat array the C++ emits.
 
-    ⚠ The dtype is asserted rather than coerced. ``ascontiguousarray`` would happily widen a uint32 count
+    The dtype is asserted rather than coerced. ``ascontiguousarray`` would happily widen a uint32 count
     to uint64, which compares equal by value — so a schema drift would pass every value check downstream
     while the payload silently stopped matching the specification.
     """
@@ -862,7 +836,8 @@ def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
     if array.dtype != dtype:
         raise ValueError(
             f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. Counts are uint32 and "
-            f"densities uint64; a widened array compares equal by value and would hide the change."
+            f"reciprocal-opportunity sums are float64; a widened array compares equal by value and "
+            f"would hide the change."
         )
     if array.size != rows * N_STRAND_COLUMNS:
         raise ValueError(
@@ -875,15 +850,15 @@ def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
 def _single_column_bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
     """One SINGLE-column bank — the conserved masses. Same dtype contract as :func:`_bank`.
 
-    ⚠ Separate from :func:`_bank` rather than parameterised by a column count, because the two carry
+    Separate from :func:`_bank` rather than parameterised by a column count, because the two carry
     different claims: a two-column bank asserts the strand axis is meaningful for that channel, and this
     one asserts it is not. A shared function taking ``n_columns=1`` would read as the same statement.
     """
     array = np.ascontiguousarray(cal[name])
     if array.dtype != dtype:
         raise ValueError(
-            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. These are uint64 sums (a "
-            f"fixed point for the reciprocal ones), and a narrowed array wraps at realistic depth."
+            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. A narrowed array loses "
+            f"precision at realistic depth."
         )
     if array.shape != (rows,):
         raise ValueError(

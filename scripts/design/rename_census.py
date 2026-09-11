@@ -1,35 +1,18 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **THE BULK RENAME'S LANDSCAPE, RE-DERIVED — every name the vocabulary ruling touches.**
+"""Which names does a vocabulary ruling touch, and which of them carry two senses?
 
-The owner's vocabulary (2026-08-12, sharpened 2026-08-13):
-
-    REGION           a genomic INTERVAL.                      was: node
-    BOUNDARY         a single genomic POSITION between two    was: edge, cut, line, seam
-                     regions.
-    SPLICE JUNCTION  a connection between two BOUNDARIES,     was: junction (alone), sj
-                     non-contiguous. ⭐ `splice junction`
-                     and `sj` are BOTH allowed; bare
-                     `junction` is NOT.
-    ⛔ splice donor / splice acceptor are BANNED as names for a genomically-ordered pair.
-
-⛔ **THIS REPORTS, IT DOES NOT RENAME.** A ~5,000-site mechanical change needs its landscape measured
-before a single edit, because the dangerous part is not the volume — it is the handful of names that
-carry TWO senses, where a correct-looking global replace silently corrupts the other one. Two are
-already known and both were found the hard way::
-
-    donor      splice donor  ..AND..  the toy harness's SOURCE CONDITION (`donor_dir`, `donor_on`)
-    cut        the ANCHORED boundary set (N+R)  ..AND..  the interior deposit axis (N-R)
-    line       a 0-bp boundary (120 sites)  ..AND..  an ordinary line of TEXT (60 sites)
-    node       a genomic interval  ..AND..  an `ast` node, in this very file and `module_census.py`
-
-⭐⭐ **The `cut` collision decides the plan, and the owner respecified it on 2026-08-13:** a BOUNDARY
-INCLUDES the terminal anchors, so a chromosome with ``N`` regions has ``N+1`` boundaries. Measured on the
-shipped index, ``cut_positions`` is **35,229 = N + one per chromosome — already exactly that anchored
-set** — while the deposit axis is **35,041 = N - one per chromosome**, the interior-only subset. So the
-codebase carries the boundary set TWICE at two extents, 188 slots apart. ⛔ Renaming both to `boundary`
-without first unifying them is `TRAPS: two-masks-one-name`; the recommendation on record is to UNIFY the
-deposit axis at ``N+R`` FIRST — the two terminal slots per reference carry zero crossings, so it is
-additive, and it makes ``region r -> boundaries (r, r+1)`` true with no special case at a reference end.
+The vocabulary is REGION (a genomic interval; was node), BOUNDARY (a single genomic position between two
+regions; was edge, cut, line, seam) and SPLICE JUNCTION (a connection between two boundaries; `sj` is
+allowed, bare `junction` is not), with splice donor / acceptor banned as names for a genomically-ordered
+pair. This reports every site the ruling touches, by kind (Python identifiers by class / function /
+argument / attribute / variable from the AST, C++ identifiers, prose in docstrings, docs and the memory
+directory, file names, and the payload wire schema, whose renaming refuses every cache), and it never
+renames. The dangerous part of a bulk rename is not the volume but the tokens that carry two senses,
+where a correct-looking global replace silently corrupts the other one (`line` as a 0-bp boundary and as a
+line of text, `node` as an interval and as an `ast` node, `donor` as a splice donor and as the toy
+harness's source condition, `cut` at two extents); those are listed with no automatic target and
+`--sense` dumps every site of one with context for a per-site ruling. Names in `EXEMPT` are correct as
+they stand and must survive the rename.
 
 Usage::
 
@@ -51,24 +34,23 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 _REPO = Path(__file__).resolve().parents[2]
 
-#: The tokens the ruling touches, and what each becomes. ⚠ ``cut`` and ``junction`` have NO automatic
-#: target — they are the two that need a per-site decision, which is the point of this census.
+#: The tokens the ruling touches, and what each becomes. A ``None`` target is a token that needs a
+#: per-site decision, which is the point of this census.
 TOKENS = {
     "node": "region",
     "edge": "boundary",
-    "line": None,  # ⛔ AMBIGUOUS: a 0-bp boundary vs an ordinary line of TEXT
+    "line": None,  # ambiguous: a 0-bp boundary vs an ordinary line of text
     "seam": "boundary",
-    "cut": None,  # ⛔ AMBIGUOUS: position-including-termini vs interior boundary
-    "junction": None,  # ⛔ AMBIGUOUS: bare `junction` is banned, `splice_junction`/`sj` are not
-    "donor": None,  # ⛔ AMBIGUOUS: splice donor vs the toy harness's source condition
+    "cut": None,  # ambiguous: position-including-termini vs interior boundary
+    "junction": None,  # ambiguous: bare `junction` is banned, `splice_junction`/`sj` are not
+    "donor": None,  # ambiguous: splice donor vs the toy harness's source condition
     "acceptor": None,
-    #: the message policy retired on 2026-09-09. A surviving site is history (a docstring recording
-    #: what was measured against it), a doc, or a label that still names it for a live mechanism —
-    #: only the last is a defect, and the per-site dump is how the three are told apart.
+    #: a retired message policy. A surviving site is a record, a doc, or a label that still names it
+    #: for a live mechanism; only the last is a defect, and the per-site dump tells the three apart.
     "relay": None,
 }
 
-#: ⭐ Names that are CORRECT and must survive the rename. Each is here for a measured reason, not taste.
+#: Names that are correct and must survive the rename, each with its reason.
 EXEMPT = {
     "splice_donor_acceptor": "sim/splice_motif.py — takes the STRAND and returns the GT..AG "
     "dinucleotides. The one place the biology term is used correctly.",
@@ -88,7 +70,7 @@ def _tokens_in(name: str) -> list[str]:
 
 
 class _Collect(ast.NodeVisitor):
-    """Real identifiers, by KIND — a grep cannot tell a class from a comment."""
+    """Real identifiers, by kind; a grep cannot tell a class from a comment."""
 
     def __init__(self):
         self.by_kind: dict[str, Counter] = defaultdict(Counter)

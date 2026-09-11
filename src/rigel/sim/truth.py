@@ -1,9 +1,10 @@
 """Fragment-origin aggregation + post-capture truth-table writing.
 
-The read-name *parsing* (``Origin`` / ``parse_origin``) lives in :mod:`read_name`; this module
-consumes it to count origins and write per-condition truth tables. ``Origin``/``OriginKind``/
-``parse_origin`` are re-exported here for the many existing ``from rigel.sim.truth import ...``
-call sites.
+The read-name parsing (``Origin`` / ``parse_origin``) lives in :mod:`read_name`; this module
+consumes it to count origins and write each condition's truth tables — the per-transcript
+post-capture abundances, the fragment-length table and the summary JSON. ``Origin``,
+``OriginKind`` and ``parse_origin`` are re-exported here, so a caller that reads truth need not
+also import :mod:`read_name`.
 """
 
 from __future__ import annotations

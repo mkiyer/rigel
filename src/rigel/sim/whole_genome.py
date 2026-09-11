@@ -1,94 +1,50 @@
 #!/usr/bin/env python3
-"""Whole-genome RNA-seq read simulator.
+"""Whole-genome RNA-seq read simulator: config, abundances, and the condition grid.
 
-Generates paired-end RNA-seq reads across the full transcriptome with
-configurable mRNA/nRNA abundances, gDNA contamination, and strand
-specificity.  Outputs FASTQ files and optional oracle BAM files.
+Parses one YAML scenario, builds the transcript set, assigns mature and nascent abundances, and
+hands every condition to :func:`rigel.sim.orchestrator.run_condition_grid`, which generates the
+reads, the optional oracle BAM and the per-condition truth. Finishes by writing ``manifest.json``
+and ``truth_abundances.tsv`` beside one directory per condition.
 
-Abundance model
----------------
-Two abundance sources:
-
-**random** — For each transcript, sample whether it is expressed
-(Bernoulli with probability ``frac_expressed``).  For expressed
-transcripts, draw total RNA abundance from a **log-uniform**
-distribution:
-
-    log_total ~ Uniform(log(min), log(max))
-    total = exp(log_total)
-
-**file** — Load from a TSV with columns ``transcript_id``,
-``mrna_abundance``, ``nrna_abundance``.
+The transcript set is the rigel index's (:func:`load_transcripts_from_index`): annotated
+transcripts plus the synthetic single-exon nascent entities, each with ``t_index`` equal to its
+index row, so the simulator, the oracle and ``rigel quant`` speak about the same rows. A shadow
+GTF, if configured, is appended on top (:func:`merge_shadow_transcripts`) and is transcription the
+index never sees. Mature abundance comes either from a log-uniform draw over transcripts flagged
+expressed with probability ``frac_expressed``, or from a salmon / kallisto / sim TSV file.
 
 Nascent RNA
 -----------
-Nascent RNA is controlled separately by the ``nrna`` section, and it lives on the
-rigel index's NASCENT-RNA ENTITIES (owner, 2026-08-19): every multi-exon transcript
-links (``nrna_t_index``) to one single-exon entity over its TSS/TES-clustered span —
-a synthetic transcript, or an annotated single-exon transcript that already covers
-the span. Annotated multi-exon transcripts carry ``nrna_abundance = 0`` always.
+Nascent abundance lives on the nascent entities: every multi-exon transcript links through
+``nrna_t_index`` to one entity spanning its TSS/TES cluster, and annotated multi-exon transcripts
+always end with ``nrna_abundance = 0``. Three modes set the entity levels. ``sparse``
+(``abundance_ranges`` + ``on_fraction``) switches each entity on with probability ``on_fraction``
+and draws its level log-uniformly over ``(lo, hi)``; that level is absolute and independent of the
+mature level, so ``nascent > mature`` occurs and the nascent fragment share is emergent rather
+than solved — priceable with :func:`expected_rna_weights`. ``additive_ratio`` (``ratios``) and
+``fragment_share`` (``shares``) are the ratio modes: an entity's molecules are the sum over its
+contributors of ``contributor.abundance x nrna_ratio``, so nascent mass tracks mature abundance
+and cannot exceed it. ``additive_ratio`` states the ratio directly; ``fragment_share`` states the
+nascent share of RNA fragments in the uncaptured library and solves for the ratio that produces it
+(:func:`apply_nrna_fragment_share`). Under every mode, sampling is one multinomial over all RNA
+rows, mature and entity alike, with probability proportional to abundance x effective length, so
+the fragment share follows from the molecules and their lengths and is never imposed.
 
-Whatever sets those numbers, sampling is ONE multinomial over every RNA row — mature
-rows and entity rows alike — with probability ∝ abundance × effective length, so the
-nascent FRAGMENT share follows from the molecules and their lengths and is never
-imposed. Three modes set them (``NRNAConfig``):
+Budget and grid
+---------------
+``n_rna_fragments`` is the whole RNA budget and gDNA is added on top; when ``n_total_fragments``
+is set instead, the total is fixed and ``gdna_rate`` decides only the split
+(:func:`rigel.sim.orchestrator.resolve_depths`)::
 
-**sparse** (``abundance_ranges`` + ``on_fraction``) — ⭐ the mode the benchmark panels
-use, and the one to read first. Nascent RNA is ABSENT from most gene spans and present
-in a minority: each ENTITY is switched on with probability ``on_fraction``, and where
-it is on its abundance is drawn LOG-UNIFORMLY over ``(lo, hi)``. That level is
-**ABSOLUTE** and independent of the mature level, so ``nascent > mature`` occurs.
-The fragment share is EMERGENT — priceable in advance with :func:`expected_rna_weights`
-and recorded per condition by the orchestrator. See :func:`apply_sparse_nrna`.
+    n_gdna = round(n_rna x gdna_rate)                          # n_total_fragments unset
+    n_rna  = round(total / (1 + gdna_rate));  n_gdna = total - n_rna
 
-**additive_ratio** (``ratios``) and **fragment_share** (``shares``) — the two RATIO
-modes, where the entity's molecules are pooled from its contributors:
-
-    entity.nrna_abundance = Σ over the entity's contributors of (contributor.abundance × nrna_ratio)
-
-``additive_ratio`` states ``nrna_ratio`` directly; ``fragment_share`` states the
-nascent share of RNA FRAGMENTS in the uncaptured library and SOLVES for the ratio that
-produces it (:func:`apply_nrna_fragment_share`). ⛔ Under both, nascent mass tracks
-mature abundance and can never exceed it, which is why the panels no longer use them.
-
-Fragment allocation
--------------------
-``n_rna_fragments`` is the whole RNA budget and gDNA is added on top; or, when
-``n_total_fragments`` is set, the total is fixed and ``gdna_rate`` decides only the
-split (:func:`rigel.sim.orchestrator.resolve_depths`, which the panels use):
-
-    n_gdna = round(n_rna × gdna_rate)              # n_total_fragments unset
-    n_rna  = round(total / (1 + gdna_rate));  n_gdna = total − n_rna
-
-⛔ Nascent comes OUT of ``n_rna``, never on top of it, in every mode: the entities are
-rows of the one RNA multinomial, so the mature/nascent split inside ``n_rna`` is
-realised and read off the origin counts afterwards rather than allocated.
-
-Condition grid
---------------
-Sweeps: ``nrna × gdna_rates × gdna strand overdispersions × strand_specificities ×
-capture scenarios``. The ``nrna`` axis is one condition per configured entry of
-whichever key the mode reads — ``ratios``, ``shares`` or ``abundance_ranges``.
-
-When the abundance file provides explicit nRNA data, the nRNA sweep is
-skipped (single condition using the file's nRNA values).
-
-Usage
------
-::
-
-    python scripts/sim/simulate_reads.py --config scripts/sim/configs/example_existing_reference.yaml
-
-Output
-------
-::
-
-    <outdir>/
-        manifest.json
-        truth_abundances.tsv
-        <condition>/               e.g. gdna_none_ss_1.00
-            sim_R1.fq.gz, sim_R2.fq.gz
-            sim_oracle.bam         (if oracle_bam enabled)
+Nascent always comes out of ``n_rna`` and never on top of it: the entities are rows of the one RNA
+multinomial, so the split inside ``n_rna`` is realised and read off the origin counts afterwards
+rather than allocated. The grid sweeps ``nrna x gdna rates x gDNA strand overdispersions x strand
+specificities x capture scenarios``, the ``nrna`` axis being one condition per configured entry of
+whichever key the selected mode reads — collapsed to one condition when the abundance file itself
+supplies nRNA values.
 """
 
 from __future__ import annotations
@@ -231,8 +187,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     sim_raw = raw.get("simulation", {})
     sim = cfg.simulation
     sim.n_rna_fragments = int(sim_raw.get("n_rna_fragments", 1_000_000))
-    # ⭐ Optional FIXED-TOTAL budget: when present, `gdna.rates` decides only the RNA/gDNA
-    # SPLIT instead of adding gDNA on top (`orchestrator.resolve_depths`). Absent ⇒ legacy.
+    # Optional fixed-total budget: when present, `gdna.rates` decides only the RNA/gDNA split
+    # instead of adding gDNA on top of the RNA budget (`orchestrator.resolve_depths`).
     _total = sim_raw.get("n_total_fragments")
     sim.n_total_fragments = None if _total is None else int(_total)
     sim.sim_seed = int(sim_raw.get("sim_seed", 42))
@@ -273,8 +229,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     raw_abundance_ranges = nrna_raw.get("abundance_ranges", None)
     if raw_abundance_ranges is not None:
         for pair in raw_abundance_ranges:
-            # ⛔ a range is a PAIR. A three-element entry used to be silently TRUNCATED to its first
-            # two, so `[1, 10, 100]` ran as `(1, 10)` and the panel was quietly not the one configured.
+            # a range is a pair: a longer entry is refused rather than truncated to its first two,
+            # which would quietly run a scenario other than the one configured.
             if not hasattr(pair, "__len__") or len(pair) != 2:
                 raise ValueError(
                     f"nrna.abundance_ranges entries must be [lo, hi] pairs; got {pair!r}"
@@ -285,10 +241,10 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     nrna.seed = int(nrna_raw.get("seed", 42))
     if nrna.mode == "sparse" and nrna.abundance_ranges is None:
         raise ValueError("nrna.abundance_ranges is required for mode='sparse'")
-    # ⛔⛔ A FIELD THAT THE SELECTED MODE CANNOT READ IS A CONFIG THE AUTHOR DID NOT WRITE. Without
-    # this, `abundance_ranges` + `on_fraction` with `mode:` omitted parsed CLEAN and ran
-    # `additive_ratio` at ratio 0.0 — a NASCENT-FREE panel whose conditions were still named for the
-    # nascent label. Silence is the whole defect: the numbers look like a panel, and are another one.
+    # A field the selected mode cannot read is a config the author did not write, so it is refused
+    # rather than ignored: without this, `abundance_ranges` + `on_fraction` with `mode:` omitted
+    # parses clean and runs `additive_ratio` at ratio 0.0 — a nascent-free run whose conditions are
+    # still named for the nascent label, which looks like the configured scenario and is another one.
     _MODE_FIELDS = {
         "additive_ratio": ("ratios",),
         "fragment_share": ("shares",),
@@ -317,7 +273,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         expected_len = len(nrna.shares or [])
     else:
         for lo, hi in nrna.abundance_ranges or []:
-            # ⛔ a LOG-uniform draw has no zero end: express "no nascent" with on_fraction = 0
+            # a log-uniform draw has no zero end: express "no nascent" with on_fraction = 0
             if lo <= 0 or hi < lo:
                 raise ValueError("nrna.abundance_ranges entries must satisfy 0 < min <= max")
         expected_len = len(nrna.abundance_ranges or [])
@@ -355,10 +311,10 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
     # Misc
     cfg.oracle_bam = bool(raw.get("oracle_bam", True))
-    # ⭐ Drop sim_R1/R2.fq.gz after each condition's truth is written. No calibration
-    # instrument reads a FASTQ and they are ~half a panel's on-disk size; ``scripts/benchmarking/``
-    # DOES read them, so a panel built this way cannot be compared against another tool
-    # without re-simulating. `sim.orchestrator.run_condition_grid`.
+    # Drop sim_R1/R2.fq.gz once each condition's truth is written: no calibration instrument reads
+    # a FASTQ and they dominate a panel's on-disk size. A third-party tool comparison does need
+    # them, so a panel built this way cannot be compared against another aligner or quantifier
+    # without re-simulating. Honoured by `sim.orchestrator.run_condition_grid`.
     cfg.emit_fastq = bool(raw.get("emit_fastq", True))
     cfg.verbose = bool(raw.get("verbose", True))
 
@@ -411,17 +367,17 @@ def load_transcripts(
 def merge_shadow_transcripts(
     transcripts: list[Transcript], shadow_gtf: str | Path
 ) -> list[Transcript]:
-    """Append SHADOW transcripts — unannotated transcription the simulator draws from and the index
-    never sees (owner design, 2026-08-29).
+    """Append shadow transcripts: unannotated transcription the simulator draws from and the index
+    never sees.
 
-    ``transcripts`` is the index's list (annotated + nascent entities). The shadow GTF's transcripts are
-    loaded with the ordinary GTF loader and appended with ``t_index`` continuing after the index's rows,
-    ``is_nrna = is_synthetic = False`` and ``nrna_t_index = -1`` (a shadow carries no nascent: it is
-    itself the unannotated RNA). ⛔ A shadow whose ``t_id`` the index already knows is REFUSED — it
-    would be annotated, and the whole point is that the tool cannot know about it. Their fragments are
-    named like any RNA fragment (``{t_id}:…``), so the oracle split files them as ``mrna`` and the
-    certified per-slot truth shows RNA exactly where the annotation says there is none.
-    Gate: ``tests/test_sim_shadow_transcripts.py``."""
+    ``transcripts`` is the index's list (annotated rows plus nascent entities). The shadow GTF is read
+    with the ordinary GTF loader and appended with ``t_index`` continuing after the index's rows,
+    ``is_nrna = is_synthetic = False`` and ``nrna_t_index = -1`` — a shadow carries no nascent because
+    it is itself the unannotated RNA. A shadow whose ``t_id`` the index already knows is refused: it
+    would be annotated, and the point of a shadow is that the tool cannot know about it. Their
+    fragments are named like any RNA fragment (``{t_id}:…``), so the oracle split files them as
+    ``mrna`` and the certified per-slot truth shows RNA exactly where the annotation says there is
+    none. Gate: ``tests/test_sim_shadow_transcripts.py``."""
     shadows = load_transcripts(shadow_gtf, transcript_filter="all")
     known = {t.t_id for t in transcripts}
     clash = sorted(t.t_id for t in shadows if t.t_id in known)
@@ -446,14 +402,15 @@ def merge_shadow_transcripts(
 
 
 def load_transcripts_from_index(index_dir: str | Path) -> list[Transcript]:
-    """⭐ The simulation's transcriptome IS the rigel index's (owner, 2026-08-19).
+    """The simulation's transcriptome is the rigel index's.
 
-    Rebuilds one :class:`Transcript` per index row — annotated transcripts AND the synthetic nascent
+    Rebuilds one :class:`Transcript` per index row — annotated transcripts and the synthetic nascent
     entities, with ``is_nrna`` / ``is_synthetic`` / ``nrna_t_index`` / ``nrna_n_contributors`` exactly as
     the index carries them and ``t_index`` equal to the index row — so the simulator, the oracle and
-    `rigel quant` all speak about the same transcript set. ⛔ The GTF loader is not used here because
-    it cannot know what the index did (duplicate collapse, nascent consolidation); feeding the simulator
-    the raw GTF is how its nascent model diverged from the tool's.
+    `rigel quant` all speak about the same transcript set. The GTF loader is not used here because it
+    cannot know what the index did (duplicate collapse, nascent consolidation), and a simulator fed the
+    raw GTF would carry a different nascent model from the tool's. Raises if the rebuilt rows are not
+    contiguous ``t_index`` 0..n-1, or if an index row has no exon intervals.
     """
     from ..index import TranscriptIndex
 
@@ -549,8 +506,8 @@ def assign_random_abundances(
 
     rng = np.random.default_rng(config.seed)
     n = len(transcripts)
-    # ⛔ A synthetic nascent entity is not a mature molecule: it never draws a mature abundance. The
-    # draw runs over the ANNOTATED rows only, in index order, so the synthetic rows do not shift it.
+    # A synthetic nascent entity is not a mature molecule, so it never draws a mature abundance. The
+    # draw runs over the annotated rows only, in index order, so the synthetic rows do not shift it.
     annotated = np.array([not t.is_synthetic for t in transcripts], dtype=bool)
 
     # Step 1: expressed?
@@ -670,16 +627,17 @@ def _load_abundance_map(
 
 
 def assign_nrna_to_entities(transcripts: list[Transcript], per_contributor: np.ndarray) -> int:
-    """⭐ Pool each contributor's nascent molecules onto its nRNA ENTITY (owner, 2026-08-19).
+    """Pool each contributor's nascent molecules onto its nascent entity.
 
     ``per_contributor[i]`` is transcript ``i``'s nascent molecular abundance (zero for anything that
     is not an expressed multi-exon transcript). Every multi-exon transcript links to one entity through
     ``nrna_t_index`` — the index's synthetic single-exon transcript over the clustered span, or the
     annotated single-exon transcript that already covers it — and the entity's ``nrna_abundance`` is
-    the SUM over its contributors. Annotated multi-exon transcripts end with ``nrna_abundance = 0``:
+    the sum over its contributors. Annotated multi-exon transcripts end with ``nrna_abundance = 0``:
     their nascent molecules are the entity's, and are sampled on the entity's template.
 
-    ⛔ A contributor with no entity (``nrna_t_index < 0``) is an index defect, not a case to skip.
+    Raises rather than skipping when a contributor has no entity (``nrna_t_index < 0``) or is
+    single-exon: both mean the transcript list did not come from a rigel index.
     Returns the number of entities that received nascent.
     """
     by_index = {t.t_index: t for t in transcripts}
@@ -759,24 +717,24 @@ def expected_rna_weights(
 def apply_nrna_fragment_share(
     transcripts: list[Transcript], share: float, sim: "SimulationParams"
 ) -> float:
-    """⭐ Set nascent molecules so nascent takes ``share`` of the RNA **FRAGMENTS** in the uncaptured
+    """Set nascent molecules so that nascent takes ``share`` of the RNA *fragments* in the uncaptured
     library, and return the molecular ratio that achieves it.
 
-    ⛔ **Why a panel states the FRAGMENT share and not the molecular ratio.** A nascent entity spans a
-    whole gene and a mature transcript is spliced — on the ladder's index, mean 40,667 bp against
-    1,708 bp — so a molecular ratio of 0.25 puts **86 %** of RNA fragments in nascent RNA. The ratio
-    that gives the 20 % the panel has always meant is **0.0100**, and it is a property of the
-    annotation, not a number anyone should hand-write into a config
-    (`TRAPS: no-magic-numbers`).
+    A config states the fragment share rather than the molecular ratio because the two are far apart
+    and the map between them is a property of the annotation, not a number to hand-write
+    (`TRAPS: no-magic-numbers`): a nascent entity spans a whole gene while a mature transcript is
+    spliced, so a modest molecular ratio already puts most RNA fragments in nascent RNA.
 
     Each expressed multi-exon transcript contributes ``ratio × abundance`` nascent molecules to its
     entity, so ``W_nascent`` is linear in the ratio and the solve is exact::
 
         share = c·W_n1 / (W_m + c·W_n1)   ⇒   c = (share / (1 − share)) · W_m / W_n1
 
-    with ``W_n1`` the nascent weight at ratio 1. ⚠ Solved on UNCAPTURED lengths: it fixes the
-    LIBRARY's molecular composition, and the realised share then moves under capture, which is
-    physically right — capture acts on molecules that already exist.
+    with ``W_n1`` the nascent weight at ratio 1. The solve runs on uncaptured lengths: it fixes the
+    library's molecular composition, and the realised share then moves under capture, which is
+    physically right because capture acts on molecules that already exist. Requires
+    ``0 <= share < 1``, and raises when no expressed multi-exon transcript has a nascent entity, so
+    the requested share is unreachable.
     """
     if not 0.0 <= share < 1.0:
         raise ValueError(f"nrna share must be in [0, 1); got {share}")
@@ -809,34 +767,34 @@ def apply_sparse_nrna(
     on_fraction: float,
     seed: int,
 ) -> float:
-    """⭐⭐⭐ **NASCENT RNA IS SPARSE: ABSENT FROM MOST GENE SPANS, PRESENT AND MEASURABLE IN A
-    MINORITY** (owner, 2026-08-22). Draw, per nascent ENTITY, whether it is transcribed at all
-    (Bernoulli ``on_fraction``) and, if it is, its **ABSOLUTE** molecular abundance LOG-UNIFORMLY over
-    ``abundance_range``. Returns the realised nascent:mature molecular ratio.
+    """Sparse nascent RNA: absent from most gene spans, present and measurable in a minority.
 
-    ⛔⛔ **THE LEVEL IS INDEPENDENT OF THE MATURE LEVEL, AND THAT IS THE POINT** (owner's ruling; it is
-    what this mode changes). The retired ratio modes set ``nascent = mature x ratio``, so nascent mass
-    tracked mature abundance and nascent could never exceed it. The steady state says the opposite:
-    mature is synthesis/degradation and nascent is synthesis, so the nascent:mature ratio is a
-    STABILITY parameter, not an expression one — an abundant stable transcript shows almost no nascent
-    signal and an unstable rare one can show more nascent than mature. Drawing the two independently
-    makes ``nascent > mature`` a real case the tool must survive.
+    Draws, per nascent entity, whether it is transcribed at all (Bernoulli ``on_fraction``) and, where
+    it is, its absolute molecular abundance log-uniformly over ``abundance_range``. Returns the
+    realised nascent:mature molecular ratio.
 
-    ⭐ **LOG-UNIFORM, because the levels span decades where nascent is present** — a linear draw on a
-    range like (0.05, 2) puts 97 % of its mass in the top decade and cannot express "very low in some,
-    high in others".
+    The level is independent of the mature level, which is what this mode gives that the ratio modes
+    cannot. Under a ratio, ``nascent = mature × ratio``, so nascent mass tracks mature abundance and
+    can never exceed it; the steady state says the opposite, since mature reflects synthesis and
+    degradation while nascent reflects synthesis alone, making the nascent:mature ratio a stability
+    parameter rather than an expression one. An abundant stable transcript shows almost no nascent
+    signal and an unstable rare one can show more nascent than mature, so drawing the two
+    independently makes ``nascent > mature`` a case the tool has to survive.
 
-    ⛔⛔ **THE UNIT OF SPARSITY IS THE ENTITY, NOT THE TRANSCRIPT, and the difference is measurable.**
-    An entity is one TSS/TES-clustered gene span and several isoforms share it, so drawing per
-    contributor would give a gene with 5 isoforms ``1 - (1 - 0.1)^5 = 41 %`` chance of carrying nascent
-    at ``on_fraction = 0.1`` — the INTRON slots, which is what calibration reads, would be four times
-    less sparse than configured. Per entity, the configured fraction is the fraction of gene spans and
-    therefore of intron slots. Pre-mRNA is a property of a locus being transcribed, which is the same
-    unit.
+    The draw is log-uniform because the levels span decades where nascent is present: a linear draw
+    over a range such as (0.05, 2) concentrates nearly all its mass in the top decade and cannot
+    express "very low in some, high in others".
 
-    ⚠ The nascent FRAGMENT share is EMERGENT here rather than solved (owner: acceptable, since a sparse
-    subset and a bounded range control it). It is not a free parameter — the caller can price it
-    exactly with :func:`expected_rna_weights`, and the orchestrator records it per condition.
+    The unit of sparsity is the entity, not the transcript, and the difference is measurable. An
+    entity is one TSS/TES-clustered gene span shared by several isoforms, so drawing per contributor
+    would give a gene with 5 isoforms a ``1 - (1 - p)^5`` chance of carrying nascent at
+    ``on_fraction = p`` and the intron slots calibration reads would be several times less sparse than
+    configured. Per entity, the configured fraction is the fraction of gene spans and therefore of
+    intron slots, which matches pre-mRNA being a property of a locus being transcribed.
+
+    The nascent fragment share is emergent here rather than solved, bounded by the sparse subset and
+    the range; a caller can price it exactly with :func:`expected_rna_weights`, and the orchestrator
+    records it per condition. Requires ``0 < lo <= hi`` and ``0 <= on_fraction <= 1``.
     """
     lo, hi = float(abundance_range[0]), float(abundance_range[1])
     if lo <= 0.0 or hi < lo:
@@ -851,9 +809,9 @@ def apply_sparse_nrna(
     for t in transcripts:
         t.nrna_abundance = 0.0
 
-    # an entity is ELIGIBLE iff at least one EXPRESSED multi-exon transcript names it: a silent gene
-    # is not being transcribed, so it has no pre-mRNA (`TRAPS: starved-is-not-depleted` — this is the
-    # "biology puts nothing there" side, and it must read as an exact zero rather than a small number)
+    # an entity is eligible iff at least one expressed multi-exon transcript names it: a silent gene
+    # is not being transcribed, so it has no pre-mRNA, and that must read as an exact zero rather than
+    # a small number (`TRAPS: starved-is-not-depleted`, the "biology puts nothing there" side)
     eligible: list[Transcript] = []
     seen: set[int] = set()
     for t in transcripts:
@@ -917,9 +875,9 @@ def assign_file_abundances(
 
     matched = 0
     has_nrna_data = False
-    # ⭐ A file names ANNOTATED transcripts, and its nRNA column is that transcript's nascent
-    # molecules — which live on its ENTITY (owner, 2026-08-19). Collect them per contributor and pool
-    # in one pass, exactly as the ratio modes do; a file row naming an entity directly is honoured too.
+    # A file names annotated transcripts, and its nRNA column is that transcript's nascent molecules,
+    # which live on its entity. Collect them per contributor and pool in one pass, exactly as the
+    # ratio modes do; a file row naming an entity directly is honoured too.
     per_contributor = np.zeros(len(transcripts))
 
     for i, t in enumerate(transcripts):
@@ -1087,7 +1045,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
     if not gtf_path.exists():
         raise FileNotFoundError(f"GTF not found: {gtf_path}")
 
-    # 1. Load transcripts — from the rigel INDEX, so the simulated transcriptome (annotated transcripts
+    # 1. Load transcripts from the rigel index, so the simulated transcriptome (annotated transcripts
     #    plus the synthetic nascent entities) is exactly the one `rigel quant` reads.
     if cfg.transcript_filter != "all":
         raise ValueError(
@@ -1132,9 +1090,9 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         label = gdna_label_for_rate(rate, cfg.gdna.rate_labels, i)
         gdna_pairs.append((label, rate))
 
-    # ⭐ The genomic/RNA-only split is a SCENARIO input. A config that asks for gDNA without stating
-    # which references are genomic is rejected rather than guessed at, because the guess that used to
-    # live in the engine — "has an annotation" — put gDNA on RNA-only spike-ins.
+    # The genomic/RNA-only split is a scenario input: a config that asks for gDNA without stating
+    # which references are genomic is rejected rather than guessed at, since inferring it from "the
+    # reference has an annotation" puts gDNA on RNA-only spike-ins.
     genomic_refs = cfg.gdna.genomic_refs
     if genomic_refs is None:
         if any(rate > 0 for rate in cfg.gdna.rates):
@@ -1267,10 +1225,9 @@ def main() -> int:
     print(f"  Workers:          {cfg.simulation.n_workers}", flush=True)
     print(f"  gDNA rates:       {cfg.gdna.rates}", flush=True)
     print(f"  Strand specs:     {cfg.strand_specificities}", flush=True)
-    # ⚠ Print the CONFIGURED nRNA mode, whichever it is. The `fragment_share` branch used to fall
-    # through to "explicit file values" — right for a config whose abundance TSV supplies nascent
-    # weights and wrong for one that does not, and the two are not distinguishable here: whether the
-    # sweep is skipped is decided later, by whether the loaded file carried an `nrna_abundance` column.
+    # Print the configured nRNA mode, whichever it is. Whether the nascent sweep is actually run
+    # cannot be reported here: it is decided later, by whether the loaded abundance file carried an
+    # `nrna_abundance` column, which is why the file case prints a conditional line of its own.
     if cfg.nrna.mode == "additive_ratio":
         print(f"  nRNA ratios:      {cfg.nrna.ratios}", flush=True)
     elif cfg.nrna.mode == "fragment_share":

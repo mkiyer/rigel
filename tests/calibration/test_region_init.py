@@ -108,7 +108,7 @@ def test_strand_evidence_deadband_kills_unstranded():
     assert np.all(tau_nog == 0.0)
 
 
-def test_strand_deconv_single_strand_solves_and_is_precise():
+def test_a_single_strand_slot_solves_and_is_precise():
     """A single-strand (TRAPS: one-thing-varied) exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own belief
     with own evidence, and NO antisense (the − axis is structurally dead). The strand λ-term (c·a²) applies
     to a single-strand region — the tilt is locked, so the strand PINS f_g (approach E)."""

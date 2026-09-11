@@ -1,21 +1,18 @@
 """Derive the global gDNA density — a library-average QC scalar.
 
-An aggregate of the converged deconvolution into the library-average gDNA density scalar:
+Aggregates the converged deconvolution over both axes into one scalar:
 
     gdna_density_global = (Σ_regions gdna_mass + Σ_boundaries gdna_mass) / (Σ_regions E_g + Σ_boundaries E_g)
 
-⭐ **Two axes, and every object on them exists.** The predecessor summed a region's contained mass plus
-its two boundary SIDES, and had to mask each side with ``same_ref_left_right`` because a reference
-terminal's outer boundary has nothing on the far side — "a side that doesn't exist contributes no
-length". A contiguous boundary is the boundary BETWEEN two adjacent regions, so there is no such object to
-exclude: ``E = N − n_refs`` and every entry is real. The mask goes with the terminal slots.
+Every entry on both axes is a real object with a real support: a contiguous boundary is the boundary
+BETWEEN two adjacent regions, so ``E = N − n_refs`` and no slot has to be masked out.
 
-⚠ **It is a ratio of SUMS, never a mean of ratios** (``ρ_bg = Σg/ΣE``) — a rate
-pooled over unequal supports is not the average of the per-object rates.
+It is a ratio of SUMS, never a mean of ratios (``ρ_bg = Σg/ΣE``) — a rate pooled over unequal supports
+is not the average of the per-object rates.
 
-The per-locus **contraction** of the gDNA component's effective length under capture is the inverse
-participation ratio of the deconvolved gDNA mass over the two supports, computed downstream in
-``priors.assemble_priors``; this aggregate only produces the library-average density scalar.
+The per-locus contraction of the gDNA component's effective length under capture is a different
+quantity, computed downstream in ``priors.assemble_priors``; this aggregate produces only the
+library-average density scalar.
 """
 
 from __future__ import annotations

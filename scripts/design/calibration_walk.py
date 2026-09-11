@@ -1,48 +1,37 @@
-"""THE CALIBRATION WALK — every stage of the solve scored against the CERTIFIED oracle, in order.
+"""Which stage of calibration introduces the error?
 
-⭐⭐⭐ **WHICH STAGE INTRODUCES THE ERROR?** Owner, 2026-08-18: calibration shows catastrophic error,
-so it is to be walked function by function from the accumulator state forward, against a proven ground
-truth, until the stage that breaks is NAMED. This instrument is that walk. It runs `calibrate` under a
-2x2 of the two big switches — landscape refits x message propagation — and reads the per-slot belief at
-every rung the solver already exposes, so the ladder is:
+The solve as a ladder, every rung scored against the certified per-slot truth. It runs `calibrate`
+under a 2x2 of the two big switches, landscape refits x message propagation, and reads the per-slot
+belief at every rung the solver already exposes::
 
     A  fg_init      the initialisation belief (before any solve)
     B  fg_strand    the strand likelihood alone
-    C  fg_loc       the message-free LOCAL solve (strand + density; the reference LOCATION was deleted 2026-08-24), refits 0
-    D  f_g          refits 0,      messages ON     -> C→D is what the MESSAGES do at pass-0
-    E  f_g          shipped refits, messages OFF   -> C→E is what the LANDSCAPE refit does alone
-    F  f_g          shipped refits, messages ON    -> the SHIPPED tool
+    C  fg_loc       the message-free local solve (strand + density), refits 0
+    D  f_g          refits 0,      messages on    -> C to D is what the messages do at pass-0
+    E  f_g          shipped refits, messages off  -> C to E is what the landscape refit does alone
+    F  f_g          shipped refits, messages on   -> the shipped tool
 
-⚠ "messages ON" is the shipped transfer policy, certified flux included (it enters as an RNA level
-and through the splice-in maps): C→D bundles every message. To see one mechanism apart, prototype it
-(`policy_prototype.py --module`) and compare per slot (`backbone_parity.py --arm-b module:...`).
-
-⛔ **TRUTH COMES ONLY FROM THE CERTIFIED TABLE** (`calibration_oracle.py`'s ``slot_truth.npz``) — this
-file recomputes nothing about truth and REFUSES to run on a condition whose table is missing, because a
-walk against an uncertified truth debugs the wrong thing. The table's ``field_certified`` stamp is
-printed with every run: ``true_f_g`` is composition-certified either way; densities are only comparable
-when the field gate passed.
-
-⛔ Every arm asserts what ran: the backbone stamps the policy's name into the capture, and a muted arm
-must reproduce ``f_g == fg_loc`` bit for bit (TRAPS: an-ablation-that-never-ran).
-
-Errors are ``Sum |f_g - true_f_g| * mass`` in FRAGMENTS, total and per stratum, never pooled across
-strata in the verdict line. The per-stage DELTA column is the point of the file: the stage whose delta
-is large is where to open the code next.
+A and B are ingredient views rather than stages C is built on, so the sequential chain scored for
+"largest error introduced" is C onward. "Messages on" is the whole shipped transfer policy, certified
+flux included; to see one mechanism apart, prototype it (`policy_prototype.py --module`) and compare
+per slot (`backbone_parity.py`). Truth comes only from `calibration_oracle.py`'s ``slot_truth.npz``:
+this file recomputes nothing about truth and refuses to run on a condition whose table is missing,
+and prints the table's ``field_certified`` stamp with every run. Every arm asserts what ran: the
+backbone stamps the policy's name into the capture, and a muted arm must reproduce ``f_g == fg_loc``
+bit for bit (TRAPS: an-ablation-that-never-ran). Errors are ``Sum |f_g - true_f_g| * mass`` in
+fragments, total and per stratum, never pooled across strata; the per-stage delta column is the point.
 
 Usage::
 
-    python scripts/design/calibration_walk.py --condition NAME
-    python scripts/design/calibration_walk.py --condition NAME --strata "R intron" "R exon"
+    python scripts/design/calibration_walk.py --condition <name>
+    python scripts/design/calibration_walk.py --condition <name> --strata "R intron" "R exon"
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import os
-import sys
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -50,17 +39,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-OC = _sibling("object_composition.py")
+OC = sibling("object_composition.py")
 
 from rigel.calibration import calibrate  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
@@ -115,8 +97,8 @@ def main() -> int:
     index = TranscriptIndex.load(args.index)
     cache = read_scan_cache(args.suite / "scan_cache" / args.condition, index)
     kw = calibration_inputs(cache, index)
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling) — every rung walks the payload production
-    # calibrates. ⚠ slot_truth must be certified in the same frame (re-run calibration_oracle.py).
+    # the drained frame: every rung walks the payload production calibrates, and slot_truth must be
+    # certified in the same frame (re-run calibration_oracle.py after a frame change).
     payload = kw["payload"]
 
     shipped_refits = int(CalibrationConfig().calib_refit_iters)
@@ -160,9 +142,9 @@ def main() -> int:
         for s in names:
             print(f" {err(fg, live & (stratum == s)):>15,.0f}", end="")
         print()
-    # ⛔ A and B are INGREDIENT views, not stages C is built on — the strand-only rung cannot see the
-    #   structural lock, so B "loses" intergenic and C "recovers" it, and scoring those deltas as
-    #   introductions blamed the wrong rung on the first real run. The sequential chain is C→D/E→F.
+    # A and B are ingredient views, not stages C is built on: the strand-only rung cannot see the
+    # structural lock, so B "loses" intergenic and C "recovers" it, and scoring those deltas as
+    # introductions blames the wrong rung. The sequential chain is C→D/E→F.
     seq = [n for n in total if base_for[n] and not n.startswith(("A ", "B ", "C "))]
     worst = max(((n, total[n] - total[base_for[n]]) for n in seq), key=lambda x: x[1])
     print(f"\n   ⭐ largest error INTRODUCED by a SEQUENTIAL stage (C onward): {worst[0]}  "

@@ -332,13 +332,13 @@ class AbundanceEstimator:
             float64 — additive aggregate RNA alpha per locus. Defaults to zeros
             for wrapper-level compatibility.
         rna_prior_weight : np.ndarray, optional
-            ⭐ float64[**n_transcripts**] — how the per-locus RNA prior is SHARED
+            float64[n_transcripts] — how the per-locus RNA prior is SHARED
             OUT among a locus's eligible components. ``None`` (the default and the
             shipped behaviour) means "in proportion to the evidence each component
             already carries".
 
-            ⛔ **This rides the PER-TRANSCRIPT lane, like ``t_eff_lens`` and
-            ``t_is_synthetic`` — not the per-locus one.** It is passed to the C++
+            ⛔ This rides the PER-TRANSCRIPT lane, like ``t_eff_lens`` and
+            ``t_is_synthetic`` — not the per-locus one. It is passed to the C++
             FLAT and whole; it is never indexed by ``multi_locus_id``. Mixing the
             two conventions is the plumbing error this axis invites, so the C++
             refuses any length but ``n_transcripts`` or 0.
@@ -373,13 +373,13 @@ class AbundanceEstimator:
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
-        # ⭐ WHICH COMPONENTS THE ANNOTATION DOES NOT ASSERT. A synthetic nascent entity is a shadow
+        # Which components the annotation does not assert. A synthetic nascent entity is a shadow
         # span this index MANUFACTURED, so the null hypothesis is that it is absent and it receives no
         # RNA prior mass — it earns mass only from fragments the data cannot explain any other way.
         # ⛔ `is_synthetic`, NEVER `is_nrna`: a single-exon annotated transcript carries `is_nrna` (it
         # is at once the nascent and the mature form of a real gene) and keeps its prior like any
         # other annotated transcript.
-        # ⚠ An EMPTY array means "no synthetic components anywhere", and the C++ then takes the
+        # An EMPTY array means "no synthetic components anywhere", and the C++ then takes the
         # shipped code path unchanged — which is what keeps a synthetic-free locus bit-identical.
         t_is_synthetic = self._t_is_synthetic(index, n_transcripts)
         n_loci = len(partition_tuples)
@@ -400,7 +400,7 @@ class AbundanceEstimator:
                     f"rna_prior_count length {rna_prior_count.shape[0]} != n_loci {n_loci}."
                 )
 
-        # ⭐ The allocation weight rides the PER-TRANSCRIPT lane, flat and whole — never `[ids]`. An
+        # The allocation weight rides the PER-TRANSCRIPT lane, flat and whole — never `[ids]`. An
         # EMPTY array means "share the prior out by current evidence", the shipped rule, and the C++
         # reaches it through the same `nullptr` test `t_is_synthetic` uses.
         if rna_prior_weight is None:

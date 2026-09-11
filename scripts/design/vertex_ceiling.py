@@ -1,174 +1,36 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ WHAT IS PERFECTING THE SIMPLEX VERTEX WORTH? — the re-solve ceiling, on the REAL
-ladder, plus the mechanism prototype in the same harness so the two are directly comparable.
+"""What is knowing the truth at the parameter-vertex objects worth, on the real ladder?
 
-⚠ **THE LADDER IS 16 CONDITIONS** (rebuilt 2026-08-13, when ``pilot``/``flgap_short``/``flgap_long`` were
-deleted). Every ``36``-row number below was measured on the RETIRED 36-condition ladder and is stamped as
-such where it appears; none of them can be reproduced by running this file today, and re-running an arm
-re-measures rather than confirming them.
-
-⛔⛔ **THIS IS THE MEASUREMENT THAT DECIDES BUILD-VS-NOTE** (TRAPS: measure-the-ceiling-first, which has re-ranked this
-project five times). A silent gene's objects are pure gDNA and the truth is ``f_g = 1.000`` exactly; a
-zero-gDNA library's objects are pure RNA and the truth is ``0.000`` exactly. The solver lands 2–8 % inside
-both. Before designing anything, hand those objects the exact answer, **re-solve the whole chain**, and
-read what the headroom actually is.
-
-⭐ **A RE-SOLVE, NOT A SUBSTITUTION** (TRAPS: substitution-understates-a-source). A vertex object is mostly a message SOURCE — its
-value is what it CARRIES — and substituting its answer after the fact does not propagate. ⭐ **Where the
-pin goes, under the two-phase transfer policy (re-pointed 2026-09-09):** a node's neighbours receive its
-OWN CLAIM (`messages.transfer._claims`) and never its belief, and the node itself answers through ψ from
-its own evidence, the two held messages and the delivered rows. So the pin is two things, both from the
-oracle's truth: the pinned node's claim becomes a DELTA at the true composition on the solve grid (what
-every rule and lane carries onward — the level lanes read it through the node's own total), and the same
-delta is delivered into ψ's final solve at that node as a `lam_rows` row (what the node answers). The
-vertex-truth population is classified from `region_init`'s ``tau_lam`` in a wrapper on
-``sweep.build_region_init``, which is where the truth is mapped onto slots. ⛔ The relay-era pin rewrote
-`RegionInit.f_*`, which the two-phase backbone reads only into its diagnostics capture — under the shipped
-policy that arm was INERT (found 2026-09-09) and its comparator would have reported it "did not fire".
-
-**THE ARMS.**
-
-| arm | what it does | what it is |
-|---|---|---|
-| ``base`` | nothing | the baseline, re-recorded from the current tree in the same run (TRAPS: re-record-the-baseline) |
-| ``noop`` | pins the truth at ZERO objects | ⭐ the harness's own falsification — MUST be byte-identical to ``base`` |
-| ``vertex_free`` | pins the truth at every PARAMETER-vertex object (`_parameter_vertex`) with **no own composition evidence** | ⭐⭐ **THE CEILING.** The population a vertex fix can reach. Needs ``--oracle-cache`` (the certified `slot_truth`) |
-| ``vertex_all`` | pins the truth at **every** parameter-vertex object | a looser upper bound — includes objects that have their own evidence |
-| ``ref_c=<C>`` | sets ψ's reference exponent to ``C`` instead of ½ | ⭐ the mechanism prototype (TRAPS: panel-before-src — the panel arm before ``src/``) |
-
-⚠ ``vertex_free``'s "no own evidence" test is ``tau_lam <= 1e-4``, and that is a CLASSIFICATION FOR A
-CEILING, never a production predicate — TRAPS: a-threshold-on-a-fitted-residue refused exactly this shape as a mechanism. Both
-arms are reported side by side so the filter's effect is visible rather than assumed.
-
-⛔ **TRAPS: honesty-metrics-reward-ignorance — the honesty columns are never quoted alone.** Every row carries ``mwae_all`` (denominator =
-every object with mass) and ``abs_err_all`` (no denominator at all) beside the solvable-set numbers,
-because an arm that changes what counts as solvable changes its own denominator.
-
-⛔ **TRAPS: an-ablation-that-never-ran — every arm counts its own firings and RAISES if it did not fire.** An override that never ran
-reads as "no effect", which is publishable and wrong.
-
-⚠ **TRAPS: could-the-arm-have-fired — the pin count per condition is printed.** An arm with zero opportunities is not a control.
-
----
-
-⛔⛔⛔ **RE-POINTED 2026-09-09 — read this before the 2026-08-05 record below.** Under the transfer policy
-the relay-era pin (a rewrite of `RegionInit.f_*`) was INERT: the two-phase backbone reads those fields
-into its diagnostics capture only. The pin now enters where the solve reads — the pinned node's OWN
-CLAIM and its ψ row, both a delta at the truth (`_install_vertex_pin`). ⭐ **The population is the
-PARAMETER vertex** (`_parameter_vertex`: every region of a silent gene no expressed gene overlaps, every
-intron of a gene with no nascent fragment, every counted object of a zero-gDNA row). The REALIZED vertex
-the instrument used to classify by (truth exactly 0 or 1 per object) priced CHANCE: on `g50 ss.50 OFF`
-most of its 22,201 evidence-free vertex slots were boundaries of 6–19 crossings that all happened to be
-gDNA; pinned as certain and propagated they drove RNA-rich exon neighbours from 0.46 to 0.64 at a truth
-of 0.01 and made the region axis 23 % WORSE (Σ|err| 728 k → 894 k) while every pinned slot went to zero
-error. With the parameter vertex the same row improves on every column (region 728,378 → 725,752).
-
-⭐⭐ **THE CEILING UNDER THE SHIPPED POLICY (2026-09-09; the 16-row ladder, `base` vs `vertex_free`,
-`noop` byte-identical; the FINAL solve's Σ|err| ratio `vertex_free / base`):**
-
-=====================================  ===================  ===================  ===================
-row                                    pins per sweep       region axis          boundary axis
-=====================================  ===================  ===================  ===================
-``g00`` (all four)                     8,900–16,000         0.000–0.004          0.000
-``g05 ss.99 OFF / ON``                 11 / 18              1.000 / 0.999        1.000 / 0.999
-``g50 ss.99 OFF / ON``                 44 / 48              1.000 / 0.999        1.000 / 0.999
-``g98 ss.99 OFF / ON``                 104 / 236            0.999 / 0.991        0.998 / 0.988
-``g05 ss.50 OFF``                      448                  0.983                0.995
-``g50 ss.50 OFF``                      1,104                0.978                0.986
-``g98 ss.50 OFF``                      2,111                0.931                0.956
-``g05 / g50 / g98 ss.50 ON`` (deferred)  445 / 993 / 2,631  0.648 / 0.742 / 0.765  0.883 / 0.920 / 0.910
-=====================================  ===================  ===================  ===================
-
-Reading: the vertex information is worth at most 1 % on every stranded in-scope row (the strand term
-already reaches the vertex), 2–7 % of the unstranded capture-OFF rows rising with gDNA — silent genes'
-regions and nascent-free introns, the landscape prior's training population, not a message's — and
-25–35 % of the DEFERRED stratum; the zero rows are total by construction. Pass zero reads the same way
-(unstranded OFF 0.996–0.999), so the gain arrives through the refit prior. ⭐ Every number in the
-2026-08-05 record is therefore triply historical: the retired 36-row ladder, the relay, and a population
-that priced chance. Re-derive with the arms below before quoting a ceiling.
-
-⛔⛔⛔ **WHAT IT MEASURED, 2026-08-05 — and the verdict is NOT A BUILD. READ THIS FIRST.**
-
-The number below is real and reproducible, and it is **the value of INFORMATION, not headroom for a
-fix.** The objects it pins are HONEST: measured per-object, `|f_g - truth| / sd(f_g)` has median
-**z = 0.5-0.6** on every arm and both simplex vertices, i.e. every wrong answer sits inside its own 1
-sigma with a variance that is if anything conservative. And no prior-free solve can do better: every
-PROPER prior on [0,1] has a median strictly inside (0,1), an object with zero composition information
-has posterior = prior, so a vertex is unreachable there in ANY coordinate at ANY depth.
-⛔ Pass-0 must stay prior-free — its purpose is to produce the substrate a prior is fitted ON — so
-'fit a prior to fix this' is circular. ⭐ Use this number to SIZE the cost of missing information, and
-look for the pass-0 defect in the **confidently-wrong** population instead, which is a different set of
-objects.
-
-⚠ **EVERY NUMBER IN THIS SECTION WAS MEASURED ON THE RETIRED 36-CONDITION LADDER** (2026-08-05). The rung
-names it quotes — ``gdna_g01_ss_0.50_capture_on`` below — do not exist on the 16-condition rebuild, whose
-gDNA rungs are ``g00``/``g05``/``g50``/``g98``. ⛔ Do not compare a fresh run against them; re-run both
-arms if the comparison is the point.
-
-``vertex_free``, against a ``base`` re-recorded in the same run, with ``noop`` byte-identical on all 36
-rows of both axes (the harness's own falsification passing):
-
-======================================  =========  ===========  ==================
-the deliverable — library ``f_g``       base       vertex_free
-======================================  =========  ===========  ==================
-mean \\|error\\| at pass-0                0.1036     **0.0804**   −22.4 %
-mean \\|error\\| on the SHIPPED solve      0.0538     **0.0407**   ⭐ **−24.4 %**
-======================================  =========  ===========  ==================
-
-⭐⭐ **For scale: perfecting BOTH fragment-length models is worth 2.6 % of the same deliverable.** The
-vertex is ~9× the entire Stage-A length ceiling.
-
-Per-object, pass-0 ``mwae`` over ALL objects (fixed denominator; ``solv%`` is byte-identical across every
-arm, so none of this is a denominator move):
-
-=========  ======  ============  ==============  ==============
-axis       base    vertex_free   Σ\\|err\\| frags   better/worse
-=========  ======  ============  ==============  ==============
-region       0.1247  **0.0975**    −149,267        27 / 9
-boundary       0.1434  **0.1127**    −161,302        29 / 3
-=========  ======  ============  ==============  ==============
-
-⭐⭐⭐ **AND IT SPLITS ON EXACTLY ONE AXIS — STRAND — which is what the mechanism predicts.** Pass-0
-``mwae`` delta, region axis: unstranded **−0.0188** (capture off, 9/0) and **−0.0963** (capture ON, 9/0);
-stranded **−0.0003** and **+0.0064** (2/7). Every one of the 9 rows that got worse is ``ss_0.99``.
-The strand channel's Fisher information is ``∝ (2κ−1)²`` and is EXACTLY zero at κ = ½, so on an
-unstranded library ψ's reference is the only term left with a gradient at the vertex, while on a stranded
-one the strand term supplies the λ information and the vertex is already reached. ⭐ The ceiling is
-therefore entirely on unstranded data — which is also the panel's worst stratum
-(``capture_ON × ss0.50``: base 0.3235 region / 0.2922 boundary). Largest single row:
-``gdna_g01_ss_0.50_capture_on``, **−0.2188**.
-
-⛔⛔ **TWO WARNINGS THAT MUST TRAVEL WITH THE NUMBER.**
-
-* **``vertex_all`` is WORSE than ``vertex_free``** — region pass-0 0.1076 vs 0.0975, and on the shipped
-  solve it is worse than *base* (+0.0080). Pinning MORE truth hurts: the extra objects have their own
-  evidence, and declaring them certain overrides it and propagates. That is TRAPS: admitting-an-object-costs's shape
-  reached with the TRUTH, so the harm is in the relay's dynamics and not in the values. ⭐ Quote
-  ``vertex_free``, and note that a fix which hands out certainty broadly can lose even when it is right.
-* **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (region) / +893 (boundary),
-  28 and 16 rows worse — while accuracy improves 22 %. TRAPS: honesty-metrics-reward-ignorance exactly: certainty handed to an
-  object moves it into the confident population. Read ``mwae_all`` and ``abs_err_all``, never these.
+A silent gene's regions are pure gDNA (``f_g = 1`` exactly), the introns of a gene with no nascent
+fragment are pure gDNA, and every counted object of a zero-gDNA library is pure RNA (``f_g = 0``
+exactly). This harness hands those objects their exact answer from the certified slot truth and
+RE-SOLVES the whole chain: under the two-phase transfer policy a node's neighbours receive its own
+claim, so the pin is a delta at the truth installed as the node's claim (`messages.transfer._claims`)
+and delivered as its ψ row (`PsiMessage.lam_rows`), never a substitution after the fact. The
+population is the PARAMETER vertex (`_parameter_vertex`), never the realized one: an object whose few
+fragments all happened to be gDNA is chance, and pinning chance as certainty prices nothing. Every arm
+counts its own firings and raises if it did not fire; `noop` runs the whole wrapper and pins nothing,
+so it must be byte-identical to `base`; `vertex_free` (no own composition evidence, the reachable
+population) is the ceiling and `vertex_all` the looser bound. Two mechanism prototypes share the
+harness so a ceiling and a mechanism are directly comparable: `ref_c=<a>[,<b>]` drives ψ's two Beta
+reference exponents, `psi_mean` reports ``f_g`` as the posterior mean. The result prices missing
+information, not headroom for a fix. Read ``mwae_all`` and ``abs_err_all`` (fixed denominators) and
+never the honesty columns alone: an arm that changes what counts as solvable changes its own
+denominator. Scoring is `solvability_audit.audit` over `pass0_vs_oracle.measure_condition`.
 
 Usage::
 
-    # ⭐ FIRST — the harness's own gates, perturbed, with no I/O and no solver (~1 s)
     python scripts/design/vertex_ceiling.py --self-test
-
-    # one condition first, to check the levers are connected
-    python scripts/design/vertex_ceiling.py --arm base       --conditions gdna_g50_ss_0.50_nrna_mid_capture_off --out /tmp/v_base.jsonl
-    python scripts/design/vertex_ceiling.py --arm vertex_free --conditions gdna_g50_ss_0.50_nrna_mid_capture_off --out /tmp/v_free.jsonl
-    # the whole ladder, with the oracle cache
-    python scripts/design/vertex_ceiling.py --arm vertex_free \
-        --oracle-cache ~/Downloads/rigel_runs/suite/ladder/oracle_cache --out /tmp/v_free.jsonl
-    # and the comparison
-    python scripts/design/vertex_ceiling.py --compare /tmp/v_base.jsonl /tmp/v_free.jsonl
+    python scripts/design/vertex_ceiling.py --arm base --conditions <cond> --out base.jsonl
+    python scripts/design/vertex_ceiling.py --arm vertex_free --oracle-cache <suite>/oracle_cache --out free.jsonl
+    python scripts/design/vertex_ceiling.py --arm ref_c=0.5,2.0 --out ref.jsonl
+    python scripts/design/vertex_ceiling.py --compare base.jsonl free.jsonl
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
-import importlib.util
 import inspect
 import io
 import json
@@ -186,18 +48,11 @@ DESIGN = Path(__file__).resolve().parent
 sys.path.insert(0, str(DESIGN))
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, DESIGN / name)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[key] = mod
-        spec.loader.exec_module(mod)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-SA = _sibling("solvability_audit.py")
-P0 = _sibling("pass0_vs_oracle.py")
+SA = sibling("solvability_audit.py")
+P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
@@ -210,14 +65,14 @@ from rigel.index import TranscriptIndex  # noqa: E402
 CAL = sys.modules["rigel.calibration.calibrate"]
 
 _EPS = 1.0e-9
-#: the ceiling's own classification of "this object has no composition evidence of its own". ⛔ NOT a
-#: production predicate (TRAPS: a-threshold-on-a-fitted-residue); the `vertex_all` arm exists so its effect is measured, not
-#: assumed.
+#: the ceiling's own classification of "this object has no composition evidence of its own"; a
+#: classification for a ceiling, not a production predicate (TRAPS: a-threshold-on-a-fitted-residue).
+#: The `vertex_all` arm exists so the filter's effect is measured rather than assumed.
 _TAU_FREE = 1.0e-4
 
 #: filled by the wrappers, one call before `build_region_init` needs them.
 _CTX: dict = {}
-#: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
+#: per-arm firing counters; an expected counter left at zero raises (TRAPS: an-ablation-that-never-ran).
 _FIRED: dict = {
     "init": 0, "pinned": 0, "claimed": 0, "delivered": 0, "ref_g": 0, "ref_r": 0, "psi_mean": 0,
     "conditions": 0,
@@ -230,16 +85,10 @@ _PIN_WALL = -1.0e6
 
 
 def _wrap_solve_chain():
-    """Stash `region_arrays` — `solve_chain` receives it and calls `build_region_init` after.
+    """Stash `region_arrays`: `solve_chain` receives it and calls `build_region_init` after.
 
-    ⚠ It was ``CAL.region_sweep`` until the sweep was renamed, and this harness kept wrapping a name
-    that no longer existed — an `AttributeError` on the first arm, so the instrument was DEAD while the
-    suite stayed green. `TRAPS: a-green-suite-hid-five-dead-instruments`. ⛔ That sentence then promised
-    *"`--self-test` is the gate that catches it now"* for **eight months of commits in which no such flag
-    existed** — a promised gate reads as coverage and is worse than none. It exists as of 2026-08-17:
-    :func:`self_test`'s PATCH-TARGET block asserts every name this harness rebinds is still present, still
-    callable, and still the SAME OBJECT as its definition, and perturbs each check against the dead
-    ``CAL.region_sweep`` name itself."""
+    The wrapped name is a patch target the self-test checks for presence and identity, because a
+    wrapped name that vanishes kills the instrument while the suite stays green."""
     orig = CAL.solve_chain
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
@@ -250,17 +99,10 @@ def _wrap_solve_chain():
 
 
 def _install_psi_mean():
-    """⭐⭐⭐ f_g AS THE POSTERIOR MEAN INSTEAD OF THE MEDIAN — the one change that makes ψ's composition
-    CLOSE, and this arm is what prices it.
+    """Report ``f_g`` as the posterior mean instead of the shipped ½-quantile, and price it.
 
-    ⛔ The composition does not close because ``f_g`` is the posterior MEDIAN while ``f_pos``/``f_neg`` are
-    posterior MEANS of ``1 − f_g``, so ``SUM = 1 + median − mean`` EXACTLY — the shortfall IS the
-    posterior's skew (verified to 5.8e-15). Swapping the median for the mean closes it by linearity of
-    expectation, at ZERO other cost in machinery: `_posterior_median_fg` is the single function both the
-    single-strand and the AMBIG solve call.
-
-    ⚠ It is not free: the median is measurably CLOSER to truth at both simplex vertices, and the
-    vertex population carries 49-83 % of in-scope error. That is what this arm measures."""
+    `_posterior_median_fg` is the single function both the single-strand and the AMBIG solve call, so
+    one patch reaches both."""
     real = SL._posterior_median_fg
 
     def as_mean(post, lam, fg):
@@ -272,9 +114,9 @@ def _install_psi_mean():
 
 
 def _pin_row(lam, f_true: float) -> np.ndarray:
-    """A DELTA at the true composition on the solve grid: zero at the cell nearest ``logit(f_true)``
-    (a vertex lands on the grid's end cell) and a wall everywhere else — a claim that is certain, in
-    the currency every rule, lane and ψ read (a max-normalised log-profile over ``lam``)."""
+    """A delta at the true composition on the solve grid: zero at the cell nearest ``logit(f_true)``
+    (a vertex lands on the grid's end cell) and a wall everywhere else, i.e. a certain claim in the
+    currency every rule, lane and ψ read (a max-normalised log-profile over ``lam``)."""
     lam = np.asarray(lam, np.float64)
     f = float(np.clip(f_true, _EPS, 1.0 - _EPS))
     target = float(np.clip(np.log(f / (1.0 - f)), lam[0], lam[-1]))
@@ -312,21 +154,16 @@ class _PinnedPolicy(TR.TransferPolicy):
 
 
 def _parameter_vertex(chain, index, ra, slot_truth: dict, library_f_gdna: float):
-    """The PARAMETER-vertex population per slot, and its true composition: objects whose composition IS
-    a vertex by construction, never objects whose few fragments landed on one by chance.
+    """The parameter-vertex population per slot, and its true composition: objects whose composition
+    is a vertex by construction, never objects whose few fragments landed on one by chance (a boundary
+    of a handful of crossings that all happened to be gDNA, pinned as certain, propagates chance).
 
-    ⛔ **Why the realized vertex is the wrong population, measured 2026-09-09 on `g50 ss.50 OFF`:** of
-    22,201 evidence-free slots whose realized truth was exactly 0 or 1, most were boundaries of 6–19
-    crossings that all happened to be gDNA in a half-gDNA library. Pinned as CERTAIN and propagated
-    through the transfer policy's rules, they drove their RNA-rich exon neighbours from 0.46 to 0.64
-    (truth 0.01) and the region axis 23 % WORSE (Σ|err| 728 k → 894 k) while the pinned slots
-    themselves went to zero error — chance, priced as information.
-
-    Three sources, each a parameter: (i) every region of a SILENT gene (no RNA fragment of any kind in
+    Three sources, each a parameter: (i) every region of a silent gene (no RNA fragment of any kind in
     any of its regions) that no expressed gene overlaps, ``f_g = 1``; (ii) every intron region of a
-    gene with NO nascent fragment in any of its introns that no nascent-bearing gene overlaps (mature
+    gene with no nascent fragment in any of its introns that no nascent-bearing gene overlaps (mature
     RNA cannot be contained in an intron, so its only RNA is nascent), ``f_g = 1``; (iii) every live
-    slot of a ZERO-gDNA library, ``f_g = 0``. A boundary joins (i)/(ii) when both its flanks do."""
+    slot of a zero-gDNA library, ``f_g = 0``. A boundary joins (i)/(ii) when both its flanks do.
+    Returns ``nan`` at every slot outside the population."""
     n = int(chain.n_slots)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -378,22 +215,20 @@ def _parameter_vertex(chain, index, ra, slot_truth: dict, library_f_gdna: float)
 
 
 def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
-    """⭐⭐ THE CEILING ARM. At every object whose truth sits on a **vertex** of the composition simplex
-    (``f_g`` exactly 0 or exactly 1): make its OWN CLAIM the oracle's exact answer (a delta on the
+    """The ceiling arm. At every object whose truth sits on a vertex of the composition simplex
+    (``f_g`` exactly 0 or exactly 1): make its own claim the oracle's exact answer (a delta on the
     solve grid, what its neighbours receive through every rule and lane) and deliver the same delta
     into ψ at the node (what it answers), then let the two passes and the solve run on top of it.
+    An interior object keeps its own answer, so this prices the vertex and nothing else.
 
-    ⭐ Only the VERTEX population is pinned. An interior object keeps its own answer, so this prices the
-    vertex and nothing else — which is the whole point of a channel ceiling.
+    ``evidence_free_only`` restricts the pin to objects with no own composition evidence
+    (``tau_lam <= _TAU_FREE``), the population a vertex fix can actually reach; the unrestricted arm is
+    the looser bound. ``force_empty`` runs the whole wrapper and pins nothing (the `noop` arm).
 
-    ⚠ ``evidence_free_only`` restricts the pin to objects with no own composition evidence
-    (``tau_lam <= _TAU_FREE``). That is the population a vertex fix can actually reach; the unrestricted
-    arm is the looser bound.
-
-    Three patches, each a live target of the self-test: ``sweep.build_region_init`` (the classification —
-    the truth mapped onto slots and the evidence filter — runs there, once per sweep, before the policy
-    prepares); ``messages.transfer._claims`` (the pinned claims); ``calibrate.TransferPolicy`` (the
-    pinned ψ rows)."""
+    Three patches, each a live target of the self-test: ``sweep.build_region_init`` (the
+    classification, the truth mapped onto slots and the evidence filter, runs there once per sweep
+    before the policy prepares); ``messages.transfer._claims`` (the pinned claims);
+    ``calibrate.TransferPolicy`` (the pinned ψ rows)."""
     orig = NI.build_region_init
     orig_claims = TR._claims
 
@@ -410,9 +245,9 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
         if evidence_free_only:
             at_vertex &= tau <= _TAU_FREE
         if force_empty:
-            # ⭐ the `noop` arm: the WHOLE wrapper runs — the oracle is read, the truth is mapped to
-            #   slots, the classification is evaluated — and then nothing is pinned. Byte-identical to
-            #   `base` is the assertion; anything else means the wrapper itself moves the answer (TRAPS: byte-identity-gate).
+            # the `noop` arm: the whole wrapper runs (the oracle is read, the truth is mapped to
+            # slots, the classification is evaluated) and then nothing is pinned. Byte-identical to
+            # `base` is the assertion; anything else means the wrapper itself moves the answer.
             at_vertex[:] = False
         tgt = np.flatnonzero(at_vertex)
         _FIRED["pinned"] += int(tgt.size)
@@ -432,22 +267,17 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
 
 
 def _install_ref_exponent(a_value: float, b_value: float | None = None):
-    """⭐⭐ ψ's two reference exponents as free numbers instead of the single shipped ½.
+    """ψ's two reference exponents as free numbers instead of the single shipped ½.
 
-    ⭐⭐⭐ **THEY ARE PSEUDO-COUNTS, AND THE PAIR IS A Beta.** ``a·log f_g + b·log(1−f_g)`` on the λ grid
-    is exactly ``Beta(a, b)`` in ``f_g`` — the Jacobian ``|df/dλ| = f(1−f)`` turns ``f^{a−1}(1−f)^{b−1}``
-    into ``f^a (1−f)^b``. So the pair has a STRENGTH ``a+b`` (one prior pseudo-fragment at the shipped
-    value) and a MEAN ``a/(a+b)``, and the shipped ``a = b = ½`` fixes the mean at ½ — which asserts the
-    library is half gDNA.
-
-    ⛔ ``a = b = 0`` makes ψ improper on both sides (Beta(0,0) — TRAPS: no-prior-means-haldane's Haldane,
-    a vertex amplifier), so small exponents are a PROTOTYPE that bounds what a derived rule could buy,
+    They are pseudo-counts and the pair is a Beta: ``a·log f_g + b·log(1−f_g)`` on the λ grid is
+    ``Beta(a, b)`` in ``f_g`` (the Jacobian ``|df/dλ| = f(1−f)`` turns ``f^{a−1}(1−f)^{b−1}`` into
+    ``f^a (1−f)^b``), so the pair has a strength ``a+b`` and a mean ``a/(a+b)``, and the shipped
+    ``a = b = ½`` fixes the mean at ½. ``a = b = 0`` makes ψ improper on both sides
+    (TRAPS: no-prior-means-haldane), so small exponents bound what a derived rule could buy and are
     never the rule itself.
 
-    ⚠ ``b_value = None`` keeps the two equal, which is the historical one-knob behaviour; passing both
-    is what an unequal-arm design needs. ⛔ The RNA arm takes ``rna_logprior`` exactly as its gDNA twin
-    takes ``global_logprior``: this patch shadowed a one-argument ``_rna_arm`` after the arms were made
-    symmetric, which raised on the first solve."""
+    ``b_value = None`` keeps the two equal. Both replacements take the shipped parameter names
+    (``global_logprior``, ``rna_logprior``), which the self-test's arity block checks."""
     b_value = a_value if b_value is None else b_value
 
     def _gdna_arm(lam, global_logprior=None):
@@ -472,8 +302,8 @@ def _install_ref_exponent(a_value: float, b_value: float | None = None):
 
 
 def _compare(paths: list[Path]) -> int:
-    """Read two or more arm files and print the per-axis deltas, with the fixed-denominator columns
-    first because those are the ones that cannot be gamed by knowing less (TRAPS: honesty-metrics-reward-ignorance)."""
+    """Read two or more arm files and print the per-axis deltas, the fixed-denominator columns first
+    because those cannot be gamed by knowing less (TRAPS: honesty-metrics-reward-ignorance)."""
     arms: dict[str, dict] = {}
     for p in paths:
         for line in p.read_text().splitlines():
@@ -486,8 +316,8 @@ def _compare(paths: list[Path]) -> int:
         print(f"⛔ need >= 2 arms, got {names}")
         return 1
     base = names[0]
-    # ⛔ TRAPS: honesty-metrics-reward-ignorance ORDER: the two FIXED-DENOMINATOR columns come FIRST, because they are the only two that
-    #    cannot be gamed by the solver knowing less. `solvable_mwae` and the honesty columns follow.
+    # the two fixed-denominator columns come first, because they are the only two that cannot be
+    # gamed by the solver knowing less; `solvable_mwae` and the honesty columns follow.
     cols = [
         ("mwae_all", "mwae ALL", "lower"),
         ("abs_err_all", "Σ|err| ALL", "lower"),
@@ -527,8 +357,8 @@ def _compare(paths: list[Path]) -> int:
                 flat = len(shared) - better - worse
                 print(f"   {'':<22}{nm:<16}{v.mean():>12.4f}{v.mean() - b.mean():>+12.4f}"
                       f"{better:>9}{worse:>7}{flat:>6}   {len(shared)}")
-        # ⛔ A byte-identical arm is NOT evidence of no change (TRAPS: hard-labels-miss-soft-change/TRAPS: byte-identity-gate) — EXCEPT for `noop`,
-        #   where it is the assertion the arm exists to make. Say which of the two it is.
+        # a byte-identical arm is not evidence of no change (TRAPS: byte-identity-gate), except for
+        # `noop`, where it is the assertion the arm exists to make; say which of the two it is.
         for nm in names[1:]:
             shared = [c for (c, a) in arms[nm] if a == axis and (c, a) in arms[base]]
             same = sum(
@@ -548,16 +378,16 @@ def _compare(paths: list[Path]) -> int:
     return 0
 
 
-# ── --self-test: PERTURB EVERY GATE, WITH NO I/O AND NO SOLVER ──────────────────────────────────────
-# ⛔⛔ This exists because the docstring PROMISED it and it did not exist, while the instrument was dead.
-#    The two recorded deaths were both PATCH-TARGET DRIFT — a wrapped name that vanished
-#    (`CAL.region_sweep`) and a replacement whose arity no longer matched the shipped one (`_rna_arm`) —
-#    so those are the first two blocks, and each is perturbed against the exact shape that killed it.
+# ── --self-test: perturb every gate, with no I/O and no solver ──────────────────────────────────────
+# Patch-target drift (a wrapped name that vanishes, a replacement whose arity no longer matches the
+# shipped one) kills a monkey-patching harness while the suite stays green
+# (TRAPS: a-green-suite-hid-five-dead-instruments), so those are the first two blocks and each is
+# perturbed against the shape that would kill it.
 
 
-#: every name this harness REBINDS, as ``(module, attribute, definition_module_or_None)``. When the third
-#: entry is given, the attribute must be the SAME OBJECT as its definition — patching a re-export only
-#: reaches the solver while the re-export is live, and that is precisely what stopped being true.
+#: every name this harness rebinds, as ``(module, attribute, definition_module_or_None)``. When the third
+#: entry is given, the attribute must be the same object as its definition: patching a re-export only
+#: reaches the solver while the re-export is live.
 def _patch_targets():
     return (
         (CAL, "solve_chain", SW),
@@ -582,8 +412,8 @@ def _target_live(mod, attr, definition) -> bool:
 
 
 def _same_params(a, b) -> bool:
-    """Same parameter NAMES in the same order. ⭐ Names rather than count, because the death was a
-    KEYWORD (`rna_logprior`) the shipped caller passes by name."""
+    """Same parameter names in the same order. Names rather than count, because the shipped caller
+    passes `rna_logprior` by keyword."""
     return [p.name for p in inspect.signature(a).parameters.values()] == [
         p.name for p in inspect.signature(b).parameters.values()
     ]
@@ -592,10 +422,9 @@ def _same_params(a, b) -> bool:
 def _try(fn):
     """Call ``fn`` and return its value, or ``None`` if it raised.
 
-    ⛔ Without this a BROKEN replacement takes the whole self-test down with a traceback, and the FAIL row
-    for the check that already caught it never prints — the arity block is what diagnoses the failure, and
-    the numeric block two lines later is what crashes. Measured while falsifying this file: restoring the
-    recorded one-argument ``_rna_arm`` produced a ``TypeError`` and NO check output at all."""
+    Without this a broken replacement takes the whole self-test down with a traceback and the FAIL row
+    for the check that already caught it never prints: the arity block diagnoses the failure, and the
+    numeric block two lines later is what would crash."""
     try:
         return fn()
     except Exception:  # noqa: BLE001 — the self-test's job is to REPORT a broken arm, not to inherit it
@@ -620,12 +449,12 @@ def self_test() -> int:
     if dead:
         print(f"  ⛔ DEAD PATCH TARGETS: {', '.join(dead)}", flush=True)
 
-    # ⛔ PERTURBATION, and it is the exact name whose disappearance killed this file: the SAME predicate
-    #   must REFUSE `CAL.region_sweep`. A checker that cannot fail is not a check.
+    # perturbation: the same predicate must refuse a name that does not exist (`CAL.region_sweep`).
+    # A checker that cannot fail is not a check.
     checks.append(("the predicate REFUSES the dead `CAL.region_sweep` name",
                    not _target_live(CAL, "region_sweep", None)))
 
-    # ⛔ PERTURBATION: break one re-export and the identity half must fire, not just the presence half.
+    # perturbation: break one re-export and the identity half must fire, not just the presence half.
     SW.build_region_init = lambda *a, **k: None
     checks.append(("a re-export rebound to a stranger => target reads DEAD",
                    not _target_live(SW, "build_region_init", NI)))
@@ -637,8 +466,8 @@ def self_test() -> int:
     checks.append(("ref_c's two arms match the shipped signatures",
                    _same_params(SL._gdna_arm, saved[(SL.__name__, "_gdna_arm")])
                    and _same_params(SL._rna_arm, saved[(SL.__name__, "_rna_arm")])))
-    # ⛔ PERTURBATION: the recorded death verbatim — a one-argument `_rna_arm` after the arms were made
-    #   symmetric. The same comparison must reject it.
+    # perturbation: a one-argument `_rna_arm` (one fewer than the shipped signature) must be rejected
+    # by the same comparison.
     checks.append(("a one-argument `_rna_arm` is REJECTED by the same comparison",
                    not _same_params(lambda lam: None, saved[(SL.__name__, "_rna_arm")])))
 
@@ -655,13 +484,13 @@ def self_test() -> int:
     checks.append(("…and both fire counters moved (TRAPS: an-ablation-that-never-ran)",
                    _FIRED["ref_g"] > before["ref_g"] and _FIRED["ref_r"] > before["ref_r"]))
     restore()
-    # ⛔ PERTURBATION: a different exponent must NOT reproduce it, or the arm is inert.
+    # perturbation: a different exponent must not reproduce it, or the arm is inert.
     _install_ref_exponent(0.25)
     q_g = _try(lambda: SL._gdna_arm(lam, None))
     checks.append(("ref_c=0.25 DIFFERS from the shipped reference",
                    q_g is not None and not np.array_equal(q_g, ship_g)))
     restore()
-    # ⛔ PERTURBATION: the pair is a Beta(a,b), so the two arms must be drivable INDEPENDENTLY.
+    # perturbation: the pair is a Beta(a,b), so the two arms must be drivable independently.
     _install_ref_exponent(0.5, 2.0)
     ab_g = _try(lambda: SL._gdna_arm(lam, None))
     ab_r = _try(lambda: SL._rna_arm(lam, None))
@@ -717,7 +546,7 @@ def self_test() -> int:
                    msg.lam_rows is not None and msg.lam_rows.shape == (4, 21)
                    and np.array_equal(msg.lam_rows[2], top) and not msg.lam_rows[0].any()
                    and _FIRED["delivered"] == before["delivered"] + 1))
-    # ⛔ PERTURBATION: with no pins the policy is the shipped one — silent stays silent
+    # perturbation: with no pins the policy is the shipped one, so silent stays silent
     _CTX["pins"] = {}
     checks.append(("with nothing pinned the policy's solve is untouched (silent stays silent)",
                    CAL.TransferPolicy(lambda g, w: None)
@@ -756,11 +585,11 @@ def self_test() -> int:
                    np.isnan(f[6]) and np.isnan(f[5]) and np.isnan(f[7])))
     checks.append(("expressed gene C without nascent: its INTRON is at 1, its exons are not",
                    f[10] == 1.0 and np.isnan(f[8]) and np.isnan(f[12]) and np.isnan(f[9]) and np.isnan(f[11])))
-    # ⛔ PERTURBATION: one nascent fragment in C's intron un-pins it
+    # perturbation: one nascent fragment in C's intron un-pins it
     st2 = dict(st, n_nrna=np.where(np.arange(13) == 10, 1.0, n_nrna))
     checks.append(("one nascent fragment in the intron un-pins it (chance is not the population)",
                    np.isnan(_parameter_vertex(chain, index_, ra_, st2, 0.5)[10])))
-    # ⛔ PERTURBATION: an expressed gene overlapping the silent one un-pins the shared regions
+    # perturbation: an expressed gene overlapping the silent one un-pins the shared regions
     gdf2 = pd.concat([gdf, pd.DataFrame({"ref": ["c"], "start": [0], "end": [200], "g_id": ["D"], "is_synthetic": [False]})])
     st3 = dict(st, n_mrna=np.where(np.arange(13) == 0, 2.0, n_mrna))
     f3 = _parameter_vertex(chain, SimpleNamespace(g_df=gdf2, ref_name_to_id={"c": 0}), ra_, st3, 0.5)
@@ -796,7 +625,7 @@ def self_test() -> int:
                                "own falsification PASSES" not in txt and "did not fire" not in txt))
             else:
                 checks.append((f"identical `{arm}` is labelled {want!r}", want in txt))
-        # ⛔ PERTURBATION: one arm alone is not a comparison and must be refused.
+        # perturbation: one arm alone is not a comparison and must be refused.
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             rc = _compare([base_p])
@@ -836,7 +665,7 @@ def main() -> int:
     arm = args.arm
     expect_fire: list[str] = []
     if arm == "psi_mean":
-        # ⭐ the CLOSURE arm: f_g as the posterior mean, which closes the simplex exactly.
+        # f_g as the posterior mean, which closes the simplex exactly.
         _install_psi_mean()
         expect_fire = ["psi_mean"]
     elif arm == "vertex_free":
@@ -846,12 +675,12 @@ def main() -> int:
         _install_vertex_pin(False)
         expect_fire = ["pinned", "claimed", "delivered"]
     elif arm == "noop":
-        # ⭐ the harness's OWN falsification: the same wrapper, pinning nothing. Must be byte-identical
-        #   to `base`, and if it is not, the wrapper itself is changing the answer (TRAPS: byte-identity-gate).
+        # the harness's own falsification: the same wrapper, pinning nothing. Must be byte-identical
+        # to `base`; if it is not, the wrapper itself is changing the answer.
         _install_vertex_pin(True, force_empty=True)
         expect_fire = ["init"]
     elif arm.startswith("ref_c="):
-        # ⭐ `ref=C` keeps both arms equal; `ref=A,B` drives them unequal (the Beta(a,b) design).
+        # `ref_c=<a>` keeps both arms equal; `ref_c=<a>,<b>` drives them unequal (the Beta(a,b) design).
         _spec = arm.split("=", 1)[1]
         _install_ref_exponent(*(float(x) for x in _spec.split(",")))
         expect_fire = ["ref_g", "ref_r"]
@@ -913,7 +742,8 @@ def main() -> int:
                 fh.write(json.dumps({"arm": arm, "condition": name, "axis": axis,
                                      "f_gdna": truth, **s}) + "\n")
                 fh.flush()
-            # ⚠ TRAPS: could-the-arm-have-fired: the opportunity count, printed beside the result.
+            # the opportunity count, printed beside the result: an arm with zero opportunities is
+            # not a control (TRAPS: could-the-arm-have-fired).
             print(f"  {name} {time.perf_counter() - t0:.0f}s   pinned={fired.get('pinned', 0)}"
                   f"  init_calls={fired.get('init', 0)}", flush=True)
     return 0

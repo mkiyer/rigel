@@ -1,6 +1,9 @@
 # Publishing Rigel
 
-Cutting a new release is now two commands, plus one wait.
+This is the release procedure: how a version of Rigel reaches PyPI and Bioconda, the two
+scripts that do it, what the GitHub Actions workflow builds, and how to recover when a step
+fails. It does not describe how to build or test the code (`README.md` and `CLAUDE.md`) or
+what a release contains (the changelog and git). Cutting a release is two commands plus one wait.
 
 > **Naming**
 > - PyPI distribution: `rigel-rnaseq` (`pip install rigel-rnaseq`)
@@ -13,19 +16,17 @@ Cutting a new release is now two commands, plus one wait.
 
 ```bash
 # 1. Add a `## [Unreleased]` section to CHANGELOG.md with your notes,
-#    then region bound the release:
-./scripts/publishing/release.sh 0.4.0
+#    then cut the release:
+./scripts/publishing/release.sh X.Y.Z
 
 # 2. Wait for the GitHub Actions publish workflow to go green
 #    (~15–30 min): https://github.com/mkiyer/rigel/actions
 
 # 3. Finalize: patch conda recipe with PyPI sha256 and (optionally)
 #    upload to your personal anaconda.org channel:
-./scripts/publishing/post_release.sh 0.4.0
+./scripts/publishing/post_release.sh X.Y.Z
 ```
 
-That's it. No GitHub UI clicks, no manual sha256 lookups, no
-`sed`-by-hand of YAML files.
 
 ---
 
@@ -43,9 +44,10 @@ That's it. No GitHub UI clicks, no manual sha256 lookups, no
 5. `git commit`, `git tag vX.Y.Z`, `git push origin main --tags`.
 
 **Pushing the tag is the trigger.** `.github/workflows/publish.yml` runs on
-any `v*` tag push: it builds the sdist + Linux x86_64/aarch64 + macOS arm64
-wheels and uploads to PyPI via OIDC trusted publishing. You no longer need
-to open the GitHub Releases UI.
+any `v*` tag push (and on manual dispatch, never on a GitHub Release — that
+would double-fire and the second upload would fail as "file already exists"):
+it builds the sdist + Linux x86_64/aarch64 + macOS arm64 wheels and uploads
+to PyPI via OIDC trusted publishing.
 
 ### `post_release.sh X.Y.Z` — stage 2 (run after the workflow is green)
 
@@ -60,15 +62,9 @@ to open the GitHub Releases UI.
 
 ### `conda_publish.sh` — personal channel upload (optional)
 
-Builds the conda recipe from the PyPI sdist and uploads it to your own
-`anaconda.org/<user>` channel. Requires a `bioconda-build` env plus
-`anaconda login`. Useful when you want the package installable right away
-while bioconda is still reviewing.
-
-```bash
-conda activate bioconda-build
-./scripts/publishing/conda_publish.sh
-```
+Builds the conda recipe from the PyPI sdist and uploads it to your own `anaconda.org/<user>`
+channel (`conda activate bioconda-build && ./scripts/publishing/conda_publish.sh`; needs
+`anaconda login`). Useful while bioconda is still reviewing.
 
 ---
 
@@ -89,14 +85,12 @@ release notes:
 - ...
 ```
 
-You do **not** need to fill in the version number or the date — stage 1
-will do that for you. You also don't need to append the comparison link at
-the bottom; stage 1 adds it.
+Stage 1 fills in the version, the date and the comparison link.
 
 ### 2. Cut the release
 
 ```bash
-./scripts/publishing/release.sh 0.4.0
+./scripts/publishing/release.sh X.Y.Z
 ```
 
 The script prints the diff and asks for confirmation. If you answer "N",
@@ -113,70 +107,39 @@ needed.
 Verify once green:
 
 ```bash
-pip install rigel-rnaseq==0.4.0
+pip install rigel-rnaseq==X.Y.Z
 rigel --version
 ```
 
 ### 4. Finalize
 
 ```bash
-./scripts/publishing/post_release.sh 0.4.0
+./scripts/publishing/post_release.sh X.Y.Z
 ```
 
-It will block until PyPI has the sdist, then patch/commit/push the conda
-recipe and (on prompt) upload to your personal channel. The next bioconda
-auto-bump bot run (within ~24h) picks up the new PyPI release and opens a
-PR against `bioconda-recipes`.
-
-If the auto-bump bot doesn't fire, `post_release.sh` prints the exact git
-commands to open a manual PR.
+It blocks until PyPI has the sdist, then patches, commits and pushes the conda recipe and (on
+prompt) uploads to your personal channel. The bioconda auto-bump bot (within ~24h) opens a PR
+against `bioconda-recipes`; if it does not fire, `post_release.sh` prints the git commands for a
+manual PR.
 
 ---
 
 ## Recovery scenarios
 
-### I answered "N" at the confirmation prompt
+- **Answered "N" at the confirmation prompt.** Nothing was committed, tagged or pushed:
+  `git checkout -- pyproject.toml conda/meta.yaml CHANGELOG.md`, then run `release.sh` again.
+- **The tag pushed but `publish.yml` failed before uploading.** Re-run the failed jobs from the
+  Actions tab, or delete the tag and retry after fixing the problem:
 
-Nothing was committed, tagged, or pushed. Revert the staged edits and
-start over:
+  ```bash
+  git tag -d vX.Y.Z && git push origin --delete vX.Y.Z
+  ./scripts/publishing/release.sh X.Y.Z
+  ```
 
-```bash
-git checkout -- pyproject.toml conda/meta.yaml CHANGELOG.md
-./scripts/publishing/release.sh 0.4.0
-```
-
-### The tag pushed but `publish.yml` failed before uploading to PyPI
-
-You can re-run the workflow against the same tag:
-
-```bash
-# From the Actions tab → publish.yml run → "Re-run failed jobs"
-```
-
-Or delete the tag and retry:
-
-```bash
-git tag -d v0.4.0
-git push origin --delete v0.4.0
-# fix the underlying problem, commit, then:
-./scripts/publishing/release.sh 0.4.0
-```
-
-### PyPI upload succeeded but the release is broken
-
-PyPI refuses re-uploads of the same version. Bump to a patch:
-
-```bash
-# Add a ## [Unreleased] section to CHANGELOG.md with the fix,
-# then:
-./scripts/publishing/release.sh 0.4.1
-```
-
-### `release.sh` says the tag already exists
-
-You've already run stage 1. Either continue with
-`./scripts/publishing/post_release.sh <same-version>`, or delete the tag
-locally + remotely and retry (see above).
+- **PyPI upload succeeded but the release is broken.** PyPI refuses re-uploads of a version:
+  add a `## [Unreleased]` section with the fix and release the next patch version.
+- **`release.sh` says the tag already exists.** Stage 1 already ran: continue with
+  `./scripts/publishing/post_release.sh <same-version>`, or delete the tag as above and retry.
 
 ---
 
@@ -201,7 +164,7 @@ A matching GitHub environment named `pypi` exists in repo settings.
 | Workflow | Trigger | What it does |
 |----------|---------|--------------|
 | `ci.yml` | Push / PR to `main` | Tests on Ubuntu + macOS, Python 3.12 + 3.13 |
-| `publish.yml` | **Tag push `v*`** / GitHub Release / manual dispatch | Builds sdist + wheels → PyPI |
+| `publish.yml` | **Tag push `v*`** / manual dispatch (deliberately not GitHub Release, which would double-fire) | Builds sdist + wheels → PyPI |
 
 ### Wheel matrix
 
@@ -211,7 +174,9 @@ A matching GitHub environment named `pypi` exists in repo settings.
 | Linux | aarch64 | `manylinux_2_28` (QEMU) |
 | macOS | arm64 | `macos-latest` |
 
-Intel Mac users install from the sdist. Linux glibc ≥ 2.28 required.
+`CIBW_BUILD: "cp312-*"` (with `*-musllinux_*` skipped) builds CPython 3.12 wheels only, so
+Python 3.13 — which CI tests and the package classifies — installs from the sdist on every
+platform, as do Intel Macs. Linux glibc ≥ 2.28 required.
 
 ---
 

@@ -34,14 +34,13 @@ NUM_SPLICE_TYPES = len(SpliceType)
 def census_field(stype: SpliceType) -> str:
     """The :class:`~rigel.stats.PipelineStats` field holding the scanner's count of ``stype``.
 
-    ⭐ **The scanner classifies, so the scanner counts.** The per-fragment splice breakdown is
-    SCANNER QC — it has no algorithmic consumer, only the report — so it lives where it is
-    generated and is passed through nothing to get there. It used to be read off the fragment-length
-    category models, which counted only the fragments that contributed a LENGTH observation; that
-    histogram is deleted by TRAPS: pure-and-length-censored and the population was never stated. See
+    The scanner classifies, so the scanner counts. The per-fragment splice breakdown is scanner QC —
+    it has no algorithmic consumer, only the report — so it lives where it is generated and is passed
+    through nothing to get there. Reading it off a fragment-length category model instead would count
+    only the fragments that contributed a LENGTH observation, a population nobody states
+    (TRAPS: pure-and-length-censored).
 
-
-    ⚠ **There is no name table, deliberately.** The C++ keys these counters off
+    There is no name table, deliberately. The C++ keys these counters off
     ``splice_type_label`` (``bam_scanner.cpp``), whose strings are exactly these member names
     lower-cased. Writing the correspondence as a mapping would create a second place for it to be
     wrong; deriving it means a category added to :class:`SpliceType` and forgotten in either

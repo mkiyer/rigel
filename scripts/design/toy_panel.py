@@ -1,41 +1,34 @@
 #!/usr/bin/env python
-"""⭐⭐ **ONE TOY SPEC × EVERY CACHED CONDITION × AN RNA-DENSITY LADDER, SCORED PER OBJECT.**
+"""How does one toy spec behave across every cached condition and an RNA-density ladder, scored per object?
 
-`toy_harness.py` answers "what does this structure do on ONE library at ONE RNA level". This answers
-"where does it break across the whole space the cache can express", which is the question you ask once a
-structure is the target rather than a probe. It is `toy_harness`'s own machinery — same spec, same
-`run_toy`, same `object_rows`, same per-object truth — swept over two axes and aggregated.
-
-⛔⛔ **IT MEASURES THE PRIOR-FREE PASS-0 SOLVE BY DEFAULT** (``--refit-iters 0``), because that is the
-substrate the gDNA hyperprior is later fitted against: an object that is confidently wrong here anchors the
-prior and corrupts everything downstream. ``--refit-iters 3`` gives the shipped solve for comparison, and
-the two answer different questions — do not quote one for the other.
-
-⭐ **The RNA density is quoted as a MULTIPLE of each donor's own gDNA density**, never absolutely. What the
-solver has to resolve is the RATIO, and the left_boundaries' gDNA rates span ~100× across the ladder, so an absolute
-density would put different left_boundaries at completely different true ``f_g`` on the "same" rung.
-
-⚠ **What it cannot say.** Every cached condition is ``nrna_none``, so on any spec with an intron the
-intron↔exon BOUNDARIES have truth exactly 1.0 and the panel structurally cannot distinguish "no RNA crosses this
-boundary" from "no *mature* RNA crosses it". ⛔ Read `docs/TESTING.md` on the panels before concluding anything
-about a boundary.
-
-⚠ **Harvesting is 30 s per donor and is deliberately not cached to disk** (`DonorGlobals`' own docstring:
-a stored bundle goes stale on exactly the changes this harness exists to test). So a full 36-condition run
-is ~20 min single-process. Shard it with ``--conditions``.
+`toy_harness.py` answers what a structure does on one library at one RNA level; this sweeps the same spec,
+through `toy_harness`'s own `harvest`, `run_toy` and `object_rows`, over two axes — every cached condition
+(each donor's priors harvested afresh; the harvest is deliberately not cached to disk because a stored
+bundle goes stale on exactly the changes this instrument tests) and a ladder of RNA densities — and
+aggregates the per-object rows: mass-weighted |Δf_g| per stratum and rung, each object's share of the
+error mass with its local-solve error beside its final error, the sweep shape (a prediction that does not
+move when the truth moves is the tell, `TRAPS: a-total-density-ratio`), and the confidently-wrong table
+against the declared sd. The RNA density is quoted as a multiple of each donor's own gDNA density, never
+absolutely, so a rung means the same true `f_g` on every row. By default it measures the prior-free
+pass-0 solve (``--refit-iters 0``), the substrate the gDNA hyperprior is fitted against; ``--refit-iters 3``
+is the shipped solve, and the two answer different questions. Every cached condition is nascent-free, so
+on a spec with an intron the intron|exon boundaries have truth exactly 1.0 unless ``--nrna`` is given.
+About 13 s per condition; shard with ``--conditions``.
 
 Usage::
 
-    python scripts/design/toy_panel.py --spec spliced_exons
+    python scripts/design/toy_panel.py --list                                            # the specs
+    python scripts/design/toy_panel.py --spec spliced_exons                              # every cached condition
     python scripts/design/toy_panel.py --spec spliced_exons --conditions gdna_g50_ss_0.50_nrna_mid_capture_off
-    python scripts/design/toy_panel.py --report rows.jsonl        # re-aggregate, no re-measurement
+    python scripts/design/toy_panel.py --spec spliced_exons --refit-iters 3 --nrna 0.2   # the shipped solve, with nascent RNA
+    python scripts/design/toy_panel.py --spec spliced_exons --genome-length 120000 --out rows.jsonl
+    python scripts/design/toy_panel.py --report rows.jsonl                               # re-aggregate, no re-measurement
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import json
 import os
 import sys
@@ -47,23 +40,16 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-TH = _sibling("toy_harness.py")
+TH = sibling("toy_harness.py")
 
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
-#: ⭐ multiples of the DONOR's own gDNA density. At `m` the exon's true `f_g` is roughly `1/(1+m)`, so this
-#: ladder spans ~0.91 → ~0.01 and brackets the crossover at 1x. ⚠ Read points, not tuned values.
+#: Multiples of the donor's own gDNA density. At `m` the exon's true `f_g` is roughly `1/(1+m)`, so this
+#: ladder spans ~0.91 → ~0.01 and brackets the crossover at 1x. Read points, not tuned values.
 LADDER = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0)
 
 
@@ -110,9 +96,9 @@ def measure(spec_name: str, conditions: list[str], *, suite: Path, index_path: P
 # THE REPORT
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-#: ⭐ The chain slot's identity for aggregation: its object class plus, for a repeated class, WHICH one.
-#: `intron|exon` appears twice on a two-exon gene and they are NOT interchangeable — one is the donor side
-#: and one the acceptor side — so collapsing them would average away the asymmetry the SPLICE IN creates.
+#: The chain slot's identity for aggregation: its object class plus, for a repeated class, which one.
+#: `intron|exon` appears twice on a two-exon gene and they are not interchangeable — one is the donor side
+#: and one the acceptor side — so collapsing them would average away the asymmetry the splice-in creates.
 def _key(row) -> str:
     return f"{row['type']}@{row['where']}"
 
@@ -229,7 +215,7 @@ def report(rows: list[dict], spec_name: str, refit_iters: int) -> None:
 
 
 def main() -> int:
-    P0 = _sibling("pass0_vs_oracle.py")
+    P0 = sibling("pass0_vs_oracle.py")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--spec", default="spliced_exons")
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE.parent / "ladder")

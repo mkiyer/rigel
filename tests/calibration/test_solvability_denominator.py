@@ -65,7 +65,7 @@ def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
 
     ⛔ Three instruments used to each restate ``_EPS = 1.0e-9`` beside a comment saying it must
     match the solver. Changing the solver would have moved none of them. The instruments import the
-    home (`composition_evidence_census`, `pass0_vs_oracle` — gated in ``test_pass0_vs_oracle``), and
+    home (`pass0_vs_oracle` — gated in ``test_pass0_vs_oracle``), and
     on every value the solver publishes — exactly zero where the deadband or the AMBIG gate silenced
     the channel, a Fisher information otherwise — the home agrees with the transfer policy's own
     liveness test on a node's strand channel, ``tau_lam > 0``."""

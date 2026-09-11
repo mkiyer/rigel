@@ -1,10 +1,10 @@
-"""Hybrid-capture probe *design* — generate synthetic capture panels for the simulator.
+"""Hybrid-capture probe design: generate a synthetic capture panel for the simulator.
 
-Tile probes over captured transcripts (transcript-coordinate TSV + genomic BED12), avoiding
-already-placed genomic probes. This is the design side of hybrid capture; the runtime sampler that
-*consumes* a panel is :mod:`capture.sampler`, and the panel config is :mod:`capture.config`.
-(Moved out of ``suite.py`` — design is capture logic, not suite orchestration; the suite-config
-layer that wires its parameters in stays in ``suite.py``.)
+Tiles probes over the captured transcripts and writes the panel twice, as a transcript-coordinate
+TSV and as a genomic BED12, avoiding probes already placed on the same genomic span. This is the
+design side of hybrid capture; the runtime sampler that consumes a panel is
+:mod:`capture.sampler`, and the panel's parameters are :mod:`capture.config`. The suite-config
+layer that chooses which panels to build lives in ``suite.py``.
 """
 
 from __future__ import annotations

@@ -1,12 +1,14 @@
-"""assemble_priors — bridge from CalibrationResult to the per-locus EM prior (PR 6).
+"""assemble_priors — the bridge from CalibrationResult to the per-locus EM prior.
 
-Turns the calibration's per-region deconvolved mass + geometric length into the **two
-per-locus Dirichlet scalars** the locus EM consumes — ``rna_prior_count`` and
-``gdna_prior_count`` — plus the per-locus gDNA-component effective length (the IPR).
+Turns the calibration's per-object deconvolved mass and geometric length into the two per-locus
+Dirichlet scalars the locus EM consumes — ``rna_prior_count`` and ``gdna_prior_count`` — plus the
+per-locus gDNA-component effective length (the inverse participation ratio of the deconvolved gDNA
+mass over its supports).
 
-The prior's only job is to split each locus's unspliced fragments between gDNA
-and RNA; it does **not** attribute RNA mass to individual transcripts (that is
-what the EM is for).
+The prior's only job is to split each locus's unspliced fragments between gDNA and RNA; it does not
+attribute RNA mass to individual transcripts, which is what the EM is for.
+
+Layer: LAYER 7. It reads a finished `CalibrationResult` and never re-solves anything.
 """
 
 from __future__ import annotations
@@ -26,13 +28,10 @@ if TYPE_CHECKING:
 
 # A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by the
 # per-locus projection.
-# ⛔ **The RE-ATTRIBUTION this comment described is GONE, and so is the function it pointed at.** It read
-# *"so a boundary whose left flank is such a region must be re-attributed to its (locus) right flank or its
-# gDNA is lost (see boundary_owner_regions)"*. That re-key existed only to serve ``boundary_owner_regions``,
-# which folded a boundary's mass into ONE flank region; projecting a BOUNDARY as a BOUNDARY removed both —
-# see :func:`assemble_priors`'s own "what this replaced, so it does not come back" note.
-# ⚠ The constant itself now has NO production consumer; ``tests/calibration/test_prior_vs_oracle.py``
-# imports it to rebuild the same in-locus predicate. Retiring it is a source change, left to the owner.
+# ⛔ No re-attribution happens here: a boundary is projected AS a boundary, so a boundary beside a
+# dropped intergenic region does not have to be re-keyed to its other flank to keep its gDNA.
+# The constant's one consumer is ``tests/calibration/test_prior_vs_oracle.py``, which imports it to
+# rebuild the same in-locus predicate rather than restate the bits.
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 # Numerical floor for the gDNA-component effective length: matches the EM's own
@@ -62,10 +61,9 @@ def _region_locus_shares(
     """``(region_idx, locus_idx, share)`` — THE region↔locus overlap, computed exactly once.
 
     For each region, the fractional overlap with each ``MultiLocus`` block, normalised across the loci
-    it touches. A region overlapping no locus (intergenic) emits nothing and is thereby dropped. The
-    overlap math is the pre-burn ``adaptive_prior._project_to_loci``'s, unchanged.
+    it touches. A region overlapping no locus (intergenic) emits nothing and is thereby dropped.
 
-    ⭐ **Published as triples rather than folded straight into sums**, because the BOUNDARY axis needs the
+    Published as triples rather than folded straight into sums, because the BOUNDARY axis needs the
     same shares (:func:`_boundary_locus_shares`) and a second traversal computing the same predicate is how
     two homes for one rule come about (``TRAPS: a-test-that-redefines``).
     """
@@ -129,9 +127,9 @@ def _boundary_locus_shares(
     multi_loci: "list[MultiLocus]",
     n_loci: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(edge_idx, locus_idx, share)`` — **a locus's boundaries are the boundaries that touch its regions.**
+    """``(edge_idx, locus_idx, share)`` — a locus's boundaries are the boundaries that touch its regions.
 
-    ⭐⭐ **THE RULE** (owner, 2026-08-08): an BOUNDARY owns the fragments that cross it, a REGION owns only the
+    THE RULE: a BOUNDARY owns the fragments that cross it, a REGION owns only the
     fragments contained in it, and nothing is re-attributed between them. Every region contributes both of
     its boundaries, so a locus of ``k`` contiguous regions carries ``k + 1`` boundaries — its two OUTER ones
     included, which is correct because a fragment crossing a locus's outer boundary overlaps the locus
@@ -143,12 +141,12 @@ def _boundary_locus_shares(
     locus"*, so a boundary inherits the stronger of its two flanks' memberships rather than accumulating
     them.
 
-    ⛔ **This replaces ``boundary_owner_regions``**, which folded a boundary's mass into ONE flank region's total so
-    the region projection could reach it — a 0-bp boundary has no extent and ``_region_locus_shares`` divides
-    by the region length. The fold then needed the intergenic re-key to stop a locus's far-LEFT boundary
-    vanishing into its dropped intergenic flank. Projecting an boundary AS an boundary removes both.
+    ⛔ Do not fold a boundary's mass into one flank region's total instead: ``_region_locus_shares``
+    divides by the region length and a 0-bp boundary has no extent, so such a fold then needs an
+    intergenic re-key to stop a locus's far-left boundary vanishing into its dropped intergenic flank.
+    Projecting a boundary AS a boundary removes both.
 
-    ⚠ **Shares can sum above 1 only for a CONTENDED boundary** — adjacent regions in different multi-loci —
+    Shares can sum above 1 only for a CONTENDED boundary — adjacent regions in different multi-loci —
     and that boundary carries no mass: any fragment crossing it overlaps transcripts in both loci, so it is
     a candidate in both and the union-find has already merged them into one multi-locus. The
     configuration is therefore unreachable for a boundary with mass, and it is *reported* by
@@ -186,7 +184,7 @@ def _boundary_locus_shares(
     locus_ids = l_sorted[pair_ids]
     shares = w_sorted[pair_ids]
 
-    # reduce duplicates — an boundary whose two flanks are both in L appears twice — keeping the MAX
+    # reduce duplicates — a boundary whose two flanks are both in L appears twice — keeping the MAX
     key = edge_ids * np.int64(n_loci) + locus_ids
     uniq, inv = np.unique(key, return_inverse=True)
     out = np.zeros(uniq.size, dtype=np.float64)
@@ -220,7 +218,7 @@ def _project_regions_to_loci(
 ) -> dict[str, np.ndarray]:
     """Overlap-weighted projection of per-REGION arrays to per-locus sums.
 
-    ⚠ Regions only. The crossing axis is projected by :func:`_boundary_locus_shares`, because a boundary is a
+    Regions only. The crossing axis is projected by :func:`_boundary_locus_shares`, because a boundary is a
     first-class object and is not carried by a region.
     """
     out = {name: np.zeros(n_loci, dtype=np.float64) for name in arrays}
@@ -248,8 +246,8 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the calibration result.
 
-    ⭐⭐⭐ **A REGION OWNS THE FRAGMENTS CONTAINED IN IT; AN BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
-    IS RE-ATTRIBUTED** (owner, 2026-08-08). A locus collects both kinds of object — its regions by genomic
+    A REGION OWNS THE FRAGMENTS CONTAINED IN IT; A BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT; NOTHING
+    IS RE-ATTRIBUTED. A locus collects both kinds of object — its regions by genomic
     overlap (:func:`_region_locus_shares`) and its boundaries by touching those regions
     (:func:`_boundary_locus_shares`)::
 
@@ -260,7 +258,7 @@ def assemble_priors(
             elen = Σ_regions share·min(m_r/ρ_ref, S_r) + Σ_boundaries share·min(m_e/ρ_ref, S_e)
             span = Σ_regions share·S_r                 + Σ_boundaries share·S_e
 
-    ⭐ **THE PRIOR IS A CONSERVED FRAGMENT COUNT.** The EM adds these scalars straight to its own soft
+    THE PRIOR IS A CONSERVED FRAGMENT COUNT. The EM adds these scalars straight to its own soft
     counts (``G = n_gdna + a_g``, ``em_solver.cpp:apply_grouped_prior_update``), where ``n_gdna`` counts
     the gDNA fragments that are candidates in this multi-locus — each ONCE, since a multi-locus is a
     connected component of transcripts linked by shared fragments. The region term is already such a count
@@ -269,40 +267,33 @@ def assemble_priors(
     boundary, which undoes the ``+1``-per-crossed-boundary inflation. ``q`` is a geometry,
     ``[min(w−1,a) + min(w−1,b)] / 2(w−1)`` under a uniform field.
 
-    ⛔ **A locus's OUTER boundaries are included, and that is the point.** A fragment crossing a locus's
-    boundary overlaps the locus, so it is one of its EM candidates and must load its prior. ⚠ It follows
+    ⛔ A locus's OUTER boundaries are included, and that is the point: a fragment crossing a locus's
+    boundary overlaps the locus, so it is one of its EM candidates and must load its prior. It follows
     that a *first-base* count of the locus's fragments is NOT this quantity — it drops exactly the
     straddlers — so an oracle built that way reads a one-way excess here that is semantics, not error.
 
-    ⛔ **What this replaced, so it does not come back.** ``boundary_owner_regions`` folded each boundary's mass
-    into ONE flank region's total, because ``_region_locus_shares`` divides by the region length and so
-    cannot see a 0-bp object. The fold then needed the intergenic RE-KEY to stop a locus's far-left boundary
-    vanishing into its dropped intergenic flank. Projecting an boundary AS an boundary removes both, and makes
-    this the same operation ``transcript_capture_eff_lengths`` performs over a transcript's own objects.
+    The zero-opportunity guard is structural: ``min(m/ρ_ref, S)`` is applied PER OBJECT, so an object
+    with ``S = 0`` contributes exactly 0 to ``elen`` and 0 to ``span`` with no test and no floor.
+    ⛔ Do not sum the supports first and take one ``min()`` over the pair: that needs an explicit
+    zero-opportunity test and a cap, and it UNDER-contracts a captured exon whose boundary runs into a
+    depleted intron.
 
-    ⭐ **The zero-opportunity guard is now structural.** ``min(m/ρ_ref, S)`` is applied PER OBJECT, so an
-    object with ``S = 0`` contributes exactly 0 to ``elen`` and 0 to ``span`` with no test and no floor.
-    The predecessor summed supports first and therefore needed an explicit
-    ``mass_where_there_is_opportunity`` and a ``1e-9`` cap; folding two objects into one ``min()`` also
-    UNDER-contracted a captured exon whose boundary ran into a depleted intron. Both are gone.
-
-    **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each object's mass by its EFFECTIVE
+    The bedrock invariant — factor 1 under uniform gDNA. Dividing each object's mass by its EFFECTIVE
     sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched) library,
     because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a region and ``ρ·E_f[w−1]``
     of crossing mass on a boundary. Every object's ``min(m/ρ_ref, S)`` then returns ``S``, so
-    ``gdna_eff_len == span`` exactly: an unenriched library contracts NOTHING. Using the genomic
-    ``region_size_bp`` instead would understate short-region density and fabricate a contraction with no
-    capture bias present (verified factor 0.878 vs the correct 1.000). Under capture the contraction
-    falls below ``span`` toward the probed footprint.
+    ``gdna_eff_len == span`` exactly: an unenriched library contracts NOTHING. ⛔ Using the genomic
+    ``region_size_bp`` instead understates short-region density and fabricates a contraction with no
+    capture bias present. Under capture the contraction falls below ``span`` toward the probed
+    footprint.
 
-    ⚠ **The RNA prior is the UNSPLICED RNA mass only.** A spliced fragment has no gDNA candidate in the
+    The RNA prior is the UNSPLICED RNA mass only. A spliced fragment has no gDNA candidate in the
     EM (gDNA does not splice), so it is assigned directly and counting it here would inflate the RNA side
     of a split that arbitrates only unspliced fragments. ``mass_rna_boundary`` is spliced-inclusive, so
     ``mass_rna_spliced_boundary`` is subtracted. ⛔ The SJ flux is deliberately NOT added, for the same
-    reason (owner ruling, 2026-07-30) — a locus whose RNA is fully spliced SHOULD get a near-zero
-    ``rna_prior_count``.
+    reason — a locus whose RNA is fully spliced SHOULD get a near-zero ``rna_prior_count``.
 
-    ⚠ **The contraction is SHRUNK toward the uniform span on the contained evidence** ``C``, by
+    The contraction is SHRUNK toward the uniform span on the contained evidence ``C``, by
     ``w = C/(C+1)`` — one pseudo-observation, no tunable. Calibration's accumulator is fed by unique
     mappers only, so a multimapper-dominated locus has little contained mass and an unreliable reference
     read; ``C = 0`` ⇒ ``span`` exactly.
@@ -322,7 +313,7 @@ def assemble_priors(
     def by_boundary(values):
         return _sum_by_locus(e_idx, e_lid, e_w, values, n_loci)
 
-    # ⭐ THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
+    # THE TWO PSEUDOCOUNTS. The region term is already a fragment count; only the crossing term is
     # converted, by the accumulator's own conserved mass-per-crossing at that boundary.
     q = np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
     gdna_boundary = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64) * q

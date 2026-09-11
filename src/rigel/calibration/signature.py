@@ -1,21 +1,17 @@
-"""Region signature encoding — the 4-bit exon/intron × strand annotation.
+"""Region signature encoding — the 4-bit exon/intron x strand annotation.
 
-Every genome position carries a 4-bit *signature* recording which transcript
-features cover it: ``{intron_pos, intron_neg, exon_pos, exon_neg}``. A
-calibration *region* (see :mod:`rigel.calibration.regions`) is a maximal
-interval over which this signature is constant.
+Every genome position carries a 4-bit *signature* recording which transcript features cover it:
+``{intron_pos, intron_neg, exon_pos, exon_neg}``. A calibration *region* (see
+:mod:`rigel.calibration.region_arrays`) is a maximal interval over which this signature is constant.
 
-This module is the pure encoding layer: the bit constants, the
-``RegionType`` / ``RegionStrand`` enums, and the small functions that derive
-coarse class from a signature. It has **no tunable parameters** — the bit
-values and enum integers are a wire encoding, not heuristics — and depends
-on nothing else in the package, so every other calibration module can import
-it freely.
+This module is the pure encoding layer: the bit constants, the ``RegionType`` / ``RegionStrand``
+enums, and the small functions that derive a coarse class from a signature. It has no tunable
+parameters — the bit values and enum integers are a wire encoding, not heuristics — and it depends
+on nothing else in the package, so every other calibration module may import it freely.
 
-Recovered from the pre-burn ``signature.py`` (``fc96902``), scrubbed of the
-obsolete 12-channel layout (the accumulator emits a 4-channel ``region_contained``
-plus separate boundary arrays; the gDNA FL pools are a separate payload keyed by
-the coarse region type — see :func:`coarse_type_array`).
+The derivations here are the vocabulary the rest of calibration is written in: the coarse type
+(exon wins over intron), the transcript-strand class, and the two per-strand activity masks that
+say which RNA populations the annotation admits at a position.
 """
 
 from __future__ import annotations
@@ -69,12 +65,12 @@ class RegionStrand(IntFlag):
 # NONE and AMBIG both lack a single transcript strand but are NOT
 # interchangeable for the strand channel:
 #   * TS_NONE  — no transcript (intergenic). gDNA is unstranded, so an arbitrary
-#                sense assignment is SAFE (neutral). Stays in the strand model.
+#                sense assignment is safe (neutral). Stays in the strand model.
 #   * TS_AMBIG — transcripts on BOTH strands (overlapping opposite-strand
 #                annotations). Every read is sense for one and antisense for the
-#                other, so there is NO valid sense split. AMBIG regions are
-#                EXCLUDED from strand deconvolution and recovered by density +
-#                boundary-sweep imputation + global fallback
+#                other, so there is no valid sense split. AMBIG regions are
+#                excluded from strand deconvolution and recovered by density,
+#                boundary-sweep imputation and the global fallback.
 TS_NONE: int = int(RegionStrand.NONE)  # 0
 TS_POS: int = int(RegionStrand.POS)  # 1
 TS_NEG: int = int(RegionStrand.NEG)  # 2
@@ -137,8 +133,8 @@ def coarse_type_array(signature: np.ndarray) -> np.ndarray:
     """Map a signature array to its uint8 :class:`RegionType` (exon > intron).
 
     Returns ``0`` (INTERGENIC) / ``1`` (INTRON) / ``2`` (EXON) per region — the
-    region-type axis of the gDNA FL pools (PR 4c); matches the C++ accumulator's
-    ``fl_pool_idx`` convention.
+    region-type axis of the gDNA fragment-length pools, and the same convention as
+    the C++ accumulator's ``fl_pool_idx``.
     """
     sig = np.asarray(signature)
     has_exon = (sig & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
@@ -168,13 +164,13 @@ def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
 
 
 def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-strand **nascent**-RNA-active masks from a signature array — ``(pos, neg)``.
+    """Per-strand nascent-RNA-active masks from a signature array — ``(pos, neg)``.
 
-    Nascent RNA is present wherever a transcript is (exon OR intron), so ``nrna_active`` on strand ``s``
-    is the union of that strand's exon and intron bits. This is the boundary solver's
-    transcript-continuity gate ``free_s``: a region's ``nrna_active`` is its own bits; a boundary's is the
-    AND of its two flanks (both flanks must carry the strand for an unspliced fragment to cross). See
-
+    Nascent RNA is present wherever a transcript is (exon OR intron), so ``nrna_active`` on strand
+    ``s`` is the union of that strand's exon and intron bits. This is the boundary solver's
+    transcript-continuity gate ``free_s``: a region's ``nrna_active`` is its own bits; a boundary's
+    is the AND of its two flanks, because both flanks must carry the strand for an unspliced
+    fragment to cross.
     """
     sig = np.asarray(signature)
     return (sig & (BIT_EXON_POS | BIT_INTRON_POS)) != 0, (
@@ -183,14 +179,14 @@ def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def mrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-strand **mature**-RNA-active masks from a signature array — ``(pos, neg)``.
+    """Per-strand mature-RNA-active masks from a signature array — ``(pos, neg)``.
 
-    Mature RNA lives only in exons, so ``mrna_active`` on strand ``s`` is that strand's exon bit — hence
-    ``mrna_active_s`` implies ``nrna_active_s`` (an exon carries both nascent and mature; an intron only
-    nascent). A region's ``mrna_active`` is its own exon bits; a boundary's is the AND of its two flanks
-    (mature crosses an unspliced fragment only across contiguous exon — else it would be spliced). This
-    selects the region's solver prior:
-    ``nrna_active ∧ ¬mrna_active`` ⇒ nascent-only ⇒ the nascent≈0 prior.
+    Mature RNA lives only in exons, so ``mrna_active`` on strand ``s`` is that strand's exon bit,
+    hence ``mrna_active_s`` implies ``nrna_active_s``. A region's ``mrna_active`` is its own exon
+    bits; a boundary's is the AND of its two flanks, because an unspliced fragment crosses as mature
+    only over contiguous exon — otherwise it would be spliced. This selects the region's solver
+    prior: ``nrna_active`` without ``mrna_active`` means the annotation admits RNA here only inside
+    an intron, which takes the near-zero nascent prior.
     """
     sig = np.asarray(signature)
     return (sig & BIT_EXON_POS) != 0, (sig & BIT_EXON_NEG) != 0

@@ -24,7 +24,7 @@ one numeric convention). The banks are float64 fractions; there is no quantum an
 ⚠ Claim 3 states the rule a second time, deliberately and in one place only. The specification reaches
 the answer through slices and two ``searchsorted`` calls; this reaches it by asking of every base "which
 region holds you, and which of that region's bounding region_bounds lie strictly inside this fragment?". Agreement is
-not automatic — the same shape ``reference_on_real_data.py``'s ``bisect`` walk has against the
+not automatic — the same shape ``native_parity_on_real_data.py``'s ``bisect`` walk has against the
 specification's index ranges (``TRAPS: a-test-that-redefines``).
 """
 

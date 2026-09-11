@@ -1,107 +1,43 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ IS THE INPUT TO THE SOLVER CORRECT? — the toy substrate, end to end, against first principles.
+"""Is the input to the solver correct? The toy substrate, end to end, against first principles. No solver runs.
 
-⛔ **NO SOLVER RUNS HERE.** Every number below is either (a) derived by hand from the transcript's own
-geometry, (b) read off the simulator's per-fragment ground truth in the BAM read names, or (c) read off
-the accumulator payload. Nothing is compared against a previous run and nothing is tolerated.
+Every number here is derived by hand from the transcripts' own geometry, read off the simulator's
+per-fragment ground truth in the BAM read names, or read off the accumulator payload; nothing is
+compared against a previous run and nothing is tolerated. The generative model is read out of the
+simulator rather than assumed — a length drawn from a truncated normal (floored to an integer), a
+start uniform over the template's legal starts (or from the probe landscape under capture), and a read
+name in template coordinates: spliced-transcript space for mRNA, pre-mRNA space for nascent, genomic
+for gDNA. `Geom` re-orients transcript coordinates to ascend with the genome so any number of
+transcripts on either strand share one implementation, with the reflections transcribed from
+`rigel.sim.bam` (`TRAPS: two-divisors-opposite-sign`). Five gates: S1 the simulator produced the
+requested budget in the coordinates it claims, with each RNA pool's realised length marginal against
+the opportunity-reweighted law; S2 the sj-crossing counts per transcript and per sj against exact
+placement combinatorics, checked per length so a placement bug cannot hide in an aggregate; S3 start
+uniformity with capture off, pooled across lengths by standardising each fragment against its own
+range, and the split-penalty shape with capture on; A1 every accumulator bank against an independent
+re-implementation of the deposit rule (`tests/native/_accumulator_reference.py`) driven by the truth
+rather than the aligned records (`TRAPS: self-checking-validator`), plus the structural zero — on a
+pure-mRNA library `boundary_unspliced` is nonzero exactly where some exon spans the boundary; A2 the
+payload's own identities. Two gates are resolution-aware and print the depth they would need rather
+than passing quietly (`TRAPS: key-on-a-realised-quantity`). `--perturb` corrupts one thing and the run
+must then fail; on a one-transcript spec most perturbations are vacuous and their silence is not a
+pass (`TRAPS: could-the-arm-have-fired`). `verify_capture.py` imports `_simulate`, `_fragments`,
+`check`, `FAIL`, `Geom`, `TH`, `INDEX` and `SUITE` from here.
 
-**The generative model, read out of the simulator rather than assumed** (`wgs_engine`, `sampling`):
+Usage::
 
-1. each fragment's LENGTH ``w`` is drawn from ``Normal(mean, sd)`` truncated to ``[min, max]``;
-2. its START is drawn over the ``seq_len - w + 1`` legal starts of its own template — uniformly with
-   capture off, and from the probe landscape with capture on (`capture.sampler.sample_starts`);
-3. the read name records ``{t_id}:{start}-{start+w}:{strand}:{i}`` in **TEMPLATE** coordinates —
-   spliced-transcript space for mRNA, pre-mRNA space for nascent, genomic for gDNA.
-
-So for a two-exon transcript with exons of ``e1`` and ``e2`` bases and spliced length ``L = e1 + e2``,
-a length-``w`` fragment has exactly ``L - w + 1`` legal starts, of which
-
-    w - 1                  cross the sj        (start in [e1-w+1, e1-1])
-    (e1 - w + 1)+          lie inside exon 1
-    (e2 - w + 1)+          lie inside exon 2
-
-and those three add back to ``L - w + 1``. ⭐ That identity is the spine of the whole file: it is checked
-per length, so a placement bug cannot hide in an aggregate.
-
-**The deposit rule, transcribed from `tests/native/_accumulator_reference.py`** (the executable
-specification, which the C++ is gated byte-identical to) and re-implemented here from the TRUTH rather
-than from the BAM — so this compares *the molecule the simulator made* with *the tally the accumulator
-holds*, which no existing gate does:
-
-* the path is the fragment's contiguous genomic SEGMENTS; a sj splits it in two;
-* ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
-  fragment, so its sum is the deposited count;
-* a region_bound boundary strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
-  sj, else ``boundary_unspliced``;
-* a region between two consecutively-crossed boundaries OF ONE SEGMENT is SPANNED;
-* every annotated sj used gets ``sj_count`` +1;
-* CONTAINED — ``region_contained`` — iff the path used no sj AND its first and last bases are in
-  the same region. ⛔ A spliced fragment is never contained.
-
-⭐⭐ **What that predicts for a ONE-transcript toy, and it is worth stating before measuring it:** on a
-pure-mRNA two-exon transcript whose exons ARE the regions, every fragment deposits either one
-``region_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``boundary_unspliced`` at the two
-``intron|exon`` boundaries is **exactly zero**, because mature RNA cannot cross an exon↔intron boundary
-contiguously. ⛔ **That last clause is NOT "zero everywhere"**, and the difference is the whole reason the
-structural gate is now a SET: as soon as another transcript's exon spans the intron, mature RNA crosses
-that boundary legitimately. On `splice_both_strands` TB+ and TC− both do, at all six interior BOUNDARIES.
-
-⭐⭐⭐ **ANY NUMBER OF TRANSCRIPTS, ON EITHER STRAND (2026-08-05).** The predecessor refused a ``−``
-transcript and refused more than one, which made the rung the splice-flux reframe must be derived against
-unverifiable input (TRAPS: self-checking-validator). Both restrictions are gone, and the mechanism is one idea: work in
-``u``-space, the transcript coordinate RE-ORIENTED to ascend with the genome. See :class:`Geom`. The
-reflections are transcribed from `rigel.sim.bam.transcript_to_genomic_blocks` and
-``premrna_to_genomic_interval`` rather than assumed, per TRAPS: two-divisors-opposite-sign's rule about reading the
-simulator's code.
-
-⛔⛔ **WHAT IT MEASURED, 2026-08-05.** Every bank matched the truth-derived deposit **exactly** on
-`spliced_exons` × 4 arms (pure mRNA, + gDNA, + nascent, capture-ON at 120 kb) and on
-**`splice_both_strands` × 2 arms** — pure mRNA at 100 k, and + gDNA + nascent(60) — with **zero**
-fragments held on any of them. On `splice_both_strands`, 4 transcripts / 2 strands / 2 sj: 22
-nonzero banks all Δ = 0, ``sj_count`` 174 and 190 against truth 174 and 190, and both sj'
-crossing counts within 0.5 z of the exact placement prediction.
-
-⭐⭐ **The finding worth carrying:** ``sj_count`` equals the TRUE sj-crossing count exactly, and it
-still does with FOUR overlapping transcripts on both strands, where a fragment's sj set has to
-resolve against its own transcript. The implicit-splice path is not lossy here — which is what makes this
-toy a clean substrate, and what says a pool shortfall on the real panel is about ANNOTATION AMBIGUITY,
-not read length.
-
-⚠ **Perturbations — TRAPS: self-checking-validator's second half, and they are a ``--perturb`` FLAG rather than a hand
-edit so every claim here is reproducible.** All six fire — ⛔⛔ **ON `splice_both_strands`, AND THE SPEC
-IS PART OF THE CLAIM.** Re-verified 2026-08-13. On the owner's `spliced_exons` rung only `drop_sj` fires
-and the other five are SILENT — not a hole, but not a pass either: that spec declares ONE `+`-strand
-transcript, so `pos_blocks` has no `−` fragment to mirror, `single_geom`/`transcript_order` have no
-second geometry to confuse, and the structural-set gate `unspliced_zero_everywhere` flips is VACUOUS
-there (no exon spans a BOUNDARY, so both its sets are empty). ⭐ Reading those five silences as a pass
-is `TRAPS: could-the-arm-have-fired`, and it was read that way once. `pos_premrna` additionally needs
-`--nrna`; the arms below are `--spec splice_both_strands --no-gdna [--nrna 60]`.
-
-| perturbation | what fired |
-|---|---|
-| `pos_blocks` | ⭐ the deposit gate — a ``−`` mature fragment mapped as ``+`` lands mirror-image |
-| `pos_premrna` | ⭐ the deposit gate — same for nascent, against the transcript's genomic SPAN |
-| `transcript_order` | the deposit gate, and 2,586 fragments stop mapping at all |
-| `single_geom` | the deposit gate — the old one-transcript assumption loses HALF the deposits |
-| `unspliced_zero_everywhere` | ⭐⭐ the structural-set gate, naming all six BOUNDARIES. ⚠ Only on the
-  pure-mRNA arm, because that is the only arm the claim is about — a scope statement, not a hole |
-| `drop_sj` | the sj-axis equality AND the deposit gate |
-
-⚠ **Two gates are RESOLUTION-AWARE and say so out loud** rather than passing quietly. The
-drawn-vs-realised length discrimination needs the templates to be short enough to tilt the marginal: on
-`splice_both_strands` the four templates (2/8/10/4 kb) separate the two laws by only 1.10 bp, so the arm
-needs ≳ 83 k mRNA fragments before that check has teeth, and it prints the required depth when it does
-not (TRAPS: key-on-a-realised-quantity). ⭐ The start-uniformity test is POOLED across lengths by standardising each
-fragment against its own ``(eff−1)/2 ± √((eff²−1)/12)``, which is exact and has teeth at any depth — the
-per-length form it replaces needed n ≥ 500 in ONE length and therefore reported "not checked" on every
-toy, which reads as a pass.
+    python scripts/design/verify_toy_substrate.py --spec spliced_exons                       # the default donor, gDNA on
+    python scripts/design/verify_toy_substrate.py --spec splice_both_strands --no-gdna        # the pure-mRNA arm, every prediction exact
+    python scripts/design/verify_toy_substrate.py --spec splice_both_strands --no-gdna --nrna 60
+    python scripts/design/verify_toy_substrate.py --spec spliced_exons --donor <capture_on cond> --genome-length 120000
+    python scripts/design/verify_toy_substrate.py --spec splice_both_strands --no-gdna --perturb pos_blocks   # must fail
+    python scripts/design/verify_toy_substrate.py --spec two_exon --n-rna 100000 --work-dir /tmp/rigel_verify_substrate
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import math
 import os
 import sys
@@ -113,11 +49,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 import pysam  # noqa: E402
 
-DESIGN = Path(__file__).resolve().parent
-_s = importlib.util.spec_from_file_location("toy_harness", DESIGN / "toy_harness.py")
-TH = importlib.util.module_from_spec(_s)
-sys.modules["toy_harness"] = TH
-_s.loader.exec_module(TH)
+from _shared import sibling  # noqa: E402
+
+TH = sibling("toy_harness.py")
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
@@ -131,10 +65,9 @@ TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 FAIL: list[str] = []
 
-#: ⭐⭐ THE PERTURBATION UNDER TEST — TRAPS: self-checking-validator's second half, as a flag rather than a hand edit so
-#: every claim below is reproducible by anyone. ``--perturb <name>`` corrupts exactly one thing and the
-#: run must then FAIL; a perturbation that fires nothing is a hole in the gate set, not a pass.
-#: The verdicts are in this module's docstring.
+#: The perturbation under test, as a flag rather than a hand edit so every claim is reproducible.
+#: ``--perturb <name>`` corrupts exactly one thing and the run must then fail; a perturbation that
+#: fires nothing is a hole in the gate set, not a pass (`TRAPS: self-checking-validator`).
 PERTURB = "none"
 PERTURBATIONS = {
     "none": "the honest run",
@@ -165,10 +98,10 @@ def check(ok: bool, label: str, detail: str = "") -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class Geom:
-    """One transcript's geometry, on EITHER strand.
+    """One transcript's geometry, on either strand.
 
-    ⭐⭐ **Everything below works in ``u``-space — the transcript coordinate RE-ORIENTED so it ascends
-    with the genome** — and that single change is what makes one implementation serve both strands.
+    Everything below works in ``u``-space — the transcript coordinate re-oriented so it ascends with
+    the genome — and that single change is what makes one implementation serve both strands.
     ``rigel.sim.bam.transcript_to_genomic_blocks`` maps a ``−``-strand transcript interval by reflecting
     it (``t → L − t``) and then walking the exons in ascending genomic order, so::
 
@@ -177,9 +110,10 @@ class Geom:
 
     and in ``u``-space the exons are the genomic ones in genomic order, the sj region_bounds are their
     cumulative lengths, and a uniform draw over ``t`` is a uniform draw over ``u``. So placement
-    combinatorics, containment and per-sj crossing are all strand-FREE once expressed here.
+    combinatorics, containment and per-sj crossing are all strand-free once expressed here.
 
-    ⛔ The reflection is transcribed from the simulator's own code, not assumed — TRAPS: two-divisors-opposite-sign's rule.
+    The reflection is transcribed from the simulator's own code, not assumed
+    (`TRAPS: two-divisors-opposite-sign`).
     """
 
     exons: tuple[tuple[int, int], ...]  #: genomic [start, end) per exon, ascending
@@ -224,17 +158,17 @@ class Geom:
         return self.exons[0][0], self.exons[-1][1]
 
     def u_interval(self, t_start: int, t_end: int) -> tuple[int, int]:
-        """A TRANSCRIPT-space interval re-oriented to ascend with the genome (see the class docstring)."""
+        """A transcript-space interval re-oriented to ascend with the genome (see the class docstring)."""
         if self.strand == "-" and PERTURB != "pos_blocks":
             L = self.spliced_length
             return L - t_end, L - t_start
         return t_start, t_end
 
     def blocks(self, t_start: int, t_end: int) -> list[tuple[int, int]]:
-        """Map a TRANSCRIPT-space interval to its genomic segments, ascending, on either strand.
+        """Map a transcript-space interval to its genomic segments, ascending, on either strand.
 
-        ⚠ Byte-for-byte the same arithmetic as ``rigel.sim.bam.transcript_to_genomic_blocks``: reflect
-        on ``−``, then walk the exons in genomic order."""
+        The same arithmetic as ``rigel.sim.bam.transcript_to_genomic_blocks``: reflect on ``−``, then
+        walk the exons in genomic order."""
         u0, u1 = self.u_interval(t_start, t_end)
         out = []
         for (gs, ge), off in zip(self.exons, self.offsets):
@@ -245,9 +179,9 @@ class Geom:
         return out
 
     def premrna_block(self, t_start: int, t_end: int) -> tuple[int, int]:
-        """A NASCENT (pre-mRNA-space) interval mapped to its single genomic segment, either strand.
+        """A nascent (pre-mRNA-space) interval mapped to its single genomic segment, either strand.
 
-        ⚠ The same reflection, against the transcript's genomic SPAN rather than its spliced length —
+        The same reflection, against the transcript's genomic span rather than its spliced length —
         ``rigel.sim.bam.premrna_to_genomic_interval``. Getting this wrong on ``−`` puts every nascent
         fragment at the mirror-image position inside the gene, which is invisible in a total and
         visible per region."""
@@ -264,10 +198,10 @@ class Geom:
         return total, total - sum(inside), inside
 
     def crossings_per_sj(self, w: int) -> list[int]:
-        """Legal starts that cross EACH sj, in ``u``-space — one entry per intron.
+        """Legal starts that cross each sj, in ``u``-space — one entry per intron.
 
         A length-``w`` fragment crosses the region_bound at ``c`` iff its ``u``-start lies in
-        ``[c − w + 1, c − 1]``, intersected with the ``[0, L − w]`` legal range. ⭐ Per sj, not
+        ``[c − w + 1, c − 1]``, intersected with the ``[0, L − w]`` legal range. Per sj, not
         pooled: on a 3-exon transcript a long fragment can cross two, and only the per-sj form
         can tell a mis-placed sj from a mis-counted one."""
         total = max(self.spliced_length - w + 1, 0)
@@ -293,9 +227,9 @@ class Geom:
 class TruthTally:
     """Re-derive every accumulator bank from the simulator's own per-fragment truth.
 
-    ⚠ Deliberately NOT a copy of the production code path: it takes the TRUE genomic segments (from the
+    Deliberately not a copy of the production code path: it takes the true genomic segments (from the
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
-    the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
+    the payload is a real statement about fidelity and not a tautology (`TRAPS: self-checking-validator`)."""
 
     def __init__(
         self, region_bounds: np.ndarray, n_regions: int, n_boundaries: int, sj_id_by_intron: dict
@@ -305,18 +239,16 @@ class TruthTally:
         self.region_start = np.zeros(n_regions, np.int64)
         self.boundary_unspliced = np.zeros(n_boundaries, np.int64)
         self.boundary_spliced = np.zeros(n_boundaries, np.int64)
-        #: ⛔ TWO DIFFERENT THINGS, AND THEY ONCE SHARED THE NAME ``sj`` — the crossing TALLY below
-        #: was overwritten by the lookup map, so ``deposit`` raised on the first spliced fragment.
-        #: This file's own `TRAPS: two-masks-one-name`; keep the tally and the map named apart.
+        #: Two different things — the crossing tally and the lookup map — kept named apart
+        #: (`TRAPS: two-masks-one-name`).
         self.sj = Counter()  #: jid -> crossings, the bank ``sj_count`` is scored against
         self.sj_id_by_intron = sj_id_by_intron  #: (intron_start, intron_end) -> jid
         self.n_deposited = 0
 
     def _region_of(self, pos: int) -> int:
-        """⚠ ``region_bounds`` carries BOTH reference boundaries — ``n_regions = n_region_bounds − 1`` — so the
-        region index is one less than the insertion point. Transcribed from the reference's own
-        ``_local_region``; getting it wrong shifts every deposit by one region, which is exactly what a
-        first run of this file did."""
+        """``region_bounds`` carries both reference boundaries — ``n_regions = n_region_bounds − 1`` — so
+        the region index is one less than the insertion point. Transcribed from the reference's own
+        ``_local_region``; getting it wrong shifts every deposit by one region."""
         return min(max(int(np.searchsorted(self.region_bounds, pos, side="right")) - 1, 0), self.region_bounds.size - 2)
 
     def deposit(self, segments: list[tuple[int, int]], introns: list[tuple[int, int]]):
@@ -327,17 +259,15 @@ class TruthTally:
         first_base, last_base = segments[0][0], segments[-1][1] - 1
         self.region_start[self._region_of(first_base)] += 1
         self.n_deposited += 1
-        # ⛔ THE ARRAY AND THE LOOP INDEX MUST NOT SHARE A NAME. They did — ``boundary[boundary - 1]``
-        # raised ``TypeError: 'int' object is not subscriptable`` the moment a fragment crossed one.
         # The bank carries the ``_count`` suffix exactly as `tests/native/_accumulator_reference.py`
-        # names it, which is the file this one transcribes.
+        # names it, which is the file this one transcribes; the loop index below must not shadow it.
         boundary_count = self.boundary_spliced if spliced else self.boundary_unspliced
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(self.region_bounds, seg_start, side="right"))
             last = int(np.searchsorted(self.region_bounds, seg_end, side="left"))
             for boundary in range(first, last):
                 boundary_count[boundary - 1] += 1
-        # ⚠ ``boundary`` indexes ``region_bounds``; boundary ``boundary-1`` follows the reference exactly.
+        # ``boundary`` indexes ``region_bounds``; boundary ``boundary-1`` follows the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
         if not sj_ids and self._region_of(first_base) == self._region_of(last_base):
@@ -350,7 +280,7 @@ class TruthTally:
 def _drawn_pmf(donor):
     """The pre-capture length marginal the sampler actually draws, as ``(lengths, pmf)``.
 
-    ⚠ The engine rounds the config to INTEGERS and its sampler does ``.astype(int)``, which FLOORS a
+    The engine rounds the config to integers and its sampler does ``.astype(int)``, which floors a
     continuous normal — so ``P(w) = Phi((w+1−μ)/σ) − Phi((w−μ)/σ)``, not the density at ``w``."""
     lo, hi = donor.frag_min, donor.frag_max
     mu_i, sd_i = float(round(donor.frag_mean)), float(round(donor.frag_std))
@@ -362,12 +292,12 @@ def _drawn_pmf(donor):
 
 
 def _pool_length_gate(label, widths, templates, donor, tag):
-    """The realised length marginal of ONE pool, against ``f_post(w) ∝ f_pre(w)·Σ_t a_t·eff_t(w)``.
+    """The realised length marginal of one pool, against ``f_post(w) ∝ f_pre(w)·Σ_t a_t·eff_t(w)``.
 
-    ⭐⭐ **THE REALISED MARGINAL IS NOT THE DRAWN ONE**, and with several templates it is not one
-    template's either. `wgs_engine._post_capture_length_allocation` reweights the pre-capture draw by
-    the pool's TOTAL opportunity summed over templates — ``Σ_t a_t·(L_t − w + 1)+`` off capture — because
-    a library cannot yield more fragments of a length than its templates have placements for. Each pool
+    The realised marginal is not the drawn one, and with several templates it is not one template's
+    either: `wgs_engine._post_capture_length_allocation` reweights the pre-capture draw by the pool's
+    total opportunity summed over templates — ``Σ_t a_t·(L_t − w + 1)+`` off capture — because a
+    library cannot yield more fragments of a length than its templates have placements for. Each pool
     (mature / nascent) has its own template lengths, so each is gated separately: pooling them would let
     a long template's tilt cancel a short one's.
 
@@ -385,14 +315,14 @@ def _pool_length_gate(label, widths, templates, donor, tag):
     for a, tlen in templates:
         eff += float(a) * np.maximum(tlen - xs + 1, 0).astype(float)
     if donor.capture_on:
-        # ⭐ Under capture ``total_eff(w)`` is the PROBE-WEIGHTED opportunity, and the engine's own note
-        # says capture SELECTS FOR LENGTH: a longer fragment presents more sequence, overlaps more of a
-        # probe, and is captured better — until the overlap saturates at the probe length. With
-        # `off_target_weight` a and `binding_per_base` b and probes tiling the exons, a fragment's best
-        # single-probe overlap is ``min(w, probe_length)``, so
+        # Under capture ``total_eff(w)`` is the probe-weighted opportunity, and capture selects for
+        # length: a longer fragment presents more sequence, overlaps more of a probe, and is captured
+        # better — until the overlap saturates at the probe length. With `off_target_weight` a and
+        # `binding_per_base` b and probes tiling the exons, a fragment's best single-probe overlap is
+        # ``min(w, probe_length)``, so
         #     total_eff(w) ≈ Σ_t a_t (L_t − w + 1)+ · (a + b·min(w, probe_length))
-        # ⚠ APPROXIMATE — it ignores the sj split and the per-probe tiling phase — so the gate
-        # below only asserts the DIRECTION under capture, never the value.
+        # Approximate — it ignores the sj split and the per-probe tiling phase — so the gate below
+        # only asserts the direction under capture, never the value.
         k = donor.capture_knobs
         a0, b0 = float(k["off_target_weight"]), float(k["binding_per_base"])
         plen = float(k["probe_length"])
@@ -416,14 +346,14 @@ def _pool_length_gate(label, widths, templates, donor, tag):
     check(abs(w.mean() - mu_pred) < 4 * se,
           f"the realised {label} length mean matches f_pre(w)·Σ_t a_t·eff_t(w)",
           f"observed {w.mean():.2f} vs predicted {mu_pred:.2f}  (4 se = {4 * se:.2f})")
-    # ⭐⭐ DOES THIS SPEC RESOLVE THE TWO LAWS AT ALL? The separation the geometry offers is
-    # ``|mu_pred − mu_drawn|``, and it is a property of the TEMPLATE LENGTHS, not of the depth: a
+    # Does this spec resolve the two laws at all? The separation the geometry offers is
+    # ``|mu_pred − mu_drawn|``, and it is a property of the template lengths, not of the depth: a
     # 10,000 bp template has a nearly flat ``(L − w + 1)`` over the fragment range, so a mixture
-    # dominated by long templates tilts the marginal by ~1 bp where a 2 kb one tilts it by ~5.
-    # ⛔ So an unconditional "it must be 4 se from the drawn mean" FAILS on a long-template spec for a
-    # reason that has nothing to do with fidelity. The honest form is `suite_resolves.py`'s: assert the
-    # discrimination where the design supplies it, and where it does not, say so and say what depth
-    # would (TRAPS: key-on-a-realised-quantity — key the claim on a realised quantity, and print it).
+    # dominated by long templates tilts the marginal by ~1 bp where a 2 kb one tilts it by ~5. An
+    # unconditional "it must be 4 se from the drawn mean" would fail on a long-template spec for a
+    # reason that has nothing to do with fidelity, so the discrimination is asserted where the design
+    # supplies it, and where it does not, the depth that would is printed
+    # (`TRAPS: key-on-a-realised-quantity`).
     gap = abs(mu_pred - mu_drawn)
     if gap > 4 * se:
         check(abs(w.mean() - mu_drawn) > 4 * se,
@@ -446,7 +376,7 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
     nrna = [f for f in frags if f["kind"] == "nrna"]
     print(f"   fragments in the oracle BAM: {len(frags):,}   "
           f"mRNA {len(mrna):,} · nascent {len(nrna):,} · gDNA {len(gdna):,}")
-    # ⚠ ``n_rna_fragments`` is the RNA BUDGET, not the mature count: with ``nrna_abundance > 0`` the
+    # ``n_rna_fragments`` is the RNA budget, not the mature count: with ``nrna_abundance > 0`` the
     # nascent pool is drawn from the same budget. Checking it against the mature count alone reads as a
     # simulator failure and is a reader failure.
     check(len(mrna) + len(nrna) == spec.n_rna_fragments,
@@ -455,7 +385,7 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
     if spec.nrna_abundance:
         print(f"      nascent share of the RNA budget: {len(nrna) / max(len(mrna) + len(nrna), 1):.1%}")
 
-    # ⛔ every t_id in the BAM must be one this spec declared — a typo'd id would otherwise be silently
+    # every t_id in the BAM must be one this spec declared — a typo'd id would otherwise be silently
     # skipped by every per-transcript prediction below and read as "nothing to check".
     unknown = sorted({f["t_id"] for f in mrna + nrna} - set(geoms))
     check(not unknown, "every RNA fragment's transcript id is one the spec declared", f"{unknown}")
@@ -475,7 +405,7 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
             check(not bad, f"{tid}{geom.strand}: every nascent interval lies inside [0, {n:,}) of "
                            "PRE-mRNA space", f"{len(bad)} violation(s) of {len(own):,}")
 
-    # ⭐ the two RNA pools are drawn SEPARATELY (`wgs_engine._accumulate_pool` per pool), so each gets
+    # the two RNA pools are drawn separately (`wgs_engine._accumulate_pool` per pool), so each gets
     # its own opportunity-reweighted prediction against its own template lengths.
     _pool_length_gate(
         "mRNA", [f["end"] - f["start"] for f in mrna],
@@ -497,10 +427,9 @@ def gate_simulator(frags, geoms, abund, nrna_abund, spec, donor):
 
 
 def gate_splice_combinatorics(mrna, geoms, capture_on):
-    """S2 — the sj-crossing counts, against the exact placement count, PER TRANSCRIPT and PER
-    SJ.
+    """S2 — the sj-crossing counts, against the exact placement count, per transcript and per sj.
 
-    ⭐ Per sj rather than pooled: on a multi-exon transcript a long fragment can cross two, and
+    Per sj rather than pooled: on a multi-exon transcript a long fragment can cross two, and
     only the per-sj form separates "a sj is in the wrong place" from "the total is off".
     Returns ``{(t_id, sj_index): observed crossings}``."""
     print("\n── GATE S2: THE SPLICE, AGAINST FIRST-PRINCIPLES COMBINATORICS ───────────────────────")
@@ -538,7 +467,7 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
         if capture_on:
             print("      ⚠ capture is ON, so uniform placement is NOT the null — the probe landscape")
             print("        reweights the starts. Reported for scale only; GATE S3 tests the law.")
-        # ⛔ THE PARTITION IDENTITY, per length, so a placement bug cannot hide in an aggregate: a
+        # The partition identity, per length, so a placement bug cannot hide in an aggregate: a
         # fragment lies wholly inside exactly one exon, or it crosses at least one sj.
         worst = (0.0, None)
         for w, n in sorted(by_len.items()):
@@ -573,16 +502,13 @@ def gate_splice_combinatorics(mrna, geoms, capture_on):
 
 
 def _uniform_start_z(starts, widths, template_len):
-    """The POOLED z for "starts are uniform over each fragment's own legal range", exactly.
+    """The pooled z for "starts are uniform over each fragment's own legal range", exactly.
 
-    ⭐ A length-``w`` fragment has ``eff = template_len − w + 1`` legal starts, so under uniform
+    A length-``w`` fragment has ``eff = template_len − w + 1`` legal starts, so under uniform
     placement ``E[start] = (eff−1)/2`` and ``Var[start] = (eff²−1)/12`` — both known in closed form and
-    both length-dependent. Standardising EACH fragment by its OWN mean and sd gives i.i.d. mean-0
-    variance-1 terms, so ``Σz/√n`` is a single N(0,1) test over the whole pool.
-
-    ⛔ This replaces a per-length test that needed n ≥ 500 IN ONE LENGTH: a realistic draw spreads
-    ~450 distinct lengths over the pool, so that form reported "not checked" on every toy and the
-    absence read as a pass. Pooling costs nothing and has teeth at any depth.
+    both length-dependent. Standardising each fragment by its own mean and sd gives i.i.d. mean-0
+    variance-1 terms, so ``Σz/√n`` is a single N(0,1) test over the whole pool, with teeth at any
+    depth where a per-length form would report "not checked".
 
     Returns ``(z, n_used)``; ``n_used`` excludes degenerate fragments (``eff ≤ 1``, no freedom)."""
     zs = []
@@ -599,12 +525,12 @@ def _uniform_start_z(starts, widths, template_len):
 
 
 def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
-    """S3 — does the realised start distribution match the sampler's OWN weight law?"""
+    """S3 — does the realised start distribution match the sampler's own weight law?"""
     print("\n── GATE S3: HYBRID CAPTURE ───────────────────────────────────────────────────────────")
     if not donor.capture_on:
         print("   capture is OFF on this donor — the null is uniform placement, tested in GATE S2.")
-        # ⛔ and that null must actually hold, or 'off' is not off. Per transcript: a mixture of
-        # templates of different lengths is NOT uniform on any one of them.
+        # and that null must actually hold, or 'off' is not off. Per transcript: a mixture of
+        # templates of different lengths is not uniform on any one of them.
         for tid, geom in sorted(geoms.items()):
             own = [f for f in mrna if f["t_id"] == tid]
             z, n = _uniform_start_z([f["start"] for f in own],
@@ -620,9 +546,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
                 print(f"   {tid}{geom.strand}: pooled nascent start-uniformity z = {z:+.2f} "
                       f"(n = {n:,}, pre-mRNA template {g1 - g0:,} bp)")
                 check(abs(z) < 4.0, f"{tid}: nascent starts are uniform on the pre-mRNA, capture off")
-        # ⭐⭐ AND THE ONE THE REFRAME DERIVATION LEANS ON: gDNA is uniform along the chromosome before
-        # capture. the truth's own gDNA-density RATIO is the comparand for a gDNA
-        # level precisely because of this, so it is worth a gate rather than an assumption.
+        # gDNA is uniform along the chromosome before capture; the truth's own gDNA-density ratio is
+        # the comparand for a gDNA level precisely because of this, so it is a gate, not an assumption.
         if gdna:
             z, n = _uniform_start_z([f["start"] for f in gdna],
                                     [f["end"] - f["start"] for f in gdna], spec.genome_length)
@@ -635,8 +560,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
     print(f"   capture ON.  knobs: {donor.capture_knobs}")
     print("   ⭐ the ON-vs-OFF contrast, which is where the capture LAW is actually tested, lives in")
     print("      `verify_capture.py`. What follows is the shape this run alone can show.")
-    # ⭐ The probes tile each exon, so on this spec EVERY transcript base is under some probe and the
-    # discriminating quantity is not "on probe vs off" but the SPLIT penalty at the sj: a probe
+    # The probes tile each exon, so on this spec every transcript base is under some probe and the
+    # discriminating quantity is not "on probe vs off" but the split penalty at the sj: a probe
     # never spans the sj (they tile per exon), so a sj-crossing fragment's best single
     # probe group covers at most the longer of its two overhangs.
     for tid, geom in sorted(geoms.items()):
@@ -671,7 +596,7 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
 
 
 def gate_accumulator(frags, geoms, res, payload, ra, spec):
-    """A1 — every bank, re-derived from the TRUTH, against the payload. The main event."""
+    """A1 — every bank, re-derived from the truth, against the payload. The main event."""
     print("\n── GATE A1: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
     region_bounds = np.asarray(payload.region_bounds, np.int64)
@@ -687,7 +612,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
         src = int(np.asarray(jg.src_region)[k])
         dst = int(np.asarray(jg.dst_region)[k])
         sj[(int(starts[src] + sizes[src]), int(starts[dst]))] = k
-    # ⛔ EVERY spec-declared intron must appear on the index's sj axis, and nothing else may. A
+    # Every spec-declared intron must appear on the index's sj axis, and nothing else may. A
     # sj the map misses would make its crossings read as contiguous and silently deposit on the
     # wrong bank; the equality catches both directions.
     if PERTURB == "drop_sj" and sj:
@@ -721,11 +646,6 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print("   " + "-" * 80)
     ok_all = True
     pay = {
-        # ⛔ NO `region_spanning` ROW, AND THE TRUTH-SIDE TALLY IS GONE WITH IT. The bank was DELETED
-        # from the payload on 2026-08-08 (`5591cc01`, "six dead banks gone"); this table went on
-        # naming it, so the gate raised `AttributeError` before it compared anything. A `src/`
-        # deletion is the mechanism that kills an instrument — there is nothing left to score it
-        # against, so keeping the tally would be scoring a bank that no longer exists.
         "region_contained": (col(payload.region_contained_count), tt.region_contained, "region"),
         "region_start": (np.asarray(payload.region_start_count, np.int64), tt.region_start, "region"),
         "boundary_unspliced": (col(payload.boundary_unspliced_count), tt.boundary_unspliced, "boundary"),
@@ -756,14 +676,14 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print()
     check(ok_all, "⭐⭐ EVERY BANK MATCHES THE TRUTH-DERIVED DEPOSIT EXACTLY")
 
-    # ── ⭐⭐ THE ZERO THAT IS STRUCTURAL, PREDICTED FROM THE ANNOTATION ALONE ──────────────────────
-    # On a pure-mRNA library an BOUNDARY can carry unspliced flux only where some transcript's EXON spans
-    # its position — mature RNA cannot cross an exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary). ⛔ The
-    # predecessor asserted `boundary_unspliced == 0` EVERYWHERE, which is true only of a one-transcript
-    # two-exon toy and false the moment another transcript's exon spans the intron: on
-    # `splice_both_strands` TB+ and TC− both do. So the prediction is now a SET, derived from the exon
-    # intervals with no reference to the fragments, and the gate is an EQUALITY in both directions —
-    # a spurious nonzero and a missing one are both failures (TRAPS: self-checking-validator's "emit all classes").
+    # ── the zero that is structural, predicted from the annotation alone ──────────────────────────
+    # On a pure-mRNA library a boundary can carry unspliced flux only where some transcript's exon
+    # spans its position — mature RNA cannot cross an exon↔intron boundary contiguously
+    # (`TRAPS: mature-rna-never-crosses-a-boundary`). "Zero everywhere" is true only of a
+    # one-transcript two-exon toy and false the moment another transcript's exon spans the intron, so
+    # the prediction is a set, derived from the exon intervals with no reference to the fragments, and
+    # the gate is an equality in both directions — a spurious nonzero and a missing one are both
+    # failures.
     e_un = col(payload.boundary_unspliced_count)
     mrna_only = all(f["kind"] == "mrna" for f in frags)
     if mrna_only:
@@ -839,7 +759,7 @@ def main() -> int:
         spec = dataclasses.replace(spec, nrna_abundance=float(args.nrna))
     spec = dataclasses.replace(spec, name=f"verify_{spec.name}")
 
-    # ⭐ ANY number of transcripts, on EITHER strand — `Geom` works in genome-ascending ``u``-space.
+    # any number of transcripts, on either strand — `Geom` works in genome-ascending ``u``-space.
     geoms, abund, nrna_abund = {}, {}, {}
     for gene in spec.genes:
         for t in gene["transcripts"]:
@@ -850,7 +770,7 @@ def main() -> int:
             exons = tuple(tuple(int(x) for x in e) for e in sorted(t["exons"]))
             geoms[tid] = Geom(exons, str(gene["strand"]))
             abund[tid] = float(t.get("abundance", 0.0))
-            # ⚠ ``spec.nrna_abundance`` OVERRIDES the per-transcript value when > 0 — that is
+            # ``spec.nrna_abundance`` overrides the per-transcript value when > 0 — that is
             # `Scenario.build_oracle`'s own rule, and reading the per-transcript field instead would
             # predict a zero nascent pool on every toy that has one.
             nrna_abund[tid] = (
@@ -870,7 +790,7 @@ def main() -> int:
     print(f"   gDNA rate {donor.gdna_rate_per_base:.6g}/bp"
           + ("   ⭐ FORCED TO ZERO (pure-mRNA arm)" if args.no_gdna else ""))
 
-    # simulate + scan, reusing the harness so this is the SAME substrate every other instrument sees
+    # simulate + scan, reusing the harness so this is the same substrate every other instrument sees
     sub = _simulate(spec, donor, args.work_dir)
     frags = _fragments(sub["bam"])
     mrna, nrna, gdna = gate_simulator(frags, geoms, abund, nrna_abund, spec, donor)
@@ -892,7 +812,7 @@ def main() -> int:
 
 
 def _simulate(spec, donor, work_dir):
-    """`toy_harness.run_toy`'s first half, kept verbatim so this verifies the SHIPPED path."""
+    """`toy_harness.run_toy`'s first half, kept verbatim so this verifies the shipped path."""
     import rigel.pipeline as PL
     from rigel.sim import CaptureConfig, GDNAConfig, ReadSimConfig, Scenario
 

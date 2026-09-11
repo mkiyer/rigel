@@ -1,63 +1,37 @@
 #!/usr/bin/env python
-"""⭐⭐ **WHICH OBJECTS CAN BE SOLVED, AND OF THOSE, WHICH ARE SOLVED WRONG — AND CONFIDENTLY SO.**
+"""Which objects are solvable, which are solved wrong, and which are confidently wrong?
 
-⛔ **THE MISTAKE THIS REPLACES.** ``pass0_vs_oracle.py`` scores every object that carries mass and
-mass-weights the result. In pass-0 that is the wrong question. Pass-0 is the **prior-free** solve, and
-its job is not to be accurate everywhere — it is to produce a substrate the gDNA hyperprior can be
-fitted against. A region with no own evidence that reports ``f_g ≈ ½`` at **zero precision** is not
-making an error; it is correctly saying *I cannot be solved without a prior*, which is exactly true.
-Counting that as error buries the thing that actually matters underneath it.
+Pass-0 is the prior-free solve, and its job is to produce the substrate the gDNA prior is fitted on,
+not to be accurate everywhere: an object with no own evidence that reports ``f_g ≈ ½`` at zero
+precision is correctly saying it cannot be solved without a prior, and counting that as error buries
+what matters. So this audit takes `pass0_vs_oracle.measure_condition`'s truth and pass-0 arm and
+separates three populations a mass-weighted error lumps together: undetermined (no own-evidence
+channel; excluded from the error denominator, and checked only for the opposite failure, a value far
+from ½ claiming a finite precision), solvable and right, and solvable and wrong, the last split by
+confidence, because a wrong value with a tight variance outvotes correct neighbours and anchors the
+prior. The standardised discrepancy is in log space, ``z = (log f_pred − log f_true) / sqrt(var)``,
+because ``var_gdna`` is ``Var(log f_g)`` despite its name, with the truth clipped to the solver's own
+λ-grid endpoints. No tuned threshold decides anything: ``|z|`` bands are sd multiples, own-evidence
+strength is a curve over ``sd(λ) = 1/√τ`` decades, and the headline is a calibration curve of realised
+RMS log error against claimed sd. The ablation ladder (``fg_strand`` / ``fg_loc`` / ``f_g``) is read
+off the solver's own capture, so nothing is re-solved. Rank a panel on ``mwae_all`` and ``Σ|err|``
+(fixed denominators), never on the columns whose denominator the solver moves; zero-gDNA rows are
+printed as false-positive checks and never averaged in.
 
-⭐⭐ **WHAT MATTERS IS THE OBJECT THAT IS SOLVABLE, IS SOLVED WRONG, AND IS SURE OF ITSELF.** That is
-what corrupts the hyperprior fit, and through the prior it corrupts everything downstream. The whole
-point of this instrument is to separate three populations that a mass-weighted error lumps together:
-
-1. **UNDETERMINED** — no own evidence. ⛔ EXCLUDED from the error denominator. Its only failure mode
-   is the opposite one: claiming a precision it has not earned.
-2. **SOLVABLE and right.**
-3. **SOLVABLE and wrong** — split by whether the solver was *confident*. Uncertainly wrong is a cost;
-   **confidently wrong is a defect**, because a wrong value with a tight variance outvotes correct
-   neighbours and anchors the prior.
-
-⛔ **THE CONFIDENCE COMPARISON MUST BE IN LOG SPACE, AND THE FIELD NAME LIES ABOUT THIS.**
-``var_gdna`` / ``gdna_frac_var`` is ``Var(log f_g)`` (`simplex_logodds`, required by TRAPS: two-gaussians-one-latent), while both
-names read as the variance of the fraction. Writing ``|f_g − truth| / sqrt(var_gdna)`` is a linear
-error over a log-space variance — the exact defect that, when corrected once before, moved a suite
-total 0.046 → 1.007 and INVERTED the per-class ranking. So the standardised discrepancy here is::
-
-    z = (log f_pred − log f_truth) / sqrt(var_gdna)
-
-⚠ **and the truth is clipped to the solver's OWN λ-grid endpoints**, not to a chosen epsilon. Truth is
-exactly 0 at a pure-RNA object and exactly 1 at a structurally-pure-gDNA one — both common — and
-``log 0`` is not a number. The grid is the honest bound: the solver cannot express a fraction outside
-it, so that is the best answer it could ever have given.
-
-⭐ **NO TUNED THRESHOLD DECIDES ANYTHING HERE.** ``|z|`` bands are standard-deviation multiples, which
-is a scale the quantity brings with it. And the headline is a **calibration curve** — realised RMS log
-error against claimed sd, per precision decile — which needs no region_bound at all: a ratio of 1 means the
-declared precision is earned, above 1 means overconfident. That curve is the answer to "is the solver
-sure and wrong?" without anyone choosing a number.
-
-⭐ **THE ABLATION LADDER IS FREE.** ``_debug["capture"]`` already carries the same solve at three
-depths — ``fg_strand`` (strand likelihood alone), ``fg_loc`` (the message-free local self-solve: strand
-+ intron factory + reference) and ``f_g`` (final, after the messages). Nothing is re-solved, so the rungs
-are the solver's own arithmetic rather than a reimplementation of it. Comparing them says WHICH channel
-moved an object off truth, and in particular recovers the class the old tooling called
-``P1_OVERRULED``: strand had it right and confident, and the full solve overrode it.
-
-⚠ On an unstranded library the strand rung is silent by construction (``I(f_g) ∝ (2κ−1)²`` is exactly
-0 at κ = ½), so the FACTORY is the only own-evidence channel and is reported as its own rung. A ladder
-without it would be blank on precisely the condition that matters most.
+Also a library: `vertex_ceiling.py` and the calibration tests import `audit`, `summarise`,
+`channel_masks`, `standardised_discrepancy`, `resolving_power_rows`, `undetermined_overreach_rows`
+and the band constants.
 
 Usage::
 
-    python scripts/design/solvability_audit.py --condition NAME [--suite DIR] [--top 20]
+    python scripts/design/solvability_audit.py --condition <name> --oracle-cache <dir>   # one condition, in full
+    python scripts/design/solvability_audit.py --oracle-cache <dir>                      # the whole panel, one row each
+    python scripts/design/solvability_audit.py --condition <name> --axis both
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -67,17 +41,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-P0 = _sibling("pass0_vs_oracle.py")
+P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
@@ -88,73 +55,54 @@ from rigel.index import TranscriptIndex  # noqa: E402
 
 _EPS = 1.0e-9
 
-#: ⚠ Standard-deviation multiples, not tuned constants: ``z`` carries its own scale, and these are
-#: where a Gaussian's mass sits. Nothing branches on them — they are read points on a distribution.
+#: Standard-deviation multiples, not tuned constants: ``z`` carries its own scale, and these are
+#: where a Gaussian's mass sits. Nothing branches on them; they are read points on a distribution.
 Z_BANDS = ((0.0, 1.0), (1.0, 2.0), (2.0, 5.0), (5.0, np.inf))
 
-#: The own-evidence channels a slot can have in pass-0. ⚠ ``length`` is absent deliberately: the
-#: per-region length likelihood is gated OFF, so it cannot contribute to what the SOLVER could get
-#: right. C_info's identification test is a statement about the payload, not about the solver.
-#:
-#: ⛔ **THESE OVERLAP AND ARE NOT A PARTITION**, which a first draft of this instrument got wrong.
-#: ``tau_lam = i_strand + tau_fac``, so a single-stranded INTRON region has BOTH — and that is the
-#: best-evidenced kind of object there is, not a bookkeeping error. Only ``none`` is exclusive of the
-#: rest. Mass summed over these rows therefore DOUBLE-COUNTS, and the report says so; the partition
-#: that does add up is determined / undetermined.
+#: The own-evidence channels a slot can have in pass-0 (C_info's identification test is a statement
+#: about the payload, not about the solver, and is not one of them). These overlap and are not a
+#: partition: ``tau_lam = i_strand + tau_fac``, so a single-stranded intron region has both, and that
+#: is the best-evidenced kind of object there is. Only ``none`` is exclusive of the rest. Mass summed
+#: over these rows therefore double-counts, and the report says so; the partition that does add up
+#: is determined / undetermined.
 CHANNELS = ("locked", "strand", "factory", "none")
 
 
-#: ⭐⭐ **OWN-EVIDENCE STRENGTH IS A CONTINUUM AND MUST BE REPORTED AS ONE.** ``tau_lam`` is a Fisher
-#: precision on ``λ = log(f_g/f_R)``, so a slot's own statement carries sd ``1/√τ``, in nats, against a
-#: solver that can only represent ``λ ∈ [−L, +L]``. These are DECADE boundaries on that sd — read
-#: points on a distribution, not a region_bound: nothing branches on them.
-#:
-#: ⛔ **A BINARY solvable/undetermined REGION_BOUND AT ``τ > 1e-9`` WAS THE DEFECT, AND A BETTER THRESHOLD IS
-#: NOT THE FIX.** The strand arm carries ``I(f_g) ∝ (2κ−1)²`` (`EQUATIONS.md` §5.2), *exactly* zero at
-#: κ = ½; but κ is FITTED, so on a genuinely unstranded library it misses ½ by a few 1e-4 and τ lands
-#: at ~1e-7 rather than at 0. ``τ > 1e-9`` then calls that a live channel and the object is scored as
-#: SOLVABLE while its own statement has sd of 10³ nats. ⚠ A resolving-power floor at ``1/(2L)²`` was
-#: derived, implemented and **REFUTED by its own insensitivity gate**: τ is CONTINUOUS across that
-#: region on 4 of 5 ladder conditions (only the unstranded capture-OFF row is bimodal, and there the
-#: two clusters are the silent strand arm and the live intron factory). With no empty interval, any
-#: floor is a tuned constant. So the honest instrument reports the CURVE and lets the reader see how
-#: much of the mass sits where nothing could be resolved.
+#: Own-evidence strength is a continuum and is reported as one. ``tau_lam`` is a Fisher precision on
+#: ``λ = log(f_g/f_R)``, so a slot's own statement carries sd ``1/√τ``, in nats, against a solver that
+#: can only represent ``λ ∈ [−L, +L]``. These are decade boundaries on that sd, read points and not
+#: thresholds. A binary solvable/undetermined cut at ``τ > 1e-9`` is the solver's gate, not a
+#: strength: the strand arm's information is ``∝ (2κ−1)²``, exactly zero at κ = ½, but κ is fitted,
+#: so on an unstranded library τ lands near 1e-7 rather than 0 and the object is scored as solvable
+#: while its own statement has an sd of thousands of nats. A resolving-power floor was refuted by its
+#: own insensitivity gate (τ is continuous across that region, so any floor is a tuned constant); the
+#: curve lets the reader see how much of the mass sits where nothing could be resolved.
 SD_LAMBDA_DECADES = (1.0, 10.0, 100.0, 1000.0, np.inf)
 
 
 def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
-    """Which own-evidence channel(s) can speak at each slot — the solvability question, per channel.
+    """Which own-evidence channel(s) can speak at each slot: the solvability question, per channel.
 
-    ⚠ **Overlapping capability flags, NOT a partition.** ``strand`` and ``factory`` are both live on a
-    single-stranded intron region, because ``tau_lam`` is their SUM. Only ``none`` excludes the others.
-
-    ⭐ Decomposed from ``tau_lam`` rather than re-derived: the factory arm is recoverable exactly by
+    Overlapping capability flags, not a partition: ``strand`` and ``factory`` are both live on a
+    single-stranded intron region, because ``tau_lam`` is their sum; only ``none`` excludes the others.
+    Decomposed from ``tau_lam`` rather than re-derived: the factory arm is recovered exactly by
     re-reading the captured ``intron_prior`` through the same ``density_factor_precision`` the solver
-    used, and with the length channel off, whatever remains of ``tau_lam`` is the strand arm. So these
-    are the solver's own numbers, split, not a second opinion about them.
-
-    ⛔ **``locked`` IS THE G1 CLASS ON BOTH AXES** (:func:`~rigel.calibration.region_geometry.g1_locked`).
-    It used to be ``~solvable & (kind == REGION)``, which dropped every structurally-locked **boundary** — an
-    intergenic↔exon boundary, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
-    at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
-    ignorance. Those objects are the opposite of ignorant: they are structurally certain, and right.
-    ⚠ The relay-era region-only mask of the same name (``region_init``'s ``struct_lock``) retired on
-    2026-09-09; ``g1_locked`` is the one home.
-
-    ⚠ **The τ tests here stay at the solver's own ``_EPS``**, so "has a channel" means what
-    ``region_init.has_own_composition_evidence`` (``tau_lam`` above the guard) means by it. Strength is a
-    separate question and it is reported as a
-    curve over ``SD_LAMBDA_DECADES`` — see that constant for why a threshold cannot answer it.
+    used, and whatever remains of ``tau_lam`` is the strand arm, so these are the solver's own numbers
+    split, not a second opinion. ``locked`` is the G1 class on both axes
+    (:func:`~rigel.calibration.region_geometry.g1_locked`): a structurally-locked boundary is certain
+    and right, not ignorant, and must not fall into ``none``. The τ tests stay at the solver's own
+    ``_EPS``, so "has a channel" means what ``region_init.has_own_composition_evidence`` means by it;
+    strength is a separate question, reported as the curve over ``SD_LAMBDA_DECADES``.
     """
     tau = np.asarray(capture["_tau0_lam"], np.float64)
-    # ⚠ ``chain`` is here to be CHECKED, not merely to be passed: a capture built against a different
+    # ``chain`` is here to be checked, not merely passed: a capture built against a different
     # partition would shift every mask by one slot, which is invisible in aggregate.
     if tau.shape != (int(chain.n_slots),):
         raise ValueError(
             f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
-    # G1, from the ONE definition (`region_geometry.g1_locked`) — see there for why this is both axes.
+    # G1, from the one definition (`region_geometry.g1_locked`), on both axes.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
     lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
     fac = density_factor_precision(capture.get("intron_prior"), lam_grid)
@@ -170,12 +118,13 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
 
 
 def standardised_discrepancy(f_pred, f_true, var_log, fg_grid):
-    """``z = (log f_pred − log f_truth) / sd``, both clipped to the solver's own grid support.
+    """``z = (log f_pred − log f_truth) / sd``, both clipped to the solver's own grid support; returns
+    ``(z, gap, sd)``.
 
-    ⛔ Log space, because ``var_gdna`` is ``Var(log f_g)`` and the names say otherwise. ⚠ ``sd == 0``
-    is a slot the solver called CERTAIN; a wrong answer there is infinitely confident and is returned
-    as ``inf`` rather than divided by zero — that is the honest encoding, and it puts structurally
-    locked mistakes at the top of the ranking where they belong.
+    Log space, because ``var_gdna`` is ``Var(log f_g)`` and the names say otherwise. ``sd == 0`` is a
+    slot the solver called certain; a wrong answer there is infinitely confident and is returned as
+    ``inf`` rather than divided by zero, which puts structurally locked mistakes at the top of the
+    ranking where they belong.
     """
     lo, hi = float(np.min(fg_grid)), float(np.max(fg_grid))
     lp = np.log(np.clip(np.asarray(f_pred, np.float64), lo, hi))
@@ -222,7 +171,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
     determined = (per_axis["locked"] | per_axis["strand"] | per_axis["factory"]) & live
     undetermined = per_axis["none"] & live
     err = np.where(live, g_p - g_t, 0.0)
-    # ⭐ the own-evidence STRENGTH each object earned, in the units the solver works in: sd(λ) = 1/√τ
+    # the own-evidence strength each object earned, in the units the solver works in: sd(λ) = 1/√τ
     # nats. ``inf`` where there is no channel at all, 0 where the object is structurally certain.
     tau_axis = onto(cap["_tau0_lam"])
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -246,29 +195,21 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
     }
 
 
-#: ⭐ Read points on ``|f_pred − ½|``, which lives on [0, ½] by construction. Nothing branches on them.
+#: Read points on ``|f_pred − ½|``, which lives on [0, ½] by construction. Nothing branches on them.
 OVERREACH_BANDS = (0.05, 0.15, 0.30, 0.50)
 
 
 def undetermined_overreach_rows(a: dict) -> list[tuple]:
-    """⛔⛔ **THE UNDETERMINED CLASS'S OWN GATE, AND IT WAS MISSING.**
+    """The undetermined class's own gate.
 
-    Excluding the undetermined population from the error denominator is right — an object with no own
-    evidence reporting ``f_g ≈ ½`` at zero precision is stating a true fact about itself. But
-    `SUCCESS.md` names the failure mode that exclusion leaves open, and nothing was checking it:
-
-        "Its only failure mode is the opposite one: claiming a precision it has not earned."
-
-    An undetermined object at ``f_g = 0.83`` is **not** honest ignorance. It is the messages and the
-    population reference asserting an answer where the object had none, and because the class is
-    excluded from every error total, the assertion is invisible. Measured cost of that blindness on the
-    gDNA ladder: on ``gdna_g25_ss_0.50_nrna_none_capture_off``, **87 exon regions are driven to
-    ``f_g = 0.829`` against a truth of 0.009 — 395,251 fragments of error, 0.0 % of it scored**, and
-    that is 3× the error on the row where the defect was first found.
-
-    So: bucket the undetermined by how far from ½ they were moved, and report the error and the claimed
-    precision in each bucket. ⭐ The correct answer for this class is ``½`` at ``sd = ∞``, so a row far
-    from ½ with a FINITE sd is the defect, stated without any threshold deciding it.
+    Excluding the undetermined population from the error denominator is right: an object with no own
+    evidence reporting ``f_g ≈ ½`` at zero precision is stating a true fact about itself. Its one
+    failure mode is the opposite one, claiming a precision it has not earned: an undetermined object
+    far from ½ is the messages and the reference asserting an answer where the object had none, and
+    because the class is excluded from every error total the assertion would otherwise be invisible.
+    So the undetermined are bucketed by how far from ½ they were moved, with the error and the claimed
+    precision in each bucket; the correct answer for this class is ``½`` at ``sd = ∞``, so a row far
+    from ½ with a finite sd is the defect, stated without any threshold deciding it.
 
     Returns ``(label, n, mass, Σ|err|, mean |f−½|, share claiming finite precision)``.
     """
@@ -292,26 +233,22 @@ def undetermined_overreach_rows(a: dict) -> list[tuple]:
 
 
 def resolving_power_rows(a: dict, mask: np.ndarray) -> list[tuple]:
-    """``(label, n, mass, Σ|err|, pred f_g, true f_g)`` per ``sd(λ)`` decade — the CURVE that replaces
-    the solvable/undetermined region_bound for everything that is not structurally certain.
+    """``(label, n, mass, Σ|err|, pred f_g, true f_g)`` per ``sd(λ)`` decade: the curve that replaces
+    a solvable/undetermined cut for everything that is not structurally certain.
 
-    ⭐ **This is the shape the measurement actually has.** ``sd(λ) ≫ L`` says the object's own evidence
-    is flat across every λ the solver can represent, so whatever it reports came from its neighbours
-    and the reference — the *substance* of "undetermined", stated as a magnitude instead of a class.
-    ⛔ Nothing branches on the boundaries; they are decades, and a reader draws their own boundary.
-
-    ⚠ **Pass a mask that EXCLUDES the structurally-locked slots.** Their ``sd(λ)`` is 0 because they
-    are certain, not because their evidence is strong, and putting them in the first band would read
-    as "0–1 nat: the best-evidenced population" when nothing was ever asked of them. They have their
-    own row in the channel table.
+    ``sd(λ) ≫ L`` says the object's own evidence is flat across every λ the solver can represent, so
+    whatever it reports came from its neighbours and the reference: the substance of "undetermined",
+    stated as a magnitude instead of a class. Nothing branches on the boundaries. Pass a mask that
+    excludes the structurally-locked slots: their ``sd(λ)`` is 0 because they are certain, not because
+    their evidence is strong, and they have their own row in the channel table.
     """
     out = []
     sd, err, total, fp, ft = a["sd_lam"], np.abs(a["err"]), a["total"], a["f_pred"], a["f_true"]
     lo = 0.0
     for hi in SD_LAMBDA_DECADES:
-        # ⚠ the top band must be CLOSED at infinity: ``sd`` is exactly ``inf`` where no channel spoke,
-        # and ``inf < inf`` is False, so a half-open top band silently drops that whole population —
-        # the one the curve exists to make visible.
+        # the top band must be closed at infinity: ``sd`` is exactly ``inf`` where no channel spoke,
+        # and ``inf < inf`` is False, so a half-open top band would silently drop that whole
+        # population, the one the curve exists to make visible.
         b = mask & (sd >= lo) & ((sd < hi) if np.isfinite(hi) else np.ones_like(sd, bool))
         w = total[b]
         label = f"{lo:g}–{hi:g}" if np.isfinite(hi) else f">= {lo:g}"
@@ -328,7 +265,7 @@ def resolving_power_rows(a: dict, mask: np.ndarray) -> list[tuple]:
 
 
 def _band_table(a: dict, mask: np.ndarray) -> list[tuple[str, int, float, float]]:
-    """``(band, n, mass, Σ|err|)`` over ``|z|`` bands — the confidence profile of a population."""
+    """``(band, n, mass, Σ|err|)`` over ``|z|`` bands: the confidence profile of a population."""
     out = []
     z, err, total = np.abs(a["z"]), np.abs(a["err"]), a["total"]
     for lo, hi in Z_BANDS:
@@ -445,15 +382,15 @@ def report(m, a: dict, config=None) -> None:
     print("      old `P1_OVERRULED` class: strand right and confident, then overruled by the full solve.")
 
 
-#: ⭐ THE DEBUG CHAIN, in dependency order (owner, 2026-08-03). Each link is a precondition for the
-#: next, so they are reported in this order and read top-down: the first one that is wrong explains
-#: everything below it, and fixing anything lower before it is wasted work.
+#: The debug chain, in dependency order. Each link is a precondition for the next, so they are
+#: reported in this order and read top-down: the first one that is wrong explains everything below
+#: it, and fixing anything lower before it is wasted work.
 #:
-#: 1. ``region/intergenic`` — structurally pure gDNA. If these are wrong, nothing else can be right.
-#: 2. ``region/intron``     — the DENSITY DECONVOLUTION: intron density against the intergenic background. On an
-#:                          unstranded library this is the ONLY own-evidence channel there is.
-#: 3. ``boundary/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron region.
-#: 4. ``boundary/intergenic|exon``  — must impute from the resolved intergenic region.
+#: 1. ``region/intergenic``: structurally pure gDNA. If these are wrong, nothing else can be right.
+#: 2. ``region/intron``: the density deconvolution, intron density against the intergenic
+#:    background. On an unstranded library this is the only own-evidence channel there is.
+#: 3. ``boundary/intron|exon``: must infer gDNA/RNA by propagation from the resolved intron region.
+#: 4. ``boundary/intergenic|exon``: must impute from the resolved intergenic region.
 CHAIN = (
     "region/intergenic",
     "region/intron",
@@ -468,17 +405,15 @@ CHAIN = (
 
 
 def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
-    """Label each object by what it IS, structurally — a region's region type, or for a contiguous boundary
-    the PAIR of region types it separates.
+    """Label each object by what it is structurally: a region's region type, or for a contiguous
+    boundary the pair of region types it separates.
 
-    ⭐ The boundary pair is the axis the debug chain turns on. An ``intron|exon`` boundary and an
+    The boundary pair is the axis the debug chain turns on: an ``intron|exon`` boundary and an
     ``intergenic|exon`` boundary are the same kind of object to the solver and completely different
-    problems: the first must inherit its answer from an intron region the density deconvolve resolved, the
-    second from a structurally-locked intergenic region. Lumping them as "boundaries" hides which
-    propagation path is broken.
-
-    ⚠ The pair is unordered (``intron|exon`` and ``exon|intron`` are one class) — the chain is
-    genomic order, not a direction of inference.
+    problems (the first inherits its answer from an intron region the density deconvolve resolved,
+    the second from a structurally-locked intergenic region), and lumping them as "boundaries" hides
+    which propagation path is broken. The pair is unordered (``intron|exon`` and ``exon|intron`` are
+    one class); the chain is genomic order, not a direction of inference.
     """
     from rigel.calibration.signature import coarse_type_array
 
@@ -511,7 +446,7 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
 
 
 def chain_report(m, a: dict, config) -> None:
-    """The debug chain, in dependency order — the first broken link explains the ones below it."""
+    """The debug chain, in dependency order: the first broken link explains the ones below it."""
     struct = structural_classes(m, a["axis"], config)
     live, total, err = a["live"], a["total"], np.abs(a["err"])
     det, f_true, f_pred = a["determined"], a["f_true"], a["f_pred"]
@@ -535,14 +470,13 @@ def chain_report(m, a: dict, config) -> None:
 
 
 def summarise(a: dict) -> dict:
-    """The one-line-per-condition summary the debug loop's step 1-2 reads.
+    """The one-line-per-condition summary the panel table reads.
 
-    ⭐ Every field is about the SOLVABLE population, because that is the only population pass-0 is
-    accountable for. ``message_delta`` is the one to watch across a panel: it is ``final − local`` on
-    the solvable objects, so a POSITIVE value means the message layer moved objects that had their
-    own answer AWAY from truth — the class the retired tooling called ``P1_OVERRULED``, and the one
-    that matters out of proportion to its size because the hyperprior is fitted on exactly these
-    objects.
+    Every field but the last two is about the solvable population, the only population pass-0 is
+    accountable for. ``message_delta`` is ``final − local`` on the solvable objects, so a positive
+    value means the message layer moved objects that had their own answer away from truth, which
+    matters out of proportion to its size because the hyperprior is fitted on exactly these objects.
+    ``all_mwae`` and ``abs_err`` are over the live population and are the fields to rank on.
     """
     det, total, err = a["determined"], a["total"], np.abs(a["err"])
     live = a["live"]
@@ -558,26 +492,22 @@ def summarise(a: dict) -> dict:
         return float(np.sum(w * np.abs(a["ladder"][key][det] - f_true[det])) / max(w.sum(), 1))
 
     local, final = rung("fg_loc"), rung("f_g")
-    # ⭐⭐⭐ THE TWO FIXED-DENOMINATOR FIELDS — TRAPS: honesty-metrics-reward-ignorance's own prescription, and the reason this
-    # table can be ranked on at all. Every field above is defined over the DETERMINED set, whose size
-    # the solver moves by declining to answer; these two are defined over the LIVE population, so
+    # the two fixed-denominator fields (TRAPS: honesty-metrics-reward-ignorance), the reason this
+    # table can be ranked on at all. Every field above is defined over the determined set, whose size
+    # the solver moves by declining to answer, and the boolean `determined` flips on fitting noise
+    # (TRAPS: deadband-from-the-wrong-sample); these two are defined over the live population, so
     # nothing the solver does to its own confidence can touch them.
-    # ⛔ They exist because the boolean `determined` flips on FITTING NOISE at some conditions and not
-    # others (TRAPS: deadband-from-the-wrong-sample): `g75 ss0.50 capture_off` reports solv% 96.2 %, weak% 65.4 %, conf-wrong 92,154
-    # and calib 3.67 — and forcing κ = ½ takes solv% to 0.0 % while Σ|err| moves −0.6/−5.3/+4.6 %
-    # across the three big classes. The row is a reporting artefact, and ranking the ladder on the
-    # gameable columns picked it as the panel's worst. These two would not have.
     mass_live = float(total[live].sum())
     return_extra = {
         "all_mwae": float(err[live].sum()) / max(mass_live, 1.0),
         "abs_err": float(err[live].sum()),
     }
-    # ⭐⭐ THE COMPANION COLUMN THAT MAKES ``solv%`` SAFE TO READ. ``solv%`` counts objects the SOLVER
-    # treats as evidenced (``tau > 1e-9``), and that admits a strand arm whose own statement is 10³ nats
-    # wide — statistically real, physically nil (TRAPS: a-threshold-on-a-fitted-residue). So report, beside it, the share of the
-    # scored error that sits on objects whose own evidence cannot resolve one nat in ten. ⚠ 10 is a
-    # DECADE off the curve, a read point, not a region_bound: nothing branches on it, and the curve above it in
-    # the single-condition report is what a reader should actually consult.
+    # the companion column that makes ``solv%`` safe to read: ``solv%`` counts objects the solver
+    # treats as evidenced (``tau > 1e-9``), which admits a strand arm whose own statement is thousands
+    # of nats wide (TRAPS: a-threshold-on-a-fitted-residue). So report, beside it, the share of the
+    # scored error on objects whose own evidence cannot resolve one nat in ten. 10 is a decade off the
+    # curve, a read point and not a threshold; the curve in the single-condition report is what a
+    # reader should consult.
     weak = det & (a["sd_lam"] >= 10.0)
     return {
         "solvable_mass_share": mass_det / max(float(total[live].sum()), 1.0),
@@ -627,10 +557,9 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
             f"{s['calibration_ratio']:>6.2f} {s['local_mwae']:>7.4f} {s['final_mwae']:>7.4f} "
             f"{s['message_delta']:>+9.4f} {s['all_mwae']:>9.4f} {s['abs_err']:>11,.0f}"
         )
-    # ⛔ ZERO-gDNA ROWS ARE NEVER AVERAGED IN. Truth is 0 exactly there, so every log-space
-    # discrepancy is measured against the grid floor and any change that lowers the estimate
-    # "improves" the row — a one-sidedness that has already reversed a verdict in this project. They
-    # are printed above as false-positive checks and excluded from every aggregate below.
+    # zero-gDNA rows are never averaged in. Truth is 0 exactly there, so every log-space discrepancy
+    # is measured against the grid floor and any change that lowers the estimate "improves" the row.
+    # They are printed above as false-positive checks and excluded from every aggregate below.
     scored = [r for r in rows if r[1] > 0.0]
     zero = [r for r in rows if r[1] <= 0.0]
     if zero:

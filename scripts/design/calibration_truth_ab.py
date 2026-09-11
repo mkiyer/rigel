@@ -1,56 +1,28 @@
 #!/usr/bin/env python
-"""⭐ **THE DELIVERABLE, SCORED AGAINST TRUTH**: does the second pass reach the gDNA/RNA composition?
+"""How does the deliverable, the library's gDNA fraction, score against truth, and what is perfecting
+each fragment-length PMF worth?
 
-⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** The length work and the
-second pass are upstream plumbing: one definition of fragment length, then an accurate one, then an
-*unbiased* one. None of that is the product. The product is the library's composition, and the coupling
-was measured at **a 10 % length-model error is worth 0.010–0.026 of composition** — so a length error
-that went from +27 % to +0.00 % should be visible here, or the coupling is not what it was thought to be.
-
-⛔⛔ **"LENGTH" HERE IS THE fl PMF INSIDE THE *OPPORTUNITY* MODEL — NOT THE COMPOSITION CHANNEL THAT IS
-DEFERRED PAST 0.8.0, AND THE TWO SHARE A WORD AND NOTHING ELSE.** `--ceiling` hands `calibrate` the
-simulator's own post-capture length **distributions** in place of the fitted ones; it does not add a
-fragment-length composition channel, which is out of scope and must not be proposed. ⚠ Said here because
-this docstring's own headline says "the whole fragment-length track", and a reader who meets that sentence
-alone can reach for the retired thing.
-
-⚠ **Three sentences of this docstring were WRECKAGE from the numbered-label rename** — a dangling
-"Baseline it replaces:," with no referent, and a rule citation that had become
-"TRAPS: two-divisors-opposite-sign–TRAPS: pure-and-length-censored.6". They named documents and labels
-that no longer exist and are deleted rather than guessed at (2026-08-11).
-
-⭐ **ONE THING VARIED.** The same cached scan, the same index, the same config; the only difference is
-whether the side buffer has been **drained** before calibration reads the tally. The undrained arm is
-exactly what shipped before the second-pass drain landed. ⚠ That sentence said "before P4" until
-2026-08-17; `P4` is a HISTORICAL phase label and it resolves nowhere — it appears in none of the six
-permanent docs (checked). The mechanism is named instead, and `rigel.pipeline._drain_side_buffer` is it.
-
-⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE** (`TRAPS: zero-target-guards-are-one-sided`). Truth there is
-`f_gdna = 0` *exactly*, so any change that lowers the estimate scores better — a one-sidedness that has
-already reversed a verdict in this project once. The CONTAMINATED rungs carry the real signal: on the
-ladder, `g50` is 5 M gDNA against a fixed 10 M total, so `f_gdna = 0.5`.
-
-⚠ **The rungs were named `gdna100` / zero-gDNA until 2026-08-17** — pilot condition labels, and that panel
-was deleted on 2026-08-13. The 16-condition `gdna_ladder.yaml` names them `g00` / `g05` / `g50` / `g98`,
-and `--scan-cache` (was `--pilot`) now defaults to it.
-
-⛔⛔ **THE MESSAGE POLICY IS STAMPED ON EVERY ROW, because this number MOVES WITH IT and nothing said so
-(added 2026-08-17).** This instrument calls `calibrate` under a plain `CalibrationConfig()`, so it runs
-whatever `message_propagation` currently ships — `False` today. ⭐ Measured on
-`gdna_g50_ss_0.99_nrna_none_capture_off`, one thing varied: the undrained `f_gdna` reads **0.503297**
-with the relay muted and **0.496667** with it on, against a truth of exactly 0.500 — the SAME magnitude
-with the SIGN FLIPPED. ⛔ That is larger than the drain effect this instrument exists to measure
-(+0.0033 → −0.0053), so an unstamped row from a study configuration is indistinguishable from a shipped
-one and would read as the mechanism (`TRAPS: an-ablation-that-never-ran`, in the reporting direction).
-⭐ `ladder_arm_ab.py` stamps `messages` on every arm row for exactly this reason and `arm_score.py`
-refuses to aggregate across it; the old state table had to hand-annotate "messages OFF" beside this
-instrument's own numbers, which is the same fact written down by hand. ⚠ **STAMPED, not switchable** —
-no `--messages` flag is added here: the shipped default is what this measures, and a knob is a decision
-for the owner rather than a review repair.
+Off one cached scan per condition it runs `calibrate` twice, one thing varied: with the side buffer
+undrained and with it drained by `rigel.pipeline._drain_side_buffer`, and scores each `f_gdna` (in
+fragment units, from `CalibrationResult`'s own conserved counts) against the simulator's origin counts in
+`truth_summary.json`. With `--ceiling` it adds three arms that hand `calibrate` the simulator's own
+post-capture fragment-length distributions in place of the fitted ones (exact gDNA, exact RNA, both),
+which prices what perfecting each length model is worth before any work to perfect it. That "length" is
+the fl PMF inside the opportunity model, not a fragment-length composition channel, which this adds
+nowhere. The ceiling reaches only what `calibrate` reads: the effective-length shrinkage is built by
+`pipeline.py` outside every ceiling's patch point, so it is inside no ceiling number here. Judge on the
+contaminated rows and never on the zero-gDNA rows alone, where truth is exactly 0 and any change that
+lowers the estimate scores better (`TRAPS: zero-target-guards-are-one-sided`). Every row is stamped with
+the shipped message policy, because the number moves with it and a row from a study configuration is
+otherwise indistinguishable from a shipped one; there is no switch for it here. No EM runs and no
+re-scan happens.
 
 Usage::
 
-    python scripts/design/calibration_truth_ab.py [--index DIR] [--scan-cache DIR] [--json out.json]
+    python scripts/design/calibration_truth_ab.py                       # the ladder's scan caches
+    python scripts/design/calibration_truth_ab.py --ceiling --json out.json
+    python scripts/design/calibration_truth_ab.py --scan-cache DIR --cache-subdir _main --index DIR
+    python scripts/design/calibration_truth_ab.py --conditions <cond> ... --seed 1
 """
 
 from __future__ import annotations
@@ -72,13 +44,10 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
 
 def truth_f_gdna(condition_dir: Path) -> float | None:
-    """The library's TRUE gDNA fragment fraction, from the simulator's own origin counts.
+    """The library's true gDNA fragment fraction, from the simulator's own origin counts.
 
-    ⚠ Read from ``truth_summary.json``'s ``origin_counts`` rather than from the condition NAME. ⛔ On the
-    retired pilot the name was a RATE knob ("gdna100" gave 5 M gDNA against 5 M mRNA, i.e. 0.5) and the
-    gap was obvious. On the 16-condition ladder it is worse: the label happens to be the fraction exactly
-    — ``g05`` / ``g50`` / ``g98`` measure **0.050000 / 0.500000 / 0.980000** — which is precisely when
-    parsing the string starts to look safe, and it is still one rename away from silently wrong.
+    Read from ``truth_summary.json``'s ``origin_counts`` and never parsed from the condition name, which
+    is one rename away from silently wrong even where it happens to spell the fraction.
     """
     path = condition_dir / "truth_summary.json"
     if not path.is_file():
@@ -90,18 +59,11 @@ def truth_f_gdna(condition_dir: Path) -> float | None:
 
 
 def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarray | None":
-    """The simulator's OWN post-capture length distribution for one origin class, as a pmf.
+    """The simulator's own post-capture length distribution for one origin class, as a pmf.
 
-    ⭐⭐ **THIS IS THE CEILING INSTRUMENT** (`docs/TRAPS.md` measure-the-ceiling-first). Handing `calibrate`
-    the right answer for one channel says what *perfecting* that channel is worth, before any of the work
-    to perfect it is done — and it is available whenever the simulator writes truth. It is what showed
-    that a perfect RNA length model was worth 0.0004 while the gDNA pool nobody was ranking was worth
-    22 %: an A/B tells you whether a change helped, a ceiling tells you whether to start.
-
-    ⚠ Read from ``truth_fragment_lengths.tsv``, which is **post-capture empirical** — the realised
-    distribution, not the configured ``frag_mean``. Capture selects for length, so the configured
-    parameters describe a library that was never sequenced
-    (`docs/TRAPS.md` capture-selects-for-length).
+    Read from ``truth_fragment_lengths.tsv``, the realised distribution, not the configured
+    ``frag_mean``: capture selects for length, so the configured parameters describe a library that was
+    never sequenced. ``None`` when the class has no fragments (a zero-gDNA condition).
     """
     path = condition_dir / "truth_fragment_lengths.tsv"
     if not path.is_file():
@@ -121,19 +83,10 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarr
 
 
 def f_gdna_of(result) -> float:
-    """``f_gdna`` in FRAGMENT units — ``CalibrationResult``'s own conserved counts, the one definition.
+    """``f_gdna`` in fragment units, from ``CalibrationResult``'s own conserved counts.
 
-    ⛔⛔ **THIS USED TO SUM INCIDENCES AND SCORE THEM AGAINST A FRAGMENT COUNT.** It added
-    ``mass_gdna_region + mass_gdna_boundary`` over the raw banks, where an boundary term books ``max(K,1)`` per
-    fragment, and compared the ratio to ``truth_summary.json``'s ``origin_counts`` — which are real
-    molecules. The units did not match across the subtraction, and because the two components' K
-    inflations differ they did not cancel: on ladder g50 capture_off the incidence ratio reads
-    **0.3851** against a truth of **0.5085**, while the conserved counts reproduce **0.5085** exactly.
-    It also silently omitted the sj axis, so it disagreed with ``pipeline.py``'s version too.
-
-    ⭐ Reading the result's own field is the point: the count is assembled once, in ``calibrate``, where
-    each axis is converted by its own population's ``mass / count``. A consumer recombining the banks
-    itself is how the tree came to hold three different answers to this question.
+    The result's field is read rather than the banks recombined: a boundary bank books incidences, not
+    fragments, so a ratio over raw banks is in the wrong unit against the truth's molecule counts.
     """
     g, r = result.library_gdna_fragments, result.library_rna_fragments
     return g / (g + r) if (g + r) > 0 else 0.0
@@ -143,14 +96,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    # ⛔ WAS `--pilot`, RENAMED 2026-08-17. It is simply the scan-cache ROOT and always was; the name
-    # survived the `pilot` panel by four days and its DEFAULT pointed at a directory that no longer
-    # exists, so the instrument exited 2 out of the box. ⚠ `docs/SUCCESS.md` still spells the old name.
     ap.add_argument("--scan-cache", type=Path, default=DEFAULT_SCAN_CACHE,
                     help="the scan-cache ROOT — a directory of <condition>/ caches")
-    # ⭐ THE LADDER'S FULL SCAN IS CACHED ONE LEVEL DEEPER. `pass0_vs_oracle` writes the undrained main
-    # payload to `<oracle_cache>/<condition>/_main`, in exactly the `write_scan_cache` layout this
-    # reads — so the 16-condition panel needs a subdirectory, not a second copy of every scan.
+    # the oracle cache holds the undrained main payload one level deeper, at
+    # `<oracle_cache>/<condition>/_main`, in the `write_scan_cache` layout this reads
     ap.add_argument("--cache-subdir", default="",
                     help="subdirectory under each condition holding the cache; use `_main` to read an "
                          "oracle_cache built by pass0_vs_oracle.py / prior_vs_oracle.py")
@@ -184,13 +133,13 @@ def main() -> int:
     index = TranscriptIndex.load(str(args.index))
     derived = index_derived_inputs(index)
     config = CalibrationConfig()
-    # ⚠ The same de-tilt production uses, built once off the annotation, so it is identical in both
-    # arms and cannot be what moved them.
+    # the same de-tilt production uses, built once off the annotation, so it is identical in both
+    # arms and cannot be what moved them
     crossing = crossing_probability_from_index(index, 4096)
     gdna_opp = gdna_opportunity_from_index(index, 4096)
 
     def run(payload, strand_model, *, gdna_pmf=None, rna_pmf=None):
-        """Calibrate. ``gdna_pmf`` / ``rna_pmf`` override the fitted model — that is the ceiling arm."""
+        """Calibrate. ``gdna_pmf`` / ``rna_pmf`` override the fitted model; that is the ceiling arm."""
         fl = build_fl_models(payload, sj_opportunity=crossing, gdna_opportunity=gdna_opp)
         return calibrate(
             payload=payload,
@@ -215,9 +164,8 @@ def main() -> int:
         after = f_gdna_of(run(drained, cache.strand_model))
         row = {
             "condition": name,
-            # ⛔ PART OF THE MEASUREMENT, not metadata — see the module docstring: flipping this alone
-            # moves the undrained number from +0.0033 to −0.0033 against truth on `g50` stranded
-            # capture-OFF. A saved row without it cannot be attributed to a configuration.
+            # part of the measurement, not metadata: the number moves with the message policy, and a
+            # saved row without it cannot be attributed to a configuration
             "messages": "on" if config.message_propagation else "off",
             "truth_f_gdna": truth,
             "undrained_f_gdna": before,
@@ -228,9 +176,9 @@ def main() -> int:
             max_size = int(drained.max_length)
             exact_g = truth_length_pmf(suite / name, "gdna", max_size)
             exact_r = truth_length_pmf(suite / name, "rna", max_size)
-            # ⚠ A zero-gDNA condition has no gDNA truth histogram at all, so its exact-gDNA arm does not
-            # exist. Reported as None rather than silently falling back to the fitted model, which would
-            # read as "the ceiling arm changed nothing".
+            # a zero-gDNA condition has no gDNA truth histogram, so its exact-gDNA arm does not exist;
+            # reported as None rather than silently falling back to the fitted model, which would read
+            # as "the ceiling arm changed nothing"
             row["exact_gdna_f_gdna"] = (
                 f_gdna_of(run(drained, cache.strand_model, gdna_pmf=exact_g))
                 if exact_g is not None
@@ -265,8 +213,8 @@ def main() -> int:
         if t is None:
             print(f"{r['condition']:<44} {'—':>7}")
             continue
-        # ⚠ Absolute error, not relative: truth is 0 exactly on the zero-gDNA arm, where a relative error
-        # is undefined and a ratio would read as a division blow-up rather than a good answer.
+        # absolute error, not relative: truth is 0 exactly on the zero-gDNA arm, where a relative error
+        # is undefined
         eb, ea = r["undrained_f_gdna"] - t, r["drained_f_gdna"] - t
         print(
             f"{r['condition']:<44} {t:>7.4f} {r['undrained_f_gdna']:>10.4f} {eb:>+8.4f} "

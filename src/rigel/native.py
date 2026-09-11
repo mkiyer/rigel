@@ -18,9 +18,8 @@ from ._bam_impl import BamAnnotationWriter
 from ._bam_impl import detect_sj_strand_tag
 
 # -- The accumulator --------------------------------------------------------
-# The native class directly. The `_accumulator.py` row-view façade it used to come through is gone: it
-# existed only so the pre-rework spec tests could write `acc.regions[i].contained[ch]`, and the arrays it
-# wrapped no longer exist.
+# The native class directly: there is no Python row-view façade in front of it, so a caller reads the
+# banks the accumulator actually exports.
 from ._bam_impl import Accumulator
 
 # -- Fragment resolution ----------------------------------------------------

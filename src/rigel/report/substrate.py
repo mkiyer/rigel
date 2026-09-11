@@ -4,10 +4,10 @@ The substrate is everything ``rigel quant`` writes to its output directory:
 
 * ``summary.json`` — the lean run manifest (schema v2), read eagerly.
 * companion feather tables (``fragment_lengths``, ``gene_quant``,
-  ``calibration_track``, …) — read **lazily** on first access, so a report only
-  pays I/O + memory for the tables it actually uses. The big per-transcript /
-  nascent tables (``quant``, ``nrna_quant``) are exposed for future features but
-  never read unless something asks for them.
+  ``calibration_track``, …) — read lazily on first access, so a report only
+  pays I/O and memory for the tables it actually uses. The big per-transcript
+  and nascent tables (``quant``, ``nrna_quant``) are reachable the same way and
+  are never read unless something asks for them.
 
 Only ``summary.json`` is required; every companion table is optional so the
 report degrades gracefully on partial or older outputs.

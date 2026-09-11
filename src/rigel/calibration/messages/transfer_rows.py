@@ -105,9 +105,9 @@ def outside_flank(flags_b, left, right):
     (INSIDE) flank, as ``(outside, inside)``; ``(None, None)`` when the termini point both ways or when
     no terminus sits here. The orientation is read off the terminus flag alone: TSS+ and TES− bodies
     extend genomic-right, so the outside is the LEFT flank; TES+ and TSS− extend left, so it is the
-    RIGHT. ⭐ A splice junction sharing the boundary does not change which flank is inside (the
-    sj+terminus case, 2026-09-08: a transcript starting or ending exactly at another isoform's exon
-    edge — RUNX1's short isoform, LARGE1's ending isoform); its flux is placed by `junction_exon_side`."""
+    RIGHT. A splice junction sharing the boundary does not change which flank is inside — the
+    sj+terminus case, where a transcript starts or ends exactly at another isoform's exon edge; that
+    junction's flux is placed by `junction_exon_side` instead."""
     f = int(flags_b)
     if not (f & TERMINUS):
         return None, None
@@ -251,17 +251,17 @@ def level_bound_row(lam, density_b, opportunity_i, total_i, v):
 
 
 def edge_level_row(lam, n_b, n_e, a_g_b, a_g_e):
-    """THE EDGE'S LEVEL, ONE-SIDED (rule 5 as a level, the owner's design; the form the ladder kept,
-    2026-09-04). The intergenic|exon edge's crossing is structurally pure gDNA, so its COUNT measures the
-    gDNA level the exon continues; for each hypothesised exon share the implied edge count is
-    ``c = sigma(lam) * n_e * a_g_b / a_g_e``. BELOW the edge's level the count's exact Poisson likelihood
-    ``n_b log(c/n_b) − (c − n_b)`` — the exon has at least the edge's gDNA density, at counting width —
-    and NOTHING above it. The upper side has no honest form: capture enriches a probed interior over
-    its edge by an amount no local witness measures (1.25× on the test chromosome, 2.3× on the ladder),
-    and a two-sided or dampened upper side pulls an unstranded exon toward a centre below the truth
-    (ladder `g05 ss.50 ON` +15 %, `g50 ss.50 ON` +11 %). A ZERO count is vacuous: under capture a dark
-    edge beside a probed exon is not an empty one (the two-sided zero claim read 36,645 against 6,981
-    on the sparse-probe panel's `g98 ss.99 ON`); the zero controls it would win are the landscape's."""
+    """THE EDGE'S LEVEL, ONE-SIDED. The intergenic|exon edge's crossing is structurally pure gDNA, so
+    its COUNT measures the gDNA level the exon continues; for each hypothesised exon share the implied
+    edge count is ``c = sigma(lam) * n_e * a_g_b / a_g_e``. BELOW the edge's level the row is the
+    count's exact Poisson likelihood ``n_b log(c/n_b) − (c − n_b)`` — the exon has at least the edge's
+    gDNA density, at counting width — and NOTHING above it.
+
+    ⛔ The upper side has no honest form and must not be added: capture enriches a probed interior over
+    its edge by an amount no local witness measures, so a two-sided or dampened upper side pulls an
+    unstranded exon toward a centre below the truth. A ZERO count is vacuous for the same reason —
+    under capture a dark edge beside a probed exon is not an empty one — and the zero controls such a
+    claim would win belong to the landscape prior."""
     lam = np.asarray(lam, np.float64)
     n_b = float(n_b)
     if not n_b > 0.0:
@@ -332,16 +332,16 @@ def count_logvar(count) -> np.ndarray:
     """``Var(log rho)`` for a Poisson rate seen as ``count`` events over an opportunity — exactly, at
     every count including zero: under the Jeffreys prior the rate's posterior is ``Gamma(count + 1/2,
     E)``, whose log has variance ``trigamma(count + 1/2)``, independent of the opportunity ``E`` (it
-    moves the location and cannot sharpen the claim). This IS the ``1/n`` it replaces (they agree to
-    0.1 % from ``n = 10``); the whole difference is at small counts, and at ``n = 0`` it is ``pi^2/2 =
-    4.93`` (an sd of 2.2 nats) instead of infinity — a zero count is a measurement, not an absence.
-    ⭐ THE ONE HOME of the counting term: every hop price here and `region_init`'s own precision read
-    it, so there is one definition and nothing to keep in step."""
+    moves the location and cannot sharpen the claim). It agrees with the ``1/n`` it replaces at
+    moderate counts; the whole difference is at small ones, and at ``n = 0`` it is ``pi^2/2`` rather
+    than infinity — a zero count is a measurement, not an absence. THE ONE HOME of the counting term:
+    every hop price here and `region_init`'s own precision read it, so there is one definition and
+    nothing to keep in step."""
     return polygamma(1, np.asarray(count, np.float64) + 0.5)
 
 
 def hop_price(n_s, a_s, n_x, a_x):
-    """One hop's price on the lane's WITNESS counts — the owner's rule per hop, nothing pooled: both
+    """One hop's price on the lane's WITNESS counts, per hop and nothing pooled: both
     counts' counting (`count_logvar` each) plus the discrepancy of the two count densities beyond
     what counting explains, ``max(0, log(r)^2 - (1/n_s + 1/n_x))`` with ``r`` the ratio of the
     densities ``n_x / a_x`` and ``n_s / a_s``. A discrepancy is never attributed (capture, new
@@ -358,7 +358,7 @@ def hop_price(n_s, a_s, n_x, a_x):
     return v
 
 
-# ── THE RNA LEVEL LANES (the both-stranded locus, phase 1, 2026-09-08) ──────────────────────────
+# ── THE RNA LEVEL LANES (the both-stranded locus) ─────────────────────────────────────────────────
 
 #: a strand's four boundary bits, its junction bits and its terminus bits, by strand key
 strand_bits = {
@@ -380,7 +380,7 @@ def rna_level_of_profile(row, lam, u, n, a_r, rho_ref):
     LEVEL (over ``u = log(rho_s / rho_ref_s)``) through the node's own total: the RNA density
     ``rho_s`` implies the RNA share ``rho_s a_r / n``, hence ``f_g = 1 − rho_s a_r / n`` and the ``lam``
     the profile is read at; above the total the share is impossible and the level falls as the
-    total's Poisson tail. `level_of_profile` with ``1 − sigma`` in place of ``sigma``. ⚠ Near
+    total's Poisson tail. `level_of_profile` with ``1 − sigma`` in place of ``sigma``. Near
     ``f_r → 1`` the coordinate saturates at the total and several ``lam`` cells share one ``u`` cell —
     the same grid limit the gDNA level has at ``f_g → 1``."""
     row = np.asarray(row, np.float64)
@@ -397,8 +397,7 @@ def rna_row_of_level(profile, u, lam, n, a_r, rho_ref):
     """A held RNA level read as THIS single-strand node's composition row — `rna_level_of_profile`'s map
     read backwards, a pure coordinate change: ``u_s(lam) = log((1 − sigma(lam)) n / (a_r rho_ref))``. A
     lower-only level (non-decreasing in u) is NON-INCREASING in lam: "at least this much RNA" is "at most
-    this much gDNA", the upper side of the gDNA share, the partner a gDNA floor needs (phase 2 of the
-    both-stranded locus, 2026-09-08)."""
+    this much gDNA", the upper side of the gDNA share, the partner a gDNA floor needs."""
     p = np.asarray(profile, np.float64)
     lam = np.asarray(lam, np.float64)
     f_r = 1.0 / (1.0 + np.exp(lam))
@@ -408,14 +407,13 @@ def rna_row_of_level(profile, u, lam, n, a_r, rho_ref):
 
 
 def flux_level(u, count, rate, rho_ref, v=0.0):
-    """THE CERTIFIED FLUX at one of an exon's junctions as that strand's RNA level at the exon (the
-    owner's rulings 2026-09-08: spliced fragments are RNA of a KNOWN strand, measured, never solved —
-    one hop, boundary → exon; the junction's rate is an ESTIMATE of the exon's abundance, priced by
-    the node pair's disagreement): the spliced count's Poisson profile at each hypothesised density
-    on the route rate's own opportunity ``count / rate``, widened by the hop's price ``v``, then its
-    LOWER SIDE — the two-sided estimate over-claimed at the probe cliff (the sparse-probe panel's zero
-    control 94 → 448, measured 2026-09-08), so the exon takes "at least the RNA its junction's
-    isoforms carry" and nothing above. A zero count claims nothing (``None``)."""
+    """THE CERTIFIED FLUX at one of an exon's junctions as that strand's RNA level at the exon.
+    Spliced fragments are RNA of a KNOWN strand: measured, never solved, and strictly one hop
+    (boundary → exon). The junction's rate is an ESTIMATE of the exon's abundance, priced by the node
+    pair's disagreement — the spliced count's Poisson profile at each hypothesised density on the route
+    rate's own opportunity ``count / rate``, widened by the hop's price ``v``, then its LOWER SIDE.
+    ⛔ Lower-only, because a two-sided estimate over-claims at the probe cliff: the exon takes "at least
+    the RNA its junction's isoforms carry" and nothing above. A zero count claims nothing (``None``)."""
     count, rate = float(count), float(rate)
     if not (count > 0.0 and rate > 0.0):
         return None
@@ -427,8 +425,8 @@ def read_column(col, kappa):
     """The genome-strand column strand ``col``'s RNA READS on: its own when the library reads sense
     (``kappa >= 1/2``, or no fitted strand model), the other under an antisense protocol. A junction's
     route rate is in transcript-strand terms, so the exon count it is priced against must be the
-    count of the reads that strand's RNA produces — measured 2026-09-08: the wrong column read a
-    90 % transcript as 10 % and blurred its floor to nothing."""
+    count of the reads that strand's RNA produces; reading the other column inverts a node's strand
+    share and blurs its floor to nothing."""
     return int(col) if (kappa is None or float(kappa) >= 0.5) else 1 - int(col)
 
 

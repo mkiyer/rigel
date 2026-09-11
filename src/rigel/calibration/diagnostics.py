@@ -1,15 +1,17 @@
-"""CalibrationDiagnostics — report-facing diagnostics from the calibrator.
+"""CalibrationDiagnostics — the report-facing view of the fitted density landscape.
 
-Distinct from :class:`CalibrationResult` (the frozen prior the EM consumes):
-this carries what the QC report wants to *show*, chiefly the fitted gDNA-density
-KDE ``P(log ρ_g)``. On a hybrid-capture library that density is bimodal — a low
-"depleted" (off-target) mode and a high "enriched" (on-target) mode; their
-separation in nats is the log enrichment factor. We surface the curve, the two
-dominant modes, and the separation — but deliberately assign **no** categorical
-"capture worked" verdict (that threshold is left to the analyst).
+:class:`CalibrationResult` is the frozen prior the EM consumes; this is what the QC report may
+*show*. It carries the total-density curve ``P(log ρ)`` on its grid, the two labelled dominant
+modes, and their separation in nats. On a hybrid-capture library the density is bimodal — a low
+"depleted" (off-target) mode and a high "enriched" (on-target) mode — and the separation is the log
+enrichment factor.
 
-The calibrator builds one only when it actually fits the Phase-2 KDE (enough
-training regions); otherwise it is ``None`` and the report omits the panel.
+Two deliberate limits. No categorical "capture worked" verdict is assigned; the threshold is the
+analyst's. And the field described is a TOTAL density, so the panel reads ENRICHMENT and never the
+gDNA/RNA split.
+
+The calibrator builds one only when the landscape was fit (it needs wall inputs); otherwise it is
+``None`` and the report omits the panel.
 """
 
 from __future__ import annotations
@@ -36,39 +38,29 @@ class CalibrationDiagnostics:
         np.ndarray
     )  # per-region training log-densities — EVERY training region, not a sample
     rug_kind: np.ndarray  # int region-kind codes (0=intergenic,1=intron,2=exon,3=boundary)
-    # ⚠ ``rug_log_rho`` said "downsampled" until 2026-08-21, when it was always EMPTY (the npmle
-    # carried no training points). It is now the full training population — ~30.7 k rows at panel
-    # scale, which `rigel report` writes to `gdna_density_regions.feather` as a data export and no
-    # chart spec reads, so there is nothing to downsample FOR. Sample at the consumer if one ever
+    # ``rug_log_rho`` is the FULL training population (tens of thousands of rows at panel scale), not
+    # a sample: `rigel report` writes it to `gdna_density_regions.feather` as a data export and no
+    # chart spec reads it, so there is nothing to downsample for. Sample at the consumer if one ever
     # plots it directly.
 
     @classmethod
     def from_abundance_landscape(cls, al) -> "CalibrationDiagnostics":
         """Build from a fitted :class:`~rigel.calibration.abundance_landscape.AbundanceLandscape`.
 
-        ⭐⭐ **Every number here is READ FROM THE CENSUS rather than re-derived from the curve, and that
-        is the improvement over the ``DensityNPMLE`` version this replaces.** That one took the two
-        TALLEST local maxima and called them depleted and enriched; this takes the census's basins, where
-        *depleted* is the basin containing the pooled intergenic ANCHOR rate — an independent
-        measurement of the same level — and *enriched* is the largest-mass basin strictly above it. So
-        the labels mean something a curve alone cannot say.
+        Every number here is READ FROM THE CENSUS rather than re-derived from the curve, so the mode
+        labels mean something a curve alone cannot say: *depleted* is the basin containing the pooled
+        intergenic anchor rate — an independent measurement of the same level — and *enriched* is the
+        largest-mass basin strictly above it.
 
-        ⭐ **The rug is REAL.** The npmle carried no per-region training points, so the report's rug was
-        always empty and the CLI wrote a zero-row feather. The landscape publishes its training centres
-        and their classes, so the panel can show the population under the fit.
+        ``bandwidth`` is the smoothing ACTUALLY IN FORCE — the grid step in decades — not a fitted
+        kernel width. Nearly every per-region kernel is clamped to one grid step, so the knn width is
+        not the resolution and reporting it would mislead
+        (`TRAPS: a-floored-knob-is-not-the-bandwidth`). ``n_eff`` is the training-region count.
 
-        ⚠ **``bandwidth`` is the smoothing ACTUALLY IN FORCE — the grid step in decades — not a fitted
-        kernel width.** On the benchmark ~99 % of this estimator's kernels are clamped to one grid step,
-        so the per-region knn width is not the resolution and reporting it would mislead
-        (`TRAPS: a-floored-knob-is-not-the-bandwidth`). ``n_eff`` is the training-region count, a real
-        ``n`` where the npmle could only offer a collapsed-cell count.
-
-        ⚠ **``separation_nats`` is the census's mode ratio, and it is the one field here that is
-        RESOLUTION-SENSITIVE** (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`; the ruling is
-        `DESIGN.md` §3.1a-iii). It is displayed rather than consumed, and the depleted level beside it
-        is grid-robust — but a reader must not treat it as a calibrated enrichment factor.
-        ⚠ And the field this describes is a TOTAL density, so the panel reads ENRICHMENT and never the
-        gDNA split — composition-vacuous, exactly as the npmle version was."""
+        ``separation_nats`` is the census's mode ratio and is the one field here that is
+        RESOLUTION-SENSITIVE (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`): it is displayed
+        rather than consumed, while the depleted level beside it is grid-robust. A reader must not
+        treat it as a calibrated enrichment factor."""
         ls = al.landscape
         x = np.asarray(ls.log_rho, dtype=np.float64)
         logp = np.asarray(ls.logP, dtype=np.float64)

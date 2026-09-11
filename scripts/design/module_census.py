@@ -1,53 +1,26 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **WHERE DOES A CHANGE GO?** — the calibration package's real shape, re-derived from the AST.
+"""Where does a change go? The calibration package's shape, re-derived from the AST.
 
-⛔ **THE PROBLEM THIS EXISTS FOR, stated as the owner stated it: 35 modules and no sense of how or where to
-develop.** And the graph says why, which is not what it looks like from the outside: there are **no import
-cycles**, and most of the modules have exactly one importer. It is not a knot. It is a FLAT PILE of peers,
-and nothing in the tree names the layers that already exist in the import graph.
+Four reports, each a question about the package as it stands. The layering, from
+`rigel.calibration._layers`: every module's assigned layer and any import that points upward, which is
+what a layering violation is (`tests/calibration/test_layering.py` gates it; this prints the shape). The
+graph: per module its layer, lines, public surface, and every importer inside and outside the package,
+both counted by an AST walk so a relative import (`from .calibration.X import`) is a boundary like any
+other; a module with no importer inside the package is an entry point or it is dead, and which is told
+by whether anything outside the package imports it. Unbacked docstring cross-references: every sibling a
+module's docstring names with no import boundary in either direction, a sentence pointing at code that
+is not connected. Dead public surface: exported names that nothing anywhere imports. An import under
+`if TYPE_CHECKING:` is reported as an annotation, not a boundary. It reports and does not judge: an
+entry point looks dead, an executable reference that a test gates looks like dead surface, and a
+data-flow claim ("fitted in X") with no import is true of a value passed through a caller, so each
+count is a worklist to read and never a defect count. No number from a past run is carried in the
+instrument; the current module count is the first line of every run.
 
-⚠ **The counts in that paragraph are the owner's, from when he said it, and they have MOVED. This file
-deliberately does not restate them**, because a count frozen into an instrument is
-`TRAPS: re-record-the-baseline` committed where it is hardest to see. The current module count is the
-first line of every run and the current one-importer set is readable straight off THE GRAPH's ``in``
-column. ⛔ Neither is a target.
+Usage::
 
-⭐⭐ **The second finding is the one that actually blocks a reader, and this instrument is the only thing
-that can see it: the module docstrings MISDESCRIBE THE GRAPH.** ``run_fill`` said it was "shared by
-`density_model`, `strand_deconv`, `priors`, and the `sweep` chain geometry" and had **one** importer.
-``strand_likelihood`` said it was "Used by the per-region strand module (`strand_deconv`)" and
-``strand_deconv`` does not import it at all. A developer who trusts either sentence goes looking for code
-that is not there — and neither sentence can rot *loudly*, because nothing checks prose against boundaries.
-⛔ That is the same failure as a stale doc citation, one layer down: **a claim about the code, inside the
-code, that nothing gates.** Measured 14 on 2026-08-07; **6 were genuinely stale and are fixed**, and the
-rest are data-flow statements the instrument cannot tell apart — see below.
-
-What it reports
----------------
-1. **THE LAYERING**, from ``rigel.calibration._layers``, with every module's assigned layer and any import
-   that points UPWARD (which is what a layering violation is). ``test_layering.py`` gates this; here it is
-   printed so a reader can see the shape rather than only be told it holds.
-2. **THE GRAPH** — per module: layer, lines, public surface, and every importer inside the package and
-   outside it. ⭐ A module with no importer inside the package is an ENTRY POINT or it is DEAD, and the two
-   are distinguished by whether anything outside the package calls it. ⛔⛔ **The ``out`` column is an AST
-   walk and used to be a TEXT SCAN that could not see a relative import** — see ``_imported_dotted``; that
-   defect printed "⛔ DEAD: nothing imports it, anywhere" over `strand_summary`, which `rigel/pipeline.py`
-   imports, and this file is the one CLAUDE.md tells a reader to trust over its own table.
-3. ⭐⭐ **STALE DOCSTRING CROSS-REFERENCES** — every sibling module a docstring names for which **no import
-   boundary exists in either direction**. Each one is a sentence pointing at code that is not connected.
-4. **DEAD PUBLIC SURFACE** — exported names that nothing anywhere imports. ⚠ Not automatically a cut: a
-   name may be an executable reference that a test gates, which is a legitimate second home. The report
-   says which, by naming the importers it does have.
-
-⚠ **It reports, it does not judge.** A verdict needs a human, because three of the categories above have a
-legitimate member: an entry point looks dead, a reference implementation looks duplicated, and a
-single-consumer module may be a named concept worth its own file.
-
-Usage
------
     python scripts/design/module_census.py                 # the calibration package
     python scripts/design/module_census.py --package rigel # any package under src/
-    python scripts/design/module_census.py --stale-only    # just the lying docstrings
+    python scripts/design/module_census.py --stale-only    # only the unbacked cross-references
 """
 
 from __future__ import annotations
@@ -75,9 +48,9 @@ def _modules(pkg: pathlib.Path) -> dict[str, dict]:
         tree = ast.parse(src)
         imports: set[str] = set()
         typing_only: set[str] = set()
-        # ⭐ An import inside ``if TYPE_CHECKING:`` is an ANNOTATION, not a boundary — it cannot form a cycle
-        # and it does not constrain the layering. It is still reported, because an annotation reaching
-        # upward is a hint that a TYPE belongs lower, which is exactly what it was here.
+        # an import inside ``if TYPE_CHECKING:`` is an annotation, not a boundary: it cannot form a cycle
+        # and does not constrain the layering; it is still reported because an annotation reaching
+        # upward is a hint that a type belongs lower
         guarded: set[int] = set()
         for n in ast.walk(tree):
             if isinstance(n, ast.If):
@@ -125,14 +98,11 @@ def _boundaries(mods: dict[str, dict]) -> tuple[dict, dict]:
 
 
 def _own_package(p: pathlib.Path) -> str:
-    """The dotted PACKAGE a file's relative imports resolve against — ``""`` when there is none.
+    """The dotted package a file's relative imports resolve against, ``""`` when there is none.
 
-    ⭐ Only a file under ``src/`` has one that Python would agree with, and that is sufficient rather
-    than a gap: a relative import resolves against the importer's OWN package, so a `.`-import inside
-    ``tests/`` or ``scripts/`` can only ever name a sibling of that file — `tests/native/` has seven
-    ``from ._accumulator_reference import`` sites and `tests/scenarios/` many ``from .conftest import``
-    ones, and NONE of them can reach `rigel.calibration` however deep the dots go. ⛔ The one shape this
-    misses is therefore unreachable, not merely unobserved.
+    Only a file under ``src/`` has one: a relative import resolves against the importer's own package,
+    so a `.`-import inside ``tests/`` or ``scripts/`` can only name a sibling of that file and can never
+    reach `rigel.calibration`, whatever the depth of dots.
     """
     src = ROOT / "src"
     if src not in p.parents:
@@ -142,21 +112,11 @@ def _own_package(p: pathlib.Path) -> str:
 
 
 def _imported_dotted(p: pathlib.Path) -> set[str]:
-    """Every module name ``p`` actually imports, ABSOLUTE and RELATIVE, resolved to a dotted name.
+    """Every module name ``p`` actually imports, absolute and relative, resolved to a dotted name.
 
-    ⛔⛔ **THIS IS AN AST WALK BECAUSE THE TEXT SCAN IT REPLACES COULD NOT SEE A RELATIVE IMPORT,
-    AND THAT MADE A LIVE MODULE READ AS DEAD.** The predecessor required the literal string
-    ``"rigel.calibration.<short>"`` or ``"rigel.calibration import"``, so
-    ``from .calibration.strand_summary import StrandSummary`` — `src/rigel/pipeline.py` — matched
-    nothing, and `strand_summary`, which has no importer INSIDE the package either, printed
-    "⛔ DEAD: nothing imports it, anywhere". ⚠ **It was never one module's problem**: every
-    ``from .calibration.X import`` site in `src/rigel/` was invisible — 9 distinct modules on
-    2026-08-17, re-derivable in one AST pass rather than quoted — so all nine ``out`` counts were
-    understated and `strand_summary` is simply the one whose understatement reached zero.
-    ⛔ Nested modules were worse: the predecessor keyed on the SHORT name, so a nested module was
-    looked up under the wrong dotted name and read 1 outside importer where it had 10.
-    ⭐ Widening the regex was the wrong repair: a MENTION is not an import, and the text scan also
-    counted a docstring that names the dotted path. The AST counts boundaries and nothing else.
+    An AST walk rather than a text scan: a relative import (``from .calibration.X import``) spells no
+    dotted path, a nested module is keyed by its full dotted name and not its short one, and a mention
+    in a docstring is not an import. Only boundaries are counted.
     """
     try:
         tree = ast.parse(p.read_text(errors="ignore"))
@@ -181,7 +141,7 @@ def _imported_dotted(p: pathlib.Path) -> set[str]:
             if not base:
                 continue
             out.add(base)
-            # ⭐ `from pkg import mod` imports the SUBMODULE `mod`, which the bare `base` misses.
+            # `from pkg import mod` imports the submodule `mod`, which the bare `base` misses
             out.update(f"{base}.{a.name}" for a in n.names)
     return out
 
@@ -218,11 +178,8 @@ def main() -> int:
     outside = _outside(pkg, mods)
     short = {n.split("/")[-1]: n for n in mods}
 
-    # ⛔ THE LAYERING IS `rigel.calibration`'s OWN and belongs to no other package. Pointing `--package`
-    #   elsewhere used to load it anyway, so `rigel/report` printed 30 lines of "⚠ X is declared in the
-    #   layering and does not exist" and then filed `rigel/report/substrate.py` under layer 1 on a
-    #   short-name COLLISION with `rigel/calibration/substrate.py` — a layer assignment invented out of a
-    #   coincidence. A package with no declared layering has none; say so and print the rest.
+    # the layering is `rigel.calibration`'s own: loading it for another package would file that
+    # package's modules by short-name collision, so a package with no declared layering has none
     LAYERS, layer_of = None, lambda _m: None  # noqa: E731
     if args.package.strip("/") == "rigel/calibration":
         try:
@@ -278,11 +235,8 @@ def main() -> int:
         if stale:
             n_stale += len(stale)
             print(f"      {m:<24} names {', '.join(stale)}")
-    # ⛔ NO FROZEN COMPARISON HERE. This line used to append "(was 14 on 2026-08-07; 6 were genuinely
-    #   stale and are fixed)" — a hand-carried number inside the instrument, which is
-    #   `TRAPS: re-record-the-baseline` in the one place a reader cannot check it, and it had already
-    #   gone self-contradictory: 14 − 6 is 8 and the live count is not 8. The measurement's one home is
-    #   `CLAUDE.md`'s module-census paragraph; this prints what is true of the tree in front of it.
+    # no frozen comparison here: a hand-carried count inside the instrument is
+    # `TRAPS: re-record-the-baseline` where a reader cannot check it
     print(f"      {'✅ none' if not n_stale else f'{n_stale} to read — each is a sentence to read, not a defect count'}")
     if args.stale_only:
         return 1 if n_stale else 0

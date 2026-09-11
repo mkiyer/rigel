@@ -1,29 +1,29 @@
-"""IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — a confusion matrix against
-certified slot truth, no solver.
+"""Is every slot the structural-claims substrate admits truly what it claims?
 
-The stage-0 substrate (`rigel.calibration.structural_claims`) admits slots on STRUCTURE alone, and
-every class carries a claim the certified truth can test directly, in FRAGMENTS:
+A confusion matrix against certified slot truth, with no solver. The substrate
+(`rigel.calibration.structural_claims`) admits slots on structure alone, and every class carries a
+claim the certified truth can test directly, in fragments::
 
     intergenic           n_nrna + n_mrna == 0   no RNA strand is admissible at all
     ss_intron_region     n_mrna == 0            contiguous mature RNA does not fit inside
     ss_intron_boundary   n_mrna == 0            an unspliced crossing has no mature term
-    solvable_exon        n_mrna == 0            **at the LICENSING FLANK(S)** — the claim is the
+    solvable_exon        n_mrna == 0            at the licensing flank(s): the claim is the
                                                 flank's, never the exon's own mass
 
-Per condition it rebuilds the chain and statics from the index and scan cache (exactly as
-`calibration_oracle.py` does), derives the claims, reads ``slot_truth.npz`` beside the oracle cache
-(⛔ REFUSED if absent — run `calibration_oracle.py` first; a merely plausible truth is how a predicate
-bug survives), and reports per class: slots admitted, live slots, claimed fragments, violating slots,
-violating fragments, and the worst offenders. A single violating fragment falsifies the predicate for
-that class — that is the point of deriving the substrate from structure.
+Per condition it rebuilds the chain and statics from the index and scan cache, derives the claims,
+reads ``slot_truth.npz`` beside the oracle cache (refused if absent or not slot-aligned with the
+rebuilt chain) and reports per class the slots admitted, live slots, claimed fragments, violating
+slots and fragments, and the worst offenders. A single violating fragment falsifies the predicate for
+that class. Only the claimed slots are judged: the un-admitted remainder appears once, as coverage
+context, and is never scored. Nascent fragments inside an ss_intron slot are not a violation (they are
+the population the deconvolution exists for); only a mature fragment there is. Exit status is nonzero
+iff any claim is violated anywhere.
 
-⛔ JUDGE ONLY THE CLAIMED SLOTS (owner): the un-admitted remainder appears once, as COVERAGE context,
-and is never scored. ⚠ Nascent fragments inside an ss_intron slot are NOT a violation — they are the
-population stage 2 exists to deconvolve; only a MATURE fragment there is.
+Usage::
 
-Exit status: nonzero iff any claim is violated anywhere. ``--self-test`` runs the checker against
-synthetic truth with injected violations and must catch every one of them (and must NOT score a
-violation parked on an unclaimed slot).
+    python scripts/design/structural_claims_audit.py                       # every condition of the suite
+    python scripts/design/structural_claims_audit.py --condition <name>
+    python scripts/design/structural_claims_audit.py --self-test           # injected violations, no I/O
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ CLAIMS = (
 
 
 def _licensing_flanks(chain, claims) -> np.ndarray:
-    """The UNIQUE slot ids of every flank that licenses a solvable exon — where that class's claim
+    """The unique slot ids of every flank that licenses a solvable exon, where that class's claim
     actually lives. Unique, because two exons may be licensed through one boundary and a fragment
     must not be counted twice."""
     left = np.asarray(chain.left, np.int64)[np.asarray(claims.exon_flank_left, bool)]
@@ -65,7 +65,7 @@ def _licensing_flanks(chain, claims) -> np.ndarray:
 
 
 def confusion(chain, claims, truth: dict) -> list[dict]:
-    """The per-class rows: each class's admitted slots scored against ITS OWN claim, plus one
+    """The per-class rows: each class's admitted slots scored against its own claim, plus one
     unscored coverage row. ``truth`` needs ``count``/``n_nrna``/``n_mrna`` slot-keyed arrays."""
     count = np.asarray(truth["count"], np.float64)
     rows = []
@@ -76,9 +76,9 @@ def confusion(chain, claims, truth: dict) -> list[dict]:
             sel = np.zeros(int(chain.n_slots), bool)
             sel[idx] = True
             n_exons = int(np.asarray(claims.solvable_exon, bool).sum())
-            # ⭐ the completeness split — how much of the exon substrate is ESTIMATE-grade (some
-            # licensed flank's account of the exon is complete: a two-sided transfer) vs BOUND-grade
-            # (every licensed flank incomplete: one-sided only). Substrate composition, not a score.
+            # the completeness split: how much of the exon substrate is estimate-grade (some
+            # licensed flank's account of the exon is complete, a two-sided transfer) vs bound-grade
+            # (every licensed flank incomplete, one-sided only). Substrate composition, not a score.
             estimate_grade = int(
                 (
                     np.asarray(claims.exon_flank_left_complete, bool)
@@ -181,12 +181,12 @@ def report(condition: str, rows: list[dict]) -> int:
     return n_bad
 
 
-# ── self-test: falsify the CHECKER — injected violations must be caught, and only on claimed slots ──
+# ── self-test: falsify the checker; injected violations must be caught, and only on claimed slots ──
 
 
 def _synthetic() -> tuple:
     """One reference, five regions: intergenic · exon · intron · exon · intergenic (a two-exon
-    transcript), built directly as chain + statics with a DONOR flag at the exon|intron boundary."""
+    transcript), built directly as chain + statics with a donor flag at the exon|intron boundary."""
     from rigel.calibration.splice_graph import FLAG_DONOR_POS, FLAG_TSS_POS
 
     chain = build_region_chain(np.array([0, 5]), np.array([0, 4]))
@@ -198,9 +198,9 @@ def _synthetic() -> tuple:
     mp = np.array([0, 0, 1, 0, 0, 0, 1, 0, 0], bool)
     mn = np.zeros(9, bool)
     bflags = np.zeros(9, np.uint16)
-    bflags[1] = FLAG_TSS_POS  # gene edge — a terminus, licenses nothing
-    bflags[3] = FLAG_DONOR_POS  # exon|intron — licenses the exon at slot 2
-    bflags[5] = FLAG_DONOR_POS  # intron|exon — licenses the exon at slot 6
+    bflags[1] = FLAG_TSS_POS  # gene edge: a terminus, licenses nothing
+    bflags[3] = FLAG_DONOR_POS  # exon|intron: licenses the exon at slot 2
+    bflags[5] = FLAG_DONOR_POS  # intron|exon: licenses the exon at slot 6
     bflags[7] = FLAG_TSS_POS
     statics = RegionStatics(
         n_slots=9,
@@ -216,7 +216,7 @@ def _synthetic() -> tuple:
         "n_nrna": np.zeros(9),
         "n_mrna": np.zeros(9),
     }
-    truth["n_mrna"][2] = truth["n_mrna"][6] = 10.0  # the exons' own mature mass — NOT a violation
+    truth["n_mrna"][2] = truth["n_mrna"][6] = 10.0  # the exons' own mature mass, not a violation
     truth["count"][0] = truth["count"][8] = 3.0
     return chain, claims, truth
 
@@ -276,7 +276,7 @@ def self_test() -> int:
     )
 
     t = {k: v.copy() for k, v in truth.items()}
-    t["n_nrna"][4] = 9.0  # nascent inside the intron — stage 2's population, NOT a violation
+    t["n_nrna"][4] = 9.0  # nascent inside the intron: the deconvolution's population, not a violation
     r = {x["class"]: x for x in confusion(chain, claims, t)}
     check(
         "nascent inside an ss intron is NOT a violation — it is what stage 2 deconvolves",

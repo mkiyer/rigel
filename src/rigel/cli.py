@@ -199,14 +199,13 @@ def _build_pipeline_config(
     return cfg
 
 
-#: summary.json schema version. Bumped to 2 when the fragment-length histograms
-#: were externalized to ``fragment_lengths.feather`` (they previously bloated the
-#: JSON by thousands of boundaries) and the splice / strand-contamination diagnostics
-#: were added. Consumers should read this before parsing.
+#: summary.json schema version, which a consumer should read before parsing. Version 2 keeps the
+#: fragment-length histograms out of the JSON — they live in ``fragment_lengths.feather`` — and
+#: carries the splice and strand-contamination diagnostics.
 SUMMARY_SCHEMA_VERSION = 2
 
 
-#: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. ⚠ Named here rather
+#: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. Named here rather
 #: than derived from the enum because these are an OUTPUT CONTRACT — a rename in the enum must not
 #: silently rename a reported category.
 _POOL_REPORT_NAMES = (
@@ -227,10 +226,10 @@ def _fragment_length_report(fl_models):
       mode, max_size, overflow_count, overflow_fraction}}`` — small, human-readable,
       destined for ``summary.json`` (no raw per-bin arrays).
     * ``histogram_df`` is a long ``(category, length, count)`` DataFrame — the raw
-      1-bp histograms, destined for ``fragment_lengths.feather``. This is the bulk
-      that used to inflate ``summary.json``.
+      1-bp histograms, destined for ``fragment_lengths.feather``, which keeps them out of
+      ``summary.json``.
 
-    ⭐ **Every category is now ONE measurement of ONE quantity** — the accumulator's ``L`` — over a
+    Every category is ONE measurement of ONE quantity — the accumulator's ``L`` — over a
     stated population:
 
     ``global``
@@ -241,13 +240,12 @@ def _fragment_length_report(fl_models):
         the pure pools **unaggregated**. ``gdna`` is the sum of the two contained rows and ``rna`` is
         ``pool_rna_spliced``; the two ``*_exon`` crossing rows are ON-TARGET gDNA and are in neither,
         which is why they are reported separately (``calibration.fl.splash_fl_mass``) — on-target
-        gDNA runs ~42 bp shorter than off-target, and a model fitted off-target is mis-centred for
+        gDNA runs tens of bp shorter than off-target, and a model fitted off-target is mis-centred for
         exactly the fragments that leak.
 
-    ⛔ **The per-SpliceType histograms are gone** (``unspliced``, ``spliced_annot``, …). They were the
-    scanner's own, measured by two rules that were neither each other nor ``L``, over a population
-    gated by a unanimity test nobody had stated. The
-    per-fragment splice COUNTS they were used for survive, from the scanner's census.
+    There are no per-SpliceType histograms here, deliberately: they would be the scanner's own,
+    measured by rules that are neither each other nor ``L``, over a population gated by a unanimity
+    test. The per-fragment splice COUNTS come from the scanner's census instead.
     """
     import pandas as pd
 
@@ -371,12 +369,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     ci_lo, ci_hi = sm_primary.posterior_95ci()
 
     # Fragment length: lean per-category summary statistics go into summary.json;
-    # the raw 1-bp histograms are written separately to fragment_lengths.feather
-    # (they used to inflate summary.json by thousands of boundaries).
+    # the raw 1-bp histograms are written separately to fragment_lengths.feather, which keeps
+    # thousands of bins out of the summary.
     #
-    # ⭐ ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
+    # ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
     # payload alone — the anchor, the two modelled pools and the five pure pools, all binned at the
-    # accumulator's L. The scanner's parallel histograms were deleted by TRAPS: pure-and-length-censored.
+    # accumulator's L (TRAPS: pure-and-length-censored).
     fl_models = result.fl_models
     fl_summary, fl_histogram_df = _fragment_length_report(fl_models)
 
@@ -384,11 +382,10 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Surfaces the ``spliced_implicit`` and ``splice_artifact`` classes that the scan-level
     # ``with_*_sj`` counters omit.
     #
-    # ⭐ SCANNER QC, read from where it is generated. These used to be read off the fragment-length
-    # category models, so they counted only fragments that also yielded a length observation — a
-    # population gated by a transcript-space unanimity test and never stated. The census counts every
-    # fragment the scanner offers the accumulator, and its books close against the accumulator's own
-    # qc block.
+    # SCANNER QC, read from where it is generated rather than off the fragment-length category
+    # models, which would count only fragments that also yielded a length observation — a population
+    # gated by a transcript-space unanimity test. The census counts every fragment the scanner offers
+    # the accumulator, and its books close against the accumulator's own qc block.
     from .splice import SpliceType, census_field
 
     def _splice_n(stype) -> int:
@@ -408,9 +405,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "sj_blacklist_loaded": bool(_bl_size) if _bl_size is not None else None,
     }
 
-    # Calibration section — minimal library-scalar observability (the v5 per-region dict stays
-    # burned down). Surfacing gdna_strand_overdispersion here is required so it is never again
-    # silently 0 (see docs/em_strand/03).
+    # Calibration section — library scalars only, never a per-region dict.
+    # gdna_strand_overdispersion is surfaced here so that a silently-zero estimate is visible in the
+    # summary rather than only inside the solver.
     cal = getattr(result, "calibration", None)
     cal_dict = (
         None

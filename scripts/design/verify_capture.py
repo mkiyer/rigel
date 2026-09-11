@@ -1,43 +1,33 @@
 #!/usr/bin/env python
-"""⭐⭐ IS HYBRID CAPTURE DOING WHAT IT CLAIMS? — the same toy, probes ON and OFF, nothing else moved.
+"""What does hybrid capture do on identical geometry, probes on versus off? Three directions, gated on sign.
 
-Capture is a physical claim with a direction: **probes on the exons enrich the sequence that binds them
-and thereby DEPLETE, relatively, the sequence that does not.** That is testable without a solver and
-without re-implementing the sampler — simulate the identical chromosome, identical seed, identical gDNA
-rate and identical RNA budget twice, once with probes and once without, and read the three consequences
-off the ground truth:
+Capture is a physical claim with a direction: probes on the exons enrich the sequence that binds them and
+thereby deplete, relatively, the sequence that does not. That is testable without a solver and without
+re-implementing the sampler. The same toy chromosome is simulated twice through `verify_toy_substrate`'s
+machinery — identical seed, gDNA rate, lengths and RNA budget, only the probes differ — and three
+consequences are read off the per-fragment ground truth: the gDNA density per region (uniform before
+capture, so its post-capture profile is the capture landscape itself — probed exons must rise, and the
+off-probe interior must fall, while the collar within one fragment length of a probed exon is not
+off-probe and is gated as enriched, which is why a whole intron region can read near 1.0), the mRNA
+length marginal (a longer fragment presents more sequence to a probe, so the realised mean must rise),
+and the sj-crossing share against each arm's own uniform-placement expectation (probes tile within each
+exon, so a crossing fragment loses overlap below one probe length and the effect vanishes above two).
+Each gate is a direction the knobs predict, never a magnitude this file fits; the magnitudes are printed
+because they are the useful part. A ratio of two Poisson counts is gated only where both sides are
+resolvable, and `--gdna-rate` raises both arms equally for power without touching the contrast.
 
-1. ⭐ **gDNA per base, per region.** gDNA is uniform along the genome before capture, so its post-capture
-   density profile IS the capture landscape, measured directly. Exon regions must go UP, intergenic and
-   intronic regions must go DOWN — relative to the same library's own mean.
-2. ⭐ **the mRNA length marginal.** A longer fragment presents more sequence to a probe, so capture
-   selects for length until the overlap saturates at the probe length. The realised mean must RISE.
-3. ⭐ **the sj-crossing share.** ``_toy_probes`` tiles probes WITHIN each exon so none spans the
-   sj, so a sj-crossing fragment's best single probe covers only its longer overhang. Below
-   about ``2 x probe_length`` that is less overlap than a contained fragment gets, so crossing fragments
-   must be relatively DEPLETED.
+Usage::
 
-⛔ Each is a direction the knobs predict, not a number this file fits. The magnitudes are reported
-because they are the useful part; the gates are on sign.
-
-⭐⭐ **MEASURED 2026-08-05** on `spliced_exons`, 120 kb, gDNA rate raised to 0.05/bp for power (both arms):
-
-* probed exon regions **65-66x enriched**; the off-probe INTERIOR (116 kb) **0.046x**, i.e. 22x depleted;
-* ⛔ but a whole 7 kb intron REGION reads **0.80x**, NOT depleted — because the +-500 bp COLLAR abutting a
-  probed exon is itself **5.4x ENRICHED**. A region beside a probe is not off-probe, and an intron's
-  measured gDNA density under capture is a MIXTURE of a depleted interior and two enriched ends;
-* the mRNA length mean rises **+6.6 bp** (z = 14.8) — capture selects for length, as the engine says;
-* the sj depletion has the hard onset the weight law predicts: crossing/uniform is **0.62x below
-  120 bp** (one probe length), 0.97 in 120-240, and 0.97 above 240 where both saturate. ⚠ The residual
-  3 % above 240 bp is the probe TILING PHASE: 1,000 bp of exon at 120 bp per probe leaves a 40 bp runt
-  at the exon end, and that runt is what a sj-crossing fragment's overhang lands on.
+    python scripts/design/verify_capture.py                                          # spliced_exons on the default capture-on donor
+    python scripts/design/verify_capture.py --spec spliced_exons --donor gdna_g50_ss_0.50_nrna_mid_capture_on
+    python scripts/design/verify_capture.py --gdna-rate 0.05 --genome-length 120000  # more gDNA per region, both arms alike
+    python scripts/design/verify_capture.py --n-rna 40000 --work-dir /tmp/rigel_verify_capture
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import os
 import sys
 from collections import Counter
@@ -48,11 +38,9 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import math  # noqa: E402
 import numpy as np  # noqa: E402
 
-SCR = Path(__file__).resolve().parent
-_s = importlib.util.spec_from_file_location("vts", SCR / "verify_toy_substrate.py")
-V = importlib.util.module_from_spec(_s)
-sys.modules["vts"] = V
-_s.loader.exec_module(V)
+from _shared import sibling  # noqa: E402
+
+V = sibling("verify_toy_substrate.py")
 
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
@@ -86,7 +74,7 @@ def main() -> int:
     if not donor_on.capture_on:
         print("pick a capture_on donor", file=sys.stderr)
         return 2
-    # ⛔ ONE thing varied. Same gDNA rate, same lengths, same strand, same seed — only the probes go.
+    # One thing varied. Same gDNA rate, same lengths, same strand, same seed — only the probes go.
     if args.gdna_rate is not None:
         donor_on = dataclasses.replace(donor_on, gdna_rate_per_base=float(args.gdna_rate))
     donor_off = dataclasses.replace(donor_on, capture_on=False)
@@ -143,7 +131,7 @@ def main() -> int:
         label = f"{TYPE_NAMES[int(rtype[i])]} [{starts[i]:,},{starts[i] + bp:,})"
         k_on, k_off = g_on.get(i, 0), g_off.get(i, 0)
         ratio = d_on / d_off if d_off > 0 else float("inf")
-        # ⛔ a ratio of two Poisson counts: log-sd is sqrt(1/k_on + 1/k_off). With ten fragments a side
+        # A ratio of two Poisson counts: log-sd is sqrt(1/k_on + 1/k_off). With ten fragments a side
         # that is 45 %, so a 1.3x reading means nothing and must not be gated on.
         rel = math.sqrt(1.0 / max(k_on, 1) + 1.0 / max(k_off, 1))
         resolvable = k_on >= 25 and k_off >= 25
@@ -153,9 +141,9 @@ def main() -> int:
             continue
         if TYPE_NAMES[int(rtype[i])] == "exon" and not (math.log(ratio) > 2 * rel):
             fails.append(f"exon {label} not ENRICHED (ratio {ratio:.2f} ± {100 * rel:.0f}%)")
-        # ⛔ NOT "every non-exon region is depleted". A region ABUTTING a probed exon is not off-probe: a
+        # Not "every non-exon region is depleted". A region abutting a probed exon is not off-probe: a
         # fragment lying in its first or last ~fragment-length can still overlap the neighbour's probe
-        # and be captured. Only the INTERIOR is off-probe, and it is split out below.
+        # and be captured. Only the interior is off-probe, and it is split out below.
     V.check(not fails, "⭐ every probed exon region is ENRICHED", "; ".join(fails))
 
     # ── the interior/boundary split, which is where "off-probe is depleted" is actually testable ──
@@ -226,8 +214,8 @@ def main() -> int:
 
     c_on, n_m_on, s_on = share(fr_on)
     c_off, n_m_off, s_off = share(fr_off)
-    # ⚠ the two arms have different LENGTH marginals (that is result 2), and the crossing share depends
-    # on length — so compare against each arm's OWN uniform-placement expectation, which removes it.
+    # The two arms have different length marginals (that is result 2), and the crossing share depends
+    # on length — so compare against each arm's own uniform-placement expectation, which removes it.
     def expected_share(frags):
         m = [f for f in frags if f["kind"] == "mrna"]
         by = Counter(f["end"] - f["start"] for f in m)
@@ -243,13 +231,13 @@ def main() -> int:
     V.check(abs(s_off / e_off - 1.0) < 0.05,
             "with probes OFF the crossing share matches uniform placement")
 
-    # ⭐⭐ THE EFFECT IS CONFINED, AND THE WEIGHT LAW SAYS EXACTLY WHERE. A contained fragment's best
-    # single-probe overlap is ``min(w, probe_length)``; a crossing one's is
-    # ``min(max(a, w−a), probe_length)`` with ``a`` its exon-1 overhang. For ``w >= 2·probe_length`` the
-    # longer overhang already exceeds the probe, so BOTH saturate at ``probe_length`` and there is NO
-    # depletion at all. Below that the crossing fragment loses overlap, and below ``probe_length`` it
-    # loses the most. ⛔ So a flat "crossing fragments are depleted" is the WRONG prediction — the right
-    # one is a gradient with a hard onset at 2·probe_length.
+    # The effect is confined, and the weight law says where. A contained fragment's best single-probe
+    # overlap is ``min(w, probe_length)``; a crossing one's is ``min(max(a, w−a), probe_length)`` with
+    # ``a`` its exon-1 overhang. For ``w >= 2·probe_length`` the longer overhang already exceeds the
+    # probe, so both saturate at ``probe_length`` and there is no depletion at all. Below that the
+    # crossing fragment loses overlap, and below ``probe_length`` it loses the most. So a flat "crossing
+    # fragments are depleted" is the wrong prediction — the right one is a gradient with a hard onset
+    # at 2·probe_length.
     plen = int(k["probe_length"])
     print(f"\n   {'length band':<22} {'OFF obs/exp':>12} {'ON obs/exp':>12} {'ON/OFF':>9} "
           f"{'n(ON)':>8}   predicted")

@@ -1,19 +1,21 @@
-"""Scan a suite ONCE and cache what calibration needs, so calibration can be iterated on without rescanning.
+"""Scan once, calibrate many times: cache what calibration reads from a BAM scan, one cache per condition.
 
-    TODO item 2 (the cached substrate) · Library: `rigel.scan_cache`
+Calibration is the phase under development and re-running it must cost seconds, not a re-scan, so this
+script runs the single-pass scan on each condition's oracle BAM (or on one BAM) and writes the payload
+and strand model to a `rigel.scan_cache` directory. Each cache is independently keyed against the index
+it was built from — `graph_hash`, a reach digest (which neither `partition_hash` nor `graph_hash`
+covers) and the scan config — and is refused at load if the index does not match, so a partial suite is
+usable and one condition can be rebuilt without touching the others. Every cache is read straight back
+after it is written so a cache that cannot be loaded fails here rather than in a later session. The
+cache key hashes the accumulator's deposit rule and not the fragment construction, so a change to which
+fragments are offered needs `--force`. Nothing is calibrated or scored.
 
-⭐ **THE POINT.** Calibration is the phase under development and it is the expensive one — index load
-~8 s, BAM scan ~2 s, **calibration ~66 s** on a real cfRNA library — while
-a 5 M-fragment simulated condition costs far more than that to scan. Caching the scan took a 24-condition
-sweep from ~13 min to ~9 s on the old path. One cache per condition, each independently keyed and valid,
-so a partial suite is usable and one condition can be rebuilt without touching the others.
+Usage::
 
-    python scripts/design/build_scan_cache.py --index IDX --suite SUITE [--conditions A B ...]
-    python scripts/design/build_scan_cache.py --index IDX --bam X.bam --out CACHE_DIR
-
-⚠ **A cache is refused at load unless it describes the index it is loaded against** — `graph_hash`, a
-**reach digest** (which neither `partition_hash` nor `graph_hash` covers, and a rebuild once moved ~38 %
-of human contiguous reaches with both byte-identical), and the scan config. See `rigel.scan_cache`.
+    python scripts/design/build_scan_cache.py --index IDX --suite SUITE                    # every condition with an oracle BAM
+    python scripts/design/build_scan_cache.py --index IDX --suite SUITE --conditions A B   # a subset
+    python scripts/design/build_scan_cache.py --index IDX --suite SUITE --force            # rebuild existing caches
+    python scripts/design/build_scan_cache.py --index IDX --bam X.bam --out CACHE_DIR      # a single BAM
 """
 
 from __future__ import annotations
@@ -50,8 +52,8 @@ def cache_one(index: TranscriptIndex, bam: Path, out_dir: Path) -> tuple[float, 
         bam=str(bam),
         scan_config=scan,
     )
-    # ⚠ Read it straight back: a cache that cannot be loaded against the index it was just written
-    # from is worse than no cache, and the failure should surface here rather than three days later.
+    # Read it straight back: a cache that cannot be loaded against the index it was just written
+    # from is worse than no cache, and the failure should surface here.
     start = time.perf_counter()
     read_scan_cache(out_dir, index)
     load_seconds = time.perf_counter() - start

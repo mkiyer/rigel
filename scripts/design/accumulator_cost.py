@@ -1,35 +1,25 @@
-"""What the accumulator costs per fragment, measured on a real BAM.
+"""How many nanoseconds per fragment does the accumulator cost, regressed over several real BAMs?
 
-    
+The scanner only accumulates when `set_regions` has been called (`pipeline._wire_calibration_regions`),
+so the same BAM is scanned twice, once with the accumulator wired and once without, and the difference is
+the accumulator's cost; everything else (htslib parsing, fragment assembly, overlap resolution, model
+training, columnar buffering) is common to both runs and cancels. That difference holds two costs with
+different scaling that must not be averaged together: work that is O(fragments), the deposit itself, and
+work that is O(partition), allocating and zeroing a per-worker accumulator, merging the workers and
+copying the per-reference structs into the flat payload. On a shallow BAM against the human partition
+the second term dominates, so a single-BAM `delta / n_fragments` is an upper bound and not a per-fragment
+cost. Given two or more BAMs of different depth against the same index it regresses
+`delta(n) = fixed_partition_cost + per_fragment_cost * n`; the slope is the number that generalises and
+the intercept is the price of the partition itself. The minimum over `--repeats` is used. Run it on a
+quiet machine with `OMP_NUM_THREADS=1` unless the parallel path is what is being measured: the deposit is
+per-worker with a serial merge, so a threaded number answers a different question. It measures only, and
+profiles on real data, never on a small synthetic suite.
 
-⚠ WHY THIS EXISTS. There was no scan-profiling harness in this repository, and the only recorded figure
-— *"the BAM scan is ~2 % of runtime"* — was measured on a 39 MB BAM with 155,352 read groups. That
-percentage does not generalise: at 10^8 fragments a 124 ns deposit is 12.4 s of single-thread CPU on its
-own. **The accumulator's budget must be stated per fragment, not per run.**
+Usage::
 
-HOW THE DEPOSIT IS ISOLATED. The scanner only accumulates when ``set_regions`` has been called
-(``pipeline._wire_calibration_regions``). So the same BAM is scanned twice — once with the accumulator
-wired and once without — and the difference, divided by the fragment count, is the per-fragment deposit
-cost. Everything else (htslib parsing, fragment assembly, overlap resolution, model training, columnar
-buffering) is common to both runs and cancels.
-
-⚠ TWO COSTS WITH DIFFERENT SCALING, AND THEY MUST NOT BE AVERAGED TOGETHER. Wiring the accumulator adds
-work that is **O(fragments)** — the deposit itself — and work that is **O(partition)**: allocating and
-zeroing a per-worker accumulator, merging the workers, and copying the per-reference structs into the
-flat payload. On a shallow BAM against the 1.04 M-region human partition the second term dominates, so a
-single-BAM ``delta / n_fragments`` is not a per-fragment cost.
-
-So pass **two or more BAMs of different depth against the same index** and the harness regresses::
-
-    delta(n)  =  fixed_partition_cost  +  per_fragment_cost * n
-
-the slope being the number that generalises and the intercept the price of the partition itself.
-
-    OMP_NUM_THREADS=1 python scripts/design/scan_profile.py INDEX BAM [BAM ...] [--repeats N]
-
-⚠ Run it on a quiet machine and with ``OMP_NUM_THREADS=1`` unless you are deliberately measuring the
-parallel path: the deposit is per-worker with a serial merge, so a threaded number answers a different
-question.
+    OMP_NUM_THREADS=1 python scripts/design/accumulator_cost.py INDEX BAM            # one BAM: an upper bound
+    OMP_NUM_THREADS=1 python scripts/design/accumulator_cost.py INDEX BAM BAM2 ...   # the regression
+    python scripts/design/accumulator_cost.py INDEX BAM BAM2 --repeats 5 --threads 4
 """
 
 from __future__ import annotations
@@ -53,11 +43,7 @@ def _timed_scan(bam: str, index: TranscriptIndex, scan: BamScanConfig, accumulat
         pipeline._wire_calibration_regions = lambda *a, **k: None
     try:
         t0 = time.perf_counter()
-        # ⚠ FOUR values. This read FIVE until 2026-08-17 and had raised `ValueError` on its first arm
-        # since `40006126` (2026-08-01) deleted the scanner's own fragment-length histogram from the
-        # return. ⛔ `tests/test_scripts_index.py` covers this tree and did NOT catch it: the gate
-        # IMPORTS a script, and an arity mismatch lives in a call site
-        # (`TRAPS: a-green-suite-hid-five-dead-instruments` — the same class, one level deeper).
+        # four values: an arity mismatch here lives in a call site, which an import-only gate cannot see
         stats, _strand, _buffer, payload = pipeline.scan_and_buffer(bam, index, scan)
         return time.perf_counter() - t0, stats, payload
     finally:

@@ -1,24 +1,11 @@
-"""⭐⭐⭐ THE GATE THE SOURCE CLAIMED TO HAVE AND DID NOT — and it is what makes a "dead" module a REFERENCE.
+"""The two-component strand likelihood is an executable REFERENCE, and this is its gate.
 
-`simplex.py`'s docstring asserted, in the source's own words, that its three-component strand likelihood
-*"collapses to ``strand_loglik`` exactly (the no-regression guard)"*. **No such guard existed anywhere.**
-Measured 2026-08-07 by `scripts/design/module_census.py`:
-
-* `strand_likelihood.strand_loglik` had **no production consumer at all**. Its own docstring said "Used by
-  the per-region strand module (`strand_deconv`)", and `strand_deconv` does not import it.
-* the only importers were two test files, and both exercised it against **its own properties** — never
-  against the three-component form it is supposedly the special case of.
-
-⛔ So the two-component function was a **second home for a predicate** whose one home is ψ's
-`_mixture_strand_loglik`, with nothing detecting drift between them. That is the shape of TRAPS' "a test that
-re-derives a definition cannot detect drift in it", one layer up: the *definition* was duplicated and the
-*claim* that the two agree was prose.
-
-⭐ **Deleting it was the other option and this is the better one.** With this file the two-component form
-becomes what the source already called it — an executable REFERENCE, gated, in the pattern
-`tests/native/_accumulator_reference.py` established. If they ever diverge, this fires instead of a comment
-being quietly wrong. And a reference is worth having precisely because ψ's version is 3-component,
-vectorised over a lattice and hard to read: the special case is the one a human can check by hand.
+`simplex_logodds._mixture_strand_loglik` is the production form: three components, vectorised over a
+lattice, hard to read by hand. `strand_likelihood.strand_loglik` is the two-component special case it
+must collapse to. Nothing in `src/` calls the reference, and that is the point — it is a second,
+readable statement of one predicate, and this file is what stops the two drifting apart
+(TRAPS: a-test-that-redefines). The pattern is the one `tests/native/_accumulator_reference.py`
+established: keep the readable form, and gate the production form against it.
 """
 
 from __future__ import annotations

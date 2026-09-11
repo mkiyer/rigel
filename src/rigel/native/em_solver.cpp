@@ -660,9 +660,8 @@ static void parallel_estep(
 // The calibration prior for one locus: how many pseudo-fragments of gDNA and of RNA to add, and who
 // is allowed to receive the RNA share.
 //
-// Field names spell the quantity out. They were `alpha_gdna_add` / `alpha_rna_add` until 2026-08-11 —
-// a spelled-out Greek letter plus an abbreviation, which said what the symbol was in a derivation
-// rather than what the number is here. It is a count of pseudo-fragments.
+// Field names spell the quantity out: each is a count of pseudo-fragments, not a symbol from a
+// derivation.
 struct AggregatePrior {
     double gdna_prior_fragments = 0.0;
     double rna_prior_fragments  = 0.0;
@@ -787,13 +786,8 @@ static void apply_grouped_prior_update(
     // state. Gate: `tests/native/test_grouped_prior_update.py`, specifically
     // `test_a_locus_with_NO_annotated_carried_alpha_drops_the_prior_from_BOTH_sides`.
     //
-    // ⚠ This boundary used to cite `test_the_gDNA_RNA_split_is_UNTOUCHED_by_the_rna_prior_split`, which
-    // existed NOWHERE in the repository (grepped 2026-08-12, one hit: this comment). A source→test
-    // citation is meant to be the one kind that cannot rot silently, and this one did — it named the
-    // gate the paragraph above says was missing. The gate exists now.
-    //
-    // ⭐⭐ AND WITH AN EXPLICIT ALLOCATION WEIGHT THE DENOMINATOR IS THE WEIGHT TOTAL, so that is what
-    // the gate must name. This is not a refinement — it is the case the weighted lane exists FOR. A
+    // With an explicit allocation weight the denominator is the weight total, so that is what the
+    // gate must name. This is not a refinement — it is the case the weighted lane exists FOR. A
     // locus with no RNA evidence at all has `annotated_count == annotated_carried == 0`, so the
     // count-based gate zeroes the prior and the pool stays empty; that is right when the only thing
     // saying where mass belongs IS the evidence, and wrong when the caller has said so directly.

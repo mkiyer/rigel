@@ -9,7 +9,7 @@ annotation
     ``GeneBuilder`` — gene/transcript annotation with splice-motif injection.
 reads
     ``ReadSimConfig`` / ``GDNAConfig`` — single-condition read-simulation config dataclasses
-    (the engine is ``whole_genome.WholeGenomeSimulator``).
+    (the engine itself is ``wgs_engine.WholeGenomeSimulator``).
 scenario
     ``Scenario``, ``ScenarioResult`` — end-to-end orchestration
     (genome → GTF → FASTQ → BAM → TranscriptIndex).

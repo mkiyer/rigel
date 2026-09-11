@@ -29,22 +29,19 @@ signal in the same library:
 - Nascent RNA (nRNA)
 - Genomic DNA contamination (gDNA)
 
-The implementation is built around a single-pass native BAM scan plus a
-locus-level EM solver. A key architectural change in the current codebase is
-that nRNA is no longer represented as one shadow per transcript. Instead,
-Rigel builds a global table of unique nRNA spans keyed by `(ref, strand,
-start, end)` and shares each nRNA component across transcripts with the same
-genomic span. This reduces redundant nRNA states in loci with many isoforms
-that start and end at the same coordinates.
+A single-pass native BAM scan feeds a calibration stage that separates RNA from gDNA
+genome-wide, and a locus-level EM then assigns the RNA to transcripts. Nascent RNA is
+represented as one component per unique genomic span `(ref, strand, start, end)`, shared by
+every transcript with that span, so isoforms that start and end at the same coordinates do
+not multiply nRNA states.
 
 ### Key features
 
 - Joint mRNA, nRNA, and gDNA quantification in one locus-level model
-- Shared-span nRNA architecture with one component per unique genomic span `(ref, strand, start, end)`
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
 - Automatic strand-model training from annotated spliced fragments; protocol auto-detection (`R1-sense` / `R1-antisense`)
-- gDNA/RNA calibration via a bipartite region↔boundary belief-propagation sweep that deconvolves each genomic node's unspliced mass into the `(RNA₊, RNA₋, gDNA)` simplex, library-agnostic
-- Empirical Bayes priors for nRNA fractions and gDNA rates; calibrated per-locus gDNA initialization
+- gDNA/RNA calibration that solves each genomic region's unspliced mass into sense RNA, antisense RNA and gDNA, with a gDNA-density prior fitted from the library itself
+- Calibrated per-locus gDNA priors feeding the EM
 - MAP-EM and Variational Bayes EM (VBEM, default) solver modes with SQUAREM acceleration
 - Discrete fragment assignment: `fractional`, `map`, or `sample` (default) post-EM assignment modes
 - Parallel BAM scanning and parallel locus EM controlled through one `--threads` setting
@@ -72,11 +69,9 @@ pip install 'rigel-rnaseq[report]'
 The PyPI package name is `rigel-rnaseq` because `rigel` is already taken on
 PyPI. The import name and CLI stay `rigel`.
 
-The `[report]` extra pulls in `vl-convert-python`, which bundles the
-Vega/Vega-Lite JavaScript runtime so reports are fully self-contained and render
-offline. On conda, install it alongside with
-`conda install -c conda-forge vl-convert-python`. Without it, `rigel report`
-still builds a report — only the fragment-length charts are omitted.
+The `[report]` extra pulls in `vl-convert-python` (on conda:
+`conda install -c conda-forge vl-convert-python`); without it `rigel report` still builds a
+report, minus the fragment-length charts.
 
 ### From source
 
@@ -94,7 +89,8 @@ pip install --no-build-isolation -e .
 
 - Python 3.12+
 - C++17-capable compiler
-- Runtime dependencies: `numpy`, `pandas`, `pyarrow`, `pysam`, `pyyaml`
+- Runtime dependencies (from `pyproject.toml`): `pysam>=0.22`, `numpy>=1.26`, `pandas>=2.1`,
+  `pyarrow>=14.0`, `pyyaml>=6.0`, `scipy>=1.11`
 
 On macOS, install Xcode Command Line Tools first:
 
@@ -109,17 +105,17 @@ xcode-select --install
 ### 1. Build an index
 
 ```bash
+samtools faidx genome.fa          # the FASTA needs a .fai index
 rigel index \
     --fasta genome.fa \
     --gtf annotation.gtf \
+    --no-mappability \
     -o index/
 ```
 
-The FASTA must have a `.fai` index. If needed:
-
-```bash
-samtools faidx genome.fa
-```
+`rigel index` requires either `--alignable-zarr PATH` (a per-base mappability store built by
+the companion `alignable` tool for the same genome and aligner, recommended for real genomes)
+or `--no-mappability` to opt out explicitly.
 
 ### 2. Quantify a BAM
 
@@ -127,7 +123,8 @@ samtools faidx genome.fa
 rigel quant \
     --bam sample.bam \
     --index index/ \
-    -o results/
+    -o results/ \
+    --tsv
 ```
 
 Input BAM requirements:
@@ -137,6 +134,9 @@ Input BAM requirements:
 - Splice-junction strand tag available for best strand-model training (`XS` or `ts`, or let Rigel auto-detect)
 
 ### 3. Inspect outputs
+
+Outputs are Feather files; `--tsv` above also writes `.tsv` mirrors (or convert afterward with
+`rigel export results/ --format tsv`).
 
 ```bash
 head results/quant.tsv
@@ -152,12 +152,14 @@ cat results/summary.json
 rigel report results/ -o results/report.html
 ```
 
-Produces a single self-contained HTML file (alignment fates, fragment
-composition, strand model, fragment-length distributions, the mRNA/nRNA/gDNA
-split, capture enrichment, a genome-wide gDNA-density track, and a searchable
-gene table). It reads only the files `rigel quant` already wrote, so reports can
-be built long after — and in bulk — without re-running quantification. Requires
-the `[report]` extra (see [Installation](#pypi)).
+Produces a single self-contained HTML QC file from the files `rigel quant` already wrote, so
+reports can be built later and in bulk. Requires the `[report]` extra (see
+[Installation](#pypi)).
+
+The five subcommands are `index`, `quant`, `sim` (a small synthetic scenario from a YAML
+file), `export` (Feather to TSV or Parquet) and `report`. `rigel --version` prints the version;
+`rigel -v <subcommand>` (`--verbose`) enables DEBUG-level logging. See
+[docs/MANUAL.md](docs/MANUAL.md) for every flag.
 
 ---
 
@@ -169,134 +171,39 @@ the `[report]` extra (see [Installation](#pypi)).
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
 | `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary |
-| `summary.json` | Library protocol, strand specificity, per-category fragment-length **summary statistics**, the calibration scalars (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions, `n_regions`), alignment counts, and global quantification totals (schema v2) |
+| `summary.json` | Library protocol, strand specificity, per-category fragment-length summary statistics, the calibration scalars, alignment counts, and global quantification totals |
 | `fragment_lengths.feather` | Raw per-bin fragment-length histograms, tidy `(category, length, count)` |
 | `calibration_track.feather` / `.bedgraph` | Per-region gDNA solution; the bedGraph is a genome-browser track (IGV / UCSC) |
-| `gdna_density_kde.feather` / `gdna_density_nodes.feather` | Capture gDNA-density KDE diagnostic (written when the Phase-2 prior is fit) |
+| `gdna_density_kde.feather` / `gdna_density_regions.feather` | The fitted gDNA-density curve and its training-region rug (written when the density prior is fit) |
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
 | `report.html` | Optional self-contained QC report, built by `rigel report` (see step 4) |
 | `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |
-| `annotated.bam` | Optional annotated BAM with per-fragment assignment tags, written with `--annotated-bam` (a second BAM pass). Rigel guarantees a collated-in → collated-out contract: the output contains exactly the same records as the input (no drops, no duplications). |
+| `annotated.bam` | Optional annotated BAM with per-fragment assignment tags, written with `--annotated-bam` (a second BAM pass); the same records as the input, collated |
 
-`tpm` is normalized over annotated transcripts only; `tpm_total_rna` uses the
-same numerator but normalizes over all RNA (annotated + synthetic nRNA spans),
-so it is directly comparable to the `nrna_quant` TPM column.
-
-The `nrna` values in transcript- and gene-level tables are derived from shared
-nRNA-span counts that are pro-rated across transcripts sharing the same span.
+`tpm` is normalized over annotated transcripts only; `tpm_total_rna` normalizes over all RNA
+(annotated + synthetic nRNA spans) and is comparable to the `nrna_quant` TPM column.
 
 ---
 
 ## How it works
 
-Rigel runs one native BAM pass feeding three stages: **scan**, **calibrate**,
-and **quantify**.
-
-### Architecture
+Rigel runs one native BAM pass feeding three stages: **scan**, **calibrate**, and **quantify**.
 
 ```
- FASTA + GTF ──▶ Index Build (index.py) ──▶ Feather index files
-                                                    │
- BAM file ──────────────────────────────────────────┤
-                                                    ▼
-                              ┌──────────────────────────────────┐
-                              │  Stage 1: BAM Scan & Training    │
-                              │  C++: BamScanner → Resolver      │
-                              │  Py:  buffer.py, strand_model.py │
-                              │  → FragmentBuffer + models +     │
-                              │    accumulator (AccumulatorPayload)│
-                              └──────────────┬───────────────────┘
-                                             │ per-region/boundary mass
-                                             ▼
-                              ┌──────────────────────────────────┐
-                              │  Stage 2: gDNA/RNA Calibration   │
-                              │  The region↔boundary chain,      │
-                              │  two-phase belief propagation    │
-                              │  Py:  calibration/sweep.py +     │
-                              │       calibration/messages/      │
-                              └──────────────┬───────────────────┘
-                                             │ per-locus Dirichlet prior
-                                             ▼
-                              ┌──────────────────────────────────┐
-                              │  Stage 3: Quantification         │
-                              │  score → route → build loci →    │
-                              │  per-locus EM                    │
-                              │  C++: scoring, batch_locus_em    │
-                              │  Py:  scan.py, locus.py,         │
-                              │       estimator.py               │
-                              └──────────────┬───────────────────┘
-                                             │ posterior counts
-                                             ▼
-                              ┌──────────────────────────────────┐
-                              │  Output: Feather / TSV / JSON    │
-                              │  Py:  cli.py                     │
-                              └──────────────────────────────────┘
+FASTA + GTF ──▶ rigel index ──▶ regions / boundaries partition + transcript tables
+BAM ──▶ 1. scan       C++ single pass: resolve fragments, train the strand and fragment-length
+                      models, buffer the ambiguous fragments, tally per-region/boundary mass
+    ──▶ 2. calibrate  split each region's unspliced mass into sense RNA / antisense RNA / gDNA
+                      (strand tilt + neighbour messages + a gDNA-density prior fitted from the
+                      library) ──▶ two Dirichlet scalars per locus
+    ──▶ 3. quantify   per-locus EM (VBEM or MAP-EM, SQUAREM, OpenMP across loci) with one
+                      component per transcript row plus one gDNA component ──▶ counts, TPM
 ```
 
-### BAM scan and model training
-
-A native scanner reads the BAM once, resolves fragments against the indexed
-annotation, classifies splice structure, trains strand and fragment-length
-models, and writes resolved fragment data into a columnar buffer. In the same
-pass it deposits fractional per-region and per-boundary fragment mass into a
-C++ accumulator (four channels: unspliced ±, spliced sense/antisense),
-producing the `AccumulatorPayload` that calibration consumes.
-
-The main strand model is trained from annotated spliced fragments with
-unambiguous gene assignment. Diagnostic exonic and intergenic strand models are
-also retained for reporting, but gDNA itself is always scored with strand
-probability `0.5`.
-
-### gDNA/RNA calibration
-
-Before per-locus EM, Rigel deconvolves each genomic object's unspliced
-fragment mass into the composition simplex `(f_rna₊, f_rna₋, f_g)` — sense-RNA /
-antisense-RNA / gDNA. The objects are the annotation's REGIONS (genomic
-intervals) and BOUNDARIES (the positions between them), which alternate along
-one chain per reference. Calibration models *only* RNA-vs-gDNA; nascent-vs-mature
-is separated downstream by the per-locus EM.
-
-The solve is a **two-phase belief propagation** over that chain
-(`rigel.calibration.sweep`, the backbone): every object states its own claim,
-a forward pass and a backward pass carry messages between neighbours with the
-RECIPIENT deciding what to do with each, and every object is then solved once
-from its own evidence, the two messages it holds and the prior. What a message
-says is a **policy** (`rigel.calibration.messages`); the shipped one is the
-**composition transfer** (`transfer`): a neighbour's composition crosses a
-splice face by a derived map, and where composition cannot cross — a transcript
-terminus, a strand change — the gDNA and per-strand RNA LEVELS still do, as
-one-sided bounds, every hop priced by the two objects' counting and their own
-disagreement beyond it. Three sources set an object's composition:
-
-1. its **strand likelihood** — the Beta-Binomial tilt of its per-strand counts,
-   the one intrinsic gDNA/RNA signal (identically zero on unstranded data);
-2. its **messages** — the certified splice flux at its junctions and its
-   neighbours' claims, delivered as profiles on the solve grid;
-3. the **gDNA landscape prior** — the population's gDNA density, fitted on the
-   solved objects and refit over a few sweeps, plus the intron factory (each
-   intron's density against the intergenic background).
-
-Calibration fits the library hyperparameters (`gdna_density_global`,
-`rna_sense_frac`, and the gDNA/RNA strand Beta-Binomial overdispersions) plus
-the per-region and per-boundary deconvolved gDNA/RNA mass. These are bridged
-into **two per-locus Dirichlet scalars** (`gdna_prior_count`,
-`rna_prior_count`) that set the gDNA-vs-RNA split feeding the EM. See
-[docs/DESIGN.md](docs/DESIGN.md) for the architecture and
-[docs/EQUATIONS.md](docs/EQUATIONS.md) for the derivations.
-
-### Locus-level EM
-
-Ambiguous fragments are scored, routed into CSR form, and grouped into
-connected components of overlapping transcripts. Each locus is an independent
-subproblem with `n_t + 1` components — one per transcript **row** (annotated
-mRNA and synthetic nRNA spans alike, since unique nRNA spans are materialized
-as ordinary transcript rows) plus one merged gDNA component.
-
-The solver runs VBEM (default; digamma soft updates) or MAP-EM with SQUAREM
-acceleration, parallelized across loci with OpenMP. The calibration prior
-enters as the two per-locus Dirichlet scalars; the EM distributes RNA mass
-among the compatible transcripts. Post-EM fragments are assigned using the
-configured assignment mode (`sample` by default).
+A spliced fragment is certified RNA, so calibration's problem is the unspliced mass. Its
+answer enters the EM as a prior that a decisive locus likelihood can override. The design and
+its rulings are in [docs/DESIGN.md](docs/DESIGN.md); the derivations are in
+[docs/EQUATIONS.md](docs/EQUATIONS.md).
 
 ---
 
@@ -304,9 +211,14 @@ configured assignment mode (`sample` by default).
 
 | Document | Description |
 |----------|-------------|
-| [docs/MANUAL.md](docs/MANUAL.md) | CLI reference, parameter defaults, configuration rules, and output schema |
-| [docs/EQUATIONS.md](docs/EQUATIONS.md) | The derivations the implementation depends on — deposit rule, opportunity functions, strand, priors |
+| [docs/MANUAL.md](docs/MANUAL.md) | The user manual: CLI reference, defaults, configuration rules, output schema |
 | [docs/DESIGN.md](docs/DESIGN.md) | What is built, and the rulings behind it |
+| [docs/EQUATIONS.md](docs/EQUATIONS.md) | The derivations the implementation depends on |
+| [docs/SUCCESS.md](docs/SUCCESS.md) | How performance is measured: the accumulator, then calibration against an oracle |
+| [docs/TESTING.md](docs/TESTING.md) | The benchmark panels, how to build them, and what the test suite can judge |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | The ranked view of what is next for the 0.8.0 release |
+| [docs/ISSUES.md](docs/ISSUES.md) | The issue log: open problems and the record of what was refused |
+| [docs/TRAPS.md](docs/TRAPS.md) | Mistakes already made, as named rules |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
 
 ---
@@ -329,7 +241,9 @@ Rigel is distributed under the [GNU General Public License v3.0](LICENSE).
 ## Development
 
 ```bash
-pytest tests/ -v
-pytest tests/ --cov=rigel --cov-report=term-missing
+conda activate rigel
+pip install --no-build-isolation -e ".[dev]"   # rebuild after any src/rigel/native/ change
+python -m pytest tests/ -q
+ruff check src/ tests/ scripts/ && ruff format src/ tests/
 ```
 

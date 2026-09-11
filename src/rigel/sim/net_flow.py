@@ -1,21 +1,20 @@
-"""⭐⭐ NET FRAGMENT FLOW — WHERE DID EACH MISASSIGNED FRAGMENT GO?
+"""Net fragment flow: where each misassigned fragment went.
 
-    Gate: ``tests/test_net_flow.py``
+Invoked by import, not from a command line: :func:`analyze_net_flow` is the entry point, and it
+writes ``net_flow_per_transcript.tsv`` and ``net_flow_per_locus.tsv`` beside a text report.
+Gate: ``tests/test_net_flow.py``.
 
-⭐ **This answers a question no other instrument does.** ``quant_accuracy.py`` measures the MAGNITUDE of
-transcript error; this decomposes its DIRECTION — each transcript's surplus or deficit split into
-gDNA-sourced and RNA-isoform-sourced flow, over a confusion matrix of true origin against assigned
-destination. "6 M gDNA fragments left the gDNA pool at ``g98 ss0.50 capture_on``" is a `quant_accuracy`
-number; "and here is the transcript they landed on" is this one.
+This decomposes the DIRECTION of transcript error, which a magnitude table cannot give: each
+transcript's surplus or deficit split into gDNA-sourced and RNA-isoform-sourced flow, over a
+confusion matrix of true origin against assigned destination. "Six million gDNA fragments left the
+gDNA pool" is an accuracy number; "and here is the transcript they landed on" is this one.
 
-⛔ **THIS MODULE IS WHAT SURVIVED ``sim/analysis.py``** (retired 2026-08-11, owner). That file was a
-1,589-boundary SECOND SCORER: it ran the tool and rendered its own accuracy tables beside
-``quant_accuracy.py``'s, against its own definition of truth. Two scorers is how a baseline and a ceiling
-drift apart (`TRAPS: score-the-consumers-own-count`), so the scoring and report-rendering halves went and
-the flow decomposition — the part with no duplicate — moved here with its tests.
-
-⚠ The truth loaders below came along because the flow analysis needs them; they are panel plumbing, not
-a second definition of truth.
+Truth comes from the simulator's per-fragment read names (:mod:`rigel.sim.read_name`) read out of
+each condition's annotated BAM, and each component's home locus is the modal locus over the
+fragments touching it, so the flow matrix is self-consistent within one BAM. The truth loaders here
+are panel plumbing for that, not a second definition of truth: scoring the tool is the accuracy
+instrument's job, and a second scorer is how a baseline and a ceiling drift apart
+(`TRAPS: score-the-consumers-own-count`).
 """
 
 from __future__ import annotations
@@ -99,9 +98,10 @@ def collect_fragment_flows(
 ) -> tuple[dict[str, FlowData], list[dict]]:
     """Single pass over each condition's annotated BAM.
 
-    Returns ``(flows_by_condition, overview_rows)``. ``overview_rows`` reproduces the
-    legacy gross-confusion schema (consumed by the condition report + acceptance checks);
-    ``flows_by_condition`` carries the sparse per-locus flow matrix for the net analysis.
+    Returns ``(flows_by_condition, overview_rows)``. ``overview_rows`` is the gross-confusion
+    schema the condition report and the acceptance checks consume; ``flows_by_condition`` carries
+    the sparse per-locus flow matrix the net analysis reads. A condition with no ``annotated.bam``
+    is skipped rather than reported empty.
     """
     import pysam
 
@@ -161,7 +161,8 @@ def collect_fragment_flows(
         flow: Counter = Counter()
         pool_flow: Counter = Counter()  # (true_pool, assigned_pool) -> count, pools gdna/nrna/mrna
 
-        # Legacy gross-confusion counters (back-compat for downstream consumers).
+        # Gross-confusion counters — the overview rows the condition report and the acceptance
+        # checks read, kept beside the flow matrix this function exists for.
         correct_tx = correct_gene = wrong_tx = 0
         rna_as_gdna = gdna_as_rna = gdna_correct = 0
         total_rna = total_mrna = total_nrna = total_gdna = 0
@@ -197,7 +198,7 @@ def collect_fragment_flows(
                 else:
                     a_cid = cid_unassigned()
 
-                # True component (oracle) + legacy gross counters.
+                # True component (oracle) plus the gross counters.
                 if origin.kind == "gdna":
                     total_gdna += 1
                     t_cid = cid_for_gdna(zl)

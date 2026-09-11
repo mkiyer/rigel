@@ -539,7 +539,7 @@ class Tally:
     #: crosses, so a fragment contributes ``max(K, 1)`` of them; this sums to ONE per fragment.
     #:
     #: ⛔ **ONE COLUMN, NOT TWO, AND THAT IS DELIBERATE.** Every other boundary bank is ``[n_boundaries, 2]``
-    #: because the two genome strands are read separately — ``strand_deconv`` reads
+    #: because the two genome strands are read separately — the strand fit's boundary seeds read
     #: ``boundary_unspliced.count`` per column. Nothing reads a mass per strand: the mass exists to convert
     #: an object-incidence total into a fragment count, and that question has no strand in it. A column
     #: nothing reads is half the bank wasted by construction, which is the defect the surviving

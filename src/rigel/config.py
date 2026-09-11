@@ -95,7 +95,7 @@ class EMConfig:
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
-        # ⚠ `Literal` is a type-checker annotation and not a runtime constraint, so an unrecognised
+        # `Literal` is a type-checker annotation and not a runtime constraint, so an unrecognised
         # value would otherwise fall through to the shipped path — a config field that reads as applied
         # and is not.
         if self.warm_start not in ("coverage", "prior", "uniform"):
@@ -194,11 +194,9 @@ class BamScanConfig:
     can be treated as containing an annotated intron when the intron is
     supported with this many bp of one-sided slack.
 
-    Under the fractional cutover the calibration accumulator no longer
-    interprets this value \u2014 compartment / splice / strand are
-    recorded directly into 12 fractional channels per region. The
-    field is preserved here so the resolver can still be tuned
-    independently. Default 3 bp matches the pre-cutover behaviour.
+    The calibration accumulator does not read this value: compartment,
+    splice and strand are recorded directly into the per-region
+    channels. It tunes the resolver alone.
     """
 
     def __post_init__(self) -> None:
@@ -247,200 +245,141 @@ class BamScanConfig:
 class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
-    The calibrator is the **belief-propagation sweep** over the region↔boundary chain — a single
-    forward-backward pass per solve_chain call, with the belief-free Poisson disagreement-variance message
-    precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-region log-odds solve grid. See
-    :func:`rigel.calibration.calibrate.calibrate`.
+    The calibrator is the belief-propagation sweep over the region-boundary chain — a single
+    forward-backward pass per solve_chain call, with the belief-free Poisson disagreement-variance
+    message precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-region log-odds
+    solve grid. See :func:`rigel.calibration.calibrate.calibrate`.
     """
 
-    #: ⭐ The strand-overdispersion CEILING is not config: it lives as the single asserted constant
+    #: The strand-overdispersion CEILING is not config: it lives as the single asserted constant
     #: ``_CEIL_ALPHA_BETA`` in :mod:`rigel.calibration.gdna_strand`, next to the estimator it
-    #: parameterises. ⭐ 2026-08-30: the shrinkage TARGET went with the four config fields it replaced —
-    #: neither component shrinks toward a constant any more, they shrink toward EACH OTHER by their own
-    #: measured informations (``gdna_strand.reconcile_overdispersions``).
+    #: parameterises. Nor is a shrinkage target — neither component shrinks toward a constant, they
+    #: shrink toward EACH OTHER by their own measured informations
+    #: (``gdna_strand.reconcile_overdispersions``).
 
-    #: **Sweep grid resolution** ``K`` for the per-region log-density log-odds solve over ``λ = logit(f_g)``
+    #: Sweep grid resolution ``K`` for the per-region log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand regions are exact 1-D, AMBIG
-    #: regions marginalize the RNA tilt ``τ``). ``K=60`` matches per-region accuracy at a tractable cost
-    #: (``K=20`` over-calls / under-resolves the zero-DNA case).
+    #: regions marginalize the RNA tilt ``τ``). 60 matches per-region accuracy at a tractable cost; a
+    #: much coarser grid under-resolves the zero-DNA case.
     sweep_n_grid: int = 60
 
-    #: **Single-strand λ-grid resolution** ``K_ss`` (Fix 3). Single-strand regions solve a cheap 1-D λ grid
-    #: (``O(m·K)``), so a fine grid is affordable there and de-quantizes the ``f_g`` readout (the coarse
-    #: ``K=60`` snapped f_g to Δf_g≈0.085 steps — the dominant post-Fix-1 error on high-mass exons). Decoupled
-    #: from ``sweep_n_grid`` because the AMBIG 2-D ``(λ,τ)`` cube is ``O(m·K·K_t)`` and a fine grid there is a
-    #: genome-scale memory risk. Paired with the parabolic sub-grid-mode readout (``simplex_logodds``), which
-    #: recovers a 4×-finer-grid accuracy at any ``K``; ``256`` is where the pair saturates (512 adds <1%).
+    #: Single-strand λ-grid resolution ``K_ss``. Single-strand regions solve a cheap 1-D λ grid
+    #: (``O(m·K)``), so a fine grid is affordable there and de-quantizes the ``f_g`` readout, which the
+    #: coarse shared grid snaps into visible steps on high-mass exons. Decoupled from ``sweep_n_grid``
+    #: because the AMBIG 2-D ``(λ,τ)`` cube is ``O(m·K·K_t)`` and a fine grid there is a genome-scale
+    #: memory risk. Paired with the parabolic sub-grid-mode readout (``simplex_logodds``), which recovers
+    #: roughly a 4x-finer-grid accuracy at any ``K``; 256 is where the pair saturates.
     sweep_n_grid_single_strand: int = 256
 
-    #: **Log-odds grid FLOOR** ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
-    #: Beta(½,½) REFERENCE needs to stay proper — under it ~0.9 % of the reference's mass lies outside
-    #: ``L = 10`` — and it is a FLOOR, not the value.
+    #: Log-odds grid FLOOR ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
+    #: Beta(½,½) reference needs to stay proper, and it is a FLOOR, not the value.
     #:
-    #: ⭐⭐⭐ **THE BRACKET ACTUALLY SOLVED ON IS ``max(this, the fitted prior's own demand)``**, and the
-    #: second term is DERIVED rather than chosen: `calibration.landscape.DensityLandscape.required_logodds_window`.
-    #: ψ evaluates the landscape at ``log ρ = log f + log M − log E`` and can only offer
-    #: ``f ∈ [σ(−L), σ(L)]``; at ``L = 10`` that floor is ``4.540e-05``, which on a zero-gDNA library sits
-    #: **370×** above the median density the prior points at, so ψ had no coordinate for what its own
-    #: prior was telling it. The demand is the landscape's log-dynamic range — 21.0–23.0 nats on the human
-    #: index — so the shipped 10 was less than half of it.
-    #:
-    #: ⭐⭐ **MEASURED THROUGH `calibrate` ON ALL 16 LADDER CONDITIONS**, Σ|Δ| in object-incidence
-    #: fragments against the origin-split oracle, derived ÷ fixed, per stratum::
-    #:
-    #:     unstranded x capture OFF   0.4339      g00 0.3449 / g05 0.9917 / g50 0.9840 / g98 0.9766
-    #:     stranded   x capture OFF   0.9075      g00 0.3242 / g05 0.9914 / g50 0.9820 / g98 0.9732
-    #:     stranded   x capture ON    0.9674      g00 0.3951 / g05 0.9972 / g50 1.0077 / g98 0.9739
-    #:     unstranded x capture ON    0.9847      (the DEFERRED stratum — reported, not targeted)
-    #:
-    #: ⭐ All four strata improve; 11 of the 12 IN-SCOPE conditions improve and one regresses
-    #: (`g50 ss_0.99 capture_on`, 1.0077). ⭐⭐ `g05` is the tell — it regressed **1.43×** under every
-    #: library-wide reference mean ever tried, the blocker that killed that whole family, and here it
-    #: improves on both strand settings.
-    #: ⛔ The resolution-only control — the lattice doubled at the OLD bracket — moves the OTHER way
-    #: (1.0147× / 1.0046× / 1.0036×), so the effect is the BRACKET and not the lattice.
+    #: The bracket actually solved on is ``max(this, the fitted prior's own demand)``, and the second
+    #: term is DERIVED rather than chosen:
+    #: `calibration.landscape.DensityLandscape.required_logodds_window`. ψ evaluates the landscape at
+    #: ``log ρ = log f + log M − log E`` and can only offer ``f ∈ [σ(−L), σ(L)]``, so a bracket narrower
+    #: than the landscape's own log-dynamic range leaves ψ with no coordinate for what its own prior
+    #: points at — acutely on a near-zero-gDNA library, where the floor sits orders of magnitude above
+    #: the density the prior favours.
     sweep_logodds_window: float = 10.0
 
-    # ⛔ ψ's reference LOCATION is GONE (owner refutation, 2026-08-24). Two fields stood here —
-    # ``structural_reference`` (the annotation-derived ``m → 0.75``) and
-    # ``measured_intron_reference`` (the measured background location at ss-intron REGIONs). Both
-    # were prior ASSERTIONS at fixed strength: where the strand channel carried information they
-    # were worth ~one fragment as documented, and where it did not (κ = ½, or composition near a
-    # vertex) they were the ENTIRE answer at any depth — measured, the location decided 100 % of
-    # the claimed-boundary error at zero refits. The reference is now the symmetric Jeffreys
-    # measure alone; background information enters as the intron-factory density λ-factor
-    # (`density_deconv.density_lambda_factor`), a LIKELIHOOD whose precision scales with counts.
-
-    #: **Inner tilt-grid resolution** ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
+    #: Inner tilt-grid resolution ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **WHICH (counts, exposure) PAIR THE POOLED gDNA BACKGROUND ESTIMATORS TAKE.**
-    #: ``"contained"`` (the default, and bit-identical to the tree before this field existed) pools the
-    #: CONTAINED count over the gDNA contained effective length — unbiased, since
-    #: ``E[count] = rho·E_contained``, but the fragment-length pmf enters the DIVISOR.
-    #: ``"measured_total"`` pools the START/END banks over the region's own LENGTH
+    #: Which (counts, exposure) pair the pooled gDNA background estimators take.
+    #: ``"contained"`` (the default) pools the CONTAINED count over the gDNA contained effective
+    #: length — unbiased, since ``E[count] = rho·E_contained``, but the fragment-length pmf enters the
+    #: DIVISOR. ``"measured_total"`` pools the START/END banks over the region's own LENGTH
     #: (`calibration.total_abundance.region_counts_and_exposure`) — ``E[S] = rho·ell`` for EVERY
     #: fragment length, so no pmf enters at all, and double-walled regions are excluded as honestly not
     #: model-free. Both are pooled as a ratio of SUMS and both feed the SAME conjugate
     #: ``Gamma(Σcounts + ½, Σexposure)``, so this swaps the pair and not the estimator.
     #:
-    #: ⭐⭐ **MEASURED on the 16-condition ladder against the `gdna` origin partition's own start rate,
-    #: per stratum (`total_abundance_audit.py` arm ⓕ). The verdict is that it is a TIE off capture and a
-    #: 1.8–4.3× repair under it:**
-    #:
-    #: ===============================  ==================  ==============
-    #: pool                             shipped / truth     new / truth
-    #: ===============================  ==================  ==============
-    #: intergenic, capture-OFF          1.0000 / 1.0001     1.0000
-    #: intergenic, capture-ON           **0.5627–0.5644**   **1.0818–1.0830**
-    #: +introns, capture-OFF            1.1821–1.1823       1.2055–1.2058
-    #: +introns, capture-ON             **0.2344–0.2348**   **1.0649–1.0654**
-    #: ===============================  ==================  ==============
-    #:
-    #: ⭐ The capture-ON repair is the point: the gDNA pmf is itself capture-distorted, so the divisor is
-    #: mis-estimated and the shipped pair under-reads the true gDNA rate by 1.8× (intergenic) to 4.3×
-    #: (+introns), while a pmf-free exposure is immune. ⛔ The +introns rows show the ONE cost, and it is
-    #: not the estimator's: those pools carry nascent RNA, both forms over-read, and the START form takes
-    #: ~2 pp MORE of it because a fragment starting in an intron and reaching into an exon books a START
-    #: there. Where the pool is clean (intergenic) that term is absent.
-    #: ⛔ ``"measured_total"`` REFUSES to run unless ``calibrate`` is given ``mature_walls`` and
+    #: The two agree off capture. Under capture the gDNA pmf is itself capture-distorted, so the
+    #: contained divisor is mis-estimated and that pair under-reads the true gDNA rate several-fold,
+    #: while a pmf-free exposure is immune. The cost of the pmf-free form is on pools that carry
+    #: nascent RNA: both forms over-read there, and the START form takes slightly more of it, because a
+    #: fragment starting in an intron and reaching into an exon books a START there. On a clean pool
+    #: that term is absent. Scored by `total_abundance_audit.py`.
+    #: ``"measured_total"`` REFUSES to run unless ``calibrate`` is given ``mature_walls`` and
     #: ``boundary_reach`` — a background rate that silently changed estimator is worse than either.
     background_abundance: str = "contained"
 
-    #: **FIT THE `AbundanceLandscape` AT CALIBRATION INIT** — the pre-pass-0 TOTAL-density field and
+    #: Fit the `AbundanceLandscape` at calibration init — the pre-pass-0 TOTAL-density field and
     #: its mode census (`calibration.abundance_landscape`). Its inputs are counts and lengths only
     #: (the wall-exact measured totals), so there is NO circularity with the solve; under capture it
-    #: is bimodal and supplies `rho_0` (the depleted mode), the span `R` (the mode ratio) and a
-    #: per-region enrichment responsibility `w_i` — the three quantities the measured pass-0
-    #: reference consumes.
-    #: ⭐⭐ **``True`` IS THE DEFAULT SINCE 2026-08-21, when the enrichment NPMLE was retired**: this
-    #: object is now the SOLE source of the QC report's gDNA-density panel
-    #: (`CalibrationDiagnostics.from_abundance_landscape`), and it is strictly more informative than
-    #: what it replaced — basins from the mode census rather than the two tallest peaks of a curve, a
-    #: depleted mode picked by an INDEPENDENT anchor measurement, a real training count, and a real
-    #: rug (the npmle carried no training points, so the report's rug was always empty).
-    #: ⛔ **Nothing in the SOLVE reads it**, so enabling it moves no solved number — the retirement's
-    #: gate was a bit-identical deliverable.
-    #: ⚠ Without the wall inputs (`mature_walls`, `boundary_reach`) the fit is SKIPPED with a WARNING
-    #: and the object is ``None``, so the report simply omits the panel. ⛔ That is deliberately NOT
-    #: the same policy as ``background_abundance`` above, which still REFUSES: that pair feeds ψ, so a
-    #: missing input there would silently change a number the solve consumes, whereas this one is read
-    #: only by the report and the debug bundle.
+    #: is bimodal and supplies `rho_0` (the depleted mode), the mode ratio and a per-region enrichment
+    #: responsibility.
+    #: It is the sole source of the QC report's gDNA-density panel
+    #: (`CalibrationDiagnostics.from_abundance_landscape`).
+    #: Nothing in the SOLVE reads it, so enabling it moves no solved number.
+    #: Without the wall inputs (`mature_walls`, `boundary_reach`) the fit is SKIPPED with a warning
+    #: and the object is ``None``, so the report simply omits the panel. That is deliberately NOT the
+    #: same policy as ``background_abundance`` above, which REFUSES: that pair feeds ψ, so a missing
+    #: input there would silently change a number the solve consumes, whereas this one is read only by
+    #: the report and the debug bundle.
     abundance_landscape: bool = True
 
-    # **gDNA intron factory**. ``True`` ⇒ deconvolve confident gDNA
+    #: gDNA intron factory. ``True`` ⇒ deconvolve confident gDNA
     #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
-    #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
-    #: density, a two-sided estimate; deconvolves gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
-    #: prior-free pass-0 currently leaves at ~½ (fixes both the zero-gDNA false-positive and the gDNA under-call),
-    #: and seeds the Phase-2 hyperprior fit with clean intron gDNA. ``False`` ⇒ byte-identical to the
-    #: pre-factory pass-0.
+    #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE
+    #: gDNA density, a two-sided estimate; it deconvolves gDNA, not RNA, so it is strand-free). It
+    #: resolves the unstranded-intron gDNA that the prior-free pass-0 otherwise leaves near ½ — both
+    #: the zero-gDNA false positive and the gDNA under-call — and seeds the hyperprior fit with clean
+    #: intron gDNA. ``False`` ⇒ byte-identical to the pre-factory pass-0.
     #:
-    #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
-    #: (``I_factory``). Before that the factory shifted an intron's own
-    #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
-    #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
-    #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite (⚠ DELETED — see
-    #: `rigel.sim.capture.sampler`; these numbers stand as recorded and are not reproducible as written):
-    #: mwae 0.1361 → 0.0949, corr 0.688 → 0.736,
-    #: 20 scenarios better / 1 worse / 11 flat; intron mwae 0.1781 → 0.0117 (its share of suite error 17.0 % →
-    #: 1.6 %); every stranded scenario better or flat (R4 clean).
+    #: The factor's precision is registered as composition evidence (``I_factory``), and that is what
+    #: makes it useful beyond its own slot: without it the factory shifts an intron's own mode but
+    #: carries no ``τ``, so the intron has no standing to EMIT and the correction dies one hop out.
     intron_factory: bool = True
 
-    #: ⭐⭐⭐ **MESSAGE PROPAGATION — what one neighbour tells another, on the two-phase backbone
-    #: (prepare → propagate → solve). DEFAULT ON** (owner, 2026-08-18). ``True`` installs the policy
-    #: ``message_policy`` names; ``False`` installs ``messages.silent.SilentPolicy`` — ψ carries each
-    #: slot's OWN evidence alone (its two strand counts, its spliced count, the fitted gDNA prior and
-    #: the intron factory), the measured floor every policy is judged against. ⭐ Messages exist for
-    #: the slots whose own solve has no composition channel — unstranded data and the both-stranded
-    #: (AMBIG) slots, where the strand likelihood is flat and the local answer is a default rather
-    #: than a measurement; on stranded data a sighted exon's own solve is excellent and a message can
-    #: mostly only disturb it. The standing is re-derived by ``scripts/design/policy_benchmark.py``,
-    #: the two halves read apart and never pooled.
-    #: ⚠ **Flipping this default, or ``message_policy``, is a CONFIG DEFAULT FLIP** — the trigger that
-    #: once left six instruments dead while the suite stayed green, because the TEST readers install
-    #: the policy themselves. Run the instruments, not just the suite
+    #: Message propagation — what one neighbour tells another, on the two-phase backbone
+    #: (prepare → propagate → solve). ``True`` installs the policy ``message_policy`` names; ``False``
+    #: installs ``messages.silent.SilentPolicy``, under which ψ carries each slot's OWN evidence alone
+    #: (its two strand counts, its spliced count, the fitted gDNA prior and the intron factory) — the
+    #: measured floor every policy is judged against. Messages exist for the slots whose own solve has
+    #: no composition channel: unstranded data and the both-stranded (AMBIG) slots, where the strand
+    #: likelihood is flat and the local answer is a default rather than a measurement. On stranded data
+    #: a sighted exon's own solve is excellent and a message can mostly only disturb it. The standing is
+    #: re-derived by ``scripts/design/policy_benchmark.py``, the two halves read apart and never pooled.
+    #: ⛔ Flipping this default, or ``message_policy``, is a config default flip — the trigger that has
+    #: left instruments dead while the suite stayed green, because the TEST readers install the policy
+    #: themselves. Run the instruments, not just the suite
     #: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
     message_propagation: bool = True
 
-    #: **Which policy `message_propagation = True` installs** — ⭐ `"transfer"` (THE SHIPPED
-    #: DEFAULT since 2026-09-09: :class:`~rigel.calibration.messages.transfer.TransferPolicy`, the
-    #: composition-transfer rebuild on the two-phase backbone — the owner's rulings of 2026-09-01
-    #: onward; the ship judgement is `policy_benchmark.py --panel ladder`: it beats silence on 7 of 8
-    #: rows of EACH half (the other two within 1 %) and the relay on 13 of 16, that relay leading only
-    #: on three zero-gDNA rows that are the landscape's; on the 0.8.0 metric it has the lowest
-    #: composition error on every in-scope stratum, `calibration_vs_oracle.py --message-policy`) or
-    #: `"silent"` (:class:`~rigel.calibration.messages.silent.SilentPolicy`, the measured floor — the
-    #: same policy `message_propagation = False` installs). The relay it replaced, and the relay's
-    #: certified-flux anchor, were retired on 2026-09-09; git carries them.
-    #: ⛔ An unknown name RAISES: an arm that silently runs a policy other than the one it names
+    #: Which policy `message_propagation = True` installs. `"transfer"`
+    #: (:class:`~rigel.calibration.messages.transfer.TransferPolicy`, the composition transfer on the
+    #: two-phase backbone) is the shipped default; `"silent"`
+    #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) is the measured floor, the same policy
+    #: `message_propagation = False` installs. The ship judgement is `policy_benchmark.py --panel
+    #: ladder` read as two halves, and `calibration_vs_oracle.py --message-policy` on the
+    #: composition metric.
+    #: An unknown name RAISES: an arm that silently runs a policy other than the one it names
     #: is a benchmark that cannot be trusted.
     message_policy: str = "transfer"
 
-    #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
-    #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the *current* solved gDNA
-    #: densities + belief widths, then **fully resets the belief** and re-solves with it. So nothing but the
-    #: fitted landscape carries between iterations, and the prior sharpens only where the data has earned it.
-    #: ``0`` ⇒ the prior-free pass-0 alone.
+    #: Calibration refit iterations — the prior BOOTSTRAP. Each iteration re-fits the population gDNA
+    #: landscape (:class:`~rigel.calibration.landscape.DensityLandscape`) on the current solved gDNA
+    #: densities and belief widths, then fully RESETS the belief and re-solves with it. So nothing but
+    #: the fitted landscape carries between iterations, and the prior sharpens only where the data has
+    #: earned it. ``0`` ⇒ the prior-free pass-0 alone.
     #:
-    #: **Default 3, measured (2026-07-28).** The bootstrap converges geometrically — suite mass-weighted
-    #: mwae over the 32-condition battery (⚠ RETIRED; the panel is now the 16-condition ladder, so these
-    #: stand as recorded and are not reproducible as written) goes 0.0788 → 0.0525 → 0.0486 → **0.0475** → 0.0471 → 0.0468, with
-    #: successive increments shrinking 2–3× each step, and it is **monotone on every stratum including the
-    #: zero-gDNA false-positive guard** (0.0667 → 0.0109), so extra iterations never trade specificity for
-    #: accuracy. Iteration 3 captures **96 %** of the total available gain; past it the increments are below
-    #: anything worth acting on. Cost is linear — one landscape fit plus one full sweep each, measured
-    #: 46.8 s (1 iter) → 96.0 s (3 iters) on a 118 k-region real cfRNA sample. Lower it if calibration
-    #: wall-clock matters more than the last ~10 % of its accuracy.
+    #: The bootstrap converges geometrically, with successive increments shrinking by a factor of two
+    #: or three, and it is monotone on every stratum including the zero-gDNA false-positive guard, so
+    #: extra iterations never trade specificity for accuracy. Three captures nearly all of the
+    #: available gain. Cost is linear — one landscape fit plus one full sweep each — so lower it if
+    #: calibration wall-clock matters more than the last few percent of its accuracy.
     calib_refit_iters: int = 3
 
-    #: **gDNA hyperprior STRENGTH** — a temperature on ψ's fitted composition arm
+    #: gDNA hyperprior STRENGTH — a temperature on ψ's fitted composition arm
     #: (``calibration.landscape.DensityLandscape``). ``1.0`` is exact Bayes. Below 1 tempers a prior that
-    #: is, after all, fitted from *biased* pass-0 output, which is robustness rather than a fudge: it is what
-    #: lets real data overcome a wrong prior, and it is the intended control for the one measured failure
-    #: direction — on zero-gDNA and capture-OFF libraries the landscape places 0.2–2.4 % of its mass in the
-    #: enriched region where the truth has ~0.01–1 %. Affects ONLY the fitted hyperprior refit, never
+    #: is, after all, fitted from biased pass-0 output, which is robustness rather than a fudge: it is
+    #: what lets real data overcome a wrong prior, and it is the intended control for the one measured
+    #: failure direction — on zero-gDNA and capture-OFF libraries the landscape places a little more
+    #: mass in the enriched region than the truth carries. Affects ONLY the fitted hyperprior refit,
+    #: never
     #: the pre-solve total-density landscape (which votes on nothing) and never the solve's gDNA messages.
     gdna_prior_strength: float = 1.0
 
@@ -487,11 +426,11 @@ class PipelineConfig:
     scan: BamScanConfig = field(default_factory=BamScanConfig)
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    # ⭐ The second pass's multinomial draw. Pass 1 holds every
+    # The second pass's multinomial draw. Pass 1 holds every
     #: fragment whose unsequenced gap has more than one surviving explanation; the drain picks one
     #: hypothesis each and re-deposits, and this seeds that draw.
     #:
-    #: ⚠ **Deliberately NOT ``em.seed``.** They are two independent RNG consumers, and sharing one field
+    #: Deliberately NOT ``em.seed``. They are two independent RNG consumers, and sharing one field
     #: would mean changing the EM's seed silently re-drew every held fragment — so an EM A/B would move
     #: the tally it was being run against.
     second_pass_seed: int = 0
@@ -520,28 +459,28 @@ class PipelineConfig:
 class TranscriptGeometry:
     """Pre-computed transcript/gene geometry for the EM solver.
 
-     Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
-     at the start of ``quant_from_buffer``.  Not user-configurable — these are
-     derived from the reference and the fitted models.
+    Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
+    at the start of ``quant_from_buffer``.  Not user-configurable — these are
+    derived from the reference and the fitted models.
 
-     ⚠ That model is built by ``FragmentLengthModel.from_pmf`` from
-     ``FLModels.rna_pmf``, which since TRAPS: pure-and-length-censored is derived from the accumulator payload alone
-    the effective lengths here and the calibration divisors
-     read the SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
+    That model is built by ``FragmentLengthModel.from_pmf`` from ``FLModels.rna_pmf``, which is
+    derived from the accumulator payload alone (TRAPS: pure-and-length-censored). The effective
+    lengths here and the calibration divisors read the SAME pmf, so a change to it reaches every
+    transcript in the EM, not only calibration.
 
-     Parameters
-     ----------
-     effective_lengths : np.ndarray
-         float64[n_transcripts] — effective transcript lengths.
-     effective_lengths_em : np.ndarray, optional
-         float64[n_transcripts] — EM-only effective transcript lengths. When
-         omitted, EM uses ``effective_lengths``.
-     exonic_lengths : np.ndarray
-         float64[n_transcripts] — spliced exonic lengths.
-     t_to_g : np.ndarray
-         int32[n_transcripts] — transcript-to-gene mapping.
-     transcript_spans : np.ndarray
-         float64[n_transcripts] — genomic transcript spans.
+    Parameters
+    ----------
+    effective_lengths : np.ndarray
+        float64[n_transcripts] — effective transcript lengths.
+    effective_lengths_em : np.ndarray, optional
+        float64[n_transcripts] — EM-only effective transcript lengths. When
+        omitted, EM uses ``effective_lengths``.
+    exonic_lengths : np.ndarray
+        float64[n_transcripts] — spliced exonic lengths.
+    t_to_g : np.ndarray
+        int32[n_transcripts] — transcript-to-gene mapping.
+    transcript_spans : np.ndarray
+        float64[n_transcripts] — genomic transcript spans.
     """
 
     effective_lengths: np.ndarray

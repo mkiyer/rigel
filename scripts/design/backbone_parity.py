@@ -1,58 +1,27 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **WHAT DOES ONE MESSAGE OPERATOR DO, PER SLOT, ON A REAL CHAIN?** — the fast half of the byte-identity gate.
+"""What does one message operator do, per slot, on a real chain? Two policies run through
+``sweep.solve_chain`` on the same captured inputs, in one process, and every output array is
+compared element by element: the six ``RegionBelief`` arrays, the two chain projections that feed
+``CalibrationResult``, every shared key of the diagnostics ``_capture`` (the dissect loop reads it,
+so a silently dropped key is a regression), and the backbone assertions as violation counts beside
+their eligible sets, because zero violations where the predicate can never fire is not evidence.
+It is strictly stronger than the panel per condition — an aggregate is a handful of scalars, so an
+error that cancels between two slots is invisible there and visible here — and covers one condition
+where the panel covers the ladder, so run it first and the panel after. ``transfer`` against
+``silent`` is the per-slot view of the shipped policy; ``transfer`` against a prototype arm
+(``module:<file.py>:<arm>``, the ``ARMS`` table `policy_prototype.py` loads) is the per-slot view
+of one mechanism, and a prototype identical to the shipped policy must score byte-identical. The
+policy is the arm, named on both sides and printed before each run, so there is no separate
+``--messages`` switch; the one calibration at the top exists only to capture ``solve_chain``'s
+inputs and the shipped policy instance. Identity is bit-equality, never a tolerance, and it refuses
+to pass if it compared nothing or if both arms are the same policy. For an ablation arm a
+byte-identical result means the operator is inert here and is no evidence, not "no change".
 
-Two policies, one real 70,176-slot chain, one process, **every output array compared element by element**.
+Usage::
 
-⭐ **It is strictly stronger per condition than the panel, and strictly weaker across conditions.** An
-aggregate score is a handful of SCALARS, so an error that cancels between two slots is invisible there and
-visible here; the panel in turn covers the whole ladder (**16** conditions since the 2026-08-13 rebuild)
-and this covers one. Run this first, on the condition with the
-most structure, then run the panel. ⛔ It is also the honest answer to TRAPS: all-small-singly-large-jointly — *when every single
-ablation is small and the joint one is large, go one stage upstream* — because an aggregate cannot tell a
-switch that moves nothing from one that moves two slots in opposite directions.
-
-⛔⛔ **THE VERDICT THIS DOCSTRING ONCE CARRIED IS NO LONGER REPRODUCIBLE, AND SAYING SO IS THE POINT.**
-It read: *"the relay reproduced the shipped answer on 421,056 output elements and 18,245,830 diagnostic
-elements, zero differences"*. That was the relay against the solver the backbone replaced; both are
-deleted (the relay retired 2026-09-09), so no invocation of this file can produce the number again.
-
-⭐⭐ **What the machinery is FOR now**: ``transfer`` against ``silent`` is the per-slot view of what the
-shipped policy does to a real chain; ``transfer`` against a PROTOTYPE arm (``module:<file.py>:<arm>``, the
-same ``ARMS`` file `policy_prototype.py` loads) is the per-slot view of ONE mechanism, element by element,
-where an aggregate cannot tell a mechanism that moves nothing from one that moves two slots in opposite
-directions. A prototype identical to the shipped policy must score byte-identical here.
-
-⛔⛔ **IT SETS THE POLICY ITSELF AND DOES NOT TAKE ``--messages``, WHICH IS DELIBERATE.** The policy
-**IS** the arm — it is named on both sides of every comparison and printed before each run — so a
-``--messages`` flag would be a second, contradictable source for the same fact. ⚠ The one calibration run
-at the top exists ONLY to capture ``solve_chain``'s inputs and the shipped policy instance (its intron-row
-memo and strand model), which are built before any policy is consulted.
-
-What it compares
-----------------
-Two ``sweep.solve_chain`` arms on the SAME inputs:
-
-* the six :class:`RegionBelief` arrays — ``f_pos``, ``f_neg``, ``f_g``, ``var_pos``, ``var_neg``, ``var_gdna``
-* the two chain PROJECTIONS both feed ``CalibrationResult``
-* every shared key of the diagnostics ``_capture``, because the dissect loop's instruments read it and a
-  change that silently drops one of its keys breaks them with no error
-* ⭐ the five BACKBONE ASSERTIONS, as counts beside their ELIGIBLE sets — because an assertion reporting
-  zero violations where its predicate can never fire is not evidence of anything (TRAPS: could-the-arm-have-fired)
-
-⛔ **TRAPS: byte-identity-gate's first lie is gated: this refuses to pass if it compared nothing.** It asserts both arms produced
-the same key set and that the number of elements compared is nonzero, so "0 differences" cannot mean "0
-comparisons".
-
-Usage
------
-    # what the shipped policy does to one real chain, per slot
-    python scripts/design/backbone_parity.py --suite .../ladder --index .../rigel_index
-
-    # what ONE prototype mechanism does, per slot
-    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b module:proto.py:my_arm
-
-⚠ Both arms run in ONE process against ONE set of inputs, which is what makes this an identity test rather
-than a reproducibility test.
+    python scripts/design/backbone_parity.py --suite .../ladder --index .../rigel_index   # shipped transfer vs silent, per slot
+    python scripts/design/backbone_parity.py --suite ... --index ... --arm-b module:proto.py:my_arm   # one prototype mechanism
+    python scripts/design/backbone_parity.py --suite ... --index ... --condition <name> --oracle-cache <dir>
 """
 
 from __future__ import annotations
@@ -69,38 +38,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from rigel.calibration import sweep as SW  # noqa: E402
 from rigel.calibration.messages.silent import SilentPolicy  # noqa: E402
 
-#: capture keys that CANNOT match by construction, with the reason. ⛔ Keep this set EMPTY unless the
-#: reason is structural — every entry is a hole in the gate.
-#: ⚠ It held ``backbone_assertions`` until 2026-08-17, on the reason *"the predecessor had no assertions
-#: to count"*. The predecessor is deleted, and ``sweep.solve_chain`` publishes that key unconditionally
-#: inside its own ``_capture`` block, so BOTH arms now always carry it — the entry could only ever have
-#: hidden a real regression.
+#: capture keys that cannot match by construction. Keep this set empty unless the reason is
+#: structural — every entry is a hole in the gate.
 _EXPECTED_ABSENT: set[str] = set()
 
 
 def _cmp(a, b, where: str = ""):
     """Element-wise identity, not closeness. Returns ``(n_elements, n_differing, max_abs_delta)``.
 
-    ⛔⛔ **AN UNKNOWN TYPE RAISES HERE RATHER THAN FALLING THROUGH TO ``!=``, and that is the repair this
-    function needed** (2026-08-17). The fall-through read *"anything numpy will not take is a scalar,
-    compare it with ``!="``* — and when ``sweep`` began publishing ``global_lp`` as a
-    :class:`CompositionPriors` **dataclass holding numpy arrays**, ``np.asarray(.., float64)`` raised
-    ``TypeError`` and the handler then raised ``ValueError: The truth value of an array … is ambiguous``
-    from inside the dataclass's own ``__eq__``. ⚠ The instrument was DEAD for two commits with a green
-    suite: nothing in ``tests/`` reads ``_capture["global_lp"]``. So a type this function does not
-    understand is now a LOUD failure naming the key, never a silent guess.
+    A type this function does not understand raises, naming the key, rather than falling through to
+    ``!=``: a dataclass holding arrays would answer that through a generated ``__eq__`` that cannot
+    reduce an array to one bool, and nothing in the suite reads ``_capture``, so a silent guess here
+    leaves the instrument dead with a green suite.
     """
     if a is None and b is None:
         return 0, 0, 0.0
     if (a is None) != (b is None):
         return 1, 1, float("inf")
-    # ⛔⛔ A dict is walked KEY BY KEY **here** as well as by the caller, and the difference matters.
-    #   ``main`` walks the TOP level of ``_capture`` itself, so this branch used to read
-    #   ``return 0, 0, 0.0  # compared key-by-key by the caller where it matters`` — but a dict reached
-    #   through a LIST element or a DATACLASS FIELD has no such caller, and that return reported
-    #   "0 elements, 0 differing" on data that DIFFERED. ⚠ Falsified 2026-08-17: a dataclass holding
-    #   ``{"a": zeros(5)}`` vs ``{"a": ones(5)}`` scored ``(0, 0, 0.0)``. That is the same silent guess
-    #   the ``!=`` fall-through below was removed for, one level down.
+    # a dict is walked key by key here as well as by the caller: ``main`` walks the top level of
+    #   ``_capture`` itself, but a dict reached through a list element or a dataclass field has no
+    #   such caller, and returning "0 elements, 0 differing" for it would hide data that differed.
     if isinstance(a, dict) or isinstance(b, dict):
         if not (isinstance(a, dict) and isinstance(b, dict)):
             return 1, 1, float("inf")
@@ -117,10 +74,9 @@ def _cmp(a, b, where: str = ""):
             nd += len(one_sided)
             d = float("inf")
         return el, nd, d
-    # ⭐ A DATACLASS is walked FIELD BY FIELD, because its members are what carry the numbers. Comparing
-    #   the objects instead would ask a generated ``__eq__`` to reduce an array to one bool, which is
-    #   exactly the failure above; and a field-wise walk keeps the ELEMENT COUNT honest, so a dataclass
-    #   whose members are all ``None`` contributes 0 comparisons rather than a spurious 1.
+    # a dataclass is walked field by field, because its members carry the numbers; comparing the
+    #   objects would ask a generated ``__eq__`` to reduce an array to one bool, and a field-wise walk
+    #   keeps the element count honest (all-``None`` members contribute 0 comparisons, not 1).
     if dataclasses.is_dataclass(a) or dataclasses.is_dataclass(b):
         if type(a) is not type(b):
             return 1, 1, float("inf")
@@ -187,9 +143,9 @@ def main() -> int:
             )
         return orig(chain, statics, geometry, belief, region_arrays, **kw)
 
-    # ⛔⛔ TRAPS: an-ablation-that-never-ran, and it fired on the first run: ``import rigel.calibration.calibrate as CAL`` binds the
-    # re-exported FUNCTION, not the module, so patching an attribute on it patches nothing and the spy
-    # reads as "never called". Go through ``sys.modules``, and RAISE if the patch did not fire.
+    # ``import rigel.calibration.calibrate as CAL`` binds the re-exported FUNCTION, not the module, so
+    # patching an attribute on it patches nothing and the spy reads as "never called". Go through
+    # ``sys.modules``, and RAISE if the patch did not fire (`TRAPS: an-ablation-that-never-ran`).
     CAL = sys.modules["rigel.calibration.calibrate"]
     CAL.solve_chain = spy
     cond = args.suite / args.condition
@@ -223,14 +179,13 @@ def main() -> int:
         )
         return out, cap
 
-    # ⭐ the CAPTURED policy is the shipped transfer policy with its intron-row memo and strand model;
+    # the captured policy is the shipped transfer policy with its intron-row memo and strand model;
     # a prototype arm is built on the same two, so the two arms differ by the mechanism alone.
     _shipped = g["kw"].get("policy")
 
     def policy_for(spec: str):
-        """``transfer`` | ``silent`` | ``module:<file.py>:<arm>``. ⛔ An unknown arm RAISES rather than
-        being silently ignored — an arm that changes nothing scores identical and reads as inert
-        (TRAPS: an-ablation-that-never-ran)."""
+        """``transfer`` | ``silent`` | ``module:<file.py>:<arm>``. An unknown arm raises rather than
+        being silently ignored — an arm that changes nothing scores identical and reads as inert."""
         if spec == "silent":
             return SilentPolicy()
         if spec == "transfer":
@@ -324,16 +279,13 @@ def main() -> int:
     print(f"   {'_capture TOTAL':<34} {cap_el:>12,} {cap_diff:>10,}")
 
     if cap_bad:
-        # ⛔⛔ VALUE differences are printed BEFORE structural ones, and this is not cosmetic. A policy
-        #   ablation produces dozens of "key MISSING" rows by construction, and the list is truncated at
-        #   40 — so a real numeric difference sorted below them was reported only as a count in the
-        #   TOTAL line. Caught while falsifying this file: two deliberately nudged elements moved
-        #   `_capture TOTAL` differing by exactly +2 and appeared nowhere in the listing.
+        # VALUE differences are printed BEFORE structural ones: a policy ablation produces dozens of
+        #   "key MISSING" rows by construction and the list is truncated at 40, so a real numeric
+        #   difference sorted below them would appear only as a count in the TOTAL line.
         n_val = sum(1 for _n, _e, _d, dd in cap_bad if np.isfinite(dd))
         cap_bad.sort(key=lambda r: (0 if np.isfinite(r[3]) else 1, -r[2]))
-        # ⚠ "structural" is every row whose delta is not finite, and that is MORE than a missing key:
-        #   a shape mismatch, a None on one side only, and a type mismatch all land here too. Naming it
-        #   as only "a key one arm does not publish" would mis-describe the other three.
+        # "structural" is every row whose delta is not finite: a missing key, a shape mismatch, a None
+        #   on one side only, or a type mismatch.
         print(f"\n   ⛔ capture differences (the dissect loop reads these): {n_val:,} carry a VALUE "
               f"delta, {len(cap_bad) - n_val:,} are structural (a missing key, shape, None or type)")
         for nm, el, nd, d in cap_bad[:40]:
@@ -347,11 +299,11 @@ def main() -> int:
     if added:
         print(f"\n   ⚠ diagnostic keys only ARM B publishes: {added}")
 
-    # ── THE FIVE BACKBONE ASSERTIONS, as counts — and TRAPS: could-the-arm-have-fired is why the ELIGIBLE column is here ───────────
-    # An assertion reporting 0 violations on a substrate where its predicate can never fire is not evidence
-    # of anything. So print what each one could have caught beside what it did.
-    # ⛔ BOTH arms, because a policy that sends nothing skips every check on a message and its table would
-    # otherwise read as "the assertion holds" when the truth is "the assertion never ran" — TRAPS: could-the-arm-have-fired one level up.
+    # ── the backbone assertions, as violation counts beside their ELIGIBLE sets ──────────────────────
+    # An assertion reporting 0 violations where its predicate can never fire is not evidence of
+    # anything, so print what each one could have caught beside what it did — for BOTH arms, because a
+    # policy that sends nothing skips every check on a message and would otherwise read as "holds"
+    # when the truth is "never ran" (`TRAPS: could-the-arm-have-fired`).
     aa = cap_old.get("backbone_assertions") or {}
     ab = cap_new.get("backbone_assertions") or {}
     if aa or ab:

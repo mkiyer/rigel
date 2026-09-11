@@ -1,47 +1,46 @@
-"""rigel.calibration.abundance_landscape — the pre-pass-0 TOTAL-density field, and its mode census.
+"""rigel.calibration.abundance_landscape — the pre-pass-0 total-density field, and its mode census.
 
-⭐⭐ **The one question this module answers: what does the library's TOTAL fragment density look like
-over the genome, BEFORE anything is solved — and which regions sit on which mode?** Under hybrid
-capture the field is bimodal by construction (a depleted off-target level and an enriched on-target
-one, ~2–3 decades apart); off capture it is unimodal. The census reads that structure off a fitted
-density: `rho_0` (the depleted mode — the level the pooled intergenic anchors also measure,
-independently), the span `R` (the mode ratio — never the 2.6–3.6×-under-reading in-gene anchors), and
-per region a responsibility `w_i` for the enriched basin. Those three are what the pass-0 measured
-reference consumes.
+The one question this module answers: what does the library's total fragment density look like over the
+genome, before anything is solved, and which regions sit on which mode? Under hybrid capture the field
+is bimodal by construction — a depleted off-target level and an enriched on-target one, a couple of
+decades apart — and off capture it is unimodal. The census reads that structure off a fitted density:
+`rho_0`, the depleted mode, which the pooled intergenic anchors also measure independently; the span
+`R`, the ratio between the two modes, read off the field and never from in-gene anchors, which
+under-read the enriched level; and per region a responsibility `w_i` for the enriched basin.
 
-⭐ **The estimator is `landscape.fit_landscape`, reused verbatim.** It is deliberately
-component-agnostic, and every decision in it transfers: zero-native Poisson kernels (a wall-exact
-region that sequenced nothing says "below the resolution wall", not "at 1/E"), knn population
-resolution (what suppresses combing with no tuning), the one-pseudo-region Laplace floor, and the grid
-derived from the data's own support. What is NEW here is only the inputs and the census:
+The estimator is `landscape.fit_landscape`, reused as it stands. It is deliberately component-agnostic
+and every decision in it transfers: zero-native Poisson kernels (a wall-exact region that sequenced
+nothing says "below the resolution wall", not "at 1/E"), knn population resolution (what suppresses
+combing with no tuning), the one-pseudo-region Laplace floor, and the grid derived from the data's own
+support. What is particular to this module is the inputs and the census:
 
-* the inputs are the MEASURED TOTALS — `total_abundance.region_counts_and_exposure`'s side-selected
-  START/END counts over the region's own length, REGIONs only (boundaries cross rather than contain
-  and have zero genomic measure — the same geometry ruling the gDNA hyperprior's substrate carries),
-  restricted to the wall-exact (`model_free`) population;
-* `var = 0` — ⭐ a DIRECT measurement has no deconvolution ambiguity, so the reliability weights are
+* the inputs are the measured totals — `total_abundance.region_counts_and_exposure`'s side-selected
+  START/END counts over the region's own length, REGIONs only (boundaries cross rather than contain and
+  have zero genomic measure, the same geometry rule the gDNA hyperprior's substrate follows), restricted
+  to the wall-exact (`model_free`) population;
+* `var = 0` — a direct measurement has no deconvolution ambiguity, so the reliability weights are
   honestly flat. The hyperprior's `Var(log f_g)` weight exists because its training data came out of a
   solve; this data did not.
 
-⛔ **NO SIGNIFICANCE THRESHOLD EXISTS IN THE CENSUS, ANYWHERE.** Every interior local maximum is a
-mode; the grid is partitioned into basins at the minima between them; masses carry every verdict
-continuously. A phantom wiggle above the bulk owns ~zero basin mass, so it yields `w ≈ 0` — harmless —
-and the capture-OFF unimodality gate MEASURES that instead of a constant asserting it. The depleted
-mode is picked by an independent measurement (the basin containing the pooled intergenic anchor rate),
-and the anchor-consistency verdict's tolerance is the depleted mode's own fitted width — the density's
-statement of its resolution, never a chosen number.
+⛔ No significance threshold exists in the census, anywhere. Every interior local maximum is a mode, the
+grid is partitioned into basins at the minima between them, and masses carry every verdict continuously.
+A phantom wiggle above the bulk owns near-zero basin mass and so yields `w ≈ 0`, which is harmless, and
+the capture-OFF unimodality gate measures that rather than a constant asserting it. The depleted mode is
+picked by an independent measurement — the basin containing the pooled intergenic anchor rate — and the
+anchor-consistency verdict's tolerance is the depleted mode's own fitted width, the density's statement
+of its own resolution, never a chosen number.
 
-⚠ **T CONFLATES ENRICHMENT WITH EXPRESSION, AND THAT IS RECORDED UP FRONT**: a hot unprobed exon and a
-probed cold one can land in the same basin, so the failure direction of any consumer is PERMISSIVE (an
-over-wide enriched basin), never a hard exclusion. Pricing that confound is the plan's rung-5 read.
+The field conflates enrichment with expression, and that is stated up front: a hot unprobed exon and a
+probed cold one can land in the same basin, so the failure direction of any consumer is permissive (an
+over-wide enriched basin) and never a hard exclusion.
 
-⚠ `_KNN_SCALE` / `_S0` are inherited from `landscape` and have only ever been validated on gDNA-shaped
-data (that module's own warning) — every result reported off this landscape carries that caveat until
+`_KNN_SCALE` / `_S0` are inherited from `landscape` and have only ever been validated on gDNA-shaped
+data — that module's own warning — so every result reported off this landscape carries the caveat until
 it is priced.
 
-⛔ **Nothing here decides anything in the solve.** Its consumers are the census, the QC/injection
-surface, and (behind its own flag, separately gated) the pass-0 measured reference. Its own
-falsification is ``tests/calibration/test_abundance_landscape.py``.
+Nothing here decides anything in the solve. Its consumers are the census instrument, the QC surface
+(`CalibrationDiagnostics.from_abundance_landscape`) and the injection substrate. Its own falsification
+is ``tests/calibration/test_abundance_landscape.py``.
 """
 
 from __future__ import annotations
@@ -71,9 +70,9 @@ class AbundanceMode:
     """One mode of the fitted total-density field: a local maximum and its basin.
 
     ``log_rho`` is the peak's location (natural-log rate); ``lo``/``hi`` the basin bounds (the
-    interior minima flanking it — adjacent basins share a bound, so the modes PARTITION the grid);
+    interior minima flanking it — adjacent basins share a bound, so the modes partition the grid);
     ``basin_mass`` the share of the fitted density inside the basin; ``width`` the mass-weighted
-    standard deviation of ``log_rho`` WITHIN the basin — the fit's own statement of how precisely this
+    standard deviation of ``log_rho`` within the basin — the fit's own statement of how precisely this
     mode is located, and the only tolerance any consumer is given.
     """
 
@@ -93,15 +92,15 @@ class AbundanceLandscape:
     posterior responsibility. ``0`` everywhere when the field is unimodal; ``NaN`` where the region is
     not model-free (a double-walled region has no trustworthy total and therefore no reading).
 
-    ``anchor_log_rho`` is the INDEPENDENT depleted-level estimator — the pooled rate over intergenic
+    ``anchor_log_rho`` is the independent depleted-level estimator — the pooled rate over intergenic
     model-free regions (the same composition-free pool ``fit_intron_background`` uses) — and
     ``anchor_consistent`` says whether it falls within the depleted mode's own width. ``NaN`` (and a
     ``False``-free fallback to the largest basin) when no intergenic region exists, which is a toy.
 
-    ⭐ ``train_log_rho`` / ``train_class`` are the population this landscape was FITTED ON: one entry
-    per selected region, the kernel centre ``log(max(count,1)) − log(exposure)`` in natural log, and
-    its coarse class (``0`` intergenic / ``1`` intron / ``2`` exon — the report's own rug codes, where
-    ``3`` is a boundary and this substrate has none, being REGIONs only). They are published because a
+    ``train_log_rho`` / ``train_class`` are the population this landscape was fitted on: one entry per
+    selected region, the kernel centre ``log(max(count,1)) − log(exposure)`` in natural log, and its
+    coarse class (``0`` intergenic / ``1`` intron / ``2`` exon — the report's own rug codes, where ``3``
+    is a boundary and this substrate has none, being REGIONs only). They are published because a
     consumer that plots the fit needs to plot what it was fitted on, and re-deriving the centres
     elsewhere would be a second copy of the selection rule.
     """
@@ -140,9 +139,9 @@ def _census(landscape: DensityLandscape) -> tuple[AbundanceMode, ...]:
     modes = []
     for i, pk in enumerate(peaks):
         s, e = cuts[i], cuts[i + 1]
-        # half-open segments so the shared cut bin is counted ONCE — the last basin takes the final
-        # grid point. Without this the basin masses sum to 1 + (mass at each cut), which the
-        # partition gate caught at 1.0000047.
+        # half-open segments so the shared cut bin is counted once — the last basin takes the final
+        # grid point. Without this the basin masses sum to 1 + (the mass at each cut), which is what the
+        # partition gate catches.
         hi_idx = e + 1 if i == len(peaks) - 1 else e
         seg_p, seg_x = p[s:hi_idx], x[s:hi_idx]
         m = float(seg_p.sum())
@@ -157,18 +156,18 @@ def _census(landscape: DensityLandscape) -> tuple[AbundanceMode, ...]:
                 hi=float(x[e]),
             )
         )
-    # ⚠ shared bounds: mode i's hi IS mode i+1's lo (they were cut at one index). The construction
-    # guarantees it; the partition gate asserts it.
+    # shared bounds: mode i's hi is mode i+1's lo, both cut at one index. The construction guarantees
+    # it; the partition gate asserts it.
     return tuple(modes)
 
 
 def split_basins(
     modes: tuple[AbundanceMode, ...], anchor_log_rho: float
 ) -> tuple[AbundanceMode, AbundanceMode | None]:
-    """The depleted/enriched selection rule, on its own so a scorer can apply it to ANOTHER
-    estimator's census: depleted = the basin CONTAINING the anchor rate (nearest mode if the anchor
-    falls between basins; the largest-mass basin when the anchor is NaN — a toy); enriched = the
-    largest-mass basin strictly ABOVE the depleted one, ``None`` ⇒ unimodal."""
+    """The depleted/enriched selection rule, kept on its own so a scorer can apply it to another
+    estimator's census: depleted is the basin containing the anchor rate (the nearest mode if the anchor
+    falls between basins, the largest-mass basin when the anchor is NaN, which happens only on a toy);
+    enriched is the largest-mass basin strictly above the depleted one, ``None`` meaning unimodal."""
     if np.isfinite(anchor_log_rho):
         inside = [m for m in modes if m.lo <= anchor_log_rho <= m.hi]
         depleted = (
@@ -210,7 +209,7 @@ def fit_abundance_landscape(
 
     modes = _census(landscape)
 
-    # ── the INDEPENDENT depleted-level estimator: the pooled intergenic rate, composition-free
+    # ── the independent depleted-level estimator: the pooled intergenic rate, composition-free
     sig = np.asarray(region_arrays.signature, dtype=np.int64)
     anchors = sel & ((sig & _GENE_BITS) == 0)
     if anchors.any() and float(exposure[anchors].sum()) > 0.0 and counts[anchors].sum() > 0.0:
@@ -223,7 +222,7 @@ def fit_abundance_landscape(
 
     span_R = float(np.exp(enriched.log_rho - depleted.log_rho)) if enriched is not None else 1.0
     gap = abs(depleted.log_rho - anchor_log_rho) if np.isfinite(anchor_log_rho) else float("nan")
-    # the tolerance is the depleted mode's OWN fitted width — the density's statement of its
+    # the tolerance is the depleted mode's own fitted width — the density's statement of its
     # resolution — floored at one grid step, below which nothing is representable at all.
     step = float(landscape.log_rho[1] - landscape.log_rho[0])
     consistent = bool(np.isfinite(gap) and gap <= max(depleted.width, step))
@@ -241,8 +240,8 @@ def fit_abundance_landscape(
         w_slot[sel] = 0.0
 
     # ── the training population, published: the kernel centres this fit was built from, in natural
-    # log, with each region's coarse class. ⚠ The centre expression is `fit_landscape`'s own
-    # (`log10(max(count,1)) − log10(eff)`, then to nats) — the SAME floor, because a zero-count region
+    # log, with each region's coarse class. The centre expression is `fit_landscape`'s own
+    # (`log10(max(count,1)) − log10(eff)`, then to nats) — the same floor, because a zero-count region
     # sits at its resolution wall rather than at −inf.
     train_log_rho = np.log(np.maximum(c, 1.0)) - np.log(e)
     exon = (sig[sel] & (BIT_EXON_POS | BIT_EXON_NEG)) != 0

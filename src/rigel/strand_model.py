@@ -13,7 +13,7 @@ read 1's genomic orientation, so the model's estimand is
 
     p_r1_sense = P(align_strand == reference strand)
 
-⭐ **Two nested views of ONE population, with one source of truth.**
+Two nested views of ONE population, with one source of truth.
 
 * :class:`SJStrandTable` — sense / antisense counts **per sj**, keyed on
   ``(ref, start, end, motif strand)``.  This is the primary record.
@@ -21,19 +21,16 @@ read 1's genomic orientation, so the model's estimand is
   For the spliced model it is **exactly the table's marginal** and is built from it
   (:meth:`StrandModel.from_sj_table`), never accumulated separately.
 
-The refinement exists because a **dispersion across sj** cannot be recovered from the
-2×2: the RNA strand Beta-Binomial's mean (κ) and its overdispersion must be estimated from the
-same population, and the overdispersion previously came from the accumulator's boundary spliced
-channels, which also pool unannotated and implicit splices.  See
+The per-sj refinement exists because a dispersion ACROSS sj cannot be recovered from the 2×2:
+the RNA strand Beta-Binomial's mean (κ) and its overdispersion must be estimated from the same
+population, and the accumulator's boundary spliced channels are not that population — they also
+pool unannotated and implicit splices.
 
-
-Models are **immutable**: built once from the scanner's arrays, then read.  There is no
+Models are immutable: built once from the scanner's arrays, then read.  There is no
 observe/finalize lifecycle and therefore no way to score against a half-trained model.
 
-⚠ **This module does not serialize itself.**  ``summary.json``'s ``strand_model`` block is
-hand-built in :mod:`rigel.cli` from a handful of properties (plus
-:meth:`SJStrandTable.to_dict`); a parallel ``to_dict``/``write_json`` pair lived here for a long
-time with no caller and was deleted 2026-07-28.
+This module does not serialize itself.  ``summary.json``'s ``strand_model`` block is hand-built
+in :mod:`rigel.cli` from a handful of properties, plus :meth:`SJStrandTable.to_dict`.
 """
 
 import logging
@@ -184,7 +181,7 @@ class StrandModel:
     Qualification (applied in C++ by ``get_is_strand_qualified()``, not here): annotated splice
     sj, unique mapper, unambiguous exon strand, unambiguous SJ strand, non-chimeric.
 
-    ⚠ Deliberately NOT ``slots=True``: development caches under ``_selfsolve_cache`` /
+    Deliberately NOT ``slots=True``: development caches under ``_selfsolve_cache`` /
     ``_calib_cache`` hold pickled instances, and a slotted class cannot restore a
     ``__dict__``-based pickle state.  The field names are load-bearing for the same reason.
     """
@@ -230,7 +227,7 @@ class StrandModel:
         )
 
     def contingency_matches_table(self) -> bool:
-        """⭐ The invariant, made executable: the 2×2 IS the sj table's marginal.
+        """The invariant, made executable: the 2×2 IS the sj table's marginal.
 
         Trivially ``True`` when there is no table (the all-exonic diagnostic model). Nothing in the
         production path can violate it — :meth:`from_sj_table` is the only way the pair is built —
@@ -336,10 +333,9 @@ class StrandModel:
         under a Beta(k + 1, (n − k) + 1) posterior on the minor-orientation
         rate (Jeffreys-ish / Laplace prior).
 
-        ⚠ **QC only.** It was written for a gDNA calibration mixture that no longer exists; its
-        one remaining consumer is the ``[CAL] Strand trainer`` log line in
+        QC only. Its one consumer is the ``[CAL] Strand trainer`` log line in
         :func:`rigel.pipeline.run_pipeline`. Kept because "how well is the protocol pinned" is a
-        fair thing to report, but do not describe it as feeding the deconvolution — it does not.
+        fair thing to report, but it does not feed the deconvolution.
 
         - ``n = 0``: returns 0.5 (maximally uncertain → caps LLR completely).
         - ``n_minor = 0`` (degenerate): closed-form exact upper limit
@@ -386,14 +382,13 @@ class StrandModels:
       ``exonic_spliced`` reveals gDNA contamination (``contamination_gap`` in the CLI summary):
       unspliced genic fragments include gDNA and nascent RNA, which are unstranded relative to
       the transcript, so the mixed estimate is dragged toward ½.
-      ⚠ It is **not** "all exonic fragments (RNA + gDNA mixture)" as it was long documented —
-      intergenic fragments have no transcript and never enter it. The gap it measures is
-      **genic** contamination only.
+      It is not "all exonic fragments" — intergenic fragments have no transcript and never enter
+      it, so the gap it measures is GENIC contamination only.
 
-    gDNA is scored with a fixed strand probability of **0.5**
-    (no strand bias), not learned from intergenic data.
+    gDNA is scored with a fixed strand probability of one half (no strand bias), never learned
+    from intergenic data.
 
-    ⚠ Not ``slots=True`` — see the note on :class:`StrandModel`.
+    Not ``slots=True`` — see the note on :class:`StrandModel`.
     """
 
     exonic_spliced: StrandModel = field(default_factory=StrandModel)

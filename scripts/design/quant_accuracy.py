@@ -1,60 +1,33 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **THE TOOL'S ABSOLUTE ACCURACY, AND THE RE-SOLVE CEILING ABOVE IT** — one instrument, two jobs.
+"""How accurate is the tool end to end, and what is a perfect prior worth?
 
-``--arm base`` alone is **tool-absolute-accuracy**: run the shipped pipeline end to end on a simulated
-condition and score the transcript table against the simulator's own per-transcript truth.
-``--arm oracle`` is **error-downstream-of-calibration**: run the identical pipeline with the ORACLE
-prior injected in place of calibration's, and re-quantify. The difference between the two arms is the
-whole of what a perfect calibration would buy, and it is the measurement that decides whether the work
-belongs in calibration or in the EM.
+``--arm base`` runs the shipped pipeline on a simulated condition and scores its transcript table
+against the simulator's own per-transcript truth. Every other arm runs the identical pipeline with
+one thing substituted -- the oracle ``LocusPriors`` built from the origin-split truth (``oracle``, or
+one of its three arrays alone: ``oracle_gdna``, ``oracle_rna``, ``oracle_efflen``), the ruler the EM
+divides by (``oracle_ruler``, the only arm that substitutes at the ``calibrate`` boundary and so
+reaches the effective-length shrinkage), the EM's seed (``warm_uniform``), or the per-transcript
+allocation weights (the ``oracle_alloc*`` arms, a capability proof and never a headroom claim) -- and
+the difference from ``base`` is what that one thing is worth. One scorer serves every arm, so the
+ceiling and the baseline cannot drift apart. The primary score is count against count: the truth is
+each condition's realised observed fragment count, never the pre-capture molar abundance, and no
+length model enters the comparison; the TPM rows share the tool's own effective length on both sides
+and so measure assignment only. This is a thermometer above the 0.8.0 metric, never the target.
+Reading rules: ``noop`` and ``oracle_ruler_noop`` must be byte-identical to ``base``
+(``arm_identity.py`` is the gate); ``base_reseed`` is the sampling noise floor and any smaller delta
+is noise; the oracle masses are undrained while the shipped pipeline drains, a small conservative
+bias that cannot explain a large surviving error or hide a large removed one. The library-level
+gDNA fraction counts intergenic fragments as gDNA, as ``cli.py`` does.
 
-⭐ **ONE SCRIPT BECAUSE IT IS ONE SCORER.** The two questions differ only in which ``LocusPriors`` the
-EM is handed; scoring them with two implementations is how the ceiling and the baseline drift apart.
-
-THE ARMS
---------
-===============  ===============================================================================
-``base``         the shipped pipeline, untouched
-``noop``         the injection wrapper runs in full — the oracle is read, O is built and then
-                 DISCARDED — and the shipped prior is returned. ⛔ MUST be byte-identical to
-                 ``base``; this is the harness's own falsification (TRAPS: byte-identity-gate)
-``oracle``       all three arrays replaced by O
-``oracle_gdna``  only ``gdna_prior_count``      ⭐ the three single-array arms are what say
-``oracle_rna``   only ``rna_prior_count``          WHICH of the prior's three numbers carries the
-``oracle_efflen``only ``gdna_eff_len``             value — a joint ceiling cannot
-===============  ===============================================================================
-
-⛔ **WHAT "TRUTH" MEANS HERE, BECAUSE THE PANEL SHIPS TWO AND THEY ARE NOT INTERCHANGEABLE.** Each
-condition carries its own ``truth_abundances.tsv`` whose ``mrna_abundance`` column is the **realised
-observed fragment count** for that transcript in that condition (verified: it equals
-``observed_mrna_fragments`` exactly and sums to the condition's RNA fragment total). The suite-level
-``truth_abundances_nrna_none.tsv`` is the **pre-capture molar** abundance — a different quantity, and
-under capture a very different one (log-space correlation 0.72 between them at
-``g25 ss0.50 capture_on``). Scoring an observed-fragment estimate against a pre-capture molar truth
-would charge the tool for hybrid capture, which it never claims to invert. ⭐ So the primary score is
-**count against count**, with no length model anywhere in the comparison.
-
-⚠ **The TPM rows are secondary and they measure ASSIGNMENT, not the length model.** Truth TPM is built
-with the tool's OWN ``effective_length``, so the two sides share the length model and it cancels. That
-is deliberate: the fragment-length models have their own instrument (``length_ceiling.py``) and mixing
-the two questions is how a 14x split between two length pmfs stayed hidden
-(TRAPS: price-the-halves-separately).
-
-⛔ **THE ORACLE MASSES ARE UNDRAINED AND THE SHIPPED PIPELINE DRAINS, AND THAT BIAS IS MEASURED, NOT
-ASSUMED.** ``prior_vs_oracle.py`` prices it on this panel at **0.153 %** of the gDNA prior and
-**0.462 %** of the RNA prior. A drained oracle is inadmissible here (3.92 % of held fragments tie on
-the deferred bank's key across origins, depositing spliced records into the gdna partition, which
-``OracleTruth`` refuses). ⭐ The direction is conservative for either conclusion: a 0.2 % low oracle
-cannot explain a large surviving error, and it can only understate a large removed one.
-
-Gates: ``tests/calibration/test_quant_accuracy.py``. The byte-identity gate is
-``scripts/design/arm_identity.py base noop`` — the rows are keyed ``(condition, axis)`` on purpose so
-that already-falsified instrument can be pointed straight at them.
+This file is also a library: ``em_fl_ceiling.py`` runs ``run_condition`` with its own injection
+installed and reads the rows by axis. Gates: ``tests/calibration/test_quant_accuracy.py``.
 
 Usage::
 
     python scripts/design/quant_accuracy.py --arm base --out $RIGEL_ARMS/qa_base.jsonl --jobs 4
-    python scripts/design/quant_accuracy.py --arm oracle --out $RIGEL_ARMS/qa_oracle.jsonl --jobs 4
+    python scripts/design/quant_accuracy.py --arm oracle --oracle-cache DIR --out $RIGEL_ARMS/qa_oracle.jsonl
+    python scripts/design/quant_accuracy.py --arm oracle_alloc_unspliced --truth-by-transcript TSV --out F.jsonl
+    python scripts/design/quant_accuracy.py --arm base --conditions COND --em-seed 1 --suite DIR --index INDEX
     python scripts/design/arm_identity.py $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_noop.jsonl
     python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_oracle.jsonl
 """
@@ -81,7 +54,6 @@ sys.path.insert(0, str(_REPO / "scripts" / "design"))
 
 from _oracle import ORIGINS, OracleTruth  # noqa: E402
 
-import transcript_weights as TW  # noqa: E402
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
@@ -93,75 +65,51 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: ⭐⭐ ``warm_uniform`` seeds every component EQUALLY instead of by coverage-weighted share. It varies
-#: ONE thing against ``base`` — where the EM is put down — so a difference is the seed's BASIN and
-#: nothing else. ⛔ It exists because the true per-transcript split was measured to be a fixed point of
-#: the prior-free objective (drifting 1.0 % of RNA mass over 200 iterations) while the shipped answer
-#: sits 444,595 nats WORSE in data likelihood: the solver is not failing on ambiguity, it is landing
-#: somewhere else, and this says whether the seed is what puts it there.
-#: ⭐⭐⭐ ``oracle_alloc`` IS STAGE 5, AND IT IS A CAPABILITY PROOF RATHER THAN A CEILING. It hands the
-#: EM the TRUE relative transcript abundances as the per-transcript allocation weights and zeroes the
-#: coverage seed, so `theta` starts from the prior alone. The question is narrow and the answer is
-#: binary: *given correct weights, does the machinery produce correct per-transcript abundances?* If it
-#: does, a weighting function is worth designing; if it does not, no weighting function can help and the
-#: work stops here.
+#: ``warm_uniform`` seeds every component equally instead of by coverage-weighted share. It varies
+#: one thing against ``base`` — where the EM is put down — so a difference is the seed's basin and
+#: nothing else.
 #:
-#: ⛔ **It is NOT a claim about reachable headroom**, and must not be quoted as one. Truth-derived
-#: weights also hand over the true SUPPORT — a zero weight is exactly absorbing, so every silent
-#: transcript is switched off for free, and silent transcripts carry 23.1 % of the transcript error at
-#: g00. Pricing what a REAL weighting function could earn needs controls this arm deliberately omits.
-#: ⭐⭐⭐ STAGE 6 — ``alloc_<mode>_<opportunity>``, the COMPUTED weighting function, one arm per rung of
-#: the power-mean dial (`transcript_weights.py` has the derivation and the re-partition falsification).
-#: ⛔ Each runs with the warm start ZEROED, exactly as ``oracle_alloc`` does, so the two are comparable:
-#: `oracle_alloc` is then the CAPABILITY PROOF above the family and `base` the floor below it.
-#: ⚠ ``alloc_arithmetic_*`` is the CONTROL of the family, not a proposal — at ``p = 1`` the weighted
-#: power mean collapses to the pooled `Σmass / Σopportunity`, which does no deconvolution along the path
-#: at all. A soft-min rung that cannot beat it is not paying for its noise.
-ALLOC_ARMS = tuple(
-    f"alloc_{m}_{o}" for m in TW.MODES for o in TW.OPPORTUNITIES
-) + tuple(
-    f"allocg_{m}_{o}" for m in TW.MODES for o in TW.OPPORTUNITIES
-)
-
-#: ⭐⭐ ``oracle_alloc_unspliced`` SHARPENS THE TARGET, and it is a control stage 5 omitted. `oracle_alloc`
-#: weights by each transcript's TOTAL observed fragments, but the budget being split is UNSPLICED
-#: pseudocounts — a spliced fragment has no gDNA candidate and is assigned directly. So the two arms ask
-#: *which quantity should a weighting function estimate*, and until one of them wins, stage 6 is aiming
-#: at an unnamed target. ⛔ It needs `--truth-by-transcript` (from `transcript_truth.py`).
-#: ⭐⭐⭐ THE RULER ARMS — the only arms that substitute at the ``calibrate`` BOUNDARY, and the reason
-#: they had to exist. A ``CalibrationResult`` has TWO consumers and every other arm in this file
-#: reaches one of them::
+#: ``oracle_alloc`` is a capability proof rather than a ceiling. It hands the EM the true relative
+#: transcript abundances as the per-transcript allocation weights and zeroes the coverage seed, so
+#: `theta` starts from the prior alone. The question is binary: given correct weights, does the
+#: machinery produce correct per-transcript abundances? It is not a claim about reachable headroom:
+#: truth-derived weights also hand over the true support (a zero weight is exactly absorbing, so every
+#: silent transcript is switched off for free), and pricing what a real weighting function could earn
+#: needs controls this arm deliberately omits.
+#:
+#: ``oracle_alloc_unspliced`` sharpens the target: `oracle_alloc` weights by each transcript's total
+#: observed fragments, but the budget being split is unspliced pseudocounts — a spliced fragment has no
+#: gDNA candidate and is assigned directly. The two arms ask which quantity a weighting function should
+#: estimate. It needs `--truth-by-transcript` (from `transcript_truth.py`).
+#:
+#: The ruler arms are the only arms that substitute at the ``calibrate`` boundary. A
+#: ``CalibrationResult`` has two consumers and every other arm in this file reaches one of them::
 #:
 #:     calibrate(...)                          <- the ruler arms substitute HERE
 #:       |-- transcript_capture_eff_lengths()  <- consumer A: `effective_lengths_em`, the EM's RULER
 #:       |-- assemble_priors()                 <- consumer B: `LocusPriors`  (every other arm wraps this)
 #:
-#: ``pipeline._setup_geometry_and_estimator`` builds consumer A **before** ``assemble_priors`` runs, so
-#: the effective-length shrinkage had never been inside any measurement arm and every ceiling in this
-#: project was measured with the shipped (wrong) ruler still installed.
+#: ``pipeline._setup_geometry_and_estimator`` builds consumer A before ``assemble_priors`` runs, so
+#: an arm that wraps only ``assemble_priors`` never reaches the effective-length shrinkage.
 #:
-#: ⭐⭐ **``oracle_ruler`` minus ``oracle`` is the shrinkage and NOTHING else, which is what makes this
-#: an attribution rather than another composite.** ``LocusPriors`` has exactly three fields and
-#: ``oracle`` already takes all three from O, so the two arms differ in one thing: whether the ruler
-#: the EM divides by was built from the true split or the shipped one.
+#: ``oracle_ruler`` minus ``oracle`` is the shrinkage and nothing else: ``LocusPriors`` has exactly
+#: three fields and ``oracle`` already takes all three from O, so the two arms differ in one thing —
+#: whether the ruler the EM divides by was built from the true split or the shipped one.
 #:
-#: ⛔ The value is a BOOL — substitute, or take nothing — and the dispatch is EXACT MEMBERSHIP rather
-#: than a prefix test. This file already keys on the arm name in twelve places across three
-#: inconsistent families, and a name that passes one test and fails another is how an arm comes to be
-#: scored as the thing it never installed (TRAPS: an-ablation-that-never-ran).
+#: The value is a bool — substitute, or take nothing — and the dispatch is exact membership rather
+#: than a prefix test, so a name that passes one arm test and fails another cannot be scored as the
+#: thing it never installed (TRAPS: an-ablation-that-never-ran).
 _RULER_ARMS = {"oracle_ruler": True, "oracle_ruler_noop": False}
 
 ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
         "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip",
-        "oracle_alloc_unspliced") + tuple(_RULER_ARMS) + ALLOC_ARMS
+        "oracle_alloc_unspliced") + tuple(_RULER_ARMS)
 
-#: ⛔⛔ **THE SHIPPED PIPELINE IS NOT REPRODUCIBLE RUN TO RUN, AND EVERY ARM HERE PINS THE SEED THAT
-#: MAKES IT SO.** ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so
-#: the EM's final hard assignment is an UNSEEDED categorical draw: measured on the gate toy, two
-#: back-to-back runs of the identical pipeline differ on 4 transcripts by up to 43 fragments. A
-#: byte-identical ``noop`` is therefore impossible on the default config — which is why this instrument
-#: sets a seed rather than reporting a difference it cannot attribute. ⭐ ``base_reseed`` re-runs
-#: ``base`` at ``seed + 1`` and is the NOISE FLOOR: any arm delta smaller than it is sampling.
+#: The EM seed every arm pins. ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to
+#: ``"sample"``, so the EM's final hard assignment is an unseeded categorical draw and a byte-identical
+#: ``noop`` is impossible on the default config; this instrument sets a seed rather than reporting a
+#: difference it cannot attribute. ``base_reseed`` re-runs ``base`` at ``seed + 1`` and is the noise
+#: floor: any arm delta smaller than it is sampling.
 DEFAULT_EM_SEED = 20260807
 
 #: arm -> which ``LocusPriors`` fields come from O. ``noop`` takes NONE of them and still builds O,
@@ -183,23 +131,23 @@ _ARM_FIELDS = {
 def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) -> OracleTruth:
     """The origin-split truth for one condition, entirely from the shipped scan cache.
 
-    ⛔ ``_main`` (the UNDRAINED full payload) is what sum-to-full is asserted against, and it must come
+    ``_main`` (the UNDRAINED full payload) is what sum-to-full is asserted against, and it must come
     from the same cache as the three partitions or the identity is checking two different scans
-    against each other. ⚠ ``read_scan_cache`` refuses a payload whose ``graph_hash`` / ``reach_digest``
+    against each other. ``read_scan_cache`` refuses a payload whose ``graph_hash`` / ``reach_digest``
     / ``payload_schema_digest`` / scan config does not describe this index — ``reach`` is covered by no
     other hash — so a stale cache is a loud refusal rather than a silent wrong truth.
     """
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     root = Path(cache_root) / tag
-    # ⭐⭐ THE ZERO-gDNA ROWS HAVE NO ``_main``, AND WITHOUT THIS FALLBACK NO ORACLE ARM CAN REACH THEM.
+    # The zero-gDNA rows have no ``_main``, and without this fallback no oracle arm can reach them.
     # ``pass0_vs_oracle.py`` — which populates this cache — holds every zero-gDNA condition out as a
     # false-positive check, so it never wrote one for `g00`. That is deliberate on its part and it is
-    # not a reason `g00` cannot be measured: ``_main`` is the UNDRAINED FULL PAYLOAD, which is the same
+    # not a reason `g00` cannot be measured: ``_main`` is the undrained full payload, which is the same
     # quantity as the plain scan cache beside it, and ``from_parts`` re-runs sum-to-full over whichever
-    # one it is handed. ⛔ The two are two independent scans of one BAM, so they are NOT byte-identical
+    # one it is handed. The two are two independent scans of one BAM, so they are NOT byte-identical
     # — float addition is not associative across worker threads and the six float64 banks differ by
     # ~1e-14 relative. That is inside ``_validate``'s derived budget and far outside anything a real
-    # partition error would produce, so the substitution is sound for measurement — ⛔ but it must
+    # partition error would produce, so the substitution is sound for measurement — but it must
     # never be used as a byte-identity gate.
     main = root / "_main"
     if not main.is_dir():
@@ -219,23 +167,23 @@ def load_oracle(bam: str, index, pipeline_config, cache_root: Path, tag: str) ->
 def install_arm(arm: str, oracle: OracleTruth | None):
     """Wrap :func:`~rigel.calibration.priors.assemble_priors` for one arm. Returns ``(restore, fired)``.
 
-    ⭐ **The wrapper is IDENTICAL across every arm including ``noop``** — the oracle is read, O is
+    The wrapper is IDENTICAL across every arm including ``noop`` — the oracle is read, O is
     built on the loci the run itself produced, and only then does the arm decide which fields to take.
     A ``noop`` that short-circuits before building O would prove the ``if`` works and nothing else
     (TRAPS: could-the-arm-have-fired); this one proves the whole path is inert when it takes no field.
 
-    ⛔ **O is built on the run's OWN ``multi_loci``, never on a stored array.** ``build_multi_loci``
+    O is built on the run's OWN ``multi_loci``, never on a stored array. ``build_multi_loci``
     unions transcripts linked by SCORED fragments, so the locus partition is a function of the run —
     an oracle prior keyed by ``multi_locus_id`` from another process is not portable and index-aligning
     it would compare locus 7 of one run with locus 7 of another.
 
-    ⚠ ``fired`` is a mutable counter, not a bool, and the caller RAISES on zero: an override that never
+    ``fired`` is a mutable counter, not a bool, and the caller RAISES on zero: an override that never
     ran reads as "no effect", which is the most flattering possible failure (TRAPS: an-ablation-that-never-ran).
     """
     original = PRIORS.assemble_priors
 
     if arm in ("base", "base_reseed", "warm_uniform"):
-        # ⚠ Counted as fired: ``base`` installs nothing by design, so the "did the override run?"
+        # Counted as fired: ``base`` installs nothing by design, so the "did the override run?"
         # check must not fail on the one arm that has no override. The thing it guards — an
         # injection that silently did not happen — cannot occur here.
         return (lambda: None), {"n": 1}
@@ -280,11 +228,11 @@ def _spearman_pearson(true_v: np.ndarray, est_v: np.ndarray) -> tuple[float, flo
 def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """Score one arm's transcript table against the condition's realised fragment truth.
 
-    ⭐ **``count`` against ``mrna_abundance``, both fragment counts.** No effective length, no
+    ``count`` against ``mrna_abundance``, both fragment counts. No effective length, no
     normalisation, no model between the two sides — so a difference is a fragment the tool put
     somewhere the simulator did not.
 
-    ⛔ **The false-positive mass is reported separately and it is the number this tool exists for.**
+    The false-positive mass is reported separately and it is the number this tool exists for.
     ``fp_mass`` is the estimate summed over transcripts the simulator gave ZERO fragments: every one of
     those is contamination the deconvolution failed to remove, with nothing to cancel it. Its mirror
     ``fn_mass`` is real RNA the tool called gDNA. A single ``Σ|Δ|`` cannot separate them and the two
@@ -303,7 +251,7 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     expressed = t > 0.0
     silent = ~expressed
 
-    # TPM. ⚠ Truth TPM uses the TOOL's own effective length, so the length model is common to both
+    # TPM. Truth TPM uses the TOOL's own effective length, so the length model is common to both
     # sides and cancels — this row is about ASSIGNMENT (see the module docstring).
     eff = np.maximum(m["effective_length"].to_numpy(np.float64), 1.0)
     rate = t / eff
@@ -326,7 +274,7 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
         "count_net_err": float(d.sum()),
         "count_over": float(np.maximum(d, 0.0).sum()),
         "count_under": float(np.maximum(-d, 0.0).sum()),
-        #: ⭐ contamination the deconvolution left on a silent transcript — a pure false positive
+        #: contamination the deconvolution left on a silent transcript — a pure false positive
         "fp_mass": float(e[silent].sum()),
         "fp_n": int((e[silent] > 0).sum()),
         #: real RNA the tool did not assign to the transcript that produced it
@@ -344,14 +292,14 @@ def score_transcripts(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
 def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
     """The SAME scorer, over genes — and the difference from the transcript row is the whole point.
 
-    ⭐⭐ **THIS IS THE DISCRIMINATOR THAT SEPARATES "ISOFROM AMBIGUITY" FROM "SOMETHING ELSE", AND
-    WITHOUT IT THE TRANSCRIPT NUMBER CANNOT BE ACTED ON.** Summing a gene's isoforms collapses exactly
+    This is the discriminator that separates isoform ambiguity from something else, and without it
+    the transcript number cannot be acted on. Summing a gene's isoforms collapses exactly
     the error that comes from not knowing WHICH isoform a fragment came from — the difficulty every
     transcript quantifier has and that no prior can remove. What survives at gene level is error in
     deciding whether the fragment was RNA *from this gene* at all, which is the question Rigel is for.
 
-    ⛔ Grouped on ``gene_id`` from the TRUTH table, not from the index, so the two sides are grouped by
-    one definition. ⚠ Synthetic nRNA entities are absent from ``quant`` by construction
+    Grouped on ``gene_id`` from the TRUTH table, not from the index, so the two sides are grouped by
+    one definition. Synthetic nRNA entities are absent from ``quant`` by construction
     (``get_counts_df`` drops them), so their mass is missing from the gene row too — it is reported on
     the ``library`` row as ``nrna_est`` and must be read there.
     """
@@ -393,15 +341,12 @@ def score_genes(quant: pd.DataFrame, truth: pd.DataFrame) -> dict:
 def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     """The library-level split — the thermometer, not the target.
 
-    ⛔⛔ **INTERGENIC FRAGMENTS ARE gDNA AND THE DENOMINATOR MUST SAY SO.** ``n_intergenic`` counts
+    Intergenic fragments are gDNA and the denominator must say so. ``n_intergenic`` counts
     fragments that reached no locus at all; they never enter the EM, so ``estimator.gdna_em_count``
-    excludes them. Off capture, gDNA is genome-uniform and **more than half of it is intergenic**
-    (measured at `g50 ss0.50 capture_off`: 2,601,271 intergenic against 2,330,992 EM-assigned gDNA), so
+    excludes them. Off capture, gDNA is genome-uniform and more than half of it is intergenic, so
     leaving them out of the numerator while RNA stays in the denominator understates the fraction
-    enormously — it read **0.3151 against a truth of 0.5000**, and that fabricated a "systematic
-    off-capture EM under-call" that does not exist. With them, the same run reads **0.4933**.
-    ⭐ This is ``cli.py``'s ``gdna_fraction`` — ``(gdna_em + n_intergenic) / (rna + gdna_em +
-    n_intergenic)`` — so the number here is the one a user reads. ⚠ ``gdna_em_frac_est`` is kept
+    badly. This is ``cli.py``'s ``gdna_fraction`` — ``(gdna_em + n_intergenic) / (rna + gdna_em +
+    n_intergenic)`` — so the number here is the one a user reads. ``gdna_em_frac_est`` is kept
     beside it because the two answer different questions and only one of them is the deliverable.
 
     The truth is ``origin_counts`` from the simulator, which counts each fragment exactly once.
@@ -419,7 +364,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
     total = mrna + nrna + gdna
     total_all = total + intergenic
     return {
-        # ⭐ THE NASCENT ARM IS BROKEN OUT AND IT IS NOT COSMETIC. ``get_counts_df`` drops the
+        # THE NASCENT ARM IS BROKEN OUT AND IT IS NOT COSMETIC. ``get_counts_df`` drops the
         # SYNTHETIC nRNA entities, so every fragment the EM parks on one is invisible in the
         # transcript table's ``fp_mass``. On an ``nrna_none`` panel the truth is exactly 0, which
         # makes ``nrna_est`` a THIRD false-positive channel with nothing to cancel it — and the
@@ -432,7 +377,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
         "rna_true": t_r,
         "gdna_est": gdna,
         "gdna_true": t_g,
-        #: ⭐ THE DELIVERABLE — intergenic included, cli.py's denominator.
+        #: THE DELIVERABLE — intergenic included, cli.py's denominator.
         "gdna_frac_est": (gdna + intergenic) / total_all if total_all > 0 else float("nan"),
         #: the EM's own view, intergenic in NEITHER side. A different question; not the deliverable.
         "gdna_em_frac_est": gdna / total if total > 0 else float("nan"),
@@ -445,7 +390,7 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
 
 
 def seeded(pipeline_config, arm: str, em_seed: int):
-    """The arm's pipeline config. ⭐ ``base_reseed`` differs from ``base`` in the SEED ALONE, so the
+    """The arm's pipeline config. ``base_reseed`` differs from ``base`` in the SEED ALONE, so the
     gap between them is the sampling noise of the EM's own hard assignment and nothing else.
 
     """
@@ -453,11 +398,10 @@ def seeded(pipeline_config, arm: str, em_seed: int):
     warm = pipeline_config.em.warm_start
     if arm == "warm_uniform":
         warm = "uniform"
-    elif arm in ("oracle_alloc", "oracle_alloc_unspliced") or arm.startswith(("alloc_", "allocg_")):
-        # ⭐ the seed is zeroed so `theta` starts proportional to the prior ALONE — otherwise a
-        # coverage-weighted seed is MULTIPLIED by an allocation from a different method and the result
-        # is neither method's answer. ⛔ Every stage-6 `alloc_*` arm takes the same setting as
-        # `oracle_alloc`, or the capability proof is not the yardstick it is being read as.
+    elif arm in ("oracle_alloc", "oracle_alloc_unspliced"):
+        # the seed is zeroed so `theta` starts proportional to the prior alone — otherwise a
+        # coverage-weighted seed is multiplied by an allocation from a different method and the result
+        # is neither method's answer.
         warm = "prior"
     out = dataclasses.replace(
         pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
@@ -468,12 +412,12 @@ def seeded(pipeline_config, arm: str, em_seed: int):
 def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
     """``float64[n_transcripts]`` — the TRUE realised fragment count per transcript, on the EM's axis.
 
-    ⭐ This is the whole of stage 5's input: the relative abundances the simulator actually produced.
+    This is the whole of ``oracle_alloc``'s input: the relative abundances the simulator actually produced.
     Within a locus the EM only reads their RATIOS, so no normalisation is needed here.
 
-    ⚠ Exact-duplicate transcripts are folded onto the twin the index kept — the truth table is keyed on
+    Exact-duplicate transcripts are folded onto the twin the index kept — the truth table is keyed on
     the un-collapsed annotation, so without the fold their fragments would be dropped rather than
-    attributed. ⛔ For such a pair the per-transcript truth is not merely awkward, it is UNDEFINED: the
+    attributed. For such a pair the per-transcript truth is not merely awkward, it is UNDEFINED: the
     two are the same molecule and only the group total is a fact about the world.
     """
     col = next((c for c in ("observed_mrna_fragments", "mrna_abundance") if c in truth.columns), None)
@@ -491,12 +435,12 @@ def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
 def unspliced_truth_weights(truth_by_transcript: Path, index) -> np.ndarray:
     """``float64[n_transcripts]`` — the true UNSPLICED fragment count per transcript.
 
-    ⭐ The target ``oracle_alloc`` does NOT aim at. That arm weights by each transcript's TOTAL observed
-    fragments, and the budget being allocated is the UNSPLICED pseudocount — spliced fragments have no
+    The target ``oracle_alloc`` does not aim at. That arm weights by each transcript's total observed
+    fragments, and the budget being allocated is the unspliced pseudocount — spliced fragments have no
     gDNA candidate in the EM and never enter the split the prior arbitrates. The two differ by exactly
-    how spliced a transcript is, so which one wins names the quantity stage 6's estimator should target.
+    how spliced a transcript is, so which one wins names the quantity a weighting function should target.
 
-    ⚠ ``transcript_truth.py`` already folds exact-duplicate transcripts onto the twin the index kept.
+    ``transcript_truth.py`` already folds exact-duplicate transcripts onto the twin the index kept.
     """
     t = pd.read_csv(truth_by_transcript, sep="\t")
     t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
@@ -508,78 +452,14 @@ def unspliced_truth_weights(truth_by_transcript: Path, index) -> np.ndarray:
     return w
 
 
-def install_computed_weights(mode: str, opportunity: str, index, granularity: str = "transcript"):
-    """⭐⭐⭐ STAGE 6 — compute the weights from CALIBRATION and hand them to the EM.
-
-    ⛔ **Three boundaries, because the inputs appear at three different moments.** ``rna_fl_pmf`` is an
-    argument to ``calibrate`` and is on no published object; the ``CalibrationResult`` first exists at
-    ``assemble_priors``; and the weights are consumed per locus below that. Each is patched at the
-    module attribute the caller imports FUNCTION-LOCALLY, so the patch is picked up at call time — the
-    same mechanism ``prior_vs_oracle.capture_priors`` relies on.
-
-    ⚠ The weights are built ONCE and cached: they are a function of the calibration, which does not
-    change across loci, and rebuilding per locus would re-read ``intervals.feather`` 1,269 times.
-
-    ⛔⛔ **THE COUNTER WATCHES THE ESTIMATOR, NOT THE BUILDER**, for the reason
-    :func:`install_truth_weights` records at length: a counter on the array this function produced
-    stayed healthy through a whole session while ``_run_locus_em_partitioned`` silently dropped the
-    parameter. ⭐ ``--arm oracle_alloc_flip`` remains the end-to-end half of that check and must be
-    re-run whenever this lane is touched.
-    """
-    import rigel.calibration as CAL
-    import rigel.pipeline as PL
-    from rigel.estimator import AbundanceEstimator
-
-    orig_cal, orig_assemble = CAL.calibrate, PRIORS.assemble_priors
-    inner, inner_em = PL._run_locus_em_partitioned, AbundanceEstimator.run_batch_locus_em_partitioned
-    box: dict = {"rna_pmf": None, "w": None}
-    fired = {"n": 0}
-
-    def cal_wrapper(*a, **kw):
-        box["rna_pmf"] = np.asarray(kw["rna_fl_pmf"], dtype=np.float64)
-        return orig_cal(*a, **kw)
-
-    def assemble_wrapper(calibration, region_arrays, multi_loci):
-        if box["w"] is None:
-            if box["rna_pmf"] is None:
-                raise RuntimeError("⛔ assemble_priors ran before calibrate — the pmf boundary moved")
-            box["w"] = TW.build_weights(
-                calibration, region_arrays, index, box["rna_pmf"],
-                mode=mode, opportunity=opportunity, granularity=granularity,
-            )
-        return orig_assemble(calibration, region_arrays, multi_loci)
-
-    def em_partition_wrapper(*args, **kw):
-        kw["rna_prior_weight"] = box["w"]
-        return inner(*args, **kw)
-
-    def em_wrapper(self, *args, **kw):
-        w = kw.get("rna_prior_weight")
-        if w is not None and int(np.asarray(w).size) and float(np.asarray(w).sum()) > 0.0:
-            fired["n"] += 1
-        return inner_em(self, *args, **kw)
-
-    CAL.calibrate = cal_wrapper
-    PRIORS.assemble_priors = assemble_wrapper
-    PL._run_locus_em_partitioned = em_partition_wrapper
-    AbundanceEstimator.run_batch_locus_em_partitioned = em_wrapper
-
-    def restore():
-        CAL.calibrate, PRIORS.assemble_priors = orig_cal, orig_assemble
-        PL._run_locus_em_partitioned = inner
-        AbundanceEstimator.run_batch_locus_em_partitioned = inner_em
-
-    return restore, fired, box
-
-
 def install_ruler_arm(arm: str, oracle: OracleTruth):
-    """⭐⭐⭐ Wrap ``calibrate`` so a corrected split reaches BOTH consumers. Returns ``(restore, fired)``.
+    """Wrap ``calibrate`` so a corrected split reaches BOTH consumers. Returns ``(restore, fired)``.
 
-    ⭐ ``rigel.calibration.calibrate`` is patched as a MODULE ATTRIBUTE, and that works because
+    ``rigel.calibration.calibrate`` is patched as a MODULE ATTRIBUTE, and that works because
     ``run_pipeline`` does ``from .calibration import calibrate`` function-locally — the name is
     resolved at call time, not at module load. Same mechanism as :func:`install_computed_weights`.
 
-    ⛔⛔ **CALIBRATE BEING CALLED IS NECESSARY AND NOT SUFFICIENT, SO THE COUNTER WATCHES THE RULER.**
+    Calibrate being called is necessary and not sufficient, so the counter watches the ruler.
     ``_setup_geometry_and_estimator`` builds ``effective_lengths_em`` only when it is handed both a
     calibration and the region arrays; hand it ``None`` for either and the substituted result would
     reach the prior alone, the arm would silently become ``oracle``, and the difference between them —
@@ -587,11 +467,11 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
     SHRINKAGE runs makes that impossible to miss, exactly as ``install_truth_weights`` counts where the
     solver receives its weights rather than where they were handed over.
 
-    ⭐ ``max_abs_delta`` is the end-to-end half of the same check and it is recorded per condition:
+    ``max_abs_delta`` is the end-to-end half of the same check and it is recorded per condition:
     ``oracle_ruler`` MUST move the ruler and ``oracle_ruler_noop`` must not move it at all. An arm that
     cannot move the number it names is not a measurement of zero effect.
 
-    ⚠ The ``noop`` variant still reads the oracle, still builds the override and still calls
+    The ``noop`` variant still reads the oracle, still builds the override and still calls
     ``dataclasses.replace`` — it takes no field. A noop that short-circuits earlier would prove the
     ``if`` works and nothing else (TRAPS: could-the-arm-have-fired).
     """
@@ -616,7 +496,7 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
         shipped["cal"] = cal
         fired["n"] += 1
         if not substitute:
-            # ⭐ The noop's field set is read off ``override`` ITSELF, never from a local copy of the
+            # The noop's field set is read off ``override`` ITSELF, never from a local copy of the
             # list. A second copy is a second home, and the day ``override_masses`` writes a seventh
             # field the noop would replace six with themselves while the arm replaced seven — and both
             # would still print the word "identical".
@@ -625,8 +505,8 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
 
     def ruler_wrapper(calibration, region_arrays, index, fl_eff_lengths):
         out = orig_ruler(calibration, region_arrays, index, fl_eff_lengths)
-        # ⭐ the SHIPPED ruler, computed alongside, so "did this arm move the ruler" is a number rather
-        # than an inference. ~0.3 s against a run measured in minutes.
+        # the shipped ruler, computed alongside, so "did this arm move the ruler" is a number rather
+        # than an inference; cheap against a run measured in minutes.
         base = orig_ruler(shipped["cal"], region_arrays, index, fl_eff_lengths)
         fired["ruler"] += 1
         fired["max_abs_delta"] = max(
@@ -647,17 +527,14 @@ def install_ruler_arm(arm: str, oracle: OracleTruth):
 def install_truth_weights(weights: np.ndarray):
     """Pass per-transcript weights into the EM, and COUNT THE ARM AT THE DEEPEST POINT IT CAN OBSERVE.
 
-    ⭐ A wrapper rather than a config field: the weights are a per-run ARRAY, and an experiment that
+    A wrapper rather than a config field: the weights are a per-run ARRAY, and an experiment that
     injects one should not add production surface.
 
-    ⛔⛔ **THE COUNTER WATCHES THE ESTIMATOR, NOT THE INJECTION, AND THAT DISTINCTION COST A SESSION.**
-    An earlier version counted nonzero entries in ``weights`` — a property of the array this function
-    was handed, true whatever the pipeline then did with it. Meanwhile
-    ``pipeline._run_locus_em_partitioned`` accepted ``rna_prior_weight`` and silently dropped it, so
-    every allocation, however extreme, produced byte-identical output while the counter read healthy.
-    ⭐ Counting where the SOLVER receives the array makes a dropped parameter impossible to miss, and
-    ``--arm oracle_alloc_flip`` (a maximally WRONG allocation, which must move the answer) is the
-    end-to-end half of the same check.
+    The counter watches the estimator, not the injection: counting nonzero entries in ``weights``
+    would be true whatever the pipeline then did with the array, and a parameter dropped between the
+    wrapper and the solver would read healthy. Counting where the solver receives the array makes a
+    dropped parameter impossible to miss, and ``--arm oracle_alloc_flip`` (a maximally wrong
+    allocation, which must move the answer) is the end-to-end half of the same check.
     """
     import rigel.pipeline as PL
     from rigel.estimator import AbundanceEstimator
@@ -695,28 +572,18 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     pipeline_config = seeded(pipeline_config, arm, em_seed)
 
     oracle = None
-    if not (arm in ("base", "base_reseed", "warm_uniform")
-            or arm.startswith(("oracle_alloc", "alloc_", "allocg_"))):
+    if not (arm in ("base", "base_reseed", "warm_uniform") or arm.startswith("oracle_alloc")):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
 
-    weight_box = None
-    if arm.startswith(("alloc_", "allocg_")):
-        # ⭐⭐ STAGE 6: the weights are COMPUTED from calibration, not read from truth. `allocg_` takes
-        # the soft min at GENE granularity and splits within the gene by effective length alone.
-        prefix, mode, opportunity = arm.split("_", 2)
-        restore, fired, weight_box = install_computed_weights(
-            mode, opportunity, index,
-            granularity="gene" if prefix == "allocg" else "transcript",
-        )
-    elif arm == "oracle_alloc_unspliced":
+    if arm == "oracle_alloc_unspliced":
         if truth_by_transcript is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --truth-by-transcript (see transcript_truth.py)")
         restore, fired = install_truth_weights(unspliced_truth_weights(truth_by_transcript, index))
     elif arm == "oracle_alloc_flip":
         w = truth_weights(truth, index)
-        # ⛔ FALSIFICATION OF THE HARNESS, not a treatment: put the weight where the truth is NOT.
+        # falsification of the harness, not a treatment: put the weight where the truth is NOT.
         # If a maximally wrong allocation moves nothing, the allocation never reached the solver.
         flip = np.zeros_like(w)
         nz = np.flatnonzero(w > 0)
@@ -724,12 +591,12 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
             flip[nz] = w[nz][::-1]
         restore, fired = install_truth_weights(flip)
     elif arm.startswith("oracle_alloc"):
-        # ⭐ `oracle_alloc_seed` keeps the SHIPPED coverage seed, so it varies ONE thing against `base`:
+        # `oracle_alloc_seed` keeps the shipped coverage seed, so it varies one thing against `base`:
         # the allocation. `oracle_alloc` also zeroes the seed, which additionally removes RNA's evidence
         # advantage over calibration's gDNA prior — two changes, not one.
         restore, fired = install_truth_weights(truth_weights(truth, index))
     elif arm in _RULER_ARMS:
-        # ⛔ EXACT MEMBERSHIP, and placed before the fall-through: `oracle_ruler` starts with "oracle"
+        # exact membership, and placed before the fall-through: `oracle_ruler` starts with "oracle"
         # and would otherwise land in `install_arm`, whose `_ARM_FIELDS[arm]` would raise — or worse,
         # would not have, had the name been one letter different.
         restore, fired = install_ruler_arm(arm, oracle)
@@ -741,13 +608,13 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     finally:
         restore()
     if fired["n"] == 0:
-        # ⛔ TRAPS: an-ablation-that-never-ran — an injection that never ran reads as "a perfect prior changes nothing".
+        # TRAPS: an-ablation-that-never-ran — an injection that never ran reads as "a perfect prior changes nothing".
         raise RuntimeError(
             f"{condition} [{arm}]: the override was never wrapped-and-called. This is not a "
             "measurement of zero effect."
         )
     if arm in _RULER_ARMS:
-        # ⛔ The ruler arms carry a SECOND requirement, because reaching `assemble_priors` is the thing
+        # The ruler arms carry a SECOND requirement, because reaching `assemble_priors` is the thing
         # they were built NOT to settle for: the shrinkage must have run on the substituted result, and
         # the substituting arm must have MOVED it.
         if fired["ruler"] == 0:
@@ -771,23 +638,13 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     common = {"arm": arm, "condition": condition, "seconds": seconds,
               "em_seed": int(pipeline_config.em.seed)}
     if arm in _RULER_ARMS:
-        # ⭐ How far the substituted split moved the EM's ruler, in base pairs of opportunity on the
+        # How far the substituted split moved the EM's ruler, in base pairs of opportunity on the
         # worst transcript. Recorded rather than only asserted, so the arm's REACH is readable off the
         # output file beside the score it produced.
         common["ruler_max_abs_delta"] = float(fired["max_abs_delta"])
-    if weight_box is not None:
-        # ⭐ The WEIGHT VECTOR's own agreement with truth, recorded beside the end-to-end score. They
-        # answer different questions and a stage-6 arm needs both: a weight that correlates well and
-        # still scores badly says the failure is downstream of the allocation.
-        w = weight_box["w"]
-        common["weight_nonzero"] = int((np.asarray(w) > 0).sum())
-        if truth_by_transcript is not None:
-            common.update({f"w_{k}": v for k, v in
-                           TW.weight_vs_truth(w, pd.read_csv(truth_by_transcript, sep="\t"),
-                                              index).items()})
     return [
         {**common, "axis": "transcript", **score_transcripts(quant, truth)},
-        # ⭐ the SAME scorer over genes — isoform ambiguity summed away, see score_genes
+        # the SAME scorer over genes — isoform ambiguity summed away, see score_genes
         {**common, "axis": "gene", **score_genes(quant, truth)},
         {**common, "axis": "library", **score_library(result, quant, summary)},
     ]
@@ -815,7 +672,7 @@ def _load(path: Path) -> dict:
 
 
 def report(paths: list[Path]) -> None:
-    """One or more arms, per stratum. ⛔ Never pooled — the panel total hides a sign flip between
+    """One or more arms, per stratum. Never pooled — the panel total hides a sign flip between
     strata, and on this panel one stratum carries almost all of the error."""
     arms = [(_load(p), Path(p).stem) for p in paths]
     keys = set(arms[0][0])
@@ -904,12 +761,12 @@ def report(paths: list[Path]) -> None:
 
     # ── ⑥ THE POOL LEVEL ─────────────────────────────────────────────────────────────────────────
     #
-    # ⛔⛔ AXIOM 0 GUARD, AND IT IS THE WHOLE REASON THIS TABLE NEEDS A HEADER. The solver has THREE
-    # populations — gDNA, RNA+, RNA− — and "nascent" is NOT one of them and never becomes one. This is
+    # Axiom 0 guard, and the reason this table needs a header. The solver has three
+    # populations — gDNA, RNA+, RNA− — and "nascent" is not one of them and never becomes one. This is
     # an ASSIGNMENT question, not a deconvolution one: `nrna_est` is mass the EM parked on nascent
     # entities, and reading it as a fourth component is the exact error `CLAUDE.md`'s AXIOM 0 exists to
     # prevent.
-    # ⭐ On a `nrna_none` panel `nrna_true` is exactly 0, so every fragment in that column is a false
+    # On a `nrna_none` panel `nrna_true` is exactly 0, so every fragment in that column is a false
     # positive with NOTHING TO CANCEL IT — the same one-sided logic that makes the `g00` control
     # readable (`TRAPS: zero-target-guards-are-one-sided`), and it is why the column is worth printing
     # even on a panel that contains no nascent RNA at all.
@@ -923,7 +780,7 @@ def report(paths: list[Path]) -> None:
     for a, name in arms:
         print()
         print(f"    arm: {name}")
-        # ⚠ An arm file written before this table existed has no pool fields. Say so and skip, rather
+        # An arm file written before this table existed has no pool fields. Say so and skip, rather
         # than dying on a KeyError halfway through a report whose other seven tables are fine.
         probe = next((a[(c, "library")] for c in conds if (c, "library") in a), None)
         if probe is None or any(f not in probe for f in _POOL_FIELDS):
@@ -937,13 +794,13 @@ def report(paths: list[Path]) -> None:
                 return sum(a[(c, "library")][field] for c in conds
                            if sel(c) and (c, "library") in a)
 
-            # ⛔⛔ INTERGENIC FRAGMENTS ARE gDNA AND THE NUMERATOR MUST SAY SO. `gdna_est` is
+            # Intergenic fragments are gDNA and the numerator must say so. `gdna_est` is
             # `gdna_em_count`, which EXCLUDES fragments that reached no locus; `gdna_true` is the
             # simulator's origin count, which includes them. Scoring one against the other is the
             # documented mistake in `score_library`'s own docstring — it read 0.3151 against a truth of
             # 0.5000 and fabricated an off-capture EM under-call that does not exist. Measured here
             # before the fix: -50.7 % panel-wide, which is the intergenic pool and nothing else.
-            # ⭐ The `of which` rows are informational and carry no truth of their own; only the TOTAL
+            # The `of which` rows are informational and carry no truth of their own; only the TOTAL
             # is scored, and it is `cli.py`'s own `gdna_fraction` numerator.
             gdna_em, inter = tot("gdna_est"), tot("n_intergenic")
             rows = [
@@ -960,7 +817,7 @@ def report(paths: list[Path]) -> None:
                           f"{'—':>15} {'—':>15} {'—':>8}")
                 else:
                     d = est - tru
-                    # ⛔ a relative error against a TRUE ZERO is not a large number, it is undefined —
+                    # a relative error against a TRUE ZERO is not a large number, it is undefined —
                     # printing `inf` or a huge % invites the misreading the header warns of.
                     pct = f"{100.0 * d / tru:>7.1f}%" if tru > 0 else "     n/a"
                     print(f"    {label if first else '':<26} {pretty:<20} {est:>15,.0f} "
@@ -976,7 +833,7 @@ def report(paths: list[Path]) -> None:
 
     # ── ⑦ THE POOL LEVEL, PER CONDITION ──────────────────────────────────────────────────────────
     #
-    # ⭐ The stratum roll-up above answers "which stratum is broken"; this answers "what happened in
+    # The stratum roll-up above answers "which stratum is broken"; this answers "what happened in
     # THIS scenario", which is the row an owner reads when deciding whether a condition is usable. Same
     # three pools, same intergenic-inclusive gDNA, one line per condition.
     for a, name in arms:
@@ -1051,8 +908,7 @@ def main() -> int:
                          "assignment is an unseeded categorical draw — see DEFAULT_EM_SEED")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument("--truth-by-transcript", type=Path, default=None,
-                    help="transcript_truth.py --out TSV. Required by `oracle_alloc_unspliced`; on an "
-                         "`alloc_*` arm it adds the weight-vs-truth columns beside the score")
+                    help="transcript_truth.py --out TSV. Required by `oracle_alloc_unspliced`")
     args = ap.parse_args()
 
     if args.report:
@@ -1069,7 +925,7 @@ def main() -> int:
         cache = args.suite / "oracle_cache"
 
     if args.jobs > 1 and len(names) > 1:
-        # ⭐ Shards, not threads. Conditions share nothing but a read-only index and cache, so this
+        # Shards, not threads. Conditions share nothing but a read-only index and cache, so this
         # changes no number; and the measured path stays byte-for-byte the serial one.
         shards = [s for s in (names[i:: args.jobs] for i in range(args.jobs)) if s]
         tmp = args.out.parent / f".{args.out.stem}_shards"
@@ -1097,7 +953,7 @@ def main() -> int:
             else:
                 print(f"  shard {i}: {len(shards[i])} conditions ok", flush=True)
         if rc:
-            # ⛔ A short output file reads as a complete panel (TRAPS: an-ablation-that-never-ran's shape).
+            # A short output file reads as a complete panel (TRAPS: an-ablation-that-never-ran's shape).
             raise SystemExit("a shard failed; refusing to concatenate a partial panel")
         with args.out.open("w") as fh:
             for o in outs:

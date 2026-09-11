@@ -1,23 +1,20 @@
-"""Re-derive an index's census from the artifacts on disk. ⛔ Never quote these numbers; re-run this.
+"""What is actually in this index? Re-derives an index's census from the artifacts on disk.
 
-    TODO item 1   ·   Ledger: "Benchmarks and indexes DELETED" (2026-07-30)
+Region and boundary counts, length medians, the terminus/splice-site flag split and the intron-length
+spread are properties of one annotation, not constants of the tool: a rebuild from a different GTF moves
+every one of them, so a claim about them is checked by re-running this rather than quoted from a table.
+Two rows are independent re-derivations rather than readbacks: the merged partition is rebuilt here by
+run-length-encoding equal signatures (to count the terminus boundaries a signature-merged partition
+could not represent), and every splice junction's endpoints are checked against the region table,
+because the deposit's sj lookup is a search in the region_bound array and silently finds nothing for an
+intron whose start is not one. With `--gtf` the annotation is re-parsed for its own transcript rows;
+without it those rows are reported as skipped. Nothing is scanned or solved.
 
-⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 sj boundaries · median 151 bp* were quoted
-across the documentation as though they were constants of the tool. They are properties of **one
-annotation**. A rebuild from a different GTF moves every one of them, and the deletion entry says so
-explicitly. This script re-derives them so a claim can be checked instead of inherited.
+Usage::
 
-⭐ Two of the rows are **independent re-derivations**, not readbacks ( — a
-validator that calls the builder's own helper validates nothing):
-
-* the **merged partition** is rebuilt here by run-length-encoding equal signatures, so "how many termini
-  did the old merge hide?" is computed from the region table rather than taken from a stored column;
-* **every annotated intron's endpoints are looked up in the region_bound array** — the deposit's sj lookup
-  depends on that being 100 %, because an intron whose start is not a region_bound can never be found.
-
-    python scripts/design/index_census.py INDEX_DIR [--gtf GTF --collapse-duplicate-transcripts]
-
-Without `--gtf` the transcript-dependent rows are skipped and said to be skipped.
+    python scripts/design/index_census.py INDEX_DIR                                             # nodes, boundaries, merge visibility, junctions
+    python scripts/design/index_census.py INDEX_DIR --gtf GTF                                   # plus the transcript rows
+    python scripts/design/index_census.py INDEX_DIR --gtf GTF --collapse-duplicate-transcripts  # as the index builder collapsed them
 """
 
 from __future__ import annotations
@@ -86,11 +83,11 @@ def census_boundaries(boundaries: pd.DataFrame) -> None:
 
 
 def census_merge_visibility(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
-    """⭐ RE-DERIVED, not read back: rebuild the old merged partition and ask what it could not see.
+    """Rebuild the signature-merged partition and count the region_bounds it could not represent.
 
-    The v7 partition merged genomically adjacent regions carrying the same signature. A region_bound that
-    disappears into the interior of a merged region is a position that partition could not represent —
-    and a terminus region_bound is exactly the kind that vanished. This is the whole reason for v8.
+    Merging genomically adjacent regions of equal signature hides every region_bound interior to a
+    merged region; a terminus region_bound is exactly the kind that vanishes. Re-derived from the
+    region table, not read from a stored column.
     """
     signature = regions["signature"].to_numpy(np.uint8)
     ref = regions["ref_name"].astype(str).to_numpy()
@@ -117,10 +114,10 @@ def census_merge_visibility(regions: pd.DataFrame, boundaries: pd.DataFrame) -> 
 
 
 def census_sj_region_bounds(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
-    """⭐ RE-DERIVED: the deposit's sj lookup IS a search in the region_bound array, so this must be 100 %.
+    """Check every sj boundary's endpoints are region_bounds and report the intron-length spread.
 
-     rests on it — if an annotated intron's start is not a region_bound, the CSR
-    scan never happens and the sj is unfindable, silently.
+    The deposit's sj lookup is a search in the region_bound array: an annotated intron whose start is
+    not a region_bound is unfindable, silently, so this must hold for every junction.
     """
     sj = boundaries["kind"].to_numpy() == EDGE_KIND_SJ
     src = boundaries.loc[sj, "src"].to_numpy(np.int64)

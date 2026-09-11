@@ -1,50 +1,29 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ THE TWO ZERO CONTROLS, ON EVERY RUNG — and they belong on every experiment.
+"""Does the tool hold at zero RNA and at zero gDNA? The two zero controls, which belong on every
+experiment. Each arm runs a toy spec through the toy harness on a donor condition and prints every
+object's answer beside a truth that is a constant, so every deviation is a false positive with
+nothing to cancel against it: the zero-RNA arm silences every transcript (``abundance = 0``, a
+silent gene) on a gDNA-rich donor and the truth is ``f_g = 1`` at every object; the zero-gDNA arm
+runs the spec on the ``g00`` donor, whose measured gDNA rate is 0/bp, and the truth is ``f_g = 0``
+at every object that carries RNA. The zero-RNA arm is the biologically dominant case, not a corner:
+most annotated transcripts are off in any one sample, so their pure-gDNA objects are the modal
+case. Per object it prints the three rungs — ``fg_strand`` (the strand likelihood alone),
+``fg_loc`` (the message-free self-solve) and ``f_g`` (the final answer after the message passes) —
+because a wrong ``fg_loc`` is an initialisation defect no message caused, while a right ``fg_loc``
+and a wrong ``f_g`` is the messages; the localisation table reports the fraction of the gap the
+messages closed beside whether the object had own evidence, since an evidence-free object is
+supposed to return the reference. It runs the shipped message setting by default; muted, it prints
+the measured rung-3 vs rung-2 separation rather than implying a message was sent. An object with
+zero counts is flagged EMPTY and an arm whose every object is empty is reported as degenerate
+(`TRAPS: could-the-arm-have-fired`): judge an arm by how many objects carried mass, never by the
+total. Prior-free pass-0 (``calib_refit_iters = 0``), capture-OFF, unstranded throughout.
 
-⛔ **Owner's standing requirement, 2026-08-05:** *"We generally need zero gDNA and zero RNA controls
-everywhere, generally, for almost any experiment and investigation that we run."*
+Usage::
 
-Two arms, and the point of both is that **the truth is a CONSTANT**, so every deviation is a false
-positive with nothing to cancel against it:
-
-| arm | how | truth at every object | what a deviation means |
-|---|---|---|---|
-| ⭐⭐ **ZERO RNA** | every transcript's ``abundance = 0`` — a SILENT gene | ``f_g = 1.000`` exactly | invented RNA in a pure-gDNA library |
-| ⭐⭐ **ZERO gDNA** | the ``g00`` donor, whose measured gDNA rate is 0/bp | ``f_g = 0.000`` exactly | invented gDNA — the phantom floor |
-
-⭐⭐ **THE ZERO-RNA ARM IS THE BIOLOGICALLY DOMINANT CASE AND IT IS NOT A CORNER.** The annotation has
->50,000 genes and perhaps ~10,000 are expressed in any one sample, so **most annotated transcripts are
-simply OFF**. Their objects are pure gDNA, they are the majority of the genome's objects, and they carry
-real mass — so an error there is not an boundary case, it is the modal case. It should also be the easiest
-thing the solver ever does: there is nothing to deconvolve.
-
-**The three-rung ladder is printed per object, because it localises the defect with no guessing:**
-
-    fg_strand   the strand likelihood ALONE  — on an unstranded library this MUST be psi's reference
-    fg_loc      the message-free SELF-SOLVE  — strand + the intron factory + psi's own reference
-    f_g         the FINAL answer, after the two message passes
-
-⭐ If ``fg_loc`` is already wrong the fault is in the per-object initialisation and no message caused it.
-If ``fg_loc`` is right and ``f_g`` is not, it is the messages. ⛔ Reading only the final number cannot tell
-those apart, and they have completely different fixes.
-
-⭐ **THE THIRD RUNG IS REAL UNDER THE SHIPPED CONFIG** — ``CalibrationConfig.message_propagation``
-ships ``True`` and ``message_policy`` names the transfer policy. ⚠ Under ``--messages off``
-(``SilentPolicy``, sends nothing) rung 3 can only repeat rung 2: this instrument then **prints the two
-rungs' measured maximum separation** rather than implying a message was sent, with the stamp saying the
-configuration is not the shipped one. ⚠ It defaults to the SHIPPED setting on purpose: this is the
-admissibility control the owner requires on **every experiment**, and an experiment runs the
-configuration the tool ships.
-
-⚠ **A zero arm can be DEGENERATE, and then it is not a control at all** (TRAPS: could-the-arm-have-fired). An object with
-zero counts has no density, so the reframe is skipped and every message into it is inert — the arm then
-reports "no error" while testing nothing. So this prints the COUNTS beside every answer and flags any
-object that is empty. ⛔ Judge the arm by how many objects actually carried mass, not by the total.
-
-Usage:
-
+    python scripts/design/zero_controls.py                                       # both arms, the default specs
     python scripts/design/zero_controls.py --specs silent spliced_exons TA_single_exon nested_exons
-    python scripts/design/zero_controls.py --specs spliced_exons --arms rna     # zero-RNA only
+    python scripts/design/zero_controls.py --specs spliced_exons --arms rna       # zero-RNA only
+    python scripts/design/zero_controls.py --arms gdna --n-rna 50000 --work-dir /path/to/work
 """
 
 from __future__ import annotations
@@ -52,20 +31,16 @@ from __future__ import annotations
 import argparse
 import copy
 import dataclasses
-import importlib.util
 import os
-import sys
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-DESIGN = Path(__file__).resolve().parent
-_s = importlib.util.spec_from_file_location("toy_harness", DESIGN / "toy_harness.py")
-TH = importlib.util.module_from_spec(_s)
-sys.modules["toy_harness"] = TH
-_s.loader.exec_module(TH)
+from _shared import sibling  # noqa: E402
+
+TH = sibling("toy_harness.py")
 
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -73,11 +48,10 @@ from rigel.index import TranscriptIndex  # noqa: E402
 SUITE = Path.home() / "Downloads/rigel_runs/suite/ladder"
 INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
 
-#: ⭐ capture-OFF × unstranded throughout: the simplest regime, no enrichment landscape and exactly zero
-#: strand information, so nothing can mask a defect in the length or count channels.
-# ⚠ `g75` until 2026-08-13, retired when the ladder was rebuilt to four rungs. `g98` is the surviving
-# rung with the MOST gDNA (9.8 M fragments against g75's 7.5 M), which is what "plenty" asks for; the
-# arm silences RNA by construction, so g98's thin RNA side costs this control nothing.
+#: capture-OFF x unstranded throughout: the simplest regime, no enrichment landscape and exactly zero
+#: strand information, so nothing can mask a defect in the length or count channels. `g98` is the
+#: rung with the most gDNA; the zero-RNA arm silences RNA by construction, so its thin RNA side costs
+#: this control nothing.
 DONOR_GDNA = "gdna_g98_ss_0.50_nrna_mid_capture_off"  # plenty of gDNA — the ZERO-RNA arm's substrate
 DONOR_NONE = "gdna_g00_ss_0.50_nrna_mid_capture_off"  # zero gDNA — the ZERO-gDNA arm's substrate
 
@@ -87,10 +61,10 @@ FAIL: list[str] = []
 def silence(spec):
     """Every transcript's abundance to 0 — a gene that is annotated and NOT expressed.
 
-    ⚠ ``n_rna_fragments`` is kept at 1, not 0: the simulator needs a nonzero RNA budget to run and a
-    single fragment is the smallest thing that is still a library. ⛔ `ToySpec.genes` is a list of dicts
-    shared with the module-level `SPECS`, so it is DEEP-copied — mutating it in place silently changed
-    every later run in the same process, which is how this was first mis-measured."""
+    ``n_rna_fragments`` is kept at 1, not 0: the simulator needs a nonzero RNA budget to run and a
+    single fragment is the smallest thing that is still a library. `ToySpec.genes` is a list of dicts
+    shared with the module-level `SPECS`, so it is deep-copied — mutating it in place would change
+    every later run in the same process."""
     genes = copy.deepcopy(spec.genes)
     for g in genes:
         for t in g["transcripts"]:
@@ -138,23 +112,20 @@ def report(spec_name, arm, r, expect, messages):
         return
     print(f"   ⭐ worst object: {worst[1]} {worst[2]}  Δ = {worst[0]:+.4f}   "
           f"·   error share of mass = {tot_err / max(mass, 1):.4%}")
-    # ⭐⭐ RUNG 3 vs RUNG 2, MEASURED. Under `SilentPolicy` nothing is sent, so the third rung can only
-    # repeat the second — but that is a claim about the code, and this instrument's job is to print the
-    # NUMBER instead. `max|f_g − fg_loc|` over the live objects is that number, and it is also the
-    # honest proof that the muted arm is not silently doing something (`TRAPS: an-ablation-that-never-ran`).
+    # rung 3 vs rung 2, measured. Under `SilentPolicy` nothing is sent, so the third rung can only
+    # repeat the second — but that is a claim about the code, and this instrument prints the NUMBER
+    # instead: `max|f_g − fg_loc|` over the live objects, which is also the proof that the muted arm
+    # is not silently doing something (`TRAPS: an-ablation-that-never-ran`).
     _live = np.asarray([float(cnt[row["slot"]]) > 0 for row in rows], bool)
     _sl = np.asarray([row["slot"] for row in rows], np.int64)[_live]
     _sep = float(np.max(np.abs(fg[_sl] - loc[_sl]))) if _sl.size else float("nan")
     print(f"   ⭐ RUNG 3 − RUNG 2, over the {live} live objects: max|f_g − fg_loc| = {_sep:.3g}   "
           f"— {'what the messages MOVED' if messages else 'muted: what no third rung MEASURES'}")
-    # ⛔⛔ THE LOCALISATION, and it must NOT be a raw comparison of |Δ fg_loc| against |Δ f_g|.
-    # An object with no own composition evidence is SUPPOSED to return psi's uninformative reference
-    # (~0.49) at zero precision — that is correct behaviour, not an error, so a rule that reads a large
-    # |Δ fg_loc| as "the self-solve is broken" mislabels every evidence-free object. (It did, on the
-    # first run of this file: it called an exon whose messages had moved it 0.49 → 0.93 a self-solve
-    # defect.) ⭐ The honest quantity is what fraction of the gap the messages CLOSED, reported per
-    # object beside its own precision, so an evidence-free object and an evidence-bearing one are read
-    # differently rather than pooled.
+    # the localisation, which must NOT be a raw comparison of |Δ fg_loc| against |Δ f_g|: an object
+    # with no own composition evidence is SUPPOSED to return psi's uninformative reference at zero
+    # precision, so a rule that reads a large |Δ fg_loc| as "the self-solve is broken" mislabels every
+    # evidence-free object. The honest quantity is what fraction of the gap the messages CLOSED,
+    # reported per object beside whether it has own evidence, so the two kinds are read apart.
     print(f"\n   {'slot':>4} {'own evidence?':<14} {'|Δ| local':>10} {'|Δ| final':>10} "
           f"{'gap closed':>11}   reading")
     fin_bad = 0.0
@@ -169,8 +140,8 @@ def report(spec_name, arm, r, expect, messages):
         if df < 1e-6:
             reading = "✅ exact"
         elif not has_own:
-            # ⛔ THE WORDING IS THE MEASUREMENT. Muted, "the messages did not carry it" is trivially true
-            # of a policy that was never asked, and reads as a message-layer verdict. Say which it is.
+            # the wording is the measurement: muted, "the messages did not carry it" is trivially true
+            # of a policy that was never asked and would read as a message-layer verdict, so say which.
             if not messages:
                 reading = "⛔ NO own evidence, and the messages are MUTED — nothing COULD carry it"
             else:
@@ -193,8 +164,8 @@ def main() -> int:
     ap.add_argument("--arms", nargs="*", default=["rna", "gdna"], choices=["rna", "gdna"])
     ap.add_argument("--n-rna", type=int, default=200_000, help="the ZERO-gDNA arm's RNA depth")
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_zero_controls"))
-    # ⭐ defaults to the SHIPPED setting: this is the admissibility control the owner requires on every
-    # experiment, so it must run the configuration the tool ships.
+    # defaults to the SHIPPED setting: this is the admissibility control on every experiment, so it
+    # must run the configuration the tool ships.
     TH.add_messages_flag(ap, default=TH.MESSAGES_SHIPPED)
     args = ap.parse_args()
 

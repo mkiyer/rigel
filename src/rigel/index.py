@@ -140,12 +140,12 @@ def _sha256_of_directory(path: Path) -> str:
 def source_record(path: str | Path) -> dict:
     """Provenance for ONE build input: where it was, how big it was, and what it contained.
 
-    ⚠ **This is not the stale-cache trap.** That one forbids storing a hash of an artifact
-    *beside* that artifact, because the two drift and the stale hash then verifies clean. This hashes an
-    input the index **cannot recompute from itself** — the genome and the annotation are not in the index
-    — so it is provenance, not a cache key. ``partition_hash`` and ``graph_hash`` stay computed on demand.
+    This is not the stale-cache trap. That one forbids storing a hash of an artifact BESIDE that
+    artifact, because the two drift and the stale hash then verifies clean. This hashes an input the
+    index cannot recompute from itself — the genome and the annotation are not in the index — so it is
+    provenance, not a cache key. ``partition_hash`` and ``graph_hash`` stay computed on demand.
 
-    ⭐ ``sha256`` rather than the ``blake2b`` used for the two partition keys, deliberately: those are
+    ``sha256`` rather than the ``blake2b`` used for the two partition keys, deliberately: those are
     internal cache keys nobody types, while this one is meant to be checked against ``shasum -a 256`` on
     the command line by whoever is trying to find the source again.
     """
@@ -904,17 +904,16 @@ class TranscriptIndex:
         produce the same hash **iff** a scan against them yields an identically-shaped, identically-keyed
         accumulator payload — which is precisely the condition under which a cached payload is reusable.
 
-        ⚠ **Computed on demand, never stored.** A hash written into ``manifest.json`` at build time is a
+        Computed on demand, never stored. A hash written into ``manifest.json`` at build time is a
         derived value that can go stale against the feathers beside it; this one cannot.
 
-        ⚠ **It covers ``regions.feather`` only, and that is deliberate** — it is the key for a cached
-        SCAN, and the scan sees the region_bound array and nothing else. ``edges.feather`` (the flags and
-        reaches) can change without invalidating a payload, and does: the 2026-07-29 flag-filter fix
-        rewrote every boundary file while leaving every region file byte-identical. Anything that caches an
-        *boundary*-derived artifact must carry its own provenance; this hash will not catch it.
+        It covers ``regions.feather`` only, and that is deliberate — it is the key for a cached SCAN,
+        and the scan sees the region-bound array and nothing else. ``edges.feather`` (the flags and
+        reaches) can change without invalidating a payload, and does: a flag-filter change can rewrite
+        every boundary file while leaving every region file byte-identical. Anything that caches a
+        BOUNDARY-derived artifact must carry its own provenance; this hash will not catch it.
 
-        Cost at human scale: ~60 ms (8.4 MB of int64 through blake2b plus the groupby that builds
-        it) — negligible against the BAM scan it gates.
+        Cost is tens of milliseconds at human scale — negligible against the BAM scan it gates.
         """
         import hashlib
 
@@ -933,17 +932,17 @@ class TranscriptIndex:
     def graph_hash(self) -> str:
         """16-hex-char content hash of **everything the accumulator payload depends on** — regions AND boundaries.
 
-        ⚠ **`partition_hash` is not enough for a payload, and that is not an oversight in either of them.**
-        That hash keys a cached *scan*, and a scan sees the region_bound array; this one keys a cached *tally*, whose
-        sj axis is meaningless against a different sj CSR. ⭐ The two genuinely differ: the
-        2026-07-29 flag fix rewrote every ``edges.feather`` while leaving every ``regions.feather``
-        byte-identical, so a regions-only key would have verified **clean** against a stale payload and fed
-        every downstream comparison the pre-fix sj.
+        `partition_hash` is not enough for a payload, and that is not an oversight in either of
+        them. That hash keys a cached SCAN, and a scan sees the region-bound array; this one keys a
+        cached TALLY, whose sj axis is meaningless against a different sj CSR. The two genuinely
+        differ — a change can rewrite every ``edges.feather`` while leaving every ``regions.feather``
+        byte-identical, so a regions-only key would verify CLEAN against a stale payload and feed
+        every downstream comparison the old sj.
 
-        So it is ``partition_hash``'s inputs plus the sj CSR — the donor offsets, the acceptor region_bound
-        indices and the annotated strands, i.e. exactly what crosses into ``set_sj``.
+        So it is ``partition_hash``'s inputs plus the sj CSR — the donor offsets, the acceptor
+        region-bound indices and the annotated strands, i.e. exactly what crosses into ``set_sj``.
 
-        ⚠ **Computed on demand, never stored.** A hash written beside the data it describes can go stale
+        Computed on demand, never stored. A hash written beside the data it describes can go stale
         against it; this one cannot.
         """
         import hashlib
@@ -953,8 +952,9 @@ class TranscriptIndex:
         h = hashlib.blake2b(digest_size=8)
         h.update(self.partition_hash.encode())
         sj = build_sj_arrays(self)
-        # ⚠ `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses the
-        # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated boundary row moved.
+        # `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses
+        # the ABI, and hashing it would invalidate a good payload whenever an unrelated boundary row
+        # moved.
         for array in (sj.offsets, sj.boundary_right, sj.strand):
             contiguous = np.ascontiguousarray(array)
             h.update(str(contiguous.dtype).encode())
@@ -1124,10 +1124,9 @@ class TranscriptIndex:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
 
         # -- Manifest --------------------------------------------------------
-        # ⛔ Everything needed to REBUILD this index, because the previous manifest recorded neither the
-        # sources nor the flags, so a rebuild had to infer both (the index-rebuild
-        # entry). Defaults are written out explicitly: a rebuilder must not have to know this rigel
-        # version's defaults to reproduce the artifact.
+        # Everything needed to REBUILD this index: without both the sources and the flags a rebuild
+        # has to infer them. Defaults are written out explicitly, so a rebuilder need not know this
+        # rigel version's defaults to reproduce the artifact.
         logger.info("[START] Digesting build sources for the manifest")
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
@@ -1141,7 +1140,7 @@ class TranscriptIndex:
                     None if alignable_zarr_path is None else source_record(alignable_zarr_path)
                 ),
             },
-            # ⚠ Hand-listed, and `tests/test_index_provenance.py` reads the expected key set off
+            # Hand-listed, and `tests/test_index_provenance.py` reads the expected key set off
             # `inspect.signature(build)` — so a NEW build parameter that does not reach here fails that
             # test rather than silently escaping the provenance.
             "build_flags": {
@@ -1305,11 +1304,11 @@ class TranscriptIndex:
         ]
 
         # -- the splice graph: THE calibration partition ----------------------
-        # ⚠ The load-time validation is the GRAPH-INTERNAL half only — I1/I2/I5-I9/I12. I3b, I4, I11
-        # and I13 need the transcripts (~3 s to reconstruct at human scale) and run at BUILD. So a
-        # `signature` or `flags` column that has drifted from the annotation loads clean; what this
-        # catches is a graph that is internally inconsistent or truncated, which is what has
-        # historically gone wrong with a stale index.
+        # The load-time validation is the GRAPH-INTERNAL half only. The checks that need the
+        # transcripts (seconds to reconstruct at human scale) run at BUILD instead, so a `signature`
+        # or `flags` column that has drifted from the annotation loads clean; what this catches is a
+        # graph that is internally inconsistent or truncated, which is what has historically gone
+        # wrong with a stale index.
         from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
 
         logger.debug("Reading splice graph")

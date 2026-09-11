@@ -1,14 +1,29 @@
 #!/usr/bin/env python3
-"""Generate synthetic mini-genome simulation suites.
+"""Build a complete synthetic mini-genome simulation suite, from random sequence to manifest.
 
-Steps:
-  1. Generate synthetic genome (10 Mb, ~50 genes, ~250 transcripts)
-    2. Simulate reads across strand x gDNA x nRNA-ratio conditions
-  3. Each condition produces oracle BAM + paired-end FASTQ
+The entry point is :func:`main`, a CLI. Flags carry every knob; ``--config`` supplies defaults
+from a YAML mapping, and an explicitly given flag always wins over the config value.
 
-Usage:
-    python scripts/sim/simulate_suite.py \\
-    --outdir /Users/mkiyer/Downloads/rigel_runs/sim_synthetic
+Order of operations. Arguments are parsed and the config defaults folded in; the capture scenarios
+are resolved into :class:`SuiteCaptureSpec` records, each either pointing at a provided probe panel
+or asking for generated probes. Step 1 writes (or reuses) the synthetic reference — a random genome
+with genes, isoforms and antisense overlaps from :mod:`rigel.sim.synthetic_genome`, with real
+splice motifs injected at every junction — and stops there under ``--reference-only``. Probe panels
+are then generated once per distinct probe geometry (capture fraction, probe length, probe
+density), so scenarios differing only in binding parameters share one probe file. Step 2 assembles
+a :class:`~rigel.sim.wgs_config.WholeGenomeSimConfig`, loads the transcripts and assigns random
+abundances once for the whole suite, then hands the grid to
+:func:`rigel.sim.orchestrator.run_condition_grid`, which sweeps nascent x gDNA rate x gDNA strand
+overdispersion x strand specificity x capture scenario and writes each condition's FASTQ, oracle
+BAM and truth. The manifest is written last.
+
+Guarantees. Condition directory names come from :func:`rigel.sim.manifest.condition_dir_name`, and
+a ``--conditions`` selection naming anything outside the generated grid raises rather than running
+a subset that silently differs from the request. Every seed derives from ``--seed`` through
+:func:`rigel.sim.orchestrator.stable_seed`, so a condition is reproducible on its own and
+independent of the others. ``--skip-existing`` makes both the reference and the conditions
+resumable. The synthetic reference declares itself genomic explicitly, since it carries no
+RNA-only spike-in.
 """
 
 from __future__ import annotations
@@ -83,11 +98,11 @@ def _as_float_list(value: object) -> list[float]:
 
 
 def _or_default(value, default):
-    """``value`` unless it is None — never unless it is FALSY.
+    """``value`` unless it is None — never merely because it is falsy.
 
-    ⛔ `x or default` is wrong for any knob whose zero is meaningful: it silently substitutes the
-    default for `0`, `0.0` and `""`. Under the sparse nascent model `on_fraction=0` means "no nascent
-    anywhere", which is precisely the value the falsy spelling destroyed.
+    ``x or default`` is wrong for any knob whose zero is meaningful: it silently substitutes the
+    default for ``0``, ``0.0`` and ``""``. Under the sparse nascent model ``on_fraction=0`` means
+    "no nascent anywhere", so the falsy spelling turns that request into its opposite.
     """
     return default if value is None else value
 
@@ -349,10 +364,7 @@ def main():
         "--outdir",
         type=Path,
         default=Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic"),
-        help=(
-            "Base output directory. NOTE: the default is a developer path into a tree cleared on "
-            "2026-07-30 when every benchmark and index was deleted — pass this explicitly."
-        ),
+        help=("Base output directory. The default is a developer path; pass this explicitly."),
     )
     parser.add_argument(
         "--genome-length",
@@ -551,10 +563,9 @@ def main():
         "--no-fastq",
         action="store_true",
         help=(
-            "drop sim_R1/R2.fq.gz after each condition's truth is written. ⭐ No calibration "
-            "instrument reads a FASTQ, and they are ~half the on-disk size of a panel. "
-            "⛔ scripts/benchmarking/ DOES read them, so a panel built with this cannot be "
-            "compared against another tool without re-simulating."
+            "drop sim_R1/R2.fq.gz after each condition's truth is written. No calibration instrument "
+            "reads a FASTQ, and they are about half the on-disk size of a panel; a comparison "
+            "against another tool does read them, so such a panel must be re-simulated first."
         ),
     )
     parser.add_argument(
@@ -859,8 +870,8 @@ def main():
         gdna=GDNASimConfig(
             rates=gdna_rates,
             rate_labels=gdna_labels,
-            # ⭐ A synthetic mini-genome carries no RNA-only spike-ins, so its one reference is
-            # genomic. Stated rather than inferred: the engine no longer guesses from the annotation.
+            # A synthetic mini-genome carries no RNA-only spike-ins, so its one reference is
+            # genomic. Stated rather than inferred: the engine never guesses from the annotation.
             genomic_refs=[REF_NAME],
             frag_mean=args.gdna_frag_mean,
             frag_std=args.gdna_frag_std,
@@ -872,10 +883,10 @@ def main():
             ratios=nrna_ratios if nrna_ratios is not None else [0.0],
             abundance_ranges=nrna_abundance_ranges,
             ratio_labels=nrna_labels,
-            # ⛔ NO `or` HERE. `0.0 or 1.0` is 1.0, so the inherited spelling silently INVERTED
-            # `on_fraction=0` (no nascent anywhere) into 1.0 (nascent everywhere) — the exact opposite
-            # of the request, with no warning — and turned `seed=0` into 42. Both are meaningful values
-            # under the sparse model, so the default must come from `getattr`, never from falsiness.
+            # No `or` here: `0.0 or 1.0` is 1.0, which would turn `on_fraction=0` (no nascent
+            # anywhere) into 1.0 (nascent everywhere) without warning, and `seed=0` into 42. Both
+            # are meaningful values under the sparse model, so the default comes from `getattr`
+            # plus `_or_default`, never from falsiness.
             on_fraction=float(_or_default(getattr(args, "nrna_on_fraction", None), 1.0)),
             seed=int(_or_default(getattr(args, "nrna_seed", None), 42)),
         ),

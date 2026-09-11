@@ -95,12 +95,11 @@ class FragmentLengthModel:
     def n_observations(self) -> int:
         """Number of observations, derived from the total histogram weight.
 
-        ⚠ **ROUNDED, not truncated, and that matters because some histograms are fractional.** A length
+        ROUNDED, not truncated, and that matters because some histograms are fractional. A length
         pool divided by its own opportunity holds non-integer weights by construction (the de-tilt
-        preserves the pool's total but redistributes it), so a total of 552.9 must report 553 and not
-        552 — otherwise the reported count and the histogram the report writes beside it fail to
-        reconcile, and a reader has no way to tell a rounding artefact from a lost fragment.
-        ``total_weight`` is the unrounded quantity for anyone who needs it.
+        preserves the pool's total but redistributes it), so truncating would report one fewer
+        fragment than the histogram beside it holds, and a reader has no way to tell a rounding
+        artefact from a lost fragment. ``total_weight`` is the unrounded quantity.
         """
         return int(round(self._total_weight))
 
@@ -613,13 +612,10 @@ class FragmentLengthModel:
         }
 
 
-# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by TRAPS: pure-and-length-censored.
-# It held the scanner's own global + per-SpliceType raw histograms,
-# trained during the BAM scan from two different measurements of "fragment length" — a genomic
-# footprint for one subset of fragments and a transcript-space length for a disjoint one — summed
-# into a single array and used as the empirical-Bayes anchor for pools measured a third way.
+# There is deliberately no plural container of raw per-SpliceType histograms here: mixing a genomic
+# footprint for one subset of fragments with a transcript-space length for a disjoint one gives an
+# anchor measured differently from the pools it anchors (TRAPS: pure-and-length-censored).
 #
-# ⚠ `FragmentLengthModel` (SINGULAR), above, is a different thing and STAYS: it is the scoring and
-# effective-length model, built by `from_pmf` from a pmf that `calibration.fl.build_fl_models`
-# derives from the accumulator payload. The per-splice-type QC counts the plural container used to
-# supply are now the scanner's own census (`rigel.splice.census_field`).
+# `FragmentLengthModel` above is the scoring and effective-length model, built by `from_pmf` from a
+# pmf that `calibration.fl.build_fl_models` derives from the accumulator payload. The per-splice-type
+# QC counts come from the scanner's own census (`rigel.splice.census_field`).

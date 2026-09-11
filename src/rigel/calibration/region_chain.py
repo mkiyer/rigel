@@ -1,30 +1,29 @@
-"""rigel.calibration.region_chain — the region<->boundary chain the belief-propagation sweep traverses.
+"""The region/boundary chain the belief-propagation sweep traverses.
 
-       Gate: ``tests/calibration/test_region_chain.py``
+Gate: ``tests/calibration/test_region_chain.py``.
 
-The calibration graph is a **linear bipartite chain of REGION and BOUNDARY slots, interleaved in genomic
-order**. A reference with ``k`` regions owns exactly ``k − 1`` interior boundaries, so its slot sequence is::
+The calibration graph is a linear bipartite chain of REGION and BOUNDARY slots interleaved in
+genomic order. A reference with ``k`` regions owns exactly ``k - 1`` interior boundaries, so its
+slot sequence is::
 
-    N0  E0  N1  E1  ...  E(k-2)  N(k-1)          2k − 1 slots
+    N0  E0  N1  E1  ...  E(k-2)  N(k-1)          2k - 1 slots
 
-⭐ **It starts and ends with a REGION, and there are no terminal slots.** That is the whole shape change
-from the predecessor, which ran ``B R B R … R B`` with ``k + 1`` boundary slots per reference — the two
-outermost carrying no data and existing only so every region had an object on each side. A contiguous
-boundary is the boundary BETWEEN two adjacent regions; there is no such boundary before the first or after the last, so
-the object does not exist rather than existing empty. **An boundary therefore always has a region on both
-sides**, an invariant the old shape could not state.
+The chain starts and ends with a REGION and has no terminal boundary slots: a contiguous boundary
+is the boundary BETWEEN two adjacent regions, and there is no such boundary before the first region
+or after the last, so the object does not exist rather than existing empty. A boundary therefore
+always has a region on both sides, which is the invariant every consumer relies on.
 
-Boundary endpoints are **implicit**: boundary ``i`` lies between region ``i`` and region ``i + 1``. Nothing stores
-them, and this module is the one place that arithmetic lives.
+Boundary endpoints are implicit: boundary ``i`` lies between region ``i`` and region ``i + 1``.
+Nothing stores them, and this module is the one place that arithmetic lives.
 
-A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:`BOUNDARY`, and ``obj_idx``
-indexes the region axis or the contiguous-boundary axis respectively. That keeps every per-object statistic in
-its own payload-shaped array — the chain only sequences and links them.
+A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:`BOUNDARY`, and
+``obj_idx`` indexes the region axis or the contiguous-boundary axis respectively. That keeps every
+per-object statistic in its own payload-shaped array; the chain only sequences and links them.
 
-⚠ **SpliceJunction boundaries are NOT chain slots.** The graph is a DAG but not a polytree: every sj boundary
-closes an undirected loop, so a sj must be a FACTOR on its endpoint regions and never a message
-channel (— never break a cycle by dropping a sj boundary,
-that re-isolates the exon the boundary exists for).
+Splice-junction boundaries are NOT chain slots. The graph is a DAG but not a polytree: every sj
+boundary closes an undirected loop, so an sj must be a FACTOR on its endpoint regions and never a
+message channel. Breaking such a cycle by dropping the sj boundary re-isolates the exon the
+boundary exists for.
 """
 
 from __future__ import annotations
@@ -41,11 +40,11 @@ BOUNDARY = 1
 
 @dataclass(frozen=True, slots=True)
 class RegionChain:
-    """The genomic-ordered region∪boundary chain and its adjacency. All arrays have length ``n_slots``.
+    """The genomic-ordered region-and-boundary chain and its adjacency, all arrays of length ``n_slots``.
 
-    Slot ids are assigned in genomic visiting order, so ``order`` would be ``arange`` and is not stored.
-    ``left``/``right`` give each slot its single adjacent slot of the OTHER kind, ``-1`` at a reference
-    terminal — which is a propagation sink, and is now always a REGION.
+    Slot ids are assigned in genomic visiting order, so ``order`` would be ``arange`` and is not
+    stored. ``left`` / ``right`` give each slot its single adjacent slot of the other kind, and
+    ``-1`` at a reference terminal — a propagation sink, which is always a REGION.
     """
 
     kind: np.ndarray  # int8[n_slots] — REGION or BOUNDARY
@@ -71,24 +70,22 @@ class RegionChain:
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
-# ⭐⭐ ONE SLOT'S DECONVOLUTION RESULT — vocabulary, and it lives here because THREE LAYERS need it.
-# It was defined in the STRAND family (layer 4) and imported by `region_geometry` and `simplex_logodds`
-# (layer 3) and `sweep` (layer 6), so three layers reached UPWARD for a type. `module_census.py` is what
-# made that visible, and the repair is the one a layering violation always asks for: the TYPE belongs at
-# the bottom, not the code that happened to define it first. ⚠ It is not a strand concept — the pie
-# `(f_pos, f_neg, f_g)` is the tool's central datum, and a slot is what carries it.
+# ONE SLOT'S DECONVOLUTION RESULT — vocabulary, so it lives at the bottom layer: `region_geometry` and
+# `simplex_logodds` (layer 3), the strand family (layer 4) and `sweep` (layer 6) all need the type, and
+# a type every layer reaches for belongs below all of them. It is not a strand concept: the composition
+# `(f_pos, f_neg, f_g)` is the tool's central datum and a slot is what carries it.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True, slots=True)
 class RegionDeconv:
-    """Per-region deconvolution result. TWO disjoint uses, hence the optional halves:
+    """Per-region deconvolution result, with two disjoint uses — hence the optional halves:
 
-    * the per-region SOLVE (`simplex_logodds._solve_regions_logodds_all`) returns the **composition** —
-      ``*_frac`` + ``*_frac_var`` — and no mass (a region's mass is a per-FACE quantity; the solve is
-      face-invariant, so a single ``*_mass`` here would be meaningless);
-    * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_boundary_deconv`) returns the
-      **mass** the downstream `CalibrationResult` consumes, and no precision.
+    * the per-region SOLVE (`simplex_logodds._solve_regions_logodds_all`) returns the composition,
+      ``*_frac`` plus ``*_frac_var``, and no mass: a region's mass is a per-FACE quantity and the
+      solve is face-invariant, so a single ``*_mass`` here would be meaningless;
+    * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_boundary_deconv`) returns the mass
+      the downstream `CalibrationResult` consumes, and no precision.
     """
 
     gdna_frac: (
@@ -99,13 +96,13 @@ class RegionDeconv:
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
     # per-component posterior variances in LOG-FRACTION space — `Var(log f_c)`, NOT `Var(f_c)`. They are
-    # grid moments of `log f_c` over the λ lattice (`simplex_logodds._solve_regions_logodds`), because the
-    # message currency is a log-density and the send precision `1/(Var(log f_c) + 1/n + σ²_transfer)` is
-    # log-space throughout. ⚠ They are therefore NOT bounded by ¼ and routinely exceed it — a consumer that
-    # needs the LINEAR `Var(f_c)` must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as
-    # `sweep.solve_chain` does when it builds `_var_fg` for `composition_logvar`). Set by the per-region
-    # solve, consumed when a region emits a message. None on the chain region/boundary projections (precision
-    # is a chain-region property, not needed by the downstream EM prior).
+    # grid moments of `log f_c` over the lambda lattice (`simplex_logodds._solve_regions_logodds`), because
+    # the message currency is a log-density and the send precision is log-space throughout. They are
+    # therefore NOT bounded by 1/4 and routinely exceed it — a consumer that needs the LINEAR `Var(f_c)`
+    # must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does when it
+    # builds `_var_fg` for `composition_logvar`). Set by the per-region solve, consumed when a region
+    # emits a message. None on the chain region/boundary projections, where precision is not needed by
+    # the downstream EM prior.
     # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-region solve.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
@@ -119,11 +116,12 @@ def build_region_chain(
 ) -> RegionChain:
     """Build the chain from the payload's two per-reference CSR offset arrays.
 
-    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries ``[reo[f], reo[f+1])``, with
-    ``boundaries == max(regions − 1, 0)``. A reference with no regions contributes nothing at all, which is legal.
+    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries
+    ``[reo[f], reo[f+1])``, with ``boundaries == max(regions - 1, 0)``. A reference with no regions
+    contributes nothing at all, which is legal.
 
-    ⚠ Both arrays come from ONE accumulator payload, so a mismatch between them is an accumulator /
-    payload inconsistency and **not** a stale index — rebuilding will not fix it, and the error says so.
+    Both arrays come from ONE accumulator payload, so a mismatch between them is an accumulator or
+    payload inconsistency and not a stale index: rebuilding will not fix it, and the error says so.
     """
     region_offsets = np.asarray(ref_region_offsets, dtype=np.int64)
     boundary_offsets = np.asarray(ref_boundary_offsets, dtype=np.int64)
@@ -141,7 +139,7 @@ def build_region_chain(
         raise ValueError(
             f"reference {bad}: the payload reports {int(boundaries_per_ref[bad])} contiguous boundaries for "
             f"{int(regions_per_ref[bad])} regions, but a reference with k regions has exactly k-1 interior "
-            f"boundaries (expected {int(expected[bad])}). There are no terminal boundary slots: an boundary is the "
+            f"boundaries (expected {int(expected[bad])}). There are no terminal boundary slots: a boundary is the "
             f"boundary BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
             f"this is an accumulator/payload inconsistency, not a stale index — rebuilding will not fix it."
         )

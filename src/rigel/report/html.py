@@ -3,7 +3,7 @@
 Inlines the design-system CSS, the front-end render layer, the view-model
 payload, and — when ``vl-convert-python`` is installed — the Vega/Vega-Lite/
 Vega-Embed runtime, so the resulting single ``.html`` renders offline with no
-CDN, server, or Region dependency.
+CDN, no server, and no Node.js runtime.
 """
 
 from __future__ import annotations

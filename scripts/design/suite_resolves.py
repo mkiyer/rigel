@@ -1,32 +1,23 @@
-"""Can this benchmark suite resolve the axis it is about to be used to judge? Answer BEFORE running it.
+"""Can this benchmark suite resolve the axis you are about to change? Answer it before quoting any suite number.
 
-    TODO item 2 · and 16
+A suite can be structurally blind to the change it is used to judge — a fine partition identical to its
+merged one, a fragment-length distribution with no variance, a single length-gap regime — and a number
+from such a suite says nothing about that axis. This script makes the proof executable. There are no
+tuned thresholds: every requirement is scored against its degenerate value, the number a suite scores
+when it is blind to that requirement (a partition ratio of exactly 1.000 and zero hidden termini, a
+fragment-length sd of exactly 0, zero replicate pairs, a capture density step of exactly 1.0, a
+length-gap narrowing of exactly 0.00), and it passes iff the measurement is strictly on the
+non-degenerate side. The structural requirements read the suite's index alone and run with no reads;
+the empirical ones read the suite's own truth files (`truth_summary.json`, `truth_abundances.tsv`,
+`manifest.json`) and never scan a BAM or run a solver. `--compare-index` prints a reference index's
+values beside the structural rows as a scale, not a threshold, so a technically non-zero but useless
+number is visible as such. Exits non-zero if any requirement fails to resolve.
 
-⛔ **WHY THIS EXISTS, AND WHY IT IS WRITTEN BEFORE THE SUITE.** The 32-condition `ambig_dense_10mb` suite
-was used for months to judge a partition change it was **structurally incapable of seeing**: its fine region
-set was row-for-row identical to its merged region set (1,698 == 1,698). It also had `frag_std = 0`, so
-nothing fragment-length-dependent was exercised at all, and it was Poisson by construction. The standing
-rule that came out of that: *before running a benchmark, prove it can resolve the axis you are changing.*
-This script is that proof, made executable, and it is written first so it cannot be retrofitted to whatever
-the suite turned out to be.
+Usage::
 
-⭐ **THERE ARE NO TUNED THRESHOLDS HERE, DELIBERATELY** — a pass mark would be a magic number, and the
-standing rule forbids one. Every requirement is scored against its **degenerate value**: the number a suite
-scores when it is structurally blind to that requirement. Those are boundaries, not choices —
-
-* a partition that cannot be resolved has `regions / merged regions` **exactly 1.000` and **0** hidden termini;
-* a suite with no fragment-length variation has variance **exactly 0**;
-* a Poisson simulator has overdispersion **exactly 0** (measured `< 5e-5`);
-* a reference with no single-stranded region to train the population prior on has **0** of them.
-
-A requirement passes iff its measurement is strictly on the non-degenerate side. The **human index** is
-printed beside it as the calibration reference — not as a threshold, but so a number that is technically
-non-zero and practically useless is visible as such.
-
-    python scripts/design/suite_resolves.py SUITE_INDEX [--compare-index HUMAN_INDEX] [--suite SUITE_DIR]
-
-Without `--suite` only the structural requirements run and the rest say so. That is the useful mode while
-the reference exists and the reads do not.
+    python scripts/design/suite_resolves.py SUITE_INDEX                                    # structural requirements only
+    python scripts/design/suite_resolves.py SUITE_INDEX --compare-index HUMAN_INDEX         # with the human index for scale
+    python scripts/design/suite_resolves.py SUITE_INDEX --suite SUITE_DIR                   # plus the empirical requirements
 """
 
 from __future__ import annotations
@@ -63,7 +54,7 @@ TERMINUS_NEG = FLAG_TSS_NEG | FLAG_TES_NEG
 class Verdict:
     """One requirement, its measurement, and the value a blind suite would score."""
 
-    key: str # the letter from
+    key: str # the requirement's letter, for the failure list
     requirement: str
     measured: float
     degenerate: float
@@ -90,7 +81,7 @@ class Verdict:
 
 
 def merged_region_boundaries(regions: pd.DataFrame) -> np.ndarray:
-    """Rebuild the v7 merged partition: a region ends where the reference or the signature changes."""
+    """Rebuild the signature-merged partition: a region ends where the reference or the signature changes."""
     signature = regions["signature"].to_numpy(np.uint8)
     ref = regions["ref_name"].astype(str).to_numpy()
     boundary = np.ones(len(regions), dtype=bool)
@@ -101,8 +92,7 @@ def merged_region_boundaries(regions: pd.DataFrame) -> np.ndarray:
 def requirement_g_partition(regions: pd.DataFrame, boundaries: pd.DataFrame) -> list[Verdict]:
     """(g) Can the suite see a partition change at all?
 
-    ⛔ The deleted suite scored **exactly** the degenerate value on both of these: 1,698 regions against
-    1,698 merged regions, and therefore zero termini hidden by the merge.
+    Blind at exactly 1.000 regions per merged region, and therefore zero termini hidden by the merge.
     """
     boundary = merged_region_boundaries(regions)
     n_merged = int(boundary.sum())
@@ -137,11 +127,11 @@ def requirement_g_partition(regions: pd.DataFrame, boundaries: pd.DataFrame) -> 
 
 
 def requirement_d_interior_termini(regions: pd.DataFrame, boundaries: pd.DataFrame) -> list[Verdict]:
-    """(d) Alternative TSS/TES that fall strictly INSIDE an exon.
+    """(d) Alternative TSS/TES that fall strictly inside an exon.
 
-    A terminus boundary whose flanking regions are BOTH exonic on the terminus's own strand sits strictly
-    inside an exon of some other isoform — which is the case a merged partition cannot represent and
-    the case a real annotation is full of. A generated mini-genome with one isoform per gene has none.
+    A terminus boundary whose flanking regions are both exonic on the terminus's own strand sits strictly
+    inside an exon of some other isoform — the case a merged partition cannot represent and the case a
+    real annotation is full of. A generated mini-genome with one isoform per gene has none.
     """
     signature = regions["signature"].to_numpy(np.uint8)
     contiguous = boundaries["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
@@ -170,11 +160,11 @@ def requirement_d_interior_termini(regions: pd.DataFrame, boundaries: pd.DataFra
 def requirement_e_single_stranded(regions: pd.DataFrame) -> list[Verdict]:
     """(e) Ample single-stranded regions — the population prior trains on them.
 
-    ⚠ Scored PER REFERENCE and by DISTANCE, not pooled. The stated failure is not "the suite has no
-    single-stranded regions anywhere", it is *an isolated both-strand region with no single-stranded
-    neighbours* — a starved toy. So the measurement is: from each both-stranded region, how many regions
-    away is the nearest single-stranded one? A reference with both-stranded regions and none at all
-    scores an infinite distance, which is the degenerate case.
+    Scored per reference and by distance, not pooled. The failure mode is not "no single-stranded
+    regions anywhere" but an isolated both-strand region with no single-stranded neighbours — a starved
+    toy. So the measurement is: from each both-stranded region, how many regions away is the nearest
+    single-stranded one? A reference with both-stranded regions and no single-stranded one scores an
+    infinite distance, the degenerate case.
     """
     signature = regions["signature"].to_numpy(np.uint8)
     ref = regions["ref_name"].astype(str).to_numpy()
@@ -239,10 +229,10 @@ def requirement_e_single_stranded(regions: pd.DataFrame) -> list[Verdict]:
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # Empirical requirements — properties of the SIMULATED DATA
 #
-# ⭐ All four read the suite's own truth files, not a BAM scan: `truth_summary.json` carries the
+# All of these read the suite's own truth files, not a BAM scan: `truth_summary.json` carries the
 # realised per-kind fragment-length moments, `truth_abundances.tsv` carries pre- and post-capture
 # fragments per transcript, and `manifest.json` carries the condition grid. Nothing here needs rigel to
-# run, which matters because calibration is red until S5.
+# run.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -252,7 +242,7 @@ def load_conditions(suite: Path) -> list[dict]:
 
 
 def requirement_b_fragment_length_variance(suite: Path, conditions: list[dict]) -> list[Verdict]:
-    """(b) Fragment-length variance. ⛔ The deleted suite had EXACTLY zero — every fragment 200 bp."""
+    """(b) Fragment-length variance: the sd of the least-variable pool over all conditions. Blind at exactly 0."""
     worst = None
     detail = ""
     for condition in conditions:
@@ -284,12 +274,12 @@ def requirement_b_fragment_length_variance(suite: Path, conditions: list[dict]) 
 
 
 def requirement_a_density_step(suite: Path, conditions: list[dict]) -> list[Verdict]:
-    """(a) A density STEP, not a uniform background.
+    """(a) A density step, not a uniform background.
 
-    Over a run of flat regions a relayed message decays geometrically per hop, so a uniform scenario
-    cannot distinguish "the relay works" from "the global prior reached it". Capture supplies the step:
-    on-panel transcripts are enriched, off-panel ones are not, and the ratio between them IS the step.
-    Measured from the truth as post-capture fragments per unit pre-capture abundance.
+    Over a run of flat regions a message decays per hop, so a uniform scenario cannot distinguish "the
+    messages work" from "the global prior reached it". Capture supplies the step: on-panel transcripts
+    are enriched, off-panel ones are not, and the ratio between them is the step. Measured from the
+    truth as post-capture fragments per unit pre-capture abundance; blind at exactly 1.0.
     """
     best_ratio = 0.0
     detail = "no capture-on condition with a truth table"
@@ -343,22 +333,14 @@ def requirement_f_low_gdna_corner(conditions: list[dict]) -> list[Verdict]:
 
 
 def requirement_h_length_gap_regime(suite: Path, conditions: list[dict]) -> list[Verdict]:
-    """(h) ⭐ **G-S7 — does the suite exercise a NARROWED gDNA<->RNA length gap?**
+    """(h) Does the suite present more than one gDNA-RNA length-gap regime, and does capture narrow it?
 
-    ``mu_g - mu_r`` is the **only** thing that identifies the fragment-length channel: at equal
-    component means ``(count, sum 1/L)`` carries exactly zero information about composition at any
-    depth. So a suite that presents one single value of that gap cannot resolve anything the length
-    channel does, and a suite whose capture arm leaves the gap untouched has never tested the tool
-    against the regime real capture produces.
-
-    ⛔ **The panel this replaces scored the degenerate value exactly.** Its post-capture truth summaries
-    were byte-identical to the pre-capture ones — gDNA mean 195.57 and RNA 217.24 on BOTH capture arms —
-    so the gap was −21.66 bp twice and the narrowing was 0.00. Hybrid capture hybridises probes to
-    sequence, so it selects for length, and it narrows the gap whenever gDNA is the shorter component
-    because the short tail it removes is disproportionately gDNA.
-
-    ⚠ **Directional, no threshold.** A magnitude would be inventing the capture efficiency curve. The
-    degenerate value is a *measured* 0.00, not a chosen one.
+    ``|mu_g - mu_r|`` is what a fragment-length reading can identify: at equal component means the
+    length marginal carries no information about composition at any depth. A suite presenting one
+    value of that gap is one regime, and a suite whose capture arm leaves the gap untouched has never
+    exercised the regime real capture produces — capture selects for length, and narrows the gap
+    whenever gDNA is the shorter component. Directional, no threshold: blind at a narrowing of
+    exactly 0.00 and at one distinct regime.
     """
     def gap(name: str) -> float | None:
         path = suite / name / "truth_summary.json"
@@ -420,12 +402,11 @@ def requirement_h_length_gap_regime(suite: Path, conditions: list[dict]) -> list
 def requirement_c_overdispersion(conditions: list[dict]) -> list[Verdict]:
     """(c) Non-Poisson counts.
 
-    ⚠ Reported as ESTIMABILITY, not as a number. With one draw per parameter set there is nothing to
+    Reported as estimability, not as a number. With one draw per parameter set there is nothing to
     estimate overdispersion against: the simulator draws multinomial at fixed abundance, so counts are
-    Poisson given truth and any `omega` computed from a single condition is measuring the estimator, not
-    the data. It becomes measurable when the suite carries **replicate conditions** — identical
-    parameters, different `sim_seed` — because then per-object variance across replicates is directly
-    comparable to the mean.
+    Poisson given truth and any `omega` computed from a single condition measures the estimator, not
+    the data. It becomes measurable when the suite carries replicate conditions — identical parameters,
+    different `sim_seed` — because then per-object variance across replicates is comparable to the mean.
     """
     signature: dict[tuple, int] = {}
     for condition in conditions:

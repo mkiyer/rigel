@@ -1,21 +1,14 @@
-"""⭐⭐⭐ THE LAYERING — **where does a change go?** This file is the answer, and a test enforces it.
+"""The layering of the calibration package — the declaration of where a change goes.
 
-       Gate: ``tests/calibration/test_layering.py``
-       Census: ``python scripts/design/module_census.py``
+The one rule: an import may point DOWN a layer or SIDEWAYS within one, never UP. A module that
+needs something from a higher layer is telling you the thing belongs lower, or that the module
+itself belongs higher. A type almost always belongs lower.
 
-⛔⛔ **THE PROBLEM THIS FILE EXISTS FOR.** The package had no stated shape, and the shape is not what a
-flat module list suggests: measured from the AST when this file landed (2026-08-07, 35 modules), there were
-**no import cycles** and **18 of the 35 modules had exactly one importer**. It was never a knot. It was a
-**FLAT PILE of peers** — and a flat pile is the one structure that cannot tell you where to add anything,
-because every file is equally plausible. ⚠ The counts move whenever a module is added or retired; the
-census re-derives them, and no number here is maintained by hand.
-
-⭐ The layers below were not invented. They were **read off the existing import boundaries**: every one of them
-was already there, and the only thing missing was a name and a gate. That is why declaring them costs no
-behaviour change — ``test_layering.py`` passed on the tree as it stood.
-
-**THE ONE RULE: an import may point DOWN a layer or SIDEWAYS within one. Never UP.** A module that needs
-something from a higher layer is telling you the thing belongs lower, or that your module belongs higher.
+``LAYERS`` below is that declaration, lowest layer first, and it is authoritative: every module in
+the package must appear in it exactly once. ``tests/calibration/test_layering.py`` enforces both
+halves — the direction rule against the real imports, and the requirement that nothing is unplaced,
+since an unplaced module is a file whose home nobody decided. ``python scripts/design/module_census.py``
+re-derives the graph from the AST and prints the live per-layer contents, so no count belongs here.
 
 Where to put a change
 ---------------------
@@ -24,34 +17,29 @@ if the change is about…                    it goes in layer
 =========================================  ==========================================================
 what a fragment tally MEANS                1 · the payload view
 how many places a fragment COULD have sat  2 · opportunity
-one slot's own numbers, and ψ              3 · geometry and the per-slot solve
+one slot's own numbers, and psi            3 · geometry and the per-slot solve
 which strand a fragment came from          4 · strand
 how dense a component is, and the priors   5 · density and prior
-what one neighbour tells another           6 · the solve  (⭐ and `messages/` inside it)
+what one neighbour tells another           6 · the solve (and ``messages/`` inside it)
 turning the solve into a result            7 · assemble
 =========================================  ==========================================================
 
-⚠ **A layer is not a promise that its modules are the right SIZE.** Layer 4 is five modules for one concept
-and layer 5 is six. Whether those should be fewer files is a separate question with its own risk, and this
-file deliberately does not answer it — it answers *where*, which is what was blocking a reader. ⛔ The
-per-layer line counts that used to be quoted here (939 for layer 4, 1,858 for layer 5, measured 2026-08-07)
-had drifted and are dropped rather than re-stated: the census prints them live, which is the only place a
-count of a moving thing belongs.
+A layer says where, not how big. It is not a promise that its modules are the right size or the
+right count; whether a layer should be fewer files is a separate question this file does not answer.
 """
 
 from __future__ import annotations
 
 __all__ = ["LAYERS", "layer_of"]
 
-#: ``(number, title, modules)`` — the layer a module belongs to, lowest first. ⛔ Every module in the
-#: package must appear exactly once; the gate fails on an unplaced module, because an unplaced module is a
-#: new file nobody decided the home of.
+#: ``(number, title, modules)`` — the layer a module belongs to, lowest first. Every module in the
+#: package must appear exactly once; the gate fails on an unplaced module.
 LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         0,
         "vocabulary — no calibration deps",
-        # The words everything else is written in. ⭐ `signature` is the region bitmask, `region_chain` is the
-        # N E N E … N sequence, `errors` is the one exception type. Nothing here knows what a solve is.
+        # The words everything else is written in: `signature` is the region bitmask, `region_chain` is
+        # the N E N E … N sequence, `errors` the exception types. Nothing here knows what a solve is.
         ("errors", "signature", "region_chain", "_layers"),
     ),
     (
@@ -64,9 +52,9 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         2,
         "opportunity — how many places a fragment COULD have sat",
-        # ⭐ The deposit weight is 1/OPPORTUNITY, so every divisor in the tool is derived here and nowhere
+        # The deposit weight is 1/opportunity, so every divisor in the tool is derived here and nowhere
         # else. `fl` is the entry point the scanner and the second pass call.
-        # ⭐ `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
+        # `gdna_density` is the gDNA background RATE — a count divided by an opportunity, which is this
         # layer's job. It owns BOTH estimators of that one quantity (the naive pooled rate and the
         # contamination-robust one-sided rate), so layer 5's `density_deconv` calls DOWN to it rather
         # than carrying a second implementation.
@@ -82,10 +70,8 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         3,
         "geometry and the per-slot solve",
-        # One slot's own numbers, and ψ — the log-density log-odds posterior over (f_pos, f_neg, f_g).
-        # ⚠ `simplex_logodds` is ψ and was 784 boundaries when this file landed (2026-08-07); it is the
-        # single densest thing in the package. ⛔ Like every other count once quoted here that number has
-        # DRIFTED and is not maintained by hand — the census re-derives it.
+        # One slot's own numbers, and psi — the log-density log-odds posterior over (f_pos, f_neg, f_g),
+        # which `simplex_logodds` owns and which is the single densest thing in the package.
         # `total_abundance` is the composition-FREE per-slot total (the START/END banks side-selected
         # by the wall rule, plus the exact boundary banks) — geometry work, and it reads the geometry.
         # `structural_claims` is the first pass's substrate — per-slot structural classes derived from
@@ -95,45 +81,36 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         4,
         "strand — which strand a fragment came from",
-        # ⚠ FIVE modules for one concept. `strand_likelihood` is the TWO-component executable REFERENCE
-        # that ψ's three-component form is gated against; the other four are production.
-        (
-            "strand_likelihood",
-            "strand_deconv",
-            "strand_balance",
-            "strand_summary",
-            "gdna_strand",
-        ),
+        # `strand_likelihood` is the two-component executable REFERENCE that psi's three-component
+        # form is gated against; `strand_summary` is the dependency-light QC view the pipeline reads
+        # without importing calibration; the other two are production.
+        ("strand_likelihood", "strand_balance", "strand_summary", "gdna_strand"),
     ),
     (
         5,
         "density and prior",
-        # How dense a component is, and every fitted population prior. ⚠ It was SIX modules until
-        # 2026-08-21, when `background_reference` was converge-and-deleted: it computed a second pooled
-        # intergenic background on the SAME pool as `density_deconv.fit_intron_background` (measured
-        # identical, n = 1,298) and no caller ever consumed it. The census prints the live count.
+        # How dense a component is, and every fitted population prior.
         (
             "density_model",
             "density_deconv",
             "landscape",
             # `abundance_landscape` is the pre-pass-0 TOTAL-density field + mode census — it reuses
-            # `landscape`'s estimator SIDEWAYS and reads `total_abundance` (layer 3) DOWN.
+            # `landscape`'s estimator sideways and reads `total_abundance` (layer 3) down.
             "abundance_landscape",
         ),
     ),
     (
         6,
         "the solve — what one neighbour tells another",
-        # ⭐ The backbone and the message policy. `sweep` owns the shape of the solve and four assertions;
-        # `messages/` owns every argument about what a message should say. `DESIGN.md` §6.1.
+        # The backbone and the message policy. `sweep` owns the shape of the solve and its assertions;
+        # `messages/` owns every argument about what a message should say.
         (
             "region_init",
             "sweep",
             "messages",
-            # `messages/__init__` is the two-phase protocol (owner ruling 2026-09-04: prepare /
-            # propagate → receive / solve) and the message type; `messages/silent` is the measured
-            # floor every policy is judged against; `messages/transfer` is the shipped
-            # composition-transfer policy (owner rulings 2026-09-01 onward) and
+            # `messages/__init__` is the two-phase protocol (prepare / propagate → receive / solve)
+            # and the message type; `messages/silent` is the measured floor every policy is judged
+            # against; `messages/transfer` is the shipped composition-transfer policy and
             # `messages/transfer_rows` its pure row constructors, the one home of the counting term.
             "messages/silent",
             "messages/transfer_rows",
@@ -161,7 +138,7 @@ _OF: dict[str, int] = {m: num for num, _t, members in LAYERS for m in members}
 def layer_of(module: str) -> int | None:
     """The layer of a module, by its package-relative name (``"sweep"``, ``"messages/transfer"``).
 
-    ``None`` means UNPLACED, which the gate treats as a failure rather than as a default — a module with no
-    declared home is exactly the flat-pile state this file exists to end.
+    ``None`` means unplaced, which the gate treats as a failure rather than as a default: a module with
+    no declared home is exactly the state this file exists to end.
     """
     return _OF.get(module)

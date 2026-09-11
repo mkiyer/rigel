@@ -1,73 +1,39 @@
 #!/usr/bin/env python
-"""⭐⭐ **THE TOY HARNESS — one transcript at a time, under a real library's global conditions.**
+"""How does a mini chromosome you define calibrate, in seconds, with every object's answer beside its truth?
 
-⛔ **THE PROBLEM THIS SOLVES.** Every calibration defect we have found so far was found by sifting a
-36-condition, 10-million-fragment panel for objects that behave badly, and then trying to reason
-backwards from a region id to a mechanism. That is slow, the examples are never quite the ones you
-wanted, and a fix cannot be *demonstrated* — only measured in aggregate, where two errors can cancel.
-
-⭐ **WHAT IT DOES.** A **mini chromosome** you define — a handful of genes with exactly the structure
-you want to interrogate — simulated, scanned and calibrated in seconds, with the per-object answer
-printed beside per-object truth. Small enough to read every row.
-
-⭐⭐ **AND THE GLOBALS COME FROM A REAL CACHED CONDITION, NOT FROM DEFAULTS.** That is the whole
-trick. A tiny toy cannot fit the library-level quantities calibration needs — a single transcript has
-no population to estimate a strand balance, an enrichment landscape or an intergenic background from.
-So one of the 36 ladder conditions acts as **donor**: it is calibrated once, and its fitted
-library-level bundle is injected into the toy (:class:`~rigel.calibration.calibrate.InjectedCalibrationPriors`,
-whose docstring specifies exactly this use). The toy then supplies only the controlled per-region
-GEOMETRY, which is the thing under study.
-
-The donor supplies, and the toy therefore does NOT have to invent:
-
-===========================  ================================================================
-gDNA + RNA length pmfs       the fitted models, passed as ``calibrate`` kwargs
-strand balance kappa         plus both Beta-Binomial overdispersions and the Fisher noise-floor
-                             sample sizes -- so the deadband behaves as it does on real data
-enrichment landscape         the density NPMLE (an ABSOLUTE log-density model, hence the depth
-                             matching below)
-intergenic gDNA background   the intron-factory reference and the aggregate rho_bg
-capture on/off + its knobs   reproduced in the toy's own SIMULATION, with toy probes
-fragment-length simulation   frag mean/sd/min/max, read length, strand specificity
-gDNA density per base        ⭐ see `_rate_from_capture` -- the toy is simulated to MATCH it
-===========================  ================================================================
-
-⭐⭐ **DEPTH MATCHING IS NOT OPTIONAL.** ``calibrate``'s own note on the injected enrichment prior says
-it: the NPMLE is an *absolute* log-density landscape, so "the toy's densities must be generated at the
-reference library's depth so its regions project onto the right cells". A toy at the wrong depth is not
-a small version of the library, it is a different library. So the harness measures the donor's gDNA
-density per base from the donor's OWN pure-gDNA population and simulates the toy to match it, rather
-than taking a fragment count from the user.
-
-⭐⭐ **TERMINOLOGY — one word per concept, owner-set 2026-08-04.**
-
-=================  ==============================================================================
-**counts**         discrete INTEGER fragment counts. What the accumulator stores and what the
-                   solver's Poisson ``n`` is
-**density**        counts per base. ⭐ **"abundance" is the SAME THING and the two are used
-**abundance**      interchangeably** -- both mean counts/bp. ⛔ Not the simulator's molar
-                   ``abundance=`` field, which is a per-transcript weight, not a density
-=================  ==============================================================================
-
-⚠ A region's stored *counts* are CONTAINED counts, so ``counts != density x bp`` -- it is
-``density x effective_length``. The sweep therefore reports the density it ASKED the simulator for
-and the counts each object actually RECEIVED, side by side, and never converts one into the other.
+A toy spec is a handful of genes with exactly the structure under interrogation, simulated, scanned,
+drained by the second pass exactly as production runs it, split by origin, and calibrated, with the
+per-object result printed beside the per-object truth from the simulator's read names. The
+library-level quantities a toy cannot fit for itself — the fitted fragment-length pmfs, the strand
+balance with its overdispersions and noise-floor sample sizes, the enrichment landscape, the intron
+background, the capture knobs and the read-simulation settings — are harvested from one real cached
+condition, the donor, and injected through `InjectedCalibrationPriors`; the toy supplies only the
+controlled geometry. Depth matching is not optional: the landscape is an absolute log-density model,
+so the toy's gDNA count is derived from the donor's own gDNA density per base (measured on its
+intergenic slots) times the chromosome length, never chosen. There is no gDNA knob; the RNA side is
+the experimental variable. A region's stored counts are contained counts (``density x
+effective_length``, not ``density x bp``), so the sweep reports the density it asked for and the
+counts each object received side by side and never converts one into the other. `SPECS` is an
+ordered ladder, each rung adding one structure to the one before it. This is also the library the toy
+family loads: `toy_panel.py`, `zero_controls.py` and `verify_toy_substrate.py` import `SPECS`,
+`harvest`, `run_toy`, `object_rows`, `exon_bp`, `add_messages_flag`, `messages_on`, `with_messages`,
+`messages_stamp` and `MESSAGES_SHIPPED` from it. Its own report is a reading of one toy on one
+library, not a yardstick. Gated by `tests/calibration/test_toy_harness.py`.
 
 Usage::
 
-    # list the built-in specs, then run one against a donor condition
-    python scripts/design/toy_harness.py --list
+    python scripts/design/toy_harness.py --list                                                   # the spec ladder
     python scripts/design/toy_harness.py --spec two_exon --donor gdna_g50_ss_0.50_nrna_mid_capture_off
-    python scripts/design/toy_harness.py --spec all --donor <cond>     # the whole ladder of specs
-
-Gates: ``tests/calibration/test_toy_harness.py``.
+    python scripts/design/toy_harness.py --spec all --donor <cond>                                # every spec
+    python scripts/design/toy_harness.py --spec spliced_exons --donor <capture_on cond> --genome-length 120000
+    python scripts/design/toy_harness.py --spec one_exon --donor <cond> --sweep-density              # a decade ladder around the donor's gDNA density
+    python scripts/design/toy_harness.py --spec one_exon --donor <cond> --sweep-density 0.01 0.1 1  # in counts/bp
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import json
 import os
 import sys
@@ -105,36 +71,27 @@ DEFAULT_INDEX = Path.home() / "Downloads/rigel_runs/suite/rigel_index"
 TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
-# ⭐⭐⭐ THE MESSAGE SETTING IS PART OF THE ARM, AND IT IS STAMPED
+# The message setting is part of the arm, and it is stamped
 # ──────────────────────────────────────────────────────────────────────────────────────────────────
 #
-# ⛔ Five instruments once died with `KeyError` the day a policy default flipped, while the SUITE stayed
-# green because the test readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-
-# instruments`). So every reader of a calibration capture takes `--messages {off,on}`, prints
-# `messages_stamp()`, and reads its policy off the config it ran — never off a bank a policy may or may
-# not publish. (The relay's per-slot banks and their readers retired with the relay, 2026-09-09.)
+# An instrument can die the day a policy default flips while the suite stays green, because the test
+# readers install the policy themselves (`TRAPS: a-green-suite-hid-five-dead-instruments`). So every
+# reader of a calibration capture takes `--messages {off,on}`, prints `messages_stamp()`, and reads
+# its policy off the config it ran — never off a bank a policy may or may not publish.
 
-#: ⭐ what the tool SHIPS, re-derived rather than written down — the honest default for an instrument
+#: What the tool ships, re-derived rather than written down — the honest default for an instrument
 #: whose headline question does not involve the message layer at all.
 MESSAGES_SHIPPED: bool = bool(CalibrationConfig().message_propagation)
 
 
 def add_messages_flag(ap, *, default: bool) -> None:
-    """Give an instrument the `--messages {off,on}` flag, with ITS OWN honest default.
+    """Give an instrument the `--messages {off,on}` flag, with its own honest default.
 
-    ⭐ `default=MESSAGES_SHIPPED` for an instrument whose measurement is policy-independent — it then
-    runs the configuration the tool ships. `default=True` for one whose measurement IS the message
+    `default=MESSAGES_SHIPPED` for an instrument whose measurement is policy-independent — it then
+    runs the configuration the tool ships. `default=True` for one whose measurement is the message
     layer, stamped as such on every run."""
     ap.add_argument(
         "--messages",
@@ -152,7 +109,7 @@ def messages_on(args) -> bool:
 
 
 def with_messages(config: CalibrationConfig, messages: bool) -> CalibrationConfig:
-    """The same config with propagation switched. ⭐ No monkeypatching: `calibrate` installs the policy
+    """The same config with propagation switched. No monkeypatching: `calibrate` installs the policy
     `message_policy` names when on, `SilentPolicy` when off."""
     return dataclasses.replace(config, message_propagation=bool(messages))
 
@@ -186,17 +143,17 @@ def messages_stamp(messages: bool) -> str:
 class DonorGlobals:
     """The library-level conditions harvested from one real cached condition.
 
-    ⚠ **Deliberately NOT cached to disk.** The bundle is a function of the calibration code that fit
-    it, so a stored copy goes stale on exactly the changes this harness exists to test, and a stale
-    global is invisible — it does not crash, it just quietly answers a different question. Harvesting
-    costs one scan plus one calibrate (~30 s); harvest once per session and run many toys against it.
+    Deliberately not cached to disk. The bundle is a function of the calibration code that fit it, so
+    a stored copy goes stale on exactly the changes this harness exists to test, and a stale global is
+    invisible — it does not crash, it just quietly answers a different question. Harvesting costs one
+    scan plus one calibrate; harvest once per session and run many toys against it.
     """
 
     condition: str
     priors: InjectedCalibrationPriors
     gdna_fl_pmf: np.ndarray
     rna_fl_pmf: np.ndarray
-    #: ⭐ gDNA molecules per base, measured on the donor's own structurally-pure-gDNA population.
+    #: gDNA molecules per base, measured on the donor's own structurally-pure-gDNA population.
     gdna_rate_per_base: float
     #: the donor's read-simulation settings, so the toy draws from the same library
     frag_mean: float
@@ -222,14 +179,10 @@ class DonorGlobals:
             f"  strand_specificity={self.strand_specificity:.4g}  capture={'ON' if self.capture_on else 'off'}\n"
             f"  abundance_landscape="
             f"{'yes' if self.priors.abundance_landscape is not None else 'NONE'}  "
-            # ⛔⛔ **THIS ONE LINE HAS NOW BEEN BROKEN BY TWO SUCCESSIVE CONVERGE-AND-DELETES, AND THAT
-            # REPETITION IS THE LESSON** (`TRAPS: a-green-suite-hid-five-dead-instruments`, the
-            # instrument form). First the aggregate `background` field went (2026-08-21, a duplicate
-            # intergenic pool no caller consumed) and this line still read it; then
-            # `enrichment_prior` went with the NPMLE the same day and this line still read that. Both
-            # times the suite stayed GREEN and only a census/real run found it, because a `describe()`
-            # string is executed by nothing. ⭐ When a field leaves `InjectedCalibrationPriors`, grep
-            # THIS function before believing the deletion is complete.
+            # A `describe()` string is executed by no test, so a field deleted from
+            # `InjectedCalibrationPriors` leaves this line raising while the suite stays green
+            # (`TRAPS: a-green-suite-hid-five-dead-instruments`). Grep this function when a field
+            # leaves that class.
             f"intron_background={'yes' if self.priors.intron_background is not None else 'NONE'}"
         )
 
@@ -296,9 +249,9 @@ def harvest(
 def _rate_from_capture(capture, chain, region_arrays) -> float:
     """``sum(count) / sum(eff_gdna)`` over the donor's INTERGENIC region slots.
 
-    ⭐ Both arrays are the solver's own (``capture['count']`` and ``capture['eff_gdna']``), so the rate
+    Both arrays are the solver's own (``capture['count']`` and ``capture['eff_gdna']``), so the rate
     is in exactly the frame the toy's own regions will be measured in — no second implementation of an
-    effective length, which is how two definitions of one quantity start to drift (TRAPS: two-docstrings-one-quantity).
+    effective length (`TRAPS: two-docstrings-one-quantity`).
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -316,10 +269,10 @@ def _rate_from_capture(capture, chain, region_arrays) -> float:
 def _donor_sim_params(donor_dir: Path, name: str) -> dict:
     """The donor's read-simulation settings.
 
-    ⚠ Fragment lengths come from ``truth_summary.json``'s **post-capture** measurement where it
-    exists, never from a configured ``frag_mean`` — capture selects for length, so the configured
-    parameters describe a library that was never sequenced (TRAPS: capture-selects-for-length). Strand specificity is read
-    off the condition name, which is where the panel encodes it.
+    Fragment lengths come from ``truth_summary.json``'s post-capture measurement where it exists,
+    never from a configured ``frag_mean`` — capture selects for length, so the configured parameters
+    describe a library that was never sequenced (`TRAPS: capture-selects-for-length`). Strand
+    specificity is read off the condition name, which is where the panel encodes it.
     """
     ss = 0.5
     for part in name.split("_"):
@@ -367,9 +320,9 @@ def _donor_sim_params(donor_dir: Path, name: str) -> dict:
 class ToySpec:
     """A mini chromosome: what to put on it, and how much RNA to express.
 
-    ⚠ **There is no gDNA knob.** The gDNA level is not a free parameter — it is set to match the
-    donor's measured density per base, because the injected enrichment landscape is absolute. The RNA
-    side is the experimental knob, and ``abundance`` on each transcript is what you vary.
+    There is no gDNA knob. The gDNA level is not a free parameter — it is set to match the donor's
+    measured density per base, because the injected enrichment landscape is absolute. The RNA side is
+    the experimental knob, and ``abundance`` on each transcript is what you vary.
     """
 
     name: str
@@ -395,22 +348,21 @@ class ToyResult:
     capture: dict
     n_gdna_target: int
     seconds: float
-    #: ⭐ the toy's OWN index, so a caller can rebuild anything index-derived — in particular
-    #: `splice_graph.build_boundary_flags_array`, the TSS/TES/DONOR/ACCEPTOR bits per BOUNDARY.
+    #: the toy's own index, so a caller can rebuild anything index-derived — in particular
+    #: `splice_graph.build_boundary_flags_array`, the TSS/TES/DONOR/ACCEPTOR bits per boundary.
     index: object = None
 
 
 def _toy_probes(spec: "ToySpec", out: Path, knobs: dict) -> str:
-    """Probes over the toy's transcripts, written from the SPEC's own exon coordinates.
+    """Probes over the toy's transcripts, written from the spec's own exon coordinates.
 
-    ⛔ **Deliberately not ``write_random_capture_probes``.** That draws a random subset of genes, which
-    is right for a 36-condition panel and wrong for a toy: the whole point of a toy is that you decide
-    what is captured, and a random draw would make the condition depend on a seed. Here every
-    transcript named in ``spec.captured`` (default: all of them) gets ONE probe centred in its own
-    transcript coordinates, which makes probe placement part of the controlled geometry.
+    Deliberately not ``write_random_capture_probes``: that draws a random subset of genes, which is
+    right for a panel and wrong for a toy, where you decide what is captured and a random draw would
+    make the condition depend on a seed. Every transcript named in ``spec.captured`` (default: all of
+    them) is tiled with probes per exon, which makes probe placement part of the controlled geometry.
 
     The file is the transcript-coordinate TSV the sampler already reads: ``transcript_id start end``,
-    coordinates in TRANSCRIPT space (`sampler._load_transcript_probes`).
+    coordinates in transcript space (`sampler._load_transcript_probes`).
     """
     plen = int(knobs.get("probe_length", 120))
     lines = ["transcript_id\tstart\tend"]
@@ -418,26 +370,21 @@ def _toy_probes(spec: "ToySpec", out: Path, knobs: dict) -> str:
         for t in gene["transcripts"]:
             if spec.captured is not None and t["t_id"] not in spec.captured:
                 continue
-            # ⭐⭐ TILED, not one centred probe. A single central probe leaves a 2 kb transcript's ENDS
-            # uncovered, so its `intergenic|exon` boundaries stay at off-target density -- and a 0-bp line's
-            # counts are `density x mean_FL` no matter how long the chromosome is, so those objects then
-            # have ~0.26 counts and the chain has nothing to propagate. The donor panels are built with
-            # `design_suite_probes.py` at probe_density 1.0, i.e. tiled, which is what enriches a
+            # Tiled, not one centred probe: a single central probe leaves a transcript's ends
+            # uncovered, so its `intergenic|exon` boundaries stay at off-target density, and a 0-bp
+            # line's counts are `density x mean_FL` however long the chromosome is. The donor panels
+            # are tiled (`design_suite_probes.py` at probe_density 1.0), which is what enriches a
             # first/last exon's boundary in the first place. Match that.
             #
-            # ⭐⭐⭐ AND TILED **PER EXON**, SO EVERY PROBE ABUTS THE intron|exon BOUNDARIES AND NONE STRADDLES
-            # A SJ. Probes are written in TRANSCRIPT space, so a probe spanning an internal sj
-            # offset has a genomic footprint in TWO blocks -- and `capture/sampler._split_scale` then
-            # multiplies every gDNA fragment overlapping it by ``gdna_split_penalty``. Tiling across the
-            # whole transcript put a split probe over each internal sj, which SUPPRESSED exactly the
-            # population that spans an intron|exon BOUNDARY: measured on `spliced_exons` x
-            # `g75 ss0.50 capture_on`, the two boundaries carried 2 and 5 gDNA counts while the exon interiors
-            # carried 16 and 14. Per-exon tiling leaves every probe inside one exon, so it is unsplit, it
-            # ends exactly ON the boundary, and an boundary-crossing fragment takes the full binding weight for
-            # its exon-side overlap.
-            # ⚠ It is also the honest geometry for the question: a probe boundary at an exon end is what a
-            # real panel produces, and the split-probe case is a SEPARATE population worth its own rung
-            # rather than an accident of how a tiling loop was written.
+            # And tiled per exon, so every probe abuts the intron|exon boundaries and none straddles a
+            # sj. Probes are written in transcript space, so a probe spanning an internal sj offset has
+            # a genomic footprint in two blocks, and `capture/sampler._split_scale` then multiplies
+            # every gDNA fragment overlapping it by ``gdna_split_penalty`` — suppressing exactly the
+            # population that spans an intron|exon boundary. Per-exon tiling leaves every probe inside
+            # one exon, unsplit, ending exactly on the boundary, so a boundary-crossing fragment takes
+            # the full binding weight for its exon-side overlap. It is also the honest geometry: a
+            # probe boundary at an exon end is what a real panel produces, and the split-probe case is
+            # a separate population worth its own rung.
             off = 0
             for s, e in t["exons"]:
                 elen = e - s
@@ -521,14 +468,11 @@ def run_toy(
     _stats, strand_model, _buf, pass_one = scan_and_buffer(bam, res.index, scan)
     ra = RegionArrays.from_index(res.index)
 
-    # ── ⭐⭐ THE SECOND PASS, on the WHOLE, exactly as production runs it ─────────────────────────
-    # ⛔ Until this landed every number the toy reported was an UNDRAINED tally, and the population it
-    # understates is the spliced one: a held fragment is held precisely because its unsequenced gap
-    # admits more than one intron path. On `tes_readthrough` TA's and TB's sj share the donor at
-    # 2,000 and differ only in acceptor, so 0.65 % of fragments defer — and they understate the
-    # certified channel at @9,100 by a measured 13.5 %.
-    # ⭐ `_lift` is what makes the ORACLE valid afterwards: score and draw ONCE on the whole, then replay
-    # each fragment's chosen hypothesis inside whichever origin partition holds it (TRAPS: draining-breaks-the-oracle).
+    # ── the second pass, on the whole, exactly as production runs it ─────────────────────────────
+    # An undrained tally understates the spliced population: a held fragment is held precisely because
+    # its unsequenced gap admits more than one intron path. `_lift` is what makes the oracle valid
+    # afterwards: score and draw once on the whole, then replay each fragment's chosen hypothesis
+    # inside whichever origin partition holds it (`TRAPS: draining-breaks-the-oracle`).
     lift: dict = {}
     payload = _drain_side_buffer(
         pass_one, res.index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
@@ -539,8 +483,8 @@ def run_toy(
         pipeline_config,
         wd / "split",
         spec.name,
-        # ⛔ DRAINED whole here (it is what calibration reads and what sum-to-full is asserted against);
-        # UNDRAINED whole inside `drain_with` (the drained bank holds nothing, so it has no key pool).
+        # Drained whole here (it is what calibration reads and what sum-to-full is asserted against);
+        # undrained whole inside `drain_with` (the drained bank holds nothing, so it has no key pool).
         full_payload=payload,
         drain_with=(
             (lift["undrained"], lift["choices"], lift["region_types"], lift["sj"])
@@ -656,8 +600,8 @@ def report(r: ToyResult) -> None:
           f"{r.spec.n_rna_fragments:,} RNA fragments · {r.n_gdna_target:,} gDNA fragments "
           f"(DERIVED to match the donor's density) · nrna={r.spec.nrna_abundance:g}")
     print(f"   {r.seconds:.1f} s end to end")
-    # ⭐ THE DRAIN, printed rather than assumed. ``held`` is what pass one could not resolve; ``ambig`` is
-    # how many of those the origin lift could not attribute — it BOUNDS the truth error, so a run that
+    # The drain, printed rather than assumed. ``held`` is what pass one could not resolve; ``ambig`` is
+    # how many of those the origin lift could not attribute — it bounds the truth error, so a run that
     # does not show it is a run whose oracle carries an unstated error bar (`second_pass.lift_choices`).
     d = getattr(r.payload, "drain", None)
     print(f"   second pass: {0 if d is None else d.offered:,} held · "
@@ -703,11 +647,11 @@ def _gene(gid, strand, exons, abundance, t_id=None):
     }
 
 
-#: ⭐ Ordered simplest-first, and each one adds exactly ONE structure to the one before it. That is the
+#: Ordered simplest-first, and each one adds exactly one structure to the one before it. That is the
 #: point: when a row goes wrong, the thing that changed is the thing to look at.
 SPECS: dict[str, ToySpec] = {
-    # ⚠ There is no gene-FREE rung: `TranscriptIndex` requires at least one transcript, so a
-    # chromosome with no annotation cannot be indexed at all. A SILENT gene is the right first rung
+    # There is no gene-free rung: `TranscriptIndex` requires at least one transcript, so a
+    # chromosome with no annotation cannot be indexed at all. A silent gene is the right first rung
     # anyway — it makes every object in the toy structurally pure gDNA, so any deviation from
     # f_g = 1 is a pure false positive with nothing to trade off against.
     "silent": ToySpec(
@@ -998,15 +942,15 @@ def sweep_density(
     *,
     config: CalibrationConfig | None = None,
 ) -> None:
-    """⭐⭐ Vary the transcript's RNA **density** (counts/bp) and nothing else. One variable.
+    """Vary the transcript's RNA density (counts/bp) and nothing else. One variable.
 
     The gDNA side is untouched by construction: :func:`run_toy` derives the gDNA count from the
     donor's density per base and the chromosome length, neither of which the sweep changes — so the
-    gDNA background is **pinned** across every row while the RNA density moves. That is what makes the
+    gDNA background is pinned across every row while the RNA density moves. That is what makes the
     exon's true ``f_g`` sweep from mostly-gDNA to mostly-RNA with a single knob.
 
-    ⚠ The densities are quoted as multiples of the donor's own gDNA density as well as absolutely,
-    because what the solver has to resolve is the RATIO, not either level.
+    The densities are quoted as multiples of the donor's own gDNA density as well as absolutely,
+    because what the solver has to resolve is the ratio, not either level.
     """
     g_rate = donor.gdna_rate_per_base
     ebp = exon_bp(spec)
@@ -1098,8 +1042,8 @@ def main() -> int:
         help="sweep the transcript's RNA density (counts/bp) instead of one fixed run; "
         "no values = a default decade ladder around the donor's own gDNA density",
     )
-    # ⚠ `g25` until 2026-08-13, retired with the ladder rebuild. `g50` is the surviving mid rung and
-    # is also `verify_toy_substrate.py`'s default, so the harness and its verifier agree by default.
+    # `g50` is the ladder's mid rung and also `verify_toy_substrate.py`'s default, so the harness and
+    # its verifier agree by default.
     ap.add_argument("--donor", default="gdna_g50_ss_0.50_nrna_mid_capture_off")
     ap.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
@@ -1146,7 +1090,7 @@ def main() -> int:
         spec = SPECS[names[0]]
         if args.genome_length:
             spec = dataclasses.replace(spec, genome_length=int(args.genome_length))
-        # ⭐ the default ladder is anchored on the DONOR's own gDNA density, so the rows are
+        # the default ladder is anchored on the donor's own gDNA density, so the rows are
         # 0.1x .. 1000x the background rather than absolute numbers that mean nothing on their own.
         ladder = args.sweep_density or [
             donor.gdna_rate_per_base * m for m in (0.1, 0.3, 1.0, 3.0, 10.0, 100.0, 1000.0)

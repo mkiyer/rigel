@@ -1,78 +1,33 @@
 #!/usr/bin/env python
-"""⭐⭐ **STAGE B STEP 1** — pass-0 against the oracle, per object and per class.
+"""How does pass-0 compare with the origin-split payload and two levered ceilings, per object and per class?
 
-**The question.** Pass-0 is calibration's PRIOR-FREE first solve, the first thing that happens after
-initialisation and before any fitted prior exists. Does it find what the payload actually contains?
-And where it does not, is that because the accumulator destroyed the information, or because the
-solver missed it? A single library-level number cannot separate those two, and this project has
-already spent sessions on the wrong one of them.
+Pass-0 is calibration's prior-free first solve (``calib_refit_iters=0``). For each contaminated
+condition this instrument scans the BAM once (or reads the cached scan), builds T, the truth, by
+running the production accumulator on the BAM split by true origin (sum-to-full validated exactly,
+in the drained frame: the whole drained at the production seed and every partition drained by
+replaying its choices), runs P (pass-0) and the final solve, and scores each against T per object,
+mass-weighted, on both deconvolved axes. The two ceilings are levers that already exist, never an
+estimator: C_input runs the same solve with the simulator's own post-capture length pmfs, so
+``C_input − P`` is how much of the error is wrong inputs rather than wrong solving; C_info is a
+classification, never an estimate, of whether an object's own stored channels identify the
+two-component split at all (`info_class_masks`), and it ignores neighbours, so ``C_info − P`` is not
+a gap. Every object is also filed by the solver's own partition (`own_evidence` / `message_only` /
+`struct_lock`), and the cross-tab "undetermined by C_info x answered by the messages" is the cell the
+report exists to find. Scored per object and per class, never pooled; the directional split beside
+the absolute; an object with no mass is absent, not ``f_g = 0``; zero-gDNA rows are held out because
+a truth of exactly 0 is saturated. Its mass-weighted headline is the wrong yardstick for pass-0,
+where honest ignorance reads as error; `solvability_audit.py` is that judge.
 
-⭐ **THREE QUANTITIES PER OBJECT, AND THE DIFFERENCES BETWEEN THEM ARE THE WHOLE DIAGNOSTIC.**
-
-===  =========================================================  ==========================================
- T   the truth: each object's real gDNA / RNA split             ``tests/calibration/_oracle.py``
- C   a ceiling: the best answer reachable under stated inputs   two LEVERS, below — never an estimator
- P   what pass-0 produces                                       ``calib_refit_iters=0``
-===  =========================================================  ==========================================
-
-``T − C`` is information the accumulator destroyed → Stage A work. ``C − P`` is solver gap → Stage B.
-
-⛔ **THERE IS NO "BEST POSSIBLE PER-OBJECT ESTIMATOR" HERE, AND WRITING ONE WOULD BE THE MAGIC-NUMBER
-FAILURE MODE WITH AN ESTIMATOR IN PLACE OF A CONSTANT.** So C is TWO things, each defined by a lever
-that already exists, and they are reported separately:
-
-* **C_input — the perfect-INPUT ceiling.** ``calibrate`` run with the simulator's own post-capture
-  length distributions in place of the fitted ones (the same override ``calibration_truth_ab.py
-  --ceiling`` uses), at both solve depths so each arm is compared against its own ceiling.
-  ``C_input − P`` is "how much of the error is wrong INPUTS rather than wrong SOLVING?".
-  ⚠ It is a *length*-input ceiling. The other library-level inputs (κ, the two strand
-  overdispersions, the two Fisher sample sizes, the enrichment landscape, the two backgrounds) are
-  injectable via ``InjectedCalibrationPriors`` — but the simulator writes no truth for them, so
-  injecting anything there would be an A/B against a guess, not a ceiling. The one with a truth
-  value is κ, and it is not a free lever either: protocol *fidelity* and a directional *sense
-  fraction* are different quantities and a fitted κ of 0.0101 on a "0.99 stranded" library is
-  correct. That is the next lever and it is a separate measurement.
-* **C_info — the INFORMATION ceiling, reported as a CLASSIFICATION and never as an estimate.** Per
-  object: is the two-component split recoverable from the stored channels at all? See
-  :func:`info_class_masks`.
-
-⚠ **C_info deliberately ignores neighbour information, which the sweep does use.** So C_info can be
-"worse" than P on an object its neighbours rescued. ⛔ ``C_info − P`` is therefore NOT a gap and is
-not reported as one. The useful statement is the reverse, and it is the point of the whole script:
-**objects that C_info says are undetermined but that P answers anyway are objects whose answer came
-entirely from the messages and the prior** — the class that carried 92 % of all error in the last full sweep.
-
-SCORING RULES, NON-NEGOTIABLE
------------------------------
-* **Per object AND per class, never pooled.** One run once reported a −47.6 k error next to a +75.4 k
-  error as a "nearly perfect" −1.9 k.
-* **Mass-weighted**, because that is how the consumer weights it — a 1 bp region with 2 fragments must
-  not count like an exon with 40,000.
-* **The directional split alongside the absolute**, because here they nearly cancel.
-* **The contaminated conditions only.** A zero-gDNA row is saturated at truth = 0 exactly, so
-  anything that lowers the estimate "improves" it. Those rows are false-positive checks, nothing more,
-  and this script refuses to average them in.
-* **An object with no mass is ABSENT, not ``f_g = 0``.** Most of any real index carries no fragments.
-
-⭐⭐ **THE DRAINED FRAME, since the 2026-08-31 frame ruling**
-(`DESIGN.md` §4.3). T and every arm describe the tally production
-calibrates: the whole is drained at the production seed, and each origin partition is drained by
-REPLAYING the whole's already-drawn choices (`second_pass.lift_choices`, via
-`OracleTruth.from_cached_parts`), which is what keeps sum-to-full exact — draining the partitions
-independently would not survive it, which is why an earlier revision of this file ruled "no drain,
-and that is forced". That ruling conflated the independent-drain hazard (real, and solved by the
-lift) with the frame choice (wrong: pass-one tallies fed every P arm WORSE length models than
-production ships — the held fragments are systematically long — and mis-stated the certified spliced
-channel by a fifth). ⚠ The oracle may carry a nonzero ``gdna_spliced_leak`` — production's own drain
-behaviour, recorded rather than refused (`ISSUES: drain-contaminates-certified-rna`) — and
-``n_ambiguous`` bounds the lift's origin attribution; report both beside any per-origin claim.
-
-Gates: ``tests/calibration/test_pass0_vs_oracle.py`` (9, each carrying its own perturbation).
+Also a library: `calibration_vs_oracle.py`, `solvability_audit.py`, `vertex_ceiling.py`,
+`worst_objects.py`, `toy_panel.py`, `em_fl_ceiling.py`, `backbone_parity.py` and `sim/panel.py`
+import `measure_condition`, `score_axis`, `check_same_basis`, `object_fractions`,
+`truth_length_pmf`, `truth_f_gdna`, `library_f_gdna`, the class tuples and the two defaults.
 
 Usage::
 
-    python scripts/design/pass0_vs_oracle.py                      # the 4 contaminated conditions
-    python scripts/design/pass0_vs_oracle.py --conditions NAME    # one
+    python scripts/design/pass0_vs_oracle.py --oracle-cache <dir>                    # the contaminated conditions
+    python scripts/design/pass0_vs_oracle.py --conditions <name> --oracle-cache <dir>
+    python scripts/design/pass0_vs_oracle.py --oracle-cache <dir> --jobs 4           # pre-warm the caches in parallel
     python scripts/design/pass0_vs_oracle.py --json out.json
 """
 
@@ -112,35 +67,28 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.pipeline import _drain_side_buffer, _native_detect_sj_tag, scan_and_buffer  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-#: ⛔ **The CURRENT panel, and this default has been stale once already.** It read ``pilot`` until
-#: 2026-08-15, four days after that suite was deleted and the ladder rebuilt at 16 conditions — so the
-#: no-argument form of this file, ``solvability_audit.py`` and ``vertex_ceiling.py`` all died on
-#: "Failed to open BAM" pointing at a directory that no longer exists. ⚠ Three instruments read it from
-#: here; ``prior_vs_oracle.py`` carries its own copy and was already correct, which is exactly how one
-#: of two homes goes stale without the other noticing.
+#: The current panel. Several instruments read this default from here; ``prior_vs_oracle.py``
+#: carries its own copy, so a panel move must update both.
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: ⭐ NOT DEFINED HERE ANY MORE. "Has own composition evidence" has ONE home in production —
-#: :func:`~rigel.calibration.region_init.has_own_composition_evidence` — and every instrument imports
-#: it. It used to be restated here and in ``composition_evidence_census.py``, each beside a comment
-#: saying it must match the solver, which is precisely the arrangement TRAPS: a-test-that-redefines names: a change
-#: to the solver would have moved neither. Kept as a name only because ``solver_slot_classes`` takes
-#: it as a MOVEABLE argument so a gate can perturb the partition and watch it move.
+#: The solver's own "has own composition evidence" gate lives in production
+#: (:func:`~rigel.calibration.region_init.has_own_composition_evidence`); this value exists only
+#: because ``solver_slot_classes`` takes it as a movable argument so a gate can perturb the partition.
 _EPS = 1.0e-9
 
-#: The two axes ``CalibrationResult`` deconvolves. The sj axis is pure RNA by construction —
-#: nothing is deconvolved there, so there is nothing to score.
+#: The two axes ``CalibrationResult`` deconvolves. The sj axis is pure RNA by construction, so
+#: nothing is deconvolved there and there is nothing to score.
 AXES = ("region", "boundary")
 
-#: ⭐ WHERE DID THE ANSWER COME FROM? The solver's own three-way partition of a slot, reproducing
-#: ``region_init``'s definitions. Mutually exclusive and exhaustive — a gate asserts the mass and the
+#: Where did the answer come from? The solver's own three-way partition of a slot, reproducing
+#: ``region_init``'s definitions. Mutually exclusive and exhaustive; a gate asserts the mass and the
 #: error both decompose over them exactly.
 SOLVER_CLASSES = ("own_evidence", "message_only", "struct_lock")
 
-#: ⭐ IS THE ANSWER THERE AT ALL? The 2x2's identification status per object. ``absent`` is a class,
+#: Is the answer there at all? The 2x2's identification status per object. ``absent`` is a class,
 #: not a filter: an object with no mass has no answer to get right or wrong, and folding it into any
-#: of the other three is how 80 % of a genome reads as perfectly solved.
+#: of the other three is how most of a genome reads as perfectly solved.
 INFO_CLASSES = ("identified", "undet_no_separation", "undet_out_of_range", "absent")
 
 
@@ -148,13 +96,12 @@ INFO_CLASSES = ("identified", "undet_no_separation", "undet_out_of_range", "abse
 
 
 def object_fractions(gdna_mass, rna_mass) -> tuple[np.ndarray, np.ndarray]:
-    """``(f_g, total)`` per object — ``f_g`` is **NaN** where the object carries no mass.
+    """``(f_g, total)`` per object; ``f_g`` is NaN where the object carries no mass.
 
-    ⛔ NaN, never 0. "No data" must be inert; a floored 0 reads as a confident "no gDNA here" and its
-    mirror reads as a confident "all gDNA here", and one of those was actively seeding false gDNA
-    into neighbouring exons. The mass-weighted mean is blind to the difference (a zero-mass object
-    carries zero weight), so the place it shows up is the COUNT of objects scored and the class
-    shares — which is exactly where an inflated denominator is invisible.
+    NaN, never 0: "no data" must be inert, and a floored 0 reads as a confident "no gDNA here". The
+    mass-weighted mean is blind to the difference (a zero-mass object carries zero weight), so the
+    place it shows up is the count of objects scored and the class shares, which is exactly where an
+    inflated denominator is invisible.
     """
     g = np.asarray(gdna_mass, np.float64)
     total = g + np.asarray(rna_mass, np.float64)
@@ -166,30 +113,29 @@ def object_fractions(gdna_mass, rna_mass) -> tuple[np.ndarray, np.ndarray]:
 @dataclass(frozen=True, slots=True)
 class AxisScore:
     """One arm's error over one selection of one axis. Every field is a mass, not a rate, except
-    ``mwae`` — so the fields ADD across a partition of the objects and the rate does not."""
+    ``mwae``, so the fields add across a partition of the objects and the rate does not."""
 
-    n_scored: int  #: objects with mass. ⚠ never the object count of the axis
+    n_scored: int  #: objects with mass, never the object count of the axis
     mass: float  #: Σ total, the weight behind every number below
     net_err: float  #: Σ (gDNA_arm − gDNA_true). What the library-level figure sees
     abs_err: float  #: Σ |gDNA_arm − gDNA_true|. What the per-object answer is
-    over_call: float  #: Σ (gDNA_arm − gDNA_true)+ — gDNA claimed where there was RNA
-    under_call: float  #: Σ (gDNA_true − gDNA_arm)+ — gDNA missed
+    over_call: float  #: Σ (gDNA_arm − gDNA_true)+, gDNA claimed where there was RNA
+    under_call: float  #: Σ (gDNA_true − gDNA_arm)+, gDNA missed
     mwae: float  #: mass-weighted mean |Δf_g| ≡ abs_err / mass. 0 = per-object perfect
 
     @property
     def cancellation(self) -> float:
-        """``Σ|err| / |net|`` — how much better the library-level number looks than the per-object
-        answer. ⭐ This is the hook for the whole of Stage B: at 5.9x, the deliverable is reporting a
-        near-miss over a large under-call sitting next to a large over-call."""
+        """``Σ|err| / |net|``: how much better the library-level number looks than the per-object
+        answer, i.e. how much of an under-call is sitting next to an over-call."""
         return self.abs_err / abs(self.net_err) if self.net_err != 0.0 else float("inf")
 
 
 def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore:
     """Score one arm against T on one axis, optionally restricted to ``select``.
 
-    ⛔ **Refuses arms and truths on different bases.** ``Σ w·|Δf_g| ≡ Σ|Δ gDNA mass|`` holds *only*
-    when the two per-object totals agree; without that identity the mass-weighted mean is a weighted
-    average of fractions over different denominators, which is a number with no interpretation.
+    Refuses arms and truths on different bases: ``Σ w·|Δf_g| ≡ Σ|Δ gDNA mass|`` holds only when the
+    two per-object totals agree, and without that identity the mass-weighted mean is a weighted
+    average of fractions over different denominators.
     """
     arm_f, arm_total = object_fractions(arm_gdna, arm_rna)
     true_f, true_total = object_fractions(true_gdna, true_rna)
@@ -226,12 +172,10 @@ def score_axis(arm_gdna, arm_rna, true_gdna, true_rna, select=None) -> AxisScore
 def check_same_basis(name: str, arm, full_substrate) -> None:
     """Assert one ``CalibrationResult``-shaped arm's per-object totals are the payload's own totals.
 
-    ⚠ **Per axis, never pooled.** ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error
-    on one axis cancelling an equal and opposite one on the other is not far-fetched — that is a real
-    class of mistake a three-axis schema makes possible, and pooling the check invites it.
-
-    The region axis holds no spliced molecule (``region_contained`` is credited only when the fragment
-    used no sj); the boundary axis is unspliced + spliced, because ``chain_boundary_deconv`` builds
+    Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error
+    on one axis cancelling an equal and opposite one on the other is a real class of mistake. The
+    region axis holds no spliced molecule (``region_contained`` is credited only when the fragment
+    used no sj); the boundary axis is unspliced + spliced, because the boundary deconvolution builds
     ``rna = (1−f_g)·unspliced + spliced`` and T must match that or the two are different quantities.
     """
     region_total = np.asarray(full_substrate.region_contained.count, np.float64).sum(axis=1)
@@ -255,35 +199,24 @@ def check_same_basis(name: str, arm, full_substrate) -> None:
 
 
 def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarray]:
-    """Partition the chain's SLOTS three ways, using ``region_init``'s own definitions.
+    """Partition the chain's slots three ways, using ``region_init``'s own definitions.
 
-    * ``struct_lock`` — composition CERTAIN. A slot the solver could not move because there is
-      nothing to decide: neither RNA strand admissible, so ``_type_belief`` pins ``{0,0,1}`` at
-      ``Var(log f_g) = 0``. ⚠ Locked is not the same as uninformed, and lumping the two reports a
-      pure-gDNA intergenic region as a solver failure.
-      ⛔ **BOTH AXES** — :func:`~rigel.calibration.region_geometry.g1_locked`. This was
-      ``(~solvable) & (kind == REGION)``, so every structurally-locked BOUNDARY — an intergenic↔exon boundary,
-      where RNA cannot cross a gene boundary — was filed as ``message_only``, i.e. as an object whose
-      answer came from its neighbours, when nothing was ever asked of it and its ``f_g = 1`` is the
-      pinned init.
-      ⚠ The relay-era region-only mask of the same name (``region_init``'s ``struct_lock``) retired
-      on 2026-09-09; ``g1_locked`` is the one home.
-    * ``message_only`` — no own composition evidence at all (``tau_lam`` at zero and not locked). Its
+    * ``struct_lock``: composition certain, on both axes
+      (:func:`~rigel.calibration.region_geometry.g1_locked`). Neither RNA strand is admissible, so
+      there is nothing to decide and ``f_g = 1`` is the pinned init. Locked is not the same as
+      uninformed, and lumping the two reports a pure-gDNA intergenic region as a solver failure.
+    * ``message_only``: no own composition evidence at all (``tau_lam`` at zero and not locked). Its
       gDNA/RNA split is decided entirely by neighbour messages and the population prior.
-    * ``own_evidence`` — everything else: the strand Beta-Binomial, the intron factory's density
-      deconvolution, or the length channel had something to say here.
+    * ``own_evidence``: everything else, where the strand Beta-Binomial or the intron factory's
+      density deconvolution had something to say.
 
-    ⚠⚠ **``eps`` IS THE SOLVER'S OWN GATE AND MUST STAY THAT WAY.** ``own_composition_logvar`` tests
-    ``tau > 1e-9``, so this partition answers "which mechanism did the solver USE here" — which is what
-    the cross-tab and ``worst_objects.py`` need. It is deliberately **not** the question "should pass-0
-    be SCORED here": a fitted κ that misses ½ by a rounding step leaves τ ~1e-7, which the solver does
-    treat as evidence and which nonetheless has sd(λ) ~10³ nats and can resolve nothing. That second
-    question needs a resolving-power floor and it lives in
-    ``solvability_audit.own_evidence_tau_floor``. ⛔ Do not collapse the two — they gave different
-    answers on the ladder's unstranded strata, and each is right for its own consumer.
-
-    ``eps`` exists so a gate can move it and watch the partition move; production callers must not
-    pass it. The three sources of ``tau_lam`` and their gating are ``region_init.build_region_init``.
+    ``eps`` is the solver's own gate (``own_composition_logvar`` tests ``tau > 1e-9``), so this
+    partition answers "which mechanism did the solver use here", which is what the cross-tab and
+    ``worst_objects.py`` need. It is deliberately not the question "should pass-0 be scored here": a
+    fitted κ that misses ½ by a rounding step leaves a τ the solver treats as evidence that can
+    resolve nothing, and that question is answered by ``solvability_audit``'s resolving-power curve
+    over ``SD_LAMBDA_DECADES``. ``eps`` exists so a gate can move it and watch the partition move;
+    production callers must not pass it.
     """
     tau = np.asarray(capture["_tau0_lam"], np.float64)
     struct_lock = g1_locked(capture["free_pos"], capture["free_neg"])
@@ -296,9 +229,9 @@ def solver_slot_classes(capture, chain, eps: float = _EPS) -> dict[str, np.ndarr
 
 
 def _project(slot_mask, chain, n_regions: int, n_boundaries: int) -> dict[str, np.ndarray]:
-    """Scatter a per-slot boolean onto the region and boundary axes. The chain is ``N E N E … N`` per
-    reference, so every region and every contiguous boundary is exactly one slot and the map is a
-    bijection — there is nothing to pool and nothing to drop."""
+    """Scatter a per-slot boolean onto the region and boundary axes. The chain alternates
+    REGION/BOUNDARY per reference, so every region and every contiguous boundary is exactly one slot
+    and the map is a bijection; there is nothing to pool and nothing to drop."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     mask = np.asarray(slot_mask, bool)
@@ -321,44 +254,37 @@ def solver_class_masks(capture, chain, n_regions: int, n_boundaries: int) -> dic
 
 
 def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict[str, dict]:
-    """⭐ **C_info** — per object, is the two-component split recoverable from the stored channels?
+    """C_info: per object, is the two-component split recoverable from the stored channels?
 
-    The 2×2 at one object is ``N = ρ_g·E_g + ρ_r·E_r`` and ``Σ1/L = ρ_g·D_g + ρ_r·D_r``, and it is
-    identified iff ``E_g/D_g ≠ E_r/D_r`` — the two components' **opportunity-weighted** mean lengths.
-    ⚠ At a contiguous boundary the opportunity is ``(w−1)+`` and that reduces to the bare ``μ_g ≠ μ_r``;
-    at a REGION it does **not**, because the opportunity is ``(ell − w + 1)+`` and ``1/w`` does not
-    cancel it. Applying the boundary form at a region would be scoring one frame's evidence against another
-    frame's support, so this reads the moments in each slot's own frame.
-
-    ⭐ **And it reads them from ``length_likelihood.build_slot_moments``, which already computes
-    exactly this in exactly these frames.** Writing the algebra out again here would put two
-    implementations of one quantity in the tree; the same argument is why ``LandedMoments`` carries
-    ``eff`` at all. Conditional on the object's count ``N``, the deposited weight has mean
-    ``pi·m1_g + (1−pi)·m1_r`` where ``pi`` is the gDNA share of the LANDED fragments — which is the
-    quantity ``chain_region_deconv`` turns into mass — so::
+    The 2×2 at one object is ``N = ρ_g·E_g + ρ_r·E_r`` and ``Σ1/L = ρ_g·D_g + ρ_r·D_r``, identified
+    iff ``E_g/D_g ≠ E_r/D_r``, the two components' opportunity-weighted mean lengths. At a contiguous
+    boundary the opportunity is ``(w−1)+`` and that reduces to the bare ``μ_g ≠ μ_r``; at a REGION it
+    does not, because the opportunity is ``(ell − w + 1)+`` and ``1/w`` does not cancel it, so the
+    moments are read in each slot's own frame from ``effective_length.build_slot_moments``, which
+    already computes exactly this. Conditional on the object's count ``N``, the deposited weight has
+    mean ``pi·m1_g + (1−pi)·m1_r`` where ``pi`` is the gDNA share of the landed fragments, so::
 
         pi_hat = (Σ(1/L)/N − m1_r) / (m1_g − m1_r)
 
     Four classes, and the middle two are the answer this function exists to give:
 
-    * ``absent`` — no count. There is no answer here to get right or wrong.
-    * ``identified`` — either only ONE component has any opportunity here (a region too short for any
-      RNA fragment to fit inside can only contain gDNA — determined, with no arithmetic at all), or
-      both do, the moments separate, and ``pi_hat`` lands in ``[0, 1]``.
-    * ``undet_no_separation`` — ``m1_g == m1_r`` **exactly**. At equal opportunity-weighted means the
-      channel carries exactly zero information about composition, at any depth. ⚠ Tested exactly, not
-      to a tolerance: a difference computed from large floats comes out flat only to ~1e-11, and a
-      1e-11 row reads as live and then sells the grid's own width back as evidence. ⭐ The degenerate
-      "no opportunity for EITHER component" case lands here without a special branch, because
+    * ``absent``: no count. There is no answer here to get right or wrong.
+    * ``identified``: either only one component has any opportunity here (a region too short for any
+      RNA fragment to fit inside can only contain gDNA), or both do, the moments separate, and
+      ``pi_hat`` lands in ``[0, 1]``.
+    * ``undet_no_separation``: ``m1_g == m1_r`` exactly. At equal opportunity-weighted means the
+      channel carries zero information about composition, at any depth. Tested exactly, not to a
+      tolerance: a difference computed from large floats comes out flat only to ~1e-11, and a 1e-11
+      row would read as live and sell the grid's own width back as evidence. The degenerate "no
+      opportunity for either component" case lands here without a special branch, because
       ``LandedMoments`` zeroes every moment at zero opportunity rather than flooring a division.
-    * ``undet_out_of_range`` — the moments separate but the solution is outside ``[0, 1]``, so the
-      observation is not consistent with ANY mixture of these two components. ⚠ This class also
-      absorbs sampling noise: at one or two fragments a single draw of ``1/L`` easily falls outside
-      the interval the two components span. That is why it is a separate class from the one above and
-      not pooled into a single "undetermined" — the two mean different things.
+    * ``undet_out_of_range``: the moments separate but the solution is outside ``[0, 1]``, so the
+      observation is not consistent with any mixture of these two components. This class also absorbs
+      sampling noise (at one or two fragments a single draw of ``1/L`` easily falls outside the
+      interval the two components span), which is why it is not pooled with the class above.
 
-    ⚠ This function ignores neighbours, which the sweep does not. It is a statement about one
-    object's own channels and nothing else, and it must not be read as a bound on the solver.
+    This function ignores neighbours, which the sweep does not. It is a statement about one object's
+    own channels and nothing else, and must not be read as a bound on the solver.
     """
     mg = build_slot_moments(chain, region_arrays, gdna_pmf)
     mr = build_slot_moments(chain, region_arrays, rna_pmf)
@@ -371,7 +297,7 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
     for k, view in ((REGION, substrate.region_contained), (BOUNDARY, substrate.boundary_unspliced)):
         sel = kind == k
         count[sel] = np.asarray(view.count, np.float64).sum(axis=1)[obj[sel]]
-        # ⛔ Two deposit rules, two names (TRAPS: two-masks-one-name): the REGION bank is the contained
+        # two deposit rules, two names (TRAPS: two-masks-one-name): the REGION bank is the contained
         # rule's `inv_opportunity_sum`, the BOUNDARY bank the crossing rule's `inv_length_sum`.
         bank = view.inv_opportunity_sum if k == REGION else view.inv_length_sum
         inv[sel] = np.asarray(bank, np.float64)[obj[sel]]
@@ -406,8 +332,8 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
 
 
 def calibrate_arm(payload, kwargs, config, *, gdna_pmf=None, rna_pmf=None, debug=None):
-    """One ``calibrate`` run. ``gdna_pmf`` / ``rna_pmf`` override the FITTED length models — that, and
-    the solve depth in ``config``, are the only two things any arm below varies."""
+    """One ``calibrate`` run. ``gdna_pmf`` / ``rna_pmf`` override the fitted length models; that, and
+    the solve depth in ``config``, are the only two things any arm varies."""
     call = dict(kwargs)
     if gdna_pmf is not None:
         call["gdna_fl_pmf"] = gdna_pmf
@@ -418,27 +344,20 @@ def calibrate_arm(payload, kwargs, config, *, gdna_pmf=None, rna_pmf=None, debug
 
 def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payload, cache_root,
                          lift=None):
-    """T, from a per-origin cache when one is valid — otherwise split, scan, and populate it.
+    """T, from a per-origin cache when one is valid, otherwise split, scan, and populate it.
 
-    ⭐⭐ **WHY THIS IS WORTH CACHING AND THE FULL SCAN IS NOT.** The debug loop is "measure the whole
-    panel → fix → measure again", and the fixes are in CALIBRATION. The oracle depends only on the
-    accumulator and the index, so it is **invariant across every solver change the loop makes** — the
-    cache is written once and hits for the rest of the campaign. Uncached, a 36-condition table costs
-    hours of BAM splitting and re-scanning per iteration, which makes the loop impractical.
-
-    ⛔ **KEYED BY THE SCAN CACHE'S OWN KEY, NOT A NEW ONE.** ``read_scan_cache`` refuses a payload
-    whose ``graph_hash``, ``reach_digest``, ``payload_schema_digest`` or scan config does not describe
-    the index it is loaded against — and ``reach`` in particular is covered by no other hash, so a
-    rebuild that moved 38 % of contiguous reaches would verify clean against a home-made key. Reusing
-    the shipped loader means a stale oracle is *refused*, loudly, rather than silently feeding
-    everything downstream.
-
-    ⚠ And the sum-to-full identity is re-run over the loaded arrays regardless
-    (:meth:`OracleTruth.from_parts`): the cache can only skip the scanning, never the validation.
+    The oracle depends only on the accumulator and the index, so it is invariant across every solver
+    change the debug loop makes: the cache is written once and hits for the rest of a campaign.
+    Keyed by the scan cache's own key, never a new one: ``read_scan_cache`` refuses a payload whose
+    ``graph_hash``, ``reach_digest``, ``payload_schema_digest`` or scan config does not describe the
+    index it is loaded against (``reach`` in particular is covered by no other hash), so a stale
+    oracle is refused loudly rather than silently feeding everything downstream. The sum-to-full
+    identity is re-run over the loaded arrays regardless: the cache skips the scanning, never the
+    validation.
     """
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): ``full_payload`` is the drained whole and
-    # ``lift`` the drain's box; the partitions are drained by replaying the whole's choices. An empty
-    # ``lift`` (no held fragments, or a pre-ruling caller) keeps the pass-one identity unchanged.
+    # the drained frame: ``full_payload`` is the drained whole and ``lift`` the drain's box; the
+    # partitions are drained by replaying the whole's choices. An empty ``lift`` (no held fragments)
+    # keeps the pass-one identity unchanged.
     lift = lift or {}
     if cache_root is None:
         return OracleTruth.from_bam(
@@ -452,10 +371,10 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
         parts = {k: read_scan_cache(dirs[k], index, scan).payload for k in ORIGINS}
         truth = OracleTruth.from_cached_parts(full_payload, parts, lift)
     except (FileNotFoundError, KeyError, ScanCacheKeyError):
-        pass  # no cache, or it does not describe this index/scan — rebuild it below
+        pass  # no cache, or it does not describe this index/scan: rebuild it below
     else:
-        # ⚠ the three-way cache can be complete while the per-strand one is not (it is newer), so it
-        # is ensured on the HIT path too rather than only when the three are rebuilt
+        # the three-way cache can be complete while the per-strand one is not, so it is ensured on
+        # the hit path too rather than only when the three are rebuilt
         ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
         return truth
 
@@ -467,19 +386,17 @@ def load_or_build_oracle(bam, index, pipeline_config, work_dir, tag, full_payloa
         write_scan_cache(dirs[origin], payload=payload, strand_model=strand_model, index=index,
                          bam=paths[origin], scan_config=scan)
     ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root)
-    # ⚠ the CACHE stays pass one (write_scan_cache refuses a drained payload); the returned truth is
+    # the cache stays pass one (write_scan_cache refuses a drained payload); the returned truth is
     # lifted into the drained frame exactly as the cached path is.
     return OracleTruth.from_cached_parts(full_payload, parts, lift, read_counts)
 
 
 def ensure_rna_strand_cache(bam, index, scan, work_dir, tag, cache_root) -> bool:
-    """⭐ Cache the RNA reads split by TRANSCRIPT strand — ``rna_pos`` / ``rna_neg`` beside the three
-    ``ORIGINS`` partitions — which is what a per-ARM measurement of the message layer needs
-    (`_oracle.RNA_STRAND_ORIGINS` says why the payload's genome-strand columns cannot serve).
-
-    ⚠ ADDITIVE: nothing that reads ``ORIGINS`` changes, and the two partitions describe the same reads
-    as ``mrna`` + ``nrna``, so ``calibration_oracle.py`` can gate them against each other. Skips the
-    work when both caches already load. Returns True if it built them.
+    """Cache the RNA reads split by transcript strand, ``rna_pos`` / ``rna_neg`` beside the three
+    ``ORIGINS`` partitions, which is what a per-component truth needs (`_oracle.RNA_STRAND_ORIGINS`
+    says why the payload's genome-strand columns cannot serve). Additive: the two partitions describe
+    the same reads as ``mrna`` + ``nrna``, so ``calibration_oracle.py`` gates them against each other.
+    Skips the work when both caches already load. Returns True if it built them.
     """
     if cache_root is None:
         return False
@@ -513,39 +430,31 @@ class ConditionMeasurement:
     scores: dict  #: arm -> axis -> class-or-"ALL" -> AxisScore
     info_scores: dict  #: arm -> axis -> info-class -> AxisScore
     info_shares: dict  #: axis -> info-class -> mass share
-    #: The two classifications as BOOLEAN MASKS per axis, kept so a downstream instrument reads the
-    #: same partition this one scored rather than recomputing its own (two definitions of one class
-    #: is how they drift). ``worst_objects.py`` consumes these.
+    #: The two classifications as boolean masks per axis, kept so a downstream instrument reads the
+    #: same partition this one scored rather than recomputing its own. ``worst_objects.py`` consumes these.
     solver_masks: dict
     info_masks: dict
     cross: dict  #: axis -> (info class, solver class) -> AxisScore, for pass-0
-    library_f_gdna: dict  #: "T" / arm name -> the LIBRARY-level gDNA fraction (the thermometer)
-    #: ⭐ ``kind -> axis -> class -> objects IN the class``, scored or not. Distinct from
-    #: ``AxisScore.n_scored``, which counts only objects with mass — and that distinction is the whole
-    #: content of the ``absent`` class, whose scored count is 0 BY DEFINITION. Without this the class
-    #: prints an empty row and the fact it exists to state ("most of the index carries no fragments")
-    #: is invisible.
+    library_f_gdna: dict  #: "T" / arm name -> the library-level gDNA fraction (the thermometer)
+    #: ``kind -> axis -> class -> objects in the class``, scored or not. Distinct from
+    #: ``AxisScore.n_scored``, which counts only objects with mass; that distinction is the whole
+    #: content of the ``absent`` class, whose scored count is 0 by definition.
     class_objects: dict
-    #: Which length pmfs C_info was classified with. ⚠ Recorded rather than assumed: the report says
-    #: "with the simulator's own pmfs", and on a condition with no truth file it would be the FITTED
-    #: ones — a caption describing something the code did not do.
+    #: Which length pmfs C_info was classified with, recorded rather than assumed: on a condition
+    #: with no truth file it is the fitted ones.
     info_pmf_source: str
     seconds: float
 
 
 def library_f_gdna(result) -> float:
-    """The library gDNA fraction, summed over BOTH deconvolved axes — the reported deliverable.
+    """The library gDNA fraction, summed over both deconvolved axes, the reported deliverable.
 
-    ⭐ Printed here beside the per-object answer for one reason: **the gap between the two is the
-    finding.** The library figure is ``|Σ(g − t)|`` and the per-object answer is ``Σ|g − t|``, so a
-    large under-call sitting next to a large over-call makes the first look an order of magnitude
-    better than the second. Applying the same functional to T rather than to the simulator's origin
-    counts keeps the comparison on the accumulator's own basis — the origin-count fraction is a
-    different quantity (it counts fragments once; this counts each fragment on every object it
-    touched), and subtracting one from the other would mix a basis change into the error.
-
-    ⚠ Both axes, always: gDNA lives contained in a region AND crossing a line, and summing one axis
-    reports a library's gDNA as a fraction of part of itself.
+    Printed beside the per-object answer because the gap between the two is the finding: the library
+    figure is ``|Σ(g − t)|`` and the per-object answer is ``Σ|g − t|``. Applying the same functional
+    to T rather than to the simulator's origin counts keeps the comparison on the accumulator's own
+    basis (the origin-count fraction counts fragments once; this counts each fragment on every object
+    it touched). Both axes, always: summing one axis reports a library's gDNA as a fraction of part
+    of itself.
     """
     g = float(np.asarray(result.mass_gdna_region).sum() + np.asarray(result.mass_gdna_boundary).sum())
     r = float(np.asarray(result.mass_rna_region).sum() + np.asarray(result.mass_rna_boundary).sum())
@@ -563,28 +472,20 @@ def measure_condition(
     truth_pmfs=None,
     oracle_cache=None,
 ) -> ConditionMeasurement:
-    """Scan once, build T, run every arm, and score them per object and per class.
+    """Scan once (or read the cached scan), build T, run every arm, and score them per object and
+    per class.
 
     ``truth_pmfs`` is a callable ``max_size -> (gdna_pmf, rna_pmf)``, or ``None`` to skip the C_input
-    arms. ⚠ A callable rather than two arrays because a pmf must be sized by the PAYLOAD's own
-    ``max_length`` — ``build_fl_models`` produces one of length ``max_length + 1``, and handing
-    ``calibrate`` two pmfs of different lengths is a silent frame mismatch rather than an error. The
-    payload does not exist until the scan below, and scanning a 1.6 GB BAM twice to learn one integer
-    is four minutes per condition.
-
-    ⚠ Four ``calibrate`` runs and four BAM scans. The oracle re-scans per partition and there is no
-    cache for it; that is minutes, not seconds.
+    arms. A callable rather than two arrays because a pmf must be sized by the payload's own
+    ``max_length``, which does not exist until the scan; handing ``calibrate`` two pmfs of different
+    lengths is a silent frame mismatch rather than an error.
     """
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    # ⭐⭐ THE MAIN PAYLOAD IS CACHED TOO, and it is the same argument the oracle cache already makes:
-    # the scan depends ONLY on the BAM, the index and the scan config — never on calibration — so one
-    # cache serves every arm of a whole debugging campaign. Measured 8.3 s of a 24.5 s condition
-    # (**34 %**), and it was being paid again for every arm of every A/B.
-    # ⛔ Keyed by the SHIPPED loader, never a home-made key: ``read_scan_cache`` refuses a payload whose
-    # ``graph_hash`` / ``reach_digest`` / ``payload_schema_digest`` / scan config does not describe this
-    # index, and ``reach`` is covered by no other hash. A refusal here is loud and falls through to a
-    # rescan; a home-made key would load a stale tally silently.
+    # the main payload is cached too, by the same argument as the oracle cache: the scan depends only
+    # on the BAM, the index and the scan config, never on calibration, so one cache serves every arm
+    # of a campaign. Keyed by the shipped loader, never a home-made key: a refusal here is loud and
+    # falls through to a rescan, where a home-made key would load a stale tally silently.
     _sc_dir = None if oracle_cache is None else Path(oracle_cache) / tag / "_main"
     payload = strand_model = None
     if _sc_dir is not None:
@@ -599,15 +500,15 @@ def measure_condition(
             write_scan_cache(_sc_dir, payload=payload, strand_model=strand_model, index=index,
                              bam=bam, scan_config=scan)
 
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): every arm below and T itself describe the
-    # tally production calibrates. The drain replays at the production seed; the cache stays pass one.
+    # the drained frame: every arm below and T itself describe the tally production calibrates. The
+    # drain replays at the production seed; the cache stays pass one.
     lift: dict = {}
     payload = _drain_side_buffer(
         payload, index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
     )
 
-    # T. ⭐ Sum-to-full is validated on every bank exactly and RAISES if it does not hold — on the
-    # cached path as well as the scanned one — so nothing below can run on an oracle that is not the
+    # T. Sum-to-full is validated on every bank exactly and raises if it does not hold, on the cached
+    # path as well as the scanned one, so nothing below can run on an oracle that is not the
     # production payload split by origin. In the drained frame it is also the lift's identity gate.
     oracle = load_or_build_oracle(
         bam, index, pipeline_config, work_dir, tag, payload, oracle_cache, lift
@@ -632,7 +533,7 @@ def measure_condition(
         payload,
         sj_opportunity=crossing_probability_from_index(index, max_size),
         gdna_opportunity=gdna_opportunity_from_index(index, max_size),
-        # ⭐ production parity: the region args enable the two-pool contrast, exactly as pipeline.py
+        # production parity: the region args enable the two-pool contrast, exactly as pipeline.py
         region_lengths=region_lengths_from_partition(_fb, _fo, len(_frt)),
         region_types=_frt,
     )
@@ -664,11 +565,10 @@ def measure_condition(
     for name, arm in arms.items():
         check_same_basis(name, arm, substrate)
 
-    # ⭐ THE CLASSES COME FROM PASS-0's OWN RUN, and are held fixed across every arm. ``tau_lam``
+    # the classes come from pass-0's own run and are held fixed across every arm. ``tau_lam``
     # depends weakly on the incoming belief, so the final solve partitions slots slightly
-    # differently — but "what evidence does this object have" is a property of the object, the
-    # question Stage B asks is about the prior-free solve, and a class that moves between arms cannot
-    # be used to compare them.
+    # differently, but "what evidence does this object have" is a property of the object, and a
+    # class that moves between arms cannot be used to compare them.
     chain = debug_pass0["chain"]
     n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
     solver_masks = solver_class_masks(debug_pass0["capture"], chain, n_regions, n_boundaries)
@@ -709,9 +609,8 @@ def measure_condition(
         for axis in AXES
     }
 
-    # ⭐ THE CROSS-TAB. Not a threshold on confidence — a threshold would be a magic number and this
-    # needs none. "Undetermined by C_info × answered by the messages" is a cell of a partition, and its
-    # error share is the statement.
+    # the cross-tab. Not a threshold on confidence: "undetermined by C_info × answered by the
+    # messages" is a cell of a partition, and its error share is the statement.
     cross = {}
     p0 = arms["pass0"]
     for axis in AXES:
@@ -756,12 +655,12 @@ def measure_condition(
 
 
 def truth_length_pmf(condition_dir: Path, kind: str, max_size: int):
-    """The simulator's own POST-CAPTURE length distribution for one origin class, as a pmf.
+    """The simulator's own post-capture length distribution for one origin class, as a pmf sized
+    ``max_size + 1``; ``None`` when the condition has no truth file or no fragments of that kind.
 
-    ⚠ Post-capture empirical, not the configured ``frag_mean``: capture selects for length, so the
+    Post-capture empirical, not the configured ``frag_mean``: capture selects for length, so the
     configured parameters describe a library that was never sequenced. Same reader as
-    ``calibration_truth_ab.py``'s ceiling arms, and it must stay the same reader — the whole value of
-    a ceiling is that it is the consumer's own lever, not a second one that resembles it.
+    ``calibration_truth_ab.py``'s ceiling arms, so a ceiling is the consumer's own lever.
     """
     path = condition_dir / "truth_fragment_lengths.tsv"
     if not path.is_file():
@@ -781,10 +680,10 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int):
 
 
 def truth_f_gdna(condition_dir: Path):
-    """The library's TRUE gDNA fragment fraction, from the simulator's own origin counts.
+    """The library's true gDNA fragment fraction, from the simulator's own origin counts; ``None``
+    without a ``truth_summary.json``.
 
-    ⚠ From ``truth_summary.json``, never from the condition NAME: "gdna100" is a rate knob, not a
-    fraction, and inferring one from the other is a rename away from silently wrong.
+    From the file, never from the condition name: a name's gDNA token is a rate knob, not a fraction.
     """
     path = condition_dir / "truth_summary.json"
     if not path.is_file():
@@ -880,7 +779,7 @@ def _report_classes(measurements: list[ConditionMeasurement]) -> None:
                 s = m.scores["pass0"][axis][name]
                 mass_share = s.mass / whole.mass
                 err_share = s.abs_err / whole.abs_err if whole.abs_err > 0 else 0.0
-                # ⚠ An EMPTY class still prints its row. A report that only shows non-empty classes
+                # an empty class still prints its row: a report that only shows non-empty classes
                 # can never show that a class it expected is missing.
                 rate = f"{err_share / mass_share:.1f}x" if mass_share > 0 else "—"
                 print(
@@ -909,7 +808,7 @@ def _report_info(measurements: list[ConditionMeasurement]) -> None:
                 s = m.info_scores["pass0"][axis][name]
                 mass_share = s.mass / whole.mass
                 err_share = s.abs_err / whole.abs_err if whole.abs_err > 0 else 0.0
-                # ⚠ ``absent`` scores 0 objects and 0 mass BY DEFINITION — its content is the
+                # ``absent`` scores 0 objects and 0 mass by definition; its content is the
                 # "in class" column, which is why that column exists.
                 print(
                     f"   {'':<5} {name:<22} {m.class_objects['info'][axis][name]:>10,} "
@@ -1020,14 +919,9 @@ def main() -> int:
         truth = truth_f_gdna(args.suite / name)
         if truth is None:
             continue
-        # ⛔ **ONLY AN EXACTLY-ZERO ROW IS SATURATED**, and the distinction is not pedantry: at
-        # truth = 0 any change that lowers the estimate scores better, which is the one-sidedness
-        # that reversed a verdict here once. At truth = 0.01 it does not — a 1 % row is a perfectly
-        # good scoring row and is where real libraries often sit.
-        # ⚠ This test used to be ``truth <= 0.1``, which was correct for a panel whose only values
-        # were 0 and 0.5 and became WRONG the moment the gDNA ladder added rungs at 1 %, 5 % and
-        # 10 %: it would have silently dropped the entire low-gDNA end. A threshold that encodes one
-        # panel's value set is a landmine for the next panel.
+        # only an exactly-zero row is saturated: at truth = 0 any change that lowers the estimate
+        # scores better. At truth = 0.01 it does not, and a 1 % row is a perfectly good scoring row;
+        # a threshold that encodes one panel's value set would drop the next panel's low-gDNA end.
         if truth <= 0.0:
             zero_rows.append(name)
             continue
@@ -1045,7 +939,7 @@ def main() -> int:
     calibration_config = CalibrationConfig()
     work_dir = args.work_dir / "rigel_pass0_oracle"
 
-    # ⭐ ONE condition's cache, then exit — the worker half of `--jobs`. Not part of the public CLI.
+    # one condition's cache, then exit: the worker half of `--jobs`. Not part of the public CLI.
     if args._prewarm is not None:
         c = args._prewarm
         payload = read_scan_cache(Path(args.suite) / "scan_cache" / c, index).payload
@@ -1053,12 +947,12 @@ def main() -> int:
                              work_dir / f"w_{c}", c, payload, args.oracle_cache)
         return 0
 
-    # ── ⭐⭐ PRE-WARM IN PARALLEL, THEN MEASURE SERIALLY OFF WARM CACHES ────────────────────────────
-    # ⛔ The split is what makes `--jobs` safe. `load_or_build_oracle` is a PURE cache fill keyed by the
-    # SHIPPED loader, so filling it in another process cannot move a number: `measure_condition` re-runs
-    # `OracleTruth.from_parts`'s sum-to-full gate over whatever it loads, cached or not. The SCORING loop
-    # stays serial and in order, so `--jobs N` is bit-identical to `--jobs 1`.
-    # ⚠ A worker that fails is NOT fatal: the serial loop rebuilds that condition itself, same code path.
+    # ── pre-warm in parallel, then measure serially off warm caches ──────────────────────────────
+    # The split is what makes `--jobs` safe: `load_or_build_oracle` is a pure cache fill keyed by the
+    # shipped loader, so filling it in another process cannot move a number (`measure_condition`
+    # re-runs the sum-to-full gate over whatever it loads), and the scoring loop stays serial and in
+    # order, so `--jobs N` is bit-identical to `--jobs 1`. A worker that fails is not fatal: the
+    # serial loop rebuilds that condition itself, same code path.
     if args.jobs > 1 and args.oracle_cache is not None and len(scored) > 1:
         import concurrent.futures as _cf
         import subprocess as _sp

@@ -1781,10 +1781,7 @@ private:
         bool any_hit_chimeric = false;
         int32_t worst_chimera_type = CHIMERA_NONE;
 
-        // Count ONE fragment per physical molecule (not per hit).
-        // (Phase A burndown 2026-05-29: per-fragment calibration
-        // observation capture removed; rebuilt against the new
-        // fractional-accumulator binding in Phase B — see
+        // Count ONE fragment per physical molecule, not per hit.
         stats.n_fragments++;
 
         for (const auto& [r1_reads, r2_reads] : all_hits) {
@@ -1893,13 +1890,11 @@ private:
                     // so `sense` is exactly the align==sj bit the 2×2 is built from
                     // and `sj_key_*` is necessarily set.
                     //
-                    // Two parallel int8 label vectors used to be pushed here as well,
-                    // one pair per fragment, and the Python 2×2 was counted from them.
-                    // The table's marginal IS that 2×2 (verified exact on 32 synthetic
-                    // conditions and 4 real libraries), so they were pure duplication
-                    // and were deleted 2026-07-28. `stats.n_strand_trained` below still
-                    // counts the fragments, and Python asserts it against the table's
-                    // total depth — the invariant that one fragment credits one sj.
+                    // The table's marginal IS the 2x2 the strand fit needs, so no
+                    // per-fragment label vector is pushed alongside it.
+                    // `stats.n_strand_trained` below counts the fragments, and Python
+                    // asserts it against the table's total depth — the invariant that
+                    // one fragment credits one sj.
                     SJKey sj_key{result.sj_key_ref, result.sj_key_start,
                                  result.sj_key_end, result.sj_strand};
                     auto& counts = strand_obs.sj_strand_table[sj_key];
@@ -2128,8 +2123,8 @@ private:
             std::vector<double> boundary_spliced_mass(n_boundaries, 0.0);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
             std::vector<double> sj_inv_length_sum(n_sj, 0.0);
-            // ⭐ MULTIPLIED by kNStrandColumns, unlike every other mass here — the sj mass is
-            // the one that carries a strand (owner 2026-08-12; premise in `SpliceJunction::mass`).
+            // MULTIPLIED by kNStrandColumns, unlike every other mass here: the sj mass is the
+            // one that carries a strand (premise in `SpliceJunction::mass`).
             std::vector<double> sj_mass(n_sj * kNStrandColumns, 0.0);
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;

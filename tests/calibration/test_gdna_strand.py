@@ -256,7 +256,7 @@ def test_boundary_seeds_emits_ONE_seed_per_boundary_not_two_per_boundary():
     inflates its apparent sample size by 2× and correlates every pair perfectly. A contiguous boundary is
     a 0-bp boundary with ONE count, so there is ONE seed.
     """
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     # exon+ | intron+ : one boundary, count-observable (no shared EXON bit), oriented POS.
     substrate, region_arrays, region_density = _boundary_parts(
@@ -272,7 +272,7 @@ def test_boundary_seeds_emits_ONE_seed_per_boundary_not_two_per_boundary():
 
 def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
     """A NEG-strand boundary orients to the NEG genome column; the sense count is not always ``pos``."""
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_NEG, 0], boundary_pos=[70.0], boundary_neg=[30.0]
@@ -286,7 +286,7 @@ def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
 
 def test_an_intergenic_flank_is_a_strand_WILDCARD():
     """Intergenic carries no transcript, so a gene boundary is oriented by its gene flank."""
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [0, BIT_INTRON_NEG], boundary_pos=[70.0], boundary_neg=[30.0]
@@ -297,7 +297,7 @@ def test_an_intergenic_flank_is_a_strand_WILDCARD():
 
 def test_an_opposite_strand_boundary_is_not_strand_observable():
     """``{POS, NEG}`` leaves 'sense' undefined, so the boundary cannot seed the fit at all."""
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS, BIT_INTRON_NEG], boundary_pos=[70.0], boundary_neg=[30.0]
@@ -318,7 +318,7 @@ def test_an_AMBIG_flank_cannot_seed():
     ⚠ The fixture uses INTRON bits on both strands, not exon bits: an AMBIG flank must still be
     count-observable, or the test would pass for the wrong reason.
     """
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
@@ -333,7 +333,7 @@ def test_an_AMBIG_flank_cannot_seed():
 def test_a_boundary_inside_one_exon_is_not_count_observable():
     """A shared exon bit means an exon-strand continues across the boundary, so unspliced MATURE RNA
     crosses it and its count is not gDNA."""
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_EXON_POS, BIT_EXON_POS], boundary_pos=[70.0], boundary_neg=[30.0]
@@ -344,7 +344,7 @@ def test_a_boundary_inside_one_exon_is_not_count_observable():
 
 def test_boundary_seeds_never_straddle_a_reference():
     """Two single-region references own ZERO boundaries between them — nothing can leak across."""
-    from rigel.calibration.strand_deconv import boundary_seeds
+    from rigel.calibration.gdna_strand import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(
         [BIT_INTRON_POS, BIT_INTRON_POS], boundary_pos=[], boundary_neg=[], ref_id=[0, 1]

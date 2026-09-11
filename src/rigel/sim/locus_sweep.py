@@ -485,8 +485,8 @@ def build_sweep_grid(sweep_config, patterns_config, all_t_ids, nrna_labels, para
         dims["_pattern_idx"] = list(range(len(patterns_config)))
 
     # Independent sweep params (skip pattern-linked entities and
-    # config-field names — those belong in params:, but we accept
-    # them here for backward compatibility)
+    # config-field names — those belong in params:, though a sweep
+    # entry naming one is accepted here too)
     for key, spec in sweep_config.items():
         if key in linked_names:
             continue

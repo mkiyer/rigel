@@ -1,28 +1,24 @@
-"""⭐⭐⭐ **ARE THE FOUR gDNA FRAGMENT-LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH
-MODEL SAY AGAINST TRUTH? — no solver, no model, straight off the origin-split oracle.**
+"""Are the four gDNA fragment-length pools actually pure gDNA, and what does the shipped length model
+say against truth? No solver and no model: straight off the origin-split oracle.
 
-`fl.py` asserts "Every pool is PURE BY CONSTRUCTION" and `scan_payload.py` labels two of them `pure gDNA`.
-This measures that assertion. Each oracle condition holds a SEPARATE full scan per origin (`gdna`, `mrna`,
+`fl.py` treats every pool as pure by construction and `scan_payload.py` labels two of them pure gDNA;
+this measures that claim. Each oracle condition holds a separate full scan per origin (`gdna`, `mrna`,
 `nrna`), so every pool's composition and every component's length distribution are directly observable.
+Two tables per condition. Composition: per pool, the gDNA / nascent / mature fragment counts, each
+component's mean length, and the length bias the mixture imposes on that pool. Shipped against truth:
+`TRUE` (the gDNA partition's own lengths, what the model should estimate), `POOLED` (the four pools as
+they actually are) and `SHIPPED` (`build_fl_models(...).gdna_pmf`, opportunity-divided and shrunk), so
+that `pool-true` (what contamination costs) and `ship-pool` (what the opportunity divisor and the
+shrinkage cost) are attributed apart and never confused. It measures nothing on an equal-length panel:
+the bias is the RNA share times the length gap, and the ladder and the test chromosome give both
+components equal lengths deliberately, so run it only where the two components' fragment lengths differ.
+It needs the oracle cache with its origin partitions (`panel.py cache`), not just a scan cache.
 
-Two panels per row:
+Usage::
 
-* **COMPOSITION** — per pool: the gDNA / nascent / mature fragment counts, each component's mean length,
-  and the length bias the mixture imposes on that pool.
-* **SHIPPED vs TRUTH** — `TRUE` (the gDNA partition's own lengths, what the model should estimate),
-  `POOLED` (the four pools as they actually are) and `SHIPPED` (`build_fl_models(...).gdna_pmf`, i.e.
-  opportunity-divided AND empirical-Bayes shrunk). ⭐ **Read `pool−true` against `ship−pool`**: the first is
-  what CONTAMINATION costs, the second what the OPPORTUNITY DIVISOR and the SHRINKAGE cost, and confusing
-  them has already produced one wrong attribution.
-
-⛔⛔ **RUN IT ON A PANEL WHERE THE TWO COMPONENTS' FRAGMENT LENGTHS DIFFER, OR IT MEASURES NOTHING.** The
-bias is `RNA_share × (len_RNA − len_gDNA)`, and the ladder and test chromosome give both components EQUAL
-lengths deliberately (a forcing function for the EM). On those panels a 95 %-contaminated pool reads under
-a bp of error; on the fl-gap arms the same pool reads over a hundred. That is why this defect shipped.
-
-⚠ Needs the ORACLE cache with its origin partitions (`panel.py cache`), not just a scan cache.
-
-    python scripts/design/fl_pool_purity.py --panel <scenarios dir> --index <index dir> [--conditions ...]
+    python scripts/design/fl_pool_purity.py --panel <scenarios dir> --index <index dir>
+    python scripts/design/fl_pool_purity.py --panel DIR --index DIR --conditions <cond> ...
+    python scripts/design/fl_pool_purity.py --panel DIR --index DIR --no-composition   # the second table only
 """
 
 from __future__ import annotations

@@ -1,78 +1,40 @@
-"""IS THE MEASURED TOTAL A TRUE TOTAL? — the composition-free per-slot abundance against certified
-truth, on every condition, with the wall mask checked against an independent enumeration.
-
-⭐⭐⭐ **THE VALIDATION RUNG. A MEASUREMENT: no solver runs, no EM, no BAM re-scan, and nothing in
-``src/`` is patched.** ``rigel.calibration.total_abundance`` claims that a slot's TOTAL fragment
-density is measurable with no composition model in it — the START/END region banks over ``ell``,
-side-selected by the wall rule, plus the exact reciprocal-opportunity banks and the certified spliced
-incidence at a BOUNDARY. This instrument is what decides whether that claim survives contact with the
-certified per-slot truth, before any consumer reads the number.
-
-Five arms, and they answer different questions on purpose — read ⓔ first.
-
-**ⓔ THE START/END AGREEMENT ARM — the decisive test of the WALL RULE, and the only one that is
-FIELD-FREE.** ``S/ell`` and ``E/ell`` estimate the SAME per-region rate with the SAME opportunity
-``ell`` for every fragment length, reading whatever field capture produced at that very slot. So no
-uniformity assumption and no length distribution enter, and the rule's content is a DIRECTION::
-
-    both sides exact         ->  the two must AGREE            ( Sum E / Sum S = 1 )
-    start exact, end BOUND   ->  E is depressed                ( < 1 )
-    end exact, start BOUND   ->  S is depressed                ( > 1 )
-
-⛔ A mask assigned at random reads ~1 on all three; a mask with the sides BACKWARDS inverts the last
-two. ⭐ **Measured on the ladder under capture — the hardest case — 1.0060 / 0.8018 / 1.2461.**
-
-**ⓐ THE TRUNCATION LAW — the START bank is a TOTAL where the CONTAINED bank is a SHAPE.** Per
-component and per region the two are estimators of the same density differing only by support::
-
-    E[S_c / ell]      =  rho_c                     <- the total
-    E[Cinv_c]         =  rho_c * P_c(w <= ell)     <- the shipped bank, truncated
-
-so their ratio must reproduce ``P_c(w <= ell)``, which each origin partition's own deposit histogram
-states exactly. ⛔⛔ **IT ASSUMES LOCAL FIELD UNIFORMITY AND CAPTURE VIOLATES THAT, WHICH IS A FINDING
-RATHER THAN A FAILURE**: the two banks weight the region's positions differently (a start anywhere in
-the region, versus a fragment wholly inside it), so under a probe-shaped field they are different
-weighted averages of it — legitimately, and by up to 30x on intron/intergenic regions. Read it at
-capture-OFF, where it is the claim's confirmation (**1.00025 / 1.00045** on the ladder over 14.4 M
-fragments), and read ⓔ under capture. Aggregated as a RATIO OF SUMS inside ``ell`` bins
-(``TRAPS: a-mean-of-ratios-inherits-the-partition``).
-
-**ⓑ THE UNIFORM-FIELD ARM — the absolute total, in FRAGMENTS, and STAMPED VACUOUS under capture.**
-Against the per-reference per-component realized rate ``rho_c = Sigma S_c / Sigma ell``, whose sum over
-components is the slot's true total density where the field is uniform. Error is reported as
-``|measured - true| * ell`` — misplaced fragments, not a ratio. ⛔ Under capture the gDNA field is
-deliberately non-uniform, so this arm is not a measurement there and says so, exactly as
-``calibration_oracle.py`` stamps its own field gate.
-
-**ⓒ THE WALL MASK against an INDEPENDENT ENUMERATION.** The shipped mask reads its mature distances
-from a vectorised kernel; this arm recomputes them with a per-transcript Python loop over
-``index.get_exon_intervals`` — a second implementation sharing no helper with the first — and demands
-EXACT agreement. It then reports the exposure (what fraction of START mass sits on a wall-bound or
-double-walled region) so the wall is a number rather than a worry.
-
-**ⓓ THE BOUNDARY ARM.** A crossing's opportunity is ``w - 1`` and the deposit ``1/(w - 1)``, so
-``E[Sigma] = rho`` for any real library — no support factor and no wall. Scored against the same
-uniform-field truth, and its residual is the control for ⓑ: the boundary axis has no truncation and no
-wall, so an error there is a field error and not an estimator error.
-
-⛔ Every arm is scored per stratum with the 0.8.0 scope stamped, ``g00`` on its own row, and the
-DEFERRED stratum reported rather than dropped. Gates refuse the run rather than warning: the ledger
-must close on every payload, the partitions must sum to the whole, and the mask's two implementations
-must agree.
+"""Is the measured total a true total? ``rigel.calibration.total_abundance`` claims a slot's total
+fragment density is measurable with no composition model in it — the START/END region banks over
+``ell``, side-selected by the wall rule, plus the reciprocal-opportunity banks and the certified
+spliced incidence at a boundary — and this instrument scores that claim against the origin-split
+oracle's partitions on every cached condition. A measurement: no solver runs, no EM, no BAM re-scan,
+nothing in ``src/`` is patched. Read arm ⓔ first, the START/END agreement: ``S/ell`` and ``E/ell``
+estimate the same per-region rate with the same opportunity, reading whatever field capture
+produced at that slot, so no uniformity or length distribution enters and the wall rule's content
+is a direction — both sides exact must agree (``Sum E / Sum S = 1``), an end-bound side depresses
+``E`` (< 1), a start-bound side depresses ``S`` (> 1); a random mask reads ~1 on all three and a
+backwards mask inverts the last two. Arm ⓐ is the truncation law (``E[S/ell] = rho`` against the
+contained bank's ``rho * P(w <= ell)``, aggregated as a ratio of sums inside ``ell`` bins, split by
+wall class and by component; the gDNA rows are decisive since gDNA cannot splice), which assumes a
+locally uniform field and so is read at capture-OFF, its ⓐ′ variant re-pricing the support per
+region class as the capture diagnostic. Arm ⓑ is the absolute gDNA rate in misplaced fragments
+against the per-reference uniform-field truth and is stamped vacuous under capture, where the gDNA
+field is non-uniform by design. Arm ⓒ checks the shipped wall mask against an independent
+per-transcript enumeration sharing no helper with the kernel, demanding exact agreement, and reports
+the wall exposure. Arm ⓓ scores the boundary axis, which has no truncation and no wall, as ⓑ's
+control. Arm ⓕ prices what each consumer pool would see if it swapped estimators, against the
+gDNA-only start rate; its exon row is scored on the total and its ``new/truth`` is circular by
+construction, so read ``shipped/truth`` there. Every arm is reported per stratum with the deferred
+stratum kept, and the gates refuse the run rather than warn: the ledger must close on every payload,
+the partitions must sum to the whole, and the mask's two implementations must agree.
 
 Usage::
 
-    python scripts/design/total_abundance_audit.py                    # every cached condition
-    python scripts/design/total_abundance_audit.py --condition NAME   # one condition, full detail
-    python scripts/design/total_abundance_audit.py --suite ... --index ...   # the other panel
-    python scripts/design/total_abundance_audit.py --out rows.tsv     # one row per condition x arm
-    python scripts/design/total_abundance_audit.py --self-test        # perturbed, no I/O
+    python scripts/design/total_abundance_audit.py                          # every cached condition
+    python scripts/design/total_abundance_audit.py --condition NAME         # one condition, full detail
+    python scripts/design/total_abundance_audit.py --suite ... --index ...  # the other panel
+    python scripts/design/total_abundance_audit.py --out rows.tsv           # one row per condition x consumer pool
+    python scripts/design/total_abundance_audit.py --self-test              # perturbed, no I/O
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -82,17 +44,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-OC = _sibling("object_composition.py")
+OC = sibling("object_composition.py")
 PVO = OC.PVO
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
@@ -121,11 +76,11 @@ from rigel.types import Strand  # noqa: E402
 DEFAULT_SUITE = OC.DEFAULT_SUITE
 DEFAULT_INDEX = OC.DEFAULT_INDEX
 
-#: the three origin partitions whose START banks must sum to the whole. ⭐ gdna/mrna/nrna, not the
-#: transcript-strand split: the truncation law is per POPULATION and the fragment-length pmf that
+#: the three origin partitions whose START banks must sum to the whole — gdna/mrna/nrna, not the
+#: transcript-strand split: the truncation law is per population and the fragment-length pmf that
 #: truncates it is that population's own.
 ORIGINS = ("gdna", "mrna", "nrna")
-#: ell bins for the truncation law, in bp. ⚠ Bins rather than per-region ratios because the law is a
+#: ell bins for the truncation law, in bp. Bins rather than per-region ratios because the law is a
 #: ratio of expectations: a per-region ratio of two small counts has no usable distribution.
 ELL_BINS = (0, 50, 100, 200, 400, 800, 1600, 1 << 62)
 
@@ -139,9 +94,9 @@ def enumerate_mature_walls(index, region_arrays) -> MatureWallDistances:
     """The mature wall distances, recomputed the slow obvious way: for every transcript, walk its own
     exons, accumulate spliced offsets by hand, and write MAX per (region, strand).
 
-    ⛔ Deliberately NOT vectorised and deliberately not sharing a line with
+    Deliberately not vectorised and not sharing a line with
     :func:`~rigel.calibration.splice_graph.mature_wall_distances_kernel` — an enumeration that reuses
-    the implementation's own machinery gates nothing. This is the RANK-3 collapse stated directly:
+    the implementation's own machinery gates nothing. It states the collapse directly:
     ``d_high(r) = MAX`` downstream spliced template over the templates covering ``r``.
     """
     starts = np.asarray(region_arrays.start, np.int64)
@@ -158,8 +113,8 @@ def enumerate_mature_walls(index, region_arrays) -> MatureWallDistances:
         return MatureWallDistances(d_low=d_low, d_high=d_high, covered=covered)
 
     # a plain per-reference list of (start, end, row); no CSR arithmetic, so an offset bug cannot be
-    # shared with the kernel. ⚠ Sorted and bisected rather than scanned: at panel scale a full scan
-    # per exon is ~1e8 Python steps. The bisect locates the first candidate; the walk below is an
+    # shared with the kernel. Sorted and bisected rather than scanned (a full scan per exon is ~1e8
+    # Python steps at panel scale); the bisect locates the first candidate and the walk below is an
     # explicit loop, which is what keeps this a second implementation rather than a second call.
     import bisect
 
@@ -170,11 +125,10 @@ def enumerate_mature_walls(index, region_arrays) -> MatureWallDistances:
         v.sort()
     starts_of_ref = {k: [x[0] for x in v] for k, v in rows_of_ref.items()}
 
-    # ⛔ SYNTHETIC spans are excluded, and this filter is the POPULATION rule rather than a detail:
-    # a synthetic entity is a manufactured nascent template and a nascent molecule extends
-    # GENOMICALLY, which is the contiguous reach's arm. ⚠ `get_exon_intervals` DOES return a
-    # synthetic span's own interval, so omitting this reads 9 nascent spans as mature templates —
-    # measured, on the test chromosome, as 57 differing distances against the shipped kernel.
+    # SYNTHETIC spans are excluded, and this filter is the population rule rather than a detail: a
+    # synthetic entity is a manufactured template for RNA that extends GENOMICALLY, which is the
+    # contiguous reach's arm, not a spliced wall. `get_exon_intervals` DOES return a synthetic span's
+    # own interval, so omitting this reads those spans as mature templates and disagrees with the kernel.
     synthetic = (
         tdf["is_synthetic"].to_numpy(dtype=bool)
         if "is_synthetic" in tdf.columns
@@ -237,7 +191,7 @@ def _pmf_cdf(deposited_lengths: np.ndarray, ell: np.ndarray) -> np.ndarray:
 
 def _unspliced_hist(payload) -> np.ndarray:
     """This partition's deposit histogram with the SPLICED pool removed — the support the contained
-    bank actually has. ⛔ Refuses a negative residue rather than clipping it: the spliced pool is a
+    bank actually has. Refuses a negative residue rather than clipping it: the spliced pool is a
     subset of the deposits by construction, and a negative would mean the two disagree."""
     from rigel.scan_payload import POOL_RNA_SPLICED
 
@@ -333,19 +287,17 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
     mask = build_region_wall_mask(ra, mature, reach_lo, reach_hi, w_max=w_max)
     total = build_total_abundance(chain, substrate, ra, geometry, mask, rna_pmf)
 
-    # ── ⓔ THE START/END AGREEMENT ARM — the decisive WALL test, and the only arm that is FIELD-FREE
-    #
-    # ⭐⭐⭐ **THIS IS THE ARM THAT VALIDATES THE WALL RULE, AND IT WORKS UNDER CAPTURE.** S and E are
-    # two estimators of the SAME per-region rate, both with opportunity `ell` for every fragment
-    # length, both reading whatever field capture produced at that slot — so no uniformity assumption
-    # enters and no length distribution is needed. The rule's content is exactly:
+    # ── ⓔ the START/END agreement arm — the decisive wall test, and the only arm that is field-free.
+    # S and E are two estimators of the SAME per-region rate, both with opportunity `ell` for every
+    # fragment length, both reading whatever field capture produced at that slot, so no uniformity
+    # assumption enters and no length distribution is needed. The rule's content:
     #
     #   both sides exact  ->  S/ell and E/ell must AGREE          (ratio 1.000)
     #   start exact, end bound  ->  E is depressed, so E/S < 1
     #   end exact, start bound  ->  S is depressed, so E/S > 1
     #
-    # ⛔ A mask that classified at random would give ratio ~1 in all three rows; a mask that has the
-    # sides BACKWARDS inverts rows 2 and 3. So the arm has a direction, not just a magnitude.
+    # A mask that classified at random would give ratio ~1 in all three rows; a mask with the sides
+    # BACKWARDS inverts rows 2 and 3. So the arm has a direction, not just a magnitude.
     se: list[dict] = []
     s_ok_all = np.asarray(mask.start_exact, bool)
     e_ok_all = np.asarray(mask.end_exact, bool)
@@ -367,24 +319,20 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
             }
         )
 
-    # ── ⓐ the truncation law, per component, SPLIT BY WALL CLASS — UNIVERSAL
-    #
-    # ⭐⭐ The split is the decisive part, not a refinement. On a region whose START side is wall-EXACT
+    # ── ⓐ the truncation law, per component, SPLIT BY WALL CLASS.
+    # The split is the decisive part, not a refinement: on a region whose START side is wall-exact
     # the law must read 1.000 for EVERY component; where the wall binds, S is depressed and the ratio
-    # rises — and it rises by COMPONENT, because gDNA's template is the chromosome (no wall at all)
-    # while a mature template ends at its own TES. A pooled ratio mixes the two and reads neither.
+    # rises — by COMPONENT, because gDNA's template is the chromosome (no wall at all) while a
+    # spliced template ends at its own TES. A pooled ratio mixes the two and reads neither.
     trunc: list[dict] = []
     for k in parts:
-        # ⛔⛔ **THE SUPPORT IS THE UNSPLICED LENGTH DISTRIBUTION, AND THE REASON IS A CONFOUND WORTH
-        # NAMING**: a SPLICED fragment books a START (its first covered base lands in some region)
-        # but can NEVER be CONTAINED — both endpoints of an annotated intron are region bounds, so
-        # no spliced fragment touches the contained axis at all (`DESIGN.md` §3.1). Using the full
-        # histogram therefore prices C's support with a population C cannot hold. ⚠ Removing it from
-        # the DIVISOR is exact; the residue in the NUMERATOR `S` is not removable from the banks —
-        # `region_start_count` has no spliced/unspliced split — so the RNA arms keep a confound
-        # proportional to their spliced share, which is printed beside them. ⭐ gDNA CANNOT SPLICE
-        # (AXIOM 0, and the oracle asserts it), so for gDNA the law is EXACTLY formable and the gDNA
-        # rows are the decisive ones.
+        # the support is the UNSPLICED length distribution: a spliced fragment books a START (its
+        # first covered base lands in some region) but can never be CONTAINED — both endpoints of an
+        # annotated intron are region bounds — so the full histogram would price C's support with a
+        # population C cannot hold. Removing it from the DIVISOR is exact; the residue in the
+        # NUMERATOR `S` is not removable from the banks (`region_start_count` has no spliced/unspliced
+        # split), so the RNA arms keep a confound proportional to their spliced share, printed beside
+        # them. gDNA cannot splice, so for gDNA the law is exactly formable and its rows are decisive.
         unspl = _unspliced_hist(parts[k])
         pk = _pmf_cdf(unspl, ell.astype(np.int64))
         pred = (S[k] / np.where(ell > 0, ell, 1.0)) * pk
@@ -411,11 +359,10 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
                     }
                 )
 
-    # ── THE REALISED FRAGMENT-LENGTH GAP, per condition, from the partitions' own deposit histograms.
-    # ⭐⭐ On the fl-gap SIDE panel every conclusion hangs off this number, and "configured" is not
+    # ── the REALISED fragment-length gap, per condition, from the partitions' own deposit histograms.
+    # On the fl-gap side panel every conclusion hangs off this number, and "configured" is not
     # "realised": the sampler truncates to [frag_min, frag_max], and an mRNA fragment must additionally
-    # fit inside its transcript while gDNA need not. So it is MEASURED here and printed on every row
-    # (`gdna_ladder.yaml`'s header makes the same point about its equal arms).
+    # fit inside its transcript while gDNA need not. So it is measured here and printed on every row.
     def _mu(hist):
         h = np.asarray(hist, np.float64)
         tot = h.sum()
@@ -432,17 +379,14 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
     }
     fl["gap"] = fl["mu_rna"] - fl["mu_gdna"]
 
-    # ── ⓕ THE CONSUMER POOLS — what would actually CHANGE if each consumer swapped estimators
-    #
-    # ⭐⭐⭐ **THIS IS THE ARM THAT PRICES A SWAP, AND IT NEEDS NO `src/` CHANGE.** Every consumer below
-    # forms a pooled gDNA rate today as `Σcount / ΣE_contained` — unbiased, but the fragment-length pmf
-    # enters the DIVISOR. The candidate replacement is `Σcounts / Σexposure` from
-    # `total_abundance.region_counts_and_exposure`, where the exposure is the region's own length and no
-    # pmf enters at all. ⛔ Both are scored against the SAME truth: the gDNA-only start rate over the
-    # same population, taken from the `gdna` origin partition — which is untruncated and pmf-free, and
-    # is therefore not the target of either estimator's own machinery.
-    # ⚠ Each population's predicate is IMPORTED from the module that owns it, never restated here: a
-    # second copy of a selection is how a consumer and its own audit drift apart.
+    # ── ⓕ the consumer pools — what would change if each consumer swapped estimators, with no `src/`
+    # change. Every consumer below forms a pooled gDNA rate as `Σcount / ΣE_contained` — unbiased, but
+    # the fragment-length pmf enters the DIVISOR. The candidate replacement is `Σcounts / Σexposure`
+    # from `total_abundance.region_counts_and_exposure`, where the exposure is the region's own length
+    # and no pmf enters. Both are scored against the SAME truth: the gDNA-only start rate over the same
+    # population, taken from the `gdna` origin partition — untruncated and pmf-free, so not the target
+    # of either estimator's own machinery. Each population's predicate is IMPORTED from the module that
+    # owns it, never restated here: a second copy of a selection is how a consumer and its audit drift.
     from rigel.calibration.signature import (
         BIT_EXON_NEG,
         BIT_EXON_POS,
@@ -460,10 +404,9 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
         _GENE_BITS
     )  # the intergenic pool is `coarse == INTERGENIC` below; kept for the exon mask only
     coarse = coarse_type_array(sig_i)
-    # ⭐ The shipped divisor, obtained by PROJECTION exactly as `calibrate` does it, never recomputed
+    # the shipped divisor, obtained by PROJECTION exactly as `calibrate` does it, never recomputed
     # here: `contained_eff_length` was already applied at REGION slots by `build_region_geometry`, and a
-    # second call would put two implementations of one quantity in the tree (the reason `_project_eff`
-    # exists at all).
+    # second call would put two implementations of one quantity in the tree.
     eff_g_region = np.zeros(ell.shape[0], np.float64)
     eff_g_region[obj[is_region]] = np.asarray(geometry.eff_gdna, np.float64)[is_region]
     contained = np.asarray(substrate.region_contained.count, np.float64).sum(axis=1)
@@ -482,13 +425,12 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
             np.asarray(obs_region, bool) & (eff_g_region > 0.0),
         ),
     )
-    # ⭐⭐ **THE EXON ROW IS WHERE THE DEFECT ACTUALLY LIVES, and it is scored on the TOTAL rather than
-    # on a gDNA rate** — an exon's total is not a gDNA density (RNA is there by definition), so the
-    # pure-gDNA truth above does not apply. What IS measurable is the shipped RECIPROCAL bank's
-    # under-read of the total: `inv_abundance` at a REGION reads `rho*P(w<=ell)` and the exon median is
-    # ~98 bp, so this row prints the truncation factor on the population that carries it.
-    # ⛔ `new/truth` on this row is CIRCULAR BY CONSTRUCTION (both are S over ell, differing only by
-    # the wall restriction) and is printed only to show the wall's cost — it validates nothing. The
+    # the exon row is scored on the TOTAL rather than on a gDNA rate — an exon's total is not a gDNA
+    # density (RNA is there by definition), so the pure-gDNA truth above does not apply. What IS
+    # measurable is the shipped RECIPROCAL bank's under-read of the total: `inv_abundance` at a REGION
+    # reads `rho*P(w<=ell)`, and short exons are where that truncation factor bites.
+    # `new/truth` on this row is CIRCULAR BY CONSTRUCTION (both are S over ell, differing only by the
+    # wall restriction) and is printed only to show the wall's cost — it validates nothing. The
     # non-circular number is `shipped/truth`.
     exon_sel = (coarse == int(RegionType.EXON)) & (ell > 0)
     exon_row = None
@@ -538,16 +480,14 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
             }
         )
 
-    # ── ⓐ′ the same law with a PER-REGION-CLASS support — the capture diagnostic
-    #
-    # ⭐⭐ **WHY THIS ARM EXISTS: ⓐ's support is a GLOBAL histogram, and capture makes the fragment
-    # length distribution vary SPATIALLY.** The contained bank is truncated by the LOCAL distribution,
-    # so a global CDF prices it wrongly wherever capture has selected lengths — which is a comparator
-    # limitation, not necessarily an estimator defect, and the two are separated here rather than
-    # argued about. The accumulator already keeps the gDNA deposit histogram PER REGION CLASS
-    # (`pool_lengths`: intergenic-contained and intron-contained are the two whose population is
-    # exactly a contained gDNA fragment), so restricting to those two classes and using each one's
-    # OWN pool is the same law with the right support and no new model.
+    # ── ⓐ′ the same law with a PER-REGION-CLASS support — the capture diagnostic.
+    # ⓐ's support is a GLOBAL histogram, and capture makes the fragment length distribution vary
+    # SPATIALLY: the contained bank is truncated by the LOCAL distribution, so a global CDF prices it
+    # wrongly wherever capture has selected lengths — a comparator limitation, not necessarily an
+    # estimator defect, and the two are separated here. The accumulator keeps the gDNA deposit
+    # histogram PER REGION CLASS (`pool_lengths`: intergenic-contained and intron-contained are the
+    # two whose population is exactly a contained gDNA fragment), so restricting to those two classes
+    # and using each one's OWN pool is the same law with the right support and no new model.
     from rigel.scan_payload import POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC
 
     g_pools = np.asarray(parts["gdna"].pool_lengths, np.float64)
@@ -581,14 +521,13 @@ def measure(payload, parts, index_parts, condition: str) -> dict:
                 }
             )
 
-    # ── ⓑ the uniform-field arm — gDNA ONLY, the absolute rate, split by wall class
-    #
-    # ⛔⛔ **gDNA IS THE ONLY COMPONENT WITH A UNIFORM-FIELD TRUTH, and pooling the three was the first
-    # draft's error.** RNA density varies per transcript BY DESIGN (that is what abundance means), so
-    # a per-reference pooled RNA rate is not that region's truth and scoring against it measures the
-    # panel's expression profile, not the estimator. gDNA off capture is uniform — that is exactly
-    # what `calibration_oracle.py`'s gdna-field-uniformity gate certifies — so the gDNA start rate
-    # has a truth that does NOT come from the region's own bank, and the comparison is not circular.
+    # ── ⓑ the uniform-field arm — gDNA ONLY, the absolute rate, split by wall class.
+    # gDNA is the only component with a uniform-field truth. RNA density varies per transcript BY
+    # DESIGN (that is what abundance means), so a per-reference pooled RNA rate is not that region's
+    # truth and scoring against it would measure the panel's expression profile, not the estimator.
+    # gDNA off capture is uniform — what `calibration_oracle.py`'s gdna-field-uniformity gate certifies
+    # — so the gDNA start rate has a truth that does NOT come from the region's own bank, and the
+    # comparison is not circular.
     n_refs = int(ref_id.max()) + 1 if ref_id.size else 0
     num = np.bincount(ref_id, weights=S["gdna"], minlength=n_refs)
     den = np.bincount(ref_id, weights=ell, minlength=n_refs)
@@ -685,8 +624,8 @@ def load_condition(suite: Path, condition: str, index, cached: dict) -> tuple[ob
 
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): the audited total and the origin partitions
-    # it is scored against are drained consistently (`lift_drain_parts` replays the whole's choices).
+    # the drained frame: the audited total and the origin partitions it is scored against are drained
+    # consistently (`lift_drain_parts` replays the whole's choices).
     payload = kw["payload"]
     from calibration._oracle import lift_drain_parts
 
@@ -861,7 +800,7 @@ def self_test() -> int:
     n_r = ell.shape[0]
     z = np.zeros((n_r, 2))
     mature = MatureWallDistances(d_low=z.copy(), d_high=z.copy(), covered=np.zeros((n_r, 2), bool))
-    #: ⭐ GENEROUS reach on purpose: with a zero reach every RNA-admitting region is double-walled and
+    #: generous reach on purpose: with a zero reach every RNA-admitting region is double-walled and
     #: the exposure arm has nothing to report. Here only the CONTIG walls bind, which is the shape the
     #: gDNA-only case has on a real reference.
     reach = (np.full((2, 2), 5000.0), np.full((2, 2), 5000.0))
@@ -914,7 +853,7 @@ def self_test() -> int:
     check("the stratum parses", d["stratum"] == ("stranded", "capture OFF"))
     check("the scope is stamped", d["scope"] == "IN SCOPE")
 
-    # ⛔ a partition that does not sum to the whole must FAIL the gate, not be absorbed
+    # a partition that does not sum to the whole must FAIL the gate, not be absorbed
     broken = dict(parts_u)
     broken["gdna"] = dataclasses.replace(
         parts_u["gdna"],
@@ -926,7 +865,7 @@ def self_test() -> int:
         not next(g for g in d2["gates"] if "sum-to-full[start]" in g["gate"])["ok"],
     )
 
-    # ⛔ a payload whose ledger does not close must fail its own gate
+    # a payload whose ledger does not close must fail its own gate
     d3 = measure(
         dataclasses.replace(
             p_u, region_end_count=np.array([[6, 6], [6, 6], [6, 7]], dtype=np.uint32)
@@ -940,7 +879,7 @@ def self_test() -> int:
         not next(g for g in d3["gates"] if "ledger-closes[full]" in g["gate"])["ok"],
     )
 
-    # ⭐ the truncation law: a DELTA pmf at 60 with ell = 100 gives P(w <= ell) = 1, so the contained
+    # the truncation law: a DELTA pmf at 60 with ell = 100 gives P(w <= ell) = 1, so the contained
     # bank and S/ell must agree exactly — the law with its factor equal to one.
     ratios = [t["ratio"] for t in d["truncation"] if np.isfinite(t["ratio"])]
     check(
@@ -948,7 +887,7 @@ def self_test() -> int:
         bool(ratios) and max(abs(r - 1.0) for r in ratios) < 1e-9,
     )
 
-    # ⛔ and it must MOVE when the contained bank is scaled — a law that cannot fail measures nothing
+    # and it must MOVE when the contained bank is scaled — a law that cannot fail measures nothing
     s_u = np.asarray(uniform, np.float64).sum(1)
     p_h, parts_h = condition_of(uniform, uniform, contained=(s_u / ell) * 0.5)
     d5 = measure(p_h, parts_h, parts_for(p_h), COND)
@@ -958,8 +897,8 @@ def self_test() -> int:
         bool(r5) and max(abs(r - 0.5) for r in r5) < 1e-9,
     )
 
-    # ⭐ the truncation law must also READ a real truncation: a pmf at 150 against ell = 100 gives
-    # P(w <= ell) = 0, so the contained bank is 0 and the ratio must be 0 — the 11.6×-at-98 bp defect
+    # the truncation law must also READ a real truncation: a pmf at 150 against ell = 100 gives
+    # P(w <= ell) = 0, so the contained bank is 0 and the ratio must be 0 — the short-exon under-read
     # in its extreme form.
     p_t, parts_t = condition_of(uniform, uniform, contained=np.zeros(n_r), pmf_at=150)
     d_t = measure(p_t, parts_t, parts_for(p_t), COND)
@@ -969,13 +908,13 @@ def self_test() -> int:
         or not d_t["truncation"],
     )
 
-    # ⭐ the uniform-field arm: uniform by construction, so the error must be exactly 0
+    # the uniform-field arm: uniform by construction, so the error must be exactly 0
     check(
         "the uniform-field error is ~0 on a uniform synthetic field",
         d["field_err_fragments"] < 1e-9,
     )
 
-    # ⛔ and it must be nonzero when the field is made lumpy
+    # and it must be nonzero when the field is made lumpy
     lumpy = [[15, 15], [3, 0], [3, 0]]
     p_l, parts_l = condition_of(lumpy, lumpy)
     d6 = measure(p_l, parts_l, parts_for(p_l), COND)
@@ -991,7 +930,7 @@ def self_test() -> int:
         "nothing is double-walled with a generous reach on a 300 bp reference",
         d["exposure"]["double_walled_frac_mass"] == 0.0,
     )
-    # ⛔ ... and a longer w_max must move the verdict, by an amount stated in advance. At w_max = 200
+    # ... and a longer w_max must move the verdict, by an amount stated in advance. At w_max = 200
     # the bar is 199: the INTERIOR region has 100 bases either side and goes double-walled, while the
     # two outer ones still clear on their one open side (200 >= 199). So exactly its third of the
     # START mass, and no more — an exposure that cannot move measures nothing.
@@ -1002,10 +941,10 @@ def self_test() -> int:
         abs(d7["exposure"]["double_walled_frac_mass"] - 1.0 / 3.0) < 1e-12,
     )
 
-    # ⛔ the independent enumeration must agree with the kernel on a hand-built annotation
+    # the independent enumeration must agree with the kernel on a hand-built annotation
     check("the enumeration agrees with the kernel", _enumeration_agrees())
 
-    # ⛔ ... and must DISAGREE when the kernel is fed a different annotation — a comparator that
+    # ... and must DISAGREE when the kernel is fed a different annotation — a comparator that
     # cannot fail is not a comparator
     check("the enumeration comparator can fail", _enumeration_can_fail())
 
@@ -1024,11 +963,10 @@ def _split_three(payload, *, pmf_at: int = 60):
     """Split a payload's banks three ways so the parts sum to the whole exactly, each part INTERNALLY
     consistent: the contained bank is split in PROPORTION to that part's own start bank.
 
-    ⚠ A test fixture, not a truth: it exists so the sum-to-full gate has something consistent to pass
-    and a deliberate over-sum has something to break. ⛔ The proportional split is the point — an
+    A test fixture, not a truth: it exists so the sum-to-full gate has something consistent to pass
+    and a deliberate over-sum has something to break. The proportional split is the point — an
     equal-thirds contained bank against an unequal start split makes the truncation law read a
-    fixture artefact rather than the estimator (measured: it read 0.92/1.00/1.08 and the first draft
-    of this self-test failed on its own fixture).
+    fixture artefact rather than the estimator.
     """
     import dataclasses
 
@@ -1219,9 +1157,9 @@ def main(argv=None) -> int:
     summarise(rows)
 
     if args.out:
-        # ⭐ ONE ROW PER (condition x consumer pool) — the shape arm ⓕ's question has. The per-condition
+        # one row per (condition x consumer pool) — the shape arm ⓕ's question has. The per-condition
         # scalars (the wall exposure, the realised fl gap) are repeated on every row of that condition so
-        # the file needs no join, and the fl columns are here because on the fl-gap SIDE panel every
+        # the file needs no join, and the fl columns are here because on the fl-gap side panel every
         # conclusion hangs off the REALISED gap rather than the configured one.
         cols = [
             "condition",
@@ -1277,7 +1215,7 @@ def main(argv=None) -> int:
                         )
                         + "\n"
                     )
-                # ⚠ the exon row is scored on the TOTAL, not on a gDNA rate, so its `truth` column is a
+                # the exon row is scored on the TOTAL, not on a gDNA rate, so its `truth` column is a
                 # different quantity and its `new_over_truth` is circular by construction — both are
                 # labelled in the pool name rather than silently sharing the numeric columns.
                 x = d["exon_row"]

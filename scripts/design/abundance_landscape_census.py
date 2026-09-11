@@ -1,39 +1,30 @@
-"""WHAT DOES THE TOTAL-DENSITY FIELD LOOK LIKE, PER CONDITION — the AbundanceLandscape census.
-
-⭐⭐⭐ **A MEASUREMENT: no solver runs, no EM, nothing in `src/` is patched.** Per condition it fits
-`calibration.abundance_landscape.fit_abundance_landscape` on the cached payload's wall-exact measured
-totals and prints the CENSUS: every mode with its basin mass and width, `rho_0` (the depleted mode),
-the span `R`, the pooled-anchor consistency verdict with its gap in nats, and the per-region
-enrichment responsibility `w` summarised BY REGION CLASS (intergenic / intron / exon — mean and the
-exposure-weighted mean, never a thresholded count). This is the instrument that says whether the
-landscape can serve as the pass-0 measured reference: capture-OFF rows must read unimodal, capture-ON
-rows bimodal with the enriched basin claiming the exon class, and the depleted mode must agree with
-the pooled intergenic anchors on EVERY row.
-
-⛔ **`w` CONFLATES ENRICHMENT WITH EXPRESSION, and every reading here carries that**: a hot unprobed
-exon and a probed cold one can share a basin. The failure direction for any consumer is therefore
-PERMISSIVE; the pricing of that confound is the plan's rung-5 read, not this instrument's.
-
-⚠ The knn/width constants inherited from `landscape` have only ever been validated on gDNA-shaped
-data — that module's own warning, repeated on every page this instrument writes.
-
-`--json` dumps everything the census printed PLUS the fitted curve and a deterministic rug sample per
-condition, so a report can be RENDERED elsewhere without refitting (rendering is not this
-instrument's job — `benchmark_report.py`'s division of labour).
+"""What does the total-density field look like, per condition? A measurement: no solver runs, no EM,
+nothing in `src/` is patched. Per cached condition it fits
+`calibration.abundance_landscape.fit_abundance_landscape` on the payload's wall-exact measured totals
+and prints the census — every mode with its basin mass and width, `rho_0` (the depleted mode), the
+span `R`, the pooled-anchor consistency verdict with its gap in nats, and the per-region enrichment
+responsibility `w` summarised by region class (intergenic / intron / exon: the mean and the
+exposure-weighted mean, never a thresholded count). It says whether the landscape can serve as a
+measured reference: capture-OFF rows should read unimodal, capture-ON rows bimodal with the enriched
+basin claiming the exon class, and the depleted mode should agree with the pooled intergenic anchors
+on every row. Read `w` knowing it conflates enrichment with expression — a hot unprobed exon and a
+probed cold one can share a basin, so any consumer fails in the permissive direction — and that the
+knn/width constants inherited from `landscape` were validated on gDNA-shaped data only. `--json`
+dumps the census plus the fitted curve and a deterministic rug sample per condition so a report can
+be rendered elsewhere without refitting; rendering is not this instrument's job.
 
 Usage::
 
-    python scripts/design/abundance_landscape_census.py                      # every cached condition
-    python scripts/design/abundance_landscape_census.py --condition NAME     # one condition
+    python scripts/design/abundance_landscape_census.py                           # every cached condition
+    python scripts/design/abundance_landscape_census.py --condition NAME          # one condition
     python scripts/design/abundance_landscape_census.py --suite ... --index ...   # another panel
-    python scripts/design/abundance_landscape_census.py --json out.json      # census + curves + rug
-    python scripts/design/abundance_landscape_census.py --self-test          # perturbed, no I/O
+    python scripts/design/abundance_landscape_census.py --json out.json           # census + curves + rug
+    python scripts/design/abundance_landscape_census.py --self-test               # perturbed, no I/O
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import sys
@@ -44,17 +35,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-OC = _sibling("object_composition.py")
+OC = sibling("object_composition.py")
 PVO = OC.PVO
 
 from rigel.calibration.abundance_landscape import fit_abundance_landscape  # noqa: E402
@@ -243,11 +227,10 @@ def self_test() -> int:
         "unimodal w is 0 in every class", all(v["mean_w"] == 0.0 for v in d2["w_by_class"].values())
     )
 
-    # ⛔ the census must MOVE when the field does — a reporter that cannot move reports nothing
+    # the census must MOVE when the field does — a reporter that cannot move reports nothing
     c3 = c2.copy()
-    c3[-400:] = c3[-400:] * 300  # lift the WHOLE exon class (the fixture's last 400 regions) 300x
-    # ⚠ a first draft lifted only the last 200 — HALF the class — and read mean_w 0.498, which is the
-    # census being right about a half-lifted class, not a defect
+    c3[-400:] = c3[-400:] * 300  # lift the WHOLE exon class (the fixture's last 400 regions) 300x;
+    # lifting only half of it reads mean_w ~ 0.5, which is the census being right, not a defect
     sub3, ra3, mask3 = parts(c3, l2, s2)
     d3 = measure(sub3, ra3, mask3, "gdna_g50_ss_0.50_nrna_mid_capture_off")
     check("lifting the exon class creates the enriched mode", not d3["unimodal"])

@@ -125,7 +125,7 @@ def test_the_passes_run_in_chain_order_and_read_one_side_each():
 
 
 def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
-    """⛔ A hop that carries nothing must still ARRIVE as SILENCE. A kernel returning ``None`` for a node
+    """A hop that carries nothing must still arrive as SILENCE. A kernel returning ``None`` for a node
     that HAS a neighbour is the one thing the pass refuses, because the solve could not then tell
     "nothing to say" from "never spoken to"."""
 
@@ -134,7 +134,7 @@ def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
             return lambda s, i: None
 
     ctx = _ctx()
-    with pytest.raises(AssertionError, match="ARRIVE as SILENCE"):
+    with pytest.raises(AssertionError, match="must still arrive as SILENCE"):
         SW._pass(list(range(ctx.n_slots)), list(ctx.left), _Mute().prepare(ctx), backward=False)
 
 

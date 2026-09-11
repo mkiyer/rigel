@@ -1,19 +1,18 @@
-"""RNA strand-balance model: the library RNA sense mean ``rna_sense_frac``.
+"""RNA strand-balance model: the library RNA sense mean ``rna_sense_frac`` (κ).
 
-Fit from the **posterior-predictive** of the library sense rate over annotated spliced unique mappers (the
-2×2 contingency in the live ``StrandModel``, itself the marginal of the per-sj SJ strand table). The
-sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` is its **mean**,
-``(n_same + 1) / (n_obs + 2)``: it strand-cleans the count density and parameterises the per-region strand
-likelihood. Zero spliced reads ⇒ ``Beta(1,1)`` ⇒ 0.5, and ``calibrate`` raises ``CalibrationStrandError``
-(a real RNA-seq library always has spliced reads).
+Fitted from the posterior-predictive of the library sense rate over annotated spliced unique mappers —
+the 2×2 contingency in the live ``StrandModel``, itself the marginal of the per-sj SJ strand table. The
+sense-rate posterior is ``Beta(n_same + 1, n_opp + 1)`` and ``rna_sense_frac`` is its mean,
+``(n_same + 1) / (n_obs + 2)``. It strand-cleans the count density and parameterises the per-region
+strand likelihood.
 
-⚠ **This module used to also return that posterior's own width, ``1/(n_obs+3)``, under the name
-``rna_strand_overdispersion``.** It had no consumer anywhere in ``src/``, and the name collided with the
-deconv's genuine RNA strand Beta-Binomial overdispersion — a different quantity on a different axis (the
-spread of sj ABOUT the mean, fitted in :func:`gdna_strand.fit_rna_strand_from_sj_table` and applied
-in ψ's ``simplex_logodds._mixture_strand_loglik``, versus the width of the mean itself). **Deleted 2026-07-28**, which removes the
-collision without needing a second name. Restoring it is one boundary if a consumer ever appears; the strand
-model's own :meth:`StrandModel.posterior_variance` already reports the same power question.
+Zero spliced reads give ``Beta(1, 1)`` and hence κ = 0.5, which ``fallback_used`` announces and
+``calibrate`` turns into ``CalibrationStrandError``: a real RNA-seq library always has spliced reads, so
+an exactly uninformative κ means the input is wrong, not the fit.
+
+⛔ κ's own posterior width (:meth:`StrandModel.posterior_variance`) is not the RNA strand
+overdispersion, which is the spread of individual sj about κ — a different axis, fitted in
+:func:`gdna_strand.fit_rna_strand_from_sj_table`.
 """
 
 from __future__ import annotations
@@ -35,11 +34,12 @@ class StrandBalance:
 
 
 def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
-    """RNA strand mean = posterior-predictive of the spliced sense rate (PR 9).
+    """RNA strand mean: the posterior mean of the spliced sense rate.
 
     The RNA strand Beta-Binomial is the posterior-predictive ``BB(n, n_same + 1, n_opp + 1)`` from the
     ``StrandModel``'s 2×2 spliced-fragment counts, and ``rna_sense_frac`` is its posterior mean. With
-    ``n_obs == 0`` the ``Beta(1, 1)`` prior gives ``rna_sense_frac = 0.5`` (the strand channel adds no pull).
+    ``n_obs == 0`` the ``Beta(1, 1)`` prior gives ``rna_sense_frac = 0.5`` (the strand channel adds no pull)
+    and ``fallback_used`` is set.
     """
     n_obs = float(strand_model.n_observations)
     p_sense = float(strand_model.p_r1_sense)  # MLE n_same / n_obs (0.5 when n_obs == 0)

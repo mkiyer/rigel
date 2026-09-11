@@ -1,48 +1,30 @@
 #!/usr/bin/env python
-"""⭐⭐ **STEP 3 OF THE DEBUG LOOP** — dissect one condition's error down to individual objects.
+"""Which regions and boundaries carry one condition's error mass?
 
-The loop is: run the panel → measure the full error table → take the worst conditions → **dissect
-them to individual regions/boundaries** → find the mechanism → fix → start again.
-``pass0_vs_oracle.py`` does the table and ranks CLASSES; this does the last step, which no instrument
-covered. A class share says *where* the error lives; it cannot say *why*, and "message-only" is a
-name for a set of objects, not a mechanism.
-
-⭐ **RANKED BY ERROR MASS, NEVER BY MEAN ERROR.** A 1 bp region holding two fragments can carry a
-``|Δf_g|`` of 1.0 and be worth two fragments of error; an exon holding 40,000 at ``|Δf_g| = 0.05``
-carries a thousand times more. Ranking by rate puts the first at the top and sends the reader after
-noise. The ranking key here is ``|gDNA_pred − gDNA_true|`` **in fragments**, which is also exactly the
-quantity that sums to the ``Σ|err|`` the table reports — so the top of this list is literally the top
-of that number.
-
-⭐ **THE FIRST THING TO READ IS THE CONCENTRATION CURVE**, before any individual row. If the top
-hundred objects hold most of the error, there is a mechanism to find and a handful of objects that
-demonstrate it. If the error is spread evenly over tens of thousands, there is a systematic bias and
-chasing individual objects is wasted effort. Those two findings call for completely different work,
-and the curve distinguishes them in one boundary.
-
-⚠ **EVERY COLUMN IS AN INPUT THE SOLVER ACTUALLY SAW, OR AN OUTPUT IT ACTUALLY PRODUCED.** Nothing
-here is re-derived: the counts come from the substrate, the divisors from the geometry the solver
-divided by, the classes from ``pass0_vs_oracle`` (one definition, not a second copy), and the belief
-from ``_debug["capture"]``. A dissection tool that recomputes its own version of the solver's inputs
-is debugging a different program.
-
-⚠ **THE NEIGHBOUR COLUMNS ARE THE POINT ON MESSAGE-ONLY OBJECTS.** An object with no own evidence takes
-its answer from its neighbours, so its error is only interpretable beside theirs. For a REGION the
-neighbours are the two flanking BOUNDARY slots and vice versa — the chain is ``N E N E … N`` per
-reference, so "neighbour" is unambiguous and needs no graph traversal.
-
-⛔ Undrained, like the instrument it builds on, and for the same forced reason (see that module).
+The dissection step of the debug loop: `pass0_vs_oracle.py` scores a condition and ranks classes,
+and this instrument takes one condition's arm (`pass0` or `final`) and axis down to individual
+objects against the origin-split truth. Objects are ranked by error mass, ``|gDNA_pred − gDNA_true|``
+in fragments, never by mean error: that key is exactly what sums to the ``Σ|err|`` the table reports,
+so the top of this list is the top of that number, whereas ranking by rate sends the reader after
+two-fragment regions. Read the concentration curve first: if the top hundred objects hold most of
+the error there is a mechanism and a few objects demonstrate it, if the error is spread over tens of
+thousands there is a systematic bias and individual rows are noise. Every column is an input the
+solver actually saw or an output it produced (counts from the substrate, divisors from the geometry,
+classes from `pass0_vs_oracle`, the belief from the debug capture); nothing is re-derived. ``fg_loc``
+against ``pred_fg`` separates a bad local solve from bad messages, and the two neighbour columns are
+the explanation on a message-only object, which has no evidence of its own. Same frame as the
+instrument it builds on.
 
 Usage::
 
-    python scripts/design/worst_objects.py --condition NAME [--suite DIR] [--top 40]
-    python scripts/design/worst_objects.py --condition NAME --arm final --axis region
+    python scripts/design/worst_objects.py --condition <name> [--suite DIR] [--top 40]
+    python scripts/design/worst_objects.py --condition <name> --arm final --axis region
+    python scripts/design/worst_objects.py --condition <name> --axis both --oracle-cache <dir>
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -52,20 +34,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    """Load a sibling instrument by path. ⚠ Registered in ``sys.modules`` before execution, or its
-    dataclasses fail to resolve their own module."""
-    key = name[:-3]
-    if key in sys.modules:
-        return sys.modules[key]
-    spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[key] = module
-    spec.loader.exec_module(module)
-    return module
+from _shared import sibling  # noqa: E402
 
 
-P0 = _sibling("pass0_vs_oracle.py")
+P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
@@ -74,10 +46,9 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.types import Strand  # noqa: E402
 
 TYPE_NAME = {0: "intergenic", 1: "intron", 2: "exon"}
-#: ⚠ ``region_arrays.strand_class`` is the region's TRANSCRIPT-strand class over the whole ``Strand``
-#: enum, AMBIGUOUS included — and AMBIGUOUS is the interesting one here, because it is where the
-#: strand λ-term is gated off by the Schur argument. Naming all four rather than two keeps that
-#: visible in the table instead of collapsing it into "other".
+#: ``region_arrays.strand_class`` is the region's transcript-strand class over the whole ``Strand``
+#: enum, AMBIGUOUS included, and AMBIGUOUS is the interesting one here because it is where the strand
+#: term carries no composition. Naming all four rather than two keeps that visible in the table.
 STRAND_NAME = {
     int(Strand.NONE): "none",
     int(Strand.POS): "+",
@@ -85,9 +56,8 @@ STRAND_NAME = {
     int(Strand.AMBIGUOUS): "amb",
 }
 
-#: Where the concentration curve is sampled. ⚠ Not thresholds — nothing branches on these. They are
-#: read points on a cumulative curve, chosen to span three orders of magnitude so the SHAPE is
-#: visible rather than a single number that could be read either way.
+#: Where the concentration curve is sampled. Not thresholds, nothing branches on these: read points
+#: on a cumulative curve, spanning three orders of magnitude so the shape is visible.
 REGION_BOUNDS = (10, 100, 1_000, 10_000)
 
 
@@ -106,8 +76,8 @@ def concentration(err: np.ndarray) -> list[tuple[int, float, float]]:
 
 
 def _slot_lookup(chain, n_regions: int, n_boundaries: int):
-    """``(region_slot, boundary_slot)`` — the chain slot each object occupies. The chain is ``N E N E … N``
-    per reference, so this is a bijection per axis and there is nothing to pool."""
+    """``(region_slot, boundary_slot)``: the chain slot each object occupies. The chain alternates
+    REGION/BOUNDARY per reference, so this is a bijection per axis and there is nothing to pool."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     region_slot = np.full(n_regions, -1, np.int64)
@@ -118,7 +88,7 @@ def _slot_lookup(chain, n_regions: int, n_boundaries: int):
 
 
 def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
-    """Rank one axis of one arm by error MASS and assemble the per-object diagnostic table."""
+    """Rank one axis of one arm by error mass and assemble the per-object diagnostic table."""
     truth, res = m.truth, m.arms[arm]
     pred_g = np.asarray(getattr(res, f"mass_gdna_{axis}"), np.float64)
     true_g = np.asarray(getattr(truth, f"mass_gdna_{axis}"), np.float64)
@@ -178,7 +148,7 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
                 "pred_fg": float(pred_g[obj] / total[obj]), "true_fg": float(true_g[obj] / total[obj]),
                 "err": float(err[obj]), "cls": cls, "info": icls,
                 "tau": float(tau[s]), "var_g": float(var_g[s]), "fg_loc": float(fg_loc[s]),
-                # ⭐ the region's own density in the gDNA frame -- the quantity the density model
+                # the region's own density in the gDNA frame, the quantity the density model
                 # compares against the intergenic background. N / E_g, nothing re-derived.
                 "rho": float((counts[s, 0] + counts[s, 1]) / max(eff_g[s], 1e-12)),
                 "nb_err": [float(slot_err[s - 1]) if s > 0 else float("nan"),
@@ -199,8 +169,8 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
 
 
 def _profile(d: dict, masks: dict, names) -> list[tuple[str, float, float]]:
-    """``(class, share of the TOP objects' error, share of ALL error)`` — what the worst objects have
-    in common, against the background rate. ⚠ Both shares, always: a class that is 60 % of the worst
+    """``(class, share of the top objects' error, share of all error)``: what the worst objects have
+    in common, against the background rate. Both shares, always: a class that is 60 % of the worst
     objects and 60 % of everything is not a finding."""
     err, live = np.abs(d["err"]) * d["live"], d["live"]
     top = np.zeros_like(live)

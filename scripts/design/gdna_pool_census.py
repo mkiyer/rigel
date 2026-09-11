@@ -1,45 +1,24 @@
-"""The FOUR gDNA fragment-length pools, each against its OWN opportunity and against truth.
+"""Does each of the four gDNA fragment-length pools agree with its own opportunity, and with truth?
 
-    Stage A of `docs/SUCCESS.md`: is the accumulator's gDNA length model accurate?
+The accumulator bins every deposited gDNA fragment into at most one of four pools, two contained (in
+exactly one intergenic or one intronic region, which dominate with capture off) and two crossing (exactly
+one intron|exon or intergenic|exon boundary, which dominate under capture, where the surviving gDNA sits
+beside a probe and reaches the exon boundary). Off a scan cache, drained unless `--no-drain`, this
+re-derives each pool's opportunity from the region partition alone (a contained pool's admissible starts
+fall with length, a crossing pool's rise, and the two nearest boundaries are excluded by an exact
+inclusion-exclusion), de-tilts each pool by the probability form of its own divisor, and reports every
+pool's raw and de-tilted moments against the simulator's `truth_fragment_lengths.tsv`. Three combinations
+are printed beside them: the two contained pools alone, the four pooled raw under one divisor (the wrong
+combination, kept visible), and the four each de-tilted, whose combination is the opportunity-weighted
+average and under Poisson counts inverse-variance, so it carries no tunable weight. It measures nothing
+on an equal-length panel; run it only where the two components' fragment lengths differ. It builds no
+cache and refuses, naming the missing input, when the scan cache, the index or a truth file is absent.
 
-⭐ **The four pools, and why four.** The accumulator bins every deposited fragment into at most one pool
-that is **pure by construction** (`tests/native/_accumulator_reference.py`, `FragmentPool`):
+Usage::
 
-| pool | rule | dominant when |
-|---|---|---|
-| `DNA_INTERGENIC` | contained in exactly one **intergenic** region | capture OFF |
-| `DNA_INTRONIC` | contained in exactly one **intronic** region | capture OFF |
-| `DNA_INTRON_EXON` | crosses exactly one line, flanks {intron, exon} | capture ON |
-| `DNA_INTERGENIC_EXON` | crosses exactly one line, flanks {intergenic, exon} | capture ON |
-
-Off capture the library is spread over the genome and most gDNA sits wholly inside a large intergenic or
-intronic region. Under capture the surviving gDNA sits beside a probe, and a fragment beside a probe
-*reaches* the exon boundary — so it stops being contained and becomes crossing. **Both regimes need
-covering, which is why the model is fitted from all four.**
-
-⛔⛔ **THE POOLS MUST NOT BE POOLED RAW, AND THIS SCRIPT IS WHERE THAT IS VISIBLE.** A contained pool's
-opportunity falls with length — `(ell - w + 1)+` — and a crossing pool's *rises* — roughly `(w - 1)+`.
-Summing four differently-tilted histograms and applying one divisor is the defect that read a gDNA mean
-of 146.05 where the pure contained pool said 88.0. Each pool is divided by **its own** opportunity.
-
-⭐ **AND THE DIVISOR IS A PROBABILITY, NOT A COUNT.** `count(w)/A(w)` recovers the distribution lengths
-were *drawn* from; every consumer needs the one the library *realises*, so the divisor is
-`pi(w) = A(w) / T(w)` with `T(w) = sum_refs (L_ref - w + 1)+` the total admissible starts genome-wide.
-On whole chromosomes `T(w)` is flat to ~1e-5 and the two forms coincide; on a short reference they do not,
-and the probability form is the correct one either way.
-
-⭐ **THE COMBINATION IS DERIVED, NOT CHOSEN.** Summing counts and summing opportunities,
-`f(w) ~ [sum_p count_p(w)] * T(w) / [sum_p A_p(w)]`, is algebraically the **opportunity-weighted average**
-of the four de-tilted pools — and under Poisson counts `Var(count_p) ∝ A_p`, so weights proportional to
-`A_p` are exactly inverse-variance. There is no tunable weight.
-
-⚠ **It reads a SCAN CACHE, so `panel.py cache` comes first.** The default is the ladder's, which is the
-only panel on disk. ⛔ It pointed at `suite/pilot/scan_cache` until 2026-08-17 — a panel DELETED on
-2026-08-13 — so every bare invocation between those dates died on a `FileNotFoundError` traceback with no
-statement of what was missing. The flag that named that panel (`--pilot`) went with it.
-
-    python scripts/design/gdna_pool_census.py [--index DIR] [--scan-cache DIR] [--suite DIR]
-        [--conditions ...] [--json out.json]
+    python scripts/design/gdna_pool_census.py                                   # the ladder's scan caches
+    python scripts/design/gdna_pool_census.py --scan-cache DIR --index DIR --suite DIR
+    python scripts/design/gdna_pool_census.py --conditions <cond> ... --no-drain --seed 1 --json out.json
 """
 
 from __future__ import annotations
@@ -55,8 +34,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
-#: the LADDER's scan cache — the only panel on disk since the 2026-08-13 rebuild deleted `pilot`,
-#: `flgap_short` and `flgap_long`. ⚠ Built by `panel.py cache`; this instrument never builds one.
+#: the ladder's scan cache, built by `panel.py cache`; this instrument never builds one
 DEFAULT_SCAN_CACHE = _RUNS / "suite" / "ladder" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
@@ -91,7 +69,7 @@ def _ramp(values: np.ndarray, max_w: int) -> np.ndarray:
 def contained_opportunity(region_lengths: np.ndarray, max_w: int) -> np.ndarray:
     """``sum_n (ell_n - w + 1)+`` — the admissible starts for a fragment contained in one of these regions.
 
-    ⭐ Exact, and O(max_w + n) rather than O(max_w * n): regions longer than ``max_w`` always contribute,
+    Exact, and O(max_w + n) rather than O(max_w * n): regions longer than ``max_w`` always contribute,
     so they reduce to ``sum(ell) - (w - 1) * count``; the rest come from a length histogram's reverse
     cumulative sums.
     """
@@ -122,12 +100,13 @@ def crossing_opportunity(left: np.ndarray, right: np.ndarray, max_w: int) -> np.
 
         A(w) = (w-1)+ - (w-1-a)+ - (w-1-b)+ + (w-1-a-b)+
 
-    ⭐ The two nearest lines are the only ones that need excluding: a fragment is an interval containing
+    The two nearest lines are the only ones that need excluding: a fragment is an interval containing
     ``p``, so if it reaches any line left of ``p-a`` it must also cross ``p-a``. The inclusion-exclusion
-    over the two neighbours is therefore **exact**, not an approximation.
+    over the two neighbours is therefore exact, not an approximation.
 
-    ⚠ The reference ends need no special case. The partition region_bounds at 0 and at ``L_ref``, so the outermost
-    region's length *is* the distance to the wall and the same subtraction removes the impossible starts.
+    The reference ends need no special case. The partition has region bounds at 0 and at ``L_ref``, so
+    the outermost region's length is the distance to the wall and the same subtraction removes the
+    impossible starts.
     """
     w = np.arange(max_w + 1, dtype=np.float64)
     base = float(len(left)) * np.maximum(w - 1.0, 0.0)
@@ -253,9 +232,8 @@ def main() -> int:
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
-    # ⛔ FAIL FAST AND NAME WHAT IS MISSING. A missing panel used to surface as a raw traceback out of
-    #   `read_scan_cache`, which a batch runner cannot tell from a real crash — same defect, two exit
-    #   codes. Every input this instrument cannot build itself is checked here, before any work.
+    # fail fast and name what is missing: a raw traceback out of `read_scan_cache` is what a batch
+    # runner cannot tell from a real crash, so every input this instrument cannot build is checked first
     for label, path, how in (("scan cache", args.scan_cache, "`panel.py cache` (or pass --scan-cache)"),
                              ("index", args.index, "`rigel index` (or pass --index)")):
         if not path.is_dir():
@@ -323,8 +301,8 @@ def main() -> int:
             summed_counts += counts
             summed_opportunity += opportunity[pool_name]
 
-        # ⛔ The wrong combination, kept visible on purpose: pool the four histograms and treat them as
-        # if they shared one opportunity. This is the defect the four-pool model exists to avoid.
+        # the wrong combination, kept visible on purpose: pool the four histograms and treat them as
+        # if they shared one opportunity, the defect the four-pool model exists to avoid
         _rn, raw_mean, raw_sd = moments(summed_counts)
         combined = detilt(summed_counts, summed_opportunity, opportunity["T"])
         _cn, comb_mean, comb_sd = moments(combined)

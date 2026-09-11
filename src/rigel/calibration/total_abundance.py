@@ -1,40 +1,38 @@
-"""rigel.calibration.total_abundance — the MEASURED TOTAL per slot, and the wall mask behind it.
+"""rigel.calibration.total_abundance — the measured total per slot, and the wall mask behind it.
 
-⭐⭐ **The one question this module answers: how many fragments per base sit at this object, with NO
-composition model anywhere in the answer?** It is not a gDNA density and not an RNA density — it is
-the pooled total, which is the only density a payload can state before anything is deconvolved. What
-consumes it is a landscape fitted before pass-0, so its inputs must be counts and lengths and nothing
-that was solved.
+The one question this module answers: how many fragments per base sit at this object, with no composition
+model anywhere in the answer? It is not a gDNA density and not an RNA density but the pooled total, the
+only density a payload can state before anything is deconvolved. What consumes it is a landscape fitted
+before pass-0, so its inputs must be counts and lengths and nothing that was solved.
 
-⛔ **It is NEVER ``mass / effective_length``.** That divisor is a function of the composition being
-solved for, so the same 100 counts in 500 bp read 0.25 as pure gDNA and 0.33 as pure RNA. Every term
-below is a count over an opportunity that is the SAME for every component:
+⛔ It is never ``mass / effective_length``. That divisor is a function of the composition being solved
+for, so the same 100 counts in 500 bp read 0.25 as pure gDNA and 0.33 as pure RNA. Every term below is a
+count over an opportunity that is the same for every component:
 
-* **BOUNDARY** — the shipped reciprocal-opportunity banks. The crossing opportunity is ``w − 1`` and
-  the deposit ``1/(w − 1)``, so ``E[Σ] = ρ·P(w ≥ 2) = ρ`` for any real library: exact, model-free,
-  every fragment length. The sj banks complete the face (a spliced fragment crosses its sj, and
-  without that arm a boundary's total is not a total), and the certified SPLICED population enters as
-  an INCIDENCE at its own divisor ``mu_r − 1`` — a spliced fragment cannot be gDNA (AXIOM 0), so
-  using the RNA pmf there is a certainty, not a composition assumption.
-* **REGION** — the START/END banks over the region's own length. A fragment's first covered base
-  falls in a region at rate ``ρ·ℓ`` for EVERY fragment length, which is what makes it a TOTAL where
-  the contained bank is only a density SHAPE (``ρ·P(w ≤ ℓ)``, 11.6× at a 98 bp exon —
-  ``EQUATIONS.md`` §2). The two banks are blind at OPPOSITE template ends, so the consumer
-  side-selects: use the side whose wall does not bind, average where both are exact.
+* BOUNDARY — the reciprocal-opportunity banks. The crossing opportunity is ``w − 1`` and the deposit
+  ``1/(w − 1)``, so ``E[Σ] = ρ·P(w ≥ 2) = ρ`` for any real library: exact, model-free, at every fragment
+  length. The sj banks complete the face — a spliced fragment crosses its sj, and without that arm a
+  boundary's total is not a total — and the certified spliced population enters as an incidence at its
+  own divisor ``mu_r − 1``. A spliced fragment cannot be gDNA (Axiom 0), so using the RNA pmf there is a
+  certainty, not a composition assumption.
+* REGION — the START/END banks over the region's own length. A fragment's first covered base falls in a
+  region at rate ``ρ·ℓ`` at every fragment length, which is what makes it a total, where the contained
+  bank is only a density shape (``ρ·P(w ≤ ℓ)``, an order of magnitude off at a short exon). The two banks
+  are blind at opposite template ends, so the consumer side-selects: use the side whose wall does not
+  bind, average where both are exact.
 
-⭐ **The wall rule, derived and not tuned.** ``A_start(w | d) = min(ℓ, (d + ℓ − w + 1)₊)``, so the
-start form is exact iff the template continues at least ``w_max − 1`` bases past the region's
-genomic-HIGH bound; the end form mirrors at the LOW bound. ``w_max`` is READ from the support end of
-``deposited_lengths`` — the longest fragment the library actually deposited — never chosen. The
-distance is taken at the COMPONENT MINIMUM over the populations the annotation admits at that slot
-(``AXIOM 0``'s ``T(slot)``): gDNA's template is the chromosome, a nascent molecule's is its genomic
-span (the contiguous boundary reach), a mature molecule's is its SPLICED length
-(:class:`~rigel.calibration.splice_graph.MatureWallDistances`). Where BOTH sides bind the slot is
-honestly **not model-free** and says so — the total reads NaN rather than a number no consumer can
-trust.
+The wall rule is derived, not tuned: ``A_start(w | d) = min(ℓ, (d + ℓ − w + 1)₊)``, so the start form is
+exact iff the template continues at least ``w_max − 1`` bases past the region's genomic-high bound, and
+the end form mirrors at the genomic-low bound. ``w_max`` is read from the support end of
+``deposited_lengths`` — the longest fragment the library actually deposited — never chosen. The distance
+is taken at the component minimum over the populations the annotation admits at that slot (Axiom 0's
+``T(slot)``): gDNA's template is the chromosome, a nascent molecule's is its genomic span (the contiguous
+boundary reach), a mature molecule's is its spliced length
+(:class:`~rigel.calibration.splice_graph.MatureWallDistances`). Where both sides bind, the slot is
+honestly not model-free and says so — the total reads NaN rather than a number no consumer can trust.
 
-⛔ **Nothing here decides anything.** It measures; the landscape fit and the prior are separate rungs
-with separate gates. Its own falsification is ``tests/calibration/test_total_abundance.py``.
+Nothing here decides anything: it measures, and the landscape fit and the prior are separate rungs with
+separate gates. Its own falsification is ``tests/calibration/test_total_abundance.py``.
 """
 
 from __future__ import annotations
@@ -60,11 +58,12 @@ __all__ = [
 
 
 def w_max_from_deposited_lengths(deposited_lengths) -> int:
-    """The longest fragment length the library DEPOSITED — the support end of the histogram.
+    """The longest fragment length the library deposited — the support end of the histogram.
 
     ⛔ Read, never chosen: the wall rule's bar is ``w_max − 1``, and a quantile would let a
     conservative-looking choice mark a binding wall exact. ``payload.max_length`` is the scanner's
-    LIMIT, not the observed maximum, and is the wrong number here.
+    limit, not the observed maximum, and is the wrong number here. Raises when nothing was deposited,
+    since there is then no wall rule to apply.
     """
     hist = np.asarray(deposited_lengths)
     nz = np.nonzero(hist)[0]
@@ -80,14 +79,14 @@ def w_max_from_deposited_lengths(deposited_lengths) -> int:
 class RegionWallMask:
     """Per-REGION wall verdicts on the accumulator's region axis.
 
-    ``d_low``/``d_high`` are the COMPONENT-MINIMUM template distances past the region's genomic-low
-    and genomic-high bounds, in bases. ``end_exact`` is ``d_low ≥ w_max − 1`` and ``start_exact`` is
-    ``d_high ≥ w_max − 1``: the START bank is blind at the DOWNSTREAM (genomic-high) end and the END
-    bank at the UPSTREAM (genomic-low) one, which is why the pair closes.
+    ``d_low``/``d_high`` are the component-minimum template distances past the region's genomic-low and
+    genomic-high bounds, in bases. ``end_exact`` is ``d_low ≥ w_max − 1`` and ``start_exact`` is
+    ``d_high ≥ w_max − 1``: the START bank is blind at the downstream (genomic-high) end and the END
+    bank at the upstream (genomic-low) one, which is why the pair closes.
 
-    ⚠ Genomic, never transcriptional: a start at ``p`` needs ``w − 1`` bases of template to its
-    genomic RIGHT whatever strand the transcript is on, so the minus strand does not flip the sides
-    (only which per-strand distance column is read).
+    The frame is genomic, never transcriptional: a start at ``p`` needs ``w − 1`` bases of template to
+    its genomic right whatever strand the transcript is on, so the minus strand does not flip the sides,
+    only which per-strand distance column is read.
     """
 
     n_regions: int
@@ -129,28 +128,30 @@ def build_region_wall_mask(
     *,
     w_max: int,
 ) -> RegionWallMask:
-    """The wall mask, at the COMPONENT MINIMUM over the populations the annotation admits.
+    """The wall mask, at the component minimum over the populations the annotation admits.
 
     ``mature`` is a :class:`~rigel.calibration.splice_graph.MatureWallDistances`;
     ``boundary_reach_lo``/``_hi`` are the contiguous-boundary reach arrays ``float64[E, 2]``
-    (:func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`) — the NASCENT
-    arm, genomic by construction.
+    (:func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`) — the nascent arm,
+    genomic by construction.
 
     The minimum runs over, per region:
 
-    * **gDNA** — always admitted (it is genomically continuous), template the contig: the distance is
-      the region's own offset from the reference ends. This is the only arm at a structurally
-      pure-gDNA slot, and it binds only at the outermost regions of each reference.
-    * **RNA on strand ``s``** — admitted iff the annotation admits it there (``free_s``). Mature where
-      an exon covers the region (the SPLICED distance), nascent where one does not (the genomic reach
-      at the region's own wall). An admitted strand with a SHORT template is what makes an interior
-      terminal exon inexact, and the mature arm must be able to bind BELOW a long nascent reach —
-      that is the measured mature-differential wall.
+    * gDNA — always admitted, being genomically continuous, with the contig as its template: the
+      distance is the region's own offset from the reference ends. This is the only arm at a
+      structurally pure-gDNA slot, and it binds only at the outermost regions of each reference.
+    * RNA on strand ``s`` — admitted iff the annotation admits it there (``free_s``). Mature where an
+      exon covers the region (the spliced distance), nascent where one does not (the genomic reach at
+      the region's own wall). An admitted strand with a short template is what makes an interior
+      terminal exon inexact, and the mature arm must be able to bind below a long nascent reach.
 
-    ⚠ The reach is keyed per BOUNDARY: a region's low wall is the boundary to its LEFT and its high
-    wall the boundary to its RIGHT, and a reference's outermost regions have no such boundary. There
-    the RNA arm has no reach to read, so only the gDNA arm bounds it — correct, because a molecule
-    of any kind is bounded by the reference there too.
+    Raises when a region is marked mature-covered but carries no matching exon bit: the annotation and
+    the wall distances then describe different partitions and every verdict on the slot is arbitrary.
+
+    The reach is keyed per BOUNDARY: a region's low wall is the boundary to its left and its high wall
+    the boundary to its right, and a reference's outermost regions have no such boundary. There the RNA
+    arm has no reach to read, so only the gDNA arm bounds it — correct, because a molecule of any kind
+    is bounded by the reference there too.
     """
     start = np.asarray(region_arrays.start, dtype=np.int64)
     end = np.asarray(region_arrays.end, dtype=np.int64)
@@ -165,7 +166,7 @@ def build_region_wall_mask(
     d_low = (start - ref_lo).astype(np.float64)
     d_high = (ref_hi - end).astype(np.float64)
 
-    # ── RNA, per admitted strand. `free_s` is AXIOM 0's T(slot) at a REGION: the strands the
+    # ── RNA, per admitted strand. `free_s` is Axiom 0's T(slot) at a REGION: the strands the
     # annotation admits RNA on at all.
     free_pos, free_neg = nrna_active_strands(sig)
     mrna_pos, mrna_neg = mrna_active_strands(sig)
@@ -176,9 +177,9 @@ def build_region_wall_mask(
 
     for col, free, mrna in ((0, free_pos, mrna_pos), (1, free_neg, mrna_neg)):
         # mature where an exon of that strand covers the region; nascent (genomic reach) elsewhere.
-        # ⭐ The `free_s ∧ mrna_active_s` licence is REDUNDANT with `covered` — an exon covering a
-        # region puts that strand's exon bit in its signature — so it is ASSERTED rather than carried
-        # as an ungated term. Where they disagree the annotation and the distances describe different
+        # The `free_s ∧ mrna_active_s` licence is redundant with `covered` — an exon covering a region
+        # puts that strand's exon bit in its signature — so it is asserted rather than carried as an
+        # ungated term. Where they disagree the annotation and the distances describe different
         # partitions and every verdict on that slot would be arbitrary.
         use_mature = m_cov[:, col]
         if np.any(use_mature & ~(free & mrna)):
@@ -209,8 +210,8 @@ def _region_reach(region_arrays, boundary_reach_lo, boundary_reach_hi):
     """The contiguous-boundary reaches gathered onto the REGION axis — ``(low_wall, high_wall)``,
     each ``float64[R, 2]``, ``inf`` where the region has no boundary on that side.
 
-    ⚠ A reach of 0 is an ANSWER (no template of that strand crosses there); ``inf`` is the absence of
-    a boundary object, which is a different thing and must not read as "wall binds".
+    A reach of 0 is an answer — no template of that strand crosses there. ``inf`` is the absence of a
+    boundary object, a different thing, and must not read as "the wall binds".
     """
     lo_e = np.asarray(boundary_reach_lo, dtype=np.float64)
     hi_e = np.asarray(boundary_reach_hi, dtype=np.float64)
@@ -232,23 +233,22 @@ def region_counts_and_exposure(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The side-selected ``(counts, exposure, model_free)`` triple on the REGION axis.
 
-    ⭐⭐ **This is the entry point a POOLED estimator wants, and it is deliberately not a density.** A
-    pooled rate is `Σcounts / Σexposure` — a ratio of sums, never a mean of ratios
+    This is the entry point a pooled estimator wants, and it is deliberately not a density. A pooled
+    rate is `Σcounts / Σexposure` — a ratio of sums, never a mean of ratios
     (`TRAPS: a-mean-of-ratios-inherits-the-partition`) — and a conjugate posterior wants the same pair
     (`Gamma(Σcounts + ½, Σexposure)`), so handing a consumer a per-region density would force it to
-    re-multiply and lose the pooling. Every consumer that today pools `count / E_contained` can take
-    this pair instead and keep its own estimator unchanged.
+    re-multiply and lose the pooling. A consumer that pools `count / E_contained` can take this pair
+    instead and keep its own estimator unchanged.
 
-    ⭐ **Why the pair is better-specified than the one it replaces**: `E[count] = ρ·E_contained` is
-    unbiased but the fragment-length pmf enters the DIVISOR, while `E[S] = ρ·ℓ` for every fragment
-    length — so the exposure here is a GEOMETRY (the region's own length) rather than a model output.
-    Where both walls clear, the two sides are two counts of one rate at one exposure, so the exposure
-    doubles with the counts and the pooled ratio is the precision-weighted combination.
+    The pair is better specified than that one: `E[count] = ρ·E_contained` is unbiased, but the
+    fragment-length pmf enters the divisor, whereas `E[S] = ρ·ℓ` at every fragment length — so the
+    exposure here is a geometry (the region's own length) rather than a model output. Where both walls
+    clear, the two sides are two counts of one rate at one exposure, so the exposure doubles with the
+    counts and the pooled ratio is the precision-weighted combination.
 
-    ``model_free`` is False on a double-walled region, where both counts and exposure are returned as
-    0 so a caller that pools without masking gets no contribution rather than a wrong one — but a
-    caller that CARES (a per-region consumer) must read the mask, and one that pools is safe either
-    way.
+    ``model_free`` is False on a double-walled region, where both counts and exposure are returned as 0
+    so that a caller that pools without masking gets no contribution rather than a wrong one. A
+    per-region consumer must still read the mask; a pooling one is safe either way.
     """
     s_bank = np.asarray(substrate.region_start_count, dtype=np.float64).sum(axis=1)
     e_bank = np.asarray(substrate.region_end_count, dtype=np.float64).sum(axis=1)
@@ -267,9 +267,9 @@ def region_counts_and_exposure(
 
 
 def _check_ledger(s_bank: np.ndarray, e_bank: np.ndarray) -> None:
-    """⛔ The START/END ledger, CHECKED and never assumed: each bank takes one increment per deposited
-    fragment, so their totals must agree. A payload where they do not is corrupted input, and
-    averaging two different populations there would be a silent wrong answer."""
+    """The START/END ledger, checked and never assumed: each bank takes one increment per deposited
+    fragment, so their totals must agree to within half a fragment. A payload where they do not is
+    corrupted input, and averaging two different populations there would be a silent wrong answer."""
     if not np.isclose(s_bank.sum(), e_bank.sum(), rtol=0.0, atol=0.5):
         raise ValueError(
             f"the START/END ledger does not close: Σstart = {s_bank.sum():.0f} but "
@@ -288,9 +288,8 @@ def build_total_abundance(
 ) -> TotalAbundance:
     """Assemble the measured total per slot. No solver, no belief, no composition anywhere.
 
-    ⛔ The START/END ledger is CHECKED, not assumed: the two banks each carry one increment per
-    deposited fragment, so their totals must agree. A payload where they do not is corrupted input,
-    and averaging two different populations there would be a silent wrong answer.
+    Raises through :func:`_check_ledger` when the START/END banks disagree, and again when the RNA
+    fragment-length pmf cannot price a certified-spliced incidence (a non-positive ``mu_r − 1``).
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -298,7 +297,7 @@ def build_total_abundance(
     is_region = kind == REGION
     is_boundary = kind == BOUNDARY
 
-    # ⭐ ONE derivation, shared with every pooled consumer: the side selection lives in
+    # One derivation, shared with every pooled consumer: the side selection lives in
     # `region_counts_and_exposure` and this function only turns its pair into a per-slot rate. A second
     # copy of the selection is how a consumer and this total would drift apart.
     counts, exposure, r_free = region_counts_and_exposure(substrate, region_arrays, wall_mask)

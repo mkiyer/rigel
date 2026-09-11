@@ -1,4 +1,14 @@
-"""Manifest helpers shared by simulation generation and analysis."""
+"""The simulation manifest: condition naming, and the JSON both writers and readers agree on.
+
+:func:`condition_dir_name` is the single definition of a condition's directory name, so the
+generator and every consumer derive it the same way; an overdispersion slug appears only when the
+value is non-zero, which keeps names stable for suites that do not sweep that axis.
+:func:`write_manifest` serialises the config dataclasses and the per-condition entries to
+``manifest.json`` under the output directory, resolving genome, GTF and shadow-GTF paths to
+absolute ones so a manifest stays readable from anywhere. :func:`load_manifest` accepts either the
+file or its directory and returns an empty mapping when there is none, and
+:func:`condition_manifest_map` keys the condition entries by name.
+"""
 
 from __future__ import annotations
 
@@ -67,8 +77,8 @@ def write_manifest(
             break
     manifest = {
         "version": 1,
-        # ⭐ SHADOW transcripts (owner design 2026-08-29): unannotated transcription simulated from
-        # `shadow_gtf`, never given to the index — recorded so a scored panel says it carried them.
+        # Shadow transcripts: unannotated transcription simulated from `shadow_gtf` and never given
+        # to the index — recorded here so a scored panel says it carried them.
         "n_shadow_transcripts": int(n_shadow_transcripts),
         "simulation": _jsonable(getattr(config, "simulation", {})),
         "gdna": _jsonable(getattr(config, "gdna", {})),

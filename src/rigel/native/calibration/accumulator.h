@@ -19,8 +19,7 @@
  *   Regions count fragments CONTAINED (the whole path fits inside one region); boundaries count fragments
  *   CROSSING. Each population stores only the channels something READS, and they differ: count (integer),
  *   the reciprocal-opportunity sum (float64), and -- on the contiguous boundaries -- the conserved mass
- *   (float64). There is no fixed point anywhere (removed 2026-08-11) and no `length_sum` (deleted
- *   2026-08-13, retraction in scan_payload.py's docstring).
+ *   (float64). There is no fixed point anywhere and no `length_sum`.
  *
  * WHY MORE THAN ONE SUM
  *   With `A(w)` the number of admissible start positions -- (ell - w + 1)+ contained in a region,
@@ -100,8 +99,8 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 //: on 2^32 because two rounding errors cancel, while 1/3 + 1/3 + 1/3 is one quantum short -- and double
 //: is exact on both.
 //:
-//: ⛔ What is genuinely given up is bit-identity across worker counts, since float addition is not
-//: associative. Owner ruling 2026-08-10: one convention, and this is it.
+//: What is genuinely given up is bit-identity across worker counts, since float addition is not
+//: associative. One convention, and this is it.
 
 // ============================================================================
 // what each object stores
@@ -137,9 +136,9 @@ struct Boundary {
     /// number cannot be both: `unspliced_count` is `+1` on every boundary a fragment crosses, so a fragment
     /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the boundaries it crosses.
     ///
-    /// ⛔ ONE VALUE, NOT TWO, AND THE RULING STANDS **HERE** WHILE IT WAS REVERSED ON THE SJ AXIS
-    /// (2026-08-13) — the premise that changed is specific to sj and does not reach this bank.
-    /// `strand_deconv` reads the counts per column; nothing reads a BOUNDARY's mass per strand, because at a
+    /// One value, not two. The ruling is reversed on the sj axis below; the premise that changed
+    /// there is specific to sj and does not reach this bank.
+    /// the strand fit reads the counts per column; nothing reads a BOUNDARY's mass per strand, because at a
     /// boundary the mass exists to turn an object-incidence total into a fragment count and that question
     /// has no strand in it. ⚠ `one-thing-varied`: widening this too would have been a second change with
     /// no named consumer. See `SpliceJunction::mass`.
@@ -172,9 +171,9 @@ struct SpliceJunction {
     /// crossed a boundary is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
     /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
     ///
-    /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `Boundary::unspliced_mass`'s ONE-VALUE RULING ON
-    /// THIS AXIS ONLY (owner, 2026-08-12). THE REVERSAL IS ADMISSIBLE BECAUSE THE PREMISE CHANGED, AND
-    /// THE PREMISE IS RECORDED HERE SO IT IS NOT RE-LITIGATED IN EITHER DIRECTION.**
+    /// Two values, reversing `Boundary::unspliced_mass`'s one-value rule on this axis only. The
+    /// reversal is admissible because the premise changed, and the premise is recorded here so it is
+    /// not re-litigated in either direction.
     /// The ruling was *"nothing reads a mass per strand"*. That is now false for sj and only for
     /// sj: an ARTIFACTUAL splice junction accumulates SYMMETRICALLY on both strands, exactly as
     /// gDNA does, so the strand model the tool already has can detect one — but only if it is given a
@@ -293,7 +292,7 @@ struct OfferedFragment {
     std::size_t          n_hypotheses;
 };
 
-/// ⭐ The umbrella census (owner ruling, 2026-08-01): every fragment whose enumeration produced at least
+/// The umbrella census: every fragment whose enumeration produced at least
 /// one non-unspliced hypothesis, partitioned by how the gap was RESOLVED. Exhaustive and mutually
 /// exclusive, so `sum(GapCensus) == the umbrella` and the three deferred_* == `deferred_undetermined_gap`.
 ///
@@ -580,7 +579,7 @@ private:
     std::vector<Region>          regions_;             // n_region_bounds - 1
     std::vector<Boundary> boundaries_;            // n_region_bounds - 2, the interior boundaries
     std::vector<SpliceJunction>  sj_;         // one per annotated sj on this reference
-    // ⭐ The START/END/SPAN region banks (2026-08-21) — flat [n_regions * kNStrandColumns], their own
+    // The START/END/SPAN region banks — flat [n_regions * kNStrandColumns], their own
     // arrays so Region keeps its static_assert'd 16 B. START/END: the path's first/last COVERED base,
     // by align strand — opportunity ℓ for every fragment length, wall-blind only at the template's
     // downstream/upstream end respectively. SPAN: regions STRICTLY covered by one segment, neither

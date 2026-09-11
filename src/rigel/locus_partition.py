@@ -92,7 +92,7 @@ def partition_and_free(
         setattr(em_data, attr, None)
         del global_arr
 
-    # g_offsets no longer needed
+    # The global offsets have been scattered into per-locus arrays; release them.
     em_data.offsets = None
 
     # ---- Scatter per-unit arrays ----

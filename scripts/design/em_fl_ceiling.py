@@ -1,47 +1,33 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **WHAT IS A PERFECT gDNA FRAGMENT-LENGTH pmf WORTH END TO END, THROUGH THE EM? — the one fl
-question that stops at no earlier stage.**
+"""What is a perfect gDNA fragment-length pmf worth end to end, through the EM? The one fl question
+that stops at no earlier stage.
 
-⛔ **Every other fl instrument stops at `calibrate`.** `length_ceiling.py` and
-`calibration_truth_ab.py --ceiling` both price the pmf as an OPPORTUNITY input and go no further, and
-`quant_accuracy.py`'s arms all inject `LocusPriors` fields, never an fl pmf. But `pipeline.py` also turns
-`fl_models.gdna_pmf` into a `FragmentLengthModel` and hands it to the fragment scorer, so a wrong gDNA
-length model is applied as a **per-fragment length likelihood in exactly the channel that separates
-origins**. That path had no instrument; this is it.
+Every other fl instrument stops at `calibrate`, but `pipeline.py` also turns `fl_models.gdna_pmf` into a
+`FragmentLengthModel` and hands it to the fragment scorer, so a wrong gDNA length model is applied as a
+per-fragment length likelihood in exactly the channel that separates origins. This patches
+`build_fl_models` so the shipped pipeline runs with the simulator's own post-capture gDNA length
+distribution in place of the fitted pmf, and scores the arms with `quant_accuracy.run_condition` against
+the simulator's read-name truth; it re-implements no scorer. That "length" is the fl pmf inside the
+opportunity and scoring models, not a fragment-length composition channel, which this adds nowhere.
+Read `gdna_frac_est`, the product (`cli.py`'s own `gdna_fraction`, intergenic included), against
+`gdna_frac_true` from the simulator's `origin_counts`; the transcript rows are not the deliverable and
+flip sign between the two fl-gap arms, so a one-arm transcript reading quotes it backwards. It is
+meaningless on an equal-length panel: run it only where the two components' fragment lengths differ,
+on both sign arms and the equal-length control, since an effect that also appears on the equal-length
+arm is an artefact rather than the length gap. Three gates make a number believable: the injection
+counts its fires and raises if it never ran, `noop_fl` replaces the pmf with itself and must be
+byte-identical, and `base_reseed` is the noise floor below which no delta is attributable.
 
-⚠ **This is the fl pmf inside the OPPORTUNITY and SCORING models — NOT the fragment-length COMPOSITION
-channel, which is retired until after 0.8.0 and must not be proposed.** They share a word and nothing else.
-
-⭐⭐ **READ `gdna_frac_est`, WHICH IS THE PRODUCT** — `cli.py`'s own `gdna_fraction`, intergenic included —
-and read it against `gdna_frac_true` from the simulator's `origin_counts`. ⛔ **The TRANSCRIPT rows are not
-the deliverable here and have been measured flipping sign between the two fl-gap arms**, so a one-arm
-transcript reading is how this instrument would be quoted backwards.
-
-⛔⛔ **RUN IT ON A PANEL WHERE THE TWO COMPONENTS' FRAGMENT LENGTHS DIFFER, AND RUN BOTH SIGNS PLUS THE
-EQUAL-LENGTH CONTROL.** The ladder and the main test chromosome give both origins equal lengths by design,
-which is a forcing function for calibration and a NULL for this question. An effect that also appears on
-the equal-length arm is an artefact rather than the length gap.
-
-Three gates, and they are the reason a number from here can be believed:
-
-* the injection **counts its fires** and raises if it never ran (`TRAPS: an-ablation-that-never-ran`);
-* ``noop_fl`` replaces the pmf **with itself** and must be byte-identical — this fired on its first run,
-  catching a renormalisation that moved the pmf by 8.7e-19 (`TRAPS: perturb-every-gate`);
-* ``base_reseed`` is run as the **noise floor**, because the shipped pipeline is not reproducible run to
-  run and no `quant_accuracy` delta below that floor is attributable.
-
-⛔ It re-implements no scorer: the arms are run and scored by `quant_accuracy.run_condition`
-(`TRAPS: score-the-consumers-own-count`).
+Usage::
 
     python scripts/design/em_fl_ceiling.py --panel <scenarios dir> --index <index dir> \\
-        --conditions <cond> [<cond> ...]
+        --conditions <cond> [<cond> ...] [--max-size 1000]
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
-import importlib.util
 import sys
 from pathlib import Path
 
@@ -51,28 +37,21 @@ DESIGN = Path(__file__).resolve().parent
 sys.path.insert(0, str(DESIGN))
 
 
-def _sib(name):
-    key = name[:-3]
-    if key not in sys.modules:
-        sp = importlib.util.spec_from_file_location(key, DESIGN / name)
-        m = importlib.util.module_from_spec(sp)
-        sys.modules[key] = m
-        sp.loader.exec_module(m)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-QA = _sib("quant_accuracy.py")
-P0 = _sib("pass0_vs_oracle.py")
+QA = sibling("quant_accuracy.py")
+P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
-#: the metrics printed per axis. ⭐ `count_abs_err` is in FRAGMENTS, the unit the noise floor is quoted in.
+#: the metrics printed per axis; `count_abs_err` is in fragments, the unit the noise floor is quoted in
 _TX_METRICS = ("count_abs_err", "fp_mass", "mard")
 
 
 def install_gdna_pmf(pmf: np.ndarray | None):
-    """Swap ``FLModels.gdna_pmf`` for ``pmf``. ``None`` replaces it with ITSELF — the noop falsification.
+    """Swap ``FLModels.gdna_pmf`` for ``pmf``. ``None`` replaces it with itself, the noop falsification.
 
     ``pipeline`` imports ``build_fl_models`` function-locally in both call sites, so patching the module
     attribute reaches production without touching the pipeline.
@@ -86,8 +65,8 @@ def install_gdna_pmf(pmf: np.ndarray | None):
         models = inner(*a, **kw)
         cur = np.asarray(models.gdna_pmf, dtype=np.float64)
         if pmf is None:
-            # ⛔ The noop must be EXACT — no renormalisation. Normalising here moved the pmf by one
-            # float64 round-trip and the inertness gate caught it, which is the gate's whole point.
+            # the noop must be exact, with no renormalisation: normalising moves the pmf by a float64
+            # round-trip, which the inertness gate exists to catch
             new = cur.copy()
         else:
             new = np.asarray(pmf, dtype=np.float64)[: cur.size].copy()

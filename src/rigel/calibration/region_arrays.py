@@ -1,29 +1,24 @@
-"""rigel.calibration.region_arrays — sorted region geometry + the region↔boundary mapping.
+"""Sorted region geometry, and the region-to-boundary index mapping.
 
 Two pieces of pure geometry the calibrator builds on:
 
-* :class:`RegionArrays` — a per-reference-CSR view of the region table,
-  sorted by ``(ref_id, start)`` so each reference's rows are contiguous and
-  ascending. Carries the structural columns plus the int8 transcript-strand
-  class derived from each region's signature (the strand-model input).
+* :class:`RegionArrays` — a per-reference-CSR view of the region table, sorted by ``(ref_id, start)``
+  so each reference's rows are contiguous and ascending. It carries the structural columns plus the
+  int8 transcript-strand class derived from each region's signature, which is the strand-model input.
 
-* The **region↔contiguous-boundary index mapping** — :func:`region_right_boundary` and
+* The region-to-contiguous-boundary index mapping — :func:`region_right_boundary` and
   :func:`boundary_region_indices`.
 
-⭐ **The ``k + 1`` boundary axis is retired (S5.f).** A reference with ``k`` regions used to own
-``k + 1`` boundary slots — the ``k − 1`` interior boundaries plus two data-free terminals that existed
-only so every region had an object on each side. A contiguous boundary is the boundary BETWEEN two adjacent
-regions: there is no such boundary before the first or after the last, so a reference owns exactly
-``k − 1`` of them and **an boundary always has a region on both sides**. That kills the ``-1``-terminal
-branch, the two-spaces-off-by-one-per-reference arithmetic, and the pair of offset arrays the old
-mapping needed — the boundary axis is derivable from ``ref_id`` alone.
+A contiguous boundary is the boundary BETWEEN two adjacent regions, so a reference with ``k`` regions
+owns exactly ``k - 1`` of them and a boundary always has a region on both sides. There are no terminal
+boundary slots, and the boundary axis is therefore derivable from ``ref_id`` alone — no stored offsets.
 
-⚠ The derivation rests on ONE fact: boundary ids are assigned per reference in genomic order, in
+That derivation rests on one fact: boundary ids are assigned per reference in genomic order, in
 reference order, which is exactly the order adjacent same-reference region pairs appear in a
-``(ref_id, start)``-sorted region table. :func:`~rigel.calibration.region_chain.build_region_chain` lays
-out the same numbering by walking the payload's CSR offsets, and
-``test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against each
-other — a second algorithm, not a second call to the first.
+``(ref_id, start)``-sorted region table. :func:`~rigel.calibration.region_chain.build_region_chain`
+lays out the same numbering by walking the payload's CSR offsets, and
+``test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against
+each other — a second algorithm, not a second call to the first.
 
 No tunable parameters: this module is index arithmetic only.
 """
@@ -71,13 +66,13 @@ class RegionArrays:
 
     @classmethod
     def from_index(cls, index) -> "RegionArrays":
-        """⭐ Build the geometry for **the partition the scanner actually deposits into**.
+        """Build the geometry for the partition the scanner actually deposits into.
 
-        This and :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` are the two halves
-        of one contract — the calibration geometry must address the payload the scanner produced —
-        so they read the same frame (``index.regions_df``, the v8 splice graph) through one accessor.
-        Passing a frame by hand is how the two drift apart, and nothing downstream detects that
-        except as a shape error far from its cause.
+        This and :func:`~rigel.calibration.splice_graph.build_region_partition_arrays` are the two
+        halves of one contract — the calibration geometry must address the payload the scanner
+        produced — so they read the same frame (``index.regions_df``, the v8 splice graph) through
+        one accessor. Passing a frame by hand is how the two drift apart, and nothing downstream
+        detects that except as a shape error far from its cause.
         """
         return cls.from_frame(index.regions_df, index.ref_name_to_id)
 
@@ -136,11 +131,8 @@ class RegionArrays:
         )
 
 
-# NOTE: BoundaryArrays (a per-boundary structural-flags CSR view) and the per-region mature_eligible_{pos,neg}
-# columns were deleted in the 2026-07 cleanup — they fed the removed mature/nascent overlay and had no runtime
-# reader. The per-boundary annotation flags they mirrored (is_tss/is_tes/is_splice_sj/genomic_sj_strand)
-# were dropped from the index schema at the same time (INDEX_FORMAT_VERSION 7); the solver reads sj
-# strand from the accumulator splice motif instead.
+# The index schema carries no per-boundary annotation flags: the solver reads an sj's strand from the
+# accumulator's splice motif instead.
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +141,13 @@ class RegionArrays:
 
 
 def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
-    """``int64[N]`` — the contiguous boundary to the right of each region, ``-1`` at a reference's last region.
+    """``int64[N]`` — the contiguous boundary right of each region, ``-1`` at a reference's last region.
 
-    Regions ``r`` and ``r + 1`` share a boundary exactly when they are in the same reference, so the boundary
-    axis is the run of adjacent same-reference pairs, numbered in region order. A reference with one
-    region owns no boundary; an empty reference contributes nothing.
+    Regions ``r`` and ``r + 1`` share a boundary exactly when they are in the same reference, so the
+    boundary axis is the run of adjacent same-reference pairs, numbered in region order. A reference
+    with one region owns no boundary; an empty reference contributes nothing.
 
-    ``ref_id`` must be **grouped** (all of a reference's regions contiguous), which
+    ``ref_id`` must be grouped — all of a reference's regions contiguous — which
     :class:`RegionArrays` guarantees by sorting on ``(ref_id, start)``. Ungrouped input would
     manufacture boundaries that straddle references, so it is refused rather than tolerated.
     """
@@ -179,8 +171,8 @@ def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
 def boundary_region_indices(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(lo_region, hi_region)`` — the two regions contiguous boundary ``e`` lies between, each ``int64[E]``.
 
-    The exact inverse of :func:`region_right_boundary`. ``hi_region == lo_region + 1`` always, and both are in
-    the same reference by construction — there is no terminal case and no ``-1``.
+    The exact inverse of :func:`region_right_boundary`. ``hi_region == lo_region + 1`` always, and
+    both are in the same reference by construction — there is no terminal case and no ``-1``.
     """
     right = region_right_boundary(ref_id)
     lo = np.flatnonzero(right >= 0).astype(np.int64)

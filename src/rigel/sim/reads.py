@@ -1,12 +1,12 @@
-"""rigel.sim.reads — read-simulation configuration dataclasses.
+"""Read-simulation configuration for a single-condition run.
 
-The read-generation *engine* is :class:`whole_genome.WholeGenomeSimulator` (one fast, vectorized,
-parallel engine). This module holds the small
-``ReadSimConfig`` / ``GDNAConfig`` dataclasses that :class:`scenario.Scenario` (and its tests) use
-to describe a single-condition run; ``Scenario`` translates them into the engine's
-``SimulationParams`` / ``GDNASimConfig``.
+``ReadSimConfig`` and ``GDNAConfig`` are the small dataclasses :class:`scenario.Scenario` and its
+tests use to describe one condition; ``Scenario`` translates them into the engine's
+``SimulationParams`` / ``GDNASimConfig``, and the engine itself is
+:class:`rigel.sim.wgs_engine.WholeGenomeSimulator`. Nothing here generates reads.
 
-Read-name format encodes ground-truth origin (parsed by :mod:`read_name`):
+The read names the engine emits encode each fragment's ground-truth origin, and
+:mod:`read_name` parses them back:
 
     RNA:   {t_id}:{frag_start}-{frag_end}:{strand_char}:{index}/1
     gDNA:  gdna:{genomic_start}-{genomic_end}:{strand_char}:{index}/1
@@ -55,7 +55,7 @@ class GDNAConfig:
     gDNA fragments are sampled from the genome (both strands) with an independent fragment-size
     distribution. ``abundance`` uses the same relative scale as transcript abundances — the gDNA
     fragment fraction is ``abundance × genome_eff_len`` over the total abundance × effective-length
-    weight (see :meth:`whole_genome.WholeGenomeSimulator.pool_split`).
+    weight (see :meth:`rigel.sim.wgs_engine.WholeGenomeSimulator.rna_gdna_split`).
 
     Attributes
     ----------
@@ -66,8 +66,9 @@ class GDNAConfig:
         split in ``[0, 1)``, in the same units the calibrator fits. ``0`` ⇒ exact Binomial 50/50;
         larger ⇒ more region-to-region strand skew. Overrides ``strand_kappa`` when set.
     strand_kappa : float or None
-        Legacy/low-level Beta concentration form (per-region rate ``Beta(kappa/2, kappa/2)`` with
-        intra-class correlation ``1/(kappa + 1)``). Prefer ``gdna_strand_overdispersion``.
+        The same knob in its low-level Beta concentration form (per-region rate
+        ``Beta(kappa/2, kappa/2)``, intra-class correlation ``1/(kappa + 1)``). Prefer
+        ``gdna_strand_overdispersion``, whose units are the ones everything else states.
     """
 
     abundance: float = 10.0

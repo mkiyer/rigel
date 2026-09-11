@@ -1,10 +1,29 @@
-"""Whole-genome read-simulation engine (the single compute engine).
+"""Whole-genome read-simulation engine: the single compute engine behind every simulated library.
 
-``WholeGenomeSimulator`` — vectorized (numpy), parallel (fork-based sharding), FASTA-backed
-(pysam) generation of paired-end FASTQ + an optional name-sorted oracle BAM, with mRNA / nRNA /
-gDNA pools, strand-specificity, hybrid-capture weighting, and gDNA strand overdispersion. Config
-lives in :mod:`wgs_config`; the suite frontend (config parsing, abundance, run_simulation, CLI) is
-:mod:`whole_genome`; the multi-condition loop is :mod:`orchestrator`.
+``WholeGenomeSimulator`` turns a genome FASTA plus a transcript list whose mature and nascent
+abundances are already assigned into paired-end FASTQ and, optionally, a query-grouped oracle BAM.
+It is vectorized with numpy, reads sequence through :class:`GenomeCache`, and can shard the write
+phase across forked workers. Configuration is :mod:`wgs_config`; the frontend that parses YAML and
+assigns abundances is :mod:`whole_genome`; the multi-condition loop is :mod:`orchestrator`.
+
+Order of operations. ``__init__`` caches every spliced mature sequence as a byte array, checks
+that each declared genomic reference exists in the FASTA and that no multi-exon row carries
+nascent abundance, preloads the genomic chromosomes, builds the gDNA strand-overdispersion regions
+when one is configured, and takes or builds a :class:`~rigel.sim.capture.CaptureSampler`.
+``simulate_and_write`` then runs one accumulate phase and one write phase: RNA counts come from a
+single multinomial over every RNA row — the mature row of each transcript and the nascent row of
+each entity — and gDNA counts from a multinomial over the genomic references, both at each
+fragment length; the writers then emit FASTQ and BAM records, serially or sharded and concatenated.
+
+Guarantees. The fragment-length marginal is drawn pre-capture and reallocated in proportion to
+capture-weighted opportunity in exactly one place (:meth:`_post_capture_length_allocation`), so
+the three pools cannot drift apart, and the reallocation conserves the fragment total exactly.
+Every fragment's read name encodes its origin, template, coordinates and strand
+(:mod:`rigel.sim.read_name`), which is what makes the oracle BAM per-fragment truth. The run is a
+function of the configured seed, the parallel path drawing each shard's seed from that same
+stream, so a given worker count reproduces exactly. Requesting gDNA with no genomic reference
+declared raises rather than silently writing nothing, and so does a mis-named genomic reference:
+a run that is quietly short of fragments looks exactly like a correct one.
 """
 
 from __future__ import annotations
@@ -214,7 +233,7 @@ class WholeGenomeSimulator:
     2. Pre-compute abundance weight vectors (numpy arrays).
     3. Sample from the fragment-length distribution in bulk, counting
        fragments per unique length.
-    4. For each fragment length, ONE multinomial over every RNA row — the mature row of each
+    4. For each fragment length, one multinomial over every RNA row — the mature row of each
        transcript and the nascent row of each nRNA ENTITY — with probability ∝ abundance ×
        capture-aware effective length. Accumulate per-row fragment counts.
     5. Iterate rows: pull sequence ONCE, extract all fragments via numpy fancy indexing, and write
@@ -222,15 +241,14 @@ class WholeGenomeSimulator:
        its read-name origin tag, ``nrna_<entity id>``). gzip compression is multi-threaded via pgzip
        when available.
 
-    ⭐ **Nascent RNA is a TRANSCRIPT, not a parallel pre-mRNA space** (owner, 2026-08-19). The
-    transcript list comes from the rigel index and already holds the nascent entities — single-exon
-    transcripts over each clustered TSS/TES span — with the nascent molecules pooled onto them
-    (`whole_genome.assign_nrna_to_entities`). Their template is their own (single-exon) sequence, the
-    same one the mature writer uses, and their capture intervals are whatever probes overlap the span
-    — any transcript's, any strand — exactly as for gDNA. ⛔ The previous per-transcript pre-mRNA
-    space scoped a nascent molecule's capture to its OWN transcript's probes, which under-enriched
-    nascent spanning another transcript's probed exon by up to 6x against the gDNA there
-    (`hop_currency.py`, 2026-08-19).
+    Nascent RNA is a transcript here, not a parallel pre-mRNA space. The transcript list comes from
+    the rigel index and already holds the nascent entities — single-exon transcripts over each
+    clustered TSS/TES span — with the nascent molecules pooled onto them
+    (`whole_genome.assign_nrna_to_entities`). Their template is their own single-exon sequence, the
+    same one the mature writer uses, and their capture intervals are whatever probes overlap the
+    span — any transcript's, any strand — exactly as for gDNA. Scoping a nascent molecule's capture
+    to its own transcript's probes instead would under-enrich nascent RNA that spans another
+    transcript's probed exon, against the gDNA sitting at the same place.
     """
 
     def __init__(
@@ -275,8 +293,8 @@ class WholeGenomeSimulator:
             "r" if t.strand == Strand.NEG else "f" for t in transcripts
         ]
         self._mrna_abund = np.array([t.abundance or 0.0 for t in transcripts])
-        # ⛔ nascent lives on single-exon ENTITY rows only: a multi-exon row carrying nascent would be
-        # sampled on a SPLICED template and written as contiguous genomic reads — wrong both ways.
+        # nascent lives on single-exon entity rows only: a multi-exon row carrying nascent would be
+        # sampled on a spliced template and written as contiguous genomic reads — wrong both ways.
         self._nrna_abund = np.array([t.nrna_abundance for t in transcripts])
         bad = [t.t_id for t in transcripts if t.nrna_abundance > 0 and len(t.exons) != 1]
         if bad:
@@ -296,13 +314,12 @@ class WholeGenomeSimulator:
         max_mrna = int(self._t_lengths.max()) if N > 0 else 0
         self._frag_max = min(sim_params.frag_max, max_mrna) if max_mrna > 0 else sim_params.frag_max
 
-        # ⭐ gDNA setup: the GENOMIC references, stated by the caller, weighted by length.
-        # ⛔ This used to be `annotated_refs = {t.ref for t in transcripts}` — "has an annotation"
-        # standing in for "is genomic", and it is not one. An RNA-only spike-in reference carries a
-        # transcript, so it qualified, and the panel filled with gDNA molecules on templates where no
-        # genomic DNA exists. Every reference is genomic or RNA-only and the classification is an
-        # INPUT: `tests/test_sim_genomic_refs.py` pins that, with a fixture whose RNA-only reference
-        # is annotated precisely so the old proxy cannot pass it.
+        # gDNA setup: the genomic references, stated by the caller, weighted by length. Every
+        # reference is genomic or RNA-only and the classification is an input, never inferred —
+        # "has an annotation" is not "is genomic", since an RNA-only spike-in reference carries a
+        # transcript and would then collect gDNA molecules on a template where no genomic DNA
+        # exists. `tests/test_sim_genomic_refs.py` pins that, with a fixture whose RNA-only
+        # reference is annotated precisely so that proxy cannot pass it.
         unknown = sorted(set(genomic_refs) - set(self.fasta.references))
         if unknown:
             raise ValueError(
@@ -337,9 +354,9 @@ class WholeGenomeSimulator:
         self._ref_names = list(self.fasta.references)
         self._ref_lengths = [self.fasta.get_reference_length(r) for r in self._ref_names]
         self._ref_name_to_id: dict[str, int] = {name: i for i, name in enumerate(self._ref_names)}
-        # ⭐ A prebuilt sampler is REUSED ACROSS CONDITIONS: its probe layout and its partition memo
-        # depend only on the panel and the templates, never on abundances (`CaptureSampler`), and the
-        # partition is 260 s per condition otherwise.
+        # A prebuilt sampler is reused across conditions: its probe layout and its partition memo
+        # depend only on the panel and the templates, never on abundances (`CaptureSampler`), and
+        # rebuilding the partition per condition costs minutes.
         self.capture = capture_sampler or CaptureSampler.from_config(
             capture_config,
             transcripts,
@@ -459,35 +476,33 @@ class WholeGenomeSimulator:
     ) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
         """Re-allocate a pre-capture length draw in proportion to capture-weighted opportunity.
 
-        ⭐⭐ **THE ONE PLACE `f_post(w) = f_pre(w) . total_eff(w) / Z` IS WRITTEN**, shared by the
-        mature, nascent and gDNA pools so the three cannot drift apart.
+        The one place ``f_post(w) = f_pre(w) . total_eff(w) / Z`` is written, shared by the mature,
+        nascent and gDNA pools so the three cannot drift apart.
 
-        ⛔ **The defect this replaces.** Each pool drew its length marginal FIRST, capture-blind, then
-        computed the capture-aware per-template opportunity ``weights_at(w)`` and threw its TOTAL away
-        by normalising within each length. Capture could then move only *where* a fragment landed,
-        never *whether* its length survived, and the simulated post-capture fragment-length
-        distribution came out byte-identical to the pre-capture one on every condition. Hybrid capture
-        hybridises probes to sequence: a short fragment presents less sequence, binds worse, and is
-        captured less efficiently — so capture SELECTS FOR LENGTH, and that selection lives entirely in
-        the term that was being divided out.
+        The total of ``weights_at(w)`` is the whole point and must not be normalised away. Drawing
+        the length marginal capture-blind and then normalising the capture-aware per-template
+        opportunity within each length lets capture move only *where* a fragment lands, never
+        *whether* its length survives, and the simulated post-capture length distribution then comes
+        out identical to the pre-capture one. Hybrid capture hybridises probes to sequence: a short
+        fragment presents less sequence, binds worse, and is captured less efficiently, so capture
+        selects for length, and that selection lives entirely in the term being divided out.
 
-        ⭐ **No new constant.** ``total_eff(w)`` is already computed by machinery that already exists:
-        ``CaptureSampler.fragment_weight`` is ``off_target_weight + binding_per_base * overlap``, and
-        ``overlap`` rises with fragment length until it saturates at the probe length. That is the
+        No constant is introduced. ``total_eff(w)`` is already computed by existing machinery:
+        ``CaptureSampler.fragment_weight`` is ``off_target_weight + binding_per_base * overlap``,
+        and ``overlap`` rises with fragment length until it saturates at the probe length — the
         physics, already parameterised by ``CaptureConfig``.
 
-        ⚠ **It reweights off capture too, and that is also a correction.** With no probes,
-        ``total_eff(w) = off_target_weight * sum_k a_k (L_k - w + 1)+`` — the ordinary effective
-        length. A library CAN'T yield more fragments of a length than its templates have placements
-        for it, and the old code let it. On a whole chromosome the term is flat to 1 part in 10^5, so
-        the gDNA pool barely moves off capture; on transcripts of a few kb it is a real tilt.
+        The reweighting applies off capture as well, and is a correction there too. With no probes,
+        ``total_eff(w) = off_target_weight * sum_k a_k (L_k - w + 1)+``, the ordinary effective
+        length: a library cannot yield more fragments of a length than its templates have placements
+        for it. On a whole chromosome that term is nearly flat, so the gDNA pool barely moves off
+        capture; on transcripts of a few kb it is a real tilt.
 
-        ⚠ **Two-stage, not analytic, on purpose.** ``f_pre`` stays defined by exactly one thing — the
-        shared sampler in :mod:`sampling` — and its empirical draw is reweighted, rather than a second
-        analytic copy of the truncated normal being written here for the marginal to disagree with
-        later. The cost is a ratio estimator's O(1/n) bias, which at the pilot's 5 M fragments over
-        ~800 lengths is a relative 1e-7, and a sqrt(2) inflation of the realised mean's Monte-Carlo
-        sd: 0.063 bp instead of 0.045 bp.
+        The two-stage form is deliberate rather than analytic. ``f_pre`` stays defined by exactly one
+        thing, the shared sampler in :mod:`sampling`, and its empirical draw is reweighted, instead
+        of a second analytic copy of the truncated normal living here to disagree with it later. The
+        price is a ratio estimator's O(1/n) bias, negligible at simulation depths, and a sqrt(2)
+        inflation of the realised mean's Monte-Carlo standard deviation.
 
         Returns ``(widths, weights_per_width, counts_per_width)`` — the ascending distinct lengths,
         each one's unnormalised per-template weight vector, and how many fragments it now carries.
@@ -531,13 +546,14 @@ class WholeGenomeSimulator:
 
         counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
-        # ⭐ Only transcripts with nonzero abundance can carry a fragment: `weights` multiplies the
+        # Only transcripts with nonzero abundance can carry a fragment: `weights` multiplies the
         # capture-aware effective length by the abundance, so a zero-abundance row contributes zero
-        # whatever its effective length is. With `frac_expressed: 0.5` that is HALF the annotation, and
-        # the effective length is the expensive term — `partition_array` was 96.6 % of a capture-on run.
-        # ⚠ `eff` is still built at FULL length with zeros in the dead rows, so `weights`, `probs` and
-        # therefore the `rng.choice` draw are bit-identical to computing every row. This is a speed
-        # change, not a behaviour change, and `tests/test_sim_capture_partition.py` pins that.
+        # whatever its effective length is. Skipping those rows matters because the effective length
+        # is by far the expensive term under capture, and a config expressing half the annotation
+        # leaves half the rows dead. `eff` is still built at full length with zeros in the dead rows,
+        # so `weights`, `probs` and therefore the `rng.choice` draw are bit-identical to computing
+        # every row — a speed change, not a behaviour change, pinned by
+        # `tests/test_sim_capture_partition.py`.
         live = np.flatnonzero(abundances > 0)
         live_keys = live.tolist()
         live_lengths = lengths[live]
@@ -548,8 +564,8 @@ class WholeGenomeSimulator:
                 eff[live] = self.capture.partition_array(space, live_keys, live_lengths, width)
             return abundances * eff
 
-        # ⭐ The length marginal is the pre-capture draw reweighted by capture-weighted opportunity;
-        # `weights_at(w)` is then the conditional over templates AT that length. See
+        # The length marginal is the pre-capture draw reweighted by capture-weighted opportunity;
+        # `weights_at(w)` is then the conditional over templates at that length. See
         # `_post_capture_length_allocation` for why the total must not be normalised away.
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
             frag_lengths, weights_at, rng
@@ -573,9 +589,9 @@ class WholeGenomeSimulator:
     def _accumulate_rna_counts(
         self, n_rna: int
     ) -> tuple[dict[int, dict[int, int]], dict[int, dict[int, int]]]:
-        """ONE multinomial over every RNA row: the mature row of each transcript (``abundance``) and
+        """One multinomial over every RNA row: the mature row of each transcript (``abundance``) and
         the nascent row of each nRNA entity (``nrna_abundance``), each weighted by its abundance ×
-        capture-aware effective length on its OWN template. The nascent fragment share is therefore a
+        capture-aware effective length on its own template. The nascent fragment share is therefore a
         consequence of molecules and lengths, never an imposed count.
 
         Returns ``(mrna_counts, nrna_counts)``, each ``dict[t_idx, dict[frag_len, count]]`` — two
@@ -591,10 +607,10 @@ class WholeGenomeSimulator:
         mrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         nrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
-        # ⭐ Only rows with nonzero abundance can carry a fragment, and the effective length is the
-        # expensive term (`partition_array` was 96.6 % of a capture-on run), so it is evaluated on the
-        # LIVE rows only; `eff` is still full length with zeros in the dead rows, so the draw is
-        # bit-identical to computing every row (`tests/test_sim_capture_partition.py`).
+        # Only rows with nonzero abundance can carry a fragment, and the capture-aware effective
+        # length is the expensive term, so it is evaluated on the live rows only; `eff` is still full
+        # length with zeros in the dead rows, so the draw is bit-identical to computing every row
+        # (`tests/test_sim_capture_partition.py`).
         live = np.flatnonzero((self._mrna_abund > 0) | (self._nrna_abund > 0))
         live_keys = live.tolist()
         live_lengths = self._t_lengths[live]
@@ -678,7 +694,7 @@ class WholeGenomeSimulator:
             # The base emission is R1-ANTISENSE; a flip makes that fragment R1-sense. ``ss`` is the
             # fidelity about the TARGETED direction, so an R1-sense protocol flips the fragments the
             # R1-antisense protocol would have kept — the exact per-fragment mirror on one RNG stream.
-            # ⚠ The r1_sense=False path must consume the RNG exactly as before, or every existing
+            # The r1_sense=False path must consume the RNG in exactly this pattern, or every
             # condition's realized library moves.
             if ss < 1.0:
                 flip_mask = rng.random(count) >= ss
@@ -833,8 +849,9 @@ class WholeGenomeSimulator:
         if n_gdna == 0:
             return {}
         if not self._gdna_refs:
-            # ⛔ Writing zero of a requested five million fragments is trap 20's failure mode: the
-            # run completes, the truth files agree with themselves, and the deficit is invisible.
+            # Writing zero of a requested few million fragments has to be loud: the run would
+            # otherwise complete, the truth files would agree with themselves, and the deficit
+            # would be invisible.
             raise ValueError(
                 f"{n_gdna} gDNA fragments requested but no genomic reference was declared "
                 "(genomic_refs is empty)"
@@ -843,20 +860,19 @@ class WholeGenomeSimulator:
         rng = self._rng
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
         counts: dict[tuple[int, int], int] = {}
-        # ⭐ One batched call per fragment length, not one scalar call per (chromosome, length).
-        # Profiled: this comprehension was 49,662 `partition` calls driving 6,476,550
-        # `_local_overlap_weights` calls and 110.6 s, because every call re-integrates the capture
-        # landscape of a WHOLE chromosome. Batched, the 93 references share one pass.
+        # One batched call per fragment length, not one scalar call per (chromosome, length): every
+        # scalar call re-integrates the capture landscape of a whole chromosome, so the per-pair
+        # form costs minutes per condition where batching lets all the references share one pass.
         ref_lengths = np.asarray(self._gdna_ref_lengths, dtype=np.int64)
         gdna_refs = list(self._gdna_refs)
 
         def weights_at(width: int) -> np.ndarray:
             return self.capture.partition_array("gdna", gdna_refs, ref_lengths, width)
 
-        # ⭐ The per-chromosome conditional was always right; the length MARGINAL is what was thrown
-        # away. Off capture this term is flat to 1 part in 10^5 on a whole chromosome — which is why
-        # correcting it moves the gDNA pool essentially not at all off capture, and a great deal
-        # under it. See `_post_capture_length_allocation`.
+        # The per-chromosome conditional and the length marginal are separate: this reallocates the
+        # marginal. Off capture the total is nearly flat across lengths on a whole chromosome, so it
+        # moves the gDNA pool very little; under capture it moves it a great deal. See
+        # `_post_capture_length_allocation`.
         widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
             frag_lengths, weights_at, rng
         )
@@ -1061,7 +1077,7 @@ class WholeGenomeSimulator:
     ) -> tuple[Path, Path, Path | None]:
         """Single-pass simulation: accumulate counts, generate, write.
 
-        *n_rna* fragments are drawn from ONE multinomial over every RNA row (mature rows and nascent
+        *n_rna* fragments are drawn from one multinomial over every RNA row (mature rows and nascent
         entity rows, :meth:`_accumulate_rna_counts`); *n_gdna* from the genomic references.
 
         When *n_workers* > 1 the per-transcript and per-(chrom, frag-len)

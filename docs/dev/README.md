@@ -1,34 +1,25 @@
 # docs/dev — the sandbox
 
-⭐ **Working notes live here and that is the point.** A feature write-up, a session handoff, a
-half-finished derivation, a note to a collaborator. It is expected to be provisional, and nobody should
-treat anything in this directory as settled.
+Working notes live here: a session handoff, a half-finished derivation, a note to a collaborator.
+Everything in this directory is provisional and nothing in it is settled.
 
 ## The two rules
 
-1. ⛔ **Nothing outside `docs/dev/` may cite anything inside it.** Not the source, not a test, not one of
-   the permanent docs (`CLAUDE.md`'s doc map names them). A citation is what turns a note into a dependency, and a dependency is what
-   makes a temporary file permanent. `tests/test_docs_boundary.py` enforces this.
+1. **Nothing outside `docs/dev/` may cite anything inside it** — not the source, not a test, not a
+   permanent doc. A citation turns a note into a dependency, and a dependency makes a temporary file
+   permanent. `tests/test_docs_boundary.py` enforces this.
 
-2. ⛔⛔ **When a finding settles, MOVE it out and delete it here, in the same edit.** Not copy — move.
+2. **When a finding settles, MOVE it out and delete it here, in the same edit.** Move, never copy: two
+   homes diverge, and the provisional copy is the one that ends up being read.
 
    | the finding is… | its permanent home |
    |---|---|
-   | an open problem, or a refusal with its measurement | `docs/ISSUES.md` (a NAMED entry) |
+   | an open problem, or a refusal with its measurement | `docs/ISSUES.md` (a named entry) |
    | a claim about the current state | `docs/ROADMAP.md`, naming the instrument that re-derives it |
-   | a mistake not to repeat | `docs/TRAPS.md` (a NAMED rule) |
+   | a mistake not to repeat | `docs/TRAPS.md` (a named rule) |
    | a decision that is settled | `docs/DESIGN.md` |
    | a derivation the code depends on | `docs/EQUATIONS.md` |
    | how performance is judged | `docs/SUCCESS.md` |
    | a panel, a harness, a gate | `docs/TESTING.md` |
-   | an instrument's verdict | the instrument's own docstring |
 
-## Why the rules exist
-
-Two working docs once reached **1,181 lines between them — larger than DESIGN + ROADMAP + SUCCESS
-combined** — and a new session was being told to read one of them as "⭐⭐⭐ THE STATE". They were deleted on
-2026-08-07 and their content promoted. ⭐ **The failure was never that they existed.** It was that nothing
-was ever moved out, so the provisional copy quietly became the authoritative one and the permanent docs
-went stale beside it.
-
-⚠ A stale dev doc is harmless. A dev doc that something else depends on is not.
+A stale dev doc is harmless. A dev doc that something else depends on is not.

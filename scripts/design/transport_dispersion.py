@@ -1,20 +1,24 @@
-"""⭐⭐⭐ WHERE DOES THE FLANK-TRANSPORT DISPERSION COME FROM? — the decomposition, certified truth,
-no solver runs.
+"""Where does the flank-transport dispersion come from? The decomposition against certified truth; no
+solver runs and nothing in `src/` is patched. Per exon with a complete flank it measures the pair
+disagreement D = log(rate_L / rate_R) between the two flanks' route-summed junction rates and the
+common-mode centre c = log(geomean rate / certified contained rate), the certified rate being the
+slot truth's `n_mrna` over the exon's RNA opportunity, and charges each candidate source with its
+measurable signature: per-route trigamma counting on the flank side, the truth count's own trigamma
+(an artifact that inflates any "certified scatter" reading unless subtracted), the length-curve
+centre by exon-length decile (geometry moves both flanks together), termini strictly inside the exon
+body (structure), the side-split centre (which would betray the deposit rule), a strand-matched
+re-pooling arm, and the capture OFF/ON contrast across conditions. What survives every charge is
+the transport premise itself. It also reports the single-complete-flank population's relative
+centre. Fit nothing on shallow pairs: below about 100 flank flux the disagreement is all counting,
+so the tables are read on the deep pairs. The strand-matched arm keys the substrate's count columns
+per sj strand, which is not their key (the columns are genome-strand); its row is kept as the
+falsification of that keying, not as a candidate. Per-exon rows are written to `--out-dir` as npz.
 
-Per two-complete-flank exon this instrument measures the pair disagreement D = log(rate_L/rate_R)
-and the common-mode center c = log(geomean rate / certified contained rate), and charges each
-candidate source with its measurable signature: per-route trigamma COUNTING (flank side), the
-TRUTH count's own trigamma (⛔ the instrument artifact that inflated every prior "certified
-scatter" reading ~sd 0.44 — median deep-pair n_mrna is 11-19), the LENGTH-CURVE center by exon
-decile (geometry — both flanks move together), termini strictly INSIDE the exon body (structure),
-the credit-leftmost deposit rule (a SIDE-SPLIT center would betray it), a strand-matched
-re-pooling arm, and the capture OFF/ON contrast. What survives every charge is the honest
-transport premise. Also reports the single-complete-flank population's relative center.
+Usage::
 
-⛔ Fit nothing on shallow pairs: below ~100 flank flux the disagreement is 100 % counting.
-⚠ The strand-matched arm keys the substrate's count columns naively per sj strand — measured to
-be the WRONG key (columns are genome-strand); its reading is retained as the falsification of
-that key, not as a candidate.
+    python scripts/design/transport_dispersion.py                                          # the default ladder conditions
+    python scripts/design/transport_dispersion.py --conditions gdna_g50_ss_0.99_nrna_mid_capture_on
+    python scripts/design/transport_dispersion.py --suite ... --index ... --out-dir /path/to/npz
 """
 
 import sys
@@ -65,8 +69,7 @@ class RouteTable:
     """Per-junction flux and crossing opportunity, indexed by the region each route serves: ``into[r]``
     / ``outof[r]`` list the sj indices whose destination / source region is ``r`` — the routes through
     r's left / right flank. The routes at a flank are DISJOINT (each molecule crosses exactly one), which
-    is why their rates SUM. (Once `rna_anchor.build_route_table`, retired with the relay 2026-09-09; the
-    instrument keeps the fifteen lines it needs.)"""
+    is why their rates SUM."""
 
     def __init__(self, flux, opportunity, into, outof):
         self.flux, self.opportunity, self.into, self.outof = flux, opportunity, into, outof

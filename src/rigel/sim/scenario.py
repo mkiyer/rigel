@@ -77,10 +77,11 @@ def _to_sim_params(sim_config: ReadSimConfig, n_rna: int) -> SimulationParams:
 def _gdna_overdispersion(gdna_config: GDNAConfig) -> float:
     """Resolve a single gDNA strand overdispersion from either knob on ``GDNAConfig``.
 
-    ``gdna_strand_overdispersion`` (clear units) wins; otherwise convert the legacy
-    ``strand_kappa`` Beta concentration via ``od = 1/(kappa + 1)`` (the inverse of GDNAConfig's
-    own ``kappa = (1 − od)/od``), so the engine sees the same Beta(kappa/2, kappa/2) per-region
-    rate the old engine did. ``0`` when neither is set.
+    ``gdna_strand_overdispersion`` (intra-class correlation, the units everything else states)
+    wins; otherwise the low-level ``strand_kappa`` Beta concentration is converted by
+    ``od = 1/(kappa + 1)``, the inverse of ``GDNAConfig``'s own ``kappa = (1 − od)/od``, so both
+    spellings reach the engine as the same Beta(kappa/2, kappa/2) per-region rate. ``0`` when
+    neither is set.
     """
     od = gdna_config.gdna_strand_overdispersion
     if od is not None:
@@ -308,10 +309,10 @@ class Scenario:
     def _index_and_transcriptome(
         self, fasta_path: Path, gtf_path: Path, nrna_abundance: float
     ) -> tuple[Path, TranscriptIndex, list[Transcript], list[Transcript]]:
-        """⭐ The toy is simulated from the SAME transcriptome `rigel quant` will read (owner,
-        2026-08-19): build the TranscriptIndex from the written GTF FIRST, load its transcript list —
-        annotated transcripts plus the synthetic nascent entities — carry the annotation's abundances
-        onto the annotated rows by ``t_id``, and pool each multi-exon transcript's nascent molecules
+        """Simulate the toy from the same transcriptome `rigel quant` will read: build the
+        TranscriptIndex from the written GTF first, load its transcript list — annotated
+        transcripts plus the synthetic nascent entities — carry the annotation's abundances onto
+        the annotated rows by ``t_id``, and pool each multi-exon transcript's nascent molecules
         onto its entity (`whole_genome.assign_nrna_to_entities`).
 
         ``nrna_abundance > 0`` overrides every expressed multi-exon transcript's own value, as

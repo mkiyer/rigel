@@ -1,45 +1,27 @@
 #!/usr/bin/env python3
-"""HOW DOES EACH MESSAGE POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH? — the standing
-policy benchmark, on either substrate, never pooled.
+"""How does each message policy score, per condition, against certified truth? This is the standing
+policy benchmark and the instrument a message-policy change is judged by. It runs every named
+policy over each cached condition of a panel and reports the whole-library gDNA error in
+fragments, `sum |estimate - truth|` against the certified per-slot truth in `slot_truth.npz`,
+split by axis (region / boundary), one row per condition. It runs no EM and re-scans nothing:
+each condition is read from its cached scan in the drained frame the truth is certified in.
+Read the two halves separately and never pool them: unstranded rows (`ss 0.50`) are where a
+policy must win against `silent`, the measured floor; stranded rows (`ss 0.99`) are where it
+must do minimal harm, so a ratio near 1.00x is a pass; a panel total hides a sign flip between
+them. `--panel test` is the development loop (seconds); `--panel ladder` is the shipping judgement,
+and a toy and the panel have inverted a ranking before, so a claim names its substrate.
+`--by-class` sums the same error per node class (certified stratum, boundaries split
+by terminus flag, exons by reach: licensed intron face / edge only / walled) to rank where a
+policy's remaining error sits; on the test chromosome the capture-OFF rows are dominated by the
+designed shadow-transcription floor, identical in every arm, so read the capture-ON rows there.
+Other instruments import `PANELS`, `POLICIES`, `score_condition` and `_slot_classes`.
 
-⭐⭐⭐ **THIS IS THE INSTRUMENT A POLICY CHANGE IS JUDGED BY.** It runs each named policy over
-every cached condition of a panel and reports the whole-library gDNA error in FRAGMENTS,
-split by axis (REGION / BOUNDARY) and by stranded / unstranded, one row per condition.
+Usage::
 
-⭐⭐ **THE BAR IS NOT "BEAT SILENT".** `SilentPolicy` is the measured floor and on
-strand-specific data it is very hard to improve on: a sighted exon's own strand solve is
-excellent, so a message can mostly only disturb it. The goal message propagation exists for is
-UNSTRANDED data, where the strand channel is dead and the local answer is a default rather
-than a measurement. So read the two halves of the table differently:
-
-* **unstranded rows (`ss 0.50`)** — this is where a policy has to WIN.
-* **stranded rows (`ss 0.99`)** — this is where a policy has to do as LITTLE HARM as possible.
-  A ratio near 1.00x against silence is a pass; a large ratio is the thing to fix.
-
-⛔ **NEVER POOL THE ROWS.** A panel total hides a sign flip between strata, and the two halves
-above are being judged against different bars. The per-condition table is the result.
-
-⭐ **SUBSTRATES.** `--panel test` is the method-development test chromosome (small, cached, a
-few seconds for the whole sweep — the loop to develop in); `--panel ladder` is the 16-condition
-benchmark ladder (the shipping judgement). ⚠ A toy and the panel have inverted a ranking
-before (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`), so a claim must name its substrate
-and a change is only real once the ladder agrees.
-
-⛔ It scores the CALIBRATION result against the oracle's certified per-slot truth. It runs no
-EM and re-scans nothing: every condition is read from its cached scan.
-
-    python scripts/design/policy_benchmark.py --panel test
-    python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer
+    python scripts/design/policy_benchmark.py --panel test                                   # the development loop
+    python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer       # the shipping judgement
     python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nrna_file_capture_off
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
-
-⭐ **`--by-class` — WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** The same per-slot
-error summed per certified stratum, boundaries split by terminus flag and exons by reach — an
-intron|exon face without a terminus flag (the strand-set half of the licence is not applied here,
-so a both-stranded face counts as licensed), an edge only, or WALLED (no such face). It ranks the
-holes a message rebuild has left; read it per row, never pooled. ⚠ On the test chromosome the
-off-capture rows are dominated by the designed shadow-transcription floor at intergenic regions,
-identical in every arm — read the capture-ON rows there, and the ladder for the rest.
 """
 
 from __future__ import annotations
@@ -73,14 +55,13 @@ RUNS = Path.home() / "Downloads" / "rigel_runs"
 #: the two substrates, each: (index dir, the dir holding `oracle_cache/<condition>/`)
 PANELS = {
     "test": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios"),
-    # the same chromosome under the two other probe designs (`docs/TESTING.md` §0a)
+    # the same chromosome under the two other probe designs (junction-only and sparse probes)
     "test_junction": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_junction"),
     "test_sparse": (RUNS / "test_reference" / "idx", RUNS / "test_reference" / "scenarios_probes_sparse"),
     "ladder": (RUNS / "suite" / "rigel_index", RUNS / "suite" / "ladder"),
 }
 
-#: policy name -> the `CalibrationConfig` fields that install it. The relay was retired on
-#: 2026-09-09 (git carries it and its recorded ladder standings).
+#: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
     "silent": dict(message_propagation=False),
     "transfer": dict(message_propagation=True, message_policy="transfer"),
@@ -133,9 +114,9 @@ def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policie
     ``by_class``, the same error summed per node class (``rows[name]["classes"]``, each value
     ``(slots, mass, error)``)."""
     cache = read_scan_cache(cache_dir / "_main", index)
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): `calibration_inputs` drains at the
-    # production seed and builds the production fl models (two-pool contrast included) — the same
-    # frame `slot_truth.npz` is now certified in, so estimate and truth speak one tally.
+    # the drained frame: `calibration_inputs` drains at the production seed and builds the
+    # production fl models — the frame `slot_truth.npz` is certified in, so estimate and truth
+    # speak one tally.
     kw = calibration_inputs(cache, index)
     payload = kw["payload"]
     kwargs = dict(

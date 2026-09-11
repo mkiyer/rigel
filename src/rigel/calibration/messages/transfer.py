@@ -9,12 +9,12 @@ population's LEVEL — an absolute profile over the log density — carried wher
 cross, so no level ever crosses a capture cliff and no constant is anywhere. The policy has three
 parts, and ``prepare`` is a table of contents: one named BUILDER per shipped message.
 
-* **Every node's OWN CLAIM** (`_claims`): an intron's factory profile (its density against the
+* Every node's OWN CLAIM (`_claims`): an intron's factory profile (its density against the
   intergenic background, the rows ``rows_at`` supplies); an exon's or a boundary's own strand profile
   where the solver's derived strand deadband declares the channel live (``strand``); an
   intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is structurally pure gDNA).
   ⛔ A claim is data only — never a belief, which already holds the prior and the neighbours.
-* **The RECIPIENT's rule per directed face**: absent = STOP (composition cannot cross: the recipient
+* The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
   holds SILENCE); the identity = FORWARD (the two objects share one unspliced population exactly); a
   map = MODIFY (the face's arithmetic with its counting width and, where two witnesses exist, the
   pair's own discrepancy). The rules ARE the shipped messages, each built by the function named:
@@ -24,55 +24,52 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
     LICENSED face (no terminus, the same strand set): the splice-in face map, the certified flux
     capping the claimable gDNA share, widened by the face's counting. exon → boundary at that face:
     the splice-in map read backwards, marginalised over the face's spliced-to-unspliced ratio.
-  - `_edge_level` — intergenic|exon edge → exon: THE EDGE'S LEVEL, one-sided (the owner's design
-    2026-09-04): the exon has at least the edge's gDNA density, at the count's Poisson width; nothing
-    above (no local witness prices capture's enrichment of the interior), a zero count vacuous
-    (darkness is not absence).
+  - `_edge_level` — intergenic|exon edge → exon: THE EDGE'S LEVEL, one-sided: the exon has at least
+    the edge's gDNA density, at the count's Poisson width; nothing above (no local witness prices
+    capture's enrichment of the interior), a zero count vacuous (darkness is not absence).
   - `_terminus_rules` — the exon|exon TERMINUS boundary ⇄ its OUTSIDE exon: the licence counts the
     spliced crossing, ``f_b = f_O (U_b + S_b) / U_b`` — the outside exon's message travels the
     splice-out map, the boundary's the face map with the spliced density. And a TERMINUS boundary →
-    the region INSIDE it (exon|exon and exon|intron alike): THE LEVEL RULE (the owner's design,
-    2026-09-04). Composition cannot cross a terminus (new transcription starts or ends there), the
-    gDNA LEVEL can: the boundary's OWN strand profile — a measurement, never what it holds — carried
-    through the level-kept map (the inside's gDNA share is the boundary's share times its crossing
-    density, over the inside's own total), its shape preserved, blurred by the two totals' counting
-    and by the pair's own discrepancies: the excess of the totals' disagreement over counting, and,
-    where the inside exon's strand channel is live, the excess of the two strand modes' disagreement
-    over counting. Value kept, nothing pooled, no hypothesis chosen for the discrepancy. With no own
-    claim the boundary still sends what every library measures: its crossing's total bounds the
-    inside's gDNA density above. The sj+terminus boundary (2026-09-08): a junction sharing the
-    terminus does not change which flank is inside; its flux belongs to the flank on the junction's
-    exon side.
+    the region INSIDE it (exon|exon and exon|intron alike): THE LEVEL RULE. Composition cannot cross
+    a terminus (new transcription starts or ends there), the gDNA LEVEL can: the boundary's OWN
+    strand profile — a measurement, never what it holds — carried through the level-kept map (the
+    inside's gDNA share is the boundary's share times its crossing density, over the inside's own
+    total), its shape preserved, blurred by the two totals' counting and by the pair's own
+    discrepancies: the excess of the totals' disagreement over counting, and, where the inside exon's
+    strand channel is live, the excess of the two strand modes' disagreement over counting. Value
+    kept, nothing pooled, no hypothesis chosen for the discrepancy. With no own claim the boundary
+    still sends what every library measures: its crossing's total bounds the inside's gDNA density
+    above. At an sj+terminus boundary a junction sharing the terminus does not change which flank is
+    inside; its flux belongs to the flank on the junction's exon side.
   - `_alternative_splice_site` — the ALTERNATIVE SPLICE SITE ⇄ both flanks: the intron-side flank
     shares the full unspliced crossing, the exon-of-both flank the crossing plus the leaving isoform
     measured as the route flux; each pair widened by its own disagreement beyond counting, nothing
     pooled.
   - `_gdna_lane` — EVERY OTHER DIRECTED FACE (a strand change, termini pointing both ways, the AMBIG
     complex, and every face into or out of an EMPTY node — a piece with no total) carries THE LEVEL
-    LANE (2026-09-05): the gDNA level as an ABSOLUTE profile over the log density, which needs no map
-    and no recipient. An empty node forwards it unchanged; a full node emits the intersection of its
-    own level's lower side and the level it holds; the recipient prices the hop (both totals'
-    counting plus the abundance discrepancy beyond it) and takes it as a LOWER bound — a level that
-    crosses a face says "at least this much gDNA" and nothing more. The only faces with no rule at all
-    lead into intergenic regions (structurally pure gDNA) or off the chain.
-  - `_rna_lanes` — THE RNA LEVEL LANES (2026-09-08, the both-stranded locus): one lane per strand,
-    its FACES from the flag bits (strand ``s`` crosses a face iff the boundary carries none of
-    ``s``'s bits and both nodes admit ``s``; across ``s``'s own junction it enters ``s``'s INTRON —
-    the intron test is per strand, from ``StepContext.exon_pos`` / ``exon_neg`` — and not ``s``'s
-    exon; a terminus of ``s`` stops ``s``), TWO-SIDED only between an intron of ``s`` and its own
-    boundary (one shared unspliced population: the whole profile), lower-only everywhere else, and
-    EVERY hop priced by the pair — both counts' counting plus the disagreement between the two nodes'
-    estimates of the strand's abundance (`_LevelLane.witness`). SOURCES: a single-strand node's own
-    claim read as its live strand's RNA level; the certified flux at each of an exon's junctions as
-    that strand's level at the exon (one hop, boundary → exon; two junctions pay their pair's
-    disagreement beyond counting) — at an EMPTY exon piece too, which emits it with the flux's own
-    witness (2026-09-09). DELIVERED at AMBIG nodes as one row over ψ's (λ, θ) cube
-    (`PsiMessage.cube_rows`): a lower bound on RNA+ is an upper bound on the gDNA share through the
-    node's own strand counts — the side the gDNA lane cannot give (THE BRACKET THEOREM, gated); and
-    at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face that sent no
-    composition (`_PreparedTransfer._ceilings`). The tilt needs no lane of its own.
+    LANE: the gDNA level as an ABSOLUTE profile over the log density, which needs no map and no
+    recipient. An empty node forwards it unchanged; a full node emits the intersection of its own
+    level's lower side and the level it holds; the recipient prices the hop (both totals' counting
+    plus the abundance discrepancy beyond it) and takes it as a LOWER bound — a level that crosses a
+    face says "at least this much gDNA" and nothing more. The only faces with no rule at all lead
+    into intergenic regions (structurally pure gDNA) or off the chain.
+  - `_rna_lanes` — THE RNA LEVEL LANES: one lane per strand, its FACES from the flag bits (strand
+    ``s`` crosses a face iff the boundary carries none of ``s``'s bits and both nodes admit ``s``;
+    across ``s``'s own junction it enters ``s``'s INTRON — the intron test is per strand, from
+    ``StepContext.exon_pos`` / ``exon_neg`` — and not ``s``'s exon; a terminus of ``s`` stops ``s``),
+    TWO-SIDED only between an intron of ``s`` and its own boundary (one shared unspliced population:
+    the whole profile), lower-only everywhere else, and EVERY hop priced by the pair — both counts'
+    counting plus the disagreement between the two nodes' estimates of the strand's abundance
+    (`_LevelLane.witness`). SOURCES: a single-strand node's own claim read as its live strand's RNA
+    level; the certified flux at each of an exon's junctions as that strand's level at the exon (one
+    hop, boundary → exon; two junctions pay their pair's disagreement beyond counting) — at an EMPTY
+    exon piece too, which emits it with the flux's own witness. DELIVERED at AMBIG nodes as one row
+    over ψ's (λ, θ) cube (`PsiMessage.cube_rows`): a lower bound on RNA+ is an upper bound on the
+    gDNA share through the node's own strand counts — the side the gDNA lane cannot give (the bracket
+    theorem, gated); and at SINGLE-STRAND nodes as a CEILING on the gDNA share, read only from a face
+    that sent no composition (`_PreparedTransfer._ceilings`). The tilt needs no lane of its own.
 
-* **The two passes and the solve** (`_PreparedTransfer.propagate` / `solve`): a node SENDS two
+* The two passes and the solve (`_PreparedTransfer.propagate` / `solve`): a node SENDS two
   things apart — its own claim (a measurement) and what it holds from its far side (an imputation) —
   and the recipient's rule decides what to do with each: a composition rule composes them (a witness
   product: profiles add) and maps the product; a level rule reads the measurement only, because an
@@ -87,13 +84,6 @@ The laws the policy keeps: the sender publishes its claim unchanged; the recipie
 stays a no-claim — a flat profile, an absent factory, an evidence-free provider all deliver SILENCE,
 never a zero-filled channel; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
-
-⚠ **What the passes changed against the hand-built one-hop policy they replace (2026-09-04).** A
-boundary's own strand profile now also reaches the exon through the face map; an exon forwards what it
-holds through EVERY face it has, and a boundary forwards the exon's splice-out profile into its intron;
-the hand-built two-hop messages are ordinary hops. Measured before landing (`policy_prototype.py`): the
-form wins both halves of the ladder against the one-hop policy, 7/8 and 7/8, at pass zero and through
-the pipeline.
 """
 
 from __future__ import annotations
@@ -174,9 +164,9 @@ def _composed(mapping):
 class TransferPolicy:
     """``rows_at(n_grid, logodds_window)`` supplies the intron factory's per-slot profiles on the sweep's
     own grid (``calibrate`` passes its memoized ``_intron_prior_at``; ``None`` means no factory
-    evidence and the policy is silent — byte-identical to `SilentPolicy`). ``strand = (kappa, od_g, od_r)`` is the
-    library's fitted strand model, which the exon's and the boundary's own claims need; ``None``
-    leaves every strand claim off."""
+    evidence and the policy is silent — byte-identical to `SilentPolicy`). ``strand = (kappa, od_g,
+    od_r)`` is the library's fitted strand model, which the exon's and the boundary's own claims need;
+    ``None`` leaves every strand claim off."""
 
     name = "transfer"
 
@@ -386,8 +376,8 @@ def _splice_faces(c: _Chain, rule: dict) -> None:
 
 
 def _edge_level(c: _Chain, own: list, rule: dict) -> None:
-    """THE INTERGENIC|EXON EDGE → its exon: A LEVEL, one-sided (the owner's design, 2026-09-04; the form
-    the ladder kept). The edge's own claim is its gDNA COUNT — a marker profile; the rule reads the
+    """THE INTERGENIC|EXON EDGE → its exon: A LEVEL, one-sided. The edge's own claim is its gDNA
+    COUNT — a marker profile; the rule reads the
     count, and nothing is held at an edge — and the exon converts it through its own total: the exon
     has at least the edge's gDNA density, at the count's own Poisson width; nothing above (no local
     witness prices a probed interior's enrichment over its edge), and a zero count is vacuous
@@ -537,7 +527,7 @@ def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
     """THE LEVEL LANE: the default of every directed face that has no composition rule. A gDNA level
     is absolute (a profile over ``u = log(rho / rho_ref)``), so it needs no map and no recipient: it
     crosses the faces composition cannot (strand changes, termini both ways, the AMBIG complex) and
-    the EMPTY node — a piece with no total, 52 % of the ladder's exon pieces — which forwards it
+    the EMPTY node — a piece with no total, which many exon pieces are — which forwards it
     unchanged. Every full node's own level: a gene edge's crossing as a Poisson level (structurally
     pure gDNA), any other node's own profile read through its total. ``None`` when the library has no
     positive density to serve as the coordinate."""
@@ -545,9 +535,9 @@ def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
     pure = c.is_intergenic & (c.a_g > 0.0)
     # the lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE for a
     # log axis, so any positive density serves; when the intergenic count is zero (a zero-gDNA
-    # library with no intergenic reads) the library-wide density stands in — measured 2026-09-09:
-    # with the coordinate at zero the gDNA lane AND the RNA lanes that hang off it were never built,
-    # and a both-stranded overlap at zero gDNA read 0.95 gDNA against a truth of 0.
+    # library with no intergenic reads) the library-wide density stands in. ⛔ Without that fallback
+    # the coordinate is zero, and the gDNA lane plus every RNA lane hanging off it is never built at
+    # all — a gDNA-free library then gets no level messages anywhere.
     rho_ref = float(c.n_u[pure].sum() / c.a_g[pure].sum()) if c.a_g[pure].sum() > 0.0 else 0.0
     if not rho_ref > 0.0:
         rho_ref = float(c.n_u[c.a_g > 0.0].sum() / max(c.a_g[c.a_g > 0.0].sum(), EPS))
@@ -574,23 +564,22 @@ def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
 
 
 def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
-    """THE RNA LEVEL LANES, one per strand (the both-stranded locus, phase 1; owner rulings 2026-09-08).
+    """THE RNA LEVEL LANES, one per strand (the both-stranded locus).
     FACES from the flag bits: strand ``s``'s level crosses a face iff the boundary carries none of
     ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN junction it enters ``s``'s
     intron — the crossing IS the intron's unspliced population — and not ``s``'s exon; a terminus of
     ``s`` stops ``s`` both ways. TWO-SIDED only between an intron of ``s`` and its own boundary (one
-    shared unspliced population; ⭐ the intron test is PER STRAND). SOURCES: a single-strand node's
+    shared unspliced population; the intron test is PER STRAND). SOURCES: a single-strand node's
     own claim read as its live strand's RNA level, and the certified flux at each of an exon's
     junctions as that strand's level at the exon — the junction's estimate of the exon's RNA
     abundance, priced by THE NODE PAIR (the junction's spliced count at its route rate against the
-    exon's own count of that strand per RNA opportunity), kept LOWER-SIDED (the two-sided estimate
-    over-claimed at the probe cliff, measured 2026-09-08); kept per FACE so the solve can tell which
-    face's composition already carries it. ⭐ An EMPTY exon piece beside a lit junction is a source too
-    (2026-09-09): its level is priced on its zero count — counting alone — and the piece emits it
-    with the flux's own witness, the pooled spliced count on the pooled route opportunity, so the next
-    full node prices the hop as a full exon prices its flux. The coordinate ``rho_ref_s`` is the
-    library's strand-``s`` unspliced density over its single-strand exons. Nothing pooled, no
-    constant."""
+    exon's own count of that strand per RNA opportunity), kept LOWER-SIDED because a two-sided
+    estimate over-claims at the probe cliff; kept per FACE so the solve can tell which face's
+    composition already carries it. An EMPTY exon piece beside a lit junction is a source too: its
+    level is priced on its zero count — counting alone — and the piece emits it with the flux's own
+    witness, the pooled spliced count on the pooled route opportunity, so the next full node prices
+    the hop as a full exon prices its flux. The coordinate ``rho_ref_s`` is the library's strand-``s``
+    unspliced density over its single-strand exons. Nothing pooled, no constant."""
     n_u, a_r, cnt = c.n_u, c.a_r, c.cnt
     empty = ~(n_u > 0.0) | ~(a_r > 0.0)
     single = ~(c.fp & c.fn)
@@ -604,10 +593,9 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
     for name, free, col in (("pos", c.fp, 0), ("neg", c.fn, 1)):
         all_bits, _sj_bits, term_bits = strand_bits[name]
         # the lane's WITNESS is the count of the reads strand-``s`` RNA produces: its own genome-strand
-        # column when the library reads sense, the other under an antisense protocol (`read_column`;
-        # measured 2026-09-09 at κ ≈ 0.01: the own column held a handful of reads at every
-        # single-strand exon, every hop was priced as counting on nothing, and the floors arrived
-        # blurred to nothing at a zero-gDNA overlap that then read 0.35 gDNA)
+        # column when the library reads sense, the other under an antisense protocol (`read_column`).
+        # ⛔ Under a strongly antisense protocol the own column holds almost nothing, so reading it
+        # prices every hop as counting on an empty witness and blurs every floor away.
         col_read = read_column(col, kappa)
         intron_s = ~c.is_bnd & free & ~c.exon_of[name]
         faces, two_sided = set(), set()
@@ -640,7 +628,7 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
                 c_sum = a_sum = 0.0
                 if c.is_exon[x]:
                     # the junction's flux is a measurement of THIS exon's RNA whether or not the piece
-                    # holds a fragment of its own (2026-09-09): at an EMPTY piece — one shorter than a
+                    # holds a fragment of its own: at an EMPTY piece — one shorter than a
                     # fragment, or dark — the level is built too, priced on the piece's zero count (the
                     # counting rule every hop pays), and the piece emits it with the flux's witness
                     for b in (c.left[x], c.right[x]):
@@ -688,10 +676,9 @@ class _LevelLane:
     """ONE population's LEVEL LANE — the gDNA lane, or one strand's RNA lane — for one sweep. A level
     travels as an ABSOLUTE profile over ``u = log(rho / rho_ref)`` on the solve grid, so it needs no
     map and no recipient: an EMPTY node forwards it unchanged, a full node emits the INTERSECTION of
-    its own level and what it holds (bounds intersect, they do not multiply: a product of one-sided
-    claims sharpens along a chain into a hard bound at the noisiest node's mode — measured: nine
-    terminus boundaries with one true gDNA fragment each moved 2 → 29 on the ladder's `g05 ss.99
-    OFF`), and a full recipient prices the hop and takes the level as a LOWER bound.
+    its own level and what it holds — ⛔ bounds INTERSECT, they do not multiply: a product of
+    one-sided claims ratchets along a chain into a hard bound at the noisiest node's mode — and a
+    full recipient prices the hop and takes the level as a LOWER bound.
 
     The two kinds are one class because they differ by PARAMETERS and nothing else: the WITNESS the
     hop's price reads — every node's ``count`` on its opportunity ``a`` (the totals on the gDNA lane;
@@ -788,16 +775,16 @@ class _LevelLane:
         profile, everywhere else its lower side — and on EVERY face the hop's price: both witness
         counts' counting plus the disagreement, beyond its own counting, between the two nodes'
         estimates of the population's abundance (`hop_price` on the counts; the owner's rule per hop,
-        nothing pooled). ⭐ On an RNA lane the witness is the column split's asymmetry (`witness`),
+        nothing pooled). On an RNA lane the witness is the column split's asymmetry (`witness`),
         not the column count: the column holds gDNA's half, which jumps with every probe edge whether
         or not this strand's RNA is there, while the asymmetry is this strand's RNA alone. So a dark
         recipient (no measurable RNA of the strand) agrees with a dark claim and the claim arrives
         whole — the perfectly dark host intron's "no RNA of mine here" that resolves the tilt at an
         antisense exon's boundaries under capture — while a lit recipient disagrees with a claim from
-        a dimmer node by the cliff between them and blurs it away (the ladder's `g05 ss.99 ON`,
-        2026-09-09: a + intron at 0.005 fragments per base whose nascent RNA the − gene's probe
-        captured 170-fold, carried whole under a counting-only exemption, read a 93 % RNA junction as
-        86 % gDNA). Where the library's strand channel is dead the column count is the witness."""
+        a dimmer node by the cliff between them and blurs it away. ⛔ There is no counting-only
+        exemption: a faint intron whose neighbour's probe enriches it many-fold would otherwise carry
+        its claim whole across the cliff. Where the library's strand channel is dead the column count
+        is the witness."""
         if self.other is None or level.rna_count is None:
             v = hop_price(level.n, level.a, self.count[x], self.a[x])
         else:
@@ -913,12 +900,12 @@ class _PreparedTransfer:
         return PsiMessage(lam_rows=rows if live else None, cube_rows=cube or None)
 
     def _ceilings(self, from_left, from_right, rows) -> bool:
-        """THE UPPER SIDE AT SINGLE-STRAND NODES (phase 2, 2026-09-08): an RNA level of the node's live
-        strand says "at most this much gDNA". Read ONLY from a face that sent no composition — a held
-        level on that side, and the node's own junction flux at that face — because a licensed face's
-        splice-in map already carries the flux as its cap and a composition already carries its
-        sender's witnesses (reading them again counted them twice: the weak-κ zero control 42 → 1,540).
-        Bounds intersect; the row joins the node's other witnesses. Returns whether anything was added."""
+        """THE UPPER SIDE AT SINGLE-STRAND NODES: an RNA level of the node's live strand says "at most
+        this much gDNA". ⛔ Read ONLY from a face that sent no composition — a held level on that
+        side, and the node's own junction flux at that face — because a licensed face's splice-in map
+        already carries the flux as its cap and a composition already carries its sender's witnesses,
+        so reading them again counts the same evidence twice. Bounds intersect; the row joins the
+        node's other witnesses. Returns whether anything was added."""
         site = self.site
         if site is None:
             return False

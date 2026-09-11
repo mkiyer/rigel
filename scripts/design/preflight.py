@@ -1,39 +1,19 @@
 #!/usr/bin/env python3
-"""PREFLIGHT — can this session actually run and REGENERATE everything? One command, one verdict.
+"""Can this session run and regenerate everything? One command, one verdict, before anything else.
 
-⭐⭐⭐ **WHAT THIS IS FOR.** Owner, 2026-08-19: *"I want the next session to verify that they have access
-to all of the necessary tools and can rerun and regenerate everything."* A session that starts by
-assuming its environment is fine discovers otherwise three hours in, usually as a confusing wrong number
-rather than an error. This checks — before any of that — that the toolchain, the reference data and the
-instruments are present and working, and for anything MISSING it prints the exact command that rebuilds
-it.
-
-⛔ **IT CHANGES NOTHING AND MEASURES NOTHING.** Every check is a read or an import. A ✘ is never fatal
-here: much of this data is DERIVED and the point is to say which command derives it.
-
-==========================  =========================================================================
-**toolchain**               the `rigel` conda env is active, the compiled native extension imports,
-                            and the `rigel` CLI is on PATH
-**reference data**          the panel's genome/GTF/index/probes, and the method-development test
-                            reference — each with the command that regenerates it
-**panel**                   the 16 simulated conditions, their scan caches, and the oracle caches
-                            with all FIVE partitions (the three ORIGINS plus `rna_pos`/`rna_neg`)
-**certification**           every condition's `slot_truth.npz` and its stamp
-**instruments**             every `scripts/design/` file imports, and every one that has a
-                            `--self-test` passes it
-==========================  =========================================================================
-
-⭐⭐ **THE DEFAULT IS THE FAST PATH, DELIBERATELY** (owner, 2026-08-22: a session must not open with a
-ten-minute wait). Every instrument is IMPORTED, which is the check that actually rots — an import break is
-what a `src/` deletion or a rename causes. ⛔ The `--self-test` SWEEP is opt-in via `--full`: it runs each
-instrument's own falsification in a subprocess, and it is what you want after a deposit-rule change, a
-default flip, or before a commit that touches many instruments.
-
-⛔⛔ **`--full` IS EXPENSIVE AND THE MEASURED COST IS THE ONE TO QUOTE: 59:56 wall / 7.5 CPU-hours / 845 %
-CPU for 15 instruments** (2026-08-22, 16 cores, with a pytest run competing — so read it as an upper
-bound). `ladder_arm_ab.py --self-test` dominates it and is still running long after every other instrument
-has finished. ⚠ An earlier version of this docstring guessed "~15 min" before measuring; it was wrong by
-4×, which is `TRAPS: re-record-the-baseline` committed inside the file that warns about it.
+A session that assumes its environment is fine discovers otherwise hours in, usually as a confusing
+wrong number rather than an error. This checks first that the toolchain (the `rigel` conda env, the
+compiled native extension, the `rigel` CLI), both references (the panel's genome/GTF/index/probes and
+the test chromosome's YAML with its renders), both panels (scan caches, oracle caches carrying all five
+partitions, the certified `slot_truth.npz`) and every `scripts/design/` instrument (each one imports)
+are present and working. It changes nothing and measures nothing: every check is a read or an import,
+and a failed check prints the exact command that regenerates the missing artifact, because most of this
+data is derived and a missing derived artifact is a command not yet run rather than damage. An import
+break is the check that actually rots after a `src/` deletion or a rename, so the default path is the
+fast one; the `--self-test` sweep over every instrument is opt-in via `--full`, runs each one in a
+subprocess, and is what to run after a deposit-rule change, a default flip, or before a commit that
+touches many instruments. An empty test chromosome is a designed state and prints as a note, never as
+a failure.
 
 Usage::
 
@@ -59,13 +39,13 @@ RUNS = Path.home() / "Downloads" / "rigel_runs"
 SUITE = RUNS / "suite"
 LADDER = SUITE / "ladder"
 TESTREF = RUNS / "test_reference"
-#: the five partitions an oracle-cached condition must carry — three ORIGINS plus the per-STRAND RNA
-#: pair the three-arm map needs (`calibration/_oracle.RNA_STRAND_ORIGINS`)
+#: the five partitions an oracle-cached condition must carry — the three origins plus the per-strand
+#: RNA pair (`calibration/_oracle.RNA_STRAND_ORIGINS`)
 ORACLE_PARTS = ("gdna", "mrna", "nrna", "rna_pos", "rna_neg")
 
 
 class Report:
-    """Every check as ``(ok, what, detail, fix)`` — and a MISSING thing always names its command."""
+    """Every check as ``(ok, what, detail, fix)``; a missing thing always names its command."""
 
     def __init__(self) -> None:
         self.rows: list[tuple[bool | None, str, str, str]] = []
@@ -75,9 +55,8 @@ class Report:
         return bool(ok)
 
     def note(self, what: str, detail: str = "") -> None:
-        """A designed state that is neither pass nor fail — an empty test chromosome is the
-        case this exists for. It prints as ⭐ and never counts against the verdict, because a
-        thing the owner has not authored yet is not damage to go hunting for."""
+        """A designed state that is neither pass nor fail (an empty test chromosome). It prints
+        with its own mark and never counts against the verdict."""
         self.rows.append((None, what, detail, ""))
 
     def print(self, title: str) -> None:
@@ -120,17 +99,15 @@ def check_reference(rep: Report) -> None:
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
     rep.add((SUITE / "reference" / "capture_panel.tsv").is_file(), "panel capture probes", "",
             "python scripts/sim/panel.py build --config scripts/sim/configs/gdna_ladder.yaml")
-    # the METHOD-DEVELOPMENT reference — ONE hand-edited YAML in the repo (owner ruling 2026-09-02),
-    # the GTFs / abundances / probe panels RENDERED beside it, everything else derived
+    # the method-development reference: one hand-edited YAML in the repo, the GTFs / abundances /
+    # probe panels rendered beside it, everything else derived
     spec = REPO / "scripts" / "sim" / "test_reference" / "test_chr.yaml"
     gtf = spec.parent / "test_chr.gtf"
     rep.add(spec.is_file(), "test chromosome YAML (the ONE hand-edited file)", str(spec))
     rep.add(test_chromosome_renders_in_sync(spec), "test chromosome renders match the YAML", str(gtf),
             "python scripts/sim/build_test_reference.py")
-    # ⭐ AN EMPTY TEST CHROMOSOME IS A DESIGNED STATE, NOT A BROKEN ONE (owner, 2026-08-27): the
-    # owner authors its transcripts, and until at least one exists nothing derived from it CAN
-    # exist. Reporting that as a failure sends a fresh session hunting for damage, so say what is
-    # true and name the file to edit.
+    # an empty test chromosome is a designed state, not a broken one: until at least one transcript
+    # exists nothing derived from it can exist, so say so and name the file to edit
     if not test_chromosome_transcripts(gtf):
         rep.note("test chromosome is EMPTY — add transcripts to build anything derived from it",
                  f"edit {gtf}, then follow docs/TESTING.md §0a")
@@ -224,12 +201,9 @@ def check_instruments(rep: Report, full: bool) -> None:
         rep.add(True, "instrument --self-test sweep",
                 "SKIPPED (default; --full runs it)")
         return
-    # ⛔⛔ THE OUTER POOL IS DELIBERATELY NARROW BECAUSE THE INSTRUMENTS PARALLELISE THEMSELVES.
-    # `ladder_arm_ab.py --self-test` runs 6 arms concurrently by default and several others shard by
-    # condition, so a wide outer pool oversubscribes the machine and starves the very instrument that
-    # dominates the wall time. Three lets the many quick instruments overlap while leaving cores for the
-    # long one. ⚠ This is reasoned from the instruments' own defaults, NOT measured against a serial
-    # baseline — the sweep costs ~an hour, so an A/B of the width has not been paid for.
+    # the outer pool is deliberately narrow because several instruments parallelise themselves (by
+    # arm or by condition), so a wide outer pool oversubscribes the machine and starves the one that
+    # dominates the wall time; three lets the quick instruments overlap while leaving cores for it
     have = [p for p in files if '"--self-test"' in p.read_text()]
     workers = max(1, min(3, (os.cpu_count() or 2) - 1))
 
@@ -247,7 +221,7 @@ def check_instruments(rep: Report, full: bool) -> None:
 
 
 def self_test() -> int:
-    """⛔ The reporter perturbed, with no I/O — a preflight that cannot report a failure is decoration."""
+    """The reporter perturbed, with no I/O: a preflight that cannot report a failure is decoration."""
     ok = fail = 0
 
     def check(name, cond):

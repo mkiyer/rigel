@@ -5,9 +5,8 @@ front-end driver injects the theme palette + axis colours at embed time and
 re-embeds on theme change). Densities are pre-computed here so the same numbers
 back the chart, its tooltip, and the summary table.
 
-Only the fragment-length section uses Vega-Lite in v1; the composition / pool /
-strand components are native HTML/SVG. The genome-track and capture-KDE charts
-(Phase 2) will reuse this same spec + driver pipeline.
+Only the fragment-length section uses Vega-Lite; the composition, pool and strand components
+are native HTML/SVG, and any chart added here reuses this same spec-plus-driver pipeline.
 """
 
 from __future__ import annotations

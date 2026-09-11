@@ -1,58 +1,24 @@
-r"""The simulator's acceptance gates — G-S1..G-S6, scored on the panel's own per-fragment truth.
+r"""Does the simulator pass its own gates? Six acceptance gates scored on the panel's per-fragment truth.
 
-    `docs/TESTING.md` §3
+Every gate is a direction or an absolute count, never a threshold: a pass mark on "how much longer is a
+captured fragment" would invent the capture efficiency curve, so only the sign is asserted and the
+magnitude is printed. G-S1: no gDNA fragment on an RNA-only reference (must be 0). G-S2: at least two
+genomic references carry gDNA, in every contaminated condition. G-S3: the gDNA mean length is strictly
+greater under capture. G-S4: on-target gDNA is strictly longer than off-target, where on-target means
+the fragment overlaps a probe and never that its start lies in an exon — conditioned on capture, an
+intronic start selects long fragments by geometry, so the start-territory table is printed as a
+diagnostic only (`TRAPS: on-target-by-start-is-geometry`). G-S5: capture lengthens each RNA population
+separately, mature and nascent, never their pool, which a mixture change could move
+(`TRAPS: never-pool-the-strata`). G-S6: no gDNA fragment runs past its reference end (must be 0). The
+gDNA truth comes from the oracle BAM's read names; the length truth is each condition's own post-capture
+`truth_fragment_lengths.tsv`, never the configured mean, because the post-capture distribution is the
+ground truth (`TRAPS: capture-selects-for-length`). G-S3 is the gate that falsifies a capture defect;
+G-S4 is a regression guard that passed with one present. No solver runs. Exits non-zero on any failure.
 
-⭐ **Every gate here is DIRECTIONAL or an absolute count.** Not one of them carries a threshold: a pass
-mark on "how much longer is a captured fragment" would be inventing the capture efficiency curve, which
-is `docs/TRAPS.md` no-magic-numbers. The *sign* is physics — hybrid capture hybridises probes to
-sequence, so a short fragment presents less sequence, binds worse, and is captured less efficiently —
-and the sign is all that is asserted. The magnitude is whatever `binding_per_base` and the probe length
-imply.
+Usage::
 
-| | gate | form |
-|---|---|---|
-| G-S1 | gDNA fragments on an RNA-only reference | absolute count, must be 0 |
-| G-S2 | genomic references carrying gDNA | count, must be >= 2, each non-zero |
-| G-S3 | gDNA mean length, capture on vs off | strictly greater under capture |
-| G-S4 | gDNA mean length, on-target vs off-target | on-target strictly longer |
-| G-S5 | mean length of EACH RNA population, capture on vs off | strictly greater under capture |
-| G-S6 | gDNA fragments longer than their own reference | absolute count, must be 0 |
-
-⚠ **G-S4 is scored on PROBE OVERLAP, not on the start's territory, and the difference is not cosmetic**
-(`docs/TRAPS.md` on-target-by-start-is-geometry). Conditioned on being captured, a fragment whose start is in the intron is one that
-was **long enough to reach the probe**, so an intronic start selects long fragments by construction
-(weight ~ w^2/2) while an exonic start does not (weight ~ p^2/2, flat in w). So an exonic-start population
-reads SHORTER than an intronic-start one under any capture model of this form, and gating on that pair is
-gating on geometry. The population that physically binds is the one that **overlaps a probe**, so that is
-what is scored; the start-territory table is printed underneath as the diagnostic it is.
-
-⚠ **G-S4 is a REGRESSION GUARD, not a falsification** (`docs/TRAPS.md` a-gate-that-already-passed): it passed with the capture
-defect present, because the engine's per-fragment conditional was right and only the marginal was being
-discarded. G-S3 is the gate that falsifies.
-
-⚠ **G-S3 and G-S5 read `truth_fragment_lengths.tsv`**, the panel's own post-capture empirical truth,
-and never the configured `frag_mean`. The configured value describes a library that was never
-sequenced; post-capture is the baseline (`docs/TRAPS.md` capture-selects-for-length) — owner, 2026-08-19:
-*"the post-capture FL distribution (and post-capture transcript abundances) become our ground truth"*.
-
-⛔⛔ **G-S5 USED TO POOL MATURE AND NASCENT INTO ONE `mu_rna` AND ASSERT THE gDNA GAP NARROWED — AND
-THAT VERDICT TRACKED THE NASCENT MIXTURE RATHER THAN ANY LAW.** It passed 12/12 only because the old
-simulator IMPOSED a 20 % nascent fragment count in every condition, capture included. Once nascent
-became a transcript in one multinomial, hybrid capture depleted it (20.01 % → 2.13 %, which is correct:
-probes tile exons), the pooled RNA mean stopped rising with gDNA, and the gate failed — with every
-per-population number directional and sensible (mature 211.8 → 229.0, nascent 216.7 → 238.2, gDNA
-216.5 → 240.2). ⭐ **The law is per POPULATION: capture selects for length in each of them.** That is
-what G-S5 now asserts, and it cannot be moved by a mixture (`TRAPS: never-pool-the-strata`).
-
-    python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/ladder \\
-        --reference ~/Downloads/rigel_runs/suite/reference [--genomic-refs chr21 chr22]
-
-⚠ **The example named `suite/pilot` until 2026-08-17 and that panel does not exist**: `pilot`,
-`flgap_short` and `flgap_long` were deleted on 2026-08-13 and `gdna_ladder.yaml` (16 conditions) is the
-only panel on disk. Nothing here is pilot-specific — `--suite` is any panel directory holding a
-`manifest.json` — so only the example was wrong.
-
-Exits non-zero if any gate fails.
+    python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/ladder --reference ~/Downloads/rigel_runs/suite/reference
+    python scripts/design/simulator_gates.py --suite SUITE --reference REF --genomic-refs chr21 chr22   # override the manifest's gDNA references
 """
 
 from __future__ import annotations
@@ -189,10 +155,10 @@ def read_truth_length_stats(path: Path) -> dict[str, dict[str, float]]:
 def read_gdna_origins(bam: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Per-reference ``(starts, ends)`` of every gDNA fragment, from the oracle BAM's read names.
 
-    ⭐ **The read name IS the per-fragment truth** — ``gdna:chr22:21469960-21470127:f:0`` names the
+    The read name is the per-fragment truth — ``gdna:chr22:21469960-21470127:f:0`` names the
     reference and the molecule's own coordinates. One record per fragment is taken by filtering to
-    R1 (flag 0x40), which is cheaper and exact where a de-duplicating set over ten million query
-    names is neither.
+    R1 (flag 0x40), which is cheaper and exact where a de-duplicating set over every query name is
+    neither.
     """
     starts: dict[str, array.array] = defaultdict(lambda: array.array("q"))
     ends: dict[str, array.array] = defaultdict(lambda: array.array("q"))
@@ -310,8 +276,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    # ⛔ Fail FAST and by name. Pointed at the deleted `pilot` panel this raised a bare
-    # `FileNotFoundError` traceback, which says a file is missing but not that the PANEL is.
+    # Fail fast and by name: a bare `FileNotFoundError` says a file is missing, not that the panel is.
     manifest_path = args.suite / "manifest.json"
     if not manifest_path.is_file():
         raise SystemExit(
@@ -415,7 +380,7 @@ def main() -> int:
             for pool in ("mrna", "nrna"):
                 m_off = off.get(pool, {}).get("mean")
                 m_on = on.get(pool, {}).get("mean")
-                # ⛔ a pool with no fragments in either arm is VACUOUS, never a pass
+                # a pool with no fragments in either arm is vacuous, never a pass
                 if m_off and m_on:
                     g5_rows.append((f"{label} {pool}", float(m_off), float(m_on)))
 

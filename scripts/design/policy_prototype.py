@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?
-— the harness every message rung is developed on before it touches `src/`.
-
-⭐ **The seam.** A prototype is a Python class with the backbone's ``Policy`` shape (``prepare(ctx)``
-returning an object with ``propagate``/``solve`` — the two phases), named in a module the caller supplies; this harness
-installs it in place of ``calibrate``'s ``TransferPolicy`` for the ``transfer`` arm and scores it beside
-``silent`` and the SHIPPED ``transfer`` on a cached, certified condition. ⛔ Compare `src` against `src`
-across a landing — a prototype that subclasses the shipped policy and calls its ``prepare`` delivers the
-landed mechanism TOO once it lands (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`).
-
-**Three views**, never pooled with each other: the whole-library |gDNA estimate − truth| per condition with
-its region/boundary split and a per-GENE-TYPE table (a gene's type is the token after ``B<k>_`` in its
-``gene_id`` on the test chromosome — ``clean``, ``capnasc``, ``altstart`` …, so a moved number names its
-structure); ``--by-class``, the same error summed per NODE CLASS (the certified stratum, boundaries
-split by their terminus and junction flags, exons by reach: a licensed intron face, an edge only, or
-walled) — the view that judges a message at its DESTINATIONS, which the whole-library number cannot
-(it carries the refit prior's response); and ``dissect``, every slot of one gene type with its truth
-beside every arm.
+"""How does a prototype message policy score, per gene type and per slot, against certified truth?
+This is the harness a message mechanism is developed on before it touches `src/`. A prototype is a
+Python class with the backbone's ``Policy`` shape (``prepare(ctx)`` returning an object with
+``propagate`` / ``solve``), named in an ``ARMS = {"my_arm": PolicyClass, ...}`` table in the module
+``--module`` points at; the harness installs it in place of ``calibrate``'s ``TransferPolicy`` for
+the ``transfer`` arm and scores it beside ``silent`` and the shipped ``transfer`` on a cached,
+certified condition, with the shipped class restored afterwards. The error is |gDNA estimate -
+truth| in fragments against `slot_truth.npz`; no EM runs and nothing is re-scanned. Three views,
+never pooled with each other: the whole-library number per condition with its region/boundary
+split and a per-gene-type table (a gene's type is the token after ``gB<k>_`` in its test-chromosome
+``gene_id``, so a moved number names its structure); ``--by-class``, the same error summed per node
+class (certified stratum, a boundary's terminus and junction flags, an exon's reach: licensed /
+edge / walled), which judges a message at its destinations where the whole-library number carries
+the refit prior's response; and ``dissect``, every slot of one gene type with its truth beside every
+arm. A prototype that subclasses the shipped policy inherits every mechanism the parent later
+gains, so compare `src` against `src` across a landing. `backbone_parity.py` imports `load_arms`.
 
 Usage::
 
@@ -26,10 +24,7 @@ Usage::
     python scripts/design/policy_prototype.py --panel test --arms transfer my_arm --module p.py --all --by-class
     python scripts/design/policy_prototype.py dissect --panel test --arms transfer my_arm --module p.py \\
         --condition gdna_g50_ss_0.99_nrna_file_capture_on --type capnasc
-
-``--module`` is a Python file defining ``ARMS = {"my_arm": SomePolicyClass, ...}``; each class is
-constructed exactly as ``calibrate`` constructs ``TransferPolicy`` (``rows_at`` and ``strand``).
-``--self-test`` exercises the type derivation and the arm installation on a toy.
+    python scripts/design/policy_prototype.py --self-test
 """
 
 from __future__ import annotations

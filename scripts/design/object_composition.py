@@ -1,140 +1,35 @@
-"""IS THE TARGET `f_lib` OR THE OBJECT-WEIGHTED MEAN COMPOSITION — AND CAN IT BE ESTIMATED WITHOUT THE
-SOLVE?
+"""Must ψ's Beta reference be one library-wide number, or can each object supply its own?
 
-⭐⭐⭐ **This is the prior-free half of the Beta(a,b) reference question, and it runs with NO SOLVER, NO
-EM and NO `src/` change.** psi's composition reference ``a*log f_g + b*log(1-f_g)`` is exactly
-``Beta(a, b)`` in ``f_g``, so ``a`` and ``b`` are PSEUDO-COUNTS with a strength ``a+b`` and a MEAN
-``a/(a+b)``. The shipped ``_JEFFREYS_REF = 0.5`` fixes the mean at 1/2 — an assertion that the library
-is half gDNA. This file measures the two things that decide what the mean should be instead:
+ψ's composition reference ``a·log f_g + b·log(1−f_g)`` is ``Beta(a, b)`` in ``f_g``, so ``a`` and
+``b`` are pseudo-counts with a mean ``a/(a+b)``, and the shipped ½ asserts every object is half gDNA.
+This instrument measures what that mean should be instead, with no solver, no EM and nothing patched in
+`src/`: the target (the fragment-weighted ``f_lib`` against the object-weighted mean of the per-object
+truth, the one with a prior's denominator); whether it is reachable from the payload alone (no
+deconvolved array is read here, which is what makes an estimate non-circular); and the per-object
+prior mean ``m_i = rho_g·E_g / (rho_g·E_g + rho_r·E_r)`` built from two pooled gDNA densities (the
+off-target anchors and the in-gene ``exon|intron`` anchor, whose ratio is the capture enrichment) and
+a shrunk sj-flux RNA density gated to where mature RNA can be. Each arm is scored as the fragments the
+prior misplaces if believed outright, ``Σ|m_i − f_g,i|·M_i``, against the shipped ½ and per stratum,
+with the truth from the origin-split oracle cache (sum-to-full gated). Every slot takes exactly one
+of seven strata (:func:`strata`, asserted), the boundary axis split on whether mature RNA can cross.
+Read the zero-control rows first (the gDNA-side estimator must read 0.0000 there) and the capture-ON
+rows second. `PURE_GDNA_STRATA` includes ``R intron``, which the panel's sparse nascent RNA
+contaminates; the shipped background pools intergenic only, so that is this instrument's anchor.
 
-============  =====================================================================================
-**TARGET**    what quantity the reference's mean wants: the FRAGMENT-weighted library composition
-              ``f_lib``, or the OBJECT-weighted mean of the per-object truth. A prior applies once
-              per object, so the second is the one with the matching denominator
-**ESTIMATOR**  whether that quantity is reachable from the payload alone — no deconvolved array is
-              read anywhere in this file, which is what makes an estimate here non-circular
-============  =====================================================================================
-
-⛔⛔ **THE HEADLINE, AND IT IS TWO NUMBERS THAT DISAGREE BY AN ORDER OF MAGNITUDE.** At ``g05
-capture-OFF`` the fragment-weighted composition is **0.067** and the object-weighted one is **0.649**;
-at ``g50`` they are **0.576** and **0.791**. gDNA is spread thinly over the whole genome while RNA is
-concentrated in a few exons, so the many small intergenic and intronic objects are nearly pure gDNA
-while the fragment mass sits in RNA-rich exons. ⭐ The direction is the one an independent sweep of
-``vertex_ceiling.py`` already implied — that the optimal pseudo-count sits ABOVE ``f_lib`` — and at
-``g50`` the object-weighted value lands on that sweep's optimum. ⛔ **Neither number ranks the work on
-its own: `vertex_ceiling.py` does, and this file exists to tell it what value to install.**
-
-⭐⭐⭐ **AND THE ANSWER TO BOTH IS THAT THE QUESTION WAS WRONG: THE REFERENCE DOES NOT HAVE TO BE
-LIBRARY-WIDE AT ALL.** psi solves one object at a time, and the gDNA arm's fitted term is ALREADY per
-slot — ``(n_slots, K)``. The reference is the only scalar left in psi. Written per object as
-
-    m_i  =  rho_g,i * E_g,i  /  ( rho_g,i * E_g,i  +  rho_r,i * E_r,i )
-
-every term but the two DENSITIES is per-object and exactly known, so even POOLED densities give a
-per-object prior mean. Scored as ``sum |m_i - f_g,i| * M_i`` — how many fragments the prior misplaces if
-believed outright — against the shipped constant 1/2, per stratum, in FRAGMENTS (table 6):
-
-===========================  ====================  ====================  ===============
-stratum                      shipped constant 1/2  ``m_i``, prior-free   class-pooled ref
-===========================  ====================  ====================  ===============
-stranded x capture OFF       1.000                 **0.040**             0.081
-stranded x capture ON        1.000                 **0.326**             0.346
-unstranded x capture OFF     1.000                 **0.040**             0.081
-unstranded x capture ON      1.000                 0.326                 0.346  (DEFERRED)
-``g00`` ZERO-gDNA control    1.000                 **0.000**             0.000
-===========================  ====================  ====================  ===============
-
-⭐⭐ **25x better than the shipped constant at capture-OFF, 3x at capture-ON, and EXACTLY ZERO at both
-zero controls.** ⛔ It also beats the class-pooled reference arm on every stratum, so that arm is NOT a
-ceiling: it hands an on-target RNA density to objects mature RNA cannot occupy, which the ``m_i`` form
-refuses to do by construction. ⚠ ``g05``, which regressed 1.43x under every library-wide mean tried,
-reads **0.009**.
-
-⭐⭐⭐ **WHAT CARRIES THE PER-OBJECT VARIATION IS THE OPPORTUNITY GEOMETRY, NOT A PER-OBJECT DENSITY —
-AND AT EXONS THE PRIOR IS FRANKLY A CLASS CONSTANT.** Measured at ``g50`` capture-OFF: within ``R exon``
-``m_i`` has sd **0.0021** against a true ``f_g`` sd of **0.4441**, and within ``B exon|exon`` its sd is
-**exactly 0**. Replacing it by its own class mean changes nothing (168,551 vs 164,074 fragments). ⛔ **Do
-not read the win at the exonic strata as per-object resolution**; it is a better CONSTANT, and the
-population that needs per-object resolution — exons, ``exon|exon``, AMBIG — is precisely the one the gDNA
-LANDSCAPE exists to serve. The two terms partition the object universe rather than competing on it.
-
-**THE LOCAL RNA DENSITY, and the answer is to shrink it hard (stage 0a).** Three ways of turning the sj
-flux into ``rho_r``, per stratum at capture-OFF: raw local flux with a pooled fallback **0.121**, one
-pooled scalar **0.042**, and one pseudo-observation of the pooled rate blended with the local flux
-**0.040**. ⭐ The local flux carries a little signal and only survives heavy shrinkage; ⛔ and the naive
-version that sets ``rho_r = 0`` where no sj is in reach reads **0.088-0.130 at the zero control**, where
-the shrunk form reads **0.000**.
-
-**THE SCOPE, and the answer is EVERYWHERE (stage 0b).** Letting the reference speak only where the
-annotation determines the answer — the four strata where mature RNA cannot be — and leaving psi's 1/2
-elsewhere reads **0.437 / 0.827**, i.e. 10x worse than letting it speak everywhere. At pass-0 there is no
-landscape, so the exonic constant is strictly better than 1/2 there.
-
-**THE POST-SOLVE UPDATE DOES NOT RUN AWAY (stage 0c, table 8).** The one update this design proposes —
-re-estimating the on-target gDNA density from solved exons — is a single scalar measured on exons and
-applied to exons, structurally the positive-feedback loop that makes a library-wide ``f_lib`` rule
-inadmissible. Iterated with each object's OWN LIKELIHOOD REMOVED, which is a strict UPPER BOUND on the
-feedback, four starts spanning three decades converge to the SAME fixed point to six decimals on all
-twelve contaminated conditions and to exactly 0.000 at the control. ⭐ The per-object geometry damps it:
-raising ``rho_g`` cannot raise the share at an object whose ``rho_r * E_r`` is large. ⛔ A pass here is
-NECESSARY AND NOT SUFFICIENT, and the fixed point's VALUE is not the loop's value — the likelihood is
-absent from it by construction.
-
-⭐⭐ **THE STRATA, AND WHY THE BOUNDARY AXIS SPLITS ON MATURE-RNA CROSSABILITY.** Every slot lands in
-exactly one of seven populations and the partition is asserted (:func:`strata`)::
-
-    R intergenic     no transcript covers it        f_g = 1 STRUCTURALLY - no nascent assumption
-    R intron         transcript, but no exon        f_g = 1 IF unspliced nascent RNA is sparse
-    R exon           the mixture                    no structural claim
-    B exon|intron    one flank exonic, in-gene      mature CANNOT cross - it splices. The ON-TARGET
-                                                    gDNA anchor, which intergenic can never be
-    B exon|exon      both flanks exonic             an alternative splice site inside an exonic
-                                                    stretch. Mature crosses FREELY - not an anchor
-    B intron|intron  neither flank exonic, in-gene  off-target, nascent-only
-    B gene edge      a flank is intergenic          a TSS/TES interface; the ``g1_locked`` class
-
-⛔⛔ **THAT CURATION IS THE CORRECTION THAT MADE THIS WORK** (owner, 2026-08-15). An earlier version used
-"a sj attaches here" as one stratum and measured its true ``f_g`` at **0.0000 over 955,428 fragments** at
-the zero control, because that pool lumps ``exon|exon`` in. ⭐ The same predicate then does a second job:
-``rho_r`` from the sj flux is a MATURE density on the spliced template, so handing it to a slot mature
-cannot occupy subtracts RNA that is not there. Gating it by the solver's own ``mrna_active`` takes
-``R intron`` from 0.498 to **0.000** and ``B exon|intron`` from 0.485 to **0.000**.
-
-⭐⭐ **HYBRID CAPTURE NEEDS NO DETECTION STEP** (table 5). Measure the gDNA density at BOTH anchors — the
-off-target intergenic+intron REGIONs and the in-gene ``exon|intron`` boundaries — and their RATIO is the
-enrichment: **0.98 without probes and 113-114 with them**, a 116x separation, no threshold and no flag.
-The off-target anchor is accurate on all 16 (**0.91-1.00x** of truth). ⛔ The in-gene anchor is a clean
-DETECTOR and not yet a calibrated level: it under-reads on-target gDNA by **2.6-3.6x** under capture,
-because an ``exon|intron`` boundary sits at the EDGE of the probe footprint and its crossing opportunity
-reaches into unprobed intron.
-
-⛔ **``boundary_spliced`` IS A SEPARATE BANK FROM ``boundary_unspliced``, NOT A SUBSET OF IT** — the same
-molecules split by whether they used a sj ELSEWHERE. So the contiguous RNA at a boundary is
-``unspliced_RNA + S``, and S SUBTRACTS from the estimated RNA crossing rather than bounding ``f_g``.
-⚠ A first draft of this file wrote ``f_g <= 1 - S/M`` as an assumption-free bound; it is false, and the
-truth violated it by **302**. Table 7 keeps the identity under measurement instead.
-
-⚠ **THE ONE ASSUMPTION THIS PANEL CANNOT PRICE.** ``nrna = 0`` on all sixteen conditions, so ``R intron``
-and ``B exon|intron`` reading ``f_g = 1.0000`` is the panel's own build restated. ⭐ ``R intergenic`` is
-the arm that does not depend on it — no transcript covers those regions at any nascent level — and
-``bg_ig`` is printed beside ``bg`` for that reason. ⚠ On a STRANDED library the nascent half of an
-``exon|intron`` boundary is deconvolvable by the strand channel anyway, so the assumption is load-bearing
-on unstranded data only.
-
-Gates: ``tests/test_object_composition_self_test.py``. ``--self-test`` perturbs every comparator with no
-I/O, which is the other half of the discipline (TRAPS: perturb-every-gate).
+Also a library: `calibration_oracle.py`, `calibration_walk.py`, `total_abundance_audit.py` and
+`abundance_landscape_census.py` import `strata`, `slot_counts`, `_scope`, `_SELECTIONS`, `PVO` and
+the two defaults; its own tables are not the yardstick for a mechanism, `vertex_ceiling.py` is.
 
 Usage::
 
-    python scripts/design/object_composition.py                    # the whole ladder
-    python scripts/design/object_composition.py --conditions NAME
-    python scripts/design/object_composition.py --self-test        # no I/O
+    python scripts/design/object_composition.py                                # the whole ladder
+    python scripts/design/object_composition.py --conditions <name> --oracle-cache <dir>
+    python scripts/design/object_composition.py --self-test                    # no I/O
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 import time
@@ -145,17 +40,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-PVO = _sibling("prior_vs_oracle.py")
+PVO = sibling("prior_vs_oracle.py")
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
@@ -186,20 +74,17 @@ DEFAULT_INDEX = PVO.DEFAULT_INDEX
 
 _EPS = 1.0e-12
 
-#: Either strand's exon bit. ⭐ The union over strands is deliberate: a boundary is "exonic" on a flank
-#: if ANY transcript has an exon there, and the per-STRAND question is answered by ``mrna_active``,
+#: Either strand's exon bit. The union over strands is deliberate: a boundary is "exonic" on a flank
+#: if any transcript has an exon there, and the per-strand question is answered by ``mrna_active``,
 #: which :func:`strata` cross-checks against.
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 
-#: ⭐⭐ The SEVEN populations, in report order. ⛔ MUTUALLY EXCLUSIVE and EXHAUSTIVE over the chain,
-#: asserted in :func:`strata` rather than promised here — a stratum table whose rows overlap
-#: double-counts the object weight it exists to compute, and nothing downstream could tell.
-#:
-#: ⛔⛔ **THE BOUNDARY AXIS IS SPLIT BY WHETHER MATURE RNA CAN CROSS IT, NOT BY WHETHER A sj ATTACHES,
-#: AND THAT DISTINCTION IS THE WHOLE POINT** (owner, 2026-08-15). An earlier version of this file used
-#: "has a splice junction attached" as one stratum and measured its true ``f_g`` at **0.0000 over
-#: 955,428 fragments** at the zero control — because that pool lumps ``exon|exon`` boundaries in, where
-#: an alternative splice site sits inside a contiguous exonic stretch and mature RNA crosses freely.
+#: The seven populations, in report order: mutually exclusive and exhaustive over the chain, asserted
+#: in :func:`strata` rather than promised here, because a stratum table whose rows overlap
+#: double-counts the object weight it exists to compute and nothing downstream could tell.
+#: The boundary axis is split by whether mature RNA can cross, not by whether a sj attaches: a pool
+#: keyed on "a sj attaches here" lumps in ``exon|exon`` boundaries, where an alternative splice site
+#: sits inside a contiguous exonic stretch and mature RNA crosses freely.
 STRATA = (
     "R intergenic",
     "R intron",
@@ -210,59 +95,48 @@ STRATA = (
     "B gene edge",
 )
 
-#: ⭐ The strata whose composition is knowable with NO deconvolution, and they are NOT equally free:
+#: The strata whose composition is knowable with no deconvolution, and they are not equally free:
 #: ``R intergenic`` is covered by no transcript at all, so ``f_g = 1`` holds at any nascent level;
-#: ``R intron`` and ``B exon|intron`` need unspliced nascent RNA to be sparse. ⚠ On a STRANDED library
-#: the nascent half of an ``B exon|intron`` boundary is deconvolvable by the strand channel anyway, so
-#: the assumption is load-bearing on unstranded data only.
-#:
-#: ⛔⛔⛔ **MEASURED 2026-08-22: THIS POOL IS CONTAMINATED ON THE CURRENT PANEL, AND THE FACTOR IS NOT A
-#: CONSTANT.** The panel used to hold ``nrna = 0``, which made ``R intron`` exactly pure and this pool
-#: exactly right; it now carries SPARSE nascent RNA (``DESIGN.md`` §0b) and the pool's rate over its own
-#: true gDNA rate reads **4.49x at g05, 1.18x at g50, 1.004x at g98 capture-OFF** — it scales with the
-#: RNA:gDNA ratio, so it is worst exactly where gDNA is scarce and the anchor matters most.
-#: ⭐ ``R intergenic`` ALONE is inflated **exactly 1.0000x** on every condition, and so is ``B gene
-#: edge``. ⛔ So any number this instrument reports off ``PURE_GDNA_STRATA`` — including the recorded
-#: exon-reference result (see `ISSUES: measured-prior-rung-4`'s anchor-contamination constraint) — was produced with an anchor up to 4.49x high and must be
-#: re-derived before it is quoted. ⭐ The SHIPPED path is clean: ``density_deconv.fit_intron_background``
-#: pools intergenic only (``include_introns=False`` at both call sites), so this is an INSTRUMENT defect
-#: rather than shipped behaviour. Whether to drop ``R intron`` from this pool is a MEASUREMENT-DESIGN
-#: decision (it is also the on-target-vs-off-target question), so it is recorded here rather than
-#: silently changed.
+#: ``R intron`` needs unspliced nascent RNA to be sparse, and the panel's sparse nascent RNA
+#: contaminates it by a factor that scales with the RNA:gDNA ratio (worst where gDNA is scarce). The
+#: shipped background (``density_deconv.fit_intron_background``) pools intergenic only, so a number
+#: this instrument reports off this pool is the instrument's and not shipped behaviour; whether to drop
+#: ``R intron`` is a measurement-design decision, so it is recorded here rather than silently changed.
+#: ``est_bg_intergenic_only`` is printed beside ``est_bg`` for that reason.
 PURE_GDNA_STRATA = ("R intergenic", "R intron")
 
-#: ⭐⭐ The curated gDNA anchor that sits INSIDE genes, and therefore ON-TARGET under hybrid capture —
-#: the one thing the intergenic anchor structurally cannot be.
+#: The gDNA anchor that sits inside genes, and therefore on-target under hybrid capture, which the
+#: intergenic anchor structurally cannot be.
 ONTARGET_GDNA_STRATUM = "B exon|intron"
 
 
 def strata(chain, statics, geometry, region_arrays) -> dict:
-    """Per-slot stratum label and the masks the derivation needs, all from the ANNOTATION alone.
+    """Per-slot stratum label and the masks the derivation needs, all from the annotation alone.
 
-    ⛔ **The partition is asserted, not documented.** Every slot must take exactly one label: the
-    object-weighted mean this file computes is a mean over objects, so a slot counted twice or not at
-    all silently reweights the target it is trying to measure.
+    The partition is asserted: every slot must take exactly one label, because the object-weighted
+    mean this file computes is a mean over objects, so a slot counted twice or not at all silently
+    reweights the target.
 
-    **The boundary classification, and the reason it is by EXON-NESS of the two flanks.** A BOUNDARY's
-    unspliced-crossing population is the molecules that crossed it CONTIGUOUSLY. Mature RNA can do that
-    only where the template is contiguous exon on both sides, so:
+    The boundary classification is by exon-ness of the two flanks, because a boundary's
+    unspliced-crossing population is the molecules that crossed it contiguously, which mature RNA can
+    do only where the template is contiguous exon on both sides:
 
     ================  =================================================================================
-    ``B exon|intron``  exactly one flank exonic, both flanks inside a gene ⇒ **mature RNA CANNOT cross,
-                       it splices** ⇒ near-pure gDNA under sparse unspliced nascent. ⭐ In-gene, so it
-                       is the ON-TARGET gDNA anchor under capture
-    ``B exon|exon``    both flanks exonic — an alternative splice site inside a contiguous exonic
-                       stretch. ⛔ Mature RNA crosses it freely; **not an anchor and never was**
+    ``B exon|intron``  exactly one flank exonic, both flanks inside a gene: mature RNA cannot cross, it
+                       splices, so near-pure gDNA under sparse unspliced nascent; in-gene, so the
+                       on-target gDNA anchor under capture
+    ``B exon|exon``    both flanks exonic, an alternative splice site inside a contiguous exonic
+                       stretch; mature RNA crosses it freely, so not an anchor
     ``B intron|intron`` neither flank exonic, both inside a gene (adjacent introns of different
-                       signature). Off-target, nascent-only RNA
-    ``B gene edge``    at least one flank intergenic — a TSS/TES interface. This is the ``g1_locked``
-                       boundary class, structurally pure gDNA on both strands
+                       signature); off-target, nascent-only RNA
+    ``B gene edge``    at least one flank intergenic, a TSS/TES interface; the ``g1_locked`` boundary
+                       class, structurally pure gDNA on both strands
     ================  =================================================================================
 
-    ⭐ **``R intergenic`` is defined by the SIGNATURE and cross-checked against ``g1_locked``**, which is
-    the predicate the solver itself pins on. Likewise ``B exon|intron`` is cross-checked against the
-    solver's own ``mrna_active`` — if the two ever separate, this file's purity claim is about a
-    different population than the one the solver reasons over, and it raises.
+    ``R intergenic`` is defined by the signature and cross-checked against ``g1_locked``, the predicate
+    the solver itself pins on; ``B exon|intron`` is cross-checked against the solver's own
+    ``mrna_active``. If either pair separates, this file's purity claim is about a different population
+    than the one the solver reasons over, and it raises.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -307,10 +181,10 @@ def strata(chain, statics, geometry, region_arrays) -> dict:
             "population by construction — no transcript covers an intergenic region, so neither RNA "
             "strand is admissible — and this file's structural `f_g = 1` claim rests on that."
         )
-    # ⛔ THE CURATION, MADE FALSIFIABLE. `mrna_active_s` is the solver's own "contiguous exon on BOTH
-    #    flanks" gate — exactly "mature RNA of strand s may cross here". At an `exon|intron` boundary one
-    #    flank carries no exon bit at all, so it must be False on both strands. If that ever fails, the
-    #    signature semantics moved and the near-pure-gDNA claim is about a different population.
+    # `mrna_active_s` is the solver's own "contiguous exon on both flanks" gate, i.e. "mature RNA of
+    # strand s may cross here". At an `exon|intron` boundary one flank carries no exon bit at all, so
+    # it must be False on both strands; if that ever fails, the signature semantics moved and the
+    # near-pure-gDNA claim is about a different population.
     mature_can_cross = np.asarray(statics.mrna_active_pos, bool) | np.asarray(
         statics.mrna_active_neg, bool
     )
@@ -324,9 +198,9 @@ def strata(chain, statics, geometry, region_arrays) -> dict:
     return {
         "label": label,
         "locked": locked,
-        # ⭐ ON-TARGET means "touches an exon" — annotation-derived, no threshold and no capture
-        #   detection. It is the axis hybrid capture enriches along, so it is the axis the gDNA density
-        #   is allowed to differ across.
+        # on-target means "touches an exon": annotation-derived, no threshold and no capture
+        # detection. It is the axis hybrid capture enriches along, so it is the axis the gDNA density
+        # is allowed to differ across.
         "on_target": np.where(
             is_region,
             (np.where(is_region, sig[np.clip(obj, 0, max(n_regions - 1, 0))], 0) & _EXON_BITS) != 0,
@@ -337,10 +211,10 @@ def strata(chain, statics, geometry, region_arrays) -> dict:
 
 
 def slot_counts(payload, region_arrays, chain) -> np.ndarray:
-    """One payload's unspliced/contained count per slot — **the mixture psi deconvolves, and nothing
-    else.** ``region_contained`` at a REGION, ``boundary_unspliced`` at a BOUNDARY, exactly the
-    populations :attr:`RegionGeometry.unspliced_count` carries, so a truth built from the origin
-    partitions and an estimate built from the full payload are on one basis.
+    """One payload's unspliced/contained count per slot, the mixture ψ deconvolves and nothing else:
+    ``region_contained`` at a REGION, ``boundary_unspliced`` at a BOUNDARY, exactly the populations
+    :attr:`RegionGeometry.unspliced_count` carries, so a truth built from the origin partitions and an
+    estimate built from the full payload are on one basis.
     """
     sub = CalibrationSubstrate.from_payload(payload, region_arrays)
     kind = np.asarray(chain.kind)
@@ -353,7 +227,7 @@ def slot_counts(payload, region_arrays, chain) -> np.ndarray:
 
 
 def pooled_density(mass: np.ndarray, eff: np.ndarray, select: np.ndarray) -> float:
-    """``sum(mass) / sum(eff)`` over a selected population — the ratio of sums, never the mean of
+    """``sum(mass) / sum(eff)`` over a selected population, the ratio of sums and never the mean of
     ratios (TRAPS: a-mean-of-ratios-inherits-the-partition). ``0.0`` when the population has no
     opportunity, which is the honest answer and not a floored division."""
     e = float(np.sum(np.asarray(eff, np.float64)[select]))
@@ -363,16 +237,13 @@ def pooled_density(mass: np.ndarray, eff: np.ndarray, select: np.ndarray) -> flo
 
 
 def neighbour_sj_density(chain, geometry) -> np.ndarray:
-    """Per-slot certified-RNA density from the sj flux **at the slot and its two chain neighbours**,
-    pooled as ``sum(count) / sum(E)``.
+    """Per-slot certified-RNA density from the sj flux at the slot and its two chain neighbours,
+    pooled as ``sum(count) / sum(E)``; returns ``(density, has_flux)``.
 
-    ⭐ **The flux is a density on the SPLICED template**, so it is on the same footing as an exon
-    REGION's contained RNA opportunity and NOT on the same footing as a BOUNDARY's unspliced-crossing
-    opportunity — table ③ measures both and the difference is a factor of 7-10.
-
-    ⚠ The neighbour set is the chain's own adjacency: genomic order IS slot order and the chain
-    alternates REGION/BOUNDARY, so a slot's neighbours are ``i-1`` and ``i+1`` and a reference terminal
-    links to ``-1``.
+    The flux is a density on the spliced template, so it is on the same footing as an exon REGION's
+    contained RNA opportunity and not on that of a BOUNDARY's unspliced-crossing opportunity; table ③
+    measures both. The neighbour set is the chain's own adjacency: a slot's neighbours are ``i-1`` and
+    ``i+1`` and a reference terminal links to ``-1``.
     """
     sj_count = np.asarray(geometry.sj_count, np.float64).sum(1)
     eff_sj = np.asarray(geometry.eff_sj, np.float64).sum(1)
@@ -385,12 +256,11 @@ def neighbour_sj_density(chain, geometry) -> np.ndarray:
 
 
 def object_weighted_mean(f_true: np.ndarray, live: np.ndarray) -> float:
-    """The TARGET: the mean per-object composition over objects that have any mass at all.
+    """The target: the mean per-object composition over objects that have any mass at all.
 
-    ⛔ **Objects with no mass are excluded and that is not a convenience.** An empty object has no true
-    composition to average — ``0/0`` — and folding a fabricated value in would move the target by the
-    share of the genome that happens to be empty at this gDNA level, which at the zero control is most
-    of it.
+    Objects with no mass are excluded because an empty object has no true composition to average
+    (``0/0``), and folding a fabricated value in would move the target by the share of the genome that
+    happens to be empty at this gDNA level, which at the zero control is most of it.
     """
     return float(np.mean(np.asarray(f_true, np.float64)[live])) if live.any() else float("nan")
 
@@ -402,7 +272,7 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling)
+    # the drained frame, the one calibration reads
     payload = kw["payload"]
     chain = build_region_chain(
         payload.ref_region_offsets, payload.ref_boundary_offsets
@@ -422,17 +292,11 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         cls["label"], cls["locked"], cls["has_sj"], cls["on_target"]
     )
 
-    # ⭐ Through ``OracleTruth.from_parts`` rather than the raw payloads, so sum-to-full runs as a HARD
-    #   gate on every condition — a cached partition that does not reconstruct the scan calibration read
-    #   is a silently wrong truth source, and it would be invisible in every number below.
-    # ⭐⭐ **The full payload is the SCAN CACHE'S, never the oracle cache's ``_main``, and that is a
-    #   deliberate difference from ``calibration_vs_oracle.py``.** The two are the same scan — measured
-    #   bit-identical on every integer bank and 3.5e-14 apart on the six float ones, which is the
-    #   recorded re-association floor (`rescan_panels.py`) — so taking the one this file ALREADY loaded
-    #   makes sum-to-full validate the truth partition against the exact array object the estimator
-    #   reads, rather than against a second copy of it. ⚠ It also removes a read of a directory that
-    #   ``pass0_vs_oracle.measure_condition`` WRITES whenever an arm runs with ``--oracle-cache``, so
-    #   this instrument cannot race a concurrent arm.
+    # Through ``OracleTruth`` rather than the raw payloads, so sum-to-full runs as a hard gate on every
+    # condition: a cached partition that does not reconstruct the scan calibration read is a silently
+    # wrong truth source. The full payload is the scan cache's, never the oracle cache's ``_main``, so
+    # sum-to-full validates the truth partition against the exact array object the estimator reads,
+    # and this instrument never reads a directory ``pass0_vs_oracle.measure_condition`` writes.
     root = Path(oracle_cache) / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
     truth_oracle = OracleTruth.from_cached_parts(payload, parts, lift)
@@ -449,8 +313,8 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     eff_g = np.asarray(geometry.eff_gdna, np.float64)
     eff_r = np.asarray(geometry.eff_rna, np.float64)
 
-    # ⛔ The estimator reads the FULL payload's own per-slot totals, never the origin partitions. That
-    #   is the non-circularity claim made structural: `truth` below is the only name bound to `parts`.
+    # The estimator reads the full payload's own per-slot totals, never the origin partitions: the
+    # non-circularity claim made structural.
     est_mass = np.zeros(int(chain.n_slots), np.float64)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -480,17 +344,16 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     rho_bg, mean_bg = gdna_side(anchors)
     _, mean_bg_ig = gdna_side(label == "R intergenic")
 
-    # ── ⭐⭐⭐ THE PER-OBJECT PRIOR MEAN `m_i`, WHICH IS WHAT THE DERIVATION ACTUALLY NEEDS ──
+    # ── the per-object prior mean `m_i` ──
     #
     #   m_i = rho_g,i * E_g,i / ( rho_g,i * E_g,i + rho_r,i * E_r,i )
     #
-    # ⛔ **A LIBRARY-WIDE SCALAR IS THE SPECIAL CASE WHERE BOTH DENSITIES ARE CONSTANT AND THE GEOMETRY
-    #   IS IGNORED.** Every term but the two densities is per-object and exactly known, so even a
-    #   CLASS-POOLED density yields a per-object prior mean — which is the claim under test.
-    # ⭐ Two gDNA densities, not one, split on an ANNOTATION-derived axis (does this object touch an
-    #   exon?) rather than on a detected capture flag. Hybrid capture enriches along exactly that axis,
-    #   so their RATIO is the enrichment factor: ~1 without probes and large with them, measured rather
-    #   than declared (TRAPS: no-magic-numbers — there is no threshold and no switch here).
+    # A library-wide scalar is the special case where both densities are constant and the geometry is
+    # ignored; every term but the two densities is per-object and exactly known, so even a class-pooled
+    # density yields a per-object prior mean, which is the claim under test. Two gDNA densities, split
+    # on an annotation-derived axis (does this object touch an exon?) rather than a detected capture
+    # flag: hybrid capture enriches along exactly that axis, so their ratio is the enrichment factor,
+    # measured rather than declared, with no threshold and no switch.
     on_anchor = label == ONTARGET_GDNA_STRATUM
     rho_g_off = pooled_density(est_mass, eff_g, anchors)
     rho_g_on = pooled_density(est_mass, eff_g, on_anchor)
@@ -513,13 +376,12 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         tot = g + r
         return np.where(tot > 0.0, g / np.maximum(tot, _EPS), 0.5)
 
-    # ⭐⭐⭐ **THE MATURE-RNA GATE, AND IT IS THE SAME PREDICATE THE OWNER'S BOUNDARY CURATION USES.**
-    #   ``rho_r`` from the sj flux is a density of MATURE molecules on the spliced template. Handing it
-    #   to a slot mature RNA cannot occupy — an intron REGION, an ``exon|intron`` boundary, a gene edge —
-    #   subtracts RNA that is not there and calls gDNA RNA. ``mrna_active_s`` is the shipped predicate
-    #   for exactly this on BOTH axes: a REGION's own exon bit, a BOUNDARY's contiguous exon on both
-    #   flanks. ⚠ Where mature cannot be, what remains is NASCENT, which this design assumes sparse and
-    #   this panel cannot price (``nrna = 0``).
+    # The mature-RNA gate, the same predicate the boundary strata use. ``rho_r`` from the sj flux is a
+    # density of mature molecules on the spliced template; handing it to a slot mature RNA cannot
+    # occupy (an intron REGION, an ``exon|intron`` boundary, a gene edge) subtracts RNA that is not
+    # there and calls gDNA RNA. ``mrna_active_s`` is the shipped predicate for exactly this on both
+    # axes: a REGION's own exon bit, a BOUNDARY's contiguous exon on both flanks. Where mature cannot
+    # be, what remains is nascent, which this design assumes sparse.
     mature_here = np.asarray(statics.mrna_active_pos, bool) | np.asarray(
         statics.mrna_active_neg, bool
     )
@@ -529,27 +391,24 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
     _esj = np.asarray(geometry.eff_sj, np.float64).sum(1)
     rho_r_pooled = float(_sjc.sum() / max(float(_esj.sum()), _EPS))
 
-    # ⛔⛔ **AND THE CERTIFIED SPLICED CROSSING IS A SUBTRACTION, NOT A BOUND.** ``boundary_spliced`` is a
-    #   SEPARATE bank from ``boundary_unspliced`` — the same molecules split by whether they used a sj
-    #   ELSEWHERE — so the contiguous RNA crossing a boundary is ``unspliced_RNA + S`` and
+    # The certified spliced crossing is a subtraction, not a bound. ``boundary_spliced`` is a separate
+    # bank from ``boundary_unspliced`` (the same molecules split by whether they used a sj elsewhere),
+    # so the contiguous RNA crossing a boundary is ``unspliced_RNA + S`` and
     #
-    #       unspliced_RNA = rho_r * E_r - S      =>      f_g = 1 - (rho_r * E_r - S) / M
+    #     unspliced_RNA = rho_r * E_r - S      =>      f_g = 1 - (rho_r * E_r - S) / M
     #
-    #   ⚠ A first draft of this file wrote ``f_g <= 1 - S/M`` as an assumption-free bound. It is simply
-    #   FALSE — S is not inside M — and the truth violated it by up to 302 at ``g50``. ⚠ Subtracting S
-    #   inside ``m_i`` was then measured a net LOSS (0.553 -> 0.570, over-correcting at ``exon|exon``),
-    #   so it is NOT in the arm ladder; table (7) keeps the identity under measurement instead.
+    # ``f_g <= 1 - S/M`` is false (S is not inside M), so S is not in the arm ladder and table ⑦ keeps
+    # the identity under measurement instead.
     spliced = np.zeros(int(chain.n_slots), np.float64)
     spliced[kind == BOUNDARY] = np.asarray(full_sub.boundary_spliced.count, np.float64).sum(1)[
         obj[kind == BOUNDARY]
     ]
 
-    # ⭐⭐ THE LOCAL RNA DENSITY, THREE WAYS — stage 0a. The per-object sj flux is at the right LEVEL
-    #   and far too NOISY per object (measured: 0.515 against 0.123 for a single pooled density). But
-    #   the first version set ``rho_r = 0`` wherever no sj was in reach, which sends an RNA-rich exon to
-    #   ``m_i = 1``; that is a coverage artefact, not a measurement. The honest fallback is the
-    #   POPULATION rate, and the honest blend is one pseudo-observation of it — the same
-    #   "one pseudo-object of ignorance" convention ``fit_landscape`` uses, so no constant is introduced.
+    # The local RNA density, three ways. The per-object sj flux is at the right level and noisy per
+    # object, and setting ``rho_r = 0`` wherever no sj is in reach sends an RNA-rich exon to
+    # ``m_i = 1``, a coverage artefact rather than a measurement. The fallback is the population rate,
+    # and the blend is one pseudo-observation of it, the same "one pseudo-object of ignorance"
+    # convention ``fit_landscape`` uses, so no constant is introduced.
     sj_num = np.asarray(geometry.sj_count, np.float64).sum(1)
     sj_den = np.asarray(geometry.eff_sj, np.float64).sum(1)
     num, den = sj_num.copy(), sj_den.copy()
@@ -557,20 +416,19 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         ok = side >= 0
         num[ok] += sj_num[side[ok]]
         den[ok] += sj_den[side[ok]]
-    #: the mean sj opportunity carried by ONE sj-bearing boundary — the weight of one pseudo-observation
+    #: the mean sj opportunity carried by one sj-bearing boundary: the weight of one pseudo-observation
     e_one = float(sj_den[sj_den > 0.0].mean()) if np.any(sj_den > 0.0) else 0.0
     rho_r_fallback = np.where(has_flux, rho_r, rho_r_pooled)
     rho_r_shrunk = (num + rho_r_pooled * e_one) / np.maximum(den + e_one, _EPS)
 
     def gated(x):
-        """``rho_r`` is a MATURE density on the spliced template — zero where mature RNA cannot be."""
+        """``rho_r`` is a mature density on the spliced template: zero where mature RNA cannot be."""
         return np.where(mature_here, x, 0.0)
 
-    #: ⭐ the ARM LADDER, each an `m_i` and each scored the same way. `shipped` is the constant ½ ψ
-    #: carries today — the baseline every ratio is against — and `TRUTH` is the class-pooled ceiling.
-    #: ⛔ `structural` is stage 0b's scope question: let the reference speak ONLY where the annotation
-    #: determines the answer (mature RNA cannot be here) and leave psi's ½ everywhere else, which is
-    #: the population the gDNA LANDSCAPE exists to serve.
+    #: the arm ladder, each an `m_i` and each scored the same way. `shipped` is the constant ½ ψ
+    #: carries, the baseline every ratio is against, and `TRUTH` is the class-pooled ceiling.
+    #: `structural` lets the reference speak only where the annotation determines the answer (mature
+    #: RNA cannot be here) and leaves ψ's ½ everywhere else.
     m_pooled = prior_mean(rho_g_per_object, gated(rho_r_pooled))
     m_arms = {
         "shipped": np.full(int(chain.n_slots), 0.5),
@@ -581,20 +439,15 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         "pooled": m_pooled,
         "flux+fallbk": prior_mean(rho_g_per_object, gated(rho_r_fallback)),
         "flux+shrunk": prior_mean(rho_g_per_object, gated(rho_r_shrunk)),
-        # ⭐⭐⭐ THE DECONVOLUTION: `f_g = rho_g * E_g / M`, RNA as the RESIDUAL and never predicted.
-        #   ⛔ This is not a new idea — it is the PEAK of the shipped `density_lambda_factor`, whose own
-        #   docstring reads "peaked at f_g = rho_bg/rho_obs". With `rho_obs = M/E_g` that is exactly this
-        #   expression, so the arm measures the LOCATION the shipped NegBinom factor already carries at
-        #   the one stratum it is switched on for.
-        #   ⭐ It needs NO RNA density, which is the whole asymmetry: gDNA is near-uniform and
-        #   predictable pre-solve; RNA spans six decades with no genomic autocorrelation and is never
-        #   predicted — it is whatever mass the gDNA deconvolve leaves behind.
+        # the deconvolution: `f_g = rho_g * E_g / M`, RNA as the residual and never predicted. It is
+        # the peak of the shipped `density_lambda_factor` ("peaked at f_g = rho_bg/rho_obs", with
+        # `rho_obs = M/E_g`), so the arm measures the location the shipped factor already carries at
+        # the one stratum it is switched on for. It needs no RNA density: gDNA is near-uniform and
+        # predictable pre-solve, RNA is whatever mass the gDNA deconvolve leaves behind.
         "deconvolve": np.clip(rho_g_per_object * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0),
-        # ⭐⭐⭐ THE HYBRID: pin where the annotation DETERMINES the answer, deconvolve where it does not.
-        #   The structural strata are exactly ``~mature_here`` — mature RNA cannot be there — and the
-        #   deconvolve's use of the observed ``M`` makes it strictly worse on them (a downward Poisson
-        #   fluctuation reads as RNA). Everywhere else the annotation is silent and the deconvolution is the only
-        #   honest statement.
+        # the hybrid: pin where the annotation determines the answer, deconvolve where it does not.
+        # The structural strata are exactly ``~mature_here``, and the deconvolve's use of the observed
+        # ``M`` makes it strictly worse there (a downward Poisson fluctuation reads as RNA).
         "pin+deconvolve": np.where(
             mature_here,
             np.clip(rho_g_per_object * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0),
@@ -617,18 +470,15 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
             },
         }
 
-    # ── ⭐⭐⭐ STAGE 0c — THE RUNAWAY BOUND, WITH THE LIKELIHOOD REMOVED ──
+    # ── the runaway bound, with the likelihood removed ──
     #
-    # The only post-solve update this design proposes is narrow: re-estimate the ON-TARGET gDNA density
-    # from solved exons, because the pre-solve ``exon|intron`` anchor under-reads it 2.6-3.6x under
-    # capture. ⛔ That is ONE SCALAR, measured on exons and applied to exons — structurally the same
-    # positive-feedback loop that makes a library-wide ``f_lib`` rule inadmissible: a higher rho_g raises
-    # every exonic ``m_i``, which raises the gDNA mass attributed to exons, which raises rho_g.
-    #
-    # ⭐⭐ **Iterating that map with each object's OWN LIKELIHOOD REMOVED is a strict UPPER BOUND on the
-    # feedback** — it is the prior believed outright, with no data pulling against it. If this converges,
-    # the real refit loop converges a fortiori; if it runs away, the hazard is real and the full test is
-    # owed. That is what makes a solver-free answer admissible here at all.
+    # A post-solve re-estimate of the on-target gDNA density from solved exons is one scalar measured
+    # on exons and applied to exons, structurally the positive-feedback loop that makes a library-wide
+    # ``f_lib`` rule inadmissible: a higher rho_g raises every exonic ``m_i``, which raises the gDNA
+    # mass attributed to exons, which raises rho_g. Iterating that map with each object's own
+    # likelihood removed is a strict upper bound on the feedback (the prior believed outright, with no
+    # data pulling against it): if this converges the real refit loop converges a fortiori, which is
+    # what makes a solver-free answer admissible here at all.
     exonic = live & on_target
     rho_r_here = np.where(mature_here, rho_r_pooled, 0.0)
 
@@ -644,8 +494,8 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         return traj
 
     true_on = true_rho_g(exonic)
-    #: ⭐ four starts spanning three decades around the measured anchor: if they meet, the map has ONE
-    #: attracting fixed point and the starting value does not matter (TRAPS: perturb-every-gate).
+    #: four starts spanning three decades around the measured anchor: if they meet, the map has one
+    #: attracting fixed point and the starting value does not matter.
     runaway = {
         k: _runaway(v)
         for k, v in (
@@ -656,10 +506,10 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         )
     }
 
-    # ── THE CONTIGUOUS-RNA IDENTITY, kept under measurement ──
+    # ── the contiguous-RNA identity, kept under measurement ──
     # ``rho_r * E_r = unspliced_RNA + S`` at a BOUNDARY. Scored as: does the neighbouring sj flux
-    # recover the TRUE total contiguous RNA density ``(n_r + S)/E_r``? ⭐ That is the quantity the
-    # corrected estimator needs, and it is better posed than the ``n_r/E_r`` this file asked for first.
+    # recover the true total contiguous RNA density ``(n_r + S)/E_r``, the quantity a corrected
+    # estimator would need?
     contig_true = np.where(eff_r > 0.0, (n_r + spliced) / np.maximum(eff_r, _EPS), 0.0)
     has_contig = live & mature_here & has_flux & (contig_true > 0.0)
 
@@ -672,8 +522,8 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
         "mass_total": float(mass.sum()),
         # ── the TARGET, three ways ──
         "target_objw": object_weighted_mean(f_true, live),
-        # ⚠ the same mean over the objects psi actually SOLVES a composition on: `g1_locked` slots are
-        #   pinned, so the reference never moves them and their share of the target is inert.
+        # the same mean over the objects ψ actually solves a composition on: `g1_locked` slots are
+        # pinned, so the reference never moves them and their share of the target is inert.
         "target_objw_unlocked": object_weighted_mean(f_true, live & ~locked),
         "f_lib": float(n_g.sum() / max(mass.sum(), _EPS)),
         # ── the ESTIMATORS ──
@@ -726,7 +576,7 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
             "p10_fg": float(np.percentile(f_true[ml], 10)) if ml.any() else float("nan"),
         }
 
-    # ── ③ the sj flux as an RNA density, on TWO bases that differ by a factor of 7-10 ──
+    # ── ③ the sj flux as an RNA density, on two bases (the spliced template, the crossing opportunity) ──
     def flux_vs_truth(select) -> dict:
         if not select.any():
             return {"n": 0, "aggregate": float("nan"), "median": float("nan")}
@@ -751,8 +601,8 @@ def measure_condition(index, region_arrays, sj, boundary_flags, suite: Path, ora
 
 # ── reporting ────────────────────────────────────────────────────────────────────────────────────
 
-#: ⭐⭐ The 0.8.0 scope, stamped on every row rather than left to the reader — three strata are the
-#: development target and unstranded x capture-ON is DEFERRED-but-REPORTED. Same table as
+#: The 0.8.0 scope, stamped on every row rather than left to the reader: three strata are the
+#: development target and unstranded x capture-ON is deferred but reported. Same table as
 #: ``calibration_vs_oracle.py``'s; a reader ranking on a stratum that is not a target inverts the order.
 _SCOPE = {
     ("stranded", "capture OFF"): "IN SCOPE",
@@ -766,8 +616,8 @@ def _scope(condition: str) -> str:
     return "CONTROL" if PVO.is_zero_gdna(condition) else _SCOPE[PVO.stratum(condition)]
 
 
-#: Every selection the per-stratum tables print, in order — one list, so a stratum cannot appear on some
-#: tables and not others. ⛔ The zero control is its own row and is never folded into a stratum: its truth
+#: Every selection the per-stratum tables print, in order: one list, so a stratum cannot appear on some
+#: tables and not others. The zero control is its own row and is never folded into a stratum: its truth
 #: is exactly 0, so every gDNA fragment there is a false positive with nothing to cancel it.
 _SELECTIONS = (
     *(
@@ -1011,8 +861,8 @@ def _toy_chain(n_regions: int = 4):
 
 
 def self_test() -> int:
-    """⛔ **Every comparator perturbed, with no I/O.** A gate that cannot fail is not a gate — each
-    block below asserts the honest answer AND that a deliberate corruption changes it."""
+    """Every comparator perturbed, with no I/O: each block asserts the honest answer and that a
+    deliberate corruption changes it."""
     passed = failed = 0
 
     def check(name: str, ok: bool):
@@ -1046,7 +896,7 @@ def self_test() -> int:
     check("no live object ⇒ NaN, never a fabricated 0", not np.isfinite(object_weighted_mean(f, np.zeros(4, bool))))
 
     print("\n── object_weighted_mean vs the FRAGMENT-weighted mean: they differ, and that is the finding ──")
-    #: one huge RNA object and three tiny pure-gDNA ones — the panel's own shape in miniature
+    #: one huge RNA object and three tiny pure-gDNA ones: the panel's own shape in miniature
     n_g = np.array([1.0, 1.0, 1.0, 0.0])
     n_r = np.array([0.0, 0.0, 0.0, 997.0])
     m = n_g + n_r
@@ -1071,7 +921,7 @@ def self_test() -> int:
     sj_count[1, 0] = 60.0
     rho2, _ = neighbour_sj_density(chain, _Geom(sj_count, eff_sj))
     check("doubling the flux doubles the density — the estimator is not inert", abs(rho2[1] - 6.0) < 1e-12)
-    #: ⭐ two sj on one boundary are two estimates of ONE rate, so the pooled statement is Σcount/ΣE
+    #: two sj on one boundary are two estimates of one rate, so the pooled statement is Σcount/ΣE
     sj_count[1, 1], eff_sj[1, 1] = 0.0, 10.0
     rho3, _ = neighbour_sj_density(chain, _Geom(sj_count, eff_sj))
     check("a second, silent sj on the same boundary HALVES it (Σcount/ΣE)", abs(rho3[1] - 3.0) < 1e-12)
@@ -1090,7 +940,7 @@ def self_test() -> int:
 
     from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
-    #: REGIONs: intergenic | intron | exon | exon — so the boundaries are
+    #: REGIONs: intergenic | intron | exon | exon, so the boundaries are
     #: intergenic|intron, intron|exon, exon|exon.
     sig = np.array([0, BIT_INTRON_POS, BIT_EXON_POS, BIT_EXON_POS], np.uint8)
     fp = np.array([False, False, True, True, True, True, True], bool)
@@ -1113,20 +963,20 @@ def self_test() -> int:
         "`on_target` is exon-touching on both axes",
         list(out["on_target"].astype(bool)) == [False, False, False, True, True, True, True],
     )
-    #: ⛔ the g1_locked cross-check must FIRE when an intergenic region is not structurally locked
+    #: the g1_locked cross-check must fire when an intergenic region is not structurally locked
     try:
         strata(chain, _Statics(fp | np.eye(7, dtype=bool)[0], fn, mp, fn.copy()), geom, _RA(sig))
         check("an intergenic REGION that is NOT g1_locked raises", False)
     except AssertionError:
         check("an intergenic REGION that is NOT g1_locked raises", True)
-    #: ⛔⛔ AND THE CURATION'S OWN GATE: if the solver says mature RNA may cross an `exon|intron`
-    #:    boundary, this file's near-pure-gDNA claim is about a different population. Must raise.
+    #: the curation's own gate: if the solver says mature RNA may cross an `exon|intron` boundary,
+    #: this file's near-pure-gDNA claim is about a different population, so it must raise.
     try:
         strata(chain, _Statics(fp, fn, mp | np.eye(7, dtype=bool)[3], fn.copy()), geom, _RA(sig))
         check("⭐ an `exon|intron` boundary the solver thinks mature can cross raises", False)
     except AssertionError:
         check("⭐ an `exon|intron` boundary the solver thinks mature can cross raises", True)
-    #: ⛔ and the partition gate must FIRE on a chain the labels do not cover
+    #: and the partition gate must fire on a chain the labels do not cover
     try:
         strata(chain, _Statics(fp, fn, mp, fn.copy()), geom, _RA(np.array([0, 0, 0], np.uint8)))
         check("a chain whose objects the labels do not cover raises", False)
@@ -1135,7 +985,7 @@ def self_test() -> int:
 
     print("\n── the gDNA-side estimator: exact at a zero control, wrong under a depleted anchor ──")
     eff_g = np.array([100.0, 100.0, 100.0, 100.0])
-    est_mass = np.array([0.0, 0.0, 50.0, 50.0])  # anchors EMPTY, exons full — the `g00` shape
+    est_mass = np.array([0.0, 0.0, 50.0, 50.0])  # anchors empty, exons full: the `g00` shape
     anchors = np.array([True, True, False, False])
     rho = pooled_density(est_mass, eff_g, anchors)
     est = np.clip(rho * eff_g / np.maximum(est_mass, _EPS), 0.0, 1.0)

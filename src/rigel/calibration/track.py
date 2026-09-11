@@ -26,9 +26,9 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     (mass / ``gdna_region_eff_len``); ``gdna_frac`` is gDNA's share of the region's
     contained mass.
 
-    ⚠ **Contained only, deliberately.** A contiguous boundary is a 0-bp boundary: it has no genomic extent to
-    occupy a row of a track, and attributing its crossing mass to a flank region would report a density
-    at a position where that mass was never contained.
+    Contained only, deliberately: a contiguous boundary is a 0-bp boundary, so it has no genomic
+    extent to occupy a row of a track, and attributing its crossing mass to a flank region would
+    report a density at a position where that mass was never contained.
     """
     gdna = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
     rna = np.asarray(calibration.mass_rna_region, dtype=np.float64)
@@ -171,7 +171,7 @@ def write_bedgraph(
     """Write a bedGraph of one track column (default gDNA density) for genome browsers.
 
     bedGraph is ``chrom  start  end  value`` (tab-separated). A ``track`` header
-    boundary names it for IGV/UCSC. Rows follow the track's genomic order.
+    line names it for IGV/UCSC. Rows follow the track's genomic order.
     """
     with open(path, "w") as fh:
         fh.write(

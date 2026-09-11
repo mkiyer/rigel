@@ -73,12 +73,11 @@ class PipelineStats:
 
     # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
     #
-    # ⭐ ONE observation per fragment the scanner offers the accumulator — unique mapper, resolved,
-    # non-chimeric. That population is STATED, which the predecessor's was not: these counts used to
-    # be read off the fragment-length category models, so they silently counted only the fragments
-    # that also yielded a length observation.
+    # ONE observation per fragment the scanner offers the accumulator — unique mapper, resolved,
+    # non-chimeric. That population is stated; reading these off a fragment-length category model
+    # instead would silently count only the fragments that also yielded a length observation.
     #
-    # ⚠ The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
+    # The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
     # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
     # ``splice_type_label``. Renaming one of these by hand breaks that correspondence silently,
     # because the copy below uses ``dict.get(key, 0)``.

@@ -2,9 +2,7 @@
 
 Calibration's prior-free first pass ("pass-0") deconvolves each slot's unspliced fragment mass into
 ``(f_pos, f_neg, f_g)`` before any message passing, and records what the slot's OWN data says about that
-split, as two things the backbone and the message policy read (structural certainty is not one of
-them: the one predicate for a pure-gDNA object is `region_geometry.g1_locked`, which the instruments
-import; the relay-era ``struct_lock`` mask retired on 2026-09-09):
+split, as two things the backbone and the message policy read:
 
 * the composition MODE ``f_*`` — the strand deconvolution (`simplex_logodds`) at every solvable slot; a
   slot that does not deconvolve its own split (no admissible RNA strand, or no counts) keeps its
@@ -12,16 +10,15 @@ import; the relay-era ``struct_lock`` mask retired on 2026-09-09):
 * ``tau_lam`` — the slot's own λ-axis composition evidence, the DATA's Fisher information and never a
   prior's, from two sources: the STRAND deconvolution (a Beta-Binomial that is RANK-1, so it informs
   only ``p``; at a single-strand slot the tilt is structurally locked and the strand PINS ``f_g``, at
-  an AMBIG slot the tilt is free and the strand cancels out of ``f_g`` — the Schur marginal, approach
-  E — so the strand term is gated to single-strand slots; identically zero on unstranded data by a
-  derived noise-floor deadband) and the INTRON FACTORY (the curvature of the density deconvolution's
-  per-slot λ-factor, `density_deconv.density_factor_precision`). The message policy reads ``tau_lam``
-  as the liveness of a node's strand channel; `has_own_composition_evidence` is the instruments' one
+  an AMBIG slot the tilt is free and the strand cancels out of ``f_g`` — the Schur marginal — so the
+  strand term is gated to single-strand slots; identically zero on unstranded data by a derived
+  noise-floor deadband) and the INTRON FACTORY (the curvature of the density deconvolution's per-slot
+  λ-factor, `density_deconv.density_factor_precision`). The message policy reads ``tau_lam`` as the
+  liveness of a node's strand channel; `has_own_composition_evidence` is the instruments' one
   predicate on it.
 
-The relay's per-component own densities and precisions (``rho_*`` / ``prec_*``, its message currency)
-retired with it on 2026-09-09; the counting term they carried lives on as
-`messages.transfer_rows.count_logvar`, which every hop price reads.
+Structural certainty is not recorded here: the one predicate for a pure-gDNA object is
+`region_geometry.g1_locked`, which the instruments import.
 
 Layer: LAYER 6. It imports DOWN to `region_chain` (0), `region_geometry` and `simplex_logodds` (3) and
 `density_deconv` (5) — never `sweep`, so it sits cleanly beneath the backbone that consumes
@@ -50,27 +47,26 @@ _EPS = 1.0e-9
 
 
 def has_own_composition_evidence(tau_lam) -> np.ndarray:
-    """⭐⭐ **THE ONE DEFINITION of "this slot has own composition evidence", and it lives here so
-    every consumer imports it instead of restating the number.**
+    """THE ONE DEFINITION of "this slot has own composition evidence", and it lives here so every
+    consumer imports it instead of restating the number.
 
-    ``tau_lam`` is the λ-axis Fisher precision summed over the sources
-    (:func:`build_region_init`); anything above the divide-by-zero guard the retired own-precision
-    arithmetic carried is a live channel. That is the whole content — the predicate was read off the
-    solver's behaviour, not chosen. ⚠ The transfer policy's own liveness test is ``tau_lam > 0``
-    (`messages.transfer`); the two agree wherever a positive ``tau_lam`` exceeds the guard.
+    ``tau_lam`` is the λ-axis Fisher precision summed over the sources (:func:`build_region_init`);
+    anything above the divide-by-zero guard is a live channel. That is the whole content — the
+    predicate is read off the solver's behaviour, not chosen. The transfer policy's own liveness test
+    is ``tau_lam > 0`` (`messages.transfer`); the two agree wherever a positive ``tau_lam`` exceeds the
+    guard.
 
-    ⛔ **IT IS NOT A RESOLVING-POWER TEST, AND MUST NOT BECOME ONE.** ``τ`` is continuous across the
-    interesting region, so a floor on it is a tuned constant: one at ``1/(2L)²`` was derived,
-    implemented and refuted by its own insensitivity gate. On an unstranded library the strand arm
+    ⛔ It is NOT a resolving-power test and must not become one. ``τ`` is continuous across the
+    interesting region, so a floor on it is a tuned constant. On an unstranded library the strand arm
     carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the region's depth over the library's spliced
     depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
-    ⭐ **The consumer's defence is a FIXED-DENOMINATOR score, not a better region_bound**
+    The consumer's defence is a FIXED-DENOMINATOR score, not a tighter bound here
     (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
     ``test_solvability_denominator.py``).
 
-    ⚠ Three instruments each restated this as ``_EPS = 1.0e-9`` beside a comment saying it must match
-    the solver; changing the solver would have moved none of them. The home is production because the
-    predicate is a production concept and ``scripts/`` is deliberately not importable.
+    The home is production, rather than each instrument restating the constant beside a comment saying
+    it must match the solver, because the predicate is a production concept and ``scripts/`` is
+    deliberately not importable.
     """
     return np.asarray(tau_lam, np.float64) > _EPS
 
@@ -79,13 +75,13 @@ def has_own_composition_evidence(tau_lam) -> np.ndarray:
 class RegionInit:
     """The per-slot message-free self-solve (length ``n_slots``) — the sweep's starting beliefs.
 
-    ⚠ **The first axis is the unified region+boundary CHAIN, not the region axis.** This line said
-    ``n_regions`` until 2026-08-17: :func:`build_region_init` reads `RegionGeometry`, whose every array is
-    ``n_slots``, and a reader sizing a new array off it would have built the wrong shape.
+    ⛔ The first axis is the unified region+boundary CHAIN, not the region axis:
+    :func:`build_region_init` reads `RegionGeometry`, whose every array is ``n_slots``, so a reader
+    sizing a new array off "n_regions" builds the wrong shape.
 
     ``f_*`` are the composition MODE (strand / intron / structural-default fractions), read by the
-    diagnostics capture; ``tau_lam`` is the combined ``λ``-axis evidence (I_strand + I_factory) — ⛔ **the
-    DATA's information, never a prior's**, see :func:`build_region_init` — the liveness of a node's
+    diagnostics capture; ``tau_lam`` is the combined ``λ``-axis evidence (I_strand + I_factory) — the
+    DATA's information, never a prior's, see :func:`build_region_init` — the liveness of a node's
     strand channel, which the message policy reads."""
 
     f_g: np.ndarray
@@ -109,10 +105,9 @@ def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rn
     deadband that kills the unstranded phantom). ``1/N_gdna`` gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒
     disc=0).
 
-    ⚠ Structural composition CERTAINTY is not this function's to declare: the one predicate is
+    Structural composition CERTAINTY is not this function's to declare: the one predicate is
     `region_geometry.g1_locked` (neither RNA strand admissible), and the instruments that classify
-    objects by it import that. The relay-era ``struct_lock`` this returned beside ``I_strand`` — every
-    zero-count REGION, a mask nothing on the shipped path read — retired on 2026-09-09."""
+    objects by it import that."""
     n_raw = np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64)
     n_str = n_raw / (1.0 + np.maximum(n_raw - 1.0, 0.0) * od_r)
     fgl = np.clip(np.asarray(fg_loc, np.float64), _EPS, 1.0 - _EPS)
@@ -159,8 +154,8 @@ def build_region_init(
     factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
-    # ⭐ The counts come from the GEOMETRY, which is their single source since S5.e: the unspliced
-    # ``count`` is both the density numerator and the Poisson n, so there is no second copy to drift.
+    # The counts come from the GEOMETRY, their single source: the unspliced ``count`` is both the
+    # density numerator and the Poisson n, so there is no second copy to drift.
     count = np.asarray(geometry.unspliced_count, np.float64)
     u_pos, u_neg = count[:, 0], count[:, 1]
     n_region = count.sum(axis=1)
@@ -210,7 +205,7 @@ def build_region_init(
         n_gdna_obs=n_gdna_obs,
         n_rna_obs=n_rna_obs,
     )
-    # APPROACH E (verified). The strand Beta-Binomial is
+    # The strand Beta-Binomial is
     # RANK-1: it depends on (λ,θ) only through p = ½+(κ−½)(1−f_g)sinθ. So the honest MARGINAL gDNA-level
     # precision (the Schur complement of the 2×2 composition Fisher) is:
     #   * SINGLE-STRAND (1-DOF): θ is STRUCTURALLY locked ⇒ τ_λ gets the full strand λ-term c·a² (strand pins f_g);
@@ -225,9 +220,9 @@ def build_region_init(
     )  # I_density (NB curvature) on the λ axis
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
-    # ⛔ ψ's composition reference (its location term) contributes NOTHING here, and that is a ruling
-    # (2026-08-16), not an omission: ``tau_lam`` is the DATA's Fisher information on λ, and the location
-    # term carries no count — giving it a curvature was built, measured and refused, since it flips the
-    # own-evidence predicate on tens of thousands of slots without adding a measurement.
+    # ⛔ ψ's composition reference (its location term) contributes NOTHING here, and that is deliberate
+    # rather than an omission: ``tau_lam`` is the DATA's Fisher information on λ, and the location term
+    # carries no count, so crediting it a curvature would flip the own-evidence predicate on slots that
+    # gained no measurement.
 
     return RegionInit(f_g=fg_loc, f_pos=fp_loc, f_neg=fn_loc, tau_lam=tau_lam)

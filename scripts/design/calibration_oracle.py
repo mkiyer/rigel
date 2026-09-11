@@ -1,70 +1,33 @@
-"""THE CALIBRATION ORACLE — per-REGION and per-BOUNDARY ground-truth composition, CERTIFIED.
+"""What is the certified per-object truth? Run this before debugging calibration against anything.
 
-⭐⭐⭐ **THE ONE TABLE CALIBRATION IS DEBUGGED AGAINST, AND EVERY ROW OF IT IS GATED BEFORE IT MAY BE
-USED.** Owner, 2026-08-18: calibration is showing catastrophic error, so nothing downstream of the
-accumulator can be trusted until the ground truth itself is proven. This instrument produces, for every
-slot of the chain:
-
-    count        the ACCUMULATOR's own tally (the mixture calibration deconvolves)
-    n_gdna       TRUE genomic-DNA fragments        } realized, from the origin-split oracle BAMs,
-    n_nrna       TRUE unannotated nascent fragments } each scanned by the SAME accumulator and
-    n_mrna       TRUE annotated-RNA fragments       } re-validated against the full scan
-    true_f_g     n_gdna / (n_gdna + n_nrna + n_mrna)
-
-and REFUSES to emit it unless every gate below passes. ⛔ An oracle that is merely *plausible* is how a
-calibration bug gets debugged against a truth bug and both survive.
-
-**THE GATES — what "100 % sure" means here, stated as the checks that enforce it. Named, never
-numbered** (`tests/test_no_jargon_labels.py`):
-
-==============================  ======================================================================
-**sum-to-full**                 the three origin partitions re-scanned through the accumulator
-                                reconstruct the full scan's every bank (`OracleTruth.from_parts`); a
-                                cached partition that does not describe this index/scan is refused by
-                                the cache layer itself
-**partition-projects-exactly**  at every slot ``n_gdna + n_nrna + n_mrna == count`` — the projection
-                                used for truth is the projection used for the estimate, or the two
-                                tables describe different populations
-**gdna-field-uniformity**       ⭐⭐ the gDNA field is UNIFORM where physics says it must be
-                                (capture-OFF, per genomic reference): every slot's expected gDNA count
-                                is ``rho_ref x E_g(slot)``. Scored as Poisson z per slot and as a
-                                ratio-z per object CLASS — a per-class bias is the signature of
-                                exactly the counting/arithmetic bug this campaign hunts
-**exact-zeros**                 a reference with no simulated gDNA, or a ``g00`` condition, must carry
-                                a gdna partition that is identically 0 — counted VACUOUS, never
-                                "pass", when the whole bank is empty
-**nascent-in-annotation**       ``n_nrna > 0`` only where a transcript span admits RNA
-                                (``free_pos | free_neg``); nascent in intergenic space is a split or
-                                projection bug
-**rna-strands-close**           ⭐ the RNA reads partitioned by TRANSCRIPT strand
-                                (``rna_pos``/``rna_neg``) must sum, AT EVERY SLOT, to the same total as
-                                the ``mrna`` + ``nrna`` partition. Two different partitions of the same
-                                reads, so any disagreement is a split bug — and this is what makes the
-                                per-ARM truth (``{gDNA, RNA+, RNA−}``, AXIOM 0) usable
-==============================  ======================================================================
-
-⚠ **WHAT IS *NOT* YET CERTIFIED, SAID PLAINLY RATHER THAN IMPLIED:** the per-object ANALYTIC RNA
-expectation (abundance x per-transcript opportunity). The RNA truth here is *realized* — certified as
-accumulator-consistent (sum-to-full, partition-projects-exactly) and annotation-consistent
-(nascent-in-annotation), and it inherits fragment-level truth
-from the simulator's read names via the origin split. The analytic cross-check is the natural next
-gate; the gDNA arm (**gdna-field-uniformity**) is fully analytic already because a uniform field needs no per-transcript
-model.
-
-Output: a per-slot ``.npz`` beside the report, for `calibration_walk.py` and any stepwise dissection
-to read — one truth source, derived once, gated once.
+For every REGION and BOUNDARY slot of the chain this instrument derives the accumulator's own tally
+(``count``, the mixture calibration deconvolves), the realized ``n_gdna`` / ``n_nrna`` / ``n_mrna``
+from the origin-split oracle caches (each partition scanned by the same accumulator), the same RNA
+split again by transcript strand (``n_rna_pos`` / ``n_rna_neg``), and ``true_f_g``, all in the drained
+frame production calibrates. It refuses to write the table unless its named gates pass: sum-to-full
+(the partitions reconstruct every bank of the full scan), partition-projects-exactly (``n_gdna + n_nrna
++ n_mrna == count`` at every slot), gdna-field-uniformity (at capture-OFF every slot's expected gDNA
+count is ``rho_ref x E_g``, scored as Poisson z per slot and a ratio-z per object class, the signature
+of a counting or divisor bug), exact-zeros (a bank that must be empty is identically zero, and an empty
+bank is vacuous rather than a pass), nascent-in-annotation (nascent RNA only where a transcript span
+admits RNA) and rna-strands-close (the strand split and the mature/nascent split are two partitions of
+the same reads). Two certification levels: COMPOSITION (``true_f_g``, no opportunity model anywhere in
+it) and FIELD (gdna-field-uniformity as well, so a density ``n/E`` may be trusted). A merely plausible
+oracle is how a calibration bug and a truth bug survive each other. The analytic per-object RNA
+expectation is not certified here; the RNA truth is realized. No solver runs. Writes ``slot_truth.npz``
+beside each oracle cache, which every slot-scored instrument reads.
 
 Usage::
 
-    python scripts/design/calibration_oracle.py --condition NAME     # certify one condition
-    python scripts/design/calibration_oracle.py                      # certify the whole ladder
-    python scripts/design/calibration_oracle.py --self-test          # perturb every gate, no I/O
+    python scripts/design/calibration_oracle.py --condition <name>     # certify one condition
+    python scripts/design/calibration_oracle.py                        # certify the whole ladder
+    python scripts/design/calibration_oracle.py --condition <name> --out truth.npz
+    python scripts/design/calibration_oracle.py --self-test            # perturb every gate, no I/O
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -74,17 +37,10 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
-OC = _sibling("object_composition.py")
+OC = sibling("object_composition.py")
 
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import REGION, build_region_chain  # noqa: E402
@@ -100,11 +56,11 @@ from calibration._oracle import ORIGINS, RNA_STRAND_ORIGINS, OracleTruth, lift_d
 DEFAULT_SUITE = OC.DEFAULT_SUITE
 DEFAULT_INDEX = OC.DEFAULT_INDEX
 _EPS = 1.0e-12
-#: |z| above which a slot is flagged under **gdna-field-uniformity**. 4 sigma two-sided is ~6e-5 expected false flags per
-#: 70k slots ~ 4 slots; the gate is on the FLAG RATE and the CLASS ratio, not on any single slot.
+#: |z| above which a slot is flagged under gdna-field-uniformity. 4 sigma two-sided is ~6e-5 expected
+#: false flags per slot; the gate is on the flag rate and the class ratio, not on any single slot.
 _Z_FLAG = 4.0
-#: Poisson slots below this expectation are pooled into their class rather than z-scored singly —
-#: the normal approximation is not honest there, and a per-slot z on lambda = 0.3 flags noise.
+#: Poisson slots below this expectation are pooled into their class rather than z-scored singly:
+#: the normal approximation is not honest there, and a per-slot z on a tiny lambda flags noise.
 _MIN_LAMBDA = 5.0
 
 
@@ -112,7 +68,7 @@ _MIN_LAMBDA = 5.0
 
 
 def gate_partition(count: np.ndarray, n_g, n_n, n_m, atol: float = 1e-6) -> dict:
-    """**partition-projects-exactly** — the origin partition must reproduce the accumulator count at EVERY slot."""
+    """partition-projects-exactly: the origin partition must reproduce the accumulator count at every slot."""
     gap = np.abs((n_g + n_n + n_m) - count)
     worst = float(gap.max()) if gap.size else 0.0
     return {"gate": "gate partition-projects-exactly", "ok": bool(worst <= atol), "worst_gap": worst,
@@ -121,11 +77,11 @@ def gate_partition(count: np.ndarray, n_g, n_n, n_m, atol: float = 1e-6) -> dict
 
 def gate_uniformity(n_g: np.ndarray, eff_g: np.ndarray, classes: np.ndarray,
                     select: np.ndarray) -> dict:
-    """**gdna-field-uniformity** — Poisson uniformity of the realized gDNA field against ``rho x E_g``, per class.
+    """gdna-field-uniformity: Poisson uniformity of the realized gDNA field against ``rho x E_g``, per class.
 
-    ⭐ The CLASS ratio-z is the counting-bug detector: a deposit-rule or divisor bug is per-KIND
+    The class ratio-z is the counting-bug detector: a deposit-rule or divisor bug is per kind
     (regions vs boundaries vs a signature class), so it shows as one class sitting off the shared
-    rate while per-slot flags stay unremarkable. ⛔ VACUOUS when the selected field is empty.
+    rate while per-slot flags stay unremarkable. Vacuous when the selected field is empty.
     """
     sel = select & (eff_g > 0.0)
     tot_n, tot_e = float(n_g[sel].sum()), float(eff_g[sel].sum())
@@ -143,8 +99,8 @@ def gate_uniformity(n_g: np.ndarray, eff_g: np.ndarray, classes: np.ndarray,
         cn, ce = float(n_g[m].sum()), float(rho * eff_g[m].sum())
         cz = (cn - ce) / np.sqrt(max(ce, _EPS))
         rows.append({"class": cls, "n": cn, "expected": ce, "ratio": cn / max(ce, _EPS), "z": cz})
-        # ⚠ class totals are 1e5-1e6 fragments, so a real bias is hundreds of sigma; 6 allows the
-        #   slight non-independence of the shared rho-hat without admitting any real bias.
+        # class totals are large, so a real bias is hundreds of sigma; 6 allows the slight
+        # non-independence of the shared rho-hat without admitting any real bias.
         if abs(cz) > 6.0:
             ok = False
     return {"gate": "gate gdna-field-uniformity", "ok": ok and flag_rate < 1e-3, "vacuous": False,
@@ -152,7 +108,7 @@ def gate_uniformity(n_g: np.ndarray, eff_g: np.ndarray, classes: np.ndarray,
 
 
 def gate_zero(n: np.ndarray, select: np.ndarray, what: str) -> dict:
-    """**exact-zeros** — a bank that must be empty, checked as EXACTLY zero. Vacuous if nothing is selected."""
+    """exact-zeros: a bank that must be empty, checked as exactly zero. Vacuous if nothing is selected."""
     if not select.any():
         return {"gate": f"gate exact-zeros:{what}", "ok": True, "vacuous": True}
     bad = float(n[select].sum())
@@ -161,8 +117,8 @@ def gate_zero(n: np.ndarray, select: np.ndarray, what: str) -> dict:
 
 def gate_rna_strands_close(n_pos: np.ndarray, n_neg: np.ndarray, n_m: np.ndarray,
                            n_n: np.ndarray, atol: float = 1e-6) -> dict:
-    """**rna-strands-close** — the transcript-strand split and the mature/nascent split are two
-    partitions of the SAME RNA reads, so they must agree at every slot."""
+    """rna-strands-close: the transcript-strand split and the mature/nascent split are two partitions
+    of the same RNA reads, so they must agree at every slot."""
     gap = np.abs((n_pos + n_neg) - (n_m + n_n))
     worst = float(gap.max()) if gap.size else 0.0
     return {"gate": "gate rna-strands-close", "ok": bool(worst <= atol), "worst_gap": worst,
@@ -170,7 +126,7 @@ def gate_rna_strands_close(n_pos: np.ndarray, n_neg: np.ndarray, n_m: np.ndarray
 
 
 def gate_nascent_scope(n_n: np.ndarray, rna_admissible: np.ndarray) -> dict:
-    """**nascent-in-annotation** — nascent RNA may exist only where the annotation admits ANY RNA."""
+    """nascent-in-annotation: nascent RNA may exist only where the annotation admits any RNA."""
     bad = float(n_n[~rna_admissible].sum())
     return {"gate": "gate nascent-in-annotation", "ok": bool(bad == 0.0), "out_of_scope_mass": bad}
 
@@ -185,8 +141,8 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     cache = read_scan_cache(Path(suite) / "scan_cache" / condition, index)
     lift: dict = {}
     kw = calibration_inputs(cache, index, lift_out=lift)
-    # ⭐ the DRAINED frame (the 2026-08-31 frame ruling): the truth certified here must describe the
-    # tally production calibrates, so the whole and every partition below are drained consistently.
+    # the drained frame: the truth certified here must describe the tally production calibrates, so
+    # the whole and every partition below are drained consistently.
     payload = kw["payload"]
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     statics = build_region_statics(chain, region_arrays, bflags)
@@ -196,9 +152,9 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     )
     label = OC.strata(chain, statics, geom, region_arrays)["label"]
 
-    # **sum-to-full** — a hard gate inside from_parts, now asserted on the DRAINED frame, which
-    # makes it the lift's own end-to-end identity check; an exception IS the verdict. The parts are
-    # loaded pass-one and drained by replaying the whole's choices (`from_cached_parts`).
+    # sum-to-full is a hard gate inside from_parts, asserted on the drained frame, which makes it
+    # the lift's own end-to-end identity check; an exception is the verdict. The parts are loaded
+    # pass-one and drained by replaying the whole's choices (`from_cached_parts`).
     root = Path(suite) / "oracle_cache" / condition
     parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
     truth = OracleTruth.from_cached_parts(payload, parts, lift)
@@ -207,8 +163,8 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     n_g = OC.slot_counts(truth.parts["gdna"], region_arrays, chain)
     n_n = OC.slot_counts(truth.parts["nrna"], region_arrays, chain)
     n_m = OC.slot_counts(truth.parts["mrna"], region_arrays, chain)
-    # ⭐ the same RNA reads again, keyed by TRANSCRIPT strand — the per-ARM truth. REFUSED rather than
-    # skipped if absent: an instrument that silently drops to two arms would measure a different thing.
+    # the same RNA reads again, keyed by transcript strand: the per-component truth. Refused rather
+    # than skipped if absent: an instrument that silently drops to two arms would measure a different thing.
     try:
         strand_parts = {k: read_scan_cache(root / k, index).payload for k in RNA_STRAND_ORIGINS}
     except Exception as exc:  # noqa: BLE001
@@ -217,8 +173,8 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
             "built by `pass0_vs_oracle.py` (via `panel.py cache`) alongside the three ORIGINS ones; "
             "without them there is no per-strand RNA truth and the three-arm map cannot be scored."
         ) from exc
-    # ⭐ the SECOND exact partitioning of the same whole — drained with the SAME choice queue,
-    # gdna FIRST in both lists so the shared member takes the identical choice slice and the two
+    # the second exact partitioning of the same whole, drained with the same choice queue, gdna
+    # first in both lists so the shared member takes the identical choice slice and the two
     # partitionings' RNA remainders stay consistent (`lift_drain_parts`' docstring). `drain` is pure,
     # so the undrained `parts["gdna"]` loaded above is reusable here.
     strand_drained, n_amb_strand = lift_drain_parts(
@@ -242,7 +198,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
     gdna_refs = np.array(sorted({int(r) for r in ref[n_g > 0]}), np.int64)
 
     verdicts = [gate_partition(count, n_g, n_n, n_m), gate_rna_strands_close(n_rp, n_rn, n_m, n_n)]
-    # ⭐ the drained frame's own report — informational, never a pass/fail: the leak is production's
+    # the drained frame's own report, informational and never a pass/fail: the leak is production's
     # behaviour (`ISSUES: drain-contaminates-certified-rna`) and the ambiguity bounds the lift.
     verdicts.append({
         "gate": "drained-frame report", "ok": True, "vacuous": False,
@@ -261,7 +217,7 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
         if gdna_refs.size == 0:
             verdicts.append({"gate": "gate gdna-field-uniformity", "ok": True, "vacuous": True,
                              "note": "no gDNA anywhere (a zero condition)"})
-    # refs that carry no gDNA at all must be EXACTLY zero (ERCC backbone, and every ref at g00)
+    # refs that carry no gDNA at all must be exactly zero (ERCC backbone, and every ref at g00)
     verdicts.append(gate_zero(n_g, ~np.isin(ref, gdna_refs), "gdna outside genomic refs"))
     verdicts.append(gate_nascent_scope(n_n, rna_ok))
 
@@ -278,16 +234,14 @@ def derive(index, region_arrays, suite: Path, condition: str) -> tuple[dict, lis
 
 
 def report(condition: str, verdicts: list[dict]) -> tuple[bool, bool]:
-    """Two certification LEVELS, because the gates certify two different things.
+    """Print the verdicts and return ``(composition_ok, field_ok)``, two certification levels because
+    the gates certify two different things.
 
-    ⭐ **COMPOSITION-certified** (**sum-to-full** **partition-projects-exactly** **exact-zeros** **nascent-in-annotation**): ``true_f_g`` is sound — it is realized counts against
-    realized counts through one accumulator, and no opportunity model enters it anywhere.
-    ⭐ **FIELD-certified** (**gdna-field-uniformity** as well): the deposit geometry also matches the opportunity model, so a
-    DENSITY (``n/E``) may be trusted too. ⛔ First run of this gate on real data (2026-08-18) FAILED
-    field certification: every BOUNDARY class reads **2-3 % below** ``rho x E_cross`` while every
-    REGION class is exact — reproduced on two refs and three independent simulations. ``true_f_g`` is
-    untouched by that; every density calibration divides out is not, so the table is stamped with
-    both verdicts rather than one.
+    COMPOSITION-certified (sum-to-full, partition-projects-exactly, exact-zeros, rna-strands-close,
+    nascent-in-annotation): ``true_f_g`` is sound, realized counts against realized counts through one
+    accumulator, with no opportunity model anywhere in it. FIELD-certified (gdna-field-uniformity as
+    well): the deposit geometry also matches the opportunity model, so a density ``n/E`` may be
+    trusted too. The table is stamped with both verdicts rather than one.
     """
     comp_ok, field_ok = True, True
     print(f"\n== {condition}")
@@ -314,7 +268,7 @@ def report(condition: str, verdicts: list[dict]) -> tuple[bool, bool]:
     return comp_ok, field_ok
 
 
-# ── self-test: every gate shown to FIRE on the defect it exists for ───────────────────────────────
+# ── self-test: every gate shown to fire on the defect it exists for ───────────────────────────────
 
 
 def self_test() -> int:
@@ -339,12 +293,12 @@ def self_test() -> int:
     v = gate_uniformity(n_g, eff, cls, sel)
     check("uniformity passes on a genuinely uniform field", v["ok"] and not v["vacuous"])
 
-    # ① the counting-bug shape: ONE CLASS deposited at half weight
+    # ① the counting-bug shape: one class deposited at half weight
     bad = n_g.copy()
     bad[cls == "B exon|exon"] *= 0.5
     check("a half-weight class fires the class ratio-z",
           not gate_uniformity(bad, eff, cls, sel)["ok"])
-    # ② a wrong DIVISOR on one class (eff doubled) fires the same way
+    # ② a wrong divisor on one class (eff doubled) fires the same way
     bad_e = eff.copy()
     bad_e[cls == "R intron"] *= 2.0
     check("a doubled divisor on one class fires", not gate_uniformity(n_g, bad_e, cls, sel)["ok"])

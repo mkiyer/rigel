@@ -1,21 +1,20 @@
-"""rigel.calibration.sj_opportunity — de-tilting the annotated-sj length pool.
+"""De-tilting the annotated-sj length pool.
 
 The RNA fragment-length model is fitted from ``RNA_SPLICED``, the pool of deposited fragments whose
-path used an **annotated sj**. That is a selection, and it is length-dependent: a longer
-fragment covers more of its transcript, so it crosses a sj more often. Measured against the
-simulator's own realized mRNA lengths on the chr22 pilot, the pool runs **+6.2 % to +8.1 %** long
-while the unconditional anchor runs +0.00 %.
+path used an annotated sj. That is a length-dependent selection: a longer fragment covers more of
+its transcript, so it crosses a sj more often, and the raw pool therefore reads long against the
+library's real RNA lengths while the unconditional anchor does not.
 
-⭐ **The tilt is exactly computable from the annotation.** For a transcript with exon lengths
+The tilt is exactly computable from the annotation. For a transcript with exon lengths
 ``e_1 .. e_K`` in transcript space and total ``L = SUM e_i``, the number of start positions at which a
 length-``w`` window crosses **at least one** sj is::
 
     A_j(w)  =  (L - w + 1)+  -  SUM_i (e_i - w + 1)+
 
-⭐ Work with the **complement** and it decomposes with no inclusion-exclusion: a window crosses no
-sj iff it lies wholly inside a single exon, and the exons are disjoint, so those placements
-partition by which exon contains the window. Attempting the union of "crosses sj ``j``" events
-directly is messy and gets worse with every exon; the complement is exact in one boundary.
+Work with the COMPLEMENT and it decomposes with no inclusion-exclusion: a window crosses no sj iff
+it lies wholly inside a single exon, and the exons are disjoint, so those placements partition by
+which exon contains the window. The union of "crosses sj ``j``" events gets worse with every exon;
+the complement is exact in one subtraction.
 
 The library-level quantities are abundance-weighted sums of that, over transcripts::
 
@@ -25,22 +24,21 @@ The library-level quantities are abundance-weighted sums of that, over transcrip
 
 and the corrected pool is ``pool(w) / pi(w)``.
 
-⛔ **Divide by ``pi``, never by ``A`` alone, and the difference is not cosmetic.** ``A`` alone recovers
-the distribution lengths were *drawn* from; what every consumer needs is the distribution the library
-*realizes*, which is the drawn one weighted by how many placements each length has — and that weight
-is ``T``. The ratio also makes the correction **safe under a wrong ``theta``**: ``A`` and ``T`` are
-sums over the same transcripts, so a reweighting moves both. Measured over a theta sweep including
-deliberately pathological regimes (all the abundance on the single steepest-tilted transcript), the
-ratio form never does worse than not correcting and the ``A``-only form does.
-``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
+Divide by ``pi``, never by ``A`` alone, and the difference is not cosmetic. ``A`` alone recovers the
+distribution lengths were DRAWN from; what every consumer needs is the distribution the library
+REALIZES, which is the drawn one weighted by how many placements each length has — and that weight
+is ``T``. The ratio also makes the correction safe under a wrong ``theta``, because ``A`` and ``T``
+are sums over the same transcripts, so a reweighting moves both: over a theta sweep including
+deliberately pathological regimes the ratio form never does worse than not correcting, while the
+``A``-only form does. ``tests/calibration/test_sj_opportunity.py`` pins both halves of that.
 
-⚠ **``theta`` is a molar abundance — copies — not an observed fragment count.** ``A_j`` already counts
-start positions, so a count applies the length weighting twice.
+``theta`` is a molar abundance — copies — and never an observed fragment count. ``A_j`` already
+counts start positions, so a count would apply the length weighting twice.
 
-⭐ **And production uses a UNIFORM theta over the non-synthetic transcripts, which needs no expression
-estimate at all.** That is not a shortcut taken for cheapness: swept on the pilot, uniform lands the
-corrected pool within 0.2 pp of what the simulator's own molar abundances achieve, because the ratio
-cancels most of the dependence. The remaining sensitivity is measured in the test module.
+Production uses a UNIFORM theta over the non-synthetic transcripts, which needs no expression
+estimate at all. That is not a shortcut taken for cheapness: the ratio cancels most of the
+dependence on theta, so a uniform weighting lands the corrected pool essentially where the true
+molar abundances do, and the residual sensitivity is measured in the test module.
 """
 
 from __future__ import annotations
@@ -68,10 +66,10 @@ def _ramp_sum(lengths: np.ndarray, weights: np.ndarray, max_length: int) -> np.n
     weighted length histogram. Exact integer geometry with no loop over ``w`` and no float rounding
     beyond the weights themselves.
 
-    ⚠ The histogram must span the longest object present **and** ``max_length``, not whichever is
+    The histogram must span the longest object present AND ``max_length``, not whichever is
     smaller: too short a span truncates the inner tail sum and every value comes back too small, and
-    a spectrum that stops before ``max_length`` returns a short array that silently misaligns against
-    the other curve.
+    a spectrum that stops before ``max_length`` returns a short array that silently misaligns
+    against the other curve.
     """
     lengths = np.asarray(lengths, dtype=np.int64)
     span = max(int(lengths.max(initial=0)) + 2, max_length + 1)
@@ -101,7 +99,7 @@ def sj_opportunity(
     max_length
         the largest fragment length to return, inclusive.
 
-    ⭐ Both curves are built from the same two length spectra — one over transcripts, one over exons —
+    Both curves are built from the same two length spectra — one over transcripts, one over exons —
     so they cannot disagree about what a length is.
     """
     exon_lengths = np.asarray(exon_lengths, dtype=np.int64)
@@ -113,7 +111,7 @@ def sj_opportunity(
         )
 
     n_exons = np.diff(transcript_offsets)
-    # ⚠ A prefix-sum difference rather than `add.reduceat`, which has no answer for an EMPTY slice —
+    # A prefix-sum difference rather than `add.reduceat`, which has no answer for an EMPTY slice —
     # and a transcript with no cached exons is an ordinary state, not an error.
     prefix = np.concatenate([[0], np.cumsum(exon_lengths)])
     transcript_lengths = prefix[transcript_offsets[1:]] - prefix[transcript_offsets[:-1]]
@@ -122,7 +120,7 @@ def sj_opportunity(
     inside_one_exon = _ramp_sum(exon_lengths, np.repeat(theta, n_exons), max_length)
     crossing = total - inside_one_exon
 
-    # ⛔ Bin 0 is not a fragment length, and the complement identity is NEGATIVE there: a zero-length
+    # Bin 0 is not a fragment length, and the complement identity is NEGATIVE there: a zero-length
     # window sits exactly ON an exon boundary, so `SUM_i (e_i + 1)` counts every internal boundary
     # twice and `A_j(0) = 1 - K`. Both curves are defined on `w >= 1`; leaving a negative divisor in
     # bin 0 would be a landmine for any consumer that does not happen to guard on it.
@@ -149,11 +147,11 @@ def crossing_probability(
 def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -> np.ndarray:
     """``pi(w)`` for an index, weighting every **real** transcript equally.
 
-    ⛔ The transcript filter is ``~is_synthetic``, alone. The manufactured nascent spans are not
+    The transcript filter is ``~is_synthetic``, alone. The manufactured unspliced spans are not
     molecules anybody sequenced, and giving them opportunity puts weight on exon structures the
-    library does not contain. ⚠ It is **not** ``~is_synthetic & ~is_nrna``: on a real row ``is_nrna``
-    means "single-exon, so mature is nascent", and using it as a realness filter silently deletes
-    real transcripts.
+    library does not contain. It is NOT ``~is_synthetic & ~is_nrna``: on a real row ``is_nrna``
+    means "single-exon, so the mature and unspliced forms coincide", and using it as a realness
+    filter silently deletes real transcripts.
     """
     offsets, exon_starts, exon_ends, _ = index.build_exon_csr()
     theta = (~index.t_df["is_synthetic"].to_numpy()).astype(np.float64)
@@ -168,14 +166,15 @@ def crossing_probability_from_index(index: "TranscriptIndex", max_length: int) -
 def detilt_pool(counts: np.ndarray, crossing_probability: np.ndarray) -> np.ndarray:
     """Divide a sj-pool histogram by its own opportunity, keeping its evidence weight.
 
-    ⚠ **The total is preserved on purpose.** ``build_fl_models`` shrinks each pool toward the anchor
-    with a Dirichlet pseudo-count whose strength is the pool total, and the pool total means "how many
-    fragments stand behind this shape". De-tilting changes the shape, not how much evidence there is;
-    letting the total move would weaken the shrinkage as an accidental side effect.
+    The total is preserved on purpose. ``build_fl_models`` shrinks each pool toward the anchor with
+    a Dirichlet pseudo-count whose strength is the pool total, and that total means "how many
+    fragments stand behind this shape". De-tilting changes the shape, not how much evidence there
+    is; letting the total move would weaken the shrinkage as an accidental side effect.
 
-    ⭐ A bin where the opportunity is zero cannot legitimately hold mass — a fragment is only in this
-    pool because it crossed an annotated sj, which is a placement the opportunity counts. Such a
-    bin contributes nothing and the surviving mass is renormalised over it, so no evidence is lost.
+    A bin where the opportunity is zero cannot legitimately hold mass, since a fragment is only in
+    this pool because it crossed an annotated sj, which is a placement the opportunity counts. Such
+    a bin contributes nothing and the surviving mass is renormalised over it, so no evidence is
+    lost.
 
     Returns ``counts`` unchanged when the annotation offers no opportunity anywhere (every transcript
     single-exon, or an empty annotation): a correction with no information must be inert.

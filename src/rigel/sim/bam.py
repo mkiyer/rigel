@@ -1,4 +1,17 @@
-"""Shared BAM and coordinate-projection helpers for simulators."""
+"""BAM record construction and coordinate projection, shared by every simulator path.
+
+Two groups, with no state between them. The projections map a fragment from a template's own
+coordinates into genomic ones: :func:`transcript_to_genomic_blocks` splits a spliced-transcript
+interval into the exon blocks it covers, and :func:`premrna_to_genomic_interval` shifts an
+unspliced interval; both flip the interval end-for-end on a minus-strand transcript, so callers
+always pass strand-oriented template coordinates. :func:`take_from_left` and
+:func:`take_from_right` cut a read's worth of bases off either end of a block list.
+
+The BAM group turns blocks into records: :func:`blocks_to_cigar` writes gaps between blocks as
+``N`` operations, so a fragment spanning a junction reads as spliced, and
+:func:`make_aligned_segment` fills in the simulator's standard defaults. The flag constants and
+the two base flags for R1 and R2 are here so the writers cannot disagree about them.
+"""
 
 from __future__ import annotations
 

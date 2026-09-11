@@ -1,24 +1,25 @@
-"""THE S3 GATE ON REAL DATA — the native accumulator against the specification, at full human scale.
+"""Does native parity hold on real data at full human scale? The native accumulator against the
+executable specification, fragment by fragment, on a real BAM.
 
-    Gate:  ``tests/native/test_accumulator_native_parity.py`` (the same comparison, on fixtures)
-    Spec:  ``tests/native/_accumulator_reference.py``
-     step 6
+The unit gate (`tests/native/test_accumulator_native_parity.py`) drives the same comparison on a
+seven-bound fixture, and a fixture cannot see a defect that only appears at a million regions and
+hundreds of thousands of sj: a per-reference offset that drifts, an index that wraps at int32, a sj CSR
+slice off by one reference. This streams fragment paths from a name-collated BAM, deposits each into the
+pure-Python reference (`tests/native/_accumulator_reference.py`, which wins over any document about the
+accumulator) and into one native accumulator per reference, and demands byte-identity per fragment
+outcome, per `Tally` field over every reference that received a fragment (each flat reference array
+sliced by its axis), on the library-wide pools summed over references, and on the QC denominators. The
+per-reference sj CSR slicing is re-derived in numpy rather than taken from the builder's own helper, so a
+disagreement there shows in the sj banks instead of being reported as agreement. A `Tally` field with no
+axis in `_AXIS` refuses to run rather than dropping out of the gate. Real data is a test input here and
+never a design input. The reference is pure Python and slow, so `--limit` is how this stays runnable;
+raise it until the numbers stop moving.
 
-⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-region_bound partition. It cannot see
-a defect that only appears at **1,043,881 regions and 404,168 sj**: a per-reference offset that drifts,
-a region_bound index that wraps at int32, a sj CSR slice that is off by one reference. Every such bug this
-project has had was invisible on a fixture — a ref-id mismatch once dropped **476,719 of 476,732 fragments
-inside deposit()** while every golden test passed.
+Usage::
 
-⭐ AND THE SLICING IS RE-DERIVED HERE BY A DIFFERENT ROUTE, DELIBERATELY. ``AccumulatorSet::set_sj``
-slices the flat sj CSR per reference in C++; this script does the same arithmetic in numpy and feeds
-the result to a per-reference ``Accumulator``. If the two disagree the sj banks disagree, which is
-exactly the class of error a validator that called the builder's own helper would report as agreement.
-
-    OMP_NUM_THREADS=1 python scripts/design/native_parity_on_real_data.py INDEX BAM [--limit N]
-
-⚠ The reference costs ~500 us/fragment (pure Python, and that is expected of a specification), so
-``--limit`` is how this stays runnable. Raise it until the numbers stop moving.
+    OMP_NUM_THREADS=1 python scripts/design/native_parity_on_real_data.py INDEX BAM
+    OMP_NUM_THREADS=1 python scripts/design/native_parity_on_real_data.py INDEX BAM --limit 0   # every fragment
+    python scripts/design/native_parity_on_real_data.py INDEX BAM --limit 200000 --max-fragment-length 1000
 """
 
 from __future__ import annotations
@@ -31,23 +32,29 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+import pysam
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 
 from native._accumulator_reference import (  # noqa: E402
     Accumulator as ReferenceAccumulator,
+    Partition,
     Tally,
 )
-from reference_on_real_data import build_partition, fragment_paths  # noqa: E402
-
 from rigel._bam_impl import Accumulator as NativeAccumulator  # noqa: E402
+from rigel.calibration.splice_graph import (  # noqa: E402
+    EDGE_KIND_SJ,
+    build_region_partition_arrays,
+    build_sj_arrays,
+)
 from rigel.index import TranscriptIndex  # noqa: E402
+from rigel.types import Strand  # noqa: E402
 
 
-#: Which flat axis each Tally array is indexed by. This is the whole reason the comparison needs care: the
-#: reference holds one flat array per quantity across every reference, the native class holds one
-#: accumulator per reference, and the three axes have different per-reference lengths.
+#: Which flat axis each Tally array is indexed by: the reference holds one flat array per quantity
+#: across every reference, the native class holds one accumulator per reference, and the three axes
+#: have different per-reference lengths.
 _AXIS = {
     "region_contained_count": "region",
     "region_contained_inv_opportunity_sum": "region",
@@ -67,12 +74,107 @@ _AXIS = {
 }
 
 
+
+def build_partition(index) -> Partition:
+    """The real index as the reference's ``Partition``; refuses if the sj CSR and `edges_df` disagree on the sj count."""
+    region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
+    arrays = build_sj_arrays(index)
+    boundaries = index.edges_df
+    is_sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
+    n_sj = int(is_sj.sum())
+    if arrays.boundary_right.shape[0] != n_sj:
+        raise SystemExit("sj CSR disagrees with edges.feather on the sj count")
+    return Partition(
+        region_bounds=region_bounds,
+        ref_region_bound_offsets=region_bound_offsets,
+        region_types=region_types,
+        ref_region_offsets=_offsets(region_bound_offsets, per_ref=1),
+        ref_boundary_offsets=_offsets(region_bound_offsets, per_ref=2),
+        sj_offsets=arrays.offsets,
+        sj_boundary_right=arrays.boundary_right,
+        sj_strand=arrays.strand,
+    )
+
+
+def _offsets(region_bound_offsets: np.ndarray, per_ref: int) -> np.ndarray:
+    """Region (``per_ref=1``) or contiguous-boundary (``per_ref=2``) CSR offsets from the region-bound offsets.
+
+    A reference contributing ``c`` region bounds owns ``c - 1`` regions and ``c - 2`` boundaries; one
+    contributing none owns neither, which is why the subtraction is clamped at zero.
+    """
+    counts = np.diff(region_bound_offsets.astype(np.int64))
+    sizes = np.maximum(counts - per_ref, 0) * (counts > 0)
+    out = np.zeros(region_bound_offsets.shape[0], np.int64)
+    np.cumsum(sizes, out=out[1:])
+    return out
+
+
+def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
+    """Stream ``(ref_id, lo, hi, introns, align_strand, sj_strand)`` fragment paths from a name-collated BAM.
+
+    Blocks are joined across the mate gap and broken at CIGAR ``N``; introns are de-duplicated on
+    ``(start, end)``, because a pair whose two records both carry the same ``N`` would otherwise credit
+    the sj twice. Stops after ``limit`` paths when ``limit`` is given.
+    """
+    af = pysam.AlignmentFile(bam, "rb")
+    group, current = [], None
+
+    def emit(records):
+        if not records:
+            return None
+        by_ref = defaultdict(list)
+        introns_by_ref = defaultdict(set)
+        motif = Strand.NONE
+        reverse_r1 = None
+        for r in records:
+            if r.is_unmapped or r.is_secondary or r.is_supplementary:
+                continue
+            by_ref[r.reference_id].append((r.reference_start, r.reference_end))
+            position = r.reference_start
+            for op, length in r.cigartuples or []:
+                if op in (0, 2, 7, 8):  # M D = X consume the reference
+                    position += length
+                elif op == 3:  # N — an intron
+                    introns_by_ref[r.reference_id].add((position, position + length))
+                    position += length
+            if r.has_tag("XS"):
+                tag = r.get_tag("XS")
+                motif = Strand.POS if tag == "+" else Strand.NEG if tag == "-" else motif
+            if r.is_read1 or reverse_r1 is None:
+                reverse_r1 = r.is_reverse
+        if not by_ref:
+            return None
+        ref_id = max(by_ref, key=lambda k: len(by_ref[k]))
+        name = af.get_reference_name(ref_id)
+        if name not in name_to_ref_id:
+            return None
+        lo = min(a for a, _ in by_ref[ref_id])
+        hi = max(b for _, b in by_ref[ref_id])
+        align = Strand.NEG if reverse_r1 else Strand.POS
+        return (name_to_ref_id[name], lo, hi, sorted(introns_by_ref[ref_id]), align, motif)
+
+    emitted = 0
+    for record in af.fetch(until_eof=True):
+        if record.query_name != current:
+            path = emit(group)
+            if path is not None:
+                yield path
+                emitted += 1
+                if limit and emitted >= limit:
+                    return
+            group, current = [], record.query_name
+        group.append(record)
+    path = emit(group)
+    if path is not None:
+        yield path
+
+
 def ref_sj_offsets(partition) -> np.ndarray:
     """Per-reference offsets into the sj axis, from the CSR alone.
 
-    The CSR is keyed by the flat donor region_bound index and references are region_bound-major, so a reference's sj
-    are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the sj-boundary
-    id can BE the slot: the flat slot order is already the per-reference banks concatenated in order.
+    The CSR is keyed by the flat left region-bound index and references are region-bound-major, so a
+    reference's sj are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``; the flat slot order
+    is already the per-reference banks concatenated in order.
     """
     return partition.sj_offsets[partition.ref_region_bound_offsets]
 

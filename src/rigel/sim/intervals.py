@@ -1,13 +1,12 @@
 """Shared genomic-interval helpers for the sim package.
 
-Interval merging and genomic→transcript-coordinate projection. Extracted from the byte-identical
-copies that had grown in ``capture.py`` (the capture sampler) and ``suite.py`` (capture-probe
-design) — one home so a fix lands in both.
+Two operations the capture sampler and the probe designer both need: merging overlapping genomic
+intervals, and projecting one genomic block onto a transcript's spliced coordinates.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 
 from ..transcript import Transcript
 from ..types import Strand
@@ -60,17 +59,3 @@ def project_genomic_block_to_transcript(
     if mapped_bp != block_end - block_start:
         return None
     return sorted(projected)
-
-
-def project_genomic_blocks_to_transcript(
-    transcript: Transcript,
-    blocks: Sequence[tuple[int, int]],
-) -> list[tuple[int, int]] | None:
-    """Project a sequence of genomic blocks; ``None`` if any block is not fully exonic."""
-    projected: list[tuple[int, int]] = []
-    for start, end in blocks:
-        block_intervals = project_genomic_block_to_transcript(transcript, start, end)
-        if block_intervals is None:
-            return None
-        projected.extend(block_intervals)
-    return projected

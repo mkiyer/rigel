@@ -49,20 +49,15 @@ _ROW = re.compile(r"`design/([a-z0-9_]+\.py)`")
 #: ⛔ Instruments that predate the current campaign, were never run in it, and are documented as drift
 #: rather than silently tolerated. ⚠ Each is a DECISION owed: promote it to the table or delete it. Adding
 #: to this list is not a fix — it is a way of saying "not yet", and the list should only ever shrink.
-UNDOCUMENTED_DEBT: frozenset[str] = frozenset(
-    {
-        "bam_spans.py",
-        "implicit_splice_census.py",
-        "inv_L_limits.py",
-        "length_sieve.py",
-        "partition_test.py",
-        "reference_on_real_data.py",
-        "sigma_inv_L.py",
-        "spanning.py",
-    }
-)
+UNDOCUMENTED_DEBT: frozenset[str] = frozenset()
 
-ON_DISK = frozenset(p.name for p in DESIGN_DIR.glob("*.py") if p.name != "__init__.py")
+#: the instruments — every design/ file except the package marker and the `_`-prefixed helper modules,
+#: which answer no question and have no row (they are still import- and docstring-gated below).
+ON_DISK = frozenset(
+    p.name
+    for p in DESIGN_DIR.glob("*.py")
+    if p.name != "__init__.py" and not p.name.startswith("_")
+)
 IN_TABLE = frozenset(_ROW.findall(CLAUDE.read_text()))
 
 SIM_DIR = SCRIPTS / "sim"
@@ -104,15 +99,9 @@ ALL_SCRIPTS = sorted(
 
 
 def _case_id(path: pathlib.Path) -> str:
-    """⛔⛔ **NAME THE TREE, NEVER THE BASENAME ALONE — A BASENAME COLLIDES ACROSS TREES.**
-
-    `design/scan_profile.py` (the accumulator's ns/fragment, regressed over several BAMs) and
-    `profiling/scan_profile.py` (the scan's own wall time and RSS across thread budgets) are different
-    instruments that share a filename. Under a basename id pytest would silently de-duplicate them to
-    `scan_profile.py0` / `scan_profile.py1`, whose ORDER is an implementation detail — so a failure
-    would name neither file, and `-k` could not select one. ⚠ The collision itself is not fixed here;
-    renaming a file is an owner call, and `scripts/README.md` records the proposal.
-    """
+    """Name the tree, never the basename alone: two trees can carry one basename, and under a basename
+    id pytest would de-duplicate them to `name.py0` / `name.py1`, so a failure would name neither file
+    and `-k` could not select one."""
     return f"{path.parent.name}/{path.name}"
 
 
@@ -149,7 +138,7 @@ def test_every_instrument_still_imports(path):
     #   * the module must be in `sys.modules` BEFORE `exec_module`, or a dataclass resolving its own
     #     `__module__` gets `None` and raises `'NoneType' object has no attribute '__dict__'`;
     #   * the script's OWN directory is `sys.path[0]` under a real invocation, which is how the
-    #     sibling-importing instruments (`_sibling`, `from reference_on_real_data import ...`) resolve.
+    #     sibling-importing instruments (`_sibling`) resolve.
     sys.modules[name] = module
     sys.path.insert(0, str(path.parent))
     try:

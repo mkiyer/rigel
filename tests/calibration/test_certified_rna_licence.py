@@ -23,7 +23,8 @@ C5   ⛔ ``density_factor_precision`` must NOT price this factor — on a monoto
 ===  ==========================================================================================
 
 ⭐ **The measured consequence, which is why this file exists rather than a mechanism**
-(`scripts/design/certified_q_census.py`, full 36-condition ladder against origin-split truth): the realised
+(measured on the retired 36-condition ladder against origin-split truth; the instrument was retired with
+its verdict recorded): the realised
 ``q`` has a mass-weighted median of **0.19–0.71** with 60–98 % of the mass below 0.9, so the dropped term
 is the same size as the retained one. Scored against truth the raw-count term is **worse than the
 uninformative reference on 12 of 36 conditions**, worst **+0.4578** mwae at ``g90 ss0.50 capture_on``. Its

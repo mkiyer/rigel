@@ -1,21 +1,17 @@
-"""Verify a rebuilt index against the one it replaces: regions UNCHANGED, boundaries changed only in `reach`.
+"""Did an index rebuild preserve the structure? Compares a rebuilt index with the one it replaces.
 
-    TODO item 1   ·   Ledger: S1 (what changed and why)
+A rebuild that changed only how a contiguous boundary's reach is derived has an exactly predictable
+shape, and this script checks for that shape and nothing else: `regions.feather` must be byte-identical
+(or equal as a table, if only the compression differs) — the partition did not move, which is also the
+proof that the rebuild used the same FASTA and GTF — and `edges.feather` may differ only in the four
+`reach_*` columns and only on contiguous rows. A splice-junction boundary's reach is exonic on both
+sides by construction and must not move. Any other difference — a changed flag, kind, region id or row
+count — is reported as a failure, because `partition_hash` covers `regions.feather` alone and would not
+notice it. Nothing is scanned or solved; both indexes are read from disk.
 
-⭐ WHY THIS CHECK IS THE WHOLE POINT. S1 changed `_contiguous_reaches` — the reach a contiguous boundary
-reports — and **nothing else**. So a correct rebuild has an exactly predictable shape:
+Usage::
 
-* `regions.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
-  used the RIGHT SOURCE: a different FASTA or GTF moves the region_bounds, and regions would differ immediately.
-* `edges.feather` differing in the four `reach_*` columns of the **contiguous** rows and nowhere else.
-  ⚠ SpliceJunction reach is deliberately unchanged — a sj boundary is only used by a molecule that spliced
-  across it, so what remains either side is exonic, and `_sj_edges` stays on the exonic reach.
-
-Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the region
-ids would be a different change wearing this one's clothes — and `partition_hash` would not notice, because
-it covers `regions.feather` only.
-
-    python scripts/design/verify_index_rebuild.py OLD_INDEX NEW_INDEX
+    python scripts/design/verify_index_rebuild.py OLD_INDEX NEW_INDEX   # exit 1 unless only contiguous reach moved
 """
 
 from __future__ import annotations
@@ -27,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-#: The columns S1 was allowed to move, and only on contiguous rows.
+#: The only columns a reach-only rebuild may move, and only on contiguous rows.
 REACH_COLUMNS = ["reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg"]
 
 EDGE_KIND_CONTIGUOUS = 0

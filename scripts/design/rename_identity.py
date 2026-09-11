@@ -1,39 +1,26 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **THE BULK RENAME'S GATE: every stage proven BIT-IDENTICAL to a frozen reference.**
+"""Is this rename stage numerically a no-op? Every stage proven bit-identical to a frozen reference.
 
-A rename is a numeric NO-OP. That claim is falsifiable, and this makes it so::
+A rename must change no number, and this makes that claim falsifiable. `--freeze` runs the whole
+pipeline once on one condition and reduces it to digests; `--check` runs it again after a stage and
+compares. It compares content, never names, because the names are the thing changing: the content
+multiset (the sorted `dtype|shape|sha256` of every payload and calibration array, field names discarded,
+so any pure rename is invisible and any moved value is not) and the tool's own output (the transcript
+table, canonicalised by transcript id at full precision, which carries no region/boundary vocabulary at
+all). The pair is needed: the multiset cannot see two arrays swapping names, and the transcript digest
+can. No name map is used. Bit-identity is only provable with every source of run-to-run variation
+pinned, so the scan runs on one thread with one BGZF thread, `OMP_NUM_THREADS=1` and a fixed EM seed;
+a `--check` is therefore a statement about the code, not about the shipped thread configuration. The
+reference is frozen, not rolling: every stage compares to the same capture, never to the stage before it,
+because renames compound and a rolling baseline would let one stage's defect become the next stage's
+truth, so `--freeze` refuses to overwrite an existing reference.
 
-    python scripts/design/rename_identity.py --self-test   # perturb the comparator; no I/O
-    python scripts/design/rename_identity.py --freeze      # capture the reference, ONCE
-    python scripts/design/rename_identity.py --check       # after EVERY stage
+Usage::
 
-⭐⭐ **WHY THIS CAN EXIST AT ALL, AND IT NEARLY COULD NOT.** The shipped scan is **not**
-bit-reproducible: float addition is not associative across worker threads, so two scans of the same BAM
-by the same binary differ on six banks by ~3.5e-14 (measured 2026-08-13, and it is what left
-`rescan_panels.py`'s gate unsatisfiable for three days — `TRAPS: a-stale-gate-accuses-the-newest-change`).
-⛔ **Pinning `total_threads=1` removes it entirely: 0 of 62 banks differ.** So this harness pins the
-thread count, the BGZF thread count, `OMP_NUM_THREADS` and the EM seed, and only then is "bit-identical"
-a claim anyone can make. ⚠ That also means a `--check` run says nothing about the SHIPPED thread
-configuration; it is a statement about the CODE, which is exactly what a rename needs.
-
-⛔⛔ **AND IT COMPARES CONTENT, NEVER NAMES — because the names are the thing changing.** A gate keyed on
-bank names would fail on every stage by construction and prove nothing. Two rename-invariant views are
-compared instead, and they are complementary:
-
-    ① the CONTENT MULTISET   the sorted (dtype, shape, sha256) of every array, names discarded.
-                             Invariant under any pure rename; changes if any VALUE moves.
-    ② the TOOL'S OUTPUT      the transcript table. It carries transcript ids and counts and no
-                             region/boundary vocabulary at all, so a rename cannot touch it.
-
-⭐ Neither alone is enough and the pair is: ① cannot see two arrays having their names SWAPPED (the
-multiset is unchanged), and ② can, because a swap moves the answer. ⛔ A name map would close ① too, and
-is deliberately NOT used — it is the compatibility hack the owner refused, and it would have to be
-maintained across nine stages while being exactly the thing under test.
-
-⚠ **The reference is FROZEN, not rolling.** Every stage compares to the SAME capture, never to the stage
-before it, because the renames COMPOUND: a rolling baseline lets a defect introduced at stage 2 become
-the accepted truth for stages 3-9. This is the one place `TRAPS: re-record-the-baseline` is inverted, and
-deliberately — the claim under test is *"nothing has moved since the freeze"*.
+    python scripts/design/rename_identity.py --self-test          # perturb the comparator; no I/O
+    python scripts/design/rename_identity.py --freeze             # capture the reference, once
+    python scripts/design/rename_identity.py --check --stage s1   # after every stage
+    python scripts/design/rename_identity.py --check --suite DIR --index DIR --condition NAME
 """
 
 from __future__ import annotations
@@ -62,8 +49,8 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 DEFAULT_CONDITION = "gdna_g00_ss_0.99_nrna_mid_capture_off"
 REFERENCE = _RUNS / "arms" / "rename_identity_reference.json"
 
-#: ⛔ EVERY source of run-to-run variation, pinned. Removing any one makes "bit-identical" unprovable.
-#: ``total_threads=1`` is the load-bearing one — see the module docstring.
+#: every source of run-to-run variation, pinned; removing any one makes "bit-identical" unprovable.
+#: ``total_threads=1`` is the load-bearing one: float addition is not associative across worker threads.
 DETERMINISM = dict(total_threads=1, bgzf_threads=1)
 EM_SEED = 20260807
 
@@ -73,10 +60,10 @@ def _sha(a: np.ndarray) -> str:
 
 
 def content_multiset(obj) -> list[str]:
-    """⭐ Every array as ``dtype|shape|sha256``, SORTED and with the field name DISCARDED.
+    """Every array as ``dtype|shape|sha256``, sorted and with the field name discarded.
 
-    Discarding the name is the whole point: it is what survives a rename. Sorting makes the result a
-    multiset, so a reordering of the dataclass fields is invisible while a changed VALUE is not.
+    Discarding the name is what survives a rename. Sorting makes the result a multiset, so a
+    reordering of the dataclass fields is invisible while a changed value is not.
     """
     out = []
     for f in dataclasses.fields(obj):
@@ -96,9 +83,9 @@ def capture(suite: Path, index_dir: Path, condition: str) -> dict:
         scan=dataclasses.replace(base.scan, sj_strand_tag=_native_detect_sj_tag(bam), **DETERMINISM),
         em=dataclasses.replace(base.em, seed=EM_SEED),
     )
-    # ⭐ The PAYLOAD is not on `PipelineResult`, and it holds the very banks being renamed — so it is
-    # captured at the `calibrate` boundary rather than by scanning a second time. `calibrate` is imported
-    # FUNCTION-LOCALLY by the pipeline, so patching the module attribute is picked up at call time.
+    # the payload is not on `PipelineResult` and holds the very banks being renamed, so it is captured
+    # at the `calibrate` boundary rather than by scanning a second time; `calibrate` is imported
+    # function-locally by the pipeline, so patching the module attribute is picked up at call time
     import rigel.calibration as CAL
 
     original = CAL.calibrate
@@ -118,8 +105,8 @@ def capture(suite: Path, index_dir: Path, condition: str) -> dict:
                            "missing the payload would silently gate less than it claims")
 
     quant = result.estimator.get_counts_df(index)
-    # ⭐ Canonicalised: sorted by the transcript id and rendered at full precision, so the digest is a
-    # statement about the NUMBERS and not about row order or float formatting.
+    # canonicalised: sorted by the transcript id and rendered at full precision, so the digest is a
+    # statement about the numbers and not about row order or float formatting
     key = "transcript_id" if "transcript_id" in quant.columns else quant.columns[0]
     q = quant.sort_values(key).to_csv(index=False, float_format="%.17g")
 
@@ -133,7 +120,7 @@ def capture(suite: Path, index_dir: Path, condition: str) -> dict:
 
 
 def compare(ref: dict, now: dict) -> list[str]:
-    """Every difference, named. Empty list ⇒ the stage is a proven numeric no-op."""
+    """Every difference, named. An empty list means the stage is a proven numeric no-op."""
     bad = []
     if ref.get("condition") != now.get("condition"):
         bad.append(f"condition: {ref.get('condition')!r} -> {now.get('condition')!r}")
@@ -162,7 +149,7 @@ def compare(ref: dict, now: dict) -> list[str]:
 
 
 def self_test() -> int:
-    """⭐ The comparator's own falsification. No pipeline, no I/O — pure perturbation."""
+    """The comparator's own falsification. No pipeline, no I/O, pure perturbation."""
     ref = {
         "condition": "c", "quant_rows": 10, "quant_sha": "abc",
         "payload_multiset": sorted(["int64|(3,)|aaa", "float64|(4,)|bbb"]),
@@ -172,33 +159,33 @@ def self_test() -> int:
 
     checks.append(("identical => silent", compare(ref, dict(ref)) == []))
 
-    # ⛔ a renamed FIELD must be INVISIBLE — that is the whole design
+    # a renamed field must be invisible; that is the whole design
     renamed = dict(ref)  # the multiset holds no names at all, so a rename cannot change it
     checks.append(("a pure rename => silent", compare(ref, renamed) == []))
 
-    # ⛔ a changed VALUE must be caught, however small — the hash has no tolerance
+    # a changed value must be caught, however small; the hash has no tolerance
     moved = dict(ref, payload_multiset=sorted(["int64|(3,)|aaa", "float64|(4,)|bbZ"]))
     checks.append(("one array's CONTENT moved => caught", any("payload_multiset" in x
                                                               for x in compare(ref, moved))))
 
-    # ⛔ a changed SHAPE is a different array, and stage 0 is exactly that
+    # a changed shape is a different array
     shaped = dict(ref, payload_multiset=sorted(["int64|(3,)|aaa", "float64|(5,)|bbb"]))
     checks.append(("a SHAPE change => caught", compare(ref, shaped) != []))
 
-    # ⛔ the tool's output is the second, independent view
+    # the tool's output is the second, independent view
     checks.append(("the quant digest moved => caught",
                    any("OUTPUT MOVED" in x for x in compare(ref, dict(ref, quant_sha="zzz")))))
 
-    # ⛔ a DROPPED array must not read as agreement (`arm_identity`'s recorded lie: 0 rows scored 32/32)
+    # a dropped array must not read as agreement (an empty comparison scoring as a pass)
     dropped = dict(ref, payload_multiset=["int64|(3,)|aaa"])
     checks.append(("an array DISAPPEARING => caught", compare(ref, dropped) != []))
 
-    # ⛔ an empty capture is the sharpest version of the same lie
+    # an empty capture is the sharpest version of the same lie
     checks.append(("an EMPTY capture => caught", compare(ref, dict(ref, payload_multiset=[])) != []))
 
-    # ⚠ THE KNOWN HOLE, pinned so nobody mistakes it for coverage: the multiset cannot see two arrays
-    # SWAPPING names, because a multiset has no names. The quant digest is what covers that, and this
-    # asserts the hole is exactly where it is documented to be.
+    # the known hole, pinned so nobody mistakes it for coverage: the multiset cannot see two arrays
+    # swapping names, because a multiset has no names; the quant digest is what covers that, and this
+    # asserts the hole is exactly where it is documented to be
     swapped = dict(ref)  # same contents, names exchanged — multiset identical BY CONSTRUCTION
     checks.append(("a NAME SWAP is invisible to the multiset (documented hole)",
                    compare(ref, swapped) == []))

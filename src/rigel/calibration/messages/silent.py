@@ -2,15 +2,14 @@
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
-⭐⭐⭐ **This file is five boundaries of behaviour, and that is the entire point.** A new session reads
-``sweep.py`` plus this and holds the whole working system in their head. :mod:`~.transfer` is the SHIPPED
-policy (the default since 2026-09-09); this one is what every policy is priced against.
+Five boundaries of behaviour, and that is the point: a reader of ``sweep.py`` plus this file holds
+the whole working backbone. :mod:`~.transfer` is the shipped policy; this one is what every policy
+is priced against.
 
-⛔ **It is a MEASURED floor, not a placeholder.** On strand-specific data a sighted exon's own solve is
-excellent and a message can mostly only disturb it, so the bar a policy is held to is: WIN on unstranded
-data, do minimal HARM against this floor on stranded data, the two halves never pooled
-(`scripts/design/policy_benchmark.py` prints them apart). The shipped policy beats this floor on 7 of 8
-ladder rows of each half, the other two within 1 % (2026-09-09).
+It is a MEASURED floor, not a placeholder. On strand-specific data a sighted exon's own solve is
+already excellent and a message can mostly only disturb it, so the bar a policy is held to is: WIN
+on unstranded data, do minimal HARM against this floor on stranded data, the two halves never
+pooled (`scripts/design/policy_benchmark.py` prints them apart).
 """
 
 from __future__ import annotations

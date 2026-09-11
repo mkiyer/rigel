@@ -1,34 +1,21 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE?** — the byte-identity gate, and it refuses to lie in either
-direction.
+"""Is this arm byte-identical to that one? The byte-identity gate for a restructure that must be a
+numerical no-op. An aggregate answers "how much did this move?"; a no-op needs "did any field move
+at all?", and a sum cannot answer that because two fields moving by +x and -x cancel. This compares
+every scored field of every row of two arm files (the `.jsonl` rows `quant_accuracy.py` and
+`prior_vs_oracle.py` write with `--out`), keyed by (condition, axis). Both failure modes it has
+shown are gated rather than trusted (`TRAPS: byte-identity-gate`): the row-key sets must be equal,
+not overlapping, and two empty arms fail rather than pass vacuously; and every differing field is
+named with its own max |delta| and location, with both files' mtimes printed, because a baseline
+recorded in an earlier session is the thing to re-record, never believe. Identity is bit-equality
+or two `nan`s (a field not produced at a condition), never a tolerance. It measures nothing and
+patches nothing in `src`; exit status is 0 only if every field of every row is identical, so it
+composes into a shell gate.
 
-`arm_score.py` AGGREGATES, so it answers "how much did this move?". A restructure gated on byte-identity
-needs the other question — "did ANY field move at all?" — and a sum cannot answer it: two fields that move
-by ±x cancel in a total and read as identical. This compares **every scored field of every row**.
+Usage::
 
-⛔⛔ **TRAPS: byte-identity-gate SAYS THIS INSTRUMENT HAS LIED IN BOTH DIRECTIONS, so both failure modes are gated
-here rather than trusted:**
-
-* *"An arm with ZERO rows scored 32/32 IDENTICAL because the comparison looped over the new arm's rows."*
-  ⇒ the row-key sets must be **EQUAL**, not overlapping, and the comparison runs over the UNION. A row
-  present in one arm and absent from the other is a FAILURE, never a skip.
-* *"A stored baseline went stale so unmodified HEAD no longer reproduced it."*
-  ⇒ every field is named in the output with its own max |Δ|, so a mismatch says WHICH field and WHERE
-  rather than only that the totals differ. And the two files' `mtime`s are printed, because a baseline
-  recorded in an earlier session is exactly the thing TRAPS: byte-identity-gate warns about (`TRAPS: re-record-the-baseline` — re-record it).
-
-⛔ **A `nan` equals a `nan` here, and that is deliberate.** `library_f_gdna_*` is `nan` at a condition
-where the field was not produced, and `nan != nan` would report every such field as a difference on both
-arms. Identity is `(both nan) or (bit-equal)` — compared as BITS (`==` on the float), never within a
-tolerance, because a tolerance is what turns "byte-identical" into "close enough" and this gate exists to
-refuse that.
-
-Usage
------
-    python scripts/design/arm_identity.py base backbone_relay       # names under $RIGEL_ARMS
-    python scripts/design/arm_identity.py a.jsonl b.jsonl          # or explicit paths
-
-Exit status is 0 only if every field of every row is identical, so it composes into a shell gate.
+    python scripts/design/arm_identity.py qa_base qa_noop            # names under $RIGEL_ARMS
+    python scripts/design/arm_identity.py a.jsonl b.jsonl            # or explicit paths
 """
 
 from __future__ import annotations
@@ -40,17 +27,13 @@ import sys
 import time
 from pathlib import Path
 
-#: where `ladder_arm_ab.py --out` wrote the arms. Override with $RIGEL_ARMS.
+#: where an instrument's `--out` wrote the arms. Override with $RIGEL_ARMS.
 D = Path(os.environ.get("RIGEL_ARMS", Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_arms"))
 
-#: ⛔ NOT compared: fields that differ BY CONSTRUCTION and would report a difference on every row.
-#: Everything else in the row is a measurement and is compared.
-#:
-#: * ``arm`` — the arm's own name.
-#: * ``seconds`` — wall clock. It is an observation of the MACHINE, not of the arm, and it never
-#:   repeats. ⚠ Added when ``quant_accuracy.py`` became the first producer to record one; keeping the
-#:   set this small is deliberate, because every name added here is a way for a real difference to
-#:   stop being reported. A field belongs here only if it CANNOT be equal between two identical arms.
+#: Not compared: fields that differ by construction and would report a difference on every row —
+#: ``arm`` (the arm's own name) and ``seconds`` (wall clock, an observation of the machine). Every
+#: other field is a measurement and is compared. A field belongs here only if it cannot be equal
+#: between two identical arms: every name added is a way for a real difference to stop being reported.
 _NOT_A_MEASUREMENT = frozenset({"arm", "seconds"})
 
 
@@ -93,7 +76,7 @@ def main() -> int:
 
     fails: list[str] = []
 
-    # ── TRAPS: byte-identity-gate, failure mode 1: the row sets must be EQUAL. A missing row is not a skipped row. ────────────
+    # ── the row sets must be EQUAL: a missing row is a failure, not a skipped row ──────────────────
     only_a, only_b = sorted(set(A) - set(B)), sorted(set(B) - set(A))
     if only_a or only_b:
         for k in only_a:
@@ -104,18 +87,11 @@ def main() -> int:
     if not keys:
         fails.append("BOTH arms are empty — this gate would otherwise pass vacuously (TRAPS: byte-identity-gate)")
 
-    # ── the field sets must match too: a field added or dropped is a change to what was measured ──────
-    #
-    # ⛔⛔ **PER ROW KEY, NEVER OVER THE WHOLE FILE.** This used to union the field names across every
-    # row of an arm and then demand every row carry every name. That holds only while all rows share one
-    # schema — true for `ladder_arm_ab`, whose two axes are `region` and `boundary` — and it reports a
-    # spurious failure the moment an arm emits rows of DIFFERENT shapes on different axes:
-    # `quant_accuracy.py` writes a `transcript` row and a `library` row per condition, and the global
-    # union made each one look like it was missing the other's fields. **1,296 false "field missing"
-    # failures on two arms that were in fact byte-identical.**
-    # ⭐ The per-key comparison is also strictly STRONGER, not a relaxation: a field present in A's row
-    # and absent from B's SAME row is still a failure, and it is now attributed to that row instead of
-    # being masked by any other row that happened to carry the name.
+    # ── the field sets must match too, PER ROW KEY: a field added or dropped is a change to what was
+    # measured. Rows of different axes may legitimately carry different schemas (`quant_accuracy.py`
+    # writes a `transcript` row and a `library` row per condition), so a whole-file union of field
+    # names would report spurious misses; per key, a field present in A's row and absent from B's
+    # same row is still a failure and is attributed to that row.
     shared = sorted(set(A) & set(B))
     n_cmp = 0
     worst: dict[str, tuple[float, tuple[str, str]]] = {}

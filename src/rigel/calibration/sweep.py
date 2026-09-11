@@ -3,31 +3,28 @@
        Gate: ``tests/calibration/test_sweep_backbone.py``
 
 Each slot's unspliced fragment mass is deconvolved into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
-antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), on the TWO-PHASE shape (owner
-ruling 2026-09-04): every node's own claim (`prepare`), a forward pass then a backward pass in which each
-RECIPIENT receives what its neighbour sends (`propagate`), and ONE solve per node from its own evidence,
-the two held messages and the prior (`solve`). The chain is a forest of linear paths, so that is exact
-belief propagation, not an iteration.
+antisense-RNA / gDNA — over the ``N E N E … N`` chain (`region_chain`), on the TWO-PHASE shape: every
+node's own claim (`prepare`), a forward pass then a backward pass in which each RECIPIENT receives what
+its neighbour sends (`propagate`), and ONE solve per node from its own evidence, the two held messages
+and the prior (`solve`). The chain is a forest of linear paths, so that is exact belief propagation, not
+an iteration.
 
-⭐⭐⭐ **THIS FILE KNOWS NOTHING ABOUT CAPTURE, SPLICE IN, LEVELS, LANES OR ENRICHMENT — those words do not
-appear in it, and that is the design rather than a tidiness.** Everything about *what a message says* is a
+This file knows nothing about capture, splice in, levels, lanes or enrichment — those words do not appear
+in it, and that is the design rather than tidiness. Everything about *what a message says* is a
 :mod:`~.messages` policy. What is left here is the shape of the solve and the four invariants no policy may
 break:
 
 ===================================================  ====================================================
 the backbone asserts                                 it would have caught
 ===================================================  ====================================================
-the kernel sees only the two NEIGHBOUR states        **TRAPS: a-message-from-the-destinations-belief — nine recurrences in nine costumes**
+the kernel sees only the two NEIGHBOUR states        TRAPS: a-message-from-the-destinations-belief
 every delivered row is one row per slot, finite      a row array off the solve grid, or a NaN reaching ψ
-``|T| <= 3``                                         **AXIOM 0**, made executable
-the write-back touches only ``solvable`` slots       the basis mismatch that made a gate read max|Δ| = 1.0
+``|T| <= 3``                                         AXIOM 0, made executable
+the write-back touches only ``solvable`` slots       a replay that read the untouched mask as a difference
 ===================================================  ====================================================
 
-⭐⭐ **The assertions live HERE, not in the policy, and that is the entire point.** A future policy can be
-as wrong as it likes and still cannot commit any of these — each of which has shipped at least once. (A
-profile delivered on the solve grid cannot sit off-grid or claim an over-unit share, so the two assertions
-that guarded Gaussian message channels — **TRAPS: off-grid-message-mode** — retired with those channels
-on 2026-09-09.)
+The assertions live HERE, not in the policy, and that is the entire point: a future policy can be as
+wrong as it likes and still cannot commit any of them, and each has shipped at least once.
 
 Two gates on this slot in the pipeline
 --------------------------------------
@@ -66,13 +63,11 @@ from .region_chain import BOUNDARY, REGION, RegionChain, RegionDeconv
 __all__ = ["AssertionCounts", "chain_boundary_deconv", "chain_region_deconv", "solve_chain"]
 
 
-# ⛔⛔ ASSERTIONS A SHIPPED POLICY IS KNOWN TO VIOLATE, with the measurement beside each. They would be
-# COUNTED and PUBLISHED rather than raised, because widening an assertion to fit a defect is how a gate
-# becomes vacuous (TRAPS: perturb-every-gate / TRAPS: a-gate-that-reconstructs); each would carry a STRICT
-# xfail in the gate file, this project's convention for a PROVEN defect whose fix is panel-negative on its
-# own. ⭐ EMPTY since 2026-09-09: every entry guarded the retired relay's Gaussian channels (off-grid share
-# modes at the _EPS floor, over-unit shares, the share sum) and retired with them; the transfer policy
-# delivers max-normalised profiles on the solve grid. Anything NOT in here raises.
+# ⛔ ASSERTIONS A SHIPPED POLICY IS KNOWN TO VIOLATE, each entered with the measurement that proved it.
+# An entry is COUNTED and PUBLISHED rather than raised, because widening an assertion to fit a defect is
+# how a gate becomes vacuous (TRAPS: perturb-every-gate / TRAPS: a-gate-that-reconstructs); an entry also
+# carries a STRICT xfail in the gate file, this project's convention for a PROVEN defect whose fix is
+# panel-negative on its own. The dict is EMPTY, so anything violated raises.
 #: ``name -> why it is not fatal yet``.
 _KNOWN_VIOLATIONS: dict[str, str] = {}
 
@@ -80,8 +75,8 @@ _KNOWN_VIOLATIONS: dict[str, str] = {}
 class AssertionCounts(dict):
     """How many slots violated each backbone assertion, published into the diagnostics capture.
 
-    ⭐ A count rather than a bool, because TRAPS: could-the-arm-have-fired is the rule: *before believing "the arm changed
-    nothing", check it COULD have changed something.* An assertion reporting 0 violations on a substrate
+    A count rather than a bool, because TRAPS: could-the-arm-have-fired is the rule: before believing "the
+    arm changed nothing", check it COULD have changed something. An assertion reporting 0 violations on a substrate
     where the predicate can never fire is not evidence, so the report also carries how many slots were
     ELIGIBLE for each check.
     """
@@ -103,13 +98,13 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
     """The assertions on what the policy actually delivered: the population axiom, and every row
     channel one row per slot on the solve grid and finite.
 
-    ⛔ Assertion 1 (TRAPS: a-message-from-the-destinations-belief) is not checked here because it is enforced BY CONSTRUCTION: the
-    propagate kernel is called with two INDICES and builds the message into the destination from the
-    source's claim and what the source holds; the backbone writes ``held`` and the policy never reaches
-    past its hop. A structural impossibility beats a check. ⛔ Assertion 5 is checked at the write-back,
-    where its basis lives.
+    TRAPS: a-message-from-the-destinations-belief is not checked here because it is enforced BY
+    CONSTRUCTION: the propagate kernel is called with two INDICES and builds the message into the
+    destination from the source's claim and what the source holds; the backbone writes ``held`` and the
+    policy never reaches past its hop. A structural impossibility beats a check. The write-back
+    assertion is checked at the write-back, where its basis lives.
     """
-    # ── (4) AXIOM 0, made executable: |T(slot)| = 1 + free_pos + free_neg, and it is <= 3 ALWAYS ────────
+    # ── AXIOM 0, made executable: |T(slot)| = 1 + free_pos + free_neg, and it is <= 3 ALWAYS ───────────
     # There are THREE populations and there is no fourth. This is a function of TWO BITS, which is what
     # makes it structural rather than something to remember — and the message packet carries exactly three
     # component channels (gDNA, RNA+, RNA-) for the same reason.
@@ -141,7 +136,8 @@ def _check_message(msg: PsiMessage, ctx: StepContext, counts: AssertionCounts) -
                 )
         bad = np.array([not np.isfinite(np.asarray(r)).all() for r in msg.cube_rows.values()], bool)
         counts.note("cube_rows_finite", bad, np.ones(bad.shape[0], bool))
-    # ⛔ TRAPS: could-the-arm-have-fired's ANTI-DEGENERACY CLAUSE, and it is the half that makes the gate mean anything: on a chain
+    # ⛔ TRAPS: could-the-arm-have-fired's anti-degeneracy clause, the half that makes the gate mean
+    # anything: on a chain
     # where NO slot admits both RNA strands, ``|T| <= 3`` is satisfied by a substrate that never had a
     # three-population slot to test. That is not the axiom holding, it is the check never running — so the
     # eligible set is the slots that actually reach 3, and a substrate with none of them says so.
@@ -172,19 +168,19 @@ def solve_chain(
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
 
-    ``policy`` is the message-composition policy (:mod:`~.messages`). ⭐ **It defaults to
-    :class:`~.messages.silent.SilentPolicy`, which sends nothing** — so a reader of this file plus five
+    ``policy`` is the message-composition policy (:mod:`~.messages`). It defaults to
+    :class:`~.messages.silent.SilentPolicy`, which sends nothing — so a reader of this file plus five
     boundaries holds the whole working system. The shipped answer is
     :class:`~.messages.transfer.TransferPolicy`, which ``calibrate`` passes explicitly.
 
     ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then carries the Jeffreys reference
-    measure alone on both arms. Prior-free is not reference-free. ⭐ That pass's only job is to be a training substrate for
-    the population gDNA hyperprior — it is not the deliverable, and it does not have to answer objects it
-    cannot solve.
+    measure alone on both arms. Prior-free is not reference-free. That pass's only job is to be a
+    training substrate for the population gDNA hyperprior — it is not the deliverable, and it does not
+    have to answer objects it cannot solve.
 
-    ⛔ ψ carries NO reference location (owner refutation, 2026-08-24): the reference is the
-    symmetric Jeffreys measure and asserts nothing; background information enters as the
-    ``intron_prior`` λ-factor, a likelihood whose precision scales with counts.
+    ⛔ ψ carries NO reference location: the reference is the symmetric Jeffreys measure and asserts
+    nothing; background information enters as the ``intron_prior`` λ-factor, a likelihood whose
+    precision scales with counts.
     """
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
@@ -221,7 +217,7 @@ def solve_chain(
         """The per-slot solve (the log-density log-odds backend). Phase A calls it with a silent message;
         the final call passes the policy's rows (the λ rows and the cube rows).
 
-        ⚠ ``fg_ref`` is the count-zero-information variance freeze: the reference is the incoming belief,
+        ``fg_ref`` is the count-zero-information variance freeze: the reference is the incoming belief,
         so the variance — hence the message precision — is evaluated near the truth and not at a flat 1/2.
         It is passed EXPLICITLY rather than closed over, because the write-back rebinds the belief and one
         diagnostic solve below deliberately runs after that.
@@ -256,7 +252,7 @@ def solve_chain(
             fg_ref=fg_ref,
             fpos_ref=fpos_ref,
             fneg_ref=fneg_ref,
-            # ⭐ the CUBE channel: the RNA level lanes delivered at AMBIG slots, final solve only
+            # the CUBE channel: the RNA level lanes delivered at AMBIG slots, final solve only
             cube_rows=cube_rows,
         )
 
@@ -266,10 +262,10 @@ def solve_chain(
     # THE gDNA ARM of ψ — the COMPOSITION prior, and ONLY that. A total-density model is an ENRICHMENT
     # model, not a DNA composition prior: letting it vote a slot's f_g is the count-votes-composition
     # regression.
-    # ⭐ ONE construction site for ψ's composition arms. The RNA member stays ``None`` until something
+    # ONE construction site for ψ's composition arms. The RNA member stays ``None`` until something
     # fits an RNA landscape; ``None`` there means "that arm takes its derived reference", which is the
     # shipped behaviour and a first-class configuration rather than a gap.
-    # ⭐ The RNA arm asks the SAME landscape about the OTHER component: the complementary fraction
+    # The RNA arm asks the SAME landscape about the OTHER component: the complementary fraction
     # `1 - f_g` against RNA's own opportunity. `mass_global` is shared because both components split one
     # unspliced population (`region_rna_geometry`).
     _rna_mass, _eff_rna = region_rna_geometry(geometry)
@@ -282,7 +278,7 @@ def solve_chain(
         else None,
     )
 
-    # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
+    # Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
     # it. The scans are sequential, so iterate as a Python list of ints.
     order_list = list(range(int(chain.n_slots)))
     # per-slot EXON-region flag — the SPLICE IN's destination class, and a policy input rather than a gate.
@@ -295,7 +291,7 @@ def solve_chain(
     _is_region = np.asarray(chain.kind) == REGION
     exon_pos = _is_region & ((_sig & BIT_EXON_POS) > 0)
     exon_neg = _is_region & ((_sig & BIT_EXON_NEG) > 0)
-    # ── (A) the per-slot message-free SELF-SOLVE — the four init sources ──────────────────────────────
+    # ── the per-slot message-free SELF-SOLVE ──────────────────────────────────────────────────────────
     own = build_region_init(
         chain,
         statics,
@@ -347,23 +343,21 @@ def solve_chain(
 
     prepared = (policy if policy is not None else SilentPolicy()).prepare(ctx)
 
-    # ── PHASE 1, PROPAGATE: (B) the FORWARD pass L→R and (C) the BACKWARD pass R→L ────────────────────
-    # ⛔ TRAPS: a-comment-quoted-as-a-finding: ONE pass each, in chain order, which on a chain IS
-    # forward-backward. It is not an iterative scheme, and a source comment's shorthand once crossed
-    # into a design doc as if it were one. When both passes end every node holds one message from each
-    # neighbour it has (owner ruling 2026-09-04): the recipient's kernel wrote it, or SILENCE stands.
+    # ── PHASE 1, PROPAGATE: the FORWARD pass L→R and the BACKWARD pass R→L ───────────────────────────
+    # ⛔ ONE pass each, in chain order, which on a chain IS forward-backward. It is not an iterative
+    # scheme (TRAPS: a-comment-quoted-as-a-finding). When both passes end every node holds one message
+    # from each neighbour it has: the recipient's kernel wrote it, or SILENCE stands.
     from_left = _pass(order_list, left.tolist(), prepared, backward=False)
     from_right = _pass(order_list[::-1], right.tolist(), prepared, backward=True)
 
-    # ── PHASE 2, SOLVE: (D) the policy's half — the two held messages into ψ's channels ──────────────
+    # ── PHASE 2, SOLVE: the policy's half — the two held messages into ψ's channels ──────────────────
     msg = prepared.solve(from_left, from_right)
     counts = AssertionCounts()
     _check_message(msg, ctx, counts)
 
-    # ⭐⭐ THE CITIZENSHIP SEAM (owner ruling 2026-08-25): a delivered certified-flux claim joins the
-    # λ-factor rows in the FINAL solve only. Phase-A (`build_region_init`) and the own-evidence
-    # precision never see it — an imputation may inform the fused answer, never masquerade as the
-    # slot's own evidence.
+    # THE CITIZENSHIP SEAM: a delivered claim joins the λ-factor rows in the FINAL solve only. Phase-A
+    # (`build_region_init`) and the own-evidence precision never see it — an imputation may inform the
+    # fused answer, never masquerade as the slot's own evidence.
     dc_fin = _psi(
         global_lp,
         msg,
@@ -375,10 +369,9 @@ def solve_chain(
     )
 
     # ── THE WRITE-BACK — only SOLVABLE slots ──────────────────────────────────────────────────────────
-    # A locked slot (no admissible RNA strand) or an empty one keeps its signature-binary init. ⛔ The
-    # alternative — skip UNIDENTIFIED slots too and defer to the prior — was derived, implemented and
-    # EMPIRICALLY REFUTED: it regresses both standalone and with the hyperprior, because the prior resolves
-    # an imperfectly-solved slot better than a deferred ``f_g = 1``.
+    # A locked slot (no admissible RNA strand) or an empty one keeps its signature-binary init. ⛔ Do
+    # not extend the skip to UNIDENTIFIED slots and defer them to the prior: that arm is refuted, because
+    # the prior resolves an imperfectly-solved slot better than a deferred ``f_g = 1``.
     mg_, mp_, mn_ = dc_fin.gdna_frac, dc_fin.rna_pos_frac, dc_fin.rna_neg_frac
     vg_, vp_, vn_ = dc_fin.gdna_frac_var, dc_fin.rna_pos_frac_var, dc_fin.rna_neg_frac_var
     out_fg = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
@@ -387,10 +380,10 @@ def solve_chain(
     out_vg = np.where(solvable, vg_, var_g)
     out_vpos = np.where(solvable, vp_, var_pos)
     out_vneg = np.where(solvable, vn_, var_neg)
-    # ── (5) the write-back touched ONLY solvable slots ────────────────────────────────────────────────
-    # ⛔ The silent version of this made an TRAPS: byte-identity-gate identity gate read ``max|Δ| = 1.0``: a replay compared the
-    # solve's raw output against the shipped belief, and the two differ by exactly this mask. Reproducing a
-    # pipeline stage means reproducing its WRITE-BACK.
+    # ── the write-back touched ONLY solvable slots ───────────────────────────────────────────────────
+    # ⛔ Without this the mask is invisible to a replay, which then compares the solve's raw output
+    # against the shipped belief and reads the mask as a difference (TRAPS: byte-identity-gate).
+    # Reproducing a pipeline stage means reproducing its WRITE-BACK.
     untouched = ~np.asarray(solvable, bool)
     counts.note(
         "writeback_only_solvable",
@@ -411,12 +404,10 @@ def solve_chain(
     # COMPOSITION row received from a neighbour (`Message.composition`). A level lane, a ceiling
     # (the RNA lanes' or the node's own flux's) and a cube row are BOUNDS: one-sided, so the value the
     # solve settles on within the admitted half-line is the prior's, and a slot with nothing at all
-    # believes the prior outright. Neither trains the landscape (`calibrate._fit_gdna_hyperprior`):
-    # the owner's ruling of 2026-09-06 ("nodes whose only evidence is a bound do not train it"),
-    # landed 2026-09-10. ⛔ Read off the HELD MESSAGES, not `msg.lam_rows`, which fuses compositions
-    # and bounds into one row: the bound-only slots with a non-flat row (1,476 own-flux ceilings at
-    # the ladder's unstranded zero control) are what the ruling excludes — keeping them read 137k
-    # against the ruling's 111k there.
+    # believes the prior outright. A bound-only node does NOT train the landscape
+    # (`calibrate._fit_gdna_hyperprior`). ⛔ Read this off the HELD MESSAGES, not `msg.lam_rows`, which
+    # fuses compositions and bounds into one row: the bound-only slots with a non-flat row are exactly
+    # the ones the training rule excludes.
     held_composition = np.zeros(n_slot.shape[0], dtype=bool)
     for held in (from_left, from_right):
         for i, m in enumerate(held):
@@ -445,8 +436,8 @@ def solve_chain(
         ).gdna_frac
         # the message-free self-solve variances, for the local-error attribution — a debug-only solve, so
         # the production path carries none of it (the self-solve fractions come from ``own``).
-        # ⚠ Deliberately AFTER the write-back, so its reference is the OUTGOING belief. That is what the
-        # shipped solver did, and an instrument comparing against it depends on the same reference.
+        # Deliberately AFTER the write-back, so its reference is the OUTGOING belief — an instrument
+        # comparing against the shipped solve depends on the same reference.
         _dc_loc = _psi(global_lp, PsiMessage.silent(), fg_ref=f_g, fpos_ref=f_pos, fneg_ref=f_neg)
         _capture.update(
             backbone_assertions=counts,
@@ -454,7 +445,7 @@ def solve_chain(
             n_slot=n_slot.copy(),
             left=np.asarray(left, np.int64),
             right=np.asarray(right, np.int64),
-            # ⭐ which policy ran, read off the artifact — the witness an instrument's "the arm ran"
+            # which policy ran, read off the artifact — the witness an instrument's "the arm ran"
             # assertion needs (TRAPS: an-ablation-that-never-ran), never a config flag it did not thread
             policy_name=str(getattr(policy, "name", type(policy).__name__)),
             fg_loc=own.f_g,
@@ -484,9 +475,9 @@ def solve_chain(
             _tau0_lam=own.tau_lam,
             # the incoming belief (the final solve's ``fg_ref``) + the intron-factory λ arm, so an ablation
             # replay reproduces the shipped f_g exactly BEFORE ablating. ⛔ The final solve's row
-            # factor is ``intron_prior`` PLUS the delivered certified-flux rows (`msg.lam_rows`) —
-            # a replay passing the bare ``intron_prior`` is unfaithful whenever the stream is live,
-            # so both are published and a faithful replay sums them.
+            # factor is ``intron_prior`` PLUS the delivered rows (`msg.lam_rows`) — a replay passing the
+            # bare ``intron_prior`` is unfaithful whenever the policy delivers anything, so both are
+            # published and a faithful replay sums them.
             fg_init=_fg_init,
             fpos_init=_fp_init,
             fneg_init=_fn_init,
@@ -511,9 +502,9 @@ def _pass(seq, nbr, prepared, *, backward: bool) -> list:
     """ONE directional pass — phase 1 of the two-phase solve: for each node in ``seq``, in chain order,
     the node RECEIVES from its neighbour of the other kind and holds the result.
 
-    ⭐ **The whole direction dependence is which neighbour array is read.** ``-1`` is a reference terminal:
+    The whole direction dependence is which neighbour array is read. ``-1`` is a reference terminal:
     the node holds ``NO_NEIGHBOUR`` (``None``) there, which is not a message — the chain's two end nodes
-    hold one message, every other node two. ⛔ **A real hop must arrive**: a kernel that returns ``None``
+    hold one message, every other node two. ⛔ A real hop must arrive: a kernel that returns ``None``
     for a node that HAS a neighbour is refused, because the solve could not then tell "nothing to say"
     (:data:`~.messages.SILENCE`) from "never spoken to". A policy that sends nothing at all returns no
     kernel, and every node then holds SILENCE from this side.
@@ -528,8 +519,8 @@ def _pass(seq, nbr, prepared, *, backward: bool) -> list:
         if held[i] is None:
             raise AssertionError(
                 f"the {'backward' if backward else 'forward'} pass left slot {i} with no message from "
-                f"its neighbour {s}: a hop that carries nothing must still ARRIVE as SILENCE (owner "
-                "ruling 2026-09-04) — return SILENCE, never None, from a real hop"
+                f"its neighbour {s}: a hop that carries nothing must still arrive as SILENCE — return "
+                "SILENCE, never None, from a real hop"
             )
     return held
 
@@ -544,10 +535,10 @@ def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> 
     """Project the chain belief's REGION slots back onto the REGION axis as a :class:`RegionDeconv` — what
     ``CalibrationResult`` / ``priors`` / ``derive`` consume.
 
-    ⚠ **A region's contained population carries no spliced term any more, and that is structural**: the
-    accumulator credits ``region_contained`` only when the fragment used no sj, so a contained
-    fragment is unspliced by construction. The predecessor added ``+ mass_spliced`` here; that quantity
-    is identically zero on the region axis now, and adding it would be adding a channel that cannot exist.
+    A region's contained population carries no spliced term, and that is structural: the accumulator
+    credits ``region_contained`` only when the fragment used no sj, so a contained fragment is unspliced
+    by construction. ⛔ Do not add a ``+ mass_spliced`` term here — the quantity is identically zero on
+    the region axis, so adding it would be adding a channel that cannot exist.
     """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -574,13 +565,12 @@ def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -
     """Project the chain belief's BOUNDARY slots onto the CONTIGUOUS-BOUNDARY axis — the crossing flux that
     ``priors`` and ``derive`` consume.
 
-    ⭐ **ONE per-boundary result, not a ``(left, right)`` pair of per-region ones.** The predecessor split
-    each boundary's flux onto its two flanking regions and ``priors`` then pooled the two halves straight
-    back together — so the split and the re-pool were a no-op, and that exact sum-then-halve pattern is
-    what hid a factor of 2 for months. Owner ruling, 2026-07-30:
-    ``CalibrationResult``'s per-region ``mass_*_left/right`` become per-boundary arrays.
+    ONE per-boundary result, not a ``(left, right)`` pair of per-region ones: splitting each boundary's
+    flux onto its two flanking regions only for ``priors`` to pool the halves back together is a no-op,
+    and that sum-then-halve pattern is what hides a factor of 2. ``CalibrationResult`` carries
+    per-boundary arrays for this reason.
 
-    The RNA mass is spliced-inclusive: an boundary's certified-RNA crossings (``boundary_spliced``) are RNA
+    The RNA mass is spliced-inclusive: a boundary's certified-RNA crossings (``boundary_spliced``) are RNA
     whatever the unspliced mixture resolves to, since gDNA cannot be spliced.
     """
     kind = np.asarray(chain.kind)
@@ -594,12 +584,12 @@ def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
     f_g[ei] = np.asarray(belief.f_g, dtype=np.float64)[boundary]
-    # ⭐ THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
+    # THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
     # ``(f_g, f_pos, f_neg)`` at EVERY slot — AXIOM 0's `T(slot)`, which is a function of the two
-    # `free_*` bits and never of the slot's kind — so an BOUNDARY slot has the same three-way composition a
-    # REGION slot does. ⛔ This projection used to emit ``np.zeros(n)`` for both RNA strands, so the
-    # crossing axis published a composition that summed to ``f_g`` alone. Nothing consumed it, which is
-    # why it survived; a per-transcript prior reading composition per object does.
+    # `free_*` bits and never of the slot's kind — so a BOUNDARY slot has the same three-way composition
+    # a REGION slot does. ⛔ Emitting zeros for both RNA strands here would publish a composition on the
+    # crossing axis that sums to ``f_g`` alone, which a per-transcript prior reading composition per
+    # object then believes.
     f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[boundary]
     f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[boundary]
     return RegionDeconv(

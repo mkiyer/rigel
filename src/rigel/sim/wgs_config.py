@@ -17,10 +17,10 @@ class SimulationParams:
     """Read simulation parameters."""
 
     n_rna_fragments: int = 1_000_000
-    #: ⭐ Fixed TOTAL budget. When set, `gdna.rates` decides only the SPLIT between RNA and gDNA
-    #: (`rigel.sim.orchestrator.resolve_depths`) rather than adding gDNA on top of a fixed RNA depth
-    #: — the only way to reach the high-gDNA end of the spectrum at a simulatable depth. `None`
-    #: keeps the legacy behaviour, so every pre-existing config is unaffected.
+    #: Fixed total fragment budget. When set, `gdna.rates` decides only the split between RNA and
+    #: gDNA (`rigel.sim.orchestrator.resolve_depths`) rather than adding gDNA on top of a fixed RNA
+    #: depth — the only way to reach the high-gDNA end of the spectrum at a simulatable depth.
+    #: `None` keeps the additive form, where the RNA depth is fixed and gDNA is added to it.
     n_total_fragments: int | None = None
     sim_seed: int = 42
     frag_mean: float = 250.0
@@ -50,12 +50,12 @@ class GDNASimConfig:
 
     rates: list[float] = field(default_factory=lambda: [0.0])
     rate_labels: list[str] | None = None
-    #: ⭐ The references genomic DNA is drawn from — an EXPLICIT input, never inferred from the
+    #: The references genomic DNA is drawn from — an explicit input, never inferred from the
     #: annotation. Every reference in the FASTA is genomic or RNA-only; naming the genomic ones
     #: classifies both, since the complement is exactly the RNA-only set. ``None`` is not a default
-    #: for "guess": a config that asks for gDNA without stating this is rejected.
-    #: ⚠ At least TWO real genomic references are wanted, so the gDNA deposit path is exercised over
-    #: a non-trivial reference-id space; see `tests/test_sim_genomic_refs.py`.
+    #: for "guess": a config that asks for gDNA without stating this is rejected. At least two real
+    #: genomic references are wanted, so the gDNA deposit path is exercised over a non-trivial
+    #: reference-id space; see `tests/test_sim_genomic_refs.py`.
     genomic_refs: list[str] | None = None
     frag_mean: float = 350.0
     frag_std: float = 100.0
@@ -66,62 +66,52 @@ class GDNASimConfig:
     #: This is the *per-condition* value the simulator reads; the suite sweep axis is below.
     strand_overdispersion: float = 0.0
     #: Suite sweep axis over gDNA strand overdispersion (one condition per value). ``None`` ⇒ a
-    #: single condition at ``strand_overdispersion`` (backward-compatible: no name change).
+    #: single condition at ``strand_overdispersion``, whose condition name carries no extra field.
     strand_overdispersions: list[float] | None = None
     strand_overdispersion_labels: list[str] | None = None
 
 
 @dataclass
 class NRNAConfig:
-    """Nascent RNA sweep configuration.
+    """Nascent RNA sweep configuration: which mode sets the entity levels, and its sweep values.
 
-    THREE sweep modes are supported, and ⭐ ``sparse`` is the one the benchmark panels use:
+    Three modes are supported, and ``mode`` selects exactly one; a field belonging to another mode
+    is refused rather than ignored, so a config cannot silently run a scenario it does not name.
 
-    - ⭐⭐ ``sparse`` (via ``abundance_ranges`` + ``on_fraction``): nascent RNA is
-      ABSENT from most gene spans and present in a minority (owner, 2026-08-22).
-      Each nascent ENTITY is switched on with probability ``on_fraction`` and, if
-      on, given an ABSOLUTE molecular abundance drawn LOG-UNIFORMLY from a
-      ``(lo, hi)`` range — INDEPENDENT of the mature level, so ``nascent >
-      mature`` is a real case the tool must survive. The fragment share is
-      EMERGENT rather than requested: it is priceable in advance with
-      ``whole_genome.expected_rna_weights`` and the orchestrator records the
-      realised molar ratio per condition. ⛔ ``on_fraction`` and the range TOGETHER
-      set the nascent burden, so neither is readable on its own.
-    - ``additive_ratio`` (via ``ratios``): each entry adds nascent RNA at a
-      fixed ratio of mature RNA, ``nrna_abundance = mrna_abundance * ratio``.
-    - ``fragment_share`` (via ``shares``): each entry states the nascent share
-      of RNA **FRAGMENTS** in the uncaptured library, and the simulator SOLVES for
-      the common molecular scale that produces it. ⭐ Why it exists at all is a
-      factor of four: a nascent ENTITY spans a whole gene (mean 40,667 bp on the
-      ladder's index) while a mature transcript is spliced (mean 1,708 bp), so a
-      molecular ratio of 0.25 puts **86 %** of RNA fragments in nascent RNA, not
-      25 % (measured 2026-08-19). The molecular ratio that gives a 20 % fragment
-      share is **0.0100** — which is also the biologically sensible pre-mRNA:mRNA
-      molar ratio. ⚠ The scale is solved on UNCAPTURED effective lengths, i.e. it
-      fixes the LIBRARY's molecular composition; the realised fragment share then
-      differs under capture, which is the physics (capture acts after the
-      molecules exist).
+    - ``sparse`` (via ``abundance_ranges`` + ``on_fraction``): nascent RNA is absent from most gene
+      spans and present in a minority. Each nascent entity is switched on with probability
+      ``on_fraction`` and, if on, given an absolute molecular abundance drawn log-uniformly from a
+      ``(lo, hi)`` range, independent of the mature level, so ``nascent > mature`` is a case that
+      occurs. The fragment share is emergent rather than requested: it is priceable in advance with
+      ``whole_genome.expected_rna_weights`` and the orchestrator records the realised molar ratio
+      per condition. ``on_fraction`` and the range together set the nascent burden, so neither is
+      readable on its own.
+    - ``additive_ratio`` (via ``ratios``): each entry adds nascent RNA at a fixed ratio of mature
+      RNA, ``nrna_abundance = mrna_abundance * ratio``.
+    - ``fragment_share`` (via ``shares``): each entry states the nascent share of RNA *fragments*
+      in the uncaptured library, and the simulator solves for the common molecular scale that
+      produces it. It exists because the two quantities are far apart: a nascent entity spans a
+      whole gene while a mature transcript is spliced, so even a small molecular ratio puts most
+      RNA fragments in nascent RNA. The scale is solved on uncaptured effective lengths, so it
+      fixes the library's molecular composition and the realised fragment share then differs under
+      capture, which is the physics — capture acts after the molecules exist.
 
-    ⛔⛔ **BOTH RATIO MODES PUT NASCENT RNA ON EVERY EXPRESSED MULTI-EXON SPAN AT ONE
-    LEVEL, AND THAT IS WHY THE PANELS LEFT THEM** (the owner's NASCENT SCOPE ruling,
-    2026-08-22). Nascent mass tracks mature abundance there and can never exceed it,
-    and no intron is ever exactly nascent-free — so a tool developed against them is
-    designed AROUND nascent RNA rather than robust TO it. ⚠ They are not dead: the
-    fl-gap side panels still use ``fragment_share``, so the two nascent models coexist
-    across the panels on disk, and a config states which one it uses.
+    Both ratio modes put nascent RNA on every expressed multi-exon span at one level: nascent mass
+    tracks mature abundance and can never exceed it, and no intron is ever exactly nascent-free. A
+    tool developed only against them is designed around nascent RNA rather than robust to it, which
+    is what ``sparse`` exists to exercise.
 
-    When abundances come from a file that already contains explicit nRNA
-    data, the configured sweep is ignored and the file's nRNA values are
-    used as-is in a single nRNA condition.
+    When abundances come from a file that already contains explicit nRNA data, the configured sweep
+    is ignored and the file's nRNA values are used as-is in a single nRNA condition.
     """
 
     mode: str = "additive_ratio"
     ratios: list[float] = field(default_factory=lambda: [0.0])
-    #: per-condition (lo, hi) for the LOG-uniform ABSOLUTE nascent abundance, for ``mode="sparse"``
+    #: per-condition (lo, hi) for the log-uniform absolute nascent abundance, for ``mode="sparse"``
     abundance_ranges: list[tuple[float, float]] | None = None
-    #: nascent share of RNA FRAGMENTS in the uncaptured library, for ``mode="fragment_share"``
+    #: nascent share of RNA fragments in the uncaptured library, for ``mode="fragment_share"``
     shares: list[float] | None = None
-    #: labels the CONDITION whatever the quantity swept (ratios, shares or abundance ranges)
+    #: labels the condition whatever the quantity swept (ratios, shares or abundance ranges)
     ratio_labels: list[str] | None = None
     #: fraction of eligible gene spans that carry nascent RNA at all, for ``mode="sparse"``
     on_fraction: float = 1.0
@@ -134,17 +124,18 @@ class WholeGenomeSimConfig:
 
     genome: str = ""
     gtf: str = ""
-    #: ⭐ The rigel index the simulation's TRANSCRIPTOME comes from (owner, 2026-08-19). The simulator
-    #: takes the index's transcript list — annotated transcripts PLUS the synthetic nascent-RNA entities
-    #: `rigel index` creates (`index.create_nrna_transcripts`, TSS/TES clustered within
-    #: `NRNA_MERGE_TOLERANCE`) — so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an
-    #: index is built from ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
+    #: The rigel index the simulation's transcriptome comes from. The simulator takes the index's
+    #: transcript list — annotated transcripts plus the synthetic nascent-RNA entities `rigel index`
+    #: creates (`index.create_nrna_transcripts`, TSS/TES clustered within `NRNA_MERGE_TOLERANCE`) —
+    #: so what it simulates is exactly what `rigel quant` sees. ``None`` ⇒ an index is built from
+    #: ``genome`` + ``gtf`` into ``<outdir>/rigel_index`` on first use.
     index: str | None = None
-    #: ⭐ SHADOW transcripts (owner design, 2026-08-29): a supplemental GTF the SIMULATOR draws fragments
-    #: from but the INDEX never sees — unannotated transcription, simulated. Their ids must be unknown to
-    #: the index (a shadow that is annotated is not a shadow — refused); they take abundances from the
-    #: same abundance file, carry no nascent, and are tagged like any RNA fragment (``{t_id}:…``, origin
-    #: ``mrna``), so the oracle split and the certified truth see them as RNA the tool cannot know about.
+    #: Shadow transcripts: a supplemental GTF the simulator draws fragments from but the index never
+    #: sees — unannotated transcription, simulated. Their ids must be unknown to the index (a shadow
+    #: that is annotated is not a shadow, and is refused); they take abundances from the same
+    #: abundance file, carry no nascent, and are tagged like any RNA fragment (``{t_id}:…``, origin
+    #: ``mrna``), so the oracle split and the certified truth see them as RNA the tool cannot know
+    #: about.
     shadow_gtf: str | None = None
     outdir: str = "sim_output"
     transcript_filter: str = "all"  # "all", "basic", "mane", "ccds"

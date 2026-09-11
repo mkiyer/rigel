@@ -1,35 +1,25 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repository.
+Directions for a session working in this repository. It says what Rigel is, what the current release is
+about, where each kind of change goes, how to run the benchmarks and the suite, and which instrument
+answers which question. It is not a history: the changelog is git, rulings live in `docs/DESIGN.md`, open
+problems in `docs/ISSUES.md`, lessons in `docs/TRAPS.md`. A rule earns its place here by changing what the
+next session does.
 
 ## What Rigel is
 
-A Bayesian RNA-seq transcript quantifier that separates **RNA from genomic-DNA contamination**. A
-single-pass C++ BAM scanner tallies fragments, a **calibration** stage deconvolves the library into gDNA vs
-RNA, and a per-locus EM solver assigns RNA to transcripts. PyPI package `rigel-rnaseq`; the import and CLI
-are `rigel`.
+A Bayesian RNA-seq transcript quantifier that separates RNA from genomic-DNA contamination. A single-pass
+C++ BAM scanner tallies fragments, a **calibration** stage deconvolves the library into gDNA vs RNA, and a
+per-locus EM solver assigns RNA to transcripts. PyPI package `rigel-rnaseq`; the import and CLI are
+`rigel`. The version on disk is 0.7.1 (`pyproject.toml`); the target is **0.8.0, a calibration release**.
 
-⭐⭐⭐ **The release target is 0.8.0 and CALIBRATION is the focus.** The SCOPE section below is the frame
-for every change in this phase. ⭐ Read it with `DESIGN.md` §0b's **NASCENT SCOPE RULING** (2026-08-22):
-nascent RNA is sparse in real data and is modeled for ROBUSTNESS, so a number measured at the panel's
-nascent share (20.2 % capture-OFF and 2.6 % capture-ON) is a stress reading and never a design driver.
+## Axiom 0 — RNA is RNA
 
-⭐⭐ **THIS FILE IS DIRECTIONS, NOT A HISTORY.** It was torn down from 732 lines on 2026-08-22 because the
-accumulated rules had started to inhibit design rather than protect it. ⛔ Keep it that way: a rule earns
-its place by changing what the next session DOES, its evidence lives in the doc that owns it, and nothing
-here is a changelog. Do not add a rule the owner did not ask for.
-
-## ⛔⛔⛔ AXIOM 0 — RNA IS RNA. READ THIS BEFORE ANYTHING ELSE
-
-**There are THREE populations and there is no fourth: `gDNA`, `RNA+`, `RNA−`.**
-
-⛔ **"Mature" and "nascent" are NOT populations, NOT species, and NOT a degree of freedom.** RNA inside an
-intron is RNA that has not spliced *at that position*. The only distinction that exists is whether a
-fragment **is spliced** — certified RNA, gDNA cannot splice, needs no deconvolution — or **is not**, which
-is the entire deconvolution problem.
-
-⭐ **The set is a function of TWO BITS, which is what makes this structural rather than something to
-remember:**
+There are three populations and no fourth: `gDNA`, `RNA+`, `RNA−`. "Mature" and "nascent" are not
+populations and not a degree of freedom: RNA inside an intron is RNA that has not spliced at that
+position. The only distinction is whether a fragment **is spliced** (certified RNA, needing no
+deconvolution) or **is not** (the whole deconvolution problem). The population set at a slot is a function
+of two bits, which is what makes this structural:
 
 ```
 T(slot) = {gDNA}                                  # always — gDNA is genomically continuous
@@ -37,333 +27,198 @@ T(slot) = {gDNA}                                  # always — gDNA is genomical
         ∪ {RNA− if statics.free_neg[slot]}
 ```
 
-so `|T| ∈ {1,2,3}`, always. **No expression in this codebase may produce a fourth population.**
+so `|T| ∈ {1,2,3}`. The tell that you have violated this: a population set with more than three members,
+or the words "mature", "nascent" or "a third component" in a solver or composition question. Re-ask it as
+"what is this channel's OPPORTUNITY for RNA at this object?" — the answer is a geometry, derivable from
+the index. The words survive only as simulator inputs (`nrna_abundance`, the toy harness's `--nrna`).
+How much weight a nascent concern carries is the nascent scope ruling's question (`docs/DESIGN.md` §0b):
+nascent RNA is sparse in real data and is modelled for robustness, so a number measured at the panel's
+nascent share is a stress reading, never a design driver.
 
-⛔ **The tell that you have just violated this:** you have written a population set with more than three
-members, or the words "mature"/"nascent"/"subspecies" while describing a *solver*, *composition* or
-*population* question, or you have concluded that something needs "a third component". Stop, and re-ask the
-question as **"what is this channel's OPPORTUNITY for RNA at this object?"** — the answer is a geometry, it
-is derivable from the index, and it dissolves the objection every time.
+## The 0.8.0 scope
 
-⚠ The words survive as **simulator inputs and never as model concepts**: the simulator's
-`nrna_abundance` knob and the toy harness's `--nrna` arm, which exist to put RNA inside introns so the
-solver can be tested on it. ⭐ How much WEIGHT a nascent concern carries is the NASCENT SCOPE RULING's
-question, not this axiom's — see the frame above.
+The focus is CALIBRATION, and the metric is the calibration result scored against oracle calibration
+(`calibration_vs_oracle.py`, `solvability_audit.py`, `prior_vs_oracle.py`), never the end-to-end
+transcript number, which stays a thermometer (`docs/SUCCESS.md`). Three strata are in scope — unstranded ×
+capture-OFF, stranded × capture-OFF, stranded × capture-ON — and **unstranded × capture-ON is DEFERRED**:
+still reported on every benchmark, never a development target until the other three are optimised. It is
+also where most of the error is (the gDNA fraction cancels from the strand mean, so an unstranded AMBIG
+slot has no channel), so the debug loop must take the worst IN-SCOPE scenario, never the deferred one.
 
-## ⛔⛔⛔ THE 0.8.0 SCOPE — READ THIS BEFORE CHOOSING WHAT TO WORK ON
+The fragment-length COMPOSITION channel is retired until after 0.8.0 and may not be proposed; it does not
+exist in `src/`. Three other things called "length" are unaffected: layer 2's `fl` / `effective_length` /
+`capture_eff_length` (the opportunity model), `length_likelihood` in `second_pass.py` (per-fragment
+assignment), and the fl PMFs priced by `em_fl_ceiling.py`. The ladder gives gDNA and RNA EQUAL fragment
+lengths on purpose: the EM already reads the fl distribution, so a gap would let it split origins on length
+alone and mask calibration bugs. Scenarios are cached (`panel.py cache`) so calibration re-runs in seconds.
+The full ruling is `docs/DESIGN.md` §0b; the ranked next steps are `docs/ROADMAP.md`.
 
-Owner ruling, 2026-08-14. The version on disk is **0.7.1** (`pyproject.toml`); the target is **0.8.0**.
-This is the frame every doc, every experiment and every ranked list hangs off.
+## The docs
 
-⭐⭐⭐ **THE FOCUS IS CALIBRATION, AND THE METRIC IS THE CALIBRATION RESULT SCORED AGAINST ORACLE
-CALIBRATION — not the end-to-end transcript number.** The transcript number stays a thermometer
-(`SUCCESS.md` says why); a change is judged by `solvability_audit.py` and `prior_vs_oracle.py`.
-
-**THE FOUR STRATA — THREE ARE THE TARGET AND ONE IS NOT:**
-
-| stratum | 0.8.0 |
-|---|---|
-| unstranded × capture-OFF | ⭐ **IN SCOPE** |
-| stranded × capture-OFF | ⭐ **IN SCOPE** |
-| stranded × capture-ON | ⭐ **IN SCOPE** |
-| unstranded × capture-ON | ⛔ **DEFERRED** |
-
-⛔⛔ **DEFERRED IS NOT DROPPED, AND THAT DISTINCTION IS THE WHOLE RULING.** unstranded × capture-ON
-**remains in every benchmark and every measurement, and must keep being reported**. It is simply not a
-development target until the other three are fully optimised. If it improves as a side effect of other
-work, that is a free win.
-
-⚠ **The deferred stratum is also where the error is** — 64.5 % of transcript error and 90 % of
-gene-level error on the rebuilt ladder — because the tool emits a near-zero gDNA fraction there
-regardless of truth, which looks acceptable at low gDNA by coincidence. ⛔ So the debug loop points there
-every time: take the worst **IN-SCOPE** scenario instead. The algebra behind the blindness is that the
-gDNA fraction cancels from the strand mean, so an unstranded AMBIG slot has no channel at all.
-
-⛔⛔ **THE LENGTH CHANNEL IS RETIRED UNTIL AFTER 0.8.0 — DO NOT PROPOSE IT.** The fragment-length
-likelihood **as a CALIBRATION composition channel** may not be listed or ranked. ⚠ It does not exist in
-`src/`: it was A/B'd once and purged the same day, so this is a scope ruling and not a deletion.
-⭐ **Three other things called "length" are NOT affected**: layer 2's `fl` / `effective_length` /
-`capture_eff_length` (the OPPORTUNITY model, which calibration and the EM both need), `length_likelihood`
-in `src/rigel/second_pass.py` (per-fragment assignment, same word, different thing), and the fl PMFs
-priced by `length_ceiling.py`.
-
-⭐⭐ **THE LADDER GIVES gDNA AND RNA EQUAL FRAGMENT LENGTHS BECAUSE THE EM ALREADY READS THE FL
-DISTRIBUTION.** A large length gap lets the EM split the origins on LENGTH ALONE, bypassing calibration
-and masking its bugs; equal lengths FORCE calibration to be exercised, leaving it strand, density and the
-message layer. The fl-gap SIDE panel is what exerts the length mechanism deliberately.
-
-⭐ **SCENARIOS ARE CACHED, and that is a scope requirement**: calibration must re-run in seconds off a
-cached scan, so `panel.py cache` / `build_scan_cache.py` come before any experiment. ⭐ **The ranked list
-of what to do next is `ROADMAP.md`** — this section says what counts, not what is next.
-
-## ⭐ The docs — read them in this order
-
-Seven permanent docs. They do not overlap, and none of them is a changelog — the changelog is git.
+Nine permanent docs, none of them a changelog.
 
 | doc | what it is |
 |---|---|
-| ⭐⭐ **`docs/SUCCESS.md`** | **START HERE.** How performance is measured: **Stage A** (the accumulator — faithful, unbiased, sufficient?) and **Stage B** (calibration against an oracle). ⭐ 0.8.0's metric is Stage B's |
-| ⭐⭐ **`docs/ROADMAP.md`** | The SHORT ranked view: the 0.8.0 frame, a one-line-per-claim state summary, and the ordered next steps. ⛔ **No measurements and no history live here — a claim names the instrument that re-derives it** |
-| ⭐⭐ **`docs/ISSUES.md`** | **The issue log** (2026-08-31): every open problem/question/decision as a NAMED entry (`ISSUES: <kebab-name>`, never a number) with priority and substance, plus the append-only **CLOSED / REFUSED** record that keeps each refusal's stamped measurement so it is not rebuilt. ⛔ The changelog is git — neither file records what was done |
-| ⭐ **`docs/TRAPS.md`** | Mistakes already made. Lessons, not measurements — cite a rule by its NAME |
-| **`docs/EQUATIONS.md`** | The derivations the code depends on |
-| **`docs/DESIGN.md`** | What is built and the rulings behind it — settled, do not re-litigate. ⭐⭐ **§0 is the binding VOCABULARY** (REGION, BOUNDARY, step, structurally pure-gDNA object) and **§0b carries the 0.8.0 SCOPE and the NASCENT SCOPE RULING** |
-| **`docs/TESTING.md`** | The panels, how to build them, the simulator's gates, and what the suite can and cannot judge. ⭐⭐ **§0b is the TOY HARNESS** |
+| `docs/SUCCESS.md` | **Start here.** How performance is measured: Stage A (the accumulator) and Stage B (calibration against an oracle), with the instruments in run order |
+| `docs/ROADMAP.md` | The short ranked view: the frame, one line per state claim naming its instrument, the ordered next steps. No numbers, no history |
+| `docs/ISSUES.md` | The issue log: every open problem as a named entry (`ISSUES: kebab-name`) with priority and instrument, plus the append-only CLOSED / REFUSED record that keeps each refusal's killing number |
+| `docs/TRAPS.md` | Mistakes already made, as rules that change what the next session does. Cite by name: `TRAPS: kebab-name` |
+| `docs/EQUATIONS.md` | The derivations the code depends on, each named from the module that implements it |
+| `docs/DESIGN.md` | What is built and the rulings behind it — settled, not re-litigated. §0 is the binding vocabulary; §0b the 0.8.0 scope and the nascent scope ruling |
+| `docs/TESTING.md` | A manual: how to build each panel and reference, how to run each gate, what the suite can and cannot judge. §0a is the test chromosome, §0b the toy harness |
+| `docs/MANUAL.md`, `docs/PUBLISHING.md` | The user's manual and the release procedure |
 
-Reference rather than design: `docs/MANUAL.md`, `docs/PUBLISHING.md`.
+**The move rule.** When a finding settles, MOVE it to its one home (an open problem or refusal to
+`ISSUES.md`, a lesson to `TRAPS.md` as a named rule, a ruling to `DESIGN.md`, a derivation to
+`EQUATIONS.md`) and delete it where it was, in the same edit. Never copy: two homes diverge.
 
-⛔ **THE MOVE RULE, which governs every doc and `docs/dev/` alike.** When a finding settles, MOVE it to its
-one home — an open problem or a refusal to `ISSUES.md`, a lesson to `TRAPS.md` as a NAMED rule, a ruling to
-`DESIGN.md`, a derivation to `EQUATIONS.md` — and delete it from where it was, in the same edit. ⛔ **Move,
-never copy**: copying is what creates two homes that then diverge. ⚠ Both halves of this have been paid
-for — `ROADMAP.md` reached 787 lines under "never delete, only stamp", and two dev docs reached 1,181 lines
-and were being read as THE STATE.
+**`docs/dev/` is the sandbox** — working notes, half-finished arguments, handoffs. Nothing there is
+authoritative and nothing may cite into it (`tests/test_docs_boundary.py`). **The source does not cite
+the docs**: a docstring may cite a test or the executable specification
+(`tests/native/_accumulator_reference.py`), never a doc.
 
-⭐⭐ **`docs/dev/` IS THE SANDBOX AND IT IS ENCOURAGED** — working notes, a half-finished argument, a
-handoff. ⛔ Nothing there is authoritative and nothing may cite into it: not the source, not a test, not a
-permanent doc. It is expected to be provisional and occasionally wrong.
+## Where does a change go? — the calibration layering
 
-⛔ **THE SOURCE DOES NOT CITE THE DOCS.** Docs rot — 73 % of the citations once in the source pointed at
-deleted documents. A docstring may cite a TEST or the executable specification
-(`tests/native/_accumulator_reference.py`, which wins over any document about the accumulator), never a doc.
-
-## ⭐⭐⭐ WHERE DOES A CHANGE GO? — the calibration layering
-
-**THE ONE RULE: an import may point DOWN a layer or SIDEWAYS within one, never UP.** A module reaching for
-something one layer up is telling you the thing belongs lower — a TYPE almost always does.
-`rigel/calibration/_layers.py` is authoritative and `tests/calibration/test_layering.py` enforces it.
+An import may point DOWN a layer or SIDEWAYS within one, never UP. A module reaching for something a
+layer up is telling you the thing belongs lower. `rigel/calibration/_layers.py` is authoritative,
+`tests/calibration/test_layering.py` enforces it, and `python scripts/design/module_census.py` re-derives
+the graph from the AST.
 
 | if the change is about… | it goes in |
 |---|---|
 | what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `sj_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
-| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_deconv` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable REFERENCE) |
+| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable reference) |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
 
-⭐ **Run `python scripts/design/module_census.py` rather than trusting this table** — it re-derives the
-graph from the AST, flags any upward import, and flags docstrings naming a sibling with no import. ⚠ A layer
-is not a claim that its modules are the right SIZE; layer 4 being five modules for one concept is open.
+## The message layer
 
-## ⭐⭐⭐ THE MESSAGE LAYER — the shipped design, in one place
-
-⭐⭐⭐ **THE TRANSFER POLICY SHIPS (`CalibrationConfig.message_policy = "transfer"`, the default since
-2026-09-09; `message_propagation = True` since 2026-08-18).** The message layer's development is
-FINISHED and merged: the owner's completion contract (`DESIGN.md` §0c.0e — every case handled, nothing
-nullified, forward-backward with the recipient deciding, every node solved from two honest messages) is
-fulfilled, and `DESIGN.md` §6b.4–§6b.14 carry every ruling with its measurement. ⛔ Accepted errors and
-owner decisions are recorded where they were made and are not re-litigated.
-
-⭐⭐⭐ **WHAT MESSAGE PROPAGATION IS FOR, AND THE BAR IT IS JUDGED BY (owner, 2026-08-27).** Messages
-exist for the slots whose own solve has no composition channel — **unstranded data and AMBIG slots**,
-where the strand likelihood is flat and the local answer is a default rather than a measurement.
-⛔ **WE DO NOT EXPECT TO BEAT `SilentPolicy`.** On strand-specific data a sighted exon's own solve is
-excellent and a message can mostly only disturb it. The goal is: **perform well on UNSTRANDED data
-while doing minimal harm relative to SILENT on strand-specific data.** ⛔ The two halves are judged
-against DIFFERENT bars and are never pooled — `design/policy_benchmark.py` prints them apart. ⭐ Where
-it stands is `ROADMAP.md`'s state section, never this file (2026-09-10: the landscape prior now solves a
-gDNA-free library nearly alone, so the zero rows sit at a few hundred fragments under BOTH policies and
-the "beats silence" count is read on the contaminated rows).
-
-⭐⭐ **TWO POLICIES, selected by one config value** (an unknown name RAISES), both on the TWO-PHASE
-backbone (`DESIGN.md` §6b.11–§6b.12): `prepare` (every node's OWN CLAIM) → `propagate(backward)`
-returning `receive(source, destination)`, which the backbone runs as a forward pass then a backward
-pass, every node ending with one message from each neighbour it has (`SILENCE` is a message,
-`NO_NEIGHBOUR` is not) → `solve(from_left, from_right)`, which hands ψ two row channels and nothing
-else (`PsiMessage.lam_rows`, `cube_rows`).
+`CalibrationConfig.message_policy = "transfer"` ships (the default since 2026-09-09, `message_propagation
+= True`). Two policies, selected by one config value (an unknown name raises), both on the two-phase
+backbone (`docs/DESIGN.md` §6b.11–§6b.12): `prepare` (every node's own claim) → a forward pass and a
+backward pass of `receive(source, destination)`, so every node ends with one message from each
+neighbour it has → `solve(from_left, from_right)`, which hands ψ two row channels and nothing else.
 
 | policy | |
 |---|---|
-| `silent` | ⭐ **THE MEASURED FLOOR** (`messages/silent.py`) — frozen. The same policy `message_propagation = False` installs |
-| `transfer` | ⭐⭐⭐ **THE SHIPPED DEFAULT** (`messages/transfer.py`; the pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims` (every node's own claim: an intron's factory profile, a live exon's or boundary's strand profile), `_splice_faces` (the intron|exon face: forward both ways, the splice-in map with the certified flux as its cap, the splice-out map), `_edge_level` (the edge's one-sided level), `_terminus_rules` (the outside map and THE LEVEL RULE into the inside), `_alternative_splice_site` (both flanks, priced per pair), `_gdna_lane` (the level lane on every face without a composition rule, lower-only, empties forwarding), `_rna_lanes` (one lane per strand: sources from own claims and the certified flux at junctions — at an empty piece too — delivered on the cube at AMBIG nodes and as a ceiling at single-strand nodes). Every hop pays its pair's counting plus the disagreement beyond it, the witness being the column split's asymmetry where the strand channel is live (`_LevelLane`) |
+| `silent` | the measured floor (`messages/silent.py`); the same policy `message_propagation = False` installs |
+| `transfer` | the shipped default (`messages/transfer.py`; pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims`, `_splice_faces`, `_edge_level`, `_terminus_rules`, `_alternative_splice_site`, `_gdna_lane`, `_rna_lanes`. Every hop pays its pair's counting plus the disagreement beyond it |
 
-⭐ **The certified flux is a MESSAGE** (owner ruling 2026-08-25): spliced fragments are MEASURED at
-boundaries, never solved, strictly ONE HOP — a flux enters a map or a level at the adjacent exon, never
-a lane of its own (`DESIGN.md` §6b.13). ⚠ The retired relay's zero-gDNA leads are the landscape prior's
-to win (`ISSUES: gdna-landscape-trains-on-false-positives`), a recorded, accepted price of the flip
-visible in two goldens. ⚠ Two earlier policy campaigns were torn down with their numbers
-(`ISSUES: the-message-policy-campaign`, 2026-08-27; the relay's records in `DESIGN.md` §6b.2–§6b.3) —
-read them before re-proposing a mechanism, so a refuted experiment is not repeated.
+Messages exist for the slots whose own solve has no composition channel — unstranded data and AMBIG
+slots. **We do not expect to beat `silent`**: on strand-specific data a sighted exon's own solve is
+excellent. The goal is to win on unstranded data while doing minimal harm on stranded data, and the two
+halves are judged against different bars and never pooled (`policy_benchmark.py` prints them apart). The
+certified flux is a message: spliced fragments are measured at boundaries, never solved, strictly one hop
+(`docs/DESIGN.md` §6b.13). Two earlier policy campaigns were torn down with their numbers (`ISSUES:
+the-message-policy-campaign`) — read them before re-proposing a mechanism.
 
-## ⭐⭐⭐ RUNNING THE BENCHMARKS
+## Running the benchmarks
 
 Two substrates. Develop on the test chromosome; decide on the ladder.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
-python scripts/design/preflight.py                          # ⭐ FIRST: can this session run at all?
+python scripts/design/preflight.py                          # first: can this session run at all?
 
-# THE DEVELOPMENT LOOP — the test chromosome, seconds for the whole sweep
-python scripts/design/policy_benchmark.py --panel test
-
-# THE SHIPPING JUDGEMENT — the 16-condition ladder, minutes
-python scripts/design/policy_benchmark.py --panel ladder
+python scripts/design/policy_benchmark.py --panel test      # the development loop: 30 conditions, seconds
+python scripts/design/policy_benchmark.py --panel ladder    # the shipping judgement: 16 conditions, minutes
 python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
 ```
 
-⭐⭐ **THE TEST CHROMOSOME SWEEPS 30 CONDITIONS** — gDNA `g00 g05 g25 g50 g98` × strand
-`0.50 / 0.70 / 0.99` × capture `off / on`. Two more requirements are carried by the SUBSTRATE the
-owner authors: about HALF the transcripts probed (the rest with no probe) and SPARSE nascent RNA on
-up to about half of them — so no condition is uniform in either. `docs/TESTING.md` §0a.
+The test chromosome is one hand-edited YAML, `scripts/sim/test_reference/test_chr.yaml`; its GTFs,
+abundances, probe panels and FASTA are rendered from it by `build_test_reference.py`, a suite gate refuses
+a drifted render, and after editing it everything derived must be rebuilt (`docs/TESTING.md` §0a has the
+recipe; `panel.py status` names the next stage). Read the two halves separately and never pool them:
+unstranded rows are where a policy must win, stranded rows where it must do minimal harm. A toy and the
+panel have inverted a ranking before (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): confirm on the
+ladder.
 
-⭐⭐ **THE TEST CHROMOSOME IS ONE YAML FILE AND SEVEN BLOCKS** (owner rulings 2026-08-28 / 2026-09-02 / 2026-09-03 / 2026-09-05 / 2026-09-07 / 2026-09-08).
-`scripts/sim/test_reference/test_chr.yaml` — the `rigel sim` scenario schema plus `probed` and
-`shadow_genes` — is the ONE hand-edited file; the GTFs, abundances, three capture panels and the FASTA
-are RENDERED from it by `build_test_reference.py` (a suite gate refuses a drifted render). It carries the
-ANCHORED TWIN BLOCK (5 types × 5 abundance blocks: `clean` · `nasc` · `cap` · `capnasc` · `silent` — the
-message layer's own controls), the MONO BLOCK (single-exon, edge-only: `mono` · `capmono` · the two
-silent controls), the ISOFORM BLOCK (host + one second isoform, grown ONE structure at a time — `altstart`
-and `altss` present, `nest` queued (`ISSUES: message-layer-open-cases`), every multi-isoform
-structure REPLICATED across A ≫ B, A ≪ B, A ≈ B), the WALLED BLOCK (four transcript groups whose exon
-pieces have NO licensed face — `chain` · `tssalt` · `tandem` · `altlast` — the scan's stress test, designed
-from the ladder's walled-exon census), the TERMINUS-CLUSTER BLOCK (`cluster` · `capcluster`: ten transcript
-ends 126–147 bp into a shared last exon, mirrored from MIR99AHG on the ladder — the EMPTY exon pieces
-the level lane crosses, which no earlier block makes), the BOTH-STRANDED BLOCK (`asin` · `asinrev` · `span` ·
-`conv`: two genes per locus on opposite strands, the host and its antisense, mirrored from the ladder's
-overlapping loci — the AMBIG nodes' substrate, `DESIGN.md` §6b.13), the sj+terminus BLOCK (`sjterm` ·
-`capsjterm`: a transcript starting at an internal exon's edge and one ending at one, mirrored from RUNX1 and
-LARGE1 — one boundary carrying a junction and a terminus of the same strand, the message plan's case D), and 8
-SHADOW transcripts the index never sees: 205 genes at a 1,030 k-fragment budget per condition. ⭐ Every gene has an explicit strand and the chromosome keeps EQUAL + / −
-representation (a sign error is invisible on one strand); both-stranded loci are a later step.
-⛔ After editing the YAML, everything derived MUST be rebuilt or the benchmark scores a stale
-annotation — `docs/TESTING.md` §0a has the full recipe and `panel.py status` names the next stage.
-⚠ κ is fitted from spliced reads, so the reference needs at least one multi-exon transcript with real
-depth before a number means anything.
+## Cite a rule by its name
 
-⛔ **READ THE TWO HALVES SEPARATELY AND NEVER POOL THEM** — unstranded rows are where a policy must
-WIN, stranded rows are where it must do minimal HARM against silence. ⚠ A toy and the panel have
-inverted a ranking before (`TRAPS: a-toy-and-a-panel-can-disagree-in-rank`): confirm on the ladder.
-
-⭐ The other instruments — the oracle-scored metric, the dissections, the thermometer — are indexed in
-the table near the end of this file, grouped by the question each one answers.
-
-⭐ **The vocabulary rename is in flight.** Landed: `graft` → SPLICE IN, the operator sense of the old
-peel token → SPLICE OUT, the deconvolution verb → `deconvolve`, `mass_pin` → `mass_rescale`,
-`HeadPolicy` → `RelayPolicy` (since retired), `lend` → `may_share_composition`, `s2t` → `hop_logvar`. ⛔ **Still to do and
-DEFERRED for a measured reason: `arm` has THREE senses** — an experiment arm, a component arm (the sense
-the owner ruled becomes `component`), and `__ARM_NEON` in the C++ scanner — across 1,358 sites. It needs
-its own `rename_census.py --sense` pass, never a tail-end sweep. ⛔ Run `rename_census.py --sense <token>`
-before renaming anything and `rename_identity.py --check` after each stage.
-
-## ⛔⛔ CITE A RULE BY ITS NAME. NUMBERED LABELS ARE BANNED
-
-Cite a trap as `TRAPS: off-grid-message-mode`, never as `A16`. The name IS the identifier, so a citation
-says what it means without a lookup and stays one greppable string with one home. ⛔ The old numbers were
-not merely opaque, they were AMBIGUOUS — `G1` meant "no magic numbers" AND "a structurally pure-gDNA
-object" across 201 sites. `tests/test_no_jargon_labels.py` enforces this and carries the history; its
-allowlist is scoped, never blanket.
+Cite a trap as `TRAPS: off-grid-message-mode`, an issue as `ISSUES: two-sided-exon-row`, never by a
+number. `tests/test_no_jargon_labels.py` enforces it: the old numbered labels were ambiguous (`G1` meant
+both a process rule and a structurally pure-gDNA object).
 
 ## Working rules
 
-- ⭐⭐⭐ **DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → ONLY THEN `src/`** (owner, 2026-08-27). No idea
-  enters the production source code before it has been derived on paper, designed, planned, prototyped
-  outside `src/`, and A/B'd against the policies that already exist. ⛔ The campaign that was torn down
-  on 2026-08-27 failed by inverting this — mechanisms landed in `src/` first and were justified
-  afterwards, which produced a stack nobody could attribute. ⛔ **One mechanism at a time**: a change
-  that cannot be A/B'd alone cannot be judged alone.
+- **DERIVE → DESIGN → PLAN → PROTOTYPE → A/B → only then `src/`.** No idea enters the production source
+  before it has been derived on paper, prototyped outside `src/`, and A/B'd against the policies that
+  already exist. One mechanism at a time: a change that cannot be A/B'd alone cannot be judged alone.
 - **No magic numbers.** Stop and discuss before adding any constant, heuristic or tunable. Every divisor
   must be derived from the deposit rule and unit-tested against brute-force enumeration.
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
   The second half is not optional; it has found holes in already-green gates repeatedly.
-- ⭐⭐ **THE DEBUG LOOP IS THE DEFAULT METHOD**: run the panel → take the worst **IN-SCOPE** scenario
-  (never the deferred stratum, which is otherwise worst every time) → dissect it to the highest-error
-  objects → find the mechanism → fix → re-run the panel. It produced the 39 % win.
-- ⭐ **A ceiling is sometimes the right instrument** (`calibration_truth_ab.py --ceiling`) and has
-  re-ranked the project twice, but it prices something that may be unreachable, so it is not the default
-  (owner, 2026-08-05). ⛔ Check which RULER a ceiling left installed: every arm patches `assemble_priors`
-  while `pipeline.py` builds `effective_lengths_em` BEFORE calling it, so the effective-length shrinkage
-  has never been inside any ceiling number.
-- **One thing varied per experiment**, and a baseline re-recorded from the current tree in the same
-  session.
-- **Score against TRUTH, not against the previous run.** The simulator writes per-fragment ground truth
-  into the oracle BAM's read names.
-- **No legacy, no backwards compatibility, no speculative code.** Converge and delete. Code kept "for
-  comparison with the old version" is a defect. ⛔ No version suffixes in file names — it is
-  `accumulator.py`, never `accumulator_v5.py`.
-- **No Greek letters in identifiers** (fine in maths write-ups).
-- ⛔ **Real data is a TEST input, NEVER a DESIGN input.** The cfRNA on disk is one far end of the RNA-seq
-  spectrum, not a sample of it. Sweep the plausible space, report the worst case, and bring the owner the
-  domain call.
-- **Profile on real data, never a small synthetic suite** — a toy ranks hotspots backwards. ⚠ For the
-  0.8.0 performance work the target is HIGH-DEPTH real RNA-seq rather than cfRNA, which is too sparse to
-  optimise against (owner, 2026-08-17).
+- **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
+  to the highest-error objects (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → fix →
+  re-run the panel.
+- **A ceiling is sometimes the right instrument** (`calibration_truth_ab.py --ceiling`) but prices
+  something that may be unreachable, so it is not the default. Every ceiling arm patches
+  `assemble_priors`, while `pipeline.py` builds `effective_lengths_em` before calling it, so the
+  effective-length shrinkage has never been inside any ceiling number.
+- **One thing varied per experiment**, a baseline re-recorded from the current tree in the same session,
+  and **score against truth** (the oracle BAM's read names), never against the previous run.
+- **No legacy, no backwards compatibility, no speculative code.** Converge and delete. No version
+  suffixes in file names. No Greek letters in identifiers (fine in maths write-ups).
+- **Real data is a test input, never a design input.** Sweep the plausible space, report the worst case.
+  Profile on high-depth real RNA-seq, never a small synthetic suite and not cfRNA (`docs/TESTING.md` §7).
+- **Renames**: run `rename_census.py --sense <token>` before renaming anything and `rename_identity.py
+  --check` after each stage. `arm` still carries three senses (an experiment arm, a component arm, and
+  `__ARM_NEON` in the scanner) and needs its own `--sense` pass, never a tail-end sweep.
 - **The owner drives commits.** Do not commit unless asked.
 
 ## Build, test, lint
 
-> **Every build, test and lint command runs inside the activated `rigel` conda environment** — it holds
-> htslib and the compilers, and the C++ build finds htslib via `$CONDA_PREFIX`.
+Every build, test and lint command runs inside the activated `rigel` conda environment — it holds htslib
+and the compilers, and the C++ build finds htslib via `$CONDA_PREFIX`.
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the repo root leaves sys.path
+python -m pytest tests/ -q                     # never bare `pytest` — the repo root leaves sys.path
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
-ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
+ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-⭐ **THE STANDING BASELINE: 0 failed / 3,609 passed / 0 skipped / 2 xfail, 3,611 collected**
-(re-derived 2026-09-10, after the landscape prior's training population and the E-step on its
-location-free kernels landed and the superseded measured-prior plan retired). Account it from
-**3,595 collected / 3,593 passed / 2 xfail** — the merge-day count — by **+15 collected**: **+4** the
-`scripts/design/landscape_training_census.py` instrument (imports, says-what-it-is-for, jargon,
-docs-boundary), **+2** the `tests/calibration/test_landscape_training_population.py` file (jargon,
-docs-boundary), **+10** its gates, **−1** for `docs/dev/PLAN_measured_prior.md` (jargon only) and **+1**
-for `docs/dev/CLEANUP_SESSION_PROMPT.md` (jargon only; the next session's kickoff, delete it when used). The 2 xfails: the toy harness's intron-independence gate
-(`ISSUES: two-sided-exon-row`), the antisense t2 prior-assembly casualty. ⛔ **RE-DERIVE, NEVER ADJUST** —
-the table below gives the per-file deltas, and a bracket-matched `--collect-only` confirms the attribution.
+**The standing baseline: 0 failed / 3,477 passed / 0 skipped / 2 xfail, 3,479 collected** (re-derived
+2026-09-11 after the source cleanup, which retired `calibration/strand_deconv.py` at −3). The 2 xfails are executable records of proven defects whose fixes are elsewhere
+(`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
+error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
+widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
+line.
 
-⛔ **ANY failure at all is a regression** — a stronger and
-cheaper rule than counting the expected ones. ⚠ A commit that measures the suite updates this line, or the
-next session reads a green run as a regression.
-
-⛔ **RE-DERIVE A COUNT, NEVER ADJUST ONE** (`TRAPS: re-record-the-baseline`). Adding or retiring a file
-moves the total, because several gates are PARAMETRISED over the files on disk. Account for the delta from
-this table, then confirm it with `pytest --collect-only -q | grep <stem>` and EXACT bracket matching:
+**Re-derive a count, never adjust one** (`TRAPS: re-record-the-baseline`). Several gates are parametrised
+over the files on disk, so adding or retiring a file moves the total; account for it from this table and
+confirm with `pytest --collect-only -q | grep <stem>`:
 
 | adding one… | moves collected by | which cases |
 |---|---|---|
 | `src/rigel/calibration/` module | **+3** | jargon, docs-boundary, and layering *if declared in `_layers.py`* |
-| `tests/calibration/` file | **+2** | jargon, docs-boundary (never +3 — `test_scripts_index` does not parametrise it) |
+| `tests/calibration/` file | **+2** | jargon, docs-boundary |
 | top-level `tests/` file | **+3** | jargon, docs-boundary, scripts-index |
 | `scripts/design/` (or `sim/`, `profiling/`) file | **+4** | imports, says-what-it-is-for, jargon, docs-boundary |
 | `docs/dev/` file | **+1** | jargon only |
 | top-level `docs/` .md (an owner decision — the permanent-set gate pins the list) | **+2** | jargon, docs-boundary |
 
-⭐ **A content-only sweep must move the collected total by ZERO, and that is the check** — edits to
-comments, docstrings and prose add no cases, so a moved total after one means a file was added or removed.
-
-⛔ **DERIVE THE FAILURE SET, NEVER EYEBALL THE TAIL** (`TRAPS: read-the-whole-failure-list`) — pytest
-prints the last screen, and 21 reported "golden failures" once hid two real ones::
+A content-only sweep moves the collected total by zero, and that is the check. Derive the failure set,
+never eyeball the tail (`TRAPS: read-the-whole-failure-list`):
 
     python -m pytest tests/ -q 2>&1 | grep '^FAILED' | sed 's/::.*//' | sort | uniq -c
 
-⛔ **A GOLDEN UPDATE IS WHERE A REGRESSION GETS LAUNDERED INTO "INTENDED".** Read the diff and record its
-magnitude BEFORE `--update-golden`, and check the truth-scored instruments (panel, thermometer) first.
-
-⛔ **RUN THE INSTRUMENTS, NOT ONLY THE SUITE, after a `src/` DELETION, a RENAME, or a SHIPPED-DEFAULT
-FLIP** — `preflight.py --full` does it in one command. A green suite has hidden five dead instruments twice
-(`TRAPS: a-green-suite-hid-five-dead-instruments`), because the tests install what the shipped default
-does not.
-
-⭐⭐ **THE 2 xfails ARE EXECUTABLE RECORDS OF PROVEN DEFECTS** whose fixes are elsewhere (the message
-layer's two-sided exon row; the prior assembler's nascent handling) — "fix the test" is a category error,
-because the test is right and the code is wrong. ⛔ An xfail is closed by REPAIRING the thing or by
-asserting the invariant STRUCTURALLY, never by widening a bound.
-
+A golden update is where a regression gets laundered into "intended": read the diff and record its
+magnitude before `--update-golden`, and check the truth-scored instruments first. After a `src/`
+deletion, a rename, or a shipped-default flip, run the instruments and not only the suite —
+`preflight.py --full` does it in one command (`TRAPS: a-green-suite-hid-five-dead-instruments`).
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
 ## Tooling under `scripts/`
 
-This table indexes `scripts/design/` plus four `sim/` rows and nothing else — ⛔ **an absence is NOT a
-deletion.** The eight unindexed `design/` files are named in `tests/test_scripts_index.py`'s
-`UNDOCUMENTED_DEBT` (an entry is a decision owed, and the list may only shrink); `scripts/profiling/` is
-covered by the same gate and described in `scripts/README.md`. ⭐ **Each row carries only the QUESTION its
-instrument answers** — verdicts and long cautions live in the instrument's own docstring, which a suite gate
-requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run order.
+This table indexes `scripts/design/` plus four `sim/` rows; `tests/test_scripts_index.py` holds it
+against the disk in both directions. `scripts/profiling/` is indexed in `scripts/README.md`. Each row carries only the
+question its instrument answers; `docs/SUCCESS.md` has the run order.
 
 | | |
 |---|---|
@@ -376,17 +231,12 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries; `--message-policy` prices a policy on this metric (the ship protocol's first item). ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 21/21 |
 | `design/object_composition.py` | ⭐⭐⭐ **MUST ψ's Beta REFERENCE BE ONE LIBRARY-WIDE NUMBER, OR CAN EACH OBJECT SUPPLY ITS OWN?** `m_i` per object from the two densities, scored as misplaced fragments against the shipped ½, per stratum. `--self-test` 25/25 |
 | `design/abundance_landscape_census.py` | ⭐⭐⭐ **WHAT DOES THE TOTAL-DENSITY FIELD LOOK LIKE, PER CONDITION?** Fits `calibration.abundance_landscape` on the cached wall-exact totals — every mode's basin mass, `rho_0`, the anchor gap in nats, the per-class enrichment. `--self-test` 13/13 |
-| `design/landscape_head_to_head.py` | ⭐⭐⭐ **HOW GOOD IS THE TOTAL-DENSITY LANDSCAPE, AND WHAT IS ITS BANDWIDTH REALLY?** The axis offset, a held-out predictive likelihood, and `--grid-sweep`. ⛔ `span_R` and the mode count are grid artefacts. `--self-test` 42/42 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 11/11 |
 | `design/total_abundance_audit.py` | ⭐⭐⭐ **IS THE MEASURED TOTAL A TRUE TOTAL?** Five arms against the origin partitions; read ⓔ START/END agreement first — the only field-free arm and the decisive test of the wall rule. `--self-test` 15/15 |
 | `design/landscape_training_census.py` | ⭐⭐⭐ **WHICH SLOTS TRAIN THE gDNA LANDSCAPE PRIOR, WITH WHAT EVIDENCE, AND HOW MUCH OF THAT TRAINING IS FALSE?** Spies each refit's `fit_landscape` inputs and each sweep's held messages; per refit, per node class and per evidence class (anchor · locked · own:strand · own:factory · delivered:composition · delivered:bound · none), the weight the estimator summed, the gDNA trained and its share on certified-zero slots, with both zero controls from the final answer; `--estimator` re-fits the last population at the certified values. ⛔ Reads `Σw`, never the trained mass, on a `g00` row. `--self-test` 17/17 |
 | `design/calibration_walk.py` | ⭐⭐⭐ **WHICH STAGE OF CALIBRATION INTRODUCES THE ERROR?** The solve as a ladder — init → strand → local → +messages → +refits → shipped — each rung scored per stratum against `calibration_oracle.py`, which it refuses to run without |
 | `design/structural_claims_audit.py` | ⭐⭐⭐ **IS EVERY SLOT THE STAGE-0 SUBSTRATE ADMITS TRULY WHAT IT CLAIMS? — the confusion matrix against certified slot truth, no solver.** Each structural class scored on ITS OWN claim in fragments; the solvable-exon claim is tested at the licensing FLANK, and nascent inside an ss intron is not a violation. ⛔ REFUSED without `slot_truth.npz`. `--self-test` 8/8 |
-| `design/pass0_claimed_ab.py` | ⭐⭐⭐ **HOW WELL DOES PASS-0 SOLVE THE SLOTS IT CLAIMS, PER POLICY?** silent/transfer at the stage-0 substrate's two claimed populations (`ss_intron_boundary`, `solvable_exon`), misplaced gDNA fragments vs certified truth, split into pure-gDNA and RNA-bearing slots and never pooled. ⛔ A whole-library number cannot judge pass-0 — that context is `calibration_vs_oracle.py`. ⚠ The `--dissect` survey died with `FanOutPolicy` (2026-08-24); its verdicts live in `DESIGN.md` §6b.2. `--self-test` 6/6 |
-| `design/message_pool_ab.py` | ⭐⭐ **WHAT DOES MESSAGE PROPAGATION DO, OFF vs ON, per condition and per pool?** Signed and misplaced-mass errors in fragments against origin-split truth, never collapsed, both arms in one process off one cached payload. `--self-test` 11/11 |
-| `design/benchmark_report.py` | ⭐⭐ **WHAT DOES THE WHOLE BENCHMARK LOOK LIKE ON ONE HTML PAGE? — every scenario in counts, pooled only on the last row.** ⛔ It scores nothing: it renders `message_pool_ab.py --out`. `--self-test` 10/10 |
 | `design/transport_dispersion.py` | ⭐⭐⭐ **WHERE DOES THE FLANK-TRANSPORT DISPERSION COME FROM? — the decomposition against certified truth, no solver.** Pair disagreement vs common-mode center, each charged with counting (flank AND truth side), the length curve, structure and capture. ⛔ Fit nothing on shallow pairs; the truth count's own trigamma must be subtracted before quoting any certified scatter |
-| `design/hop_currency.py` | ⭐⭐⭐ **WHICH CURRENCY DOES EACH HOP TYPE CARRY — A LEVEL OR A COMPOSITION?** Every adjacent pair keyed by `object class × {sj, term}`, the source's true value transported both ways and scored against a Monte-Carlo noise floor. `--self-test` 36/36 |
 | `design/solvability_audit.py` | ⭐⭐⭐ **WHICH OBJECTS ARE SOLVABLE, WHICH ARE SOLVED WRONG, AND WHICH ARE CONFIDENTLY WRONG? — where pass-0 and 0.8.0 are judged.** ⛔ Honest ignorance is excluded: `f_g ≈ ½` at zero precision with no own evidence is correct. `--suite` runs the panel |
 | `design/prior_vs_oracle.py` | ⭐⭐⭐ **IS `LocusPriors` — the thing the EM actually reads — RIGHT?** Five arms separate calibration's own error from the assembler's, reporting the count, the composition claim and the scale apart, per stratum. ⛔ Undrained on every arm |
 | `design/pass0_vs_oracle.py` | **HOW DOES PASS-0 COMPARE WITH THE ORIGIN-SPLIT PAYLOAD AND TWO LEVERED CEILINGS, per object and per class?** ⛔ Its mass-weighted headline is the wrong yardstick for pass-0 — honest ignorance reads as error there |
@@ -403,7 +253,6 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⚠ A THERMOMETER above 0.8.0's metric, never the target |
 | `design/mass_prior_ab.py` | ⭐⭐⭐ **CAN THE PRIOR BE A CONSERVED FRAGMENT COUNT RATHER THAN ONE MANUFACTURED FROM A DENSITY?** Subsamples by qname hash so the whole and all three origin partitions stay consistent. ⛔ The subsample must reproduce the defect first |
 | `design/transcript_truth.py` | ⭐⭐⭐ **WHAT IS THE TRUE PER-TRANSCRIPT COUNT, SPLIT BY SPLICEDNESS?** One pass over the oracle BAM, read names only. ⛔ Splicedness comes from spliced-transcript coordinates, NEVER the CIGAR, which misses every sj in the unsequenced inner gap |
-| `design/transcript_weights.py` | ⛔⛔ **WHAT IS THE SOFT-MIN PER-TRANSCRIPT WEIGHT WORTH? — BUILT, PRICED AND REFUSED; a RECORD, not a proposal** (`ISSUES: refused-soft-min-path-weighting`). ⚠ Standalone it runs only its own re-partition falsification; scoring belongs to `quant_accuracy.py` |
 | `rigel.sim.net_flow` (a MODULE, not a script) | ⭐⭐ **WHERE DID EACH MISASSIGNED FRAGMENT GO?** The DIRECTION of transcript error, per transcript, split into gDNA-sourced and RNA-isoform-sourced flow — the one question an accuracy table cannot answer. Gate: `tests/test_net_flow.py` |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME STAGE NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
@@ -417,10 +266,7 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from per-fragment truth by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run it on any new toy spec first |
 | `design/verify_capture.py` | ⭐⭐ **WHAT DOES HYBRID CAPTURE DO ON IDENTICAL GEOMETRY, probes ON vs OFF?** The gDNA landscape, the length selection and the sj depletion, each gated on the direction the knobs predict |
 | `design/zero_controls.py` | ⭐⭐⭐ **DOES THE TOOL HOLD AT ZERO RNA AND AT ZERO gDNA? — the owner requires both on every experiment.** The truth is a constant, so every deviation is a false positive. ⛔ Flags any EMPTY object: a degenerate zero arm tests nothing |
-| `design/certified_rna_audit.py` | ⭐⭐⭐ **IS THE CERTIFIED-RNA CHANNEL WIRED?** Audits whether the bank is populated, whether it has a divisor and whether a precision is emitted — any one failing looks identical. ⛔ Scores the MASS, never `f_g` |
-| `design/certified_q_census.py` | ⭐⭐ **CAN A CERTIFIED COUNT SPEAK ABOUT THE UNSPLICED SPLIT? — the answer is NO, and this measures why**, straight off the origin-split oracle with no solver. ⭐ Its two extreme rungs are the two zero controls |
 | `design/vertex_ceiling.py` | ⭐⭐ **WHAT IS KNOWING THE TRUTH AT THE PARAMETER-VERTEX OBJECTS WORTH ON THE REAL LADDER?** The pin is the node's own claim plus its ψ row (re-pointed to the two-phase solve, 2026-09-09); the population is the PARAMETER vertex (silent genes, nascent-free introns, the zero rows — never the realized vertex, which priced chance), so it needs `--oracle-cache`. A `noop` arm must be byte-identical, and `--arm ref_c=A,B` drives ψ's two Beta reference exponents. ⛔ It prices missing information, not headroom |
-| `design/length_ceiling.py` | ⭐ **WHAT IS A PERFECT LENGTH MODEL WORTH ON THE LADDER, ONE fl PMF AT A TIME?** ⚠ This is the OPPORTUNITY model's fl PMF, not the length-likelihood composition channel deferred past 0.8.0 |
 | `design/toy_harness.py` | ⭐⭐ **HOW DOES A MINI CHROMOSOME YOU DEFINE CALIBRATE — in 0.1–5 s, with every object's answer beside its truth?** (`docs/TESTING.md` §0b) The priors a toy cannot fit are harvested from a real cached condition; `--list` for the ladder |
 | **the substrate — are the panel and the index sound?** | |
 | `design/simulator_gates.py` | **DOES THE SIMULATOR PASS ITS OWN GATES, scored on per-fragment truth?** ⛔ Run it before trusting the panel |
@@ -430,20 +276,13 @@ requires. Groups are ordered by 0.8.0 priority; `docs/SUCCESS.md` has the run or
 | **Stage A — the accumulator** | |
 | `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
 | `design/em_fl_ceiling.py` | ⭐⭐⭐ **WHAT IS A PERFECT gDNA fl pmf WORTH END TO END, THROUGH THE EM? — the one fl question that stops at no earlier stage.** Every other fl instrument stops at `calibrate`, but `pipeline.py` also hands `gdna_pmf` to the fragment scorer, so a wrong length model is applied per fragment in the channel that separates origins. ⭐ Read `gdna_frac_est` against `gdna_frac_true` — the PRODUCT; ⛔ the transcript rows flip sign between the two fl-gap arms and are not the deliverable. Three gates: the injection counts its fires, `noop_fl` must be byte-identical, and `base_reseed` is the noise floor. ⛔⛔ Meaningless on an equal-length panel — run both sign arms AND the equal-length control |
-| `design/fl_anchor_gap.py` | **HOW DO THE ANCHOR AND BOTH LENGTH MODELS COMPARE WITH TRUTH?** `--drain` measures before and after the second pass |
 | `design/gdna_pool_census.py` | ⭐ **DOES EACH OF THE FOUR gDNA POOLS AGREE WITH ITS OWN OPPORTUNITY, AND WITH TRUTH?** |
-| `design/second_pass_accuracy.py` | **HOW ACCURATE IS THE SECOND PASS, PER FRAGMENT, against the oracle BAM's read names?** |
-| `design/observable_efficiency.py` | **WHAT FRACTION OF THE LENGTH INFORMATION DOES A STORAGE CHOICE KEEP?** |
-| `design/region_density_derivation.py` | **DOES THE RECIPROCAL-OPPORTUNITY THEOREM HOLD?** T0–T6, each perturbed |
 | **diagnostics** | |
-| `design/anchor_opportunity_census.py` | ⭐⭐ **IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.** The empty pure-gDNA population against what its own chain neighbours measure. ⚠ Its population is `g1_locked ∧ REGION`, not `struct_lock` |
-| `design/composition_evidence_census.py` | **HOW MUCH LIBRARY MASS REACHES THE SOLVER WITH NO COMPOSITION EVIDENCE?** `--inject-kappa 0.5` is its falsification handle |
-| `design/held_flux_census.py` | **HOW OFTEN DOES A HELD CANDIDATE HAVE ZERO FLUX EVIDENCE, AND BY WHAT CAUSE?** |
 | `design/prior_units_check.py` | **IS THE EM PRIOR IN FRAGMENT UNITS, OR STILL THE OLD INCIDENCE SUM?** |
-| `design/boundary_q_population.py` | ⭐⭐⭐ **IS THE PRIOR'S CROSSING→FRAGMENT CONVERSION POPULATION-BLIND?** Feeds a perfect `f_g` from the oracle so the `q` conversion is isolated, and scores it against the conserved truth. ⛔ Real but bounded: record the bound, build nothing |
 | **plumbing** | |
 | `design/native_parity_on_real_data.py` | **DOES NATIVE PARITY HOLD ON REAL cfRNA AT FULL SCALE?** |
-| `design/scan_profile.py` | **HOW MANY ns PER FRAGMENT, regressed over several BAMs?** ⚠ A `profiling/` file shares this basename and is a different instrument |
+| `design/accumulator_cost.py` | **HOW MANY ns PER FRAGMENT DOES THE ACCUMULATOR COST, regressed over several BAMs?** |
+
 
 ## CLI
 

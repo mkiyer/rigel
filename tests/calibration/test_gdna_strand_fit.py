@@ -42,7 +42,7 @@ from rigel.calibration.signature import (
     BIT_INTRON_NEG,
     BIT_INTRON_POS,
 )
-from rigel.calibration.strand_deconv import boundary_seeds
+from rigel.calibration.gdna_strand import boundary_seeds
 
 KAPPA = 0.01  # the RNA sense fraction on an R1-antisense library
 

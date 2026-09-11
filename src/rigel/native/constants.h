@@ -220,7 +220,7 @@ struct RawResolveResult {
     // mates that disagree OR to STRAND_AMBIGUOUS, which the qualification
     // rejects.  So all K sj of a fragment necessarily agree.
     //
-    // Two measured reasons for credit-one (2026-07-28):
+    // Two measured reasons for credit-one:
     //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
     //   (b) the K >= 2 stratum is a materially cleaner population (minor rate
     //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
@@ -353,7 +353,7 @@ inline MergeResult merge_sets(const std::vector<std::vector<int32_t>>& sets) {
 
 // Intrachromosomal chimera detection.
 //
-// ⭐⭐⭐ COMPATIBILITY IS CHECKED BEFORE A FRAGMENT IS CALLED A CHIMERA (owner, 2026-08-19).
+// Compatibility is checked before a fragment is called a chimera.
 // Transcript-set disjointness ALONE is not evidence of a rearrangement: a genomic molecule is
 // contiguous and routinely spans two transcripts that share nothing -- that is what the annotation
 // looks like there. Such fragments carry no junction anywhere in them, so there is nothing to infer a

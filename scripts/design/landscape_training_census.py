@@ -1,70 +1,29 @@
 #!/usr/bin/env python3
-"""WHICH SLOTS TRAIN THE gDNA LANDSCAPE PRIOR, WITH WHAT EVIDENCE, AND HOW MUCH OF THAT TRAINING IS
-FALSE? — the refit's training population censused per refit iteration, per node class and per
-evidence class, against certified slot truth. No mechanism runs; nothing is proposed.
+"""Which slots train the gDNA landscape prior, with what evidence, and how much of that training is
+false? `calibrate._fit_gdna_hyperprior` fits `landscape.DensityLandscape` on the previous sweep's
+solved belief, so the prior learns whatever that sweep believed and a false positive at pass one can
+be taught back to every blind slot at pass two (`ISSUES: gdna-landscape-trains-on-false-positives`).
+This instrument spies every sweep's ``_capture`` and held messages and every `fit_landscape` call's
+inputs, changing nothing, re-derives the training selector from the statics and refuses to score
+unless it reproduces the recorded inputs bit for bit, then censuses the population per refit, per
+node class (the region strata, exons split by reach as `policy_benchmark.py --by-class` splits
+them) and per evidence class — a slot's strongest evidence at the sweep it trained from: ``anchor``
+(zero count, trains at 0), ``locked`` (structurally pure gDNA), ``own:strand``, ``own:factory``,
+``delivered:composition``, ``delivered:bound``, ``none`` — against certified slot truth. Read ``Σw``
+(what the estimator sums; a class's say in the landscape), ``gDNA trained`` (``Σ f_g · M``), ``FP w``
+(the class's weight on certified-zero slots trained at one fragment or more; below one the kernel
+sits at the resolution wall like the anchor's) and ``Δdec`` (median offset from the certified centre).
+On a `g00` row every slot is certified zero, so read ``Σw`` there, never the trained mass; both zero
+controls are printed from the final answer. ``--estimator`` re-fits the last population at the
+certified values and reports the earth-mover distance in decades from the shipped landscape, which
+separates the training values' error from the estimator's own; it prices nothing downstream.
 
-⭐⭐⭐ **THE QUESTION.** `calibrate._fit_gdna_hyperprior` fits `landscape.DensityLandscape` on the
-previous sweep's solved belief (``f_g · mass`` per training region, weighted by
-`landscape._reliability`) and the refit loop re-solves with it, ``calib_refit_iters`` times. The
-prior therefore learns whatever the previous sweep believed, and a slot that had no evidence of
-its own believes the reference and the prior — so a false positive at pass one can be taught back
-to every blind slot at pass two (`ISSUES: gdna-landscape-trains-on-false-positives`). The owner's
-ruling (2026-09-06) is that nodes whose only evidence is a BOUND do not train the prior; it LANDED
-2026-09-10 as `RegionBelief.informed` (gate `tests/calibration/test_landscape_training_population.py`),
-so the `delivered:bound` and `none` classes below are now OUTSIDE the training population and the
-census shows them absent — run it at a commit before the landing to see what they trained at.
-This instrument says WHO trains the prior, with WHAT evidence, at WHAT value, with WHAT weight — and
-how much of that is false against the certified truth.
-
-**What it records, per refit iteration.** It spies three things and changes nothing:
-
-* every sweep's ``_capture`` (the belief that the NEXT fit trains on, ``tau_lam``, the intron
-  factory's λ-factor) and the two held messages per slot at that sweep's solve
-  (`_PreparedTransfer.solve`'s ``from_left`` / ``from_right``);
-* every `fit_landscape` call's inputs — the exact ``(count, mass, eff, var, anchor)`` the estimator
-  saw — and the landscape it returned.
-
-The training selector is RE-DERIVED here from the same statics and GATED bit for bit against the
-recorded inputs (a drifted re-derivation refuses to score), so the census is of the fit that ran.
-
-**The evidence classes** — each slot's STRONGEST evidence at the sweep whose belief it trained
-with, from the solver's own quantities and nothing invented:
-
-    anchor                 the zero-count structural anchor (no unspliced mass; trains at 0, w = 1)
-    locked                 structurally pure gDNA — neither RNA strand admissible
-                           (`region_geometry.g1_locked`): trains at its whole mass, certain
-    own:strand             the strand channel is live — `region_init.has_own_composition_evidence`
-                           on ``tau_lam`` less the factory arm (`density_factor_precision`)
-    own:factory            an ss intron's density-deconvolution factor is live (no strand)
-    delivered:composition  no own channel; a COMPOSITION row arrived from a neighbour (a strand
-                           profile through a face map, a splice-out row, a level-kept map)
-    delivered:bound        no own channel, no composition; only a LEVEL arrived (the gDNA lane's
-                           lower side, an RNA lane's ceiling, a cube row) — "a bound only"
-    none                   no own channel, nothing delivered: the belief is the reference and the
-                           prior alone — pure echo at every refit after the first
-
-**How to read the tables.** Per refit iteration: ``Σw`` is what the estimator actually sums (each
-region's Poisson kernel carries ``w``, not its mass), so ``Σw share`` is a class's say in the
-landscape; ``gDNA trained`` is ``Σ f_g · M`` (the mass the class asserts is gDNA); ``FP w`` is the
-share of the class's ``Σw`` on slots whose CERTIFIED gDNA is zero but which trained at ONE fragment or
-more (below one the kernel centres at the resolution wall like the anchor's: the estimator's own
-``max(count, 1)`` floor) — the false-positive training weight; ``centre`` is the median trained centre
-``log10(max(count,1)/eff)`` and ``Δdec`` its median offset from the certified centre on slots with
-true gDNA. ⛔ On a ``g00`` row EVERY slot is certified zero, so ``FP w`` there is simply the weight
-share that trains at a fragment or more — the whole thing is false, and the zero controls are where
-the entry's number comes from. ⚠ The training population is REGIONs only (boundaries are excluded by
-the owner's ruling of 2026-07-27), so the node classes are the three region strata, exons split by
-reach as `policy_benchmark.py --by-class` splits them.
-
-**`--estimator` — THE METHODOLOGY AUDIT (owner, 2026-09-09).** For the last fit, the same
-population re-fitted at the CERTIFIED values (``count = n_gdna``) with the weights as trained, and
-again at ``var = 0``: the earth-mover distance in decades between the shipped landscape and each
-tells apart the error the training VALUES put into the prior from what the estimator does with a
-true population. It prices nothing downstream — `calibration_walk.py`'s C→E rung does that.
+Usage::
 
     python scripts/design/landscape_training_census.py --panel test --conditions gdna_g00_ss_0.50_nrna_file_capture_off
     python scripts/design/landscape_training_census.py --panel ladder --conditions gdna_g00_ss_0.50_nrna_mid_capture_off --estimator
-    python scripts/design/landscape_training_census.py --panel ladder --g00
+    python scripts/design/landscape_training_census.py --panel ladder --g00 --by-node    # the zero controls, node class x evidence
+    python scripts/design/landscape_training_census.py --panel test --policy silent
     python scripts/design/landscape_training_census.py --self-test
 """
 
@@ -86,14 +45,7 @@ if str(REPO / "src") not in sys.path:
     sys.path.insert(0, str(REPO / "src"))
 
 
-def _sibling(name: str):
-    key = name[:-3]
-    if key not in sys.modules:
-        spec = importlib.util.spec_from_file_location(key, Path(__file__).resolve().parent / name)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[key] = module
-        spec.loader.exec_module(module)
-    return sys.modules[key]
+from _shared import sibling  # noqa: E402
 
 
 import importlib  # noqa: E402
@@ -117,7 +69,7 @@ from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-PB = _sibling("policy_benchmark.py")
+PB = sibling("policy_benchmark.py")
 PANELS = PB.PANELS
 POLICIES = PB.POLICIES
 
@@ -198,8 +150,8 @@ def training_selector(
 ):
     """The refit's training population, re-derived from the statics exactly as
     `calibrate._fit_gdna_hyperprior` selects it: expressed REGIONs that are single-strand or
-    structurally locked AND hold a composition (`RegionBelief.informed`, since 2026-09-10: a slot whose
-    only evidence is a bound, or which has none, does not train), plus the zero-count anchor (an
+    structurally locked AND hold a composition (`RegionBelief.informed`: a slot whose only evidence
+    is a bound, or which has none, does not train), plus the zero-count anchor (an
     intergenic or intronic region with opportunity and no unspliced mass). Returns ``(sel, anchor)``;
     the caller GATES it against the recorded fit."""
     isr = np.asarray(kind) == REGION
@@ -423,7 +375,7 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
 
 
 def zero_controls(result, slots: dict) -> dict:
-    """THE TWO ZERO CONTROLS INSIDE ONE CONDITION, from the shipped final answer (the same estimate
+    """The two zero controls inside one condition, from the shipped final answer (the same estimate
     `policy_benchmark.py` scores, so ``total`` reproduces its row): invented gDNA on the slots whose
     certified gDNA is zero, and invented RNA on the slots that are certified PURE gDNA — the silent
     genes and the RNA-free introns and intergenic regions — each in fragments over its own
@@ -460,7 +412,7 @@ def estimator_audit(res: dict) -> dict:
     """The last fit re-run at the certified values on the same population: EMD in decades between
     the shipped landscape and (a) the truth values under the weights as trained, (b) the truth values
     at ``var = 0`` (every slot trusted), (c) the truth values with the slots whose only evidence is
-    a bound or nothing removed — the owner's population — at the weights as trained."""
+    a bound or nothing removed, at the weights as trained."""
     last = res["fits"][-1]
     fit, sel = last["fit"], last["sel"]
     sel_idx = np.flatnonzero(sel)

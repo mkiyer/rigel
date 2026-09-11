@@ -40,7 +40,7 @@ def _beta_binom_regions(rng, n_regions, depth, overdispersion, mean):
 def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000):
     """Posterior median gDNA fraction of one region under a FLAT count prior (strand-only deconv).
 
-    Mirrors the strand module (``strand_deconv._deconv_per_region`` strand branch): a weak prior ×
+    Mirrors the strand module (the per-region strand branch): a weak prior ×
     the strand likelihood, isolating the strand likelihood's effect on the deconvolution.
     """
     grid = np.linspace(1e-6, 1.0 - 1e-6, n_grid)

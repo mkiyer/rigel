@@ -1,56 +1,65 @@
-"""rigel.calibration.fl — gDNA / RNA fragment-length distributions (PR 4c).
+"""The gDNA and RNA fragment-length distributions, and the two gDNA estimands.
 
-Produces the library-wide FL distributions the calibrator's **effective lengths**
-need (boundary ``fl_mean``, region ``E_f[max(0, L−ℓ)]``): the **gDNA FL** (from
-gDNA-dominated regions/boundaries) and the **RNA FL** (spliced fragments), each
-**smoothly empirical-Bayes-shrunk** toward the global FL.
+This module produces the library-wide length laws the calibrator's effective lengths and the EM's
+per-fragment scorer read, from the accumulator's five length pools. It is not a per-fragment length
+likelihood: that composition channel is deliberately outside calibration. Both laws drive per-region
+effective lengths in the sweep (``region_geometry.build_region_geometry``) — gDNA opportunities use
+the gDNA law, RNA opportunities the RNA law — and each is smoothly empirical-Bayes-shrunk toward the
+global length distribution, so a thin pool falls back to the anchor without a threshold.
 
-This is **not** a per-fragment FL likelihood — that channel is deliberately
-excluded from calibration. BOTH FLs drive per-region effective lengths in the sweep
-(``region_geometry.build_region_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
-unspliced + spliced) eff-lengths use the RNA FL.
+The five pools, as ``rigel.scan_payload`` orders them:
 
-⛔⛔ **NO POOL IS PURE, AND THIS MODULE USED TO ASSERT ONE WAS.** The claim that stood here — *"every pool
-is PURE BY CONSTRUCTION, and that purity is what removes the circularity"* — is false and was measured
-false: against an origin-split oracle the intronic pool runs **95 % nascent RNA** and the intergenic pool
-**53 % mature**, because "intergenic" is whatever the annotation leaves over and nascent RNA sits inside
-introns by definition (`TRAPS: purity-is-a-property-of-the-annotation`). The resulting bias is
-``RNA_share x (len_RNA - len_gDNA)``, which is why it went unseen: the panels give both components EQUAL
-fragment lengths on purpose, so the second factor is zero there and a 95 %-contaminated pool reads under a
-bp of error.
+* two CONTAINED gDNA pools, intergenic and intronic — gDNA wholly inside one region. Dominant off
+  capture.
+* two CROSSING gDNA pools, {intron, exon} and {intergenic, exon} flanks — gDNA across exactly one
+  boundary. Dominant under capture, because a fragment beside a probe reaches the exon boundary and
+  so stops being contained. Mature RNA never crosses an exon/intron boundary, so these are gDNA by
+  structure.
+* one RNA pool: an OBSERVED splice across an annotated sj. gDNA cannot splice. Implicit splices are
+  excluded by the accumulator, since a splice that was never sequenced is a product of the model
+  this pool is used to fit.
 
-⭐⭐ **WHAT REPLACES IT: a two-pool CONTRAST, which needs no pure pool and no template.** The two CONTAINED
-pools share one opportunity geometry — nascent RNA in an intron and unannotated transcription in
-intergenic space are genomically contiguous exactly as gDNA is — so de-tilted, each is the SAME two shapes
-at a DIFFERENT mixing weight, and the contaminant cancels::
+No pool is pure, and nothing here may assume one is. Against an origin-split oracle the intronic
+pool is dominated by RNA inside introns and the intergenic pool carries mature RNA too, because
+"intergenic" is whatever the annotation leaves over
+(`TRAPS: purity-is-a-property-of-the-annotation`). The resulting bias is
+``RNA_share x (len_RNA - len_gDNA)``, so it is invisible on any panel that gives the two components
+equal fragment lengths.
+
+What replaces purity is a two-pool CONTRAST, which needs no pure pool and no template. The two
+contained pools share one opportunity geometry — RNA inside an intron and unannotated transcription
+in intergenic space are genomically contiguous exactly as gDNA is — so after de-tilting each is the
+same two shapes at a different mixing weight, and the contaminant cancels::
 
     f_0 = a_0*g + (1-a_0)*r        f_1 = a_1*g + (1-a_1)*r
     =>  g = [ (1-a_1)*f_0 - (1-a_0)*f_1 ] / (a_0 - a_1)
 
-⭐ The divisor is the SEPARATION of the two purities, not a purity, so it does not blow up as a pool gets
-dirty; and with ``f_0 = f_1`` it returns them unchanged, so a pool pair with nothing to say changes
-nothing. The weights come from :mod:`rigel.calibration.gdna_density` — ``a_p = rho_g*E_p/n_p`` with
-``rho_g`` read off the low side of the per-object density, where a contaminant that only ADDS cannot
-reach. ⚠ Under hybrid capture the premise weakens — the probes reshape the RNA lengths, so the two
-contaminants stop resembling each other — and the contrast is applied anyway; measured against the
-four-pool sum it is a large WIN there too, but for a reason it does not model, so read
-:func:`_deconvolved_gdna_counts` before relying on it.
+The divisor is the SEPARATION of the two purities, not a purity, so it does not blow up as a pool
+gets dirty; and with ``f_0 == f_1`` it returns them unchanged, so a pool pair with nothing to say
+changes nothing. The weights come from :mod:`rigel.calibration.gdna_density`: ``a_p = rho_g*E_p/n_p``
+with ``rho_g`` read off the low side of the per-object density, where a contaminant that only ADDS
+cannot reach. Under hybrid capture the premise weakens, because the probes reshape the RNA lengths
+and the two contaminants stop resembling each other; the contrast is applied anyway, and
+:func:`_deconvolved_gdna_counts` states what that costs.
 
-* **gDNA** = **all FOUR** gDNA pools — intergenic contained, intronic contained, intron-exon crossing,
-  intergenic-exon crossing — each divided by **its own** opportunity and then combined
-  (:mod:`rigel.calibration.gdna_opportunity`). The contained pair dominates off capture; the crossing
-  pair dominates under it, because a fragment beside a probe *reaches* the exon boundary and stops being
-  contained. Fitting from the contained pair alone measures the short half of one population.
-  ⛔ **Pooling the four RAW is a different operation and it is wrong**: the contained opportunity falls
-  with length and the crossing opportunity rises, and one divisor over the sum read a gDNA mean of
-  **146.05** where the contained pool said **88.0**. Divide each, then combine.
-* **RNA** = the annotated-sj pool, splice OBSERVED. gDNA cannot be spliced.
-  ⚠ ``sj_implicit`` fragments are already excluded by the accumulator — a splice that was never
-  sequenced is a product of the very model this pool is used to fit.
+Never pool the four gDNA histograms raw. The contained opportunity falls with length and the
+crossing opportunity rises, so one divisor over the sum reads the gDNA mean far too long. Divide
+each pool by its own opportunity (:mod:`rigel.calibration.gdna_opportunity`), then combine.
+
+TWO gDNA ESTIMANDS, and routing them apart is the point:
+
+* ``gdna_pmf`` is the UNIFORM-FRAME law, what a gDNA fragment looks like before capture selects it.
+  This is the one the opportunity and prior mathematics assumes, and the only one geometry may read.
+* ``gdna_realized_pmf`` is the LIBRARY-CENSUS law, what a SEQUENCED gDNA fragment looks like,
+  capture selection included. This is the one the EM's per-fragment scorer conditions on.
+
+Off capture the two coincide exactly, and the realized field is never ``None``, so the scorer reads
+it unconditionally. Feeding the realized law to geometry is a large regression; one name over the
+two quantities is how that happens.
 
 The pool axis itself lives in :mod:`rigel.scan_payload`, with the schema, because it is the
-accumulator's own enum and a private copy here is how three files come to disagree about which row is
-which.
+accumulator's own enum and a private copy here is how three files come to disagree about which row
+is which.
 """
 
 from __future__ import annotations
@@ -92,24 +101,24 @@ __all__ = [
 #: gDNA contained in exactly one intergenic or intronic region. Dominant OFF capture.
 _GDNA_CONTAINED_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
 
-#: gDNA crossing exactly one boundary whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
+#: gDNA crossing exactly one boundary whose flanks are {intron, exon} or {intergenic, exon}. Dominant
 #: UNDER capture: a fragment beside a probe reaches the exon boundary, so it leaves the contained pools
-#: and arrives here. Mature RNA never crosses an exon<->intron boundary, so these are gDNA by construction.
+#: and arrives here. Mature RNA never crosses an exon/intron boundary, so these are gDNA by structure.
 _GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
 
-#: ⭐ All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.
+#: All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.
 _GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
 #: The pure RNA pool: an OBSERVED splice across an annotated sj.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
 
-#: Kept as a name because the report shows on-target gDNA separately; it is now also FITTED, via
-#: ``_GDNA_CROSSING_POOLS``.
+#: The crossing pair under the name the report uses when it shows on-target gDNA separately. The
+#: same two pools are fitted through ``_GDNA_CROSSING_POOLS``.
 _SPLASH_POOLS = _GDNA_CROSSING_POOLS
 
-#: Dirichlet pseudo-count for the smooth EB shrink toward the global FL. Not a
-#: cliff: ``pool_total ≫ prior_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
-#: → global. Revisit the default on real-data pool sizes (PR04c decision 5).
+#: Dirichlet pseudo-count for the smooth EB shrink toward the global length law. Not a cliff: a pool
+#: total far above it gives the empirical law, far below it the global anchor, and 0 the anchor
+#: exactly.
 POOL_EB_PRIOR_ESS: float = 1000.0
 
 
@@ -117,8 +126,8 @@ POOL_EB_PRIOR_ESS: float = 1000.0
 class GdnaContrast:
     """What the two-pool contrast did, or why it declined — QC, never an input to anything.
 
-    ⭐ ``rate_over_pooled`` is the number to read: how much contamination the density fit found. A value
-    near 1 says the pools were already clean, which is a measurement and not an inaction.
+    ``rate_over_pooled`` is the number to read: how much contamination the density fit found. A
+    value near 1 says the pools were already clean, which is a measurement and not an inaction.
     """
 
     applied: bool
@@ -155,17 +164,16 @@ class FLModels:
 
     Two views of each distribution are carried:
 
-    * ``*_pmf`` — the EB-smoothed pmf used for **scoring / calibration** (RNA and
-      gDNA are shrunk toward ``global_pmf``; see :func:`build_fl_models`).
-    * ``*_counts`` — the **raw, unsmoothed** histograms (aligned to
-      ``max_size + 1`` bins) the pmfs were built from. These are the honest
-      empirical distributions surfaced as QC (:meth:`rna_model` / :meth:`gdna_model`
-      / :meth:`global_model`); the EB smoothing is a <1% perturbation at real
-      library scale and stays internal to scoring.
+    * ``*_pmf`` — the EB-smoothed pmf used for scoring and calibration; RNA and gDNA are shrunk
+      toward ``global_pmf``, see :func:`build_fl_models`.
+    * ``*_counts`` — the raw, unsmoothed histograms, aligned to ``max_size + 1`` bins, that the pmfs
+      were built from. These are the honest empirical distributions surfaced as QC
+      (:meth:`rna_model` / :meth:`gdna_model` / :meth:`global_model`); the EB smoothing is a small
+      perturbation at real library scale and stays internal to scoring.
 
-    ``gdna_counts`` is the pure contained-pool histogram (:func:`gdna_fl_mass`) — intergenic + intronic,
-    so gDNA *plus* whatever nascent RNA sits in an intron, not a deconvolved pure-gDNA distribution.
-    ``rna_counts`` is the annotated-sj histogram (:func:`rna_fl_mass`).
+    ``gdna_counts`` is the four-pool gDNA histogram (:func:`gdna_fl_mass`), which is a mixture and
+    not a deconvolved pure-gDNA distribution. ``rna_counts`` is the annotated-sj histogram
+    (:func:`rna_fl_mass`).
     """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
@@ -178,23 +186,20 @@ class FLModels:
     n_rna: float
     n_gdna: float
     max_size: int
-    #: float64[N_FRAGMENT_POOLS, max_size + 1] — the five pure pools UNAGGREGATED, straight off the
-    #: payload. ``rna_counts`` and ``gdna_counts`` above are sums of subsets of these rows; the two
-    #: crossing pools (:func:`splash_fl_mass`, on-target gDNA) are in **neither** sum and appear
-    #: nowhere else. ⭐ They are carried here so the report can show each pool separately — that
-    #: function's docstring asks for exactly this ("makes that comparison an output instead of an
-    #: assumption") and nothing was doing it.
+    #: float64[N_FRAGMENT_POOLS, max_size + 1] — the five pools UNAGGREGATED, straight off the
+    #: payload. ``rna_counts`` and ``gdna_counts`` above are sums of subsets of these rows. They are
+    #: carried separately so the report can show each pool on its own, which is what makes the
+    #: off-target / on-target length comparison an output rather than an assumption.
     pool_counts: np.ndarray = None
     #: What the two-pool contrast did. ``None`` when it was never offered the per-region inputs (the
     #: second pass and most tests), which is a different state from having declined.
     gdna_contrast: "GdnaContrast | None" = None
-    #: ⭐⭐ THE SECOND ESTIMAND — the LIBRARY-CENSUS law: what a sequenced gDNA fragment looks like,
-    #: capture selection included. ``gdna_pmf`` above is the UNIFORM-FRAME law the opportunity/prior
-    #: mathematics assumes; this one is what the EM's per-fragment scorer conditions on. Off capture the
-    #: two coincide and this field EQUALS ``gdna_pmf`` exactly; it is never ``None``, so the scorer reads
-    #: it unconditionally. ⛔ Routing them was measured, not asserted: the realized law fed to GEOMETRY
-    #: cost +188,208 transcripts on one ladder row, while fed to the SCORER it helps — one name over two
-    #: quantities is how that regression happened.
+    #: The second estimand — the LIBRARY-CENSUS law: what a sequenced gDNA fragment looks like,
+    #: capture selection included. ``gdna_pmf`` above is the UNIFORM-FRAME law the opportunity and
+    #: prior mathematics assumes; this one is what the EM's per-fragment scorer conditions on. Off
+    #: capture the two coincide and this field equals ``gdna_pmf`` exactly; it is never ``None``, so
+    #: the scorer reads it unconditionally. Feeding this law to GEOMETRY is a large regression, and
+    #: one name over the two quantities is how that happens.
     gdna_realized_pmf: np.ndarray = None
     gdna_realized: "GdnaRealized | None" = None
 
@@ -230,10 +235,10 @@ class FLModels:
 def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
     """Sum the named rows of ``payload.pool_lengths`` into one float64 histogram over ``L``.
 
-    ⭐ Binned at ``L``, the molecule length — not at the covered length. Binning at covered length
-    collapses the gDNA histogram to a spike at twice the read length, so every long gDNA fragment scores
-    as RNA. The accumulator's ``L`` already includes the mate gap and
-    excludes region_bound introns, so it is the molecule length for both components under one rule.
+    Binned at ``L``, the molecule length, never at the covered length. Binning at covered length
+    collapses the gDNA histogram to a spike at twice the read length, so every long gDNA fragment
+    scores as RNA. The accumulator's ``L`` already includes the mate gap and excludes spliced-out
+    introns, so it is the molecule length for both components under one rule.
     """
     pool_lengths = payload.pool_lengths
     if pool_lengths is None:
@@ -242,12 +247,12 @@ def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
 
 
 def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The gDNA length histogram: **all four** pure gDNA pools, summed.
+    """The gDNA length histogram: all four structural gDNA pools, summed.
 
-    ⛔ **This sum is only meaningful paired with :meth:`GdnaOpportunity.combined_probability`.** The four
-    pools tilt in opposite directions, so the raw sum is biased long — that is the 146.05-against-88.0
-    defect. :func:`build_fl_models` sums the counts and divides by the summed opportunity, which is a
-    different operation; it never uses this histogram on its own.
+    This sum is only meaningful paired with :meth:`GdnaOpportunity.combined_probability`. The four
+    pools tilt in opposite directions, so the raw sum is biased long. :func:`build_fl_models` sums
+    the counts and divides by the summed opportunity, which is a different operation; it never uses
+    this histogram on its own.
     """
     return _pool_sum(payload, _GDNA_POOLS)
 
@@ -255,8 +260,8 @@ def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     """Only the two CONTAINED gDNA pools — the fallback when no annotation divisor is available.
 
-    ⚠ Correct to within ~0.5 % off capture and ~15 % short under it, because capture moves the long half
-    of the population into the crossing pools. Use the four-pool form whenever an index is at hand.
+    Accurate off capture, but short under it, because capture moves the long half of the population
+    into the crossing pools. Use the four-pool form whenever an index is at hand.
     """
     return _pool_sum(payload, _GDNA_CONTAINED_POOLS)
 
@@ -269,10 +274,11 @@ def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
     """The ON-TARGET gDNA length histogram — the two crossing pools, for QC.
 
-    ⚠ Never fold this into :func:`gdna_fl_mass`. Under capture the intergenic pool is *depleted, not
-    impure*, so composition stays clean while coverage does not, and on-target gDNA fragments run ~42 bp
-    shorter. A model fitted off-target is therefore mis-centred for exactly the fragments that leak —
-    and having this as a named pool makes that comparison an output instead of an assumption.
+    Never fold this into :func:`gdna_fl_mass`. Under capture the intergenic pool is depleted rather
+    than made impure, so its composition stays clean while its coverage does not, and on-target gDNA
+    fragments run markedly shorter. A model fitted off-target is therefore mis-centred for exactly
+    the fragments that leak, and having this as a named pool makes that comparison an output instead
+    of an assumption.
     """
     return _pool_sum(payload, _SPLASH_POOLS)
 
@@ -280,12 +286,12 @@ def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
 def _resolution_weight(signal_sq: float, noise_sq: float) -> float:
     """``S / (S + N)`` — how much of an observed split is signal rather than its own sampling noise.
 
-    ⭐⭐ **This is what replaces every "is it big enough?" threshold in this module.** A test of the form
-    ``|split| > standard error`` is a CLIFF: the estimator's behaviour changes discontinuously as data
-    accumulates, and where the cliff sits is a property of the sample rather than of the tool. This is
-    the same comparison made continuously — the Wiener/signal-to-noise weight, 0 when the split is pure
-    noise, 1 when the noise vanishes, ``½`` exactly where the old threshold sat, and monotone between.
-    ⭐ No constant is introduced: both arguments are variances the data supplies.
+    This is what replaces every "is it big enough?" threshold in this module. A test of the form
+    ``|split| > standard error`` is a cliff: the estimator's behaviour changes discontinuously as
+    data accumulates, and where the cliff sits is a property of the sample rather than of the tool.
+    This is the same comparison made continuously — the signal-to-noise weight, 0 when the split is
+    pure noise, 1 when the noise vanishes, 1/2 exactly where such a threshold would sit, and
+    monotone between. No constant is introduced: both arguments are variances the data supplies.
     """
     s = max(float(signal_sq), 0.0)
     n = max(float(noise_sq), 0.0)
@@ -299,11 +305,11 @@ def _resolution_weight(signal_sq: float, noise_sq: float) -> float:
 def _couple_estimands(g_uniform, mass_uniform: float, g_boundary, mass_boundary: float):
     """Couple the two gDNA length estimands so they CONVERGE when their split is not measurable.
 
-    ⛔⛔ **THE PROBLEM THIS SOLVES.** Capture is a spectrum, and at either end one of the two strata has
-    no data: at zero capture the boundary pools are nearly empty, and at very strong capture the
-    contained pools are. A hard "use the realized law / fall back to the uniform law" switch is then
-    both a cliff and a lie — the estimates do not merely become uncertain, they become the SAME
-    estimate, because nothing in the data distinguishes them any more.
+    The problem this solves: capture is a spectrum, and at either end one of the two strata has no
+    data — at zero capture the boundary pools are nearly empty, and at very strong capture the
+    contained pools are. A hard "use the realized law, else fall back to the uniform law" switch is
+    then both a cliff and a lie, because the estimates do not merely become uncertain, they become
+    the SAME estimate: nothing in the data distinguishes them any more.
 
     So the split is carried explicitly and weighted by how well it is resolved. With ``M`` the total
     gDNA mass and ``lam`` the resolution weight of ``Δ = g_boundary − g_uniform``::
@@ -312,10 +318,10 @@ def _couple_estimands(g_uniform, mass_uniform: float, g_boundary, mass_boundary:
         uniform  = g_uniform + (1 − lam)·(g_common − g_uniform)   shrinks toward consensus as lam → 0
         realized = g_common                                       the census, always the mixture
 
-    ⭐ At ``lam = 1`` this is exactly the uncoupled behaviour: ``uniform`` is the contained-derived law
-    and ``realized`` the mass-weighted census. ⭐ At ``lam = 0`` **both are ``g_common``** — identical
+    At ``lam = 1`` this is exactly the uncoupled behaviour: ``uniform`` is the contained-derived law
+    and ``realized`` the mass-weighted census. At ``lam = 0`` both are ``g_common`` — identical
     arrays, whichever stratum is the starved one, because ``g_common`` is precision-weighted and the
-    starved stratum contributes nothing to it. The noise term ``1/m_u + 1/m_b`` diverges when EITHER
+    starved stratum contributes nothing to it. The noise term ``1/m_u + 1/m_b`` diverges when either
     mass collapses, which is what makes the convergence automatic from both ends.
 
     Returns ``(uniform, realized, lam)``; the caller adds any capture-only correction to ``realized``,
@@ -347,51 +353,49 @@ def _deconvolved_gdna_counts(
 ) -> "tuple[np.ndarray | None, GdnaContrast]":
     """The two-pool contrast: the gDNA length histogram with the contaminant divided out.
 
-    Returns ``(counts_or_None, diagnostics)``. ⭐ **``None`` means DECLINED and the caller must fall back
-    to the four-pool sum** — declining is a real answer here, not a failure, and every decline is named in
-    the returned :class:`GdnaContrast` so a run that corrected nothing cannot be mistaken for one that
-    corrected everything.
+    Returns ``(counts_or_None, diagnostics)``. ``None`` means DECLINED and the caller must fall back
+    to the four-pool sum; declining is a real answer here, not a failure, and every decline is named
+    in the returned :class:`GdnaContrast`, so a run that corrected nothing cannot be mistaken for
+    one that corrected everything.
 
-    **The three declines, each derived rather than chosen:**
+    The three declines, each derived rather than chosen:
 
     * *no density* — the one-sided rate found no support, which is what a zero-gDNA library looks like.
       There is no gDNA length distribution to estimate and inventing one is the failure mode to avoid.
     * *purities not separated* — the contrast divides by ``a_0 - a_1``, so it needs the two pools to have
-      measurably different compositions. ⛔ The comparison is against that difference's OWN sampling
-      error, never a chosen floor: with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p``, the delta method
-      gives ``Var(a_0 - a_1) ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is common-mode and
-      cancels out of the difference — and the fit stands down when the separation does not exceed its own
-      standard error. Same shape as the strand channel's derived noise-floor deadband. ⭐ This is what
-      makes the estimator stand down by itself at a near-pure library, where nothing needs correcting.
+      measurably different compositions. The comparison is against that difference's own sampling
+      error, never a chosen floor: with ``a_p = rho*E_p/n_p`` and ``Var(n_p) ~ n_p``, the delta
+      method gives ``Var(a_0 - a_1) ~ a_0^2/n_0 + a_1^2/n_1`` — the shared ``rho`` term is
+      common-mode and cancels out of the difference — and the fit stands down when the separation
+      does not exceed its own standard error. This is what makes the estimator stand down by itself
+      at a near-pure library, where nothing needs correcting.
     * *degenerate* — a pool with no fragments at all.
 
-    ⭐⭐ **UNDER HYBRID CAPTURE THE CONTRAST DEGENERATES TO THE INTERGENIC POOL ALONE, AND THAT IS WHY IT
-    IS SAFE THERE.** The premise is that both pools' contaminants share a length distribution; off capture
-    they agree to a total variation of 0.06-0.14, under capture only 0.95-0.97. That would be alarming
-    except that under capture the intergenic pool is **depleted, not impure** (its measured gDNA purity
-    goes 0.48 -> 0.955 at ``g05``), so ``a_0 = rho*E_0/n_0`` exceeds 1 and CLIPS. Put ``a_0 = 1`` in the
-    formula above and it collapses exactly::
+    Under hybrid capture the contrast degenerates to the intergenic pool alone, and that is why it
+    is safe there. The premise is that both pools' contaminants share a length distribution, and
+    under capture that premise is false. It survives because under capture the intergenic pool is
+    depleted rather than made impure, so ``a_0 = rho*E_0/n_0`` exceeds 1 and CLIPS. Put ``a_0 = 1``
+    in the formula above and it collapses exactly::
 
         g = [(1-a_1) f_0 - 0] / (1 - a_1) = f_0
 
-    ⭐ **The intronic pool's coefficient becomes zero, so its contaminant never enters the answer** — which
-    is precisely the term the shared-``r`` premise was needed for. Verified: under capture the returned
-    histogram equals the de-tilted intergenic pool to **3e-17**, machine epsilon. ⚠ So the estimator does
-    not "get away with" a false premise; the clip removes the term that depended on it, and what is left is
-    a one-pool estimate that capture happens to make nearly pure. ⛔ **The safety therefore rests on
-    ``a_0`` clipping**, i.e. on the intergenic pool really being near-pure under capture; a probe panel
-    that put RNA back into intergenic space would silently break it, and nothing here would notice.
+    The intronic pool's coefficient becomes zero, so its contaminant never enters the answer, and
+    that is precisely the term the shared-contaminant premise was needed for; under capture the
+    returned histogram equals the de-tilted intergenic pool to machine epsilon. So the estimator
+    does not get away with a false premise — the clip removes the term that depended on it, and what
+    is left is a one-pool estimate that capture happens to make nearly pure. The safety therefore
+    rests on ``a_0`` clipping, i.e. on the intergenic pool really being near-pure under capture; a
+    probe panel that put RNA back into intergenic space would break it silently, and nothing here
+    would notice.
 
-    ⛔ **Two candidate detectors were built and BOTH refuted by measurement**, so do not re-propose them:
-    projecting onto the non-negative cone (it reproduces the contrast wherever the contrast is already
-    feasible, and degrades capture further where it is not), and testing the recovered components'
-    negative mass against its own Poisson noise floor (the floor scales with the violation, so the ratio
-    sits flat at 0.2-0.7 on and off capture and never separates).
+    Two candidate detectors for that failure were built and both refuted by measurement, so do not
+    re-propose them: projecting onto the non-negative cone, and testing the recovered components'
+    negative mass against its own Poisson noise floor.
     """
     types = np.asarray(region_types).ravel()
     lengths = np.asarray(region_lengths, dtype=np.float64).ravel()
     counts = np.asarray(payload.region_contained_count, dtype=np.float64)
-    # ⚠ genome-strand columns summed: gDNA is strand-symmetric and this estimator is about DENSITY, which
+    # genome-strand columns summed: gDNA is strand-symmetric and this estimator is about DENSITY, which
     # is why it also works on an unstranded library, where the strand axis carries nothing.
     counts = counts.sum(axis=1) if counts.ndim > 1 else counts
     n = min(types.size, lengths.size, counts.size)
@@ -422,10 +426,10 @@ def _deconvolved_gdna_counts(
 
     sep = a0 - a1
     se = float(np.sqrt(a0 * a0 / totals[0] + a1 * a1 / totals[1]))
-    # ⭐ NO THRESHOLD. The inversion is blended toward the pools' own mixture by how well the purity
+    # No threshold. The inversion is blended toward the pools' own mixture by how well the purity
     # separation is resolved against its own standard error, so a pair that says nothing changes
-    # nothing and a pair that says a little changes a little. `lam = 1` is the old accept branch and
-    # `lam = 0` the old decline, now joined continuously instead of switched between.
+    # nothing and a pair that says a little changes a little. `lam = 1` accepts the inversion whole
+    # and `lam = 0` declines it, joined continuously rather than switched between.
     lam_sep = _resolution_weight(sep * sep, se * se)
     if sep == 0.0:
         return None, GdnaContrast(
@@ -444,8 +448,8 @@ def _deconvolved_gdna_counts(
         f.append(_normalized(detilt_pool(raw[pool], prob)))
     mixture = _normalized(totals[0] * f[0] + totals[1] * f[1])
     g = ((1.0 - a1) * f[0] - (1.0 - a0) * f[1]) / sep
-    # ⚠ The negative excursions are sampling noise on a quantity that is a density; clipping is the
-    # cheapest projection back onto the cone and was measured equal-or-better than a least-squares one.
+    # The negative excursions are sampling noise on a quantity that is a density; clipping is the
+    # cheapest projection back onto the cone, and measures no worse than a least-squares one.
     g = np.clip(g, 0.0, None)
     s = g.sum()
     g = mixture + lam_sep * (_normalized(g) - mixture) if s > 0.0 else mixture
@@ -454,7 +458,7 @@ def _deconvolved_gdna_counts(
         return None, GdnaContrast(
             False, "empty after the contrast", fit.rate, fit.rate_over_pooled, a0, a1, sep
         )
-    # ⭐ Rescaled to the pool mass the four-pool path would have carried, because the EB shrinkage reads
+    # Rescaled to the pool mass the four-pool path would have carried, because the EB shrinkage reads
     # the TOTAL as "how much evidence stands behind this shape".
     return _normalized(g) * float(raw[list(_GDNA_POOLS)].sum()), GdnaContrast(
         True, "", fit.rate, fit.rate_over_pooled, a0, a1, sep
@@ -490,8 +494,8 @@ def _realized_gdna_counts(
     Returns ``(realized_counts, uniform_counts, diagnostics)`` — BOTH estimands, because they are
     coupled: :func:`_couple_estimands` shrinks them toward one another by how well their split is
     resolved, so the uniform law returned here may differ from the ``uniform_counts`` handed in when the
-    contained stratum is thin. ⭐ That coupling is what removes the last cliff: there is no data at which
-    behaviour switches, only a weight that fades.
+    contained stratum is thin. That coupling is what removes the last cliff: there is no data at
+    which behaviour switches, only a weight that fades.
 
     Declining is still a real answer at literally zero gDNA — there is no census to take — and the
     caller then keeps the uniform-frame law for both estimands.
@@ -615,11 +619,11 @@ def _realized_gdna_counts(
             obs_e = exon_eps.get(int(e_idx), [(mean_eps, 0.0)])
             eps_e = float(np.mean([e for e, _ in obs_e]))
             n_e = float(sum(w for _, w in obs_e))
-            # ⭐ THE EXCESS HAS ITS OWN RESOLUTION, and it is NOT `lam`. `lam` asks whether the two
-            # strata's LAWS differ; this asks whether this exon's ENRICHMENT differs from 1 — a
-            # different question, and gating one on the other suppressed a real correction. Same
-            # helper, its own signal and its own noise: a ratio estimated from `n_e` gDNA crossings
-            # has relative variance ~ 1/n_e, so `Var(eps) ~ eps^2/n_e`.
+            # The excess has its OWN resolution weight, and it is not `lam`: `lam` asks whether the
+            # two strata's LAWS differ, while this asks whether this exon's ENRICHMENT differs from
+            # 1, and gating one on the other suppresses a real correction. Same helper, its own
+            # signal and its own noise: a ratio estimated from `n_e` gDNA crossings has relative
+            # variance ~ 1/n_e, so `Var(eps) ~ eps^2/n_e`.
             w_e = _resolution_weight(
                 (eps_e - 1.0) ** 2, (eps_e * eps_e / n_e) if n_e > 0.0 else np.inf
             )
@@ -636,7 +640,7 @@ def _realized_gdna_counts(
     if m_C + m_B <= 0.0:
         return None, None, GdnaRealized(False, "no gDNA mass anywhere", 0.0, 0.0, a2, a3)
 
-    # ⭐⭐ COUPLE THE TWO ESTIMANDS. `lam` is how well the capture-induced split between the strata is
+    # Couple the two estimands. `lam` is how well the capture-induced split between the strata is
     # resolved; at `lam = 0` the two laws are the SAME ARRAY, which is the honest answer whenever one
     # stratum is starved — at zero capture the boundaries are empty, at very strong capture the
     # contained pools are, and in neither case does the data distinguish a chemistry law from a census.
@@ -647,7 +651,7 @@ def _realized_gdna_counts(
 
     # the on-target excess is a capture-only correction, so it rides `lam` too and vanishes with it
     m0 = min(uniform.size, realized.size, h_E.size)
-    # ⚠ the excess rides its OWN resolution weight (applied per exon above), not `lam`
+    # the excess rides its OWN resolution weight (applied per exon above), not `lam`
     realized = realized[:m0] + h_E[:m0] / max(m_C + m_B, 1e-30)
     if not realized.sum() > 0.0 or not uniform[:m0].sum() > 0.0:
         return None, None, GdnaRealized(False, "empty census", 0.0, 0.0, a2, a3)
@@ -699,57 +703,52 @@ def build_fl_models(
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
 
-     ⭐ **All three histograms come off the same object, so they cannot disagree about what a
-     fragment length IS.** The anchor is ``payload.deposited_lengths`` — every deposited fragment
-     binned at its own ``L`` with no purity condition (TRAPS: a-purity-filter-is-a-length-filter); the two component pools are
-     :func:`rna_fl_mass` and :func:`gdna_fl_mass`, drawn from exactly that same population. RNA and
-     gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
+    All three histograms come off the same object, so they cannot disagree about what a fragment
+    length IS. The anchor is ``payload.deposited_lengths`` — every deposited fragment binned at its
+    own ``L`` with no purity condition (TRAPS: a-purity-filter-is-a-length-filter) — and the two
+    component pools, :func:`rna_fl_mass` and :func:`gdna_fl_mass`, are drawn from exactly that
+    population. RNA and gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
 
-     ⚠ **The payload is the only argument on purpose**. The
-     anchor used to be passed in separately and was taken from the **scanner's** histogram, which
-     measures fragment length by two other rules — ``frag.genomic_footprint()`` for one subset and a
-     transcript-space length for a disjoint one — over a population that was never stated. That is
-     accumulator-frame pools shrunk toward a scanner-frame anchor.
-     in shipped code, and it is what made the length likelihood read a ruler mismatch as composition
-    Removing the parameter is what makes the mixed-frame call unrepresentable
-     rather than merely discouraged.
+    The payload is the only source of histograms on purpose. An anchor passed in separately would
+    come from the scanner, which measures fragment length by other rules over a population nobody
+    states, and shrinking accumulator-frame pools toward a scanner-frame anchor makes a ruler
+    mismatch read as composition. Having no such parameter is what makes that call unrepresentable
+    rather than merely discouraged.
 
-     ⚠ The anchor is unconditional **given deposit**, not unconditional: it excludes what the
-     accumulator rejects (too long, ambiguous path, strand-undefined, empty), each counted in
-     ``payload.qc``. That is precisely the population the pools are drawn from, which is what makes
-     it the right anchor rather than a merely convenient one.
+    The anchor is unconditional GIVEN DEPOSIT, not unconditional: it excludes what the accumulator
+    rejects (too long, ambiguous path, strand-undefined, empty), each counted in ``payload.qc``.
+    That is precisely the population the pools are drawn from, which is what makes it the right
+    anchor rather than a merely convenient one.
 
-     ⭐ **Each component pool is divided by ITS OWN opportunity, and the two divisors are different
-     objects because the two selections are different.**
+    Each component pool is divided by its OWN opportunity, and the two divisors are different
+    objects because the two selections are different:
 
-     * ``sj_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses
-       an annotated sj at all (:mod:`rigel.calibration.sj_opportunity`). The RNA pool is
-       selected on *"used an annotated sj"*, which longer fragments do more often.
-     * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
-       (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one region*, whose
-       opportunity **falls** with length; two are *crossing exactly one boundary*, whose opportunity
-       **rises**. ⛔ Folding one divisor into the other, or one divisor over the pooled sum, is a
-       category error — it is the defect that read a gDNA mean of 146.05 where the contained pool said
-       88.0.
+    * ``sj_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses an
+      annotated sj at all (:mod:`rigel.calibration.sj_opportunity`). The RNA pool is selected on
+      "used an annotated sj", which longer fragments do more often.
+    * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
+      (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are contained in one region,
+      whose opportunity falls with length; two are crossing exactly one boundary, whose opportunity
+      rises. Folding one divisor into the other, or applying one divisor over the pooled sum, is a
+      category error that reads the gDNA mean far too long.
 
-     ⭐ **``region_lengths`` and ``region_types`` are what enable the two-pool CONTRAST** (the module
-     docstring derives it; :func:`_deconvolved_gdna_counts` implements it and owns every reason it
-     declines). Both come straight from
-     :func:`~rigel.calibration.splice_graph.build_region_partition_arrays`, the same partition the
-     scanner deposits into, so they cannot disagree with the banks they index. ⛔ **Omitting them is a
-     supported state, not a degraded one** — the second pass and most tests do — and it falls back to the
-     four-pool sum, which is what shipped before.
+    ``region_lengths`` and ``region_types`` are what enable the two-pool CONTRAST: the module
+    docstring derives it, and :func:`_deconvolved_gdna_counts` implements it and owns every reason
+    it declines. Both come straight from
+    :func:`~rigel.calibration.splice_graph.build_region_partition_arrays`, the same partition the
+    scanner deposits into, so they cannot disagree with the banks they index.
 
-     ⚠ **``None`` means no annotation was offered, and the fallback is the honest one, not the
-     convenient one**: the RNA pool stays tilted and the gDNA pool falls back to the CONTAINED pair
-     alone (:func:`gdna_contained_fl_mass`). ⛔ It does **not** fall back to the four pools pooled raw,
-     because that is measurably worse than either.
+    Omitting them is a supported state, not a degraded one — the second pass and most tests do —
+    and ``None`` then means no annotation was offered. The fallback is the honest one rather than
+    the convenient one: the RNA pool stays tilted and the gDNA pool falls back to the CONTAINED pair
+    alone (:func:`gdna_contained_fl_mass`). It does not fall back to the four pools pooled raw,
+    which is worse than either.
 
-     For the EB kernel over three free histograms — the shape a unit test needs and production never
-     has — see :func:`_fl_models_from_histograms`.
+    For the EB kernel over three free histograms — the shape a unit test needs and production never
+    has — see :func:`_fl_models_from_histograms`.
     """
     rna_counts = rna_fl_mass(payload)
-    # ⚠ One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
+    # One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
     # "how much evidence stands behind this shape") and drops bins the opportunity says are impossible.
     from .sj_opportunity import detilt_pool
 
@@ -768,7 +767,7 @@ def build_fl_models(
             )
             if deconvolved is not None:
                 gdna_counts = deconvolved
-            # ⭐ the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
+            # the SECOND estimand: the library-census law for the scorer. It reads the uniform-frame
             # result and the same banks; on decline the two estimands coincide, which is the honest
             # off-capture answer rather than a degraded one.
             realized_counts, coupled_uniform, realized = _realized_gdna_counts(
@@ -781,7 +780,7 @@ def build_fl_models(
                 else rna_fl_mass(payload),
                 gdna_counts,
             )
-            # ⭐ the coupling can move the UNIFORM law too — that is the point: when the contained
+            # the coupling can move the UNIFORM law too, and that is the point: when the contained
             # stratum is starved the chemistry law is not estimable and must borrow the one that is.
             if coupled_uniform is not None:
                 gdna_counts = coupled_uniform
@@ -813,8 +812,8 @@ def _fl_models_from_histograms(
 ) -> FLModels:
     """The smooth-EB kernel: three histograms in, three pmfs out.
 
-    ⛔ **Not a production entry point.** Production has exactly one source for all three histograms
-    and reaches it through :func:`build_fl_models`; this exists so the shrinkage policy itself can be
+    Not a production entry point. Production has exactly one source for all three histograms and
+    reaches it through :func:`build_fl_models`; this exists so the shrinkage policy itself can be
     exercised over anchors and pools that no real payload would produce.
     """
     global_aligned = _aligned(global_counts, max_size)
@@ -823,9 +822,9 @@ def _fl_models_from_histograms(
     global_pmf = _normalized(global_aligned)
     rna_pmf, n_rna = _smooth_eb(rna_aligned, global_pmf, prior_ess)
     gdna_pmf, n_gdna = _smooth_eb(gdna_aligned, global_pmf, prior_ess)
-    # ⭐ the realized law is shrunk exactly like its sibling; with no realized estimate the two
+    # the realized law is shrunk exactly like its sibling; with no realized estimate the two
     # estimands COINCIDE — same array values, so an off-capture or input-starved build behaves
-    # byte-identically to the single-law world.
+    # byte-identically to a build with a single law.
     if gdna_realized_counts is not None:
         gdna_realized_pmf, _ = _smooth_eb(
             _aligned(gdna_realized_counts, max_size), global_pmf, prior_ess

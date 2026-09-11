@@ -1,4 +1,4 @@
-"""rigel.calibration.gdna_density — the gDNA background RATE, from counts and their opportunity.
+"""The gDNA background RATE, from counts and their opportunity.
 
 Two estimators of one quantity, over one signature ``(counts, exposure) -> rate``, so there is exactly
 one implementation of each and no second home to drift:
@@ -8,14 +8,15 @@ one implementation of each and no second home to drift:
 * :func:`one_sided_rate` — the same rate WITHOUT that assumption, for a pool that transcription may have
   added to. This is the one the fragment-length model uses.
 
-⭐⭐ **THE ONE-SIDED ARGUMENT, which is why the second exists.** No structural class of objects is pure
-gDNA — "intergenic" is whatever the annotation leaves over, nascent RNA sits inside introns by
-definition, and pervasive transcription is real. But **transcription can only ADD fragments to an object,
-never remove them**, so every object's observed density ``n_i / E_i`` is an OVERESTIMATE and the clean
-objects are the ones on the LOW side. Using the side a contaminant cannot reach is an assumption about
-DIRECTION, which the biology gives, in place of an assumption about PURITY, which it does not.
+The one-sided argument, which is why the second estimator exists: no structural class of objects is
+pure gDNA. "Intergenic" is whatever the annotation leaves over, RNA sits inside introns wherever it
+has not spliced, and pervasive transcription is real. But transcription can only ADD fragments to an
+object, never remove them, so every object's observed density ``n_i / E_i`` is an overestimate and
+the clean objects are the ones on the LOW side. Using the side a contaminant cannot reach is an
+assumption about DIRECTION, which the biology gives, in place of an assumption about PURITY, which
+it does not.
 
-**The estimator.** With ``lam_i = rho * E_i``, under pure gDNA ``n_i ~ Poisson(lam_i)`` and ``E[n_i - lam_i]
+The estimator. With ``lam_i = rho * E_i``, under pure gDNA ``n_i ~ Poisson(lam_i)`` and ``E[n_i - lam_i]
 = 0``, so the negative part of the residual has a closed form — De Moivre's mean-absolute-deviation
 identity for the Poisson::
 
@@ -26,15 +27,16 @@ mass to its exact null expectation is then one scalar equation::
 
     F(rho)  =  sum_i (rho*E_i - n_i)+  -  sum_i D(rho*E_i)  =  0
 
-⭐ **No trim depth, no quantile, no threshold, no chosen level.** An earlier form of this estimator kept
-the lowest ``q`` of objects by density and pooled those; it worked, but the safe ``q`` is a function of the
-library's contaminated fraction — a property of the sample, not of the tool — and it broke at ``q = 0.80``.
-The identity above is that estimator's limit taken exactly.
+No trim depth, no quantile, no threshold, no chosen level. Keeping the lowest ``q`` of objects by
+density and pooling those also works, but a safe ``q`` is a function of the library's contaminated
+fraction — a property of the sample, not of the tool. The identity above is that estimator's limit
+taken exactly.
 
-⚠ **The one bias, and it is one-signed.** A heavily contaminated object contributes ``0`` to the first sum
-but its full ``D(lam_i)`` to the second, so the root is pushed UP. Measured against an origin-split oracle
-it runs **+0.2 % to +6.7 %** high; it is never low. ⛔ Its scaling with the contaminated fraction is NOT
-established, so a library dirtier than any simulated panel may sit outside that range.
+The one bias is one-signed: a heavily contaminated object contributes ``0`` to the first sum but
+its full ``D(lam_i)`` to the second, so the root is pushed UP. Against an origin-split oracle the
+estimate runs a few percent high and is never low. How that bias scales with the contaminated
+fraction is not established, so a library dirtier than any simulated panel may sit outside the
+range the panels show.
 """
 
 from __future__ import annotations
@@ -67,9 +69,9 @@ _BRACKET_HEADROOM = 10.0
 class GdnaDensityFit:
     """A gDNA density estimate with the diagnostics that make it auditable.
 
-    ``rate`` is the one-sided estimate; ``pooled_rate`` is the naive one the pool would have given. ⭐
-    ``rate_over_pooled`` is the number to read: it is how much contamination the fit found, and a value
-    near 1 means the pool was already clean rather than that the estimator did nothing.
+    ``rate`` is the one-sided estimate; ``pooled_rate`` is the naive one the pool would have given.
+    ``rate_over_pooled`` is the number to read: it is how much contamination the fit found, and a
+    value near 1 means the pool was already clean rather than that the estimator did nothing.
     """
 
     rate: float
@@ -93,9 +95,9 @@ class GdnaDensityFit:
 def poisson_lower_mean(lam: np.ndarray) -> np.ndarray:
     """``E[(lam - N)+]`` for ``N ~ Poisson(lam)``, exactly: ``lam^(k+1) e^-lam / k!`` with ``k = floor(lam)``.
 
-    De Moivre's mean-absolute-deviation identity for the Poisson, halved (``E[N - lam] = 0`` makes the two
-    one-sided means equal). ⭐ Closed form at every ``lam``, so the estimator that uses it needs no
-    simulation and no tabulation. Verified against the exact truncated sum and against Monte Carlo.
+    De Moivre's mean-absolute-deviation identity for the Poisson, halved, since ``E[N - lam] = 0``
+    makes the two one-sided means equal. Closed form at every ``lam``, so the estimator that uses it
+    needs no simulation and no tabulation; gated against the exact truncated sum and Monte Carlo.
     """
     lam = np.asarray(lam, dtype=np.float64)
     out = np.zeros(lam.shape, dtype=np.float64)
@@ -112,9 +114,9 @@ def poisson_lower_mean(lam: np.ndarray) -> np.ndarray:
 def pooled_log_rate(counts, exposure, *, shape: float = 0.0) -> float:
     """``ln((sum counts + shape) / sum exposure)`` — the naive pooled rate, in logs.
 
-    ⛔ **It assumes the pool is pure**, which no structural class of objects is; that is what
-    :func:`one_sided_rate` exists to avoid. It stays here because it is the other estimator of the same
-    quantity and both belong in one module.
+    It assumes the pool is pure, which no structural class of objects is; that is what
+    :func:`one_sided_rate` exists to avoid. It stays here because it is the other estimator of the
+    same quantity and both belong in one module.
 
     ``shape`` is the caller's prior pseudo-count (a Gamma-posterior location uses the Jeffreys ``½``);
     the default of 0 is the plain ratio. Returns ``-inf`` when the pool has no support, which is the
@@ -131,18 +133,18 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
 
     Solves ``F(rho) = sum (rho*E_i - n_i)+ - sum D(rho*E_i) = 0`` by bisection.
 
-    ⭐ **The bracket is structural, not guessed.** ``F(0) = 0`` exactly (both sums vanish), and just above
-    zero ``F`` is strictly negative — ``D(lam) -> lam`` as ``lam -> 0``, so the second sum approaches
-    ``rho * sum E`` while the first collects only the objects with ``n_i = 0``, leaving
-    ``F(0+) ~ -rho * sum_{n_i>0} E_i``. ``F`` then rises without bound, because the first sum is eventually
-    linear in ``rho`` while the second grows only as ``sqrt(rho)``. So there is exactly one root above
-    zero.
+    The bracket is structural, not guessed. ``F(0) = 0`` exactly, since both sums vanish, and just
+    above zero ``F`` is strictly negative: ``D(lam) -> lam`` as ``lam -> 0``, so the second sum
+    approaches ``rho * sum E`` while the first collects only the objects with ``n_i = 0``, leaving
+    ``F(0+) ~ -rho * sum_{n_i>0} E_i``. ``F`` then rises without bound, because the first sum is
+    eventually linear in ``rho`` while the second grows only as ``sqrt(rho)``. So there is exactly
+    one root above zero.
 
-    ⚠ ``F`` is NOT monotone — it dips before it rises — but bisection does not need it to be, only
-    ``F(lo) <= 0 <= F(hi)``. ⭐ **And the root at ``rho = 0`` is not sticky**: because ``F(0+) < 0``
-    whenever any object carries a count, the first midpoints test negative and the lower end walks off
-    zero on its own. The early return above is what guarantees that premise, so no separate guard against
-    the boundary root is needed — one was written, and removed when no perturbation could make it fire.
+    ``F`` is NOT monotone — it dips before it rises — but bisection does not need it to be, only
+    ``F(lo) <= 0 <= F(hi)``. The root at ``rho = 0`` is not sticky either: because ``F(0+) < 0``
+    whenever any object carries a count, the first midpoints test negative and the lower end walks
+    off zero on its own. The early return above is what guarantees that premise, so no separate
+    guard against the boundary root is needed.
     """
     n = np.asarray(counts, dtype=np.float64).ravel()
     e = np.asarray(exposure, dtype=np.float64).ravel()
@@ -155,7 +157,7 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
     pooled = total_n / total_e if total_e > 0.0 else 0.0
     if not (total_e > 0.0 and total_n > 0.0):
         # No support, or no fragments at all: there is no density to estimate and saying so is the
-        # answer. ⭐ A zero-gDNA library reaches this and must NOT be handed a fabricated rate.
+        # answer. A zero-gDNA library reaches this and must NOT be handed a fabricated rate.
         return GdnaDensityFit(0.0, pooled, int(n.size), total_n, total_e, bracket_ok=False)
 
     def f(rho: float) -> float:
@@ -177,10 +179,11 @@ def one_sided_rate(counts, exposure) -> GdnaDensityFit:
 def contained_opportunity(pmf, lengths) -> np.ndarray:
     """``E_f[(ell - L + 1)+]`` per object — the CONTAINED opportunity a uniformly placed fragment has.
 
-    ⭐ Evaluated by cumulative sums rather than an ``(objects x lengths)`` outer product, which at genome
-    scale would be tens of billions of entries. Writing ``F`` and ``S`` for the pmf's cumulative mass and
-    cumulative first moment, ``E[(ell-L+1)+] = (ell+1)*F(ell) - S(ell)``, and for ``ell`` beyond the pmf's
-    support that is exactly ``ell + 1 - E[L]``. Cost is ``O(objects + max_length)``.
+    Evaluated by cumulative sums rather than an ``(objects x lengths)`` outer product, which at
+    genome scale would be tens of billions of entries. Writing ``F`` and ``S`` for the pmf's
+    cumulative mass and cumulative first moment, ``E[(ell-L+1)+] = (ell+1)*F(ell) - S(ell)``, and
+    for ``ell`` beyond the pmf's support that is exactly ``ell + 1 - E[L]``. Cost is
+    ``O(objects + max_length)``.
     """
     p = np.asarray(pmf, dtype=np.float64)
     ell = np.asarray(lengths, dtype=np.float64)
@@ -197,11 +200,11 @@ def contained_opportunity(pmf, lengths) -> np.ndarray:
 def region_lengths_from_partition(region_bounds, ref_pos_offsets, n_regions: int) -> np.ndarray:
     """Region lengths from the scanner's own partition, differenced **PER REFERENCE**.
 
-    ⛔ ``np.diff(region_bounds)`` straight through is WRONG. The bound positions are concatenated per
-    reference (``ref_pos_offsets`` delimits them), and each reference's ``k`` regions contribute ``k + 1``
-    positions — so a plain diff manufactures one phantom region spanning the junction between every pair
-    of adjacent references. It is silent, plausible-looking, and lands on whichever reference happens to
-    follow; caught here once by a gate rather than by a wrong answer.
+    ``np.diff(region_bounds)`` straight through is WRONG. The bound positions are concatenated per
+    reference (``ref_pos_offsets`` delimits them), and each reference's ``k`` regions contribute
+    ``k + 1`` positions, so a plain diff manufactures one phantom region spanning the junction
+    between every pair of adjacent references. It is silent, plausible-looking, and lands on
+    whichever reference happens to follow.
     """
     b = np.asarray(region_bounds, dtype=np.float64).ravel()
     off = np.asarray(ref_pos_offsets, dtype=np.int64).ravel()
