@@ -163,7 +163,10 @@ both a process rule and a structurally pure-gDNA object).
 - **No legacy, no backwards compatibility, no speculative code.** Converge and delete. No version
   suffixes in file names. No Greek letters in identifiers (fine in maths write-ups).
 - **Real data is a test input, never a design input.** Sweep the plausible space, report the worst case.
-  Profile on high-depth real RNA-seq, never a small synthetic suite and not cfRNA (`docs/TESTING.md` §7).
+  Profile on a deep real RNA-seq library, never a panel condition or a toy; the cfRNA libraries are smoke
+  tests (`docs/TESTING.md` §7). Read a timing only from back-to-back A/B pairs — untouched stages drift
+  25–40 % between runs taken at different times — and prove every speed-up a numeric no-op
+  (`rename_identity.py --bam`, `profiling/sweep_replay.py`).
 - **Renames**: run `rename_census.py --sense <token>` before renaming anything and `rename_identity.py
   --check` after each stage. `arm` still carries three senses (an experiment arm, a component arm, and
   `__ARM_NEON` in the scanner) and needs its own `--sense` pass, never a tail-end sweep.

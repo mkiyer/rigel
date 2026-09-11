@@ -50,6 +50,9 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   effective-length shrinkage fabricates a reference from the residual false-positive fragments and
   contracts every transcript (`ISSUES: g00-shrinkage-upstream-repair` — the fix is the detector); the
   never-passed per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other.
+- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run and hold
+  the memory peak, on a single core, while the locus EM beside them is a rounding error; the loci an
+  intergenic region bounds are the decomposition — `profiling/profiler.py`, `profiling/sweep_replay.py`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
@@ -73,7 +76,15 @@ capture-OFF rows, rising with gDNA (`vertex_ceiling.py`); by class the in-scope 
 intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons (stranded ON)
 (`policy_benchmark.py --by-class`).
 
-1. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
+1. **Calibration's performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the
+   active thread). Calibration is the tool's one unfinished component: on a deep library its sweeps are
+   most of the run and hold the memory peak, on one core, beside a locus EM that is a rounding error.
+   The decomposition is the LOCUS, as the EM already does it — an intergenic region terminates message
+   passing, so the chain breaks into independent loci, none of them a large share of it — with threads
+   for the message passes and the grid solves. Judge each step by `profiling/profiler.py --compare` on
+   back-to-back pairs and prove it a no-op with `profiling/sweep_replay.py` and
+   `design/rename_identity.py --bam`; the accuracy frame is unchanged, and no step may move a number.
+2. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
    modal real case, the composition there is now right, and the effective length the EM divides by is
    still a fraction of the truth because the reference-density detector accepts any few slots with
    positive mass. Derive what "this library has an enriched gDNA mode" is evidence of (a boolean),
@@ -81,22 +92,22 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    `calibration_vs_oracle.py`'s ruler table per stratum with both zero controls, then
    `quant_accuracy.py`. Settle first whether the instrument's "exactly 1.000 off capture" contract is
    stale, since both P and O read below it there.
-2. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
+3. **The rest of the pre-EM setup** — `priors.py` / `result.py` / `derive.py` against
    `prior_vs_oracle.py` (re-run it first) and the ruler column: `ISSUES: prior-fidelity-vs-deliverable`,
    `ISSUES: eb-shrinkage-magic-ess`, `ISSUES: capture-blind-gdna-divisor`,
    `ISSUES: per-transcript-prior-lane`, `ISSUES: u-ruler-arm`.
-3. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
+4. **The intron's own solve on unstranded capture-OFF** — the intron class carries the largest share of
    the in-scope error there (`policy_benchmark.py --by-class`): the factory profile's resolution against
    the intergenic background (`density_deconv`); dissect with `worst_objects.py`.
-4. **The vertex atom** — priced by `vertex_ceiling.py` on silent genes and nascent-free introns; a
+5. **The vertex atom** — priced by `vertex_ceiling.py` on silent genes and nascent-free introns; a
    mechanism for it is the prior's reference (`ISSUES: reference-prior-refuted-at-concept-level`
    constrains the form) or the intron's own solve, not a message.
-5. **The message policy, only where a row is above the bar**: one prototype arm at a time through
+6. **The message policy, only where a row is above the bar**: one prototype arm at a time through
    `policy_prototype.py --module`, halves apart, pass zero beside the pipeline:
    `ISSUES: flux-price-witness-units`, `ISSUES: two-sided-exon-row`, `ISSUES: flux-floor-dispersion`,
    `ISSUES: ambig-node-as-a-gdna-source`, `ISSUES: message-layer-open-cases`.
 
-Then, in standing order: `ISSUES: performance-memory-bounded-solve` (owner: mandatory before 0.8.0) ·
+Then, in standing order: `ISSUES: scan-thread-split-starves-the-workers` ·
 `ISSUES: refit-vs-message-arbitration` (re-read under the E-step: the walk now says the prior does the
 unstranded rows and the messages the stranded capture-ON ones).
 

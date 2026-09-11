@@ -624,13 +624,24 @@ a `base_reseed` noise floor beside the effect).
 Develop on controlled toys, validate on real data — both, in that order: a big suite has confounds that
 hide mechanisms, and a toy ranks hotspots backwards (`TRAPS: toys-rank-hotspots-backwards`).
 
-**Profiling targets a deep, real, high-complexity RNA-seq library** (owner, 2026-08-17) — never a panel
-condition and never cfRNA. The cfRNA libraries on disk are sparse and small, so they under-fill exactly
-the structures whose cost the performance work is about (the grid solve, the per-slot arrays, the
-fragment buffer). This leaves `TRAPS: real-data-is-a-test-input` and the accuracy panel (the ladder)
-untouched. The instruments are `scripts/profiling/profiler.py` (whole pipeline, wall clock and per-phase
-peak RSS; `--scan-only` for the scan alone) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared bit for bit); set `OMP_NUM_THREADS` deliberately.
-`ISSUES: performance-memory-bounded-solve` carries the work.
+**Profiling is judged on a deep, real, high-complexity RNA-seq library** (owner, 2026-08-17) — never a
+panel condition and never a toy. The cfRNA libraries on disk are sparse and small, so they under-fill
+exactly the structures whose cost the performance work is about (the grid solve, the per-slot arrays, the
+fragment buffer); they are smoke tests that find a defect cheaply, and the deep library decides. This
+leaves `TRAPS: real-data-is-a-test-input` and the accuracy panel (the ladder) untouched.
+
+**Read a timing only from back-to-back A/B pairs.** Stages nobody touched drift 25–40 % between runs
+taken at different times — page cache, concurrent work — so a before-and-after taken hours apart credits
+the machine's mood to the change. Alternate the two arms in one sitting (stash `src/` only) and check
+that the untouched stages read 1.00. **Every speed-up is proven a numeric no-op** before it is believed:
+`design/rename_identity.py --bam` end to end on a real library and on both ladder references, and
+`profiling/sweep_replay.py` for anything inside the sweep.
+
+The instruments are `scripts/profiling/profiler.py` (the whole pipeline as a tree of named stages, with
+per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the scan alone, `--compare`
+for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
+bit for bit); set `OMP_NUM_THREADS` deliberately. `ISSUES: performance-memory-bounded-solve` carries the
+work.
 
 A both-strand stress test needs ample single-stranded regions (the population prior trains on them).
 How to A/B honestly: in-process, opposite extremes, never on a saturated condition, one thing varied,

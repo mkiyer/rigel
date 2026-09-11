@@ -138,14 +138,26 @@ is the whole problem, so the next candidate is a sparsity mechanism, targeting e
 transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `quant_accuracy.py`.
 
 ### performance-memory-bounded-solve
-`priority: next · kind: build · 2026-08-17 (mandatory before 0.8.0)`
-The grid solve in memory-bounded parallel chunks, with an advanced CLI flag spanning one object at a time to
-many; optimise on high-depth real RNA-seq, not cfRNA. Calibration scales with the index and the EM with the
-data (`TRAPS: toys-rank-hotspots-backwards`). Measured 2026-09-11 on an 18.6M-fragment library: the four
-sweeps are 80% of the run and the held messages set the 32 GB peak, on one core. The passes couple slots
-only within a reference and ψ is per slot, so a per-reference split stays bit-identical if the three
-genome-wide scalars in `prepare` (the gDNA lane's and each RNA lane's reference density, and whether the
-strand split is live) are computed once over the whole chain. `profiling/profiler.py`, `profiling/sweep_replay.py`.
+`priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11`
+Calibration is the tool's one unfinished component: on 18.6M fragments its four sweeps are 706 s of an
+836 s run and hold the 32 GB peak, on ONE core, while the locus EM beside it takes 8 s; the cost is set by
+the index's 2.09M chain slots, not by depth. THE DECOMPOSITION IS THE LOCUS, as the EM already does it: an
+intergenic region terminates message passing, so the chain breaks at every one into independent loci.
+Measured on the human chain: of 1,206,202 composition faces and 4,621,302 lane faces, NONE delivers to an
+intergenic node, while 65,852 gDNA-lane faces are SENT by one (its measured level is the pure-gDNA anchor
+its neighbour reads), so a locus needs only its two flanking intergenic claims, which are local. The chain
+holds 32,927 loci, median 19 slots, largest 2,477 = 0.12% of the chain, so the serial floor is about 800x
+and the working set is per locus rather than genome-wide. Threads are wanted for the message passes and
+the grid solves alike. `profiling/profiler.py`, `profiling/sweep_replay.py`.
+
+### scan-thread-split-starves-the-workers
+`priority: next · kind: decision · 2026-09-11`
+`BamScanConfig.resolved_scan_threads` gives BGZF decompression `min(4, total - 1)` threads and the scan
+workers what is left, so a 2-4 thread budget runs ONE worker and decompression is not the bottleneck.
+Scan seconds on the 18.6M-fragment library by (bgzf, workers): total 4 — (3,1) 113.5, (2,2) 59.5, (1,3)
+42.4, (0,4) 33.7; total 8 — (4,4) 34.4, (2,6) 26.4, (1,7) 24.8; total 16 — (4,12) 19.1, (1,15) 19.5,
+(2,14) 17.4. Any new split rule is a tunable and `--scan-bgzf-threads` is a user-facing flag, so the rule
+is the owner's to set. `profiling/profiler.py --scan-only`.
 
 ### u-ruler-arm
 `priority: next · kind: measurement · 2026-08`

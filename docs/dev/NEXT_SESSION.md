@@ -41,19 +41,32 @@ What is left on the deep library (835.7 s, 32.5 GB peak): the four sweeps 706 s 
 `prepare` 210 (RNA lanes 87, gDNA lane 50), ψ grid solves about 150 (inside own claims and the sweep) —
 scan 32, second pass 22, locus EM 8. All of calibration runs on one core.
 
-## Decisions for the owner
+## What is next — parallel calibration (owner, 2026-09-11)
 
-1. **The per-reference parallel sweep** (`ISSUES: performance-memory-bounded-solve`). The passes couple slots
-   only within a reference and ψ is per slot, so a split by reference groups stays bit-identical if the three
-   genome-wide scalars in `prepare` are computed once. The largest chromosome is about 9% of the slots, which
-   caps the speed-up near 10×; running a bounded number of groups at a time bounds the memory.
-2. **Threads for the ψ block loop.** Large NumPy array work that releases the GIL; bit-identical; about 150 s
-   on the deep library. Needs a thread budget calibration does not have today.
-3. **The scan's thread split.** `resolved_scan_threads` gives BGZF `min(4, total − 1)` threads, so a 2–4
-   thread budget runs one scan worker. Measured on the deep library, scan seconds by (BGZF, workers):
-   total 4 — (3,1) 113.5, (2,2) 59.5, (1,3) 42.4, (0,4) 33.7; total 8 — (4,4) 34.4, (2,6) 26.4, (1,7) 24.8;
-   total 16 — (4,12) 19.1, (1,15) 19.5, (2,14) 17.4. Any new rule is a tunable, and the knob is a CLI flag.
-4. **The refit count.** Each refit is a full sweep; on the 876k library they move 31k, 11k and 3.7k gDNA
-   fragments of 502k, converging by a third per step. Cutting one changes answers.
-5. **Caching index-derived geometry in the index** (mature walls, incidence, opportunity tables): now about
-   3 s a run after the vectorization, so low priority.
+Calibration is the tool's one unfinished component and the target is at least a hundredfold, C++ not yet
+spent. **The decomposition is the LOCUS, exactly as the EM already does it.** An intergenic region
+terminates message passing: it is solved, fixed and measured as pure gDNA. Verified on the real human
+chain, not assumed — of 1,206,202 composition faces and 4,621,302 lane faces, NONE delivers to an
+intergenic node, while 65,852 gDNA-lane faces are SENT by one (its measured level is the pure-gDNA anchor
+its neighbour reads). So a locus needs only its two flanking intergenic claims, and those are local.
+
+    chain slots 2,087,476   intergenic 33,120   loci 32,927
+    locus size: median 19, p99 459, largest 2,477 = 0.12% of the chain
+
+The largest locus is 0.12% of the work, so the serial floor is about 800x and the working set becomes per
+locus instead of genome-wide, which is the memory half of the same problem. Threads are wanted for the
+message passes and for the grid solves alike.
+
+What must stay identical, and what that costs: the three genome-wide scalars inside `prepare` (the gDNA
+lane's reference density, each RNA lane's, and whether the strand split is live) are sums over the whole
+chain and have to be computed once, over the same arrays in the same order, then handed to the workers.
+Everything else in a sweep is per slot or per face. `sweep_replay.py` replays a captured real sweep and
+compares bit for bit in about 40 s, so each step is provable before the pipeline is run at all.
+
+## The other decisions
+
+* **The scan's thread split** — `ISSUES: scan-thread-split-starves-the-workers`: a 2-4 thread budget runs
+  one scan worker. The numbers are in the entry; any new rule is a tunable, so the rule is the owner's.
+* **The refit count** stays as it is (owner, 2026-09-11).
+* **Caching index-derived geometry in the index** (mature walls, incidence, opportunity tables): about 3 s
+  a run after the vectorisation, so low priority.
