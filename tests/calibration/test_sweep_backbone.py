@@ -307,11 +307,14 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
     ships can never be inherited from a function default that an edit could silently change: the
     config names it (``message_policy``, ``"transfer"``), ``calibrate`` reads it, and both the
     shipped policy and the measured floor are reachable from the one call site."""
+    import importlib
     import inspect
 
-    import rigel.calibration.calibrate as _c  # noqa: PLC0415
     from rigel.config import CalibrationConfig  # noqa: PLC0415
 
+    # the package re-exports the function under the module's name, so ``import … as`` would bind the
+    # FUNCTION and this gate would read one function's body; the module is what reads the switch
+    _c = importlib.import_module("rigel.calibration.calibrate")
     assert CalibrationConfig().message_propagation is True
     assert CalibrationConfig().message_policy == "transfer"
     src = inspect.getsource(_c)
@@ -473,7 +476,7 @@ def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
     import re
 
     src = inspect.getsource(SW)
-    assert re.search(r"terminal = .*is_region & g1_locked\(fp, fn\)", src), "the predicate moved"
+    assert re.search(r"terminal ?= ?.*is_region & g1_locked\(fp, fn\)", src), "the predicate moved"
     assert re.search(r"_pass\(.*terminal=", src), "the passes are no longer told the terminals"
 
 

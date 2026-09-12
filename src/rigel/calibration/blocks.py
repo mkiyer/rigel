@@ -22,7 +22,7 @@ from .simplex_logodds import CompositionPriors
 __all__ = ["block_slice", "gather", "view_fields"]
 
 
-def view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg) -> dict:
+def view_fields(chain, statics, geometry, structure) -> dict:
     """Every per-slot array a policy may read, under the two belief-free headings of
     :class:`~.messages.ChainView` — for the whole chain (the library) or one block (the context)."""
     return dict(
@@ -40,11 +40,11 @@ def view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg) ->
         left=np.asarray(chain.left, np.int64),
         right=np.asarray(chain.right, np.int64),
         is_boundary=np.asarray(chain.kind) != REGION,
-        is_exon_region=np.asarray(is_exon_region, bool),
+        is_exon_region=np.asarray(structure.is_exon_region, bool),
         free_pos=np.asarray(statics.free_pos, bool),
         free_neg=np.asarray(statics.free_neg, bool),
-        exon_pos=np.asarray(exon_pos, bool),
-        exon_neg=np.asarray(exon_neg, bool),
+        exon_pos=np.asarray(structure.exon_pos, bool),
+        exon_neg=np.asarray(structure.exon_neg, bool),
         boundary_flags=statics.boundary_flags,
     )
 

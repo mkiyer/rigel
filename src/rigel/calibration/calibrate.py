@@ -308,6 +308,477 @@ def _scaled_grid(n: int, window: float, required: float) -> int:
     return int(round(1.0 + (n - 1) * (required / window)))
 
 
+#: the QC seeds of an INJECTED strand value: no fit ran, so no seed regions, no fragments
+_NO_GDNA_SEED = (-1, -1, False, float("nan"), float("nan"))
+_NO_RNA_SEED = (-1, -1, False, float("nan"))
+
+
+@dataclass(frozen=True, slots=True)
+class _Strand:
+    """The library's strand model as the solve reads it, fitted or injected: the RNA sense fraction
+    ``κ``, the two Beta-Binomial overdispersions, and the strand-Fisher noise-floor sample sizes
+    (``N_rna`` the certified-RNA count κ was fit from, ``N_gdna`` the intergenic unspliced count).
+    The two seeds are QC for the log only — ``(n_seed_regions, n_seed_fragments, fallback, …)``,
+    ``-1`` where the value was injected."""
+
+    rna_sense_frac: float
+    n_rna_obs: float
+    n_gdna_obs: float
+    gdna_strand_overdispersion: float
+    rna_strand_overdispersion: float
+    gdna_seed: tuple = _NO_GDNA_SEED
+    rna_seed: tuple = _NO_RNA_SEED
+
+    @property
+    def model(self) -> tuple[float, float, float]:
+        """``(κ, od_gdna, od_rna)`` — the triple the transfer policy's own strand claims need."""
+        return (
+            self.rna_sense_frac,
+            self.gdna_strand_overdispersion,
+            self.rna_strand_overdispersion,
+        )
+
+
+def _fit_strand(substrate, region_arrays, strand_models, inj) -> _Strand:
+    """The strand model, in the order the fits lean on each other.
+
+    ``κ`` first — the posterior-mean spliced sense fraction (`fit_strand_balance`); the strand
+    channel's discriminability ``(2κ−1)²`` is the smooth strand→count deference weight, there is no
+    hard identifiability gate (an unstranded library has κ≈½ ⇒ the count governs at any depth). A
+    library with no spliced reads is not an RNA-seq library and raises. Then the RNA overdispersion
+    (mean κ, from the per-sj strand table, certified pure RNA), which is the gDNA fit's fallback; then
+    the gDNA overdispersion (mean ½ by dsDNA symmetry) by the AWAY-HALF moment over every genic count-
+    and strand-observable object — unbiased under any RNA content of the seeds (`gdna_strand`'s
+    lemma), so no seed is weighted and no class asserted pure; intergenic and AMBIG objects cannot be
+    oriented and are out. The two are RECONCILED with no conjured target: the weaker-measured
+    dispersion shrinks toward the better-measured one by their own null informations — ⛔ only when
+    neither is injected, since an injected value is an arm's whole point. Last the two sample sizes;
+    ``N_gdna = 0`` (a gDNA-free library) gates the strand seed off."""
+    if inj is not None and inj.rna_sense_frac is not None:
+        rna_sense_frac = float(inj.rna_sense_frac)
+        n_rna_obs = float(inj.n_rna_obs) if inj.n_rna_obs is not None else 0.0
+    else:
+        balance = fit_strand_balance(strand_models)
+        if balance.fallback_used:
+            raise CalibrationStrandError(
+                "the library has zero spliced unique-mapper observations; this does not look like an "
+                "RNA-seq library. A real RNA-seq library always carries spliced reads."
+            )
+        rna_sense_frac = float(balance.rna_sense_frac)
+        n_rna_obs = float(balance.n_observations)
+
+    gdna_seed, rna_seed = _NO_GDNA_SEED, _NO_RNA_SEED
+    if inj is not None and inj.rna_strand_overdispersion is not None:
+        rna_od = float(inj.rna_strand_overdispersion)
+    else:
+        rna_strand = fit_rna_strand_from_sj_table(
+            strand_models.sj_table, rna_sense_frac=rna_sense_frac
+        )
+        rna_od = rna_strand.rna_strand_overdispersion
+        rna_seed = (
+            rna_strand.n_seed_regions,
+            rna_strand.n_seed_fragments,
+            rna_strand.fallback_used,
+            rna_strand.raw_overdispersion,
+        )
+    if inj is not None and inj.gdna_strand_overdispersion is not None:
+        gdna_od = float(inj.gdna_strand_overdispersion)
+    else:
+        # the seed selector is count-observability, straight off the signature
+        region_obs, boundary_obs = count_observable_masks(
+            np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
+        )
+        gdna_strand = fit_gdna_strand_from_substrate(
+            substrate,
+            region_arrays,
+            region_count_observable=region_obs,
+            boundary_count_observable=boundary_obs,
+            rna_sense_frac=rna_sense_frac,
+        )
+        gdna_od = gdna_strand.gdna_strand_overdispersion
+        gdna_seed = (
+            gdna_strand.n_seed_regions,
+            gdna_strand.n_seed_fragments,
+            gdna_strand.fallback_used,
+            gdna_strand.effective_seeds,
+            gdna_strand.raw_overdispersion,
+        )
+    if inj is None or (
+        inj.rna_strand_overdispersion is None and inj.gdna_strand_overdispersion is None
+    ):
+        rna_od, gdna_od = reconcile_overdispersions(
+            rna_strand.raw_overdispersion,
+            rna_strand.information,
+            gdna_strand.raw_overdispersion,
+            gdna_strand.information,
+        )
+
+    if inj is not None and inj.n_gdna_obs is not None:
+        n_gdna_obs = float(inj.n_gdna_obs)
+    else:
+        intergenic = coarse_type_array(np.asarray(region_arrays.signature)) == 0
+        n_gdna_obs = float(
+            np.asarray(substrate.region_contained.count, dtype=np.float64)[intergenic].sum()
+        )
+    return _Strand(rna_sense_frac, n_rna_obs, n_gdna_obs, gdna_od, rna_od, gdna_seed, rna_seed)
+
+
+class _IntronFactory:
+    """The gDNA INTRON FACTORY: the intergenic background — fitted here with ``include_introns=False``
+    (an intron-inclusive pool is inflated by nascent RNA worst exactly where gDNA is scarce), or
+    injected — and its λ-factor rows on a solve grid, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` per
+    intron slot (`_build_intron_prior`). ``background`` is ``None`` when the factory is off, and
+    ``rows`` is then ``None`` too, which leaves every sweep byte-identical to the pre-factory path.
+
+    ⛔ The rows are evaluated ON the solve grid, so they are a function of ``(n_grid, L)`` and are
+    REBUILT when the bracket widens, never regridded: `_regrid_global` maps between two grids of the
+    same ``L``, and there is no map onto a wider domain the factor was never evaluated on. Memoised,
+    because only two brackets ever occur in one calibration."""
+
+    def __init__(
+        self, chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair
+    ):
+        self._site = (chain, substrate, region_arrays, region_eff_gdna, config)
+        if inj is not None and inj.intron_background is not None:
+            self.background = inj.intron_background
+        elif config.intron_factory:
+            self.background = fit_intron_background(
+                substrate,
+                region_arrays,
+                region_eff_gdna,
+                include_introns=False,
+                counts_exposure=background_pair,
+            )
+        else:
+            self.background = None
+        self._rows: dict = {}
+
+    def rows(self, n_grid: int, window: float):
+        """The λ-factor rows ``(n_slots, K)`` on the grid ``(n_grid, window)``, or ``None``."""
+        if self.background is None:
+            return None
+        key = (int(n_grid), float(window))
+        if key not in self._rows:
+            chain, substrate, region_arrays, region_eff_gdna, config = self._site
+            self._rows[key] = _build_intron_prior(
+                chain,
+                substrate,
+                region_arrays,
+                region_eff_gdna,
+                replace(config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)),
+                bg=self.background,
+            )
+        return self._rows[key]
+
+
+def _wall_mask(payload, region_arrays, mature_walls, boundary_reach):
+    return build_region_wall_mask(
+        region_arrays,
+        mature_walls,
+        boundary_reach[0],
+        boundary_reach[1],
+        w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
+    )
+
+
+def _background_pair(payload, substrate, region_arrays, config, mature_walls, boundary_reach):
+    """The MEASURED-TOTAL ``(counts, exposure)`` pair for the pooled gDNA background estimators, built
+    once and handed to each. ``None`` under the shipped default (``"contained"``), and every consumer
+    then takes its own contained pair. ⛔ ``"measured_total"`` REFUSES to run without the wall inputs
+    rather than falling back: a background rate that silently changed estimator because an argument
+    was missing is worse than either estimator."""
+    if config.background_abundance != "measured_total":
+        return None
+    if mature_walls is None or boundary_reach is None:
+        raise ValueError(
+            "CalibrationConfig.background_abundance = 'measured_total' needs the wall inputs: "
+            "pass mature_walls=build_mature_wall_distances(index, region_arrays) and "
+            "boundary_reach=build_contiguous_boundary_reach_arrays(index) (both are in "
+            "scan_cache.index_derived_inputs). Refusing rather than falling back to the contained "
+            "pair, which would change the background rate without saying so."
+        )
+    mask = _wall_mask(payload, region_arrays, mature_walls, boundary_reach)
+    counts, exposure, _ = region_counts_and_exposure(substrate, region_arrays, mask)
+    return (counts, exposure)
+
+
+def _abundance_landscape(
+    payload, substrate, region_arrays, config, inj, mature_walls, boundary_reach
+):
+    """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
+    counts and lengths only, so it is circular with nothing solved. A QC and injection surface: nothing
+    in the solve reads it. Without the wall inputs it is SKIPPED, LOUDLY, never raised for — the flag is
+    on by default, this object is the QC report's density panel, and many unit and toy callers have no
+    wall arrays and want no panel; the object stays ``None`` rather than a quietly different estimate."""
+    if not config.abundance_landscape:
+        return None
+    if inj is not None and inj.abundance_landscape is not None:
+        return inj.abundance_landscape
+    if mature_walls is None or boundary_reach is None:
+        logger.warning(
+            "calibration: abundance_landscape is enabled but the wall inputs are missing "
+            "(mature_walls / boundary_reach, both in scan_cache.index_derived_inputs) — skipping "
+            "the total-density landscape, so the QC density panel will be omitted. Nothing in the "
+            "solve reads it, so no solved number changes."
+        )
+        return None
+    mask = _wall_mask(payload, region_arrays, mature_walls, boundary_reach)
+    return fit_abundance_landscape(substrate, region_arrays, mask)
+
+
+def _policy(config, strand: _Strand):
+    """The message-composition policy the config names. ⛔ THE NAME MUST SELECT THE POLICY — an arm that
+    silently runs a different policy than it names is a benchmark that cannot be trusted, so an unknown
+    name raises. The transfer policy's own strand claims read the library's strand model; an intron's
+    own claim is the factory's row for it, which the sweep hands over on the context."""
+    if not config.message_propagation or config.message_policy == "silent":
+        return SilentPolicy()
+    if config.message_policy == "transfer":
+        return TransferPolicy(strand=strand.model)
+    raise ValueError(
+        f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Solve:
+    """Everything a sweep reads, fixed for the whole calibration: the chain, its statics and geometry,
+    the region arrays, the strand model, the intron factory, the policy, the config, and the per-slot
+    gDNA support ``(mass_global, eff_global)`` the landscape prior is fit and read on."""
+
+    chain: object
+    statics: object
+    geometry: object
+    region_arrays: object
+    strand: _Strand
+    factory: _IntronFactory
+    policy: object
+    config: object
+    mass_global: np.ndarray
+    eff_global: np.ndarray
+
+
+def _init_belief(s: _Solve):
+    """The signature-binary G1/G2/G3 belief on the chain, before any sweep."""
+    return init_beliefs(
+        s.chain,
+        s.geometry,
+        s.statics,
+        rna_sense_frac=s.strand.rna_sense_frac,
+        gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
+        rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
+        n_grid=s.config.sweep_n_grid,
+        n_grid_ss=s.config.sweep_n_grid_single_strand,
+        logodds_window=s.config.sweep_logodds_window,
+    )
+
+
+def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
+    """One sweep of the chain from ``belief``, with the composition prior ``prior`` (``None``: the
+    prior-free pass) — the λ bracket first, then `solve_chain`.
+
+    THE λ BRACKET IS ``max(the reference's floor, the fitted prior's own demand)``. ψ evaluates the
+    landscape at ``log ρ = log f + log M − log E`` and can only offer ``f ∈ [σ(−L), σ(L)]``, so a bracket
+    narrower than the prior's support leaves ψ no coordinate for what the prior says — and the answer
+    then depends on ``L``. The demand is DERIVED (`required_logodds_window`), never chosen; the
+    prior-free pass has nothing to widen for and keeps the floor. ``dlam`` is held FIXED, so the grids
+    scale with the bracket (`_scaled_grid`): widening ``L`` at a fixed grid size would coarsen the
+    lattice and confound two knobs. The TILT axis does not scale — θ is a share with no bracket
+    problem — which keeps the AMBIG cube linear in the bracket.
+
+    ⛔ ψ has NO reference location. A located reference is a prior assertion at fixed strength and
+    becomes the whole answer wherever the strand channel is dead; background information enters as the
+    factory's λ-factor, a likelihood whose precision scales with counts. Every message's price is
+    self-contained in the sweep (each hop charges the two nodes' counting and the pair's disagreement)
+    — there is nothing to fit here."""
+    cfg = s.config
+    window = float(cfg.sweep_logodds_window)
+    n_grid, n_grid_ss = int(cfg.sweep_n_grid), int(cfg.sweep_n_grid_single_strand)
+    n_tilt = cfg.sweep_n_tilt if cfg.sweep_n_tilt is not None else int(cfg.sweep_n_grid)
+    if prior is not None:
+        required = prior.required_logodds_window(s.mass_global, s.eff_global)
+        if required > window:
+            n_grid = _scaled_grid(n_grid, window, required)
+            n_grid_ss = _scaled_grid(n_grid_ss, window, required)
+            window = required
+            logger.debug(
+                "calibration: λ bracket %.4f (the landscape's support), n_grid %d, n_grid_ss %d, "
+                "n_tilt %d (unscaled)",
+                window,
+                n_grid,
+                n_grid_ss,
+                n_tilt,
+            )
+    return solve_chain(
+        s.chain,
+        s.statics,
+        s.geometry,
+        belief,
+        s.region_arrays,
+        rna_sense_frac=s.strand.rna_sense_frac,
+        gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
+        rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
+        n_gdna_obs=s.strand.n_gdna_obs,
+        n_rna_obs=s.strand.n_rna_obs,
+        n_grid=n_grid,
+        logodds_window=window,
+        n_tilt=n_tilt,
+        n_grid_ss=n_grid_ss,
+        gdna_prior=prior,
+        intron_prior=s.factory.rows(n_grid, window),
+        policy=s.policy,
+        block_slots=cfg.sweep_block_slots,
+        message_cache=cache,
+        _capture=capture,
+    )
+
+
+def _solve(s: _Solve, _debug):
+    """The two phases. PHASE 1, the INITIAL solve, carries no fitted composition prior: the inert
+    Beta(½,½) reference alone plus the strand likelihood and the messages — single-strand regions
+    self-solve from strand, AMBIG regions on unstranded data are grounded only by the messages, and
+    their two-root ambiguity is what phase 2 resolves. PHASE 2, the DECONVOLVED-gDNA hyperprior REFIT:
+    fit `landscape.DensityLandscape` on the previous solve's deconvolved gDNA (`_fit_gdna_hyperprior`
+    selects the training substrate), reset the belief in FULL — nothing from pass 0 survives but the
+    fitted landscape, so an over-confident region cannot refuse to budge when the prior lands — and
+    re-solve with it as ψ's composition arm; ``calib_refit_iters`` times, each refit's landscape the
+    E-step's start for the next. THE REFIT SWEEPS SHARE THEIR MESSAGE LAYER: the belief is reset before
+    each and the messages never read the prior, so for one grid every input the layer reads is
+    identical from refit to refit, and a refit pays only its two ψ solves (`MessageCache`,
+    content-keyed; a widened bracket misses). Pass 0's grid is never reused.
+
+    Returns ``(belief, belief_pass0, hyperprior)`` — the final belief, the prior-free one, and the last
+    fitted landscape (``None`` if no refit ran). With ``_debug`` the last sweep fills
+    ``_debug["capture"]``."""
+    capture = {} if _debug is not None else None
+    belief = _sweep(s, _init_belief(s), None, capture=capture)
+    belief_pass0 = belief
+    hyperprior: DensityLandscape | None = None
+    cache = MessageCache()
+    for it in range(int(s.config.calib_refit_iters)):
+        hyperprior = _fit_gdna_hyperprior(
+            s.chain,
+            belief,
+            s.statics,
+            s.region_arrays,
+            s.mass_global,
+            s.eff_global,
+            strength=s.config.gdna_prior_strength,
+            prev=hyperprior,
+        )
+        if hyperprior is None:
+            break
+        capture = {} if _debug is not None else None
+        belief = _sweep(s, _init_belief(s), hyperprior, cache, capture=capture)
+        logger.debug(
+            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
+            it + 1,
+            s.config.calib_refit_iters,
+            hyperprior.n_train,
+        )
+    if _debug is not None:
+        _debug["capture"] = capture
+    return belief, belief_pass0, hyperprior
+
+
+def _result(
+    substrate, sj, chain, belief, strand: _Strand, region_eff, boundary_eff, config
+) -> CalibrationResult:
+    """The solved chain projected onto the two payload axes and published as the
+    :class:`CalibrationResult`, with the library-average gDNA density QC scalar.
+
+    ``mass_rna_spliced_boundary`` is the certified-RNA crossings per BOUNDARY — molecules that crossed
+    contiguously having spliced elsewhere; `chain_boundary_deconv` adds the whole of it to ``rna_mass``
+    (``rna = (1−g)·unspliced + spliced``), and `assemble_priors` withholds it from the RNA prior count,
+    since a spliced fragment is guaranteed-RNA in the EM. There is no REGION twin, structurally: a
+    region's contained population cannot hold a spliced molecule. ``count_rna_sj`` is the JUMPING
+    population, exported verbatim — pure RNA by construction, nothing to deconvolve. The three
+    ``mass_per_crossing`` are each their own population's incidence→fragment conversion: applying one
+    population's ratio to another is `TRAPS: a-pooled-conversion-applied-per-component`."""
+    regions = chain_region_deconv(chain, belief, substrate)
+    boundaries = chain_boundary_deconv(chain, belief, substrate)
+    region_eff_gdna, region_eff_rna = region_eff
+    boundary_eff_gdna, boundary_eff_rna = boundary_eff
+    return CalibrationResult(
+        mass_gdna_region=regions.gdna_mass,
+        mass_rna_region=regions.rna_mass,
+        mass_gdna_boundary=boundaries.gdna_mass,
+        mass_rna_boundary=boundaries.rna_mass,
+        mass_rna_spliced_boundary=np.asarray(
+            substrate.boundary_spliced.count, dtype=np.float64
+        ).sum(axis=1),
+        boundary_mass_per_crossing=substrate.boundary_unspliced.mass_per_crossing,
+        count_rna_sj=np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1),
+        boundary_spliced_mass_per_crossing=substrate.boundary_spliced.mass_per_crossing,
+        sj_mass_per_crossing=substrate.sj.mass_per_crossing,
+        gdna_region_eff_len=region_eff_gdna,
+        gdna_boundary_eff_len=boundary_eff_gdna,
+        rna_region_eff_len=region_eff_rna,
+        rna_boundary_eff_len=boundary_eff_rna,
+        # the simplex ψ solved, published per object; the masses above are the same answer with the
+        # two RNA strands added together
+        gdna_frac_region=regions.gdna_frac,
+        rna_pos_frac_region=regions.rna_pos_frac,
+        rna_neg_frac_region=regions.rna_neg_frac,
+        gdna_frac_boundary=boundaries.gdna_frac,
+        rna_pos_frac_boundary=boundaries.rna_pos_frac,
+        rna_neg_frac_boundary=boundaries.rna_neg_frac,
+        gdna_density_global=gdna_density_global(
+            regions, boundaries, region_eff_gdna, boundary_eff_gdna
+        ),
+        rna_sense_frac=strand.rna_sense_frac,
+        gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
+        rna_strand_overdispersion=strand.rna_strand_overdispersion,
+        n_regions=int(substrate.n_regions),
+        n_boundaries=int(substrate.n_boundaries),
+        n_sj=int(substrate.n_sj),
+        config=config,
+    )
+
+
+def _log_summary(result: CalibrationResult, strand: _Strand, substrate, sj) -> None:
+    """The debug line: the sizes, the density scalar, the strand model with its seeds and clamps, and
+    the sj sense fraction against κ — a large gap flags a strand-model / accumulator mismatch (κ stays
+    the StrandModel posterior; this is QC only). Sense is derived, never stored: the accumulator's
+    columns are GENOME strand, and which is sense is read off each sj's annotated transcript strand."""
+    flux = np.asarray(substrate.sj.count, dtype=np.float64)
+    is_pos = np.asarray(sj.strand) == np.int8(Strand.POS)
+    spl_sense = float(np.where(is_pos, flux[:, 0], flux[:, 1]).sum())
+    spl_total = float(flux.sum())
+    sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
+    gd, rn = strand.gdna_seed, strand.rna_seed
+    logger.debug(
+        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
+        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags, %.1f effective%s%s) "
+        "rna_strand_overdispersion=%.4g (%d sj, %d frags%s) "
+        "[own-evidence od: rna=%.4g gdna=%.4g] "
+        "[sj sense_frac=%.3f vs κ=%.3f]",
+        result.n_regions,
+        result.n_boundaries,
+        result.n_sj,
+        result.gdna_density_global,
+        strand.rna_sense_frac,
+        strand.gdna_strand_overdispersion,
+        gd[0],
+        gd[1],
+        gd[3],
+        ", FALLBACK" if gd[2] else ("" if gd[0] >= 0 else ", INJECTED"),
+        (
+            f", CLAMPED at the ceiling from a raw {gd[4]:.3f} - NOT a measurement"
+            if (not gd[2]) and gd[4] > _MAX_OVERDISPERSION
+            else ""
+        ),
+        strand.rna_strand_overdispersion,
+        rn[0],
+        rn[1],
+        ", FALLBACK" if rn[2] else ("" if rn[0] >= 0 else ", INJECTED"),
+        rn[3],
+        gd[4],
+        sj_sense_frac,
+        strand.rna_sense_frac,
+    )
+
+
 def calibrate(
     payload: "AccumulatorPayload",
     region_arrays: "RegionArrays",
@@ -324,32 +795,22 @@ def calibrate(
     mature_walls=None,
     boundary_reach=None,
 ) -> CalibrationResult:
-    """Deconvolve the library into gDNA / RNA per object, then derive gdna_density_global.
+    """Deconvolve the library into gDNA / RNA per object, then derive gdna_density_global — the
+    stages in the module docstring's order, each a function above with one job.
 
-    Runs the belief-propagation sweep (a single forward-backward pass per phase, resolving the
-    per-object pie); see the module docstring for the data flow. ``gdna_density_global`` may be ``0``
-    (a zero-gDNA library) and an object's deconvolved gDNA mass may be ``0`` (a pure-RNA object); both
-    are valid, graceful outputs — not failures.
+    ``gdna_density_global`` may be ``0`` (a zero-gDNA library) and an object's deconvolved gDNA mass
+    may be ``0`` (a pure-RNA object); both are valid, graceful outputs — not failures.
 
-    ``sj`` is the splice graph's sj axis
-    (:func:`~rigel.calibration.splice_graph.build_sj_geometry_arrays`), in the accumulator's own
-    sj slot order — where each sj attaches, its transcript strand, and its exonic reach.
-    ``None`` means "this library's graph has no sj boundaries", which is legal (a single-exon-only
-    reference) and is NOT the same as "no sj flux".
-
-    ``boundary_flags`` is the splice graph's per-contiguous-boundary structural bits
-    (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
-    ``RegionStatics.boundary_flags``. ``None`` (the default) leaves them zero.
-
-    ``mature_walls`` / ``boundary_reach`` are the two annotation-only WALL inputs the MEASURED-TOTAL
-    exposure needs (:func:`~rigel.calibration.splice_graph.build_mature_wall_distances` and
-    :func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`). ⛔ They are
-    consulted ONLY when ``config.background_abundance == "measured_total"``, and that setting REFUSES
-    to run without them rather than silently falling back — a background rate that quietly changed
-    estimator would be the worst of both.
+    ``sj`` is the splice graph's sj axis (:func:`~rigel.calibration.splice_graph.build_sj_geometry_arrays`),
+    in the accumulator's own sj slot order; ``None`` means the graph has no sj boundaries, which is legal
+    (a single-exon-only reference) and is NOT the same as "no sj flux". ``boundary_flags`` is the graph's
+    per-contiguous-boundary structural bits, carried onto the chain as ``RegionStatics.boundary_flags``.
+    ``mature_walls`` / ``boundary_reach`` are the two annotation-only WALL inputs the measured-total
+    exposure and the abundance landscape need. ``injected_priors`` are population-scale priors a tiny toy
+    cannot fit, injected in place of the internal fits (:class:`InjectedCalibrationPriors`).
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
+    inj = injected_priors
     sj = _empty_sj_geometry() if sj is None else sj
     if int(sj.n_sj) != int(substrate.n_sj):
         raise ValueError(
@@ -361,360 +822,48 @@ def calibrate(
         )
 
     # THE CHAIN AND ITS GEOMETRY COME FIRST, and the geometry owns every divisor from here down:
-    # `eff_gdna`/`eff_rna` are the CONTAINED placements at a REGION slot and the CROSSING placements at
-    # a BOUNDARY slot, one rule, one array. Nothing below computes a second length model.
+    # `eff_gdna` / `eff_rna` are the CONTAINED placements at a REGION slot and the CROSSING placements at
+    # a BOUNDARY slot, one rule, one array. Nothing below computes a second length model; the result's
+    # supports are PROJECTED off the geometry (`_project_eff`), so the number `priors` divides by is
+    # byte-identically the one the solver divided by.
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(
         chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
     )
     statics = build_region_statics(chain, region_arrays, boundary_flags)
-
-    # The result's two gDNA supports, PROJECTED off the geometry rather than recomputed — so the number
-    # `priors` divides by is byte-identically the one the solver divided by. Two implementations
-    # of one quantity is how they come to disagree.
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
-
-    # THE MEASURED-TOTAL (counts, exposure) PAIR for the pooled gDNA background estimators, built
-    # ONCE here and handed to both. ``None`` under the shipped default, and then every consumer takes
-    # its own contained pair instead.
-    # ⛔ It REFUSES rather than falling back: a background rate that silently changed estimator because
-    # an argument was missing is worse than either estimator.
-    background_pair = None
-    if config.background_abundance == "measured_total":
-        if mature_walls is None or boundary_reach is None:
-            raise ValueError(
-                "CalibrationConfig.background_abundance = 'measured_total' needs the wall inputs: "
-                "pass mature_walls=build_mature_wall_distances(index, region_arrays) and "
-                "boundary_reach=build_contiguous_boundary_reach_arrays(index) (both are in "
-                "scan_cache.index_derived_inputs). Refusing rather than falling back to the contained "
-                "pair, which would change the background rate without saying so."
-            )
-        _wall_mask = build_region_wall_mask(
-            region_arrays,
-            mature_walls,
-            boundary_reach[0],
-            boundary_reach[1],
-            w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
-        )
-        _bg_counts, _bg_exposure, _ = region_counts_and_exposure(
-            substrate, region_arrays, _wall_mask
-        )
-        background_pair = (_bg_counts, _bg_exposure)
-
-    # THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT
-    # from counts and lengths only, so it is not circular with anything solved below. It is a QC and
-    # injection surface; nothing in the solve reads it.
-    abundance_landscape = None
-    if config.abundance_landscape:
-        if inj is not None and inj.abundance_landscape is not None:
-            abundance_landscape = inj.abundance_landscape
-        elif mature_walls is None or boundary_reach is None:
-            # ⛔ SKIPPED, LOUDLY — it must not raise. The flag is ON by default, this object is the
-            # sole source of the QC report's density panel, and many unit and toy callers legitimately
-            # have no wall arrays and never wanted a panel. The alternative to skipping was never to
-            # fit on unmasked totals — nothing fits unmasked either way — so the choice is between a
-            # missing panel and a refusal, and a missing panel is right here. It is NOT a silent
-            # fallback: the object stays None, never a quietly-different estimate, and the skip is
-            # logged. `background_abundance` above KEEPS its refusal, because that pair feeds ψ while
-            # this one is read only by the report and the debug bundle.
-            logger.warning(
-                "calibration: abundance_landscape is enabled but the wall inputs are missing "
-                "(mature_walls / boundary_reach, both in scan_cache.index_derived_inputs) — skipping "
-                "the total-density landscape, so the QC density panel will be omitted. Nothing in the "
-                "solve reads it, so no solved number changes."
-            )
-        else:
-            _al_mask = build_region_wall_mask(
-                region_arrays,
-                mature_walls,
-                boundary_reach[0],
-                boundary_reach[1],
-                w_max=w_max_from_deposited_lengths(payload.deposited_lengths),
-            )
-            abundance_landscape = fit_abundance_landscape(substrate, region_arrays, _al_mask)
-    # And the RNA twin, on the same two axes — the RNA population's own opportunity per object.
-    # It has no consumer in the solve: the prior is a conserved FRAGMENT COUNT and divides by nothing
-    # on the mass path. Kept because it is the RNA divisor any density-based prior needs and because
-    # it is byte-identically the opportunity the solver used — see `result.py`.
+    background_pair = _background_pair(
+        payload, substrate, region_arrays, config, mature_walls, boundary_reach
+    )
+    abundance_landscape = _abundance_landscape(
+        payload, substrate, region_arrays, config, inj, mature_walls, boundary_reach
+    )
+    # the RNA twin: no consumer in the solve (the prior is a conserved FRAGMENT COUNT and divides by
+    # nothing on the mass path), kept because it is byte-identically the opportunity the solver used
     region_eff_rna, boundary_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
-    # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
-    # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
-    # deference weight — there is no hard identifiability gate (an unstranded library has κ≈½ ⇒ w≈0 ⇒
-    # count governs, regardless of depth).
-    if inj is not None and inj.rna_sense_frac is not None:
-        # INJECTED population κ + spliced sample size — a tiny toy cannot fit either (scarce spliced).
-        rna_sense_frac = float(inj.rna_sense_frac)
-        n_rna_obs = float(inj.n_rna_obs) if inj.n_rna_obs is not None else 0.0
-    else:
-        balance = fit_strand_balance(strand_model)
-        if balance.fallback_used:
-            # No spliced reads at all — not a usable RNA-seq library. Fail loudly (a real RNA-seq library
-            # always carries spliced reads); see CalibrationStrandError.
-            raise CalibrationStrandError(
-                "the library has zero spliced unique-mapper observations; this does not look like an "
-                "RNA-seq library. A real RNA-seq library always carries spliced reads."
-            )
-        rna_sense_frac = float(balance.rna_sense_frac)
-        n_rna_obs = float(balance.n_observations)
-
-    # The gDNA strand fit's SEED SELECTOR: count-observability, straight off the signature. The
-    # away-half moment (`gdna_strand`) needs no seed weight, so two masks are the whole input — there
-    # is no local density imputation behind them.
-    _region_obs, _boundary_obs = count_observable_masks(
-        np.asarray(region_arrays.signature), np.asarray(region_arrays.ref_id)
+    strand = _fit_strand(substrate, region_arrays, strand_model, inj)
+    factory = _IntronFactory(
+        chain, substrate, region_arrays, region_eff_gdna, config, inj, background_pair
     )
-
-    # Strand-module parameters — the two Beta-Binomial overdispersions.
-    # RNA FIRST (mean κ; fitted from the PER-SJ SJ strand table, certified pure RNA): it is the gDNA
-    # fit's fallback. THEN gDNA (mean ½) by the AWAY-HALF moment over every genic count- and
-    # strand-observable object — intron regions, exon|intron and gene-edge boundaries — which is
-    # unbiased under any RNA content of the seeds (`gdna_strand`'s lemma), so no seed is weighted and
-    # no class is asserted pure: the fit must hold regardless of the reference transcriptome.
-    # Intergenic and AMBIG objects cannot be oriented and are out. The gDNA fit is the raw pooled
-    # moment clipped to the physical support — no location prior (gate
-    # `tests/calibration/test_gdna_strand_fit.py`).
-    # (n_seed_regions, n_seed_frags, fallback, effective_seeds, raw_od) — QC log only; -1 = injected
-    _gd_seed = (-1, -1, False, float("nan"), float("nan"))
-    _rna_seed = (-1, -1, False, float("nan"))
-    if inj is not None and inj.rna_strand_overdispersion is not None:
-        rna_strand_overdispersion = float(inj.rna_strand_overdispersion)
-    else:
-        rna_strand = fit_rna_strand_from_sj_table(
-            strand_model.sj_table,
-            rna_sense_frac=rna_sense_frac,
-        )
-        rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
-        _rna_seed = (
-            rna_strand.n_seed_regions,
-            rna_strand.n_seed_fragments,
-            rna_strand.fallback_used,
-            rna_strand.raw_overdispersion,
-        )
-    if inj is not None and inj.gdna_strand_overdispersion is not None:
-        gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
-    else:
-        gdna_strand = fit_gdna_strand_from_substrate(
-            substrate,
-            region_arrays,
-            region_count_observable=_region_obs,
-            boundary_count_observable=_boundary_obs,
-            rna_sense_frac=rna_sense_frac,
-        )
-        gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
-        _gd_seed = (
-            gdna_strand.n_seed_regions,
-            gdna_strand.n_seed_fragments,
-            gdna_strand.fallback_used,
-            gdna_strand.effective_seeds,
-            gdna_strand.raw_overdispersion,
-        )
-
-    # RECONCILE THE TWO COMPONENTS, with no conjured shrinkage target. The weaker-measured dispersion
-    # shrinks toward the better-measured one, weighted by their
-    # own null informations; neither is pulled toward a conjured number, and with neither measured the two
-    # coincide at the ceiling, which is what leaves the strand channel uninformative rather than confident.
-    # ⛔ ONLY when NEITHER is injected: an injected value is the arm's whole point, and letting the other
-    # component shrink toward it would silently change what every od-injection instrument measures.
-    if inj is None or (
-        inj.rna_strand_overdispersion is None and inj.gdna_strand_overdispersion is None
-    ):
-        rna_strand_overdispersion, gdna_strand_overdispersion = reconcile_overdispersions(
-            rna_strand.raw_overdispersion,
-            rna_strand.information,
-            gdna_strand.raw_overdispersion,
-            gdna_strand.information,
-        )
-
-    # Strand-Fisher noise-floor SAMPLE SIZES (the sweep's τ seed): N_gdna (gDNA-eligible unspliced fragments in
-    # the structurally pure-gDNA intergenic regions, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was
-    # fit from). gDNA's sense mean is ½ by biology (dsDNA symmetry — not fitted); the seed only needs the sample
-    # sizes to size the sampling part of the floor ¼·(1/N + ω). N_gdna=0 (a gDNA-free library) ⇒ 1/N_gdna → ∞ ⇒
-    # the strand seed is gated off (nothing to distinguish RNA from).
-    if inj is not None and inj.n_gdna_obs is not None:
-        n_gdna_obs = float(
-            inj.n_gdna_obs
-        )  # INJECTED intergenic gDNA sample size (toy intergenic is sparse)
-    else:
-        _inter = coarse_type_array(np.asarray(region_arrays.signature)) == 0
-        n_gdna_obs = float(
-            np.asarray(substrate.region_contained.count, dtype=np.float64)[_inter].sum()
-        )
-    # n_rna_obs is set above (injected or from the strand-balance fit).
-
-    def _init_belief():
-        return init_beliefs(
-            chain,
-            geometry,
-            statics,
-            rna_sense_frac=rna_sense_frac,
-            gdna_strand_overdispersion=gdna_strand_overdispersion,
-            rna_strand_overdispersion=rna_strand_overdispersion,
-            n_grid=config.sweep_n_grid,
-            n_grid_ss=config.sweep_n_grid_single_strand,
-            logodds_window=config.sweep_logodds_window,
-        )
-
-    belief = _init_belief()
-    # The gDNA INTRON FACTORY λ-factor: deconvolve confident gDNA
-    # from intron regions against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
-    # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
-    # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
-    # INJECTED intergenic intron-factory background overrides the internal (toy-sparse) fit.
-    intron_background = (
-        inj.intron_background
-        if (inj is not None and inj.intron_background is not None)
-        else (
-            fit_intron_background(
-                substrate,
-                region_arrays,
-                region_eff_gdna,
-                include_introns=False,
-                counts_exposure=background_pair,
-            )
-            if config.intron_factory
-            else None
-        )
-    )
-    intron_prior = (
-        _build_intron_prior(
-            chain, substrate, region_arrays, region_eff_gdna, config, bg=intron_background
-        )
-        if (config.intron_factory and intron_background is not None)
-        else None
-    )
-    # ⛔⛔ **THE INTRON FACTORY'S λ-FACTOR IS EVALUATED *ON* THE SOLVE GRID, so it is a function of
-    # (n_grid, L) and must be REBUILT when the bracket moves — not regridded.** `_regrid_global`
-    # interpolates a prior BETWEEN two grids of the same L; there is no such map onto a WIDER domain,
-    # because the factor was never evaluated out there; regridding onto a wider domain raises
-    # `IndexError`, which is the honest failure. Memoised, because only two brackets ever occur in one
-    # call (the configured one and the derived one) and `_build_intron_prior` is a per-slot NegBinom
-    # over the whole grid.
-    _intron_priors = {(int(config.sweep_n_grid), float(config.sweep_logodds_window)): intron_prior}
-
-    def _intron_prior_at(n_grid: int, window: float):
-        key = (int(n_grid), float(window))
-        if key not in _intron_priors:
-            _intron_priors[key] = _build_intron_prior(
-                chain,
-                substrate,
-                region_arrays,
-                region_eff_gdna,
-                replace(config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)),
-                bg=intron_background,
-            )
-        return _intron_priors[key]
-
-    # Every message's price is SELF-CONTAINED in the sweep: each hop charges the two nodes' counting
-    # and the pair's own disagreement, all derived from counts and opportunities inside the pass.
-    # There is nothing to fit here.
-
-    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region
-    # message internals. Inert in production.
-    # ONE policy instance for every phase; the intron factory's rows reach it on each sweep's context
-    # (``factory_rows``, the same memoised array the sweep adds as ψ's λ-factor).
-    # ⛔ THE POLICY NAME MUST SELECT THE POLICY. An unreadable knob is worse than no knob: an
-    # arm that silently runs a different policy than it names is a benchmark that cannot be
-    # trusted, so an unknown name RAISES here.
-    if not config.message_propagation or config.message_policy == "silent":
-        policy = SilentPolicy()
-    elif config.message_policy == "transfer":
-        # the composition-transfer policy on the two-phase backbone. An intron's own claim is the
-        # factory's row for it, which the sweep hands over on the context; `None` there (factory off /
-        # uninformative background) makes it byte-identical to silence.
-        policy = TransferPolicy(
-            strand=(rna_sense_frac, gdna_strand_overdispersion, rna_strand_overdispersion),
-        )
-    else:
-        raise ValueError(
-            f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
-        )
-
-    def _sweep(prior, cache=None):
-        capture = {} if _debug is not None else None
-        # THE λ BRACKET IS `max(the reference's floor, the fitted prior's own demand)`. ψ evaluates
-        # the landscape at `log ρ = log f + log M − log E` and can only offer `f ∈ [σ(−L), σ(L)]`, so a
-        # bracket narrower than the prior's own support leaves ψ with no coordinate for what the prior is
-        # telling it — and the answer then depends on `L`, which `simplex_logodds` calls its own
-        # acceptance test. The demand is DERIVED (`required_logodds_window`), never chosen.
-        # ⛔ The prior-free Phase-1 solve has no landscape to widen for, and is L-invariant to seven
-        # digits, so it keeps the floor. That is the whole of the conditional.
-        # ⛔ `dlam` is held FIXED, so the grids scale with the bracket: widening `L` at a fixed grid
-        # size coarsens the lattice and confounds two knobs, and the answer then reverses with `L`
-        # instead of saturating.
-        # The TILT axis does NOT scale. `θ` is the RNA-internal SHARE and has no bracket problem, so it
-        # stays at the configured resolution, which keeps the AMBIG cube's growth roughly linear in the
-        # bracket rather than quadratic.
-        window = float(config.sweep_logodds_window)
-        n_grid, n_grid_ss = int(config.sweep_n_grid), int(config.sweep_n_grid_single_strand)
-        n_tilt = (
-            config.sweep_n_tilt if config.sweep_n_tilt is not None else int(config.sweep_n_grid)
-        )
-        if prior is not None:
-            required = prior.required_logodds_window(mass_global, eff_global)
-            if required > window:
-                n_grid = _scaled_grid(n_grid, window, required)
-                n_grid_ss = _scaled_grid(n_grid_ss, window, required)
-                window = required
-                logger.debug(
-                    "calibration: λ bracket %.4f (the landscape's support), n_grid %d, n_grid_ss %d, "
-                    "n_tilt %d (unscaled)",
-                    window,
-                    n_grid,
-                    n_grid_ss,
-                    n_tilt,
-                )
-        lam_factor = _intron_prior_at(n_grid, window)
-        # ⛔ ψ has NO reference location. A located reference is a prior ASSERTION at fixed strength,
-        # and it becomes the entire answer wherever the strand channel is dead. The reference is the
-        # symmetric Jeffreys measure; background information enters as the intron-factory λ-factor
-        # above, a likelihood whose precision scales with counts.
-        out = solve_chain(
-            chain,
-            statics,
-            geometry,
-            belief,
-            region_arrays,
-            rna_sense_frac=rna_sense_frac,
-            gdna_strand_overdispersion=gdna_strand_overdispersion,
-            rna_strand_overdispersion=rna_strand_overdispersion,
-            n_gdna_obs=n_gdna_obs,
-            n_rna_obs=n_rna_obs,
-            n_grid=n_grid,
-            logodds_window=window,
-            n_tilt=n_tilt,
-            n_grid_ss=n_grid_ss,
-            gdna_prior=prior,
-            intron_prior=lam_factor,
-            # Message propagation ships ON; `message_policy` selects which policy that installs —
-            # see the dispatch above. The two halves of the panel are judged against different bars
-            # and are never pooled: messages must WIN on unstranded data, where kappa = 1/2 zeroes the
-            # strand lambda-term so a slot has no own composition evidence and a message is its only
-            # source, and do minimal HARM against silence on stranded data, where a sighted slot's own
-            # solve is already good.
-            policy=policy,
-            block_slots=config.sweep_block_slots,
-            message_cache=cache,
-            _capture=capture,
-        )
-        if capture is not None:
-            _debug["capture"] = capture
-        return out
-
-    # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate: an
-    # estimator fitted on `mass / eff_gdna` over all slots is answering the wrong question, however
-    # well it fits. The total-density field this module does use is the `AbundanceLandscape` above,
-    # fitted on the wall-exact measured totals over each region's own LENGTH — a geometry rather than
-    # a model in the divisor — and it reaches the report, never the solve.
+    # ⛔ A TOTAL density over ONE component's opportunity model is not a composition estimate; the
+    # per-slot gDNA support below is the basis the landscape prior is fit and read on, and the
+    # total-density field this module does use is the abundance landscape above, which reaches the
+    # report and never the solve.
     mass_global, eff_global = region_gdna_geometry(geometry)
-    # PHASE 1 — the INITIAL solve carries no fitted composition prior: the inert Beta(½,½) reference
-    # alone (``gdna_prior=None``) plus the strand likelihood and the messages. Single-strand regions
-    # self-solve from strand; AMBIG regions on unstranded data are grounded only by the messages here,
-    # and their two-root ambiguity is what the phase-2 hyperprior resolves.
-    belief = _sweep(None)
-    belief_pass0 = (
-        belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
+    solve = _Solve(
+        chain,
+        statics,
+        geometry,
+        region_arrays,
+        strand,
+        factory,
+        _policy(config, strand),
+        config,
+        mass_global,
+        eff_global,
     )
+    belief, belief_pass0, gdna_hyperprior = _solve(solve, _debug)
     logger.debug(
         "calibration: PHASE 1 prior-free initial solve (abundance landscape: %s)",
         "none"
@@ -722,191 +871,54 @@ def calibrate(
         else f"{abundance_landscape.n_train} training regions, {len(abundance_landscape.modes)} modes",
     )
 
-    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit `landscape.DensityLandscape` on the
-    # initial solve's deconvolved gDNA, then RE-SOLVE with it as ψ's composition arm, resolving the
-    # two-root ambiguity the prior-free pass leaves at unstranded AMBIG regions. Repeated
-    # ``calib_refit_iters`` times. It is anchored and extremely weak: `fit_landscape`'s own `anchor`
-    # argument is what grounds it, and the only intergenic background that reaches ψ is
-    # `fit_intron_background`'s.
-    gdna_hyperprior: DensityLandscape | None = None
-    # THE REFIT SWEEPS SHARE THEIR MESSAGE LAYER. The belief is reset before each, and the messages
-    # never read the prior, so for one grid every input the layer reads is identical from refit to
-    # refit; a refit pays its two ψ solves and is served the rest (`message_cache.MessageCache`, content-keyed:
-    # a refit whose bracket widens changes the grid and misses). Pass 0's grid is never reused.
-    cache = MessageCache()
-    for it in range(int(config.calib_refit_iters)):
-        gdna_hyperprior = _fit_gdna_hyperprior(
-            chain,
-            belief,
-            statics,
-            region_arrays,
-            mass_global,
-            eff_global,
-            strength=config.gdna_prior_strength,
-            prev=gdna_hyperprior,  # None at the first fit; the fit before, after
-        )
-        if gdna_hyperprior is None:
-            break
-        # FULL reset, then re-solve WITH the prior: nothing from pass-0 survives into the re-solve except
-        # the fitted landscape itself, so an over-confident region cannot refuse to budge when the prior lands.
-        belief = _init_belief()
-        belief = _sweep(gdna_hyperprior, cache)
-        logger.debug(
-            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
-            it + 1,
-            config.calib_refit_iters,
-            gdna_hyperprior.n_train,
-        )
+    result = _result(
+        substrate,
+        sj,
+        chain,
+        belief,
+        strand,
+        (region_eff_gdna, region_eff_rna),
+        (boundary_eff_gdna, boundary_eff_rna),
+        config,
+    )
 
-    regions = chain_region_deconv(chain, belief, substrate)
-    boundaries = chain_boundary_deconv(chain, belief, substrate)
-
-    if (
-        _debug is not None
-    ):  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
+    if _debug is not None:  # inert diagnostic hook — the solved chain internals
         _debug.update(
             chain=chain,
             belief=belief,  # the FINAL belief (refit if calib_refit_iters>0, else the initial solve)
-            belief_pass0=belief_pass0,  # the initial prior-free solve (the refit before/after frame)
+            belief_pass0=belief_pass0,  # the prior-free solve (the refit before/after frame)
             geometry=geometry,
             statics=statics,
             substrate=substrate,
             sj=sj,
             region_arrays=region_arrays,
             gdna_prior=abundance_landscape,  # the TOTAL-density landscape (QC / injection substrate)
-            gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
-            rna_sense_frac=rna_sense_frac,
+            gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA hyperprior (None if no refit)
+            rna_sense_frac=strand.rna_sense_frac,
             region_eff_gdna=region_eff_gdna,
             boundary_eff_gdna=boundary_eff_gdna,
-            # the fitted-or-injected population priors — extract from a population scenario, inject into a toy
+            # the fitted-or-injected population priors — extract from a population scenario, inject
+            # into a toy
             calibration_priors=InjectedCalibrationPriors(
-                rna_sense_frac=rna_sense_frac,
-                n_rna_obs=n_rna_obs,
-                n_gdna_obs=n_gdna_obs,
-                gdna_strand_overdispersion=gdna_strand_overdispersion,
-                rna_strand_overdispersion=rna_strand_overdispersion,
-                intron_background=intron_background,
+                rna_sense_frac=strand.rna_sense_frac,
+                n_rna_obs=strand.n_rna_obs,
+                n_gdna_obs=strand.n_gdna_obs,
+                gdna_strand_overdispersion=strand.gdna_strand_overdispersion,
+                rna_strand_overdispersion=strand.rna_strand_overdispersion,
+                intron_background=factory.background,
                 abundance_landscape=abundance_landscape,
             ),
+            abundance_landscape=abundance_landscape,
         )
-        _debug["abundance_landscape"] = abundance_landscape
-
-    # Report-facing diagnostics: the fitted gDNA hyperprior P(ρ) (bimodal ⇒ capture enrichment). Consumed by
-    # the QC report, never by the EM.
-    if diagnostics_out is not None:
+    if diagnostics_out is not None and abundance_landscape is not None:
+        # the QC density panel comes from the total-density landscape's census; the report omits it
+        # when the landscape was not fit
         from .diagnostics import CalibrationDiagnostics
 
-        # The QC density panel comes from the total-density landscape's CENSUS. ``None`` when the
-        # landscape was not fit (no wall inputs) — the report then omits the panel.
-        if abundance_landscape is not None:
-            diagnostics_out["calibration"] = CalibrationDiagnostics.from_abundance_landscape(
-                abundance_landscape
-            )
-
-    # Derive gdna_density_global (the library-average density QC scalar).
-    density_global = gdna_density_global(regions, boundaries, region_eff_gdna, boundary_eff_gdna)
-
-    # The certified-RNA crossings per BOUNDARY: molecules that crossed contiguously having spliced
-    # elsewhere. ``chain_boundary_deconv`` adds the whole of this to ``rna_mass`` (rna = (1−g)·unspliced +
-    # spliced), so it is exactly the spliced component of ``mass_rna_boundary``. ``assemble_priors``
-    # withholds it from ``rna_prior_count`` — a spliced fragment is guaranteed-RNA in the EM (no gDNA
-    # candidate), so it must not load the RNA side of the gDNA-vs-RNA *unspliced* split. ``mass_rna_boundary``
-    # stays spliced-inclusive so per-boundary conservation gdna + rna = unspliced + spliced holds.
-    #
-    # There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
-    # fragment used no sj, so a region's contained population cannot hold a spliced molecule.
-    mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(
-        axis=1
-    )
-    # GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this boundary carries.
-    # ``assemble_priors`` needs it to turn a per-boundary object-incidence total into a fragment count.
-    boundary_mass_per_crossing = substrate.boundary_unspliced.mass_per_crossing
-
-    # The JUMPING population, exported verbatim. A sj boundary is pure RNA by construction, so there
-    # is nothing to deconvolve: this is ``sj_count`` summed over the genome-strand columns.
-    # ``assemble_priors`` does not read it — it is certified RNA in exactly the sense the spliced
-    # crossings are withheld for — but the calibration's output should not be silent about the
-    # population that at a donor boundary IS the gene's whole spliced output.
-    count_rna_sj = np.asarray(substrate.sj.count, dtype=np.float64).sum(axis=1)
-
-    # The two remaining INCIDENCE→FRAGMENT conversions, alongside `boundary_mass_per_crossing`. Each is
-    # its own population's `mass / count`: applying one population's ratio to another is
-    # `TRAPS: a-pooled-conversion-applied-per-component`. `CalibrationResult.library_rna_fragments`
-    # derives the library count from them — a property, never a stored scalar, so an oracle arm that
-    # swaps the mass arrays cannot inherit a count describing the arrays it replaced.
-    boundary_spliced_mass_per_crossing = substrate.boundary_spliced.mass_per_crossing
-    sj_mass_per_crossing = substrate.sj.mass_per_crossing
-
-    result = CalibrationResult(
-        mass_gdna_region=regions.gdna_mass,
-        mass_rna_region=regions.rna_mass,
-        mass_gdna_boundary=boundaries.gdna_mass,
-        mass_rna_boundary=boundaries.rna_mass,
-        mass_rna_spliced_boundary=mass_rna_spliced_boundary,
-        boundary_mass_per_crossing=boundary_mass_per_crossing,
-        count_rna_sj=count_rna_sj,
-        boundary_spliced_mass_per_crossing=boundary_spliced_mass_per_crossing,
-        sj_mass_per_crossing=sj_mass_per_crossing,
-        gdna_region_eff_len=region_eff_gdna,
-        gdna_boundary_eff_len=boundary_eff_gdna,
-        rna_region_eff_len=region_eff_rna,
-        rna_boundary_eff_len=boundary_eff_rna,
-        # The simplex ψ solved, published per object rather than summed away. `mass_*` above is this
-        # same answer with the two RNA strands added together.
-        gdna_frac_region=regions.gdna_frac,
-        rna_pos_frac_region=regions.rna_pos_frac,
-        rna_neg_frac_region=regions.rna_neg_frac,
-        gdna_frac_boundary=boundaries.gdna_frac,
-        rna_pos_frac_boundary=boundaries.rna_pos_frac,
-        rna_neg_frac_boundary=boundaries.rna_neg_frac,
-        gdna_density_global=density_global,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        n_regions=int(substrate.n_regions),
-        n_boundaries=int(substrate.n_boundaries),
-        n_sj=int(substrate.n_sj),
-        config=config,
-    )
-    # Diagnostic: the SJ sense fraction should agree with the StrandModel κ. A large gap flags a
-    # strand-model / accumulator mismatch (κ stays the StrandModel posterior — this is QC only).
-    # It is also "sense derived, never stored" in one line: the accumulator's columns are GENOME
-    # strand, and which of them is *sense* is read off each sj's own annotated transcript strand.
-    _flux = np.asarray(substrate.sj.count, dtype=np.float64)
-    _is_pos = np.asarray(sj.strand) == np.int8(Strand.POS)
-    spl_sense = float(np.where(_is_pos, _flux[:, 0], _flux[:, 1]).sum())
-    spl_total = float(_flux.sum())
-    sj_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
-    logger.debug(
-        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gdna_strand_overdispersion=%.4g (%d seed regions, %d frags, %.1f effective%s%s) "
-        "rna_strand_overdispersion=%.4g (%d sj, %d frags%s) "
-        "[own-evidence od: rna=%.4g gdna=%.4g] "
-        "[sj sense_frac=%.3f vs κ=%.3f]",
-        result.n_regions,
-        result.n_boundaries,
-        result.n_sj,
-        result.gdna_density_global,
-        rna_sense_frac,
-        gdna_strand_overdispersion,
-        _gd_seed[0],
-        _gd_seed[1],
-        _gd_seed[3],
-        ", FALLBACK" if _gd_seed[2] else ("" if _gd_seed[0] >= 0 else ", INJECTED"),
-        (
-            f", CLAMPED at the ceiling from a raw {_gd_seed[4]:.3f} - NOT a measurement"
-            if (not _gd_seed[2]) and _gd_seed[4] > _MAX_OVERDISPERSION
-            else ""
-        ),
-        rna_strand_overdispersion,
-        _rna_seed[0],
-        _rna_seed[1],
-        ", FALLBACK" if _rna_seed[2] else ("" if _rna_seed[0] >= 0 else ", INJECTED"),
-        _rna_seed[3],
-        _gd_seed[4],
-        sj_sense_frac,
-        rna_sense_frac,
-    )
+        diagnostics_out["calibration"] = CalibrationDiagnostics.from_abundance_landscape(
+            abundance_landscape
+        )
+    _log_summary(result, strand, substrate, sj)
     return result
 
 

@@ -48,6 +48,8 @@ Both come from the region SIGNATURE and never from the counts:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .blocks import block_slice, gather, view_fields
@@ -237,25 +239,9 @@ def solve_chain(
     """
     policy = policy if policy is not None else SilentPolicy()
     n = int(chain.n_slots)
-    fp, fn = np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool)
-    is_region = np.asarray(chain.kind) == REGION
-    # the structural classes, from the signature and once for the chain: the EXON region (the SPLICE
-    # IN's destination class, a policy input rather than a gate) and the signature's two EXON bits per
-    # slot — a strand's opportunity geometry, which the RNA level lanes read to tell a strand's intron
-    # from its exon inside an overlapping locus
-    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-    ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
-    is_exon_region = is_region & (rtype[ri] == 2)
-    sig = np.asarray(region_arrays.signature).astype(np.int64)[ri]
-    exon_pos = is_region & ((sig & BIT_EXON_POS) > 0)
-    exon_neg = is_region & ((sig & BIT_EXON_NEG) > 0)
-    # a TERMINAL receives nothing (the structural rule in the module docstring): a region with no
-    # admissible RNA strand, the same predicate the SOLVE gate locks — and where the chain breaks
-    terminal = is_region & g1_locked(fp, fn)
-
-    kappa = float(rna_sense_frac)
-    od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
-    scalars = dict(
+    structure = _structure(chain, statics, region_arrays)
+    kappa, od_g, od_r = float(rna_sense_frac), gdna_strand_overdispersion, rna_strand_overdispersion
+    grid = dict(
         n_grid=int(n_grid),
         logodds_window=float(logodds_window),
         n_tilt=None if n_tilt is None else int(n_tilt),
@@ -263,12 +249,21 @@ def solve_chain(
     )
     # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
     # alone: the only information a message may carry across a locus boundary
-    library = policy.library(
-        ChainView(
-            **view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg),
-            factory_rows=intron_prior,
-            **scalars,
-        )
+    view = ChainView(
+        **view_fields(chain, statics, geometry, structure), factory_rows=intron_prior, **grid
+    )
+    sweep = _Sweep(
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        n_gdna_obs=n_gdna_obs,
+        n_rna_obs=n_rna_obs,
+        n_grid_ss=n_grid_ss,
+        gdna_prior=gdna_prior,
+        rna_prior=rna_prior,
+        policy=policy,
+        library=policy.library(view),
+        **grid,
     )
 
     out = {
@@ -279,30 +274,17 @@ def solve_chain(
     counts = AssertionCounts()
     diagnostics: list = []
     rowless = 0  # slots owned by blocks whose policy delivered no row array
-    for b in locus_blocks(chain, terminal, block_slots):
+    for b in locus_blocks(chain, structure.terminal, block_slots):
         sl = slice(b.start, b.end)
         res = _solve_block(
             block_slice(chain, sl),
             block_slice(statics, sl),
             block_slice(geometry, sl),
             block_slice(belief, sl),
-            is_exon_region[sl],
-            exon_pos[sl],
-            exon_neg[sl],
-            terminal[sl],
+            block_slice(structure, sl),
+            sweep,
             n_owned=b.stop - b.start,
-            kappa=kappa,
-            od_g=od_g,
-            od_r=od_r,
-            n_gdna_obs=n_gdna_obs,
-            n_rna_obs=n_rna_obs,
-            n_grid_ss=n_grid_ss,
-            gdna_prior=gdna_prior,
-            rna_prior=rna_prior,
             factory_rows=None if intron_prior is None else intron_prior[sl],
-            policy=policy,
-            library=library,
-            scalars=scalars,
             cache=None if _capture is not None else message_cache,
             _capture={} if _capture is not None else None,
         )
@@ -316,12 +298,11 @@ def solve_chain(
         if _capture is not None:
             diagnostics.append((b, res["diagnostics"]))
     # the row check's ELIGIBLE set reads as the chain's: where any block delivered rows, the chain's
-    # row array covers every slot (a silent block's rows are zero rows, `blocks.gather` fills them so), and
-    # a zero row is a finite row that was checked — so the published count does not depend on how the
-    # chain was cut. Where no block delivered, the check never ran and the key stays absent.
+    # row array covers every slot (a silent block's rows are zero rows, `blocks.gather` fills them so),
+    # and a zero row is a finite row that was checked — so the published count does not depend on how
+    # the chain was cut. Where no block delivered, the check never ran and the key stays absent.
     if rowless and "lam_rows_finite" in counts:
         counts._add("lam_rows_finite", 0, rowless)
-
     if _capture is not None:  # inert diagnostic hook
         _capture.update(gather(diagnostics, n))
         _capture.update(
@@ -335,8 +316,260 @@ def solve_chain(
             solve_grid=_logodds_grid(int(n_grid), float(logodds_window))[1],
             intron_prior=intron_prior,
         )
-
     return RegionBelief(**out, has_composition=has_composition)
+
+
+@dataclass(frozen=True, slots=True)
+class _Structure:
+    """The structural classes per slot, from the signature and once for the chain: the EXON region (the
+    SPLICE IN's destination class, a policy input rather than a gate); the signature's two EXON bits per
+    slot — a strand's opportunity geometry, which the RNA level lanes read to tell a strand's intron
+    from its exon inside an overlapping locus; and the TERMINAL — a region with no admissible RNA
+    strand, the same predicate the SOLVE gate locks — which receives nothing and where the chain
+    breaks. Sliced to a block like every other per-slot record (`blocks.block_slice`)."""
+
+    is_exon_region: np.ndarray
+    exon_pos: np.ndarray
+    exon_neg: np.ndarray
+    terminal: np.ndarray
+
+
+def _structure(chain, statics, region_arrays) -> _Structure:
+    is_region = np.asarray(chain.kind) == REGION
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
+    ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
+    sig = np.asarray(region_arrays.signature).astype(np.int64)[ri]
+    fp, fn = np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool)
+    return _Structure(
+        is_exon_region=is_region & (rtype[ri] == 2),
+        exon_pos=is_region & ((sig & BIT_EXON_POS) > 0),
+        exon_neg=is_region & ((sig & BIT_EXON_NEG) > 0),
+        terminal=is_region & g1_locked(fp, fn),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Sweep:
+    """Everything one sweep's blocks share: the strand model (``κ``, the two overdispersions, the two
+    noise-floor sample sizes), the grids, the composition priors, the policy and its LIBRARY. Built once
+    per sweep by `solve_chain` and read by every block."""
+
+    kappa: float
+    od_g: float
+    od_r: float
+    n_gdna_obs: float
+    n_rna_obs: float
+    n_grid: int
+    logodds_window: float
+    n_tilt: int | None
+    n_grid_ss: int | None
+    strand_live: bool
+    gdna_prior: object
+    rna_prior: object
+    policy: object
+    library: object
+
+
+def _psi(
+    ctx: BlockContext,
+    strand: tuple,
+    n_grid_ss,
+    *,
+    priors,
+    fg_ref,
+    fpos_ref,
+    fneg_ref,
+    lam_rows=None,
+    cube_rows=None,
+):
+    """ψ's per-slot solve on one block (`simplex_logodds`), every input read off the context. The
+    λ-factor is the intron factory's rows — anchored, per intron, zero elsewhere: it deconvolves confident
+    gDNA from introns against the intergenic background and takes part in the self-solve AND the message
+    layer — plus the policy's delivered ``lam_rows`` where the final solve passes them; ``cube_rows`` is
+    the RNA level lanes' delivery at AMBIG slots, final solve only.
+
+    ``strand`` is ``(κ, od_gdna, od_rna)``. ``fg_ref`` / ``fpos_ref`` / ``fneg_ref`` are the
+    count-zero-information variance freeze: the incoming belief, so the variance — hence the message
+    precision — is evaluated near the truth and not at a flat ½; one diagnostic solve deliberately passes
+    the outgoing belief instead."""
+    kappa, od_g, od_r = strand
+    cnt = ctx.unspliced_count
+    factory = ctx.factory_rows
+    if lam_rows is None:
+        lam_logprior = factory
+    elif factory is None:
+        lam_logprior = np.asarray(lam_rows, np.float64)
+    else:
+        lam_logprior = factory + np.asarray(lam_rows, np.float64)
+    return _solve_regions_logodds_all(
+        cnt[:, 0],
+        cnt[:, 1],
+        ctx.free_pos,
+        ctx.free_neg,
+        ctx.n_slot,
+        ctx.spliced_slot,
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        n_grid=int(ctx.n_grid),
+        L=float(ctx.logodds_window),
+        n_tilt=ctx.n_tilt,
+        n_grid_ss=n_grid_ss,
+        priors=priors,
+        lam_logprior=lam_logprior,
+        fg_ref=fg_ref,
+        fpos_ref=fpos_ref,
+        fneg_ref=fneg_ref,
+        cube_rows=cube_rows,
+    )
+
+
+def _composition_arms(geometry, gdna_prior, rna_prior, solve_grid, mass_global, eff_global):
+    """ψ's two composition arms on the solve grid — ONE construction site. THE gDNA ARM is the
+    COMPOSITION prior and only that: a total-density model is an ENRICHMENT model, and letting it vote a
+    slot's ``f_g`` is the count-votes-composition regression. The RNA arm asks the same landscape about
+    the other component — the complementary fraction ``1 − f_g`` against RNA's own opportunity, the
+    unspliced mass shared because both components split one population (`region_rna_geometry`). A
+    ``None`` member takes its derived reference in the solve: the shipped state of the RNA arm, a
+    first-class configuration rather than a gap."""
+    rna_mass, eff_rna = region_rna_geometry(geometry)
+    return CompositionPriors(
+        gdna=gdna_prior.logprior(solve_grid, mass_global, eff_global)
+        if gdna_prior is not None
+        else None,
+        rna=rna_prior.logprior(1.0 - solve_grid, rna_mass, eff_rna)
+        if rna_prior is not None
+        else None,
+    )
+
+
+def _message_layer(ctx: BlockContext, policy, library, terminal, cache, n_owned: int):
+    """The message layer for one block — served from the cache where its every input is unchanged, else
+    run: the policy's claims and rules (`prepare`), PHASE 1 (the FORWARD pass L→R and the BACKWARD pass
+    R→L, ONE each in chain order, which on a chain IS forward-backward: not an iterative scheme,
+    TRAPS: a-comment-quoted-as-a-finding), PHASE 2 (the policy's half of the solve, the two tables into
+    ψ's channels), and the backbone's checks on what was delivered. Returns ``(msg, from_left,
+    from_right, held_composition, counts)``; the two tables are ``None`` when the cache served the block,
+    and ``held_composition`` — a COMPOSITION row received on either side — is read off the tables (see
+    ``has_composition`` in `_solve_block` for why not ``msg.lam_rows``)."""
+    key = None if cache is None else cache.key(ctx, library, policy)
+    entry = None if key is None else cache.get(key)
+    if entry is not None:
+        return cache.message(entry), None, None, entry[2].copy(), AssertionCounts(entry[3])
+    prepared = policy.prepare(ctx, library)
+    order = list(range(int(ctx.n_slots)))  # slot ids ARE the genomic visiting order
+    term = np.asarray(terminal, bool).tolist()
+    n_grid = int(ctx.n_grid)
+    from_left = _pass(order, ctx.left.tolist(), prepared, n_grid, backward=False, terminal=term)
+    from_right = _pass(
+        order[::-1], ctx.right.tolist(), prepared, n_grid, backward=True, terminal=term
+    )
+    msg = prepared.solve(from_left, from_right)
+    counts = AssertionCounts()
+    _check_message(msg, ctx, counts, n_owned)
+    held_composition = from_left.has_composition | from_right.has_composition
+    if key is not None:
+        cache.put(key, msg, held_composition, counts)
+    return msg, from_left, from_right, held_composition, counts
+
+
+def _write_back(dc, solvable, belief: RegionBelief, n_owned: int, counts: AssertionCounts) -> dict:
+    """THE WRITE-BACK — only SOLVABLE slots. A locked slot (no admissible RNA strand) or an empty one
+    keeps its signature-binary init. ⛔ Do not extend the skip to UNIDENTIFIED slots and defer them to
+    the prior: that arm is refuted, because the prior resolves an imperfectly-solved slot better than a
+    deferred ``f_g = 1``. The backbone asserts the mask held on the block's own slots: without that a
+    replay compares the solve's raw output against the shipped belief and reads the mask as a difference
+    (TRAPS: byte-identity-gate) — reproducing a pipeline stage means reproducing its write-back."""
+    incoming = {
+        k: np.asarray(getattr(belief, k), np.float64) for k in ("f_pos", "f_neg", "f_g", "var_gdna")
+    }
+    out = dict(
+        f_pos=np.where(solvable, np.clip(dc.rna_pos_frac, 0.0, 1.0), incoming["f_pos"]),
+        f_neg=np.where(solvable, np.clip(dc.rna_neg_frac, 0.0, 1.0), incoming["f_neg"]),
+        f_g=np.where(solvable, np.clip(dc.gdna_frac, 0.0, 1.0), incoming["f_g"]),
+        var_gdna=np.where(solvable, dc.gdna_frac_var, incoming["var_gdna"]),
+    )
+    o = slice(0, n_owned)
+    untouched = ~np.asarray(solvable, bool)[o]
+    moved = np.zeros(n_owned, bool)
+    for k in out:
+        moved |= out[k][o] != incoming[k][o]
+    counts.note("writeback_only_solvable", untouched & moved, untouched)
+    return out
+
+
+def _block_diagnostics(
+    diag: dict, ctx, own, belief, solvable, msg, out, tables, strand, n_grid_ss, arms, support
+):
+    """The diagnostic capture of one block — the instruments' view. Two extra solves live here and
+    nowhere in production: the strand-ONLY belief (no prior, no messages), to split the local error into
+    the strand likelihood against the prior's contribution; and the message-free self-solve variance,
+    deliberately AFTER the write-back so its reference is the OUTGOING belief, which an instrument
+    comparing against the shipped solve depends on. The incoming belief and both row factors are
+    published apart, because the final solve's row factor is the factory's rows PLUS the delivered
+    rows and a replay passing the bare factory is unfaithful whenever the policy delivered anything."""
+    kappa, od_g, od_r = strand
+    cnt = ctx.unspliced_count
+    fg_strand = _solve_regions_logodds_all(
+        cnt[:, 0],
+        cnt[:, 1],
+        ctx.free_pos,
+        ctx.free_neg,
+        ctx.n_slot,
+        ctx.spliced_slot,
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        n_grid=int(ctx.n_grid),
+        L=float(ctx.logodds_window),
+        n_tilt=ctx.n_tilt,
+        n_grid_ss=n_grid_ss,
+        priors=None,
+    ).gdna_frac
+    loc = _psi(
+        ctx,
+        strand,
+        n_grid_ss,
+        priors=arms,
+        fg_ref=out["f_g"],
+        fpos_ref=out["f_pos"],
+        fneg_ref=out["f_neg"],
+    )
+    from_left, from_right, held_composition = tables
+    mass_global, eff_global = support
+    diag.update(
+        n_slot=ctx.n_slot.copy(),
+        fg_loc=own.f_g,
+        fg_strand=fg_strand,
+        fp_loc=own.f_pos,
+        fn_loc=own.f_neg,
+        vg_loc=loc.gdna_frac_var,
+        f_g=out["f_g"].copy(),
+        f_pos=out["f_pos"].copy(),
+        f_neg=out["f_neg"].copy(),
+        var_g=out["var_gdna"].copy(),
+        solvable=solvable,
+        count=cnt,
+        spliced=ctx.spliced_slot,
+        mature=ctx.sj_count.sum(axis=1),
+        free_pos=np.asarray(ctx.free_pos, bool),
+        free_neg=np.asarray(ctx.free_neg, bool),
+        eff_global=eff_global,
+        mass_global=mass_global,
+        eff_gdna=ctx.eff_gdna,
+        eff_rna=ctx.eff_rna,
+        global_lp=arms,
+        _tau0_lam=own.tau_lam,
+        fg_init=np.asarray(belief.f_g, np.float64),
+        fpos_init=np.asarray(belief.f_pos, np.float64),
+        fneg_init=np.asarray(belief.f_neg, np.float64),
+        lam_rows=msg.lam_rows,
+        cube_rows=msg.cube_rows,
+        from_left=from_left,
+        from_right=from_right,
+        held_composition=held_composition,
+        solvable_mask=solvable,
+    )
 
 
 def _solve_block(
@@ -344,227 +577,79 @@ def _solve_block(
     statics: RegionStatics,
     geometry: RegionGeometry,
     belief: RegionBelief,
-    is_exon_region,
-    exon_pos,
-    exon_neg,
-    terminal,
+    structure: _Structure,
+    sweep: _Sweep,
     *,
     n_owned: int,
-    kappa: float,
-    od_g: float,
-    od_r: float,
-    n_gdna_obs: float,
-    n_rna_obs: float,
-    n_grid_ss: int | None,
-    gdna_prior,
-    rna_prior,
     factory_rows,
-    policy,
-    library,
-    scalars: dict,
     cache: "MessageCache | None",
     _capture: dict | None,
 ) -> dict:
-    """One block of the chain, solved end to end on its own slice of every input: the self-solve, the
-    policy's claims and rules, the two passes, the solve, the write-back — today's whole sweep, on
+    """One block of the chain, solved end to end on its own slice of every input — the whole sweep, on
     ``chain.n_slots`` slots of which the first ``n_owned`` are the block's own (the rest is the terminal
-    it reads). Returns the block's belief arrays, its ``has_composition`` predicate, its assertion counts and
-    its diagnostic capture (``None`` unless asked for), each over every slot of the block; the caller
-    keeps the owned prefix."""
-    n_grid, logodds_window, n_tilt = scalars["n_grid"], scalars["logodds_window"], scalars["n_tilt"]
-    left = np.asarray(chain.left)
-    right = np.asarray(chain.right)
-    fp, fn = statics.free_pos, statics.free_neg
-    f_pos = np.asarray(belief.f_pos, dtype=np.float64).copy()
-    f_neg = np.asarray(belief.f_neg, dtype=np.float64).copy()
-    f_g = np.asarray(belief.f_g, dtype=np.float64).copy()
-    var_g = np.asarray(belief.var_gdna, dtype=np.float64).copy()
-    # the INCOMING belief, kept for the diagnostic capture: it is the ``fg_ref`` the final solve freezes
-    # its variance at, so a channel-ablation replay must pass the SAME reference to be faithful.
-    _fg_init, _fp_init, _fn_init = f_g.copy(), f_pos.copy(), f_neg.copy()
-
-    fields = view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg)
-    # per-slot "global" gDNA support — the basis the rate prior is fit and projected on.
+    it reads): ψ's composition arms, the message-free SELF-SOLVE, the block's context, the MESSAGE LAYER,
+    the FINAL solve, the WRITE-BACK, the ``has_composition`` predicate. Returns the block's belief
+    arrays, that predicate, its assertion counts and its diagnostic capture (``None`` unless asked for),
+    each over every slot of the block; the caller keeps the owned prefix."""
+    fields = view_fields(chain, statics, geometry, structure)
+    # the per-slot gDNA support — the basis the composition prior is fit and projected on
     mass_global, eff_global = region_gdna_geometry(geometry)
-
-    _, solve_grid = _logodds_grid(int(n_grid), float(logodds_window))
-
-    def _psi(
-        g_arr, msg: PsiMessage, *, fg_ref, fpos_ref, fneg_ref, extra_lam_rows=None, cube_rows=None
-    ):
-        """The per-slot solve (the log-density log-odds backend). Phase A calls it with a silent message;
-        the final call passes the policy's rows (the λ rows and the cube rows).
-
-        ``fg_ref`` is the count-zero-information variance freeze: the reference is the incoming belief,
-        so the variance — hence the message precision — is evaluated near the truth and not at a flat 1/2.
-        It is passed EXPLICITLY rather than closed over, because the write-back rebinds the belief and one
-        diagnostic solve below deliberately runs after that.
-        """
-        return _solve_regions_logodds_all(
-            u_pos,
-            u_neg,
-            fp,
-            fn,
-            n_slot,
-            spliced_slot,
-            kappa=kappa,
-            od_g=od_g,
-            od_r=od_r,
-            n_grid=int(n_grid),
-            L=float(logodds_window),
-            n_tilt=n_tilt,
-            n_grid_ss=n_grid_ss,
-            priors=g_arr,
-            # the gDNA intron-factory λ-factor (anchored, per-intron, 0 elsewhere): deconvolves confident gDNA
-            # from introns against the intergenic background BEFORE the sweep resolves the pie. Added to ψ,
-            # distinct from the gDNA arm; participates in the local solve AND the message layer.
-            lam_logprior=(
-                factory_rows
-                if extra_lam_rows is None
-                else (
-                    np.asarray(extra_lam_rows, np.float64)
-                    if factory_rows is None
-                    else factory_rows + np.asarray(extra_lam_rows, np.float64)
-                )
-            ),
-            fg_ref=fg_ref,
-            fpos_ref=fpos_ref,
-            fneg_ref=fneg_ref,
-            # the CUBE channel: the RNA level lanes delivered at AMBIG slots, final solve only
-            cube_rows=cube_rows,
-        )
-
-    # THE gDNA ARM of ψ — the COMPOSITION prior, and ONLY that. A total-density model is an ENRICHMENT
-    # model, not a DNA composition prior: letting it vote a slot's f_g is the count-votes-composition
-    # regression.
-    # ONE construction site for ψ's composition arms. The RNA member stays ``None`` until something
-    # fits an RNA landscape; ``None`` there means "that arm takes its derived reference", which is the
-    # shipped behaviour and a first-class configuration rather than a gap.
-    # The RNA arm asks the SAME landscape about the OTHER component: the complementary fraction
-    # `1 - f_g` against RNA's own opportunity. `mass_global` is shared because both components split one
-    # unspliced population (`region_rna_geometry`).
-    _rna_mass, _eff_rna = region_rna_geometry(geometry)
-    global_lp = CompositionPriors(
-        gdna=gdna_prior.logprior(solve_grid, mass_global, eff_global)
-        if gdna_prior is not None
-        else None,
-        rna=rna_prior.logprior(1.0 - solve_grid, _rna_mass, _eff_rna)
-        if rna_prior is not None
-        else None,
+    _, solve_grid = _logodds_grid(sweep.n_grid, sweep.logodds_window)
+    arms = _composition_arms(
+        geometry, sweep.gdna_prior, sweep.rna_prior, solve_grid, mass_global, eff_global
     )
 
-    # Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
-    # it. The scans are sequential, so iterate as a Python list of ints.
-    order_list = list(range(int(chain.n_slots)))
-    # ── the per-slot message-free SELF-SOLVE ──────────────────────────────────────────────────────────
     own = build_region_init(
         statics,
         geometry,
-        kappa=kappa,
-        od_g=od_g,
-        od_r=od_r,
-        n_gdna_obs=n_gdna_obs,
-        n_rna_obs=n_rna_obs,
-        n_grid=int(n_grid),
-        logodds_window=float(logodds_window),
-        n_tilt=n_tilt,
-        n_grid_ss=n_grid_ss,
+        kappa=sweep.kappa,
+        od_g=sweep.od_g,
+        od_r=sweep.od_r,
+        n_gdna_obs=sweep.n_gdna_obs,
+        n_rna_obs=sweep.n_rna_obs,
+        n_grid=sweep.n_grid,
+        logodds_window=sweep.logodds_window,
+        n_tilt=sweep.n_tilt,
+        n_grid_ss=sweep.n_grid_ss,
         belief=belief,
-        priors=global_lp,
+        priors=arms,
         intron_prior=factory_rows,
     )
-
-    has_own_composition = np.asarray(own.tau_lam, np.float64) > 0.0
     ctx = BlockContext(
         **fields,
-        **scalars,
+        n_grid=sweep.n_grid,
+        logodds_window=sweep.logodds_window,
+        n_tilt=sweep.n_tilt,
+        strand_live=sweep.strand_live,
         # the intron factory's rows are an observation on the context: the one array that is both
         # ψ's λ-factor and the intron's own claim
         factory_rows=factory_rows,
         # beliefs — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)
-        has_own_composition=has_own_composition,
-        belief_fg=f_g,
+        has_own_composition=np.asarray(own.tau_lam, np.float64) > 0.0,
+        belief_fg=np.asarray(belief.f_g, np.float64),
     )
-    CNT, n_slot, spliced_slot = ctx.unspliced_count, ctx.n_slot, ctx.spliced_slot
-    u_pos, u_neg = CNT[:, 0], CNT[:, 1]
     # ── the SOLVE gate. Structural, from the signature, never from the counts ──────────────────────────
-    solvable = (fp | fn) & (n_slot > 0.0)
+    solvable = (ctx.free_pos | ctx.free_neg) & (ctx.n_slot > 0.0)
 
-    # ── THE MESSAGE LAYER: served from the cache where its every input is unchanged, else run ─────────
-    key = None if cache is None else cache.key(ctx, library, policy)
-    entry = None if key is None else cache.get(key)
-    if entry is not None:
-        msg = cache.message(entry)
-        from_left = from_right = None
-        held_composition = entry[2].copy()
-        counts = AssertionCounts(entry[3])
-    else:
-        prepared = policy.prepare(ctx, library)
-
-        # ── PHASE 1, PROPAGATE: the FORWARD pass L→R and the BACKWARD pass R→L ───────────────────────
-        # ⛔ ONE pass each, in chain order, which on a chain IS forward-backward. It is not an iterative
-        # scheme (TRAPS: a-comment-quoted-as-a-finding). When both passes end every node holds one
-        # message from each neighbour it has: the recipient's kernel wrote its row, or silence stands.
-        term = np.asarray(terminal, bool).tolist()
-        from_left = _pass(
-            order_list, left.tolist(), prepared, n_grid, backward=False, terminal=term
-        )
-        from_right = _pass(
-            order_list[::-1], right.tolist(), prepared, n_grid, backward=True, terminal=term
-        )
-
-        # ── PHASE 2, SOLVE: the policy's half — the two held messages into ψ's channels ──────────────
-        msg = prepared.solve(from_left, from_right)
-        counts = AssertionCounts()
-        _check_message(msg, ctx, counts, n_owned)
-        # a COMPOSITION row received from a neighbour, read off the two tables (see the has_composition
-        # predicate below for why not `msg.lam_rows`)
-        held_composition = from_left.has_composition | from_right.has_composition
-        if key is not None:
-            cache.put(key, msg, held_composition, counts)
-
+    msg, from_left, from_right, held_composition, counts = _message_layer(
+        ctx, sweep.policy, sweep.library, structure.terminal, cache, n_owned
+    )
     # THE CITIZENSHIP SEAM: a delivered claim joins the λ-factor rows in the FINAL solve only. Phase-A
     # (`build_region_init`) and the own-evidence precision never see it — an imputation may inform the
     # fused answer, never masquerade as the slot's own evidence.
-    dc_fin = _psi(
-        global_lp,
-        msg,
-        fg_ref=f_g,
-        fpos_ref=f_pos,
-        fneg_ref=f_neg,
-        extra_lam_rows=msg.lam_rows,
+    strand = (sweep.kappa, sweep.od_g, sweep.od_r)
+    final = _psi(
+        ctx,
+        strand,
+        sweep.n_grid_ss,
+        priors=arms,
+        fg_ref=belief.f_g,
+        fpos_ref=belief.f_pos,
+        fneg_ref=belief.f_neg,
+        lam_rows=msg.lam_rows,
         cube_rows=msg.cube_rows,
     )
-
-    # ── THE WRITE-BACK — only SOLVABLE slots ──────────────────────────────────────────────────────────
-    # A locked slot (no admissible RNA strand) or an empty one keeps its signature-binary init. ⛔ Do
-    # not extend the skip to UNIDENTIFIED slots and defer them to the prior: that arm is refuted, because
-    # the prior resolves an imperfectly-solved slot better than a deferred ``f_g = 1``.
-    mg_, mp_, mn_ = dc_fin.gdna_frac, dc_fin.rna_pos_frac, dc_fin.rna_neg_frac
-    vg_ = dc_fin.gdna_frac_var
-    out_fg = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
-    out_fpos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
-    out_fneg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)
-    out_vg = np.where(solvable, vg_, var_g)
-    # ── the write-back touched ONLY solvable slots ───────────────────────────────────────────────────
-    # ⛔ Without this the mask is invisible to a replay, which then compares the solve's raw output
-    # against the shipped belief and reads the mask as a difference (TRAPS: byte-identity-gate).
-    # Reproducing a pipeline stage means reproducing its WRITE-BACK.
-    o = slice(0, n_owned)
-    untouched = ~np.asarray(solvable, bool)[o]
-    counts.note(
-        "writeback_only_solvable",
-        untouched
-        & (
-            (out_fg[o] != _fg_init[o])
-            | (out_fpos[o] != _fp_init[o])
-            | (out_fneg[o] != _fn_init[o])
-            | (out_vg[o] != np.asarray(belief.var_gdna, np.float64)[o])
-        ),
-        untouched,
-    )
-    f_g, f_pos, f_neg = out_fg, out_fpos, out_fneg
-    var_g = out_vg
+    out = _write_back(final, solvable, belief, n_owned, counts)
 
     # ── ``has_composition`` — does this slot hold a COMPOSITION, or only a bound? ─────────────────
     # An own composition channel (the solver's own precision), structural certainty, or a
@@ -576,81 +661,26 @@ def _solve_block(
     # fuses compositions and bounds into one row: the bound-only slots with a non-flat row are exactly
     # the ones the training rule excludes.
     has_composition = (
-        has_own_composition_evidence(own.tau_lam) | g1_locked(fp, fn) | held_composition
+        has_own_composition_evidence(own.tau_lam)
+        | g1_locked(ctx.free_pos, ctx.free_neg)
+        | held_composition
     )
-
     if _capture is not None:  # inert diagnostic hook
-        # strand-ONLY local belief (no global prior, no messages) — to split the local error into the
-        # strand likelihood vs the global gDNA prior contribution. Same solver, global=None.
-        fg_strand = _solve_regions_logodds_all(
-            u_pos,
-            u_neg,
-            fp,
-            fn,
-            n_slot,
-            spliced_slot,
-            kappa=kappa,
-            od_g=od_g,
-            od_r=od_r,
-            n_grid=int(n_grid),
-            L=float(logodds_window),
-            n_tilt=n_tilt,
-            n_grid_ss=n_grid_ss,
-            priors=None,
-        ).gdna_frac
-        # the message-free self-solve variances, for the local-error attribution — a debug-only solve, so
-        # the production path carries none of it (the self-solve fractions come from ``own``).
-        # Deliberately AFTER the write-back, so its reference is the OUTGOING belief — an instrument
-        # comparing against the shipped solve depends on the same reference.
-        _dc_loc = _psi(global_lp, PsiMessage.silent(), fg_ref=f_g, fpos_ref=f_pos, fneg_ref=f_neg)
-        _capture.update(
-            n_slot=n_slot.copy(),
-            fg_loc=own.f_g,
-            fg_strand=fg_strand,
-            fp_loc=own.f_pos,
-            fn_loc=own.f_neg,
-            vg_loc=_dc_loc.gdna_frac_var,
-            f_g=f_g.copy(),
-            f_pos=f_pos.copy(),
-            f_neg=f_neg.copy(),
-            var_g=var_g.copy(),
-            solvable=solvable,
-            count=CNT,
-            spliced=spliced_slot,
-            mature=fields["sj_count"].sum(axis=1),
-            free_pos=np.asarray(fp, bool),
-            free_neg=np.asarray(fn, bool),
-            eff_global=eff_global,
-            mass_global=mass_global,
-            eff_gdna=fields["eff_gdna"],
-            eff_rna=fields["eff_rna"],
-            # the full per-slot global prior term on the solve grid, so a diagnostic can replay the solve
-            # with message channels ablated (the message help/hurt attribution).
-            global_lp=global_lp,
-            _tau0_lam=own.tau_lam,
-            # the incoming belief (the final solve's ``fg_ref``) + the intron-factory λ arm, so an ablation
-            # replay reproduces the shipped f_g exactly BEFORE ablating. ⛔ The final solve's row
-            # factor is ``intron_prior`` PLUS the delivered rows (`msg.lam_rows`) — a replay passing the
-            # bare ``intron_prior`` is unfaithful whenever the policy delivers anything, so both are
-            # published and a faithful replay sums them.
-            fg_init=_fg_init,
-            fpos_init=_fp_init,
-            fneg_init=_fn_init,
-            lam_rows=msg.lam_rows,
-            cube_rows=msg.cube_rows,
-            # the two tables, the instruments' view of what each node heard
-            from_left=from_left,
-            from_right=from_right,
-            held_composition=held_composition,
-            solvable_mask=solvable,
+        _block_diagnostics(
+            _capture,
+            ctx,
+            own,
+            belief,
+            solvable,
+            msg,
+            out,
+            (from_left, from_right, held_composition),
+            strand,
+            sweep.n_grid_ss,
+            arms,
+            (mass_global, eff_global),
         )
-
-    return dict(
-        belief=dict(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g),
-        has_composition=has_composition,
-        counts=counts,
-        diagnostics=_capture,
-    )
+    return dict(belief=out, has_composition=has_composition, counts=counts, diagnostics=_capture)
 
 
 def _pass(seq, nbr, prepared, n_grid: int, *, backward: bool, terminal=None) -> Received:
