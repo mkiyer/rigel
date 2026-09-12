@@ -32,7 +32,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from .density_deconv import density_factor_precision
-from .region_chain import RegionChain
 from .region_geometry import RegionGeometry, RegionStatics
 from .simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 
@@ -140,7 +139,6 @@ def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rn
 
 
 def build_region_init(
-    chain: RegionChain,
     statics: RegionStatics,
     geometry: RegionGeometry,
     *,

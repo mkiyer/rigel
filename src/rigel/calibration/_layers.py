@@ -106,6 +106,10 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         # `messages/` owns every argument about what a message should say.
         (
             "region_init",
+            # `sweep` is the backbone; `blocks` cuts one locus block out of the chain and puts its
+            # results back; `message_cache` shares the message layer's output across the refit sweeps.
+            "blocks",
+            "message_cache",
             "sweep",
             "messages",
             # `messages/__init__` is the two-phase protocol (prepare / propagate → receive / solve)
@@ -114,6 +118,11 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             # `messages/transfer_rows` its pure row constructors, the one home of the counting term.
             "messages/silent",
             "messages/transfer_rows",
+            # `messages/faces` is the typed face table and the three helpers every reader of a face
+            # needs; `messages/lanes` the level lanes — both sideways of `messages/transfer`, which
+            # builds the rules and the lanes and runs the passes and the solve.
+            "messages/faces",
+            "messages/lanes",
             "messages/transfer",
         ),
     ),

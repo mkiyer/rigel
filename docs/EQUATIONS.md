@@ -184,7 +184,7 @@ per-fragment shares, so `1/mass` is not a counting variance. The shipped countin
 
 **3.5 A composition crosses only where the population is shared; a gDNA level crosses unscaled.**
 `messages/transfer.py`: the face maps (`_splice_faces`, `_terminus_rules`) carry a composition under
-§3.5b's licence; `_gdna_lane` / `_LevelLane` carry the gDNA level everywhere else. Why the level needs its
+§3.5b's licence; `lanes.gdna_lane` / `lanes.LevelLane` carry the gDNA level everywhere else. Why the level needs its
 own lane is one substitution. Rescaling a source's density by the ratio of totals
 `r = ρ_tot(dst)/ρ_tot(src)` and writing `ρ_c(src) = φ_c(src)·ρ_tot(src)` gives
 
@@ -319,7 +319,7 @@ survives it (`TRAPS: capture-inverts-the-counted-side`). The transfer policy car
 as the splice-in map's cap rather than solving face (II) outright (`DESIGN.md` §6b.13).
 
 **3.6c The splice-flux reframe — a boundary has two totals, one per flank.** Ruling 2026-08-05;
-`StepContext.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
+`BlockContext.sj_count_lo` / `sj_count_hi` (`messages/__init__.py`) carry the split and
 `transfer.py:_splice_faces` reads it. §3.6 made per step: which flank is a hop talking to? Numerator and
 denominator of a composition imputation must be totals over the same component set, and a molecule
 counted in `J` spliced at this position, so its body lies in the exon on exactly one side:

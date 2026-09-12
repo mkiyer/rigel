@@ -16,19 +16,21 @@ import numpy as np
 import pytest
 
 from rigel.calibration import sweep as SW
-from rigel.calibration.messages import NO_NEIGHBOUR, SILENCE, Message, PsiMessage, StepContext
+from rigel.calibration.blocks import block_slice
+from rigel.calibration.message_cache import MessageCache
+from rigel.calibration.messages import NO_NEIGHBOUR, SILENCE, Message, PsiMessage, BlockContext
 from rigel.calibration.messages.silent import SilentPolicy
 
 
 N = 8
 
 
-def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
-    """A minimal StepContext. Only the fields the assertions read need to be real."""
+def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> BlockContext:
+    """A minimal BlockContext. Only the fields the assertions read need to be real."""
     ones = np.ones(N)
     fp = np.ones(N, bool) if free_pos is None else np.asarray(free_pos, bool)
     fn = np.zeros(N, bool) if free_neg is None else np.asarray(free_neg, bool)
-    return StepContext(
+    return BlockContext(
         eff_gdna=ones * 200.0,
         eff_rna=ones * 200.0,
         sj_count=np.zeros((N, 2)),
@@ -37,8 +39,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         route_rate_lo=np.zeros((N, 2)),
         route_rate_hi=np.zeros((N, 2)),
         unspliced_count=np.ones((N, 2)) * 5.0,
-        n_slot=ones * 10.0,
-        spliced_slot=np.zeros(N),
+        spliced_count=np.zeros((N, 2)),
         left=np.arange(-1, N - 1),
         right=np.append(np.arange(1, N), -1),
         is_boundary=np.arange(N) % 2 == 1,
@@ -48,14 +49,14 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         exon_pos=np.zeros(N, bool),
         exon_neg=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.int64),
-        own_live=np.zeros(N, bool),
+        has_own_composition=np.zeros(N, bool),
         belief_fg=ones,
         n_grid=n_grid,
         logodds_window=10.0,
     )
 
 
-def _counts(msg: PsiMessage, ctx: StepContext | None = None):
+def _counts(msg: PsiMessage, ctx: BlockContext | None = None):
     c = SW.AssertionCounts()
     SW._check_message(msg, ctx if ctx is not None else _ctx(), c)
     return c
@@ -470,14 +471,14 @@ def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
 def _six(belief):
     return {
         f: np.asarray(getattr(belief, f))
-        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "informed")
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "has_composition")
     }
 
 
 def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
     """The property the whole decomposition stands on, on the real toy chain through the shipped
     policy: ``solve_chain`` with the chain as one block, one locus per block, and every block size in
-    between gives the same belief to the bit and the same ``informed`` predicate — and the diagnostic
+    between gives the same belief to the bit and the same ``has_composition`` predicate — and the diagnostic
     capture gathers to the same per-slot arrays. Not vacuous: the toy has several terminals, so
     ``block_slots=1`` makes more than one block."""
     from _transfer_harness import _full_policy
@@ -533,22 +534,22 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
 
 
 def test_a_block_view_rebases_the_links_and_slices_every_per_slot_array(sweep_inputs):
-    """`_slots`: a neighbour outside the block is no neighbour; every per-slot array is the chain's
+    """`blocks.block_slice`: a neighbour outside the block is no neighbour; every per-slot array is the chain's
     slice; a 2-D bank keeps its columns; ``n_slots`` follows."""
     chain, statics, geometry, belief, _ra = sweep_inputs["args"]
     n = int(chain.n_slots)
     sl = slice(2, min(9, n))
-    c = SW._slots(chain, sl)
+    c = block_slice(chain, sl)
     assert c.n_slots == sl.stop - sl.start and np.array_equal(c.kind, np.asarray(chain.kind)[sl])
     left = np.asarray(chain.left)[sl] - sl.start
     assert np.array_equal(c.left, np.where((left >= 0) & (left < c.n_slots), left, -1))
     assert c.left[0] == -1 and c.right[-1] == -1
-    g = SW._slots(geometry, sl)
+    g = block_slice(geometry, sl)
     assert g.n_slots == c.n_slots and g.unspliced_count.shape == (c.n_slots, 2)
     assert np.array_equal(g.eff_gdna, np.asarray(geometry.eff_gdna)[sl])
-    b = SW._slots(belief, sl)
+    b = block_slice(belief, sl)
     assert np.array_equal(b.f_g, np.asarray(belief.f_g)[sl])
-    assert SW._slots(statics, sl).boundary_flags.shape == (c.n_slots,)
+    assert block_slice(statics, sl).boundary_flags.shape == (c.n_slots,)
 
 
 def test_the_checks_count_only_the_owned_slots():
@@ -573,29 +574,29 @@ def test_the_checks_count_only_the_owned_slots():
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def _memo_kw(sweep_inputs):
+def _cache_kw(sweep_inputs):
     kw = dict(sweep_inputs["kw"])
     kw.pop("block_slots", None)
-    kw.pop("message_memo", None)
+    kw.pop("message_cache", None)
     return kw
 
 
-def test_a_memo_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_layer(sweep_inputs):
-    """Two sweeps on identical inputs through one memo: the second hits every block, never calls the
-    policy's `prepare`, and returns the same belief and the same ``informed`` as the first and as a
-    sweep with no memo at all. Not vacuous: the toy delivers rows, so a stale or empty hit would move
+def test_a_cache_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_layer(sweep_inputs):
+    """Two sweeps on identical inputs through one cache: the second hits every block, never calls the
+    policy's `prepare`, and returns the same belief and the same ``has_composition`` as the first and as a
+    sweep with no cache at all. Not vacuous: the toy delivers rows, so a stale or empty hit would move
     the numbers."""
     from _transfer_harness import _full_policy
 
     policy = _full_policy(sweep_inputs)[0]
-    kw = _memo_kw(sweep_inputs)
+    kw = _cache_kw(sweep_inputs)
     plain = SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, block_slots=5)
-    memo = SW.MessageMemo()
+    cache = MessageCache()
     first = SW.solve_chain(
-        *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_memo=memo
+        *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_cache=cache
     )
-    assert memo.misses > 0 and memo.hits == 0
-    n_blocks = memo.misses
+    assert cache.misses > 0 and cache.hits == 0
+    n_blocks = cache.misses
     calls = []
     orig = type(policy).prepare
 
@@ -606,21 +607,21 @@ def test_a_memo_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_layer
     type(policy).prepare = spy
     try:
         second = SW.solve_chain(
-            *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_memo=memo
+            *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_cache=cache
         )
     finally:
         type(policy).prepare = orig
     assert not calls, "a hit must not prepare the policy"
-    assert memo.hits == n_blocks and memo.misses == n_blocks
+    assert cache.hits == n_blocks and cache.misses == n_blocks
     for out in (first, second):
-        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "informed"):
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "has_composition"):
             assert np.array_equal(np.asarray(getattr(out, f)), np.asarray(getattr(plain, f))), f
-    assert memo.nbytes > 0
+    assert cache.nbytes > 0
 
 
-def test_PERTURBATION_the_memo_misses_when_any_input_the_message_layer_reads_changes(sweep_inputs):
+def test_PERTURBATION_the_cache_misses_when_any_input_the_message_layer_reads_changes(sweep_inputs):
     """The key is a digest of EVERY input the message layer reads, so it is safe by construction: a
-    changed belief, liveness bit, factory row, observation, library or grid must miss — and a memo that
+    changed belief, liveness bit, factory row, observation, library or grid must miss — and a cache that
     hit on any of them would deliver another sweep's messages as this one's."""
     import dataclasses as _dc
 
@@ -628,18 +629,18 @@ def test_PERTURBATION_the_memo_misses_when_any_input_the_message_layer_reads_cha
 
     policy, rows, _g, _w = _full_policy(sweep_inputs)
     kw = dict(
-        _memo_kw(sweep_inputs), intron_prior=rows
+        _cache_kw(sweep_inputs), intron_prior=rows
     )  # the live rows: the layer has something to read
     chain, statics, geometry, belief, ra = sweep_inputs["args"]
-    memo = SW.MessageMemo()
-    SW.solve_chain(chain, statics, geometry, belief, ra, **kw, policy=policy, message_memo=memo)
-    base_misses = memo.misses
+    cache = MessageCache()
+    SW.solve_chain(chain, statics, geometry, belief, ra, **kw, policy=policy, message_cache=cache)
+    base_misses = cache.misses
 
     def misses_after(pol=policy, **over):
-        before = memo.misses
+        before = cache.misses
         a = over.pop("args", (chain, statics, geometry, belief, ra))
-        SW.solve_chain(*a, **{**kw, **over}, policy=pol, message_memo=memo)
-        return memo.misses - before
+        SW.solve_chain(*a, **{**kw, **over}, policy=pol, message_cache=cache)
+        return cache.misses - before
 
     assert misses_after() == 0, "identical inputs must hit"
     # the incoming belief (the variance freeze of every own strand profile)
@@ -678,18 +679,18 @@ def test_PERTURBATION_the_memo_misses_when_any_input_the_message_layer_reads_cha
 
 
 def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
-    """An instrument's capture reads the held lists, so with ``_capture`` the layer runs even on a memo
-    that would hit — and what it delivers equals the memo's, so the two paths cannot drift."""
+    """An instrument's capture reads the held lists, so with ``_capture`` the layer runs even on a cache
+    that would hit — and what it delivers equals the cache's, so the two paths cannot drift."""
     from _transfer_harness import _full_policy
 
     policy = _full_policy(sweep_inputs)[0]
-    kw = _memo_kw(sweep_inputs)
-    memo = SW.MessageMemo()
-    SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, message_memo=memo)
+    kw = _cache_kw(sweep_inputs)
+    cache = MessageCache()
+    SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, message_cache=cache)
     cap: dict = {}
-    hits_before = memo.hits
+    hits_before = cache.hits
     out = SW.solve_chain(
-        *sweep_inputs["args"], **kw, policy=policy, message_memo=memo, _capture=cap
+        *sweep_inputs["args"], **kw, policy=policy, message_cache=cache, _capture=cap
     )
-    assert memo.hits == hits_before, "a captured sweep must not be served from the memo"
-    assert "from_left" in cap and out.informed is not None
+    assert cache.hits == hits_before, "a captured sweep must not be served from the cache"
+    assert "from_left" in cap and out.has_composition is not None

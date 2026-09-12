@@ -39,19 +39,19 @@ What landed, each gated before the next (`DESIGN.md` §6b.15 has the rulings and
    into one (`sweep._pass`), and no lane lists a face from one. The chain breaks at every terminal into
    33,018 loci on the human chain (median 19 slots, the largest 0.12 %). `region_chain.locus_blocks`
    merges loci to `CalibrationConfig.sweep_block_slots = 5000` and `sweep.solve_chain` solves each block on
-   its own slice of every input, reading one terminal beyond itself (`_solve_block`, `_slots`, `_gather`).
+   its own slice of every input, reading one terminal beyond itself (`_solve_block`; `blocks.block_slice`, `blocks.gather`).
 2. **The library is the only cross-block information.** `Policy.library(ChainView)` runs once over the
    whole chain on a view with no belief field; `prepare(ctx, library)` sees one block. The factory rows
-   travel on the context (`factory_rows`); the context carries the strand channel's liveness bits
-   (`own_live`), not the self-solve object.
+   travel on the context (`factory_rows`); the context carries the own-composition bits
+   (`has_own_composition`), not the self-solve object.
 3. **ψ's read-out is chunk-exact.** The one step that moved a number (≤ 3.1e-15 per slot, no
    amplification, TPM bit-identical, the oracle metric at the last ulp; owner: identical to a tolerance).
    Every block size gives the same bits, so the block size is a working-set knob.
-4. **The refit sweeps share their message layer** (`sweep.MessageMemo`). Everything the layer reads is on
+4. **The refit sweeps share their message layer** (`message_cache.MessageCache`). Everything the layer reads is on
    the context, the library and the grid — never the prior — and the belief is reset before every sweep,
-   so sweeps 1–3 deliver identical messages; the content-keyed memo serves refits 2–3 their rows
+   so sweeps 1–3 deliver identical messages; the content-keyed cache serves refits 2–3 their rows
    (38 s instead of 176 s each) for 2.68 GB held.
-5. **The rules are typed tables** (`messages.transfer.Faces`): every directed face is one of a node's
+5. **The rules are typed tables** (`messages.faces.Faces`): every directed face is one of a node's
    two sides, so a rule is a KIND (FORWARD / TRANSPORT / SPLICE_OUT / EDGE / LEVEL) and its parameters
    at ``(destination, side)``, with a row store for the ``(K,)`` maps; `Faces.apply` is the one home of
    the rule arithmetic; a face carries one rule (a second write is refused — the documented precedence
@@ -84,26 +84,28 @@ Each step: what, why, the design, the gate. Steps A–E are Python and precede t
 
 Bit-identical throughout; the gates are the replay, the references and the suite.
 
-1. **The naming pass** (§5 lists the proposals — present them to the owner at the start of the session,
-   apply unless overruled): `MessageMemo` → `MessageCache`; `ChainView.strand_live` (the library's
-   deadband is open) and `StepContext.own_live` (this node's channel is live) are two near-identical names
-   for two scopes — `strand_channel_open` and `strand_live`; `StepContext` → `BlockContext`; `_slots` →
-   `_block_view`; `_view_fields` → `_context_fields`; and a question for the owner: `RegionBelief.informed`.
-2. **Split `sweep.py`** (~1,000 lines, three concerns) into the backbone (`_pass`, `_check_message`,
-   `solve_chain`, `_solve_block`), the block plumbing (`blocks.py`: `_block_view`, `_context_fields`,
+1. **The naming pass** — DONE 2026-09-11 (§5 records the ruling and the names as applied).
+2. DONE 2026-09-12. **Split `sweep.py`** (~1,000 lines, three concerns) into the backbone (`_pass`, `_check_message`,
+   `solve_chain`, `_solve_block`), the block plumbing (`blocks.py`: `_block_slice`, `_view_fields`,
    `_gather`) and the cache (`message_cache.py`); `messages/transfer.py` (1,200 lines): the lanes
-   (`_LevelLane`, `_gdna_lane`, `_rna_lanes`) into `messages/lanes.py`. Layer 6 throughout; `_layers.py`
-   lists them; `test_layering.py` and `module_census.py` confirm.
-3. **The cache key iterates `ChainView`'s dataclass fields** rather than a hand-built dict, so a new field
+   (`LevelLane`, `gdna_lane`, `rna_lanes`) into `messages/lanes.py`, and the face table with its three
+   helpers (`side_of`, `norm`, `fuse`) into `messages/faces.py`, because the gDNA lane reads the table's
+   kind while the policy imports the lanes. Layer 6 throughout; `_layers.py` lists them; `test_layering.py`
+   and `module_census.py` confirm. Sizes: `sweep` 777, `blocks` 120, `message_cache` 126, `transfer` 680,
+   `faces` 237, `lanes` 346.
+3. DONE 2026-09-12 (`MessageCache.key(ctx, library, policy)`; a skipped field fires the perturbation gate).
+   **The cache key iterates `BlockContext`'s dataclass fields** rather than a hand-built dict, so a new field
    cannot be left out of the digest (correctness, not tidiness; the six perturbation channels in
    `test_sweep_backbone` gate it).
-4. **Drop the redundant single-strand tiling** in `_solve_regions_logodds_all` inside a block
-   (`_block_rows` stays for the AMBIG cube only): recovers the ~7 s/sweep the final ψ lost at 5,000-slot
-   blocks and removes a layer of nesting. Chunk-exact, so bit-identical; the tiling gate in `test_sweep`
-   holds it.
-5. Small things: `build_region_init`'s dead `chain` parameter; `n_slot` / `spliced_slot` carried beside the
-   arrays they derive from (properties on the context); later, the 25-key `_capture` dict as a typed record
-   (moderate churn, lower priority).
+4. **FOLDED INTO D (owner, 2026-09-12).** The single-strand tiling in `_solve_regions_logodds_all` is
+   redundant only at the per-block callers; `init_beliefs` calls the same dispatcher on the WHOLE chain
+   (the pre-sweep solve D names as the run's high-water mark), where dropping it would materialise the
+   regridded ``(n_ss, 513)`` priors for the chain at several GB apiece, and the tiling's own comment calls
+   it a cache-locality knob too. A row bound the block caller passes would be a knob. When D makes the init
+   solve per block, the tiling goes for every caller at once.
+5. DONE 2026-09-12: `build_region_init`'s dead `chain` parameter; `n_slot` / `spliced_slot` are properties
+   of `ChainView`, which carries `spliced_count` per strand as it carries `unspliced_count`. Still open,
+   lower priority: the 25-key `_capture` dict as a typed record (moderate churn).
 
 ### B. The received messages as tables — the contract, end to end (owner: agreed)
 
@@ -206,10 +208,14 @@ receives nothing), LOCUS and BLOCK (`LocusBlock`), the LIBRARY (the whole-chain 
 SIDE (left = 0, right = 1), a rule's KIND, a node's OWN CLAIM and OWN LEVEL, a LANE, a COMPOSITION and a
 LEVEL, `from_left` / `from_right`, `SILENCE` / `NO_NEIGHBOUR`, the FACTORY ROWS, `solvable`.
 
-**Proposals for the naming pass** (A.1): `MessageMemo` → `MessageCache` (and `message_memo=` →
-`message_cache=`); `ChainView.strand_live` → `strand_channel_open`; `StepContext.own_live` → `strand_live`;
-`StepContext` → `BlockContext`; `_slots` → `_block_view`; `_view_fields` → `_context_fields`. **For the
-owner:** `RegionBelief.informed` — "this slot's answer rests on a composition (its own evidence, structural
-certainty, or one received), not only on a bound", the landscape prior's training population
-(`DESIGN.md` §7.1) — is established in the code and docs; if it is to change, `has_composition` is the
-plain candidate, and it is a vocabulary ruling (`DESIGN.md` §0).
+**The naming pass, RULED and APPLIED (owner, 2026-09-11; bit-identical on every gate):**
+`MessageMemo` → `MessageCache` (`message_memo=` → `message_cache=`); `StepContext` → `BlockContext`;
+`StepContext.own_live` → `BlockContext.has_own_composition` — the bit is `tau_lam > 0`, the node's OWN
+composition evidence (strand term OR factory row), not a strand channel, so the plan's `strand_live` was
+wrong in substance; `ChainView.strand_live` and the transfer policy's private `_Library.split_live` keep
+their names (three liveness bits, one renamed removes the collision); `RegionBelief.informed` →
+`has_composition` (a vocabulary ruling: the same word carries the same fact from a received table to the
+prior's training population); `_slots` → `_block_slice` (`_block_view` refused: "view" already means
+`ChainView` in the same file); `_view_fields` and `_gather` keep their names (`_context_fields` refused:
+the function builds `ChainView`'s fields and serves the library's whole-chain view too). The split's file
+names: `sweep.py` (backbone), `blocks.py`, `message_cache.py`, `messages/lanes.py`.

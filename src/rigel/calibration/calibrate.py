@@ -59,7 +59,8 @@ from .region_geometry import (
     init_beliefs,
     region_gdna_geometry,
 )
-from .sweep import MessageMemo, chain_boundary_deconv, chain_region_deconv, solve_chain
+from .message_cache import MessageCache
+from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import count_observable_masks
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
@@ -255,7 +256,7 @@ def _fit_gdna_hyperprior(
     )
     sel = expressed & ((fp ^ fn) | (~fp & ~fn))
     # ⛔ A SLOT WHOSE ONLY EVIDENCE IS A BOUND, OR WHICH HAS NONE, DOES NOT TRAIN THE PRIOR
-    # (`RegionBelief.informed`). Its value is where the prior put it — outright, or inside the
+    # (`RegionBelief.has_composition`). Its value is where the prior put it — outright, or inside the
     # half-line a level or ceiling admits — so re-fitting on it re-seeds the landscape's tail at the
     # density its own total implies. ⛔ Do not soften the cut by DISCOUNTING the delivered rows
     # instead (a one-sided row as a bound, the own-evidence variance as a weight): those readings lose
@@ -273,8 +274,8 @@ def _fit_gdna_hyperprior(
     # their prior-free share. `fit_landscape` still refuses a training set under two.
     if int((sel | anchor).sum()) < _MIN_TRAIN:
         return None
-    if belief.informed is not None:
-        sel &= np.asarray(belief.informed, dtype=bool)
+    if belief.has_composition is not None:
+        sel &= np.asarray(belief.has_composition, dtype=bool)
     sel |= anchor
     mass = np.asarray(mass_global, dtype=np.float64)[sel]
     return fit_landscape(
@@ -629,7 +630,7 @@ def calibrate(
             f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
         )
 
-    def _sweep(prior, memo=None):
+    def _sweep(prior, cache=None):
         capture = {} if _debug is not None else None
         # THE λ BRACKET IS `max(the reference's floor, the fitted prior's own demand)`. ψ evaluates
         # the landscape at `log ρ = log f + log M − log E` and can only offer `f ∈ [σ(−L), σ(L)]`, so a
@@ -693,7 +694,7 @@ def calibrate(
             # solve is already good.
             policy=policy,
             block_slots=config.sweep_block_slots,
-            message_memo=memo,
+            message_cache=cache,
             _capture=capture,
         )
         if capture is not None:
@@ -730,9 +731,9 @@ def calibrate(
     gdna_hyperprior: DensityLandscape | None = None
     # THE REFIT SWEEPS SHARE THEIR MESSAGE LAYER. The belief is reset before each, and the messages
     # never read the prior, so for one grid every input the layer reads is identical from refit to
-    # refit; a refit pays its two ψ solves and is served the rest (`sweep.MessageMemo`, content-keyed:
+    # refit; a refit pays its two ψ solves and is served the rest (`message_cache.MessageCache`, content-keyed:
     # a refit whose bracket widens changes the grid and misses). Pass 0's grid is never reused.
-    memo = MessageMemo()
+    cache = MessageCache()
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
             chain,
@@ -749,7 +750,7 @@ def calibrate(
         # FULL reset, then re-solve WITH the prior: nothing from pass-0 survives into the re-solve except
         # the fitted landscape itself, so an over-confident region cannot refuse to budge when the prior lands.
         belief = _init_belief()
-        belief = _sweep(gdna_hyperprior, memo)
+        belief = _sweep(gdna_hyperprior, cache)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
             it + 1,

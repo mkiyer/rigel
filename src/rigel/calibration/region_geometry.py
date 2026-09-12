@@ -440,7 +440,7 @@ class RegionBelief:
     #: messages; ``None`` on a belief no solve has produced (`init_beliefs`), which the landscape's
     #: selector reads as the annotation alone.
     #: Gate: `tests/calibration/test_landscape_training_population.py`.
-    informed: np.ndarray | None = None
+    has_composition: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------

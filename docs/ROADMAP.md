@@ -87,7 +87,7 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
    rules and lane faces read counts and geometry, only the own claims read the belief), per block, per
    grid; ② the policy's rules from closures to typed tables — the C/C++ data layout, written in Python
-   first (done: `messages.transfer.Faces`); ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
+   first (done: `messages.faces.Faces`); ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
    ψ, then threads over blocks — with a DERIVED tolerance gate in place of bit-identity, since a language
    port cannot be bit-identical; ④ the intron-factory rows built per block, the last genome-wide arrays;
    ⑤ the scan and the second pass, the stages that scale with depth and the floor once the sweeps are

@@ -5,12 +5,12 @@ neighbour, not structurally locked — is not in the training population. A leve
 or the node's own flux's) and a cube row are all BOUNDS: the value the solve settles on inside the
 admitted half-line is the prior's own, so training the prior on it is training the prior on its echo
 (`ISSUES: gdna-landscape-trains-on-false-positives`). `sweep.solve_chain` publishes the predicate as
-`RegionBelief.informed`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
+`RegionBelief.has_composition`, read off the held messages, and `calibrate._fit_gdna_hyperprior` selects on
 it; the zero-count anchor trains regardless, being a structural statement rather than a solve. "Any
 non-flat λ-row" is NOT the predicate — `PsiMessage.lam_rows` fuses compositions and bounds together,
 so that reading keeps exactly the bound-only slots this rule excludes.
 
-PERTURBATION, each watched: with `informed` forced True everywhere, with the held compositions
+PERTURBATION, each watched: with `has_composition` forced True everywhere, with the held compositions
 dropped from the predicate, and with "any non-flat row" in place of the held composition, the
 identity gates fail; with the selector ignoring the predicate, the population gates fail.
 """
@@ -33,9 +33,9 @@ from _transfer_harness import _ctx_of, _full_policy, _prepared
 CAL = sys.modules["rigel.calibration.calibrate"]
 
 
-def _expected_informed(sweep_inputs, policy, capture):
+def _expected_has_composition(sweep_inputs, policy, capture):
     """The predicate re-derived INDEPENDENTLY of the solve: the two passes driven here on the same
-    prepared policy, a slot informed iff either held message carries a COMPOSITION, or its own channel
+    prepared policy, a slot has a composition iff either held message carries a COMPOSITION, or its own channel
     is live, or it is structurally certain. A level, a ceiling or a cube row does not count."""
     from rigel.calibration.messages import SILENCE
 
@@ -70,17 +70,17 @@ def test_the_solve_publishes_the_informed_predicate_as_the_solve_used_it(sweep_i
     out = SW.solve_chain(
         *sweep_inputs["args"], **sweep_inputs["kw"], policy=policy, _capture=capture
     )
-    informed = np.asarray(out.informed, bool)
-    assert informed.shape == (int(sweep_inputs["args"][0].n_slots),)
-    assert np.array_equal(informed, _expected_informed(sweep_inputs, policy, capture))
+    has_composition = np.asarray(out.has_composition, bool)
+    assert has_composition.shape == (int(sweep_inputs["args"][0].n_slots),)
+    assert np.array_equal(has_composition, _expected_has_composition(sweep_inputs, policy, capture))
     # not vacuous: the toy has both kinds
-    assert informed.any() and (~informed).any()
+    assert has_composition.any() and (~has_composition).any()
 
 
 def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs):
     """THE DISTINCTION THE RULING TURNS ON, on two blind slots (no own channel, not locked): a stub
     policy delivers a LEVEL to one and a COMPOSITION to the other, and its solve writes a non-flat row
-    at BOTH — so "any non-flat row" would call both informed. Only the composition's slot may."""
+    at BOTH — so "any non-flat row" would give both a composition. Only the composition's slot may."""
     from rigel.calibration.messages import Level, Message, PsiMessage
 
     cap: dict = {}
@@ -129,30 +129,31 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
             return _Prepared(int(ctx.n_slots))
 
     out = SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=_Stub())
-    informed = np.asarray(out.informed, bool)
-    assert informed[comp_slot], "a received composition must inform"
-    assert not informed[lvl_slot], "a level with a row is a bound only and must not inform"
+    has_composition = np.asarray(out.has_composition, bool)
+    assert has_composition[comp_slot], "a received composition must inform"
+    assert not has_composition[lvl_slot], "a level with a row is a bound only and must not inform"
 
 
 def test_silence_shrinks_the_informed_set_to_own_evidence_and_certainty(sweep_inputs):
-    """PERTURBATION: with no messages, the delivered rows vanish and the informed set must shrink to
+    """PERTURBATION: with no messages, the delivered rows vanish and the ``has_composition`` set must shrink to
     the own channel plus structural certainty — and at least one slot must change, or the message
     layer's contribution to the predicate is not being read."""
     policy, *_ = _full_policy(sweep_inputs)
     live = np.asarray(
-        SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=policy).informed, bool
+        SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=policy).has_composition,
+        bool,
     )
     cap: dict = {}
     silent = SW.solve_chain(
         *sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap
     )
-    silent_informed = np.asarray(silent.informed, bool)
+    silent_has_composition = np.asarray(silent.has_composition, bool)
     own = has_own_composition_evidence(cap["_tau0_lam"]) | g1_locked(
         cap["free_pos"], cap["free_neg"]
     )
-    assert np.array_equal(silent_informed, own)
-    assert (live & ~silent_informed).any(), "no slot was informed by a message alone"
-    assert not (silent_informed & ~live).any()
+    assert np.array_equal(silent_has_composition, own)
+    assert (live & ~silent_has_composition).any(), "no slot was has_composition by a message alone"
+    assert not (silent_has_composition & ~live).any()
 
 
 def _synthetic_population():
@@ -180,7 +181,7 @@ def _synthetic_population():
     belief = SimpleNamespace(
         f_g=np.array([0.0, 0.5, 0.3, 0.5, 1.0, 0.5, 0.9]),
         var_gdna=np.array([np.inf, 1.0, 2.0, 1.0, 0.0, 1.0, 0.5]),
-        informed=np.array([False, True, True, True, True, True, True]),
+        has_composition=np.array([False, True, True, True, True, True, True]),
     )
     return chain, belief, statics, region_arrays, mass, eff
 
@@ -207,11 +208,13 @@ def test_a_flat_likelihood_slot_is_not_in_the_training_population(monkeypatch):
     parts = _synthetic_population()
     chain, belief, *_ = parts
     full = _training_counts(monkeypatch, belief, parts)
-    # all three expressed regions plus the anchor train when every slot is informed
+    # all three expressed regions plus the anchor train when every slot has a composition
     assert full["count"].shape == (4,) and full["anchor"].sum() == 1
     # PERTURBATION: the exon's likelihood was flat -> it leaves the population; nothing else moves
     blind = SimpleNamespace(
-        f_g=belief.f_g, var_gdna=belief.var_gdna, informed=belief.informed & ~(np.arange(7) == 2)
+        f_g=belief.f_g,
+        var_gdna=belief.var_gdna,
+        has_composition=belief.has_composition & ~(np.arange(7) == 2),
     )
     part = _training_counts(monkeypatch, blind, parts)
     assert part["count"].shape == (3,)
@@ -231,7 +234,9 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
     monkeypatch.setattr(
         CAL, "_MIN_TRAIN", 4
     )  # the domain (4) passes, the cut population (1) would not
-    none = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, informed=np.zeros(7, bool))
+    none = SimpleNamespace(
+        f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=np.zeros(7, bool)
+    )
     chain, _, statics, region_arrays, mass, eff = parts
     calls = []
     monkeypatch.setattr(CAL, "fit_landscape", lambda *a, **k: calls.append(1))
@@ -242,7 +247,9 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
 def test_the_anchor_trains_whatever_the_predicate_says(monkeypatch):
     parts = _synthetic_population()
     _, belief, *_ = parts
-    none = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, informed=np.zeros(7, bool))
+    none = SimpleNamespace(
+        f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=np.zeros(7, bool)
+    )
     seen = _training_counts(monkeypatch, none, parts)
     assert seen["count"].shape == (1,) and seen["anchor"].all() and seen["count"][0] == 0.0
 
@@ -253,7 +260,7 @@ def test_a_belief_without_the_predicate_trains_the_old_population(monkeypatch):
     changes shape."""
     parts = _synthetic_population()
     _, belief, *_ = parts
-    old = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, informed=None)
+    old = SimpleNamespace(f_g=belief.f_g, var_gdna=belief.var_gdna, has_composition=None)
     seen = _training_counts(monkeypatch, old, parts)
     assert seen["count"].shape == (4,)
 

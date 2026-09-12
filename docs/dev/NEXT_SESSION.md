@@ -20,10 +20,10 @@ priced ≤ 1e-14 and are superseded.
 
 ## The first two tasks, in order (plan §3 A and B)
 
-1. **Names and cleanup** — present the rename proposals of plan §5 to the owner for a quick ruling, apply
-   them, then the splits (`sweep.py` → backbone / blocks / cache; the lanes out of `transfer.py`), the cache
-   key over `ChainView`'s fields, the redundant single-strand tiling. Bit-identical at every step: replay,
-   references, suite, `ruff`, `preflight --full`.
+1. **Names and cleanup** — DONE 2026-09-11/12 (plan §3 A and §5): the names ruled and applied, `sweep.py`
+   split into backbone / `blocks` / `message_cache`, the lanes and the face table out of `transfer.py`, the
+   cache key over the context's fields, the small things; the tiling folded into D. Every step
+   bit-identical on the replay, the three references and the suite.
 2. **The received messages as tables** — the design is written in plan §3 B with its names; the owner
    agreed to it and deferred the implementation to the session's judgement: clear, concise, efficient.
    Falsification tests first, verified failing; then the code; then break it and watch the gates fire.

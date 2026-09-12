@@ -260,7 +260,7 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
     is_exon = np.asarray(ctx.is_exon_region, bool)
     live = _prepared(pol, ctx)
     assert any(live.own[e] is not None for e in np.flatnonzero(is_exon)), "no live exon claim"
-    dead = _prepared(pol, _dc.replace(ctx, own_live=np.zeros(n, bool)))
+    dead = _prepared(pol, _dc.replace(ctx, has_own_composition=np.zeros(n, bool)))
     for x in range(n):
         if is_exon[x]:
             assert dead.own[x] is None, f"a dead exon {x} carries a claim"
@@ -350,7 +350,9 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
     message's composition removed, its level and flux join the intersection and the row changes."""
     from rigel.calibration.messages import Level, Message
-    from rigel.calibration.messages.transfer import Faces, _LevelLane, _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.faces import Faces
+    from rigel.calibration.messages.lanes import LevelLane
+    from rigel.calibration.messages.transfer import _PreparedTransfer, _SolveSite
     from rigel.calibration.messages.transfer_rows import intersect, rna_row_of_level
 
     K = 41
@@ -373,11 +375,9 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
         (1, 1): floor(0.1),
     }  # exon 1's junctions: slot 0 to its left, 2 right
     none = _bits(5, [])
-    pos = _LevelLane(
-        "pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, none, total=n_u, flux=flux
-    )
-    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, none, total=n_u)
-    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, none)
+    pos = LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, none, total=n_u, flux=flux)
+    neg = LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, none, total=n_u)
+    gd = LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, none)
     site = _SolveSite(fp & fn, {"pos": fp, "neg": fn}, 20)
     prep = _PreparedTransfer(
         [None] * 5, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
@@ -450,7 +450,7 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
     rows = np.asarray(msg.lam_rows)
     without = np.zeros_like(rows)
     n = len(prepared.own)
-    from rigel.calibration.messages.transfer import _fuse
+    from rigel.calibration.messages.faces import fuse
     from rigel.calibration.messages.transfer_rows import intersect
 
     for i in range(n):
@@ -465,7 +465,7 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
         if bounds:
             parts.append(intersect(bounds))
         if parts:
-            without[i] = _fuse(parts)
+            without[i] = fuse(parts)
     site = prepared.site
     fp, fn = site.free["pos"], site.free["neg"]
     all_comp = np.array(
@@ -484,18 +484,18 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
 
 
 def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
-    """`_LevelLane.receive` on the gDNA lane (no two-sided face): what a full recipient holds is
+    """`LevelLane.receive` on the gDNA lane (no two-sided face): what a full recipient holds is
     non-decreasing in u (a level that crosses a face says "at least this much gDNA" and nothing more),
     a two-sided input loses only its upper side, and a hop across a density cliff — a larger price —
     widens it."""
     from rigel.calibration.messages import Level
-    from rigel.calibration.messages.transfer import _LevelLane
+    from rigel.calibration.messages.lanes import LevelLane
 
     u = np.linspace(-10, 10, 60)
     two_sided = -0.5 * ((u - 1.0) / 0.4) ** 2
     two_sided -= two_sided.max()
     # one density on both sides: the price is the two totals' counting alone
-    flat = _LevelLane(
+    flat = LevelLane(
         "gdna",
         u,
         u,
@@ -512,7 +512,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
     np.testing.assert_allclose(lower[below], two_sided[below], atol=1e-3)
     assert np.all(lower[u > 2.0] > -1e-9), "the upper side was kept"
     # a cliff between the two nodes: the discrepancy beyond counting widens the bound
-    cliff = _LevelLane(
+    cliff = LevelLane(
         "gdna",
         u,
         u,
@@ -568,12 +568,12 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
     holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
     on the ladder. PERTURBATION: an `emit` that multiplies fails here."""
     from rigel.calibration.messages import Level
-    from rigel.calibration.messages.transfer import _LevelLane
+    from rigel.calibration.messages.lanes import LevelLane
     from rigel.calibration.messages.transfer_rows import intersect, lower_side
 
     u = np.linspace(-10, 10, 60)
     own = [None, -0.5 * ((u + 1.0) / 1.5) ** 2, None]
-    lane = _LevelLane(
+    lane = LevelLane(
         "gdna",
         u,
         u,
@@ -647,7 +647,7 @@ def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_f
     wrong neighbour; a second rule at a face is refused, so the builders' faces stay disjoint."""
     import pytest
 
-    from rigel.calibration.messages.transfer import (
+    from rigel.calibration.messages.faces import (
         EDGE,
         FORWARD,
         LEVEL,

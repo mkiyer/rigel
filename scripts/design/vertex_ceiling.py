@@ -225,19 +225,26 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
     (``tau_lam <= _TAU_FREE``), the population a vertex fix can actually reach; the unrestricted arm is
     the looser bound. ``force_empty`` runs the whole wrapper and pins nothing (the `noop` arm).
 
-    Three patches, each a live target of the self-test: ``sweep.build_region_init`` (the
-    classification, the truth mapped onto slots and the evidence filter, runs there once per sweep
-    before the policy prepares); ``messages.transfer._claims`` (the pinned claims);
-    ``calibrate.TransferPolicy`` (the pinned ψ rows)."""
+    Four patches, each a live target of the self-test: ``sweep._solve_block`` (records the block's
+    chain, which the classification maps the truth onto — the self-solve no longer receives it);
+    ``sweep.build_region_init`` (the classification, the truth mapped onto slots and the evidence
+    filter, runs there once per block before the policy prepares); ``messages.transfer._claims`` (the
+    pinned claims); ``calibrate.TransferPolicy`` (the pinned ψ rows)."""
     orig = NI.build_region_init
+    orig_block = SW._solve_block
     orig_claims = TR._claims
 
-    def wrapper(chain, statics, geometry, **kw):
-        ni = orig(chain, statics, geometry, **kw)
+    def block(chain, *args, **kw):
+        _CTX["chain"] = chain
+        return orig_block(chain, *args, **kw)
+
+    def wrapper(statics, geometry, **kw):
+        ni = orig(statics, geometry, **kw)
         _FIRED["init"] += 1
         _CTX["pins"] = {}
-        slot_truth, index, ra = _CTX.get("slot_truth"), _CTX.get("index"), _CTX.get("region_arrays")
-        if slot_truth is None or index is None or ra is None:
+        chain, slot_truth = _CTX.get("chain"), _CTX.get("slot_truth")
+        index, ra = _CTX.get("index"), _CTX.get("region_arrays")
+        if chain is None or slot_truth is None or index is None or ra is None:
             return ni
         true_fg = _parameter_vertex(chain, index, ra, slot_truth, float(_CTX.get("library_f_gdna", 1.0)))
         tau = np.array(ni.tau_lam, np.float64)
@@ -261,6 +268,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
             _FIRED["claimed"] += 1
         return own
 
+    SW._solve_block = block
     SW.build_region_init = wrapper
     TR._claims = claims
     CAL.TransferPolicy = _PinnedPolicy
@@ -395,6 +403,7 @@ def _patch_targets():
         (TR, "_claims", None),
         (NI, "build_region_init", None),
         (SW, "build_region_init", NI),
+        (SW, "_solve_block", None),
         (SW, "CompositionPriors", SL),
         (SL, "CompositionPriors", None),
         (SL, "_posterior_median_fg", None),
@@ -510,10 +519,10 @@ def self_test() -> int:
 
     # ── ⑤ the vertex pin's `noop` shape: the wrapper runs and returns the init UNTOUCHED ─────────────
     sentinel = object()
-    NI.build_region_init = lambda chain, statics, geometry, **kw: sentinel
+    NI.build_region_init = lambda statics, geometry, **kw: sentinel
     _install_vertex_pin(True, force_empty=True)
     before = dict(_FIRED)
-    out = SW.build_region_init(None, None, None)
+    out = SW.build_region_init(None, None)
     checks.append(("noop: wrapper fires, pins nothing, returns the init object itself",
                    out is sentinel and _FIRED["init"] > before["init"]
                    and _FIRED["pinned"] == before["pinned"]))
@@ -528,7 +537,7 @@ def self_test() -> int:
     # the claims wrapper pins exactly the slots the sweep wrapper classified, and nothing else
     from types import SimpleNamespace
 
-    NI.build_region_init = lambda chain, statics, geometry, **kw: sentinel
+    NI.build_region_init = lambda statics, geometry, **kw: sentinel
     TR._claims = lambda c: [None] * c.n
     _install_vertex_pin(True)
     _CTX["pins"] = {2: 1.0}

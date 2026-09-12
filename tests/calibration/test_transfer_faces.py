@@ -213,7 +213,7 @@ def _expected_splice_out_rows(si, ctx, strand, lam):
     sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
     sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
     nodes = norm.ppf((np.arange(9) + 0.5) / 9.0)
@@ -302,7 +302,7 @@ def _expected_boundary_rows(si, ctx, strand, lam):
     pairs, _n = _expected_pairs(si)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
     out = {}
@@ -348,7 +348,8 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
     each boundary is the identity (FORWARD); the rule from a licensed face into the exon, applied to
     the intron's claim and summed with the edge's level rule, equals the independently recomputed
     splice-in + edge rows of that exon; an unlicensed face has no rule into the exon."""
-    from rigel.calibration.messages.transfer import FORWARD, TransferPolicy
+    from rigel.calibration.messages.faces import FORWARD
+    from rigel.calibration.messages.transfer import TransferPolicy
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
@@ -394,7 +395,7 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
     the rule boundary → intron is the identity and the boundary's claim, summed per intron, equals
     the independently recomputed strand rows."""
-    from rigel.calibration.messages.transfer import FORWARD
+    from rigel.calibration.messages.faces import FORWARD
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
@@ -510,7 +511,7 @@ def _expected_terminus_rows(si, ctx, strand, lam, exon_rows):
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
 
@@ -691,7 +692,7 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     ctx2 = dataclasses.replace(ctx, boundary_flags=flags)
     assert (int(flags[b]) & TERMINUS) and (int(flags[b]) & SJ_FLAGS)
     assert junction_exon_side(flags[b], left[b], right[b]) == i  # the junction's exon is the inside
-    from rigel.calibration.messages.transfer import LEVEL
+    from rigel.calibration.messages.faces import LEVEL
 
     prep = _prepared(pol, ctx2)
     face = prep.faces.at(b, i)
@@ -737,7 +738,7 @@ def _expected_level_rows(si, ctx, strand, lam):
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     out, served = {}, []
     for b in np.flatnonzero(is_bnd):
         lo, hi = left[b], right[b]
@@ -846,7 +847,7 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     n_u = np.asarray(ctx.n_slot, np.float64)
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     sites = _item5_slots(ctx)
     served = 0
     for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
@@ -934,7 +935,7 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
     b1, i1, _k = served[-1]
     cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
     cnt[i1] = cnt[i1] * 3.0 + 7.0
-    other = _prepared(pol, _dc.replace(ctx, unspliced_count=cnt, n_slot=cnt.sum(axis=1)))
+    other = _prepared(pol, _dc.replace(ctx, unspliced_count=cnt))
     np.testing.assert_array_equal(
         other.faces.apply(b0, i0, other.own[b0], None),
         prepared.faces.apply(b0, i0, prepared.own[b0], None),
@@ -996,7 +997,7 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    live = np.asarray(ctx.own_live, bool)
+    live = np.asarray(ctx.has_own_composition, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
 

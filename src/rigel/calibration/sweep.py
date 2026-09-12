@@ -48,12 +48,11 @@ Both come from the region SIGNATURE and never from the counts:
 
 from __future__ import annotations
 
-import dataclasses
-import hashlib
-
 import numpy as np
 
-from .messages import SILENCE, ChainView, PsiMessage, StepContext
+from .blocks import block_slice, gather, view_fields
+from .message_cache import MessageCache
+from .messages import SILENCE, BlockContext, ChainView, PsiMessage
 from .messages.silent import SilentPolicy
 from .region_geometry import (
     RegionBelief,
@@ -69,16 +68,11 @@ from .region_init import (
     strand_discriminability,
 )
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
-from .simplex_logodds import (
-    CompositionPriors,
-    _logodds_grid,
-    _solve_regions_logodds_all,
-)
+from .simplex_logodds import CompositionPriors, _logodds_grid, _solve_regions_logodds_all
 from .region_chain import BOUNDARY, REGION, RegionChain, RegionDeconv, locus_blocks
 
 __all__ = [
     "AssertionCounts",
-    "MessageMemo",
     "chain_boundary_deconv",
     "chain_region_deconv",
     "solve_chain",
@@ -126,114 +120,8 @@ class AssertionCounts(dict):
             self._add(name, int(c["violations"]), int(c["eligible"]))
 
 
-class MessageMemo:
-    """The message layer's output, shared across the sweeps that would recompute it identically.
-
-    The message layer — the policy's ``prepare``, the two passes and its ``solve`` — reads only the
-    context (observations, geometry, the factory rows, the incoming belief's ``belief_fg`` and the
-    liveness bits ``own_live``), the library and the grid; never the prior. ``calibrate`` resets the
-    belief before every sweep, so for the refit sweeps that share a grid every one of those inputs is
-    identical and so is every message delivered (measured on the human chain: sweeps 1–3 deliver the
-    same ψ rows and cube rows to the bit, and every node hears the same thing). Only the own-claims
-    solve and the final ψ see the prior. So a refit sweep's blocks are served from here and pay only
-    the two ψ solves.
-
-    CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
-    every input the layer reads, and a changed belief, row, count, library or grid misses. An entry
-    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the float32 the AMBIG
-    solve casts them to, the block's ``held_composition`` and its assertion counts. Measured on the
-    18.6M-fragment library: the refit sweeps served in 38 s instead of 176 s each, the run 0.65 of its
-    wall, 4.1 GB held with float64 cube rows. Diagnostics never read from it: a captured sweep runs the
-    whole layer.
-    """
-
-    def __init__(self):
-        self._entries: dict = {}
-        self.hits = 0
-        self.misses = 0
-
-    @staticmethod
-    def key(
-        fields: dict, factory_rows, belief_fg, own_live, library, scalars: dict, policy
-    ) -> bytes:
-        """The digest of everything the message layer reads for one block."""
-        h = hashlib.blake2b(digest_size=16)
-        for part in (
-            *(fields[k] for k in sorted(fields)),
-            factory_rows,
-            belief_fg,
-            own_live,
-        ):
-            if part is None:
-                h.update(b"None")
-            else:
-                a = np.ascontiguousarray(part)
-                h.update(f"{a.dtype.str}{a.shape}".encode())
-                h.update(a)
-        h.update(
-            repr(
-                (library, scalars, getattr(policy, "name", None), getattr(policy, "_strand", None))
-            ).encode()
-        )
-        return h.digest()
-
-    def get(self, key: bytes):
-        entry = self._entries.get(key)
-        if entry is None:
-            self.misses += 1
-            return None
-        self.hits += 1
-        return entry
-
-    def put(self, key: bytes, msg: PsiMessage, held_composition, counts: AssertionCounts) -> None:
-        rows = msg.lam_rows
-        if rows is None:
-            sparse = None
-        else:
-            rows = np.asarray(rows)
-            idx = np.flatnonzero(np.any(rows != 0.0, axis=1))
-            sparse = (rows.shape, idx, rows[idx].copy())
-        # a cube row is held as float32, which is exactly what the AMBIG solve casts it to before
-        # adding it (`_solve_ambig_logodds`: ``psi += np.asarray(cube, F)``), so the bits ψ sees are
-        # the same and the memo's largest member is half the size
-        cube = (
-            None
-            if msg.cube_rows is None
-            else {int(k): np.asarray(v, dtype=np.float32) for k, v in msg.cube_rows.items()}
-        )
-        self._entries[key] = (
-            sparse,
-            cube,
-            np.array(held_composition, bool),
-            AssertionCounts(counts),
-        )
-
-    @staticmethod
-    def message(entry) -> PsiMessage:
-        """The stored entry as the message the solve receives — the rows dense again, zeros exact."""
-        sparse, cube, _held, _counts = entry
-        if sparse is None:
-            rows = None
-        else:
-            shape, idx, kept = sparse
-            rows = np.zeros(shape)
-            rows[idx] = kept
-        return PsiMessage(lam_rows=rows, cube_rows=None if cube is None else dict(cube))
-
-    @property
-    def nbytes(self) -> int:
-        total = 0
-        for sparse, cube, held, _counts in self._entries.values():
-            if sparse is not None:
-                total += sparse[1].nbytes + sparse[2].nbytes
-            if cube:
-                total += sum(v.nbytes for v in cube.values())
-            total += held.nbytes
-        return total
-
-
 def _check_message(
-    msg: PsiMessage, ctx: StepContext, counts: AssertionCounts, n_owned: int | None = None
+    msg: PsiMessage, ctx: BlockContext, counts: AssertionCounts, n_owned: int | None = None
 ) -> None:
     """The assertions on what the policy actually delivered: the population axiom, and every row
     channel one row per slot on the solve grid and finite.
@@ -312,13 +200,13 @@ def solve_chain(
     intron_prior=None,
     policy=None,
     block_slots: int | None = None,
-    message_memo: "MessageMemo | None" = None,
+    message_cache: "MessageCache | None" = None,
     _capture: dict | None = None,
 ) -> RegionBelief:
     """One forward-backward sweep over the chain. Returns the resolved :class:`RegionBelief`.
 
-    ``message_memo`` shares the message layer's output between sweeps whose inputs to it are identical
-    (:class:`MessageMemo`): a block whose digest is held is served its messages and pays only its two ψ
+    ``message_cache`` shares the message layer's output between sweeps whose inputs to it are identical
+    (:class:`MessageCache`): a block whose digest is held is served its messages and pays only its two ψ
     solves. ``None`` runs the layer for every block, as does a diagnostic capture.
 
     THE SWEEP IS SOLVED A LOCUS BLOCK AT A TIME. The chain breaks at every TERMINAL — a region that
@@ -377,7 +265,7 @@ def solve_chain(
     # alone: the only information a message may carry across a locus boundary
     library = policy.library(
         ChainView(
-            **_view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg),
+            **view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg),
             factory_rows=intron_prior,
             **scalars,
         )
@@ -387,17 +275,17 @@ def solve_chain(
         k: np.asarray(getattr(belief, k), dtype=np.float64).copy()
         for k in ("f_pos", "f_neg", "f_g", "var_pos", "var_neg", "var_gdna")
     }
-    informed = np.zeros(n, dtype=bool)
+    has_composition = np.zeros(n, dtype=bool)
     counts = AssertionCounts()
     diagnostics: list = []
     rowless = 0  # slots owned by blocks whose policy delivered no row array
     for b in locus_blocks(chain, terminal, block_slots):
         sl = slice(b.start, b.end)
         res = _solve_block(
-            _slots(chain, sl),
-            _slots(statics, sl),
-            _slots(geometry, sl),
-            _slots(belief, sl),
+            block_slice(chain, sl),
+            block_slice(statics, sl),
+            block_slice(geometry, sl),
+            block_slice(belief, sl),
             is_exon_region[sl],
             exon_pos[sl],
             exon_neg[sl],
@@ -415,27 +303,27 @@ def solve_chain(
             policy=policy,
             library=library,
             scalars=scalars,
-            memo=None if _capture is not None else message_memo,
+            cache=None if _capture is not None else message_cache,
             _capture={} if _capture is not None else None,
         )
         own = slice(b.start, b.stop)
         for k, arr in res["belief"].items():
             out[k][own] = arr[: b.stop - b.start]
-        informed[own] = res["informed"][: b.stop - b.start]
+        has_composition[own] = res["has_composition"][: b.stop - b.start]
         counts.absorb(res["counts"])
         if "lam_rows_finite" not in res["counts"]:
             rowless += b.stop - b.start
         if _capture is not None:
             diagnostics.append((b, res["diagnostics"]))
     # the row check's ELIGIBLE set reads as the chain's: where any block delivered rows, the chain's
-    # row array covers every slot (a silent block's rows are zero rows, `_gather` fills them so), and
+    # row array covers every slot (a silent block's rows are zero rows, `blocks.gather` fills them so), and
     # a zero row is a finite row that was checked — so the published count does not depend on how the
     # chain was cut. Where no block delivered, the check never ran and the key stays absent.
     if rowless and "lam_rows_finite" in counts:
         counts._add("lam_rows_finite", 0, rowless)
 
     if _capture is not None:  # inert diagnostic hook
-        _capture.update(_gather(diagnostics, n))
+        _capture.update(gather(diagnostics, n))
         _capture.update(
             backbone_assertions=counts,
             order=np.arange(n, dtype=np.int64),
@@ -448,106 +336,7 @@ def solve_chain(
             intron_prior=intron_prior,
         )
 
-    return RegionBelief(**out, informed=informed)
-
-
-def _view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg) -> dict:
-    """Every per-slot array a policy may read, under the two belief-free headings of
-    :class:`~.messages.ChainView` — for the whole chain (the library) or one block (the context)."""
-    cnt = np.asarray(geometry.unspliced_count, np.float64)  # [n, 2] by GENOME strand
-    return dict(
-        # observations
-        eff_gdna=np.asarray(geometry.eff_gdna, np.float64),
-        eff_rna=np.asarray(geometry.eff_rna, np.float64),
-        sj_count=np.asarray(geometry.sj_count, np.float64),  # [n, 2] by TRANSCRIPT strand
-        sj_count_lo=np.asarray(geometry.sj_count_lo, np.float64),
-        sj_count_hi=np.asarray(geometry.sj_count_hi, np.float64),
-        route_rate_lo=np.asarray(geometry.route_rate_lo, np.float64),
-        route_rate_hi=np.asarray(geometry.route_rate_hi, np.float64),
-        unspliced_count=cnt,
-        # the unspliced count is BOTH the density numerator and the Poisson n — one number, not a
-        # fractional mass plus a separate integer flux
-        n_slot=cnt.sum(axis=1),
-        spliced_slot=np.asarray(geometry.spliced_count, np.float64).sum(axis=1),
-        # geometry / structure
-        left=np.asarray(chain.left, np.int64),
-        right=np.asarray(chain.right, np.int64),
-        is_boundary=np.asarray(chain.kind) != REGION,
-        is_exon_region=np.asarray(is_exon_region, bool),
-        free_pos=np.asarray(statics.free_pos, bool),
-        free_neg=np.asarray(statics.free_neg, bool),
-        exon_pos=np.asarray(exon_pos, bool),
-        exon_neg=np.asarray(exon_neg, bool),
-        boundary_flags=statics.boundary_flags,
-    )
-
-
-def _slots(obj, sl: slice):
-    """``obj`` — a chain, its statics, its geometry or a belief — restricted to the slots ``sl``: every
-    per-slot array sliced (a view, no copy), ``n_slots`` updated, and a chain's links re-based so that
-    a neighbour outside the block is no neighbour (``-1``). The block's first slot is a terminal or a
-    reference start and its last read slot a terminal, so a link that leaves the block always leaves
-    it at a node that receives nothing, and what that node holds is not read by any consumer."""
-    fields = {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj)}
-    arrays = {k: v for k, v in fields.items() if isinstance(v, np.ndarray) and v.ndim >= 1}
-    n = next(iter(arrays.values())).shape[0]
-    new = {k: v[sl] for k, v in arrays.items() if v.shape[0] == n}
-    if "n_slots" in fields:
-        new["n_slots"] = len(range(*sl.indices(n)))
-    if isinstance(obj, RegionChain):
-        m = new["kind"].shape[0]
-        for k in ("left", "right"):
-            a = new[k] - sl.start
-            new[k] = np.where((a >= 0) & (a < m), a, -1)
-    return dataclasses.replace(obj, **new)
-
-
-def _gather(diagnostics: list, n: int) -> dict:
-    """The blocks' diagnostic captures as the chain's: per-slot arrays concatenated over each block's
-    OWNED slots, ψ's prior arms likewise, the delivered rows zero-filled where a block delivered
-    nothing (``None`` only when no block delivered), the held messages and cube rows re-keyed to the
-    chain; the scalars and grids, identical in every block, taken once."""
-    if not diagnostics:
-        return {}
-    out: dict = {}
-    first = diagnostics[0][1]
-    for key in first:
-        vals = [(b, c[key]) for b, c in diagnostics]
-        owned = [(b.stop - b.start, v) for b, v in vals]
-        if key in ("from_left", "from_right"):
-            held: list = [None] * n
-            for b, v in vals:
-                held[b.start : b.stop] = v[: b.stop - b.start]
-            out[key] = held
-        elif key == "cube_rows":
-            cube: dict = {}
-            for b, v in vals:
-                for slot, row in (v or {}).items():
-                    if int(slot) < b.stop - b.start:
-                        cube[int(slot) + b.start] = row
-            out[key] = cube or None
-        elif isinstance(first[key], CompositionPriors):
-            out[key] = CompositionPriors(
-                *(
-                    None
-                    if getattr(first[key], m) is None
-                    else np.concatenate([getattr(v, m)[:k] for k, v in owned], axis=0)
-                    for m in ("gdna", "rna")
-                )
-            )
-        elif key == "lam_rows":
-            if all(v is None for _k, v in owned):
-                out[key] = None
-            else:
-                K = next(np.asarray(v).shape[1] for _k, v in owned if v is not None)
-                out[key] = np.concatenate(
-                    [np.zeros((k, K)) if v is None else np.asarray(v)[:k] for k, v in owned], axis=0
-                )
-        elif isinstance(first[key], np.ndarray) and first[key].ndim >= 1:
-            out[key] = np.concatenate([np.asarray(v)[:k] for k, v in owned], axis=0)
-        else:
-            out[key] = first[key]
-    return out
+    return RegionBelief(**out, has_composition=has_composition)
 
 
 def _solve_block(
@@ -573,13 +362,13 @@ def _solve_block(
     policy,
     library,
     scalars: dict,
-    memo: "MessageMemo | None",
+    cache: "MessageCache | None",
     _capture: dict | None,
 ) -> dict:
     """One block of the chain, solved end to end on its own slice of every input: the self-solve, the
     policy's claims and rules, the two passes, the solve, the write-back — today's whole sweep, on
     ``chain.n_slots`` slots of which the first ``n_owned`` are the block's own (the rest is the terminal
-    it reads). Returns the block's belief arrays, its ``informed`` predicate, its assertion counts and
+    it reads). Returns the block's belief arrays, its ``has_composition`` predicate, its assertion counts and
     its diagnostic capture (``None`` unless asked for), each over every slot of the block; the caller
     keeps the owned prefix."""
     n_grid, logodds_window, n_tilt = scalars["n_grid"], scalars["logodds_window"], scalars["n_tilt"]
@@ -596,9 +385,7 @@ def _solve_block(
     # its variance at, so a channel-ablation replay must pass the SAME reference to be faithful.
     _fg_init, _fp_init, _fn_init = f_g.copy(), f_pos.copy(), f_neg.copy()
 
-    fields = _view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg)
-    CNT, n_slot, spliced_slot = fields["unspliced_count"], fields["n_slot"], fields["spliced_slot"]
-    u_pos, u_neg = CNT[:, 0], CNT[:, 1]
+    fields = view_fields(chain, statics, geometry, is_exon_region, exon_pos, exon_neg)
     # per-slot "global" gDNA support — the basis the rate prior is fit and projected on.
     mass_global, eff_global = region_gdna_geometry(geometry)
 
@@ -649,9 +436,6 @@ def _solve_block(
             cube_rows=cube_rows,
         )
 
-    # ── the SOLVE gate. Structural, from the signature, never from the counts ──────────────────────────
-    solvable = (fp | fn) & (n_slot > 0.0)
-
     # THE gDNA ARM of ψ — the COMPOSITION prior, and ONLY that. A total-density model is an ENRICHMENT
     # model, not a DNA composition prior: letting it vote a slot's f_g is the count-votes-composition
     # regression.
@@ -676,7 +460,6 @@ def _solve_block(
     order_list = list(range(int(chain.n_slots)))
     # ── the per-slot message-free SELF-SOLVE ──────────────────────────────────────────────────────────
     own = build_region_init(
-        chain,
         statics,
         geometry,
         kappa=kappa,
@@ -693,27 +476,27 @@ def _solve_block(
         intron_prior=factory_rows,
     )
 
-    own_live = np.asarray(own.tau_lam, np.float64) > 0.0
-    ctx = StepContext(
+    has_own_composition = np.asarray(own.tau_lam, np.float64) > 0.0
+    ctx = BlockContext(
         **fields,
         **scalars,
         # the intron factory's rows are an observation on the context: the one array that is both
         # ψ's λ-factor and the intron's own claim
         factory_rows=factory_rows,
         # beliefs — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)
-        own_live=own_live,
+        has_own_composition=has_own_composition,
         belief_fg=f_g,
     )
+    CNT, n_slot, spliced_slot = ctx.unspliced_count, ctx.n_slot, ctx.spliced_slot
+    u_pos, u_neg = CNT[:, 0], CNT[:, 1]
+    # ── the SOLVE gate. Structural, from the signature, never from the counts ──────────────────────────
+    solvable = (fp | fn) & (n_slot > 0.0)
 
-    # ── THE MESSAGE LAYER: served from the memo where its every input is unchanged, else run ─────────
-    key = (
-        None
-        if memo is None
-        else memo.key(fields, factory_rows, f_g, own_live, library, scalars, policy)
-    )
-    entry = None if key is None else memo.get(key)
+    # ── THE MESSAGE LAYER: served from the cache where its every input is unchanged, else run ─────────
+    key = None if cache is None else cache.key(ctx, library, policy)
+    entry = None if key is None else cache.get(key)
     if entry is not None:
-        msg = memo.message(entry)
+        msg = cache.message(entry)
         from_left = from_right = None
         held_composition = entry[2].copy()
         counts = AssertionCounts(entry[3])
@@ -732,7 +515,7 @@ def _solve_block(
         msg = prepared.solve(from_left, from_right)
         counts = AssertionCounts()
         _check_message(msg, ctx, counts, n_owned)
-        # a COMPOSITION row received from a neighbour, read off the HELD MESSAGES (see the informed
+        # a COMPOSITION row received from a neighbour, read off the HELD MESSAGES (see the has_composition
         # predicate below for why not `msg.lam_rows`)
         held_composition = np.zeros(n_slot.shape[0], dtype=bool)
         for held in (from_left, from_right):
@@ -740,7 +523,7 @@ def _solve_block(
                 if m is not None and m.composition is not None:
                     held_composition[i] = True
         if key is not None:
-            memo.put(key, msg, held_composition, counts)
+            cache.put(key, msg, held_composition, counts)
 
     # THE CITIZENSHIP SEAM: a delivered claim joins the λ-factor rows in the FINAL solve only. Phase-A
     # (`build_region_init`) and the own-evidence precision never see it — an imputation may inform the
@@ -787,7 +570,7 @@ def _solve_block(
     f_g, f_pos, f_neg = out_fg, out_fpos, out_fneg
     var_g, var_pos, var_neg = out_vg, out_vpos, out_vneg
 
-    # ── THE INFORMED PREDICATE — does this slot hold a COMPOSITION, or only a bound? ─────────────
+    # ── ``has_composition`` — does this slot hold a COMPOSITION, or only a bound? ─────────────────
     # An own composition channel (the solver's own precision), structural certainty, or a
     # COMPOSITION row received from a neighbour (`Message.composition`). A level lane, a ceiling
     # (the RNA lanes' or the node's own flux's) and a cube row are BOUNDS: one-sided, so the value the
@@ -796,7 +579,9 @@ def _solve_block(
     # (`calibrate._fit_gdna_hyperprior`). ⛔ Read this off the HELD MESSAGES, not `msg.lam_rows`, which
     # fuses compositions and bounds into one row: the bound-only slots with a non-flat row are exactly
     # the ones the training rule excludes.
-    informed = has_own_composition_evidence(own.tau_lam) | g1_locked(fp, fn) | held_composition
+    has_composition = (
+        has_own_composition_evidence(own.tau_lam) | g1_locked(fp, fn) | held_composition
+    )
 
     if _capture is not None:  # inert diagnostic hook
         # strand-ONLY local belief (no global prior, no messages) — to split the local error into the
@@ -869,7 +654,7 @@ def _solve_block(
         belief=dict(
             f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_pos, var_neg=var_neg, var_gdna=var_g
         ),
-        informed=informed,
+        has_composition=has_composition,
         counts=counts,
         diagnostics=_capture,
     )

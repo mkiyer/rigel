@@ -151,12 +151,12 @@ def _live_rows(si, n_grid, window):
 
 def _bits(n, pairs):
     """A lane's face table from directed ``(source, destination)`` pairs: ``(n, 2)`` bits over
-    (destination, side) — the form `_LevelLane` holds its faces in."""
-    from rigel.calibration.messages.transfer import _side
+    (destination, side) — the form `LevelLane` holds its faces in."""
+    from rigel.calibration.messages.faces import side_of
 
     out = np.zeros((int(n), 2), bool)
     for s, i in pairs:
-        out[int(i), _side(int(s), int(i))] = True
+        out[int(i), side_of(int(s), int(i))] = True
     return out
 
 
@@ -168,9 +168,9 @@ def _pairs(bits, ctx):
 
 
 def _two_sided(lane, s, x) -> bool:
-    from rigel.calibration.messages.transfer import _side
+    from rigel.calibration.messages.faces import side_of
 
-    return bool(lane.two_sided[int(x), _side(int(s), int(x))])
+    return bool(lane.two_sided[int(x), side_of(int(s), int(x))])
 
 
 def _prepared(pol, ctx):
@@ -180,7 +180,7 @@ def _prepared(pol, ctx):
 
 
 def _ctx_of(si):
-    """The StepContext exactly as the backbone builds it — captured by a spy policy inside a real
+    """The BlockContext exactly as the backbone builds it — captured by a spy policy inside a real
     sweep — with the live toy's synthetic factory rows attached, so every gate's policy reads the
     same rows the independent recomputes read (``ctx.factory_rows``)."""
     import dataclasses as _dc
@@ -230,9 +230,9 @@ def _dead_boundaries(ctx):
     """The context with every BOUNDARY's strand channel declared dead and every region's intact."""
     import dataclasses as _dc
 
-    live = np.asarray(ctx.own_live, bool).copy()
+    live = np.asarray(ctx.has_own_composition, bool).copy()
     live[np.asarray(ctx.is_boundary, bool)] = False
-    return _dc.replace(ctx, own_live=live)
+    return _dc.replace(ctx, has_own_composition=live)
 
 
 def _drive_the_backbone(prepared, ctx):
@@ -342,7 +342,7 @@ def _with_populated_inside(ctx):
     cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
     a_g = np.asarray(ctx.eff_gdna, np.float64).copy()
     a_r = np.asarray(ctx.eff_rna, np.float64).copy()
-    live = np.asarray(ctx.own_live, bool).copy()
+    live = np.asarray(ctx.has_own_composition, bool).copy()
     fills = iter(
         [(20.0, 180.0), (80.0, 120.0), (25.0, 175.0), (70.0, 130.0)]
     )  # two pairs that DISAGREE
@@ -359,10 +359,9 @@ def _with_populated_inside(ctx):
     return _dc.replace(
         ctx,
         unspliced_count=cnt,
-        n_slot=cnt.sum(axis=1),
         eff_gdna=a_g,
         eff_rna=a_r,
-        own_live=live,
+        has_own_composition=live,
     )
 
 

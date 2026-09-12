@@ -39,7 +39,7 @@ The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.
 two calls above are the two scopes a policy sees: ``library`` reads a :class:`ChainView` of the whole
 chain — observations and geometry, NO beliefs, which is what makes a cross-block reduction over beliefs
 unwritable — and returns whatever library-wide facts its messages need (the transfer policy's: three
-reference densities and whether the strand split is live). ``prepare`` reads a :class:`StepContext` of
+reference densities and whether the strand split is live). ``prepare`` reads a :class:`BlockContext` of
 one block, beliefs included, plus that library. Everything else a message reads is per slot or per face.
 
 ⛔ THE CONTRACT, and it is TRAPS: a-message-from-the-destinations-belief, a lesson that has recurred
@@ -62,7 +62,7 @@ draws is that a claim's VALUE may never be built from the destination's belief, 
 manufactures agreement out of nothing. A reception step is safe when it can only ever WIDEN a claim
 and never move its mode — it can discard information, never invent it.
 
-:class:`StepContext` splits its fields under exactly those three headings, and the heading is what
+:class:`BlockContext` splits its fields under exactly those three headings, and the heading is what
 turns the trap from a discipline into something a reader — and the backbone — can check. The backbone
 enforces the half that is enforceable: the kernel is called with two INDICES and builds the message
 into the destination from the SOURCE's claim and what the source holds; the backbone writes ``held``
@@ -78,6 +78,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 __all__ = [
+    "BlockContext",
     "ChainView",
     "Message",
     "NO_NEIGHBOUR",
@@ -85,7 +86,6 @@ __all__ = [
     "Prepared",
     "PsiMessage",
     "SILENCE",
-    "StepContext",
 ]
 
 
@@ -216,7 +216,7 @@ class ChainView:
     geometry, under the two headings that make TRAPS: a-message-from-the-destinations-belief legible,
     plus the solve's own scalars. `Policy.library` receives the WHOLE chain in this form, so the only
     cross-block information a policy can build is a reduction over observations and geometry — a
-    reduction over beliefs has no field to read. :class:`StepContext` adds the beliefs for one block.
+    reduction over beliefs has no field to read. :class:`BlockContext` adds the beliefs for one block.
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; ``beliefs`` may be indexed at the SOURCE only. A policy that reads a ``beliefs`` field at the
@@ -244,8 +244,7 @@ class ChainView:
     unspliced_count: (
         np.ndarray
     )  # [n, 2] unspliced count by GENOME strand — the density numerator AND n
-    n_slot: np.ndarray  # unspliced_count.sum(axis=1)
-    spliced_slot: np.ndarray  # per-slot spliced count, summed over strands
+    spliced_count: np.ndarray  # [n, 2] spliced count by strand
 
     # ── GEOMETRY / STRUCTURE — readable at either end, and belief-free by construction ────────────────
     left: np.ndarray  # adjacent slot of the other kind, -1 at a reference start
@@ -285,7 +284,18 @@ class ChainView:
 
     @property
     def n_slots(self) -> int:
-        return int(self.n_slot.shape[0])
+        return int(self.unspliced_count.shape[0])
+
+    @property
+    def n_slot(self) -> np.ndarray:
+        """The per-slot unspliced count over both strands — the density numerator AND the Poisson n:
+        one number, not a fractional mass plus a separate integer flux."""
+        return self.unspliced_count.sum(axis=1)
+
+    @property
+    def spliced_slot(self) -> np.ndarray:
+        """The per-slot spliced count over both strands."""
+        return self.spliced_count.sum(axis=1)
 
     def population_size(self) -> np.ndarray:
         """``|T(slot)|`` — AXIOM 0 made arithmetic.
@@ -304,17 +314,17 @@ class ChainView:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class StepContext(ChainView):
+class BlockContext(ChainView):
     """One block of the chain as `Policy.prepare` reads it: the :class:`ChainView` plus the BELIEFS —
     SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)."""
 
-    #: the LIVENESS of each node's own strand channel — `RegionInit.tau_lam > 0`, the one bit of the
-    #: message-free self-solve a policy may know: positive exactly where the node has counts and the
-    #: library's deadband is open (or the factory's row is curved), so it does not depend on the prior
-    #: a sweep carries. A policy is not handed the self-solve's fractions or precisions, and that is what
-    #: lets the message layer be shared across the refit sweeps (`sweep.MessageMemo`): every input it
-    #: reads is on this context and can be digested.
-    own_live: np.ndarray
+    #: does this node have OWN composition evidence — `RegionInit.tau_lam > 0`, the one bit of the
+    #: message-free self-solve a policy may know: the strand term (the node has counts and the library's
+    #: deadband is open) or the factory's row, so it does not depend on the prior a sweep carries. A
+    #: policy is not handed the self-solve's fractions or precisions, and that is what lets the message
+    #: layer be shared across the refit sweeps (`message_cache.MessageCache`): every input it reads is on this
+    #: context and can be digested.
+    has_own_composition: np.ndarray
     belief_fg: np.ndarray  # the INCOMING belief: the variance freeze of a node's own strand profile
 
 
@@ -355,6 +365,6 @@ class Policy(Protocol):
         need, reduced from observations and geometry alone (the view carries no belief), or ``None``.
         This is the ONLY place a policy may look across the chain; ``prepare`` sees one block."""
 
-    def prepare(self, ctx: StepContext, library) -> Prepared:
+    def prepare(self, ctx: BlockContext, library) -> Prepared:
         """Derive whatever this policy needs for the block ``ctx`` covers, given its own ``library``:
         every node's OWN claim, the rules per face, the lanes."""

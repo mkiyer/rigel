@@ -714,10 +714,14 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | | | |
 |---|---|---|
 | `sweep.py` | **The backbone.** The self-solve, two directional passes, one ψ solve, one write-back, four assertions | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
+| `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read), `block_slice` (one block cut out of the chain, its links re-based), `gather` (the blocks' captures as the chain's) | nothing about what a solve or a message is |
+| `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
 | `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_propagation = False` installs | A reader who holds `sweep.py` plus this holds the entire working system |
-| `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, one lane class for the three populations' levels, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
+| `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
+| `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
+| `messages/lanes.py` | `LevelLane` — one class for the three populations' levels — and its two builders, `gdna_lane` (every face left without a composition rule) and `rna_lanes` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
 | `messages/transfer_rows.py` | the pure row constructors — every map, level, price and coordinate change, each a function of one face's numbers | `count_logvar` is the one home of the counting term; every hop price reads it |
-| `messages/__init__.py` | the interface (`Policy`, `Prepared`), the message (`Message`, its lanes, `SILENCE`, `NO_NEIGHBOUR`), what ψ receives (`PsiMessage`) and what a policy may read (`StepContext`) | every field of `StepContext` has a reader in the policy or the backbone |
+| `messages/__init__.py` | the interface (`Policy`, `Prepared`), the message (`Message`, its lanes, `SILENCE`, `NO_NEIGHBOUR`), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
 **A restructure is gated, a rewrite is not.** The split out of the one 1,635-line function passed two
 `TRAPS: byte-identity-gate` gates of opposite direction and, per array on one real 70,176-slot chain
@@ -736,7 +740,7 @@ evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half 
 `TRAPS: a-message-from-the-destinations-belief`, and the backbone enforces the enforceable half by
 construction: the kernel is called with two indices and builds the message into the destination from the
 SOURCE's claim and what the source holds; the backbone writes `held` and the policy never reaches past its
-hop. `StepContext` splits its fields under three headings — **observations** (either end), **geometry /
+hop. `BlockContext` splits its fields under three headings — **observations** (either end), **geometry /
 structure** (either end), **beliefs** (source-side only). The shipped policy reads `belief_fg` once, at
 `prepare`, for the variance freeze of each node's own strand profile — a source-side read by construction.
 
@@ -1000,10 +1004,10 @@ anywhere in the transfer policy; the bar is about one percent of a row.
   single-strand exons — a coordinate). Faces from the flag bits, per strand: strand `s`'s level crosses a
   face iff the boundary carries none of `s`'s four bits and both nodes admit `s`; across `s`'s own
   junction it enters `s`'s intron and not `s`'s exon; a terminus of `s` stops `s` both ways. The intron
-  test is PER STRAND (`StepContext.exon_pos` / `exon_neg`): a region that admits `s` and carries no exon
+  test is PER STRAND (`BlockContext.exon_pos` / `exon_neg`): a region that admits `s` and carries no exon
   of `s` is `s`'s intron whatever the other strand does there. Two-sided only between an intron of `s` and
   its own boundary; lower-only everywhere else. **Every hop pays the pair's price, and the witness of the
-  strand's abundance is the column split's asymmetry** (`_LevelLane.witness`, 2026-09-09): both column
+  strand's abundance is the column split's asymmetry** (`lanes.LevelLane.witness`, 2026-09-09): both column
   counts' counting plus the disagreement, beyond its own counting, between the two nodes' estimates of
   this strand's RNA — `count − other` on each (gDNA splits evenly and cancels; the protocol's contrast
   `|1 − 2κ|` drops out of the ratio) — carried with the level across empty nodes. A node with no
@@ -1084,7 +1088,7 @@ F-ordered ψ whose row reductions summed in a row-count-dependent order, and the
 moments dispatched a different kernel at one row — splitting any real 255-row tile moved ~70 % of its rows
 by ≤ 1e-15, and halving `_SOLVE_BLOCK_BYTES` already moved slots on the shipped path. The repair (a
 contiguous ψ, per-row moment sums) moves the answer by ≤ 3.1e-15 per slot per sweep, does not amplify
-through four sweeps and three refits (the final belief ≤ 3.1e-15, `informed` never flips), leaves TPM and
+through four sweeps and three refits (the final belief ≤ 3.1e-15, `has_composition` never flips), leaves TPM and
 effective lengths bit-identical on a real library and every aggregate of `calibration_vs_oracle.py` at the
 last ulp with `ruler_n_moved` identical on all 16 conditions; the owner accepted it as identical to a
 tolerance (2026-09-11). With it, every block size gives the same bits (gated on the toy for six sizes and
@@ -1093,24 +1097,24 @@ on a real 2.09M-slot sweep for eight), so `CalibrationConfig.sweep_block_slots` 
 **The message layer is refit-invariant, so the refit sweeps share it** (derived and measured
 2026-09-11, the first step after the decomposition). Everything the layer reads is on the context —
 observations, geometry, the factory rows, the incoming belief's ``belief_fg`` and the liveness bits
-``own_live`` (`tau_lam > 0`, the one bit of the self-solve a policy may know; the context no longer
+``has_own_composition`` (`tau_lam > 0`, the one bit of the self-solve a policy may know; the context no longer
 carries the self-solve object) — plus the library and the grid, and never the prior; and `calibrate`
 resets the belief before every sweep. So for one grid every refit sweep's messages are the same:
 measured on the human chain, sweeps 1–3 deliver identical ψ rows and cube rows to the bit and every node
-hears the same thing. `sweep.MessageMemo` holds one grid's delivered messages, content-keyed on a
+hears the same thing. `message_cache.MessageCache` holds one grid's delivered messages, content-keyed on a
 digest of every input the layer reads (a changed belief, row, count, library, grid or policy misses —
 each channel gated by perturbation), sparsely (0.17 GB of rows plus 0.39 GB of cube rows per grid on
 the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves and is served the rest.
 Diagnostics never read from it. Pass 0's grid is never reused, so it is not held. On the 18.6M-fragment
 library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3 are served entirely
-(38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs, and the memo holds
+(38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs, and the cache holds
 2.68 GB (peak 15.0 → 17.8 GB) — the cube rows as the float32 the AMBIG solve casts them to; 4.1 GB as
 float64.
 
 **The rules are typed tables, and a face is a side** (2026-09-11, the port's data layout). Every
 directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
 recipient's composition rule is a KIND and its parameters at ``(destination, side)``:
-`messages.transfer.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts,
+`messages.faces.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts,
 the boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into
 a row store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary →
 region through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the
@@ -1211,7 +1215,7 @@ their numbers `ISSUES: the-landscape-training-population-arms`; the instrument
 `landscape_training_census.py`):
 
 1. **A node whose only evidence is a bound, or which has none, does not train the prior.**
-   `RegionBelief.informed` — an own composition channel (`has_own_composition_evidence`), structural
+   `RegionBelief.has_composition` — an own composition channel (`has_own_composition_evidence`), structural
    certainty (`g1_locked`), or a COMPOSITION row received from a neighbour — is published by
    `sweep.solve_chain` from the held messages and selected on by `calibrate._fit_gdna_hyperprior`; a level
    lane, a ceiling and a cube row are bounds; the zero-count anchor trains regardless. ⛔ "Any non-flat

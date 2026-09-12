@@ -162,14 +162,14 @@ runs) but `build_region_geometry`'s transient (14.5 GB) and the pre-sweep `init_
 next memory target, after the sweeps' time; the final ψ lost ~7 s to smaller tiles inside 5,000-slot
 blocks (`_block_rows` inside a block), a note for ① and ③; ① DONE, and larger than scoped: the WHOLE message layer — `prepare`, both passes and the
 policy's solve — is refit-invariant given the grid (`DESIGN.md` §6b.15), so the refit sweeps are served
-their messages from a content-keyed `sweep.MessageMemo` and pay only their two ψ solves. Measured on
-the deep library, two back-to-back pairs at 8 threads, memo off → on
+their messages from a content-keyed `message_cache.MessageCache` and pay only their two ψ solves. Measured on
+the deep library, two back-to-back pairs at 8 threads, cache off → on
 (`~/Downloads/rigel_runs/perf/ab_memo_2026-09-11/`): the refit grid is stable (`n_grid` 138, L 23.18 for
 all three refits), refit 1 misses its 426 blocks and refits 2–3 hit all 426 — 38 s each instead of
 176 s; wall 795 → 515 s and 799 → 515 s (0.65), `calibrate` 704 → 424 s, `prepare`/passes/policy solve
-0.49/0.48/0.45, untouched stages 1.00; the memo holds 2.68 GB (its cube rows as the float32 the AMBIG
+0.49/0.48/0.45, untouched stages 1.00; the cache holds 2.68 GB (its cube rows as the float32 the AMBIG
 solve casts them to — 4.1 GB as float64), so the peak rose 15.0 → 17.8 GB. Whether a memory-constrained
-run should be able to switch it off is a tunable for the owner to rule on; ② DONE — `messages.transfer.Faces`:
+run should be able to switch it off is a tunable for the owner to rule on; ② DONE — `messages.faces.Faces`:
 the rules as ``(n, 2)`` typed tables over (destination, side) with five kinds and a row store, the lanes'
 faces as bits, bit-identical (`DESIGN.md` §6b.15); ③ the port
 of `_solve_block` — passes and `transfer_rows`, `prepare`, ψ, then threads over blocks — behind a derived
@@ -339,7 +339,7 @@ candidate on top of being refused; the `g00` zero-control column is never moot.
 
 ### landscape-trains-on-real-substrate
 CLOSED 2026-09-10, superseded: the no-evidence share of the prior's training mass is now zero by construction
-(`RegionBelief.informed`, gated); `landscape_training_census.py` reports the population per evidence class.
+(`RegionBelief.has_composition`, gated); `landscape_training_census.py` reports the population per evidence class.
 
 ### the-landscape-training-population-arms
 A/B'd on the test chromosome (30) and the ladder (16), halves apart, both zero controls on every row
@@ -366,7 +366,7 @@ capture-OFF rungs and all four `g00` rows exactly and loses all 6 contaminated c
 16, deleted.
 
 ### flux-source-skipped-at-an-empty-exon-piece
-CLOSED by landing 2026-09-09: `transfer._rna_lanes` builds a junction's flux level at an empty exon piece too,
+CLOSED by landing 2026-09-09: `lanes.rna_lanes` builds a junction's flux level at an empty exon piece too,
 priced by `hop_price` on the piece's zero count; ladder through the pipeline every in-scope row within 0.5 %
 (worst `g98 ss.99 ON` 1.0048×), stranded zero controls 0.977×/0.958×. Only the ladder can judge it.
 

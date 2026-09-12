@@ -91,7 +91,7 @@ the graph from the AST.
 | one slot's own numbers, ψ, and its total | **3 · geometry + the per-slot solve** — `region_geometry` `simplex_logodds` `total_abundance` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_balance` `strand_summary`, and `strand_likelihood` (a gated executable reference) |
 | how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `landscape` `abundance_landscape` |
-| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `messages/` (the policy) + `region_init` |
+| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `blocks` (one locus block cut out and put back) + `message_cache` + `messages/` (the policy) + `region_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
 
 ## The message layer
@@ -105,7 +105,7 @@ neighbour it has → `solve(from_left, from_right)`, which hands ψ two row chan
 | policy | |
 |---|---|
 | `silent` | the measured floor (`messages/silent.py`); the same policy `message_propagation = False` installs |
-| `transfer` | the shipped default (`messages/transfer.py`; pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims`, `_splice_faces`, `_edge_level`, `_terminus_rules`, `_alternative_splice_site`, `_gdna_lane`, `_rna_lanes`. Every hop pays its pair's counting plus the disagreement beyond it |
+| `transfer` | the shipped default (`messages/transfer.py`; the face table in `messages/faces.py`, the level lanes in `messages/lanes.py`, pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims`, `_splice_faces`, `_edge_level`, `_terminus_rules`, `_alternative_splice_site`, `lanes.gdna_lane`, `lanes.rna_lanes`. Every hop pays its pair's counting plus the disagreement beyond it |
 
 Messages exist for the slots whose own solve has no composition channel — unstranded data and AMBIG
 slots. **We do not expect to beat `silent`**: on strand-specific data a sighted exon's own solve is
@@ -186,11 +186,9 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,419 passed / 0 skipped / 2 xfail, 3,421 collected** (re-derived
-2026-09-11 after the locus sweep, the message memo and the face tables landed: fourteen gates added to
-existing files — three on `locus_blocks`, two on the terminal rule, two on ψ's chunk-exactness, three on
-the block solve, three on the memo, one on the face table — plus one `docs/dev/` file, the calibration
-performance plan, at +1; +15 in all). The 2 xfails are executable records of proven defects whose fixes are elsewhere
+**The standing baseline: 0 failed / 3,431 passed / 0 skipped / 2 xfail, 3,433 collected** (re-derived
+2026-09-12 after the cleanup split: no gate added, four `src/rigel/calibration/` modules added — `blocks`,
+`message_cache`, `messages/faces`, `messages/lanes` — at +3 each, +12 in all). The 2 xfails are executable records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this

@@ -104,7 +104,7 @@ class Spy:
 
         def solve_chain(*a, **k):
             # the sweep solves the chain a locus block at a time, so the held messages are read off the
-            # capture, where the backbone re-keys every block's to the chain (`sweep._gather`)
+            # capture, where the backbone re-keys every block's to the chain (`blocks.gather`)
             out = orig_solve_chain(*a, **k)
             cap = k.get("_capture") or {}
             cube = cap.get("cube_rows")
@@ -152,11 +152,11 @@ class Spy:
 
 
 def training_selector(
-    kind, obj_idx, signature, free_pos, free_neg, mass_global, eff_global, informed=None
+    kind, obj_idx, signature, free_pos, free_neg, mass_global, eff_global, has_composition=None
 ):
     """The refit's training population, re-derived from the statics exactly as
     `calibrate._fit_gdna_hyperprior` selects it: expressed REGIONs that are single-strand or
-    structurally locked AND hold a composition (`RegionBelief.informed`: a slot whose only evidence
+    structurally locked AND hold a composition (`RegionBelief.has_composition`: a slot whose only evidence
     is a bound, or which has none, does not train), plus the zero-count anchor (an
     intergenic or intronic region with opportunity and no unspliced mass). Returns ``(sel, anchor)``;
     the caller GATES it against the recorded fit."""
@@ -170,8 +170,8 @@ def training_selector(
     expressed = isr & (eff > 1.0e-9) & (mass > 1.0e-12)
     anchor = isr & (eff > 1.0e-9) & (mass <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
     sel = expressed & ((fp ^ fn) | (~fp & ~fn))
-    if informed is not None:
-        sel &= np.asarray(informed, bool)
+    if has_composition is not None:
+        sel &= np.asarray(has_composition, bool)
     sel |= anchor
     return sel, anchor
 
@@ -334,7 +334,7 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
             cap["free_neg"],
             cap["mass_global"],
             cap["eff_global"],
-            informed=sw["belief"].informed,
+            has_composition=sw["belief"].has_composition,
         )
         gate_selector(sel, anchor, cap["f_g"], cap["mass_global"], cap["eff_global"], fit)
         fg_grid = np.asarray(cap["solve_grid"], np.float64)  # the capture's grid is f_g = σ(λ)

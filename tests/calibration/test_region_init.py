@@ -79,7 +79,6 @@ def _scenario(kappa=0.9):
 def _init(kappa=0.9, n_gdna_obs=230.0):
     chain, statics, geometry, belief, _ = _scenario(kappa)
     ni = build_region_init(
-        chain,
         statics,
         geometry,
         kappa=kappa,
@@ -248,8 +247,8 @@ def test_density_factor_precision_flows_into_region_init():
         n_grid_ss=256,
         belief=belief,
     )
-    ni_off = build_region_init(chain, statics, geometry, **common)
-    ni_on = build_region_init(chain, statics, geometry, intron_prior=prior, **common)
+    ni_off = build_region_init(statics, geometry, **common)
+    ni_on = build_region_init(statics, geometry, intron_prior=prior, **common)
     assert ni_off.tau_lam[4] == 0.0  # unstranded, no factory ⇒ silent
     assert ni_on.tau_lam[4] > 0.0  # factory ⇒ the region can now speak
 
