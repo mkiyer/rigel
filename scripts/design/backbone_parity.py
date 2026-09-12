@@ -201,7 +201,7 @@ def main() -> int:
             arms = PP.load_arms(Path(path))
             if arm not in arms:
                 raise SystemExit(f"⛔ {path} defines no arm {arm!r}; it has {sorted(arms)}")
-            return arms[arm](_shipped._rows_at, strand=_shipped._strand)
+            return arms[arm](strand=_shipped._strand)
         raise SystemExit(f"⛔ unknown arm {spec!r} — use 'transfer', 'silent' or 'module:<file.py>:<arm>'")
 
     pa, pb = policy_for(args.arm_a), policy_for(args.arm_b)

@@ -50,9 +50,11 @@ and RNA equal fragment lengths, is `DESIGN.md` §0b.
   effective-length shrinkage fabricates a reference from the residual false-positive fragments and
   contracts every transcript (`ISSUES: g00-shrinkage-upstream-repair` — the fix is the detector); the
   never-passed per-transcript prior lane (`ISSUES: per-transcript-prior-lane`) is the other.
-- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run and hold
-  the memory peak, on a single core, while the locus EM beside them is a rounding error; the loci an
-  intergenic region bounds are the decomposition — `profiling/profiler.py`, `profiling/sweep_replay.py`.
+- **Calibration's performance**: the one unfinished component — the sweeps dominate a deep run, on a
+  single core, while the locus EM beside them is a rounding error. The decomposition is built: a
+  terminal receives nothing, the sweep solves the chain a locus block at a time, the block size moves no
+  number (`DESIGN.md` §6b.15); what remains is the C/C++ port of the block solve, where the parallelism
+  goes — `profiling/profiler.py`, `profiling/sweep_replay.py --block-slots`.
 - **Panels**: the sparse-nascent 16-condition ladder and the 30-condition test chromosome, both cached
   and certified — `panel.py status`; the fl-gap side panels carry a different nascent model —
   `ISSUES: flgap-panels-stale-nascent-model`. The ladder's nascent level is a development stress
@@ -77,13 +79,19 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
 (`policy_benchmark.py --by-class`).
 
 1. **Calibration's performance — `ISSUES: performance-memory-bounded-solve`** (owner, 2026-09-11: the
-   active thread). Calibration is the tool's one unfinished component: on a deep library its sweeps are
-   most of the run and hold the memory peak, on one core, beside a locus EM that is a rounding error.
-   The decomposition is the LOCUS, as the EM already does it — an intergenic region terminates message
-   passing, so the chain breaks into independent loci, none of them a large share of it — with threads
-   for the message passes and the grid solves. Judge each step by `profiling/profiler.py --compare` on
-   back-to-back pairs and prove it a no-op with `profiling/sweep_replay.py` and
-   `design/rename_identity.py --bam`; the accuracy frame is unchanged, and no step may move a number.
+   active thread). The locus decomposition is landed and gated (`DESIGN.md` §6b.15); the agreed order
+   from here, each step judged by `profiling/profiler.py --compare` on back-to-back pairs and proven a
+   no-op with `profiling/sweep_replay.py` (`--block-slots` for the chunk-exactness of the whole sweep) and
+   `design/rename_identity.py --bam` against the `locus_identity_*` references:
+   ⓪ re-measure the deep library end to end, `main` against the landed tree — the baseline the rest is
+   judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
+   rules and lane faces read counts and geometry, only the own claims read the belief), per block, per
+   grid; ② the policy's rules from closures to typed tables — the C/C++ data layout, written in Python
+   first (done: `messages.transfer.Faces`); ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
+   ψ, then threads over blocks — with a DERIVED tolerance gate in place of bit-identity, since a language
+   port cannot be bit-identical; ④ the intron-factory rows built per block, the last genome-wide arrays;
+   ⑤ the scan and the second pass, the stages that scale with depth and the floor once the sweeps are
+   compiled. The accuracy frame is unchanged, and no step may move a number.
 2. **The ruler at zero gDNA — `ISSUES: g00-shrinkage-upstream-repair`.** A gDNA-free library is the
    modal real case, the composition there is now right, and the effective length the EM divides by is
    still a fraction of the truth because the reference-density detector accepts any few slots with

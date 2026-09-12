@@ -28,10 +28,19 @@ The interface
 -------------
 ::
 
-    prepared = policy.prepare(ctx)                # one working object per sweep: every node's OWN claim
+    library  = policy.library(view)               # once per sweep, over the WHOLE chain: the only
+                                                  #   cross-block reductions a message may use
+    prepared = policy.prepare(ctx, library)       # per block: every node's OWN claim
     receive  = prepared.propagate(backward=False) # phase 1: the recipient's kernel, or None ⇒ all Silence
     held[i]  = receive(source, destination)       # ... the BACKBONE runs the pass, in chain order
     evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
+
+The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.locus_blocks`), and the
+two calls above are the two scopes a policy sees: ``library`` reads a :class:`ChainView` of the whole
+chain — observations and geometry, NO beliefs, which is what makes a cross-block reduction over beliefs
+unwritable — and returns whatever library-wide facts its messages need (the transfer policy's: three
+reference densities and whether the strand split is live). ``prepare`` reads a :class:`StepContext` of
+one block, beliefs included, plus that library. Everything else a message reads is per slot or per face.
 
 ⛔ THE CONTRACT, and it is TRAPS: a-message-from-the-destinations-belief, a lesson that has recurred
 nine times in nine costumes:
@@ -69,6 +78,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 __all__ = [
+    "ChainView",
     "Message",
     "NO_NEIGHBOUR",
     "Policy",
@@ -201,9 +211,12 @@ NO_NEIGHBOUR = None
 
 
 @dataclass(frozen=True, slots=True)
-class StepContext:
-    """Everything a policy may read, under the three headings that make
-    TRAPS: a-message-from-the-destinations-belief legible.
+class ChainView:
+    """A stretch of the chain as a policy may read it WITHOUT beliefs: the observations and the
+    geometry, under the two headings that make TRAPS: a-message-from-the-destinations-belief legible,
+    plus the solve's own scalars. `Policy.library` receives the WHOLE chain in this form, so the only
+    cross-block information a policy can build is a reduction over observations and geometry — a
+    reduction over beliefs has no field to read. :class:`StepContext` adds the beliefs for one block.
 
     ⛔ The headings are load-bearing. ``observations`` and ``geometry`` may be indexed at either end of
     a hop; ``beliefs`` may be indexed at the SOURCE only. A policy that reads a ``beliefs`` field at the
@@ -254,16 +267,21 @@ class StepContext:
     #: cross, the outside flank of a terminus, the junction's exon side (`transfer_rows`)
     boundary_flags: np.ndarray
 
-    # ── BELIEFS — SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief) ───────────────────
-    own: object  # RegionInit: the message-free self-solve — f_*, tau_lam
-    belief_fg: np.ndarray  # the INCOMING belief: the variance freeze of a node's own strand profile
-
     # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
     n_grid: int
     logodds_window: float
     #: the AMBIG cube's tilt-grid size ``K_t`` (``None`` ⇒ ``n_grid``, as the solver reads it) — what a
     #: policy needs to lay a ``cube_rows`` row on the grid ψ will evaluate it on
     n_tilt: int | None = None
+    #: the intron factory's per-slot λ-factor rows on THIS grid, ``(n_slots, K)`` or ``None`` — the
+    #: same array ψ adds as its own λ-factor (`sweep.solve_chain`'s ``intron_prior``), so an intron's
+    #: own claim and the solver's factor cannot drift apart; ``None`` is no factory
+    factory_rows: np.ndarray | None = None
+    #: the derived strand deadband's verdict for the LIBRARY: does the strand split carry composition
+    #: information at all (`region_init.strand_discriminability` > 0)? A κ within its noise of ½ makes
+    #: every single-strand exon's strand precision exactly zero, and a policy reading the split as an
+    #: RNA witness must know that before it prices a single hop
+    strand_live: bool = False
 
     @property
     def n_slots(self) -> int:
@@ -283,6 +301,21 @@ class StepContext:
             + np.asarray(self.free_pos, bool).astype(np.int64)
             + np.asarray(self.free_neg, bool).astype(np.int64)
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StepContext(ChainView):
+    """One block of the chain as `Policy.prepare` reads it: the :class:`ChainView` plus the BELIEFS —
+    SOURCE-SIDE ONLY (TRAPS: a-message-from-the-destinations-belief)."""
+
+    #: the LIVENESS of each node's own strand channel — `RegionInit.tau_lam > 0`, the one bit of the
+    #: message-free self-solve a policy may know: positive exactly where the node has counts and the
+    #: library's deadband is open (or the factory's row is curved), so it does not depend on the prior
+    #: a sweep carries. A policy is not handed the self-solve's fractions or precisions, and that is what
+    #: lets the message layer be shared across the refit sweeps (`sweep.MessageMemo`): every input it
+    #: reads is on this context and can be digested.
+    own_live: np.ndarray
+    belief_fg: np.ndarray  # the INCOMING belief: the variance freeze of a node's own strand profile
 
 
 @runtime_checkable
@@ -317,5 +350,11 @@ class Policy(Protocol):
 
     name: str
 
-    def prepare(self, ctx: StepContext) -> Prepared:
-        """Derive whatever this policy needs from ``ctx``, once per sweep: every node's OWN claim."""
+    def library(self, view: ChainView):
+        """Once per sweep, over the WHOLE chain: whatever library-wide facts this policy's messages
+        need, reduced from observations and geometry alone (the view carries no belief), or ``None``.
+        This is the ONLY place a policy may look across the chain; ``prepare`` sees one block."""
+
+    def prepare(self, ctx: StepContext, library) -> Prepared:
+        """Derive whatever this policy needs for the block ``ctx`` covers, given its own ``library``:
+        every node's OWN claim, the rules per face, the lanes."""

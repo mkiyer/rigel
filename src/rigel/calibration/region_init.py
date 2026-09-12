@@ -39,6 +39,7 @@ from .simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 __all__ = [
     "RegionInit",
     "has_own_composition_evidence",
+    "strand_discriminability",
     "strand_evidence",
     "build_region_init",
 ]
@@ -93,6 +94,21 @@ class RegionInit:
 # ── source 3: the strand composition evidence (I_strand) + the structural lock ─────────────────────────────
 
 
+def strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs) -> float:
+    """The library's strand DISCRIMINABILITY ``disc = 4·max(0, (κ−½)² − σ²_d)`` — the strand Fisher
+    information's library-level factor (:func:`strand_evidence`), with the DERIVED noise floor
+    ``σ²_d = ¼·(1/N_rna + ω_r) + ¼·(1/N_gdna + ω_g)``: a κ within √σ²_d of ½ is not composition signal,
+    the deadband that kills the unstranded phantom, and ``1/N_gdna`` gates a gDNA-free library
+    (N_gdna=0 ⇒ σ²_d→∞ ⇒ disc=0). Exactly zero or strictly positive, and it is the same for every slot:
+    a positive ``disc`` is the one condition under which any counted single-strand slot has a live
+    strand channel, so it is what the message layer reads as "is the strand split a witness at all"
+    (`messages.ChainView.strand_live`). One definition, used by both."""
+    sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
+        1.0 / max(float(n_gdna_obs), _EPS) + od_g
+    )
+    return 4.0 * max(0.0, (kappa - 0.5) ** 2 - sig2_d)
+
+
 def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rna_obs):
     """The reference-free strand composition evidence ``τ₀_λ`` (**I_strand**), evaluated at the
     message-free local ``fg_loc``. Pure; no cross-region coupling.
@@ -112,10 +128,7 @@ def strand_evidence(u_pos, u_neg, fg_loc, *, kappa, od_g, od_r, n_gdna_obs, n_rn
     n_str = n_raw / (1.0 + np.maximum(n_raw - 1.0, 0.0) * od_r)
     fgl = np.clip(np.asarray(fg_loc, np.float64), _EPS, 1.0 - _EPS)
     pmix = np.clip(kappa + fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
-    sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
-        1.0 / max(float(n_gdna_obs), _EPS) + od_g
-    )
-    disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - sig2_d)
+    disc = strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs)
     return n_str * disc * (fgl * (1.0 - fgl)) ** 2 / (4.0 * pmix * (1.0 - pmix))
 
 

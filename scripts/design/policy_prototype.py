@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """How does a prototype message policy score, per gene type and per slot, against certified truth?
 This is the harness a message mechanism is developed on before it touches `src/`. A prototype is a
-Python class with the backbone's ``Policy`` shape (``prepare(ctx)`` returning an object with
-``propagate`` / ``solve``), named in an ``ARMS = {"my_arm": PolicyClass, ...}`` table in the module
+Python class with the backbone's ``Policy`` shape (``library(view)`` once over the whole chain, and
+``prepare(ctx, library)`` returning an object with ``propagate`` / ``solve``; constructed as
+``PolicyClass(strand=...)``), named in an ``ARMS = {"my_arm": PolicyClass, ...}`` table in the module
 ``--module`` points at; the harness installs it in place of ``calibrate``'s ``TransferPolicy`` for
 the ``transfer`` arm and scores it beside ``silent`` and the shipped ``transfer`` on a cached,
 certified condition, with the shipped class restored afterwards. The error is |gDNA estimate -

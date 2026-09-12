@@ -14,7 +14,7 @@ pooled (`scripts/design/policy_benchmark.py` prints them apart).
 
 from __future__ import annotations
 
-from . import PsiMessage, StepContext
+from . import ChainView, PsiMessage, StepContext
 
 __all__ = ["SilentPolicy"]
 
@@ -33,5 +33,8 @@ class SilentPolicy:
 
     name = "silent"
 
-    def prepare(self, ctx: StepContext) -> _PreparedSilence:
+    def library(self, view: ChainView) -> None:
+        return None  # nothing to reduce: no message needs a library-wide fact
+
+    def prepare(self, ctx: StepContext, library) -> _PreparedSilence:
         return _PreparedSilence()

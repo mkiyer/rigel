@@ -22,7 +22,7 @@ from _transfer_harness import (
     _expected_pairs,
     _full_policy,
     _intron_mask,
-    _live_provider,
+    _prepared,
     _strand_of,
     _strand_row_of,
     _with_alt_splice_sites,
@@ -213,13 +213,13 @@ def _expected_splice_out_rows(si, ctx, strand, lam):
     sc_lo = np.asarray(ctx.sj_count_lo, np.float64).sum(axis=1)
     sc_hi = np.asarray(ctx.sj_count_hi, np.float64).sum(axis=1)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
     nodes = norm.ppf((np.arange(9) + 0.5) / 9.0)
     out = {}
     for e in np.flatnonzero(is_exon):
-        if fp[e] == fn[e] or not tau[e] > 0.0:
+        if fp[e] == fn[e] or not live[e]:
             continue
         n = cnt[e].sum()
         ks = kappa if fp[e] else 1.0 - kappa
@@ -302,12 +302,12 @@ def _expected_boundary_rows(si, ctx, strand, lam):
     pairs, _n = _expected_pairs(si)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
     out = {}
     for b, i in pairs:
-        if fp[b] != fp[i] or fn[b] != fn[i] or fp[b] == fn[b] or not tau[b] > 0.0:
+        if fp[b] != fp[i] or fn[b] != fn[i] or fp[b] == fn[b] or not live[b]:
             continue
         n = cnt[b].sum()
         ks = kappa if fp[b] else 1.0 - kappa
@@ -348,20 +348,19 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
     each boundary is the identity (FORWARD); the rule from a licensed face into the exon, applied to
     the intron's claim and summed with the edge's level rule, equals the independently recomputed
     splice-in + edge rows of that exon; an unlicensed face has no rule into the exon."""
-    from rigel.calibration.messages.transfer import TransferPolicy, _forward
+    from rigel.calibration.messages.transfer import FORWARD, TransferPolicy
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
     pairs, _n = _expected_pairs(sweep_inputs)
     assert pairs, "the toy must carry at least one intron|exon pair or this gate proves nothing"
     ctx = _ctx_of(sweep_inputs)
-    prepared = TransferPolicy(provider).prepare(ctx)
-    src = provider(n_grid, window)
+    prepared = _prepared(TransferPolicy(), ctx)
+    src = ctx.factory_rows
     lam, _ = _logodds_grid(n_grid, window)
     for b, j in pairs:
-        assert prepared.rule.get((int(j), int(b))) is _forward, f"pair ({j}, {b}) is not FORWARD"
+        assert prepared.faces.kind_at(j, b) == FORWARD, f"pair ({j}, {b}) is not FORWARD"
         np.testing.assert_array_equal(prepared.own[j], src[j] - src[j].max())
     exon_rows = _expected_exon_rows(sweep_inputs, ctx, src, lam)
     assert exon_rows, "the toy must license at least one exon face or this gate proves nothing"
@@ -371,14 +370,13 @@ def test_the_intron_face_carries_the_pair_identity_and_the_face_map(sweep_inputs
     for e in np.flatnonzero(is_exon):
         acc = None
         for b in (left[e], right[e]):
-            fn = prepared.rule.get((int(b), int(e)))
-            if fn is None:
+            if b < 0 or not prepared.faces.has(b, e):
                 continue
             i = left[b] if right[b] == e else right[b]
             claim = prepared.own[i] if (i >= 0 and intron[i]) else prepared.own[b]
             if claim is None:
                 continue
-            r = fn(claim, None)
+            r = prepared.faces.apply(b, e, claim, None)
             if r is not None and np.ptp(r) > 1e-9:
                 acc = (r - r.max()) if acc is None else acc + (r - r.max())
         if int(e) in exon_rows:
@@ -396,14 +394,14 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     recomputed splice-out rows; at every intron|exon pair sharing one strand with a live boundary,
     the rule boundary → intron is the identity and the boundary's claim, summed per intron, equals
     the independently recomputed strand rows."""
-    from rigel.calibration.messages.transfer import _forward
+    from rigel.calibration.messages.transfer import FORWARD
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     strand = _strand_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     expected = _expected_splice_out_rows(sweep_inputs, ctx, strand, lam)
@@ -416,13 +414,12 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
         if prepared.own[e] is None:
             continue
         for b in (left[e], right[e]):
-            fn = prepared.rule.get((int(e), int(b)))
-            if fn is None or b < 0:
+            if b < 0 or not prepared.faces.has(e, b):
                 continue
             other = left[b] if right[b] == e else right[b]
             if other < 0 or not intron[other]:
                 continue  # the terminus and alternative-splice rules leave through exon|exon faces: their own gates
-            r = fn(prepared.own[e], None)
+            r = prepared.faces.apply(e, b, prepared.own[e], None)
             if r is not None and np.ptp(r) > 1e-9:
                 got[int(b)] = got.get(int(b), 0.0) + (r - r.max())
     assert set(got) == set(expected), set(got) ^ set(expected)
@@ -437,10 +434,11 @@ def test_the_exon_and_boundary_own_claims_are_the_strand_rows_and_their_rules_th
     pairs, _n = _expected_pairs(sweep_inputs)
     got_i = {}
     for b, i in pairs:
-        fn = prepared.rule.get((int(b), int(i)))
-        if fn is None or prepared.own[b] is None:
+        if not prepared.faces.has(b, i) or prepared.own[b] is None:
             continue
-        assert fn is _forward, f"the boundary → intron rule at ({b}, {i}) is not the identity"
+        assert prepared.faces.kind_at(b, i) == FORWARD, (
+            f"the boundary → intron rule at ({b}, {i}) is not the identity"
+        )
         got_i[int(i)] = got_i.get(int(i), 0.0) + prepared.own[b]
     assert set(got_i) == set(expected_i), set(got_i) ^ set(expected_i)
     for i in expected_i:
@@ -512,7 +510,7 @@ def _expected_terminus_rows(si, ctx, strand, lam, exon_rows):
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
 
@@ -548,11 +546,11 @@ def _expected_terminus_rows(si, ctx, strand, lam, exon_rows):
         acc = np.zeros(lam.shape[0])
         if int(o) in exon_rows:
             acc += splice_out_row(exon_rows[int(o)], lam, n_u[b], n_s[b], A_g[b], A_g[o])
-        if tau[o] > 0.0:
+        if live[o]:
             acc += splice_out_row(strand_row(o), lam, n_u[b], n_s[b], A_g[b], A_g[o])
         if np.ptp(acc) > 1e-9:
             at_b[int(b)] = acc
-        if tau[b] > 0.0:
+        if live[b]:
             le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
             at_o.setdefault(int(o), np.zeros(lam.shape[0]))
             at_o[int(o)] += transport_row(strand_row(b), lam, le, n_u[b], n_s[b])
@@ -693,23 +691,23 @@ def test_the_sj_terminus_boundary_places_the_flux_where_the_junctions_exon_is(sw
     ctx2 = dataclasses.replace(ctx, boundary_flags=flags)
     assert (int(flags[b]) & TERMINUS) and (int(flags[b]) & SJ_FLAGS)
     assert junction_exon_side(flags[b], left[b], right[b]) == i  # the junction's exon is the inside
-    prep = pol.prepare(ctx2)
-    rule = prep.rule.get((b, i))
-    assert rule is not None and getattr(rule, "__name__", "") == "level_rule"
-    v_with = rule.__defaults__[1]
+    from rigel.calibration.messages.transfer import LEVEL
+
+    prep = _prepared(pol, ctx2)
+    face = prep.faces.at(b, i)
+    assert face.kind == LEVEL
+    v_with = face.var
     # the plain form: the same boundary with its flux zeroed
     sjc = np.asarray(ctx.sj_count, np.float64).copy()
     sjc[b] = 0.0
-    prep0 = pol.prepare(dataclasses.replace(ctx2, sj_count=sjc))
-    rule0 = prep0.rule.get((b, i))
-    assert rule0 is not None and getattr(rule0, "__name__", "") == "level_rule"
-    v_plain = rule0.__defaults__[1]
+    prep0 = _prepared(pol, dataclasses.replace(ctx2, sj_count=sjc))
+    face0 = prep0.faces.at(b, i)
+    assert face0.kind == LEVEL
+    v_plain = face0.var
     assert v_with < v_plain, (v_with, v_plain)
     # the junction rules leave the face: the splice-in map into the inside and the splice-out map out of it are gone
-    prep_before = pol.prepare(ctx)
-    assert (b, i) in prep_before.rule and getattr(
-        prep_before.rule[(b, i)], "__name__", ""
-    ) != "level_rule"
+    prep_before = _prepared(pol, ctx)
+    assert prep_before.faces.has(b, i) and prep_before.faces.kind_at(b, i) != LEVEL
 
 
 def _expected_level_rows(si, ctx, strand, lam):
@@ -739,7 +737,7 @@ def _expected_level_rows(si, ctx, strand, lam):
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     out, served = {}, []
     for b in np.flatnonzero(is_bnd):
         lo, hi = left[b], right[b]
@@ -756,7 +754,7 @@ def _expected_level_rows(si, ctx, strand, lam):
         d_b, T_b = n_u[b] / A_g[b], n_u[b] + n_s[b]
         r = (n_u[i] / A_g[i]) / (T_b / A_g[b])
         v = max(0.0, np.log(r) ** 2 - (1.0 / n_u[i] + 1.0 / T_b))
-        if tau[b] > 0.0 and tau[i] > 0.0:
+        if live[b] and live[i]:
             ok, modes = True, []
             for y in (b, i):
                 n = cnt[y].sum()
@@ -774,7 +772,7 @@ def _expected_level_rows(si, ctx, strand, lam):
                 v += max(0.0, dd * dd - (v_b + v_i + 1.0 / n_u[i] + 1.0 / T_b))
         v += float(polygamma(1, n_u[b] + 0.5) + polygamma(1, n_u[i] + 0.5))
         m = level_map_lambda(lam, d_b, A_g[i], n_u[i])
-        if tau[b] > 0.0 and fp[b] != fn[b]:
+        if live[b] and fp[b] != fn[b]:
             row = level_row(_strand_row_of(ctx, strand, lam, b), lam, m, v)
         else:
             row = level_bound_row(lam, d_b, A_g[i], n_u[i], v)
@@ -841,21 +839,23 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
     ctx = _ctx_of(sweep_inputs)
     strand = _strand_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     n_u = np.asarray(ctx.n_slot, np.float64)
     n_s = np.asarray(ctx.spliced_slot, np.float64)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     sites = _item5_slots(ctx)
     served = 0
     for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
         if not (is_exon[left[b]] and is_exon[right[b]]):
             continue
         outs = [
-            (s, i) for (s, i) in prepared.rule if (s == b and is_exon[i]) or (i == b and is_exon[s])
+            (s, i)
+            for (s, i) in prepared.faces.pairs()
+            if (s == b and is_exon[i]) or (i == b and is_exon[s])
         ]
         if int(b) not in sites:
             assert not outs, f"boundary {b} carries exon|exon rules without a served terminus"
@@ -870,23 +870,23 @@ def test_the_terminus_rules_land_at_the_outside_pair_and_nowhere_when_the_flags_
         want = splice_out_row(
             _strand_row_of(ctx, strand, lam, o), lam, n_u[b], n_s[b], A_g[b], A_g[o]
         )
-        if tau[o] > 0.0 and prepared.own[o] is not None:
-            got = prepared.rule[(int(o), int(b))](prepared.own[o], None)
+        if live[o] and prepared.own[o] is not None:
+            got = prepared.faces.apply(o, b, prepared.own[o], None)
             np.testing.assert_allclose(got - got.max(), want - want.max(), rtol=0, atol=1e-10)
-        if tau[b] > 0.0:
+        if live[b]:
             le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[o], A_g[o], n_s[b] / A_g[b])
             want_o = transport_row(_strand_row_of(ctx, strand, lam, b), lam, le, n_u[b], n_s[b])
-            got_o = prepared.rule[(int(b), int(o))](prepared.own[b], None)
+            got_o = prepared.faces.apply(b, o, prepared.own[b], None)
             np.testing.assert_allclose(
                 got_o - got_o.max(), want_o - want_o.max(), rtol=0, atol=1e-10
             )
     assert served >= 2, (
         "the toy must carry two served terminus boundaries or this gate proves nothing"
     )
-    cleared = pol.prepare(_terminus_flags_cleared(ctx))
+    cleared = _prepared(pol, _terminus_flags_cleared(ctx))
     for b in np.flatnonzero(is_bnd & (left >= 0) & (right >= 0)):
         if is_exon[left[b]] and is_exon[right[b]]:
-            assert not any(s == b or i == b for (s, i) in cleared.rule), (
+            assert not any(s == b or i == b for (s, i) in cleared.faces.pairs()), (
                 f"rules survive at {b} with no terminus"
             )
 
@@ -906,36 +906,38 @@ def test_the_level_rule_serves_every_terminus_inside_from_the_measurement_alone(
     ctx = _with_populated_inside(_ctx_of(sweep_inputs))
     strand = _strand_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     expected, served = _expected_level_rows(sweep_inputs, ctx, strand, lam)
     assert len(served) >= 2, (
         "the toy must carry two served terminus pairs or this gate proves nothing"
     )
     spike = -0.5 * ((lam - 2.0) / 0.1) ** 2  # a held imputation that must not cross a level face
     for b, i, _kind in served:
-        fn = prepared.rule.get((b, i))
-        assert fn is not None, f"no level rule at terminus pair ({b}, {i})"
-        got = fn(prepared.own[b], None)
+        assert prepared.faces.has(b, i), f"no level rule at terminus pair ({b}, {i})"
+        got = prepared.faces.apply(b, i, prepared.own[b], None)
         np.testing.assert_allclose(
             got - got.max(), expected[i] - expected[i].max(), rtol=0, atol=1e-10
         )
         np.testing.assert_array_equal(
-            fn(prepared.own[b], spike), got, err_msg="what is held crossed a level face"
+            prepared.faces.apply(b, i, prepared.own[b], spike),
+            got,
+            err_msg="what is held crossed a level face",
         )
-        bound = fn(None, spike)
+        bound = prepared.faces.apply(b, i, None, spike)
         assert bound is not None and np.ptp(bound) > 0.0 and np.all(bound <= 0.0), (
             "no upper bound without a claim"
         )
-    cleared = pol.prepare(_terminus_flags_cleared(ctx))
+    cleared = _prepared(pol, _terminus_flags_cleared(ctx))
     for b, i, _kind in served:
-        assert (b, i) not in cleared.rule, f"a level rule survives at ({b}, {i}) with no terminus"
+        assert not cleared.faces.has(b, i), f"a level rule survives at ({b}, {i}) with no terminus"
     b0, i0, _k = served[0]
     b1, i1, _k = served[-1]
     cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
     cnt[i1] = cnt[i1] * 3.0 + 7.0
-    other = pol.prepare(_dc.replace(ctx, unspliced_count=cnt, n_slot=cnt.sum(axis=1)))
+    other = _prepared(pol, _dc.replace(ctx, unspliced_count=cnt, n_slot=cnt.sum(axis=1)))
     np.testing.assert_array_equal(
-        other.rule[(b0, i0)](other.own[b0], None), prepared.rule[(b0, i0)](prepared.own[b0], None)
+        other.faces.apply(b0, i0, other.own[b0], None),
+        prepared.faces.apply(b0, i0, prepared.own[b0], None),
     )
 
 
@@ -994,7 +996,7 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
     A_g = np.asarray(ctx.eff_gdna, np.float64)
     cnt = np.asarray(ctx.unspliced_count, np.float64)
-    tau = np.asarray(ctx.own.tau_lam, np.float64)
+    live = np.asarray(ctx.own_live, bool)
     belief = np.asarray(ctx.belief_fg, np.float64)
     fg = 1.0 / (1.0 + np.exp(-lam))
 
@@ -1026,7 +1028,7 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
                 served.append((int(b), int(x), float(s_out), kind))
     width = {}
     for b, x, s_out, _kind in served:
-        if not (tau[b] > 0.0 and tau[x] > 0.0):
+        if not (live[b] and live[x]):
             continue
         lo_v = []
         for y in (b, x):
@@ -1045,12 +1047,12 @@ def _expected_alt_splice_rows(si, ctx, strand, lam):
     out = {}
     for b, x, s_out, _kind in served:
         w = width.get((b, x), 0.0)
-        if tau[x] > 0.0 and fp[x] != fn[x]:
+        if live[x] and fp[x] != fn[x]:
             row = splice_out_row(strand_row(x), lam, n_u[b], s_out, A_g[b], A_g[x])
             if np.ptp(row) > 1e-9:
                 out.setdefault(b, np.zeros(lam.shape[0]))
                 out[b] += blur_row(row, lam, w)
-        if tau[b] > 0.0:
+        if live[b]:
             le = face_map_lambda(lam, n_u[b], A_g[b], A_g[b], A_g[x], A_g[x], s_out / A_g[b])
             row = transport_row(strand_row(b), lam, le, n_u[b], s_out)
             if np.ptp(row) > 1e-9:
@@ -1070,21 +1072,21 @@ def test_the_alt_splice_rules_carry_both_flanks_with_the_pair_width(sweep_inputs
     ctx = _with_alt_splice_sites(_ctx_of(sweep_inputs))
     strand = _strand_of(sweep_inputs)
     lam, _ = _logodds_grid(n_grid, window)
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     expected, widths = _expected_alt_splice_rows(sweep_inputs, ctx, strand, lam)
     assert expected and any(w > 0.0 for w in widths.values()), (
         "the patched toy must carry served junctions with a live pair width or this gate proves nothing"
     )
     is_bnd = np.asarray(ctx.is_boundary, bool)
     got = {}
-    for (s, d), fn in prepared.rule.items():
+    for s, d in prepared.faces.pairs():
         if not (
             (is_bnd[s] and s in widths_keys(widths)) or (is_bnd[d] and d in widths_keys(widths))
         ):
             continue
         if prepared.own[s] is None:
             continue
-        r = fn(prepared.own[s], None)
+        r = prepared.faces.apply(s, d, prepared.own[s], None)
         if r is not None and np.ptp(r) > 1e-9:
             got[int(d)] = got.get(int(d), 0.0) + (r - r.max())
     for slot, want in expected.items():

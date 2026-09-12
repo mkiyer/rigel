@@ -12,13 +12,12 @@ re-capture after any change that is allowed to move numbers.
 Usage::
 
     python scripts/profiling/sweep_replay.py capture --bam lib.bam --index idx/ --out DIR [--threads 8]
-    python scripts/profiling/sweep_replay.py replay --dir DIR [--call 0] [--cprofile out.prof]
+    python scripts/profiling/sweep_replay.py replay --dir DIR [--call 0] [--cprofile out.prof] [--block-slots N]
 """
 
 from __future__ import annotations
 
 import argparse
-import copy
 import cProfile
 import dataclasses
 import io
@@ -35,7 +34,9 @@ import numpy as np  # noqa: E402
 
 
 class FrozenRows:
-    """A policy's ``rows_at(n_grid, window)`` as a table of the rows one sweep asked for."""
+    """Unpickling shim for captures taken before 2026-09-11, whose policy carried a ``rows_at`` closure
+    frozen as this table; the intron factory's rows now travel on the sweep's context and a capture
+    pickles the policy as it is."""
 
     def __init__(self, table: dict):
         self.table = table
@@ -63,25 +64,7 @@ def capture(bam: str, index_dir: str, out: Path, threads: int | None) -> int:
     def recording(*args, **kwargs):
         k = calls["n"]
         calls["n"] += 1
-        policy = kwargs.get("policy")
-        rows_at = getattr(policy, "_rows_at", None)
-        keys: list = []
-        if rows_at is not None:
-            def spy(n_grid, window):
-                keys.append((int(n_grid), float(window)))
-                return rows_at(n_grid, window)
-            policy._rows_at = spy
-        try:
-            result = original(*args, **kwargs)
-        finally:
-            if rows_at is not None:
-                policy._rows_at = rows_at
-        if rows_at is not None:
-            # the policy's row source is a closure over calibrate's locals; the sweep needs only the rows
-            # it asked for, so the capture carries those, in a table the replay can call the same way
-            frozen = copy.copy(policy)
-            frozen._rows_at = FrozenRows({key: rows_at(*key) for key in keys})
-            kwargs = dict(kwargs, policy=frozen)
+        result = original(*args, **kwargs)
         with open(out / f"sweep_{k}.in.pkl", "wb") as fh:
             pickle.dump((args, kwargs), fh, protocol=5)
         with open(out / f"sweep_{k}.out.pkl", "wb") as fh:
@@ -125,12 +108,18 @@ def _compare(a, b, path="belief") -> list[str]:
     return [] if a == b else [f"{path}: {a!r} vs {b!r}"]
 
 
-def replay(directory: Path, call: int, cprofile_path: str | None) -> int:
-    """Run the current ``solve_chain`` on one captured call and compare with the captured result."""
+def replay(directory: Path, call: int, cprofile_path: str | None, block_slots: str | None = None) -> int:
+    """Run the current ``solve_chain`` on one captured call and compare with the captured result.
+
+    ``block_slots`` overrides the sweep's locus-block size (``"none"`` for the whole chain as one block):
+    the answer must not depend on it, so a replay at any value against a capture taken at another is the
+    chunk-exactness of the whole sweep, proven on real data."""
     import rigel.calibration.sweep as sweep
 
     with open(directory / f"sweep_{call}.in.pkl", "rb") as fh:
         args, kwargs = pickle.load(fh)
+    if block_slots is not None:
+        kwargs = dict(kwargs, block_slots=None if block_slots.lower() == "none" else int(block_slots))
     with open(directory / f"sweep_{call}.out.pkl", "rb") as fh:
         expected = pickle.load(fh)
     profiler = cProfile.Profile() if cprofile_path else None
@@ -143,7 +132,8 @@ def replay(directory: Path, call: int, cprofile_path: str | None) -> int:
         profiler.dump_stats(cprofile_path)
     seconds = time.perf_counter() - t0
     diffs = _compare(expected, result)
-    print(f"  sweep {call}: {seconds:.2f} s   " + ("BIT-IDENTICAL" if not diffs else f"{len(diffs)} FIELD(S) DIFFER"))
+    tag = "" if block_slots is None else f" [block_slots={block_slots}]"
+    print(f"  sweep {call}:{tag} {seconds:.2f} s   " + ("BIT-IDENTICAL" if not diffs else f"{len(diffs)} FIELD(S) DIFFER"))
     for d in diffs[:12]:
         print(f"     {d}")
     if profiler is not None:
@@ -165,10 +155,12 @@ def main() -> int:
     r.add_argument("--dir", type=Path, required=True)
     r.add_argument("--call", type=int, default=0)
     r.add_argument("--cprofile", default=None, metavar="OUT.prof")
+    r.add_argument("--block-slots", default=None, metavar="N|none",
+                   help="override the locus-block size the replayed sweep solves in; the answer must not move")
     args = ap.parse_args()
     if args.cmd == "capture":
         return capture(args.bam, args.index, args.out, args.threads)
-    return replay(args.dir, args.call, args.cprofile)
+    return replay(args.dir, args.call, args.cprofile, args.block_slots)
 
 
 if __name__ == "__main__":

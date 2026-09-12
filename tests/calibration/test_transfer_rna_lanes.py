@@ -15,7 +15,16 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import polygamma
 
-from _transfer_harness import _held_rna, _rna, _rna_lanes_of, _strand_intron
+from _transfer_harness import (
+    _bits,
+    _held_rna,
+    _pairs,
+    _prepared,
+    _rna,
+    _rna_lanes_of,
+    _strand_intron,
+    _two_sided,
+)
 
 
 def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
@@ -36,11 +45,11 @@ def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
         all_bits, sj_bits, term_bits = strand_bits[name]
         free = np.asarray(ctx.free_pos if name == "pos" else ctx.free_neg, bool)
         intron_s = _strand_intron(ctx, name)
-        for x, y in lane.faces:
+        for x, y in _pairs(lane.face, ctx):
             assert free[x] and free[y], (name, x, y)
-        for x, y in lane.two_sided:
+        for x, y in _pairs(lane.two_sided, ctx):
             i = y if is_bnd[x] else x
-            assert intron_s[i] and (x, y) in lane.faces, (name, x, y)
+            assert intron_s[i] and lane.serves(x, y), (name, x, y)
         for b in np.flatnonzero(is_bnd):
             lo, hi = left[b], right[b]
             if lo < 0 or hi < 0:
@@ -51,10 +60,10 @@ def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
                     continue
                 if (f & sj_bits) and not (f & term_bits):
                     checked += 1
-                    assert (int(b), int(e)) not in lane.faces and (int(e), int(b)) not in lane.faces
-                    assert (int(i), int(b)) in lane.two_sided and (int(b), int(i)) in lane.two_sided
+                    assert not lane.serves(b, e) and not lane.serves(e, b)
+                    assert _two_sided(lane, i, b) and _two_sided(lane, b, i)
                 if f & term_bits:
-                    assert (int(b), int(e)) not in lane.faces and (int(b), int(i)) not in lane.faces
+                    assert not lane.serves(b, e) and not lane.serves(b, i)
     assert checked > 0, "no junction face on the toy — this gate would prove nothing"
     # the perturbation: junction bits masked → the exon faces at junctions open
     import dataclasses
@@ -72,7 +81,7 @@ def test_the_rna_faces_come_from_the_flag_bits_per_strand(sweep_inputs):
         and is_exon[e]
         and (int(flags[b]) & strand_bits[name][1])
         and not (int(flags[b]) & strand_bits[name][2])
-        and (int(b), int(e)) in lane.faces
+        and lane.serves(b, e)
     )
     assert opened > 0
 
@@ -181,7 +190,8 @@ def test_the_rna_sources_are_single_strand_claims_and_the_flux_at_the_exon_only(
                 # an EMPTY source is an exon piece beside a lit junction, its level the flux's
                 # alone, travelling with the flux's witness
                 if lane.empty[x]:
-                    assert is_exon[x] and lane.flux[x] and lane.flux_witness[x] is not None
+                    assert is_exon[x] and (lane.flux_row[x] >= 0).any()
+                    assert lane.flux_witness[x] is not None
                     assert lane.flux_witness[x][0] > 0.0
         for b in np.flatnonzero(is_bnd):
             if sc[b].sum() > 0 and prepared.own[b] is None:
@@ -265,7 +275,8 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     count = np.array([30.0, 300.0])
     a = np.array([300.0, 3000.0])
     empty, none = np.zeros(2, bool), [None, None]
-    lane = _LevelLane("pos", u, u, 0.5, count, a, empty, none, {(0, 1)}, two_sided={(0, 1)})
+    one_face = _bits(2, [(0, 1)])
+    lane = _LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face)
     two = lane.receive(Level(prof, 30.0, 300.0), 0, 1)
     v_agree = float(polygamma(1, 30.5) + polygamma(1, 300.5))
     assert abs(hop_price(30.0, 300.0, 300.0, 3000.0) - v_agree) < 1e-12
@@ -275,7 +286,7 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
     # profile still crosses, but at the pair's price, not counting alone
     count = np.array([3.0, 229.0])
     a = np.array([2200.0, 200.0])
-    cliff = _LevelLane("pos", u, u, 0.5, count, a, empty, none, {(0, 1)}, two_sided={(0, 1)})
+    cliff = _LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face)
     two_cliff = cliff.receive(Level(prof, 3.0, 2200.0), 0, 1)
     v_pair = hop_price(3.0, 2200.0, 229.0, 200.0)
     v_counting = float(polygamma(1, 3.5) + polygamma(1, 229.5))
@@ -285,7 +296,7 @@ def test_the_two_sided_hop_keeps_the_whole_profile_and_pays_the_pairs_price():
         "the exemption is back: the two-sided face charged counting alone across a cliff"
     )
     # any other face: the lower side at the same price
-    open_lane = _LevelLane("pos", u, u, 0.5, count, a, empty, none, {(0, 1)})
+    open_lane = _LevelLane("pos", u, u, 0.5, count, a, empty, none, one_face)
     one = open_lane.receive(Level(prof, 3.0, 2200.0), 0, 1)
     np.testing.assert_allclose(one.profile, blur_row(lower_side(prof), u, v_pair), atol=1e-9)
     assert np.all(np.diff(one.profile) >= -1e-9)
@@ -313,8 +324,9 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     other = np.array([8.0, 400.0])  # the other column: no asymmetry on either node
     a = np.array([277.0, 223.0])
     empty, none = np.zeros(2, bool), [None, None]
+    one_face = _bits(2, [(0, 1)])
     lane = _LevelLane(
-        "pos", u, u, 0.5, count, a, empty, none, {(0, 1)}, two_sided={(0, 1)}, other=other
+        "pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face, other=other
     )
     sent = Level(prof, 5.0, 277.0, 5.0 - 8.0, 13.0)
     got = lane.receive(sent, 0, 1)
@@ -332,7 +344,7 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     other = np.array([0.0, 10.0])
     a = np.array([14054.0, 227.0])
     lit = _LevelLane(
-        "pos", u, u, 0.5, count, a, empty, none, {(0, 1)}, two_sided={(0, 1)}, other=other
+        "pos", u, u, 0.5, count, a, empty, none, one_face, two_sided=one_face, other=other
     )
     got = lit.receive(Level(prof, 69.0, 14054.0, 69.0, 69.0), 0, 1)
     n_s, v_s, n_x, v_x = 69.0, 69.0, 188.0, 208.0
@@ -351,7 +363,16 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
     a = np.array([14054.0, 50.0, 227.0])
     empty = np.array([False, True, False])
     chain = _LevelLane(
-        "pos", u, u, 0.5, count, a, empty, [prof, None, None], {(0, 1), (1, 2)}, other=other
+        "pos",
+        u,
+        u,
+        0.5,
+        count,
+        a,
+        empty,
+        [prof, None, None],
+        _bits(3, [(0, 1), (1, 2)]),
+        other=other,
     )
     first = chain.emit(0, 1, None)
     assert first.rna_count == 69.0 and first.rna_count_var == 69.0
@@ -369,8 +390,8 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
         np.array([14054.0, 227.0]),
         np.zeros(2, bool),
         [None, None],
-        {(0, 1)},
-        two_sided={(0, 1)},
+        one_face,
+        two_sided=one_face,
     )
     got = dead.receive(Level(prof, 69.0, 14054.0), 0, 1)
     np.testing.assert_allclose(
@@ -470,7 +491,7 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     per strand, the intersection of the two held levels and the node's own (flux) level's lower side;
     a non-AMBIG node, an empty node and a node holding nothing deliver no row."""
     from rigel.calibration.messages import Level, Message
-    from rigel.calibration.messages.transfer import _LevelLane, _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.transfer import Faces, _LevelLane, _PreparedTransfer, _SolveSite
     from rigel.calibration.messages.transfer_rows import cube_row, intersect, lower_side
     from rigel.calibration.simplex_logodds import _tilt_grid
 
@@ -486,13 +507,17 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
         None,
         None,
     ]
-    pos = _LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, own_pos, set(), total=n_u)
-    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 4, set(), total=n_u)
-    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 4, set())
+    none = _bits(4, [])
+    pos = _LevelLane("pos", u, lam, 0.5, n_u / 2, a_r, empty, own_pos, none, total=n_u)
+    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 4, none, total=n_u)
+    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 4, none)
     ambig = np.array([False, True, True, True])
     free = {"pos": np.ones(4, bool), "neg": ambig}
-    site = _SolveSite(ambig, free, np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1]), 30)
-    prep = _PreparedTransfer([None] * 4, {}, K, {"gdna": gd, "pos": pos, "neg": neg}, site)
+    left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
+    site = _SolveSite(ambig, free, 30)
+    prep = _PreparedTransfer(
+        [None] * 4, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
+    )
     lv_l = -0.5 * np.maximum(0.0, (0.5 - u) / 0.2) ** 2
     lv_r = -0.5 * np.maximum(0.0, (0.0 - u) / 0.2) ** 2
     lv_n = -0.5 * np.maximum(0.0, (-1.0 - u) / 0.2) ** 2
@@ -524,7 +549,6 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
     opportunity — a piece shorter than a fragment) | a plain contiguity boundary (no bits: a face for
     every lane; empty, so it forwards) | a full single-strand ``+`` exon. The strand channel is live (``tau_lam > 0`` at the
     full exon, κ = 0.99)."""
-    from types import SimpleNamespace
 
     from rigel.calibration.messages import StepContext
     from rigel.calibration.splice_graph import FLAG_ACCEPTOR_POS
@@ -561,10 +585,12 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
         exon_pos=np.array([False, False, True, False, True]),
         exon_neg=np.zeros(n, bool),
         boundary_flags=flags,
-        own=SimpleNamespace(tau_lam=np.array([0.0, 0.0, 0.0, 0.0, 5.0])),
+        own_live=np.array([False, False, False, False, True]),
         belief_fg=np.full(n, 0.5),
         n_grid=41,
         logodds_window=10.0,
+        factory_rows=np.zeros((n, 41)),  # a factory with nothing to say: the lanes alone
+        strand_live=True,  # the deadband is open: the full exon's split is a witness
     )
 
 
@@ -580,16 +606,15 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     from rigel.calibration.messages.transfer_rows import blur_row, flux_level, hop_price, lower_side
 
     ctx = _empty_piece_ctx()
-    K = int(ctx.n_grid)
-    pol = TransferPolicy(lambda g, w: np.zeros((5, K)), strand=(0.99, 0.02, 0.02))
-    prepared = pol.prepare(ctx)
+    pol = TransferPolicy(strand=(0.99, 0.02, 0.02))
+    prepared = _prepared(pol, ctx)
     lane = prepared.lanes["pos"]
     assert lane.empty[2], "the piece must be EMPTY for this gate to say anything"
-    assert (2, 3) in lane.faces and (3, 4) in lane.faces
+    assert lane.serves(2, 3) and lane.serves(3, 4)
     own = lane.own_level[2]
     assert own is not None, "no flux level at the empty piece: the source was skipped"
     assert np.all(np.diff(own) >= -1e-12), "the flux level is lower-sided"
-    assert lane.flux[2] is not None and 1 in lane.flux[2]
+    assert lane.flux_at(2, 0) is not None  # its junction, slot 1, is on its left
     # the price is `hop_price` on the piece's own (zero) count: counting alone, both counts
     v = hop_price(40.0, 40.0 / 0.02, 0.0, 0.0)
     np.testing.assert_allclose(own, flux_level(lane.u, 40.0, 0.02, lane.rho_ref, v), atol=1e-12)
@@ -608,8 +633,8 @@ def test_an_empty_exon_piece_beside_a_lit_junction_is_a_flux_source():
     v4 = hop_price(40.0, 40.0 / 0.02, float(lane.count[4]), float(lane.a[4]))
     np.testing.assert_allclose(got.profile, blur_row(lower_side(own), lane.u, v4), atol=1e-9)
     # PERTURBATION: a silent junction builds no source, and the empty piece forwards nothing
-    quiet = TransferPolicy(lambda g, w: np.zeros((5, K)), strand=(0.99, 0.02, 0.02)).prepare(
-        _empty_piece_ctx(flux=0.0, rate=0.0)
+    quiet = _prepared(
+        TransferPolicy(strand=(0.99, 0.02, 0.02)), _empty_piece_ctx(flux=0.0, rate=0.0)
     )
     assert quiet.lanes["pos"].own_level[2] is None
     assert quiet.lanes["pos"].emit(2, 3, None) is None

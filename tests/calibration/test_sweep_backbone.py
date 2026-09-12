@@ -48,7 +48,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> StepContext:
         exon_pos=np.zeros(N, bool),
         exon_neg=np.zeros(N, bool),
         boundary_flags=np.zeros(N, np.int64),
-        own=None,
+        own_live=np.zeros(N, bool),
         belief_fg=ones,
         n_grid=n_grid,
         logodds_window=10.0,
@@ -77,7 +77,10 @@ class _Echo:
         self.hops = {False: [], True: []}
         self.held = None
 
-    def prepare(self, ctx):
+    def library(self, view):
+        return None
+
+    def prepare(self, ctx, library):
         return self
 
     def propagate(self, *, backward: bool):
@@ -98,8 +101,8 @@ def test_every_node_holds_a_message_from_each_neighbour_it_has():
     on the open side — which is not a message and not SILENCE."""
     ctx = _ctx()
     left, right = list(ctx.left), list(ctx.right)
-    fl = SW._pass(list(range(ctx.n_slots)), left, _Echo().prepare(ctx), backward=False)
-    br = SW._pass(list(range(ctx.n_slots))[::-1], right, _Echo().prepare(ctx), backward=True)
+    fl = SW._pass(list(range(ctx.n_slots)), left, _Echo().prepare(ctx, None), backward=False)
+    br = SW._pass(list(range(ctx.n_slots))[::-1], right, _Echo().prepare(ctx, None), backward=True)
     for i in range(N):
         if left[i] >= 0:
             assert fl[i].level_gdna[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
@@ -117,8 +120,8 @@ def test_the_passes_run_in_chain_order_and_read_one_side_each():
     mirror — so what a source holds from its far side is written before it is asked to send."""
     ctx = _ctx()
     pol = _Echo()
-    SW._pass(list(range(ctx.n_slots)), list(ctx.left), pol.prepare(ctx), backward=False)
-    SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), pol.prepare(ctx), backward=True)
+    SW._pass(list(range(ctx.n_slots)), list(ctx.left), pol.prepare(ctx, None), backward=False)
+    SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), pol.prepare(ctx, None), backward=True)
     assert pol.hops[False] == [(i - 1, i) for i in range(1, N)]
     assert pol.hops[True] == [(i + 1, i) for i in range(N - 2, -1, -1)]
 
@@ -134,7 +137,9 @@ def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
 
     ctx = _ctx()
     with pytest.raises(AssertionError, match="must still arrive as SILENCE"):
-        SW._pass(list(range(ctx.n_slots)), list(ctx.left), _Mute().prepare(ctx), backward=False)
+        SW._pass(
+            list(range(ctx.n_slots)), list(ctx.left), _Mute().prepare(ctx, None), backward=False
+        )
 
 
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
@@ -146,7 +151,9 @@ def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbo
         def propagate(self, *, backward: bool):
             return None
 
-    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), _Quiet().prepare(ctx), backward=False)
+    fl = SW._pass(
+        list(range(ctx.n_slots)), list(ctx.left), _Quiet().prepare(ctx, None), backward=False
+    )
     assert fl[0] is NO_NEIGHBOUR and all(m is SILENCE for m in fl[1:])
     assert SILENCE.is_silent and Message(level_gdna=(0.0, 1.0)).is_silent is False
 
@@ -168,7 +175,7 @@ def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
             return lambda s, i: full
 
     pol = _Full()
-    prepared = pol.prepare(ctx)
+    prepared = pol.prepare(ctx, None)
     fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
     br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
     prepared.solve(fl, br)
@@ -188,7 +195,7 @@ def test_the_solve_receives_the_two_held_lists_at_the_recipient():
     """Phase 2's inputs are the two held lists indexed AT THE RECIPIENT, straight from the passes."""
     ctx = _ctx()
     pol = _Echo()
-    prepared = pol.prepare(ctx)
+    prepared = pol.prepare(ctx, None)
     fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
     br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
     prepared.solve(fl, br)
@@ -311,7 +318,7 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
     """``SilentPolicy`` is ``solve_chain``'s parameter default (the shipped config installs the
     transfer policy), and it is the MEASURED floor every policy is judged against: win on unstranded
     data, minimal harm on stranded data, never pooled."""
-    prepared = SilentPolicy().prepare(_ctx())
+    prepared = SilentPolicy().prepare(_ctx(), None)
     assert prepared.propagate(backward=False) is None, "a silent policy must send nothing at all"
     assert prepared.propagate(backward=True) is None
     assert prepared.solve([SILENCE] * N, [SILENCE] * N).is_silent
@@ -415,3 +422,274 @@ def test_the_solvers_cube_is_inert_when_absent_and_walls_the_tilt_when_present()
             walled.gdna_frac[i] == base.gdna_frac[i]
             and walled.rna_pos_frac[i] == base.rna_pos_frac[i]
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE STRUCTURAL RULE — a TERMINAL receives nothing, so the chain breaks at it.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_into_it():
+    """The boundary condition the locus solve stands on: a node marked terminal holds SILENCE from a
+    side it has a neighbour on, and the policy's kernel is never called with it as the destination —
+    so what a policy WOULD deliver there cannot exist. PERTURBATION: the same kernel with no terminal
+    marked delivers its message, which is what proves the mask does the work. What the terminal SENDS
+    is untouched: its neighbour still receives from it."""
+    ctx = _ctx()
+    left = list(ctx.left)
+    terminal = [False] * N
+    terminal[4] = True
+    pol = _Echo()
+    held = SW._pass(list(range(N)), left, pol.prepare(ctx, None), backward=False, terminal=terminal)
+    assert held[4] is SILENCE, "a terminal must hold SILENCE, delivered and empty"
+    assert (3, 4) not in pol.hops[False], "the kernel was asked for the hop into the terminal"
+    assert held[5].level_gdna[0] == 4.0, "the terminal's own sending was blocked; only receiving is"
+    assert held[0] is NO_NEIGHBOUR, "a terminal rule must not turn an open side into silence"
+    loud = _Echo()
+    unmasked = SW._pass(list(range(N)), left, loud.prepare(ctx, None), backward=False)
+    assert unmasked[4].level_gdna[0] == 3.0 and (3, 4) in loud.hops[False]
+
+
+def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
+    """One predicate, two names must not appear: the slots the backbone never delivers into are exactly
+    the REGIONS `g1_locked` locks — no admissible RNA strand — read off the source, so a reader cannot
+    find a second definition of "terminal" in the file."""
+    import inspect
+    import re
+
+    src = inspect.getsource(SW)
+    assert re.search(r"terminal = .*is_region & g1_locked\(fp, fn\)", src), "the predicate moved"
+    assert re.search(r"_pass\(.*terminal=", src), "the passes are no longer told the terminals"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE LOCUS BLOCKS — the sweep solved a block at a time is the sweep, for every block size.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _six(belief):
+    return {
+        f: np.asarray(getattr(belief, f))
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "informed")
+    }
+
+
+def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
+    """The property the whole decomposition stands on, on the real toy chain through the shipped
+    policy: ``solve_chain`` with the chain as one block, one locus per block, and every block size in
+    between gives the same belief to the bit and the same ``informed`` predicate — and the diagnostic
+    capture gathers to the same per-slot arrays. Not vacuous: the toy has several terminals, so
+    ``block_slots=1`` makes more than one block."""
+    from _transfer_harness import _full_policy
+    from rigel.calibration.region_chain import REGION, locus_blocks
+    from rigel.calibration.region_geometry import g1_locked
+
+    chain, statics = sweep_inputs["args"][0], sweep_inputs["args"][1]
+    terminal = (np.asarray(chain.kind) == REGION) & g1_locked(statics.free_pos, statics.free_neg)
+    assert len(locus_blocks(chain, terminal, 1)) > 2, "the toy has fewer than three loci"
+    policy = _full_policy(sweep_inputs)[0]
+    caps = {}
+
+    kw = dict(sweep_inputs["kw"])
+    kw.pop("block_slots", None)  # the capture carries calibrate's; this gate sets its own
+
+    def run(block_slots):
+        cap: dict = {}
+        out = SW.solve_chain(
+            *sweep_inputs["args"], **kw, policy=policy, block_slots=block_slots, _capture=cap
+        )
+        caps[block_slots] = cap
+        return _six(out)
+
+    whole = run(None)
+    for bs in (1, 2, 5, 17, 10_000):
+        got = run(bs)
+        for f in whole:
+            assert np.array_equal(got[f], whole[f]), f"block_slots={bs}: {f} differs"
+        for key in (
+            "f_g",
+            "fg_loc",
+            "_tau0_lam",
+            "held_composition",
+            "solvable",
+            "mass_global",
+            "count",
+        ):
+            assert np.array_equal(caps[bs][key], caps[None][key]), (
+                f"block_slots={bs}: capture {key} differs"
+            )
+        a, b = caps[bs]["lam_rows"], caps[None]["lam_rows"]
+        assert (a is None) == (b is None) and (a is None or np.array_equal(a, b))
+        assert caps[bs]["backbone_assertions"] == caps[None]["backbone_assertions"]
+        # what each node HEARD is the same; at a block's first slot — a terminal, which hears nothing
+        # by the structural rule — an open side (``None``) and SILENCE are the same hearing
+        for side in ("from_left", "from_right"):
+            heard = [[m is not None and not m.is_silent for m in caps[k][side]] for k in (bs, None)]
+            assert heard[0] == heard[1], f"block_slots={bs}: {side} differs in what was heard"
+            for i in np.flatnonzero(terminal):
+                assert all(
+                    caps[k][side][i] is None or caps[k][side][i].is_silent for k in (bs, None)
+                )
+
+
+def test_a_block_view_rebases_the_links_and_slices_every_per_slot_array(sweep_inputs):
+    """`_slots`: a neighbour outside the block is no neighbour; every per-slot array is the chain's
+    slice; a 2-D bank keeps its columns; ``n_slots`` follows."""
+    chain, statics, geometry, belief, _ra = sweep_inputs["args"]
+    n = int(chain.n_slots)
+    sl = slice(2, min(9, n))
+    c = SW._slots(chain, sl)
+    assert c.n_slots == sl.stop - sl.start and np.array_equal(c.kind, np.asarray(chain.kind)[sl])
+    left = np.asarray(chain.left)[sl] - sl.start
+    assert np.array_equal(c.left, np.where((left >= 0) & (left < c.n_slots), left, -1))
+    assert c.left[0] == -1 and c.right[-1] == -1
+    g = SW._slots(geometry, sl)
+    assert g.n_slots == c.n_slots and g.unspliced_count.shape == (c.n_slots, 2)
+    assert np.array_equal(g.eff_gdna, np.asarray(geometry.eff_gdna)[sl])
+    b = SW._slots(belief, sl)
+    assert np.array_equal(b.f_g, np.asarray(belief.f_g)[sl])
+    assert SW._slots(statics, sl).boundary_flags.shape == (c.n_slots,)
+
+
+def test_the_checks_count_only_the_owned_slots():
+    """`_check_message(n_owned=...)`: the read-ahead terminal at the end of a block is not counted as
+    eligible, and a row array is still required to cover every slot the policy saw."""
+    ctx = _ctx()
+    K = int(ctx.n_grid)
+    c = SW.AssertionCounts()
+    SW._check_message(PsiMessage(lam_rows=np.zeros((N, K))), ctx, c, n_owned=N - 1)
+    assert c["lam_rows_finite"] == {"violations": 0, "eligible": N - 1}
+    assert c["population_at_most_three"]["eligible"] == N - 1
+    with pytest.raises(ValueError, match="lam_rows has shape"):
+        SW._check_message(PsiMessage(lam_rows=np.zeros((N - 1, K))), ctx, c, n_owned=N - 1)
+    merged = SW.AssertionCounts()
+    merged.absorb(c)
+    merged.absorb(c)
+    assert merged["lam_rows_finite"] == {"violations": 0, "eligible": 2 * (N - 1)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE MESSAGE MEMO — the message layer is refit-invariant given the grid, so the refit sweeps share it.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _memo_kw(sweep_inputs):
+    kw = dict(sweep_inputs["kw"])
+    kw.pop("block_slots", None)
+    kw.pop("message_memo", None)
+    return kw
+
+
+def test_a_memo_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_layer(sweep_inputs):
+    """Two sweeps on identical inputs through one memo: the second hits every block, never calls the
+    policy's `prepare`, and returns the same belief and the same ``informed`` as the first and as a
+    sweep with no memo at all. Not vacuous: the toy delivers rows, so a stale or empty hit would move
+    the numbers."""
+    from _transfer_harness import _full_policy
+
+    policy = _full_policy(sweep_inputs)[0]
+    kw = _memo_kw(sweep_inputs)
+    plain = SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, block_slots=5)
+    memo = SW.MessageMemo()
+    first = SW.solve_chain(
+        *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_memo=memo
+    )
+    assert memo.misses > 0 and memo.hits == 0
+    n_blocks = memo.misses
+    calls = []
+    orig = type(policy).prepare
+
+    def spy(self, ctx, library):
+        calls.append(ctx.n_slots)
+        return orig(self, ctx, library)
+
+    type(policy).prepare = spy
+    try:
+        second = SW.solve_chain(
+            *sweep_inputs["args"], **kw, policy=policy, block_slots=5, message_memo=memo
+        )
+    finally:
+        type(policy).prepare = orig
+    assert not calls, "a hit must not prepare the policy"
+    assert memo.hits == n_blocks and memo.misses == n_blocks
+    for out in (first, second):
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "informed"):
+            assert np.array_equal(np.asarray(getattr(out, f)), np.asarray(getattr(plain, f))), f
+    assert memo.nbytes > 0
+
+
+def test_PERTURBATION_the_memo_misses_when_any_input_the_message_layer_reads_changes(sweep_inputs):
+    """The key is a digest of EVERY input the message layer reads, so it is safe by construction: a
+    changed belief, liveness bit, factory row, observation, library or grid must miss — and a memo that
+    hit on any of them would deliver another sweep's messages as this one's."""
+    import dataclasses as _dc
+
+    from _transfer_harness import _full_policy
+
+    policy, rows, _g, _w = _full_policy(sweep_inputs)
+    kw = dict(
+        _memo_kw(sweep_inputs), intron_prior=rows
+    )  # the live rows: the layer has something to read
+    chain, statics, geometry, belief, ra = sweep_inputs["args"]
+    memo = SW.MessageMemo()
+    SW.solve_chain(chain, statics, geometry, belief, ra, **kw, policy=policy, message_memo=memo)
+    base_misses = memo.misses
+
+    def misses_after(pol=policy, **over):
+        before = memo.misses
+        a = over.pop("args", (chain, statics, geometry, belief, ra))
+        SW.solve_chain(*a, **{**kw, **over}, policy=pol, message_memo=memo)
+        return memo.misses - before
+
+    assert misses_after() == 0, "identical inputs must hit"
+    # the incoming belief (the variance freeze of every own strand profile)
+    b2 = _dc.replace(belief, f_g=np.asarray(belief.f_g) * 0.999 + 0.0005)
+    assert misses_after(args=(chain, statics, geometry, b2, ra)) == base_misses
+    # each perturbation touches ONLY its channel, so the gate isolates that channel of the digest:
+    # a constant shift on an intron's live row changes the rows' bits and nothing downstream of them
+    # (liveness is a curvature, the claim is max-normalised) …
+    from _transfer_harness import _expected_pairs
+
+    intron = int(_expected_pairs(sweep_inputs)[0][0][1])
+    r2 = np.asarray(rows).copy()
+    r2[intron] += 1e-3
+    assert misses_after(intron_prior=r2) >= 1
+    # … and an intron's gDNA opportunity is read by the passes alone — by neither the library (which
+    # sums intergenic and single-strand-exon opportunities) nor any liveness bit
+    eg = np.asarray(geometry.eff_gdna).copy()
+    eg[intron] *= 1.5
+    g2 = _dc.replace(geometry, eff_gdna=eg)
+    assert misses_after(args=(chain, statics, g2, belief, ra)) >= 1
+    # the grid: the bracket (the rows keep their shape; a wider bracket re-reads them, so a hit would
+    # serve messages laid on another lattice)
+    assert misses_after(logodds_window=float(kw["logodds_window"]) + 1.0) == base_misses
+    # the library and the policy: another strand model changes every lane's coordinate and every
+    # own strand claim — the sweep's own ``rna_sense_frac`` is ψ's input, not the message layer's,
+    # so the policy is what carries the strand into the key
+    from _transfer_harness import _strand_of
+    from rigel.calibration.messages.transfer import TransferPolicy
+
+    kappa, od_g, od_r = _strand_of(sweep_inputs)
+    other = TransferPolicy(strand=(kappa * 0.9 + 0.05, od_g, od_r))
+    assert misses_after(pol=other) == base_misses
+    assert misses_after(rna_sense_frac=float(kw["rna_sense_frac"]) * 0.9 + 0.05) == 0, (
+        "the sweep's own strand parameter is ψ's, not the message layer's: a hit is correct"
+    )
+
+
+def test_a_diagnostic_capture_always_runs_the_full_layer(sweep_inputs):
+    """An instrument's capture reads the held lists, so with ``_capture`` the layer runs even on a memo
+    that would hit — and what it delivers equals the memo's, so the two paths cannot drift."""
+    from _transfer_harness import _full_policy
+
+    policy = _full_policy(sweep_inputs)[0]
+    kw = _memo_kw(sweep_inputs)
+    memo = SW.MessageMemo()
+    SW.solve_chain(*sweep_inputs["args"], **kw, policy=policy, message_memo=memo)
+    cap: dict = {}
+    hits_before = memo.hits
+    out = SW.solve_chain(
+        *sweep_inputs["args"], **kw, policy=policy, message_memo=memo, _capture=cap
+    )
+    assert memo.hits == hits_before, "a captured sweep must not be served from the memo"
+    assert "from_left" in cap and out.informed is not None

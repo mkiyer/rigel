@@ -640,8 +640,12 @@ that the untouched stages read 1.00. **Every speed-up is proven a numeric no-op*
 The instruments are `scripts/profiling/profiler.py` (the whole pipeline as a tree of named stages, with
 per-stage peak and held RSS; `--set` for any config field, `--scan-only` for the scan alone, `--compare`
 for two reports) and `scripts/profiling/sweep_replay.py` (one calibration sweep, replayed and compared
-bit for bit); set `OMP_NUM_THREADS` deliberately. `ISSUES: performance-memory-bounded-solve` carries the
-work.
+bit for bit; `--block-slots N|none` replays it at another locus-block size, which must move nothing —
+the chunk-exactness of the whole sweep on real data); set `OMP_NUM_THREADS` deliberately. The frozen
+references are `~/Downloads/rigel_runs/arms/locus_identity_*.json` (two ladder conditions and the
+LBX0190 library) and the captured sweeps `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step2` — both taken
+after ψ's read-out became chunk-exact (`DESIGN.md` §6b.15), which moved the earlier references by the
+priced ≤ 1e-14. `ISSUES: performance-memory-bounded-solve` carries the work.
 
 A both-strand stress test needs ample single-stranded regions (the population prior trains on them).
 How to A/B honestly: in-process, opposite extremes, never on a saturated condition, one thing varied,

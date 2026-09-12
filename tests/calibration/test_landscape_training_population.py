@@ -28,7 +28,7 @@ from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.signature import RegionType
-from _transfer_harness import _ctx_of, _full_policy
+from _transfer_harness import _ctx_of, _full_policy, _prepared
 
 CAL = sys.modules["rigel.calibration.calibrate"]
 
@@ -40,7 +40,7 @@ def _expected_informed(sweep_inputs, policy, capture):
     from rigel.calibration.messages import SILENCE
 
     ctx = _ctx_of(sweep_inputs)
-    prepared = policy.prepare(ctx)
+    prepared = _prepared(policy, ctx)
     n = int(ctx.n_slots)
     comp = np.zeros(n, bool)
     order = list(range(n))
@@ -122,7 +122,10 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
     class _Stub:
         name = "bound-vs-composition-stub"
 
-        def prepare(self, ctx):
+        def library(self, view):
+            return None
+
+        def prepare(self, ctx, library):
             return _Prepared(int(ctx.n_slots))
 
     out = SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=_Stub())

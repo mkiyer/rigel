@@ -685,3 +685,100 @@ def test_float32_log_is_monotone_so_the_ambig_cube_may_hoist_it():
         direct = np.log(np.maximum(grid[None, :, :], floor))
         hoisted = np.maximum(np.log(grid)[None, :, :], np.log(floor))
     assert np.array_equal(direct.view(np.int32), hoisted.view(np.int32))
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE NUMERIC CONTRACT, CONTINUED — ψ is CHUNK-EXACT: how the rows are tiled moves no number.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _chunk_substrate(m=255, K=120, K_ss=513, seed=3):
+    """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm on the coarse grid
+    (so the single-strand path REGRIDS it), non-flat λ-factor rows, and a per-slot freeze reference."""
+    from rigel.calibration.simplex_logodds import CompositionPriors
+
+    rng = np.random.default_rng(seed)
+    u_pos = rng.integers(0, 60, m).astype(float)
+    u_neg = rng.integers(0, 60, m).astype(float)
+    ap = rng.random(m) < 0.75
+    an = rng.random(m) < 0.55
+    ap[~(ap | an)] = True  # no locked slot: every row solves
+    lam = np.linspace(-10.0, 10.0, K)
+    prior = -0.5 * ((lam[None, :] - rng.normal(0.0, 2.0, m)[:, None]) / 3.0) ** 2
+    rows = -0.02 * (lam[None, :] - rng.normal(0.0, 1.0, m)[:, None]) ** 2
+    fg_ref = rng.uniform(0.05, 0.95, m)
+    rest = 1.0 - fg_ref
+    fpos_ref = np.where(ap & an, rest / 2, np.where(ap, rest, 0.0))
+    fneg_ref = np.where(ap & an, rest / 2, np.where(an, rest, 0.0))
+    args = (u_pos, u_neg, ap, an, u_pos + u_neg, np.zeros(m))
+    kw = dict(
+        kappa=0.9,
+        od_g=0.02,
+        od_r=0.03,
+        n_grid=K,
+        L=10.0,
+        n_tilt=12,
+        n_grid_ss=K_ss,
+        priors=CompositionPriors(gdna=prior),
+        lam_logprior=rows,
+        fg_ref=fg_ref,
+        fpos_ref=fpos_ref,
+        fneg_ref=fneg_ref,
+    )
+    return m, args, kw
+
+
+def _solve_in_chunks(args, kw, edges):
+    """`_solve_regions_logodds_all` on each ``[a, b)`` of ``edges`` in turn, scattered back — the
+    block solve's arithmetic, with nothing but the row tiling changed."""
+    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+
+    fields = (
+        "gdna_frac",
+        "rna_pos_frac",
+        "rna_neg_frac",
+        "gdna_frac_var",
+        "rna_pos_frac_var",
+        "rna_neg_frac_var",
+    )
+    m = args[0].shape[0]
+    out = {f: np.zeros(m) for f in fields}
+    for a, b in edges:
+        sub_args = tuple(x[a:b] for x in args)
+        sub_kw = dict(kw)
+        sub_kw["priors"] = kw["priors"].select(np.arange(a, b))
+        for key in ("lam_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
+            sub_kw[key] = kw[key][a:b]
+        dc = _solve_regions_logodds_all(*sub_args, **sub_kw)
+        for f in fields:
+            out[f][a:b] = getattr(dc, f)
+    return out
+
+
+def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
+    """The property the locus solve stands on: the answer at a slot is a function of that slot's inputs
+    and the grid, never of which other rows share its tile. Whole, in halves, in thirds and one row at a
+    time must agree to the bit on every field of both paths (the regridded single-strand solve and the
+    AMBIG cube). The read-out earns this by reducing every row in a fixed order — a contiguous ψ and
+    per-row moment sums that do not go through BLAS — because a layout- or row-count-dependent
+    reduction moves the last ulp, and one ulp is a different number."""
+    from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
+
+    m, args, kw = _chunk_substrate()
+    whole = _solve_regions_logodds_all(*args, **kw)
+    partitions = {
+        "halves": [(0, m // 2), (m // 2, m)],
+        "thirds": [(0, m // 3), (m // 3, 2 * m // 3), (2 * m // 3, m)],
+        "one row at a time": [(i, i + 1) for i in range(m)],
+    }
+    for name, edges in partitions.items():
+        got = _solve_in_chunks(args, kw, edges)
+        for f, arr in got.items():
+            ref = np.asarray(getattr(whole, f))
+            assert np.array_equal(arr, ref), (
+                f"{name}: {f} moved at {int((arr != ref).sum())} of {m} slots "
+                f"(max |delta| {np.max(np.abs(arr - ref)):.3e}) — the read-out is not chunk-exact"
+            )
+    # not vacuous: both paths solved, and the fitted arm was regridded onto the fine grid
+    assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
+    assert kw["n_grid_ss"] != kw["n_grid"] and kw["priors"].gdna is not None

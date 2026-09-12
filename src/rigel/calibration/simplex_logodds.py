@@ -115,6 +115,13 @@ def _block_rows(cells_per_row: int, itemsize: int) -> int:
     return max(1, _SOLVE_BLOCK_BYTES // max(1, int(cells_per_row) * int(itemsize)))
 
 
+def _row_moment(post, g):
+    """``Σ_k post[i, k]·g[k]`` per row — a grid moment, as a per-row pairwise sum and never as a BLAS
+    matrix-vector product, whose kernel (and rounding) changes with the row count. That is what makes
+    ψ's read-out CHUNK-EXACT: the same row gives the same bits whatever rows share the call."""
+    return np.sum(post * g[None, :], axis=1)
+
+
 def _lse(a, axis, keepdims=False):
     """Lean numpy log-sum-exp — a drop-in for ``scipy.special._lse(a, axis, keepdims)`` without the
     scipy wrapper overhead (arg validation, ``b``/``return_sign`` handling), which the profiler flagged as
@@ -395,7 +402,10 @@ def _regrid_global(glp, n_from, n_to, L):
     x0, x1 = fc[j - 1], fc[j]
     t = np.clip((ff - x0) / np.maximum(x1 - x0, _EPS), 0.0, 1.0)  # (n_to,)
     g = np.asarray(glp, np.float64)
-    return g[:, j - 1] + t[None, :] * (g[:, j] - g[:, j - 1])
+    # C-contiguous, deliberately: a fancy index on the LAST axis returns an F-ordered array, and a row
+    # reduction over an F-ordered ψ is summed in an order that depends on how many rows share the
+    # call — one ulp, and a solve that is no longer chunk-exact (`_solve_regions_logodds`).
+    return np.ascontiguousarray(g[:, j - 1] + t[None, :] * (g[:, j] - g[:, j - 1]))
 
 
 def _gdna_arm(lam, global_logprior):
@@ -594,6 +604,14 @@ def _solve_regions_logodds(
     )
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
+    # ── THE READ-OUT IS CHUNK-EXACT: every reduction below runs per row in a fixed order, so a slot's
+    #    answer is a function of its own inputs and the grid and never of which rows share the call.
+    #    Two things break that and both are excluded here: a reduction over a non-contiguous array (its
+    #    summation order follows the strides, hence the row count — so ψ is made contiguous first) and a
+    #    BLAS matrix-vector product (a one-row call dispatches a different kernel — so the moments are
+    #    per-row sums). One ulp is a different number, and the locus solve tiles the rows freely
+    #    (gate: ``test_sweep.test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number``). ──
+    psi = np.ascontiguousarray(psi)
     post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
     # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
     f_g = _posterior_median_fg(post, lam, fg)
@@ -603,11 +621,11 @@ def _solve_regions_logodds(
     # precision state = Var(log f_c), moment-matched on the grid. The dead strand is locked-certain
     # (f=0) → var 0. Capping is AUTOMATIC: the send prec_log = 1/(var+σ²+pois) ≤ 1/(σ²+pois).
     Lg = _log_fg(lam)
-    mLg = post @ Lg
-    var_g = np.maximum(post @ (Lg * Lg) - mLg * mLg, 0.0)
+    mLg = _row_moment(post, Lg)
+    var_g = np.maximum(_row_moment(post, Lg * Lg) - mLg * mLg, 0.0)
     La = _log1m_fg(lam)
-    mLa = post @ La
-    var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
+    mLa = _row_moment(post, La)
+    var_act = np.maximum(_row_moment(post, La * La) - mLa * mLa, 0.0)
     var_pos = np.where(ap & ~an, var_act, 0.0)
     var_neg = np.where(an & ~ap, var_act, 0.0)
     # ``_compose`` runs on the CLIPPED ``f_g``, so the RNA total is its exact complement and there is no
@@ -724,9 +742,10 @@ def _solve_ambig_logodds(
     psi_lam = _lse(psi, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
     f_g = _posterior_median_fg(post_lam, lam, fg)
-    # precision state = Var(log f_g) over the θ-marginal λ-posterior (`TRAPS: two-gaussians-one-latent`).
-    mLg = post_lam @ log_fg_grid
-    var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
+    # precision state = Var(log f_g) over the θ-marginal λ-posterior (`TRAPS: two-gaussians-one-latent`);
+    # per-row sums, not BLAS, so the read-out is chunk-exact (see `_solve_regions_logodds`).
+    mLg = _row_moment(post_lam, log_fg_grid)
+    var_g = np.maximum(_row_moment(post_lam, log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64), and the TILT
     # SHARE that :func:`_compose` maps into the composition.
     flat = psi.reshape(psi.shape[0], -1)

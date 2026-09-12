@@ -1083,3 +1083,84 @@ def test_a_wrong_length_is_refused(index):
     old_shape = rno + np.arange(rno.shape[0], dtype=np.int64)  # a k+1 boundary axis
     with pytest.raises(ValueError, match="one per contiguous boundary"):
         build_region_statics(chain, ra, np.zeros(int(old_shape[-1]), dtype=np.uint16))
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE LOCUS — `locus_blocks`: the chain cut at its message terminals, merged up to a block size.
+# Pure topology; which slot is a terminal is the caller's predicate.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _two_reference_chain():
+    """Two references: 7 regions (13 slots) then 3 regions (5 slots). Terminals at REGION slots 0, 6,
+    12 (the end of reference 0) and 13 (the start of reference 1) — so the fixture has a terminal that
+    is also a reference start, a locus at each end, and one interior locus of 5 slots."""
+    from rigel.calibration.region_chain import REGION, build_region_chain
+
+    chain = build_region_chain(np.array([0, 7, 10]), np.array([0, 6, 8]))
+    assert chain.n_slots == 18
+    terminal = np.zeros(chain.n_slots, bool)
+    for s in (0, 6, 12, 13):
+        assert chain.kind[s] == REGION
+        terminal[s] = True
+    return chain, terminal
+
+
+def test_locus_blocks_own_every_slot_once_in_chain_order_and_cut_only_at_terminals_or_starts():
+    from rigel.calibration.region_chain import locus_blocks
+
+    chain, terminal = _two_reference_chain()
+    left = np.asarray(chain.left)
+    for block_slots in (None, 1, 2, 5, 6, 7, 100):
+        blocks = locus_blocks(chain, terminal, block_slots)
+        assert blocks[0].start == 0 and blocks[-1].stop == chain.n_slots
+        for a, b in zip(blocks, blocks[1:]):
+            assert a.stop == b.start, f"blocks do not abut at {a} / {b}"
+        for b in blocks:
+            assert b.start < b.stop, "an empty block"
+            assert terminal[b.start] or left[b.start] < 0, f"{b} starts inside a locus"
+            # the slot read beyond the owned range is a terminal linked to the block's last slot
+            assert b.end in (b.stop, b.stop + 1)
+            if b.end == b.stop + 1:
+                assert terminal[b.stop] and left[b.stop] >= 0
+            else:
+                assert b.stop == chain.n_slots or left[b.stop] < 0
+
+
+def test_locus_blocks_merge_loci_up_to_the_block_size_and_never_split_one():
+    from rigel.calibration.region_chain import LocusBlock, locus_blocks
+
+    chain, terminal = _two_reference_chain()
+    # the loci: [0,6) [6,12) [12,13) [13,18) — cuts at 0, 6, 12 (terminals) and 13 (terminal + start)
+    one_per_locus = locus_blocks(chain, terminal, 1)
+    assert [(b.start, b.stop) for b in one_per_locus] == [(0, 6), (6, 12), (12, 13), (13, 18)]
+    # a 6-slot locus does not fit a 5-slot block: it becomes a block of its own length
+    assert all(b.stop - b.start <= 6 for b in locus_blocks(chain, terminal, 5))
+    assert [(b.start, b.stop) for b in locus_blocks(chain, terminal, 5)] == one_per_locus_ranges(
+        one_per_locus
+    )
+    # 7 slots: [0,6) cannot take [6,12); [6,12) cannot take [12,13)? it can (7 slots): [6,13)
+    assert [(b.start, b.stop) for b in locus_blocks(chain, terminal, 7)] == [
+        (0, 6),
+        (6, 13),
+        (13, 18),
+    ]
+    # one block of the whole chain, reading nothing beyond it
+    assert locus_blocks(chain, terminal, None) == [LocusBlock(0, 18, 18)]
+    # the read-ahead: [0,6) reads slot 6 (a terminal linked to slot 5); [6,12) reads 12; [12,13)
+    # reads NOT 13, which is a reference start — no message crosses a reference boundary
+    assert [(b.stop, b.end) for b in one_per_locus] == [(6, 7), (12, 13), (13, 13), (18, 18)]
+
+
+def one_per_locus_ranges(blocks):
+    return [(b.start, b.stop) for b in blocks]
+
+
+def test_locus_blocks_refuse_a_wrong_shaped_predicate_and_a_zero_block_size():
+    from rigel.calibration.region_chain import locus_blocks
+
+    chain, terminal = _two_reference_chain()
+    with pytest.raises(ValueError, match="one flag per slot"):
+        locus_blocks(chain, terminal[:-1])
+    with pytest.raises(ValueError, match="block_slots"):
+        locus_blocks(chain, terminal, 0)

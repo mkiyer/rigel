@@ -234,7 +234,10 @@ def density_factor_precision(lam_logprior, lam_grid):
         return tau
     w = np.exp(lp[live] - np.max(lp[live], axis=1, keepdims=True))
     w /= np.maximum(w.sum(axis=1, keepdims=True), _EPS)
-    mu = w @ lam
-    var = w @ (lam * lam) - mu * mu
+    # per-row sums, never a BLAS matrix-vector product: a one-row call would dispatch a different
+    # kernel and move the last ulp, and the locus solve reads this per block (chunk-exact, gated in
+    # ``test_density_deconv.test_the_factor_precision_is_chunk_exact``)
+    mu = np.sum(w * lam[None, :], axis=1)
+    var = np.sum(w * (lam * lam)[None, :], axis=1) - mu * mu
     tau[live] = np.where(var > _EPS, 1.0 / np.maximum(var, _EPS), 0.0)
     return tau

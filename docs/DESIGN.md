@@ -1053,6 +1053,85 @@ exons 182 → 63); whole library every ladder row within 0.3 %. Under sparse pro
 `g98 ss.50 ON` row loses 4.8 % — the level rule's total bound at a depleted face — reported, not a
 target. The substrate is the test chromosome's sj+terminus block (`sjterm` · `capsjterm`).
 
+### 6b.15 The locus is the unit of the solve — a terminal receives nothing, and ψ's read-out is chunk-exact (owner, 2026-09-11)
+
+**The decomposition is the locus, exactly as the EM already does it.** An intergenic region — any REGION
+admitting no RNA strand, the predicate the SOLVE gate already locks — is a TERMINAL: structurally pure
+gDNA, solved and fixed before a message exists, so nothing needs to cross it and nothing may. Verified on
+the human chain before it was made structural: of 1,206,202 composition faces and 4,621,302 lane faces
+the shipped policy built, none delivered into an intergenic region, none of a terminal's 65,852 gDNA-lane
+faces ever carried anything (a terminal has no own level), and the policy wrote no held message at one
+in either pass. The backbone now REFUSES to ask a kernel for a hop into a terminal (`sweep._pass`) and the
+lane no longer lists faces from one, so no future policy can move the boundary condition; the terminal
+predicate is `is_region & g1_locked`, one definition (33,120 slots on the human chain, exactly the
+intergenic set). The chain therefore breaks into 33,018 loci (median 19 slots, the largest 2,477 =
+0.12 % of the chain) and `sweep.solve_chain` solves it a LOCUS BLOCK at a time
+(`region_chain.locus_blocks`): each block on its own slice of every input, reading one slot beyond
+itself where that slot is the terminal its last node receives from (the halo is load-bearing: without it
+the last node hears an open side instead of silence and its own flux is not read).
+
+**The only information that crosses a block boundary is the policy's LIBRARY.** `Policy.library(view)`
+runs once over the whole chain on a `ChainView` — observations and geometry, no beliefs, so a cross-block
+reduction over beliefs has no field to read — and `prepare(ctx, library)` sees one block. The transfer
+policy's library is three reference densities (the gDNA lane's, each RNA lane's) and whether the strand
+split is a live witness, which is now derived from the deadband (`region_init.strand_discriminability`)
+rather than from a per-slot solve. The intron factory's rows travel on the context (`factory_rows`, the
+very array ψ adds as its λ-factor), which retired the policy's grid-keyed row callback.
+
+**ψ's read-out is chunk-exact, and that is what makes the block size a knob rather than a choice.** The
+shipped single-strand read-out was not: a fancy index on the last axis in `_regrid_global` returned an
+F-ordered ψ whose row reductions summed in a row-count-dependent order, and the BLAS matrix–vector
+moments dispatched a different kernel at one row — splitting any real 255-row tile moved ~70 % of its rows
+by ≤ 1e-15, and halving `_SOLVE_BLOCK_BYTES` already moved slots on the shipped path. The repair (a
+contiguous ψ, per-row moment sums) moves the answer by ≤ 3.1e-15 per slot per sweep, does not amplify
+through four sweeps and three refits (the final belief ≤ 3.1e-15, `informed` never flips), leaves TPM and
+effective lengths bit-identical on a real library and every aggregate of `calibration_vs_oracle.py` at the
+last ulp with `ruler_n_moved` identical on all 16 conditions; the owner accepted it as identical to a
+tolerance (2026-09-11). With it, every block size gives the same bits (gated on the toy for six sizes and
+on a real 2.09M-slot sweep for eight), so `CalibrationConfig.sweep_block_slots` sets only the working set.
+
+**The message layer is refit-invariant, so the refit sweeps share it** (derived and measured
+2026-09-11, the first step after the decomposition). Everything the layer reads is on the context —
+observations, geometry, the factory rows, the incoming belief's ``belief_fg`` and the liveness bits
+``own_live`` (`tau_lam > 0`, the one bit of the self-solve a policy may know; the context no longer
+carries the self-solve object) — plus the library and the grid, and never the prior; and `calibrate`
+resets the belief before every sweep. So for one grid every refit sweep's messages are the same:
+measured on the human chain, sweeps 1–3 deliver identical ψ rows and cube rows to the bit and every node
+hears the same thing. `sweep.MessageMemo` holds one grid's delivered messages, content-keyed on a
+digest of every input the layer reads (a changed belief, row, count, library, grid or policy misses —
+each channel gated by perturbation), sparsely (0.17 GB of rows plus 0.39 GB of cube rows per grid on
+the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves and is served the rest.
+Diagnostics never read from it. Pass 0's grid is never reused, so it is not held. On the 18.6M-fragment
+library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3 are served entirely
+(38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs, and the memo holds
+2.68 GB (peak 15.0 → 17.8 GB) — the cube rows as the float32 the AMBIG solve casts them to; 4.1 GB as
+float64.
+
+**The rules are typed tables, and a face is a side** (2026-09-11, the port's data layout). Every
+directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
+recipient's composition rule is a KIND and its parameters at ``(destination, side)``:
+`messages.transfer.Faces` holds ``(n, 2)`` tables (the kind, the face's unspliced and spliced counts,
+the boundary's and far region's gDNA opportunity, a blur width, the level rule's width) and indices into
+a row store of the ``(K,)`` maps; five kinds cover every shipped message — FORWARD, TRANSPORT (boundary →
+region through the face map), SPLICE-OUT (region → boundary, the map read backwards), EDGE (the
+intergenic|exon edge's one-sided level) and LEVEL (the terminus's level rule) — and `Faces.apply` is
+the one place their arithmetic lives. A face carries ONE rule: the builders' faces are disjoint by
+construction (the splice faces serve intron|exon pairs, the edge rule gene edges, the terminus rules
+unlicensed faces, the alternative splice site junctions with no terminus), so the table refuses a
+second rule at a face as it refuses a rule at a face that does not exist — the earlier "a later builder
+replaces an earlier one" precedence had no instance on the toy or the human chain and was a hidden
+assumption, not a rule. The level lanes hold their faces as ``(n, 2)`` bits and their junction flux as
+a row table. The 1.2M closures, the 4.6M-tuple face sets and the neighbour-pair enumeration are gone,
+bit-identically; `_SolveSite` needs no neighbour arrays. A compiled pass reads these buffers directly.
+
+**Threads are the wrong tool for this sweep, and the executor waits for the port.** Measured on the real
+sweep: the locus-split passes at 8 threads 0.83–0.94× (GIL-bound Python), ψ's grid solves 2.06×, the same
+passes in 8 forked processes 6.16×. The owner's decision: no parallelism until the C/C++ port of the block
+solve, which parallelises there; this ruling delivers the structure the port lands on and the memory half
+of the problem — measured end to end on the 18.6M-fragment library at 8 threads, two back-to-back pairs:
+the run's peak RSS 33.2 → 14.9 GB and 32.6 → 15.0 GB, the wall 0.97–0.98, the sweeps 0.96–0.97, and the
+peak now set outside the solve (`build_region_geometry`, `init_beliefs`).
+
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 
 **The composition has two degrees of freedom, not three.** ψ solves a point on the 2-simplex,

@@ -223,3 +223,32 @@ def test_the_populated_limit_is_the_pooled_rate():
     bg = fit_gdna_background(g, E)
     assert bg.log_mu_bg == pytest.approx(np.log(g.sum() / E.sum()), abs=1e-6)
     assert bg.informative
+
+
+def test_the_factor_precision_is_chunk_exact():
+    """`density_factor_precision` read one row at a time equals the whole array's, to the bit: the
+    precision is a per-row moment and must not depend on which rows share the call — the locus
+    solve reads it per block. A BLAS matrix-vector product breaks this at a one-row call (the
+    library dispatches a different kernel), so the moments are per-row sums instead."""
+    from rigel.calibration.density_deconv import density_factor_precision
+
+    rng = np.random.default_rng(11)
+    lam = np.linspace(-10.0, 10.0, 60)
+    rows = (
+        -0.5
+        * ((lam[None, :] - rng.normal(0.0, 3.0, 37)[:, None]) / rng.uniform(0.5, 4.0, 37)[:, None])
+        ** 2
+    )
+    rows[5] = 0.0  # a flat row: no information, τ = 0 in every tiling
+    whole = density_factor_precision(rows, lam)
+    singles = np.concatenate(
+        [density_factor_precision(rows[i : i + 1], lam) for i in range(rows.shape[0])]
+    )
+    halves = np.concatenate(
+        [density_factor_precision(rows[:20], lam), density_factor_precision(rows[20:], lam)]
+    )
+    assert whole[5] == 0.0 and (whole > 0).sum() == 36
+    assert np.array_equal(singles, whole), (
+        f"one-row calls moved {int((singles != whole).sum())} rows"
+    )
+    assert np.array_equal(halves, whole)

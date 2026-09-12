@@ -10,14 +10,18 @@ cross, so no level ever crosses a capture cliff and no constant is anywhere. The
 parts, and ``prepare`` is a table of contents: one named BUILDER per shipped message.
 
 * Every node's OWN CLAIM (`_claims`): an intron's factory profile (its density against the
-  intergenic background, the rows ``rows_at`` supplies); an exon's or a boundary's own strand profile
+  intergenic background — the context's ``factory_rows``, the very array ψ adds as its λ-factor); an
+  exon's or a boundary's own strand profile
   where the solver's derived strand deadband declares the channel live (``strand``); an
   intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is structurally pure gDNA).
   ⛔ A claim is data only — never a belief, which already holds the prior and the neighbours.
 * The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
   holds SILENCE); the identity = FORWARD (the two objects share one unspliced population exactly); a
   map = MODIFY (the face's arithmetic with its counting width and, where two witnesses exist, the
-  pair's own discrepancy). The rules ARE the shipped messages, each built by the function named:
+  pair's own discrepancy). The rules are TYPED TABLES (`Faces`): every directed face is one of a
+  node's two sides — it hears from its left neighbour or its right — so a rule is a KIND and its
+  parameters at ``(destination, side)``, five kinds in all, and the passes read the table. The rules
+  ARE the shipped messages, each built by the function named, which writes its rows into the table:
 
   - `_splice_faces` — the intron|exon face. intron ⇄ boundary: FORWARD both ways (one shared
     unspliced population; into the intron only under a shared single strand). boundary → exon at a
@@ -81,19 +85,26 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
   prior.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
-stays a no-claim — a flat profile, an absent factory, an evidence-free provider all deliver SILENCE,
+stays a no-claim — a flat profile, an absent factory, a context with no rows all deliver SILENCE,
 never a zero-filled channel; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
+
+THE LIBRARY (`TransferPolicy.library`, once per sweep over the whole chain, `_Library`): the three
+level lanes' coordinates — the library's structurally pure gDNA density, and each strand's unspliced
+density over its single-strand exons — and whether the strand split is a live RNA witness anywhere.
+They are ratios of sums over structurally selected slots and one boolean, read from observations and
+geometry only, and they are the ONLY things a message knows about slots outside its own block.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
 from ..simplex_logodds import _tilt_grid, strand_row_logodds
-from . import SILENCE, Level, Message, PsiMessage, StepContext
+from . import SILENCE, ChainView, Level, Message, PsiMessage, StepContext
 from .transfer_rows import (
     EPS,
     SJ_FLAGS,
@@ -125,7 +136,7 @@ from .transfer_rows import (
     transport_row,
 )
 
-__all__ = ["TransferPolicy"]
+__all__ = ["Faces", "TransferPolicy"]
 
 #: the three populations' lanes: the `Message` field each population's level travels on
 _FIELD = {"gdna": "level_gdna", "pos": "level_rna_pos", "neg": "level_rna_neg"}
@@ -145,62 +156,287 @@ def _fuse(parts):
     return None if out is None else _norm(out)
 
 
-def _forward(own, held):
-    """FORWARD: the identity — a hop whose two objects share one population exactly."""
-    return _fuse([r for r in (own, held) if r is not None])
+def _side(s: int, i: int) -> int:
+    """The side of ``i`` a hop from ``s`` arrives on: ``0`` from its LEFT neighbour (the forward pass),
+    ``1`` from its RIGHT (the backward pass). Slot ids are genomic order, so the left neighbour is the
+    smaller id — which is why a directed face needs no pair and no lookup: it IS ``(destination,
+    side)``, and every table below is indexed that way."""
+    return 0 if s < i else 1
 
 
-def _composed(mapping):
-    """A composition rule: the sender's own claim and what it holds compose (profiles add) and the
-    face's map carries the product."""
+#: the five KINDS of composition rule a directed face can carry (``NONE``: the face has no rule and the
+#: level lane serves it). Each is one arithmetic of `transfer_rows` with the parameters `Faces` holds.
+NONE, FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL = range(6)
+RULE_NAMES = ("none", "forward", "transport", "splice_out", "edge", "level")
 
-    def rule(own, held):
+
+class FaceRule(NamedTuple):
+    """One face's rule read out of the tables (`Faces.at`): its kind and parameters, the rows resolved."""
+
+    kind: int
+    n_u: float
+    n_s: float
+    a_b: float
+    a_x: float
+    width: float
+    var: float
+    row: "np.ndarray | None"
+    row2: "np.ndarray | None"
+
+
+class Faces:
+    """THE COMPOSITION RULES AS TYPED TABLES — the port's data layout for what a recipient does with
+    a composition that arrives at each of its two sides.
+
+    Every array is ``(n, 2)`` over ``(destination, side)``: ``kind`` (one of the five above), the
+    scalar parameters ``n_u`` / ``n_s`` / ``a_b`` / ``a_x`` (the face's unspliced and spliced counts,
+    the boundary's and the far region's gDNA opportunity), ``width`` (a blur variance beyond counting)
+    and ``var`` (the level rule's width), and ``row`` / ``row2``, indices into ``rows`` — the ``(K,)``
+    maps a rule needs (a face map's λ image, a level map, the edge's level, the level rule's bound).
+    ``nbr[i, side]`` names the neighbour each face hears from, so a builder cannot write a rule at a
+    face that does not exist; and a face carries ONE rule — a second write is refused — because the
+    builders' faces are disjoint by construction (the splice faces serve intron|exon pairs, the edge
+    rule gene edges, the terminus rules unlicensed faces, the alternative splice site junctions with
+    no terminus), and a precedence that nothing exercises is a hidden assumption, not a rule.
+
+    :meth:`apply` is the one place a rule's arithmetic lives:
+
+    ==========  ===============================================================================
+    FORWARD     the identity: the sender's claim and what it holds, fused
+    TRANSPORT   boundary → region through the face map ``rows[row]`` (`transport_row`), blurred by
+                ``width`` where a pair's discrepancy adds one
+    SPLICE_OUT  region → boundary, the face map read backwards (`splice_out_row`), likewise
+    EDGE        the intergenic|exon edge's one-sided level ``rows[row]``, a constant; a flat one
+                is no claim
+    LEVEL       the terminus's level rule: the sender's OWN claim through the level map
+                ``rows[row]`` at width ``var`` (`level_row`), or the crossing total's bound
+                ``rows[row2]`` when it has none — never what it holds
+    ==========  ===============================================================================
+    """
+
+    __slots__ = (
+        "lam",
+        "nbr",
+        "kind",
+        "row",
+        "row2",
+        "n_u",
+        "n_s",
+        "a_b",
+        "a_x",
+        "width",
+        "var",
+        "rows",
+    )
+
+    def __init__(self, lam, left, right):
+        n = int(np.asarray(left).shape[0])
+        self.lam = np.asarray(lam, np.float64)
+        self.nbr = np.stack((np.asarray(left, np.int64), np.asarray(right, np.int64)), axis=1)
+        self.kind = np.zeros((n, 2), np.int8)
+        self.row = np.full((n, 2), -1, np.int32)
+        self.row2 = np.full((n, 2), -1, np.int32)
+        self.n_u = np.zeros((n, 2))
+        self.n_s = np.zeros((n, 2))
+        self.a_b = np.zeros((n, 2))
+        self.a_x = np.zeros((n, 2))
+        self.width = np.zeros((n, 2))
+        self.var = np.zeros((n, 2))
+        self.rows: list = []
+
+    def set(
+        self,
+        s,
+        i,
+        kind,
+        *,
+        row=None,
+        row2=None,
+        n_u=0.0,
+        n_s=0.0,
+        a_b=0.0,
+        a_x=0.0,
+        width=0.0,
+        var=0.0,
+    ):
+        """The rule at the face into ``i`` from ``s`` — which must be ``i``'s neighbour on that side."""
+        s, i = int(s), int(i)
+        side = _side(s, i)
+        if self.nbr[i, side] != s:
+            raise ValueError(
+                f"no face into {i} from {s}: its neighbour on that side is {self.nbr[i, side]}"
+            )
+        if self.kind[i, side] != NONE:
+            raise ValueError(
+                f"the face into {i} from {s} already carries a {RULE_NAMES[self.kind[i, side]]} rule; "
+                f"a face carries one rule, and the builders' faces are disjoint"
+            )
+        self.kind[i, side] = kind
+        self.row[i, side] = self._keep(row)
+        self.row2[i, side] = self._keep(row2)
+        self.n_u[i, side], self.n_s[i, side] = float(n_u), float(n_s)
+        self.a_b[i, side], self.a_x[i, side] = float(a_b), float(a_x)
+        self.width[i, side], self.var[i, side] = float(width), float(var)
+
+    def _keep(self, row) -> int:
+        if row is None:
+            return -1
+        self.rows.append(np.asarray(row, np.float64))
+        return len(self.rows) - 1
+
+    def any(self) -> bool:
+        return bool((self.kind != NONE).any())
+
+    def kind_at(self, s, i) -> int:
+        return int(self.kind[int(i), _side(int(s), int(i))])
+
+    def has(self, s, i) -> bool:
+        return self.kind_at(s, i) != NONE
+
+    def at(self, s, i) -> "FaceRule":
+        """The rule at one face as a record — its kind, parameters and resolved rows — for a reader or a
+        gate; the passes read the tables directly."""
+        i, side = int(i), _side(int(s), int(i))
+        r, r2 = int(self.row[i, side]), int(self.row2[i, side])
+        return FaceRule(
+            int(self.kind[i, side]),
+            float(self.n_u[i, side]),
+            float(self.n_s[i, side]),
+            float(self.a_b[i, side]),
+            float(self.a_x[i, side]),
+            float(self.width[i, side]),
+            float(self.var[i, side]),
+            None if r < 0 else self.rows[r],
+            None if r2 < 0 else self.rows[r2],
+        )
+
+    def pairs(self) -> list:
+        """Every directed face ``(s, i)`` that carries a rule, in table order."""
+        i_idx, sides = np.nonzero(self.kind != NONE)
+        return [(int(self.nbr[i, side]), int(i)) for i, side in zip(i_idx.tolist(), sides.tolist())]
+
+    def apply(self, s, i, own, held):
+        """The rule at the face into ``i`` from ``s``, applied to what ``s`` sends: its OWN claim and what
+        it HOLDS from its far side — each ``None`` where absent. Returns the row for ``i``, or ``None``
+        for no claim."""
+        i, side = int(i), _side(int(s), int(i))
+        k = self.kind[i, side]
+        if k == FORWARD:
+            return _fuse([r for r in (own, held) if r is not None])
+        if k == EDGE:
+            r = self.rows[self.row[i, side]]
+            return r if np.ptp(r) > EPS else None
+        if k == LEVEL:
+            if own is None:
+                return self.rows[self.row2[i, side]]
+            return level_row(own, self.lam, self.rows[self.row[i, side]], float(self.var[i, side]))
         sending = _fuse([r for r in (own, held) if r is not None])
-        return None if sending is None else mapping(sending)
+        if sending is None:
+            return None
+        n_u, n_s = float(self.n_u[i, side]), float(self.n_s[i, side])
+        if k == TRANSPORT:
+            out = transport_row(sending, self.lam, self.rows[self.row[i, side]], n_u, n_s)
+        elif k == SPLICE_OUT:
+            out = splice_out_row(
+                sending, self.lam, n_u, n_s, float(self.a_b[i, side]), float(self.a_x[i, side])
+            )
+        else:
+            return None
+        w = float(self.width[i, side])
+        return blur_row(out, self.lam, w) if w > 0.0 else out
 
-    return rule
+
+@dataclass(frozen=True, slots=True)
+class _Library:
+    """What the whole library says, reduced once per sweep and read by every block — the only
+    cross-block information a message may use. ``rho_gdna``: the structurally pure gDNA density, the
+    gDNA lane's coordinate (``0.0``: no positive density anywhere, so no level lane can be built).
+    ``rho_rna``: per strand, its unspliced density over its single-strand exons, the RNA lanes'
+    coordinates. ``split_live``: the strand split is a witness of a strand's RNA somewhere — the
+    derived deadband is open and some single-strand exon has counts."""
+
+    rho_gdna: float
+    rho_rna: dict
+    split_live: bool
 
 
 class TransferPolicy:
-    """``rows_at(n_grid, logodds_window)`` supplies the intron factory's per-slot profiles on the sweep's
-    own grid (``calibrate`` passes its memoized ``_intron_prior_at``; ``None`` means no factory
-    evidence and the policy is silent — byte-identical to `SilentPolicy`). ``strand = (kappa, od_g,
-    od_r)`` is the library's fitted strand model, which the exon's and the boundary's own claims need;
-    ``None`` leaves every strand claim off."""
+    """``strand = (kappa, od_g, od_r)`` is the library's fitted strand model, which the exon's and the
+    boundary's own claims need; ``None`` leaves every strand claim off. The intron factory's per-slot
+    profiles arrive on the context (``factory_rows``, the sweep's own λ-factor on its own grid);
+    ``None`` there means no factory evidence and the policy is silent — byte-identical to
+    `SilentPolicy`."""
 
     name = "transfer"
 
-    def __init__(self, rows_at: Callable, strand: tuple[float, float, float] | None = None):
-        self._rows_at = rows_at
+    def __init__(self, strand: tuple[float, float, float] | None = None):
         self._strand = None if strand is None else tuple(float(x) for x in strand)
 
+    # ── the library: the three lanes' coordinates and the strand witness's liveness, once ───────────
+    def library(self, view: ChainView) -> _Library:
+        is_bnd = np.asarray(view.is_boundary, bool)
+        is_exon = np.asarray(view.is_exon_region, bool)
+        fp, fn = np.asarray(view.free_pos, bool), np.asarray(view.free_neg, bool)
+        is_intergenic = ~is_bnd & ~is_exon & ~fp & ~fn
+        n_u = np.asarray(view.n_slot, np.float64)
+        a_g = np.asarray(view.eff_gdna, np.float64)
+        a_r = np.asarray(view.eff_rna, np.float64)
+        cnt = np.asarray(view.unspliced_count, np.float64)
+        # the gDNA lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE
+        # for a log axis, so any positive density serves; when the intergenic count is zero (a
+        # zero-gDNA library with no intergenic reads) the library-wide density stands in. ⛔ Without
+        # that fallback the coordinate is zero, and the gDNA lane plus every RNA lane hanging off it
+        # is never built at all — a gDNA-free library then gets no level messages anywhere.
+        pure = is_intergenic & (a_g > 0.0)
+        rho = float(n_u[pure].sum() / a_g[pure].sum()) if a_g[pure].sum() > 0.0 else 0.0
+        if not rho > 0.0:
+            rho = float(n_u[a_g > 0.0].sum() / max(a_g[a_g > 0.0].sum(), EPS))
+        if not rho > 0.0:
+            rho = 0.0
+        kappa = None if self._strand is None else float(self._strand[0])
+        # the split is a witness of a strand's RNA only where the library's strand channel is live —
+        # the derived deadband's verdict (`ChainView.strand_live`): with it open, every counted
+        # single-strand exon's strand precision is positive; with it shut, none is (an intron's
+        # factory precision joins its strand term, so introns cannot stand for the channel)
+        single = fp != fn
+        split_live = (
+            kappa is not None
+            and bool(view.strand_live)
+            and bool(np.any(is_exon & single & (n_u > 0.0)))
+        )
+        rho_rna = {}
+        for name, free, col in (("pos", fp, 0), ("neg", fn, 1)):
+            # the lane's coordinate: the library's strand-``s`` unspliced density over its single-strand
+            # exons, on the column strand-``s`` RNA reads on (`read_column`)
+            sel = is_exon & free & single & (a_r > 0.0)
+            col_read = read_column(col, kappa)
+            rho_rna[name] = (
+                float(cnt[sel, col_read].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
+            )
+        return _Library(rho, rho_rna, split_live)
+
     # ── phase 0: every node's own claim, and the recipient's rule per directed face ──────────────
-    def prepare(self, ctx: StepContext) -> "_PreparedTransfer":
-        src = self._rows_at(int(ctx.n_grid), float(ctx.logodds_window))
+    def prepare(self, ctx: StepContext, library: _Library) -> "_PreparedTransfer":
+        src = ctx.factory_rows
         if src is None:
-            return _PreparedTransfer(None, {}, 0)
+            return _PreparedTransfer(None, None, 0)
         chain = _Chain(ctx, np.asarray(src, np.float64), self._strand)
         own = _claims(chain)
-        # the recipient's rule per DIRECTED face — in this order: a later builder's rule at the same
-        # face replaces an earlier one's, and the level lane serves every face left without one
-        rule: dict = {}
-        _splice_faces(chain, rule)
-        _edge_level(chain, own, rule)
-        _terminus_rules(chain, rule)
-        _alternative_splice_site(chain, rule)
+        # the recipient's rule per DIRECTED face, written into the face table by the builder that owns
+        # that kind of face (the faces are disjoint: a second rule at a face is refused); the level lane
+        # serves every face left without one
+        faces = Faces(chain.lam, chain.left, chain.right)
+        _splice_faces(chain, faces)
+        _edge_level(chain, own, faces)
+        _terminus_rules(chain, faces)
+        _alternative_splice_site(chain, faces)
         lanes: dict = {}
-        gdna = _gdna_lane(chain, own, rule)
+        gdna = _gdna_lane(chain, own, faces, library.rho_gdna)
         if gdna is not None:
             lanes["gdna"] = gdna
-            lanes.update(_rna_lanes(chain, own, gdna))
-        site = _SolveSite(
-            chain.fp & chain.fn,
-            {"pos": chain.fp, "neg": chain.fn},
-            chain.left,
-            chain.right,
-            chain.n_tilt,
-        )
-        return _PreparedTransfer(own, rule, chain.K, lanes, site)
+            lanes.update(_rna_lanes(chain, own, gdna, library))
+        site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn}, chain.n_tilt)
+        return _PreparedTransfer(own, faces, chain.K, lanes, site)
 
 
 # ══ THE CHAIN AS THE BUILDERS READ IT ═══════════════════════════════════════════════════════════════
@@ -209,7 +445,7 @@ class TransferPolicy:
 class _Chain:
     """One sweep's chain as the builders read it: every array of the context the messages need,
     unpacked once — the node classes, the geometry, the counts and opportunities per node and per
-    face, the solver's strand precision — plus the factory's per-slot profiles ``src`` and the
+    face, the liveness of each node's strand channel — plus the factory's per-slot profiles ``src`` and the
     library's fitted strand model ``strand`` (``None``: every strand claim off)."""
 
     __slots__ = (
@@ -233,7 +469,7 @@ class _Chain:
         "flux",
         "a_g",
         "a_r",
-        "tau",
+        "live",
         "cnt",
         "belief",
         "route_rate",
@@ -263,7 +499,7 @@ class _Chain:
         self.flux = np.asarray(ctx.sj_count, np.float64).sum(axis=1)
         self.a_g = np.asarray(ctx.eff_gdna, np.float64)
         self.a_r = np.asarray(ctx.eff_rna, np.float64)
-        self.tau = np.asarray(ctx.own.tau_lam, np.float64)
+        self.live = np.asarray(ctx.own_live, bool)
         self.cnt = np.asarray(ctx.unspliced_count, np.float64)
         self.belief = np.asarray(ctx.belief_fg, np.float64)
         #: per face by transcript strand, ``(low end, high end)``: the flux that crosses an exon's LEFT
@@ -333,7 +569,7 @@ def _claims(c: _Chain) -> list:
         if np.ptp(c.src[i]) > EPS:
             own[i] = _norm(c.src[i])
     if c.strand is not None:
-        live, single = c.tau > 0.0, c.fp != c.fn
+        live, single = c.live, c.fp != c.fn
         for e in np.flatnonzero(c.is_exon & single & live):
             own[e] = c.strand_profile(e)
         for b in np.flatnonzero(c.is_bnd & live & single):
@@ -341,7 +577,7 @@ def _claims(c: _Chain) -> list:
     return own
 
 
-def _splice_faces(c: _Chain, rule: dict) -> None:
+def _splice_faces(c: _Chain, faces: Faces) -> None:
     """THE INTRON|EXON FACE. intron → boundary: FORWARD (one shared unspliced population); boundary →
     intron: FORWARD under a shared single strand. At a LICENSED face (no terminus, the same strand
     set, nothing depleted): boundary → exon by the splice-in face map — the certified flux capping the
@@ -353,9 +589,9 @@ def _splice_faces(c: _Chain, rule: dict) -> None:
         e, i = c.intron_exon_pair(b)
         if e is None:
             continue
-        rule[(int(i), int(b))] = _forward
+        faces.set(i, b, FORWARD)
         if boundary_shares_strand(c.fp[b], c.fn[b], c.fp[i], c.fn[i]):
-            rule[(int(b), int(i))] = _forward
+            faces.set(b, i, FORWARD)
         hi = 1 if c.left[e] == b else 0
         if not face_is_licensed(c.flags[b], c.fp[e], c.fn[e], c.fp[i], c.fn[i]):
             continue
@@ -364,18 +600,12 @@ def _splice_faces(c: _Chain, rule: dict) -> None:
         le = face_map_lambda(
             c.lam, c.n_u[b], c.a_g[b], c.a_r[b], c.a_g[e], c.a_r[e], float(rr[hi][b])
         )
-
-        def face_rule(row, le=le, b=b, s=float(sc[hi][b])):
-            return transport_row(row, c.lam, le, c.n_u[b], s)
-
-        def out_rule(row, b=b, e=e, s=float(sc[hi][b])):
-            return splice_out_row(row, c.lam, c.n_u[b], s, c.a_g[b], c.a_g[e])
-
-        rule[(int(b), int(e))] = _composed(face_rule)
-        rule[(int(e), int(b))] = _composed(out_rule)
+        s = float(sc[hi][b])
+        faces.set(b, e, TRANSPORT, row=le, n_u=c.n_u[b], n_s=s)
+        faces.set(e, b, SPLICE_OUT, n_u=c.n_u[b], n_s=s, a_b=c.a_g[b], a_x=c.a_g[e])
 
 
-def _edge_level(c: _Chain, own: list, rule: dict) -> None:
+def _edge_level(c: _Chain, own: list, faces: Faces) -> None:
     """THE INTERGENIC|EXON EDGE → its exon: A LEVEL, one-sided. The edge's own claim is its gDNA
     COUNT — a marker profile; the rule reads the
     count, and nothing is held at an edge — and the exon converts it through its own total: the exon
@@ -392,15 +622,10 @@ def _edge_level(c: _Chain, own: list, rule: dict) -> None:
             ):
                 continue
             own[b] = np.zeros(c.K)  # the level claim (the rule reads the count, not the row)
-            row_edge = edge_level_row(c.lam, c.n_u[b], c.n_u[e], c.a_g[b], c.a_g[e])
-
-            def edge_rule(own_claim, held, row=row_edge):
-                return row if np.ptp(row) > EPS else None
-
-            rule[(int(b), int(e))] = edge_rule
+            faces.set(b, e, EDGE, row=edge_level_row(c.lam, c.n_u[b], c.n_u[e], c.a_g[b], c.a_g[e]))
 
 
-def _terminus_rules(c: _Chain, rule: dict) -> None:
+def _terminus_rules(c: _Chain, faces: Faces) -> None:
     """THE TERMINUS BOUNDARY. With its OUTSIDE exon (exon|exon, a shared single strand): composition by
     the spliced-crossing licence — the outside exon's message travels the splice-out map, the
     boundary's the face map with the spliced density. Into the region INSIDE it (exon|exon and
@@ -427,19 +652,11 @@ def _terminus_rules(c: _Chain, rule: dict) -> None:
             and c.a_g[o] > 0
         ):
             s_out = c.n_s[b] + (flux_b if ex_side == o else 0.0)
-
-            def out5(row, b=b, o=o, s=s_out):
-                return splice_out_row(row, c.lam, c.n_u[b], s, c.a_g[b], c.a_g[o])
-
             le5 = face_map_lambda(
                 c.lam, c.n_u[b], c.a_g[b], c.a_g[b], c.a_g[o], c.a_g[o], s_out / c.a_g[b]
             )
-
-            def back5(row, le=le5, b=b, s=s_out):
-                return transport_row(row, c.lam, le, c.n_u[b], s)
-
-            rule[(int(o), int(b))] = _composed(out5)
-            rule[(int(b), int(o))] = _composed(back5)
+            faces.set(o, b, SPLICE_OUT, n_u=c.n_u[b], n_s=s_out, a_b=c.a_g[b], a_x=c.a_g[o])
+            faces.set(b, o, TRANSPORT, row=le5, n_u=c.n_u[b], n_s=s_out)
         # ── THE LEVEL RULE: the boundary's gDNA level into the inside region ─────────────────────
         if not (c.is_exon[i] and (c.is_exon[o] or c.is_intron[o])):
             continue
@@ -456,7 +673,7 @@ def _terminus_rules(c: _Chain, rule: dict) -> None:
         # (ii) the two strand modes where both channels are live: the inside's share predicted from
         # the crossing alone (the flux is not a crossing), against its own mode, beyond counting
         r_mode = (c.n_u[i] / c.a_g[i]) / (total_b / c.a_g[b])
-        if c.strand is not None and c.tau[b] > 0.0 and c.tau[i] > 0.0:
+        if c.strand is not None and c.live[b] and c.live[i]:
             mode_b = c.strand_mode(b)
             mode_i = None if mode_b is None else c.strand_mode(i)
             if mode_i is not None:
@@ -467,19 +684,20 @@ def _terminus_rules(c: _Chain, rule: dict) -> None:
                 d = np.log(f_i / (1.0 - f_i)) - np.log(f_pred / (1.0 - f_pred))
                 v_pair += max(0.0, float(d * d) - (v_b + v_i + 1.0 / c.n_u[i] + 1.0 / total_b))
         v_level = float(count_logvar(c.n_u[b]) + count_logvar(c.n_u[i])) + v_pair
-        m_level = level_map_lambda(c.lam, density_b, c.a_g[i], c.n_u[i])
-        bound = level_bound_row(c.lam, density_b, c.a_g[i], c.n_u[i], v_level)
+        # a level is made from the sender's MEASUREMENT only: its own profile through the level-kept
+        # map; with none, the crossing total's upper bound. What it holds — an imputation — never
+        # crosses a level face (`Faces.apply`, LEVEL)
+        faces.set(
+            b,
+            i,
+            LEVEL,
+            row=level_map_lambda(c.lam, density_b, c.a_g[i], c.n_u[i]),
+            row2=level_bound_row(c.lam, density_b, c.a_g[i], c.n_u[i], v_level),
+            var=v_level,
+        )
 
-        def level_rule(own, held, m=m_level, v=v_level, ub=bound):
-            """A level is made from the sender's MEASUREMENT only: its own profile through the
-            level-kept map; with none, the crossing total's upper bound. What it holds — an
-            imputation — never crosses a level face."""
-            return level_row(own, c.lam, m, v) if own is not None else ub
 
-        rule[(int(b), int(i))] = level_rule
-
-
-def _alternative_splice_site(c: _Chain, rule: dict) -> None:
+def _alternative_splice_site(c: _Chain, faces: Faces) -> None:
     """THE ALTERNATIVE SPLICE SITE — an exon|exon boundary carrying a junction and no terminus — and
     both its flanks, both ways: the intron-side flank shares the full unspliced crossing, the
     exon-of-both flank the crossing plus the isoform that splices out here, measured as the route
@@ -498,7 +716,7 @@ def _alternative_splice_site(c: _Chain, rule: dict) -> None:
             if not (boundary_shares_strand(c.fp[b], c.fn[b], c.fp[x], c.fn[x]) and c.a_g[x] > 0):
                 continue
             width = 0.0
-            if c.tau[b] > 0.0 and c.tau[x] > 0.0:
+            if c.live[b] and c.live[x]:
                 mode_b = c.strand_mode(b)
                 mode_x = None if mode_b is None else c.strand_mode(x)
                 if mode_x is not None:
@@ -510,46 +728,22 @@ def _alternative_splice_site(c: _Chain, rule: dict) -> None:
             le7 = face_map_lambda(
                 c.lam, c.n_u[b], c.a_g[b], c.a_g[b], c.a_g[x], c.a_g[x], s_out / c.a_g[b]
             )
-
-            def out7(row, b=b, x=x, s=s_out, w=width):
-                return blur_row(
-                    splice_out_row(row, c.lam, c.n_u[b], s, c.a_g[b], c.a_g[x]), c.lam, w
-                )
-
-            def back7(row, le=le7, b=b, s=s_out, w=width):
-                return blur_row(transport_row(row, c.lam, le, c.n_u[b], s), c.lam, w)
-
-            rule[(int(x), int(b))] = _composed(out7)
-            rule[(int(b), int(x))] = _composed(back7)
+            faces.set(
+                x, b, SPLICE_OUT, n_u=c.n_u[b], n_s=s_out, a_b=c.a_g[b], a_x=c.a_g[x], width=width
+            )
+            faces.set(b, x, TRANSPORT, row=le7, n_u=c.n_u[b], n_s=s_out, width=width)
 
 
-def _neighbour_pairs(c: "_Chain") -> tuple[np.ndarray, np.ndarray]:
-    """Every directed ``(node, neighbour)`` pair of the chain as two aligned ``int64`` arrays, the left
-    neighbours first; a reference terminal (``-1``) has no pair."""
-    x = np.concatenate((np.arange(c.n, dtype=np.int64), np.arange(c.n, dtype=np.int64)))
-    y = np.concatenate((c.left, c.right))
-    keep = y >= 0
-    return x[keep], y[keep]
-
-
-def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
+def _gdna_lane(c: _Chain, own: list, faces: Faces, rho_ref: float) -> "_LevelLane | None":
     """THE LEVEL LANE: the default of every directed face that has no composition rule. A gDNA level
     is absolute (a profile over ``u = log(rho / rho_ref)``), so it needs no map and no recipient: it
     crosses the faces composition cannot (strand changes, termini both ways, the AMBIG complex) and
     the EMPTY node — a piece with no total, which many exon pieces are — which forwards it
     unchanged. Every full node's own level: a gene edge's crossing as a Poisson level (structurally
-    pure gDNA), any other node's own profile read through its total. ``None`` when the library has no
-    positive density to serve as the coordinate."""
+    pure gDNA), any other node's own profile read through its total. ``rho_ref`` is the lane's
+    coordinate, the library's structurally pure gDNA density (`TransferPolicy.library`); ``None``
+    when the library has no positive density to serve as one."""
     empty = ~(c.n_u > 0.0) | ~(c.a_g > 0.0)
-    pure = c.is_intergenic & (c.a_g > 0.0)
-    # the lane's coordinate: the library's structurally pure gDNA density. It is a REFERENCE for a
-    # log axis, so any positive density serves; when the intergenic count is zero (a zero-gDNA
-    # library with no intergenic reads) the library-wide density stands in. ⛔ Without that fallback
-    # the coordinate is zero, and the gDNA lane plus every RNA lane hanging off it is never built at
-    # all — a gDNA-free library then gets no level messages anywhere.
-    rho_ref = float(c.n_u[pure].sum() / c.a_g[pure].sum()) if c.a_g[pure].sum() > 0.0 else 0.0
-    if not rho_ref > 0.0:
-        rho_ref = float(c.n_u[c.a_g > 0.0].sum() / max(c.a_g[c.a_g > 0.0].sum(), EPS))
     if not rho_ref > 0.0:
         return None
     u = c.lam
@@ -565,13 +759,19 @@ def _gdna_lane(c: _Chain, own: list, rule: dict) -> "_LevelLane | None":
             own_level[x] = poisson_level(u, c.n_u[x], c.a_g[x], rho_ref)
         elif own[x] is not None and np.ptp(own[x]) > EPS:
             own_level[x] = level_of_profile(own[x], c.lam, u, c.n_u[x], c.a_g[x], rho_ref)
-    x, y = _neighbour_pairs(c)
-    keep = ~c.is_intergenic[y]
-    faces = set(zip(x[keep].tolist(), y[keep].tolist())).difference(rule)
-    return _LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, faces)
+    # the lane's faces, per (destination, side): every face with no composition rule whose two ends
+    # are not terminals — a terminal neither receives nor sends on the lane: nothing is imputed at
+    # structurally pure gDNA, and it has no own level to send; its far side is another locus
+    face = np.zeros((c.n, 2), bool)
+    for side, nbr in enumerate((c.left, c.right)):
+        s = np.maximum(nbr, 0)
+        face[:, side] = (
+            (nbr >= 0) & ~c.is_intergenic & ~c.is_intergenic[s] & (faces.kind[:, side] == NONE)
+        )
+    return _LevelLane("gdna", u, c.lam, rho_ref, c.n_u, c.a_g, empty, own_level, face)
 
 
-def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
+def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane", library: _Library) -> dict:
     """THE RNA LEVEL LANES, one per strand (the both-stranded locus).
     FACES from the flag bits: strand ``s``'s level crosses a face iff the boundary carries none of
     ``s``'s four bits and both nodes admit ``s``; across ``s``'s OWN junction it enters ``s``'s
@@ -587,16 +787,13 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
     level is priced on its zero count — counting alone — and the piece emits it with the flux's own
     witness, the pooled spliced count on the pooled route opportunity, so the next full node prices
     the hop as a full exon prices its flux. The coordinate ``rho_ref_s`` is the library's strand-``s``
-    unspliced density over its single-strand exons. Nothing pooled, no constant."""
+    unspliced density over its single-strand exons, and whether the split is a witness at all is the
+    library's verdict too — both from `TransferPolicy.library`. Nothing pooled, no constant."""
     n_u, a_r, cnt = c.n_u, c.a_r, c.cnt
     empty = ~(n_u > 0.0) | ~(a_r > 0.0)
     single = ~(c.fp & c.fn)
     kappa = None if c.strand is None else float(c.strand[0])
-    # the split is a witness of a strand's RNA only where the library's strand channel is live —
-    # the derived deadband's verdict, already on the context: a κ within its noise of ½ zeroes the
-    # strand precision of every single-strand exon (`tau_lam` there is the strand term alone; at an
-    # intron the factory's density precision joins it, so introns cannot stand for the channel)
-    split_live = kappa is not None and bool(np.any(c.tau[c.is_exon & (c.fp != c.fn)] > 0.0))
+    split_live = library.split_live
     lanes = {}
     for name, free, col in (("pos", c.fp, 0), ("neg", c.fn, 1)):
         all_bits, _sj_bits, term_bits = strand_bits[name]
@@ -608,22 +805,23 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
         intron_s = ~c.is_bnd & free & ~c.exon_of[name]
         # a face crosses when its boundary carries none of the strand's bits; across the strand's own
         # (non-terminus) bits it still enters the strand's intron, and every face into that intron is
-        # two-sided
-        x, y = _neighbour_pairs(c)
-        ok = ~c.is_intergenic[y] & free[x] & free[y]
-        b = np.where(c.is_bnd[x], x, y)
-        i = np.where(c.is_bnd[x], y, x)
-        f = c.flags[b].astype(np.int64)
-        crossing = (f & all_bits) == 0
-        into_own_intron = ~crossing & ((f & term_bits) == 0) & intron_s[i]
-        on_face = ok & (crossing | into_own_intron)
-        on_two = ok & ((crossing & intron_s[i]) | into_own_intron)
-        faces = set(zip(x[on_face].tolist(), y[on_face].tolist()))
-        two_sided = set(zip(x[on_two].tolist(), y[on_two].tolist()))
-        sel = c.is_exon & free & single & (a_r > 0.0)
-        rho_ref = float(cnt[sel, col_read].sum() / a_r[sel].sum()) if a_r[sel].sum() > 0.0 else 0.0
+        # two-sided — per (destination, side), the source being the neighbour on that side
+        face = np.zeros((c.n, 2), bool)
+        two_sided = np.zeros((c.n, 2), bool)
+        dest = np.arange(c.n)
+        for side, nbr in enumerate((c.left, c.right)):
+            s = np.maximum(nbr, 0)
+            ok = (nbr >= 0) & ~c.is_intergenic & free[s] & free
+            b = np.where(c.is_bnd[s], s, dest)
+            reg = np.where(c.is_bnd[s], dest, s)
+            f = c.flags[b].astype(np.int64)
+            crossing = (f & all_bits) == 0
+            into_own_intron = ~crossing & ((f & term_bits) == 0) & intron_s[reg]
+            face[:, side] = ok & (crossing | into_own_intron)
+            two_sided[:, side] = ok & ((crossing & intron_s[reg]) | into_own_intron)
+        rho_ref = float(library.rho_rna[name])
         own_level: list = [None] * c.n
-        flux_of: list = [None] * c.n
+        flux_of: dict = {}
         flux_witness: list = [None] * c.n
         if rho_ref > 0.0:
             for x in np.flatnonzero(free):
@@ -648,9 +846,7 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
                         v = hop_price(c_j, c_j / r_j, cnt[x, col_read], a_r[x])
                         fl = flux_level(gdna.u, c_j, r_j, rho_ref, v)
                         parts.append(fl)
-                        if flux_of[x] is None:
-                            flux_of[x] = {}
-                        flux_of[x][int(b)] = fl
+                        flux_of[(int(x), _side(int(b), int(x)))] = fl
                         c_sum += c_j
                         a_sum += c_j / r_j
                 if parts:
@@ -666,8 +862,8 @@ def _rna_lanes(c: _Chain, own: list, gdna: "_LevelLane") -> dict:
             a_r,
             empty,
             own_level,
-            frozenset(faces),
-            two_sided=frozenset(two_sided),
+            face,
+            two_sided=two_sided,
             total=n_u,
             flux=flux_of,
             other=cnt[:, 1 - col_read] if split_live else None,
@@ -712,9 +908,10 @@ class _LevelLane:
         "a",
         "empty",
         "own_level",
-        "faces",
+        "face",
         "two_sided",
-        "flux",
+        "flux_row",
+        "flux_rows",
         "other",
         "flux_witness",
     )
@@ -729,22 +926,44 @@ class _LevelLane:
         a,
         empty,
         own_level,
-        faces,
+        face,
         *,
-        two_sided=frozenset(),
+        two_sided=None,
         total=None,
         flux=None,
         other=None,
         flux_witness=None,
     ):
+        n = len(own_level)
         self.population, self.field = population, _FIELD[population]
         self.u, self.lam, self.rho_ref = u, lam, float(rho_ref)
         self.count, self.a, self.empty = count, a, empty
         self.total = count if total is None else total
-        self.own_level, self.faces, self.two_sided = own_level, faces, two_sided
-        self.flux = [None] * len(own_level) if flux is None else flux
+        self.own_level = own_level
+        # the faces the lane serves and the two-sided ones, per (destination, side)
+        self.face = np.asarray(face, bool).reshape(n, 2)
+        self.two_sided = (
+            np.zeros((n, 2), bool) if two_sided is None else np.asarray(two_sided, bool)
+        )
+        # the junction flux levels, per (exon, side of its junction): ``{(x, side): level}`` in,
+        # a row table out
+        self.flux_row = np.full((n, 2), -1, np.int32)
+        self.flux_rows: list = []
+        for (x, side), level in (flux or {}).items():
+            self.flux_row[int(x), int(side)] = len(self.flux_rows)
+            self.flux_rows.append(np.asarray(level, np.float64))
         self.other = other
-        self.flux_witness = [None] * len(own_level) if flux_witness is None else flux_witness
+        self.flux_witness = [None] * n if flux_witness is None else flux_witness
+
+    def serves(self, s: int, x: int) -> bool:
+        """Does the lane carry its level across the face into ``x`` from ``s``?"""
+        return bool(self.face[int(x), _side(int(s), int(x))])
+
+    def flux_at(self, x: int, side: int):
+        """The junction flux level ``x`` holds at its ``side`` (0: from its left junction, 1: its right),
+        or ``None``."""
+        r = self.flux_row[int(x), int(side)]
+        return None if r < 0 else self.flux_rows[r]
 
     def witness(self, y: int):
         """The strand's RNA count at ``y`` and its Poisson variance, read from the column split: the
@@ -764,7 +983,7 @@ class _LevelLane:
         own = self.own_level[s]
         if self.empty[s] and own is None:
             return far
-        if own is not None and (int(s), int(x)) not in self.two_sided:
+        if own is not None and not self.two_sided[int(x), _side(int(s), int(x))]:
             own = lower_side(own)
         parts = [p for p in (own, None if far is None else far.profile) if p is not None]
         if not parts:
@@ -801,7 +1020,11 @@ class _LevelLane:
             if n_s > 0.0 and n_x > 0.0:
                 r = (n_x / float(self.a[x])) / (n_s / float(level.a))
                 v += max(0.0, float(np.log(r)) ** 2 - (v_s / (n_s * n_s) + v_x / (n_x * n_x)))
-        p = level.profile if (int(s), int(x)) in self.two_sided else lower_side(level.profile)
+        p = (
+            level.profile
+            if self.two_sided[int(x), _side(int(s), int(x))]
+            else lower_side(level.profile)
+        )
         p = blur_row(p, self.u, v) if v > 0.0 else p
         rna_count = rna_var = None
         if self.other is not None:
@@ -818,13 +1041,12 @@ class _LevelLane:
 
 class _SolveSite:
     """What the solve's two RNA deliveries read at a node: the AMBIG mask, each strand's admitting
-    nodes, the two neighbours (the face a held message came through), and the tilt grid's size."""
+    nodes, and the tilt grid's size."""
 
-    __slots__ = ("ambig", "free", "left", "right", "n_tilt")
+    __slots__ = ("ambig", "free", "n_tilt")
 
-    def __init__(self, ambig, free, left, right, n_tilt):
-        self.ambig, self.free = ambig, free
-        self.left, self.right, self.n_tilt = left, right, int(n_tilt)
+    def __init__(self, ambig, free, n_tilt):
+        self.ambig, self.free, self.n_tilt = ambig, free, int(n_tilt)
 
 
 class _PreparedTransfer:
@@ -832,9 +1054,11 @@ class _PreparedTransfer:
     population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent), the site, the two passes'
     state."""
 
-    def __init__(self, own, rule: dict, n_grid: int, lanes: dict | None = None, site=None):
+    def __init__(
+        self, own, faces: "Faces | None", n_grid: int, lanes: dict | None = None, site=None
+    ):
         self.own = own
-        self.rule = rule
+        self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)
         self.site = site
         self._K = int(n_grid)
@@ -842,31 +1066,33 @@ class _PreparedTransfer:
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
     def propagate(self, *, backward: bool):
-        if self.own is None or not (self.rule or any(ln.faces for ln in self.lanes.values())):
+        faces = self.faces
+        if self.own is None or not (
+            faces.any() or any(ln.face.any() for ln in self.lanes.values())
+        ):
             return None  # nothing to say anywhere: every node holds SILENCE
         held: list = [None] * len(self.own)
         self.held[bool(backward)] = held
         # each lane's faces, message field and emptiness, unpacked once rather than per node
-        lanes = tuple((ln, ln.faces, ln.field, ln.empty.tolist()) for ln in self.lanes.values())
-        rule_of, own = self.rule.get, self.own
+        lanes = tuple((ln, ln.face, ln.field, ln.empty.tolist()) for ln in self.lanes.values())
+        kind, apply, own = faces.kind, faces.apply, self.own
 
         def receive(s: int, i: int):
             """``s`` sends two things apart — its own claim and what it holds from its far side (written
             by this pass one step earlier) — and the face decides: a composition rule composes and maps
             (MODIFY), passes (FORWARD) or reads the measurement only (a level face); each lane whose
             faces include this one carries its population's level; absent all (a structural pure-gDNA
-            neighbour) STOP."""
+            neighbour) STOP. A face is ``(i, side)``: the side of ``i`` that ``s`` is on."""
             far = held[s]
-            face = (int(s), int(i))
+            side = 0 if s < i else 1
             comp = None
-            fn = rule_of(face)
-            if fn is not None:
-                out = fn(own[s], None if far is None else far.composition)
+            if kind[i, side]:
+                out = apply(s, i, own[s], None if far is None else far.composition)
                 if out is not None and out.max() - out.min() > EPS:
                     comp = _norm(out)
             fields = {}
-            for lane, faces, field, empty in lanes:
-                if face not in faces:
+            for lane, face, field, empty in lanes:
+                if not face[i, side]:
                     continue
                 lv = lane.emit(s, i, None if far is None else getattr(far, field))
                 if lv is not None and not empty[i]:
@@ -926,15 +1152,15 @@ class _PreparedTransfer:
                 continue
             for i in np.flatnonzero(site.free[name] & ~site.ambig & ~rl.empty):
                 bounds = []
-                for side, m in ((site.left[i], from_left[i]), (site.right[i], from_right[i])):
+                for side, m in ((0, from_left[i]), (1, from_right[i])):
                     if m is None or m.composition is not None:
                         continue
                     lv = getattr(m, rl.field)
                     if lv is not None:
                         bounds.append(lv.profile)
-                    fx = rl.flux[i]
-                    if fx is not None and int(side) in fx:
-                        bounds.append(fx[int(side)])
+                    fx = rl.flux_at(i, side)
+                    if fx is not None:
+                        bounds.append(fx)
                 if not bounds:
                     continue
                 row = rl.row(intersect(bounds), i)

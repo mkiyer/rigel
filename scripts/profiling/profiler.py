@@ -72,6 +72,7 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("region geometry", "rigel.calibration.region_geometry", "build_region_geometry"),
     ("region statics", "rigel.calibration.region_geometry", "build_region_statics"),
     ("sweep", "rigel.calibration.sweep", "solve_chain"),
+    ("locus block", "rigel.calibration.sweep", "_solve_block"),
     ("own claims (region init)", "rigel.calibration.region_init", "build_region_init"),
     ("policy prepare", "rigel.calibration.messages.transfer", "TransferPolicy.prepare"),
     ("claims", "rigel.calibration.messages.transfer", "_claims"),

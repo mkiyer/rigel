@@ -29,10 +29,19 @@ boundary exists for.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
-__all__ = ["BOUNDARY", "REGION", "RegionChain", "RegionDeconv", "build_region_chain"]
+__all__ = [
+    "BOUNDARY",
+    "REGION",
+    "LocusBlock",
+    "RegionChain",
+    "RegionDeconv",
+    "build_region_chain",
+    "locus_blocks",
+]
 
 REGION = 0
 BOUNDARY = 1
@@ -180,3 +189,81 @@ def build_region_chain(
         n_regions_total=int(region_offsets[-1]),
         n_boundaries_total=int(boundary_offsets[-1]),
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+# THE LOCUS — where the chain breaks. Pure topology: which slots END message passing is the caller's
+# predicate (``terminal``); this module only cuts the chain there.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+class LocusBlock(NamedTuple):
+    """One unit of the sweep's work: the slots ``[start, stop)`` it OWNS (solves and writes back) and
+    the slots ``[start, end)`` it READS. ``end`` is ``stop`` or ``stop + 1``: when the slot at ``stop``
+    is a terminal linked to the block's last slot, that slot is read as a message SOURCE (the block's
+    last node receives from it in the backward pass) but is owned by the next block, which starts on
+    it. A block starts on a terminal or a reference start, never inside a locus."""
+
+    start: int
+    stop: int
+    end: int
+
+
+def locus_blocks(
+    chain: RegionChain, terminal: np.ndarray, block_slots: int | None = None
+) -> list[LocusBlock]:
+    """Cut the chain into blocks (:class:`LocusBlock`) at its message terminals, then merge consecutive
+    loci up to ``block_slots`` slots per block.
+
+    A LOCUS is the run of slots between two terminals. A terminal is a slot at which message passing
+    ends in both directions — in the calibration sweep, a REGION that admits no RNA strand, structurally
+    pure gDNA, solved and fixed before any message exists; the backbone never delivers a message INTO
+    one, so what happens on its far side cannot reach this side. ``terminal`` is that predicate as a
+    bool array over the slots; this function knows nothing about why a slot is one. A reference start
+    (``left == -1``) is a cut too, since no message crosses a reference boundary.
+
+    Every block is therefore independent given its own slots plus the terminal it reads at ``end``, and
+    the sweep over the blocks — in any order, whole or one at a time — is the sweep over the chain. The
+    two-phase solve makes this exact rather than approximate: it is not an iteration, so a node's
+    answer depends only on the messages that can reach it, and none can reach it across a terminal.
+
+    ``block_slots`` is a PERFORMANCE tunable and nothing else — it sets the working set (a block's
+    ``(slots, K)`` arrays) against the per-block overhead, and moves no number: a chunk-exact solve
+    gives the same answer for every value. ``None`` makes one block of the whole chain. A block never
+    splits a locus, so a locus longer than ``block_slots`` is one block of its own length.
+
+    Every slot is owned by exactly one block, in chain order: ``[b.start for b]`` is ascending,
+    consecutive blocks abut (``prev.stop == next.start``) and the last block stops at ``n_slots``.
+    """
+    n = int(chain.n_slots)
+    left = np.asarray(chain.left, dtype=np.int64)
+    term = np.asarray(terminal, dtype=bool)
+    if term.shape != (n,):
+        raise ValueError(f"terminal has shape {term.shape}; expected ({n},), one flag per slot")
+    if n == 0:
+        return []
+    cut = term | (left < 0)
+    cut[0] = True
+    cuts = np.flatnonzero(cut).tolist()
+    cuts.append(n)
+    if block_slots is not None and int(block_slots) < 1:
+        raise ValueError(f"block_slots must be >= 1 or None; got {block_slots}")
+    limit = n if block_slots is None else int(block_slots)
+
+    def block(start: int, stop: int) -> LocusBlock:
+        # the slot at ``stop`` is read as a source iff it is linked to the block's last slot: a
+        # terminal that is also a reference start is not, and ``n`` is no slot at all
+        reads_next = stop < n and left[stop] >= 0
+        return LocusBlock(int(start), int(stop), int(stop + 1 if reads_next else stop))
+
+    blocks: list[LocusBlock] = []
+    start = cuts[0]
+    for j in range(1, len(cuts)):
+        nxt = cuts[j]
+        # take the next locus whenever the block is still empty, else only while it fits
+        if nxt - start > limit and cuts[j - 1] > start:
+            blocks.append(block(start, cuts[j - 1]))
+            start = cuts[j - 1]
+        if j == len(cuts) - 1:
+            blocks.append(block(start, nxt))
+    return blocks

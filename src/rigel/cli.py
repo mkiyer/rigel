@@ -831,6 +831,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- CalibrationConfig: advanced --
     _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
+    _ParamSpec("sweep_block_slots", "calibration.sweep_block_slots"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1386,6 +1387,16 @@ def build_parser() -> argparse.ArgumentParser:
         "cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout (the coarse shared grid "
         "snapped it to ~0.085 steps, the dominant residual on high-mass exons). Decoupled from the AMBIG "
         "2-D grid (--sweep... n_grid) which stays coarse for genome-scale memory. Advanced calibration knob.",
+    )
+    adv.add_argument(
+        "--sweep-block-slots",
+        dest="sweep_block_slots",
+        type=int,
+        default=None,
+        help="Calibration working set: the chain is solved one locus block at a time, the pieces between "
+        "intergenic regions merged up to this many slots per block (default 5000; 'none' is not accepted here — the whole chain is a config choice). "
+        "Performance only — the answer is the same for every value; smaller blocks use less memory per "
+        "sweep, larger ones amortise the per-block overhead. Advanced calibration knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

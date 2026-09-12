@@ -22,10 +22,13 @@ import rigel.calibration.sweep as SW
 from rigel.calibration.messages import Policy
 from rigel.calibration.messages.silent import SilentPolicy
 from _transfer_harness import (
+    _bits,
     _ctx_of,
     _dead_boundaries,
     _drive_the_backbone,
     _full_policy,
+    _pairs,
+    _prepared,
     _rna,
     _rna_lanes_of,
     _run,
@@ -36,17 +39,19 @@ from _transfer_harness import (
 def test_the_transfer_policy_satisfies_the_backbone_protocol():
     from rigel.calibration.messages.transfer import TransferPolicy
 
-    assert isinstance(TransferPolicy(lambda g, w: None), Policy)
+    assert isinstance(TransferPolicy(), Policy)
 
 
 def test_an_evidence_free_transfer_is_byte_identical_to_silence(sweep_inputs):
-    """The rung-0 identity: with no factory rows to transfer, the policy must reproduce
-    `SilentPolicy` byte-for-byte through the real backbone — and it must do so by delivering a
-    SILENT message, never zero-filled channel arrays, which cost a ULP and break the identity."""
+    """The rung-0 identity: with no factory rows on the context — the sweep's ``intron_prior`` is
+    the one array both ψ and the policy read, so it is ``None`` in both arms — the policy must
+    reproduce `SilentPolicy` byte-for-byte through the real backbone, and it must do so by delivering
+    a SILENT message, never zero-filled channel arrays, which cost a ULP and break the identity."""
     from rigel.calibration.messages.transfer import TransferPolicy
 
-    a = _run(sweep_inputs, SilentPolicy())
-    b = _run(sweep_inputs, TransferPolicy(lambda g, w: None))
+    bare = dict(sweep_inputs, kw=dict(sweep_inputs["kw"], intron_prior=None))
+    a = _run(bare, SilentPolicy())
+    b = _run(bare, TransferPolicy())
     for f in a:
         np.testing.assert_array_equal(a[f], b[f], err_msg=f)
 
@@ -100,7 +105,7 @@ def _reference_rows(prepared, ctx):
     from rigel.calibration.messages.transfer_rows import EPS
 
     left, right = list(ctx.left), list(ctx.right)
-    own, rule = prepared.own, prepared.rule
+    own, faces = prepared.own, prepared.faces
     memo = {}
 
     def norm(r):
@@ -110,12 +115,11 @@ def _reference_rows(prepared, ctx):
         key = (s, i)
         if key in memo:
             return memo[key]
-        fn = rule.get((s, i))
         out = None
-        if fn is not None:
+        if faces.has(s, i):
             far = left[s] if right[s] == i else right[s]
             m = into(far, s) if far >= 0 else None
-            r = fn(own[s], m)
+            r = faces.apply(s, i, own[s], m)
             if r is not None and np.ptp(r) > EPS:
                 out = norm(r)
         memo[key] = out
@@ -135,7 +139,7 @@ def _reference_rows(prepared, ctx):
         if key in lmemo:
             return lmemo[key]
         out = None
-        if lane is not None and (s, i) in lane.faces:
+        if lane is not None and lane.serves(s, i):
             far = left[s] if right[s] == i else right[s]
             held = level_into(far, s) if far >= 0 else None
             if lane.empty[s]:
@@ -189,7 +193,7 @@ def test_the_backbone_rows_equal_an_independent_recursive_reference_of_the_passe
     and on the toy with populated inside pieces and alternative splice sites (every rule family live)."""
     pol, _p, _g, _w = _full_policy(sweep_inputs)
     for ctx in (_ctx_of(sweep_inputs), _with_alt_splice_sites(_ctx_of(sweep_inputs))):
-        prepared = pol.prepare(ctx)
+        prepared = _prepared(pol, ctx)
         rows = _drive_the_backbone(prepared, ctx)
         assert rows.any(), "the toy delivered nothing — this gate would prove nothing"
         np.testing.assert_allclose(rows, _reference_rows(prepared, ctx), rtol=0, atol=1e-10)
@@ -204,7 +208,7 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
 
     pol, _p, n_grid, window = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     lam = np.linspace(-window, window, n_grid)
     probes = [
         i
@@ -249,37 +253,38 @@ def test_a_dead_strand_channel_carries_no_own_claim(sweep_inputs):
 
     from rigel.calibration.messages.transfer import TransferPolicy
 
-    pol, provider, _g, _w = _full_policy(sweep_inputs)
+    pol, _rows, _g, _w = _full_policy(sweep_inputs)
     ctx = _ctx_of(sweep_inputs)
     n = int(ctx.n_slots)
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
-    live = pol.prepare(ctx)
+    live = _prepared(pol, ctx)
     assert any(live.own[e] is not None for e in np.flatnonzero(is_exon)), "no live exon claim"
-    dead = pol.prepare(_dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=np.zeros(n))))
+    dead = _prepared(pol, _dc.replace(ctx, own_live=np.zeros(n, bool)))
     for x in range(n):
         if is_exon[x]:
             assert dead.own[x] is None, f"a dead exon {x} carries a claim"
         elif is_bnd[x] and dead.own[x] is not None:
             assert not dead.own[x].any(), f"a dead boundary {x} carries a strand claim"
-    no_strand = TransferPolicy(provider).prepare(ctx)
+    no_strand = _prepared(TransferPolicy(), ctx)
     for x in range(n):
         if is_exon[x]:
             assert no_strand.own[x] is None
     # boundaries dead, exons live: the boundary's own claim is absent at every boundary
-    dead_b = pol.prepare(_dead_boundaries(ctx))
+    dead_b = _prepared(pol, _dead_boundaries(ctx))
     for b in np.flatnonzero(is_bnd):
         assert dead_b.own[b] is None or not dead_b.own[b].any()
 
 
 def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_inputs):
     """The completion contract, structurally: after `prepare`, every directed face (x → y) of the chain
-    carries a composition rule or is a lane face, unless y is an intergenic region (structurally pure
-    gDNA: nothing to impute there). STOP by omission is impossible by construction."""
+    carries a composition rule or is a lane face, unless an end of it is an intergenic region — a
+    TERMINAL: structurally pure gDNA, nothing to impute there and no own level to send, so it neither
+    receives nor sends and the chain breaks at it. STOP by omission is impossible by construction."""
     ctx = _ctx_of(sweep_inputs)
-    prepared = _full_policy(sweep_inputs)[0].prepare(ctx)
+    prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     lane = prepared.lanes.get("gdna")
-    assert lane is not None and lane.faces
+    assert lane is not None and lane.face.any()
     is_bnd = np.asarray(ctx.is_boundary, bool)
     is_exon = np.asarray(ctx.is_exon_region, bool)
     fp, fn = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
@@ -291,12 +296,18 @@ def test_every_directed_face_is_served_or_faces_structural_pure_gdna(sweep_input
         for y in (left[x], right[x])
         if y >= 0
         and not intergenic[y]
-        and (int(x), int(y)) not in prepared.rule
-        and (int(x), int(y)) not in lane.faces
+        and not intergenic[x]
+        and not prepared.faces.has(x, y)
+        and not lane.serves(x, y)
     ]
     assert not unserved, f"faces with no rule and no lane: {unserved[:8]}"
     # and a lane face never doubles a composition rule (no witness counted twice)
-    assert not (set(prepared.rule) & lane.faces)
+    ruled, laned = set(prepared.faces.pairs()), _pairs(lane.face, ctx)
+    assert not (ruled & laned)
+    # a terminal is at neither end of any served face: it is where the chain breaks
+    assert intergenic.any(), "the toy has no intergenic region — this clause would prove nothing"
+    served = ruled | laned
+    assert not [f for f in served if intergenic[f[0]] or intergenic[f[1]]]
 
 
 # ── phase 2's ceilings: an RNA level as an upper side on a single-strand node's gDNA share ───────
@@ -339,7 +350,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
     message's composition removed, its level and flux join the intersection and the row changes."""
     from rigel.calibration.messages import Level, Message
-    from rigel.calibration.messages.transfer import _LevelLane, _PreparedTransfer, _SolveSite
+    from rigel.calibration.messages.transfer import Faces, _LevelLane, _PreparedTransfer, _SolveSite
     from rigel.calibration.messages.transfer_rows import intersect, rna_row_of_level
 
     K = 41
@@ -357,14 +368,20 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     def floor(u_b):
         return -0.5 * np.maximum(0.0, (u_b - u) / 0.2) ** 2
 
-    flux = [None, {0: floor(0.4), 2: floor(0.1)}, None, None, None]
+    flux = {
+        (1, 0): floor(0.4),
+        (1, 1): floor(0.1),
+    }  # exon 1's junctions: slot 0 to its left, 2 right
+    none = _bits(5, [])
     pos = _LevelLane(
-        "pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, set(), total=n_u, flux=flux
+        "pos", u, lam, 0.5, n_u / 2, a_r, empty, [None] * 5, none, total=n_u, flux=flux
     )
-    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, set(), total=n_u)
-    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, set())
-    site = _SolveSite(fp & fn, {"pos": fp, "neg": fn}, left, right, 20)
-    prep = _PreparedTransfer([None] * 5, {}, K, {"gdna": gd, "pos": pos, "neg": neg}, site)
+    neg = _LevelLane("neg", u, lam, 0.4, n_u / 2, a_r, empty, [None] * 5, none, total=n_u)
+    gd = _LevelLane("gdna", u, lam, 0.5, n_u, a_r, empty, [None] * 5, none)
+    site = _SolveSite(fp & fn, {"pos": fp, "neg": fn}, 20)
+    prep = _PreparedTransfer(
+        [None] * 5, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
+    )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
     held_l = Level(floor(0.8), 25.0, 100.0)
     held_r = Level(floor(-0.3), 25.0, 100.0)
@@ -372,7 +389,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     from_right = [None, Message(level_rna_pos=held_r), None, None, None]
     rows = np.zeros((5, K))
     assert prep._ceilings(from_left, from_right, rows)
-    want = rna_row_of_level(intersect([held_r.profile, flux[1][2]]), u, lam, 400.0, 100.0, 0.5)
+    want = rna_row_of_level(intersect([held_r.profile, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
     np.testing.assert_allclose(rows[1], want, atol=1e-12)
     assert np.all(np.diff(rows[1]) <= 1e-9)
     assert not rows[[0, 2, 3, 4]].any()
@@ -381,7 +398,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     rows2 = np.zeros((5, K))
     assert prep._ceilings(from_left2, from_right, rows2)
     want2 = rna_row_of_level(
-        intersect([held_l.profile, flux[1][0], held_r.profile, flux[1][2]]),
+        intersect([held_l.profile, flux[(1, 0)], held_r.profile, flux[(1, 1)]]),
         u,
         lam,
         400.0,
@@ -402,11 +419,15 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
     per_face = 0
     for name, lane in _rna(prepared).items():
         for x in np.flatnonzero(is_exon):
-            fx = lane.flux[x]
-            if fx is None:
+            fx = [
+                (b, lane.flux_at(x, side))
+                for side, b in ((0, int(ctx.left[x])), (1, int(ctx.right[x])))
+                if lane.flux_at(x, side) is not None
+            ]
+            if not fx:
                 continue
-            for b, prof in fx.items():
-                assert b in (int(ctx.left[x]), int(ctx.right[x])) and sc[b].sum() > 0
+            for b, prof in fx:
+                assert b >= 0 and sc[b].sum() > 0
                 assert np.all(np.diff(prof) >= -1e-12)  # a lower bound
                 per_face += 1
     assert per_face > 0
@@ -483,7 +504,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         np.array([1.0e4, 1.0e4]),
         np.zeros(2, bool),
         [None, None],
-        {(0, 1)},
+        _bits(2, [(0, 1)]),
     )
     lower = flat.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
     assert np.all(np.diff(lower) >= -1e-12), "not a lower bound"
@@ -500,7 +521,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         np.array([1.0e4, 4.0e4]),
         np.zeros(2, bool),
         [None, None],
-        {(0, 1)},
+        _bits(2, [(0, 1)]),
     )
     wide = cliff.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
     assert np.all(np.diff(wide) >= -1e-12)
@@ -561,7 +582,7 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
         np.array([50.0, 60.0, 45.0]),
         np.zeros(3, bool),
         own,
-        {(0, 1), (1, 2)},
+        _bits(3, [(0, 1), (1, 2)]),
     )
     held = Level(lower_side(-0.5 * ((u - 0.5) / 0.8) ** 2), 100.0, 50.0)
     sent = lane.emit(1, 2, held)
@@ -594,7 +615,7 @@ def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
     from rigel.calibration.messages.transfer_rows import blur_row, hop_price, lower_side
 
     ctx = _ctx_of(sweep_inputs)
-    prepared = _full_policy(sweep_inputs)[0].prepare(ctx)
+    prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
     _drive_the_backbone(prepared, ctx)
     lane = prepared.lanes["gdna"]
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
@@ -616,3 +637,58 @@ def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
             assert (got.n, got.a) == (float(lane.count[x]), float(lane.a[x]))
             checked += 1
     assert checked > 0, "no level crossed an empty node on the toy: the gate proved nothing"
+
+
+def test_the_face_table_holds_one_of_five_kinds_with_finite_parameters_at_real_faces(sweep_inputs):
+    """`Faces`, the rules as typed tables: on the live toy every rule the builders wrote is one of the
+    five kinds, its scalar parameters and its rows are finite, `at` reads back what the table holds,
+    and every ruled face is a real face (the source is the destination's neighbour on that side).
+    PERTURBATION: a rule at a face that does not exist is refused, so a builder cannot address the
+    wrong neighbour; a second rule at a face is refused, so the builders' faces stay disjoint."""
+    import pytest
+
+    from rigel.calibration.messages.transfer import (
+        EDGE,
+        FORWARD,
+        LEVEL,
+        NONE,
+        RULE_NAMES,
+        SPLICE_OUT,
+        TRANSPORT,
+        Faces,
+    )
+
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
+    faces = prepared.faces
+    left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
+    kinds = {FORWARD, TRANSPORT, SPLICE_OUT, EDGE, LEVEL}
+    seen = set()
+    for s, i in faces.pairs():
+        assert s == (left[i] if s < i else right[i]), f"({s}, {i}) is not a face"
+        f = faces.at(s, i)
+        assert f.kind in kinds and f.kind != NONE
+        seen.add(f.kind)
+        for name in ("n_u", "n_s", "a_b", "a_x", "width", "var"):
+            assert np.isfinite(getattr(f, name))
+        for row in (f.row, f.row2):
+            assert row is None or (row.shape == (int(ctx.n_grid),) and np.isfinite(row).all())
+        if f.kind == TRANSPORT:
+            assert f.row is not None and f.n_u > 0.0
+        if f.kind == LEVEL:
+            assert f.row is not None and f.row2 is not None and f.var > 0.0
+    assert {FORWARD, TRANSPORT, SPLICE_OUT} <= seen, [RULE_NAMES[k] for k in sorted(seen)]
+    assert len(RULE_NAMES) == 6
+    # a rule can only be written at a face that exists
+    n = int(ctx.n_slots)
+    table = Faces(np.linspace(-1.0, 1.0, int(ctx.n_grid)), left, right)
+    i = int(np.flatnonzero(left >= 0)[0])
+    table.set(int(left[i]), i, FORWARD)
+    assert table.kind_at(int(left[i]), i) == FORWARD and table.has(int(left[i]), i)
+    stranger = int(left[i]) - 1 if int(left[i]) > 0 else (i + 2 if i + 2 < n else i - 2)
+    with pytest.raises(ValueError, match="no face into"):
+        table.set(stranger, i, FORWARD)
+    # and a face carries one rule: the builders' faces are disjoint, so a second write is a builder
+    # addressing another's face, refused rather than silently winning or losing by order
+    with pytest.raises(ValueError, match="already carries"):
+        table.set(int(left[i]), i, TRANSPORT)

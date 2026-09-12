@@ -99,19 +99,25 @@ class Spy:
 
     def __enter__(self):
         spy = self
-        self._orig = (CAL.solve_chain, CAL.fit_landscape, TR._PreparedTransfer.solve)
-        orig_solve_chain, orig_fit, orig_psolve = self._orig
+        self._orig = (CAL.solve_chain, CAL.fit_landscape)
+        orig_solve_chain, orig_fit = self._orig
 
         def solve_chain(*a, **k):
+            # the sweep solves the chain a locus block at a time, so the held messages are read off the
+            # capture, where the backbone re-keys every block's to the chain (`sweep._gather`)
             out = orig_solve_chain(*a, **k)
-            spy.sweeps.append(dict(capture=k.get("_capture"), belief=out, **spy._pending))
-            spy._pending = {}
+            cap = k.get("_capture") or {}
+            cube = cap.get("cube_rows")
+            spy.sweeps.append(
+                dict(
+                    capture=k.get("_capture"),
+                    belief=out,
+                    from_left=cap.get("from_left"),
+                    from_right=cap.get("from_right"),
+                    cube_slots=() if not cube else tuple(cube),
+                )
+            )
             return out
-
-        def psolve(self_, from_left, from_right):
-            msg = orig_psolve(self_, from_left, from_right)
-            spy._pending = dict(from_left=list(from_left), from_right=list(from_right), msg=msg)
-            return msg
 
         def fit(
             count, mass, eff, var, *, anchor, strength=1.0, knn_scale=LS._KNN_SCALE, domain=None, prev=None
@@ -134,11 +140,11 @@ class Spy:
             )
             return ls
 
-        CAL.solve_chain, CAL.fit_landscape, TR._PreparedTransfer.solve = solve_chain, fit, psolve
+        CAL.solve_chain, CAL.fit_landscape = solve_chain, fit
         return self
 
     def __exit__(self, *exc):
-        CAL.solve_chain, CAL.fit_landscape, TR._PreparedTransfer.solve = self._orig
+        CAL.solve_chain, CAL.fit_landscape = self._orig
         return False
 
 
@@ -334,9 +340,7 @@ def run_condition(index, region_arrays, sj, boundary_flags, cache_dir: Path, pol
         fg_grid = np.asarray(cap["solve_grid"], np.float64)  # the capture's grid is f_g = σ(λ)
         lam_grid = np.log(fg_grid) - np.log1p(-fg_grid)
         fac = density_factor_precision(cap.get("intron_prior"), lam_grid)
-        msg = sw.get("msg")
-        cube = () if msg is None or msg.cube_rows is None else tuple(msg.cube_rows)
-        comp, bound = held_evidence(sw.get("from_left"), sw.get("from_right"), cube, n)
+        comp, bound = held_evidence(sw.get("from_left"), sw.get("from_right"), sw.get("cube_slots", ()), n)
         locked = g1_locked(cap["free_pos"], cap["free_neg"])
         evidence = classify_evidence(cap["_tau0_lam"], fac, comp, bound, anchor, locked)
         rows_held = cap.get("lam_rows")

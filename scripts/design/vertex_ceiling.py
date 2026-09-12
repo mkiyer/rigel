@@ -132,8 +132,8 @@ class _PinnedPolicy(TR.TransferPolicy):
 
     name = "transfer"  # what the capture stamps: the instruments' "the arm ran" witness reads it
 
-    def prepare(self, ctx):
-        prepared = super().prepare(ctx)
+    def prepare(self, ctx, library):
+        prepared = super().prepare(ctx, library)
         pins = _CTX.get("pins") or {}
         if not pins:
             return prepared
@@ -539,8 +539,8 @@ def self_test() -> int:
                    and own[0] is None and own[1] is None and own[3] is None
                    and _FIRED["claimed"] == before["claimed"] + 1))
     # the pinned policy delivers the delta into ψ at the pinned slot, on top of a silent solve
-    pol = CAL.TransferPolicy(lambda g, w: None)
-    prepared = pol.prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0))
+    pol = CAL.TransferPolicy()
+    prepared = pol.prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0, factory_rows=None), None)
     msg = prepared.solve([None] * 4, [None] * 4)
     checks.append(("the pinned policy delivers the delta as the slot's ψ row (fires `delivered`)",
                    msg.lam_rows is not None and msg.lam_rows.shape == (4, 21)
@@ -549,8 +549,8 @@ def self_test() -> int:
     # perturbation: with no pins the policy is the shipped one, so silent stays silent
     _CTX["pins"] = {}
     checks.append(("with nothing pinned the policy's solve is untouched (silent stays silent)",
-                   CAL.TransferPolicy(lambda g, w: None)
-                   .prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0))
+                   CAL.TransferPolicy()
+                   .prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0, factory_rows=None), None)
                    .solve([None] * 4, [None] * 4).is_silent))
     restore()
     checks.append(("…and every patch target is restored after the pin",

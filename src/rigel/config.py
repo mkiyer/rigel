@@ -287,6 +287,18 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
+    #: The sweep's WORKING SET: the chain is solved one LOCUS BLOCK at a time — the chain cut at every
+    #: intergenic region (where message passing ends) and the pieces merged up to this many slots per
+    #: block (`calibration.region_chain.locus_blocks`). A PERFORMANCE tunable and nothing else: the
+    #: answer is the same for every value (ψ's read-out is chunk-exact, gated), so it trades the
+    #: per-sweep memory — a block's ``(slots, K)`` arrays instead of the whole chain's — against the
+    #: per-block overhead. ``None`` solves the whole chain as one block. The default is the knee of the
+    #: measured ladder on the human chain (2.09M slots, one real sweep, 2026-09-11) — the sweep's own peak
+    #: allocation / its wall time: whole chain 9.87 GB / 41 s; 20,000 slots 0.26 GB / 39 s; 5,000 slots
+    #: 0.19 GB / 39 s; 1,000 slots 0.17 GB / 41 s — every size bit-identical. 5,000 sits on the flat part
+    #: of both curves (about 420 blocks on that chain).
+    sweep_block_slots: int | None = 5000
+
     #: Which (counts, exposure) pair the pooled gDNA background estimators take.
     #: ``"contained"`` (the default) pools the CONTAINED count over the gDNA contained effective
     #: length — unbiased, since ``E[count] = rho·E_contained``, but the fragment-length pmf enters the
@@ -397,6 +409,10 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.gdna_prior_strength must be >= 0 (0 disables the prior term); "
                 f"got {self.gdna_prior_strength}."
+            )
+        if self.sweep_block_slots is not None and self.sweep_block_slots < 1:
+            raise ValueError(
+                f"CalibrationConfig.sweep_block_slots must be >= 1 or None; got {self.sweep_block_slots}."
             )
         if self.sweep_n_grid < 2:
             raise ValueError(

@@ -59,7 +59,7 @@ from .region_geometry import (
     init_beliefs,
     region_gdna_geometry,
 )
-from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
+from .sweep import MessageMemo, chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import count_observable_masks
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
@@ -610,20 +610,18 @@ def calibrate(
 
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-region
     # message internals. Inert in production.
-    # ONE policy instance for every phase: the transfer policy carries a grid-keyed memo of the
-    # intron factory's rows, so constructing it per sweep would rebuild them every refit.
+    # ONE policy instance for every phase; the intron factory's rows reach it on each sweep's context
+    # (``factory_rows``, the same memoised array the sweep adds as ψ's λ-factor).
     # ⛔ THE POLICY NAME MUST SELECT THE POLICY. An unreadable knob is worse than no knob: an
     # arm that silently runs a different policy than it names is a benchmark that cannot be
     # trusted, so an unknown name RAISES here.
     if not config.message_propagation or config.message_policy == "silent":
         policy = SilentPolicy()
     elif config.message_policy == "transfer":
-        # the composition-transfer policy on the two-phase backbone. Its own claims include the
-        # intron factory's memoized rows, so the policy consumes `_intron_prior_at` directly —
-        # grid-keyed — and `None` (factory off / uninformative background) makes it byte-identical
-        # to silence.
+        # the composition-transfer policy on the two-phase backbone. An intron's own claim is the
+        # factory's row for it, which the sweep hands over on the context; `None` there (factory off /
+        # uninformative background) makes it byte-identical to silence.
         policy = TransferPolicy(
-            _intron_prior_at,
             strand=(rna_sense_frac, gdna_strand_overdispersion, rna_strand_overdispersion),
         )
     else:
@@ -631,7 +629,7 @@ def calibrate(
             f"unknown message_policy {config.message_policy!r} — expected 'silent' or 'transfer'"
         )
 
-    def _sweep(prior):
+    def _sweep(prior, memo=None):
         capture = {} if _debug is not None else None
         # THE λ BRACKET IS `max(the reference's floor, the fitted prior's own demand)`. ψ evaluates
         # the landscape at `log ρ = log f + log M − log E` and can only offer `f ∈ [σ(−L), σ(L)]`, so a
@@ -694,6 +692,8 @@ def calibrate(
             # source, and do minimal HARM against silence on stranded data, where a sighted slot's own
             # solve is already good.
             policy=policy,
+            block_slots=config.sweep_block_slots,
+            message_memo=memo,
             _capture=capture,
         )
         if capture is not None:
@@ -728,6 +728,11 @@ def calibrate(
     # argument is what grounds it, and the only intergenic background that reaches ψ is
     # `fit_intron_background`'s.
     gdna_hyperprior: DensityLandscape | None = None
+    # THE REFIT SWEEPS SHARE THEIR MESSAGE LAYER. The belief is reset before each, and the messages
+    # never read the prior, so for one grid every input the layer reads is identical from refit to
+    # refit; a refit pays its two ψ solves and is served the rest (`sweep.MessageMemo`, content-keyed:
+    # a refit whose bracket widens changes the grid and misses). Pass 0's grid is never reused.
+    memo = MessageMemo()
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
             chain,
@@ -744,7 +749,7 @@ def calibrate(
         # FULL reset, then re-solve WITH the prior: nothing from pass-0 survives into the re-solve except
         # the fitted landscape itself, so an over-confident region cannot refuse to budge when the prior lands.
         belief = _init_belief()
-        belief = _sweep(gdna_hyperprior)
+        belief = _sweep(gdna_hyperprior, memo)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training regions)",
             it + 1,

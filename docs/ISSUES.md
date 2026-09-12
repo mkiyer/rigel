@@ -138,17 +138,45 @@ is the whole problem, so the next candidate is a sparsity mechanism, targeting e
 transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `quant_accuracy.py`.
 
 ### performance-memory-bounded-solve
-`priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11`
+`priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11, the decomposition landed 2026-09-11`
 Calibration is the tool's one unfinished component: on 18.6M fragments its four sweeps are 706 s of an
 836 s run and hold the 32 GB peak, on ONE core, while the locus EM beside it takes 8 s; the cost is set by
-the index's 2.09M chain slots, not by depth. THE DECOMPOSITION IS THE LOCUS, as the EM already does it: an
-intergenic region terminates message passing, so the chain breaks at every one into independent loci.
-Measured on the human chain: of 1,206,202 composition faces and 4,621,302 lane faces, NONE delivers to an
-intergenic node, while 65,852 gDNA-lane faces are SENT by one (its measured level is the pure-gDNA anchor
-its neighbour reads), so a locus needs only its two flanking intergenic claims, which are local. The chain
-holds 32,927 loci, median 19 slots, largest 2,477 = 0.12% of the chain, so the serial floor is about 800x
-and the working set is per locus rather than genome-wide. Threads are wanted for the message passes and
-the grid solves alike. `profiling/profiler.py`, `profiling/sweep_replay.py`.
+the index's 2.09M chain slots, not by depth. THE DECOMPOSITION IS THE LOCUS and it is BUILT
+(`DESIGN.md` §6b.15): a terminal — a region admitting no RNA strand — receives nothing, structurally, so
+the sweep solves the chain a locus block at a time (`sweep.solve_chain`, `region_chain.locus_blocks`),
+the only cross-block information being the policy's library reduction; ψ's read-out is chunk-exact, so
+the block size (`CalibrationConfig.sweep_block_slots`) moves no number and is a working-set knob. What is
+LEFT, and why the serial floor of about 800× is not yet cashed: the block solve is Python, and the two
+passes and the policy's `prepare` — most of a sweep — hold the GIL, so threads cannot speed them
+(measured 0.83–0.94× at 8 threads; processes 6.2×, deferred). The owner's decision (2026-09-11): the
+parallel executor waits for the C/C++ port of `_solve_block`, which lands on this structure; until then the
+sweeps run serially and one block at a time. Also still genome-wide: the memoised intron-factory rows
+(`(n_slots, K)`, 1–2 GB per grid), which a block could build for itself. `profiling/profiler.py`,
+`profiling/sweep_replay.py --block-slots`.
+THE AGREED ORDER (owner, 2026-09-11; `ROADMAP.md` rank 1 carries it without numbers): ⓪ re-measure the
+deep library end to end, `main` against the landed tree, two back-to-back pairs at 8 threads — DONE
+(`~/Downloads/rigel_runs/perf/ab_locus_2026-09-11/`, `profiler.py --compare`): wall 917 → 892 s and
+892 → 875 s (0.97, 0.98), PEAK 33.2 → 14.9 GB and 32.6 → 15.0 GB, the four sweeps 769 → 738 s and
+747 → 727 s (0.96, 0.97), untouched stages at 1.00. The peak is no longer the sweep's (11.5 GB while it
+runs) but `build_region_geometry`'s transient (14.5 GB) and the pre-sweep `init_beliefs` solve — the
+next memory target, after the sweeps' time; the final ψ lost ~7 s to smaller tiles inside 5,000-slot
+blocks (`_block_rows` inside a block), a note for ① and ③; ① DONE, and larger than scoped: the WHOLE message layer — `prepare`, both passes and the
+policy's solve — is refit-invariant given the grid (`DESIGN.md` §6b.15), so the refit sweeps are served
+their messages from a content-keyed `sweep.MessageMemo` and pay only their two ψ solves. Measured on
+the deep library, two back-to-back pairs at 8 threads, memo off → on
+(`~/Downloads/rigel_runs/perf/ab_memo_2026-09-11/`): the refit grid is stable (`n_grid` 138, L 23.18 for
+all three refits), refit 1 misses its 426 blocks and refits 2–3 hit all 426 — 38 s each instead of
+176 s; wall 795 → 515 s and 799 → 515 s (0.65), `calibrate` 704 → 424 s, `prepare`/passes/policy solve
+0.49/0.48/0.45, untouched stages 1.00; the memo holds 2.68 GB (its cube rows as the float32 the AMBIG
+solve casts them to — 4.1 GB as float64), so the peak rose 15.0 → 17.8 GB. Whether a memory-constrained
+run should be able to switch it off is a tunable for the owner to rule on; ② DONE — `messages.transfer.Faces`:
+the rules as ``(n, 2)`` typed tables over (destination, side) with five kinds and a row store, the lanes'
+faces as bits, bit-identical (`DESIGN.md` §6b.15); ③ the port
+of `_solve_block` — passes and `transfer_rows`, `prepare`, ψ, then threads over blocks — behind a derived
+tolerance gate (promote the tolerant replay comparator into `sweep_replay.py`); ④ the factory rows per
+block; ⑤ the scan (`ISSUES: scan-thread-split-starves-the-workers`) and the second pass. Two things not
+to do: micro-optimise the Python passes (a silent-hop early exit halves them and the port deletes it),
+and bake the refit sweeps' `n_grid_ss = 513` into the port — an accuracy ruling, kept a parameter.
 
 ### scan-thread-split-starves-the-workers
 `priority: next · kind: decision · 2026-09-11`

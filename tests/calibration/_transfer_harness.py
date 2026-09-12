@@ -136,8 +136,9 @@ def _expected_pairs(si):
     return pairs, int(chain.n_slots)
 
 
-def _live_provider(si, n_grid, window):
-    """A synthetic factory-row provider: a distinct non-flat row at every intron REGION slot."""
+def _live_rows(si, n_grid, window):
+    """Synthetic factory rows: a distinct non-flat row at every intron REGION slot, on the sweep's
+    grid — what the live toy's context carries as ``factory_rows``."""
     from rigel.calibration.simplex_logodds import _logodds_grid
 
     pairs, n_slots = _expected_pairs(si)
@@ -145,25 +146,61 @@ def _live_provider(si, n_grid, window):
     rows = np.zeros((n_slots, lam.shape[0]))
     for _b, j in pairs:
         rows[j] = -0.05 * (lam - (0.1 * (j % 7) - 0.3)) ** 2  # non-flat, slot-distinct
-    return lambda g, w: rows if (int(g), float(w)) == (int(n_grid), float(window)) else None
+    return rows
+
+
+def _bits(n, pairs):
+    """A lane's face table from directed ``(source, destination)`` pairs: ``(n, 2)`` bits over
+    (destination, side) — the form `_LevelLane` holds its faces in."""
+    from rigel.calibration.messages.transfer import _side
+
+    out = np.zeros((int(n), 2), bool)
+    for s, i in pairs:
+        out[int(i), _side(int(s), int(i))] = True
+    return out
+
+
+def _pairs(bits, ctx):
+    """The directed ``(source, destination)`` pairs a ``(n, 2)`` face table holds, read back through the
+    chain's two neighbour arrays."""
+    nbr = np.stack((np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)), axis=1)
+    return {(int(nbr[i, sd]), int(i)) for i, sd in zip(*np.nonzero(np.asarray(bits, bool)))}
+
+
+def _two_sided(lane, s, x) -> bool:
+    from rigel.calibration.messages.transfer import _side
+
+    return bool(lane.two_sided[int(x), _side(int(s), int(x))])
+
+
+def _prepared(pol, ctx):
+    """A policy prepared on ``ctx`` with the library reduced over that same context — the whole
+    chain, in every gate here — exactly as the backbone pairs the two calls."""
+    return pol.prepare(ctx, pol.library(ctx))
 
 
 def _ctx_of(si):
-    """Rebuild the StepContext exactly as the backbone would, by running a silent sweep with a
-    capture and reading nothing — instead we call solve_chain's own construction path via a spy
-    on the policy prepare."""
+    """The StepContext exactly as the backbone builds it — captured by a spy policy inside a real
+    sweep — with the live toy's synthetic factory rows attached, so every gate's policy reads the
+    same rows the independent recomputes read (``ctx.factory_rows``)."""
+    import dataclasses as _dc
+
     grabbed = []
 
     class _Spy:
         name = "ctx-spy"
 
-        def prepare(self, ctx):
+        def library(self, view):
+            return None
+
+        def prepare(self, ctx, library):
             grabbed.append(ctx)
-            return SilentPolicy().prepare(ctx)
+            return SilentPolicy().prepare(ctx, library)
 
     _run(si, _Spy())
     assert grabbed, "the spy never fired"
-    return grabbed[0]
+    rows = _live_rows(si, int(si["kw"]["n_grid"]), float(si["kw"]["logodds_window"]))
+    return _dc.replace(grabbed[0], factory_rows=rows)
 
 
 def _nothing_held(n_slots):
@@ -193,9 +230,9 @@ def _dead_boundaries(ctx):
     """The context with every BOUNDARY's strand channel declared dead and every region's intact."""
     import dataclasses as _dc
 
-    tau = np.asarray(ctx.own.tau_lam, np.float64).copy()
-    tau[np.asarray(ctx.is_boundary, bool)] = 0.0
-    return _dc.replace(ctx, own=_dc.replace(ctx.own, tau_lam=tau))
+    live = np.asarray(ctx.own_live, bool).copy()
+    live[np.asarray(ctx.is_boundary, bool)] = False
+    return _dc.replace(ctx, own_live=live)
 
 
 def _drive_the_backbone(prepared, ctx):
@@ -252,18 +289,20 @@ def _strand_row_of(ctx, strand, lam, x):
 
 
 def _full_policy(sweep_inputs):
+    """The shipped policy with the toy's strand model, the live rows it will find on `_ctx_of`'s
+    context, and the grid: ``(policy, rows, n_grid, window)``."""
     from rigel.calibration.messages.transfer import TransferPolicy
 
     n_grid = int(sweep_inputs["kw"]["n_grid"])
     window = float(sweep_inputs["kw"]["logodds_window"])
-    provider = _live_provider(sweep_inputs, n_grid, window)
-    return TransferPolicy(provider, strand=_strand_of(sweep_inputs)), provider, n_grid, window
+    rows = _live_rows(sweep_inputs, n_grid, window)
+    return TransferPolicy(strand=_strand_of(sweep_inputs)), rows, n_grid, window
 
 
 def _rna_lanes_of(sweep_inputs, ctx=None):
     pol = _full_policy(sweep_inputs)[0]
     ctx = _ctx_of(sweep_inputs) if ctx is None else ctx
-    prepared = pol.prepare(ctx)
+    prepared = _prepared(pol, ctx)
     assert set(prepared.lanes) == {"gdna", "pos", "neg"}
     return ctx, prepared
 
@@ -303,7 +342,7 @@ def _with_populated_inside(ctx):
     cnt = np.asarray(ctx.unspliced_count, np.float64).copy()
     a_g = np.asarray(ctx.eff_gdna, np.float64).copy()
     a_r = np.asarray(ctx.eff_rna, np.float64).copy()
-    tau = np.asarray(ctx.own.tau_lam, np.float64).copy()
+    live = np.asarray(ctx.own_live, bool).copy()
     fills = iter(
         [(20.0, 180.0), (80.0, 120.0), (25.0, 175.0), (70.0, 130.0)]
     )  # two pairs that DISAGREE
@@ -316,14 +355,14 @@ def _with_populated_inside(ctx):
             continue
         cnt[i] = next(fills)
         a_g[i] = a_r[i] = 150.0
-        tau[i] = 1.0
+        live[i] = True
     return _dc.replace(
         ctx,
         unspliced_count=cnt,
         n_slot=cnt.sum(axis=1),
         eff_gdna=a_g,
         eff_rna=a_r,
-        own=_dc.replace(ctx.own, tau_lam=tau),
+        own_live=live,
     )
 
 
