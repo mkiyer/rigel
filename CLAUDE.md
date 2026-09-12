@@ -186,11 +186,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,418 passed / 0 skipped / 2 xfail, 3,420 collected** (re-derived
+**The standing baseline: 0 failed / 3,419 passed / 0 skipped / 2 xfail, 3,421 collected** (re-derived
 2026-09-11 after the locus sweep, the message memo and the face tables landed: fourteen gates added to
 existing files — three on `locus_blocks`, two on the terminal rule, two on ψ's chunk-exactness, three on
-the block solve, three on the memo, one on the face table — so the collected total moved by exactly
-+14 and no file was added). The 2 xfails are executable records of proven defects whose fixes are elsewhere
+the block solve, three on the memo, one on the face table — plus one `docs/dev/` file, the calibration
+performance plan, at +1; +15 in all). The 2 xfails are executable records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
