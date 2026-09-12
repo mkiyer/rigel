@@ -82,13 +82,16 @@ intron's own solve (unstranded OFF) and on exon|exon boundaries and walled exons
    active thread). The locus decomposition is landed and gated (`DESIGN.md` §6b.15); the agreed order
    from here, each step judged by `profiling/profiler.py --compare` on back-to-back pairs and proven a
    no-op with `profiling/sweep_replay.py` (`--block-slots` for the chunk-exactness of the whole sweep) and
-   `design/rename_identity.py --bam` against the `locus_identity_*` references:
+   `design/rename_identity.py --bam` against the `onesolver_identity_*` references:
    ⓪ re-measure the deep library end to end, `main` against the landed tree — the baseline the rest is
    judged against; ① cache the refit-invariant half of `prepare` across the refit sweeps (the face
    rules and lane faces read counts and geometry, only the own claims read the belief), per block, per
    grid; ② the policy's rules from closures to typed tables — the C/C++ data layout, written in Python
-   first (done: `messages.faces.Faces`); ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
-   ψ, then threads over blocks — with a DERIVED tolerance gate in place of bit-identity, since a language
+   first (done: `messages.faces.Faces`); ②′ THE PRE-PORT WORKLIST (owner, 2026-09-12): the Python becomes
+   pristine first — one ψ solver in one precision, `calibrate` as named stages, memory, one grid, the
+   tunables census, the capture as a record, the vocabulary rulings, the two xfails — judged on the metric,
+   the panel and timing pairs, no longer on bit-identity; ③ the port of `sweep._solve_block`, the passes and `transfer_rows` first, then `prepare`, then
+   ψ, then threads over blocks — the replay's tolerance report in place of bit-identity, since a language
    port cannot be bit-identical; ④ the intron-factory rows built per block, the last genome-wide arrays;
    ⑤ the scan and the second pass, the stages that scale with depth and the floor once the sweeps are
    compiled. The accuracy frame is unchanged, and no step may move a number.

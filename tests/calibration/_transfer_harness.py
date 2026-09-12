@@ -101,10 +101,7 @@ def _run(si, policy, capture=None):
     if capture is not None:
         kw["_capture"] = capture
     out = SW.solve_chain(*si["args"], **kw, policy=policy)
-    return {
-        f: np.asarray(getattr(out, f))
-        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg")
-    }
+    return {f: np.asarray(getattr(out, f)) for f in ("f_g", "f_pos", "f_neg", "var_gdna")}
 
 
 def _expected_pairs(si):

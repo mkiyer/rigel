@@ -485,7 +485,7 @@ def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
 def _six(belief):
     return {
         f: np.asarray(getattr(belief, f))
-        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "has_composition")
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "has_composition")
     }
 
 
@@ -628,7 +628,7 @@ def test_a_cache_hit_reproduces_the_uncached_sweep_to_the_bit_and_skips_the_laye
     assert not calls, "a hit must not prepare the policy"
     assert cache.hits == n_blocks and cache.misses == n_blocks
     for out in (first, second):
-        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg", "has_composition"):
+        for f in ("f_g", "f_pos", "f_neg", "var_gdna", "has_composition"):
             assert np.array_equal(np.asarray(getattr(out, f)), np.asarray(getattr(plain, f))), f
     assert cache.nbytes > 0
 

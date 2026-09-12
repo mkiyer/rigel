@@ -406,7 +406,7 @@ def region_rna_geometry(geometry: RegionGeometry):
 @dataclass(frozen=True, slots=True)
 class RegionBelief:
     """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED
-    mass + its per-component posterior variance in LOG-FRACTION space, `(var_pos, var_neg, var_gdna)` =
+    mass + the gDNA share's posterior variance in LOG-FRACTION space, `var_gdna` =
     `Var(log f_c)`, never `Var(f_c)`. All length ``n_slots``.
 
     The first axis is the unified region+boundary CHAIN, not the region axis: :func:`init_beliefs`
@@ -414,7 +414,7 @@ class RegionBelief:
     array off "regions" builds the wrong shape.
 
     The variances are log-space — grid moments of `log f_c` over the λ lattice
-    (`simplex_logodds._solve_regions_logodds`), matching the log-density message currency. They are
+    (`simplex_logodds._solve_logodds`), matching the log-density message currency. They are
     therefore not bounded by ¼ and routinely exceed it; a consumer needing the linear `Var(f_c)` must
     convert (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does for
     `composition_logvar`).
@@ -429,8 +429,6 @@ class RegionBelief:
     f_pos: np.ndarray
     f_neg: np.ndarray
     f_g: np.ndarray
-    var_pos: np.ndarray
-    var_neg: np.ndarray
     var_gdna: np.ndarray
     #: Does this slot hold a COMPOSITION? — an own composition channel, structural certainty, or a
     #: composition row received from a neighbour. A level, a ceiling or a cube row is a BOUND and does
@@ -488,7 +486,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     * G3 (both strands free — AMBIG): unresolvable by strand, so the ``{0,0,1}`` default is kept at
       maximum (``inf``) variance and the sweep resolves it from neighbour messages and the prior.
 
-    Returns the six per-region arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the
+    Returns the four per-region arrays ``(f_pos, f_neg, f_g, var_gdna)`` — the
     composition plus the precision state: ``var=0`` locked, ``inf`` no information, else the strand-solve
     posterior variance. The variances are ``Var(log f_c)``, log-space and unbounded above, never
     ``Var(f_c)``.
@@ -499,8 +497,6 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     f_g = np.ones(n)  # the signature-binary all-gDNA default; the count plays no role in it
     # precision state: gDNA unsolved (inf); a strand axis is locked (0) iff forbidden, else unsolved (inf).
     var_g = np.full(n, np.inf)
-    var_p = np.where(free_pos, np.inf, 0.0)
-    var_n = np.where(free_neg, np.inf, 0.0)
 
     g1 = g1_locked(free_pos, free_neg)
     g2 = free_pos ^ free_neg
@@ -509,18 +505,14 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     # G2-active: take the strand-only solve (median f_g, mean f±, and the posterior variances). G1 sinks
     # and G3 AMBIG slots keep the {0,0,1} default at maximum variance.
     fgv = np.asarray(deconv.gdna_frac_var, dtype=np.float64)
-    fpv = np.asarray(deconv.rna_pos_frac_var, dtype=np.float64)
-    fnv = np.asarray(deconv.rna_neg_frac_var, dtype=np.float64)
     f_g[g2_active] = np.asarray(deconv.gdna_frac, dtype=np.float64)[g2_active]
     f_pos[g2_active] = np.asarray(deconv.rna_pos_frac, dtype=np.float64)[g2_active]
     f_neg[g2_active] = np.asarray(deconv.rna_neg_frac, dtype=np.float64)[g2_active]
     var_g[g2_active] = fgv[g2_active]
-    var_p[g2_active & free_pos] = fpv[g2_active & free_pos]
-    var_n[g2_active & free_neg] = fnv[g2_active & free_neg]
 
     # G1 sink: lock the gDNA axis (the fractions are already the {0,0,1} default).
     var_g[g1] = 0.0
-    return f_pos, f_neg, f_g, var_p, var_n, var_g
+    return f_pos, f_neg, f_g, var_g
 
 
 @dataclass(frozen=True, slots=True)
@@ -686,12 +678,8 @@ def init_beliefs(
         n_grid_ss=n_grid_ss,
         L=logodds_window,
     )
-    f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
-        st.free_pos, st.free_neg, deconv, count.sum(axis=1)
-    )
-    return RegionBelief(
-        f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_p, var_neg=var_n, var_gdna=var_g
-    )
+    f_pos, f_neg, f_g, var_g = _type_belief(st.free_pos, st.free_neg, deconv, count.sum(axis=1))
+    return RegionBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g)
 
 
 # ---------------------------------------------------------------------------

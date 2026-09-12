@@ -1,4 +1,4 @@
-"""The log-density 1-D/2-D per-region solver — the single production per-region solve driving
+"""The log-density per-slot solver on the ``(λ, θ)`` grid — ONE solve for every slot class, driving
 ``sweep.solve_chain``.
 
 The latent magnitude dof is the gDNA-vs-RNA log-odds ``λ = logit(f_g) = log ρ_g − log ρ_rna``: log-odds
@@ -33,10 +33,12 @@ There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rn
 is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
 spliced there, a channel genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
 
-Single-strand regions (exactly one of ``allow_pos`` / ``allow_neg``) are an exact 1-D solve over ``λ``;
-AMBIG regions (both set) marginalize the tilt on a 2-D ``(λ, θ)`` grid (``_solve_ambig_logodds``).
-``_solve_regions_logodds_all`` dispatches between the two. Structurally RNA-free regions (neither strand
-live — intergenic / TSS / TES) have no composition dof and never reach either solver:
+One solver, :func:`_solve_logodds`, over the ``(λ, θ)`` cube in float64. A single-strand region (exactly
+one of ``allow_pos`` / ``allow_neg``) has its tilt fixed by its live strand, so it is the ``K_t = 1`` case —
+a 1-D solve over ``λ`` at the 1-D cost — and AMBIG regions (both set) marginalise the tilt on the θ grid.
+``_solve_regions_logodds_all`` runs the two classes on their own λ grids (the single-strand grid is the
+finer one) and tiles the rows so the working set stays in cache. Structurally RNA-free regions (neither
+strand live — intergenic / TSS / TES) have no composition dof and never reach the solver:
 ``sweep.solve_chain`` gates them out via ``solvable``, so no reference is applied to a region whose
 composition is known structurally.
 """
@@ -404,7 +406,7 @@ def _regrid_global(glp, n_from, n_to, L):
     g = np.asarray(glp, np.float64)
     # C-contiguous, deliberately: a fancy index on the LAST axis returns an F-ordered array, and a row
     # reduction over an F-ordered ψ is summed in an order that depends on how many rows share the
-    # call — one ulp, and a solve that is no longer chunk-exact (`_solve_regions_logodds`).
+    # call — one ulp, and a solve that is no longer chunk-exact (`_solve_logodds`).
     return np.ascontiguousarray(g[:, j - 1] + t[None, :] * (g[:, j] - g[:, j - 1]))
 
 
@@ -480,87 +482,65 @@ def _ambig_mask(allow_pos, allow_neg) -> np.ndarray:
     return np.asarray(allow_pos, bool) & np.asarray(allow_neg, bool)
 
 
-def _local_loglik_logodds(
+def _psi(
     u_pos,
     u_neg,
     allow_pos,
     allow_neg,
+    f_g_ref,
+    f_pos_ref,
+    f_neg_ref,
+    *,
     kappa,
     od_g,
     od_r,
     lam,
     fg,
-    f_g_ref,
-    f_pos_ref,
-    f_neg_ref,
+    n_tilt: int = 1,
     priors: "CompositionPriors | None" = None,
     lam_logprior=None,
+    cube=None,
 ):
-    """ψ over the log-odds grid for single-strand regions (strand mixture, the two arms, the λ-factor
-    rows), evaluated at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``. Returns ``(m, K)``.
-
-    ψ = strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor rows (the intron factory's and the message
-    layer's, pre-summed). No Jacobian: on the two-group axis the log-rate conversions cancel
-    ``log σ'(λ)`` exactly. Both arms are always written — a fitted ``logP`` where there is one, else the
-    ``_JEFFREYS_REF`` reference — because omitting one is not neutral.
-
-    ``priors`` carries each arm already evaluated on THIS ``fg`` grid → ``(m, K)``; a ``None`` member means
-    that arm takes its reference, a prior-free solve not being a reference-free one.
-
-    ``f_g_ref`` / ``f_pos_ref`` / ``f_neg_ref`` (per-region ``(m,)``) are the count-zero-information freeze
-    reference: the strand mixture's variance is evaluated at that fixed composition rather than at the
-    grid ``f_g`` being integrated, so the count sets precision and not composition."""
+    """ψ over the ``(λ, θ)`` cube for ``m`` slots — strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor
+    rows (+ the cube channel) — as ``(m, K, K_t)`` in float64, with the two strand-fraction grids it was
+    evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they were built from. ``n_tilt = 1`` is a single-strand call: the tilt is each slot's
+    live strand (``τ = ±1``) and the cube is ``(m, K, 1)``; otherwise the θ grid (:func:`_tilt_grid`).
+    :func:`_solve_logodds` reads it out; the vertex-reference gates read ψ itself."""
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
-    pos_live = (ap & ~an)[:, None]  # (m,1)
-    neg_live = (an & ~ap)[:, None]
-    fg2 = fg[None, :]  # (1,K)
-    f_act = 1.0 - fg2
-    f_pos = np.where(pos_live, f_act, 0.0)  # (m,K)
-    f_neg = np.where(neg_live, f_act, 0.0)
-    n = (u_pos + u_neg)[:, None]
-    # ── strand mixture — variance frozen at the reference composition. Broadcasts the (m,1) reference
-    #    against the (m,K) grid. ──
+    u_pos = np.asarray(u_pos, np.float64)
+    n = u_pos + np.asarray(u_neg, np.float64)
+    if int(n_tilt) == 1:
+        # the tilt of a single-strand slot is its live strand: the cube is (m, K, 1)
+        tau = np.where(ap & ~an, 1.0, -1.0)[:, None, None]
+    else:
+        tau = np.sin(_tilt_grid(int(n_tilt)))[None, None, :]  # τ = sin θ, exact across the domain
+    f_act = (1.0 - np.asarray(fg, np.float64))[None, :, None]  # (1, K, 1)
+    f_pos = f_act * (1.0 + tau) / 2.0  # (m|1, K, K_t)
+    f_neg = f_act * (1.0 - tau) / 2.0
     psi = _mixture_strand_loglik(
-        u_pos[:, None],
-        n,
-        fg2,
+        u_pos[:, None, None],
+        n[:, None, None],
+        np.asarray(fg, np.float64)[None, :, None],
         f_pos,
         f_neg,
         kappa,
         od_g,
         od_r,
-        np.asarray(f_g_ref, np.float64)[:, None],
-        np.asarray(f_pos_ref, np.float64)[:, None],
-        np.asarray(f_neg_ref, np.float64)[:, None],
+        np.asarray(f_g_ref, np.float64)[:, None, None],
+        np.asarray(f_pos_ref, np.float64)[:, None, None],
+        np.asarray(f_neg_ref, np.float64)[:, None, None],
     )
-    # ── the two composition arms: gDNA and RNA-total. Each is its fitted logP if we have one, else the
-    #    derived Jeffreys reference. ALWAYS both — see `_gdna_arm` / `_rna_arm`. Together they make ψ proper
-    #    (Beta(½,½) when neither is fitted); the gDNA arm alone would leave f_g→1 unbounded, and the RNA arm
-    #    alone would leave f_g→0 unbounded. ──
     _p = priors or _NO_PRIORS
-    # No location term: the reference is the symmetric Jeffreys measure and asserts nothing (see
-    #    CompositionPriors). Background information enters below as the intron-factory λ-factor, a
-    #    likelihood whose precision scales with counts.
-    psi = psi + _gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna)
-    # ── the gDNA INTRON FACTORY λ-factor: a per-region (m,K) log-likelihood on
-    #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED as its own term rather than folded into
-    #    the gDNA arm — it is a per-region LIKELIHOOD, not a population density, so it does not belong inside
-    #    a term whose units are `log P(log ρ)`. It deconvolves confident gDNA from
-    #    introns against the intergenic background; zero on non-intron regions ⇒ a no-op there. ──
+    psi = psi + (_gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna))[:, :, None]
     if lam_logprior is not None:
-        psi = psi + np.asarray(lam_logprior, np.float64)
-    # ── No change-of-variable Jacobian, and that is deliberate: a fitted `logP` is a density in log-rate,
-    #    so its conversion to a linear-rate density (−log f_c, up to a constant) cancels log σ'(λ) exactly,
-    #    once per component — which is why the cancellation keeps holding as each arm acquires a fitted
-    #    prior. The reference is written always, in both arms, so
-    #    ψ_λ = strand + (ref + logP_g) + (ref + logP_r). ──
-    # ``f_pos``/``f_neg`` are local to the strand mixture and are not returned: the caller builds the
-    #   composition from the PARAMETERS (:func:`_compose`), so it never needed the grid arrays.
-    return psi
+        psi = psi + np.asarray(lam_logprior, np.float64)[:, :, None]
+    if cube is not None:
+        psi = psi + np.asarray(cube, np.float64)
+    return psi, f_pos, f_neg, tau
 
 
-def _solve_regions_logodds(
+def _solve_logodds(
     u_pos,
     u_neg,
     allow_pos,
@@ -574,217 +554,87 @@ def _solve_regions_logodds(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    priors: "CompositionPriors | None" = None,
-    lam_logprior=None,
-) -> RegionDeconv:
-    """The log-odds 1-D per-region solve for SINGLE-STRAND regions.
-
-    Read-out: ``f_g`` = posterior median over the ``λ`` grid, and ``f_pos``/``f_neg`` are its IMAGE under
-    :func:`_compose` — a single-strand slot's tilt is structurally locked, so the RNA total ``1 − f_g``
-    goes entirely to the admissible strand and the composition closes by construction.
-    ``*_frac_var`` = the grid-moment ``Var(log f_c)``. The dead strand is locked-certain (var 0); zero-mass
-    regions report 0. ``f_g_ref``/``f_pos_ref``/``f_neg_ref`` (per-region) are the count-zero-information
-    variance-freeze reference. AMBIG regions are out of contract and must be masked out."""
-    lam, fg = _logodds_grid(int(n_grid), L)
-    psi = _local_loglik_logodds(
-        u_pos,
-        u_neg,
-        allow_pos,
-        allow_neg,
-        kappa,
-        od_g,
-        od_r,
-        lam,
-        fg,
-        f_g_ref,
-        f_pos_ref,
-        f_neg_ref,
-        priors=priors,
-        lam_logprior=lam_logprior,
-    )
-    ap = np.asarray(allow_pos, bool)
-    an = np.asarray(allow_neg, bool)
-    # ── THE READ-OUT IS CHUNK-EXACT: every reduction below runs per row in a fixed order, so a slot's
-    #    answer is a function of its own inputs and the grid and never of which rows share the call.
-    #    Two things break that and both are excluded here: a reduction over a non-contiguous array (its
-    #    summation order follows the strides, hence the row count — so ψ is made contiguous first) and a
-    #    BLAS matrix-vector product (a one-row call dispatches a different kernel — so the moments are
-    #    per-row sums). One ulp is a different number, and the locus solve tiles the rows freely
-    #    (gate: ``test_sweep.test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number``). ──
-    psi = np.ascontiguousarray(psi)
-    post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
-    # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
-    f_g = _posterior_median_fg(post, lam, fg)
-    # The composition is the map from the parameters — see :func:`_compose`. A single-strand slot has one
-    #    degree of freedom, λ; its tilt is structurally locked, so the RNA total goes entirely to the
-    #    admissible strand and the simplex closes by construction.
-    # precision state = Var(log f_c), moment-matched on the grid. The dead strand is locked-certain
-    # (f=0) → var 0. Capping is AUTOMATIC: the send prec_log = 1/(var+σ²+pois) ≤ 1/(σ²+pois).
-    Lg = _log_fg(lam)
-    mLg = _row_moment(post, Lg)
-    var_g = np.maximum(_row_moment(post, Lg * Lg) - mLg * mLg, 0.0)
-    La = _log1m_fg(lam)
-    mLa = _row_moment(post, La)
-    var_act = np.maximum(_row_moment(post, La * La) - mLa * mLa, 0.0)
-    var_pos = np.where(ap & ~an, var_act, 0.0)
-    var_neg = np.where(an & ~ap, var_act, 0.0)
-    # ``_compose`` runs on the CLIPPED ``f_g``, so the RNA total is its exact complement and there is no
-    #   independent clip on ``f_pos``/``f_neg`` left to break the simplex.
-    active = (u_pos + u_neg) > 0.0
-    f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_pos, f_neg = _compose(f_g, 0.0, ap, an)
-    f_pos = np.where(active, f_pos, 0.0)
-    f_neg = np.where(active, f_neg, 0.0)
-    var_g = np.where(active, var_g, 0.0)
-    var_pos = np.where(active, var_pos, 0.0)
-    var_neg = np.where(active, var_neg, 0.0)
-    return RegionDeconv(
-        gdna_frac=f_g,
-        rna_pos_frac=f_pos,
-        rna_neg_frac=f_neg,
-        gdna_frac_var=var_g,
-        rna_pos_frac_var=var_pos,
-        rna_neg_frac_var=var_neg,
-    )
-
-
-def _solve_ambig_logodds(
-    u_pos,
-    u_neg,
-    f_g_ref,
-    f_pos_ref,
-    f_neg_ref,
-    *,
-    kappa,
-    od_g,
-    od_r,
-    n_grid,
-    L: float = _DEFAULT_L,
-    n_tilt: int | None = None,
+    n_tilt: int = 1,
     priors: "CompositionPriors | None" = None,
     lam_logprior=None,
     cube=None,
 ) -> RegionDeconv:
-    """The 2-D ``(λ, θ)`` solve for AMBIG regions (both strands live). Grids the gDNA-vs-RNA-total log-odds
-    ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt`` or
-    ``n_grid``), evaluates ψ on the ``(m, K, K_t)`` cube, and marginalizes θ (``logsumexp``) for the
-    ``f_g`` read-out. ``f_g`` = posterior median over the θ-marginal λ-posterior; ``f_pos``/``f_neg`` = means
-    over the full 2-D posterior.
+    """THE per-slot solve, one for every slot class, over the ``(λ, θ)`` grid: the gDNA-vs-RNA log-odds
+    ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt``). ψ is the
+    same expression for every slot — strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor rows (+ the
+    cube channel where one is delivered) — evaluated on the ``(m, K, K_t)`` cube in float64, and read
+    out once: ``f_g`` is the posterior median over the θ-marginal λ-posterior, ``f_pos`` / ``f_neg`` its
+    image under :func:`_compose` with the tilt share ``w_pos`` the RNA-mass-weighted posterior share, and
+    ``Var(log f_g)`` is a grid moment over the λ-marginal — the one precision the tool reads (the
+    landscape prior's training weight). One exp over the cube serves both read-outs, and no
+    transcendental is taken over the cube after it.
+
+    A SINGLE-STRAND slot is the ``K_t = 1`` case and not a second solver: its tilt is fixed by its live
+    strand (``τ = +1`` where only ``+`` is admissible, ``−1`` where only ``−`` is), so the caller passes
+    ``n_tilt = 1`` and the cube is ``(m, K, 1)`` — the 1-D solve over λ at the 1-D cost. Every slot of a
+    call must then be single-strand; AMBIG slots (both strands admissible) take the θ grid. The caller
+    (:func:`_solve_regions_logodds_all`) separates the two classes because they run on different λ grids.
 
     No Jacobian and no tilt term are written, and that is the point of the θ coordinate: the
     Berger–Bernardo tilt conditional ``(1−τ²)^{−½}`` is cancelled identically by ``|dτ/dθ| = cos θ``
-    (``_tilt_grid``), and on the two-group λ axis the log-rate conversions cancel ``log σ'(λ)``. So ψ here
-    is the same expression as on the 1-D path — strand + ``_gdna_arm`` + ``_rna_arm`` + messages — and the
-    single-strand/AMBIG reference asymmetry is closed identically rather than approximately.
+    (``_tilt_grid``), and on the two-group λ axis the log-rate conversions cancel ``log σ'(λ)``. Both arms
+    are always written — a fitted ``logP`` where there is one, else the ``_JEFFREYS_REF`` reference —
+    because omitting one is not neutral (the module docstring). The strand mixture's variance is frozen
+    at the reference composition (``f_g_ref`` / ``f_pos_ref`` / ``f_neg_ref``, per slot), so the count
+    sets precision and not composition. Zero-mass slots report 0.
 
-    ``priors``' members are ``(m, K)`` on the σ(λ) grid (broadcast over θ). The cube is only
-    materialized for the AMBIG subset (the caller masks); ``K·K_t`` is the per-region cost."""
-    lam, fg = _logodds_grid(int(n_grid), L)  # (K,)
-    Kt = int(n_tilt) if n_tilt else int(n_grid)
-    theta = _tilt_grid(Kt)  # (Kt,) the ANGLE; τ = sin θ
-    tau = np.sin(theta)  # (Kt,) the tilt itself — smooth and exact across the whole θ domain
-    f_act = (1.0 - fg)[:, None]  # (K,1)
-    f_pos_kt = f_act * (1.0 + tau[None, :]) / 2.0  # (K,Kt) f64 (reused f64 in the moment sums)
-    f_neg_kt = f_act * (1.0 - tau[None, :]) / 2.0  # (K,Kt) f64
-    n = u_pos + u_neg
-    # ── float32 cube, an authorised small-tolerance performance choice: the (m,K,Kt) log-posterior and
-    #    its per-cell inputs are f32, which halves the cube's memory and roughly doubles the elementwise
-    #    exp/log rate. Every reduction below accumulates in f64 and the (m,K) marginals are lifted to f64,
-    #    so medians, means and variances keep their precision. ──
-    F = np.float32
-    fg32 = fg.astype(F)
-    fpk = f_pos_kt.astype(F)  # (K,Kt) f32 cube grid
-    fnk = f_neg_kt.astype(F)
-    # ── strand mixture over the cube: (m,1,1)×(1,K,1)×(1,K,Kt) → (m,K,Kt) f32 ──
-    psi = _mixture_strand_loglik(
-        np.asarray(u_pos, F)[:, None, None],
-        np.asarray(n, F)[:, None, None],
-        fg32[None, :, None],
-        fpk[None, :, :],
-        fnk[None, :, :],
-        kappa,
-        od_g,
-        od_r,
-        np.asarray(f_g_ref, F)[:, None, None],
-        np.asarray(f_pos_ref, F)[:, None, None],
-        np.asarray(f_neg_ref, F)[:, None, None],
+    THE READ-OUT IS CHUNK-EXACT: every reduction runs per row in a fixed order (the θ and λ logsumexps,
+    the moment sums as per-row sums and never BLAS), so a slot's answer is a function of its own inputs
+    and the grid and never of which rows share the call; ψ is made contiguous first, since a reduction
+    over a non-contiguous array follows the strides. One ulp is a different number, and the locus solve
+    tiles the rows freely (gate: ``test_sweep.test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number``).
+    """
+    lam, fg = _logodds_grid(int(n_grid), L)
+    ap = np.asarray(allow_pos, bool)
+    an = np.asarray(allow_neg, bool)
+    n = np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64)
+    psi, f_pos, f_neg, tau = _psi(
+        u_pos,
+        u_neg,
+        ap,
+        an,
+        f_g_ref,
+        f_pos_ref,
+        f_neg_ref,
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        lam=lam,
+        fg=fg,
+        n_tilt=n_tilt,
+        priors=priors,
+        lam_logprior=lam_logprior,
+        cube=cube,
     )
-    # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
-    #    floored at one pseudo-fragment, 1/(n+1) (`TRAPS: no-prior-means-haldane`): the τ=±1 boundaries
-    #    have f_s=0 ⇒ log(0), and the count floor keeps it finite and consistent with pois_log. ──
-    log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
-    frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]  # (m,1,1) f32
-    # ``log ∘ max ≡ max ∘ log``, BITWISE, because numpy's float32 ``log`` is monotone — verified
-    # exhaustively over ALL 1,065,353,217 float32 values in [0,1], which is the entire domain both
-    # arguments live in (a fraction and ``1/(n+1)``). So the log is taken on the (K,K_t) GRID and the
-    # (m,K,K_t) cube only ever sees a ``maximum``: ~140× fewer transcendental evaluations, same bits.
-    # ``τ = ±1`` puts one strand's fraction at exactly 0 ⇒ ``log 0 = −inf``, which the floor then discards.
-    with np.errstate(divide="ignore"):
-        log_fpk, log_fnk, log_floor = np.log(fpk), np.log(fnk), np.log(frac_floor)
-    log_fpos = np.maximum(log_fpk[None, :, :], log_floor)  # (m,K,Kt) f32
-    log_fneg = np.maximum(log_fnk[None, :, :], log_floor)
-    # ── the two composition arms (θ-independent — they live on the λ axis, which is exactly what makes
-    #    the tilt a nuisance). Identical call to the 1-D path; see `_gdna_arm` / `_rna_arm`. ──
-    _p = priors or _NO_PRIORS
-    # No location term (see CompositionPriors): the reference is the symmetric Jeffreys measure alone,
-    #   identical to the 1-D path.
-    psi += np.asarray(_gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna), F)[:, :, None]
-    # ── the gDNA INTRON FACTORY λ-factor (θ-independent — it lives on the λ axis), ADDED like the arms; the
-    #    [:, :, None] broadcast makes it constant across the tilt, so θ is integrated out cleanly. ──
-    if lam_logprior is not None:
-        psi += np.asarray(lam_logprior, F)[:, :, None]
-    # ── THE CUBE CHANNEL: the RNA level lanes delivered where both strands are live — one (K, K_t)
-    #    log-profile per region, added to ψ like the λ-factor but with the tilt inside, since a strand's
-    #    level is read at the density each cell's share implies. ``None`` is byte-identical. ──
-    if cube is not None:
-        psi += np.asarray(cube, F)
-    # θ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
-    psi_lam = _lse(psi, axis=2).astype(np.float64)
-    post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
+    psi = np.ascontiguousarray(psi)
+    m = psi.shape[0]
+    # ── ONE posterior over the cube; the λ read-out on its θ-marginal ─────────────────────────────
+    flat = psi.reshape(m, -1)
+    post = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m, K, K_t)
+    post_lam = post.sum(axis=2)  # the θ-marginal, per row
     f_g = _posterior_median_fg(post_lam, lam, fg)
-    # precision state = Var(log f_g) over the θ-marginal λ-posterior (`TRAPS: two-gaussians-one-latent`);
-    # per-row sums, not BLAS, so the read-out is chunk-exact (see `_solve_regions_logodds`).
-    mLg = _row_moment(post_lam, log_fg_grid)
-    var_g = np.maximum(_row_moment(post_lam, log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
-    # Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64), and the TILT
-    # SHARE that :func:`_compose` maps into the composition.
-    flat = psi.reshape(psi.shape[0], -1)
-    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m,K,Kt) f32
-    fp_grid = fpk[None, :, :]
-    fn_grid = fnk[None, :, :]
-    # ``f_pos_kt + f_neg_kt = 1 − f_g`` pointwise, so these two sum to the posterior mean of the RNA
-    #   total and their ratio is the RNA-mass-weighted posterior mean of the + share — the natural
-    #   estimator of the tilt, which matters in proportion to how much RNA is there.
-    m_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
-    m_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
+    log_fg = _log_fg(lam)
+    m_lg = _row_moment(post_lam, log_fg)
+    var_g = np.maximum(_row_moment(post_lam, log_fg * log_fg) - m_lg * m_lg, 0.0)
+    # ── the tilt share on the whole cube: the RNA-mass-weighted posterior share of the + strand ────
+    m_pos = np.sum(post * f_pos, axis=(1, 2))
+    m_neg = np.sum(post * f_neg, axis=(1, 2))
     rna = m_pos + m_neg
     w_pos = np.where(rna > 0.0, m_pos / np.where(rna > 0.0, rna, 1.0), 0.5)
-    mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
-    mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
-    var_pos = np.maximum(
-        np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0
-    )
-    var_neg = np.maximum(
-        np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
-    )
-    # AMBIG: both strands are admissible, so the tilt share splits the RNA total between them. The clip
-    #   is on ``f_g`` alone — ``f_pos``/``f_neg`` are its image under :func:`_compose` and lie in [0,1] by
-    #   construction, so there is no independent clip on them left to break the simplex.
+    # ── the composition as the image of its two parameters ────────────────────────────────────────
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_pos, f_neg = _compose(f_g, w_pos, np.ones_like(active), np.ones_like(active))
-    f_pos = np.where(active, f_pos, 0.0)
-    f_neg = np.where(active, f_neg, 0.0)
-    var_g = np.where(active, var_g, 0.0)
-    var_pos = np.where(active, var_pos, 0.0)
-    var_neg = np.where(active, var_neg, 0.0)
+    f_pos, f_neg = _compose(f_g, w_pos, ap, an)
     return RegionDeconv(
         gdna_frac=f_g,
-        rna_pos_frac=f_pos,
-        rna_neg_frac=f_neg,
-        gdna_frac_var=var_g,
-        rna_pos_frac_var=var_pos,
-        rna_neg_frac_var=var_neg,
+        rna_pos_frac=np.where(active, f_pos, 0.0),
+        rna_neg_frac=np.where(active, f_neg, 0.0),
+        gdna_frac_var=np.where(active, var_g, 0.0),
     )
 
 
@@ -810,11 +660,10 @@ def _solve_regions_logodds_all(
     fneg_ref=None,
     cube_rows=None,
 ) -> RegionDeconv:
-    """The full per-region log-odds dispatcher: routes single-strand regions to the 1-D ``λ`` solve
-    (:func:`_solve_regions_logodds`) and AMBIG regions to the 2-D ``(λ, θ)`` solve
-    (:func:`_solve_ambig_logodds`), scattering both into full-length arrays. Structurally pure-gDNA and
-    zero-mass regions report 0, and ``sweep.solve_chain`` keeps their signature-binary init through the
-    ``solvable`` write-back.
+    """The per-region dispatcher: runs :func:`_solve_logodds` on the single-strand regions (the fine
+    ``λ`` grid, a one-cell tilt) and on the AMBIG regions (the coarse ``λ`` grid, the θ grid), scattering
+    both into full-length arrays. Structurally pure-gDNA and zero-mass regions report 0, and
+    ``sweep.solve_chain`` keeps their signature-binary init through the ``solvable`` write-back.
 
     All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
     ``lam_logprior`` is ``(m, K)``. Each is sub-indexed per class.
@@ -837,7 +686,7 @@ def _solve_regions_logodds_all(
         fg_ref = np.asarray(fg_ref, np.float64)
         fpos_ref = np.asarray(fpos_ref, np.float64)
         fneg_ref = np.asarray(fneg_ref, np.float64)
-    out = {k: np.zeros(m, dtype=np.float64) for k in ("fg", "fp", "fn", "vg", "vp", "vn")}
+    out = {k: np.zeros(m, dtype=np.float64) for k in ("fg", "fp", "fn", "vg")}
     # Skip EMPTY regions — no per-strand counts AND no unspliced/spliced mass. Both per-class solvers zero
     # every output for an inactive region (gdna/rna_mass = f_g·M = (1−f_g)·M + S = 0 when all are 0), so an
     # empty region's solve is identical to the zero-initialized `out` — skipping is BIT-IDENTICAL. At genome
@@ -863,8 +712,6 @@ def _solve_regions_logodds_all(
         out["fp"][msk] = dc.rna_pos_frac
         out["fn"][msk] = dc.rna_neg_frac
         out["vg"][msk] = dc.gdna_frac_var
-        out["vp"][msk] = dc.rna_pos_frac_var
-        out["vn"][msk] = dc.rna_neg_frac_var
 
     if bool(ss.any()):
         # Single-strand regions solve on the fine 1-D grid (`n_grid_ss`), and the coarse-grid global prior
@@ -879,7 +726,7 @@ def _solve_regions_logodds_all(
             bidx = ss_idx[s0 : s0 + rows]
             _scatter(
                 bidx,
-                _solve_regions_logodds(
+                _solve_logodds(
                     u_pos[bidx],
                     u_neg[bidx],
                     allow_pos[bidx],
@@ -892,6 +739,7 @@ def _solve_regions_logodds_all(
                     od_r=od_r,
                     n_grid=k_ss,
                     L=L,
+                    n_tilt=1,
                     priors=(priors or _NO_PRIORS).select(bidx).regrid(n_grid, k_ss, L),
                     lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
                 ),
@@ -901,7 +749,7 @@ def _solve_regions_logodds_all(
         # O(m·K²). AMBIG regions solve independently, so the subset is tiled into row blocks —
         # bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
         amb_idx = np.where(amb)[0]
-        rows = _block_rows(int(n_grid) * (int(n_tilt) if n_tilt else int(n_grid)), 4)
+        rows = _block_rows(int(n_grid) * (int(n_tilt) if n_tilt else int(n_grid)), 8)
         Kt = int(n_tilt) if n_tilt else int(n_grid)
         for s0 in range(0, amb_idx.size, rows):
             bidx = amb_idx[s0 : s0 + rows]
@@ -918,9 +766,11 @@ def _solve_regions_logodds_all(
                         cube[j] = row
             _scatter(
                 bidx,
-                _solve_ambig_logodds(
+                _solve_logodds(
                     u_pos[bidx],
                     u_neg[bidx],
+                    allow_pos[bidx],
+                    allow_neg[bidx],
                     fg_ref[bidx],
                     fpos_ref[bidx],
                     fneg_ref[bidx],
@@ -929,7 +779,7 @@ def _solve_regions_logodds_all(
                     od_r=od_r,
                     n_grid=n_grid,
                     L=L,
-                    n_tilt=n_tilt,
+                    n_tilt=Kt,
                     priors=(priors or _NO_PRIORS).select(bidx),
                     lam_logprior=_s(lam_logprior, bidx),
                     cube=cube,
@@ -940,6 +790,4 @@ def _solve_regions_logodds_all(
         rna_pos_frac=out["fp"],
         rna_neg_frac=out["fn"],
         gdna_frac_var=out["vg"],
-        rna_pos_frac_var=out["vp"],
-        rna_neg_frac_var=out["vn"],
     )

@@ -163,7 +163,31 @@ that build or inspect `Message` objects (`test_sweep_backbone`'s echo policies, 
 the suite, the block-invariance and cache gates; break-the-code cycles on `has_neighbour` (an open side
 read as silence) and `has_composition` (a level read as a composition).
 
-### C. The tolerance gate — before any compiled code exists
+### THE PRE-PORT WORKLIST (owner, 2026-09-12) — the code becomes pristine in Python before any port
+
+Ruled 2026-09-12: bit-identity is no longer the bar for the remaining Python work — the owner is not
+concerned with minuscule changes; the bar is elegant, simple, efficient, clear, concise, maintainable code,
+judged on the oracle metric (`calibration_vs_oracle.py`, per stratum, both zero controls), the panel
+(`policy_benchmark.py --panel test|ladder`), the suite, and timing on back-to-back pairs. Every item below
+precedes F (the port). Status is kept HERE; tick an item by writing DONE and the date beside it.
+
+| # | item | what | judged by |
+|---|---|---|---|
+| W1 | **C, shrunk to the report** — DONE 2026-09-12 (`EQUATIONS.md` §9d holds the derivation; the report reads zero moved on the current tree) | `sweep_replay.py replay --tolerance` prints per output array the slots moved, max abs Δ, max relative Δ, beside the bit verdict; the derived budget (½·ε·T·c_κ·N on fractions, L̃² of it on log-variances; §C) printed as a sanity bound; no frozen-array companions, no verdict on the transcript table | the report on the current tree reads zero moved; `--self-test` |
+| W2 | **One ψ solver, one precision** — DONE 2026-09-12 (`_solve_logodds`; the unread strand log-variances deleted with it; metric and panels identical to the printed precision; timing pair in DESIGN §6b.15) | a single-strand slot is the cube with a tilt grid of one cell, so `_solve_regions_logodds` and `_solve_ambig_logodds` become one solver with `K_t` a parameter, in float64 throughout (the float32 cube was a memory choice the tiling made moot); `f32-strand-tilt-at-half` closes with it; the cache stores what the solve produces | the oracle metric and the panel, W1's report on the replay captures, timing pairs, the vertex-reference and strand-reference gates |
+| W3 | **`calibrate.calibrate` as named stages** | the 600-line function becomes the walk's rungs (init → strand → local → messages → refits → shipped) as functions with one job each; `_solve_block` (319) and `solve_chain` (158) likewise | `rename_identity.py --check` where a step is a pure restructure; the metric otherwise |
+| W4 | **Memory (D)** | `build_region_geometry`'s 14.5 GB transient; `init_beliefs` per block, which frees the ψ tiling for every caller (A.4); the factory rows built per block | `profiler.py` peak and held per stage, pairs |
+| W5 | **One grid?** | with one solver and tiled memory, does one λ grid serve both classes, deleting the per-tile regrid of the priors? The refit grid (`sweep_n_grid_single_strand`) is an accuracy ruling, so this is an A/B | the oracle metric per stratum |
+| W6 | **The tunables census** | `CalibrationConfig`'s 49 fields: live / derived / dead, each derivation named; anything unearned removed | `module_census.py`, the suite |
+| W7 | **The capture as a typed record** | the 25-key `_capture` dict (75 keyword lines in `_solve_block`) | the instruments that read it (`landscape_training_census.py`, `backbone_parity.py`, the walk) |
+| W8 | **Vocabulary rulings** | `ISSUES: rename-the-drain`, `ISSUES: rename-row-and-face`; the `hygiene-ledger` items | `rename_census.py --sense`, `rename_identity.py --check` |
+| W9 | **The two xfails** | `ISSUES: two-sided-exon-row` (priority now; the fix is the landscape's enrichment witness) and the antisense prior-assembly casualty | each xfail's own test turning green structurally |
+
+Not on the list, and why: the arcsine coordinate (REFUSED with its numbers; logit is finer at the vertex);
+the vertex atom (a prior-family change whose whole ceiling is ≤ 1 % on stranded in-scope rows — see the
+plan's owner note of 2026-09-12 — parked with that number).
+
+### C. The tolerance gate — shrunk to W1 (owner, 2026-09-12); the derivation stands
 
 A language port cannot be bit-identical (libm and summation order), so the replay needs a second verdict
 beside BIT-IDENTICAL: `sweep_replay.py replay --tolerance`, reporting per output array the slots moved and
@@ -185,7 +209,7 @@ fix what is found; then the factory rows built per block from the substrate slic
 The cache trades ~280 s for 2.68 GB held. If a memory-constrained run should be able to turn it off, that
 is a `CalibrationConfig` tunable with no effect on results; it was not added unasked.
 
-### F. The port (③) — only when A–D are done and the design is agreed
+### F. The port (③) — only when the PRE-PORT WORKLIST is done and the design is agreed
 
 The unit is `sweep._solve_block`: one block's own claims, the policy's claims and rules (`Faces`, the lanes'
 tables, the row stores), the two passes writing `Received` tables, the solve, the write-back. Order inside

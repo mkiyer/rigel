@@ -746,6 +746,52 @@ on λ near the vertex, and nothing is lost there. `tau_lam` is the data's Fisher
 curvature is not the data's information (`TRAPS: a-priors-curvature-is-not-the-datas-information`), and
 feeding one in acts as a boolean gate that releases the whole count precision, at empty slots too.
 
+## 9d. sweep_replay: the tolerance budget — why the read-out cannot amplify a rounding error
+
+`scripts/profiling/sweep_replay.py --tolerance` reports, per output array, the slots moved, the largest
+absolute and relative move, and a budget beside them. The budget is derived, not chosen, and it has two
+halves.
+
+**The read-out is perfectly conditioned.** ψ's answer at a slot is a posterior mean over the grid,
+`f = Σ_k w_k σ_k` with `w_k ∝ exp(ψ_k − max ψ)`. Perturb cell k's log-density by `δ_k`; to first order
+`w_k` moves by the factor `(1 + δ_k)` and
+
+    δf = Σ_k w_k (σ_k − f) δ_k,   so   |δf| ≤ max_k |δ_k| · Σ_k w_k |σ_k − f| ≤ ½ · max_k |δ_k|,
+
+because σ lies in [0, 1] and a variable's mean absolute deviation about its mean is at most half its
+range. K does not appear: a max-normalised log-profile through exp and a normalised sum amplifies
+nothing, at any grid size. The log-variance read-out `Var(log f) = Σ w_k g_k² − (Σ w_k g_k)²` has the same
+form with `(g_k − ḡ)² − Var` in place of `σ_k − f`, bounded by the squared range of `g = log σ(λ)` on the
+window, `L̃² = log²(1 + e^L)`, so `|δ Var| ≤ L̃² · max_k |δ_k|`. The fraction is actually read as the
+posterior MEDIAN (§9a): a weight error of relative size `δ` shifts the CDF by at most `δ`, so the median
+moves by at most `δ` over the posterior density at the median — the mean's bound wherever the posterior
+is unimodal and its density there is not small. A balanced bimodal posterior has no such bound: its
+median jumps between the modes under any perturbation, and a slot the report flags beyond the budget is
+its way of pointing at one.
+
+**What an implementation perturbs.** Any implementation that keeps the solver's expressions and differs
+in libm and summation order rounds each of the `T` terms of a cell within one rounding unit `ε` of that
+term's magnitude, so `|δ_k| ≤ ε · Σ_terms |term_k| ≤ ε · T · A` with `A` the largest term magnitude a
+cell can carry. Two scales bound it. The strand Gaussian `−½ (u − n p)² / var` scales as
+`n / (2κ(1−κ)) = c_κ · n`, since `|u − n p| ≤ n` and its variance is at least `n κ(1−κ)` on the window;
+with strand overdispersion `od > 0` the variance grows as `n²·od`, which caps the term at `c_κ / od`
+however deep the slot, so on deep slots the count bound is loose by that factor — a bound, still. The
+fitted arms are kernel log-densities whose bandwidth is the grid step, so on a `K`-cell grid they are
+bounded by the kernel's range, `K²/2`. The rows are profiles of the same likelihoods, blurred, and carry
+neither scale beyond them. With `N` the largest slot count on the chain,
+
+    A = max(c_κ · N, K²/2),      B_f = ½ · ε · T · A,      B_var = L̃² · ε · T · A,
+
+with `T = 6` (the strand term, two arms, the factory rows, the message rows, the cube row) and `ε` the
+solve's rounding unit — float64's `2⁻⁵³`, or float32's `2⁻²⁴` on the AMBIG cube while it has one. The
+bound is loose by construction (a full cancellation at a high-weight cell is assumed), which is why the
+report always shows the actual move beside it. Achievable rounding lands orders inside it: float32
+rounding of every term and of the strand mean at disagreeing slots moves a fraction by 10⁻⁴–10⁻⁵ of the
+budget (the gate records the scale), because neighbouring cells' rounding errors are incoherent and the
+read-out averages them; the chunk-exact reordering of 2026-09-11 moved ≤ 3.1e-15 per slot — the
+read-out's own rounding, `K · ε`, with no term re-rounded. Gate: `tests/test_sweep_replay_tolerance.py`
+— the budget covers float32 rounding of the terms and of the strand mean at every strength.
+
 ## 10. The second pass's score
 
 `src/rigel/second_pass.py` (`combine_factors`, `choose_hypotheses`). `f(L)` here is the second pass's

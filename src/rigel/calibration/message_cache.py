@@ -34,11 +34,10 @@ class MessageCache:
 
     CONTENT-KEYED, so it is safe by construction rather than by trust: an entry's key is a digest of
     every input the layer reads, and a changed belief, row, count, library or grid misses. An entry
-    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the float32 the AMBIG
-    solve casts them to, the block's ``held_composition`` and its assertion counts (as a plain dict; the
-    backbone rebuilds its `AssertionCounts` from it). Measured on the
-    18.6M-fragment library: the refit sweeps served in 38 s instead of 176 s each, the run 0.65 of its
-    wall, 4.1 GB held with float64 cube rows. Diagnostics never read from it: a captured sweep runs the
+    holds the delivered rows sparsely (only the non-zero rows), the cube rows as the solve reads them,
+    the block's ``held_composition`` and its assertion counts (as a plain dict; the backbone rebuilds its
+    `AssertionCounts` from it). Measured on the 18.6M-fragment library: the refit sweeps served in 38 s
+    instead of 176 s each, the run 0.65 of its wall, 4.1 GB held with float64 cube rows. Diagnostics never read from it: a captured sweep runs the
     whole layer.
     """
 
@@ -84,13 +83,10 @@ class MessageCache:
             rows = np.asarray(rows)
             idx = np.flatnonzero(np.any(rows != 0.0, axis=1))
             sparse = (rows.shape, idx, rows[idx].copy())
-        # a cube row is held as float32, which is exactly what the AMBIG solve casts it to before
-        # adding it (`_solve_ambig_logodds`: ``psi += np.asarray(cube, F)``), so the bits ψ sees are
-        # the same and the cache's largest member is half the size
         cube = (
             None
             if msg.cube_rows is None
-            else {int(k): np.asarray(v, dtype=np.float32) for k, v in msg.cube_rows.items()}
+            else {int(k): np.asarray(v, dtype=np.float64) for k, v in msg.cube_rows.items()}
         )
         self._entries[key] = (
             sparse,

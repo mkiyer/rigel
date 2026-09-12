@@ -11,12 +11,12 @@ python scripts/design/preflight.py                 # ~2 s: can this session run?
 python -m pytest tests/ -q                         # CLAUDE.md's baseline line is the count to reproduce
 ```
 
-The bit-identity baseline is the chunk-exact tree: `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step2`
-(four captured sweeps; `sweep_replay.py replay --dir … --call 0..3`, `--block-slots N|none`) and the
-three references `~/Downloads/rigel_runs/arms/locus_identity_*.json` (`rename_identity.py --check`; the
+The bit-identity baseline is the one-solver tree (2026-09-12): `~/Downloads/rigel_runs/perf/sweeps_MO_3021_step3`
+(four captured sweeps; `sweep_replay.py replay --dir … --call 0..3 [--tolerance]`, `--block-slots N|none`) and
+the three references `~/Downloads/rigel_runs/arms/onesolver_identity_*.json` (`rename_identity.py --check`; the
 real BAMs are under `~/Downloads/rigel_runs/cfrna/mctp_<lib>_*/bam/star.srt.rmdup.collate.bam`). The
-older `sweeps_MO_3021`, `cleanup_identity_*` and `perf_identity_LBX0190.json` differ from the tree by the
-priced ≤ 1e-14 and are superseded.
+older `sweeps_MO_3021*`, `locus_identity_*`, `cleanup_identity_*` and `perf_identity_LBX0190.json` describe
+the two-solver code and are superseded.
 
 ## The first two tasks, in order (plan §3 A and B)
 
@@ -28,8 +28,8 @@ priced ≤ 1e-14 and are superseded.
    first, three break-the-code cycles fired their gates, bit-identical on the replay, the references and
    the suite. Next is plan §3 C, the tolerance gate, then D.
 
-Do not start the port. Steps C (the tolerance gate) and D (memory) come before it, and the port begins only
-when the owner is satisfied with the Python design and implementation.
+Do not start the port. The PRE-PORT WORKLIST (plan, the section before C) comes first, W1 → W9, status kept
+there; the port begins only when the owner is satisfied with the Python design and implementation.
 
 ## Decisions on record
 

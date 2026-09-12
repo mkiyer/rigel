@@ -273,7 +273,7 @@ def solve_chain(
 
     out = {
         k: np.asarray(getattr(belief, k), dtype=np.float64).copy()
-        for k in ("f_pos", "f_neg", "f_g", "var_pos", "var_neg", "var_gdna")
+        for k in ("f_pos", "f_neg", "f_g", "var_gdna")
     }
     has_composition = np.zeros(n, dtype=bool)
     counts = AssertionCounts()
@@ -378,8 +378,6 @@ def _solve_block(
     f_pos = np.asarray(belief.f_pos, dtype=np.float64).copy()
     f_neg = np.asarray(belief.f_neg, dtype=np.float64).copy()
     f_g = np.asarray(belief.f_g, dtype=np.float64).copy()
-    var_pos = np.asarray(belief.var_pos, dtype=np.float64).copy()
-    var_neg = np.asarray(belief.var_neg, dtype=np.float64).copy()
     var_g = np.asarray(belief.var_gdna, dtype=np.float64).copy()
     # the INCOMING belief, kept for the diagnostic capture: it is the ``fg_ref`` the final solve freezes
     # its variance at, so a channel-ablation replay must pass the SAME reference to be faithful.
@@ -543,13 +541,11 @@ def _solve_block(
     # not extend the skip to UNIDENTIFIED slots and defer them to the prior: that arm is refuted, because
     # the prior resolves an imperfectly-solved slot better than a deferred ``f_g = 1``.
     mg_, mp_, mn_ = dc_fin.gdna_frac, dc_fin.rna_pos_frac, dc_fin.rna_neg_frac
-    vg_, vp_, vn_ = dc_fin.gdna_frac_var, dc_fin.rna_pos_frac_var, dc_fin.rna_neg_frac_var
+    vg_ = dc_fin.gdna_frac_var
     out_fg = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
     out_fpos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
     out_fneg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)
     out_vg = np.where(solvable, vg_, var_g)
-    out_vpos = np.where(solvable, vp_, var_pos)
-    out_vneg = np.where(solvable, vn_, var_neg)
     # ── the write-back touched ONLY solvable slots ───────────────────────────────────────────────────
     # ⛔ Without this the mask is invisible to a replay, which then compares the solve's raw output
     # against the shipped belief and reads the mask as a difference (TRAPS: byte-identity-gate).
@@ -568,7 +564,7 @@ def _solve_block(
         untouched,
     )
     f_g, f_pos, f_neg = out_fg, out_fpos, out_fneg
-    var_g, var_pos, var_neg = out_vg, out_vpos, out_vneg
+    var_g = out_vg
 
     # ── ``has_composition`` — does this slot hold a COMPOSITION, or only a bound? ─────────────────
     # An own composition channel (the solver's own precision), structural certainty, or a
@@ -614,7 +610,6 @@ def _solve_block(
             fp_loc=own.f_pos,
             fn_loc=own.f_neg,
             vg_loc=_dc_loc.gdna_frac_var,
-            vp_loc=_dc_loc.rna_pos_frac_var,
             f_g=f_g.copy(),
             f_pos=f_pos.copy(),
             f_neg=f_neg.copy(),
@@ -651,9 +646,7 @@ def _solve_block(
         )
 
     return dict(
-        belief=dict(
-            f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_pos, var_neg=var_neg, var_gdna=var_g
-        ),
+        belief=dict(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g),
         has_composition=has_composition,
         counts=counts,
         diagnostics=_capture,

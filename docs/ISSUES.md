@@ -265,12 +265,6 @@ Does any in-scope verdict depend on the nascent stress level? The ladder runs `o
 rank moves; a verdict that holds only at stress is a robustness finding. `sim/panel.py`,
 `policy_benchmark.py`.
 
-### f32-strand-tilt-at-half
-`priority: later · kind: defect · 2026-08`
-At κ = ½ the strand mean is ½ identically, but the AMBIG cube sums in float32 and departs τ-dependently
-(float64 on the strand term alone returns `w_pos → 0.500000000`). Negligible at panel scale; repair the strand
-term inside `_solve_ambig_logodds`, not the cube's f32 storage. No instrument yet.
-
 ### hygiene-ledger
 `priority: later · kind: hygiene · 2026-08-31`
 Each its own commit, none moving the 0.8.0 metric:
@@ -330,6 +324,11 @@ averaging; the fl-gap panels are not a drop-in (`ISSUES: flgap-panels-stale-nasc
 ---
 
 ## CLOSED / REFUSED — do not rebuild these; append-only
+
+### f32-strand-tilt-at-half
+CLOSED by landing 2026-09-12: the AMBIG cube is float64 like the rest of ψ — the float32 cube was a memory
+choice the tiling made moot, and one solver (`simplex_logodds._solve_logodds`, a single-strand slot the
+``K_t = 1`` case) has one precision. At κ = ½ the strand mean is ½ identically in float64 and `w_pos` reads ½.
 
 Every entry keeps its stamped measurement exactly as recorded: a graveyard row without its number is an
 invitation to rebuild. A row measured on "all 36 conditions" or quoting `g01`/`g10`/`g25`/`g75`/`g90` predates

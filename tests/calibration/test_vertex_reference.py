@@ -120,26 +120,26 @@ def test_G2_psi_slope_in_the_vertex_tail_is_exactly_minus_the_reference_exponent
     the far tail (κ=½ ⇒ bit-flat strand; the message's gradient decays as ``e^{−2λ}``), so ``dψ/dλ``
     must equal ``−_JEFFREYS_REF``. The whole mechanism in one number.
 
-    ``_local_loglik_logodds`` is CALLED, not reimplemented, so this cannot drift from what the solver
+    ``_psi`` is CALLED, not reimplemented, so this cannot drift from what the solver
     computes (TRAPS: self-checking-validator)."""
     lam, fg = _logodds_grid(1024, 10.0)
     u_pos, u_neg, ap, an, _mu, _ms = _regions(1)
-    psi = SL._local_loglik_logodds(
+    psi, _fp, _fn, _tau = SL._psi(
         u_pos,
         u_neg,
         ap,
         an,
-        0.5,
-        0.0,
-        0.0,
-        lam,
-        fg,
         np.full(1, 0.5),
         np.full(1, 0.5),
         np.zeros(1),
+        kappa=0.5,
+        od_g=0.0,
+        od_r=0.0,
+        lam=lam,
+        fg=fg,
         lam_logprior=(-0.5 * 1e3 * SL._log_fg(lam) ** 2)[None, :],
     )
-    p = psi[0]
+    p = psi[0, :, 0]
     lo, hi = int(0.90 * lam.size), lam.size - 1
     slope = (p[hi] - p[lo]) / (lam[hi] - lam[lo])
     assert abs(slope + SL._JEFFREYS_REF) < 5e-3, (slope, -SL._JEFFREYS_REF)
@@ -362,7 +362,7 @@ def test_the_old_read_out_did_not_close_and_the_gap_was_the_skew():
     The posterior mean is recoverable from the shipped output without re-solving: the RNA total is
     ``1 − f_g``, so the three-read-out RNA total is ``1 − E[f_g]`` in its place."""
     from rigel.calibration.simplex_logodds import (
-        _local_loglik_logodds,
+        _psi,
         _logodds_grid,
         _lse,
         _posterior_median_fg,
@@ -370,20 +370,20 @@ def test_the_old_read_out_did_not_close_and_the_gap_was_the_skew():
 
     lam, fg = _logodds_grid(60, _L)
     u_pos, u_neg = np.array([27.0, 9.0, 3.0]), np.array([3.0, 1.0, 0.0])
-    psi = _local_loglik_logodds(
+    psi = _psi(
         u_pos,
         u_neg,
         np.array([True, True, True]),
         np.array([False, False, False]),
-        0.99,
-        0.0,
-        0.0,
-        lam,
-        fg,
         np.full(3, 0.5),
         np.full(3, 0.5),
         np.zeros(3),
-    )
+        kappa=0.99,
+        od_g=0.0,
+        od_r=0.0,
+        lam=lam,
+        fg=fg,
+    )[0][:, :, 0]
     post = np.exp(psi - _lse(psi, axis=1, keepdims=True))
     median = _posterior_median_fg(post, lam, fg)
     mean = np.sum(post * fg[None, :], axis=1)

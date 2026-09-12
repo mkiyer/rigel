@@ -1111,8 +1111,8 @@ the 876k library, against a dense 2 GB); a refit sweep pays its two ψ solves an
 Diagnostics never read from it. Pass 0's grid is never reused, so it is not held. On the 18.6M-fragment
 library the refit grid is stable (`n_grid` 138 for all three refits), refits 2 and 3 are served entirely
 (38 s each against 176 s), the run reads 0.65 of its wall in two back-to-back pairs, and the cache holds
-2.68 GB (peak 15.0 → 17.8 GB) — the cube rows as the float32 the AMBIG solve casts them to; 4.1 GB as
-float64.
+2.68 GB (peak 15.0 → 17.8 GB) with float32 cube rows; 4.1 GB as float64, the shipped form since the one-solver
+landing of 2026-09-12 made the whole of ψ float64.
 
 **The rules are typed tables, and a face is a side** (2026-09-11, the port's data layout). Every
 directed face is one of a node's two sides — it hears from its left neighbour or its right — so the
@@ -1130,6 +1130,24 @@ replaces an earlier one" precedence had no instance on the toy or the human chai
 assumption, not a rule. The level lanes hold their faces as ``(n, 2)`` bits and their junction flux as
 a row table. The 1.2M closures, the 4.6M-tuple face sets and the neighbour-pair enumeration are gone,
 bit-identically; `_SolveSite` needs no neighbour arrays. A compiled pass reads these buffers directly.
+
+**One ψ solver, in float64 (2026-09-12; owner: elegance is the bar, bit-identity no longer).** A
+single-strand slot is the cube with a tilt grid of one cell — its tilt is its live strand, `τ = ±1` — so
+`simplex_logodds._solve_logodds` serves both classes, ψ built once by `_psi` on the `(m, K, K_t)` cube and
+read out once: `f_g` the posterior median over the θ-marginal, `Var(log f_g)` its grid moment, the tilt
+share `w_pos` the RNA-mass-weighted posterior share, the composition their image under `_compose`. The
+float32 cube was a memory choice the tiling made moot and is gone (`ISSUES: f32-strand-tilt-at-half`
+closed with it); the cache holds float64 rows (+1.4 GB on the deep library, plan step E's switch). The
+two strand log-variances `Var(log f_±)` are DELETED: nothing downstream read them (`var_gdna` alone feeds
+the landscape's training weight), and computing them at every slot was the whole cost of the unified
+read-out; with them went the pseudo-fragment floor they were the only consumer of. Judged: the oracle
+metric and both panels identical to the printed precision (the metric moves at the ninth significant
+digit); the replay's tolerance report shows the AMBIG slots' fractions moving by ≤ 2e-7 (float32 → 64) and
+neighbouring single-strand slots by less, through the messages; the suite; and timing on a back-to-back
+pair on the deep library — wall 518 → 524 s (1.01), the ψ solves inside the sweep 0.94, untouched stages
+1.00, peak 18.1 → 19.5 GB (the cache's float64 rows). The replay's captures and the identity references
+were re-taken from this tree (`sweeps_MO_3021_step3`, `onesolver_identity_*`): the earlier ones describe
+the two-solver code and unpickle against the belief's retired fields.
 
 **The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the
 suite).** After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the

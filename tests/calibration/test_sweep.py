@@ -70,13 +70,13 @@ def test_init_zero_gdna_introns_via_strand():
     fg = b.f_g[rid]
     # intergenic: locked gDNA sink {0,0,1}, all precision locked (var 0).
     assert fg[0] == 1.0
-    assert b.var_gdna[0] == 0.0 and b.var_pos[0] == 0.0 and b.var_neg[0] == 0.0
-    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; the − axis is locked (var 0), + & g finite.
+    assert b.var_gdna[0] == 0.0
+    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; g finite.
     assert fg[1] < 0.15
-    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_gdna[2]) and np.isfinite(b.var_pos[2])
+    assert np.isfinite(b.var_gdna[2])
     # AMBIG: unresolved by strand → {0,0,1} default at MAX (inf) variance for the sweep to resolve.
     assert fg[2] == 1.0
-    assert np.isinf(b.var_gdna[4]) and np.isinf(b.var_pos[4]) and np.isinf(b.var_neg[4])
+    assert np.isinf(b.var_gdna[4])
 
 
 def test_init_boundary_continuity_gate():
@@ -95,9 +95,9 @@ def test_init_boundary_continuity_gate():
     )
     b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slots: N0=0, E0=1, N1=2.
-    # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked (var 0).
+    # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0.
     assert b.f_g[1] < 0.15
-    assert b.var_neg[1] == 0.0 and np.isfinite(b.var_gdna[1])
+    assert np.isfinite(b.var_gdna[1])
 
 
 def test_init_tss_boundary_is_black_hole():
@@ -113,7 +113,7 @@ def test_init_tss_boundary_is_black_hole():
     )
     b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slot 1 is the TSS boundary: a locked gDNA sink despite the sense tilt (all precision locked at 0).
-    assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
+    assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0
 
 
 def test_precision_state_count_resolution():
@@ -153,10 +153,9 @@ def test_precision_state_count_resolution():
     assert d.gdna_frac[0] > 0.85 and d.gdna_frac[1] > 0.85  # both gDNA-dominant
     assert d.gdna_frac[1] >= d.gdna_frac[0]  # more count ⇒ nearer the mode
     assert d.gdna_frac_var[1] < d.gdna_frac_var[0]  # more fragments ⇒ sharper
-    # all per-component variances are present, finite, non-negative for active regions.
-    for v in (d.gdna_frac_var, d.rna_pos_frac_var, d.rna_neg_frac_var):
-        assert np.all(np.isfinite(v)) and np.all(v >= 0.0)
-    # a no-fragment region is inactive ⇒ zero variance on every component.
+    # the variance is present, finite, non-negative for active regions.
+    assert np.all(np.isfinite(d.gdna_frac_var)) and np.all(d.gdna_frac_var >= 0.0)
+    # a no-fragment region is inactive ⇒ zero variance.
     d0 = _solve_regions_logodds_all(
         np.array([0.0]),
         np.array([0.0]),
@@ -169,7 +168,7 @@ def test_precision_state_count_resolution():
         od_r=0.1,
         n_grid=60,
     )
-    assert d0.gdna_frac_var[0] == 0.0 and d0.rna_pos_frac_var[0] == 0.0
+    assert d0.gdna_frac_var[0] == 0.0
 
 
 def _factor1_uniform_rho():
@@ -640,13 +639,8 @@ def test_sweep_finite_over_extreme_configs():
                     v = np.asarray(getattr(final, nm))
                     assert np.all(np.isfinite(v)), (cfg, nm, v)
                     assert np.all(v >= -1e-9) and np.all(v <= 1.0 + 1e-9), (cfg, nm, v)
-                for nm in ("var_gdna", "var_pos", "var_neg"):
-                    v = np.asarray(getattr(final, nm))
-                    assert not np.any(np.isnan(v)) and np.all(v >= -1e-12), (
-                        cfg,
-                        nm,
-                        v,
-                    )  # ∞ ok, nan not
+                v = np.asarray(final.var_gdna)
+                assert not np.any(np.isnan(v)) and np.all(v >= -1e-12), (cfg, v)  # ∞ ok, nan not
 
 
 def test_region_sweep_deterministic():
@@ -656,35 +650,9 @@ def test_region_sweep_deterministic():
     ordering nondeterminism."""
     a, capa = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
     b, capb = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
-    for nm in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg"):
+    for nm in ("f_g", "f_pos", "f_neg", "var_gdna"):
         x, y = np.asarray(getattr(a, nm)), np.asarray(getattr(b, nm))
         assert np.array_equal(x, y, equal_nan=True), (nm, x, y)  # BIT-identical (not just close)
-
-
-def test_float32_log_is_monotone_so_the_ambig_cube_may_hoist_it():
-    """`_solve_ambig_logodds` computes `log f_pos` as `max(log f_grid, log floor)` rather than
-    `log(max(f_grid, floor))` — the log on the (K,K_t) GRID instead of the (m,K,K_t) cube, ~140x fewer
-    transcendentals for the same bits.
-
-    That rewrite is exact iff numpy's float32 `log` is monotone on [0,1], the whole domain both
-    arguments live in (a fraction, and `1/(n+1)`). Monotonicity holds over every float32 there, and
-    this pins it against a numpy or platform change with a dense consecutive-value sweep per
-    exponent band, plus the identity itself over the shape the solver actually forms."""
-    with np.errstate(divide="ignore"):
-        for e in range(-40, 1):  # one dense run of consecutive float32s per exponent band in [0,1]
-            lo = np.float32(2.0**e).view(np.uint32)
-            x = np.arange(lo, lo + 200_000, dtype=np.uint32).view(np.float32)
-            assert (np.diff(np.log(x)) >= 0.0).all(), e
-
-        rng = np.random.default_rng(4)
-        grid = rng.random((60, 60)).astype(np.float32)  # the (K,K_t) fraction grid
-        grid[rng.random(grid.shape) < 0.05] = 0.0  # the tau = +-1 boundaries: f_s exactly 0
-        floor = (1.0 / (1.0 + np.exp(rng.uniform(0.0, 14.0, 500)))).astype(np.float32)[
-            :, None, None
-        ]
-        direct = np.log(np.maximum(grid[None, :, :], floor))
-        hoisted = np.maximum(np.log(grid)[None, :, :], np.log(floor))
-    assert np.array_equal(direct.view(np.int32), hoisted.view(np.int32))
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -733,14 +701,7 @@ def _solve_in_chunks(args, kw, edges):
     block solve's arithmetic, with nothing but the row tiling changed."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
-    fields = (
-        "gdna_frac",
-        "rna_pos_frac",
-        "rna_neg_frac",
-        "gdna_frac_var",
-        "rna_pos_frac_var",
-        "rna_neg_frac_var",
-    )
+    fields = ("gdna_frac", "rna_pos_frac", "rna_neg_frac", "gdna_frac_var")
     m = args[0].shape[0]
     out = {f: np.zeros(m) for f in fields}
     for a, b in edges:

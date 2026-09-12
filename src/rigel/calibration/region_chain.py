@@ -105,7 +105,7 @@ class RegionDeconv:
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
     # per-component posterior variances in LOG-FRACTION space — `Var(log f_c)`, NOT `Var(f_c)`. They are
-    # grid moments of `log f_c` over the lambda lattice (`simplex_logodds._solve_regions_logodds`), because
+    # grid moments of `log f_c` over the lambda lattice (`simplex_logodds._solve_logodds`), because
     # the message currency is a log-density and the send precision is log-space throughout. They are
     # therefore NOT bounded by 1/4 and routinely exceed it — a consumer that needs the LINEAR `Var(f_c)`
     # must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does when it
@@ -116,8 +116,6 @@ class RegionDeconv:
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_g)
-    rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_pos)
-    rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
 def build_region_chain(

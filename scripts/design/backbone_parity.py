@@ -213,7 +213,7 @@ def main() -> int:
     new, cap_new = run(SW.solve_chain, policy=pb)
 
     rows, tot_el, tot_diff = [], 0, 0
-    for f in ("f_pos", "f_neg", "f_g", "var_pos", "var_neg", "var_gdna"):
+    for f in ("f_pos", "f_neg", "f_g", "var_gdna"):
         el, nd, d = _cmp(getattr(old, f), getattr(new, f), f"belief.{f}")
         rows.append((f"belief.{f}", el, nd, d))
         tot_el += el
