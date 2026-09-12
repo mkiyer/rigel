@@ -721,7 +721,7 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
 | `messages/lanes.py` | `LevelLane` — one class for the three populations' levels — and its two builders, `gdna_lane` (every face left without a composition rule) and `rna_lanes` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |
 | `messages/transfer_rows.py` | the pure row constructors — every map, level, price and coordinate change, each a function of one face's numbers | `count_logvar` is the one home of the counting term; every hop price reads it |
-| `messages/__init__.py` | the interface (`Policy`, `Prepared`), the message (`Message`, its lanes, `SILENCE`, `NO_NEIGHBOUR`), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
+| `messages/__init__.py` | the interface (`Policy`, `Prepared`), what every node received from one side as a table (`Received`: `has_neighbour`, `has_composition`, the composition rows, three `Levels` lanes; SILENCE and NO NEIGHBOUR are its two states `silence` / `no_neighbour`, not objects), what ψ receives (`PsiMessage`) and what a policy may read (`BlockContext`) | every field of `BlockContext` has a reader in the policy or the backbone |
 
 **A restructure is gated, a rewrite is not.** The split out of the one 1,635-line function passed two
 `TRAPS: byte-identity-gate` gates of opposite direction and, per array on one real 70,176-slot chain
@@ -731,9 +731,10 @@ a clean rebuild — came out +103 %; a refactor gated on byte-identity has exact
 #### The interface, and its one contract
 
 ```python
-prepared = policy.prepare(ctx)                     # one working object per sweep: every node's OWN claim
-receive  = prepared.propagate(backward=False)      # phase 1: the recipient's kernel, or None ⇒ all SILENCE
-held[i]  = receive(source, destination)            # ... the BACKBONE runs the pass, in chain order
+prepared = policy.prepare(ctx, library)            # one working object per block: every node's OWN claim
+receive  = prepared.propagate(received, backward=False)  # phase 1: the recipient's kernel, writing rows of
+                                                   #   the pass's `Received` table, or None ⇒ all silence
+receive(source, destination)                       # ... the BACKBONE owns the table and runs the pass
 evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
 ```
 
@@ -943,8 +944,10 @@ message, so the solve can tell silence from ignorance and every node is solved f
 backward pass; at each hop the RECIPIENT receives what its neighbour sends (the sender's own claim
 composed with what the sender holds from its far side), decides to STOP, FORWARD or MODIFY it, and holds
 the result; beliefs do not change; when both passes end every node holds one message from each
-neighbour it has, `SILENCE` being a message and a missing neighbour (`NO_NEIGHBOUR`) not one. `solve` —
-every node once, from its own evidence, the two held messages and the gDNA hyperprior. The names are
+neighbour it has — silence being a neighbour with nothing present and a missing neighbour no hop at all,
+the two states the `Received` table expresses (2026-09-12: what a node holds is a ROW of the pass's
+table, never an object). `solve` — every node once, from its own evidence, the two tables and the gDNA
+hyperprior. The names are
 `prepare / propagate(backward) → receive(source, destination) / solve(from_left, from_right)`; the
 per-sweep object is `Prepared`. Measured before the ruling: the formal form with the same messages won
 both halves of the ladder against the one-hop form, 7/8 and 7/8 (`policy_prototype.py`).
@@ -999,7 +1002,7 @@ travel TOGETHER in one message (components only where measured, empties forwarde
 joins as an RNA source; ONE representation everywhere — profiles on the solve grid, no Gaussian summary
 anywhere in the transfer policy; the bar is about one percent of a row.
 
-* **The lanes.** `Message.level_rna_pos` / `level_rna_neg`: a strand's level as a profile over
+* **The lanes.** `Received.level_rna_pos` / `level_rna_neg` (`Levels`): a strand's level as a profile over
   `u_s = log(ρ_s / ρ_ref,s)` (`ρ_ref,s` the library's strand-`s` unspliced density over its
   single-strand exons — a coordinate). Faces from the flag bits, per strand: strand `s`'s level crosses a
   face iff the boundary carries none of `s`'s four bits and both nodes admit `s`; across `s`'s own
@@ -1128,6 +1131,19 @@ assumption, not a rule. The level lanes hold their faces as ``(n, 2)`` bits and 
 a row table. The 1.2M closures, the 4.6M-tuple face sets and the neighbour-pair enumeration are gone,
 bit-identically; `_SolveSite` needs no neighbour arrays. A compiled pass reads these buffers directly.
 
+**The received messages are tables (2026-09-12, bit-identical on the replay, the three references and the
+suite).** After a pass every node holds a ROW of the pass's `Received` table — `has_neighbour` (the
+backbone's), `has_composition` and the composition row, and three `Levels` lanes (`present`, the profile,
+the count and opportunity of the last full node, the RNA witness where `has_witness`) — never an object;
+`Message` and `Level` are gone, and SILENCE / NO NEIGHBOUR are the table's two states (`silence`,
+`no_neighbour`). The kernel `receive(source, destination)` reads its far side from row `source` of the same
+table and writes row `destination`; the policy keeps no copy; a lane's `emit` writes the destination's row
+and its `receive` re-prices it in place. The transfer solve fuses the two composition tables as array code in
+the same addition order (left, right, then the gDNA bound); the ceilings and the cube keep their per-node
+loops. Gates: `has_neighbour` equals the chain's links (a pass marking every side fires it); a level never
+sets `has_composition` (the training-population gates fire on the backbone, and a composition arrives only
+through a face with a composition rule — `test_transfer_policy` — fires on the kernel).
+
 **Threads are the wrong tool for this sweep, and the executor waits for the port.** Measured on the real
 sweep: the locus-split passes at 8 threads 0.83–0.94× (GIL-bound Python), ψ's grid solves 2.06×, the same
 passes in 8 forked processes 6.16×. The owner's decision: no parallelism until the C/C++ port of the block
@@ -1166,7 +1182,7 @@ and the mechanism is the EMPTY node: 52 % of the ladder's exon pieces have no to
 a fragment, or a dark piece), every rule's licence asks its flank for a total, so the boundaries on both
 sides of such a piece heard nothing. The ruling that closes it:
 
-* **A level is absolute.** `Message.level_gdna` is a PROFILE over `u = log(rho / rho_ref)` on the solve
+* **A level is absolute.** `Received.level_gdna` holds a PROFILE over `u = log(rho / rho_ref)` on the solve
   grid (`rho_ref` the library's structurally pure gDNA density, a coordinate choice); it needs no map and
   no knowledge of its recipient, which is what lets it cross a node with no total, and it is a profile
   because what travels on it is one-sided. A node's own composition profile becomes a level through its
@@ -1217,7 +1233,8 @@ their numbers `ISSUES: the-landscape-training-population-arms`; the instrument
 1. **A node whose only evidence is a bound, or which has none, does not train the prior.**
    `RegionBelief.has_composition` — an own composition channel (`has_own_composition_evidence`), structural
    certainty (`g1_locked`), or a COMPOSITION row received from a neighbour — is published by
-   `sweep.solve_chain` from the held messages and selected on by `calibrate._fit_gdna_hyperprior`; a level
+   `sweep.solve_chain` from the two received tables (`has_composition` on either side) and selected on by
+   `calibrate._fit_gdna_hyperprior`; a level
    lane, a ceiling and a cube row are bounds; the zero-count anchor trains regardless. ⛔ "Any non-flat
    λ-row" is NOT the predicate: `PsiMessage.lam_rows` fuses compositions and bounds (1,476 own-flux
    ceilings at the unstranded zero control; 137k against 111k).

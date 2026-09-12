@@ -15,6 +15,7 @@ import dataclasses
 
 import numpy as np
 
+from .messages import Received
 from .region_chain import REGION, RegionChain
 from .simplex_logodds import CompositionPriors
 
@@ -71,7 +72,7 @@ def block_slice(obj, sl: slice):
 def gather(diagnostics: list, n: int) -> dict:
     """The blocks' diagnostic captures as the chain's: per-slot arrays concatenated over each block's
     OWNED slots, ψ's prior arms likewise, the delivered rows zero-filled where a block delivered
-    nothing (``None`` only when no block delivered), the held messages and cube rows re-keyed to the
+    nothing (``None`` only when no block delivered), the two tables and the cube rows re-keyed to the
     chain; the scalars and grids, identical in every block, taken once."""
     if not diagnostics:
         return {}
@@ -81,10 +82,7 @@ def gather(diagnostics: list, n: int) -> dict:
         vals = [(b, c[key]) for b, c in diagnostics]
         owned = [(b.stop - b.start, v) for b, v in vals]
         if key in ("from_left", "from_right"):
-            held: list = [None] * n
-            for b, v in vals:
-                held[b.start : b.stop] = v[: b.stop - b.start]
-            out[key] = held
+            out[key] = Received.concat([v.take(k) for k, v in owned])
         elif key == "cube_rows":
             cube: dict = {}
             for b, v in vals:

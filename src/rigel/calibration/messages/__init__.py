@@ -31,8 +31,9 @@ The interface
     library  = policy.library(view)               # once per sweep, over the WHOLE chain: the only
                                                   #   cross-block reductions a message may use
     prepared = policy.prepare(ctx, library)       # per block: every node's OWN claim
-    receive  = prepared.propagate(backward=False) # phase 1: the recipient's kernel, or None ⇒ all Silence
-    held[i]  = receive(source, destination)       # ... the BACKBONE runs the pass, in chain order
+    receive  = prepared.propagate(received, backward=False)  # phase 1: the recipient's kernel writing
+                                                  #   rows of the pass's table, or None ⇒ all silence
+    receive(source, destination)                  # ... the BACKBONE runs the pass, in chain order
     evidence = prepared.solve(from_left, from_right)   # phase 2, the policy's half -> PsiMessage
 
 The chain is solved a LOCUS BLOCK at a time (`sweep.solve_chain`, `region_chain.locus_blocks`), and the
@@ -65,13 +66,14 @@ and never move its mode — it can discard information, never invent it.
 :class:`BlockContext` splits its fields under exactly those three headings, and the heading is what
 turns the trap from a discipline into something a reader — and the backbone — can check. The backbone
 enforces the half that is enforceable: the kernel is called with two INDICES and builds the message
-into the destination from the SOURCE's claim and what the source holds; the backbone writes ``held``
-and the policy never reaches past its hop, so a message built from the destination's belief has
-nowhere to come from.
+into the destination's row from the SOURCE's claim and what the source holds (its own row of the same
+table, written one step earlier); the backbone owns the table and the order, and the policy never
+reaches past its hop, so a message built from the destination's belief has nowhere to come from.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -80,12 +82,11 @@ import numpy as np
 __all__ = [
     "BlockContext",
     "ChainView",
-    "Message",
-    "NO_NEIGHBOUR",
+    "Levels",
     "Policy",
     "Prepared",
     "PsiMessage",
-    "SILENCE",
+    "Received",
 ]
 
 
@@ -129,46 +130,91 @@ class PsiMessage:
         return self.lam_rows is None and self.cube_rows is None
 
 
-@dataclass(frozen=True, slots=True, eq=False)
-class Level:
-    """A population's LEVEL as a message lane: ``profile`` is a max-normalised log-profile over
-    ``u = log(rho / rho_ref)`` — the population's density in counts per base of its opportunity,
-    relative to the library's structurally pure gDNA density ``rho_ref`` — on the solve grid
-    (``K`` points, the ``lam`` window: a coordinate choice, no constant). ``n`` and ``a`` are the
-    total and the opportunity of the last node WITH a total the claim passed through: the next
-    recipient prices its hop from them — both totals' counting, and the abundance discrepancy beyond
-    it, per hop and nothing pooled. An EMPTY node (no total) forwards a level
-    unchanged and leaves ``n``/``a`` as they were: a few bases of the same gDNA density — unless it is
-    itself a flux SOURCE on an RNA lane, whose level travels with the flux's witness (the spliced count
-    on the route rate's opportunity).
+@dataclass(slots=True)
+class Levels:
+    """One population's LEVEL lane as RECEIVED: row ``i`` is the level node ``i`` holds on this lane from
+    one side after a pass, or nothing (``present[i]`` False). A level is a max-normalised log-profile
+    over ``u = log(rho / rho_ref)`` — the population's density in counts per base of its opportunity,
+    relative to the library's structurally pure gDNA density ``rho_ref`` — on the solve grid (``K``
+    points, the ``lam`` window: a coordinate choice, no constant). ``count`` and ``opportunity`` are the
+    total and the opportunity of the last node WITH a total the claim passed through: the next recipient
+    prices its hop from them — both totals' counting, and the abundance discrepancy beyond it, per hop
+    and nothing pooled. An EMPTY node (no total) forwards a level unchanged and leaves them as they
+    were: a few bases of the same gDNA density — unless it is itself a flux SOURCE on an RNA lane, whose
+    level travels with the flux's witness (the spliced count on the route rate's opportunity).
 
     ``rna_count`` / ``rna_count_var`` are an RNA lane's witness of ITS strand's abundance at that same
     last full node — the strand's RNA count read from the node's column split (its asymmetry over the
     protocol's strand contrast) and that estimate's Poisson variance — the pair the next recipient's
-    price compares with its own split. ``None`` on the gDNA lane and where the library's strand
-    channel is dead (the derived deadband), where the column count is the witness."""
+    price compares with its own split. ``has_witness`` is False on the gDNA lane and where the library's
+    strand channel is dead (the derived deadband), where the column count is the witness."""
 
-    profile: np.ndarray
-    n: float
-    a: float
-    rna_count: float | None = None
-    rna_count_var: float | None = None
+    present: np.ndarray  # (n,) bool
+    profile: np.ndarray  # (n, K) f64
+    count: np.ndarray  # (n,) f64
+    opportunity: np.ndarray  # (n,) f64
+    has_witness: np.ndarray  # (n,) bool
+    rna_count: np.ndarray  # (n,) f64, NaN without a witness
+    rna_count_var: np.ndarray  # (n,) f64, NaN without a witness
+
+    @classmethod
+    def empty(cls, n: int, K: int) -> Levels:
+        return cls(
+            np.zeros(n, bool),
+            np.zeros((n, K)),
+            np.zeros(n),
+            np.zeros(n),
+            np.zeros(n, bool),
+            np.full(n, np.nan),
+            np.full(n, np.nan),
+        )
+
+    def write(self, i, profile, count, opportunity, rna_count=None, rna_count_var=None) -> None:
+        """Row ``i`` holds this level (a hop wrote it, or re-priced what it had written)."""
+        i = int(i)
+        self.present[i] = True
+        self.profile[i] = profile
+        self.count[i], self.opportunity[i] = float(count), float(opportunity)
+        self.has_witness[i] = rna_count is not None
+        self.rna_count[i] = np.nan if rna_count is None else float(rna_count)
+        self.rna_count_var[i] = np.nan if rna_count_var is None else float(rna_count_var)
+
+    def forward(self, s, i) -> None:
+        """Row ``i`` holds exactly what row ``s`` holds — an EMPTY node forwards a level unchanged."""
+        s, i = int(s), int(i)
+        for f in dataclasses.fields(self):
+            getattr(self, f.name)[i] = getattr(self, f.name)[s]
+
+    def take(self, n: int) -> Levels:
+        return Levels(*(getattr(self, f.name)[:n] for f in dataclasses.fields(self)))
+
+    @classmethod
+    def concat(cls, parts: list) -> Levels:
+        return cls(
+            *(
+                np.concatenate([getattr(q, f.name) for q in parts], axis=0)
+                for f in dataclasses.fields(cls)
+            )
+        )
 
 
-@dataclass(frozen=True, slots=True)
-class Message:
-    """What one node holds from one neighbour after a pass — the transfer policy's message.
+@dataclass(slots=True)
+class Received:
+    """What every node of a block RECEIVED from one side after one pass — the transfer policy's message,
+    as a table: row ``i`` is what node ``i`` holds from its neighbour on that side. ``from_left`` and
+    ``from_right`` are two of these per block.
 
-    THE LANES. A node's unknown is its COMPOSITION on the simplex
-    ``(f_g, f_+, f_-)`` — two degrees of freedom where both strands are live, one where a single strand
-    is — and, where composition cannot cross a face, the LEVELS of the three populations. So a message
-    carries up to four lanes, every one optional (``None`` = nothing on this lane):
+    THE LANES. A node's unknown is its COMPOSITION on the simplex ``(f_g, f_+, f_-)`` — two degrees of
+    freedom where both strands are live, one where a single strand is — and, where composition cannot
+    cross a face, the LEVELS of the three populations. So a row carries up to four lanes, every one
+    optional:
 
-    * ``composition`` — the gDNA-versus-RNA PROFILE: a max-normalised log-likelihood over the solve
-      grid of the destination's gDNA share (``lam = log f_g/(1-f_g)``, ``K = n_grid`` points). Scale-
-      free, so it crosses a face by a derived map and never carries a level across a capture cliff.
+    * ``composition`` (where ``has_composition``) — the gDNA-versus-RNA PROFILE: a max-normalised
+      log-likelihood over the solve grid of the destination's gDNA share (``lam = log f_g/(1-f_g)``,
+      ``K = n_grid`` points). Scale-free, so it crosses a face by a derived map and never carries a
+      level across a capture cliff.
     * ``level_gdna``, ``level_rna_pos``, ``level_rna_neg`` — a LEVEL claim per population
-      (:class:`Level`: a PROFILE over the log density relative to the library's structurally pure gDNA
+      (:class:`Levels`: a PROFILE over the log density relative to the library's structurally pure gDNA
       density, on the same grid as ``lam``), for faces composition cannot cross: gDNA is genomically
       continuous across ANY face; a strand's RNA continues across a face where that strand's
       population is unchanged (an AMBIG region's two degrees of freedom are imputed by exactly these).
@@ -184,30 +230,73 @@ class Message:
     node — has NO lane: the two RNA levels constrain it inside the cube, and a tilt profile from the
     same witnesses would count them twice.
 
-    :data:`SILENCE` — every lane ``None`` — is a MESSAGE, delivered: the neighbour spoke and had
-    nothing to say. A node with no neighbour on a side holds :data:`NO_NEIGHBOUR` instead, which is not
-    a message: a hop that carries nothing still arrives, explicitly uninformative.
-
-    The backbone treats what a kernel returns as opaque and only insists that a real hop returns
-    SOMETHING.
+    THE TWO STATES the table expresses where a node ``heard`` nothing. SILENCE (:attr:`silence`): the
+    node HAS a neighbour on this side (``has_neighbour``) and nothing is present — the neighbour spoke
+    and had nothing to say, or the node is a terminal, which receives nothing. NO NEIGHBOUR
+    (:attr:`no_neighbour`): the side is open — a reference start or end, or a block's edge — and there
+    was no hop at all. The backbone writes ``has_neighbour``; a policy's kernel writes the lanes and
+    nothing else; the two states need no word of their own.
     """
 
-    composition: np.ndarray | None = None
-    level_gdna: Level | None = None
-    level_rna_pos: Level | None = None
-    level_rna_neg: Level | None = None
+    has_neighbour: np.ndarray  # (n,) bool — the backbone's: the side exists
+    has_composition: np.ndarray  # (n,) bool
+    composition: np.ndarray  # (n, K) f64, where has_composition
+    level_gdna: Levels
+    level_rna_pos: Levels
+    level_rna_neg: Levels
 
-    LANES = ("composition", "level_gdna", "level_rna_pos", "level_rna_neg")
+    #: the three level lanes, by field name
+    LANES = ("level_gdna", "level_rna_pos", "level_rna_neg")
+
+    @classmethod
+    def empty(cls, n: int, K: int) -> Received:
+        return cls(
+            np.zeros(n, bool),
+            np.zeros(n, bool),
+            np.zeros((n, K)),
+            Levels.empty(n, K),
+            Levels.empty(n, K),
+            Levels.empty(n, K),
+        )
 
     @property
-    def is_silent(self) -> bool:
-        return all(getattr(self, lane) is None for lane in self.LANES)
+    def has_level(self) -> np.ndarray:
+        """A level is present on some lane — a BOUND arrived (never a composition)."""
+        return self.level_gdna.present | self.level_rna_pos.present | self.level_rna_neg.present
 
+    @property
+    def heard(self) -> np.ndarray:
+        """Something arrived on this side: a composition or a level."""
+        return self.has_composition | self.has_level
 
-#: the explicitly uninformative message: a neighbour that spoke and had nothing to say
-SILENCE = Message()
-#: the marker a node holds on a side where it HAS no neighbour (a reference terminal) — not a message
-NO_NEIGHBOUR = None
+    @property
+    def silence(self) -> np.ndarray:
+        """A neighbour on this side, and nothing heard from it."""
+        return self.has_neighbour & ~self.heard
+
+    @property
+    def no_neighbour(self) -> np.ndarray:
+        """No side to hear from: an open end of the chain, or of the block."""
+        return ~self.has_neighbour
+
+    def take(self, n: int) -> Received:
+        """The first ``n`` rows — a block's OWNED slots, without the terminal it read beyond them."""
+        return Received(
+            self.has_neighbour[:n],
+            self.has_composition[:n],
+            self.composition[:n],
+            *(getattr(self, lane).take(n) for lane in self.LANES),
+        )
+
+    @classmethod
+    def concat(cls, parts: list) -> Received:
+        """The blocks' tables as the chain's, in block order."""
+        return cls(
+            np.concatenate([q.has_neighbour for q in parts]),
+            np.concatenate([q.has_composition for q in parts]),
+            np.concatenate([q.composition for q in parts], axis=0),
+            *(Levels.concat([getattr(q, lane) for q in parts]) for lane in cls.LANES),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,25 +421,26 @@ class BlockContext(ChainView):
 class Prepared(Protocol):
     """A policy's per-sweep working object: every node's own claim, the propagate kernel, the solve."""
 
-    def propagate(self, *, backward: bool):
-        """PHASE 1. Return ``receive(source, destination) -> message`` for one direction, or ``None``
-        when this policy sends nothing (every node then holds :data:`SILENCE` from that side).
+    def propagate(self, received: Received, *, backward: bool):
+        """PHASE 1. Return ``receive(source, destination)`` for one direction — the kernel that writes
+        row ``destination`` of ``received``, the pass's table — or ``None`` when this policy sends
+        nothing (every node with a neighbour then holds silence from that side).
 
-        The BACKBONE runs the pass: in chain order, for every destination with a neighbour on that
-        side, ``held[destination] = receive(source, destination)``. Inside ``receive`` the policy
-        composes what the source sends — its own claim with what the source holds from ITS far side,
-        written by this same pass one step earlier — and applies the recipient's decision for the face:
-        STOP (return :data:`SILENCE`), FORWARD, or MODIFY. ⛔ A real hop must return a message, never
-        ``None``: the backbone refuses a kernel that leaves a node unspoken to.
+        The BACKBONE owns the table and runs the pass: it marks ``has_neighbour`` and, in chain order,
+        for every destination with a neighbour on that side that is not a terminal, calls
+        ``receive(source, destination)``. Inside ``receive`` the policy composes what the source sends
+        — its own claim with what the source holds from ITS far side, row ``source`` of the same
+        table, written by this same pass one step earlier — and applies the recipient's decision for
+        the face: STOP (write nothing: the row stays silent), FORWARD, or MODIFY.
 
         ONE pass per direction: the forward pass reads each node's LOW neighbour and the backward pass
         its HIGH one; on a chain that IS forward-backward, and nothing here iterates.
         """
 
-    def solve(self, from_left: list, from_right: list) -> PsiMessage:
-        """PHASE 2, the policy's half: the ψ channels at every slot from the two held messages —
-        ``from_left[i]`` is what slot ``i`` holds from its LOW neighbour (:data:`NO_NEIGHBOUR` at a
-        reference start), ``from_right[i]`` from its HIGH one. Never the destination's belief
+    def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
+        """PHASE 2, the policy's half: the ψ channels at every slot from the two tables — row ``i`` of
+        ``from_left`` is what slot ``i`` holds from its LOW neighbour (no neighbour at a reference
+        start), of ``from_right`` from its HIGH one. Never the destination's belief
         (TRAPS: a-message-from-the-destinations-belief)."""
 
 

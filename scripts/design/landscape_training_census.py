@@ -54,7 +54,7 @@ import importlib  # noqa: E402
 CAL = importlib.import_module("rigel.calibration.calibrate")
 from rigel.calibration import landscape as LS  # noqa: E402
 from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
-from rigel.calibration.messages import Level, Message  # noqa: E402
+from rigel.calibration.messages import Received  # noqa: E402
 from rigel.calibration.messages import transfer as TR  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.region_chain import REGION  # noqa: E402
@@ -206,19 +206,11 @@ def training_weights(fit: dict) -> np.ndarray:
 
 def held_evidence(from_left, from_right, cube_slots, n: int) -> tuple[np.ndarray, np.ndarray]:
     """Per slot: did a COMPOSITION row arrive on either side, and did a LEVEL (any lane) or a cube
-    row — a bound — arrive on either side."""
-    comp = np.zeros(n, bool)
-    bound = np.zeros(n, bool)
+    row — a bound — arrive on either side. The two arguments are the capture's `Received` tables."""
     if from_left is None or from_right is None:
-        return comp, bound
-    for i in range(n):
-        for m in (from_left[i], from_right[i]):
-            if m is None:
-                continue
-            if m.composition is not None:
-                comp[i] = True
-            if any(getattr(m, lane) is not None for lane in Message.LANES[1:]):
-                bound[i] = True
+        return np.zeros(n, bool), np.zeros(n, bool)
+    comp = from_left.has_composition | from_right.has_composition
+    bound = from_left.has_level | from_right.has_level
     for i in cube_slots:
         bound[int(i)] = True
     return comp, bound
@@ -520,9 +512,12 @@ def _self_test() -> int:
           not one_sided(plateau - 0.01 * np.abs(lam)))
 
     # evidence classification on synthetic messages
-    lv = Level(profile=plateau, n=3.0, a=100.0)
-    fl = [None, Message(composition=peaked), Message(level_gdna=lv), None, Message(level_rna_pos=lv)]
-    fr = [Message(), None, None, None, None]
+    fl, fr = Received.empty(5, K), Received.empty(5, K)
+    fl.has_neighbour[[1, 2, 4]] = True
+    fl.composition[1], fl.has_composition[1] = peaked, True
+    fl.level_gdna.write(2, plateau, 3.0, 100.0)
+    fl.level_rna_pos.write(4, plateau, 3.0, 100.0)
+    fr.has_neighbour[0] = True  # a neighbour that had nothing to say
     comp, bound = held_evidence(fl, fr, cube_slots=(3,), n=5)
     check("held_evidence: composition on slot 1 only", comp.tolist() == [False, True, False, False, False])
     check("held_evidence: bounds on slots 2 (gDNA level), 3 (cube), 4 (RNA level)",

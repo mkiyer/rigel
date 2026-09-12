@@ -107,7 +107,14 @@ Bit-identical throughout; the gates are the replay, the references and the suite
    of `ChainView`, which carries `spliced_count` per strand as it carries `unspliced_count`. Still open,
    lower priority: the 25-key `_capture` dict as a typed record (moderate churn).
 
-### B. The received messages as tables — the contract, end to end (owner: agreed)
+### B. The received messages as tables — DONE 2026-09-12 (bit-identical on every gate)
+
+As built: `Received` / `Levels` in `messages/__init__.py` with one column beyond the sketch below —
+`Levels.has_witness`, where today's RNA witness was `None` on the gDNA lane and a dead strand channel; the
+kernel is `prepared.propagate(received, backward=…)` returning `receive(source, destination)`, which
+writes the destination's row; `sweep._pass(seq, nbr, prepared, n_grid, …)` allocates and returns the
+table; a lane's `emit(s, x, levels) -> bool` writes row `x`, `receive(levels, s, x)` re-prices it in
+place; `blocks.gather` concatenates the tables (`Received.take` / `concat`). The design as agreed:
 
 **What a node holds after a pass.** Today, after each directional pass, every node holds one Python object
 from the neighbour on that side — `Message(composition, level_gdna, level_rna_pos, level_rna_neg)`, each

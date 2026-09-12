@@ -16,7 +16,7 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
   intergenic|exon edge's gDNA COUNT (the level lane: the edge's crossing is structurally pure gDNA).
   ⛔ A claim is data only — never a belief, which already holds the prior and the neighbours.
 * The RECIPIENT's rule per directed face: absent = STOP (composition cannot cross: the recipient
-  holds SILENCE); the identity = FORWARD (the two objects share one unspliced population exactly); a
+  holds silence); the identity = FORWARD (the two objects share one unspliced population exactly); a
   map = MODIFY (the face's arithmetic with its counting width and, where two witnesses exist, the
   pair's own discrepancy). The rules are TYPED TABLES (`faces.Faces`): every directed face is one of a
   node's two sides — it hears from its left neighbour or its right — so a rule is a KIND and its
@@ -85,7 +85,7 @@ parts, and ``prepare`` is a table of contents: one named BUILDER per shipped mes
   prior.
 
 The laws the policy keeps: the sender publishes its claim unchanged; the recipient decides; a no-claim
-stays a no-claim — a flat profile, an absent factory, a context with no rows all deliver SILENCE,
+stays a no-claim — a flat profile, an absent factory, a context with no rows all deliver silence,
 never a zero-filled channel; a message is built from the source's claim and the recipient's constants
 and observations, never the recipient's belief.
 
@@ -103,7 +103,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..simplex_logodds import _tilt_grid, strand_row_logodds
-from . import SILENCE, BlockContext, ChainView, Message, PsiMessage
+from . import BlockContext, ChainView, PsiMessage, Received
 from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, fuse, norm
 from .lanes import gdna_lane, rna_lanes
 from .transfer_rows import (
@@ -532,8 +532,8 @@ class _SolveSite:
 
 class _PreparedTransfer:
     """One sweep's working object: every node's own claim, the rules per directed face, the lanes by
-    population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent), the site, the two passes'
-    state."""
+    population (``"gdna"``, ``"pos"``, ``"neg"`` — any may be absent) and the site. The passes' state
+    is the backbone's table, never a copy here."""
 
     def __init__(
         self, own, faces: "Faces | None", n_grid: int, lanes: dict | None = None, site=None
@@ -542,74 +542,63 @@ class _PreparedTransfer:
         self.faces = faces
         self.lanes: dict = {} if lanes is None else dict(lanes)
         self.site = site
-        self._K = int(n_grid)
-        self.held: dict = {False: None, True: None}
 
     # ── phase 1: propagate — the recipient's kernel, run by the backbone in chain order ──────────
-    def propagate(self, *, backward: bool):
+    def propagate(self, received: Received, *, backward: bool):
         faces = self.faces
         if self.own is None or not (
             faces.any() or any(ln.face.any() for ln in self.lanes.values())
         ):
-            return None  # nothing to say anywhere: every node holds SILENCE
-        held: list = [None] * len(self.own)
-        self.held[bool(backward)] = held
-        # each lane's faces, message field and emptiness, unpacked once rather than per node
-        lanes = tuple((ln, ln.face, ln.field, ln.empty.tolist()) for ln in self.lanes.values())
+            return None  # nothing to say anywhere: every node holds silence
+        # each lane's faces, its table and its emptiness, unpacked once rather than per node
+        lanes = tuple(
+            (ln, ln.face, getattr(received, ln.field), ln.empty.tolist())
+            for ln in self.lanes.values()
+        )
         kind, apply, own = faces.kind, faces.apply, self.own
+        composition, has_composition = received.composition, received.has_composition
 
         def receive(s: int, i: int):
-            """``s`` sends two things apart — its own claim and what it holds from its far side (written
-            by this pass one step earlier) — and the face decides: a composition rule composes and maps
-            (MODIFY), passes (FORWARD) or reads the measurement only (a level face); each lane whose
-            faces include this one carries its population's level; absent all (a structural pure-gDNA
-            neighbour) STOP. A face is ``(i, side)``: the side of ``i`` that ``s`` is on."""
-            far = held[s]
+            """``s`` sends two things apart — its own claim and what it holds from its far side (its own
+            row of this pass's table, written one step earlier) — and the face decides: a composition
+            rule composes and maps (MODIFY), passes (FORWARD) or reads the measurement only (a level
+            face); each lane whose faces include this one carries its population's level; absent all (a
+            structural pure-gDNA neighbour) STOP, and row ``i`` stays silent. A face is ``(i, side)``:
+            the side of ``i`` that ``s`` is on."""
             side = 0 if s < i else 1
-            comp = None
             if kind[i, side]:
-                out = apply(s, i, own[s], None if far is None else far.composition)
+                far = composition[s] if has_composition[s] else None
+                out = apply(s, i, own[s], far)
                 if out is not None and out.max() - out.min() > EPS:
-                    comp = norm(out)
-            fields = {}
-            for lane, face, field, empty in lanes:
-                if not face[i, side]:
-                    continue
-                lv = lane.emit(s, i, None if far is None else getattr(far, field))
-                if lv is not None and not empty[i]:
-                    lv = lane.receive(lv, s, i)
-                if lv is not None:
-                    fields[field] = lv
-            if comp is None and not fields:
-                return SILENCE
-            msg = Message(composition=comp, **fields)
-            held[i] = msg
-            return msg
+                    composition[i] = norm(out)
+                    has_composition[i] = True
+            for lane, face, levels, empty in lanes:
+                if face[i, side] and lane.emit(s, i, levels) and not empty[i]:
+                    lane.receive(levels, s, i)
 
         return receive
 
     # ── phase 2: solve — the policy's half ───────────────────────────────────────────────────────
-    def solve(self, from_left: list, from_right: list) -> PsiMessage:
+    def solve(self, from_left: Received, from_right: Received) -> PsiMessage:
         if self.own is None:
             return PsiMessage.silent()
-        n = len(self.own)
-        rows = np.zeros((n, self._K))
-        live = False
+        # the two held compositions add (independent witnesses about one slot), in table order: left,
+        # right — an absent one adds nothing
+        rows = np.where(from_left.has_composition[:, None], from_left.composition, 0.0) + np.where(
+            from_right.has_composition[:, None], from_right.composition, 0.0
+        )
+        fused = from_left.has_composition | from_right.has_composition
         gdna = self.lanes.get("gdna")
-        for i in range(n):
-            parts, bounds = [], []
-            for m in (from_left[i], from_right[i]):
-                if m is None:
-                    continue
-                if m.composition is not None:
-                    parts.append(m.composition)
-                if m.level_gdna is not None and gdna is not None and not gdna.empty[i]:
-                    bounds.append(gdna.row(m.level_gdna.profile, i))
-            if bounds:
-                parts.append(intersect(bounds))  # two bounds on one density: the tighter wins
-            if parts:
-                rows[i] = fuse(parts)
-                live = True
+        if gdna is not None:
+            # a held gDNA level read as the node's composition row through its own total; two bounds on
+            # one density intersect (the tighter wins) and join the compositions as one more witness
+            held = (from_left.level_gdna, from_right.level_gdna)
+            for i in np.flatnonzero((held[0].present | held[1].present) & ~gdna.empty):
+                bound = intersect([gdna.row(lv.profile[i], i) for lv in held if lv.present[i]])
+                rows[i] = rows[i] + bound if fused[i] else bound
+                fused[i] = True
+        rows[fused] -= rows[fused].max(axis=1, keepdims=True)  # `fuse`: add, then re-normalise
+        live = bool(fused.any())
         live = self._ceilings(from_left, from_right, rows) or live
         cube = self._cube_rows(from_left, from_right)
         if not live and not cube:
@@ -633,12 +622,12 @@ class _PreparedTransfer:
                 continue
             for i in np.flatnonzero(site.free[name] & ~site.ambig & ~rl.empty):
                 bounds = []
-                for side, m in ((0, from_left[i]), (1, from_right[i])):
-                    if m is None or m.composition is not None:
+                for side, t in ((0, from_left), (1, from_right)):
+                    if not t.has_neighbour[i] or t.has_composition[i]:
                         continue
-                    lv = getattr(m, rl.field)
-                    if lv is not None:
-                        bounds.append(lv.profile)
+                    lv = getattr(t, rl.field)
+                    if lv.present[i]:
+                        bounds.append(lv.profile[i])
                     fx = rl.flux_at(i, side)
                     if fx is not None:
                         bounds.append(fx)
@@ -667,9 +656,9 @@ class _PreparedTransfer:
             profiles = {}
             for rl in (pos, neg):
                 bounds = [
-                    getattr(m, rl.field).profile
-                    for m in (from_left[i], from_right[i])
-                    if m is not None and getattr(m, rl.field) is not None
+                    getattr(t, rl.field).profile[i]
+                    for t in (from_left, from_right)
+                    if getattr(t, rl.field).present[i]
                 ]
                 if rl.own_level[i] is not None:
                     bounds.append(lower_side(rl.own_level[i]))

@@ -24,9 +24,9 @@ priced ≤ 1e-14 and are superseded.
    split into backbone / `blocks` / `message_cache`, the lanes and the face table out of `transfer.py`, the
    cache key over the context's fields, the small things; the tiling folded into D. Every step
    bit-identical on the replay, the three references and the suite.
-2. **The received messages as tables** — the design is written in plan §3 B with its names; the owner
-   agreed to it and deferred the implementation to the session's judgement: clear, concise, efficient.
-   Falsification tests first, verified failing; then the code; then break it and watch the gates fire.
+2. **The received messages as tables** — DONE 2026-09-12 (plan §3 B, DESIGN §6b.15): falsification tests
+   first, three break-the-code cycles fired their gates, bit-identical on the replay, the references and
+   the suite. Next is plan §3 C, the tolerance gate, then D.
 
 Do not start the port. Steps C (the tolerance gate) and D (memory) come before it, and the port begins only
 when the owner is satisfied with the Python design and implementation.

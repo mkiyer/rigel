@@ -18,7 +18,7 @@ import pytest
 from rigel.calibration import sweep as SW
 from rigel.calibration.blocks import block_slice
 from rigel.calibration.message_cache import MessageCache
-from rigel.calibration.messages import NO_NEIGHBOUR, SILENCE, Message, PsiMessage, BlockContext
+from rigel.calibration.messages import BlockContext, PsiMessage, Received
 from rigel.calibration.messages.silent import SilentPolicy
 
 
@@ -69,8 +69,9 @@ def _counts(msg: PsiMessage, ctx: BlockContext | None = None):
 
 
 class _Echo:
-    """A policy whose kernel records every hop and returns a message naming its source — so the pass's
-    ORDER and SIDES are observable, and so the solve can be shown the two held lists."""
+    """A policy whose kernel records every hop and writes a gDNA level naming its source into the
+    destination's row — so the pass's ORDER and SIDES are observable, and so the solve can be shown the
+    two tables."""
 
     name = "echo"
 
@@ -84,123 +85,131 @@ class _Echo:
     def prepare(self, ctx, library):
         return self
 
-    def propagate(self, *, backward: bool):
+    def propagate(self, received, *, backward: bool):
         def receive(s, i):
             self.hops[backward].append((int(s), int(i)))
-            return Message(level_gdna=(float(s), 0.0))
+            received.level_gdna.write(i, np.zeros(received.composition.shape[1]), float(s), 0.0)
 
         return receive
 
     def solve(self, from_left, from_right):
-        self.held = (list(from_left), list(from_right))
+        self.held = (from_left, from_right)
         return PsiMessage.silent()
 
 
-def test_every_node_holds_a_message_from_each_neighbour_it_has():
-    """After the two passes every interior node holds two messages, one
-    naming its low neighbour and one its high; the chain's two end nodes hold ONE and ``NO_NEIGHBOUR``
-    on the open side — which is not a message and not SILENCE."""
+def _passes(pol, ctx, terminal=None):
+    K = int(ctx.n_grid)
+    prepared = pol.prepare(ctx, None)
+    order = list(range(int(ctx.n_slots)))
+    fl = SW._pass(order, list(ctx.left), prepared, K, backward=False, terminal=terminal)
+    br = SW._pass(order[::-1], list(ctx.right), prepared, K, backward=True, terminal=terminal)
+    return fl, br
+
+
+def test_an_empty_table_is_the_two_states_and_nothing_heard():
+    """`Received.empty`: no neighbour anywhere, nothing present, nothing heard; the two states the table
+    expresses — NO NEIGHBOUR and SILENCE — partition the nodes that heard nothing, and a written level
+    is present with or without a witness but is never a composition."""
+    t = Received.empty(N, 7)
+    assert t.composition.shape == (N, 7) and t.level_gdna.profile.shape == (N, 7)
+    assert not t.has_neighbour.any() and not t.has_composition.any() and not t.heard.any()
+    assert np.array_equal(t.no_neighbour, ~t.has_neighbour) and not t.silence.any()
+    t.has_neighbour[1:] = True
+    assert np.array_equal(t.silence, t.has_neighbour) and not (t.silence & t.no_neighbour).any()
+    t.level_rna_pos.write(3, np.zeros(7), 5.0, 100.0)
+    t.level_gdna.write(4, np.zeros(7), 6.0, 200.0, 2.0, 8.0)
+    assert t.level_rna_pos.present[3] and not t.level_rna_pos.has_witness[3]
+    assert t.level_gdna.present[4] and t.level_gdna.has_witness[4]
+    assert (t.level_gdna.count[4], t.level_gdna.opportunity[4]) == (6.0, 200.0)
+    assert t.heard[3] and t.heard[4] and not t.silence[3] and not t.has_composition.any()
+    assert np.array_equal(t.has_level, t.heard)
+    for lane in Received.LANES:
+        one = Received.empty(2, 3)
+        getattr(one, lane).write(1, np.zeros(3), 1.0, 1.0)
+        assert one.heard[1] and not one.heard[0], f"a table with only {lane} read as nothing heard"
+
+
+def test_every_node_holds_what_each_neighbour_it_has_sent_and_an_open_side_is_no_neighbour():
+    """After the two passes every interior node holds one level naming its low neighbour and one naming
+    its high; ``has_neighbour`` is exactly the chain's links, so the chain's two end nodes read NO
+    NEIGHBOUR on the open side — which is not silence — and a level that arrived is not a composition."""
     ctx = _ctx()
-    left, right = list(ctx.left), list(ctx.right)
-    fl = SW._pass(list(range(ctx.n_slots)), left, _Echo().prepare(ctx, None), backward=False)
-    br = SW._pass(list(range(ctx.n_slots))[::-1], right, _Echo().prepare(ctx, None), backward=True)
-    for i in range(N):
-        if left[i] >= 0:
-            assert fl[i].level_gdna[0] == float(left[i]), f"slot {i} holds the wrong low neighbour"
-        else:
-            assert fl[i] is NO_NEIGHBOUR and fl[i] is not SILENCE
-        if right[i] >= 0:
-            assert br[i].level_gdna[0] == float(right[i])
-        else:
-            assert br[i] is NO_NEIGHBOUR
-    assert sum(m is None for m in fl) == 1 and sum(m is None for m in br) == 1, "one open side each"
+    left, right = np.asarray(ctx.left), np.asarray(ctx.right)
+    fl, br = _passes(_Echo(), ctx)
+    assert np.array_equal(fl.has_neighbour, left >= 0) and np.array_equal(
+        br.has_neighbour, right >= 0
+    )
+    assert np.array_equal(fl.level_gdna.present, left >= 0)
+    assert np.array_equal(br.level_gdna.present, right >= 0)
+    assert np.array_equal(fl.level_gdna.count[left >= 0], left[left >= 0].astype(float))
+    assert np.array_equal(br.level_gdna.count[right >= 0], right[right >= 0].astype(float))
+    assert fl.no_neighbour.sum() == 1 and br.no_neighbour.sum() == 1, "one open side each"
+    assert not fl.silence.any() and not br.silence.any(), "every real hop carried a level"
+    assert not fl.has_composition.any() and not br.has_composition.any(), (
+        "a level is not a composition"
+    )
 
 
 def test_the_passes_run_in_chain_order_and_read_one_side_each():
     """The forward pass visits low→high reading each node's LOW neighbour; the backward pass the
     mirror — so what a source holds from its far side is written before it is asked to send."""
-    ctx = _ctx()
     pol = _Echo()
-    SW._pass(list(range(ctx.n_slots)), list(ctx.left), pol.prepare(ctx, None), backward=False)
-    SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), pol.prepare(ctx, None), backward=True)
+    _passes(pol, _ctx())
     assert pol.hops[False] == [(i - 1, i) for i in range(1, N)]
     assert pol.hops[True] == [(i + 1, i) for i in range(N - 2, -1, -1)]
 
 
-def test_PERTURBATION_a_kernel_that_leaves_a_real_hop_unspoken_is_REFUSED():
-    """A hop that carries nothing must still arrive as SILENCE. A kernel returning ``None`` for a node
-    that HAS a neighbour is the one thing the pass refuses, because the solve could not then tell
-    "nothing to say" from "never spoken to"."""
-
-    class _Mute(_Echo):
-        def propagate(self, *, backward: bool):
-            return lambda s, i: None
-
-    ctx = _ctx()
-    with pytest.raises(AssertionError, match="must still arrive as SILENCE"):
-        SW._pass(
-            list(range(ctx.n_slots)), list(ctx.left), _Mute().prepare(ctx, None), backward=False
-        )
-
-
 def test_a_policy_that_sends_nothing_leaves_silence_at_every_node_with_a_neighbour():
-    """``propagate`` returning no kernel means every node holds SILENCE from that side — delivered,
-    distinguishable from the open side of the chain."""
-    ctx = _ctx()
+    """``propagate`` returning no kernel means every node holds SILENCE from that side — a neighbour
+    and nothing present — distinguishable from the open side of the chain."""
 
     class _Quiet(_Echo):
-        def propagate(self, *, backward: bool):
+        def propagate(self, received, *, backward: bool):
             return None
 
-    fl = SW._pass(
-        list(range(ctx.n_slots)), list(ctx.left), _Quiet().prepare(ctx, None), backward=False
-    )
-    assert fl[0] is NO_NEIGHBOUR and all(m is SILENCE for m in fl[1:])
-    assert SILENCE.is_silent and Message(level_gdna=(0.0, 1.0)).is_silent is False
+    fl, br = _passes(_Quiet(), _ctx())
+    for t in (fl, br):
+        assert np.array_equal(t.silence, t.has_neighbour) and t.silence.sum() == N - 1
+        assert np.array_equal(t.no_neighbour, ~t.has_neighbour) and t.no_neighbour.sum() == 1
+        assert not t.heard.any()
 
 
-def test_every_lane_of_a_message_survives_the_passes_to_the_solve():
-    """The lanes: a kernel that fills every lane — the composition profile and the three level
-    claims — hands them to the solve untouched, and a message with any one lane is not silent. The
-    backbone carries; it never reads a lane."""
+def test_every_lane_written_at_a_hop_reaches_the_solve_in_the_same_table():
+    """The lanes: a kernel that fills every lane — the composition and the three levels — leaves them in
+    the destination's row, and the solve receives the very tables the passes filled. The backbone
+    carries; it never reads a lane."""
     ctx = _ctx()
-    full = Message(
-        composition=np.zeros(3),
-        level_gdna=(-2.0, 0.1),
-        level_rna_pos=(-3.0, 0.2),
-        level_rna_neg=(-4.0, 0.3),
-    )
+    K = int(ctx.n_grid)
+    row = -0.5 * np.linspace(-1.0, 1.0, K) ** 2
 
     class _Full(_Echo):
-        def propagate(self, *, backward: bool):
-            return lambda s, i: full
+        def propagate(self, received, *, backward: bool):
+            def receive(s, i):
+                received.composition[i] = row
+                received.has_composition[i] = True
+                received.level_gdna.write(i, row - 2.0, 0.1, 1.0)
+                received.level_rna_pos.write(i, row - 3.0, 0.2, 1.0, 4.0, 4.0)
+                received.level_rna_neg.write(i, row - 4.0, 0.3, 1.0)
+
+            return receive
 
     pol = _Full()
-    prepared = pol.prepare(ctx, None)
-    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
-    br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
-    prepared.solve(fl, br)
-    got_l, got_r = pol.held
-    for i in range(N):
-        if list(ctx.left)[i] >= 0:
-            assert got_l[i] is full
-        if list(ctx.right)[i] >= 0:
-            assert got_r[i] is full
-    assert not full.is_silent and Message().is_silent
-    for lane in Message.LANES:
-        one = Message(**{lane: np.zeros(2) if lane == "composition" else (0.0, 1.0)})
-        assert not one.is_silent, f"a message with only {lane} read as silence"
-
-
-def test_the_solve_receives_the_two_held_lists_at_the_recipient():
-    """Phase 2's inputs are the two held lists indexed AT THE RECIPIENT, straight from the passes."""
-    ctx = _ctx()
-    pol = _Echo()
-    prepared = pol.prepare(ctx, None)
-    fl = SW._pass(list(range(ctx.n_slots)), list(ctx.left), prepared, backward=False)
-    br = SW._pass(list(range(ctx.n_slots))[::-1], list(ctx.right), prepared, backward=True)
-    prepared.solve(fl, br)
-    assert pol.held == (fl, br)
+    fl, br = _passes(pol, ctx)
+    pol.solve(fl, br)
+    assert pol.held[0] is fl and pol.held[1] is br, (
+        "the solve must receive the tables the passes filled"
+    )
+    for t, nbr in ((fl, np.asarray(ctx.left)), (br, np.asarray(ctx.right))):
+        has = nbr >= 0
+        assert np.array_equal(t.has_composition, has) and np.array_equal(t.heard, has)
+        assert np.array_equal(t.composition[has], np.tile(row, (int(has.sum()), 1)))
+        for lane, shift in zip(Received.LANES, (2.0, 3.0, 4.0)):
+            lv = getattr(t, lane)
+            assert np.array_equal(lv.present, has)
+            assert np.array_equal(lv.profile[has], np.tile(row - shift, (int(has.sum()), 1)))
+        assert (
+            np.array_equal(t.level_rna_pos.has_witness, has) and not t.level_gdna.has_witness.any()
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -319,10 +328,12 @@ def test_solve_chains_parameter_default_is_silent_and_sends_nothing():
     """``SilentPolicy`` is ``solve_chain``'s parameter default (the shipped config installs the
     transfer policy), and it is the MEASURED floor every policy is judged against: win on unstranded
     data, minimal harm on stranded data, never pooled."""
-    prepared = SilentPolicy().prepare(_ctx(), None)
-    assert prepared.propagate(backward=False) is None, "a silent policy must send nothing at all"
-    assert prepared.propagate(backward=True) is None
-    assert prepared.solve([SILENCE] * N, [SILENCE] * N).is_silent
+    ctx = _ctx()
+    prepared = SilentPolicy().prepare(ctx, None)
+    nothing = Received.empty(N, int(ctx.n_grid))
+    assert prepared.propagate(nothing, backward=False) is None, "a silent policy must send nothing"
+    assert prepared.propagate(nothing, backward=True) is None
+    assert prepared.solve(nothing, nothing).is_silent
 
 
 def test_the_backbone_does_not_know_what_a_message_is_about():
@@ -437,18 +448,21 @@ def test_a_terminal_receives_nothing_and_the_kernel_is_never_asked_for_the_hop_i
     marked delivers its message, which is what proves the mask does the work. What the terminal SENDS
     is untouched: its neighbour still receives from it."""
     ctx = _ctx()
-    left = list(ctx.left)
     terminal = [False] * N
     terminal[4] = True
     pol = _Echo()
-    held = SW._pass(list(range(N)), left, pol.prepare(ctx, None), backward=False, terminal=terminal)
-    assert held[4] is SILENCE, "a terminal must hold SILENCE, delivered and empty"
+    held, _br = _passes(pol, ctx, terminal=terminal)
+    assert held.has_neighbour[4] and held.silence[4], (
+        "a terminal holds SILENCE: a neighbour, nothing present"
+    )
     assert (3, 4) not in pol.hops[False], "the kernel was asked for the hop into the terminal"
-    assert held[5].level_gdna[0] == 4.0, "the terminal's own sending was blocked; only receiving is"
-    assert held[0] is NO_NEIGHBOUR, "a terminal rule must not turn an open side into silence"
+    assert held.level_gdna.count[5] == 4.0, (
+        "the terminal's own sending was blocked; only receiving is"
+    )
+    assert held.no_neighbour[0], "a terminal rule must not turn an open side into silence"
     loud = _Echo()
-    unmasked = SW._pass(list(range(N)), left, loud.prepare(ctx, None), backward=False)
-    assert unmasked[4].level_gdna[0] == 3.0 and (3, 4) in loud.hops[False]
+    unmasked, _br = _passes(loud, ctx)
+    assert unmasked.level_gdna.count[4] == 3.0 and (3, 4) in loud.hops[False]
 
 
 def test_the_terminal_predicate_is_the_solve_gates_lock_on_a_region():
@@ -523,14 +537,14 @@ def test_the_block_solve_is_the_chain_solve_for_every_block_size(sweep_inputs):
         assert (a is None) == (b is None) and (a is None or np.array_equal(a, b))
         assert caps[bs]["backbone_assertions"] == caps[None]["backbone_assertions"]
         # what each node HEARD is the same; at a block's first slot — a terminal, which hears nothing
-        # by the structural rule — an open side (``None``) and SILENCE are the same hearing
+        # by the structural rule — an open side and SILENCE are the same hearing
         for side in ("from_left", "from_right"):
-            heard = [[m is not None and not m.is_silent for m in caps[k][side]] for k in (bs, None)]
-            assert heard[0] == heard[1], f"block_slots={bs}: {side} differs in what was heard"
+            heard = [caps[k][side].heard for k in (bs, None)]
+            assert np.array_equal(heard[0], heard[1]), (
+                f"block_slots={bs}: {side} differs in what was heard"
+            )
             for i in np.flatnonzero(terminal):
-                assert all(
-                    caps[k][side][i] is None or caps[k][side][i].is_silent for k in (bs, None)
-                )
+                assert not any(caps[k][side].heard[i] for k in (bs, None))
 
 
 def test_a_block_view_rebases_the_links_and_slices_every_per_slot_array(sweep_inputs):

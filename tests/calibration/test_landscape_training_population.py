@@ -28,7 +28,7 @@ from rigel.calibration.region_chain import REGION
 from rigel.calibration.region_geometry import g1_locked
 from rigel.calibration.region_init import has_own_composition_evidence
 from rigel.calibration.signature import RegionType
-from _transfer_harness import _ctx_of, _full_policy, _prepared
+from _transfer_harness import _ctx_of, _full_policy, _passes, _prepared
 
 CAL = sys.modules["rigel.calibration.calibrate"]
 
@@ -37,25 +37,10 @@ def _expected_has_composition(sweep_inputs, policy, capture):
     """The predicate re-derived INDEPENDENTLY of the solve: the two passes driven here on the same
     prepared policy, a slot has a composition iff either held message carries a COMPOSITION, or its own channel
     is live, or it is structurally certain. A level, a ceiling or a cube row does not count."""
-    from rigel.calibration.messages import SILENCE
-
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(policy, ctx)
-    n = int(ctx.n_slots)
-    comp = np.zeros(n, bool)
-    order = list(range(n))
-    for nbr, seq, backward in (
-        (np.asarray(ctx.left, np.int64), order, False),
-        (np.asarray(ctx.right, np.int64), order[::-1], True),
-    ):
-        receive = prepared.propagate(backward=backward)
-        for i in seq:
-            src = int(nbr[i])
-            if src < 0:
-                continue
-            m = SILENCE if receive is None else receive(src, i)
-            if m is not None and m.composition is not None:
-                comp[i] = True
+    from_left, from_right = _passes(prepared, ctx)
+    comp = from_left.has_composition | from_right.has_composition
     tau = np.asarray(capture["_tau0_lam"], np.float64)
     return (
         has_own_composition_evidence(tau)
@@ -81,7 +66,7 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
     """THE DISTINCTION THE RULING TURNS ON, on two blind slots (no own channel, not locked): a stub
     policy delivers a LEVEL to one and a COMPOSITION to the other, and its solve writes a non-flat row
     at BOTH — so "any non-flat row" would give both a composition. Only the composition's slot may."""
-    from rigel.calibration.messages import Level, Message, PsiMessage
+    from rigel.calibration.messages import PsiMessage
 
     cap: dict = {}
     SW.solve_chain(*sweep_inputs["args"], **sweep_inputs["kw"], policy=SilentPolicy(), _capture=cap)
@@ -100,16 +85,16 @@ def test_a_bound_with_a_row_does_not_inform_but_a_composition_does(sweep_inputs)
         def __init__(self, n):
             self.n = n
 
-        def propagate(self, *, backward):
+        def propagate(self, received, *, backward):
             if backward:
                 return None
 
             def receive(s, i):
                 if i == lvl_slot:
-                    return Message(level_gdna=Level(profile=row, n=3.0, a=100.0))
+                    received.level_gdna.write(i, row, 3.0, 100.0)
                 if i == comp_slot:
-                    return Message(composition=row)
-                return Message()
+                    received.composition[i] = row
+                    received.has_composition[i] = True
 
             return receive
 

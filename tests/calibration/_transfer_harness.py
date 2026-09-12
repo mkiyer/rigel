@@ -203,13 +203,6 @@ def _ctx_of(si):
     return _dc.replace(grabbed[0], factory_rows=rows)
 
 
-def _nothing_held(n_slots):
-    """The two held lists of a policy that sent nothing: SILENCE at every interior node."""
-    from rigel.calibration.messages import SILENCE
-
-    return [SILENCE] * int(n_slots)
-
-
 def _strand_of(si):
     kw = si["kw"]
     return (
@@ -235,31 +228,48 @@ def _dead_boundaries(ctx):
     return _dc.replace(ctx, has_own_composition=live)
 
 
-def _drive_the_backbone(prepared, ctx):
-    """The backbone's own contract, reproduced (`sweep.solve_chain`'s two directional passes and its
-    solve): each pass calls ``receive(source, destination)`` over the chain order — the forward pass
-    reading each slot's LOW neighbour, the backward pass its HIGH one — and holds the result at the
-    destination; ``solve`` receives the two held lists. Returns the delivered rows (zeros when the
-    policy is silent)."""
-    from rigel.calibration.messages import SILENCE
+def _passes(prepared, ctx):
+    """The backbone's two directional passes, reproduced (`sweep._pass`): each pass owns a `Received`
+    table, marks ``has_neighbour`` and calls ``receive(source, destination)`` over the chain order — the
+    forward pass reading each slot's LOW neighbour, the backward pass its HIGH one. Returns the two
+    tables, ``(from_left, from_right)``."""
+    from rigel.calibration.messages import Received
 
     order = list(range(ctx.n_slots))
-    held = []
+    tables = []
     for nbr, seq, backward in (
         (np.asarray(ctx.left, np.int64), order, False),
         (np.asarray(ctx.right, np.int64), order[::-1], True),
     ):
-        receive = prepared.propagate(backward=backward)
-        got = [None] * len(order)
+        received = Received.empty(len(order), int(ctx.n_grid))
+        receive = prepared.propagate(received, backward=backward)
         for i in seq:
             s = int(nbr[i])
             if s >= 0:
-                got[i] = SILENCE if receive is None else receive(s, i)
-        held.append(got)
-    msg = prepared.solve(*held)
-    if msg.lam_rows is None:
-        return np.zeros((len(order), int(ctx.n_grid)))
-    return np.asarray(msg.lam_rows)
+                received.has_neighbour[i] = True
+                if receive is not None:
+                    receive(s, i)
+        tables.append(received)
+    return tuple(tables)
+
+
+def _drive(prepared, ctx):
+    """The backbone's own contract, reproduced: the two passes (`_passes`) and the solve, which receives
+    the two tables. Returns ``(rows, from_left, from_right)`` — the delivered rows (zeros when the
+    policy is silent) and the tables."""
+    from_left, from_right = _passes(prepared, ctx)
+    msg = prepared.solve(from_left, from_right)
+    rows = (
+        np.zeros((int(ctx.n_slots), int(ctx.n_grid)))
+        if msg.lam_rows is None
+        else np.asarray(msg.lam_rows)
+    )
+    return rows, from_left, from_right
+
+
+def _drive_the_backbone(prepared, ctx):
+    """`_drive`'s rows alone."""
+    return _drive(prepared, ctx)[0]
 
 
 def _rows_of(pol, ctx):
@@ -321,8 +331,9 @@ def _strand_intron(ctx, name):
 
 
 def _held_rna(held, x, field):
-    m = held[x]
-    return None if (m is None or getattr(m, field) is None) else getattr(m, field).profile.copy()
+    """Row ``x`` of the lane ``field`` of the table ``held``, or ``None`` where nothing is present."""
+    lv = getattr(held, field)
+    return lv.profile[int(x)].copy() if lv.present[int(x)] else None
 
 
 def _with_populated_inside(ctx):

@@ -28,7 +28,7 @@ wrong as it likes and still cannot commit any of them, and each has shipped at l
 
 And ONE structural rule, which is what lets the chain be solved a locus at a time: a TERMINAL — a REGION
 that admits no RNA strand, so it is structurally pure gDNA, solved and fixed before any message exists —
-RECEIVES NOTHING. The pass never asks the kernel for a hop into one; the terminal holds SILENCE from a side
+RECEIVES NOTHING. The pass never asks the kernel for a hop into one; the terminal holds silence from a side
 it has a neighbour on. Nothing can therefore cross a terminal, and the chain breaks into independent loci
 at every one (`region_chain.locus_blocks`). Measured on the human chain before it was made structural: of
 1,206,202 composition faces and 4,621,302 lane faces the shipped policy built, none delivered into a
@@ -52,7 +52,7 @@ import numpy as np
 
 from .blocks import block_slice, gather, view_fields
 from .message_cache import MessageCache
-from .messages import SILENCE, BlockContext, ChainView, PsiMessage
+from .messages import BlockContext, ChainView, PsiMessage, Received
 from .messages.silent import SilentPolicy
 from .region_geometry import (
     RegionBelief,
@@ -506,22 +506,22 @@ def _solve_block(
         # ── PHASE 1, PROPAGATE: the FORWARD pass L→R and the BACKWARD pass R→L ───────────────────────
         # ⛔ ONE pass each, in chain order, which on a chain IS forward-backward. It is not an iterative
         # scheme (TRAPS: a-comment-quoted-as-a-finding). When both passes end every node holds one
-        # message from each neighbour it has: the recipient's kernel wrote it, or SILENCE stands.
+        # message from each neighbour it has: the recipient's kernel wrote its row, or silence stands.
         term = np.asarray(terminal, bool).tolist()
-        from_left = _pass(order_list, left.tolist(), prepared, backward=False, terminal=term)
-        from_right = _pass(order_list[::-1], right.tolist(), prepared, backward=True, terminal=term)
+        from_left = _pass(
+            order_list, left.tolist(), prepared, n_grid, backward=False, terminal=term
+        )
+        from_right = _pass(
+            order_list[::-1], right.tolist(), prepared, n_grid, backward=True, terminal=term
+        )
 
         # ── PHASE 2, SOLVE: the policy's half — the two held messages into ψ's channels ──────────────
         msg = prepared.solve(from_left, from_right)
         counts = AssertionCounts()
         _check_message(msg, ctx, counts, n_owned)
-        # a COMPOSITION row received from a neighbour, read off the HELD MESSAGES (see the has_composition
+        # a COMPOSITION row received from a neighbour, read off the two tables (see the has_composition
         # predicate below for why not `msg.lam_rows`)
-        held_composition = np.zeros(n_slot.shape[0], dtype=bool)
-        for held in (from_left, from_right):
-            for i, m in enumerate(held):
-                if m is not None and m.composition is not None:
-                    held_composition[i] = True
+        held_composition = from_left.has_composition | from_right.has_composition
         if key is not None:
             cache.put(key, msg, held_composition, counts)
 
@@ -572,7 +572,7 @@ def _solve_block(
 
     # ── ``has_composition`` — does this slot hold a COMPOSITION, or only a bound? ─────────────────
     # An own composition channel (the solver's own precision), structural certainty, or a
-    # COMPOSITION row received from a neighbour (`Message.composition`). A level lane, a ceiling
+    # COMPOSITION row received from a neighbour (`Received.has_composition`). A level lane, a ceiling
     # (the RNA lanes' or the node's own flux's) and a cube row are BOUNDS: one-sided, so the value the
     # solve settles on within the admitted half-line is the prior's, and a slot with nothing at all
     # believes the prior outright. A bound-only node does NOT train the landscape
@@ -643,7 +643,7 @@ def _solve_block(
             fneg_init=_fn_init,
             lam_rows=msg.lam_rows,
             cube_rows=msg.cube_rows,
-            # the two held lists, the instruments' view of what each node heard
+            # the two tables, the instruments' view of what each node heard
             from_left=from_left,
             from_right=from_right,
             held_composition=held_composition,
@@ -660,39 +660,36 @@ def _solve_block(
     )
 
 
-def _pass(seq, nbr, prepared, *, backward: bool, terminal=None) -> list:
+def _pass(seq, nbr, prepared, n_grid: int, *, backward: bool, terminal=None) -> Received:
     """ONE directional pass — phase 1 of the two-phase solve: for each node in ``seq``, in chain order,
-    the node RECEIVES from its neighbour of the other kind and holds the result.
+    the node RECEIVES from its neighbour of the other kind, into its row of the pass's table.
 
-    The whole direction dependence is which neighbour array is read. ``-1`` is a reference terminal:
-    the node holds ``NO_NEIGHBOUR`` (``None``) there, which is not a message — the chain's two end nodes
-    hold one message, every other node two. ⛔ A real hop must arrive: a kernel that returns ``None``
-    for a node that HAS a neighbour is refused, because the solve could not then tell "nothing to say"
-    (:data:`~.messages.SILENCE`) from "never spoken to". A policy that sends nothing at all returns no
-    kernel, and every node then holds SILENCE from this side.
+    The whole direction dependence is which neighbour array is read. The backbone owns the table
+    (:class:`~.messages.Received`) and writes ``has_neighbour``; the policy's kernel writes the lanes.
+    ``-1`` is a reference terminal: the node has NO NEIGHBOUR there — the chain's two end nodes hear
+    from one side, every other node from two. A node with a neighbour whose row stays empty holds
+    SILENCE: delivered, and nothing to say. The two states are the table's, so a kernel cannot leave a
+    node "never spoken to" — it either writes the row or it does not. A policy that sends nothing at
+    all returns no kernel, and every node then holds silence from this side.
 
     ``terminal`` (a bool per node, or ``None`` for none) marks the nodes that RECEIVE NOTHING: the hop
-    into one is never asked of the kernel and the node holds SILENCE — delivered, and empty. What a
+    into one is never asked of the kernel and the node holds silence — delivered, and empty. What a
     terminal SENDS is the policy's business as for any node; what it hears is not, and that is the
     boundary condition the locus solve stands on.
     """
-    receive = prepared.propagate(backward=backward)
-    held: list = [None] * len(seq)
+    received = Received.empty(len(seq), int(n_grid))
+    receive = prepared.propagate(received, backward=backward)
+    has_neighbour = received.has_neighbour
     for i in seq:
         s = nbr[i]
         if s < 0:
             continue
+        has_neighbour[i] = True
         if terminal is not None and terminal[i]:
-            held[i] = SILENCE
             continue
-        held[i] = SILENCE if receive is None else receive(s, i)
-        if held[i] is None:
-            raise AssertionError(
-                f"the {'backward' if backward else 'forward'} pass left slot {i} with no message from "
-                f"its neighbour {s}: a hop that carries nothing must still arrive as SILENCE — return "
-                "SILENCE, never None, from a real hop"
-            )
-    return held
+        if receive is not None:
+            receive(s, i)
+    return received
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────

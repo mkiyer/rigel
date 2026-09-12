@@ -187,8 +187,9 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 ```
 
 **The standing baseline: 0 failed / 3,431 passed / 0 skipped / 2 xfail, 3,433 collected** (re-derived
-2026-09-12 after the cleanup split: no gate added, four `src/rigel/calibration/` modules added — `blocks`,
-`message_cache`, `messages/faces`, `messages/lanes` — at +3 each, +12 in all). The 2 xfails are executable records of proven defects whose fixes are elsewhere
+2026-09-12 after the cleanup split and the received tables: four `src/rigel/calibration/` modules added —
+`blocks`, `message_cache`, `messages/faces`, `messages/lanes` — at +3 each, +12; one backbone test retired
+with its premise (a kernel can no longer leave a hop unspoken) and one gate added on the face table, ±0). The 2 xfails are executable records of proven defects whose fixes are elsewhere
 (`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this

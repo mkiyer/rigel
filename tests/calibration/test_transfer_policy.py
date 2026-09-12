@@ -22,6 +22,7 @@ import rigel.calibration.sweep as SW
 from rigel.calibration.messages import Policy
 from rigel.calibration.messages.silent import SilentPolicy
 from _transfer_harness import (
+    _drive,
     _bits,
     _ctx_of,
     _dead_boundaries,
@@ -218,18 +219,12 @@ def test_PERTURBATION_no_node_ever_hears_its_own_claim_back(sweep_inputs):
     assert probes, "no node carries a claim — this gate would prove nothing"
     checked = 0
     for i in probes[:12]:
-        base_rows = _drive_the_backbone(prepared, ctx)
-        held_before = [
-            None if h is None else h.composition
-            for h in (prepared.held[False][i], prepared.held[True][i])
-        ]
+        base_rows, fl, br = _drive(prepared, ctx)
+        held_before = [t.composition[i] if t.has_composition[i] else None for t in (fl, br)]
         saved = prepared.own[i]
         prepared.own[i] = -0.5 * ((lam - 3.3) / 0.2) ** 2  # a spike nowhere near any real claim
-        rows = _drive_the_backbone(prepared, ctx)
-        held_after = [
-            None if h is None else h.composition
-            for h in (prepared.held[False][i], prepared.held[True][i])
-        ]
+        rows, fl, br = _drive(prepared, ctx)
+        held_after = [t.composition[i] if t.has_composition[i] else None for t in (fl, br)]
         prepared.own[i] = saved
         for a, b in zip(held_before, held_after):
             if a is None or b is None:
@@ -349,7 +344,7 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
     junction — both are read, intersected, and delivered as a non-increasing row. An AMBIG node, an
     empty node and a node whose live strand admits nothing get no ceiling. PERTURBATION: with the left
     message's composition removed, its level and flux join the intersection and the row changes."""
-    from rigel.calibration.messages import Level, Message
+    from rigel.calibration.messages import Received
     from rigel.calibration.messages.faces import Faces
     from rigel.calibration.messages.lanes import LevelLane
     from rigel.calibration.messages.transfer import _PreparedTransfer, _SolveSite
@@ -383,22 +378,26 @@ def test_the_ceiling_is_read_only_from_a_face_that_sent_no_composition():
         [None] * 5, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
     )
     comp = -0.5 * ((lam - 1.0) / 0.5) ** 2
-    held_l = Level(floor(0.8), 25.0, 100.0)
-    held_r = Level(floor(-0.3), 25.0, 100.0)
-    from_left = [None, Message(composition=comp, level_rna_pos=held_l), None, None, None]
-    from_right = [None, Message(level_rna_pos=held_r), None, None, None]
+    held_l, held_r = floor(0.8), floor(-0.3)
+    from_left, from_right = Received.empty(5, K), Received.empty(5, K)
+    from_left.has_neighbour[1] = from_right.has_neighbour[1] = True
+    from_left.composition[1], from_left.has_composition[1] = comp, True
+    from_left.level_rna_pos.write(1, held_l, 25.0, 100.0)
+    from_right.level_rna_pos.write(1, held_r, 25.0, 100.0)
     rows = np.zeros((5, K))
     assert prep._ceilings(from_left, from_right, rows)
-    want = rna_row_of_level(intersect([held_r.profile, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
+    want = rna_row_of_level(intersect([held_r, flux[(1, 1)]]), u, lam, 400.0, 100.0, 0.5)
     np.testing.assert_allclose(rows[1], want, atol=1e-12)
     assert np.all(np.diff(rows[1]) <= 1e-9)
     assert not rows[[0, 2, 3, 4]].any()
     # the perturbation: the left composition removed → its level and flux join
-    from_left2 = [None, Message(level_rna_pos=held_l), None, None, None]
+    from_left2 = Received.empty(5, K)
+    from_left2.has_neighbour[1] = True
+    from_left2.level_rna_pos.write(1, held_l, 25.0, 100.0)
     rows2 = np.zeros((5, K))
     assert prep._ceilings(from_left2, from_right, rows2)
     want2 = rna_row_of_level(
-        intersect([held_l.profile, flux[(1, 0)], held_r.profile, flux[(1, 1)]]),
+        intersect([held_l, flux[(1, 0)], held_r, flux[(1, 1)]]),
         u,
         lam,
         400.0,
@@ -431,23 +430,7 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
                 assert np.all(np.diff(prof) >= -1e-12)  # a lower bound
                 per_face += 1
     assert per_face > 0
-    from rigel.calibration.messages import SILENCE
-
-    order = list(range(ctx.n_slots))
-    held = []
-    for nbr, seq, backward in (
-        (np.asarray(ctx.left, np.int64), order, False),
-        (np.asarray(ctx.right, np.int64), order[::-1], True),
-    ):
-        receive = prepared.propagate(backward=backward)
-        got = [None] * len(order)
-        for i in seq:
-            s = int(nbr[i])
-            if s >= 0:
-                got[i] = SILENCE if receive is None else receive(s, i)
-        held.append(got)
-    msg = prepared.solve(*held)
-    rows = np.asarray(msg.lam_rows)
+    rows, fl, br = _drive(prepared, ctx)
     without = np.zeros_like(rows)
     n = len(prepared.own)
     from rigel.calibration.messages.faces import fuse
@@ -455,25 +438,19 @@ def test_the_flux_is_kept_per_face_and_a_licensed_face_keeps_the_ceiling_out(swe
 
     for i in range(n):
         parts, bounds = [], []
-        for m in (held[0][i], held[1][i]):
-            if m is None:
-                continue
-            if m.composition is not None:
-                parts.append(m.composition)
-            if m.level_gdna is not None and not prepared.lanes["gdna"].empty[i]:
-                bounds.append(prepared.lanes["gdna"].row(m.level_gdna.profile, i))
+        for t in (fl, br):
+            if t.has_composition[i]:
+                parts.append(t.composition[i])
+            if t.level_gdna.present[i] and not prepared.lanes["gdna"].empty[i]:
+                bounds.append(prepared.lanes["gdna"].row(t.level_gdna.profile[i], i))
         if bounds:
             parts.append(intersect(bounds))
         if parts:
             without[i] = fuse(parts)
     site = prepared.site
     fp, fn = site.free["pos"], site.free["neg"]
-    all_comp = np.array(
-        [
-            all(m is None or m.composition is not None for m in (held[0][i], held[1][i]))
-            for i in range(n)
-        ]
-    )
+    # every side that exists sent a composition
+    all_comp = (fl.has_composition | ~fl.has_neighbour) & (br.has_composition | ~br.has_neighbour)
     single = (fp ^ fn) & ~site.ambig
     quiet = single & all_comp
     assert quiet.sum() > 0
@@ -488,7 +465,7 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
     non-decreasing in u (a level that crosses a face says "at least this much gDNA" and nothing more),
     a two-sided input loses only its upper side, and a hop across a density cliff — a larger price —
     widens it."""
-    from rigel.calibration.messages import Level
+    from rigel.calibration.messages import Levels
     from rigel.calibration.messages.lanes import LevelLane
 
     u = np.linspace(-10, 10, 60)
@@ -506,7 +483,10 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         [None, None],
         _bits(2, [(0, 1)]),
     )
-    lower = flat.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
+    held = Levels.empty(2, u.shape[0])
+    held.write(1, two_sided, 1.0e6, 1.0e4)  # what the hop wrote at 1 before the recipient priced it
+    flat.receive(held, 0, 1)
+    lower = held.profile[1].copy()  # a row of the table: copy before the row is rewritten
     assert np.all(np.diff(lower) >= -1e-12), "not a lower bound"
     below = u < 0.0
     np.testing.assert_allclose(lower[below], two_sided[below], atol=1e-3)
@@ -523,7 +503,9 @@ def test_a_received_gdna_level_is_a_lower_bound_and_the_hop_widens_it():
         [None, None],
         _bits(2, [(0, 1)]),
     )
-    wide = cliff.receive(Level(two_sided, 1.0e6, 1.0e4), 0, 1).profile
+    held.write(1, two_sided, 1.0e6, 1.0e4)
+    cliff.receive(held, 0, 1)
+    wide = held.profile[1]
     assert np.all(np.diff(wide) >= -1e-12)
     assert wide[np.argmin(np.abs(u + 1.0))] > lower[np.argmin(np.abs(u + 1.0))], "no widening"
 
@@ -567,7 +549,7 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
     the level a full node emits is the pointwise tighter of its own lower side and the priced level it
     holds — never their sum, which sharpened a chain of nine one-fragment boundaries into a hard bound
     on the ladder. PERTURBATION: an `emit` that multiplies fails here."""
-    from rigel.calibration.messages import Level
+    from rigel.calibration.messages import Levels
     from rigel.calibration.messages.lanes import LevelLane
     from rigel.calibration.messages.transfer_rows import intersect, lower_side
 
@@ -584,13 +566,15 @@ def test_a_full_node_emits_the_intersection_of_its_own_lower_side_and_what_it_ho
         own,
         _bits(3, [(0, 1), (1, 2)]),
     )
-    held = Level(lower_side(-0.5 * ((u - 0.5) / 0.8) ** 2), 100.0, 50.0)
-    sent = lane.emit(1, 2, held)
-    want = intersect([lower_side(own[1]), held.profile])
-    np.testing.assert_allclose(sent.profile, want, atol=1e-12)
-    product = lower_side(own[1]) + held.profile
-    assert np.max(np.abs(sent.profile - (product - product.max()))) > 0.5, "the sum: the ratchet"
-    assert (sent.n, sent.a) == (120.0, 60.0)
+    held = Levels.empty(3, u.shape[0])
+    held.write(1, lower_side(-0.5 * ((u - 0.5) / 0.8) ** 2), 100.0, 50.0)  # what node 1 holds
+    assert lane.emit(1, 2, held)
+    sent = held.profile[2]
+    want = intersect([lower_side(own[1]), held.profile[1]])
+    np.testing.assert_allclose(sent, want, atol=1e-12)
+    product = lower_side(own[1]) + held.profile[1]
+    assert np.max(np.abs(sent - (product - product.max()))) > 0.5, "the sum: the ratchet"
+    assert (held.count[2], held.opportunity[2]) == (120.0, 60.0)
 
 
 def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
@@ -607,6 +591,29 @@ def test_the_hop_price_is_both_countings_and_the_discrepancy_beyond_them():
     assert hop_price(50, 100.0, 200, 50.0) == hop_price(50, 100.0, 200, 50.0)
 
 
+def test_a_composition_arrives_only_through_a_face_with_a_composition_rule(sweep_inputs):
+    """The table's ``has_composition`` against the face table, independently of the kernel that wrote
+    it: on the live toy a node holds a composition from a side only where the directed face into it
+    carries a composition rule, and a node that heard something through a face with NO rule heard a
+    level. PERTURBATION: a kernel that marks a level as a composition fails here."""
+    from rigel.calibration.messages.faces import NONE
+
+    ctx = _ctx_of(sweep_inputs)
+    prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
+    _rows, fl, br = _drive(prepared, ctx)
+    kind = prepared.faces.kind
+    for side, t in ((0, fl), (1, br)):
+        ruled = kind[:, side] != NONE
+        assert not (t.has_composition & ~ruled).any(), (
+            "a composition arrived through a face with no rule"
+        )
+        assert (t.heard & ~ruled & t.has_level).sum() == (t.heard & ~ruled).sum()
+        assert (t.has_composition & ruled).any(), (
+            "no composition crossed a ruled face: the gate is vacuous"
+        )
+        assert (t.heard & ~ruled).any(), "no level crossed an unruled face: the gate is vacuous"
+
+
 def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
     """The empty node is transparent: the toy's inside pieces have no total, so what the boundary beyond
     such a piece holds from it must be exactly what the piece received — same profile, same (n, a) of
@@ -616,25 +623,23 @@ def test_an_empty_node_forwards_the_level_it_holds_unchanged(sweep_inputs):
 
     ctx = _ctx_of(sweep_inputs)
     prepared = _prepared(_full_policy(sweep_inputs)[0], ctx)
-    _drive_the_backbone(prepared, ctx)
+    _rows, fl, br = _drive(prepared, ctx)
     lane = prepared.lanes["gdna"]
     left, right = np.asarray(ctx.left, np.int64), np.asarray(ctx.right, np.int64)
     checked = 0
-    for backward, nbr in ((False, left), (True, right)):
-        held = prepared.held[backward]
+    for backward, nbr, held in ((False, left, fl.level_gdna), (True, right, br.level_gdna)):
         for e in np.flatnonzero(lane.empty):
             s = int(nbr[e])
-            if s < 0 or held[e] is None or held[e].level_gdna is None:
+            if s < 0 or not held.present[e]:
                 continue
             x = int(right[e] if not backward else left[e])
-            if x < 0 or held[x] is None or held[x].level_gdna is None or lane.empty[x]:
+            if x < 0 or not held.present[x] or lane.empty[x]:
                 continue
-            got, sent = held[x].level_gdna, held[e].level_gdna
-            v = hop_price(sent.n, sent.a, lane.count[x], lane.a[x])
-            want = lower_side(sent.profile)
+            v = hop_price(held.count[e], held.opportunity[e], lane.count[x], lane.a[x])
+            want = lower_side(held.profile[e])
             want = blur_row(want, lane.u, v) if v > 0.0 else want
-            np.testing.assert_allclose(got.profile, want, atol=1e-9)
-            assert (got.n, got.a) == (float(lane.count[x]), float(lane.a[x]))
+            np.testing.assert_allclose(held.profile[x], want, atol=1e-9)
+            assert (held.count[x], held.opportunity[x]) == (float(lane.count[x]), float(lane.a[x]))
             checked += 1
     assert checked > 0, "no level crossed an empty node on the toy: the gate proved nothing"
 

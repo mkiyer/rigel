@@ -56,7 +56,7 @@ P0 = sibling("pass0_vs_oracle.py")
 
 from rigel.calibration import region_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
-from rigel.calibration.messages import PsiMessage  # noqa: E402
+from rigel.calibration.messages import PsiMessage, Received  # noqa: E402
 from rigel.calibration.messages import transfer as TR  # noqa: E402
 from rigel.calibration.region_chain import REGION  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -560,7 +560,7 @@ def self_test() -> int:
     checks.append(("with nothing pinned the policy's solve is untouched (silent stays silent)",
                    CAL.TransferPolicy()
                    .prepare(SimpleNamespace(n_slots=4, n_grid=21, logodds_window=10.0, factory_rows=None), None)
-                   .solve([None] * 4, [None] * 4).is_silent))
+                   .solve(Received.empty(4, 21), Received.empty(4, 21)).is_silent))
     restore()
     checks.append(("…and every patch target is restored after the pin",
                    not [a for m, a, d in _patch_targets() if not _target_live(m, a, d)]))
