@@ -12,7 +12,6 @@ conditional.
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pysam
@@ -24,13 +23,7 @@ from rigel.sim.capture.design import design_capture_probe_intervals, write_rando
 from rigel.sim.capture.sampler import WeightedInterval
 from rigel.sim.genome import MutableGenome, random_dna_array
 from rigel.sim.manifest import condition_dir_name
-from rigel.sim.suite import (
-    SuiteCaptureSpec,
-    _load_suite_config,
-    _suite_capture_specs,
-    capture_paired_condition_seed,
-    capture_probe_group_key,
-)
+from rigel.sim.orchestrator import capture_paired_condition_seed
 from rigel.sim.whole_genome import (
     GDNASimConfig,
     SimulationParams,
@@ -59,23 +52,6 @@ def _transcript(
     )
     transcript.compute_length()
     return transcript
-
-
-def _suite_capture_args(**overrides) -> SimpleNamespace:
-    values = {
-        "capture_configs": None,
-        "capture_fraction": 0.0,
-        "capture_probes": None,
-        "capture_probe_format": "auto",
-        "probe_length": 120,
-        "probe_density": 1.0,
-        "capture_off_target_weight": 1.0,
-        "capture_binding_per_base": 10.0,
-        "capture_gdna_split_penalty": 0.2,
-        "capture_min_overlap": 1,
-    }
-    values.update(overrides)
-    return SimpleNamespace(**values)
 
 
 def test_transcript_probe_weights_match_overlap_example(tmp_path):
@@ -288,52 +264,6 @@ def test_parse_yaml_capture_config_sweep(tmp_path):
     assert cfg.capture_configs[1].config.binding_per_base == pytest.approx(7.0)
 
 
-def test_suite_capture_config_accepts_top_level_external_bed_panel(tmp_path):
-    probes = tmp_path / "panel.bed"
-    probes.write_text("chr1\t10\t130\tprobe1\t0\t+\t10\t130\t0\t1\t120\t0\n")
-    config = tmp_path / "suite.yaml"
-    config.write_text(f"capture:\n  probes: {probes}\n  format: bed12\n  binding_per_base: 7\n")
-
-    values = _load_suite_config(config)
-    specs, include_capture_in_names = _suite_capture_specs(_suite_capture_args(**values))
-
-    assert include_capture_in_names is False
-    assert len(specs) == 1
-    assert specs[0].label == "on"
-    assert specs[0].enabled
-    assert specs[0].uses_provided_probes
-    assert not specs[0].generates_probes
-    assert specs[0].probes == str(probes)
-    assert specs[0].probe_format == "bed12"
-    assert specs[0].binding_per_base == pytest.approx(7.0)
-
-
-def test_suite_capture_config_can_mix_off_generated_and_external_panels(tmp_path):
-    probes = tmp_path / "panel.bed"
-    probes.write_text("chr1\t10\t130\tprobe1\t0\t+\t10\t130\t0\t1\t120\t0\n")
-    args = _suite_capture_args(
-        capture_fraction=0.25,
-        capture_configs=[
-            {"label": "off", "enabled": False},
-            {"label": "generated", "fraction": 0.5},
-            {"label": "panel", "probes": str(probes), "format": "bed12"},
-        ],
-    )
-
-    specs, include_capture_in_names = _suite_capture_specs(args)
-
-    assert include_capture_in_names
-    assert [spec.label for spec in specs] == ["off", "generated", "panel"]
-    assert not specs[0].enabled
-    assert specs[1].generates_probes
-    assert not specs[1].uses_provided_probes
-    assert specs[1].fraction == pytest.approx(0.5)
-    assert specs[2].uses_provided_probes
-    assert not specs[2].generates_probes
-    assert specs[2].probes == str(probes)
-    assert specs[2].probe_format == "bed12"
-
-
 def test_capture_sweep_uses_paired_condition_seed():
     seed = capture_paired_condition_seed(42, "none", 0.99, "none")
 
@@ -520,42 +450,6 @@ def test_random_probe_writer_selects_capture_pool_by_gene(tmp_path):
     assert result.n_captured_genes == 1
     assert len(row_genes) == 1
     assert {row[0] for row in rows} == expected_by_gene[next(iter(row_genes))]
-
-
-def test_capture_probe_group_key_ignores_binding_energy_not_geometry():
-    base = SuiteCaptureSpec(
-        label="weak",
-        fraction=0.5,
-        probe_length=120,
-        probe_density=1.0,
-        off_target_weight=1.0,
-        binding_per_base=5.0,
-        gdna_split_penalty=0.2,
-        min_overlap=1,
-    )
-    stronger = SuiteCaptureSpec(
-        label="strong",
-        fraction=0.5,
-        probe_length=120,
-        probe_density=1.0,
-        off_target_weight=1.0,
-        binding_per_base=50.0,
-        gdna_split_penalty=0.2,
-        min_overlap=1,
-    )
-    sparser = SuiteCaptureSpec(
-        label="sparse",
-        fraction=0.5,
-        probe_length=120,
-        probe_density=0.5,
-        off_target_weight=1.0,
-        binding_per_base=5.0,
-        gdna_split_penalty=0.2,
-        min_overlap=1,
-    )
-
-    assert capture_probe_group_key(base) == capture_probe_group_key(stronger)
-    assert capture_probe_group_key(base) != capture_probe_group_key(sparser)
 
 
 # ── ``CaptureSampler.partition_array`` against brute-force enumeration over every start ──────────

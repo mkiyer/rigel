@@ -10,7 +10,6 @@ import pytest
 
 from rigel.sim.annotation import GeneBuilder
 from rigel.sim.genome import MutableGenome, reverse_complement
-from rigel.sim.synthetic_genome import generate_genes
 from rigel.transcript import Transcript
 from rigel.types import Strand, Interval
 
@@ -111,21 +110,6 @@ class TestReverseComplement:
 # =====================================================================
 # GeneBuilder
 # =====================================================================
-
-
-def test_generate_genes_respects_isoform_bounds_and_antisense_fraction():
-    genes = generate_genes(
-        500_000,
-        10,
-        13,
-        min_isoforms=1,
-        max_isoforms=5,
-        target_transcripts=None,
-        antisense_overlap_frac=0.0,
-    )
-
-    assert len(genes) == 10
-    assert all(1 <= len(gene.transcripts) <= 5 for gene in genes)
 
 
 class TestGeneBuilder:

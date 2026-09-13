@@ -186,8 +186,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,439 passed / 0 skipped / 2 xfail, 3,441 collected** (re-derived
-2026-09-13 after the θ quadrature's derivation note was added to `docs/dev/`, +1 collected, and after four instruments were retired — the structural-claims audit, the gDNA pool census, the truth A/B and the landscape census — −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
+**The standing baseline: 0 failed / 3,419 passed / 0 skipped / 2 xfail, 3,421 collected** (re-derived
+2026-09-13 after W11's tier 3 retired three dead simulator features — the locus sweep, the net-flow module and the synthetic mini-genome suite path — with their wrappers and tests, and after the θ quadrature's derivation note was added to `docs/dev/`, +1 collected, and after four instruments were retired — the structural-claims audit, the gDNA pool census, the truth A/B and the landscape census — −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the

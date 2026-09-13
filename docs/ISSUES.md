@@ -324,6 +324,18 @@ Each its own commit, none moving the 0.8.0 metric:
   it — its per-condition survey is recorded, and the rung that cited it is not on the roadmap).
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
+- W11, the coverage census, RULED and LANDED 2026-09-13 (owner: converge on the production surface; my
+  judgement on dead vs. rotten): the suite and all ten self-tests under coverage found 2,191 never-executed
+  statements in `src/rigel` (84 % covered). Removed, each its own commit, byte-identical on the default rows of
+  both substrates and on the three identity references: seven dead members (a local helper, five properties, a
+  method, a loader for a record no cache holds); the unreachable no-calibration path (the index loader refuses
+  every older format); the RNA reach taper's unfed switch; the RNA arm's unfed fitted-prior socket (ψ takes one
+  fitted arm, `gdna_logprior`); and three dead simulator features — `sim/locus_sweep` (0 % executed) with its
+  wrapper, `sim/net_flow` (no entry point) with its test, and the synthetic mini-genome suite path (`sim/suite`,
+  `sim/synthetic_genome`, `simulate_suite.py`, `snapshot_suite.py`, `build_toy_2exon_reference.py`) that
+  `panel.py` superseded. Kept as coverage GAPS, not dead code: the five CLI command bodies, the silent policy
+  through `calibrate` (only the instruments run it), the simulator's sharded writers and its whole-genome path
+  (live in panel builds, silent in the suite), and the zarr splice blacklist (a CLI feature with no test).
 
 ### oracle-effective-length-diagnostic
 `priority: later · kind: measurement · 2026-08`
