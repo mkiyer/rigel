@@ -69,14 +69,6 @@ class RegionChain:
     def n_slots(self) -> int:
         return int(self.kind.shape[0])
 
-    @property
-    def is_region(self) -> np.ndarray:
-        return self.kind == REGION
-
-    @property
-    def is_boundary(self) -> np.ndarray:
-        return self.kind == BOUNDARY
-
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
 # ONE SLOT'S DECONVOLUTION RESULT — vocabulary, so it lives at the bottom layer: `region_geometry` and
