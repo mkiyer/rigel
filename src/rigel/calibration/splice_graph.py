@@ -1423,10 +1423,6 @@ class TranscriptPath:
     kind: np.ndarray  # int8[n_steps]
     obj_id: np.ndarray  # int64[n_steps]
 
-    @property
-    def n_transcripts(self) -> int:
-        return int(self.offsets.shape[0]) - 1
-
     def steps(self, t: int) -> tuple[np.ndarray, np.ndarray]:
         """``(kind, obj_id)`` for one transcript, in transcription order."""
         lo, hi = int(self.offsets[t]), int(self.offsets[t + 1])
