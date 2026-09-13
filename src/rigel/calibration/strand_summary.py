@@ -120,16 +120,6 @@ class StrandSummary:
             self.p_r1_sense, self.n_observations, confidence=confidence
         )
 
-    @property
-    def strand_specificity(self) -> float:
-        """Strand specificity in [0.5, 1.0]."""
-        return max(self.p_r1_sense, self.p_r1_antisense)
-
-    @property
-    def read1_sense(self) -> bool:
-        """True when the protocol is predominantly read-1 sense."""
-        return self.p_r1_sense >= 0.5
-
     @classmethod
     def from_model(cls, model: "StrandModel") -> "StrandSummary":
         """Create a summary from a trained :class:`StrandModel`."""
