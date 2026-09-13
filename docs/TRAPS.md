@@ -241,7 +241,7 @@ population with a size nobody has measured.
 exact answer for one channel and see what perfecting it is worth.** One channel was ranked first for two
 sessions; its ceiling was worth ~1 % while an unranked channel was worth 21 %. An A/B says whether a change
 helped; a ceiling says whether the work is worth starting. *Instrument:*
-`scripts/design/calibration_truth_ab.py --ceiling`. *Sibling:* `TRAPS: a-symptom-is-not-a-second-defect`.
+`scripts/design/em_fl_ceiling.py`. *Sibling:* `TRAPS: a-symptom-is-not-a-second-defect`.
 
 **a-broad-population-carries-no-prior. A population prior only transfers information if the population is
 tight; before fitting one, measure the pooled distribution's width against the per-object uncertainty,

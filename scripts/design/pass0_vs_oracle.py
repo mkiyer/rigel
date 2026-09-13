@@ -659,8 +659,8 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int):
     ``max_size + 1``; ``None`` when the condition has no truth file or no fragments of that kind.
 
     Post-capture empirical, not the configured ``frag_mean``: capture selects for length, so the
-    configured parameters describe a library that was never sequenced. Same reader as
-    ``calibration_truth_ab.py``'s ceiling arms, so a ceiling is the consumer's own lever.
+    configured parameters describe a library that was never sequenced. Same reader
+    ``em_fl_ceiling.py`` uses for its exact-pmf arm, so a ceiling is the consumer's own lever.
     """
     path = condition_dir / "truth_fragment_lengths.tsv"
     if not path.is_file():
@@ -721,7 +721,7 @@ def report(measurements: list[ConditionMeasurement]) -> None:
         "LENGTH-input ceiling.\n"
         "   ⚠ mass-weighted; Σ|err| is the per-object answer, net is what the library-level figure "
         "sees.\n"
-        "   ⛔ undrained on every arm, T included: three partitions cannot be drained independently."
+        "   the DRAINED frame on every arm, T included: the partitions are lifted by replaying the whole's choices."
     )
     for m in measurements:
         true_contained = m.scores["pass0"]["region"]["ALL"].mass

@@ -32,7 +32,7 @@ end-to-end figure cannot say which of the two moved.
 | **primary** | the `CalibrationResult` itself: the six deconvolved arrays and the effective-length ruler derived from them | `O`, the same result with only the deconvolved arrays replaced by the origin-split truth; `U`, the no-enrichment null | `calibration_vs_oracle.py` — read `ruler_n_moved`, never the aggregate |
 | **primary, the prior** | the prior calibration ships — `gdna_prior_count`, `rna_prior_count`, `gdna_eff_len` per multi-locus | `O`, the same assembler fed the origin-split truth masses | `prior_vs_oracle.py` (`P − O`) |
 | **primary, per object** | each region's and boundary's own `f_g`, and whether it is confidently wrong | the oracle payload: the production accumulator run on the BAM split by true origin | `solvability_audit.py` |
-| **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_truth_ab.py` |
+| **primary, one number** | the library `f_gdna` | the simulator's per-fragment truth | `calibration_vs_oracle.py` — each row's `pools` block, `P_gdna` against `true_gdna` |
 | **controls** | zero-gDNA and zero-RNA, where truth is a constant | 0.000 and 1.000 exactly | `zero_controls.py`, and the `g00` rung |
 | **thermometer** | the transcript table a user reads | `truth_abundances.tsv` | `quant_accuracy.py --arm base` |
 
@@ -70,7 +70,7 @@ Kept as a record and a regression check, not as work. Stage A asks whether the i
 the 0.8.0 work asks whether calibration *finds* it. The three criteria: **fidelity** — the tally
 reproduces the specification exactly; **bias** — no channel is systematically off against per-fragment
 truth; **sufficiency** — perfecting the stored length information changes nothing downstream, which is
-what `calibration_truth_ab.py --ceiling` measures. Do not chase the gDNA length model's residual under
+what `em_fl_ceiling.py` measures, through the EM. Do not chase the gDNA length model's residual under
 capture: its cause is known and is not a divisor (both opportunity functions assume uniform placement
 and capture does not).
 
@@ -146,7 +146,7 @@ exists, never an estimator (`TRAPS: no-magic-numbers`):
 
 | | what it is | what its gap to P means |
 |---|---|---|
-| **C_input** | `calibrate` handed the simulator's own post-capture length pmfs — the override `calibration_truth_ab.py --ceiling` uses — at both solve depths | how much of the error is wrong inputs rather than wrong solving |
+| **C_input** | `calibrate` handed the simulator's own post-capture length pmfs — the override `em_fl_ceiling.py` injects — at both solve depths | how much of the error is wrong inputs rather than wrong solving |
 | **C_info** | a classification, per object: is the 2×2 of `EQUATIONS.md` §3.1 identified from this object's own stored channels at all? | not a gap — C_info ignores neighbours and the sweep does not, so it can be "worse" than P |
 
 C_input is a length-input ceiling and under the 0.8.0 scope a diagnostic, not a route (the other
@@ -159,10 +159,10 @@ no answer of their own, and that cell is reported with its mass share and its er
 threshold because it is a cell of a partition. The two classifications are each exhaustive (gated): the
 solver's own — `own_evidence` / `message_only` / `struct_lock`, from
 `region_init.has_own_composition_evidence` and `region_geometry.g1_locked` — and C_info's —
-`identified` / `undet_no_separation` / `undet_out_of_range` / `absent`. Every arm, T included, is
-undrained, and that is forced: draining three origin partitions separately is not the same operation as
-draining the whole, and the sum-to-full identity would not survive it; the drain is a different axis,
-measured by `calibration_truth_ab.py`.
+`identified` / `undet_no_separation` / `undet_out_of_range` / `absent`. Every arm, T included, is in
+the DRAINED frame: draining three origin partitions separately is not the same operation as draining the
+whole, so the partitions are lifted by replaying the whole's choices (`lift_drain_parts`) and the
+sum-to-full identity is asserted on the drained frame.
 
 ---
 
@@ -240,10 +240,6 @@ python scripts/design/prior_vs_oracle.py --suite $LADDER --index $INDEX \
 #    (c) per OBJECT: solvable, solved wrong, and CONFIDENTLY wrong.  Read `weak%` before `mwae`.
 python scripts/design/solvability_audit.py --suite $LADDER --index $INDEX \
        --oracle-cache $LADDER/oracle_cache
-#    (d) the one-number summary: the library f_gdna against truth.  `--scan-cache` is the scan-cache ROOT;
-#        `_main` is the undrained full payload; read which conditions it scored (TESTING.md §2).
-python scripts/design/calibration_truth_ab.py --scan-cache $LADDER/oracle_cache --cache-subdir _main \
-       --suite $LADDER --index $INDEX
 
 # 4. THE TWO ZERO CONTROLS — owner-required on EVERY experiment, both arms.
 python scripts/design/zero_controls.py
@@ -257,8 +253,8 @@ python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle
 # 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY
 python scripts/design/fl_pool_purity.py                #       are the pools pure gDNA (only where the lengths differ)
-python scripts/design/calibration_truth_ab.py --scan-cache $LADDER/oracle_cache --cache-subdir _main \
-       --suite $LADDER --index $INDEX --ceiling        # SUFFICIENCY: what a perfect length model is worth
+python scripts/design/em_fl_ceiling.py --panel $SUITE/flgap_rna_long --index $INDEX   # SUFFICIENCY, through the EM:
+#       fl-gap panels only (equal lengths hide it), both sign arms and the equal-length control
 ```
 
 Steps 0 and 2–4 take about 15 minutes on a built panel; `suite_resolves.py`'s requirement (c),

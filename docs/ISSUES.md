@@ -312,6 +312,9 @@ Each its own commit, none moving the 0.8.0 metric:
   `transport_dispersion`). Retired, each its own commit, all in git: `structural_claims_audit` (stage 0 came
   out confusion-matrix clean; only a parked, twice-refused issue cited it; its inputs are frame-invariant);
   `gdna_pool_census` (Stage A is closed and gated by the accumulator's spec test; it overlapped `fl_pool_purity`);
+  `calibration_truth_ab` (its one number is in every `calibration_vs_oracle.py` row's `pools`, in the drained
+  frame with both zero controls; the drain it priced shipped; its length ceiling is `em_fl_ceiling.py`'s,
+  through the EM);
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
 

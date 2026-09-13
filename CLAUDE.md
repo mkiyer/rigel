@@ -154,8 +154,8 @@ both a process rule and a structurally pure-gDNA object).
 - **The debug loop is the default method**: run the panel → take the worst IN-SCOPE scenario → dissect it
   to the highest-error objects (`worst_objects.py`, `calibration_walk.py`) → find the mechanism → fix →
   re-run the panel.
-- **A ceiling is sometimes the right instrument** (`calibration_truth_ab.py --ceiling`) but prices
-  something that may be unreachable, so it is not the default. Every ceiling arm patches
+- **A ceiling is sometimes the right instrument** (`quant_accuracy.py`'s injection arms; `em_fl_ceiling.py`)
+  but prices something that may be unreachable, so it is not the default. Every prior-injection arm patches
   `assemble_priors`, while `pipeline.py` builds `effective_lengths_em` before calling it, so the
   effective-length shrinkage has never been inside any ceiling number.
 - **One thing varied per experiment**, a baseline re-recorded from the current tree in the same session,
@@ -186,8 +186,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,460 passed / 0 skipped / 2 xfail, 3,462 collected** (re-derived
-2026-09-13 after the structural-claims audit and the gDNA pool census were retired, −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
+**The standing baseline: 0 failed / 3,456 passed / 0 skipped / 2 xfail, 3,458 collected** (re-derived
+2026-09-13 after the structural-claims audit, the gDNA pool census and the truth A/B were retired, −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
@@ -246,7 +246,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/prior_vs_oracle.py` | ⭐⭐⭐ **IS `LocusPriors` — the thing the EM actually reads — RIGHT?** Five arms separate calibration's own error from the assembler's, reporting the count, the composition claim and the scale apart, per stratum. ⛔ Undrained on every arm |
 | `design/pass0_vs_oracle.py` | **HOW DOES PASS-0 COMPARE WITH THE ORIGIN-SPLIT PAYLOAD AND TWO LEVERED CEILINGS, per object and per class?** ⛔ Its mass-weighted headline is the wrong yardstick for pass-0 — honest ignorance reads as error there |
 | `design/worst_objects.py` | ⭐⭐ **WHICH REGIONS AND BOUNDARIES CARRY ONE CONDITION'S ERROR MASS?** Read the concentration curve first — concentrated means a mechanism exists, diffuse a systematic bias; `fg_loc` vs `pred_fg` separates a bad local solve from bad messages |
-| `design/calibration_truth_ab.py` | ⭐⭐ **HOW DOES THE DELIVERABLE SCORE AGAINST TRUTH, AND WHAT IS PERFECTING EACH fl PMF WORTH (`--ceiling`)?** ⛔ Read the ceiling caution in Working rules first: the effective-length shrinkage sits outside every arm's patch point |
 | **⭐⭐⭐ the panel, and the caches that make calibration a seconds-long loop** | |
 | `sim/configs/flgap_rna_long.yaml` · `flgap_rna_short.yaml` | ⭐⭐ **WHAT BREAKS WHEN gDNA AND RNA FRAGMENT LENGTHS DIFFER? — the fl-gap SIDE panel, two arms of opposite sign** at `g50`. ⛔ Never a ladder rung: its transcript-level number is not a calibration result, though everything before the EM is valid ⛔⛔ **NOT REGENERATED on 2026-08-22: both arms still carry the RETIRED UNIFORM nascent model (`mode: fragment_share`), while the ladder carries SPARSE.** Each panel's on-disk data matches its own config, so both are internally accurate and their recorded measurements stand — but a ladder-vs-side-panel comparison now varies TWO things, so no claim may be carried across them. Re-simulating is an open owner decision |
 | `sim/configs/gdna_ladder.yaml` | ⭐ **THE STAGE-B PANEL, AND THE ONLY PANEL THE TOOL IS RANKED ON** — 16 conditions (`g00/g05/g50/g98` × ss `0.50/0.99` × capture off/on), gDNA 0 → 98 % at a fixed 10 M total. ⛔⛔ **EQUAL FRAGMENT LENGTHS, and that is a forcing function**: the EM already reads the fl distribution, so a length gap lets it split the origins on LENGTH ALONE and mask calibration bugs (owner, 2026-08-14). ⛔⛔ **Every row carries SPARSE nascent RNA (2026-08-22): `on_fraction 0.50` of gene SPANS on, level logU(1, 100) INDEPENDENT of the mature level — 20.2 % of RNA fragments, the retired uniform model's total distributed sparsely.** 0.50 is a DEVELOPMENT STRESS level and not real data (`DESIGN.md` §0b, THE NASCENT SCOPE RULING); realistic is 0.10 ⇒ 4.2 %. `docs/TESTING.md` §0 |
