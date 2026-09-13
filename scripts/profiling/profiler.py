@@ -17,7 +17,7 @@ library for the regime that matters), never a panel condition or a toy, which ra
 Usage::
 
     python scripts/profiling/profiler.py --bam lib.bam --index idx/ --threads 8 --out lib.json
-    python scripts/profiling/profiler.py --bam lib.bam --index idx/ --set calibration.sweep_n_grid=60
+    python scripts/profiling/profiler.py --bam lib.bam --index idx/ --set calibration.sweep_logodds_step=0.2
     python scripts/profiling/profiler.py --bam lib.bam --index idx/ --scan-only --set scan.total_threads=4
     python scripts/profiling/profiler.py --bam lib.bam --index idx/ --cprofile lib.prof
     python scripts/profiling/profiler.py --compare before.json after.json
@@ -45,6 +45,10 @@ import threading
 import time
 import types
 from pathlib import Path
+
+# the one SECTION.FIELD=VALUE parser, shared with the design instruments' ``--set``
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "design"))
+from _shared import set_field  # noqa: E402
 
 #: every stage worth naming, as (label, module, attribute path). Nesting is not declared: it is whatever
 #: the call stack says at run time, so a stage called from two places appears under both parents. Probe
@@ -314,24 +318,6 @@ def remove_probes(undo: list) -> None:
 # ── one run ────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _set_knob(cfg, dotted: str, raw: str):
-    """``section.field=value`` onto a frozen ``PipelineConfig``, typed from the field's current value."""
-    section_name, field_name = dotted.split(".", 1)
-    section = getattr(cfg, section_name)
-    current = getattr(section, field_name)
-    if isinstance(current, bool):
-        value = raw.lower() in ("1", "true", "yes", "on")
-    elif isinstance(current, int):
-        value = int(raw)
-    elif isinstance(current, float):
-        value = float(raw)
-    elif current is None:
-        value = None if raw.lower() == "none" else raw
-    else:
-        value = type(current)(raw)
-    return dataclasses.replace(cfg, **{section_name: dataclasses.replace(section, **{field_name: value})})
-
-
 def _git_sha() -> str:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
@@ -354,8 +340,7 @@ def profile_run(bam: str, index_dir: str, *, threads: int | None, knobs: list[st
         cfg = dataclasses.replace(cfg, scan=dataclasses.replace(cfg.scan, total_threads=threads),
                                   em=dataclasses.replace(cfg.em, n_threads=threads))
     for knob in knobs:
-        dotted, raw = knob.split("=", 1)
-        cfg = _set_knob(cfg, dotted, raw)
+        cfg = set_field(cfg, knob)
 
     import rigel.pipeline as pipeline  # noqa: F401 — imported so its bindings exist to be patched
 

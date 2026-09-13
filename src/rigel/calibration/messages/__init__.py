@@ -358,9 +358,9 @@ class ChainView:
     # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
     n_grid: int
     logodds_window: float
-    #: the AMBIG cube's tilt-grid size ``K_t`` (``None`` ⇒ ``n_grid``, as the solver reads it) — what a
-    #: policy needs to lay a ``cube_rows`` row on the grid ψ will evaluate it on
-    n_tilt: int | None = None
+    #: the AMBIG cube's tilt-grid size ``K_t`` — what a policy needs to lay a ``cube_rows`` row on the
+    #: grid ψ will evaluate it on
+    n_tilt: int
     #: the intron factory's per-slot λ-factor rows on THIS grid, ``(n_slots, K)`` or ``None`` — the
     #: same array ψ adds as its own λ-factor (`sweep.solve_chain`'s ``intron_prior``), so an intron's
     #: own claim and the solver's factor cannot drift apart; ``None`` is no factory

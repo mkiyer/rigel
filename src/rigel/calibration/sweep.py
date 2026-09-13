@@ -195,8 +195,7 @@ def solve_chain(
     n_rna_obs: float = 0.0,
     n_grid: int,
     logodds_window: float = 10.0,
-    n_tilt: int | None = None,
-    n_grid_ss: int | None = None,
+    n_tilt: int,
     gdna_prior=None,
     rna_prior=None,
     intron_prior=None,
@@ -244,7 +243,7 @@ def solve_chain(
     grid = dict(
         n_grid=int(n_grid),
         logodds_window=float(logodds_window),
-        n_tilt=None if n_tilt is None else int(n_tilt),
+        n_tilt=int(n_tilt),
         strand_live=strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs) > 0.0,
     )
     # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
@@ -258,7 +257,6 @@ def solve_chain(
         od_r=od_r,
         n_gdna_obs=n_gdna_obs,
         n_rna_obs=n_rna_obs,
-        n_grid_ss=n_grid_ss,
         gdna_prior=gdna_prior,
         rna_prior=rna_prior,
         policy=policy,
@@ -361,8 +359,7 @@ class _Sweep:
     n_rna_obs: float
     n_grid: int
     logodds_window: float
-    n_tilt: int | None
-    n_grid_ss: int | None
+    n_tilt: int
     strand_live: bool
     gdna_prior: object
     rna_prior: object
@@ -373,7 +370,6 @@ class _Sweep:
 def _psi(
     ctx: BlockContext,
     strand: tuple,
-    n_grid_ss,
     *,
     priors,
     fg_ref,
@@ -414,7 +410,6 @@ def _psi(
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
         n_tilt=ctx.n_tilt,
-        n_grid_ss=n_grid_ss,
         priors=priors,
         lam_logprior=lam_logprior,
         fg_ref=fg_ref,
@@ -499,7 +494,7 @@ def _write_back(dc, solvable, belief: RegionBelief, n_owned: int, counts: Assert
 
 
 def _block_diagnostics(
-    diag: dict, ctx, own, belief, solvable, msg, out, tables, strand, n_grid_ss, arms, support
+    diag: dict, ctx, own, belief, solvable, msg, out, tables, strand, arms, support
 ):
     """The diagnostic capture of one block — the instruments' view. Two extra solves live here and
     nowhere in production: the strand-ONLY belief (no prior, no messages), to split the local error into
@@ -523,13 +518,11 @@ def _block_diagnostics(
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
         n_tilt=ctx.n_tilt,
-        n_grid_ss=n_grid_ss,
         priors=None,
     ).gdna_frac
     loc = _psi(
         ctx,
         strand,
-        n_grid_ss,
         priors=arms,
         fg_ref=out["f_g"],
         fpos_ref=out["f_pos"],
@@ -610,7 +603,6 @@ def _solve_block(
         n_grid=sweep.n_grid,
         logodds_window=sweep.logodds_window,
         n_tilt=sweep.n_tilt,
-        n_grid_ss=sweep.n_grid_ss,
         belief=belief,
         priors=arms,
         intron_prior=factory_rows,
@@ -641,7 +633,6 @@ def _solve_block(
     final = _psi(
         ctx,
         strand,
-        sweep.n_grid_ss,
         priors=arms,
         fg_ref=belief.f_g,
         fpos_ref=belief.f_pos,
@@ -676,7 +667,6 @@ def _solve_block(
             out,
             (from_left, from_right, held_composition),
             strand,
-            sweep.n_grid_ss,
             arms,
             (mass_global, eff_global),
         )

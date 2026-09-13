@@ -46,6 +46,7 @@ from _shared import sibling  # noqa: E402
 
 P0 = sibling("pass0_vs_oracle.py")
 
+from rigel.calibration.calibrate import lattice_points  # noqa: E402
 from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
 from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.region_geometry import g1_locked  # noqa: E402
@@ -104,7 +105,10 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
         )
     # G1, from the one definition (`region_geometry.g1_locked`), on both axes.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
-    lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+    lam_grid, _ = _logodds_grid(
+        lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
+        float(config.sweep_logodds_window),
+    )
     fac = density_factor_precision(capture.get("intron_prior"), lam_grid)
     fac = np.zeros_like(tau) if fac is None else np.asarray(fac, np.float64)
     factory = (fac > _EPS) & ~locked
@@ -165,7 +169,10 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
         return out
 
     var_log = onto(cap["var_g"])
-    _, fg_grid = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+    _, fg_grid = _logodds_grid(
+        lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
+        float(config.sweep_logodds_window),
+    )
     z, gap, sd = standardised_discrepancy(f_pred, f_true, var_log, fg_grid)
 
     determined = (per_axis["locked"] | per_axis["strand"] | per_axis["factory"]) & live

@@ -649,13 +649,14 @@ def init_beliefs(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
-    n_grid_ss: int | None = None,
+    n_tilt: int,
     logodds_window: float = 10.0,
 ) -> RegionBelief:
     """The signature-binary G1/G2/G3 initial :class:`RegionBelief` on the unified chain.
 
-    All slots are strand-solved by the log-density 1-D/2-D log-odds solver (:mod:`simplex_logodds`,
-    ``O(m·K)``): the bare strand likelihood plus the Jeffreys reference at single-strand regions, with no
+    All slots are strand-solved by the log-density log-odds solver (:mod:`simplex_logodds`; a one-cell
+    tilt at single-strand regions, the ``n_tilt`` θ grid at AMBIG ones): the bare strand likelihood plus
+    the Jeffreys reference at single-strand regions, with no
     global prior and no imputation, both of which enter later in the sweep. The signature-binary class
     overrides (:func:`_type_belief`) then set the G1/G2/G3 belief. Single-strand introns resolve to
     ``f_g≈0`` from the Beta-Binomial tilt alone, which is the zero-gDNA gate; intergenic and TSS sinks
@@ -675,7 +676,7 @@ def init_beliefs(
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
-        n_grid_ss=n_grid_ss,
+        n_tilt=n_tilt,
         L=logodds_window,
     )
     f_pos, f_neg, f_g, var_g = _type_belief(st.free_pos, st.free_neg, deconv, count.sum(axis=1))

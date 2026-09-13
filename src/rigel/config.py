@@ -247,8 +247,8 @@ class CalibrationConfig:
 
     The calibrator is the belief-propagation sweep over the region-boundary chain — a single
     forward-backward pass per solve_chain call, with the belief-free Poisson disagreement-variance
-    message precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-region log-odds
-    solve grid. See :func:`rigel.calibration.calibrate.calibrate`.
+    message precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_logodds_step`` sets the per-region
+    log-odds lattice. See :func:`rigel.calibration.calibrate.calibrate`.
     """
 
     #: The strand-overdispersion CEILING is not config: it lives as the single asserted constant
@@ -257,19 +257,23 @@ class CalibrationConfig:
     #: shrink toward EACH OTHER by their own measured informations
     #: (``gdna_strand.reconcile_overdispersions``).
 
-    #: Sweep grid resolution ``K`` for the per-region log-density log-odds solve over ``λ = logit(f_g)``
-    #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand regions are exact 1-D, AMBIG
-    #: regions marginalize the RNA tilt ``τ``). 60 matches per-region accuracy at a tractable cost; a
-    #: much coarser grid under-resolves the zero-DNA case.
-    sweep_n_grid: int = 60
-
-    #: Single-strand λ-grid resolution ``K_ss``. Single-strand regions solve a cheap 1-D λ grid
-    #: (``O(m·K)``), so a fine grid is affordable there and de-quantizes the ``f_g`` readout, which the
-    #: coarse shared grid snaps into visible steps on high-mass exons. Decoupled from ``sweep_n_grid``
-    #: because the AMBIG 2-D ``(λ,τ)`` cube is ``O(m·K·K_t)`` and a fine grid there is a genome-scale
-    #: memory risk. Paired with the parabolic sub-grid-mode readout (``simplex_logodds``), which recovers
-    #: roughly a 4x-finer-grid accuracy at any ``K``; 256 is where the pair saturates.
-    sweep_n_grid_single_strand: int = 256
+    #: The λ lattice's STEP, in nats of log-odds. ψ's grid is ``λ ∈ [−L, L]`` at this spacing, ``K =
+    #: round(2L/step) + 1`` points at whatever bracket ``L`` a pass solves on (the floor below, or the
+    #: landscape prior's derived demand), so widening the bracket never coarsens the lattice. ONE lattice
+    #: serves every consumer — the read-out, the message rows, the AMBIG cube's λ axis, the intron
+    #: factory's rows and the composition prior (ruled 2026-09-13: a second, finer single-strand grid
+    #: with a linear regrid between the two measured worse than one grid on every stratum of both
+    #: panels, and the regrid was the reason).
+    #:
+    #: Dimensionless, so one value serves every depth and genome, and what it guarantees is readable: the
+    #: ½-quantile read-out is exact to 1 % of a step once a slot's posterior is wider than the step, and
+    #: quantised by at most ``n·f(1−f)·step/4`` fragments below it — at 0.2 a slot's composition is within
+    #: 1.25 % of its mass at worst, 0.6 % on average. The ladder (16 conditions, one lattice, ratio to the
+    #: retired 60/256 pair on the three in-scope strata; cost on the 18.6M-fragment library): 0.69 (30
+    #: points) 1.10–1.22×; 0.34 (60) 1.02–1.04×; 0.20 (101) 0.993 / 0.998 / 1.000 at wall 1.09×, +1.8 GB;
+    #: 0.146 (138) 0.990 at 1.33×, +3.7 GB; 0.10 (201) 0.987 at 1.71×, +9.8 GB. The cost is the AMBIG cube
+    #: (``K × sweep_n_tilt`` per slot) and its cached rows; 0.2 is the coarsest step that loses nothing.
+    sweep_logodds_step: float = 0.2
 
     #: Log-odds grid FLOOR ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
     #: Beta(½,½) reference needs to stay proper, and it is a FLOOR, not the value.
@@ -283,9 +287,13 @@ class CalibrationConfig:
     #: the density the prior favours.
     sweep_logodds_window: float = 10.0
 
-    #: Inner tilt-grid resolution ``K_t`` for AMBIG regions' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
-    #: ``None`` ⇒ reuse ``sweep_n_grid``.
-    sweep_n_tilt: int | None = None
+    #: The AMBIG cube's tilt axis: ``K_t`` nodes of the angle ``θ = arcsin τ`` on ``[−π/2, π/2]``, uniform
+    #: (`simplex_logodds._tilt_grid`); the tilt is a share, so its axis has no bracket and does not scale
+    #: with the λ lattice. Explicit and independent of the λ lattice (it was ``None ⇒ n_grid``). The
+    #: ladder, ratio to 60 (2026-09-13): 15 and 30 hold every in-scope stratum within 2 % but break the
+    #: zero-gDNA control 10.5× and 6.3× on ψ's own θ quadrature at strand purity (`ISSUES:
+    #: theta-quadrature-at-zero-gdna`); 120 and 240 equal 60. 60 is the smallest count that holds the control.
+    sweep_n_tilt: int = 60
 
     #: The sweep's WORKING SET: the chain is solved one LOCUS BLOCK at a time — the chain cut at every
     #: intergenic region (where message passing ends) and the pieces merged up to this many slots per
@@ -414,19 +422,19 @@ class CalibrationConfig:
             raise ValueError(
                 f"CalibrationConfig.sweep_block_slots must be >= 1 or None; got {self.sweep_block_slots}."
             )
-        if self.sweep_n_grid < 2:
-            raise ValueError(
-                f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."
-            )
-        if self.sweep_n_grid_single_strand < 2:
-            raise ValueError(
-                "CalibrationConfig.sweep_n_grid_single_strand must be >= 2; "
-                f"got {self.sweep_n_grid_single_strand}."
-            )
         if not (float(self.sweep_logodds_window) > 0.0):
             raise ValueError(
                 "CalibrationConfig.sweep_logodds_window (L) must be > 0; "
                 f"got {self.sweep_logodds_window}."
+            )
+        if not (0.0 < float(self.sweep_logodds_step) <= 2.0 * float(self.sweep_logodds_window)):
+            raise ValueError(
+                "CalibrationConfig.sweep_logodds_step must be > 0 and no wider than the window "
+                f"(2L = {2.0 * float(self.sweep_logodds_window)}); got {self.sweep_logodds_step}."
+            )
+        if self.sweep_n_tilt < 2:
+            raise ValueError(
+                f"CalibrationConfig.sweep_n_tilt must be >= 2; got {self.sweep_n_tilt}."
             )
 
 

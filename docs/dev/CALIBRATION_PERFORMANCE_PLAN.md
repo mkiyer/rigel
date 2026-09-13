@@ -179,7 +179,7 @@ precedes F (the port). Status is kept HERE; tick an item by writing DONE and the
 | W2 | **One ψ solver, one precision** — DONE 2026-09-12 (`_solve_logodds`; the unread strand log-variances deleted with it; metric and panels identical to the printed precision; timing pair in DESIGN §6b.15) | a single-strand slot is the cube with a tilt grid of one cell, so `_solve_regions_logodds` and `_solve_ambig_logodds` become one solver with `K_t` a parameter, in float64 throughout (the float32 cube was a memory choice the tiling made moot); `f32-strand-tilt-at-half` closes with it; the cache stores what the solve produces | the oracle metric and the panel, W1's report on the replay captures, timing pairs, the vertex-reference and strand-reference gates |
 | W3 | **`calibrate.calibrate` as named stages** — `calibrate` DONE 2026-09-12 (141 lines of orchestration over `_fit_strand`, `_IntronFactory`, `_background_pair`, `_abundance_landscape`, `_policy`, `_Solve` + `_init_belief` / `_sweep` / `_solve`, `_result`, `_log_summary`; bit-identical on the three references); `_solve_block` (109 lines over `_psi`, `_composition_arms`, `_message_layer`, `_write_back`, `_block_diagnostics`) and `solve_chain` (136, over the `_Structure` and `_Sweep` records) DONE 2026-09-12, every step bit-identical on the three references, the replay and the suite | the 600-line function becomes the walk's rungs (init → strand → local → messages → refits → shipped) as functions with one job each; `_solve_block` (319) and `solve_chain` (158) likewise | `rename_identity.py --check` where a step is a pure restructure; the metric otherwise |
 | W4 | **Memory (D)** — DONE 2026-09-12: measured first; the crossing divisor in closed form (the 9 GB sj matrix gone), the landscape's kernels tiled (the 3 GB peak gone), the factory rows per block (`FactoryRows`); peak 19.2 → 11.4 GB, wall 0.99, metric untouched (3.4e-15); the ψ tiling stays, since the whole-chain `init_beliefs` solve still runs on it and is tiled to 1 MiB anyway — the plateau's remaining owners are the pre-calibration floor and the cache (E) | `build_region_geometry`'s 14.5 GB transient; `init_beliefs` per block, which frees the ψ tiling for every caller (A.4); the factory rows built per block | `profiler.py` peak and held per stage, pairs |
-| W5 | **The grid study** (owner, 2026-09-12: a careful search, not a two-arm A/B; do not hastily conclude two grids are needed) | understand ψ's grid before designing it: accuracy vs K per stratum and slot class, the read-out's quantisation, the bracket coupling, the regrid's cost, time and memory vs K; then the simple design — §6 | the oracle metric per stratum with both zero controls, the panel, profiler pairs |
+| W5 | **The grid study** — DONE 2026-09-13 (`DESIGN.md` §6b.15: one λ lattice, `sweep_logodds_step` 0.2, `sweep_n_tilt` 60 explicit; the second grid, `_regrid_global` and `_scaled_grid` deleted; refusals in `ISSUES: the-second-lambda-grid-and-its-regrid`; the θ quadrature filed) | understand ψ's grid before designing it: accuracy vs K per stratum and slot class, the read-out's quantisation, the bracket coupling, the regrid's cost, time and memory vs K; then the simple design — §6 | the oracle metric per stratum with both zero controls, the panel, profiler pairs |
 | W6 | **The tunables census** | `CalibrationConfig`'s 49 fields: live / derived / dead, each derivation named; anything unearned removed | `module_census.py`, the suite |
 | W7 | **The capture as a typed record** | the 25-key `_capture` dict (75 keyword lines in `_solve_block`) | the instruments that read it (`landscape_training_census.py`, `backbone_parity.py`, the walk) |
 | W8 | **Vocabulary rulings** | `ISSUES: rename-the-drain`, `ISSUES: rename-row-and-face`; the `hygiene-ledger` items | `rename_census.py --sense`, `rename_identity.py --check` |
@@ -218,8 +218,8 @@ tables, the row stores), the two passes writing `Received` tables, the solve, th
 the port: (i) the passes and `transfer_rows` (the highest ratio of Python overhead to arithmetic), (ii)
 `prepare`'s builders, (iii) ψ (SIMD exp/log, the AMBIG cube), (iv) threads over blocks — the parallelism
 the owner deferred to the port. Every step behind the tolerance gate of C, the references, the suite. Keep
-the refit sweeps' grid a parameter (`n_grid_ss = 513` on the refits is an accuracy ruling, not a
-performance one). "Satisfied with the Python" means: A–D landed, one representation for the received
+the λ lattice a parameter (`sweep_logodds_step`, its point count following the bracket through
+`calibrate.lattice_points`: an accuracy ruling, not a performance one). "Satisfied with the Python" means: A–D landed, one representation for the received
 messages, the layering clean, the gates and the tolerance instrument in place, the docs current.
 
 ### G. Then the scan and the second pass (⑤)
@@ -227,7 +227,7 @@ messages, the layering clean, the gates and the tolerance instrument in place, t
 31 s and 22 s at 8 threads on the deep library; the stages that scale with depth and the whole problem at
 100M+ fragments. The scan's thread split is the owner's decision (`ISSUES: scan-thread-split-starves-the-workers`).
 
-## 6. W5 — the grid study (the design, for the next session)
+## 6. W5 — the grid study (the design as written before the study; RULED 2026-09-13, `DESIGN.md` §6b.15)
 
 **What is there.** ψ's λ grid is ``λ ∈ [−L, L]`` with ``K`` points (`_logodds_grid`); ``f_g = σ(λ)`` is
 read out as the posterior MEDIAN by a continuous quantile over the grid's histogram, interpolated on λ

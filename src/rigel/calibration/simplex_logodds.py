@@ -36,8 +36,9 @@ spliced there, a channel genuinely disjoint from the (directly observed, already
 One solver, :func:`_solve_logodds`, over the ``(λ, θ)`` cube in float64. A single-strand region (exactly
 one of ``allow_pos`` / ``allow_neg``) has its tilt fixed by its live strand, so it is the ``K_t = 1`` case —
 a 1-D solve over ``λ`` at the 1-D cost — and AMBIG regions (both set) marginalise the tilt on the θ grid.
-``_solve_regions_logodds_all`` runs the two classes on their own λ grids (the single-strand grid is the
-finer one) and tiles the rows so the working set stays in cache. Structurally RNA-free regions (neither
+``_solve_regions_logodds_all`` runs the two classes on ONE λ lattice (ruled 2026-09-13: a finer
+single-strand grid with a regrid between the two measured worse than one lattice) and tiles the rows so the
+working set stays in cache. Structurally RNA-free regions (neither
 strand live — intergenic / TSS / TES) have no composition dof and never reach the solver:
 ``sweep.solve_chain`` gates them out via ``solvable``, so no reference is applied to a region whose
 composition is known structurally.
@@ -353,12 +354,8 @@ class CompositionPriors:
     are one concept — the fitted population density for each component of the gDNA-vs-RNA split — so
     naming the pair costs no parameter.
 
-    The pair also makes a whole class of bug unrepresentable. Each arm has to be row-sliced per solve
-    block and, on the fine single-strand grid, re-gridded from the coarse λ lattice. Those are two
-    separate operations at two separate call sites, so a second arm threaded by hand could easily be
-    sliced and not regridded — which would not raise, would not change shape, and would silently
-    evaluate one component's prior on the wrong lattice. :meth:`select` and :meth:`regrid` apply to both
-    members at once, so the two arms cannot drift apart.
+    The pair also keeps the two arms in step: each is row-sliced per solve block, and :meth:`select`
+    slices both at once, so a second arm threaded by hand cannot be sliced for one block and not the other.
 
     ``None`` on either member means that arm is not fitted and takes its derived reference, which is not
     the same as "no term" (see :func:`_gdna_arm`).
@@ -377,37 +374,10 @@ class CompositionPriors:
         """Both arms restricted to one solve block's rows."""
         return CompositionPriors(_slice_rows(self.gdna, msk), _slice_rows(self.rna, msk))
 
-    def regrid(self, n_from: int, n_to: int, L: float) -> "CompositionPriors":
-        """Both arms carried from the coarse λ lattice to the fine single-strand one."""
-        return CompositionPriors(
-            _regrid_global(self.gdna, n_from, n_to, L),
-            _regrid_global(self.rna, n_from, n_to, L),
-        )
-
 
 #: The prior-free solve — both arms take their derived reference. A first-class configuration, not a
 #: degenerate one: pass-0 runs here by design.
 _NO_PRIORS = CompositionPriors()
-
-
-def _regrid_global(glp, n_from, n_to, L):
-    """Interpolate a ``(m, n_from)`` global-logprior (evaluated on the σ(λ) grid at ``n_from``) onto the
-    ``n_to`` σ(λ) grid. The single-strand solve runs on a finer grid than the AMBIG cube, so the
-    coarse-grid global prior is regridded to feed it; the global is smooth in ``f_g``, so linear
-    interpolation is exact to interpolation accuracy. ``None`` or equal grids pass through
-    bit-identically."""
-    if glp is None or int(n_from) == int(n_to):
-        return glp
-    _, fc = _logodds_grid(int(n_from), L)
-    _, ff = _logodds_grid(int(n_to), L)
-    j = np.clip(np.searchsorted(fc, ff), 1, int(n_from) - 1)
-    x0, x1 = fc[j - 1], fc[j]
-    t = np.clip((ff - x0) / np.maximum(x1 - x0, _EPS), 0.0, 1.0)  # (n_to,)
-    g = np.asarray(glp, np.float64)
-    # C-contiguous, deliberately: a fancy index on the LAST axis returns an F-ordered array, and a row
-    # reduction over an F-ordered ψ is summed in an order that depends on how many rows share the
-    # call — one ulp, and a solve that is no longer chunk-exact (`_solve_logodds`).
-    return np.ascontiguousarray(g[:, j - 1] + t[None, :] * (g[:, j] - g[:, j - 1]))
 
 
 def _gdna_arm(lam, global_logprior):
@@ -651,8 +621,7 @@ def _solve_regions_logodds_all(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    n_tilt: int | None = None,
-    n_grid_ss: int | None = None,
+    n_tilt: int,
     priors: "CompositionPriors | None" = None,
     lam_logprior=None,
     fg_ref=None,
@@ -660,9 +629,9 @@ def _solve_regions_logodds_all(
     fneg_ref=None,
     cube_rows=None,
 ) -> RegionDeconv:
-    """The per-region dispatcher: runs :func:`_solve_logodds` on the single-strand regions (the fine
-    ``λ`` grid, a one-cell tilt) and on the AMBIG regions (the coarse ``λ`` grid, the θ grid), scattering
-    both into full-length arrays. Structurally pure-gDNA and zero-mass regions report 0, and
+    """The per-region dispatcher: runs :func:`_solve_logodds` on the single-strand regions (a one-cell
+    tilt) and on the AMBIG regions (the ``K_t = n_tilt`` θ grid), both on the one ``λ`` lattice,
+    scattering both into full-length arrays. Structurally pure-gDNA and zero-mass regions report 0, and
     ``sweep.solve_chain`` keeps their signature-binary init through the ``solvable`` write-back.
 
     All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
@@ -714,14 +683,10 @@ def _solve_regions_logodds_all(
         out["vg"][msk] = dc.gdna_frac_var
 
     if bool(ss.any()):
-        # Single-strand regions solve on the fine 1-D grid (`n_grid_ss`), and the coarse-grid global prior
-        # is regridded onto it; AMBIG keeps the coarse `n_grid`, its 2-D cube being the expensive one.
-        # `n_grid_ss=None` means `n_grid`. Tiled into row blocks for the same reason as the AMBIG cube
-        # below — see `_SOLVE_BLOCK_BYTES` — and the regrid rides inside the loop, so its (block, K_ss)
-        # temporaries are tiled too.
-        k_ss = int(n_grid_ss) if n_grid_ss else int(n_grid)
+        # Single-strand regions: the 1-D solve (a one-cell tilt), tiled into row blocks for the same
+        # reason as the AMBIG cube below — see `_SOLVE_BLOCK_BYTES`.
         ss_idx = np.where(ss)[0]
-        rows = _block_rows(k_ss, 8)
+        rows = _block_rows(int(n_grid), 8)
         for s0 in range(0, ss_idx.size, rows):
             bidx = ss_idx[s0 : s0 + rows]
             _scatter(
@@ -737,20 +702,20 @@ def _solve_regions_logodds_all(
                     kappa=kappa,
                     od_g=od_g,
                     od_r=od_r,
-                    n_grid=k_ss,
+                    n_grid=n_grid,
                     L=L,
                     n_tilt=1,
-                    priors=(priors or _NO_PRIORS).select(bidx).regrid(n_grid, k_ss, L),
-                    lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
+                    priors=(priors or _NO_PRIORS).select(bidx),
+                    lam_logprior=_s(lam_logprior, bidx),
                 ),
             )
     if bool(amb.any()):
         # The 2-D (λ,θ) cube is (B,K,K_t); materialised for every AMBIG region at once it would be
-        # O(m·K²). AMBIG regions solve independently, so the subset is tiled into row blocks —
+        # O(m·K·K_t). AMBIG regions solve independently, so the subset is tiled into row blocks —
         # bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
         amb_idx = np.where(amb)[0]
-        rows = _block_rows(int(n_grid) * (int(n_tilt) if n_tilt else int(n_grid)), 8)
-        Kt = int(n_tilt) if n_tilt else int(n_grid)
+        Kt = int(n_tilt)
+        rows = _block_rows(int(n_grid) * Kt, 8)
         for s0 in range(0, amb_idx.size, rows):
             bidx = amb_idx[s0 : s0 + rows]
             cube = None

@@ -52,6 +52,7 @@ def _ctx(*, free_pos=None, free_neg=None, n_grid=60) -> BlockContext:
         has_own_composition=np.zeros(N, bool),
         belief_fg=ones,
         n_grid=n_grid,
+        n_tilt=n_grid,
         logodds_window=10.0,
     )
 

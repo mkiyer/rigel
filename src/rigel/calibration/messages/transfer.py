@@ -299,7 +299,7 @@ class _Chain:
             np.asarray(ctx.sj_count_lo, np.float64),
             np.asarray(ctx.sj_count_hi, np.float64),
         )
-        self.n_tilt = int(ctx.n_tilt) if ctx.n_tilt else self.K
+        self.n_tilt = int(ctx.n_tilt)
 
     def other_flank(self, b, e):
         return self.left[b] if self.right[b] == e else self.right[b]

@@ -599,6 +599,7 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
         has_own_composition=np.array([False, False, False, False, True]),
         belief_fg=np.full(n, 0.5),
         n_grid=41,
+        n_tilt=41,
         logodds_window=10.0,
         factory_rows=np.zeros((n, 41)),  # a factory with nothing to say: the lanes alone
         strand_live=True,  # the deadband is open: the full exon's split is a witness

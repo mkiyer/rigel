@@ -28,9 +28,9 @@ from rigel.calibration.simplex_logodds import (
 #: κ = ½ EXACTLY, no overdispersion, no fitted priors. On that substrate the strand term is bit-flat, so
 #: the only things speaking about λ are the message under test and ψ's reference — which isolates the
 #: reference without ablating anything.
-#: ``n_grid_ss`` is deliberately FINE: the price law is read in λ, and a coarse lattice quantises the
+#: the lattice is deliberately FINE: the price law is read in λ, and a coarse lattice quantises the
 #: very quantity being measured. The window ``L`` is the one real hard limit and G1 stays clear of it.
-_BASE = dict(kappa=0.5, od_g=0.0, od_r=0.0, n_grid=128, L=10.0, n_tilt=64, n_grid_ss=4096)
+_BASE = dict(kappa=0.5, od_g=0.0, od_r=0.0, n_grid=4096, L=10.0, n_tilt=64)
 
 #: one decade of precision on a ``log f_c`` message buys this many nats of log-odds, by derivation
 #: (``λ* = ½·log(p/C)`` ⇒ ``dλ/dlog₁₀p = ½·ln 10``). Not a tuned tolerance — the prediction itself.
@@ -188,7 +188,7 @@ def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_
     ``f_g`` would read a large move as a small one.
 
     Stated as a RATIO, not as bit-identity, and that distinction is a measurement rather than
-    caution. On the toy's shipped lattice (``n_grid_ss = 256``, ``Δλ = 0.078``) the off-vertex half IS
+    caution. On a 256-point lattice (``Δλ = 0.078``) the off-vertex half IS
     bit-identical — but at the 16× finer lattice used here it moves 0.015 nats, so the identity was
     lattice quantisation and not orthogonality (TRAPS: byte-identity-gate: a bit-identity gate has lied in both
     directions). The real claim is that each half is worth two orders of magnitude more at its own
@@ -294,9 +294,7 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
 _L = 10.0
 
 
-def _solve_composition(
-    u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60, n_grid_ss=256, n_tilt=None
-):
+def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60, n_tilt=60):
     d = _solve_regions_logodds_all(
         np.asarray(u_pos, np.float64),
         np.asarray(u_neg, np.float64),
@@ -308,7 +306,6 @@ def _solve_composition(
         od_g=0.0,
         od_r=0.0,
         n_grid=n_grid,
-        n_grid_ss=n_grid_ss,
         n_tilt=n_tilt,
         L=_L,
     )

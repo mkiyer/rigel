@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import cProfile
 import dataclasses
+import inspect
 import io
 import os
 import pickle
@@ -181,7 +182,7 @@ def tolerance_report(expected, result, args, kwargs) -> list[str]:
     eps = np.where(ambig, EPS32, EPS64)
     kappa = float(kwargs["rna_sense_frac"])
     window = float(kwargs.get("logodds_window", 10.0))
-    n_grid = max(int(kwargs["n_grid"]), int(kwargs.get("n_grid_ss") or 0))
+    n_grid = int(kwargs["n_grid"])
     b_frac, b_var = budget(float(counts.max()) if counts.size else 0.0, kappa, window, eps, n_grid)
     lines = [
         f"     tolerance: N = {counts.max():.0f}, κ = {kappa:.4f}, L = {window:g}, K = {n_grid}; the budget "
@@ -266,7 +267,13 @@ def replay(
     t0 = time.perf_counter()
     if profiler is not None:
         profiler.enable()
-    result = sweep.solve_chain(*args, **kwargs)
+    # a capture outlives the signature it was taken under: a keyword `solve_chain` no longer takes
+    # is dropped and named, so an old capture still replays (the tolerance report says what moved)
+    accepted = set(inspect.signature(sweep.solve_chain).parameters)
+    dropped = sorted(k for k in kwargs if k not in accepted)
+    if dropped:
+        print(f"     replay: the capture carries {dropped}, which solve_chain no longer takes; dropped")
+    result = sweep.solve_chain(*args, **{k: v for k, v in kwargs.items() if k in accepted})
     if profiler is not None:
         profiler.disable()
         profiler.dump_stats(cprofile_path)

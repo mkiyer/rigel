@@ -14,7 +14,10 @@ and a toy and the panel have inverted a ranking before, so a claim names its sub
 by terminus flag, exons by reach: licensed intron face / edge only / walled) to rank where a
 policy's remaining error sits; on the test chromosome the capture-OFF rows are dominated by the
 designed shadow-transcription floor, identical in every arm, so read the capture-ON rows there.
-Other instruments import `PANELS`, `POLICIES`, `score_condition` and `_slot_classes`.
+`--set SECTION.FIELD=VALUE` (repeatable) applies any config value on top of every policy's fields,
+the same spelling `calibration_vs_oracle.py` takes, so a grid arm is read on the panel and on the
+metric from one config value. Other instruments import `PANELS`, `POLICIES`, `score_condition` and
+`_slot_classes`.
 
 Usage::
 
@@ -22,6 +25,7 @@ Usage::
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer       # the shipping judgement
     python scripts/design/policy_benchmark.py --panel test --conditions gdna_g50_ss_0.50_nrna_file_capture_off
     python scripts/design/policy_benchmark.py --panel ladder --policies silent transfer --by-class
+    python scripts/design/policy_benchmark.py --panel test --set calibration.sweep_logodds_step=0.1    # a config arm
 """
 
 from __future__ import annotations
@@ -46,9 +50,11 @@ from rigel.calibration.splice_graph import (  # noqa: E402
     build_boundary_flags_array,
     build_sj_geometry_arrays,
 )
-from rigel.config import CalibrationConfig  # noqa: E402
+from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
+
+from _shared import set_field  # noqa: E402
 
 RUNS = Path.home() / "Downloads" / "rigel_runs"
 
@@ -109,10 +115,13 @@ def _slot_classes(truth: dict, payload, boundary_flags) -> np.ndarray:
     return cls.astype(str)
 
 
-def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policies, by_class=False):
+def score_condition(
+    index, region_arrays, sj, boundary_flags, cache_dir, policies, by_class=False, settings=()
+):
     """One condition, every policy: `sum |estimate - truth|` per axis, in fragments — and, with
     ``by_class``, the same error summed per node class (``rows[name]["classes"]``, each value
-    ``(slots, mass, error)``)."""
+    ``(slots, mass, error)``). ``settings`` are ``--set`` specs applied on top of every policy's
+    fields."""
     cache = read_scan_cache(cache_dir / "_main", index)
     # the drained frame: `calibration_inputs` drains at the production seed and builds the
     # production fl models — the frame `slot_truth.npz` is certified in, so estimate and truth
@@ -138,11 +147,10 @@ def score_condition(index, region_arrays, sj, boundary_flags, cache_dir, policie
     rows = {}
     for name in policies:
         started = time.perf_counter()
-        result = calibrate(
-            payload=payload,
-            config=dataclasses.replace(CalibrationConfig(), **POLICIES[name]),
-            **kwargs,
-        )
+        config = PipelineConfig(calibration=dataclasses.replace(CalibrationConfig(), **POLICIES[name]))
+        for spec in settings:
+            config = set_field(config, spec)
+        result = calibrate(payload=payload, config=config.calibration, **kwargs)
         region = np.asarray(result.mass_gdna_region, np.float64)
         boundary = np.asarray(result.mass_gdna_boundary, np.float64)
         rows[name] = dict(
@@ -179,6 +187,15 @@ def main() -> int:
         action="store_true",
         help="also sum each policy's error per node class (stratum, terminus flag, exon reach)",
     )
+    ap.add_argument(
+        "--set",
+        dest="settings",
+        action="append",
+        default=[],
+        metavar="SECTION.FIELD=VALUE",
+        help="override one config field on top of every policy's fields, typed from the field; "
+        "repeatable (e.g. --set calibration.sweep_logodds_step=0.1)",
+    )
     args = ap.parse_args()
 
     for name in args.policies:
@@ -208,6 +225,8 @@ def main() -> int:
     if "silent" in args.policies:
         header += "   vs silent"
     print(f"⭐ {args.panel} panel — whole-library |gDNA estimate − truth|, in FRAGMENTS")
+    for spec in args.settings:
+        print(f"⭐ --set {spec} on every policy")
     print("   unstranded rows are where a policy must WIN; stranded rows are where it must do")
     print("   as little HARM as possible. Never pool them.\n")
     print(header)
@@ -223,6 +242,7 @@ def main() -> int:
             oracle / condition,
             args.policies,
             by_class=args.by_class,
+            settings=tuple(args.settings),
         )
         table[condition] = rows
         cells = "  ".join(f"{rows[p]['total']:>12,.0f}" for p in args.policies)

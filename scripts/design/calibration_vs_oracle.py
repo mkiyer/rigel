@@ -14,8 +14,10 @@ its ruler factor should read 1.000 (any contraction is manufactured) and at capt
 the real enrichment, so a factor near 1 there is the estimator working. No solver, no EM, no BAM
 re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns `LocusPriors`). Read
 ``ruler_n_moved`` rather than the aggregate factor: the total can barely move while nearly every
-transcript is redistributed. `--message-policy` and `--background-abundance` apply to both arms, so
-they price an estimator swap on this metric rather than comparing two tools.
+transcript is redistributed. `--message-policy`, `--background-abundance` and `--set
+SECTION.FIELD=VALUE` (any config field, typed from the field, repeatable) apply to both arms, so they
+price an estimator swap on this metric rather than comparing two tools — a grid arm is a config value
+and nothing in the source moves to price it.
 
 Usage::
 
@@ -23,6 +25,7 @@ Usage::
     python scripts/design/calibration_vs_oracle.py --conditions <name>       # one condition
     python scripts/design/calibration_vs_oracle.py --jobs 4                  # sharded, one report path
     python scripts/design/calibration_vs_oracle.py --message-policy silent   # price a policy on both arms
+    python scripts/design/calibration_vs_oracle.py --set calibration.sweep_logodds_step=0.1   # any config value, both arms
     python scripts/design/calibration_vs_oracle.py --json rows.json          # write the rows and exit
     python scripts/design/calibration_vs_oracle.py --self-test               # no I/O
 """
@@ -44,7 +47,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 
-from _shared import sibling  # noqa: E402
+from _shared import set_field, sibling  # noqa: E402
 
 
 P0 = sibling("pass0_vs_oracle.py")
@@ -914,6 +917,36 @@ def self_test() -> int:
     check("three strata are IN SCOPE and one is DEFERRED",
           sorted(_SCOPE.values()) == ["DEFERRED", "IN SCOPE", "IN SCOPE", "IN SCOPE"])
 
+    # ⑪ `--set`: the parser types from the field, touches nothing else, and refuses what it cannot spell.
+    base = PipelineConfig()
+    knob = set_field(base, "calibration.sweep_n_tilt=90")
+    check("--set types an int field from the field",
+          knob.calibration.sweep_n_tilt == 90 and type(knob.calibration.sweep_n_tilt) is int)
+    # two settings in sequence: the first must survive the second (a parser that rebuilt the section
+    # from defaults would pass a single setting against a default config and still lose the first)
+    knob2 = set_field(knob, "calibration.sweep_logodds_step=0.1")
+    check("--set leaves every other field identical, and an earlier --set survives a later one",
+          knob2.calibration.sweep_n_tilt == 90
+          and knob2.calibration.sweep_logodds_step == 0.1
+          and dataclasses.replace(knob2.calibration, sweep_n_tilt=base.calibration.sweep_n_tilt,
+                                  sweep_logodds_step=base.calibration.sweep_logodds_step)
+          == base.calibration
+          and dataclasses.replace(knob2, calibration=base.calibration) == base)
+    check("--set fills an `int | None` field as an int",
+          set_field(base, "calibration.sweep_block_slots=1000").calibration.sweep_block_slots == 1000)
+
+    def refuses(spec):
+        try:
+            set_field(base, spec)
+        except SystemExit:
+            return True
+        return False
+
+    check("--set refuses an unknown field", refuses("calibration.no_such_field=1"))
+    check("--set refuses an unknown section", refuses("nowhere.sweep_n_tilt=1"))
+    check("--set refuses a value the field's type cannot take",
+          refuses("calibration.sweep_n_tilt=sixty"))
+
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:
         print(f"  {'✅' if ok else '⛔'} {name:<{width}}")
@@ -951,6 +984,15 @@ def main() -> int:
         "message_propagation off, the same policy the flag installs), so the run prices a message "
         "policy on the 0.8.0 metric. Default: the shipped config.",
     )
+    ap.add_argument(
+        "--set",
+        dest="settings",
+        action="append",
+        default=[],
+        metavar="SECTION.FIELD=VALUE",
+        help="override one PipelineConfig field on BOTH arms, typed from the field; repeatable "
+        "(e.g. --set calibration.sweep_logodds_step=0.1)",
+    )
     ap.add_argument("--self-test", action="store_true", help="perturb every comparator; no I/O")
     args = ap.parse_args()
 
@@ -984,6 +1026,8 @@ def main() -> int:
                 cmd += ["--background-abundance", args.background_abundance]
             if args.message_policy is not None:
                 cmd += ["--message-policy", args.message_policy]
+            for spec in args.settings:
+                cmd += ["--set", spec]
             procs.append((subprocess.Popen(cmd), out))
         merged: list[dict] = []
         for proc, out in procs:
@@ -1020,6 +1064,12 @@ def main() -> int:
         )
         if args.json is None:
             print(f"⭐ message_policy = {args.message_policy!r} on BOTH arms")
+    for spec in args.settings:
+        # the same rule again: one payload, one tool, the value on BOTH arms; applied last, so an
+        # explicit --set wins over the two named overrides
+        pipeline_config = set_field(pipeline_config, spec)
+        if args.json is None:
+            print(f"⭐ --set {spec} on BOTH arms")
     if args.json is None:
         print(f"index + region arrays loaded in {time.perf_counter() - t0:.2f} s", flush=True)
 

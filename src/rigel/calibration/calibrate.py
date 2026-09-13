@@ -202,7 +202,10 @@ class FactoryRows:
         ).sum(axis=1)[ridx]
         self.eff = np.zeros(n)
         self.eff[self.is_intron] = np.asarray(region_eff_len, dtype=np.float64)[ridx]
-        _, self.fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+        _, self.fg = _logodds_grid(
+            lattice_points(config.sweep_logodds_window, config.sweep_logodds_step),
+            float(config.sweep_logodds_window),
+        )
         self.shape = (n, int(self.fg.shape[0]))
 
     def __getitem__(self, sl) -> np.ndarray:
@@ -303,18 +306,18 @@ def _fit_gdna_hyperprior(
     )
 
 
-def _scaled_grid(n: int, window: float, required: float) -> int:
-    """Grid points at the widened bracket, holding the lattice spacing ``dlam = 2L/(n−1)`` FIXED.
+def lattice_points(window: float, step: float) -> int:
+    """The λ lattice's point count at bracket ``window``: ``λ ∈ [−L, L]`` at
+    ``CalibrationConfig.sweep_logodds_step``, ``K = round(2L/step) + 1``.
 
     ⛔ The bracket and the RESOLUTION are two different knobs, and an arm that moves both at once is
-    uninterpretable: widening ``L`` at a FIXED ``n`` coarsens ``dlam``, and the result then reverses
-    with the bracket instead of saturating. Saturation is what distinguishes a truncated bracket from
-    an improper ψ, so the spacing must not move and ``n`` is linear in ``L``, exactly.
-
-    The rounding is the only slack: ``dlam`` is preserved to within half a grid point, which is the
-    best a discrete lattice can do.
+    uninterpretable: widening ``L`` at a fixed point count coarsens the lattice, and the result then
+    reverses with the bracket instead of saturating — and saturation is what distinguishes a truncated
+    bracket from an improper ψ. So the STEP is what stays fixed when the landscape prior's derived demand
+    widens the bracket (`_sweep`), and the point count follows. The rounding is the only slack: the step
+    is preserved to within half a point, the best a discrete lattice can do.
     """
-    return int(round(1.0 + (n - 1) * (required / window)))
+    return int(round(2.0 * float(window) / float(step))) + 1
 
 
 #: the QC seeds of an INJECTED strand value: no fit ran, so no seed regions, no fragments
@@ -477,7 +480,7 @@ class _IntronFactory:
                 substrate,
                 region_arrays,
                 region_eff_gdna,
-                replace(config, sweep_n_grid=int(n_grid), sweep_logodds_window=float(window)),
+                replace(config, sweep_logodds_window=float(window)),
             )
             self._rows[key] = rows if bool(rows.is_intron.any()) else None
         return self._rows[key]
@@ -579,8 +582,8 @@ def _init_belief(s: _Solve):
         rna_sense_frac=s.strand.rna_sense_frac,
         gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
-        n_grid=s.config.sweep_n_grid,
-        n_grid_ss=s.config.sweep_n_grid_single_strand,
+        n_grid=lattice_points(s.config.sweep_logodds_window, s.config.sweep_logodds_step),
+        n_tilt=s.config.sweep_n_tilt,
         logodds_window=s.config.sweep_logodds_window,
     )
 
@@ -593,9 +596,9 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
     landscape at ``log ρ = log f + log M − log E`` and can only offer ``f ∈ [σ(−L), σ(L)]``, so a bracket
     narrower than the prior's support leaves ψ no coordinate for what the prior says — and the answer
     then depends on ``L``. The demand is DERIVED (`required_logodds_window`), never chosen; the
-    prior-free pass has nothing to widen for and keeps the floor. ``dlam`` is held FIXED, so the grids
-    scale with the bracket (`_scaled_grid`): widening ``L`` at a fixed grid size would coarsen the
-    lattice and confound two knobs. The TILT axis does not scale — θ is a share with no bracket
+    prior-free pass has nothing to widen for and keeps the floor. The lattice STEP is held fixed, so the
+    point count scales with the bracket (`lattice_points`): widening ``L`` at a fixed count would coarsen
+    the lattice and confound two knobs. The TILT axis does not scale — θ is a share with no bracket
     problem — which keeps the AMBIG cube linear in the bracket.
 
     ⛔ ψ has NO reference location. A located reference is a prior assertion at fixed strength and
@@ -605,22 +608,19 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
     — there is nothing to fit here."""
     cfg = s.config
     window = float(cfg.sweep_logodds_window)
-    n_grid, n_grid_ss = int(cfg.sweep_n_grid), int(cfg.sweep_n_grid_single_strand)
-    n_tilt = cfg.sweep_n_tilt if cfg.sweep_n_tilt is not None else int(cfg.sweep_n_grid)
     if prior is not None:
         required = prior.required_logodds_window(s.mass_global, s.eff_global)
         if required > window:
-            n_grid = _scaled_grid(n_grid, window, required)
-            n_grid_ss = _scaled_grid(n_grid_ss, window, required)
             window = required
             logger.debug(
-                "calibration: λ bracket %.4f (the landscape's support), n_grid %d, n_grid_ss %d, "
+                "calibration: λ bracket %.4f (the landscape's support), %d points at step %g, "
                 "n_tilt %d (unscaled)",
                 window,
-                n_grid,
-                n_grid_ss,
-                n_tilt,
+                lattice_points(window, cfg.sweep_logodds_step),
+                cfg.sweep_logodds_step,
+                cfg.sweep_n_tilt,
             )
+    n_grid = lattice_points(window, cfg.sweep_logodds_step)
     return solve_chain(
         s.chain,
         s.statics,
@@ -634,8 +634,7 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         n_rna_obs=s.strand.n_rna_obs,
         n_grid=n_grid,
         logodds_window=window,
-        n_tilt=n_tilt,
-        n_grid_ss=n_grid_ss,
+        n_tilt=cfg.sweep_n_tilt,
         gdna_prior=prior,
         intron_prior=s.factory.rows(n_grid, window),
         policy=s.policy,

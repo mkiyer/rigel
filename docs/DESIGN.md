@@ -1184,6 +1184,35 @@ of the problem — measured end to end on the 18.6M-fragment library at 8 thread
 the run's peak RSS 33.2 → 14.9 GB and 32.6 → 15.0 GB, the wall 0.97–0.98, the sweeps 0.96–0.97, and the
 peak now set outside the solve (`build_region_geometry`, `init_beliefs`).
 
+**One λ lattice, parametrised by its step (2026-09-13; W5, the grid study).** ψ had two λ grids — a coarse
+one (`sweep_n_grid` 60, ~138 after the bracket widened) for the AMBIG cube, the message rows, the factory rows
+and the composition prior, and a fine one (`sweep_n_grid_single_strand` 256, ~557) for the single-strand
+read-out, with `_regrid_global` interpolating priors and rows between them linearly in ``f``. Measured on both
+panels with every consumer on one grid (`calibration_vs_oracle.py --set`, 21 arms a substrate, per stratum,
+both zero controls): the fine read-out was converged at 128 points and 256 bought nothing (0.994–1.005 of the
+pair); the pair's remaining cost was the REGRID, a linear interpolation of log-profiles that loses their
+curvature (≈ 1 % in scope on the ladder, ≈ 10 % on the test chromosome's unstranded rows, and all of it in the
+message layer — the silent floor barely moves); refining the coarse grid alone recovered the whole gain, in the
+introns (`density_factor_precision` reads a factory row's precision as a grid variance) and the AMBIG exons
+(the cube's λ axis). One grid at 138 or more beats the pair by 1.0–1.3 % on every in-scope stratum; the
+deferred stratum reads +1.4 % at every K and `g98` +0.8 %, the pair's regrid being an incidental smoothing
+that happens to help there (flat in K, independent of the interpolation axis). The read-out converges
+quadratically in K and is exact to 1 % of a step once a slot's posterior is wider than the step. THE RULING:
+one lattice for every consumer, `CalibrationConfig.sweep_logodds_step` = 0.2 nats — 101 points at the floor
+bracket, ~220 on the refits, ``K = round(2L/step) + 1`` at whatever bracket the landscape prior demands, so the
+step is the invariant `_scaled_grid` used to hold and `_scaled_grid`, the second field, the regrid and the
+CLI's single-strand flag are gone; `sweep_n_tilt` = 60 explicit, decoupled from K. The step is the coarsest
+that loses nothing against the pair (in scope 0.993 / 0.998 / 1.000, `g00` 0.994; the panel's two bars
+unchanged on the ladder, the transfer policy's unstranded losses on the test chromosome repaired, 15/20 →
+19/20 with the worst row 1.22× → 1.00×), and the landed tree costs 1.07× wall, 1.08× `calibrate`, +1.8 GB
+on the deep library (the sweeps' own ψ solves 0.96–0.97×; the passes 1.10×), because the AMBIG cube and its
+cached rows scale with K × K_t: 0.146 (138 points) buys −1.0 % for
+1.33× and +3.7 GB, 0.10 (201) −1.3 % for 1.71× and +9.8 GB. What the step guarantees, in a user's units: a
+slot's composition is quantised by at most ``n·f(1−f)·step/4`` fragments, 1.25 % of its mass at worst and
+0.6 % on average. The tilt grid is not over-resolved: 30 breaks the zero control 6.3× and 15 10.5× on ψ's own
+θ quadrature, 120 and 240 equal 60 (`ISSUES: theta-quadrature-at-zero-gdna`). The refused forms carry their
+numbers in `ISSUES: the-second-lambda-grid-and-its-regrid`.
+
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 
 **The composition has two degrees of freedom, not three.** ψ solves a point on the 2-simplex,

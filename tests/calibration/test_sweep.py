@@ -63,7 +63,9 @@ def test_init_zero_gdna_introns_via_strand():
         region_pos=[50.0, 95.0, 50.0],
         region_neg=[50.0, 5.0, 50.0],
     )
-    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
+    )
 
     # the chain is N E N E N, so the regions are at 0, 2, 4 — there are no terminal slots.
     rid = [0, 2, 4]
@@ -93,7 +95,9 @@ def test_init_boundary_continuity_gate():
         boundary_neg=[5.0],
         boundary_spliced=[50.0],
     )
-    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
+    )
     # slots: N0=0, E0=1, N1=2.
     # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0.
     assert b.f_g[1] < 0.15
@@ -111,7 +115,9 @@ def test_init_tss_boundary_is_black_hole():
         boundary_pos=[90.0],
         boundary_neg=[5.0],
     )
-    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    b = init_beliefs(
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
+    )
     # slot 1 is the TSS boundary: a locked gDNA sink despite the sense tilt (all precision locked at 0).
     assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0
 
@@ -144,6 +150,7 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
+        n_tilt=60,
     )
     assert d.gdna_frac_var is not None
     # p̂=0.5 at κ=0.99 ⇒ the fragments look unstranded ⇒ the mean channel points at the gDNA mode f_g=1.
@@ -167,6 +174,7 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
+        n_tilt=60,
     )
     assert d0.gdna_frac_var[0] == 0.0
 
@@ -196,7 +204,9 @@ def _factor1_uniform_rho():
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
-    belief = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40)
+    belief = init_beliefs(
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40, n_tilt=40
+    )
     final = region_sweep(
         parts.chain,
         parts.statics,
@@ -205,6 +215,7 @@ def _factor1_uniform_rho():
         parts.region_arrays,
         rna_sense_frac=0.7,
         n_grid=40,
+        n_tilt=40,
     )
     # gDNA density = f_g x count / E_gdna (the formula the sweep inlines).
     count = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
@@ -265,7 +276,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         parts.geometry,
         parts.region_arrays,
     )
-    belief = init_beliefs(chain, geom, st, rna_sense_frac=0.95, n_grid=40)
+    belief = init_beliefs(chain, geom, st, rna_sense_frac=0.95, n_grid=40, n_tilt=40)
     assert belief.f_g[2] == 1.0  # AMBIG starts all-gDNA
     final = region_sweep(
         chain,
@@ -277,6 +288,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         n_rna_obs=10000.0,  # library sample sizes so the stranded (κ=0.95) intron seeds fire (τ noise floor)
         n_gdna_obs=10000.0,
         n_grid=40,
+        n_tilt=40,
     )
     # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. This chain is the WORST
     # case for a balanced AMBIG region: it is an ARTIFICIAL all-RNA chain (intron+|AMBIG|intron−) with NO
@@ -328,6 +340,7 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
+        n_tilt=80,
         lam_logprior=_gdna_share_row(80, 0.2, 200.0),
     )
     fg = float(d.gdna_frac[0])
@@ -352,6 +365,7 @@ def test_a_weak_row_defers_to_a_decisive_strand():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
+        n_tilt=80,
         lam_logprior=_gdna_share_row(80, 0.9, 3.0),
     )
     fg = float(d.gdna_frac[0])
@@ -420,7 +434,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
         rna_fl=rna_fl,
     )
     belief = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60, n_tilt=60
     )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
@@ -441,6 +455,7 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
         n_rna_obs=n_rna_obs,
         n_gdna_obs=n_gdna_obs,
         n_grid=60,
+        n_tilt=60,
         _capture=cap,
     )
     return final, cap
@@ -548,6 +563,7 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
                 od_g=od,
                 od_r=od,
                 n_grid=80,
+                n_tilt=80,
             ).gdna_frac[0]
         )
 
@@ -660,9 +676,9 @@ def test_region_sweep_deterministic():
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def _chunk_substrate(m=255, K=120, K_ss=513, seed=3):
-    """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm on the coarse grid
-    (so the single-strand path REGRIDS it), non-flat λ-factor rows, and a per-slot freeze reference."""
+def _chunk_substrate(m=255, K=120, seed=3):
+    """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm, non-flat λ-factor
+    rows, and a per-slot freeze reference."""
     from rigel.calibration.simplex_logodds import CompositionPriors
 
     rng = np.random.default_rng(seed)
@@ -686,7 +702,6 @@ def _chunk_substrate(m=255, K=120, K_ss=513, seed=3):
         n_grid=K,
         L=10.0,
         n_tilt=12,
-        n_grid_ss=K_ss,
         priors=CompositionPriors(gdna=prior),
         lam_logprior=rows,
         fg_ref=fg_ref,
@@ -719,8 +734,8 @@ def _solve_in_chunks(args, kw, edges):
 def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
     """The property the locus solve stands on: the answer at a slot is a function of that slot's inputs
     and the grid, never of which other rows share its tile. Whole, in halves, in thirds and one row at a
-    time must agree to the bit on every field of both paths (the regridded single-strand solve and the
-    AMBIG cube). The read-out earns this by reducing every row in a fixed order — a contiguous ψ and
+    time must agree to the bit on every field of both paths (the single-strand solve and the AMBIG
+    cube). The read-out earns this by reducing every row in a fixed order — a contiguous ψ and
     per-row moment sums that do not go through BLAS — because a layout- or row-count-dependent
     reduction moves the last ulp, and one ulp is a different number."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
@@ -740,6 +755,6 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
                 f"{name}: {f} moved at {int((arr != ref).sum())} of {m} slots "
                 f"(max |delta| {np.max(np.abs(arr - ref)):.3e}) — the read-out is not chunk-exact"
             )
-    # not vacuous: both paths solved, and the fitted arm was regridded onto the fine grid
+    # not vacuous: both paths solved, with a fitted arm
     assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
-    assert kw["n_grid_ss"] != kw["n_grid"] and kw["priors"].gdna is not None
+    assert kw["priors"].gdna is not None

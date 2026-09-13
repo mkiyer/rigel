@@ -137,6 +137,20 @@ refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-we
 is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon
 transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `quant_accuracy.py`.
 
+### theta-quadrature-at-zero-gdna
+`priority: later · kind: defect · 2026-09-13`
+ψ marginalises the AMBIG cube over θ by a plain sum on a uniform θ lattice (`simplex_logodds._tilt_grid`). At
+strand purity the strand likelihood is flat in θ to first order, so a pure-RNA AMBIG slot's θ-posterior is a
+quartic peak at ±π/2 of width ∝ n^−¼, and where the lattice does not resolve it the λ-marginal is biased toward
+gDNA. On the ladder's `g00 ss.99 capture ON` row, where nothing cancels a false positive, `sweep_n_tilt` 30
+reads 9,488 fragments against 262 at 60 and 15 reads worse, with the message layer off as well (ψ's own
+quadrature, not the lanes' cube rows); 120 and 240 equal 60. A Chebyshev mesh clustered at the ends with
+midpoint weights is REFUSED (30 nodes 9.9×, and it breaks a `g00` row the uniform mesh holds: the coarse middle
+hurts too). The per-slot bias is small (≤ 4 fragments at 50k, prior-free, the variance frozen at purity); the
+refits amplify it at zero gDNA. Latent at 60 on a deep real library's heavy pure-RNA AMBIG exons (a 0.03 rad
+peak at 500k fragments against a 0.053 rad step). The fix is a θ quadrature whose accuracy does not depend on
+the node count, not a larger K_t. `calibration_vs_oracle.py --set calibration.sweep_n_tilt=30`, the `g00` rows.
+
 ### performance-memory-bounded-solve
 `priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11, the decomposition landed 2026-09-11`
 Calibration is the tool's one unfinished component: on 18.6M fragments its four sweeps are 706 s of an
@@ -176,7 +190,7 @@ of `_solve_block` — passes and `transfer_rows`, `prepare`, ψ, then threads ov
 tolerance gate (promote the tolerant replay comparator into `sweep_replay.py`); ④ the factory rows per
 block; ⑤ the scan (`ISSUES: scan-thread-split-starves-the-workers`) and the second pass. Two things not
 to do: micro-optimise the Python passes (a silent-hop early exit halves them and the port deletes it),
-and bake the refit sweeps' `n_grid_ss = 513` into the port — an accuracy ruling, kept a parameter.
+and bake the λ lattice into the port — its step (`sweep_logodds_step`) is a parameter (`DESIGN.md` §6b.15).
 MEMORY (plan step D / worklist W4) DONE 2026-09-12, measured first: the peak was not the sweeps' but two
 Python transients — `crossing_eff_length`'s `(404k sj × fragment lengths)` matrix chain, ~9 GB that the RSS
 never gave back (macOS keeps freed arenas), raising the whole run's plateau, and `fit_landscape`'s
@@ -261,7 +275,7 @@ call.
 `priority: later · kind: decision · 2026-08`
 ψ's λ bracket was too narrow to express its own prior; `DensityLandscape.required_logodds_window` derives it
 with no constant. Built, gated, priced (nearly every in-scope condition improves); ships OFF pending memory at
-genome scale (a multiple on `sweep_n_grid`) and the thermometer. Re-derive as a `policy_prototype.py --module`
+genome scale (a multiple on the lattice's point count) and the thermometer. Re-derive as a `policy_prototype.py --module`
 arm.
 
 ### transfer-variance-premise
@@ -579,3 +593,14 @@ Four more `zc_*` arms exist as decomposition reverts used to attribute the 39 % 
 REFUSED by arithmetic 2026-08-31: splitting the certified channel by drain provenance evicts 134,850 correct
 drained records to remove 75 contaminants at `g50 ss.99 OFF`, resurrecting the −4 bp spliced-pool bias the
 drain exists to repair (`ISSUES: drain-contaminates-certified-rna`).
+
+### the-second-lambda-grid-and-its-regrid
+CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15, W5 the grid study): one λ lattice for every consumer,
+`sweep_logodds_step` 0.2; the fine single-strand grid, `_regrid_global` and `_scaled_grid` deleted. Priced on the
+way and REFUSED, each with its number: a CUBIC regrid on λ (`g00` 892×, deferred 1.15 — the spline overshoots the
+landscape prior's floor wall); a SMOOTH-RECONSTRUCTION read-out (a cubic or a monotone cubic of the log-posterior
+on a 16× sub-grid: exact on Gaussians, 0.8 / 0.5 of a step on a balanced bimodal posterior against the histogram
+quantile's 0.17, a wall overshoot on the cubic); a λ-axis LINEAR regrid (0.994–1.000 on the ladder: the axis was
+never the harm, the interpolation was); a step DERIVED from the sharpest posterior (200–930 points where the metric
+plateaus by 138, because an unresolved heavy slot costs ≤ n·f(1−f)·dλ/4 fragments and a fragment-budget rule needs
+a tolerance); K_t below 60 (`ISSUES: theta-quadrature-at-zero-gdna`).

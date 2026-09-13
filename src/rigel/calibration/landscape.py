@@ -40,7 +40,7 @@ _EPS = 1e-12
 _LN10 = np.log(10.0)
 
 # ── Computational budgets (discretization, not modelling — they trade cost for exactness) ────────────────
-#: Points on the log-rate grid. Same role as the solver's ``n_grid`` / ``n_tilt``: finer is strictly more
+#: Points on the log-rate grid. Same role as the solver's λ lattice and ``n_tilt``: finer is strictly more
 #: faithful and strictly slower.
 _N_GRID = 260
 #: Kernels are grouped into this many equal-count width bins and each bin convolved once, instead of one

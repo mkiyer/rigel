@@ -71,7 +71,7 @@ def _scenario(kappa=0.9):
         gdna_strand_overdispersion=0.2,
         rna_strand_overdispersion=0.1,
         n_grid=60,
-        n_grid_ss=256,
+        n_tilt=60,
     )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
@@ -88,8 +88,7 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        n_tilt=None,
-        n_grid_ss=256,
+        n_tilt=60,
         belief=belief,
     )
     # ONE count per slot: it is both the density numerator and the Poisson n.
@@ -243,8 +242,7 @@ def test_density_factor_precision_flows_into_region_init():
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        n_tilt=None,
-        n_grid_ss=256,
+        n_tilt=60,
         belief=belief,
     )
     ni_off = build_region_init(statics, geometry, **common)
