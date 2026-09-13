@@ -86,11 +86,17 @@ weight. Three ways to integrate it whose error does not depend on `K_t`:
   uses the lattice where resolved and the closed form where not. Exact in both limits, but a regime switch is a
   threshold, and a threshold is a tunable.
 
-## 5. The plan
+## 5. The plan, and where it stands
 
 1. DERIVE — this note. The two recorded numbers (0.03 rad at 500k; ≤ 4 fragments at 50k) are reproduced by §3.
-2. PROTOTYPE outside `src/`: patch `_solve_logodds`' θ-sum (A: the endpoint weights; then B) in both bindings,
-   as `w5/theta_mesh.py` did for `_tilt_grid`.
+2. PROTOTYPE outside `src/`. **A is REFUTED (2026-09-13)**: the endpoint weights, patched into every binding of
+   `_psi` (the session scratchpad's `w12/theta_endpoint.py`), moved ≤ 0.7 false-gDNA fragments on any `g00`
+   row of either panel at `K_t` 60 or 30, and left the recorded failure untouched — ladder `g00 ss.99 ON`
+   reads 9,821.3 → 9,821.2 at `K_t` 30 against 194.1 → 194.0 at 60; the test chromosome is identical at 30
+   and 60 on every row (shallow slots, every peak resolved). So the first-order endpoint term of §2 is
+   negligible at these depths and the resolution term of §3 is the whole mechanism. Next is B (or the
+   analytic marginal of §4 C as one smooth formula), which changes the cube's shape and must handle the
+   delivered cube rows — a design decision before the prototype.
 3. A/B on both panels with both zero controls: `calibration_vs_oracle.py`, the `g00` rows under
    `--set calibration.sweep_n_tilt=30` and at the default 60, patched against unpatched, the metric per stratum;
    the panel; the profiler (the cube is the cost).
