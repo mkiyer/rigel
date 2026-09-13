@@ -162,7 +162,7 @@ midpoint weights is REFUSED (30 nodes 9.9×, and it breaks a `g00` row the unifo
 hurts too). The per-slot bias is small (≤ 4 fragments at 50k, prior-free, the variance frozen at purity); the
 refits amplify it at zero gDNA. Latent at 60 on a deep real library's heavy pure-RNA AMBIG exons (a 0.03 rad
 peak at 500k fragments against a 0.053 rad step). The fix is a θ quadrature whose accuracy does not depend on
-the node count, not a larger K_t. Derived 2026-09-13 (`docs/dev/THETA_QUADRATURE.md`): at fixed λ the strand
+the node count, not a larger K_t. Derived 2026-09-13 (the working note in the sandbox): at fixed λ the strand
 term is an exact Gaussian in τ whose peak narrows as √f_g beyond the strand-pure boundary, so the bias is the
 λ-dependence of the lattice's resolution error. REFUSED with its number: the trapezoid endpoint weights (the
 lattice's first-order term) — ≤ 0.7 fragments on any `g00` row, the K_t 30 failure 9,821 → 9,821.
