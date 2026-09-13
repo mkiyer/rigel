@@ -306,9 +306,11 @@ rank moves; a verdict that holds only at stress is a robustness finding. `sim/pa
 ### hygiene-ledger
 `priority: later · kind: hygiene · 2026-08-31`
 Each its own commit, none moving the 0.8.0 metric:
-- the wave-3 frame migration — the bank-readers still on pass one (`structural_claims_audit`,
-  `gdna_pool_census`, `abundance_landscape_census`, `transport_dispersion`, `fl_pool_purity`,
-  `calibration_truth_ab`) migrate as touched;
+- the wave-3 frame migration, RULED 2026-09-13 (owner): of the six bank-readers still on pass one, four are
+  RETIRED rather than migrated — their questions closed, superseded or parked, none loaded by a test, none in
+  any procedure — and two migrate to the drained frame the truth is certified in (`fl_pool_purity`,
+  `transport_dispersion`). Retired, each its own commit, all in git: `structural_claims_audit` (stage 0 came
+  out confusion-matrix clean; only a parked, twice-refused issue cited it; its inputs are frame-invariant);
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
 
@@ -325,8 +327,9 @@ xfails go green iff the pair lands. Re-priced 2026-08-26 with the measured intro
 refused (worse on two of three in-scope strata, wins confined to `g00`). The one-sided certified-RNA bound is
 the only mechanism the zero control has endorsed on every row (−81.9 %, 8/8) and is panel-negative alone,
 because the level channel it was covering for is structurally disconnected (bipartite chain; only pure-gDNA
-REGIONs originate a level). Revive only with messages on at `g05 ss0.50 capture_on`;
-`structural_claims_audit.py`.
+REGIONs originate a level). Revive only with messages on at `g05 ss0.50 capture_on`. The structural-claims
+audit that scored it was retired 2026-09-13; the confusion matrix is re-derivable from `build_structural_claims`
+against `calibration_oracle.py`'s `slot_truth.npz`.
 
 ### crossing-pool-contrast
 `priority: parked (blocked) · kind: question · 2026-08-31`
