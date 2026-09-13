@@ -22,7 +22,9 @@ from scipy.stats import norm
 from rigel.calibration import effective_length as el
 from rigel.calibration.effective_length import (
     contained_eff_length,
+    contained_moments,
     crossing_eff_length,
+    crossing_moments,
     fl_mean,
 )
 
@@ -235,3 +237,115 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
         "region_eff_length",
     ):
         assert not hasattr(el, dead), f"{dead} still exists"
+
+
+# ---------------------------------------------------------------------------
+# the tilted moments — the same placements, accumulated one at a time
+# ---------------------------------------------------------------------------
+#
+# `contained_moments` / `crossing_moments` are the moments of the OPPORTUNITY-TILTED length
+# distribution at an object — functionals of the same placement counts enumerated above, read by
+# `pass0_vs_oracle.info_class_masks` (the identified-or-undetermined classifier). Restored 2026-09-13:
+# they went with the deleted length channel, and the purge itself marked the coverage as owed.
+
+_MOMENTS = ("m1", "m2", "q1", "q2", "q12", "eff")
+
+
+def _pmf(pairs, max_len=64):
+    """A pmf from explicit ``(length, mass)`` pairs — exact, no distributional slack."""
+    p = np.zeros(max_len, dtype=np.float64)
+    for w, m in pairs:
+        p[w] += m
+    return p / p.sum()
+
+
+_PMFS = {
+    "point mass w=8": _pmf([(8, 1.0)]),
+    "two point 5/20": _pmf([(5, 0.4), (20, 0.6)]),
+    "three point": _pmf([(3, 0.2), (11, 0.5), (29, 0.3)]),
+    "wide": _pmf([(w, 1.0) for w in range(2, 40)]),
+}
+
+
+def _accumulate(placements):
+    """The definition: ``(mass, u, w)`` per placement class, summed, then divided by the total mass."""
+    tot = 0.0
+    acc = dict(m1=0.0, m2=0.0, q1=0.0, q2=0.0, q12=0.0)
+    for mass, u, w in placements:
+        tot += mass
+        acc["m1"] += mass * u
+        acc["m2"] += mass * w
+        acc["q1"] += mass * u * u
+        acc["q2"] += mass * w * w
+        acc["q12"] += mass * u * w
+    if tot == 0.0:
+        return dict(m1=0.0, m2=0.0, q1=0.0, q2=0.0, q12=0.0, eff=0.0)
+    return {k: v / tot for k, v in acc.items()} | {"eff": tot}
+
+
+def _brute_contained(region_len: int, pmf: np.ndarray) -> dict:
+    """Every (start, length) placement wholly inside ``[0, region_len)``; the region weight is ``1/w``."""
+    return _accumulate(
+        (pmf[w] * _enumerate_contained(region_len, w), 1.0 / w, float(w))
+        for w in range(1, pmf.shape[0])
+        if pmf[w] > 0.0 and _enumerate_contained(region_len, w) > 0
+    )
+
+
+def _brute_crossing(pmf: np.ndarray) -> dict:
+    """Every offset placing a length-``w`` fragment across a 0-bp line; the crossing weight is ``1/(w−1)``."""
+    return _accumulate(
+        (pmf[w] * (w - 1), 1.0 / (w - 1.0), float(w))
+        for w in range(2, pmf.shape[0])
+        if pmf[w] > 0.0
+    )
+
+
+@pytest.mark.parametrize("pmf_name", list(_PMFS))
+@pytest.mark.parametrize("ell", [1, 5, 10, 25, 40, 151])
+def test_contained_moments_are_the_enumerated_placements(pmf_name, ell):
+    pmf = _PMFS[pmf_name]
+    got = contained_moments(np.array([float(ell)]), pmf)
+    want = _brute_contained(ell, pmf)
+    for name in _MOMENTS:
+        np.testing.assert_allclose(
+            getattr(got, name)[0],
+            want[name],
+            rtol=1e-12,
+            atol=1e-12,
+            err_msg=f"{name} at ell={ell}",
+        )
+
+
+@pytest.mark.parametrize("pmf_name", list(_PMFS))
+def test_crossing_moments_are_the_enumerated_placements(pmf_name):
+    pmf = _PMFS[pmf_name]
+    got = crossing_moments(pmf)
+    want = _brute_crossing(pmf)
+    for name in _MOMENTS:
+        np.testing.assert_allclose(
+            float(getattr(got, name)), want[name], rtol=1e-12, atol=1e-12, err_msg=name
+        )
+
+
+def test_the_region_cross_moment_is_EXACTLY_one():
+    """``u(w)·w = 1`` at a region, so ``q12 ≡ 1`` for any pmf and any region length: an identity of the
+    deposit rule, not a coincidence. If it fails, the region deposit weight has stopped being ``1/L``."""
+    for pmf in _PMFS.values():
+        m = contained_moments(np.array([5.0, 25.0, 151.0, 4000.0]), pmf)
+        np.testing.assert_allclose(m.q12[m.eff > 0], 1.0, rtol=1e-12)
+
+
+@pytest.mark.parametrize("pmf_name", list(_PMFS))
+def test_the_moments_normaliser_IS_the_solver_divisor(pmf_name):
+    """``moments.eff`` is byte-identical to the effective length the solver divides by: one quantity,
+    one implementation. Two implementations of one quantity is how they come to differ."""
+    pmf = _PMFS[pmf_name]
+    ell = np.array([1.0, 5.0, 25.0, 151.0, 1000.0])
+    np.testing.assert_array_equal(contained_moments(ell, pmf).eff, contained_eff_length(ell, pmf))
+    unbounded = np.array([UNBOUNDED])
+    np.testing.assert_allclose(
+        float(crossing_moments(pmf).eff),
+        float(crossing_eff_length(pmf, unbounded, unbounded)[0]),
+        rtol=1e-12,
+    )

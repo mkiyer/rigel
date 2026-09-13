@@ -357,7 +357,7 @@ layering, the gates and the tolerance instrument, the docs. Four items remain, i
    is certified in (`calibration_inputs(cache, index)["payload"]`, as the oracle instrument does), one at a
    time; their numbers WILL move with the frame, so the gate is each self-test plus a before/after recorded in
    the commit; `calibration_truth_ab` prints undrained against drained on purpose — read it before migrating it;
-4. the moment tests deleted with the length channel: `git log --diff-filter=D -- tests` and
+4. DONE 2026-09-13 (33 cases into `test_effective_length.py`; both perturbations fired). the moment tests deleted with the length channel: `git log --diff-filter=D -- tests` and
    `git log -S"moment"`, restore those that gate something still live.
 The index alias map (`dropped_t_id → kept_t_id`, an index rebuild verified with `rescan_panels.py`) stays in
 `ISSUES: hygiene-ledger` as a later item.

@@ -311,7 +311,6 @@ Each its own commit, none moving the 0.8.0 metric:
   `calibration_truth_ab`) migrate as touched;
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
-- restore the moment tests deleted with the length channel;
 
 ### oracle-effective-length-diagnostic
 `priority: later · kind: measurement · 2026-08`
