@@ -62,10 +62,12 @@ Threads were measured and refuted for the Python passes (0.83–0.94× at 8 thre
 
 ## 2. The rules of the game (unchanged, and load-bearing)
 
-* **Every step is proven before it is believed.** Bit-identity: `sweep_replay.py replay --dir
-  ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step2 --call 0..3` (and `--block-slots N|none`) and
-  `rename_identity.py --check --reference ~/Downloads/rigel_runs/arms/locus_identity_*.json` (two ladder
-  conditions and `--bam` LBX0190). The suite (`CLAUDE.md`'s baseline line), `ruff`, `preflight.py --full`.
+* **Every step is proven before it is believed.** A pure restructure is bit-identical: `sweep_replay.py
+  replay --dir ~/Downloads/rigel_runs/perf/sweeps_MO_3021_step4 --call 0..3` (and `--block-slots N|none`,
+  `--tolerance` for the report of what moved) and `rename_identity.py --check --reference
+  ~/Downloads/rigel_runs/arms/memory_identity_*.json` (two ladder conditions and `--bam` LBX0190). A change
+  that may move numbers is judged on the oracle metric per stratum, the panel, and profiler pairs
+  (owner, 2026-09-12: minuscule changes are not a concern; elegance is the bar). The suite (`CLAUDE.md`'s baseline line), `ruff`, `preflight.py --full`.
   A timing is read only from back-to-back pairs (`profiler.py --compare`); patch `calibrate` for an arm
   through `importlib.import_module("rigel.calibration.calibrate")` — `import … as` binds the re-exported
   function and the arm never runs (it cost one pair this session).
@@ -177,7 +179,7 @@ precedes F (the port). Status is kept HERE; tick an item by writing DONE and the
 | W2 | **One ψ solver, one precision** — DONE 2026-09-12 (`_solve_logodds`; the unread strand log-variances deleted with it; metric and panels identical to the printed precision; timing pair in DESIGN §6b.15) | a single-strand slot is the cube with a tilt grid of one cell, so `_solve_regions_logodds` and `_solve_ambig_logodds` become one solver with `K_t` a parameter, in float64 throughout (the float32 cube was a memory choice the tiling made moot); `f32-strand-tilt-at-half` closes with it; the cache stores what the solve produces | the oracle metric and the panel, W1's report on the replay captures, timing pairs, the vertex-reference and strand-reference gates |
 | W3 | **`calibrate.calibrate` as named stages** — `calibrate` DONE 2026-09-12 (141 lines of orchestration over `_fit_strand`, `_IntronFactory`, `_background_pair`, `_abundance_landscape`, `_policy`, `_Solve` + `_init_belief` / `_sweep` / `_solve`, `_result`, `_log_summary`; bit-identical on the three references); `_solve_block` (109 lines over `_psi`, `_composition_arms`, `_message_layer`, `_write_back`, `_block_diagnostics`) and `solve_chain` (136, over the `_Structure` and `_Sweep` records) DONE 2026-09-12, every step bit-identical on the three references, the replay and the suite | the 600-line function becomes the walk's rungs (init → strand → local → messages → refits → shipped) as functions with one job each; `_solve_block` (319) and `solve_chain` (158) likewise | `rename_identity.py --check` where a step is a pure restructure; the metric otherwise |
 | W4 | **Memory (D)** — DONE 2026-09-12: measured first; the crossing divisor in closed form (the 9 GB sj matrix gone), the landscape's kernels tiled (the 3 GB peak gone), the factory rows per block (`FactoryRows`); peak 19.2 → 11.4 GB, wall 0.99, metric untouched (3.4e-15); the ψ tiling stays, since the whole-chain `init_beliefs` solve still runs on it and is tiled to 1 MiB anyway — the plateau's remaining owners are the pre-calibration floor and the cache (E) | `build_region_geometry`'s 14.5 GB transient; `init_beliefs` per block, which frees the ψ tiling for every caller (A.4); the factory rows built per block | `profiler.py` peak and held per stage, pairs |
-| W5 | **One grid?** | with one solver and tiled memory, does one λ grid serve both classes, deleting the per-tile regrid of the priors? The refit grid (`sweep_n_grid_single_strand`) is an accuracy ruling, so this is an A/B | the oracle metric per stratum |
+| W5 | **The grid study** (owner, 2026-09-12: a careful search, not a two-arm A/B; do not hastily conclude two grids are needed) | understand ψ's grid before designing it: accuracy vs K per stratum and slot class, the read-out's quantisation, the bracket coupling, the regrid's cost, time and memory vs K; then the simple design — §6 | the oracle metric per stratum with both zero controls, the panel, profiler pairs |
 | W6 | **The tunables census** | `CalibrationConfig`'s 49 fields: live / derived / dead, each derivation named; anything unearned removed | `module_census.py`, the suite |
 | W7 | **The capture as a typed record** | the 25-key `_capture` dict (75 keyword lines in `_solve_block`) | the instruments that read it (`landscape_training_census.py`, `backbone_parity.py`, the walk) |
 | W8 | **Vocabulary rulings** | `ISSUES: rename-the-drain`, `ISSUES: rename-row-and-face`; the `hygiene-ledger` items | `rename_census.py --sense`, `rename_identity.py --check` |
@@ -224,6 +226,45 @@ messages, the layering clean, the gates and the tolerance instrument in place, t
 
 31 s and 22 s at 8 threads on the deep library; the stages that scale with depth and the whole problem at
 100M+ fragments. The scan's thread split is the owner's decision (`ISSUES: scan-thread-split-starves-the-workers`).
+
+## 6. W5 — the grid study (the design, for the next session)
+
+**What is there.** ψ's λ grid is ``λ ∈ [−L, L]`` with ``K`` points (`_logodds_grid`); ``f_g = σ(λ)`` is
+read out as the posterior MEDIAN by a continuous quantile over the grid's histogram, interpolated on λ
+(`_posterior_median_fg`, transform-invariant). Two grids: the coarse ``sweep_n_grid = 60`` — the AMBIG
+cube's λ axis, the tilt axis ``K_t`` (``sweep_n_tilt``, default ``= n_grid``), every message row
+(`lam_rows`, `cube_rows`), the factory rows, the composition arms — and the fine
+``sweep_n_grid_single_strand = 256`` for the single-strand read-out, the arms and rows regridded onto it
+per tile by `_regrid_global` (linear interpolation in ``f``). Both scale with the bracket: when the
+landscape prior's support exceeds ``L``, `_scaled_grid` widens ``L`` and grows ``K`` to hold ``dλ``
+fixed (138 / 513 on the deep library at ``L ≈ 23``). The fine grid's recorded reason (the config
+docstring) is de-quantising ``f_g`` at high-mass single-strand slots; its recorded cost reason is the
+cube's memory, which the tiling has since bounded to 1 MiB tiles.
+
+**What to measure, in this order — each a config value, nothing in `src/` until a ruling.**
+
+1. *The instrument.* `calibration_vs_oracle.py --set SECTION.FIELD=VALUE` (as `profiler.py` has), so a
+   grid arm is `--set calibration.sweep_n_grid=K --set calibration.sweep_n_grid_single_strand=K_ss`.
+   `policy_benchmark.py` likewise if the panel is wanted per arm.
+2. *Accuracy vs K, one grid.* ``K = K_ss`` over a ladder of values (say 30 · 60 · 100 · 138 · 200 ·
+   300 · 513), the metric per stratum with both zero controls; and today's pair (60 / 256) as the
+   reference row. Read where the curve plateaus per stratum, and whether the deferred stratum differs.
+3. *Where the quantisation sits.* Per slot class (`--by-class` thinking): the single-strand slots by
+   mass decile — the median read-out's error against K should fall as the posterior narrows relative
+   to ``dλ``; find the mass above which today's coarse grid is too coarse, if such a mass exists on the
+   panel and on the deep library's slot distribution.
+4. *The bracket coupling.* At a fixed ``K`` the bracket widening changes ``dλ`` unless ``K`` scales; hold
+   ``dλ`` fixed as `_scaled_grid` does and ask whether the answer depends on ``dλ`` or on ``K``.
+5. *The regrid.* Today's two-grid path against a one-grid path at ``K = 513`` for single-strand slots
+   alone: the interpolation's own error, isolated.
+6. *Cost.* Time and memory vs K on a profiler pair: the message rows, the cache (≈ 4 GB at K = 138)
+   and the cube all scale with K; ``K_t`` separately.
+
+**Candidate elegant designs, to be chosen by the measurements, not before:** one grid at a K derived
+from the read-out's own resolution requirement (a rule, not a number); a read-out whose accuracy is
+insensitive to K, making the grid a pure cost knob; ``K_t`` decoupled from ``K`` if the tilt's resolution
+requirement is different. A two-grid design is the answer only if the study shows a single grid cannot
+serve both at acceptable cost — and then it is a ruling with its numbers, not an inheritance.
 
 ## 4. Two things not to do
 
