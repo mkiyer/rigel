@@ -192,7 +192,7 @@ tests rewritten in place, ±0 — and after the one-lattice landing the same day
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
 cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 2 xfails are executable records of proven defects whose fixes are elsewhere
-(`ISSUES: two-sided-exon-row`; the antisense prior-assembly casualty) — "fix the test" is a category
+(`ISSUES: two-sided-exon-row`; `ISSUES: antisense-prior-assembly-casualty`), both deferred by ruling to later threads — "fix the test" is a category
 error, and an xfail is closed by repairing the thing or asserting the invariant structurally, never by
 widening a bound. **Any failure at all is a regression.** A commit that measures the suite updates this
 line.

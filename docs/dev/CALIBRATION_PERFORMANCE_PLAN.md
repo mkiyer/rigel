@@ -182,8 +182,12 @@ precedes F (the port). Status is kept HERE; tick an item by writing DONE and the
 | W5 | **The grid study** — DONE 2026-09-13 (`DESIGN.md` §6b.15: one λ lattice, `sweep_logodds_step` 0.2, `sweep_n_tilt` 60 explicit; the second grid, `_regrid_global` and `_scaled_grid` deleted; refusals in `ISSUES: the-second-lambda-grid-and-its-regrid`; the θ quadrature filed) | understand ψ's grid before designing it: accuracy vs K per stratum and slot class, the read-out's quantisation, the bracket coupling, the regrid's cost, time and memory vs K; then the simple design — §6 | the oracle metric per stratum with both zero controls, the panel, profiler pairs |
 | W6 | **The tunables census** — DONE 2026-09-13: `CalibrationConfig` had 11 fields, not 49, every one read; four were unearned and are gone — `message_propagation` (folded into `message_policy`, the one read site was `not propagation or policy == "silent"`), the `intron_factory` switch (an off branch no instrument or test set), `gdna_prior_strength` with its `strength` plumbing (a temperature nothing moved; exact Bayes only), the `abundance_landscape` switch (a QC-only fit nothing turned off); the oracle instrument's two bespoke flags folded into `--set`; the dead pre-sweep AMBIG cube in `init_beliefs` removed on the way; `background_abundance` kept as an unruled decision (`ISSUES: background-abundance-pair-unruled`); every kept knob carries its derivation or its measured ladder; every step byte-identical on the default rows of both substrates | `module_census.py`, the suite |
 | W7 | **The capture as a typed record** — DONE 2026-09-13: `blocks.SweepCapture`, 25 typed fields (the 38 keys' 13 unread ones gone, and with the message-free variance the extra ψ solve that fed it); the request an empty record the sweep fills; `SweepCapture.gather` one typed concatenation per field kind; eight instruments and six test files read fields; the parity instrument compares fields | every capture reader byte-identical before/after on one condition per substrate; the suite; the default rows' identity |
-| W8 | **Vocabulary rulings** | `ISSUES: rename-the-drain`, `ISSUES: rename-row-and-face`; the `hygiene-ledger` items | `rename_census.py --sense`, `rename_identity.py --check` |
-| W9 | **The two xfails** | `ISSUES: two-sided-exon-row` (priority now; the fix is the landscape's enrichment witness) and the antisense prior-assembly casualty | each xfail's own test turning green structurally |
+| W8 | **Vocabulary rulings** — RULED 2026-09-13 (owner): no rename; `drain`, `row` and `face` stay (the two entries closed as rulings; §7 keeps the census). The `hygiene-ledger` items stay open as a later item of their own | — |
+| W9 | **The two xfails** — RULED 2026-09-13 (owner): both DEFERRED, neither worth the pre-port thread's effort. The antisense prior-assembly casualty belongs to the prior-assembly session, which plans to change the very rule the xfail records (synthetic nascent at Dirichlet alpha = 0; today the leak is 72 against the test's 50) — `ISSUES: antisense-prior-assembly-casualty`. The two-sided exon row belongs to the calibration-accuracy thread: the toy reads a factor of 88 today (0.762 beside a pure-gDNA intron, 0.0086 beside a nascent-bearing one), but on the ladder its class is 4–6 % of the unstranded error with the transfer policy at parity there, while the introns carry 38–46 % — `ISSUES: two-sided-exon-row`, whose first step is the enrichment witness's derivation. Both xfails stay as executable records | — |
+| W10 | **The hygiene ledger's pure cleanups** (§8) | the stale comment above the second pass's `build_fl_models`; `mass_*_boundary` → `count_*_boundary`; the six bank-readers to the drained frame; the moment tests deleted with the length channel. The index alias map stays in the ledger | fresh identity references (`rename_identity.py --freeze`, then `--check` per step); the suite; each migrated instrument's self-test and a recorded before/after |
+| W11 | **The coverage census** (§8) | the suite and every instrument's self-test under coverage; the never-executed lines of `src/` reviewed one by one — a measurement, then owner decisions | the census itself; anything removed is byte-identical on the default rows |
+| W12 | **The θ quadrature at zero gDNA** (§8; `ISSUES: theta-quadrature-at-zero-gdna`) | the one open design item inside ψ, settled in Python before ψ is ported: a θ quadrature whose accuracy does not depend on node count; the mechanism is a λ-dependence of the quadrature's error that the peak-width analysis does not capture, so it begins with that derivation | the ladder's g00 rows under `--set calibration.sweep_n_tilt=30`, the metric per stratum, the profiler (the cube is the cost) |
+| W13 | **The port's prerequisites** (§8) | re-capture the deep library's sweeps on the current tree (`sweep_replay.py capture`), since `sweeps_MO_3021_step4` predates the lattice; fresh identity references for the port thread | the captures replay bit-identical on the tree that made them; `rename_identity.py --check` |
 
 Not on the list, and why: the arcsine coordinate (REFUSED with its numbers; logit is finer at the vertex);
 the vertex atom (a prior-family change whose whole ceiling is ≤ 1 % on stranded in-scope rows — see the
@@ -266,7 +270,7 @@ insensitive to K, making the grid a pure cost knob; ``K_t`` decoupled from ``K``
 requirement is different. A two-grid design is the answer only if the study shows a single grid cannot
 serve both at acceptable cost — and then it is a ruling with its numbers, not an inheritance.
 
-## 7. W8 — the vocabulary rulings and the hygiene ledger (the design, prepared 2026-09-13 for the next session)
+## 7. W8 — the vocabulary rulings and the hygiene ledger (prepared 2026-09-13; RULED the same day: no rename, the terms stay; the ledger stays open)
 
 **What W8 is.** Two issue entries hold three word rulings that are the owner's (`ISSUES: rename-the-drain`,
 `ISSUES: rename-row-and-face`), and `ISSUES: hygiene-ledger` holds five small items, each its own commit and
@@ -334,6 +338,48 @@ sentence at the start of the session.** Counts are words containing the token (s
 **What closes W8.** The two rename entries closed with their rulings (a kept word is a ruling too), the ledger's
 items ticked in place, every identity check bit-identical, the suite at its count (renames add no file), the
 docs following each rename in the same commit (the move rule), `preflight --full`.
+
+## 8. The remaining steps before the port (agreed 2026-09-13)
+
+Plan §F's "satisfied with the Python" is met: memory, one representation for the received messages, the
+layering, the gates and the tolerance instrument, the docs. Four items remain, in this order, and then F.
+
+**W10 — the hygiene ledger's pure cleanups**, each its own commit, none moving the metric:
+1. the stale comment in `pipeline.py` above the second pass's `build_fl_models` (the text "The SAME
+   de-tilted RNA pool the calibrator will read": the second pass's fl models are pass one's; the lift's
+   docstring above it has it right) — three lines, the suite;
+2. `mass_*_boundary` → `count_*_boundary` on `CalibrationResult` (crossing incidences, 23 files) — a rename
+   gated by `rename_identity.py --check` (content, never names), the suite, and a golden regeneration that
+   must show only column names moving;
+3. the wave-3 frame migration: all six bank-readers still read pass one's `cache.payload` and none calls
+   `calibration_inputs` — `structural_claims_audit`, `gdna_pool_census`, `abundance_landscape_census`,
+   `transport_dispersion`, `fl_pool_purity`, `calibration_truth_ab` — each moves to the drained frame the truth
+   is certified in (`calibration_inputs(cache, index)["payload"]`, as the oracle instrument does), one at a
+   time; their numbers WILL move with the frame, so the gate is each self-test plus a before/after recorded in
+   the commit; `calibration_truth_ab` prints undrained against drained on purpose — read it before migrating it;
+4. the moment tests deleted with the length channel: `git log --diff-filter=D -- tests` and
+   `git log -S"moment"`, restore those that gate something still live.
+The index alias map (`dropped_t_id → kept_t_id`, an index rebuild verified with `rescan_panels.py`) stays in
+`ISSUES: hygiene-ledger` as a later item.
+
+**W11 — the coverage census.** Run the suite and every instrument's `--self-test` under coverage; list the
+lines of `src/` no run reached; review them one by one — an unreachable branch inside a live function is what
+`module_census.py` cannot see. Every removal is its own commit, byte-identical on the default rows of both
+substrates (the landed `arms_landed` rows of 2026-09-13 are the reference; re-record them first).
+
+**W12 — the θ quadrature at zero gDNA** (`ISSUES: theta-quadrature-at-zero-gdna`). The one open design item
+inside ψ, and the port will carve ψ into C++, so it is settled in Python first. What is known: K_t 30 breaks the
+zero control 6.3× on one row (`g00 ss.99 capture ON`, with the message layer off as well), 120 and 240 equal
+60; a Chebyshev mesh clustered at the ends is refused (9.9× at 30 nodes); the per-slot bias is small
+(≤ 4 fragments at 50k, prior-free) and the refits amplify it; the peak-width analysis does not predict the
+pipeline, so the bias is a λ-DEPENDENCE of the quadrature's error, not its size. Begin with that derivation;
+the design target is a quadrature whose accuracy does not depend on node count, which is also the cube's
+cost lever (K × K_t). DERIVE → PROTOTYPE outside `src/` (patch `_tilt_grid` and `_psi` in both their bindings,
+as `w5/theta_mesh.py` did) → A/B on both panels with both zero controls → then `src/`.
+
+**W13 — the port's prerequisites.** Re-capture the deep library's sweeps on the current tree
+(`sweep_replay.py capture`; `sweeps_MO_3021_step4` predates the lattice and now replays as a design change)
+and prove they replay bit-identical; freeze fresh identity references for the port thread. Then F.
 
 ## 4. Two things not to do
 

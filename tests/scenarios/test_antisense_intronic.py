@@ -296,7 +296,7 @@ class TestAntisenseIntronicMultiExonT2:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="⛔ A PRIOR-ASSEMBLY CASUALTY, NOT A CALIBRATION OR MESSAGE-LAYER DEFECT — owner diagnosis, "
+        reason="ISSUES: antisense-prior-assembly-casualty — ⛔ A PRIOR-ASSEMBLY CASUALTY, NOT A CALIBRATION OR MESSAGE-LAYER DEFECT — owner diagnosis, "
         "2026-08-18, measured under the relay policy of the day. `assemble_priors` pins synthetic nascent RNA at Dirichlet alpha = 0 "
         "(EQUATIONS.md §9b): gDNA gets an additive prior, annotated RNA a multiplicative one, and "
         "nascent must out-evidence both. On this scenario 1,600 true nascent fragments yield only "

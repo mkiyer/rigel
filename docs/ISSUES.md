@@ -29,20 +29,6 @@ previous fit (deferred 1.01–1.02×, stranded ON 1.004×); (b) the zero-RNA con
 excluding κ-dead exons (`g50 ss.50 ON` 2,691 → 56,422), AMBIG in the final fit (worse 25/32).
 `landscape_training_census.py`.
 
-### rename-the-drain
-`priority: later · kind: decision · 2026-08-31`
-"Drain" carries no intuition (pass one buffers a fragment whose mate gap admits more than one explanation; the
-second pass assigns it). The verb family (`drain`, `DrainQC`, `_drain_side_buffer`, `payload.drain`; ~530
-sites) needs a `rename_census.py --sense` pass gated by `rename_identity.py`; *resolve* and *assign* collide —
-the owner picks.
-
-### rename-row-and-face
-`priority: later · kind: decision · 2026-09-09`
-"row" (a slot's max-normalised log-profile over the solve grid; *profile* is the candidate already in the
-transfer policy's docstrings) and "face" (one directed side of a boundary, the `(source, destination)` pair a
-rule is keyed by). Both are `rename_census.py --sense` passes gated by `rename_identity.py`; the owner picks
-the words.
-
 ### drain-contaminates-certified-rna
 `priority: later (parked by the owner, 2026-09-01) · kind: defect · 2026-08-31`
 The second pass deposits some true-gDNA fragments into the certified-RNA banks: 233 records at
@@ -115,7 +101,12 @@ every upper side refused (`ISSUES: the-edge-upper-side`); (d) substrate `nest` (
 `policy_benchmark.py --by-class`.
 
 ### two-sided-exon-row
-`priority: now · kind: problem · 2026-09-04`
+`priority: later (deferred by the owner 2026-09-13 to the calibration-accuracy thread) · kind: problem · 2026-09-04`
+Today (the one-lattice tree): the toy harness gate reads a factor of 88 — exon |Δf_g| 0.762 beside a pure-gDNA
+intron, 0.0086 beside a nascent-bearing one (the lattice fixed the wet arm and left the mechanism); on the
+ladder the `R exon (licensed intron face)` class is 4–6 % of the unstranded error with `transfer` at parity or
+better than `silent` there, while on the test chromosome it is 20–32 % and transfer is worse (2,647 → 4,056 at
+`g50 ss.50 OFF`). Not the pre-port thread's; the first step when taken up is the witness's derivation.
 On unstranded data an exon's held row is the intron's composition through the face map, whose upper side is
 the map's plateau above its ceiling — a lower bound on gDNA, so at pass zero an unstranded licensed exon reads
 ~9× its true gDNA (+2,000 % at `g25 ss.50 OFF`) and forwarding it compounds the bias (+10 % on the in-scope
@@ -147,6 +138,15 @@ under-reads the true gDNA rate several-fold while the pmf-free pair over-reads o
 RNA. That is a design decision, not a tunable: rule which pair ships (`total_abundance_audit.py` scores
 them; `calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap on
 the metric) and the field goes with the ruling. Kept through W6 for that reason alone.
+
+### antisense-prior-assembly-casualty
+`priority: the prior-assembly session · kind: decision · 2026-08-18 (named 2026-09-13)`
+`tests/scenarios/test_antisense_intronic.py::test_nrna_multiexon_t2_low_ss` is a strict xfail: `assemble_priors`
+pins synthetic nascent RNA at Dirichlet alpha = 0 (`EQUATIONS.md` §9b), so recovered RNA lands on the annotated
+antisense t2 — 72 today against the test's limit of 50 (80 under the relay), while both pool totals are better
+with messages on. The owner plans to change the alpha = 0 rule in the post-calibration prior-assembly session;
+the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
+the new rule's promise. Not the pre-port thread's.
 
 ### theta-quadrature-at-zero-gdna
 `priority: later · kind: defect · 2026-09-13`
@@ -615,3 +615,13 @@ quantile's 0.17, a wall overshoot on the cubic); a λ-axis LINEAR regrid (0.994�
 never the harm, the interpolation was); a step DERIVED from the sharpest posterior (200–930 points where the metric
 plateaus by 138, because an unresolved heavy slot costs ≤ n·f(1−f)·dλ/4 fragments and a fragment-budget rule needs
 a tolerance); K_t below 60 (`ISSUES: theta-quadrature-at-zero-gdna`).
+
+### rename-the-drain
+RULED 2026-09-13 (owner): the term stays. Prepared and not pursued — the census counts (141 src / 146 scripts /
+298 tests / 50 docs sites) and the candidates (`settle`, `decide`; `resolve` and `assign` collide) are in the
+plan's §7 should the ruling ever be revisited.
+
+### rename-row-and-face
+RULED 2026-09-13 (owner): both terms stay. `row` (a slot's max-normalised log-profile over the solve grid;
+1,236 src sites, two senses) and `face` (one directed side of a boundary, the `(destination, side)` pair a
+rule is keyed by; 303 src sites) keep their names; the census and the candidates are in the plan's §7.
