@@ -84,10 +84,6 @@ class PopulationView:
     mass: np.ndarray | None = None
 
     @property
-    def n_objects(self) -> int:
-        return int(self.count.shape[0])
-
-    @property
     def total_count(self) -> np.ndarray:
         """int64[n] — both strands. Strand-agnostic magnitude."""
         return self.count.sum(axis=1)
