@@ -46,8 +46,6 @@ composition is known structurally.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 from scipy.special import expit, log_expit
 
@@ -56,7 +54,6 @@ from .region_chain import RegionDeconv
 # Public surface consumed by sweep / messages / region_geometry. The remaining private helpers stay importable
 # for tests but are not part of the module's external API.
 __all__ = [
-    "CompositionPriors",
     "_logodds_grid",
     "_solve_regions_logodds_all",
     "strand_row_logodds",
@@ -340,46 +337,6 @@ def _compose(f_g, w_pos, allow_pos, allow_neg):
     return np.where(ap, fr * w, 0.0), np.where(an, fr * (1.0 - w), 0.0)
 
 
-def _slice_rows(a, msk):
-    """One prior array's rows for a block, or ``None``. Kept module-level so
-    :class:`CompositionPriors` can use it; the solver's own ``_s`` closure is the same operation."""
-    return None if a is None else np.asarray(a)[msk]
-
-
-@dataclass(frozen=True, slots=True)
-class CompositionPriors:
-    """ψ's two fitted composition arms, carried as ONE object.
-
-    Why a pair rather than two parameters: ψ's solvers already take eighteen arguments, and the two arms
-    are one concept — the fitted population density for each component of the gDNA-vs-RNA split — so
-    naming the pair costs no parameter.
-
-    The pair also keeps the two arms in step: each is row-sliced per solve block, and :meth:`select`
-    slices both at once, so a second arm threaded by hand cannot be sliced for one block and not the other.
-
-    ``None`` on either member means that arm is not fitted and takes its derived reference, which is not
-    the same as "no term" (see :func:`_gdna_arm`).
-
-    There is no reference LOCATION member and there must not be one. A per-slot mean moving the reference
-    off ½ is a prior assertion, pass-0's job is to learn the prior, and where the strand channel is dead
-    such a term is the entire answer at any depth. The reference is the symmetric Jeffreys measure and
-    nothing else; background information enters as likelihood terms — the density λ-factor — whose
-    precision scales with counts.
-    """
-
-    gdna: np.ndarray | None = None
-    rna: np.ndarray | None = None
-
-    def select(self, msk) -> "CompositionPriors":
-        """Both arms restricted to one solve block's rows."""
-        return CompositionPriors(_slice_rows(self.gdna, msk), _slice_rows(self.rna, msk))
-
-
-#: The prior-free solve — both arms take their derived reference. A first-class configuration, not a
-#: degenerate one: pass-0 runs here by design.
-_NO_PRIORS = CompositionPriors()
-
-
 def _gdna_arm(lam, global_logprior):
     """The gDNA arm of ψ over the λ grid → broadcastable to ``(m, K)``.
 
@@ -400,25 +357,20 @@ def _gdna_arm(lam, global_logprior):
     return ref + np.asarray(global_logprior, np.float64)
 
 
-def _rna_arm(lam, rna_logprior=None):
-    """The RNA-total arm of ψ over the λ grid → broadcastable to ``(m, K)``.
-
-    The ``_JEFFREYS_REF`` reference ``+½·log(1 − f_g)`` → ``(1, K)``, plus a fitted ``logP_r`` when one is
-    supplied — the exact mirror of :func:`_gdna_arm`. ``None`` means "not fitted", never "no term".
+def _rna_arm(lam):
+    """The RNA-total arm of ψ over the λ grid → ``(1, K)``: the ``_JEFFREYS_REF`` reference
+    ``+½·log(1 − f_g)``, the exact mirror of :func:`_gdna_arm`'s reference.
 
     This is the two-group arm (gDNA vs RNA-total): the per-strand split is the nuisance tilt, integrated
     out on the θ axis, and needs no prior of its own.
 
-    Nothing fits ``logP_r``, and the cost of that is known. Until something does, the reference alone
-    bounds the ``f_g → 1`` vertex, and unlike its gDNA twin it is never swamped by evidence: it is a fixed
-    repulsion of about 3.1 nats at ``f_g = 0.999`` relative to ``f_g = ½``, roughly a 22:1 handicap.
-    Objects whose true ``f_g`` sits at that vertex carry most of the calibration error on the in-scope
-    strata and read below the vertex. The parameter exists so that an estimator can close the asymmetry;
-    the socket is the repair's landing point rather than speculative surface."""
-    ref = _JEFFREYS_REF * _log1m_fg(lam)[None, :]
-    if rna_logprior is None:
-        return ref
-    return ref + np.asarray(rna_logprior, np.float64)
+    Nothing fits ``logP_r``, and the cost of that is known: the reference alone bounds the ``f_g → 1``
+    vertex, and unlike its gDNA twin it is never swamped by evidence — a fixed repulsion of about 3.1
+    nats at ``f_g = 0.999`` relative to ``f_g = ½``, roughly a 22:1 handicap. Objects whose true ``f_g``
+    sits at that vertex carry most of the calibration error on the in-scope strata and read below the
+    vertex. A fitted RNA arm would land here as a second argument, the mirror of ``global_logprior``;
+    the unfed socket for it was removed (2026-09-13) rather than carried."""
+    return _JEFFREYS_REF * _log1m_fg(lam)[None, :]
 
 
 def _tilt_grid(n_tilt: int) -> np.ndarray:
@@ -467,7 +419,7 @@ def _psi(
     lam,
     fg,
     n_tilt: int = 1,
-    priors: "CompositionPriors | None" = None,
+    gdna_logprior=None,
     lam_logprior=None,
     cube=None,
 ):
@@ -501,8 +453,7 @@ def _psi(
         np.asarray(f_pos_ref, np.float64)[:, None, None],
         np.asarray(f_neg_ref, np.float64)[:, None, None],
     )
-    _p = priors or _NO_PRIORS
-    psi = psi + (_gdna_arm(lam, _p.gdna) + _rna_arm(lam, _p.rna))[:, :, None]
+    psi = psi + (_gdna_arm(lam, gdna_logprior) + _rna_arm(lam))[:, :, None]
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)[:, :, None]
     if cube is not None:
@@ -525,7 +476,7 @@ def _solve_logodds(
     n_grid,
     L: float = _DEFAULT_L,
     n_tilt: int = 1,
-    priors: "CompositionPriors | None" = None,
+    gdna_logprior=None,
     lam_logprior=None,
     cube=None,
 ) -> RegionDeconv:
@@ -577,7 +528,7 @@ def _solve_logodds(
         lam=lam,
         fg=fg,
         n_tilt=n_tilt,
-        priors=priors,
+        gdna_logprior=gdna_logprior,
         lam_logprior=lam_logprior,
         cube=cube,
     )
@@ -622,7 +573,7 @@ def _solve_regions_logodds_all(
     n_grid,
     L: float = _DEFAULT_L,
     n_tilt: int,
-    priors: "CompositionPriors | None" = None,
+    gdna_logprior=None,
     lam_logprior=None,
     fg_ref=None,
     fpos_ref=None,
@@ -634,7 +585,7 @@ def _solve_regions_logodds_all(
     scattering both into full-length arrays. Structurally pure-gDNA and zero-mass regions report 0, and
     ``sweep.solve_chain`` keeps their signature-binary init through the ``solvable`` write-back.
 
-    All array inputs are full length ``m``; ``priors``' members are ``(m, K)`` on the σ(λ) grid;
+    All array inputs are full length ``m``; ``gdna_logprior`` is ``(m, K)`` on the σ(λ) grid;
     ``lam_logprior`` is ``(m, K)``. Each is sub-indexed per class.
     ``cube_rows`` is ``{slot: (K, K_t) row}`` for AMBIG slots (the RNA level lanes' delivery), gathered
     per AMBIG block and added to that block's ψ; ``None`` or an absent slot changes nothing."""
@@ -702,7 +653,7 @@ def _solve_regions_logodds_all(
                     n_grid=n_grid,
                     L=L,
                     n_tilt=1,
-                    priors=(priors or _NO_PRIORS).select(bidx),
+                    gdna_logprior=_s(gdna_logprior, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
                 ),
             )
@@ -742,7 +693,7 @@ def _solve_regions_logodds_all(
                     n_grid=n_grid,
                     L=L,
                     n_tilt=Kt,
-                    priors=(priors or _NO_PRIORS).select(bidx),
+                    gdna_logprior=_s(gdna_logprior, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
                     cube=cube,
                 ),

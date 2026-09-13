@@ -371,23 +371,6 @@ def region_gdna_geometry(geometry: RegionGeometry):
     )
 
 
-def region_rna_geometry(geometry: RegionGeometry):
-    """Per-slot RNA support ``(unspliced count, eff_rna)`` — the exact mirror of
-    :func:`region_gdna_geometry`, for the OTHER component.
-
-    The count is the SAME object total ``M`` and only the divisor differs: ψ splits one unspliced
-    population, so ``rho_r = (1-f_g)*M/E_r`` exactly as ``rho_g = f_g*M/E_g``, which is what makes
-    ``sum_c rho_c*E_c = M`` hold and ``f_g`` a count share rather than a density share.
-
-    Returning the pair rather than just ``eff_rna`` is deliberate: a caller that took the count from one
-    helper and the divisor from another could silently mix bases, and the two helpers exist so that the
-    fit and the projection use one definition per component.
-    """
-    return np.asarray(geometry.unspliced_count, np.float64).sum(axis=1), np.asarray(
-        geometry.eff_rna, np.float64
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class RegionBelief:
     """Per-region solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the region's UNSPLICED

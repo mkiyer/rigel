@@ -672,8 +672,6 @@ def test_region_sweep_deterministic():
 def _chunk_substrate(m=255, K=120, seed=3):
     """A mixed substrate: single-strand and AMBIG slots, a fitted composition arm, non-flat λ-factor
     rows, and a per-slot freeze reference."""
-    from rigel.calibration.simplex_logodds import CompositionPriors
-
     rng = np.random.default_rng(seed)
     u_pos = rng.integers(0, 60, m).astype(float)
     u_neg = rng.integers(0, 60, m).astype(float)
@@ -695,7 +693,7 @@ def _chunk_substrate(m=255, K=120, seed=3):
         n_grid=K,
         L=10.0,
         n_tilt=12,
-        priors=CompositionPriors(gdna=prior),
+        gdna_logprior=prior,
         lam_logprior=rows,
         fg_ref=fg_ref,
         fpos_ref=fpos_ref,
@@ -715,8 +713,7 @@ def _solve_in_chunks(args, kw, edges):
     for a, b in edges:
         sub_args = tuple(x[a:b] for x in args)
         sub_kw = dict(kw)
-        sub_kw["priors"] = kw["priors"].select(np.arange(a, b))
-        for key in ("lam_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
+        for key in ("gdna_logprior", "lam_logprior", "fg_ref", "fpos_ref", "fneg_ref"):
             sub_kw[key] = kw[key][a:b]
         dc = _solve_regions_logodds_all(*sub_args, **sub_kw)
         for f in fields:
@@ -750,4 +747,4 @@ def test_the_psi_solve_is_chunk_exact_so_a_block_split_moves_no_number():
             )
     # not vacuous: both paths solved, with a fitted arm
     assert (args[2] ^ args[3]).any() and (args[2] & args[3]).any()
-    assert kw["priors"].gdna is not None
+    assert kw["gdna_logprior"] is not None

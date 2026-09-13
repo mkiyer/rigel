@@ -62,7 +62,6 @@ from .region_geometry import (
     RegionStatics,
     g1_locked,
     region_gdna_geometry,
-    region_rna_geometry,
 )
 from .region_init import (
     build_region_init,
@@ -70,7 +69,7 @@ from .region_init import (
     strand_discriminability,
 )
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, coarse_type_array
-from .simplex_logodds import CompositionPriors, _logodds_grid, _solve_regions_logodds_all
+from .simplex_logodds import _logodds_grid, _solve_regions_logodds_all
 from .region_chain import BOUNDARY, REGION, RegionChain, RegionDeconv, locus_blocks
 
 __all__ = [
@@ -197,7 +196,6 @@ def solve_chain(
     logodds_window: float = 10.0,
     n_tilt: int,
     gdna_prior=None,
-    rna_prior=None,
     intron_prior=None,
     policy=None,
     block_slots: int | None = None,
@@ -258,7 +256,6 @@ def solve_chain(
         n_gdna_obs=n_gdna_obs,
         n_rna_obs=n_rna_obs,
         gdna_prior=gdna_prior,
-        rna_prior=rna_prior,
         policy=policy,
         library=policy.library(view),
         **grid,
@@ -359,7 +356,6 @@ class _Sweep:
     n_tilt: int
     strand_live: bool
     gdna_prior: object
-    rna_prior: object
     policy: object
     library: object
 
@@ -368,7 +364,7 @@ def _psi(
     ctx: BlockContext,
     strand: tuple,
     *,
-    priors,
+    gdna_logprior,
     fg_ref,
     fpos_ref,
     fneg_ref,
@@ -407,7 +403,7 @@ def _psi(
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
         n_tilt=ctx.n_tilt,
-        priors=priors,
+        gdna_logprior=gdna_logprior,
         lam_logprior=lam_logprior,
         fg_ref=fg_ref,
         fpos_ref=fpos_ref,
@@ -416,23 +412,15 @@ def _psi(
     )
 
 
-def _composition_arms(geometry, gdna_prior, rna_prior, solve_grid, mass_global, eff_global):
-    """ψ's two composition arms on the solve grid — ONE construction site. THE gDNA ARM is the
+def _gdna_logprior(gdna_prior, solve_grid, mass_global, eff_global):
+    """ψ's fitted composition arm on the solve grid — ONE construction site. THE gDNA ARM is the
     COMPOSITION prior and only that: a total-density model is an ENRICHMENT model, and letting it vote a
-    slot's ``f_g`` is the count-votes-composition regression. The RNA arm asks the same landscape about
-    the other component — the complementary fraction ``1 − f_g`` against RNA's own opportunity, the
-    unspliced mass shared because both components split one population (`region_rna_geometry`). A
-    ``None`` member takes its derived reference in the solve: the shipped state of the RNA arm, a
-    first-class configuration rather than a gap."""
-    rna_mass, eff_rna = region_rna_geometry(geometry)
-    return CompositionPriors(
-        gdna=gdna_prior.logprior(solve_grid, mass_global, eff_global)
-        if gdna_prior is not None
-        else None,
-        rna=rna_prior.logprior(1.0 - solve_grid, rna_mass, eff_rna)
-        if rna_prior is not None
-        else None,
-    )
+    slot's ``f_g`` is the count-votes-composition regression. ``None`` means the arm takes its derived
+    reference in the solve — the prior-free solve pass-0 runs by design. The RNA arm has no fitted form
+    (`simplex_logodds._rna_arm`)."""
+    if gdna_prior is None:
+        return None
+    return gdna_prior.logprior(solve_grid, mass_global, eff_global)
 
 
 def _message_layer(ctx: BlockContext, policy, library, terminal, cache, n_owned: int):
@@ -514,7 +502,7 @@ def _block_diagnostics(
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
         n_tilt=ctx.n_tilt,
-        priors=None,
+        gdna_logprior=None,
     ).gdna_frac
     from_left, from_right = tables
     mass_global, eff_global = support
@@ -565,9 +553,7 @@ def _solve_block(
     # the per-slot gDNA support — the basis the composition prior is fit and projected on
     mass_global, eff_global = region_gdna_geometry(geometry)
     _, solve_grid = _logodds_grid(sweep.n_grid, sweep.logodds_window)
-    arms = _composition_arms(
-        geometry, sweep.gdna_prior, sweep.rna_prior, solve_grid, mass_global, eff_global
-    )
+    arms = _gdna_logprior(sweep.gdna_prior, solve_grid, mass_global, eff_global)
 
     own = build_region_init(
         statics,
@@ -581,7 +567,7 @@ def _solve_block(
         logodds_window=sweep.logodds_window,
         n_tilt=sweep.n_tilt,
         belief=belief,
-        priors=arms,
+        gdna_logprior=arms,
         intron_prior=factory_rows,
     )
     ctx = BlockContext(
@@ -610,7 +596,7 @@ def _solve_block(
     final = _psi(
         ctx,
         strand,
-        priors=arms,
+        gdna_logprior=arms,
         fg_ref=belief.f_g,
         fpos_ref=belief.f_pos,
         fneg_ref=belief.f_neg,

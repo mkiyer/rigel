@@ -471,7 +471,7 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
             np.asarray([0.25], F)[:, None, None],
             np.asarray([0.25], F)[:, None, None],
         )[0].astype(np.float64)
-        psi += np.asarray(sl._gdna_arm(lam, None) + sl._rna_arm(lam, None), np.float64).reshape(-1)[
+        psi += np.asarray(sl._gdna_arm(lam, None) + sl._rna_arm(lam), np.float64).reshape(-1)[
             :, None
         ]
         profiles = {

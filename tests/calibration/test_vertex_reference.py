@@ -164,17 +164,8 @@ def _set_exponents(monkeypatch, c_g: float, c_r: float):
             else c_g * SL._log_fg(lam)[None, :] + np.asarray(glp, np.float64)
         ),
     )
-    # The RNA replacement mirrors the gDNA one, fitted-prior socket included. Patching it with the
-    # wrong arity raises rather than silently ignoring the arm, which is the outcome to want.
-    monkeypatch.setattr(
-        SL,
-        "_rna_arm",
-        lambda lam, rlp=None: (
-            c_r * SL._log1m_fg(lam)[None, :]
-            if rlp is None
-            else c_r * SL._log1m_fg(lam)[None, :] + np.asarray(rlp, np.float64)
-        ),
-    )
+    # The RNA replacement mirrors the gDNA one; it has no fitted-prior socket (nothing fits logP_r).
+    monkeypatch.setattr(SL, "_rna_arm", lambda lam: c_r * SL._log1m_fg(lam)[None, :])
 
 
 def test_G3_each_half_of_the_constant_holds_ONE_vertex_and_is_NEGLIGIBLE_at_the_other(monkeypatch):

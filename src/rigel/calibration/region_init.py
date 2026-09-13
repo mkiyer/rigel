@@ -151,7 +151,7 @@ def build_region_init(
     logodds_window: float,
     n_tilt: int,
     belief,
-    priors=None,
+    gdna_logprior=None,
     intron_prior=None,
 ) -> RegionInit:
     """The pass-0 per-slot self-solve → :class:`RegionInit`. Runs the message-free strand deconvolution
@@ -160,7 +160,7 @@ def build_region_init(
 
     The strand deconvolution reference (`fg_ref`/`fpos_ref`/`fneg_ref`) is the incoming ``belief`` — the
     count-zero-information variance freeze evaluates the composition variance near the truth, not at a flat ½.
-    ``priors`` (ψ's two composition arms, each ``(m, K)`` or ``None``) and ``intron_prior`` (the intron
+    ``gdna_logprior`` (ψ's fitted gDNA arm, ``(m, K)`` or ``None``) and ``intron_prior`` (the intron
     factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
@@ -185,7 +185,7 @@ def build_region_init(
         n_grid=int(n_grid),
         L=float(logodds_window),
         n_tilt=n_tilt,
-        priors=priors,
+        gdna_logprior=gdna_logprior,
         lam_logprior=intron_prior,
         fg_ref=np.asarray(belief.f_g, np.float64),
         fpos_ref=np.asarray(belief.f_pos, np.float64),

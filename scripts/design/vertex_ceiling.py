@@ -284,8 +284,8 @@ def _install_ref_exponent(a_value: float, b_value: float | None = None):
     (TRAPS: no-prior-means-haldane), so small exponents bound what a derived rule could buy and are
     never the rule itself.
 
-    ``b_value = None`` keeps the two equal. Both replacements take the shipped parameter names
-    (``global_logprior``, ``rna_logprior``), which the self-test's arity block checks."""
+    ``b_value = None`` keeps the two equal. Both replacements take the shipped signatures
+    (``_gdna_arm(lam, global_logprior)``, ``_rna_arm(lam)``), which the self-test's arity block checks."""
     b_value = a_value if b_value is None else b_value
 
     def _gdna_arm(lam, global_logprior=None):
@@ -295,12 +295,9 @@ def _install_ref_exponent(a_value: float, b_value: float | None = None):
             return ref
         return ref + np.asarray(global_logprior, np.float64)
 
-    def _rna_arm(lam, rna_logprior=None):
+    def _rna_arm(lam):
         _FIRED["ref_r"] += 1
-        ref = float(b_value) * SL._log1m_fg(lam)[None, :]
-        if rna_logprior is None:
-            return ref
-        return ref + np.asarray(rna_logprior, np.float64)
+        return float(b_value) * SL._log1m_fg(lam)[None, :]
 
     SL._gdna_arm = _gdna_arm
     SL._rna_arm = _rna_arm
@@ -404,8 +401,6 @@ def _patch_targets():
         (NI, "build_region_init", None),
         (SW, "build_region_init", NI),
         (SW, "_solve_block", None),
-        (SW, "CompositionPriors", SL),
-        (SL, "CompositionPriors", None),
         (SL, "_posterior_median_fg", None),
         (SL, "_gdna_arm", None),
         (SL, "_rna_arm", None),
@@ -421,8 +416,8 @@ def _target_live(mod, attr, definition) -> bool:
 
 
 def _same_params(a, b) -> bool:
-    """Same parameter names in the same order. Names rather than count, because the shipped caller
-    passes `rna_logprior` by keyword."""
+    """Same parameter names in the same order: names rather than count, so a replacement with the
+    right arity and the wrong name is rejected too."""
     return [p.name for p in inspect.signature(a).parameters.values()] == [
         p.name for p in inspect.signature(b).parameters.values()
     ]
@@ -475,18 +470,18 @@ def self_test() -> int:
     checks.append(("ref_c's two arms match the shipped signatures",
                    _same_params(SL._gdna_arm, saved[(SL.__name__, "_gdna_arm")])
                    and _same_params(SL._rna_arm, saved[(SL.__name__, "_rna_arm")])))
-    # perturbation: a one-argument `_rna_arm` (one fewer than the shipped signature) must be rejected
+    # perturbation: a two-argument `_rna_arm` (one more than the shipped signature) must be rejected
     # by the same comparison.
-    checks.append(("a one-argument `_rna_arm` is REJECTED by the same comparison",
-                   not _same_params(lambda lam: None, saved[(SL.__name__, "_rna_arm")])))
+    checks.append(("a two-argument `_rna_arm` is REJECTED by the same comparison",
+                   not _same_params(lambda lam, rlp=None: None, saved[(SL.__name__, "_rna_arm")])))
 
     # ── ③ ref_c reproduces the shipped reference at ½, and moves off it elsewhere ────────────────────
     lam = np.linspace(-10.0, 10.0, 21)
     ship_g = saved[(SL.__name__, "_gdna_arm")](lam, None)
-    ship_r = saved[(SL.__name__, "_rna_arm")](lam, None)
+    ship_r = saved[(SL.__name__, "_rna_arm")](lam)
     before = dict(_FIRED)
     half_g = _try(lambda: SL._gdna_arm(lam, None))
-    half_r = _try(lambda: SL._rna_arm(lam, None))
+    half_r = _try(lambda: SL._rna_arm(lam))
     checks.append(("ref_c=0.5 is BIT-IDENTICAL to the shipped ½ reference, both arms",
                    half_g is not None and half_r is not None
                    and np.array_equal(half_g, ship_g) and np.array_equal(half_r, ship_r)))
@@ -502,7 +497,7 @@ def self_test() -> int:
     # perturbation: the pair is a Beta(a,b), so the two arms must be drivable independently.
     _install_ref_exponent(0.5, 2.0)
     ab_g = _try(lambda: SL._gdna_arm(lam, None))
-    ab_r = _try(lambda: SL._rna_arm(lam, None))
+    ab_r = _try(lambda: SL._rna_arm(lam))
     checks.append(("ref=A,B moves the RNA arm alone",
                    ab_g is not None and ab_r is not None
                    and np.array_equal(ab_g, ship_g) and not np.array_equal(ab_r, ship_r)))

@@ -70,7 +70,7 @@ def test_the_budget_covers_term_and_intermediate_rounding_and_its_constants_are_
         for share, other in ((0.001, 0.999), (0.999, 0.001), (0.02, 0.98), (0.3, 0.7)):
             u_a = n * (0.5 * share + kappa * (1.0 - share))
             u_b = n * (0.5 * other + kappa * (1.0 - other))
-            arms = SL._gdna_arm(lam, None) + SL._rna_arm(lam, None)
+            arms = SL._gdna_arm(lam, None) + SL._rna_arm(lam)
             terms = [strand(u_a, n, share, np.float64), arms, strand(u_b, n, other, np.float64)]
             exact = _read_out(SL, sum(terms), lam, fg)
             rounded_terms = sum(np.asarray(np.asarray(t, F), np.float64) for t in terms)
