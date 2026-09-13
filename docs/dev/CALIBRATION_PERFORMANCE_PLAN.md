@@ -266,6 +266,75 @@ insensitive to K, making the grid a pure cost knob; ``K_t`` decoupled from ``K``
 requirement is different. A two-grid design is the answer only if the study shows a single grid cannot
 serve both at acceptable cost — and then it is a ruling with its numbers, not an inheritance.
 
+## 7. W8 — the vocabulary rulings and the hygiene ledger (the design, prepared 2026-09-13 for the next session)
+
+**What W8 is.** Two issue entries hold three word rulings that are the owner's (`ISSUES: rename-the-drain`,
+`ISSUES: rename-row-and-face`), and `ISSUES: hygiene-ledger` holds five small items, each its own commit and
+none moving the metric. A rename is a pure restructure and is proven bit-identical; the hygiene items are
+judged by the suite and the instruments they touch.
+
+**Two facts found while preparing it.** `rename_census.py --sense` knows nine tokens (acceptor, cut, donor,
+edge, junction, line, node, relay, seam) and none of W8's three, so the census must be taught `drain`, `row`
+and `face` before any site is ruled on. And every identity reference on disk (`memory_identity_*`,
+`locus_identity_*`, …) predates the one-lattice landing, so W8 freezes its own first.
+
+**The opening steps, mechanical, in order.**
+
+0. Freeze fresh identity references from the current tree — `rename_identity.py --freeze` on the two ladder
+   conditions the earlier references used (`gdna_g05_ss_0.50_nrna_mid_capture_off`,
+   `gdna_g05_ss_0.99_nrna_mid_capture_on`) and `--bam` LBX0190 — named for this thread (`vocab_identity_*`).
+   Every rename stage below ends with `rename_identity.py --check --stage <name>` against them.
+1. Teach the census the three tokens: `TOKENS` in `scripts/design/rename_census.py` gains `"drain": None`,
+   `"row": None`, `"face": None` (each carries two senses, below), and `EXEMPT` gains the non-vocabulary
+   senses the dump shows (`interface`, `surface`; the instruments' table rows; numpy rows). Gate: the dump for
+   each token classifies every site, and `test_scripts_index.py` still passes.
+
+**The three rulings — the owner picks the words; the census counts and the candidates, so the ruling is a
+sentence at the start of the session.** Counts are words containing the token (src / scripts / tests / docs).
+
+* `drain` — 141 / 146 / 298 / 50. What it names: the second pass's operation on the deferred fragments (pass
+  one buffers a fragment whose mate gap admits more than one explanation; the second pass decides it), and by
+  extension the FRAME after it (`DRAINED` / `undrained`, the frame the truth is certified in). Identifiers:
+  `drain`, `drained`, `DrainQC`, `undrained`, `drain_seed`, `_drain_side_buffer`, `with_drain`,
+  `lift_drain_parts`. Candidates: **`settle`** (the deferred fragments are settled; the settled frame; unused
+  anywhere in the tree — the recommendation), `decide` (the chooser is `choose_hypotheses`), `place`;
+  `resolve` collides with `resolve.cpp`'s fragment construction and `assign` with the EM's assignment.
+* `row` — 1,236 / 752 / 915 / 335. Two senses entangled by the word's generality: a slot's max-normalised
+  log-profile over the solve grid (`lam_rows`, `cube_rows`, `blur_row`, `transport_row`, `level_row`,
+  `Faces.rows`, `transfer_rows.py`) against a numpy or table row everywhere else (`_row_moment`,
+  `_block_rows`, the instruments' printed rows). Candidate: **`profile`**, the word the transfer policy's
+  docstrings already use for the thing — but `Levels.profile` already names a level lane's profile, so the
+  ruling must say whether a delivered row and a lane's profile are one word. The largest of the three and the
+  one the census must classify site by site first.
+* `face` — 303 / 26 / 237 / 125. One directed side of a boundary, the `(destination, side)` pair a rule is
+  keyed by (`Faces`, `FaceRule`, `face_is_licensed`, `face_map_lambda`, `_splice_faces`, `M_face`); the
+  collisions are `interface` and `surface` in prose, not the concept. Recommendation: **keep `face`** and close
+  the entry with the ruling — it is a geometric word for a geometric thing, and SIDE is already taken by
+  left / right.
+
+**The hygiene ledger, in order of risk, each its own commit.**
+
+* the stale comment in `pipeline.py` above the second pass's `build_fl_models` (the text "The SAME
+  de-tilted RNA pool the calibrator will read" — the second pass's fl models are pass one's; the lift's
+  docstring above it has it right). A three-line edit; the suite.
+* `mass_*_boundary` → `count_*_boundary` on `CalibrationResult` (crossing incidences, 23 files): a rename
+  gated by the identity check (content, never names), the suite and a golden regeneration that must show only
+  column names moving.
+* the wave-3 frame migration: all six bank-readers still read pass one's `cache.payload` and none calls
+  `calibration_inputs` — `structural_claims_audit`, `gdna_pool_census`, `abundance_landscape_census`,
+  `transport_dispersion`, `fl_pool_purity`, `calibration_truth_ab`. Each moves to the drained frame the truth
+  is certified in (`calibration_inputs(cache, index)["payload"]`, as the oracle instrument does), one at a time;
+  their numbers WILL move with the frame, so the gate is each self-test plus a before/after recorded in the
+  commit. `calibration_truth_ab` prints undrained against drained on purpose: read it before migrating it.
+* the moment tests deleted with the length channel: find them with `git log --diff-filter=D -- tests` and
+  `git log -S"moment"`, restore those that gate something still live.
+* the index's duplicate map as an alias map `dropped_t_id → kept_t_id`: an index rebuild, no panel re-scan,
+  verified with `rescan_panels.py` (`reach` is covered by no other hash). The largest item; last.
+
+**What closes W8.** The two rename entries closed with their rulings (a kept word is a ruling too), the ledger's
+items ticked in place, every identity check bit-identical, the suite at its count (renames add no file), the
+docs following each rename in the same commit (the move rule), `preflight --full`.
+
 ## 4. Two things not to do
 
 * Micro-optimise the Python passes (a silent-hop early exit would halve them, bit-identically): the port
