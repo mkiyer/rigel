@@ -719,29 +719,6 @@ class CaptureSampler:
         nonzero = buffer > 0
         return position[nonzero], buffer[nonzero]
 
-    def _local_overlap_weights(
-        self,
-        seq_len: int,
-        frag_len: int,
-        interval: WeightedInterval,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        eff_len = int(seq_len) - int(frag_len) + 1
-        if eff_len <= 0:
-            return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64)
-        lo = max(0, interval.start - int(frag_len) + 1)
-        hi = min(eff_len, interval.end)
-        if hi <= lo:
-            return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64)
-        starts = np.arange(lo, hi, dtype=np.int64)
-        overlaps = np.minimum(starts + int(frag_len), interval.end) - np.maximum(
-            starts,
-            interval.start,
-        )
-        if self.config.min_overlap > 1:
-            overlaps = np.where(overlaps >= self.config.min_overlap, overlaps, 0)
-        weights = overlaps.astype(np.float64)
-        return starts, weights
-
 
 def _validate_config(config: CaptureConfig) -> None:
     if config.off_target_weight < 0:
