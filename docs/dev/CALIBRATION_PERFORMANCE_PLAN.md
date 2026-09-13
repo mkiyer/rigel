@@ -357,8 +357,9 @@ layering, the gates and the tolerance instrument, the docs. Four items remain, i
    `structural_claims_audit` DONE 2026-09-13; `gdna_pool_census` DONE 2026-09-13; `calibration_truth_ab` DONE 2026-09-13;
    `abundance_landscape_census` DONE 2026-09-13 — and two migrate to the drained frame the truth is certified in
    (`calibration_inputs(cache, index)["payload"]` plus the partition lift where partitions are read):
-   `fl_pool_purity` (an open defect at priority next names it; today it prices a length model production
-   never builds) and `transport_dispersion` (the decomposition the owner asked for; an open question waits on
+   `fl_pool_purity` DONE 2026-09-13 (an open defect at priority next names it; it priced a length model production
+   never builds — after the migration the shipped model reads the true gDNA mean exactly at capture-OFF on both
+   fl-gap arms, and −2.9 / −8.5 bp at capture-ON) and `transport_dispersion` (the decomposition the owner asked for; an open question waits on
    it), each with a recorded before/after;
 4. DONE 2026-09-13 (33 cases into `test_effective_length.py`; both perturbations fired). the moment tests deleted with the length channel: `git log --diff-filter=D -- tests` and
    `git log -S"moment"`, restore those that gate something still live.

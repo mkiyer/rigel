@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """Are the four gDNA fragment-length pools actually pure gDNA, and what does the shipped length model
 say against truth? No solver and no model: straight off the origin-split oracle.
 
@@ -7,12 +8,18 @@ this measures that claim. Each oracle condition holds a separate full scan per o
 Two tables per condition. Composition: per pool, the gDNA / nascent / mature fragment counts, each
 component's mean length, and the length bias the mixture imposes on that pool. Shipped against truth:
 `TRUE` (the gDNA partition's own lengths, what the model should estimate), `POOLED` (the four pools as
-they actually are) and `SHIPPED` (`build_fl_models(...).gdna_pmf`, opportunity-divided and shrunk), so
-that `pool-true` (what contamination costs) and `ship-pool` (what the opportunity divisor and the
-shrinkage cost) are attributed apart and never confused. It measures nothing on an equal-length panel:
-the bias is the RNA share times the length gap, and the ladder and the test chromosome give both
-components equal lengths deliberately, so run it only where the two components' fragment lengths differ.
-It needs the oracle cache with its origin partitions (`panel.py cache`), not just a scan cache.
+they actually are), `SHIPPED` (`build_fl_models(...).gdna_pmf`, opportunity-divided and shrunk) and
+`GLOBAL` (the unconditional anchor the shrinkage pulls toward, `deposited_lengths`), so that `pool-true`
+(what contamination costs) and `ship-pool` (what the opportunity divisor and the shrinkage cost) are
+attributed apart and never confused. Everything is read in the DRAINED frame the truth is certified in:
+the whole drained as production drains it (`scan_cache.calibration_inputs`, which also builds `SHIPPED`
+exactly as production builds it, with the two-pool contrast), and the three partitions lifted by
+replaying the whole's choices so they sum to the drained whole (`OracleTruth.from_cached_parts`, whose
+sum-to-full gate is the lift's own identity check). Until 2026-09-13 it priced pass one's model, which
+production never builds. It measures nothing on an equal-length panel: the bias is the RNA share times
+the length gap, and the ladder and the test chromosome give both components equal lengths deliberately,
+so run it only where the two components' fragment lengths differ. It needs the oracle cache with its
+origin partitions (`panel.py cache`), not just a scan cache.
 
 Usage::
 
@@ -24,15 +31,13 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from rigel.calibration.fl import build_fl_models
-from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
-from rigel.calibration.sj_opportunity import crossing_probability_from_index
 from rigel.index import TranscriptIndex
-from rigel.scan_cache import read_scan_cache
+from rigel.scan_cache import calibration_inputs, read_scan_cache
 from rigel.scan_payload import (
     POOL_DNA_INTERGENIC,
     POOL_DNA_INTERGENIC_EXON,
@@ -40,6 +45,9 @@ from rigel.scan_payload import (
     POOL_DNA_INTRON_EXON,
     POOL_RNA_SPLICED,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from calibration._oracle import ORIGINS, OracleTruth  # noqa: E402
 
 #: The four pools `fl.build_fl_models` sums into the gDNA length model, in payload order.
 GDNA_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC, POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
@@ -59,19 +67,22 @@ def mean_length(hist) -> float:
     return float((v * np.arange(v.shape[0])).sum() / n) if n > 0 else float("nan")
 
 
-def _pools(panel: Path, index, cond: str, part: str):
-    d = panel / "oracle_cache" / cond / part
-    if not d.exists():
+def load(panel: Path, index, cond: str):
+    """One condition in the DRAINED frame: production's calibration inputs for the whole (the payload and
+    the two length models) and the three origin partitions lifted into the same frame; ``None`` when the
+    condition has no origin partitions."""
+    root = panel / "oracle_cache" / cond
+    if not all((root / k).exists() for k in ORIGINS):
         return None
-    return np.asarray(read_scan_cache(d, index).payload.pool_lengths, dtype=np.float64)
+    lift: dict = {}
+    kw = calibration_inputs(read_scan_cache(root / "_main", index), index, lift_out=lift)
+    parts = {k: read_scan_cache(root / k, index).payload for k in ORIGINS}
+    return kw, OracleTruth.from_cached_parts(kw["payload"], parts, lift).parts
 
 
-def composition(panel: Path, index, cond: str) -> None:
+def composition(cond: str, parts: dict) -> None:
     """Per pool: who is actually in it, and what the mixture does to that pool's mean length."""
-    part = {p: _pools(panel, index, cond, p) for p in ("gdna", "mrna", "nrna")}
-    if any(v is None for v in part.values()):
-        print(f"══ {cond}: no origin partitions — run `panel.py cache`")
-        return
+    part = {p: np.asarray(parts[p].pool_lengths, dtype=np.float64) for p in ORIGINS}
     print(f"\n══ {cond}")
     print(
         f"   {'pool':<26}{'gDNA':>10}{'nascent':>10}{'mature':>9} | "
@@ -101,28 +112,31 @@ def composition(panel: Path, index, cond: str) -> None:
     print(f"   {'4 spliced (the RNA pool)':<26}gDNA share {100 * sp / max(tot_sp, 1):.2f}%  ⭐ the one pool that IS pure")
 
 
-def shipped_vs_truth(panel: Path, index, conds) -> None:
-    """`TRUE` / `POOLED` / `SHIPPED`, so contamination and the divisor+shrinkage are attributed apart."""
+def shipped_row(cond: str, kw: dict, parts: dict) -> tuple:
+    """`TRUE` / `POOLED` / `SHIPPED` / `GLOBAL` mean lengths and the pools' fragment count, one condition."""
+    payload = kw["payload"]
+    true = np.asarray(parts["gdna"].deposited_lengths, dtype=np.float64)
+    pooled = np.asarray(payload.pool_lengths, dtype=np.float64)[list(GDNA_POOLS)].sum(axis=0)
+    return (
+        cond,
+        mean_length(true),
+        mean_length(pooled),
+        mean_length(kw["gdna_fl_pmf"]),
+        mean_length(payload.deposited_lengths),
+        float(pooled.sum()),
+    )
+
+
+def shipped_vs_truth(rows: list[tuple]) -> None:
+    """The second table, so contamination and the divisor+shrinkage are attributed apart."""
     print(
         f"\n{'condition':<44}{'TRUE':>8}{'POOLED':>9}{'SHIPPED':>9}{'GLOBAL':>8} | "
-        f"{'ship−true':>10}{'pool−true':>10}{'ship−pool':>10}{'n_gdna':>10}"
+        f"{'ship−true':>10}{'pool−true':>10}{'ship−pool':>10}{'n_pooled':>10}"
     )
-    for cond in conds:
-        gd = panel / "oracle_cache" / cond / "gdna"
-        if not gd.exists():
-            continue
-        main = read_scan_cache(panel / "oracle_cache" / cond / "_main", index)
-        true = np.asarray(read_scan_cache(gd, index).payload.deposited_lengths, dtype=np.float64)
-        fl = build_fl_models(
-            main.payload,
-            sj_opportunity=crossing_probability_from_index(index, int(main.payload.max_length)),
-            gdna_opportunity=gdna_opportunity_from_index(index, int(main.payload.max_length)),
-        )
-        pooled = np.asarray(main.payload.pool_lengths, dtype=np.float64)[list(GDNA_POOLS)].sum(axis=0)
-        t, p, s, g = mean_length(true), mean_length(pooled), mean_length(fl.gdna_pmf), mean_length(fl.global_pmf)
+    for cond, t, p, s, g, n in rows:
         print(
             f"{cond:<44}{t:>8.1f}{p:>9.1f}{s:>9.1f}{g:>8.1f} | "
-            f"{s - t:>+10.1f}{p - t:>+10.1f}{s - p:>+10.1f}{fl.n_gdna:>10,.0f}"
+            f"{s - t:>+10.1f}{p - t:>+10.1f}{s - p:>+10.1f}{n:>10,.0f}"
         )
 
 
@@ -138,10 +152,17 @@ def main() -> None:
     conds = args.conditions or sorted(
         d.name for d in (args.panel / "oracle_cache").iterdir() if (d / "_main").exists()
     )
-    if not args.no_composition:
-        for cond in conds:
-            composition(args.panel, index, cond)
-    shipped_vs_truth(args.panel, index, conds)
+    rows = []
+    for cond in conds:
+        loaded = load(args.panel, index, cond)
+        if loaded is None:
+            print(f"══ {cond}: no origin partitions — run `panel.py cache`")
+            continue
+        kw, parts = loaded
+        if not args.no_composition:
+            composition(cond, parts)
+        rows.append(shipped_row(cond, kw, parts))
+    shipped_vs_truth(rows)
 
 
 if __name__ == "__main__":
