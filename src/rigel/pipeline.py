@@ -408,10 +408,10 @@ def _drain_side_buffer(
     sj = build_sj_arrays(index)
     scores = score_held_fragments(
         payload,
-        # The SAME de-tilted RNA pool the calibrator will read. The scorer weighs a candidate
-        # length by `f(L)`, so handing it the tilted pool would make it prefer the longer hypothesis
-        # for the same reason the pool is long in the first place — one definition of the RNA length
-        # distribution, or the second pass and the calibration disagree about the library.
+        # Pass one's length models, de-tilted the way calibration's are (`build_fl_models`): the
+        # scorer weighs a candidate length by `f(L)`, so the raw sj-tilted RNA pool would make it
+        # prefer the longer hypothesis for the same reason that pool is long. Calibration refits on
+        # the drained tally — fit once, score once, drain once (the docstring above).
         fl_models=build_fl_models(
             payload,
             sj_opportunity=crossing_probability_from_index(index, int(payload.max_length)),

@@ -345,7 +345,7 @@ Plan §F's "satisfied with the Python" is met: memory, one representation for th
 layering, the gates and the tolerance instrument, the docs. Four items remain, in this order, and then F.
 
 **W10 — the hygiene ledger's pure cleanups**, each its own commit, none moving the metric:
-1. the stale comment in `pipeline.py` above the second pass's `build_fl_models` (the text "The SAME
+1. DONE 2026-09-13. the stale comment in `pipeline.py` above the second pass's `build_fl_models` (the text "The SAME
    de-tilted RNA pool the calibrator will read": the second pass's fl models are pass one's; the lift's
    docstring above it has it right) — three lines, the suite;
 2. `mass_*_boundary` → `count_*_boundary` on `CalibrationResult` (crossing incidences, 23 files) — a rename

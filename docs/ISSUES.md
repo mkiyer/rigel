@@ -313,7 +313,6 @@ Each its own commit, none moving the 0.8.0 metric:
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
 - `mass_*_boundary` → `count_*_boundary` (crossing incidences);
 - restore the moment tests deleted with the length channel;
-- the stale comment at `pipeline.py:416` (the drain's fl models are pass one's; line 382 has it right).
 
 ### oracle-effective-length-diagnostic
 `priority: later · kind: measurement · 2026-08`
