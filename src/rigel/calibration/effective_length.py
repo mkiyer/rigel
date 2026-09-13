@@ -266,10 +266,8 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
         E[A·w²]  = E[w³] − E[w²]
         E[A·u·w] = mu                        (u(w)·w = w/(w−1), so Σ f(w)(w−1)·w/(w−1) = mu)
 
-    Unbounded reach only, matching `build_region_geometry`'s default. With the taper switched on
-    (``boundary_rna_reach``) the opportunity becomes per-boundary and these moments would have to as
-    well, so a consumer that turns the taper on must extend this function rather than silently
-    mismatch.
+    Unbounded reach only, matching `build_region_geometry`: at a contiguous boundary every
+    component's divisor is ``mu − 1``. A per-boundary reach would make these moments per-boundary too.
     """
     p = np.asarray(fl_pmf, dtype=np.float64)
     total = float(p.sum())

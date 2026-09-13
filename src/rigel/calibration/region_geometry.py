@@ -179,7 +179,6 @@ def build_region_geometry(
     sj,
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
-    boundary_rna_reach=None,
 ) -> RegionGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
@@ -192,16 +191,11 @@ def build_region_geometry(
     BOUNDARY, RNA     ``UNBOUNDED_REACH`` by ruling ⇒ ``mu_r − 1``. An unspliced crossing is a
                       MIXTURE whose RNA half alone is bounded, so reach there is per COMPONENT;
                       the untapered form carries a known genome-wide gDNA over-call of about a
-                      tenth, and tapering it is an A/B, not a fix to apply silently
+                      tenth. A per-boundary taper would be an A/B, never run; its switch was
+                      removed (2026-09-13) rather than carried unfed
     sj, RNA           the real exonic per-strand reach. A sj is used only by a molecule that
                       spliced across it, so its divisor is the spliced one
     ================  ==========================================================================
-
-    ``boundary_rna_reach`` is the switch between those two RNA forms: ``None`` (the default) keeps
-    ``UNBOUNDED_REACH`` at contiguous boundaries; a ``(reach_lo, reach_hi)`` pair per contiguous boundary
-    (:func:`~rigel.calibration.splice_graph.build_contiguous_boundary_reach_arrays`) turns the taper on.
-    It is ONE argument so that an A/B varies one thing and both arms share every line of code
-    (`TRAPS: prove-the-substrate`).
 
     Where a sj attaches: its donor is the boundary to the RIGHT of ``src_region`` and its acceptor the
     boundary to the LEFT of ``dst_region``, since molecules leave the template at the first and arrive
@@ -236,21 +230,12 @@ def build_region_geometry(
     n_regions = region_len.shape[0]
     unbounded = np.full(1, UNBOUNDED_REACH)
 
-    def divisor(pmf: np.ndarray, boundary_reach=None) -> np.ndarray:
-        """Per-slot effective length: contained at a REGION, crossing at a BOUNDARY.
-
-        ``boundary_reach`` is ``(reach_lo, reach_hi)`` per contiguous boundary, or ``None`` for
-        :data:`UNBOUNDED_REACH`. The two arms of the A/B differ in one argument and share every line of
-        code.
-        """
+    def divisor(pmf: np.ndarray) -> np.ndarray:
+        """Per-slot effective length: contained at a REGION, crossing at a BOUNDARY, the crossing at
+        :data:`UNBOUNDED_REACH` on both sides for either component."""
         contained = contained_eff_length(region_len, pmf) if n_regions else np.zeros(0)
         n_boundaries = max(int(chain.n_boundaries_total), 1)
-        if boundary_reach is None:
-            crossing = np.full(
-                n_boundaries, float(crossing_eff_length(pmf, unbounded, unbounded)[0])
-            )
-        else:
-            crossing = crossing_eff_length(pmf, boundary_reach[0], boundary_reach[1])
+        crossing = np.full(n_boundaries, float(crossing_eff_length(pmf, unbounded, unbounded)[0]))
         out = np.zeros(n, dtype=np.float64)
         if n_regions:
             out[is_region] = contained[obj[is_region]]
@@ -261,7 +246,7 @@ def build_region_geometry(
     # gDNA takes NO reach argument, ever: its template is the chromosome, so ``taper_g = 1``. That is
     # physics; the reach ruling is only about the RNA component.
     eff_gdna = divisor(gdna_fl_pmf)
-    eff_rna = divisor(rna_fl_pmf, boundary_rna_reach)
+    eff_rna = divisor(rna_fl_pmf)
 
     # ── the reciprocal-opportunity totals, straight off the banks ─────────────────────────────────
     # No divisor is applied here. A BOUNDARY slot carries ``boundary_unspliced``'s inv-length sum,

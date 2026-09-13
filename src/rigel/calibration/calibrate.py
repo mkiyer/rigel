@@ -796,7 +796,6 @@ def calibrate(
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
     sj: "SpliceJunctionGeometry | None" = None,
-    boundary_rna_reach=None,
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
     injected_priors: "InjectedCalibrationPriors | None" = None,
@@ -836,9 +835,7 @@ def calibrate(
     # supports are PROJECTED off the geometry (`_project_eff`), so the number `priors` divides by is
     # byte-identically the one the solver divided by.
     chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
-    geometry = build_region_geometry(
-        chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
-    )
+    geometry = build_region_geometry(chain, substrate, region_arrays, sj, gdna_fl_pmf, rna_fl_pmf)
     statics = build_region_statics(chain, region_arrays, boundary_flags)
     region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
     background_pair = _background_pair(
