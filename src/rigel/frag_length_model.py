@@ -212,24 +212,6 @@ class FragmentLengthModel:
         self.counts[frag_length] += weight
         self._total_weight += weight
 
-    def observe_batch(self, frag_lengths: "np.ndarray") -> None:
-        """Record a batch of fragment length observations (vectorized).
-
-        Parameters
-        ----------
-        frag_lengths : np.ndarray
-            Integer array of fragment lengths.  All weights are 1.0.
-        """
-        lengths = np.asarray(frag_lengths, dtype=np.intp)
-        # Drop out-of-range values instead of clamping to overflow bin
-        mask = (lengths >= 0) & (lengths <= self.max_size)
-        valid = lengths[mask]
-        if len(valid) == 0:
-            return
-        counts = np.bincount(valid, minlength=self.max_size + 1)
-        self.counts += counts[: self.max_size + 1].astype(np.float64)
-        self._total_weight += float(len(valid))
-
     # ------------------------------------------------------------------
     # Distribution properties
     # ------------------------------------------------------------------
