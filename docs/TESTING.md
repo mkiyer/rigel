@@ -584,16 +584,16 @@ instruments:
 |---|---|
 | how wrong is calibration, against oracle calibration? — the 0.8.0 metric | `calibration_vs_oracle.py` · `prior_vs_oracle.py` (the `LocusPriors` the EM reads) · `solvability_audit.py` (pass-0) · `pass0_vs_oracle.py` for the T/C/P decomposition |
 | how wrong is the end-to-end answer? — per transcript, per pool, against per-fragment truth | `panel.py score` / `report`, i.e. `quant_accuracy.py` — the only end-to-end scorer, a thermometer rather than the target |
-| where did the misassigned fragments go? | `rigel.sim.net_flow` (`analyze_net_flow`, `FlowData`) |
 
 ⛔ A ceiling only prices what its arm can reach: the effective-length shrinkage is built before
 `assemble_priors`, which every measurement arm patches (`SUCCESS.md`, the ruler). Say which call your
 arm patches and check it sits downstream of everything you mean to price.
 
 Hard per-fragment label recovery is the wrong target: an unspliced RNA fragment and a gDNA fragment from
-the same locus can be sequence-identical. `net_flow` reduces the per-locus `flow[true][assigned]` matrix
-to `net(a→b) = flow[a][b] − flow[b][a]`, so unrecoverable misassignment cancels and only systematic bias
-survives; report the absolute per-transcript error alongside. Hard-label metrics are nearly blind to a
+the same locus can be sequence-identical. A net-flow reduction, `net(a→b) = flow[a][b] − flow[b][a]`, cancels
+the unrecoverable part and keeps only systematic bias; the module that computed it per locus was retired
+2026-09-13 for want of an entry point (in git), and the absolute per-transcript error stays the report. Hard-label
+metrics are nearly blind to a
 calibration-prior change (`TRAPS: hard-labels-miss-soft-change`); the soft 3-pool surplus is not built.
 
 ---

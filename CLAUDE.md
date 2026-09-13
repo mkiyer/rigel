@@ -186,7 +186,7 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,447 passed / 0 skipped / 2 xfail, 3,449 collected** (re-derived
+**The standing baseline: 0 failed / 3,439 passed / 0 skipped / 2 xfail, 3,441 collected** (re-derived
 2026-09-13 after the θ quadrature's derivation note was added to `docs/dev/`, +1 collected, and after four instruments were retired — the structural-claims audit, the gDNA pool census, the truth A/B and the landscape census — −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
@@ -256,7 +256,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/quant_accuracy.py` | ⭐⭐⭐ **HOW ACCURATE IS THE TOOL END TO END, AND WHAT IS A PERFECT PRIOR WORTH?** `--arm base` plus the oracle and per-field injection arms, scored count against count. ⚠ A THERMOMETER above 0.8.0's metric, never the target |
 | `design/mass_prior_ab.py` | ⭐⭐⭐ **CAN THE PRIOR BE A CONSERVED FRAGMENT COUNT RATHER THAN ONE MANUFACTURED FROM A DENSITY?** Subsamples by qname hash so the whole and all three origin partitions stay consistent. ⛔ The subsample must reproduce the defect first |
 | `design/transcript_truth.py` | ⭐⭐⭐ **WHAT IS THE TRUE PER-TRANSCRIPT COUNT, SPLIT BY SPLICEDNESS?** One pass over the oracle BAM, read names only. ⛔ Splicedness comes from spliced-transcript coordinates, NEVER the CIGAR, which misses every sj in the unsequenced inner gap |
-| `rigel.sim.net_flow` (a MODULE, not a script) | ⭐⭐ **WHERE DID EACH MISASSIGNED FRAGMENT GO?** The DIRECTION of transcript error, per transcript, split into gDNA-sourced and RNA-isoform-sourced flow — the one question an accuracy table cannot answer. Gate: `tests/test_net_flow.py` |
 | **⭐⭐⭐ where to develop** | |
 | `design/rename_identity.py` | ⭐⭐⭐ **IS THIS RENAME, REFACTOR OR SPEED-UP NUMERICALLY A NO-OP?** `--freeze` captures one reference, `--check` compares after every stage — on array CONTENT and the transcript table, never on names; `--bam` takes a real library instead of a panel condition. ⚠ The reference is frozen, never rolling. `--self-test` 8/8 |
 | `design/rename_census.py` | ⭐⭐⭐ **WHICH NAMES DOES A VOCABULARY RULING TOUCH, AND WHICH CARRY TWO SENSES?** Reports by kind — identifiers, C++, prose — and never renames; `--sense <token>` dumps every site with context. ⛔ Run it before renaming anything |
