@@ -256,7 +256,6 @@ python scripts/sim/panel.py report --config $CFG --arms base base_reseed oracle
 
 # 6. STAGE A is CLOSED — this block is a REGRESSION check, run it after an accumulator or native change.
 python -m pytest tests/native tests/calibration -q     # FIDELITY
-python scripts/design/gdna_pool_census.py              # BIAS: the four gDNA pools, each vs its opportunity
 python scripts/design/fl_pool_purity.py                #       are the pools pure gDNA (only where the lengths differ)
 python scripts/design/calibration_truth_ab.py --scan-cache $LADDER/oracle_cache --cache-subdir _main \
        --suite $LADDER --index $INDEX --ceiling        # SUFFICIENCY: what a perfect length model is worth

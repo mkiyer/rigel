@@ -360,7 +360,7 @@ so a length model wrong by `Δ` reports the sj estimator as `1 + 0.0062·Δ` tim
 length marginal by the same opportunity it places with (`wgs_engine._post_capture_length_allocation`), so
 the realised crossing count at length `w` is `f_pre(w)·(w−1)` and the placement factor cancels. The
 inflation is `rho_j`'s: `rho_R(exon) ≥ rho_u(B) + rho_j(B)` is a correct lower bound, diluted by
-`1 + (1−s)(k−1)` with `s` the unspliced share of the exon's RNA. `gdna_pool_census.py` measures the fitted
+`1 + (1−s)(k−1)` with `s` the unspliced share of the exon's RNA. `fl_pool_purity.py` measures the fitted
 mean against truth.
 
 ---

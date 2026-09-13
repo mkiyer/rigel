@@ -186,8 +186,8 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scripts/
 ```
 
-**The standing baseline: 0 failed / 3,464 passed / 0 skipped / 2 xfail, 3,466 collected** (re-derived
-2026-09-13 after the structural-claims audit was retired, −4 collected for the one `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
+**The standing baseline: 0 failed / 3,460 passed / 0 skipped / 2 xfail, 3,462 collected** (re-derived
+2026-09-13 after the structural-claims audit and the gDNA pool census were retired, −4 collected per `scripts/design/` file, and after the tilted-moment tests deleted with the length channel were restored into an existing file, +33 cases and ±0 files; before that the same day, after the capture became a typed record and after the tunables census, neither of which added or retired a file — four config switches gone, their
 tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
@@ -281,7 +281,6 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | **Stage A — the accumulator** | |
 | `design/fl_pool_purity.py` | ⭐⭐⭐ **ARE THE FOUR gDNA LENGTH POOLS ACTUALLY PURE gDNA, AND WHAT DOES THE SHIPPED LENGTH MODEL SAY AGAINST TRUTH?** Per pool: the gDNA / nascent / mature counts and each component's mean length; then `TRUE` / `POOLED` / `SHIPPED`, so **contamination (`pool−true`) and the divisor+shrinkage (`ship−pool`) are attributed APART**. ⛔⛔ **Run it only where the two components' fragment lengths DIFFER** — the bias is `RNA_share × length gap`, and the ladder and test chromosome give them EQUAL lengths by design, so a 95 %-contaminated pool reads under a bp there. That is why the defect shipped |
 | `design/em_fl_ceiling.py` | ⭐⭐⭐ **WHAT IS A PERFECT gDNA fl pmf WORTH END TO END, THROUGH THE EM? — the one fl question that stops at no earlier stage.** Every other fl instrument stops at `calibrate`, but `pipeline.py` also hands `gdna_pmf` to the fragment scorer, so a wrong length model is applied per fragment in the channel that separates origins. ⭐ Read `gdna_frac_est` against `gdna_frac_true` — the PRODUCT; ⛔ the transcript rows flip sign between the two fl-gap arms and are not the deliverable. Three gates: the injection counts its fires, `noop_fl` must be byte-identical, and `base_reseed` is the noise floor. ⛔⛔ Meaningless on an equal-length panel — run both sign arms AND the equal-length control |
-| `design/gdna_pool_census.py` | ⭐ **DOES EACH OF THE FOUR gDNA POOLS AGREE WITH ITS OWN OPPORTUNITY, AND WITH TRUTH?** |
 | **diagnostics** | |
 | `design/prior_units_check.py` | **IS THE EM PRIOR IN FRAGMENT UNITS, OR STILL THE OLD INCIDENCE SUM?** |
 | **plumbing** | |

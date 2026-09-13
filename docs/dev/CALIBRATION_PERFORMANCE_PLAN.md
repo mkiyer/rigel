@@ -354,7 +354,7 @@ layering, the gates and the tolerance instrument, the docs. Four items remain, i
 3. the wave-3 frame migration, RULED 2026-09-13 (owner, after an instrument census: 44 files, 19,532 lines;
    none of the six is loaded by a test or named by the roadmap): four of the six bank-readers are RETIRED
    rather than migrated, each its own commit, gated by the suite (−4 collected per file) and preflight —
-   `structural_claims_audit` DONE 2026-09-13; `gdna_pool_census`; `calibration_truth_ab`;
+   `structural_claims_audit` DONE 2026-09-13; `gdna_pool_census` DONE 2026-09-13; `calibration_truth_ab`;
    `abundance_landscape_census` — and two migrate to the drained frame the truth is certified in
    (`calibration_inputs(cache, index)["payload"]` plus the partition lift where partitions are read):
    `fl_pool_purity` (an open defect at priority next names it; today it prices a length model production
