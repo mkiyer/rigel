@@ -46,7 +46,9 @@ never `span_R` (`TRAPS: a-mode-count-is-not-a-well-posed-quantity`). Requirement
 `rho_bg` on-rate for the destination's class (the intergenic pool is the unprobed rate); exact at `g00`; one
 pseudo-fragment; priced with the messages against a shuffle. Not a better tilt
 (`ISSUES: reference-prior-refuted-at-concept-level`, `ISSUES: data-derived-reference-location`).
-`abundance_landscape_census.py`.
+The census that surveyed the field per condition was retired 2026-09-13; the fit is
+`calibration.abundance_landscape` (gated by `tests/calibration/test_abundance_landscape.py`) and its measured
+facts are in `DESIGN.md` §3.1a-iii.
 
 ### reference-prior-refuted-at-concept-level
 `priority: now · kind: design-constraint · 2026-08-24`
@@ -314,7 +316,8 @@ Each its own commit, none moving the 0.8.0 metric:
   `gdna_pool_census` (Stage A is closed and gated by the accumulator's spec test; it overlapped `fl_pool_purity`);
   `calibration_truth_ab` (its one number is in every `calibration_vs_oracle.py` row's `pools`, in the drained
   frame with both zero controls; the drain it priced shipped; its length ceiling is `em_fl_ceiling.py`'s,
-  through the EM);
+  through the EM); `abundance_landscape_census` (the fit it surveys is QC-only — nothing in the solve reads
+  it — its per-condition survey is recorded, and the rung that cited it is not on the roadmap).
 - the index's duplicate map as an alias map `dropped_t_id → kept_t_id` (an index rebuild, no panel re-scan —
   verify with `rescan_panels.py`; `reach` is covered by no other hash);
 

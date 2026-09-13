@@ -16,8 +16,8 @@ Read the zero-control rows first (the gDNA-side estimator must read 0.0000 there
 rows second. `PURE_GDNA_STRATA` includes ``R intron``, which the panel's sparse nascent RNA
 contaminates; the shipped background pools intergenic only, so that is this instrument's anchor.
 
-Also a library: `calibration_oracle.py`, `calibration_walk.py`, `total_abundance_audit.py` and
-`abundance_landscape_census.py` import `strata`, `slot_counts`, `_scope`, `_SELECTIONS`, `PVO` and
+Also a library: `calibration_oracle.py`, `calibration_walk.py` and `total_abundance_audit.py`
+import `strata`, `slot_counts`, `_scope`, `_SELECTIONS`, `PVO` and
 the two defaults; its own tables are not the yardstick for a mechanism, `vertex_ceiling.py` is.
 
 Usage::
