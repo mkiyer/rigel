@@ -612,12 +612,10 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         if required > window:
             window = required
             logger.debug(
-                "calibration: λ bracket %.4f (the landscape's support), %d points at step %g, "
-                "n_tilt %d (unscaled)",
+                "calibration: λ bracket %.4f (the landscape's support), %d points at step %g",
                 window,
                 lattice_points(window, cfg.sweep_logodds_step),
                 cfg.sweep_logodds_step,
-                cfg.sweep_n_tilt,
             )
     n_grid = lattice_points(window, cfg.sweep_logodds_step)
     return solve_chain(
@@ -633,7 +631,6 @@ def _sweep(s: _Solve, belief, prior, cache=None, capture=None):
         n_rna_obs=s.strand.n_rna_obs,
         n_grid=n_grid,
         logodds_window=window,
-        n_tilt=cfg.sweep_n_tilt,
         gdna_prior=prior,
         intron_prior=s.factory.rows(n_grid, window),
         policy=s.policy,

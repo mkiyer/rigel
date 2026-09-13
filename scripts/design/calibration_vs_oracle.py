@@ -918,16 +918,16 @@ def self_test() -> int:
 
     # ⑪ `--set`: the parser types from the field, touches nothing else, and refuses what it cannot spell.
     base = PipelineConfig()
-    knob = set_field(base, "calibration.sweep_n_tilt=90")
+    knob = set_field(base, "calibration.sweep_block_slots=90")
     check("--set types an int field from the field",
-          knob.calibration.sweep_n_tilt == 90 and type(knob.calibration.sweep_n_tilt) is int)
+          knob.calibration.sweep_block_slots == 90 and type(knob.calibration.sweep_block_slots) is int)
     # two settings in sequence: the first must survive the second (a parser that rebuilt the section
     # from defaults would pass a single setting against a default config and still lose the first)
     knob2 = set_field(knob, "calibration.sweep_logodds_step=0.1")
     check("--set leaves every other field identical, and an earlier --set survives a later one",
-          knob2.calibration.sweep_n_tilt == 90
+          knob2.calibration.sweep_block_slots == 90
           and knob2.calibration.sweep_logodds_step == 0.1
-          and dataclasses.replace(knob2.calibration, sweep_n_tilt=base.calibration.sweep_n_tilt,
+          and dataclasses.replace(knob2.calibration, sweep_block_slots=base.calibration.sweep_block_slots,
                                   sweep_logodds_step=base.calibration.sweep_logodds_step)
           == base.calibration
           and dataclasses.replace(knob2, calibration=base.calibration) == base)
@@ -942,9 +942,9 @@ def self_test() -> int:
         return False
 
     check("--set refuses an unknown field", refuses("calibration.no_such_field=1"))
-    check("--set refuses an unknown section", refuses("nowhere.sweep_n_tilt=1"))
+    check("--set refuses an unknown section", refuses("nowhere.sweep_block_slots=1"))
     check("--set refuses a value the field's type cannot take",
-          refuses("calibration.sweep_n_tilt=sixty"))
+          refuses("calibration.sweep_block_slots=sixty"))
 
     width = max(len(n) for n, _ in checks)
     for name, ok in checks:

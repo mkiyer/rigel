@@ -102,7 +102,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..simplex_logodds import _tilt_grid, strand_row_logodds
+from ..simplex_logodds import CubeRow, strand_row_logodds
 from . import BlockContext, ChainView, PsiMessage, Received
 from .faces import EDGE, FORWARD, LEVEL, SPLICE_OUT, TRANSPORT, Faces, fuse, norm
 from .lanes import gdna_lane, rna_lanes
@@ -111,7 +111,6 @@ from .transfer_rows import (
     SJ_FLAGS,
     boundary_shares_strand,
     count_logvar,
-    cube_row,
     edge_level_row,
     face_is_licensed,
     face_map_lambda,
@@ -221,7 +220,7 @@ class TransferPolicy:
         if gdna is not None:
             lanes["gdna"] = gdna
             lanes.update(rna_lanes(chain, own, gdna, library))
-        site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn}, chain.n_tilt)
+        site = _SolveSite(chain.fp & chain.fn, {"pos": chain.fp, "neg": chain.fn})
         return _PreparedTransfer(own, faces, chain.K, lanes, site)
 
 
@@ -260,7 +259,6 @@ class _Chain:
         "belief",
         "route_rate",
         "sj_count",
-        "n_tilt",
     )
 
     def __init__(self, ctx: BlockContext, src: np.ndarray, strand):
@@ -299,7 +297,6 @@ class _Chain:
             np.asarray(ctx.sj_count_lo, np.float64),
             np.asarray(ctx.sj_count_hi, np.float64),
         )
-        self.n_tilt = int(ctx.n_tilt)
 
     def other_flank(self, b, e):
         return self.left[b] if self.right[b] == e else self.right[b]
@@ -521,13 +518,13 @@ def _alternative_splice_site(c: _Chain, faces: Faces) -> None:
 
 
 class _SolveSite:
-    """What the solve's two RNA deliveries read at a node: the AMBIG mask, each strand's admitting
-    nodes, and the tilt grid's size."""
+    """What the solve's two RNA deliveries read at a node: the AMBIG mask and each strand's admitting
+    nodes."""
 
-    __slots__ = ("ambig", "free", "n_tilt")
+    __slots__ = ("ambig", "free")
 
-    def __init__(self, ambig, free, n_tilt):
-        self.ambig, self.free, self.n_tilt = ambig, free, int(n_tilt)
+    def __init__(self, ambig, free):
+        self.ambig, self.free = ambig, free
 
 
 class _PreparedTransfer:
@@ -643,14 +640,13 @@ class _PreparedTransfer:
     def _cube_rows(self, from_left, from_right) -> dict:
         """THE DELIVERY AT AMBIG NODES: the held RNA levels — both sides intersected, plus the node's
         OWN flux level (the spliced claim's one hop, boundary → exon, read at the exon; an AMBIG node
-        has no own strand claim, so its own level is the flux alone) — as one row over ψ's cube. The
-        tilt needs no lane of its own: both strands' bounds constrain it through the shares."""
+        has no own strand claim, so its own level is the flux alone) — as a :class:`CubeRow`, the row's
+        ingredients, which ψ evaluates at its own θ nodes. The tilt needs no lane of its own: both
+        strands' bounds constrain it through the shares."""
         site = self.site
         pos, neg = self.lanes.get("pos"), self.lanes.get("neg")
         if site is None or pos is None or neg is None:
             return {}
-        theta = _tilt_grid(site.n_tilt)
-        rho = {"pos": pos.rho_ref, "neg": neg.rho_ref}
         out = {}
         for i in np.flatnonzero(site.ambig & ~pos.empty):
             profiles = {}
@@ -665,5 +661,13 @@ class _PreparedTransfer:
                 if bounds:
                     profiles[rl.population] = intersect(bounds)
             if profiles:
-                out[int(i)] = cube_row(profiles, pos.u, pos.lam, theta, pos.total[i], pos.a[i], rho)
+                out[int(i)] = CubeRow(
+                    profile_pos=profiles.get("pos"),
+                    profile_neg=profiles.get("neg"),
+                    u=pos.u,
+                    total=float(pos.total[i]),
+                    opportunity=float(pos.a[i]),
+                    rho_ref_pos=float(pos.rho_ref),
+                    rho_ref_neg=float(neg.rho_ref),
+                )
         return out

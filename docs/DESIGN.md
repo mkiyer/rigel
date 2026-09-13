@@ -1027,7 +1027,7 @@ anywhere in the transfer policy; the bar is about one percent of a row.
   control 94 → 448). **An empty exon piece beside a lit junction is a source too** (landed 2026-09-09):
   the level is built there, priced by `hop_price` on the piece's zero count, and emitted with the flux's
   own witness (`ISSUES: the-empty-flux-source-at-the-junctions-counting-alone`).
-* **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, `cube_row`): the held levels per strand as ONE
+* **The delivery at AMBIG nodes** (`PsiMessage.cube_rows`, `simplex_logodds.CubeRow`): the held levels per strand as ONE
   row over ψ's `(λ, θ)` cube — at each cell `f_s = (1 − σ)(1 ± τ)/2`, the profile read at
   `log(ρ_s / ρ_ref,s)`; a one-sided profile stays one-sided (gated). The backbone adds the row inside the
   AMBIG solve, final solve only; absent, byte-identical (gated).
@@ -1201,7 +1201,7 @@ quadratically in K and is exact to 1 % of a step once a slot's posterior is wide
 one lattice for every consumer, `CalibrationConfig.sweep_logodds_step` = 0.2 nats — 101 points at the floor
 bracket, ~220 on the refits, ``K = round(2L/step) + 1`` at whatever bracket the landscape prior demands, so the
 step is the invariant `_scaled_grid` used to hold and `_scaled_grid`, the second field, the regrid and the
-CLI's single-strand flag are gone; `sweep_n_tilt` = 60 explicit, decoupled from K. The step is the coarsest
+CLI's single-strand flag are gone; `sweep_n_tilt` = 60 explicit, decoupled from K (retired with the θ quadrature the same day — no tilt count exists). The step is the coarsest
 that loses nothing against the pair (in scope 0.993 / 0.998 / 1.000, `g00` 0.994; the panel's two bars
 unchanged on the ladder, the transfer policy's unstranded losses on the test chromosome repaired, 15/20 →
 19/20 with the worst row 1.22× → 1.00×), and the landed tree costs 1.07× wall, 1.08× `calibrate`, +1.8 GB
@@ -1209,9 +1209,37 @@ on the deep library (the sweeps' own ψ solves 0.96–0.97×; the passes 1.10×)
 cached rows scale with K × K_t: 0.146 (138 points) buys −1.0 % for
 1.33× and +3.7 GB, 0.10 (201) −1.3 % for 1.71× and +9.8 GB. What the step guarantees, in a user's units: a
 slot's composition is quantised by at most ``n·f(1−f)·step/4`` fragments, 1.25 % of its mass at worst and
-0.6 % on average. The tilt grid is not over-resolved: 30 breaks the zero control 6.3× and 15 10.5× on ψ's own
-θ quadrature, 120 and 240 equal 60 (`ISSUES: theta-quadrature-at-zero-gdna`). The refused forms carry their
-numbers in `ISSUES: the-second-lambda-grid-and-its-regrid`.
+0.6 % on average. The refused forms carry their numbers in `ISSUES: the-second-lambda-grid-and-its-regrid`.
+
+**The θ nodes follow the strand term's peak (2026-09-13; W12, the θ quadrature).** ψ no longer integrates
+the tilt on a fixed lattice. At fixed λ the strand term is an exact Gaussian in τ whose θ peak narrows as
+`n^{−½}` (0.005 rad at 50k fragments against a 60-node lattice's 0.053 step), so wherever a slot is deep the
+lattice's sum was a COMB across λ — a factor between 1 and `e^{−100}` chosen by where the peak fell between
+nodes — and the read-out a coin toss on node placement: the recorded K_t 30 failure (`g00 ss.99 ON`, 9,637
+false fragments) was ONE 25k-fragment slot with 28 % of its RNA on the minor strand, which 60 nodes happened
+to land on; the strand-purity story was not the mechanism. The rule (`simplex_logodds._tilt_window`,
+`EQUATIONS.md` §9e): per `(slot, λ)` a window where the term is within `T` nats of its maximum on the domain,
+one closed form for interior, boundary and beyond-boundary peaks; `K_t` uniform nodes in θ across it; the
+trapezoid weights, exact at a domain end because the integrand is even there; `log h` written into ψ.
+Both constants are DERIVED: `T = −log ε₆₄`, and `K_t = 2T/π + 1 = 24` (`_TILT_NODES`) resolves the peak
+to `e^{−T}`. Judged: the marginal matches adaptive quadrature to 2·10⁻⁶ nats at every depth (the lattice at
+60: 90–130 nats at 500k); on the ladder the change is a numeric near-no-op because its both-strand AMBIG
+slots are shallow (median 35 fragments) — the metric's stranded OFF and unstranded strata unchanged, stranded
+ON +0.4 % (the exact marginal at strand-pure slots, which the lattice's endpoint node flattered), the four
+`g00` rows identical to 0.1 fragment, the test chromosome within ±3 fragments everywhere, and the tilt
+read-out on the ladder's both-strand slots now what the lattice reached only at 120 nodes; on the
+shared-exon stress (`deep_stress.py`, two spliced genes on opposite strands, 500k fragments) a balanced exon
+at `g50` read 102,076 false gDNA fragments under the lattice and reads 19 (truth 498), a 20 %-minor exon
+11,448 → 11, with the tilt error down 6–70×. The cube is `K × 24` instead of `K × 60`. **There is no θ lattice
+anywhere and no tilt knob** (the second step, the same day): the RNA level lanes deliver a row's
+INGREDIENTS — `simplex_logodds.CubeRow`, the two held profiles, the slot's total and RNA opportunity, the
+lanes' reference densities — and ψ evaluates them at its own nodes (`CubeRow.at`); `sweep_n_tilt`,
+`_tilt_grid`, the row interpolation and the cache's `(K, K_t)` row arrays are gone (a delivered row is three
+`(K,)` arrays and four scalars). Measured on the shared-exon stress before the step: 24 nodes with the rows
+on a 240-node lattice equal 60 nodes with the same rows on every row, so evaluating the rows exactly is
+the converged form, and rows on 24 or 60 were the lattice's own resolution error. What the exact marginal made visible is a separate issue, not the quadrature's: the strand term's
+θ-marginal carries a volume factor `∝ σ_τ(λ) ∝ 1/(1 − f_g)`, an Occam push toward gDNA of order `√n` at a
+balanced both-strand slot (`ISSUES: strand-marginal-volume-factor`).
 
 ## 6c. ψ's composition is a point on the simplex, and closure is structural (2026-08-17)
 

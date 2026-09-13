@@ -85,7 +85,7 @@ class SweepCapture:
     ``solvable``; the observations ``count`` ``(n, 2)``, ``spliced``, ``mature``, ``free_pos``,
     ``free_neg``, ``eff_gdna``, ``eff_rna``, and the gDNA support ``mass_global``, ``eff_global``.
     The message layer's delivery: ``lam_rows`` ``(n, K)`` (zero rows where a block delivered nothing,
-    ``None`` when no block did), ``cube_rows`` ``{slot: (K, K_t)}`` keyed to the chain, and the two
+    ``None`` when no block did), ``cube_rows`` ``{slot: CubeRow}`` keyed to the chain, and the two
     :class:`~.messages.Received` tables ``from_left`` / ``from_right``. The chain: its adjacency
     ``left`` / ``right``, the backbone's assertion counts, the name of the policy that RAN (the witness
     an instrument's "the arm ran" assertion needs — `TRAPS: an-ablation-that-never-ran`), the solve

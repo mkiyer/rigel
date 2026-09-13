@@ -36,22 +36,29 @@ python scripts/design/preflight.py                 # ~2 s: can this session run?
 python -m pytest tests/ -q                         # CLAUDE.md's baseline line is the count to reproduce
 ```
 
-## W12 — where it stands, and the decision owed
+## W12 — where it stands
 
-Derived (`docs/dev/THETA_QUADRATURE.md`): at fixed λ the frozen-variance strand term is an exact Gaussian in
-the tilt τ, with centre `d/((1−f_g)(κ−½))` and width `σ_p/((1−f_g)|κ−½|)`; the θ-marginal is that Gaussian
-against the arcsine weight; the uniform θ lattice is the trapezoid rule in `φ = θ + π/2` with both endpoint
-nodes at weight 1 instead of ½; and beyond the strand-pure boundary the peak narrows as `√f_g`, so a fixed
-lattice inflates the marginal more at higher gDNA — the gDNA bias is the λ-dependence of the resolution
-error. Both recorded numbers are reproduced. Prototype A (the endpoint weights) is REFUTED: ≤ 0.7 fragments on
-any `g00` row of either panel, the `K_t` 30 failure untouched (9,821 → 9,821 against 194 at 60).
+Step 1 LANDED 2026-09-13 (uncommitted, the owner's go given): the θ nodes follow the strand term's peak
+(`simplex_logodds._tilt_window`, `_read_row_at`; `_T_NATS` and `_TILT_NODES` = 24 derived), the ruling in
+`DESIGN.md` §6b.15, the derivation `EQUATIONS.md` §9e, `ISSUES: theta-quadrature-at-zero-gdna` CLOSED with its
+numbers, `ISSUES: strand-marginal-volume-factor` OPENED (priority next, after W12 by the owner's word). Seven
+gates in `test_vertex_reference.py` (four marginal-vs-adaptive-quadrature cases, the derived count converged, a
+linear row read exactly, κ = ½ the whole domain); five perturbations fired; two antisense goldens regenerated
+(transcript counts 5e−5 relative, a tiny toy's `em_effective_length` 2.4 % on an 11-bp entry); `preflight.py
+--full` 10/10; the metric on both panels and the shared-exon stress reproduce the prototype. The instruments
+(`tilt_census.py`, `deep_stress.py`, `quadrature_check.py`, `theta_window.py`, `oracle_summary.py`) are in the
+session scratchpad `w12/` and cited from `docs/dev/THETA_QUADRATURE.md`; whether any becomes a
+`scripts/design/` instrument (the census is the candidate: the owner's "measure where the tilt matters") is the
+owner's call, after a census of what it would replace.
 
-The decision: **B**, Gauss–Hermite per λ centred on the Gaussian with the delivered cube rows and the arcsine
-factor interpolated from the lattice (recommended: it keeps the delivered rows on their lattice and needs only
-interpolation; the node count falls from 60 to ~8–16, the cube's cost lever), or **the analytic marginal** as
-a precomputed table in `(τ̂, log σ_τ)` (removes the θ axis outright, but the delivered cube rows then need
-the sifting approximation, exact only as `σ_τ → 0`). Either must be judged on a deep stress as well as the
-panels, since the ladder is converged at 60.
+**Step 2 LANDED the same day (uncommitted):** the RNA level lanes deliver a row's ingredients
+(`simplex_logodds.CubeRow` — the two held profiles, the slot's total and RNA opportunity, the lanes' reference
+densities) and ψ evaluates them at its own nodes (`CubeRow.at`); `CalibrationConfig.sweep_n_tilt`,
+`_tilt_grid`, `_read_row_at`, the sweep's `(K, K_t)` shape check and the cache's row arrays are gone. No tilt
+count exists anywhere in the tool: the only θ count is the derived `_TILT_NODES` = 24.
+
+Then W13, then the port. Then `ISSUES: strand-marginal-volume-factor` (the owner asked to be taught it; the
+teaching is in the session's closing message and `EQUATIONS.md` §9e's last paragraph).
 
 ## Where the worklist stands
 
@@ -65,7 +72,7 @@ files. Kept as COVERAGE GAPS, not dead code (`ISSUES: hygiene-ledger` lists them
 the silent policy through `calibrate`, the simulator's sharded writers and whole-genome path (live in panel
 builds, silent in the suite), the zarr splice blacklist. `preflight.py --full` 10/10 after the deletions.
 
-Next: W12 (above), then W13, then the port (plan §F).
+Next: W12 step 2 (above), then W13, then the port (plan §F).
 
 ## Decisions on record
 

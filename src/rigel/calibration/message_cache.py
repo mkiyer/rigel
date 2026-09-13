@@ -83,11 +83,7 @@ class MessageCache:
             rows = np.asarray(rows)
             idx = np.flatnonzero(np.any(rows != 0.0, axis=1))
             sparse = (rows.shape, idx, rows[idx].copy())
-        cube = (
-            None
-            if msg.cube_rows is None
-            else {int(k): np.asarray(v, dtype=np.float64) for k, v in msg.cube_rows.items()}
-        )
+        cube = None if msg.cube_rows is None else {int(k): v for k, v in msg.cube_rows.items()}
         self._entries[key] = (
             sparse,
             cube,
@@ -114,6 +110,11 @@ class MessageCache:
             if sparse is not None:
                 total += sparse[1].nbytes + sparse[2].nbytes
             if cube:
-                total += sum(v.nbytes for v in cube.values())
+                total += sum(
+                    p.nbytes
+                    for v in cube.values()
+                    for p in (v.profile_pos, v.profile_neg, v.u)
+                    if p is not None
+                )
             total += held.nbytes
         return total

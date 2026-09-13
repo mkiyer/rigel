@@ -87,7 +87,6 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        n_tilt=60,
         belief=belief,
     )
     # ONE count per slot: it is both the density numerator and the Poisson n.
@@ -241,7 +240,6 @@ def test_density_factor_precision_flows_into_region_init():
         n_rna_obs=85.0,
         n_grid=60,
         logodds_window=10.0,
-        n_tilt=60,
         belief=belief,
     )
     ni_off = build_region_init(statics, geometry, **common)

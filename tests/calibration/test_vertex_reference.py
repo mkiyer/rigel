@@ -30,7 +30,7 @@ from rigel.calibration.simplex_logodds import (
 #: reference without ablating anything.
 #: the lattice is deliberately FINE: the price law is read in λ, and a coarse lattice quantises the
 #: very quantity being measured. The window ``L`` is the one real hard limit and G1 stays clear of it.
-_BASE = dict(kappa=0.5, od_g=0.0, od_r=0.0, n_grid=4096, L=10.0, n_tilt=64)
+_BASE = dict(kappa=0.5, od_g=0.0, od_r=0.0, n_grid=4096, L=10.0)
 
 #: one decade of precision on a ``log f_c`` message buys this many nats of log-odds, by derivation
 #: (``λ* = ½·log(p/C)`` ⇒ ``dλ/dlog₁₀p = ½·ln 10``). Not a tuned tolerance — the prediction itself.
@@ -285,7 +285,7 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
 _L = 10.0
 
 
-def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60, n_tilt=60):
+def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60):
     d = _solve_regions_logodds_all(
         np.asarray(u_pos, np.float64),
         np.asarray(u_neg, np.float64),
@@ -297,7 +297,6 @@ def _solve_composition(u_pos, u_neg, *, kappa, allow_pos, allow_neg, n_grid=60, 
         od_g=0.0,
         od_r=0.0,
         n_grid=n_grid,
-        n_tilt=n_tilt,
         L=_L,
     )
     return (
@@ -470,3 +469,156 @@ def test_a_zero_count_slot_publishes_no_data_rather_than_a_composition():
         allow_neg=np.array([False, False]),
     )
     assert np.all(f_g == 0.0) and np.all(f_pos == 0.0) and np.all(f_neg == 0.0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+# THE θ QUADRATURE — the nodes follow the strand term's peak, so the marginal is exact at every depth
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# At fixed λ the strand term is an exact Gaussian in τ (`EQUATIONS.md`), of width ∝ n^{−½}: at 50k
+# fragments its θ peak is 0.005 rad against a 60-node lattice's 0.053 step, so a fixed lattice's sum is a
+# comb across λ (the ladder's recorded K_t 30 failure was ONE 25k-fragment slot whose peak fell between
+# nodes). The rule places K_t nodes across the window where the term is within T nats of its maximum on
+# the domain and weights them as the trapezoid rule; these gates hold it to an adaptive reference.
+
+_THETA_KAPPA = 0.99
+
+
+def _theta_case(n: float, fg_true: float, tau_true: float, K: int = 41):
+    """One AMBIG slot with the EXPECTED counts of composition ``(f_g, τ)`` and the variance frozen there."""
+    fpos = (1 - fg_true) * (1 + tau_true) / 2
+    fneg = (1 - fg_true) * (1 - tau_true) / 2
+    p = 0.5 * fg_true + _THETA_KAPPA * fpos + (1 - _THETA_KAPPA) * fneg
+    lam, fg = _logodds_grid(K, 10.0)
+    args = (
+        np.array([n * p]),
+        np.array([n * (1 - p)]),
+        np.array([True]),
+        np.array([True]),
+        np.array([fg_true]),
+        np.array([fpos]),
+        np.array([fneg]),
+    )
+    kw = dict(kappa=_THETA_KAPPA, od_g=0.0, od_r=0.0, lam=lam, fg=fg)
+    return args, kw
+
+
+def _theta_reference(args, kw):
+    """log M(λ) by adaptive quadrature in θ per λ, the peak located analytically — a second
+    implementation of the integral, not of the integrand (`_mixture_strand_loglik` is called)."""
+    from scipy.integrate import quad
+
+    u_pos, u_neg, _ap, _an, fgr, fpr, fnr = args
+    lam, fg = kw["lam"], kw["fg"]
+    n = float(u_pos[0] + u_neg[0])
+    d = float(u_pos[0]) / n - 0.5
+    out = np.empty(lam.shape[0])
+    for j in range(lam.shape[0]):
+
+        def g(theta, j=j):
+            tau = np.sin(theta)
+            f_act = 1.0 - fg[j]
+            return SL._mixture_strand_loglik(
+                float(u_pos[0]),
+                n,
+                fg[j],
+                f_act * (1 + tau) / 2,
+                f_act * (1 - tau) / 2,
+                _THETA_KAPPA,
+                0.0,
+                0.0,
+                float(fgr[0]),
+                float(fpr[0]),
+                float(fnr[0]),
+            )
+
+        a = (1 - fg[j]) * (_THETA_KAPPA - 0.5)
+        th = float(np.arcsin(np.clip(d / a, -1, 1)))
+        peak = g(th)
+        val, _err = quad(
+            lambda t: np.exp(g(t) - peak),
+            -np.pi / 2,
+            np.pi / 2,
+            points=[th],
+            limit=400,
+            epsabs=0,
+            epsrel=1e-11,
+        )
+        out[j] = peak + np.log(val)
+    return out + (SL._gdna_arm(lam, None) + SL._rna_arm(lam))[0]
+
+
+@pytest.mark.parametrize(
+    "n, fg_true, tau_true",
+    [(500.0, 0.0, 0.0), (50_000.0, 0.0, 0.5), (500_000.0, 0.3, 0.9), (500_000.0, 0.0, 1.0)],
+)
+def test_the_theta_marginal_matches_adaptive_quadrature_at_every_depth(n, fg_true, tau_true):
+    """ψ's θ-marginal, log Σ_k exp ψ(λ, θ_k), against the adaptive reference: the λ-SHAPE of the error
+    (a constant offset is harmless; a λ-dependent one is a gDNA bias) is below 1e−5 nats at 500
+    fragments and at 500k, interior tilt, near-pure tilt and the strand-pure boundary alike. The
+    fixed 60-node lattice read 0.01–0.5 nats at 500 fragments and 90–130 at 500k."""
+    args, kw = _theta_case(n, fg_true, tau_true)
+    psi, _fp, _fn, _tau = SL._psi(*args, ambig=True, **kw)
+    delta = SL._lse(psi, axis=2)[0] - _theta_reference(args, kw)
+    shape = float(np.max(np.abs(delta - delta.mean())))
+    assert shape < 1e-5, (n, fg_true, tau_true, shape)
+
+
+def test_the_derived_node_count_is_converged(monkeypatch):
+    """K_t = 2T/π + 1 = 24 is the node count at which the trapezoid error on the window falls below
+    e^{−T}: the read-out at 24 nodes equals the read-out at 60 to 1e−6 on a 500k-fragment slot at an
+    interior tilt, where a fixed lattice at 24 and 60 disagreed by tenths. There is no other θ count
+    anywhere: the config has no tilt knob and ψ's module has no tilt lattice."""
+    from rigel.calibration.simplex_logodds import _solve_logodds
+    from rigel.config import CalibrationConfig
+
+    assert SL._TILT_NODES == 24
+    assert not hasattr(CalibrationConfig(), "sweep_n_tilt")
+    assert not hasattr(SL, "_tilt_grid")
+    args, kw = _theta_case(500_000.0, 0.1, 0.6)
+    u_pos, u_neg, ap, an, fgr, fpr, fnr = args
+    base = dict(kappa=_THETA_KAPPA, od_g=0.0, od_r=0.0, n_grid=101, L=10.0, ambig=True)
+    a = _solve_logodds(u_pos, u_neg, ap, an, fgr, fpr, fnr, **base)
+    monkeypatch.setattr(SL, "_TILT_NODES", 60)
+    b = _solve_logodds(u_pos, u_neg, ap, an, fgr, fpr, fnr, **base)
+    assert abs(a.gdna_frac[0] - b.gdna_frac[0]) < 1e-6
+    assert abs(a.rna_pos_frac[0] - b.rna_pos_frac[0]) < 1e-6
+
+
+def test_a_delivered_row_is_evaluated_at_the_nodes_exactly():
+    """The RNA level lanes deliver a row's INGREDIENTS (`CubeRow`: the held profiles, the slot's total
+    and RNA opportunity, the lanes' coordinates) and ψ evaluates them at its own nodes — no lattice, no
+    interpolation: ψ with the row minus ψ without it IS `CubeRow.at` on ψ's own tilt, to the bit. A row
+    with no profile changes nothing."""
+    args, kw = _theta_case(50_000.0, 0.0, 0.5)
+    u = kw["lam"]
+    floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
+    row = SL.CubeRow(
+        profile_pos=floor,
+        profile_neg=None,
+        u=u,
+        total=400.0,
+        opportunity=100.0,
+        rho_ref_pos=0.5,
+        rho_ref_neg=0.5,
+    )
+    bare, _fp, _fn, tau = SL._psi(*args, ambig=True, **kw)
+    with_row, _fp, _fn, tau2 = SL._psi(*args, ambig=True, cube_rows=[row], **kw)
+    assert np.array_equal(tau, tau2)
+    # to rounding: the row is added before the quadrature's log-weights, so the difference of two
+    # sums is not the row to the bit; an interpolated row would miss by 1e-2
+    assert np.allclose(with_row - bare, row.at(kw["fg"], tau[0]), atol=1e-9, rtol=0.0)
+    assert not np.array_equal(with_row, bare), "the row must do something"
+    empty = SL.CubeRow(None, None, u, 400.0, 100.0, 0.5, 0.5)
+    nothing, *_ = SL._psi(*args, ambig=True, cube_rows=[empty], **kw)
+    assert np.array_equal(nothing, bare)
+
+
+def test_without_strand_information_the_nodes_are_the_whole_domain():
+    """κ = ½: the strand term is flat in the tilt, the window is the whole domain, and the nodes are
+    uniform in θ over ``[−π/2, π/2]`` — the rule degrades to a lattice exactly where a lattice was right."""
+    args, kw = _theta_case(1000.0, 0.2, 0.3)
+    kw["kappa"] = 0.5
+    _psi_, _fp, _fn, tau = SL._psi(*args, ambig=True, **kw)
+    lattice = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, SL._TILT_NODES))
+    assert np.allclose(np.broadcast_to(lattice, tau.shape), tau, atol=1e-15)

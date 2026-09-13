@@ -792,6 +792,75 @@ read-out averages them; the chunk-exact reordering of 2026-09-11 moved ≤ 3.1e-
 read-out's own rounding, `K · ε`, with no term re-rounded. Gate: `tests/test_sweep_replay_tolerance.py`
 — the budget covers float32 rounding of the terms and of the strand mean at every strength.
 
+## 9e. ψ's θ quadrature — the nodes follow the strand term's peak (`simplex_logodds._tilt_window`)
+
+**The integrand.** At an AMBIG slot ψ is read out on its θ-marginal, `M(λ) = ∫ exp ψ(λ, sin θ) dθ` over
+`θ ∈ [−π/2, π/2]` (§9c: the arcsine measure on the tilt `τ` is cancelled by the θ coordinate, so no measure
+weight is written). Only the strand term and a delivered cube row depend on θ. The strand term
+(`_mixture_strand_loglik`) is a Gaussian quasi-likelihood in the aligned-strand rate `p` with the variance
+frozen at the reference composition, and `p = ½·f_g + κ·f₊ + (1−κ)·f₋ = ½ + a(λ)·τ` with
+`a(λ) = (1 − f_g)(κ − ½)`, so at fixed λ it is an **exact Gaussian in τ**:
+
+    L(λ, τ) = −(τ − τ̂(λ))² / 2σ_τ(λ)² + const(λ),    τ̂ = d/a,   σ_τ = σ_p/|a|,   d = u₊/n − ½,   σ_p = √V/n.
+
+Its width in θ is `σ_θ = σ_τ / cos θ̂ ≈ 1/(2√n·|κ−½|·(1−f_g)·cos θ̂)`: 0.015 rad at 5k fragments, 0.005 at
+50k, 0.0015 at 500k.
+
+**Why a fixed lattice fails, and how.** With `K_t` uniform nodes at step `h = π/(K_t−1)` (0.053 at 60), wherever
+`σ_θ < h` the lattice sum at one λ is `≈ exp(−δ(λ)²/2σ_τ²)` for `δ` the distance from `τ̂(λ)` to its nearest node
+— a factor anywhere between 1 and `e^{−(h/2)²/2σ_τ²}` (`e^{−100}` at 50k) chosen by where the drifting centre
+`τ̂(λ) = d/a(λ)` happens to fall. Across λ that is a COMB: the λ posterior of a deep interior-tilt slot is a set
+of spikes at arbitrary λ, and the read-out is a coin toss on the node placement (the ladder's recorded K_t 30
+failure was one 25k-fragment slot with a 0.006 rad peak; 60 nodes happened to land on it). At a strand-pure
+slot the centre is `τ̂ = 1/(1−f_g)`, on the boundary at `f_g = 0` and beyond it after; there the peak is a quartic
+in `δ = π/2 − θ` of width `∝ n^{−¼}` at the boundary and a one-sided quadratic of width `σ_τ/√(τ̂−1)` beyond —
+the lattice's error there is λ-dependent too, but smaller, and was not the recorded mechanism.
+
+**The rule.** Per `(slot, λ)`, integrate only where the term has mass. With `τ_m = clip(τ̂, −1, 1)` the term's
+maximum ON the domain,
+
+    ρ = √((τ_m − τ̂)² + 2σ_τ²T),    [τ_lo, τ_hi] = [τ̂ − ρ, τ̂ + ρ] ∩ [−1, 1],
+
+is the window where it lies within `T` nats of that maximum — one closed form for an interior peak, a peak on
+the boundary and a peak beyond it. Place `K_t` uniform nodes in θ across `[arcsin τ_lo, arcsin τ_hi]` and sum
+them with the trapezoid weights: `M(λ) ≈ h·[½g₀ + g₁ + … + ½g_{K_t−1}]`, written into ψ as `log h(slot, λ)`
+plus `log ½` at the two end nodes. In θ the integrand `g(θ) = exp ψ(λ, sin θ)` is smooth and EVEN about `±π/2`
+(`sin(π − θ) = sin θ`), so it is the restriction of a smooth periodic function and the trapezoid rule is
+spectrally accurate in every regime: at an interior window end `g` is `e^{−T}` of its peak and the end
+weight is immaterial; at a domain end the `½` is exactly the periodic trapezoid rule's weight on the
+reflected window, on the quartic and the one-sided quadratic peak alike. The `log h` term is not optional:
+the window scales with `σ_τ(λ) ∝ 1/(1−f_g)`, and that λ-dependence is the marginal's own — the fixed lattice
+sampled it wrongly, a rule that dropped `log h` would drop it altogether. A slot with no strand information
+(`κ = ½`, `n = 0`, or `ρ ≥ 1` on either side) gets the whole domain, i.e. the uniform lattice with trapezoid
+weights — the rule degrades to the lattice exactly where the lattice was right.
+
+**The two constants are derived.** `T = −log ε₆₄ ≈ 36 nats`: the term's mass outside the window is
+`erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄` of the peak's integral — the truncation is below double precision, so no
+wider window can change a bit. `K_t`: the interior window is `2√(2T)·σ_θ` wide, and the trapezoid rule's error
+on a Gaussian of width `σ_θ` at spacing `h` is `2·e^{−2π²(σ_θ/h)²}`, below `e^{−T}` once `h ≤ σ_θ·π√2/√T`, so
+`K_t − 1 ≥ 2√(2T)·√T/(π√2) = 2T/π ≈ 23` — **`K_t = 24`** (`_TILT_NODES`). At a domain end the window is only
+`T^{¼} ≈ 2.4` widths per side, which 24 nodes over-resolve. Measured against adaptive quadrature over
+`n ∈ [500, 500k]`, `f_g ∈ {0, 0.3}`, `τ ∈ {0, 0.5, 0.9, 0.99, 1}`: the λ-shape error of `log M` is ≤ 2·10⁻⁶ nats
+at 24 nodes (12 nodes reach 0.07 and are refused); the fixed lattice at 60 reads 0.01–0.5 nats at n = 500,
+8–12 at 50k and 90–130 at 500k, and 2,400 lattice nodes still 0.1–0.4 at 500k. The gate is
+`test_vertex_reference.test_the_theta_marginal_matches_adaptive_quadrature_at_every_depth`.
+
+**A delivered row is evaluated at the nodes.** The RNA level lanes deliver a row's ingredients
+(`simplex_logodds.CubeRow`: the held profile per strand over `u = log(ρ/ρ_ref)`, the slot's total `n` and RNA
+opportunity `a_r`, each lane's `ρ_ref`) and ψ evaluates them at its own nodes: at each cell the strand's share
+`f_s = (1 − f_g)(1 ± τ)/2` implies the density `f_s·n/a_r`, and the held profile is read at `log(ρ_s/ρ_ref)`
+(`CubeRow.at`, the `profile_of_level` map with the tilt inside). No θ lattice exists for a row to be built
+on and nothing is interpolated. Before this, rows built on a 60-node lattice equalled rows on 240 on the
+shared-exon stress and rows on 24 did not — the lattice's own resolution error, now gone with it.
+
+**What the exact marginal makes visible (an open issue, not the quadrature's).** At an interior tilt the exact
+marginal is `∝ σ_τ(λ) = σ_p/((1−f_g)|κ−½|)` up to where the band fills the domain (`1 − f_g ≈ σ_p/|κ−½| ≈
+1/√n`): the volume of tilts consistent with the data grows as `f_g → 1`, an Occam factor of order `√n` toward
+gDNA at a balanced slot — Bayes-correct under an `f_g`-independent arcsine measure on τ, and contrary to §5.2's
+"strand reaches gDNA only through the triangle bound". On a real chain the RNA level lanes and the landscape
+prior pin such slots; a slot with no junction and no prior reads `f_g ≈ 1 − 1/√n` from its own solve. See
+`ISSUES: strand-marginal-volume-factor`.
+
 ## 10. The second pass's score
 
 `src/rigel/second_pass.py` (`combine_factors`, `choose_hypotheses`). `f(L)` here is the second pass's

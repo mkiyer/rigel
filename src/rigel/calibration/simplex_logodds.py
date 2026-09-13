@@ -24,10 +24,15 @@ Three facts that determine this file's shape:
    exactly) has a ``(1−τ²)^{−½}`` tilt conditional. Under ``θ = arcsin(τ)`` the Jacobian
    ``|dτ/dθ| = cos θ = (1−τ²)^{½}`` cancels it identically, so the tilt term is exactly 0 and the
    reference collapses to ONE expression for both region classes:
-   ``ψ_ref = ½·log f_g + ½·log(1−f_g)``. No class branch, no endpoint singularity, no quadrature weights.
+   ``ψ_ref = ½·log f_g + ½·log(1−f_g)``. No class branch, no endpoint singularity, no measure weights.
    θ is to the tilt what λ is to ``f_g``: the coordinate the geometry asks for. *(The vanishing is a
    property of this reference specifically — a Dirichlet(½,¼,¼) reference would leave a residual
    ``−¼·log(1−τ²)``.)*
+4. The θ nodes are not a fixed lattice: at fixed λ the strand term is an exact Gaussian in τ whose θ
+   peak narrows as ``n^{−½}`` (0.005 rad at 50k fragments), so ψ places its nodes across each
+   ``(slot, λ)``'s own peak and weights them as the trapezoid rule (:func:`_tilt_window`) — the
+   marginal is then exact at every depth with a DERIVED node count (``_TILT_NODES``), where a fixed
+   lattice's sum was a comb. The weights written are the quadrature's (``log h``), never the measure's.
 
 There is NO spliced term: ``mass_spliced`` is consumed only by the returned ``rna_mass``, never by ψ. That
 is correct — at a sj mature RNA *splices*, so the unspliced crossing mass is gDNA plus RNA that has not
@@ -49,11 +54,14 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import expit, log_expit
 
+from dataclasses import dataclass
+
 from .region_chain import RegionDeconv
 
 # Public surface consumed by sweep / messages / region_geometry. The remaining private helpers stay importable
 # for tests but are not part of the module's external API.
 __all__ = [
+    "CubeRow",
     "_logodds_grid",
     "_solve_regions_logodds_all",
     "strand_row_logodds",
@@ -373,23 +381,119 @@ def _rna_arm(lam):
     return _JEFFREYS_REF * _log1m_fg(lam)[None, :]
 
 
-def _tilt_grid(n_tilt: int) -> np.ndarray:
-    """The RNA-internal tilt grid as the ANGLE ``θ ∈ [−π/2, π/2]`` (``K_t`` points), with ``τ = sin θ``.
+@dataclass(frozen=True)
+class CubeRow:
+    """The RNA level lanes' delivery at an AMBIG slot, as what it is made of: per strand the held level
+    profile over ``u = log(ρ/ρ_ref)`` on the solve grid (either may be absent), the slot's total and its
+    RNA opportunity, and each lane's reference density. ψ evaluates it at its own θ nodes (:meth:`at`) —
+    there is no θ lattice for a row to be built on, so nothing is interpolated. A one-sided profile stays
+    one-sided through the map (it is monotone in each share), so "at least this much RNA+" arrives as a
+    wall in the cube and no parametric summary is made."""
 
-    Gridding θ rather than τ is what makes the Berger–Bernardo tilt conditional ``(1−τ²)^{−½}`` vanish
-    identically: ``|dτ/dθ| = cos θ = (1−τ²)^{½}`` cancels it exactly, so no tilt term is written at all
-    and the ψ reference is the same expression for AMBIG as for single-strand regions (the module
-    docstring's third fact). It also removes the endpoint singularity outright — no clipping, no
-    Gauss–Jacobi weights, no constant.
+    profile_pos: np.ndarray | None
+    profile_neg: np.ndarray | None
+    u: np.ndarray
+    total: float
+    opportunity: float
+    rho_ref_pos: float
+    rho_ref_neg: float
 
-    Resolution follows the reference measure rather than being uniform in τ: the τ-spacing is widest near
-    balanced tilt and an order of magnitude finer near strand purity. That is the intended trade — grid
-    is spent on the strand-pure boundaries, where distinguishing a pure strand from a small antisense
-    leak is the high-stakes call, and economised on the balanced middle, where the distinction rarely
-    matters.
+    def at(self, fg, tau) -> np.ndarray:
+        """The row over ψ's cells: at each ``(λ, θ)`` the strand's share ``f_s = (1 − f_g)(1 ± τ)/2``
+        implies the density ``f_s·n/a_r``, and the held profile is read at ``log(ρ_s/ρ_ref_s)`` — the
+        `profile_of_level` map on the λ axis with the tilt inside. ``fg`` is ``(K,)``; ``tau`` is
+        ``(K_t,)`` or ``(K, K_t)``; the result is ``(K, K_t)``, max-normalised."""
+        fg = np.asarray(fg, np.float64)
+        tau = np.asarray(tau, np.float64)
+        if tau.ndim == 1:
+            tau = tau[None, :]
+        f_act = (1.0 - fg)[:, None]
+        out = np.zeros(np.broadcast_shapes(f_act.shape, tau.shape))
+        scale = float(self.total) / float(self.opportunity)
+        for prof, sign, rho in (
+            (self.profile_pos, 1.0, self.rho_ref_pos),
+            (self.profile_neg, -1.0, self.rho_ref_neg),
+        ):
+            if prof is None:
+                continue
+            prof = np.asarray(prof, np.float64)
+            with np.errstate(divide="ignore"):
+                u_s = np.log(f_act * (1.0 + sign * tau) / 2.0 * scale) - np.log(float(rho))
+            out += np.interp(
+                u_s, np.asarray(self.u, np.float64), prof, left=prof[0], right=prof[-1]
+            )
+        return out - out.max()
 
-    ``θ = ±π/2`` ⇒ ``τ = ±1`` ⇒ all RNA on one strand; ``θ = 0`` ⇒ balanced. Only AMBIG regions integrate it."""
-    return np.linspace(-0.5 * np.pi, 0.5 * np.pi, int(n_tilt))
+
+# The θ quadrature's truncation: the strand term's mass outside a window is below double precision.
+# DERIVED, not tuned — ``erfc(√T) ≈ e^{−T}/√(πT) < ε₆₄`` at ``T = −log ε₆₄`` — so nothing about the window
+# is a choice; a wider one adds nodes where the integrand is zero to the last bit.
+_T_NATS = -np.log(np.finfo(np.float64).eps)
+
+# The node count that resolves the peak inside its window. The interior window is ``2√(2T)·σ_θ`` wide and
+# the trapezoid rule's error on a Gaussian of width ``σ_θ`` at spacing ``h`` is ``2·e^{−2π²(σ_θ/h)²}``,
+# below ``e^{−T}`` once ``h ≤ σ_θ·π√2/√T`` — so ``K_t − 1 ≥ 2T/π``. At a domain end the window is only
+# ``T^{¼}`` widths per side and this count over-resolves it. DERIVED from ``_T_NATS``; the gate
+# `test_vertex_reference.test_the_derived_node_count_is_converged` reads it out against 60 nodes.
+_TILT_NODES = int(np.ceil(2.0 * _T_NATS / np.pi)) + 1
+
+
+def _tilt_window(u_pos, n, fg, kappa, od_g, od_r, f_g_ref, f_pos_ref, f_neg_ref):
+    """The θ nodes and log-weights that integrate the strand term EXACTLY at every depth: per
+    ``(slot, λ)`` a window across the term's peak, ``_TILT_NODES`` uniform nodes in θ inside it, the
+    trapezoid weights. Returns ``(theta (m, K, K_t), log_weight (m, K, K_t))``.
+
+    At fixed λ the strand term is an exact Gaussian in the tilt ``τ`` (the variance is frozen at the
+    reference): ``p = ½ + a(λ)·τ`` with ``a = (1 − f_g)(κ − ½)``, so its centre is ``τ̂ = d/a`` for the
+    observed contrast ``d = u₊/n − ½`` and its width ``σ_τ = σ_p/|a|`` with ``σ_p = √V/n``. Its θ peak is
+    ``σ_τ/cos θ̂`` wide — 0.005 rad at 50k fragments against a 60-node lattice's 0.053 step — so a fixed
+    lattice's sum is a comb across λ, a factor between 1 and ``e^{−(h/2)²/2σ_τ²}`` chosen by where the peak
+    happens to fall, and a deep AMBIG slot's λ posterior is a set of spikes at arbitrary λ (the ladder's
+    recorded K_t 30 failure was one 25k-fragment slot whose peak fell between nodes; 60 held it by a coin
+    toss). The window is where the term lies within ``_T_NATS`` of its maximum ON the domain,
+
+        τ_m = clip(τ̂, −1, 1),   ρ = √((τ_m − τ̂)² + 2σ_τ²T),   [τ_lo, τ_hi] = [τ̂ − ρ, τ̂ + ρ] ∩ [−1, 1],
+
+    one closed form for an interior peak, a peak on the boundary and a peak beyond it. In ``θ = arcsin τ``
+    the integrand is smooth and EVEN about ``±π/2``, so the trapezoid rule with weight ½ at both window
+    ends is spectrally accurate in every regime: at an interior end the integrand is ``e^{−T}`` of its
+    peak and the weight is immaterial; at a domain end it is exactly the periodic trapezoid rule's weight
+    on the reflected window. The node spacing ``h(slot, λ)`` enters ψ as ``log h`` — the window scales with
+    ``σ_τ(λ) ∝ 1/(1 − f_g)``, and that scaling is the λ-dependence the fixed lattice got wrong. A slot
+    with no strand information (``κ = ½``, ``n = 0``, or a window wider than the domain) gets the whole
+    domain: the uniform lattice with trapezoid weights, exactly where the lattice was right.
+    """
+    m, K, Kt = u_pos.shape[0], fg.shape[0], _TILT_NODES
+    # the frozen variance, the same expression `_mixture_strand_loglik` evaluates (per slot)
+    p_ref = 0.5 * f_g_ref + kappa * f_pos_ref + (1.0 - kappa) * f_neg_ref
+    rscale = kappa * (1.0 - kappa)
+    var = (
+        n * p_ref * (1.0 - p_ref)
+        + (n * f_g_ref) ** 2 * 0.25 * od_g
+        + (n * f_pos_ref) ** 2 * rscale * od_r
+        + (n * f_neg_ref) ** 2 * rscale * od_r
+    )
+    var = np.maximum(var, _EPS)
+    counted = n > 0.0
+    n_safe = np.where(counted, n, 1.0)
+    d = np.where(counted, u_pos / n_safe - 0.5, 0.0)  # (m,)
+    sig_p = np.where(counted, np.sqrt(var) / n_safe, np.inf)
+    a = (1.0 - fg)[None, :] * (kappa - 0.5)  # (1, K)
+    informative = counted[:, None] & (a != 0.0)  # (m, K)
+    a_safe = np.where(a != 0.0, a, 1.0)
+    tau_hat = np.where(informative, d[:, None] / a_safe, 0.0)
+    with np.errstate(over="ignore", invalid="ignore"):
+        sig_tau = np.where(informative, sig_p[:, None] / np.abs(a_safe), np.inf)
+        rho = np.sqrt((np.clip(tau_hat, -1.0, 1.0) - tau_hat) ** 2 + 2.0 * sig_tau**2 * _T_NATS)
+    tau_lo = np.where(informative, np.maximum(-1.0, tau_hat - rho), -1.0)
+    tau_hi = np.where(informative, np.minimum(1.0, tau_hat + rho), 1.0)
+    th_lo = np.arcsin(tau_lo)
+    h = (np.arcsin(tau_hi) - th_lo) / (Kt - 1)  # (m, K)
+    theta = th_lo[:, :, None] + h[:, :, None] * np.arange(Kt, dtype=np.float64)[None, None, :]
+    log_weight = np.broadcast_to(np.log(h)[:, :, None], (m, K, Kt)).copy()
+    log_weight[:, :, 0] -= np.log(2.0)
+    log_weight[:, :, -1] -= np.log(2.0)
+    return theta, log_weight
 
 
 def _single_strand_mask(allow_pos, allow_neg) -> np.ndarray:
@@ -418,46 +522,61 @@ def _psi(
     od_r,
     lam,
     fg,
-    n_tilt: int = 1,
+    ambig: bool = False,
     gdna_logprior=None,
     lam_logprior=None,
-    cube=None,
+    cube_rows=None,
 ):
     """ψ over the ``(λ, θ)`` cube for ``m`` slots — strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor
-    rows (+ the cube channel) — as ``(m, K, K_t)`` in float64, with the two strand-fraction grids it was
-    evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they were built from. ``n_tilt = 1`` is a single-strand call: the tilt is each slot's
-    live strand (``τ = ±1``) and the cube is ``(m, K, 1)``; otherwise the θ grid (:func:`_tilt_grid`).
-    :func:`_solve_logodds` reads it out; the vertex-reference gates read ψ itself."""
+    rows (+ the delivered cube rows) + the θ quadrature's log-weights — as ``(m, K, K_t)`` in float64,
+    with the two strand-fraction grids it was evaluated on, ``(f_pos, f_neg)``, and the tilt ``tau`` they
+    were built from. A single-strand call (``ambig=False``) has the tilt of each slot's live strand
+    (``τ = ±1``), a ``(m, K, 1)`` cube and no weight. An AMBIG call places the θ nodes across each slot's
+    strand term (:func:`_tilt_window`, ``K_t = _TILT_NODES``) and evaluates each delivered
+    :class:`CubeRow` at them (``cube_rows``: one record or ``None`` per slot). :func:`_solve_logodds`
+    reads ψ out; the vertex-reference gates read ψ itself."""
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
     u_pos = np.asarray(u_pos, np.float64)
     n = u_pos + np.asarray(u_neg, np.float64)
-    if int(n_tilt) == 1:
+    fg = np.asarray(fg, np.float64)
+    f_g_ref = np.asarray(f_g_ref, np.float64)
+    f_pos_ref = np.asarray(f_pos_ref, np.float64)
+    f_neg_ref = np.asarray(f_neg_ref, np.float64)
+    if not ambig:
         # the tilt of a single-strand slot is its live strand: the cube is (m, K, 1)
         tau = np.where(ap & ~an, 1.0, -1.0)[:, None, None]
+        log_weight = None
     else:
-        tau = np.sin(_tilt_grid(int(n_tilt)))[None, None, :]  # τ = sin θ, exact across the domain
-    f_act = (1.0 - np.asarray(fg, np.float64))[None, :, None]  # (1, K, 1)
+        theta, log_weight = _tilt_window(
+            u_pos, n, fg, float(kappa), float(od_g), float(od_r), f_g_ref, f_pos_ref, f_neg_ref
+        )
+        tau = np.sin(theta)  # τ = sin θ, exact across the domain
+    f_act = (1.0 - fg)[None, :, None]  # (1, K, 1)
     f_pos = f_act * (1.0 + tau) / 2.0  # (m|1, K, K_t)
     f_neg = f_act * (1.0 - tau) / 2.0
     psi = _mixture_strand_loglik(
         u_pos[:, None, None],
         n[:, None, None],
-        np.asarray(fg, np.float64)[None, :, None],
+        fg[None, :, None],
         f_pos,
         f_neg,
         kappa,
         od_g,
         od_r,
-        np.asarray(f_g_ref, np.float64)[:, None, None],
-        np.asarray(f_pos_ref, np.float64)[:, None, None],
-        np.asarray(f_neg_ref, np.float64)[:, None, None],
+        f_g_ref[:, None, None],
+        f_pos_ref[:, None, None],
+        f_neg_ref[:, None, None],
     )
     psi = psi + (_gdna_arm(lam, gdna_logprior) + _rna_arm(lam))[:, :, None]
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)[:, :, None]
-    if cube is not None:
-        psi = psi + np.asarray(cube, np.float64)
+    if cube_rows is not None:
+        for j, row in enumerate(cube_rows):
+            if row is not None:
+                psi[j] += row.at(fg, tau[j])
+    if log_weight is not None:
+        psi = psi + log_weight
     return psi, f_pos, f_neg, tau
 
 
@@ -475,15 +594,16 @@ def _solve_logodds(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    n_tilt: int = 1,
+    ambig: bool = False,
     gdna_logprior=None,
     lam_logprior=None,
-    cube=None,
+    cube_rows=None,
 ) -> RegionDeconv:
     """THE per-slot solve, one for every slot class, over the ``(λ, θ)`` grid: the gDNA-vs-RNA log-odds
-    ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt``). ψ is the
+    ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = _TILT_NODES`` nodes
+    placed per slot and λ by :func:`_tilt_window`). ψ is the
     same expression for every slot — strand + ``_gdna_arm`` + ``_rna_arm`` + the λ-factor rows (+ the
-    cube channel where one is delivered) — evaluated on the ``(m, K, K_t)`` cube in float64, and read
+    delivered :class:`CubeRow` where there is one) — evaluated on the ``(m, K, K_t)`` cube in float64, and read
     out once: ``f_g`` is the posterior median over the θ-marginal λ-posterior, ``f_pos`` / ``f_neg`` its
     image under :func:`_compose` with the tilt share ``w_pos`` the RNA-mass-weighted posterior share, and
     ``Var(log f_g)`` is a grid moment over the λ-marginal — the one precision the tool reads (the
@@ -492,13 +612,14 @@ def _solve_logodds(
 
     A SINGLE-STRAND slot is the ``K_t = 1`` case and not a second solver: its tilt is fixed by its live
     strand (``τ = +1`` where only ``+`` is admissible, ``−1`` where only ``−`` is), so the caller passes
-    ``n_tilt = 1`` and the cube is ``(m, K, 1)`` — the 1-D solve over λ at the 1-D cost. Every slot of a
-    call must then be single-strand; AMBIG slots (both strands admissible) take the θ grid. The caller
-    (:func:`_solve_regions_logodds_all`) separates the two classes because they run on different λ grids.
+    ``ambig=False`` and the cube is ``(m, K, 1)`` — the 1-D solve over λ at the 1-D cost. Every slot of a
+    call must then be single-strand; an AMBIG call (both strands admissible) takes the windowed θ nodes.
+    The caller (:func:`_solve_regions_logodds_all`) separates the two classes.
 
     No Jacobian and no tilt term are written, and that is the point of the θ coordinate: the
-    Berger–Bernardo tilt conditional ``(1−τ²)^{−½}`` is cancelled identically by ``|dτ/dθ| = cos θ``
-    (``_tilt_grid``), and on the two-group λ axis the log-rate conversions cancel ``log σ'(λ)``. Both arms
+    Berger–Bernardo tilt conditional ``(1−τ²)^{−½}`` is cancelled identically by ``|dτ/dθ| = cos θ``,
+    and on the two-group λ axis the log-rate conversions cancel ``log σ'(λ)``; the only weights in ψ are
+    the θ quadrature's own (``_tilt_window``). Both arms
     are always written — a fitted ``logP`` where there is one, else the ``_JEFFREYS_REF`` reference —
     because omitting one is not neutral (the module docstring). The strand mixture's variance is frozen
     at the reference composition (``f_g_ref`` / ``f_pos_ref`` / ``f_neg_ref``, per slot), so the count
@@ -527,10 +648,10 @@ def _solve_logodds(
         od_r=od_r,
         lam=lam,
         fg=fg,
-        n_tilt=n_tilt,
+        ambig=ambig,
         gdna_logprior=gdna_logprior,
         lam_logprior=lam_logprior,
-        cube=cube,
+        cube_rows=cube_rows,
     )
     psi = np.ascontiguousarray(psi)
     m = psi.shape[0]
@@ -572,7 +693,6 @@ def _solve_regions_logodds_all(
     od_r,
     n_grid,
     L: float = _DEFAULT_L,
-    n_tilt: int,
     gdna_logprior=None,
     lam_logprior=None,
     fg_ref=None,
@@ -581,14 +701,14 @@ def _solve_regions_logodds_all(
     cube_rows=None,
 ) -> RegionDeconv:
     """The per-region dispatcher: runs :func:`_solve_logodds` on the single-strand regions (a one-cell
-    tilt) and on the AMBIG regions (the ``K_t = n_tilt`` θ grid), both on the one ``λ`` lattice,
+    tilt) and on the AMBIG regions (the windowed θ nodes, ``K_t = _TILT_NODES``), both on the one ``λ`` lattice,
     scattering both into full-length arrays. Structurally pure-gDNA and zero-mass regions report 0, and
     ``sweep.solve_chain`` keeps their signature-binary init through the ``solvable`` write-back.
 
     All array inputs are full length ``m``; ``gdna_logprior`` is ``(m, K)`` on the σ(λ) grid;
     ``lam_logprior`` is ``(m, K)``. Each is sub-indexed per class.
-    ``cube_rows`` is ``{slot: (K, K_t) row}`` for AMBIG slots (the RNA level lanes' delivery), gathered
-    per AMBIG block and added to that block's ψ; ``None`` or an absent slot changes nothing."""
+    ``cube_rows`` is ``{slot: CubeRow}`` for AMBIG slots (the RNA level lanes' delivery), evaluated at
+    each slot's own θ nodes inside its ψ; ``None`` or an absent slot changes nothing."""
     m = int(np.asarray(u_pos).shape[0])
     ap_all = np.asarray(allow_pos, bool)
     an_all = np.asarray(allow_neg, bool)
@@ -652,7 +772,6 @@ def _solve_regions_logodds_all(
                     od_r=od_r,
                     n_grid=n_grid,
                     L=L,
-                    n_tilt=1,
                     gdna_logprior=_s(gdna_logprior, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
                 ),
@@ -662,21 +781,14 @@ def _solve_regions_logodds_all(
         # O(m·K·K_t). AMBIG regions solve independently, so the subset is tiled into row blocks —
         # bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
         amb_idx = np.where(amb)[0]
-        Kt = int(n_tilt)
-        rows = _block_rows(int(n_grid) * Kt, 8)
+        rows = _block_rows(int(n_grid) * _TILT_NODES, 8)
         for s0 in range(0, amb_idx.size, rows):
             bidx = amb_idx[s0 : s0 + rows]
-            cube = None
+            delivered = None
             if cube_rows:
-                hit = [
-                    (j, cube_rows[int(slot)])
-                    for j, slot in enumerate(bidx)
-                    if int(slot) in cube_rows
-                ]
-                if hit:
-                    cube = np.zeros((bidx.size, int(n_grid), Kt))
-                    for j, row in hit:
-                        cube[j] = row
+                delivered = [cube_rows.get(int(slot)) for slot in bidx]
+                if all(r is None for r in delivered):
+                    delivered = None
             _scatter(
                 bidx,
                 _solve_logodds(
@@ -692,10 +804,10 @@ def _solve_regions_logodds_all(
                     od_r=od_r,
                     n_grid=n_grid,
                     L=L,
-                    n_tilt=Kt,
+                    ambig=True,
                     gdna_logprior=_s(gdna_logprior, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
-                    cube=cube,
+                    cube_rows=delivered,
                 ),
             )
     return RegionDeconv(

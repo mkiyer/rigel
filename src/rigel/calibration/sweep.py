@@ -152,23 +152,33 @@ def _check_message(
                 "deliver one row per slot on the solve grid"
             )
         counts.note("lam_rows_finite", ~np.isfinite(rows[:n]).all(axis=1), np.ones(n, bool))
-    # ── the cube channel: a (K, K_t) row per AMBIG slot, or absent ──────────────────────────────────
+    # ── the cube channel: a CubeRow per AMBIG slot, or absent ──────────────────────────────────────
     if msg.cube_rows is not None:
         amb = np.asarray(ctx.free_pos, bool) & np.asarray(ctx.free_neg, bool)
         for slot, row in msg.cube_rows.items():
-            row = np.asarray(row)
             if not (0 <= int(slot) < ctx.n_slots) or not amb[int(slot)]:
                 raise ValueError(
                     f"cube_rows carries slot {slot}, which is not an AMBIG slot — a cube exists only "
                     "where both strands are live"
                 )
-            if row.ndim != 2 or row.shape[0] != int(ctx.n_grid):
+            profiles = [p for p in (row.profile_pos, row.profile_neg) if p is not None]
+            if np.asarray(row.u).shape != (int(ctx.n_grid),) or any(
+                np.asarray(p).shape != (int(ctx.n_grid),) for p in profiles
+            ):
                 raise ValueError(
-                    f"cube_rows[{slot}] has shape {row.shape}; expected ({ctx.n_grid}, K_t) — one row "
-                    "over the (λ, θ) cube on the solve grid"
+                    f"cube_rows[{slot}]'s profiles are not ({ctx.n_grid},) — a held level is a profile "
+                    "on the solve grid"
                 )
         bad = np.array(
-            [not np.isfinite(np.asarray(r)).all() for k, r in msg.cube_rows.items() if int(k) < n],
+            [
+                not all(
+                    np.isfinite(np.asarray(p)).all()
+                    for p in (r.profile_pos, r.profile_neg)
+                    if p is not None
+                )
+                for k, r in msg.cube_rows.items()
+                if int(k) < n
+            ],
             bool,
         )
         counts.note("cube_rows_finite", bad, np.ones(bad.shape[0], bool))
@@ -194,7 +204,6 @@ def solve_chain(
     n_rna_obs: float = 0.0,
     n_grid: int,
     logodds_window: float = 10.0,
-    n_tilt: int,
     gdna_prior=None,
     intron_prior=None,
     policy=None,
@@ -241,7 +250,6 @@ def solve_chain(
     grid = dict(
         n_grid=int(n_grid),
         logodds_window=float(logodds_window),
-        n_tilt=int(n_tilt),
         strand_live=strand_discriminability(kappa, od_g, od_r, n_gdna_obs, n_rna_obs) > 0.0,
     )
     # THE LIBRARY — the policy's reductions over the WHOLE chain, once, from observations and geometry
@@ -353,7 +361,6 @@ class _Sweep:
     n_rna_obs: float
     n_grid: int
     logodds_window: float
-    n_tilt: int
     strand_live: bool
     gdna_prior: object
     policy: object
@@ -402,7 +409,6 @@ def _psi(
         od_r=od_r,
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
-        n_tilt=ctx.n_tilt,
         gdna_logprior=gdna_logprior,
         lam_logprior=lam_logprior,
         fg_ref=fg_ref,
@@ -501,7 +507,6 @@ def _block_diagnostics(
         od_r=od_r,
         n_grid=int(ctx.n_grid),
         L=float(ctx.logodds_window),
-        n_tilt=ctx.n_tilt,
         gdna_logprior=None,
     ).gdna_frac
     from_left, from_right = tables
@@ -565,7 +570,6 @@ def _solve_block(
         n_rna_obs=sweep.n_rna_obs,
         n_grid=sweep.n_grid,
         logodds_window=sweep.logodds_window,
-        n_tilt=sweep.n_tilt,
         belief=belief,
         gdna_logprior=arms,
         intron_prior=factory_rows,
@@ -574,7 +578,6 @@ def _solve_block(
         **fields,
         n_grid=sweep.n_grid,
         logodds_window=sweep.logodds_window,
-        n_tilt=sweep.n_tilt,
         strand_live=sweep.strand_live,
         # the intron factory's rows are an observation on the context: the one array that is both
         # ψ's λ-factor and the intron's own claim

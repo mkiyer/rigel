@@ -150,23 +150,26 @@ with messages on. The owner plans to change the alpha = 0 rule in the post-calib
 the xfail is the executable record of exactly that pending change and closes there, with a test that asserts
 the new rule's promise. Not the pre-port thread's.
 
-### theta-quadrature-at-zero-gdna
-`priority: later · kind: defect · 2026-09-13`
-ψ marginalises the AMBIG cube over θ by a plain sum on a uniform θ lattice (`simplex_logodds._tilt_grid`). At
-strand purity the strand likelihood is flat in θ to first order, so a pure-RNA AMBIG slot's θ-posterior is a
-quartic peak at ±π/2 of width ∝ n^−¼, and where the lattice does not resolve it the λ-marginal is biased toward
-gDNA. On the ladder's `g00 ss.99 capture ON` row, where nothing cancels a false positive, `sweep_n_tilt` 30
-reads 9,488 fragments against 262 at 60 and 15 reads worse, with the message layer off as well (ψ's own
-quadrature, not the lanes' cube rows); 120 and 240 equal 60. A Chebyshev mesh clustered at the ends with
-midpoint weights is REFUSED (30 nodes 9.9×, and it breaks a `g00` row the uniform mesh holds: the coarse middle
-hurts too). The per-slot bias is small (≤ 4 fragments at 50k, prior-free, the variance frozen at purity); the
-refits amplify it at zero gDNA. Latent at 60 on a deep real library's heavy pure-RNA AMBIG exons (a 0.03 rad
-peak at 500k fragments against a 0.053 rad step). The fix is a θ quadrature whose accuracy does not depend on
-the node count, not a larger K_t. Derived 2026-09-13 (the working note in the sandbox): at fixed λ the strand
-term is an exact Gaussian in τ whose peak narrows as √f_g beyond the strand-pure boundary, so the bias is the
-λ-dependence of the lattice's resolution error. REFUSED with its number: the trapezoid endpoint weights (the
-lattice's first-order term) — ≤ 0.7 fragments on any `g00` row, the K_t 30 failure 9,821 → 9,821.
-`calibration_vs_oracle.py --set calibration.sweep_n_tilt=30`, the `g00` rows.
+### strand-marginal-volume-factor
+`priority: next · kind: defect · 2026-09-13`
+The exact θ-marginal of ψ's strand term at an interior tilt is ∝ σ_τ(λ) = σ_p/((1 − f_g)|κ − ½|): the band of
+tilts consistent with the observed strand split widens as f_g → 1, so the marginal likelihood of f_g carries a
+factor 1/(1 − f_g) up to where the band fills the domain (1 − f_g ≈ 1/√n) — an Occam factor of order √n toward
+gDNA at a balanced both-strand slot ("all gDNA explains balanced strands with no parameter; all RNA needs the
+tilt tuned to ±σ_τ"). Bayes-correct under the f_g-independent arcsine measure on τ that ships, and contrary to
+`EQUATIONS.md` §5.2 ("strand reaches gDNA only through the triangle bound"). Its number: a balanced pure-RNA
+slot's OWN solve (no prior, no messages) reads f_g ≈ 1 − 1/√n — 0.960 at n = 500, 0.9955 at 50k, 0.9985 at
+500k (`quadrature_check.py`, the session scratchpad); a mono-exon toy with no junction reads f_g 0.99 on a
+50k-fragment balanced exon at zero gDNA whether or not the refits run. On a real chain the RNA level lanes and
+the landscape prior pin such slots (the ladder's `g00` both-strand slots read ≤ 26 fragments; the spliced
+shared-exon toy at 500k balanced reads 632 at `g00`, 19 at `g50`), so it is latent where junctions certify each
+strand and live where they do not. Visible only now because the windowed θ quadrature integrates the marginal
+exactly at every depth (`DESIGN.md` §6b.15); the fixed lattice realised it at shallow slots and replaced it
+with a comb at deep ones. Candidate: a tilt measure uniform in the observable p over the reachable band —
+|a(λ)| dτ — which cancels the factor exactly and leaves the strand term flat in f_g at an interior tilt, as
+§5.2 says; it changes the zero-control behaviour at strand-pure slots too, so DERIVE → PROTOTYPE → A/B on
+both panels, both zero controls and the shared-exon stress (`deep_stress.py --mono` is the no-junction arm).
+`tilt_census.py` (the session scratchpad) is the instrument: the AMBIG both-strand bands per stratum.
 
 ### performance-memory-bounded-solve
 `priority: now · kind: build · 2026-08-17 (mandatory before 0.8.0), re-framed 2026-09-11, the decomposition landed 2026-09-11`
@@ -385,6 +388,24 @@ averaging; the fl-gap panels are not a drop-in (`ISSUES: flgap-panels-stale-nasc
 ---
 
 ## CLOSED / REFUSED — do not rebuild these; append-only
+
+### theta-quadrature-at-zero-gdna
+CLOSED by landing 2026-09-13 (`DESIGN.md` §6b.15; the derivation `EQUATIONS.md` §9e): the θ nodes follow the
+strand term's peak (`simplex_logodds._tilt_window`), the node count derived (24 = 2T/π + 1, T = −log ε₆₄). The
+recorded mechanism was wrong: the K_t 30 failure was ONE slot (`g00 ss.99 ON`, slot 37345, n 25,242, 28 % of
+its RNA on the minor strand, a 0.006 rad peak) — the fixed lattice's sum is a comb across λ on any deep
+interior-tilt slot, and 60 held the control by landing a node on that one peak; the strand-purity quartic was
+never it, and the trapezoid endpoint weights alone (REFUSED, ≤ 0.7 fragments) removed nothing because the
+resolution was the whole term. Killing numbers: the marginal's λ-shape error 90–130 nats at 500k under the
+lattice at 60 (0.1–0.4 at 2,400 nodes), 2·10⁻⁶ under the window at 24; the shared-exon stress at 500k, lattice
+→ window: `g50` balanced 102,076 → 19 false fragments, 20 %-minor 11,448 → 11, `g00` 10,994 → 632 and
+9,907 → 25, tilt error down 6–70×; the ladder a numeric near-no-op (stranded OFF / unstranded unchanged,
+stranded ON +0.4 %, `g00` rows identical, the both-strand tilt error at 24 nodes what the lattice reached at
+120), the test chromosome within ±3 fragments. Gates: `test_vertex_reference` — the marginal against adaptive
+quadrature at 500 and 500k fragments, the derived count converged, a delivered row evaluated at the nodes to
+the bit, κ = ½ the whole domain; five perturbations fired. The second step the same day removed the last θ
+lattice: the lanes deliver a row's ingredients (`CubeRow`) and `sweep_n_tilt` is deleted — no tilt count
+exists in the tool. What it exposed is `ISSUES: strand-marginal-volume-factor`.
 
 ### f32-strand-tilt-at-half
 CLOSED by landing 2026-09-12: the AMBIG cube is float64 like the rest of ψ — the float32 cube was a memory

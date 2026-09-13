@@ -272,7 +272,7 @@ class CalibrationConfig:
     #: retired 60/256 pair on the three in-scope strata; cost on the 18.6M-fragment library): 0.69 (30
     #: points) 1.10–1.22×; 0.34 (60) 1.02–1.04×; 0.20 (101) 0.993 / 0.998 / 1.000 at wall 1.09×, +1.8 GB;
     #: 0.146 (138) 0.990 at 1.33×, +3.7 GB; 0.10 (201) 0.987 at 1.71×, +9.8 GB. The cost is the AMBIG cube
-    #: (``K × sweep_n_tilt`` per slot) and its cached rows; 0.2 is the coarsest step that loses nothing.
+    #: (``K × 24`` per slot, the derived tilt node count) and its cached rows; 0.2 is the coarsest step that loses nothing.
     sweep_logodds_step: float = 0.2
 
     #: Log-odds grid FLOOR ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]``. This is the range the
@@ -286,14 +286,6 @@ class CalibrationConfig:
     #: points at — acutely on a near-zero-gDNA library, where the floor sits orders of magnitude above
     #: the density the prior favours.
     sweep_logodds_window: float = 10.0
-
-    #: The AMBIG cube's tilt axis: ``K_t`` nodes of the angle ``θ = arcsin τ`` on ``[−π/2, π/2]``, uniform
-    #: (`simplex_logodds._tilt_grid`); the tilt is a share, so its axis has no bracket and does not scale
-    #: with the λ lattice. Explicit and independent of the λ lattice (it was ``None ⇒ n_grid``). The
-    #: ladder, ratio to 60 (2026-09-13): 15 and 30 hold every in-scope stratum within 2 % but break the
-    #: zero-gDNA control 10.5× and 6.3× on ψ's own θ quadrature at strand purity (`ISSUES:
-    #: theta-quadrature-at-zero-gdna`); 120 and 240 equal 60. 60 is the smallest count that holds the control.
-    sweep_n_tilt: int = 60
 
     #: The sweep's WORKING SET: the chain is solved one LOCUS BLOCK at a time — the chain cut at every
     #: intergenic region (where message passing ends) and the pieces merged up to this many slots per
@@ -380,10 +372,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_logodds_step must be > 0 and no wider than the window "
                 f"(2L = {2.0 * float(self.sweep_logodds_window)}); got {self.sweep_logodds_step}."
-            )
-        if self.sweep_n_tilt < 2:
-            raise ValueError(
-                f"CalibrationConfig.sweep_n_tilt must be >= 2; got {self.sweep_n_tilt}."
             )
 
 

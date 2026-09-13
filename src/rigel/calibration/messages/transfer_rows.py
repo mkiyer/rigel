@@ -45,7 +45,6 @@ __all__ = [
     "lower_side",
     "poisson_level",
     "profile_of_level",
-    "cube_row",
     "flux_level",
     "read_column",
     "rna_level_of_profile",
@@ -431,31 +430,3 @@ def read_column(col, kappa):
     count of the reads that strand's RNA produces; reading the other column inverts a node's strand
     share and blurs its floor to nothing."""
     return int(col) if (kappa is None or float(kappa) >= 0.5) else 1 - int(col)
-
-
-def cube_row(profiles, u, lam, theta, n, a_r, rho_refs):
-    """The held RNA levels of an AMBIG node as ONE row over ψ's ``(lam, theta)`` cube: at each cell the
-    strand's share ``f_s = (1 − sigma)(1 ± tau)/2`` implies the density ``f_s n / a_r``, and the held
-    profile is read at ``log(rho_s / rho_ref_s)`` — the map `profile_of_level` applies on the λ axis,
-    with the tilt inside. A one-sided profile stays one-sided (the map is monotone in each share), so
-    "at least this much RNA+" arrives as a wall in the cube and no parametric summary is made.
-    ``profiles`` is ``{"pos": profile, "neg": profile}`` (either may be absent), ``rho_refs`` the two
-    lanes' coordinates."""
-    lam = np.asarray(lam, np.float64)
-    theta = np.asarray(theta, np.float64)
-    sig = 1.0 / (1.0 + np.exp(-lam))
-    tau = np.sin(theta)
-    f_act = (1.0 - sig)[:, None]
-    shares = {
-        "pos": f_act * (1.0 + tau)[None, :] / 2.0,
-        "neg": f_act * (1.0 - tau)[None, :] / 2.0,
-    }
-    out = np.zeros((lam.shape[0], theta.shape[0]))
-    for name, prof in profiles.items():
-        if prof is None:
-            continue
-        prof = np.asarray(prof, np.float64)
-        with np.errstate(divide="ignore"):
-            u_s = np.log(shares[name] * float(n) / float(a_r)) - np.log(float(rho_refs[name]))
-        out += np.interp(u_s, np.asarray(u, np.float64), prof, left=prof[0], right=prof[-1])
-    return out - out.max()

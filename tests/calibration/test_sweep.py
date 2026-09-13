@@ -145,7 +145,6 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
-        n_tilt=60,
     )
     assert d.gdna_frac_var is not None
     # p̂=0.5 at κ=0.99 ⇒ the fragments look unstranded ⇒ the mean channel points at the gDNA mode f_g=1.
@@ -169,7 +168,6 @@ def test_precision_state_count_resolution():
         od_g=0.2,
         od_r=0.1,
         n_grid=60,
-        n_tilt=60,
     )
     assert d0.gdna_frac_var[0] == 0.0
 
@@ -208,7 +206,6 @@ def _factor1_uniform_rho():
         parts.region_arrays,
         rna_sense_frac=0.7,
         n_grid=40,
-        n_tilt=40,
     )
     # gDNA density = f_g x count / E_gdna (the formula the sweep inlines).
     count = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
@@ -281,7 +278,6 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         n_rna_obs=10000.0,  # library sample sizes so the stranded (κ=0.95) intron seeds fire (τ noise floor)
         n_gdna_obs=10000.0,
         n_grid=40,
-        n_tilt=40,
     )
     # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. This chain is the WORST
     # case for a balanced AMBIG region: it is an ARTIFICIAL all-RNA chain (intron+|AMBIG|intron−) with NO
@@ -333,7 +329,6 @@ def test_a_delivered_row_pulls_two_sided_and_not_to_the_vertex():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
-        n_tilt=80,
         lam_logprior=_gdna_share_row(80, 0.2, 200.0),
     )
     fg = float(d.gdna_frac[0])
@@ -358,7 +353,6 @@ def test_a_weak_row_defers_to_a_decisive_strand():
         od_g=0.0,
         od_r=0.0,
         n_grid=80,
-        n_tilt=80,
         lam_logprior=_gdna_share_row(80, 0.9, 3.0),
     )
     fg = float(d.gdna_frac[0])
@@ -448,7 +442,6 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
         n_rna_obs=n_rna_obs,
         n_gdna_obs=n_gdna_obs,
         n_grid=60,
-        n_tilt=60,
         _capture=cap,
     )
     return final, cap
@@ -556,7 +549,6 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
                 od_g=od,
                 od_r=od,
                 n_grid=80,
-                n_tilt=80,
             ).gdna_frac[0]
         )
 
@@ -692,7 +684,6 @@ def _chunk_substrate(m=255, K=120, seed=3):
         od_r=0.03,
         n_grid=K,
         L=10.0,
-        n_tilt=12,
         gdna_logprior=prior,
         lam_logprior=rows,
         fg_ref=fg_ref,

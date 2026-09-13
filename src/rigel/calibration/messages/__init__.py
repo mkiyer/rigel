@@ -97,8 +97,9 @@ class PsiMessage:
 
     * ``lam_rows`` — ``(n_slots, K)`` over ψ's log-odds grid ``λ``, added into the FINAL solve only
       (never phase-A, never the own-evidence precision);
-    * ``cube_rows`` — ``{slot: (K, K_t) row}`` over the ``(λ, θ)`` cube, for AMBIG slots only, added
-      inside the AMBIG solve the same way.
+    * ``cube_rows`` — ``{slot: CubeRow}`` for AMBIG slots only: a row's INGREDIENTS (the held RNA level
+      profiles, the slot's total and RNA opportunity, the lanes' coordinates), which ψ evaluates at its own
+      θ nodes inside the AMBIG solve, the same way.
 
     A profile on ψ's own grid cannot be delivered off-grid and cannot claim an over-unit share, so the
     lesson of TRAPS: off-grid-message-mode is structural on this channel rather than asserted. A
@@ -112,10 +113,10 @@ class PsiMessage:
     #: FINAL solve only: never phase-A, never the own-evidence precision — that citizenship is the
     #: entire difference from the intron factory's factor.
     lam_rows: np.ndarray | None = None
-    #: THE CUBE CHANNEL: ``{slot: (K, K_t) row}`` for AMBIG slots only — a max-normalised log-profile
-    #: over ψ's ``(λ, θ)`` cube, the delivery of the RNA LEVEL lanes at a node where both strands are
-    #: live (each held strand level read at the density every cell implies: ``f_s = (1 − σ)(1 ± τ)/2``,
-    #: ``ρ_s = f_s n / a_r``). The backbone adds it to ψ inside the AMBIG solve, FINAL solve only, like
+    #: THE CUBE CHANNEL: ``{slot: CubeRow}`` for AMBIG slots only — the delivery of the RNA LEVEL lanes
+    #: at a node where both strands are live, as its ingredients; ψ reads each held strand level at the
+    #: density every one of ITS cells implies (``f_s = (1 − σ)(1 ± τ)/2``, ``ρ_s = f_s n / a_r``), so there
+    #: is no θ lattice. The backbone adds it to ψ inside the AMBIG solve, FINAL solve only, like
     #: ``lam_rows``; ``None`` or an absent slot leaves the solve exactly as it is without the channel.
     #: A single-strand slot has no cube and may not appear here.
     cube_rows: dict | None = None
@@ -358,9 +359,6 @@ class ChainView:
     # ── the solve's own scalars (neither observation nor belief) ──────────────────────────────────────
     n_grid: int
     logodds_window: float
-    #: the AMBIG cube's tilt-grid size ``K_t`` — what a policy needs to lay a ``cube_rows`` row on the
-    #: grid ψ will evaluate it on
-    n_tilt: int
     #: the intron factory's per-slot λ-factor rows on THIS grid, ``(n_slots, K)`` or ``None`` — the
     #: same array ψ adds as its own λ-factor (`sweep.solve_chain`'s ``intron_prior``), so an intron's
     #: own claim and the solver's factor cannot drift apart; ``None`` is no factory

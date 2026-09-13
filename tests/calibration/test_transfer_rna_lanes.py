@@ -413,20 +413,19 @@ def test_the_rna_hop_witness_is_the_split_where_the_strand_channel_is_live():
 
 
 def test_a_lower_only_profile_stays_one_sided_on_the_cube():
-    """`cube_row`: a lower-only RNA+ profile delivered on the ``(λ, θ)`` cube is non-decreasing in θ
+    """`CubeRow.at`: a lower-only RNA+ profile evaluated on the ``(λ, θ)`` cube is non-decreasing in θ
     (the + share rises with τ) and non-increasing in λ (it falls with the gDNA share) — one-sided through
     the map, no parametric summary. PERTURBATION: a two-sided profile is not monotone."""
-    from rigel.calibration.messages.transfer_rows import cube_row
-    from rigel.calibration.simplex_logodds import _tilt_grid
+    from rigel.calibration.simplex_logodds import CubeRow
 
     lam = np.linspace(-10.0, 10.0, 60)
-    theta = _tilt_grid(60)
+    tau = np.sin(np.linspace(-0.5 * np.pi, 0.5 * np.pi, 60))
+    fg = 1.0 / (1.0 + np.exp(-lam))
     u = lam
-    rho = {"pos": 0.5, "neg": 0.5}
     floor = -0.5 * np.maximum(0.0, (0.0 - u) / 0.3) ** 2
-    row = cube_row({"pos": floor}, u, lam, theta, 400.0, 100.0, rho)
+    row = CubeRow(floor, None, u, 400.0, 100.0, 0.5, 0.5).at(fg, tau)
     assert np.all(np.diff(row, axis=1) >= -1e-9) and np.all(np.diff(row, axis=0) <= 1e-9)
-    two = cube_row({"pos": -0.5 * (u / 0.3) ** 2}, u, lam, theta, 400.0, 100.0, rho)
+    two = CubeRow(-0.5 * (u / 0.3) ** 2, None, u, 400.0, 100.0, 0.5, 0.5).at(fg, tau)
     assert not (np.all(np.diff(two, axis=1) >= -1e-9) and np.all(np.diff(two, axis=0) <= 1e-9))
 
 
@@ -437,12 +436,12 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
     truth), on stranded (κ = 0.99) and unstranded (κ = 0.5) data alike. Removing the gDNA bound
     opens the lower side and removing either RNA bound opens the upper side."""
     import rigel.calibration.simplex_logodds as sl
-    from rigel.calibration.messages.transfer_rows import cube_row, profile_of_level
+    from rigel.calibration.messages.transfer_rows import profile_of_level
 
     K = 60
     lam = np.linspace(-10.0, 10.0, K)
     u = lam
-    theta = sl._tilt_grid(K)
+    theta = np.linspace(-0.5 * np.pi, 0.5 * np.pi, K)
     fg = 1.0 / (1.0 + np.exp(-lam))
     n, a_g, a_r = 400.0, 100.0, 100.0
     rho = {"g": 0.5, "pos": 0.5, "neg": 0.5}
@@ -478,7 +477,9 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
             s: floor(np.log(truth[s] * n / a_r / rho[s])) for s in ("pos", "neg") if s not in drop
         }
         if profiles:
-            psi += cube_row(profiles, u, lam, theta, n, a_r, rho)
+            psi += sl.CubeRow(
+                profiles.get("pos"), profiles.get("neg"), u, n, a_r, rho["pos"], rho["neg"]
+            ).at(fg, tau)
         if "g" not in drop:
             lvl = floor(np.log(truth["g"] * n / a_g / rho["g"]))
             psi += profile_of_level(lvl, u, lam, n, a_g, rho["g"])[:, None]
@@ -499,15 +500,15 @@ def test_THE_BRACKET_THEOREM_three_lower_bounds_and_the_strand_equation_bracket_
 
 
 def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep_inputs):
-    """`_PreparedTransfer._cube_rows` on a hand-built AMBIG node: the delivered row is `cube_row` of,
-    per strand, the intersection of the two held levels and the node's own (flux) level's lower side;
-    a non-AMBIG node, an empty node and a node holding nothing deliver no row."""
+    """`_PreparedTransfer._cube_rows` on a hand-built AMBIG node: the delivered `CubeRow` carries, per
+    strand, the intersection of the two held levels and the node's own (flux) level's lower side, with the
+    node's total and RNA opportunity and the lanes' reference densities; a non-AMBIG node, an empty node
+    and a node holding nothing deliver no row."""
     from rigel.calibration.messages import Received
     from rigel.calibration.messages.faces import Faces
     from rigel.calibration.messages.lanes import LevelLane
     from rigel.calibration.messages.transfer import _PreparedTransfer, _SolveSite
-    from rigel.calibration.messages.transfer_rows import cube_row, intersect, lower_side
-    from rigel.calibration.simplex_logodds import _tilt_grid
+    from rigel.calibration.messages.transfer_rows import intersect, lower_side
 
     K = 41
     lam = np.linspace(-6.0, 6.0, K)
@@ -528,7 +529,7 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     ambig = np.array([False, True, True, True])
     free = {"pos": np.ones(4, bool), "neg": ambig}
     left, right = np.array([-1, 0, 1, 2]), np.array([1, 2, 3, -1])
-    site = _SolveSite(ambig, free, 30)
+    site = _SolveSite(ambig, free)
     prep = _PreparedTransfer(
         [None] * 4, Faces(lam, left, right), K, {"gdna": gd, "pos": pos, "neg": neg}, site
     )
@@ -542,17 +543,18 @@ def test_the_cube_delivery_is_the_intersected_held_levels_and_the_own_flux(sweep
     from_right.level_rna_neg.write(1, lv_n, 25.0, 100.0)
     rows = prep._cube_rows(from_left, from_right)
     assert set(rows) == {1}
-    want = cube_row(
-        {"pos": intersect([lv_l, lv_r, lower_side(own_pos[1])]), "neg": intersect([lv_n])},
-        u,
-        lam,
-        _tilt_grid(30),
+    got = rows[1]
+    np.testing.assert_allclose(
+        got.profile_pos, intersect([lv_l, lv_r, lower_side(own_pos[1])]), atol=1e-12
+    )
+    np.testing.assert_allclose(got.profile_neg, intersect([lv_n]), atol=1e-12)
+    assert np.array_equal(got.u, u)
+    assert (got.total, got.opportunity, got.rho_ref_pos, got.rho_ref_neg) == (
         400.0,
         100.0,
-        {"pos": 0.5, "neg": 0.4},
+        0.5,
+        0.4,
     )
-    np.testing.assert_allclose(rows[1], want, atol=1e-12)
-    assert rows[1].shape == (K, 30)
 
 
 def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
@@ -599,7 +601,6 @@ def _empty_piece_ctx(flux: float = 40.0, rate: float = 0.02):
         has_own_composition=np.array([False, False, False, False, True]),
         belief_fg=np.full(n, 0.5),
         n_grid=41,
-        n_tilt=41,
         logodds_window=10.0,
         factory_rows=np.zeros((n, 41)),  # a factory with nothing to say: the lanes alone
         strand_live=True,  # the deadband is open: the full exon's split is a witness

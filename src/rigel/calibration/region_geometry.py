@@ -646,7 +646,6 @@ def init_beliefs(
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
-        n_tilt=1,  # no AMBIG slot reaches this solve, so the tilt axis has one cell
         L=logodds_window,
     )
     f_pos, f_neg, f_g, var_g = _type_belief(fp, fn, deconv, count.sum(axis=1))
