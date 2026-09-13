@@ -84,7 +84,7 @@ TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 #: What the tool ships, re-derived rather than written down — the honest default for an instrument
 #: whose headline question does not involve the message layer at all.
-MESSAGES_SHIPPED: bool = bool(CalibrationConfig().message_propagation)
+MESSAGES_SHIPPED: bool = CalibrationConfig().message_policy != "silent"
 
 
 def add_messages_flag(ap, *, default: bool) -> None:
@@ -109,21 +109,23 @@ def messages_on(args) -> bool:
 
 
 def with_messages(config: CalibrationConfig, messages: bool) -> CalibrationConfig:
-    """The same config with propagation switched. No monkeypatching: `calibrate` installs the policy
-    `message_policy` names when on, `SilentPolicy` when off."""
-    return dataclasses.replace(config, message_propagation=bool(messages))
+    """The same config with messages on or off. No monkeypatching: `calibrate` installs the policy
+    `message_policy` names — the shipped one when on, `SilentPolicy` when off."""
+    shipped = CalibrationConfig().message_policy
+    on = config.message_policy if config.message_policy != "silent" else shipped
+    return dataclasses.replace(config, message_policy=on if messages else "silent")
 
 
 def policy_name(config: CalibrationConfig) -> str:
     """The policy `calibrate` installs for this config, by its name."""
-    return config.message_policy if config.message_propagation else "silent"
+    return config.message_policy
 
 
 def messages_stamp(messages: bool) -> str:
     """The line every one of these instruments prints, so a reader can never mistake which
     configuration produced the numbers below it."""
     shipped = CalibrationConfig()
-    pol = policy_name(dataclasses.replace(shipped, message_propagation=bool(messages)))
+    pol = policy_name(with_messages(shipped, messages))
     if messages == MESSAGES_SHIPPED:
         note = "  (the shipped config)"
     else:

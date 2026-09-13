@@ -148,10 +148,10 @@ def run_arm(arm, arms, c):
     """One arm's per-slot gDNA estimate. ``silent`` and ``transfer`` are the shipped policies; any other
     name is looked up in ``arms`` and installed in place of ``TransferPolicy``."""
     if arm == "silent":
-        cfg = CalibrationConfig(message_propagation=False)
+        cfg = CalibrationConfig(message_policy="silent")
         CALMOD.TransferPolicy = TransferPolicy
     else:
-        cfg = CalibrationConfig(message_propagation=True, message_policy="transfer")
+        cfg = CalibrationConfig(message_policy="transfer")
         CALMOD.TransferPolicy = TransferPolicy if arm == "transfer" else arms[arm]
     try:
         res = CALMOD.calibrate(payload=c["payload"], config=cfg, **c["kwargs"])

@@ -201,7 +201,6 @@ def fit_abundance_landscape(
         e,
         np.zeros_like(c),  # a direct measurement has no deconvolution ambiguity
         anchor=(c == 0.0),
-        strength=1.0,
         knn_scale=knn_scale,
     )
     if landscape is None:

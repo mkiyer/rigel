@@ -63,9 +63,7 @@ def test_init_zero_gdna_introns_via_strand():
         region_pos=[50.0, 95.0, 50.0],
         region_neg=[50.0, 5.0, 50.0],
     )
-    b = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
-    )
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
 
     # the chain is N E N E N, so the regions are at 0, 2, 4 — there are no terminal slots.
     rid = [0, 2, 4]
@@ -95,9 +93,7 @@ def test_init_boundary_continuity_gate():
         boundary_neg=[5.0],
         boundary_spliced=[50.0],
     )
-    b = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
-    )
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slots: N0=0, E0=1, N1=2.
     # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0.
     assert b.f_g[1] < 0.15
@@ -115,9 +111,7 @@ def test_init_tss_boundary_is_black_hole():
         boundary_pos=[90.0],
         boundary_neg=[5.0],
     )
-    b = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60, n_tilt=60
-    )
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slot 1 is the TSS boundary: a locked gDNA sink despite the sense tilt (all precision locked at 0).
     assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0
 
@@ -204,9 +198,7 @@ def _factor1_uniform_rho():
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
-    belief = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40, n_tilt=40
-    )
+    belief = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40)
     final = region_sweep(
         parts.chain,
         parts.statics,
@@ -276,7 +268,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         parts.geometry,
         parts.region_arrays,
     )
-    belief = init_beliefs(chain, geom, st, rna_sense_frac=0.95, n_grid=40, n_tilt=40)
+    belief = init_beliefs(chain, geom, st, rna_sense_frac=0.95, n_grid=40)
     assert belief.f_g[2] == 1.0  # AMBIG starts all-gDNA
     final = region_sweep(
         chain,
@@ -434,7 +426,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
         rna_fl=rna_fl,
     )
     belief = init_beliefs(
-        parts.chain, parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60, n_tilt=60
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60
     )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 

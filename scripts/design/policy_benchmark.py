@@ -69,8 +69,8 @@ PANELS = {
 
 #: policy name -> the `CalibrationConfig` fields that install it
 POLICIES = {
-    "silent": dict(message_propagation=False),
-    "transfer": dict(message_propagation=True, message_policy="transfer"),
+    "silent": dict(message_policy="silent"),
+    "transfer": dict(message_policy="transfer"),
 }
 
 

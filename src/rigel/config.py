@@ -326,58 +326,22 @@ class CalibrationConfig:
     #: ``boundary_reach`` — a background rate that silently changed estimator is worse than either.
     background_abundance: str = "contained"
 
-    #: Fit the `AbundanceLandscape` at calibration init — the pre-pass-0 TOTAL-density field and
-    #: its mode census (`calibration.abundance_landscape`). Its inputs are counts and lengths only
-    #: (the wall-exact measured totals), so there is NO circularity with the solve; under capture it
-    #: is bimodal and supplies `rho_0` (the depleted mode), the mode ratio and a per-region enrichment
-    #: responsibility.
-    #: It is the sole source of the QC report's gDNA-density panel
-    #: (`CalibrationDiagnostics.from_abundance_landscape`).
-    #: Nothing in the SOLVE reads it, so enabling it moves no solved number.
-    #: Without the wall inputs (`mature_walls`, `boundary_reach`) the fit is SKIPPED with a warning
-    #: and the object is ``None``, so the report simply omits the panel. That is deliberately NOT the
-    #: same policy as ``background_abundance`` above, which REFUSES: that pair feeds ψ, so a missing
-    #: input there would silently change a number the solve consumes, whereas this one is read only by
-    #: the report and the debug bundle.
-    abundance_landscape: bool = True
-
-    #: gDNA intron factory. ``True`` ⇒ deconvolve confident gDNA
-    #: from INTRON regions against the intergenic background BEFORE the pass-0 solve: a per-intron
-    #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE
-    #: gDNA density, a two-sided estimate; it deconvolves gDNA, not RNA, so it is strand-free). It
-    #: resolves the unstranded-intron gDNA that the prior-free pass-0 otherwise leaves near ½ — both
-    #: the zero-gDNA false positive and the gDNA under-call — and seeds the hyperprior fit with clean
-    #: intron gDNA. ``False`` ⇒ byte-identical to the pre-factory pass-0.
-    #:
-    #: The factor's precision is registered as composition evidence (``I_factory``), and that is what
-    #: makes it useful beyond its own slot: without it the factory shifts an intron's own mode but
-    #: carries no ``τ``, so the intron has no standing to EMIT and the correction dies one hop out.
-    intron_factory: bool = True
-
-    #: Message propagation — what one neighbour tells another, on the two-phase backbone
-    #: (prepare → propagate → solve). ``True`` installs the policy ``message_policy`` names; ``False``
-    #: installs ``messages.silent.SilentPolicy``, under which ψ carries each slot's OWN evidence alone
-    #: (its two strand counts, its spliced count, the fitted gDNA prior and the intron factory) — the
-    #: measured floor every policy is judged against. Messages exist for the slots whose own solve has
-    #: no composition channel: unstranded data and the both-stranded (AMBIG) slots, where the strand
-    #: likelihood is flat and the local answer is a default rather than a measurement. On stranded data
-    #: a sighted exon's own solve is excellent and a message can mostly only disturb it. The standing is
-    #: re-derived by ``scripts/design/policy_benchmark.py``, the two halves read apart and never pooled.
-    #: ⛔ Flipping this default, or ``message_policy``, is a config default flip — the trigger that has
-    #: left instruments dead while the suite stayed green, because the TEST readers install the policy
-    #: themselves. Run the instruments, not just the suite
+    #: The message policy — what one neighbour tells another, on the two-phase backbone (prepare →
+    #: propagate → solve). ``"transfer"`` (:class:`~rigel.calibration.messages.transfer.TransferPolicy`,
+    #: the composition transfer) is the shipped default; ``"silent"``
+    #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) sends nothing, so ψ carries each slot's
+    #: OWN evidence alone (its two strand counts, its spliced count, the fitted gDNA prior and the intron
+    #: factory) — the measured floor every policy is judged against. Messages exist for the slots whose own
+    #: solve has no composition channel: unstranded data and the both-stranded (AMBIG) slots, where the
+    #: strand likelihood is flat and the local answer is a default rather than a measurement; on stranded
+    #: data a sighted exon's own solve is excellent and a message can mostly only disturb it. The standing
+    #: is re-derived by ``scripts/design/policy_benchmark.py``, the two halves read apart and never pooled,
+    #: and priced on the composition metric by ``calibration_vs_oracle.py --set calibration.message_policy=…``.
+    #: An unknown name RAISES: an arm that silently runs a policy other than the one it names is a
+    #: benchmark that cannot be trusted. ⛔ Flipping this default is a config default flip — the trigger
+    #: that has left instruments dead while the suite stayed green, because the TEST readers install the
+    #: policy themselves. Run the instruments, not just the suite
     #: (`TRAPS: a-green-suite-hid-five-dead-instruments`).
-    message_propagation: bool = True
-
-    #: Which policy `message_propagation = True` installs. `"transfer"`
-    #: (:class:`~rigel.calibration.messages.transfer.TransferPolicy`, the composition transfer on the
-    #: two-phase backbone) is the shipped default; `"silent"`
-    #: (:class:`~rigel.calibration.messages.silent.SilentPolicy`) is the measured floor, the same policy
-    #: `message_propagation = False` installs. The ship judgement is `policy_benchmark.py --panel
-    #: ladder` read as two halves, and `calibration_vs_oracle.py --message-policy` on the
-    #: composition metric.
-    #: An unknown name RAISES: an arm that silently runs a policy other than the one it names
-    #: is a benchmark that cannot be trusted.
     message_policy: str = "transfer"
 
     #: Calibration refit iterations — the prior BOOTSTRAP. Each iteration re-fits the population gDNA
@@ -393,16 +357,6 @@ class CalibrationConfig:
     #: calibration wall-clock matters more than the last few percent of its accuracy.
     calib_refit_iters: int = 3
 
-    #: gDNA hyperprior STRENGTH — a temperature on ψ's fitted composition arm
-    #: (``calibration.landscape.DensityLandscape``). ``1.0`` is exact Bayes. Below 1 tempers a prior that
-    #: is, after all, fitted from biased pass-0 output, which is robustness rather than a fudge: it is
-    #: what lets real data overcome a wrong prior, and it is the intended control for the one measured
-    #: failure direction — on zero-gDNA and capture-OFF libraries the landscape places a little more
-    #: mass in the enriched region than the truth carries. Affects ONLY the fitted hyperprior refit,
-    #: never
-    #: the pre-solve total-density landscape (which votes on nothing) and never the solve's gDNA messages.
-    gdna_prior_strength: float = 1.0
-
     def __post_init__(self) -> None:
         if self.calib_refit_iters < 0:
             raise ValueError(
@@ -412,11 +366,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.background_abundance must be 'contained' or 'measured_total'; "
                 f"got {self.background_abundance!r}."
-            )
-        if float(self.gdna_prior_strength) < 0.0:
-            raise ValueError(
-                "CalibrationConfig.gdna_prior_strength must be >= 0 (0 disables the prior term); "
-                f"got {self.gdna_prior_strength}."
             )
         if self.sweep_block_slots is not None and self.sweep_block_slots < 1:
             raise ValueError(

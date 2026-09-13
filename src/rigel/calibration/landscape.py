@@ -65,18 +65,12 @@ _S0 = (0.15 * _LN10) ** 2
 
 @dataclass(frozen=True)
 class DensityLandscape:
-    """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid.
-
-    ``strength`` is a temperature on the whole term. Default 1 is exact Bayes; below 1 tempers a prior
-    that was, after all, fitted from biased pass-0 output, which is robustness rather than a fudge — it is
-    what lets real data overcome a wrong prior. It lives here rather than at the call site so the object
-    is self-describing and the sweep needs no knowledge of it.
-    """
+    """A fitted population gDNA-density hyperprior: ``logP`` over a natural-log rate grid, entering ψ
+    as exact Bayes (a temperature on the term was a tunable nothing ever moved; retired 2026-09-13)."""
 
     log_rho: np.ndarray
     logP: np.ndarray
     n_train: int
-    strength: float = 1.0
 
     def logprior(self, frac_grid, mass, eff) -> np.ndarray:
         """Project onto the ψ solve grid → ``(n_slots, K)`` additive term ``= log P(log ρ_c)`` evaluated at
@@ -107,7 +101,7 @@ class DensityLandscape:
         lp = np.interp(
             log_rho_c.ravel(), self.log_rho, self.logP, left=self.logP[0], right=self.logP[-1]
         ).reshape(log_rho_c.shape)
-        return lp if self.strength == 1.0 else float(self.strength) * lp
+        return lp
 
     def required_logodds_window(self, mass, eff) -> float:
         """The λ bracket this prior's own support demands — derived, with no constant chosen.
@@ -346,7 +340,6 @@ def fit_landscape(
     var,
     *,
     anchor,
-    strength: float = 1.0,
     knn_scale: float = _KNN_SCALE,
     domain: tuple | None = None,
     prev: "DensityLandscape | None" = None,
@@ -411,5 +404,4 @@ def fit_landscape(
         log_rho=grid * _LN10,
         logP=np.log(density / density.sum()),
         n_train=int(live.sum()),
-        strength=float(strength),
     )

@@ -96,15 +96,15 @@ the graph from the AST.
 
 ## The message layer
 
-`CalibrationConfig.message_policy = "transfer"` ships (the default since 2026-09-09, `message_propagation
-= True`). Two policies, selected by one config value (an unknown name raises), both on the two-phase
+`CalibrationConfig.message_policy = "transfer"` ships (the default since 2026-09-09; `"silent"` is the
+floor, and the one field selects — the `message_propagation` switch retired 2026-09-13). Two policies, selected by one config value (an unknown name raises), both on the two-phase
 backbone (`docs/DESIGN.md` §6b.11–§6b.12): `prepare` (every node's own claim) → a forward pass and a
 backward pass of `receive(source, destination)`, so every node ends with one message from each
 neighbour it has → `solve(from_left, from_right)`, which hands ψ two row channels and nothing else.
 
 | policy | |
 |---|---|
-| `silent` | the measured floor (`messages/silent.py`); the same policy `message_propagation = False` installs |
+| `silent` | the measured floor (`messages/silent.py`) |
 | `transfer` | the shipped default (`messages/transfer.py`; the face table in `messages/faces.py`, the level lanes in `messages/lanes.py`, pure row constructors in `messages/transfer_rows.py`). `prepare` is a table of contents, one named builder per message: `_claims`, `_splice_faces`, `_edge_level`, `_terminus_rules`, `_alternative_splice_site`, `lanes.gdna_lane`, `lanes.rna_lanes`. Every hop pays its pair's counting plus the disagreement beyond it |
 
 Messages exist for the slots whose own solve has no composition channel — unstranded data and AMBIG
@@ -187,7 +187,8 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # never format scri
 ```
 
 **The standing baseline: 0 failed / 3,435 passed / 0 skipped / 2 xfail, 3,437 collected** (re-derived
-2026-09-13 after the one-lattice landing, which added and retired no file: 21 goldens regenerated, their
+2026-09-13 after the tunables census, which added and retired no file — four config switches gone, their
+tests rewritten in place, ±0 — and after the one-lattice landing the same day, which added and retired no file: 21 goldens regenerated, their
 magnitudes read first — transcript counts ≤ 1.5e-3 relative, a tiny toy's `em_effective_length` ≤ 8.4 % — and
 the retired second grid's assertion folded into the chunk-exactness gate, ±0; before that, 2026-09-12: the
 cleanup split, the received tables, the replay's tolerance report, one ψ solver, the memory steps). The 2 xfails are executable records of proven defects whose fixes are elsewhere
@@ -233,7 +234,7 @@ question its instrument answers; `docs/SUCCESS.md` has the run order.
 | `design/policy_prototype.py` | ⭐⭐⭐ **HOW DOES A PROTOTYPE MESSAGE POLICY SCORE, PER GENE TYPE AND PER SLOT, AGAINST CERTIFIED TRUTH?** — the harness every message rung is developed on before `src/`. Installs a class from `--module` in place of the shipped policy for the `transfer` arm; whole-library and per-type tables, `--by-class` (the error at each NODE CLASS — the view that judges a message at its destinations), `dissect` for one gene type slot by slot. ⛔ Compare src-vs-src across a landing (`TRAPS: a-harness-on-the-parent-class-dies-when-the-parent-gains-the-mechanism`). `--self-test` |
 | `design/policy_benchmark.py` | ⭐⭐⭐ **HOW DOES EACH POLICY SCORE, PER CONDITION, AGAINST CERTIFIED TRUTH?** Whole-library gDNA error in fragments, per axis, one row per condition, for `silent` and `transfer`. ⭐ `--panel test` is the test chromosome (seconds — the development loop); `--panel ladder` is the 16-condition benchmark. ⭐ **`--by-class`: WHERE DOES A POLICY'S REMAINING ERROR SIT, BY NODE CLASS?** — per certified stratum, boundaries split by terminus flag, exons by reach (licensed face / edge only / walled); the instrument that ranks the rebuild's holes. `--set SECTION.FIELD=VALUE` applies a config value on top of every policy, the same spelling as `calibration_vs_oracle.py`. ⛔ NEVER POOLED, and the two halves are judged against DIFFERENT bars: unstranded rows are where a policy must WIN, stranded rows are where it must do minimal HARM against silence |
 | **⭐⭐⭐ 0.8.0'S METRIC — calibration against ORACLE CALIBRATION** | |
-| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries; `--message-policy` prices a policy on this metric (the ship protocol's first item); `--set SECTION.FIELD=VALUE` prices any config value on both arms, so a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 42/42 |
+| `design/calibration_vs_oracle.py` | ⭐⭐⭐ **IS THE CALIBRATION RESULT ITSELF RIGHT, SCORED AGAINST AN ORACLE CALIBRATION? — 0.8.0's metric, and the only instrument that reaches the effective-length shrinkage.** `P = calibrate(...)` against the same payload with only the six deconvolved arrays swapped, per stratum, plus `U`, the no-enrichment null no other instrument carries; `--set SECTION.FIELD=VALUE` prices any config value on both arms — `--set calibration.message_policy=silent` is the ship protocol's first item — so a policy or a grid arm is a config value and nothing in `src/` moves to price it. ⛔ Read `ruler_n_moved`, never the aggregate: the total can barely move while nearly every transcript is redistributed. No solver, no EM, no re-scan — ~5–12 s/condition. `--self-test` 42/42 |
 | `design/object_composition.py` | ⭐⭐⭐ **MUST ψ's Beta REFERENCE BE ONE LIBRARY-WIDE NUMBER, OR CAN EACH OBJECT SUPPLY ITS OWN?** `m_i` per object from the two densities, scored as misplaced fragments against the shipped ½, per stratum. `--self-test` 25/25 |
 | `design/abundance_landscape_census.py` | ⭐⭐⭐ **WHAT DOES THE TOTAL-DENSITY FIELD LOOK LIKE, PER CONDITION?** Fits `calibration.abundance_landscape` on the cached wall-exact totals — every mode's basin mass, `rho_0`, the anchor gap in nats, the per-class enrichment. `--self-test` 13/13 |
 | `design/calibration_oracle.py` | ⭐⭐⭐ **WHAT IS THE CERTIFIED PER-OBJECT TRUTH? — run this before debugging calibration against anything.** Every REGION and BOUNDARY's count, its realized `n_gdna`/`n_nrna`/`n_mrna` and `true_f_g`, at two certification levels: COMPOSITION (no opportunity model anywhere in it) and FIELD (densities too). ⛔ REFUSED unless its named gates pass — sum-to-full, partition-projects-exactly, gdna-field-uniformity, exact-zeros, nascent-in-annotation — because a merely plausible oracle is how a calibration bug and a truth bug survive each other. Writes `slot_truth.npz` beside each oracle cache; `--self-test` 11/11 |

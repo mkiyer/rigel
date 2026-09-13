@@ -691,8 +691,8 @@ def report(paths: list[Path]) -> None:
 
     _cc = _CC()
     print(f"  {len(conds)} conditions   arms: {', '.join(n for _a, n in arms)}"
-          f"   calibration: the shipped defaults (message_propagation={_cc.message_propagation}, "
-          f"message_policy={_cc.message_policy!r})   length_likelihood OFF")
+          f"   calibration: the shipped defaults (message_policy={_cc.message_policy!r})   "
+          f"length_likelihood OFF")
     print("=" * 112)
 
     def block(title, field, fmt="{:>14,.0f}", ratio=True, axis="transcript"):

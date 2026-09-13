@@ -66,7 +66,7 @@ def capture_sweep_inputs(tmp_path_factory):
     try:
         calibrate_mod.calibrate(
             payload=payload,
-            config=CalibrationConfig(message_propagation=True),
+            config=CalibrationConfig(),
             region_arrays=ra,
             strand_model=strand_model,
             gdna_fl_pmf=fl.gdna_pmf,

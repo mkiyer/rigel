@@ -137,6 +137,17 @@ refused (`ISSUES: refused-transcript-weights`, `ISSUES: refused-soft-min-path-we
 is the whole problem, so the next candidate is a sparsity mechanism, targeting expressed multi-exon
 transcripts with median exon ≤ 150 bp (`ISSUES: the-rna-length-law-fix`). `quant_accuracy.py`.
 
+### background-abundance-pair-unruled
+`priority: later · kind: decision · 2026-09-13 (from the tunables census, W6)`
+`CalibrationConfig.background_abundance` chooses which (counts, exposure) pair the pooled gDNA background
+takes: `"contained"` (the count over the gDNA contained effective length — unbiased, the fragment-length pmf
+in the divisor) or `"measured_total"` (the START/END banks over the region's own length — pmf-free, refuses
+without the wall inputs). The two agree off capture and part under it, where the contained divisor
+under-reads the true gDNA rate several-fold while the pmf-free pair over-reads on pools carrying nascent
+RNA. That is a design decision, not a tunable: rule which pair ships (`total_abundance_audit.py` scores
+them; `calibration_vs_oracle.py --set calibration.background_abundance=measured_total` prices the swap on
+the metric) and the field goes with the ruling. Kept through W6 for that reason alone.
+
 ### theta-quadrature-at-zero-gdna
 `priority: later · kind: defect · 2026-09-13`
 ψ marginalises the AMBIG cube over θ by a plain sum on a uniform θ lattice (`simplex_logodds._tilt_grid`). At

@@ -226,7 +226,7 @@ _MIN_TRAIN = 5
 
 
 def _fit_gdna_hyperprior(
-    chain, belief, statics, region_arrays, mass_global, eff_global, *, strength, prev=None
+    chain, belief, statics, region_arrays, mass_global, eff_global, *, prev=None
 ):
     """Select the training substrate from the chain and fit the :class:`DensityLandscape` on the
     initial solve's deconvolved gDNA — the composition (gDNA) arm of ψ for the phase-2 refit.
@@ -296,7 +296,6 @@ def _fit_gdna_hyperprior(
         np.asarray(eff_global, dtype=np.float64)[sel],
         np.asarray(belief.var_gdna, dtype=np.float64)[sel],
         anchor=anchor[sel],
-        strength=strength,
         # the previous refit's landscape: the E-step on the location-free kernels (`landscape._estep_kernels`)
         prev=prev,
         domain=(
@@ -452,7 +451,7 @@ class _IntronFactory:
         self._site = (chain, substrate, region_arrays, region_eff_gdna, config)
         if inj is not None and inj.intron_background is not None:
             self.background = inj.intron_background
-        elif config.intron_factory:
+        else:
             self.background = fit_intron_background(
                 substrate,
                 region_arrays,
@@ -460,14 +459,12 @@ class _IntronFactory:
                 include_introns=False,
                 counts_exposure=background_pair,
             )
-        else:
-            self.background = None
         self._rows: dict = {}
 
     def rows(self, n_grid: int, window: float):
         """The λ-factor rows on the grid ``(n_grid, window)`` as a :class:`FactoryRows` — sliced per block
-        by the sweep — or ``None`` when there is nothing to factor (the factory off, the background
-        uninformative, no intron regions), which leaves every sweep byte-identical to the pre-factory
+        by the sweep — or ``None`` when there is nothing to factor (the background uninformative, no
+        intron regions), which leaves every sweep byte-identical to the pre-factory
         path."""
         if self.background is None or not self.background.informative:
             return None
@@ -521,18 +518,20 @@ def _abundance_landscape(
     payload, substrate, region_arrays, config, inj, mature_walls, boundary_reach
 ):
     """THE ABUNDANCE LANDSCAPE — the pre-pass-0 TOTAL-density field + mode census, fitted at INIT from
-    counts and lengths only, so it is circular with nothing solved. A QC and injection surface: nothing
-    in the solve reads it. Without the wall inputs it is SKIPPED, LOUDLY, never raised for — the flag is
-    on by default, this object is the QC report's density panel, and many unit and toy callers have no
-    wall arrays and want no panel; the object stays ``None`` rather than a quietly different estimate."""
-    if not config.abundance_landscape:
-        return None
+    counts and lengths only (the wall-exact measured totals), so it is circular with nothing solved. A QC
+    and injection surface: it is the sole source of the QC report's gDNA-density panel
+    (`CalibrationDiagnostics.from_abundance_landscape`) and nothing in the solve reads it. Without the
+    wall inputs (``mature_walls``, ``boundary_reach``) it is SKIPPED, LOUDLY, never raised for: many unit
+    and toy callers have no wall arrays and want no panel, so the object stays ``None`` and the report
+    omits the panel rather than carrying a quietly different estimate — deliberately not the policy of
+    ``background_abundance``'s pair, which feeds ψ and REFUSES. (An on/off switch on this fit was a
+    tunable nothing ever turned off; retired 2026-09-13.)"""
     if inj is not None and inj.abundance_landscape is not None:
         return inj.abundance_landscape
     if mature_walls is None or boundary_reach is None:
         logger.warning(
-            "calibration: abundance_landscape is enabled but the wall inputs are missing "
-            "(mature_walls / boundary_reach, both in scan_cache.index_derived_inputs) — skipping "
+            "calibration: the wall inputs are missing (mature_walls / boundary_reach, both in "
+            "scan_cache.index_derived_inputs) — skipping "
             "the total-density landscape, so the QC density panel will be omitted. Nothing in the "
             "solve reads it, so no solved number changes."
         )
@@ -546,7 +545,7 @@ def _policy(config, strand: _Strand):
     silently runs a different policy than it names is a benchmark that cannot be trusted, so an unknown
     name raises. The transfer policy's own strand claims read the library's strand model; an intron's
     own claim is the factory's row for it, which the sweep hands over on the context."""
-    if not config.message_propagation or config.message_policy == "silent":
+    if config.message_policy == "silent":
         return SilentPolicy()
     if config.message_policy == "transfer":
         return TransferPolicy(strand=strand.model)
@@ -583,7 +582,6 @@ def _init_belief(s: _Solve):
         gdna_strand_overdispersion=s.strand.gdna_strand_overdispersion,
         rna_strand_overdispersion=s.strand.rna_strand_overdispersion,
         n_grid=lattice_points(s.config.sweep_logodds_window, s.config.sweep_logodds_step),
-        n_tilt=s.config.sweep_n_tilt,
         logodds_window=s.config.sweep_logodds_window,
     )
 
@@ -674,7 +672,6 @@ def _solve(s: _Solve, _debug):
             s.region_arrays,
             s.mass_global,
             s.eff_global,
-            strength=s.config.gdna_prior_strength,
             prev=hyperprior,
         )
         if hyperprior is None:

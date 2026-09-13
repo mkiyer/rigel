@@ -14,17 +14,16 @@ its ruler factor should read 1.000 (any contraction is manufactured) and at capt
 the real enrichment, so a factor near 1 there is the estimator working. No solver, no EM, no BAM
 re-scan, and the prior is not re-scored here (`prior_vs_oracle.py` owns `LocusPriors`). Read
 ``ruler_n_moved`` rather than the aggregate factor: the total can barely move while nearly every
-transcript is redistributed. `--message-policy`, `--background-abundance` and `--set
-SECTION.FIELD=VALUE` (any config field, typed from the field, repeatable) apply to both arms, so they
-price an estimator swap on this metric rather than comparing two tools — a grid arm is a config value
-and nothing in the source moves to price it.
+transcript is redistributed. `--set SECTION.FIELD=VALUE` (any config field, typed from the field,
+repeatable) applies to both arms, so a run prices an estimator swap on this metric rather than comparing
+two tools — a policy or a grid arm is a config value and nothing in the source moves to price it.
 
 Usage::
 
     python scripts/design/calibration_vs_oracle.py                           # the whole ladder
     python scripts/design/calibration_vs_oracle.py --conditions <name>       # one condition
     python scripts/design/calibration_vs_oracle.py --jobs 4                  # sharded, one report path
-    python scripts/design/calibration_vs_oracle.py --message-policy silent   # price a policy on both arms
+    python scripts/design/calibration_vs_oracle.py --set calibration.message_policy=silent   # price a policy on both arms
     python scripts/design/calibration_vs_oracle.py --set calibration.sweep_logodds_step=0.1   # any config value, both arms
     python scripts/design/calibration_vs_oracle.py --json rows.json          # write the rows and exit
     python scripts/design/calibration_vs_oracle.py --self-test               # no I/O
@@ -970,21 +969,6 @@ def main() -> int:
     ap.add_argument("--json", type=Path, default=None, help="write the per-condition rows and exit")
     ap.add_argument("--jobs", type=int, default=1)
     ap.add_argument(
-        "--background-abundance",
-        choices=("contained", "measured_total"),
-        default=None,
-        help="override CalibrationConfig.background_abundance for BOTH arms (P and O), so the run "
-        "prices that estimator swap against oracle calibration. Default: the shipped config.",
-    )
-    ap.add_argument(
-        "--message-policy",
-        choices=("silent", "relay", "transfer"),
-        default=None,
-        help="override CalibrationConfig.message_policy for BOTH arms (`silent` also turns "
-        "message_propagation off, the same policy the flag installs), so the run prices a message "
-        "policy on the 0.8.0 metric. Default: the shipped config.",
-    )
-    ap.add_argument(
         "--set",
         dest="settings",
         action="append",
@@ -1022,10 +1006,6 @@ def main() -> int:
             cmd = [sys.executable, str(Path(__file__).resolve()),
                    "--suite", str(args.suite), "--index", str(args.index),
                    "--oracle-cache", str(cache), "--json", str(out), "--conditions", *sh]
-            if args.background_abundance is not None:
-                cmd += ["--background-abundance", args.background_abundance]
-            if args.message_policy is not None:
-                cmd += ["--message-policy", args.message_policy]
             for spec in args.settings:
                 cmd += ["--set", spec]
             procs.append((subprocess.Popen(cmd), out))
@@ -1041,32 +1021,10 @@ def main() -> int:
     index = TranscriptIndex.load(str(args.index))
     region_arrays = RegionArrays.from_index(index)
     pipeline_config = PipelineConfig()
-    if args.background_abundance is not None:
-        # applied to both arms: P and O share one payload and differ only in the six deconvolved
-        # arrays, so an override on one arm alone would compare two different tools rather than two
-        # estimators.
-        pipeline_config = dataclasses.replace(
-            pipeline_config,
-            calibration=dataclasses.replace(
-                pipeline_config.calibration, background_abundance=args.background_abundance
-            ),
-        )
-        print(f"⭐ background_abundance = {args.background_abundance!r} on BOTH arms")
-    if args.message_policy is not None:
-        # the same rule: one payload, one tool, the policy on BOTH arms
-        pipeline_config = dataclasses.replace(
-            pipeline_config,
-            calibration=dataclasses.replace(
-                pipeline_config.calibration,
-                message_policy=args.message_policy,
-                message_propagation=args.message_policy != "silent",
-            ),
-        )
-        if args.json is None:
-            print(f"⭐ message_policy = {args.message_policy!r} on BOTH arms")
     for spec in args.settings:
-        # the same rule again: one payload, one tool, the value on BOTH arms; applied last, so an
-        # explicit --set wins over the two named overrides
+        # applied to BOTH arms: P and O share one payload and differ only in the six deconvolved
+        # arrays, so an override on one arm alone would compare two different tools rather than two
+        # estimators
         pipeline_config = set_field(pipeline_config, spec)
         if args.json is None:
             print(f"⭐ --set {spec} on BOTH arms")

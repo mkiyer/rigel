@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from rigel.calibration.landscape import (
-    DensityLandscape,
     fit_landscape,
     knn_widths,
 )
@@ -148,16 +147,12 @@ def test_knn_width_widens_as_the_sample_thins():
     assert np.median(thin) > np.median(full)
 
 
-def test_logprior_shape_and_strength():
+def test_logprior_shape():
     count, mass, eff, var = _two_mode()
     ls = fit_landscape(count, mass, eff, var, anchor=np.zeros(count.size, bool))
     fg = np.linspace(0.01, 0.99, 7)
     lp = ls.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0))
     assert lp.shape == (4, 7) and np.isfinite(lp).all()
-    half = DensityLandscape(ls.log_rho, ls.logP, ls.n_train, 0.5)
-    assert np.allclose(half.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0)), 0.5 * lp)
-    zero = DensityLandscape(ls.log_rho, ls.logP, ls.n_train, 0.0)
-    assert np.all(zero.logprior(fg, np.full(4, 1000.0), np.full(4, 500.0)) == 0.0)
 
 
 def test_logprior_tracks_the_region_mass():

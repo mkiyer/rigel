@@ -295,7 +295,7 @@ measured sj flux is a density at the source, which joins the RNA claim entering 
 the certified flux caps the claimable gDNA share. Only an EXON receives it; the flux is a measurement
 with its own counting width, never an imputation; and it is registered by geometry, never gated on the
 strand channel's precision, so it survives exactly the stratum where the strand channel is dead.
-`CalibrationConfig.message_propagation = False` installs `SilentPolicy` — the measured floor (§6.1).
+`CalibrationConfig.message_policy = "silent"` installs `SilentPolicy` — the measured floor (§6.1).
 
 ### 0c.3 The shape of the reference under capture is spike-and-slab
 
@@ -716,7 +716,7 @@ Re-derive this list rather than trusting it: `scripts/design/module_census.py` r
 | `sweep.py` | **The backbone.** The self-solve, two directional passes, one ψ solve, one write-back, four assertions | It knows nothing about capture, splices, levels, lanes or enrichment — `test_sweep_backbone.py` asserts those words appear in none of its identifiers, read from the AST |
 | `blocks.py` | the block plumbing of the locus solve: `view_fields` (every per-slot array a policy may read), `block_slice` (one block cut out of the chain, its links re-based), `gather` (the blocks' captures as the chain's) | nothing about what a solve or a message is |
 | `message_cache.py` | `MessageCache` — the message layer's output shared across the refit sweeps, keyed on a digest of every field of the block's context, the library and the policy (§6b.15) | a field added to the context cannot be left out of the key: the digest iterates the dataclass |
-| `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_propagation = False` installs | A reader who holds `sweep.py` plus this holds the entire working system |
+| `messages/silent.py` | `SilentPolicy` — sends nothing. **The measured floor**, what `message_policy = "silent"` installs | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/transfer.py` | `TransferPolicy` — **the shipped default** (2026-09-09): every node's own claim, one named builder per message, the two passes and the solve (§6b.4–§6b.14) | `prepare` is a table of contents: a reader finds a message by its builder's name |
 | `messages/faces.py` | `Faces` — the composition rules as typed tables over `(destination, side)`, `Faces.apply` the one home of the rule arithmetic, and the three helpers every reader of a face needs (`side_of`, `norm`, `fuse`) | gate: `test_transfer_faces.py` |
 | `messages/lanes.py` | `LevelLane` — one class for the three populations' levels — and its two builders, `gdna_lane` (every face left without a composition rule) and `rna_lanes` (one per strand, faces from the flag bits) | gate: `test_transfer_rna_lanes.py` |

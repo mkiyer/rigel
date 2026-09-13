@@ -175,9 +175,7 @@ def _training_counts(monkeypatch, belief, parts):
     chain, _, statics, region_arrays, mass, eff = parts
     seen = {}
 
-    def spy(
-        count, mass_, eff_, var, *, anchor, strength=1.0, knn_scale=0.5, domain=None, prev=None
-    ):
+    def spy(count, mass_, eff_, var, *, anchor, knn_scale=0.5, domain=None, prev=None):
         seen["count"] = np.asarray(count, np.float64)
         seen["anchor"] = np.asarray(anchor, bool)
         seen["domain_mass"] = None if domain is None else np.asarray(domain[0], np.float64)
@@ -185,7 +183,7 @@ def _training_counts(monkeypatch, belief, parts):
 
     monkeypatch.setattr(CAL, "fit_landscape", spy)
     monkeypatch.setattr(CAL, "_MIN_TRAIN", 1)
-    CAL._fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass, eff, strength=1.0)
+    CAL._fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass, eff)
     return seen
 
 
@@ -225,7 +223,7 @@ def test_the_substrate_guard_measures_the_domain_not_the_cut(monkeypatch):
     chain, _, statics, region_arrays, mass, eff = parts
     calls = []
     monkeypatch.setattr(CAL, "fit_landscape", lambda *a, **k: calls.append(1))
-    CAL._fit_gdna_hyperprior(chain, none, statics, region_arrays, mass, eff, strength=1.0)
+    CAL._fit_gdna_hyperprior(chain, none, statics, region_arrays, mass, eff)
     assert calls, "the refit was refused although the domain has enough substrate"
 
 

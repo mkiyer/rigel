@@ -58,7 +58,7 @@ def run_arm(payload, kw, *, refits: int | None, messages: bool) -> dict:
     cfg = CalibrationConfig()
     if refits is not None:
         cfg = dataclasses.replace(cfg, calib_refit_iters=refits)
-    cfg = dataclasses.replace(cfg, message_propagation=messages)
+    cfg = dataclasses.replace(cfg, message_policy=cfg.message_policy if messages else "silent")
     debug: dict = {}
     calibrate(payload=payload, config=cfg, _debug=debug,
               **{k: v for k, v in kw.items() if k != "payload"})

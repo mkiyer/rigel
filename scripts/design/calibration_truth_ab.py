@@ -166,7 +166,7 @@ def main() -> int:
             "condition": name,
             # part of the measurement, not metadata: the number moves with the message policy, and a
             # saved row without it cannot be attributed to a configuration
-            "messages": "on" if config.message_propagation else "off",
+            "messages": "on" if config.message_policy != "silent" else "off",
             "truth_f_gdna": truth,
             "undrained_f_gdna": before,
             "drained_f_gdna": after,
@@ -199,7 +199,7 @@ def main() -> int:
         print(f"  {name:<44} done in {rows[-1]['seconds']:.0f} s")
 
     print()
-    messages = "on" if config.message_propagation else "off"
+    messages = "on" if config.message_policy != "silent" else "off"
     print(
         f"═══ ⭐ f_gdna against TRUTH — undrained (what shipped before the drain) vs drained "
         f"· messages={messages} ═══"

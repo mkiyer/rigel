@@ -649,25 +649,27 @@ def init_beliefs(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
-    n_tilt: int,
     logodds_window: float = 10.0,
 ) -> RegionBelief:
     """The signature-binary G1/G2/G3 initial :class:`RegionBelief` on the unified chain.
 
-    All slots are strand-solved by the log-density log-odds solver (:mod:`simplex_logodds`; a one-cell
-    tilt at single-strand regions, the ``n_tilt`` θ grid at AMBIG ones): the bare strand likelihood plus
-    the Jeffreys reference at single-strand regions, with no
-    global prior and no imputation, both of which enter later in the sweep. The signature-binary class
-    overrides (:func:`_type_belief`) then set the G1/G2/G3 belief. Single-strand introns resolve to
-    ``f_g≈0`` from the Beta-Binomial tilt alone, which is the zero-gDNA gate; intergenic and TSS sinks
-    lock at ``{0,0,1}``; AMBIG regions hold ``{0,0,1}`` at maximum variance for the sweep."""
+    The single-strand slots are strand-solved by the log-density log-odds solver (:mod:`simplex_logodds`,
+    a one-cell tilt): the bare strand likelihood plus the Jeffreys reference, with no global prior and no
+    imputation, both of which enter later in the sweep. The signature-binary class overrides
+    (:func:`_type_belief`) then set the G1/G2/G3 belief. Single-strand introns resolve to ``f_g≈0`` from
+    the Beta-Binomial tilt alone, which is the zero-gDNA gate; intergenic and TSS sinks lock at
+    ``{0,0,1}``; AMBIG regions hold ``{0,0,1}`` at maximum variance for the sweep — so an AMBIG slot is
+    not solved here at all (its cube would be discarded), which is why each slot's admissible strands are
+    masked to the single-strand case before the solve."""
     st = statics
+    fp, fn = np.asarray(st.free_pos, bool), np.asarray(st.free_neg, bool)
+    single = fp ^ fn
     count = np.asarray(geometry.unspliced_count, np.float64)
     deconv = _solve_regions_logodds_all(
         count[:, 0],
         count[:, 1],
-        st.free_pos,
-        st.free_neg,
+        fp & single,
+        fn & single,
         count.sum(axis=1),
         # the strand solve's certified-RNA floor is strand-agnostic, so the two GENOME-strand columns
         # are summed here rather than stored pre-summed — the geometry keeps the axis it was deposited on.
@@ -676,10 +678,10 @@ def init_beliefs(
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
-        n_tilt=n_tilt,
+        n_tilt=1,  # no AMBIG slot reaches this solve, so the tilt axis has one cell
         L=logodds_window,
     )
-    f_pos, f_neg, f_g, var_g = _type_belief(st.free_pos, st.free_neg, deconv, count.sum(axis=1))
+    f_pos, f_neg, f_g, var_g = _type_belief(fp, fn, deconv, count.sum(axis=1))
     return RegionBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_gdna=var_g)
 
 

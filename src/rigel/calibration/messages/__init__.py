@@ -6,8 +6,8 @@ The backbone (:mod:`rigel.calibration.sweep`) owns the SHAPE of the solve — th
 directional passes over the ``N E N E … N`` chain, one ψ solve, one write-back, and four assertions.
 Everything about *what a message says* is a policy, and it lives here.
 
-Two policies exist; `CalibrationConfig.message_policy` selects which one `message_propagation = True`
-installs, and an unknown name raises. The default is `"transfer"`.
+Two policies exist; `CalibrationConfig.message_policy` selects which one `calibrate` installs, and an
+unknown name raises. The default is `"transfer"`.
 
 * :class:`~.transfer.TransferPolicy` — the shipped policy: every message is either a composition
   profile carried across one face by a derived map, or a population's LEVEL carried where composition

@@ -71,7 +71,6 @@ def _scenario(kappa=0.9):
         gdna_strand_overdispersion=0.2,
         rna_strand_overdispersion=0.1,
         n_grid=60,
-        n_tilt=60,
     )
     return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 

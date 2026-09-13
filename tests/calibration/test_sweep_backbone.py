@@ -303,11 +303,11 @@ def test_a_writeback_confined_to_solvable_is_accepted():
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def test_message_propagation_is_a_config_switch_and_defaults_ON():
+def test_the_message_policy_is_a_config_decision_and_defaults_to_transfer():
     """The largest behaviour switch in the tool, and it must be a written decision. Which policy
     ships can never be inherited from a function default that an edit could silently change: the
     config names it (``message_policy``, ``"transfer"``), ``calibrate`` reads it, and both the
-    shipped policy and the measured floor are reachable from the one call site."""
+    shipped policy and the measured floor (``"silent"``) are reachable from the one call site."""
     import importlib
     import inspect
 
@@ -316,10 +316,9 @@ def test_message_propagation_is_a_config_switch_and_defaults_ON():
     # the package re-exports the function under the module's name, so ``import … as`` would bind the
     # FUNCTION and this gate would read one function's body; the module is what reads the switch
     _c = importlib.import_module("rigel.calibration.calibrate")
-    assert CalibrationConfig().message_propagation is True
     assert CalibrationConfig().message_policy == "transfer"
     src = inspect.getsource(_c)
-    assert "config.message_propagation" in src and "config.message_policy" in src, (
+    assert "config.message_policy" in src, (
         "calibrate no longer reads the switch — whichever policy it now hard-codes, the config option is "
         "lying to anyone who sets it."
     )

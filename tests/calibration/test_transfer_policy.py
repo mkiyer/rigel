@@ -77,9 +77,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
     try:
         calibrate_mod.calibrate(
             payload=sweep_inputs["payload"],
-            config=_dc.replace(
-                CalibrationConfig(), message_propagation=True, message_policy="transfer"
-            ),
+            config=_dc.replace(CalibrationConfig(), message_policy="transfer"),
             **sweep_inputs["calibrate_kw"],
         )
     finally:
@@ -91,9 +89,7 @@ def test_the_policy_name_installs_the_transfer_policy(sweep_inputs):
     with pytest.raises(ValueError, match="unknown message_policy"):
         calibrate_mod.calibrate(
             payload=sweep_inputs["payload"],
-            config=_dc.replace(
-                CalibrationConfig(), message_propagation=True, message_policy="no-such-policy"
-            ),
+            config=_dc.replace(CalibrationConfig(), message_policy="no-such-policy"),
             **sweep_inputs["calibrate_kw"],
         )
 

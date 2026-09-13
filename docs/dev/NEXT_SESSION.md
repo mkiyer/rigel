@@ -66,8 +66,9 @@ pre-sweep cube is dead work (part of the 25 s init ψ on the deep library), remo
 
 ## Where the worklist stands
 
-W1–W5 DONE. Next: W6 the tunables census, W7 the capture as a typed record, W8 the vocabulary rulings,
-W9 the two xfails. The port begins only when the owner is satisfied with the Python.
+W1–W6 DONE. Next: W7 the capture as a typed record, W8 the vocabulary rulings, W9 the two xfails; and a
+coverage census of `src/` (the suite and every instrument's self-test under coverage, the never-executed
+lines reviewed one by one) is proposed as the instrument for dead code beyond the config's switches. The port begins only when the owner is satisfied with the Python.
 
 ## Decisions on record
 

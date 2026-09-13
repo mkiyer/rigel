@@ -120,10 +120,10 @@ class Spy:
             return out
 
         def fit(
-            count, mass, eff, var, *, anchor, strength=1.0, knn_scale=LS._KNN_SCALE, domain=None, prev=None
+            count, mass, eff, var, *, anchor, knn_scale=LS._KNN_SCALE, domain=None, prev=None
         ):
             ls = orig_fit(
-                count, mass, eff, var, anchor=anchor, strength=strength, knn_scale=knn_scale,
+                count, mass, eff, var, anchor=anchor, knn_scale=knn_scale,
                 domain=domain, prev=prev,
             )
             spy.fits.append(
@@ -425,7 +425,7 @@ def estimator_audit(res: dict) -> dict:
     for name, (count, var, m) in arms.items():
         ls = LS.fit_landscape(
             count[m], fit["mass"][m], fit["eff"][m], var[m], anchor=fit["anchor"][m],
-            strength=shipped.strength, domain=fit.get("domain"), prev=fit.get("prev"),
+            domain=fit.get("domain"), prev=fit.get("prev"),
         )
         if ls is None:
             out[name] = (float("nan"), 0)
@@ -434,7 +434,7 @@ def estimator_audit(res: dict) -> dict:
         # shipped grid before comparing
         if ls.log_rho.shape != shipped.log_rho.shape or not np.allclose(ls.log_rho, shipped.log_rho):
             p = np.exp(np.interp(shipped.log_rho, ls.log_rho, ls.logP, left=ls.logP[0], right=ls.logP[-1]))
-            ls = LS.DensityLandscape(shipped.log_rho, np.log(p / p.sum()), ls.n_train, ls.strength)
+            ls = LS.DensityLandscape(shipped.log_rho, np.log(p / p.sum()), ls.n_train)
         out[name] = (emd_decades(shipped, ls), int(m.sum()))
     return out
 

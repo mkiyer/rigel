@@ -1,4 +1,4 @@
-"""The policy that sends nothing — the OFF state (``message_propagation = False``) and the measured floor.
+"""The policy that sends nothing — the OFF state (``message_policy = "silent"``) and the measured floor.
 
        Gate: ``tests/calibration/test_sweep_backbone.py``
 

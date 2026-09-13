@@ -212,20 +212,15 @@ def test_the_sj_axis_length_is_what_is_checked_not_its_content():
 # --- the intron factory -----------------------------------------------------------------------
 
 
-def test_intron_factory_flag_runs_and_conserves_mass():
-    import dataclasses
-
-    result = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
+def test_the_intron_factory_runs_and_conserves_mass():
+    result = _run(CalibrationConfig())
     assert isinstance(result, CalibrationResult)
     np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
 
 
-def test_intron_factory_noop_without_introns():
-    # Correct scoping: with no INTRON regions (the synthetic is +exon/−exon/intergenic) the factory is a
-    # graceful no-op — byte-identical to the flag-off calibration.
-    import dataclasses
-
-    off = _run(CalibrationConfig())
-    on = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
-    np.testing.assert_array_equal(off.mass_gdna_region, on.mass_gdna_region)
-    np.testing.assert_array_equal(off.mass_rna_region, on.mass_rna_region)
+def test_the_intron_factory_is_a_noop_without_introns():
+    # Correct scoping: with no INTRON regions (the synthetic is +exon/−exon/intergenic) the factory has
+    # no row to write, so every factory row is zero and the solve is the bare pass-0 (`FactoryRows`
+    # is ``None`` when no slot is an intron).
+    result = _run(CalibrationConfig())
+    np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)

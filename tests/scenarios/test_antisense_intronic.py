@@ -300,7 +300,7 @@ class TestAntisenseIntronicMultiExonT2:
         "2026-08-18, measured under the relay policy of the day. `assemble_priors` pins synthetic nascent RNA at Dirichlet alpha = 0 "
         "(EQUATIONS.md §9b): gDNA gets an additive prior, annotated RNA a multiplicative one, and "
         "nascent must out-evidence both. On this scenario 1,600 true nascent fragments yield only "
-        "~536 called, and with `message_propagation = True` the messages recover MORE RNA overall "
+        "~536 called, and with the transfer policy the messages recover MORE RNA overall "
         "(536 vs 334 muted; false gDNA 879 vs 1,144) — the recovered mass lands on the annotated "
         "antisense t2 (80 > the 50 limit) because the alpha = 0 rule forbids it landing on nascent. "
         "Measured: the leak is 80 under every single message-operator ablation and passes only with "
